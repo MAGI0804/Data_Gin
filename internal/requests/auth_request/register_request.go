@@ -61,3 +61,24 @@ func SignupUsingEmail(data interface{}, c *gin.Context) map[string][]string {
 
 	return errs
 }
+
+// RefreshTokenRequest 刷新令牌的请求信息
+type RefreshTokenRequest struct {
+	TokenType string `form:"token_type" json:"token_type,omitempty" valid:"token_type"`
+}
+
+// RefreshToken 刷新令牌验证器方法
+func RefreshToken(data interface{}, c *gin.Context) map[string][]string {
+
+	rules := govalidator.MapData{
+		"token_type": []string{"omitempty", "in:refreshable,permanent"},
+	}
+
+	messages := govalidator.MapData{
+		"token_type": []string{
+			"in:令牌类型必须是 refreshable 或 permanent",
+		},
+	}
+
+	return validator.ValidateStruct(data, rules, messages)
+}

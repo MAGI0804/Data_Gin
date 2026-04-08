@@ -65,6 +65,20 @@ func init() {
 
 			// 上下文超时时间（单位：s）
 			"context_timeout": config.Get("App.ContextTimeout", 60),
+
+			// SSL 配置
+			"ssl": map[string]interface{}{
+				// 是否启用 SSL
+				"enabled": config.Get("App.SSL.Enabled", false),
+				// 域名
+				"domain": config.Get("App.SSL.Domain", "shop-test.youlankids.com"),
+				// SSL 证书路径
+				"cert_file": config.Get("App.SSL.CertFile", "ssl/shop-test.youlankids.com.pem"),
+				// SSL 私钥路径
+				"key_file": config.Get("App.SSL.KeyFile", "ssl/shop-test.youlankids.com.key"),
+				// HTTPS 端口
+				"port": config.Get("App.SSL.Port", "443"),
+			},
 		}
 	})
 }

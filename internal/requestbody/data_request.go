@@ -53,4 +53,5 @@ type RawIngestRequest struct {
 	DataSource string      `json:"data_source" binding:"max=100"`
 	DataType   string      `json:"data_type" binding:"max=50"`
 	RawContent interface{} `json:"raw_content"`
+	Remark     string      `form:"remark" binding:"max=255"`
 }

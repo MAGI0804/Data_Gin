@@ -88,6 +88,9 @@ func apiAuth(api *gin.RouterGroup) {
 		userCtrl := new(auth_ctrl.UserController)
 		authGroup.GET("/user", userCtrl.Index)                       // 用户列表
 		authGroup.GET("/me", middleware.AuthJWT(), userCtrl.Profile) // 用户个人信息
+
+		tokenCtrl := new(auth_ctrl.TokenController)
+		authGroup.POST("/token/refresh", tokenCtrl.RefreshToken) // 刷新令牌
 	}
 }
 

@@ -123,30 +123,28 @@ func (ctrl *IngestController) RawIngestData(c *gin.Context) {
 
 	// 首先尝试按标准格式解析
 	var req requestbody.RawIngestRequest
-	if err := json.Unmarshal(rawData, &req); err != nil {
-		// 如果解析失败，可能是直接发送数据的情况
-		// 解析整个请求体作为原始内容
-		var rawContent interface{}
-		if err := json.Unmarshal(rawData, &rawContent); err != nil {
-			c.JSON(400, msg.ErrResponse("无效的请求参数", err))
-			return
-		}
-		// 构建标准请求
-		req = requestbody.RawIngestRequest{
-			RawContent: rawContent,
-		}
-	} else {
-		// 如果解析成功但 RawContent 为 nil，说明是直接发送数据的情况
-		if req.RawContent == nil {
+	if len(rawData) > 0 {
+		if err := json.Unmarshal(rawData, &req); err != nil {
+			// 如果解析失败，可能是直接发送数据的情况
 			// 解析整个请求体作为原始内容
 			var rawContent interface{}
 			if err := json.Unmarshal(rawData, &rawContent); err != nil {
 				c.JSON(400, msg.ErrResponse("无效的请求参数", err))
 				return
 			}
-			req.RawContent = rawContent
+			// 构建标准请求
+			req = requestbody.RawIngestRequest{
+				RawContent: rawContent,
+			}
 		}
+	} else {
+		// 如果请求体为空，创建一个空的请求对象
+		req = requestbody.RawIngestRequest{}
+		logger.Info("Empty request body, creating empty request")
 	}
+
+	// 从查询参数中获取 remark
+	req.Remark = c.Query("remark")
 
 	// 重置请求体，确保后续操作能正确读取
 	c.Request.Body = ioutil.NopCloser(bytes.NewBuffer(rawData))

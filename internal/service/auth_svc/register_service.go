@@ -30,8 +30,8 @@ func (svc *RegisterService) CreateUserToken(c *gin.Context, request auth_request
 	database.DB.Model(&model.User{}).Select("account", "email", "password").Create(&user)
 
 	if user.ID > 0 {
-		// 生成 token
-		return jwt.NewJWT().GenerateToken(user.GetStringID())
+		// 生成 token（默认使用可刷新令牌）
+		return jwt.NewJWT().GenerateToken(user.GetStringID(), "refreshable")
 	} else {
 		return ""
 	}

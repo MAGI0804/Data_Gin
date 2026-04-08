@@ -36,6 +36,7 @@ type JWT struct {
 type JWTCustomClaims struct {
 	UserID       string `json:"user_id"`     // 当前登录的用户 id
 	ExpireAtTime int64  `json:"expire_time"` // 过期时间
+	TokenType    string `json:"token_type"`  // 令牌类型: "refreshable" 或 "permanent"
 
 	// StandardClaims 结构体实现了 Claims 接口继承了  Valid() 方法
 	// JWT 规定了7个官方字段，提供使用:
@@ -139,11 +140,18 @@ func (j *JWT) RefreshToken(c *gin.Context) (string, error) {
 	// 解析出自定义的载荷信息 JWTCustomClaims
 	claims := token.Claims.(*JWTCustomClaims)
 
+	// 检查令牌类型
+	if claims.TokenType == "permanent" {
+		// 永久令牌不需要刷新，直接返回原令牌
+		return tokenStr, nil
+	}
+
 	// 检查是否过了【最大允许刷新的时间】
 	// 首次签名时间 + 最大允许刷新时间区间 > 当前时间 ====> 首次签名时间 > 当前时间 - 最大允许刷新时间区间
 	if claims.IssuedAt > app.TimeNowInTimezone().Add(-j.MaxRefresh).Unix() {
 		// 此时并没有过最大允许刷新时间，因此可以重新颁发 token
 		claims.StandardClaims.ExpiresAt = j.expireAtTime()
+		claims.ExpireAtTime = j.expireAtTime()
 		return j.createToken(*claims)
 	}
 
@@ -152,12 +160,22 @@ func (j *JWT) RefreshToken(c *gin.Context) (string, error) {
 }
 
 // GenerateToken 生成 token
-func (j *JWT) GenerateToken(userId string) string {
+func (j *JWT) GenerateToken(userId string, tokenType string) string {
 	// 构造用户 claims 信息（负荷）
-	expireAtTime := j.expireAtTime()
+	var expireAtTime int64
+	if tokenType == "permanent" {
+		// 永久令牌，设置一个非常大的过期时间（100年）
+		expireAtTime = app.TimeNowInTimezone().Add(100 * 365 * 24 * time.Hour).Unix()
+	} else {
+		// 可刷新令牌，使用配置的过期时间
+		expireAtTime = j.expireAtTime()
+		tokenType = "refreshable" // 默认类型
+	}
+
 	claims := JWTCustomClaims{
 		UserID:       userId,
 		ExpireAtTime: expireAtTime,
+		TokenType:    tokenType,
 		StandardClaims: jwtPkg.StandardClaims{
 			NotBefore: app.TimeNowInTimezone().Unix(),   // 签名生效时间
 			IssuedAt:  app.TimeNowInTimezone().Unix(),   // 首次签名时间（后续刷新 token 不会更新）
@@ -218,4 +236,27 @@ func (j *JWT) GetToken(c *gin.Context) (string, error) {
 	}
 
 	return token, nil
+}
+
+// GetUserIDFromToken 从令牌中获取用户 ID，即使令牌过期
+func (j *JWT) GetUserIDFromToken(tokenStr string) (string, error) {
+	// 解析令牌，忽略过期错误
+	token, err := jwtPkg.ParseWithClaims(tokenStr, &JWTCustomClaims{}, func(token *jwtPkg.Token) (interface{}, error) {
+		return j.Key, nil
+	})
+
+	if err != nil {
+		// 检查是否是令牌过期错误
+		validationErr, ok := err.(*jwtPkg.ValidationError)
+		if !ok || validationErr.Errors != jwtPkg.ValidationErrorExpired {
+			return "", ErrTokenInvalid
+		}
+	}
+
+	// 解析出 claims
+	if claims, ok := token.Claims.(*JWTCustomClaims); ok {
+		return claims.UserID, nil
+	}
+
+	return "", ErrTokenInvalid
 }

@@ -150,6 +150,7 @@ func (s *IngestService) RawIngestData(ctx context.Context, req *requestbody.RawI
 	// 为缺失的原始内容设置默认值
 	rawContent := req.RawContent
 	if rawContent == nil {
+		// 如果原始内容为 nil，使用空对象
 		rawContent = map[string]interface{}{}
 		logger.Info("Raw content is nil, using empty object")
 	} else {
@@ -167,12 +168,19 @@ func (s *IngestService) RawIngestData(ctx context.Context, req *requestbody.RawI
 	}
 
 	// 构建元数据 JSON
-	metadataJSON, err := json.Marshal(map[string]interface{}{
+	metadata := map[string]interface{}{
 		"ingested_at": time.Now().Unix(),
 		"source":      dataSource,
 		"format":      "raw",
 		"client_ip":   clientIP,
-	})
+	}
+
+	// 添加备注信息
+	if req.Remark != "" {
+		metadata["remark"] = req.Remark
+	}
+
+	metadataJSON, err := json.Marshal(metadata)
 	if err != nil {
 		// 如果转换失败，使用空对象
 		metadataJSON = []byte("{}")
