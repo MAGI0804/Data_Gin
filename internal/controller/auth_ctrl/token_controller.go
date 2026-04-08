@@ -73,7 +73,7 @@ func (ctrl *TokenController) RefreshToken(c *gin.Context) {
 	}
 
 	response.ToResponse(gin.H{
-		"token_type": newClaims.TokenType,
+		"token_type": newClaims.T,
 		"token":      newToken,
 	})
 }

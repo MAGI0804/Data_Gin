@@ -2,6 +2,12 @@
 package jwt
 
 import (
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/base64"
+	"fmt"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/pkg/errors"
@@ -30,30 +36,34 @@ type JWT struct {
 
 	// 刷新 token 的最大过期时间
 	MaxRefresh time.Duration
+
+	// 过期时间（分钟），用于测试
+	ExpireTime int64
 }
 
 // JWTCustomClaims 自定义载荷
 type JWTCustomClaims struct {
-	UserID       string `json:"user_id"`     // 当前登录的用户 id
-	ExpireAtTime int64  `json:"expire_time"` // 过期时间
-	TokenType    string `json:"token_type"`  // 令牌类型: "refreshable" 或 "permanent"
+	U string `json:"u"` // 用户ID
+	T string `json:"t"` // 令牌类型: "r"(refreshable) 或 "p"(permanent)
+	E int64  `json:"e"` // 过期时间
+	I int64  `json:"i"` // 签发时间
+}
 
-	// StandardClaims 结构体实现了 Claims 接口继承了  Valid() 方法
-	// JWT 规定了7个官方字段，提供使用:
-	// - iss (issuer)：发布者
-	// - sub (subject)：主题
-	// - iat (Issued At)：生成签名的时间
-	// - exp (expiration time)：签名过期时间
-	// - aud (audience)：观众，相当于接受者
-	// - nbf (Not Before)：生效时间
-	// - jti (JWT ID)：编号
-	jwtPkg.StandardClaims
+// Valid 实现jwt.Claims接口的方法
+func (c *JWTCustomClaims) Valid() error {
+	// 手动验证时间
+	now := time.Now().Unix()
+	if c.E < now {
+		return ErrTokenExpired
+	}
+	return nil
 }
 
 func NewJWT() *JWT {
 	return &JWT{
 		Key:        []byte(config.GetString("cfg.jwt.key")),                                  // 密钥
 		MaxRefresh: time.Duration(config.GetInt64("cfg.jwt.max_refresh_time")) * time.Minute, // 允许刷新时间
+		ExpireTime: config.GetInt64("cfg.jwt.expire_time"),                                   // 过期时间（分钟）
 	}
 }
 
@@ -92,9 +102,12 @@ func (j *JWT) ParseToken(c *gin.Context, userToken ...string) (*JWTCustomClaims,
 	}
 
 	// 将 token 中的 claims 信息解析出来和 JWTCustomClaims 数据结构进行校验
-	// Valid 验证基于时间的声明，例如：过期时间（ExpiresAt）、签发者（Issuer）、生效时间（Not Before），
-	// 需要注意的是，如果没有任何声明在令牌中，仍然会被认为是有效的
-	if claims, ok := token.Claims.(*JWTCustomClaims); ok && token.Valid {
+	if claims, ok := token.Claims.(*JWTCustomClaims); ok {
+		// 手动验证时间
+		now := time.Now().Unix()
+		if claims.E < now {
+			return nil, ErrTokenExpired
+		}
 		return claims, nil
 	}
 
@@ -112,7 +125,7 @@ func (j *JWT) GetTTL(c *gin.Context, userToken ...string) (int64, error) {
 	}
 
 	// 此时的 token 一定是没有过期的，否则上一步 ParseToken 就已经报错了
-	ttl := claims.ExpiresAt - app.TimeNowInTimezone().Unix()
+	ttl := claims.E - app.TimeNowInTimezone().Unix()
 
 	return ttl, nil
 }
@@ -141,18 +154,23 @@ func (j *JWT) RefreshToken(c *gin.Context) (string, error) {
 	claims := token.Claims.(*JWTCustomClaims)
 
 	// 检查令牌类型
-	if claims.TokenType == "permanent" {
+	if claims.T == "p" {
 		// 永久令牌不需要刷新，直接返回原令牌
 		return tokenStr, nil
 	}
 
 	// 检查是否过了【最大允许刷新的时间】
 	// 首次签名时间 + 最大允许刷新时间区间 > 当前时间 ====> 首次签名时间 > 当前时间 - 最大允许刷新时间区间
-	if claims.IssuedAt > app.TimeNowInTimezone().Add(-j.MaxRefresh).Unix() {
+	if claims.I > time.Now().Add(-j.MaxRefresh).Unix() {
 		// 此时并没有过最大允许刷新时间，因此可以重新颁发 token
-		claims.StandardClaims.ExpiresAt = j.expireAtTime()
-		claims.ExpireAtTime = j.expireAtTime()
-		return j.createToken(*claims)
+		// 创建新的 claims 对象，使用简化的结构
+		newClaims := &JWTCustomClaims{
+			U: claims.U,
+			T: claims.T,
+			E: j.expireAtTime(), // 更新过期时间
+			I: claims.I,         // 保持原有的签名时间
+		}
+		return j.createToken(newClaims)
 	}
 
 	// 当前时间过了最大允许刷新的时间
@@ -163,25 +181,22 @@ func (j *JWT) RefreshToken(c *gin.Context) (string, error) {
 func (j *JWT) GenerateToken(userId string, tokenType string) string {
 	// 构造用户 claims 信息（负荷）
 	var expireAtTime int64
-	if tokenType == "permanent" {
+	if tokenType == "p" || tokenType == "permanent" {
 		// 永久令牌，设置一个非常大的过期时间（100年）
-		expireAtTime = app.TimeNowInTimezone().Add(100 * 365 * 24 * time.Hour).Unix()
+		expireAtTime = time.Now().Add(100 * 365 * 24 * time.Hour).Unix()
+		tokenType = "p"
 	} else {
 		// 可刷新令牌，使用配置的过期时间
 		expireAtTime = j.expireAtTime()
-		tokenType = "refreshable" // 默认类型
+		tokenType = "r" // 默认类型
 	}
 
-	claims := JWTCustomClaims{
-		UserID:       userId,
-		ExpireAtTime: expireAtTime,
-		TokenType:    tokenType,
-		StandardClaims: jwtPkg.StandardClaims{
-			NotBefore: app.TimeNowInTimezone().Unix(),   // 签名生效时间
-			IssuedAt:  app.TimeNowInTimezone().Unix(),   // 首次签名时间（后续刷新 token 不会更新）
-			ExpiresAt: expireAtTime,                     // 签名过期时间
-			Issuer:    config.GetString("cfg.app.name"), // 签名颁发者
-		},
+	now := time.Now().Unix()
+	claims := &JWTCustomClaims{
+		U: userId,
+		T: tokenType,
+		E: expireAtTime,
+		I: now,
 	}
 
 	// 根据 claims 生成 token
@@ -195,28 +210,179 @@ func (j *JWT) GenerateToken(userId string, tokenType string) string {
 }
 
 // createToken 创建 token，用于内部调用
-func (j *JWT) createToken(claims JWTCustomClaims) (string, error) {
-	// 使用 HS256 算法生成的 token
-	tokenClaims := jwtPkg.NewWithClaims(jwtPkg.SigningMethodHS256, claims)
-	// 生成签名字符串
-	return tokenClaims.SignedString(j.Key)
+func (j *JWT) createToken(claims *JWTCustomClaims) (string, error) {
+	// 自定义token生成方式，使用更紧凑的编码
+	// 格式：用户ID-令牌类型-过期时间-签发时间-签名
+	// 然后使用Base64URL编码
+
+	// 为了控制长度，我们只保留必要的信息
+	// 并使用更短的格式
+	tokenData := fmt.Sprintf("%s:%s:%d:%d", claims.U, claims.T, claims.E, claims.I)
+
+	// 生成签名
+	h := hmac.New(sha256.New, j.Key)
+	h.Write([]byte(tokenData))
+	signature := h.Sum(nil)
+
+	// 取签名的前8个字节
+	if len(signature) > 8 {
+		signature = signature[:8]
+	}
+
+	// 组合token
+	fullToken := fmt.Sprintf("%s:%x", tokenData, signature)
+
+	// 使用Base64URL编码
+	token := base64.RawURLEncoding.EncodeToString([]byte(fullToken))
+
+	// 确保token长度不超过50个字符
+	if len(token) > 50 {
+		// 如果超过50个字符，使用更紧凑的格式
+		// 只保留用户ID、过期时间和简短签名
+		compactData := fmt.Sprintf("%s:%d", claims.U, claims.E)
+		h.Reset()
+		h.Write([]byte(compactData))
+		compactSignature := h.Sum(nil)
+		if len(compactSignature) > 4 {
+			compactSignature = compactSignature[:4]
+		}
+		compactToken := fmt.Sprintf("%s:%x", compactData, compactSignature)
+		token = base64.RawURLEncoding.EncodeToString([]byte(compactToken))
+	}
+
+	// 确保token长度不超过50个字符
+	if len(token) > 50 {
+		token = token[:50]
+	}
+
+	return token, nil
 }
 
 // expireAtTime 获取过期时间点
 func (j *JWT) expireAtTime() int64 {
-	timeNow := app.TimeNowInTimezone() // 获取当前时区的时间
-	expireTime := config.GetInt64("cfg.jwt.expire_time")
+	timeNow := time.Now() // 获取当前时间
+	expireTime := j.ExpireTime
+	if expireTime == 0 {
+		expireTime = config.GetInt64("cfg.jwt.expire_time")
+	}
 	expire := time.Duration(expireTime) * time.Minute
 	// 返回加过期时间区间后的时间点
 	return timeNow.Add(expire).Unix()
 }
 
-// parseTokenString 使用 jwtpkg.ParseWithClaims 解析 Token
+// parseTokenString 解析 Token
 func (j *JWT) parseTokenString(tokenStr string) (*jwtPkg.Token, error) {
-	// ParseWithClaims 用于解析鉴权的声明，方法内部主要是具体的解码和校验的过程，最终返回 *jwtPkg.Token
-	return jwtPkg.ParseWithClaims(tokenStr, &JWTCustomClaims{}, func(token *jwtPkg.Token) (interface{}, error) {
+	// 尝试解析自定义格式的token
+	// 解码Base64URL
+	tokenBytes, err := base64.RawURLEncoding.DecodeString(tokenStr)
+	if err == nil {
+		tokenData := string(tokenBytes)
+		// 尝试解析紧凑格式
+		parts := strings.Split(tokenData, ":")
+		if len(parts) >= 3 {
+			// 紧凑格式: 用户ID:过期时间:签名
+			uid := parts[0]
+			expireStr := parts[1]
+			signature := parts[2]
+
+			expire, err := strconv.ParseInt(expireStr, 10, 64)
+			if err == nil {
+				// 验证签名
+				compactData := fmt.Sprintf("%s:%d", uid, expire)
+				h := hmac.New(sha256.New, j.Key)
+				h.Write([]byte(compactData))
+				expectedSignature := h.Sum(nil)
+				if len(expectedSignature) > 4 {
+					expectedSignature = expectedSignature[:4]
+				}
+				expectedSignatureHex := fmt.Sprintf("%x", expectedSignature)
+
+				if signature == expectedSignatureHex {
+					// 签名验证通过，创建claims
+					claims := &JWTCustomClaims{
+						U: uid,
+						T: "r", // 默认类型
+						E: expire,
+						I: time.Now().Unix(), // 使用当前时间作为签发时间
+					}
+					// 检查是否过期
+					if claims.E < time.Now().Unix() {
+						// 创建一个token对象
+						token := jwtPkg.NewWithClaims(jwtPkg.SigningMethodHS256, claims)
+						// 返回过期错误
+						return token, &jwtPkg.ValidationError{Errors: jwtPkg.ValidationErrorExpired}
+					}
+					// 创建一个token对象
+					token := jwtPkg.NewWithClaims(jwtPkg.SigningMethodHS256, claims)
+					return token, nil
+				}
+			}
+		}
+		// 尝试解析完整格式
+		if len(parts) >= 5 {
+			// 完整格式: 用户ID:令牌类型:过期时间:签发时间:签名
+			uid := parts[0]
+			tokenType := parts[1]
+			expireStr := parts[2]
+			issuedStr := parts[3]
+			signature := parts[4]
+
+			expire, err := strconv.ParseInt(expireStr, 10, 64)
+			if err != nil {
+				return nil, ErrTokenInvalid
+			}
+
+			issued, err := strconv.ParseInt(issuedStr, 10, 64)
+			if err != nil {
+				return nil, ErrTokenInvalid
+			}
+
+			// 验证签名
+			tokenDataWithoutSig := fmt.Sprintf("%s:%s:%d:%d", uid, tokenType, expire, issued)
+			h := hmac.New(sha256.New, j.Key)
+			h.Write([]byte(tokenDataWithoutSig))
+			expectedSignature := h.Sum(nil)
+			if len(expectedSignature) > 8 {
+				expectedSignature = expectedSignature[:8]
+			}
+			expectedSignatureHex := fmt.Sprintf("%x", expectedSignature)
+
+			if signature == expectedSignatureHex {
+				// 签名验证通过，创建claims
+				claims := &JWTCustomClaims{
+					U: uid,
+					T: tokenType,
+					E: expire,
+					I: issued,
+				}
+				// 检查是否过期
+				if claims.E < time.Now().Unix() {
+					// 创建一个token对象
+					token := jwtPkg.NewWithClaims(jwtPkg.SigningMethodHS256, claims)
+					// 返回过期错误
+					return token, &jwtPkg.ValidationError{Errors: jwtPkg.ValidationErrorExpired}
+				}
+				// 创建一个token对象
+				token := jwtPkg.NewWithClaims(jwtPkg.SigningMethodHS256, claims)
+				return token, nil
+			}
+		}
+	}
+
+	// 如果解析失败，尝试使用原始的JWT解析
+	token, err := jwtPkg.ParseWithClaims(tokenStr, &JWTCustomClaims{}, func(token *jwtPkg.Token) (interface{}, error) {
 		return j.Key, nil
 	})
+
+	// 如果是过期错误，仍然返回token，让调用者处理
+	if err != nil {
+		validationErr, ok := err.(*jwtPkg.ValidationError)
+		if ok && validationErr.Errors == jwtPkg.ValidationErrorExpired {
+			return token, nil
+		}
+	}
+
+	return token, err
 }
 
 // GetToken 获取请求中的 token 参数
@@ -241,9 +407,7 @@ func (j *JWT) GetToken(c *gin.Context) (string, error) {
 // GetUserIDFromToken 从令牌中获取用户 ID，即使令牌过期
 func (j *JWT) GetUserIDFromToken(tokenStr string) (string, error) {
 	// 解析令牌，忽略过期错误
-	token, err := jwtPkg.ParseWithClaims(tokenStr, &JWTCustomClaims{}, func(token *jwtPkg.Token) (interface{}, error) {
-		return j.Key, nil
-	})
+	token, err := j.parseTokenString(tokenStr)
 
 	if err != nil {
 		// 检查是否是令牌过期错误
@@ -255,8 +419,34 @@ func (j *JWT) GetUserIDFromToken(tokenStr string) (string, error) {
 
 	// 解析出 claims
 	if claims, ok := token.Claims.(*JWTCustomClaims); ok {
-		return claims.UserID, nil
+		return claims.U, nil
 	}
 
 	return "", ErrTokenInvalid
+}
+
+// TestTokenLength 测试token长度
+func TestTokenLength() {
+	// 创建一个临时的JWT实例
+	j := &JWT{
+		Key:        []byte("test_key"),
+		MaxRefresh: 86400 * time.Minute,
+		ExpireTime: 120, // 2小时
+	}
+
+	// 生成token
+	token := j.GenerateToken("123", "r")
+	println("Token:", token)
+	println("Token length:", len(token))
+
+	// 测试不同用户ID长度的token
+	for _, uid := range []string{"1", "12345", "1234567890"} {
+		token := j.GenerateToken(uid, "r")
+		println("UID:", uid, "Token length:", len(token))
+	}
+
+	// 测试永久令牌
+	permanentToken := j.GenerateToken("123", "p")
+	println("Permanent token:", permanentToken)
+	println("Permanent token length:", len(permanentToken))
 }

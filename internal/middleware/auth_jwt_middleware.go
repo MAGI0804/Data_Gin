@@ -30,7 +30,7 @@ func AuthJWT() gin.HandlerFunc {
 
 		// jwt 解析成功，设置用户信息
 		var user model.User
-		database.DB.First(&user, claims.UserID)
+		database.DB.First(&user, claims.U)
 		if user.ID == 0 {
 			response.ToErrorResponse(errcode.Unauthorized, "找不到对应用户")
 			c.Abort()
