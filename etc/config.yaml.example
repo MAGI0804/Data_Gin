@@ -1,0 +1,50 @@
+App:
+  Name: gin-biz-web-api # 项目名称，会在缓存中用到
+  Env: local # 当前项目运行环境
+  Debug: true # 只有开启 debug 模式时，日志记录才会有换行且高亮
+  Url: http://localhost:8501 # http 服务的访问地址
+  Port: 8501 # 默认的 HTTP 监听端口
+  GinRunMode: debug # 设置 gin 框架的运行模式
+  ContextTimeout: 60 # 上下文超时时间，单位：s
+Log:
+  Type: daily
+  MaxAge: 7
+  MaxSize: 64
+JWT:
+  Key: zBqYyQrPNaIUsnRhsGtHLivjqiMjBVLS # 加密 key
+  ExpireTime: 120 # jwt 过期时间，单位：min
+  MaxRefreshTime: 86400 # 允许刷新时间，单位：min
+Email:
+  Host: smtp.qq.com
+  Port: 465
+  UserName: 123@qq.com
+  Password: xxx
+  FromAddress: 123@qq.com
+  FromName: alex
+DB:
+  Driver: mysql
+  Host: mysql8_0_19
+  Port: 3306
+  Database: gin_biz_web_api
+  Username: root
+  Password: 123456
+  Charset: utf8mb4
+Redis: # redis 相关配置
+  Host: redis_6_2_6
+  Port: 6379
+  Username:
+  Password:
+  DB: 0
+Cache: # 缓存相关配置，默认使用的也是 redis 驱动
+  Host: redis_6_2_6
+  Port: 6379
+  Username:
+  Password:
+  DB: 1 # 建议将缓存存储位置和业务 redis 存储位置区分开来
+QueueJob:
+  Redis:
+    Host: redis_6_2_6
+    Port: 6379
+    Username:
+    Password:
+    DB: 2

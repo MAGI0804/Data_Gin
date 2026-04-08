@@ -1,0 +1,649 @@
+2026-04-07 15:01:18	[31mERROR[0m	gorm@v1.23.2/gorm.go:206	failed to initialize database, got error dial tcp 127.0.0.1:3306: connectex: No connection could be made because the target machine actively refused it.
+gorm.io/gorm.Open
+	C:/Users/易理志/go/pkg/mod/gorm.io/gorm@v1.23.2/gorm.go:206
+gin-biz-web-api/pkg/database.NewMysqlClient
+	D:/go_demo/Data_Warehouse_Go/pkg/database/database.go:87
+gin-biz-web-api/pkg/database.ConnectMySQL.func1
+	D:/go_demo/Data_Warehouse_Go/pkg/database/database.go:55
+sync.(*Once).doSlow
+	D:/Go/src/sync/once.go:78
+sync.(*Once).Do
+	D:/Go/src/sync/once.go:69
+gin-biz-web-api/pkg/database.ConnectMySQL
+	D:/go_demo/Data_Warehouse_Go/pkg/database/database.go:48
+gin-biz-web-api/bootstrap.setupDBMySQL
+	D:/go_demo/Data_Warehouse_Go/bootstrap/database.go:70
+gin-biz-web-api/bootstrap.setupDB
+	D:/go_demo/Data_Warehouse_Go/bootstrap/database.go:27
+gin-biz-web-api/bootstrap.Initialize
+	D:/go_demo/Data_Warehouse_Go/bootstrap/boot.go:23
+main.init.func1
+	D:/go_demo/Data_Warehouse_Go/main.go:34
+github.com/spf13/cobra.(*Command).execute
+	C:/Users/易理志/go/pkg/mod/github.com/spf13/cobra@v1.4.0/command.go:840
+github.com/spf13/cobra.(*Command).ExecuteC
+	C:/Users/易理志/go/pkg/mod/github.com/spf13/cobra@v1.4.0/command.go:974
+github.com/spf13/cobra.(*Command).Execute
+	C:/Users/易理志/go/pkg/mod/github.com/spf13/cobra@v1.4.0/command.go:902
+main.main
+	D:/go_demo/Data_Warehouse_Go/main.go:127
+runtime.main
+	D:/Go/src/runtime/proc.go:285
+2026-04-07 15:08:24	[31mERROR[0m	gorm@v1.23.2/gorm.go:206	failed to initialize database, got error dial tcp 127.0.0.1:3306: connectex: No connection could be made because the target machine actively refused it.
+gorm.io/gorm.Open
+	C:/Users/易理志/go/pkg/mod/gorm.io/gorm@v1.23.2/gorm.go:206
+gin-biz-web-api/pkg/database.NewMysqlClient
+	D:/go_demo/Data_Warehouse_Go/pkg/database/database.go:87
+gin-biz-web-api/pkg/database.ConnectMySQL.func1
+	D:/go_demo/Data_Warehouse_Go/pkg/database/database.go:55
+sync.(*Once).doSlow
+	D:/Go/src/sync/once.go:78
+sync.(*Once).Do
+	D:/Go/src/sync/once.go:69
+gin-biz-web-api/pkg/database.ConnectMySQL
+	D:/go_demo/Data_Warehouse_Go/pkg/database/database.go:48
+gin-biz-web-api/bootstrap.setupDBMySQL
+	D:/go_demo/Data_Warehouse_Go/bootstrap/database.go:70
+gin-biz-web-api/bootstrap.setupDB
+	D:/go_demo/Data_Warehouse_Go/bootstrap/database.go:27
+gin-biz-web-api/bootstrap.Initialize
+	D:/go_demo/Data_Warehouse_Go/bootstrap/boot.go:23
+main.init.func1
+	D:/go_demo/Data_Warehouse_Go/main.go:34
+github.com/spf13/cobra.(*Command).execute
+	C:/Users/易理志/go/pkg/mod/github.com/spf13/cobra@v1.4.0/command.go:840
+github.com/spf13/cobra.(*Command).ExecuteC
+	C:/Users/易理志/go/pkg/mod/github.com/spf13/cobra@v1.4.0/command.go:974
+github.com/spf13/cobra.(*Command).Execute
+	C:/Users/易理志/go/pkg/mod/github.com/spf13/cobra@v1.4.0/command.go:902
+main.main
+	D:/go_demo/Data_Warehouse_Go/main.go:127
+runtime.main
+	D:/Go/src/runtime/proc.go:285
+2026-04-07 15:09:21	[31mERROR[0m	gorm@v1.23.2/gorm.go:206	failed to initialize database, got error dial tcp 127.0.0.1:3306: connectex: No connection could be made because the target machine actively refused it.
+gorm.io/gorm.Open
+	C:/Users/易理志/go/pkg/mod/gorm.io/gorm@v1.23.2/gorm.go:206
+gin-biz-web-api/pkg/database.NewMysqlClient
+	D:/go_demo/Data_Warehouse_Go/pkg/database/database.go:90
+gin-biz-web-api/pkg/database.ConnectMySQL.func1
+	D:/go_demo/Data_Warehouse_Go/pkg/database/database.go:55
+sync.(*Once).doSlow
+	D:/Go/src/sync/once.go:78
+sync.(*Once).Do
+	D:/Go/src/sync/once.go:69
+gin-biz-web-api/pkg/database.ConnectMySQL
+	D:/go_demo/Data_Warehouse_Go/pkg/database/database.go:48
+gin-biz-web-api/bootstrap.setupDBMySQL
+	D:/go_demo/Data_Warehouse_Go/bootstrap/database.go:70
+gin-biz-web-api/bootstrap.setupDB
+	D:/go_demo/Data_Warehouse_Go/bootstrap/database.go:27
+gin-biz-web-api/bootstrap.Initialize
+	D:/go_demo/Data_Warehouse_Go/bootstrap/boot.go:23
+main.init.func1
+	D:/go_demo/Data_Warehouse_Go/main.go:34
+github.com/spf13/cobra.(*Command).execute
+	C:/Users/易理志/go/pkg/mod/github.com/spf13/cobra@v1.4.0/command.go:840
+github.com/spf13/cobra.(*Command).ExecuteC
+	C:/Users/易理志/go/pkg/mod/github.com/spf13/cobra@v1.4.0/command.go:974
+github.com/spf13/cobra.(*Command).Execute
+	C:/Users/易理志/go/pkg/mod/github.com/spf13/cobra@v1.4.0/command.go:902
+main.main
+	D:/go_demo/Data_Warehouse_Go/main.go:127
+runtime.main
+	D:/Go/src/runtime/proc.go:285
+2026-04-07 15:09:21	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT DATABASE()", "took time": "0.000ms", "affected rows": -1}
+2026-04-07 15:09:21	[31mERROR[0m	gorm@v1.23.2/finisher_api.go:474	Database Error	{"sql": "SELECT SCHEMA_NAME from Information_schema.SCHEMATA where SCHEMA_NAME LIKE '%' ORDER BY SCHEMA_NAME='' DESC limit 1", "took time": "0.000ms", "affected rows": -1, "error": "dial tcp 127.0.0.1:3306: connectex: No connection could be made because the target machine actively refused it."}
+gorm.io/gorm.(*DB).Scan
+	C:/Users/易理志/go/pkg/mod/gorm.io/gorm@v1.23.2/finisher_api.go:474
+gorm.io/driver/mysql.Migrator.CurrentDatabase
+	C:/Users/易理志/go/pkg/mod/gorm.io/driver/mysql@v1.3.2/migrator.go:231
+gorm.io/gorm/migrator.Migrator.HasTable.func1
+	C:/Users/易理志/go/pkg/mod/gorm.io/gorm@v1.23.2/migrator/migrator.go:280
+gorm.io/gorm/migrator.Migrator.RunWithValue
+	C:/Users/易理志/go/pkg/mod/gorm.io/gorm@v1.23.2/migrator/migrator.go:52
+gorm.io/gorm/migrator.Migrator.HasTable
+	C:/Users/易理志/go/pkg/mod/gorm.io/gorm@v1.23.2/migrator/migrator.go:279
+gorm.io/gorm/migrator.Migrator.AutoMigrate
+	C:/Users/易理志/go/pkg/mod/gorm.io/gorm@v1.23.2/migrator/migrator.go:96
+gorm.io/gorm.(*DB).AutoMigrate
+	C:/Users/易理志/go/pkg/mod/gorm.io/gorm@v1.23.2/migrator.go:28
+gin-biz-web-api/bootstrap.autoMigrateTables
+	D:/go_demo/Data_Warehouse_Go/bootstrap/database.go:90
+gin-biz-web-api/bootstrap.setupDBMySQL
+	D:/go_demo/Data_Warehouse_Go/bootstrap/database.go:73
+gin-biz-web-api/bootstrap.setupDB
+	D:/go_demo/Data_Warehouse_Go/bootstrap/database.go:27
+gin-biz-web-api/bootstrap.Initialize
+	D:/go_demo/Data_Warehouse_Go/bootstrap/boot.go:23
+main.init.func1
+	D:/go_demo/Data_Warehouse_Go/main.go:34
+github.com/spf13/cobra.(*Command).execute
+	C:/Users/易理志/go/pkg/mod/github.com/spf13/cobra@v1.4.0/command.go:840
+github.com/spf13/cobra.(*Command).ExecuteC
+	C:/Users/易理志/go/pkg/mod/github.com/spf13/cobra@v1.4.0/command.go:974
+github.com/spf13/cobra.(*Command).Execute
+	C:/Users/易理志/go/pkg/mod/github.com/spf13/cobra@v1.4.0/command.go:902
+main.main
+	D:/go_demo/Data_Warehouse_Go/main.go:127
+runtime.main
+	D:/Go/src/runtime/proc.go:285
+2026-04-07 15:09:21	[35mDEBUG[0m	gorm@v1.23.2/finisher_api.go:474	Database Query	{"sql": "SELECT SCHEMA_NAME from Information_schema.SCHEMATA where SCHEMA_NAME LIKE '%' ORDER BY SCHEMA_NAME='' DESC limit 1", "took time": "0.000ms", "affected rows": -1, "error": "dial tcp 127.0.0.1:3306: connectex: No connection could be made because the target machine actively refused it."}
+2026-04-07 15:09:21	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT count(*) FROM information_schema.tables WHERE table_schema = '' AND table_name = 'data_sources' AND table_type = 'BASE TABLE'", "took time": "0.000ms", "affected rows": -1}
+2026-04-07 15:09:21	[31mERROR[0m	gorm@v1.23.2/callbacks.go:134	Database Error	{"sql": "CREATE TABLE `data_sources` (`id` bigint unsigned AUTO_INCREMENT,`name` varchar(100) NOT NULL,`type` varchar(50) NOT NULL,`config` json NOT NULL,`schedule` varchar(100),`status` enum('active','inactive','error') DEFAULT 'active',`last_sync_time` datetime(3) NULL,`last_sync_status` varchar(20),`created_at` bigint,`updated_at` bigint,PRIMARY KEY (`id`))", "took time": "0.000ms", "affected rows": 0, "error": "dial tcp 127.0.0.1:3306: connectex: No connection could be made because the target machine actively refused it."}
+gorm.io/gorm.(*processor).Execute
+	C:/Users/易理志/go/pkg/mod/gorm.io/gorm@v1.23.2/callbacks.go:134
+gorm.io/gorm.(*DB).Exec
+	C:/Users/易理志/go/pkg/mod/gorm.io/gorm@v1.23.2/finisher_api.go:670
+gorm.io/gorm/migrator.Migrator.CreateTable.func1
+	C:/Users/易理志/go/pkg/mod/gorm.io/gorm@v1.23.2/migrator/migrator.go:252
+gorm.io/gorm/migrator.Migrator.RunWithValue
+	C:/Users/易理志/go/pkg/mod/gorm.io/gorm@v1.23.2/migrator/migrator.go:52
+gorm.io/gorm/migrator.Migrator.CreateTable
+	C:/Users/易理志/go/pkg/mod/gorm.io/gorm@v1.23.2/migrator/migrator.go:174
+gorm.io/gorm/migrator.Migrator.AutoMigrate
+	C:/Users/易理志/go/pkg/mod/gorm.io/gorm@v1.23.2/migrator/migrator.go:97
+gorm.io/gorm.(*DB).AutoMigrate
+	C:/Users/易理志/go/pkg/mod/gorm.io/gorm@v1.23.2/migrator.go:28
+gin-biz-web-api/bootstrap.autoMigrateTables
+	D:/go_demo/Data_Warehouse_Go/bootstrap/database.go:90
+gin-biz-web-api/bootstrap.setupDBMySQL
+	D:/go_demo/Data_Warehouse_Go/bootstrap/database.go:73
+gin-biz-web-api/bootstrap.setupDB
+	D:/go_demo/Data_Warehouse_Go/bootstrap/database.go:27
+gin-biz-web-api/bootstrap.Initialize
+	D:/go_demo/Data_Warehouse_Go/bootstrap/boot.go:23
+main.init.func1
+	D:/go_demo/Data_Warehouse_Go/main.go:34
+github.com/spf13/cobra.(*Command).execute
+	C:/Users/易理志/go/pkg/mod/github.com/spf13/cobra@v1.4.0/command.go:840
+github.com/spf13/cobra.(*Command).ExecuteC
+	C:/Users/易理志/go/pkg/mod/github.com/spf13/cobra@v1.4.0/command.go:974
+github.com/spf13/cobra.(*Command).Execute
+	C:/Users/易理志/go/pkg/mod/github.com/spf13/cobra@v1.4.0/command.go:902
+main.main
+	D:/go_demo/Data_Warehouse_Go/main.go:127
+runtime.main
+	D:/Go/src/runtime/proc.go:285
+2026-04-07 15:09:21	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "CREATE TABLE `data_sources` (`id` bigint unsigned AUTO_INCREMENT,`name` varchar(100) NOT NULL,`type` varchar(50) NOT NULL,`config` json NOT NULL,`schedule` varchar(100),`status` enum('active','inactive','error') DEFAULT 'active',`last_sync_time` datetime(3) NULL,`last_sync_status` varchar(20),`created_at` bigint,`updated_at` bigint,PRIMARY KEY (`id`))", "took time": "0.000ms", "affected rows": 0, "error": "dial tcp 127.0.0.1:3306: connectex: No connection could be made because the target machine actively refused it."}
+2026-04-07 15:09:21	[31mERROR[0m	bootstrap/database.go:98	数据表自动迁移失败	{"error": "dial tcp 127.0.0.1:3306: connectex: No connection could be made because the target machine actively refused it."}
+gin-biz-web-api/bootstrap.autoMigrateTables
+	D:/go_demo/Data_Warehouse_Go/bootstrap/database.go:98
+gin-biz-web-api/bootstrap.setupDBMySQL
+	D:/go_demo/Data_Warehouse_Go/bootstrap/database.go:73
+gin-biz-web-api/bootstrap.setupDB
+	D:/go_demo/Data_Warehouse_Go/bootstrap/database.go:27
+gin-biz-web-api/bootstrap.Initialize
+	D:/go_demo/Data_Warehouse_Go/bootstrap/boot.go:23
+main.init.func1
+	D:/go_demo/Data_Warehouse_Go/main.go:34
+github.com/spf13/cobra.(*Command).execute
+	C:/Users/易理志/go/pkg/mod/github.com/spf13/cobra@v1.4.0/command.go:840
+github.com/spf13/cobra.(*Command).ExecuteC
+	C:/Users/易理志/go/pkg/mod/github.com/spf13/cobra@v1.4.0/command.go:974
+github.com/spf13/cobra.(*Command).Execute
+	C:/Users/易理志/go/pkg/mod/github.com/spf13/cobra@v1.4.0/command.go:902
+main.main
+	D:/go_demo/Data_Warehouse_Go/main.go:127
+runtime.main
+	D:/Go/src/runtime/proc.go:285
+2026-04-07 15:09:21	[34mINFO[0m	bootstrap/crontab.go:49	加入定时任务成功：	{"task": "ClearLogsCrontab", "entryID": 1}
+2026-04-07 15:09:21	[34mINFO[0m	bootstrap/crontab.go:49	加入定时任务成功：	{"task": "DataCollectCrontab", "entryID": 2}
+2026-04-07 15:09:21	[34mINFO[0m	crontab/crontab.go:37	【定时任务：】	{"start": "null"}
+2026-04-07 15:09:21	[34mINFO[0m	crontab/crontab.go:37	【定时任务：】	{"schedule": "[\"now\",\"2026-04-07T15:09:21.3352894+08:00\",\"entry\",1,\"next\",\"2026-04-08T00:00:00+08:00\"]"}
+2026-04-07 15:09:21	[34mINFO[0m	crontab/crontab.go:37	【定时任务：】	{"schedule": "[\"now\",\"2026-04-07T15:09:21.3352894+08:00\",\"entry\",2,\"next\",\"2026-04-07T15:30:00+08:00\"]"}
+2026-04-07 15:10:49	[31mERROR[0m	gorm@v1.23.2/gorm.go:206	failed to initialize database, got error dial tcp 127.0.0.1:3306: connectex: No connection could be made because the target machine actively refused it.
+gorm.io/gorm.Open
+	C:/Users/易理志/go/pkg/mod/gorm.io/gorm@v1.23.2/gorm.go:206
+gin-biz-web-api/pkg/database.NewMysqlClient
+	D:/go_demo/Data_Warehouse_Go/pkg/database/database.go:90
+gin-biz-web-api/pkg/database.ConnectMySQL.func1
+	D:/go_demo/Data_Warehouse_Go/pkg/database/database.go:55
+sync.(*Once).doSlow
+	D:/Go/src/sync/once.go:78
+sync.(*Once).Do
+	D:/Go/src/sync/once.go:69
+gin-biz-web-api/pkg/database.ConnectMySQL
+	D:/go_demo/Data_Warehouse_Go/pkg/database/database.go:48
+gin-biz-web-api/bootstrap.setupDBMySQL
+	D:/go_demo/Data_Warehouse_Go/bootstrap/database.go:70
+gin-biz-web-api/bootstrap.setupDB
+	D:/go_demo/Data_Warehouse_Go/bootstrap/database.go:27
+gin-biz-web-api/bootstrap.Initialize
+	D:/go_demo/Data_Warehouse_Go/bootstrap/boot.go:23
+main.init.func1
+	D:/go_demo/Data_Warehouse_Go/main.go:34
+github.com/spf13/cobra.(*Command).execute
+	C:/Users/易理志/go/pkg/mod/github.com/spf13/cobra@v1.4.0/command.go:840
+github.com/spf13/cobra.(*Command).ExecuteC
+	C:/Users/易理志/go/pkg/mod/github.com/spf13/cobra@v1.4.0/command.go:974
+github.com/spf13/cobra.(*Command).Execute
+	C:/Users/易理志/go/pkg/mod/github.com/spf13/cobra@v1.4.0/command.go:902
+main.main
+	D:/go_demo/Data_Warehouse_Go/main.go:127
+runtime.main
+	D:/Go/src/runtime/proc.go:285
+2026-04-07 15:10:49	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT DATABASE()", "took time": "0.000ms", "affected rows": -1}
+2026-04-07 15:10:49	[31mERROR[0m	gorm@v1.23.2/finisher_api.go:474	Database Error	{"sql": "SELECT SCHEMA_NAME from Information_schema.SCHEMATA where SCHEMA_NAME LIKE '%' ORDER BY SCHEMA_NAME='' DESC limit 1", "took time": "0.000ms", "affected rows": -1, "error": "dial tcp 127.0.0.1:3306: connectex: No connection could be made because the target machine actively refused it."}
+gorm.io/gorm.(*DB).Scan
+	C:/Users/易理志/go/pkg/mod/gorm.io/gorm@v1.23.2/finisher_api.go:474
+gorm.io/driver/mysql.Migrator.CurrentDatabase
+	C:/Users/易理志/go/pkg/mod/gorm.io/driver/mysql@v1.3.2/migrator.go:231
+gorm.io/gorm/migrator.Migrator.HasTable.func1
+	C:/Users/易理志/go/pkg/mod/gorm.io/gorm@v1.23.2/migrator/migrator.go:280
+gorm.io/gorm/migrator.Migrator.RunWithValue
+	C:/Users/易理志/go/pkg/mod/gorm.io/gorm@v1.23.2/migrator/migrator.go:52
+gorm.io/gorm/migrator.Migrator.HasTable
+	C:/Users/易理志/go/pkg/mod/gorm.io/gorm@v1.23.2/migrator/migrator.go:279
+gorm.io/gorm/migrator.Migrator.AutoMigrate
+	C:/Users/易理志/go/pkg/mod/gorm.io/gorm@v1.23.2/migrator/migrator.go:96
+gorm.io/gorm.(*DB).AutoMigrate
+	C:/Users/易理志/go/pkg/mod/gorm.io/gorm@v1.23.2/migrator.go:28
+gin-biz-web-api/bootstrap.autoMigrateTables
+	D:/go_demo/Data_Warehouse_Go/bootstrap/database.go:90
+gin-biz-web-api/bootstrap.setupDBMySQL
+	D:/go_demo/Data_Warehouse_Go/bootstrap/database.go:73
+gin-biz-web-api/bootstrap.setupDB
+	D:/go_demo/Data_Warehouse_Go/bootstrap/database.go:27
+gin-biz-web-api/bootstrap.Initialize
+	D:/go_demo/Data_Warehouse_Go/bootstrap/boot.go:23
+main.init.func1
+	D:/go_demo/Data_Warehouse_Go/main.go:34
+github.com/spf13/cobra.(*Command).execute
+	C:/Users/易理志/go/pkg/mod/github.com/spf13/cobra@v1.4.0/command.go:840
+github.com/spf13/cobra.(*Command).ExecuteC
+	C:/Users/易理志/go/pkg/mod/github.com/spf13/cobra@v1.4.0/command.go:974
+github.com/spf13/cobra.(*Command).Execute
+	C:/Users/易理志/go/pkg/mod/github.com/spf13/cobra@v1.4.0/command.go:902
+main.main
+	D:/go_demo/Data_Warehouse_Go/main.go:127
+runtime.main
+	D:/Go/src/runtime/proc.go:285
+2026-04-07 15:10:49	[35mDEBUG[0m	gorm@v1.23.2/finisher_api.go:474	Database Query	{"sql": "SELECT SCHEMA_NAME from Information_schema.SCHEMATA where SCHEMA_NAME LIKE '%' ORDER BY SCHEMA_NAME='' DESC limit 1", "took time": "0.000ms", "affected rows": -1, "error": "dial tcp 127.0.0.1:3306: connectex: No connection could be made because the target machine actively refused it."}
+2026-04-07 15:10:49	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT count(*) FROM information_schema.tables WHERE table_schema = '' AND table_name = 'data_sources' AND table_type = 'BASE TABLE'", "took time": "0.000ms", "affected rows": -1}
+2026-04-07 15:10:49	[31mERROR[0m	gorm@v1.23.2/callbacks.go:134	Database Error	{"sql": "CREATE TABLE `data_sources` (`id` bigint unsigned AUTO_INCREMENT,`name` varchar(100) NOT NULL,`type` varchar(50) NOT NULL,`config` json NOT NULL,`schedule` varchar(100),`status` enum('active','inactive','error') DEFAULT 'active',`last_sync_time` datetime(3) NULL,`last_sync_status` varchar(20),`created_at` bigint,`updated_at` bigint,PRIMARY KEY (`id`))", "took time": "0.000ms", "affected rows": 0, "error": "dial tcp 127.0.0.1:3306: connectex: No connection could be made because the target machine actively refused it."}
+gorm.io/gorm.(*processor).Execute
+	C:/Users/易理志/go/pkg/mod/gorm.io/gorm@v1.23.2/callbacks.go:134
+gorm.io/gorm.(*DB).Exec
+	C:/Users/易理志/go/pkg/mod/gorm.io/gorm@v1.23.2/finisher_api.go:670
+gorm.io/gorm/migrator.Migrator.CreateTable.func1
+	C:/Users/易理志/go/pkg/mod/gorm.io/gorm@v1.23.2/migrator/migrator.go:252
+gorm.io/gorm/migrator.Migrator.RunWithValue
+	C:/Users/易理志/go/pkg/mod/gorm.io/gorm@v1.23.2/migrator/migrator.go:52
+gorm.io/gorm/migrator.Migrator.CreateTable
+	C:/Users/易理志/go/pkg/mod/gorm.io/gorm@v1.23.2/migrator/migrator.go:174
+gorm.io/gorm/migrator.Migrator.AutoMigrate
+	C:/Users/易理志/go/pkg/mod/gorm.io/gorm@v1.23.2/migrator/migrator.go:97
+gorm.io/gorm.(*DB).AutoMigrate
+	C:/Users/易理志/go/pkg/mod/gorm.io/gorm@v1.23.2/migrator.go:28
+gin-biz-web-api/bootstrap.autoMigrateTables
+	D:/go_demo/Data_Warehouse_Go/bootstrap/database.go:90
+gin-biz-web-api/bootstrap.setupDBMySQL
+	D:/go_demo/Data_Warehouse_Go/bootstrap/database.go:73
+gin-biz-web-api/bootstrap.setupDB
+	D:/go_demo/Data_Warehouse_Go/bootstrap/database.go:27
+gin-biz-web-api/bootstrap.Initialize
+	D:/go_demo/Data_Warehouse_Go/bootstrap/boot.go:23
+main.init.func1
+	D:/go_demo/Data_Warehouse_Go/main.go:34
+github.com/spf13/cobra.(*Command).execute
+	C:/Users/易理志/go/pkg/mod/github.com/spf13/cobra@v1.4.0/command.go:840
+github.com/spf13/cobra.(*Command).ExecuteC
+	C:/Users/易理志/go/pkg/mod/github.com/spf13/cobra@v1.4.0/command.go:974
+github.com/spf13/cobra.(*Command).Execute
+	C:/Users/易理志/go/pkg/mod/github.com/spf13/cobra@v1.4.0/command.go:902
+main.main
+	D:/go_demo/Data_Warehouse_Go/main.go:127
+runtime.main
+	D:/Go/src/runtime/proc.go:285
+2026-04-07 15:10:49	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "CREATE TABLE `data_sources` (`id` bigint unsigned AUTO_INCREMENT,`name` varchar(100) NOT NULL,`type` varchar(50) NOT NULL,`config` json NOT NULL,`schedule` varchar(100),`status` enum('active','inactive','error') DEFAULT 'active',`last_sync_time` datetime(3) NULL,`last_sync_status` varchar(20),`created_at` bigint,`updated_at` bigint,PRIMARY KEY (`id`))", "took time": "0.000ms", "affected rows": 0, "error": "dial tcp 127.0.0.1:3306: connectex: No connection could be made because the target machine actively refused it."}
+2026-04-07 15:10:49	[31mERROR[0m	bootstrap/database.go:98	数据表自动迁移失败	{"error": "dial tcp 127.0.0.1:3306: connectex: No connection could be made because the target machine actively refused it."}
+gin-biz-web-api/bootstrap.autoMigrateTables
+	D:/go_demo/Data_Warehouse_Go/bootstrap/database.go:98
+gin-biz-web-api/bootstrap.setupDBMySQL
+	D:/go_demo/Data_Warehouse_Go/bootstrap/database.go:73
+gin-biz-web-api/bootstrap.setupDB
+	D:/go_demo/Data_Warehouse_Go/bootstrap/database.go:27
+gin-biz-web-api/bootstrap.Initialize
+	D:/go_demo/Data_Warehouse_Go/bootstrap/boot.go:23
+main.init.func1
+	D:/go_demo/Data_Warehouse_Go/main.go:34
+github.com/spf13/cobra.(*Command).execute
+	C:/Users/易理志/go/pkg/mod/github.com/spf13/cobra@v1.4.0/command.go:840
+github.com/spf13/cobra.(*Command).ExecuteC
+	C:/Users/易理志/go/pkg/mod/github.com/spf13/cobra@v1.4.0/command.go:974
+github.com/spf13/cobra.(*Command).Execute
+	C:/Users/易理志/go/pkg/mod/github.com/spf13/cobra@v1.4.0/command.go:902
+main.main
+	D:/go_demo/Data_Warehouse_Go/main.go:127
+runtime.main
+	D:/Go/src/runtime/proc.go:285
+2026-04-07 15:10:49	[34mINFO[0m	bootstrap/crontab.go:49	加入定时任务成功：	{"task": "ClearLogsCrontab", "entryID": 1}
+2026-04-07 15:10:49	[34mINFO[0m	bootstrap/crontab.go:49	加入定时任务成功：	{"task": "DataCollectCrontab", "entryID": 2}
+2026-04-07 15:10:49	[34mINFO[0m	crontab/crontab.go:37	【定时任务：】	{"start": "null"}
+2026-04-07 15:10:49	[34mINFO[0m	crontab/crontab.go:37	【定时任务：】	{"schedule": "[\"now\",\"2026-04-07T15:10:49.4285568+08:00\",\"entry\",1,\"next\",\"2026-04-08T00:00:00+08:00\"]"}
+2026-04-07 15:10:49	[34mINFO[0m	crontab/crontab.go:37	【定时任务：】	{"schedule": "[\"now\",\"2026-04-07T15:10:49.4285568+08:00\",\"entry\",2,\"next\",\"2026-04-07T15:30:00+08:00\"]"}
+2026-04-07 15:12:12	[33mWARN[0m	bootstrap/server.go:59	Server	{"gracefulShutdown": "正在关闭服务器……"}
+2026-04-07 15:12:12	[33mWARN[0m	bootstrap/server.go:69	Server	{"gracefulShutdown": "服务已经退出"}
+2026-04-07 15:14:35	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT DATABASE()", "took time": "10.000ms", "affected rows": -1}
+2026-04-07 15:14:35	[35mDEBUG[0m	gorm@v1.23.2/finisher_api.go:474	Database Query	{"sql": "SELECT SCHEMA_NAME from Information_schema.SCHEMATA where SCHEMA_NAME LIKE 'wechat_member%' ORDER BY SCHEMA_NAME='wechat_member' DESC limit 1", "took time": "19.000ms", "affected rows": 1}
+2026-04-07 15:14:35	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'wechat_member' AND table_name = 'data_sources' AND table_type = 'BASE TABLE'", "took time": "24.000ms", "affected rows": -1}
+2026-04-07 15:14:35	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "CREATE TABLE `data_sources` (`id` bigint unsigned AUTO_INCREMENT,`name` varchar(100) NOT NULL,`type` varchar(50) NOT NULL,`config` json NOT NULL,`schedule` varchar(100),`status` enum('active','inactive','error') DEFAULT 'active',`last_sync_time` datetime(3) NULL,`last_sync_status` varchar(20),`created_at` bigint,`updated_at` bigint,PRIMARY KEY (`id`))", "took time": "15.000ms", "affected rows": 0}
+2026-04-07 15:14:35	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT DATABASE()", "took time": "7.000ms", "affected rows": -1}
+2026-04-07 15:14:35	[35mDEBUG[0m	gorm@v1.23.2/finisher_api.go:474	Database Query	{"sql": "SELECT SCHEMA_NAME from Information_schema.SCHEMATA where SCHEMA_NAME LIKE 'wechat_member%' ORDER BY SCHEMA_NAME='wechat_member' DESC limit 1", "took time": "18.000ms", "affected rows": 1}
+2026-04-07 15:14:35	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'wechat_member' AND table_name = 'raw_data' AND table_type = 'BASE TABLE'", "took time": "18.000ms", "affected rows": -1}
+2026-04-07 15:14:35	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "CREATE TABLE `raw_data` (`id` bigint unsigned AUTO_INCREMENT,`data_source_id` bigint unsigned NOT NULL,`external_id` varchar(255),`data_type` varchar(50) NOT NULL,`raw_content` json NOT NULL,`metadata` json,`status` enum('pending','processing','processed','error') DEFAULT 'pending',`error_message` text,`processed_at` bigint DEFAULT 0,`created_at` bigint,`updated_at` bigint,PRIMARY KEY (`id`))", "took time": "11.000ms", "affected rows": 0}
+2026-04-07 15:14:35	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT DATABASE()", "took time": "6.000ms", "affected rows": -1}
+2026-04-07 15:14:35	[35mDEBUG[0m	gorm@v1.23.2/finisher_api.go:474	Database Query	{"sql": "SELECT SCHEMA_NAME from Information_schema.SCHEMATA where SCHEMA_NAME LIKE 'wechat_member%' ORDER BY SCHEMA_NAME='wechat_member' DESC limit 1", "took time": "15.000ms", "affected rows": 1}
+2026-04-07 15:14:35	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'wechat_member' AND table_name = 'processed_data' AND table_type = 'BASE TABLE'", "took time": "23.000ms", "affected rows": -1}
+2026-04-07 15:14:35	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "CREATE TABLE `processed_data` (`id` bigint unsigned AUTO_INCREMENT,`raw_data_id` bigint unsigned NOT NULL,`data_type` varchar(50) NOT NULL,`data_fields` json NOT NULL,`quality_score` decimal(5,2) DEFAULT 100.000000,`version` bigint unsigned DEFAULT 1,`is_current` boolean DEFAULT true,`created_at` bigint,`updated_at` bigint,PRIMARY KEY (`id`))", "took time": "14.000ms", "affected rows": 0}
+2026-04-07 15:14:35	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT DATABASE()", "took time": "7.000ms", "affected rows": -1}
+2026-04-07 15:14:35	[35mDEBUG[0m	gorm@v1.23.2/finisher_api.go:474	Database Query	{"sql": "SELECT SCHEMA_NAME from Information_schema.SCHEMATA where SCHEMA_NAME LIKE 'wechat_member%' ORDER BY SCHEMA_NAME='wechat_member' DESC limit 1", "took time": "18.000ms", "affected rows": 1}
+2026-04-07 15:14:35	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'wechat_member' AND table_name = 'data_statistics' AND table_type = 'BASE TABLE'", "took time": "13.000ms", "affected rows": -1}
+2026-04-07 15:14:35	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "CREATE TABLE `data_statistics` (`id` bigint unsigned AUTO_INCREMENT,`stat_date` date NOT NULL,`data_type` varchar(50) NOT NULL,`data_source_id` bigint unsigned,`total_count` bigint unsigned DEFAULT 0,`processed_count` bigint unsigned DEFAULT 0,`error_count` bigint unsigned DEFAULT 0,`avg_quality_score` decimal(5,2) DEFAULT 0.000000,`created_at` bigint,`updated_at` bigint,PRIMARY KEY (`id`))", "took time": "14.000ms", "affected rows": 0}
+2026-04-07 15:14:45	[34mINFO[0m	bootstrap/crontab.go:49	加入定时任务成功：	{"task": "ClearLogsCrontab", "entryID": 1}
+2026-04-07 15:14:45	[34mINFO[0m	bootstrap/crontab.go:49	加入定时任务成功：	{"task": "DataCollectCrontab", "entryID": 2}
+2026-04-07 15:14:45	[34mINFO[0m	crontab/crontab.go:37	【定时任务：】	{"start": "null"}
+2026-04-07 15:14:45	[34mINFO[0m	crontab/crontab.go:37	【定时任务：】	{"schedule": "[\"now\",\"2026-04-07T15:14:45.6270406+08:00\",\"entry\",1,\"next\",\"2026-04-08T00:00:00+08:00\"]"}
+2026-04-07 15:14:45	[34mINFO[0m	crontab/crontab.go:37	【定时任务：】	{"schedule": "[\"now\",\"2026-04-07T15:14:45.6270406+08:00\",\"entry\",2,\"next\",\"2026-04-07T15:30:00+08:00\"]"}
+2026-04-07 15:15:34	[33mWARN[0m	bootstrap/server.go:59	Server	{"gracefulShutdown": "正在关闭服务器……"}
+2026-04-07 15:15:34	[33mWARN[0m	bootstrap/server.go:69	Server	{"gracefulShutdown": "服务已经退出"}
+2026-04-07 15:20:39	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT DATABASE()", "took time": "12.000ms", "affected rows": -1}
+2026-04-07 15:20:39	[35mDEBUG[0m	gorm@v1.23.2/finisher_api.go:474	Database Query	{"sql": "SELECT SCHEMA_NAME from Information_schema.SCHEMATA where SCHEMA_NAME LIKE 'wechat_member%' ORDER BY SCHEMA_NAME='wechat_member' DESC limit 1", "took time": "20.000ms", "affected rows": 1}
+2026-04-07 15:20:39	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'wechat_member' AND table_name = 'data_sources' AND table_type = 'BASE TABLE'", "took time": "20.000ms", "affected rows": -1}
+2026-04-07 15:20:39	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT DATABASE()", "took time": "11.000ms", "affected rows": -1}
+2026-04-07 15:20:39	[35mDEBUG[0m	gorm@v1.23.2/finisher_api.go:474	Database Query	{"sql": "SELECT SCHEMA_NAME from Information_schema.SCHEMATA where SCHEMA_NAME LIKE 'wechat_member%' ORDER BY SCHEMA_NAME='wechat_member' DESC limit 1", "took time": "17.000ms", "affected rows": 1}
+2026-04-07 15:20:39	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT * FROM `data_sources` LIMIT 1", "took time": "7.000ms", "affected rows": -1}
+2026-04-07 15:20:39	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT column_name, column_default, is_nullable = 'YES', data_type, character_maximum_length, column_type, column_key, extra, column_comment, numeric_precision, numeric_scale , datetime_precision FROM information_schema.columns WHERE table_schema = 'wechat_member' AND table_name = 'data_sources' ORDER BY ORDINAL_POSITION", "took time": "75.000ms", "affected rows": -1}
+2026-04-07 15:20:39	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT DATABASE()", "took time": "5.000ms", "affected rows": -1}
+2026-04-07 15:20:39	[35mDEBUG[0m	gorm@v1.23.2/finisher_api.go:474	Database Query	{"sql": "SELECT SCHEMA_NAME from Information_schema.SCHEMATA where SCHEMA_NAME LIKE 'wechat_member%' ORDER BY SCHEMA_NAME='wechat_member' DESC limit 1", "took time": "14.000ms", "affected rows": 1}
+2026-04-07 15:20:39	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'wechat_member' AND table_name = 'raw_data' AND table_type = 'BASE TABLE'", "took time": "17.000ms", "affected rows": -1}
+2026-04-07 15:20:39	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT DATABASE()", "took time": "7.000ms", "affected rows": -1}
+2026-04-07 15:20:39	[35mDEBUG[0m	gorm@v1.23.2/finisher_api.go:474	Database Query	{"sql": "SELECT SCHEMA_NAME from Information_schema.SCHEMATA where SCHEMA_NAME LIKE 'wechat_member%' ORDER BY SCHEMA_NAME='wechat_member' DESC limit 1", "took time": "17.000ms", "affected rows": 1}
+2026-04-07 15:20:39	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT * FROM `raw_data` LIMIT 1", "took time": "11.000ms", "affected rows": -1}
+2026-04-07 15:20:39	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT column_name, column_default, is_nullable = 'YES', data_type, character_maximum_length, column_type, column_key, extra, column_comment, numeric_precision, numeric_scale , datetime_precision FROM information_schema.columns WHERE table_schema = 'wechat_member' AND table_name = 'raw_data' ORDER BY ORDINAL_POSITION", "took time": "28.000ms", "affected rows": -1}
+2026-04-07 15:20:39	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT DATABASE()", "took time": "9.000ms", "affected rows": -1}
+2026-04-07 15:20:39	[35mDEBUG[0m	gorm@v1.23.2/finisher_api.go:474	Database Query	{"sql": "SELECT SCHEMA_NAME from Information_schema.SCHEMATA where SCHEMA_NAME LIKE 'wechat_member%' ORDER BY SCHEMA_NAME='wechat_member' DESC limit 1", "took time": "18.000ms", "affected rows": 1}
+2026-04-07 15:20:39	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'wechat_member' AND table_name = 'processed_data' AND table_type = 'BASE TABLE'", "took time": "18.000ms", "affected rows": -1}
+2026-04-07 15:20:39	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT DATABASE()", "took time": "10.000ms", "affected rows": -1}
+2026-04-07 15:20:39	[35mDEBUG[0m	gorm@v1.23.2/finisher_api.go:474	Database Query	{"sql": "SELECT SCHEMA_NAME from Information_schema.SCHEMATA where SCHEMA_NAME LIKE 'wechat_member%' ORDER BY SCHEMA_NAME='wechat_member' DESC limit 1", "took time": "22.000ms", "affected rows": 1}
+2026-04-07 15:20:39	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT * FROM `processed_data` LIMIT 1", "took time": "127.000ms", "affected rows": -1}
+2026-04-07 15:20:39	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT column_name, column_default, is_nullable = 'YES', data_type, character_maximum_length, column_type, column_key, extra, column_comment, numeric_precision, numeric_scale , datetime_precision FROM information_schema.columns WHERE table_schema = 'wechat_member' AND table_name = 'processed_data' ORDER BY ORDINAL_POSITION", "took time": "135.000ms", "affected rows": -1}
+2026-04-07 15:20:39	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "ALTER TABLE `processed_data` MODIFY COLUMN `is_current` boolean DEFAULT true", "took time": "17.000ms", "affected rows": 0}
+2026-04-07 15:20:39	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT DATABASE()", "took time": "28.000ms", "affected rows": -1}
+2026-04-07 15:20:39	[33mWARN[0m	gorm@v1.23.2/finisher_api.go:474	Database Slow Log	{"sql": "SELECT SCHEMA_NAME from Information_schema.SCHEMATA where SCHEMA_NAME LIKE 'wechat_member%' ORDER BY SCHEMA_NAME='wechat_member' DESC limit 1", "took time": "202.000ms", "affected rows": 1}
+2026-04-07 15:20:39	[35mDEBUG[0m	gorm@v1.23.2/finisher_api.go:474	Database Query	{"sql": "SELECT SCHEMA_NAME from Information_schema.SCHEMATA where SCHEMA_NAME LIKE 'wechat_member%' ORDER BY SCHEMA_NAME='wechat_member' DESC limit 1", "took time": "202.000ms", "affected rows": 1}
+2026-04-07 15:20:40	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'wechat_member' AND table_name = 'data_statistics' AND table_type = 'BASE TABLE'", "took time": "151.000ms", "affected rows": -1}
+2026-04-07 15:20:40	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT DATABASE()", "took time": "7.000ms", "affected rows": -1}
+2026-04-07 15:20:40	[35mDEBUG[0m	gorm@v1.23.2/finisher_api.go:474	Database Query	{"sql": "SELECT SCHEMA_NAME from Information_schema.SCHEMATA where SCHEMA_NAME LIKE 'wechat_member%' ORDER BY SCHEMA_NAME='wechat_member' DESC limit 1", "took time": "44.000ms", "affected rows": 1}
+2026-04-07 15:20:40	[33mWARN[0m	gorm@v1.23.2/callbacks.go:134	Database Slow Log	{"sql": "SELECT * FROM `data_statistics` LIMIT 1", "took time": "279.000ms", "affected rows": -1}
+2026-04-07 15:20:40	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT * FROM `data_statistics` LIMIT 1", "took time": "279.000ms", "affected rows": -1}
+2026-04-07 15:20:41	[33mWARN[0m	gorm@v1.23.2/callbacks.go:134	Database Slow Log	{"sql": "SELECT column_name, column_default, is_nullable = 'YES', data_type, character_maximum_length, column_type, column_key, extra, column_comment, numeric_precision, numeric_scale , datetime_precision FROM information_schema.columns WHERE table_schema = 'wechat_member' AND table_name = 'data_statistics' ORDER BY ORDINAL_POSITION", "took time": "1291.000ms", "affected rows": -1}
+2026-04-07 15:20:41	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT column_name, column_default, is_nullable = 'YES', data_type, character_maximum_length, column_type, column_key, extra, column_comment, numeric_precision, numeric_scale , datetime_precision FROM information_schema.columns WHERE table_schema = 'wechat_member' AND table_name = 'data_statistics' ORDER BY ORDINAL_POSITION", "took time": "1291.000ms", "affected rows": -1}
+2026-04-07 15:20:41	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "ALTER TABLE `data_statistics` MODIFY COLUMN `avg_quality_score` decimal(5,2) DEFAULT 0.000000", "took time": "9.000ms", "affected rows": 0}
+2026-04-07 15:20:41	[34mINFO[0m	bootstrap/crontab.go:49	加入定时任务成功：	{"task": "ClearLogsCrontab", "entryID": 1}
+2026-04-07 15:20:41	[34mINFO[0m	bootstrap/crontab.go:49	加入定时任务成功：	{"task": "DataCollectCrontab", "entryID": 2}
+2026-04-07 15:20:41	[34mINFO[0m	crontab/crontab.go:37	【定时任务：】	{"start": "null"}
+2026-04-07 15:20:41	[34mINFO[0m	crontab/crontab.go:37	【定时任务：】	{"schedule": "[\"now\",\"2026-04-07T15:20:41.8317443+08:00\",\"entry\",1,\"next\",\"2026-04-08T00:00:00+08:00\"]"}
+2026-04-07 15:20:41	[34mINFO[0m	crontab/crontab.go:37	【定时任务：】	{"schedule": "[\"now\",\"2026-04-07T15:20:41.8317443+08:00\",\"entry\",2,\"next\",\"2026-04-07T15:30:00+08:00\"]"}
+2026-04-07 15:20:53	[33mWARN[0m	bootstrap/server.go:59	Server	{"gracefulShutdown": "正在关闭服务器……"}
+2026-04-07 15:20:53	[33mWARN[0m	bootstrap/server.go:69	Server	{"gracefulShutdown": "服务已经退出"}
+2026-04-07 15:21:24	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT DATABASE()", "took time": "8.000ms", "affected rows": -1}
+2026-04-07 15:21:24	[35mDEBUG[0m	gorm@v1.23.2/finisher_api.go:474	Database Query	{"sql": "SELECT SCHEMA_NAME from Information_schema.SCHEMATA where SCHEMA_NAME LIKE 'wechat_member%' ORDER BY SCHEMA_NAME='wechat_member' DESC limit 1", "took time": "17.000ms", "affected rows": 1}
+2026-04-07 15:21:24	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'wechat_member' AND table_name = 'data_sources' AND table_type = 'BASE TABLE'", "took time": "15.000ms", "affected rows": -1}
+2026-04-07 15:21:24	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT DATABASE()", "took time": "8.000ms", "affected rows": -1}
+2026-04-07 15:21:24	[35mDEBUG[0m	gorm@v1.23.2/finisher_api.go:474	Database Query	{"sql": "SELECT SCHEMA_NAME from Information_schema.SCHEMATA where SCHEMA_NAME LIKE 'wechat_member%' ORDER BY SCHEMA_NAME='wechat_member' DESC limit 1", "took time": "17.000ms", "affected rows": 1}
+2026-04-07 15:21:24	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT * FROM `data_sources` LIMIT 1", "took time": "7.000ms", "affected rows": -1}
+2026-04-07 15:21:24	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT column_name, column_default, is_nullable = 'YES', data_type, character_maximum_length, column_type, column_key, extra, column_comment, numeric_precision, numeric_scale , datetime_precision FROM information_schema.columns WHERE table_schema = 'wechat_member' AND table_name = 'data_sources' ORDER BY ORDINAL_POSITION", "took time": "49.000ms", "affected rows": -1}
+2026-04-07 15:21:24	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT DATABASE()", "took time": "8.000ms", "affected rows": -1}
+2026-04-07 15:21:24	[35mDEBUG[0m	gorm@v1.23.2/finisher_api.go:474	Database Query	{"sql": "SELECT SCHEMA_NAME from Information_schema.SCHEMATA where SCHEMA_NAME LIKE 'wechat_member%' ORDER BY SCHEMA_NAME='wechat_member' DESC limit 1", "took time": "16.000ms", "affected rows": 1}
+2026-04-07 15:21:24	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'wechat_member' AND table_name = 'raw_data' AND table_type = 'BASE TABLE'", "took time": "17.000ms", "affected rows": -1}
+2026-04-07 15:21:24	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT DATABASE()", "took time": "9.000ms", "affected rows": -1}
+2026-04-07 15:21:24	[35mDEBUG[0m	gorm@v1.23.2/finisher_api.go:474	Database Query	{"sql": "SELECT SCHEMA_NAME from Information_schema.SCHEMATA where SCHEMA_NAME LIKE 'wechat_member%' ORDER BY SCHEMA_NAME='wechat_member' DESC limit 1", "took time": "20.000ms", "affected rows": 1}
+2026-04-07 15:21:24	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT * FROM `raw_data` LIMIT 1", "took time": "7.000ms", "affected rows": -1}
+2026-04-07 15:21:24	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT column_name, column_default, is_nullable = 'YES', data_type, character_maximum_length, column_type, column_key, extra, column_comment, numeric_precision, numeric_scale , datetime_precision FROM information_schema.columns WHERE table_schema = 'wechat_member' AND table_name = 'raw_data' ORDER BY ORDINAL_POSITION", "took time": "16.000ms", "affected rows": -1}
+2026-04-07 15:21:24	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT DATABASE()", "took time": "7.000ms", "affected rows": -1}
+2026-04-07 15:21:24	[35mDEBUG[0m	gorm@v1.23.2/finisher_api.go:474	Database Query	{"sql": "SELECT SCHEMA_NAME from Information_schema.SCHEMATA where SCHEMA_NAME LIKE 'wechat_member%' ORDER BY SCHEMA_NAME='wechat_member' DESC limit 1", "took time": "16.000ms", "affected rows": 1}
+2026-04-07 15:21:24	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'wechat_member' AND table_name = 'processed_data' AND table_type = 'BASE TABLE'", "took time": "18.000ms", "affected rows": -1}
+2026-04-07 15:21:24	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT DATABASE()", "took time": "7.000ms", "affected rows": -1}
+2026-04-07 15:21:24	[35mDEBUG[0m	gorm@v1.23.2/finisher_api.go:474	Database Query	{"sql": "SELECT SCHEMA_NAME from Information_schema.SCHEMATA where SCHEMA_NAME LIKE 'wechat_member%' ORDER BY SCHEMA_NAME='wechat_member' DESC limit 1", "took time": "24.000ms", "affected rows": 1}
+2026-04-07 15:21:24	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT * FROM `processed_data` LIMIT 1", "took time": "8.000ms", "affected rows": -1}
+2026-04-07 15:21:24	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT column_name, column_default, is_nullable = 'YES', data_type, character_maximum_length, column_type, column_key, extra, column_comment, numeric_precision, numeric_scale , datetime_precision FROM information_schema.columns WHERE table_schema = 'wechat_member' AND table_name = 'processed_data' ORDER BY ORDINAL_POSITION", "took time": "16.000ms", "affected rows": -1}
+2026-04-07 15:21:24	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "ALTER TABLE `processed_data` MODIFY COLUMN `is_current` boolean DEFAULT true", "took time": "11.000ms", "affected rows": 0}
+2026-04-07 15:21:25	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT DATABASE()", "took time": "8.000ms", "affected rows": -1}
+2026-04-07 15:21:25	[35mDEBUG[0m	gorm@v1.23.2/finisher_api.go:474	Database Query	{"sql": "SELECT SCHEMA_NAME from Information_schema.SCHEMATA where SCHEMA_NAME LIKE 'wechat_member%' ORDER BY SCHEMA_NAME='wechat_member' DESC limit 1", "took time": "17.000ms", "affected rows": 1}
+2026-04-07 15:21:25	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'wechat_member' AND table_name = 'data_statistics' AND table_type = 'BASE TABLE'", "took time": "16.000ms", "affected rows": -1}
+2026-04-07 15:21:25	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT DATABASE()", "took time": "7.000ms", "affected rows": -1}
+2026-04-07 15:21:25	[35mDEBUG[0m	gorm@v1.23.2/finisher_api.go:474	Database Query	{"sql": "SELECT SCHEMA_NAME from Information_schema.SCHEMATA where SCHEMA_NAME LIKE 'wechat_member%' ORDER BY SCHEMA_NAME='wechat_member' DESC limit 1", "took time": "20.000ms", "affected rows": 1}
+2026-04-07 15:21:25	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT * FROM `data_statistics` LIMIT 1", "took time": "8.000ms", "affected rows": -1}
+2026-04-07 15:21:25	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT column_name, column_default, is_nullable = 'YES', data_type, character_maximum_length, column_type, column_key, extra, column_comment, numeric_precision, numeric_scale , datetime_precision FROM information_schema.columns WHERE table_schema = 'wechat_member' AND table_name = 'data_statistics' ORDER BY ORDINAL_POSITION", "took time": "16.000ms", "affected rows": -1}
+2026-04-07 15:21:25	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "ALTER TABLE `data_statistics` MODIFY COLUMN `avg_quality_score` decimal(5,2) DEFAULT 0.000000", "took time": "12.000ms", "affected rows": 0}
+2026-04-07 15:21:34	[34mINFO[0m	bootstrap/crontab.go:49	加入定时任务成功：	{"task": "ClearLogsCrontab", "entryID": 1}
+2026-04-07 15:21:34	[34mINFO[0m	bootstrap/crontab.go:49	加入定时任务成功：	{"task": "DataCollectCrontab", "entryID": 2}
+2026-04-07 15:21:34	[34mINFO[0m	crontab/crontab.go:37	【定时任务：】	{"start": "null"}
+2026-04-07 15:21:34	[34mINFO[0m	crontab/crontab.go:37	【定时任务：】	{"schedule": "[\"now\",\"2026-04-07T15:21:34.7662377+08:00\",\"entry\",1,\"next\",\"2026-04-08T00:00:00+08:00\"]"}
+2026-04-07 15:21:34	[34mINFO[0m	crontab/crontab.go:37	【定时任务：】	{"schedule": "[\"now\",\"2026-04-07T15:21:34.7662377+08:00\",\"entry\",2,\"next\",\"2026-04-07T15:30:00+08:00\"]"}
+2026-04-07 15:21:46	[33mWARN[0m	bootstrap/server.go:59	Server	{"gracefulShutdown": "正在关闭服务器……"}
+2026-04-07 15:21:46	[33mWARN[0m	bootstrap/server.go:69	Server	{"gracefulShutdown": "服务已经退出"}
+2026-04-07 15:23:43	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT DATABASE()", "took time": "7.000ms", "affected rows": -1}
+2026-04-07 15:23:43	[35mDEBUG[0m	gorm@v1.23.2/finisher_api.go:474	Database Query	{"sql": "SELECT SCHEMA_NAME from Information_schema.SCHEMATA where SCHEMA_NAME LIKE 'wechat_member%' ORDER BY SCHEMA_NAME='wechat_member' DESC limit 1", "took time": "18.000ms", "affected rows": 1}
+2026-04-07 15:23:43	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'wechat_member' AND table_name = 'data_sources' AND table_type = 'BASE TABLE'", "took time": "20.000ms", "affected rows": -1}
+2026-04-07 15:23:43	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT DATABASE()", "took time": "12.000ms", "affected rows": -1}
+2026-04-07 15:23:43	[35mDEBUG[0m	gorm@v1.23.2/finisher_api.go:474	Database Query	{"sql": "SELECT SCHEMA_NAME from Information_schema.SCHEMATA where SCHEMA_NAME LIKE 'wechat_member%' ORDER BY SCHEMA_NAME='wechat_member' DESC limit 1", "took time": "19.000ms", "affected rows": 1}
+2026-04-07 15:23:43	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT * FROM `data_sources` LIMIT 1", "took time": "8.000ms", "affected rows": -1}
+2026-04-07 15:23:43	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT column_name, column_default, is_nullable = 'YES', data_type, character_maximum_length, column_type, column_key, extra, column_comment, numeric_precision, numeric_scale , datetime_precision FROM information_schema.columns WHERE table_schema = 'wechat_member' AND table_name = 'data_sources' ORDER BY ORDINAL_POSITION", "took time": "68.000ms", "affected rows": -1}
+2026-04-07 15:23:43	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT DATABASE()", "took time": "8.000ms", "affected rows": -1}
+2026-04-07 15:23:43	[35mDEBUG[0m	gorm@v1.23.2/finisher_api.go:474	Database Query	{"sql": "SELECT SCHEMA_NAME from Information_schema.SCHEMATA where SCHEMA_NAME LIKE 'wechat_member%' ORDER BY SCHEMA_NAME='wechat_member' DESC limit 1", "took time": "19.000ms", "affected rows": 1}
+2026-04-07 15:23:43	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'wechat_member' AND table_name = 'raw_data' AND table_type = 'BASE TABLE'", "took time": "16.000ms", "affected rows": -1}
+2026-04-07 15:23:43	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT DATABASE()", "took time": "10.000ms", "affected rows": -1}
+2026-04-07 15:23:43	[35mDEBUG[0m	gorm@v1.23.2/finisher_api.go:474	Database Query	{"sql": "SELECT SCHEMA_NAME from Information_schema.SCHEMATA where SCHEMA_NAME LIKE 'wechat_member%' ORDER BY SCHEMA_NAME='wechat_member' DESC limit 1", "took time": "23.000ms", "affected rows": 1}
+2026-04-07 15:23:44	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT * FROM `raw_data` LIMIT 1", "took time": "10.000ms", "affected rows": -1}
+2026-04-07 15:23:44	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT column_name, column_default, is_nullable = 'YES', data_type, character_maximum_length, column_type, column_key, extra, column_comment, numeric_precision, numeric_scale , datetime_precision FROM information_schema.columns WHERE table_schema = 'wechat_member' AND table_name = 'raw_data' ORDER BY ORDINAL_POSITION", "took time": "40.000ms", "affected rows": -1}
+2026-04-07 15:23:44	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT DATABASE()", "took time": "17.000ms", "affected rows": -1}
+2026-04-07 15:23:44	[35mDEBUG[0m	gorm@v1.23.2/finisher_api.go:474	Database Query	{"sql": "SELECT SCHEMA_NAME from Information_schema.SCHEMATA where SCHEMA_NAME LIKE 'wechat_member%' ORDER BY SCHEMA_NAME='wechat_member' DESC limit 1", "took time": "18.000ms", "affected rows": 1}
+2026-04-07 15:23:44	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'wechat_member' AND table_name = 'processed_data' AND table_type = 'BASE TABLE'", "took time": "17.000ms", "affected rows": -1}
+2026-04-07 15:23:44	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT DATABASE()", "took time": "10.000ms", "affected rows": -1}
+2026-04-07 15:23:44	[35mDEBUG[0m	gorm@v1.23.2/finisher_api.go:474	Database Query	{"sql": "SELECT SCHEMA_NAME from Information_schema.SCHEMATA where SCHEMA_NAME LIKE 'wechat_member%' ORDER BY SCHEMA_NAME='wechat_member' DESC limit 1", "took time": "19.000ms", "affected rows": 1}
+2026-04-07 15:23:44	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT * FROM `processed_data` LIMIT 1", "took time": "9.000ms", "affected rows": -1}
+2026-04-07 15:23:44	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT column_name, column_default, is_nullable = 'YES', data_type, character_maximum_length, column_type, column_key, extra, column_comment, numeric_precision, numeric_scale , datetime_precision FROM information_schema.columns WHERE table_schema = 'wechat_member' AND table_name = 'processed_data' ORDER BY ORDINAL_POSITION", "took time": "22.000ms", "affected rows": -1}
+2026-04-07 15:23:44	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "ALTER TABLE `processed_data` MODIFY COLUMN `is_current` boolean DEFAULT true", "took time": "12.000ms", "affected rows": 0}
+2026-04-07 15:23:44	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT DATABASE()", "took time": "10.000ms", "affected rows": -1}
+2026-04-07 15:23:44	[35mDEBUG[0m	gorm@v1.23.2/finisher_api.go:474	Database Query	{"sql": "SELECT SCHEMA_NAME from Information_schema.SCHEMATA where SCHEMA_NAME LIKE 'wechat_member%' ORDER BY SCHEMA_NAME='wechat_member' DESC limit 1", "took time": "22.000ms", "affected rows": 1}
+2026-04-07 15:23:44	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'wechat_member' AND table_name = 'data_statistics' AND table_type = 'BASE TABLE'", "took time": "22.000ms", "affected rows": -1}
+2026-04-07 15:23:44	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT DATABASE()", "took time": "8.000ms", "affected rows": -1}
+2026-04-07 15:23:44	[35mDEBUG[0m	gorm@v1.23.2/finisher_api.go:474	Database Query	{"sql": "SELECT SCHEMA_NAME from Information_schema.SCHEMATA where SCHEMA_NAME LIKE 'wechat_member%' ORDER BY SCHEMA_NAME='wechat_member' DESC limit 1", "took time": "18.000ms", "affected rows": 1}
+2026-04-07 15:23:44	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT * FROM `data_statistics` LIMIT 1", "took time": "9.000ms", "affected rows": -1}
+2026-04-07 15:23:44	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT column_name, column_default, is_nullable = 'YES', data_type, character_maximum_length, column_type, column_key, extra, column_comment, numeric_precision, numeric_scale , datetime_precision FROM information_schema.columns WHERE table_schema = 'wechat_member' AND table_name = 'data_statistics' ORDER BY ORDINAL_POSITION", "took time": "16.000ms", "affected rows": -1}
+2026-04-07 15:23:44	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "ALTER TABLE `data_statistics` MODIFY COLUMN `avg_quality_score` decimal(5,2) DEFAULT 0.000000", "took time": "11.000ms", "affected rows": 0}
+2026-04-07 15:23:44	[34mINFO[0m	bootstrap/crontab.go:49	加入定时任务成功：	{"task": "ClearLogsCrontab", "entryID": 1}
+2026-04-07 15:23:44	[34mINFO[0m	bootstrap/crontab.go:49	加入定时任务成功：	{"task": "DataCollectCrontab", "entryID": 2}
+2026-04-07 15:23:44	[34mINFO[0m	crontab/crontab.go:37	【定时任务：】	{"start": "null"}
+2026-04-07 15:23:44	[34mINFO[0m	crontab/crontab.go:37	【定时任务：】	{"schedule": "[\"now\",\"2026-04-07T15:23:44.3751067+08:00\",\"entry\",1,\"next\",\"2026-04-08T00:00:00+08:00\"]"}
+2026-04-07 15:23:44	[34mINFO[0m	crontab/crontab.go:37	【定时任务：】	{"schedule": "[\"now\",\"2026-04-07T15:23:44.3751067+08:00\",\"entry\",2,\"next\",\"2026-04-07T15:30:00+08:00\"]"}
+2026-04-07 15:24:10	[33mWARN[0m	bootstrap/server.go:59	Server	{"gracefulShutdown": "正在关闭服务器……"}
+2026-04-07 15:24:10	[33mWARN[0m	bootstrap/server.go:69	Server	{"gracefulShutdown": "服务已经退出"}
+2026-04-07 15:31:57	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT DATABASE()", "took time": "9.000ms", "affected rows": -1}
+2026-04-07 15:31:57	[35mDEBUG[0m	gorm@v1.23.2/finisher_api.go:474	Database Query	{"sql": "SELECT SCHEMA_NAME from Information_schema.SCHEMATA where SCHEMA_NAME LIKE 'wechat_member%' ORDER BY SCHEMA_NAME='wechat_member' DESC limit 1", "took time": "20.000ms", "affected rows": 1}
+2026-04-07 15:31:57	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'wechat_member' AND table_name = 'data_sources' AND table_type = 'BASE TABLE'", "took time": "17.000ms", "affected rows": -1}
+2026-04-07 15:31:57	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT DATABASE()", "took time": "9.000ms", "affected rows": -1}
+2026-04-07 15:31:57	[35mDEBUG[0m	gorm@v1.23.2/finisher_api.go:474	Database Query	{"sql": "SELECT SCHEMA_NAME from Information_schema.SCHEMATA where SCHEMA_NAME LIKE 'wechat_member%' ORDER BY SCHEMA_NAME='wechat_member' DESC limit 1", "took time": "19.000ms", "affected rows": 1}
+2026-04-07 15:31:57	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT * FROM `data_sources` LIMIT 1", "took time": "9.000ms", "affected rows": -1}
+2026-04-07 15:31:57	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT column_name, column_default, is_nullable = 'YES', data_type, character_maximum_length, column_type, column_key, extra, column_comment, numeric_precision, numeric_scale , datetime_precision FROM information_schema.columns WHERE table_schema = 'wechat_member' AND table_name = 'data_sources' ORDER BY ORDINAL_POSITION", "took time": "57.000ms", "affected rows": -1}
+2026-04-07 15:31:57	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT DATABASE()", "took time": "12.000ms", "affected rows": -1}
+2026-04-07 15:31:57	[35mDEBUG[0m	gorm@v1.23.2/finisher_api.go:474	Database Query	{"sql": "SELECT SCHEMA_NAME from Information_schema.SCHEMATA where SCHEMA_NAME LIKE 'wechat_member%' ORDER BY SCHEMA_NAME='wechat_member' DESC limit 1", "took time": "19.000ms", "affected rows": 1}
+2026-04-07 15:31:57	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'wechat_member' AND table_name = 'raw_data' AND table_type = 'BASE TABLE'", "took time": "18.000ms", "affected rows": -1}
+2026-04-07 15:31:57	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT DATABASE()", "took time": "10.000ms", "affected rows": -1}
+2026-04-07 15:31:57	[35mDEBUG[0m	gorm@v1.23.2/finisher_api.go:474	Database Query	{"sql": "SELECT SCHEMA_NAME from Information_schema.SCHEMATA where SCHEMA_NAME LIKE 'wechat_member%' ORDER BY SCHEMA_NAME='wechat_member' DESC limit 1", "took time": "20.000ms", "affected rows": 1}
+2026-04-07 15:31:57	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT * FROM `raw_data` LIMIT 1", "took time": "8.000ms", "affected rows": -1}
+2026-04-07 15:31:57	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT column_name, column_default, is_nullable = 'YES', data_type, character_maximum_length, column_type, column_key, extra, column_comment, numeric_precision, numeric_scale , datetime_precision FROM information_schema.columns WHERE table_schema = 'wechat_member' AND table_name = 'raw_data' ORDER BY ORDINAL_POSITION", "took time": "21.000ms", "affected rows": -1}
+2026-04-07 15:31:57	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT DATABASE()", "took time": "10.000ms", "affected rows": -1}
+2026-04-07 15:31:57	[35mDEBUG[0m	gorm@v1.23.2/finisher_api.go:474	Database Query	{"sql": "SELECT SCHEMA_NAME from Information_schema.SCHEMATA where SCHEMA_NAME LIKE 'wechat_member%' ORDER BY SCHEMA_NAME='wechat_member' DESC limit 1", "took time": "19.000ms", "affected rows": 1}
+2026-04-07 15:31:57	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'wechat_member' AND table_name = 'processed_data' AND table_type = 'BASE TABLE'", "took time": "20.000ms", "affected rows": -1}
+2026-04-07 15:31:57	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT DATABASE()", "took time": "10.000ms", "affected rows": -1}
+2026-04-07 15:31:57	[35mDEBUG[0m	gorm@v1.23.2/finisher_api.go:474	Database Query	{"sql": "SELECT SCHEMA_NAME from Information_schema.SCHEMATA where SCHEMA_NAME LIKE 'wechat_member%' ORDER BY SCHEMA_NAME='wechat_member' DESC limit 1", "took time": "16.000ms", "affected rows": 1}
+2026-04-07 15:31:57	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT * FROM `processed_data` LIMIT 1", "took time": "11.000ms", "affected rows": -1}
+2026-04-07 15:31:57	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT column_name, column_default, is_nullable = 'YES', data_type, character_maximum_length, column_type, column_key, extra, column_comment, numeric_precision, numeric_scale , datetime_precision FROM information_schema.columns WHERE table_schema = 'wechat_member' AND table_name = 'processed_data' ORDER BY ORDINAL_POSITION", "took time": "18.000ms", "affected rows": -1}
+2026-04-07 15:31:58	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "ALTER TABLE `processed_data` MODIFY COLUMN `is_current` boolean DEFAULT true", "took time": "13.000ms", "affected rows": 0}
+2026-04-07 15:31:58	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT DATABASE()", "took time": "9.000ms", "affected rows": -1}
+2026-04-07 15:31:58	[35mDEBUG[0m	gorm@v1.23.2/finisher_api.go:474	Database Query	{"sql": "SELECT SCHEMA_NAME from Information_schema.SCHEMATA where SCHEMA_NAME LIKE 'wechat_member%' ORDER BY SCHEMA_NAME='wechat_member' DESC limit 1", "took time": "17.000ms", "affected rows": 1}
+2026-04-07 15:31:58	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'wechat_member' AND table_name = 'data_statistics' AND table_type = 'BASE TABLE'", "took time": "19.000ms", "affected rows": -1}
+2026-04-07 15:31:58	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT DATABASE()", "took time": "7.000ms", "affected rows": -1}
+2026-04-07 15:31:58	[35mDEBUG[0m	gorm@v1.23.2/finisher_api.go:474	Database Query	{"sql": "SELECT SCHEMA_NAME from Information_schema.SCHEMATA where SCHEMA_NAME LIKE 'wechat_member%' ORDER BY SCHEMA_NAME='wechat_member' DESC limit 1", "took time": "16.000ms", "affected rows": 1}
+2026-04-07 15:31:58	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT * FROM `data_statistics` LIMIT 1", "took time": "7.000ms", "affected rows": -1}
+2026-04-07 15:31:58	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT column_name, column_default, is_nullable = 'YES', data_type, character_maximum_length, column_type, column_key, extra, column_comment, numeric_precision, numeric_scale , datetime_precision FROM information_schema.columns WHERE table_schema = 'wechat_member' AND table_name = 'data_statistics' ORDER BY ORDINAL_POSITION", "took time": "23.000ms", "affected rows": -1}
+2026-04-07 15:31:58	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "ALTER TABLE `data_statistics` MODIFY COLUMN `avg_quality_score` decimal(5,2) DEFAULT 0.000000", "took time": "12.000ms", "affected rows": 0}
+2026-04-07 15:31:58	[34mINFO[0m	bootstrap/crontab.go:49	加入定时任务成功：	{"task": "ClearLogsCrontab", "entryID": 1}
+2026-04-07 15:31:58	[34mINFO[0m	bootstrap/crontab.go:49	加入定时任务成功：	{"task": "DataCollectCrontab", "entryID": 2}
+2026-04-07 15:31:58	[34mINFO[0m	crontab/crontab.go:37	【定时任务：】	{"start": "null"}
+2026-04-07 15:31:58	[34mINFO[0m	crontab/crontab.go:37	【定时任务：】	{"schedule": "[\"now\",\"2026-04-07T15:31:58.1798504+08:00\",\"entry\",1,\"next\",\"2026-04-08T00:00:00+08:00\"]"}
+2026-04-07 15:31:58	[34mINFO[0m	crontab/crontab.go:37	【定时任务：】	{"schedule": "[\"now\",\"2026-04-07T15:31:58.1798504+08:00\",\"entry\",2,\"next\",\"2026-04-07T16:00:00+08:00\"]"}
+2026-04-07 16:00:00	[34mINFO[0m	crontab/crontab.go:37	【定时任务：】	{"wake": "[\"now\",\"2026-04-07T16:00:00.0005231+08:00\"]"}
+2026-04-07 16:00:00	[34mINFO[0m	crontab/crontab.go:37	【定时任务：】	{"run": "[\"now\",\"2026-04-07T16:00:00.0005231+08:00\",\"entry\",2,\"next\",\"2026-04-07T16:30:00+08:00\"]"}
+2026-04-07 16:00:00	[34mINFO[0m	crontab/data_collect_crontab.go:24	开始执行数据采集定时任务
+2026-04-07 16:00:00	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT * FROM `data_sources` WHERE status = 'active'", "took time": "69.000ms", "affected rows": 0}
+2026-04-07 16:00:00	[34mINFO[0m	crontab/data_collect_crontab.go:34	获取到活跃数据源	{"count": 0}
+2026-04-07 16:00:00	[34mINFO[0m	crontab/data_collect_crontab.go:54	数据采集定时任务执行完成
+2026-04-07 16:08:34	[34mINFO[0m	middleware/access_log_middleware.go:101	HTTP Access Log [ 404 ]	{"request_method": "GET", "request_url": "localhost:8501/", "request_path": "/", "request_uri": "/", "request_query": "", "client_ip": "::1", "remote_addr": "[::1]:55974", "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36 Edg/146.0.0.0", "headers": {"Accept":["text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7"],"Accept-Encoding":["gzip, deflate, br, zstd"],"Accept-Language":["zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6"],"Connection":["keep-alive"],"Sec-Ch-Ua":["\"Chromium\";v=\"146\", \"Not-A.Brand\";v=\"24\", \"Microsoft Edge\";v=\"146\""],"Sec-Ch-Ua-Mobile":["?0"],"Sec-Ch-Ua-Platform":["\"Windows\""],"Sec-Fetch-Dest":["document"],"Sec-Fetch-Mode":["navigate"],"Sec-Fetch-Site":["none"],"Sec-Fetch-User":["?1"],"Upgrade-Insecure-Requests":["1"],"User-Agent":["Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36 Edg/146.0.0.0"]}, "errors": "", "response_status": 404, "code_execute_time": "0.000ms", "request_body": "", "response_body": "页面无法找到 ...(｡•ˇ‸ˇ•｡) ..."}
+2026-04-07 16:08:34	[34mINFO[0m	middleware/access_log_middleware.go:101	HTTP Access Log [ 404 ]	{"request_method": "GET", "request_url": "localhost:8501/favicon.ico", "request_path": "/favicon.ico", "request_uri": "/favicon.ico", "request_query": "", "client_ip": "::1", "remote_addr": "[::1]:55974", "user_agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36 Edg/146.0.0.0", "headers": {"Accept":["image/avif,image/webp,image/apng,image/svg+xml,image/*,*/*;q=0.8"],"Accept-Encoding":["gzip, deflate, br, zstd"],"Accept-Language":["zh-CN,zh;q=0.9,en;q=0.8,en-GB;q=0.7,en-US;q=0.6"],"Connection":["keep-alive"],"Referer":["http://localhost:8501/"],"Sec-Ch-Ua":["\"Chromium\";v=\"146\", \"Not-A.Brand\";v=\"24\", \"Microsoft Edge\";v=\"146\""],"Sec-Ch-Ua-Mobile":["?0"],"Sec-Ch-Ua-Platform":["\"Windows\""],"Sec-Fetch-Dest":["image"],"Sec-Fetch-Mode":["no-cors"],"Sec-Fetch-Site":["same-origin"],"User-Agent":["Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/146.0.0.0 Safari/537.36 Edg/146.0.0.0"]}, "errors": "", "response_status": 404, "code_execute_time": "0.000ms", "request_body": "", "response_body": ""}
+2026-04-07 16:13:56	[33mWARN[0m	bootstrap/server.go:59	Server	{"gracefulShutdown": "正在关闭服务器……"}
+2026-04-07 16:13:56	[33mWARN[0m	bootstrap/server.go:69	Server	{"gracefulShutdown": "服务已经退出"}
+2026-04-07 16:14:01	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT DATABASE()", "took time": "9.000ms", "affected rows": -1}
+2026-04-07 16:14:01	[35mDEBUG[0m	gorm@v1.23.2/finisher_api.go:474	Database Query	{"sql": "SELECT SCHEMA_NAME from Information_schema.SCHEMATA where SCHEMA_NAME LIKE 'wechat_member%' ORDER BY SCHEMA_NAME='wechat_member' DESC limit 1", "took time": "20.000ms", "affected rows": 1}
+2026-04-07 16:14:01	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'wechat_member' AND table_name = 'data_sources' AND table_type = 'BASE TABLE'", "took time": "15.000ms", "affected rows": -1}
+2026-04-07 16:14:01	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT DATABASE()", "took time": "9.000ms", "affected rows": -1}
+2026-04-07 16:14:02	[35mDEBUG[0m	gorm@v1.23.2/finisher_api.go:474	Database Query	{"sql": "SELECT SCHEMA_NAME from Information_schema.SCHEMATA where SCHEMA_NAME LIKE 'wechat_member%' ORDER BY SCHEMA_NAME='wechat_member' DESC limit 1", "took time": "16.000ms", "affected rows": 1}
+2026-04-07 16:14:02	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT * FROM `data_sources` LIMIT 1", "took time": "8.000ms", "affected rows": -1}
+2026-04-07 16:14:02	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT column_name, column_default, is_nullable = 'YES', data_type, character_maximum_length, column_type, column_key, extra, column_comment, numeric_precision, numeric_scale , datetime_precision FROM information_schema.columns WHERE table_schema = 'wechat_member' AND table_name = 'data_sources' ORDER BY ORDINAL_POSITION", "took time": "53.000ms", "affected rows": -1}
+2026-04-07 16:14:02	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT DATABASE()", "took time": "7.000ms", "affected rows": -1}
+2026-04-07 16:14:02	[35mDEBUG[0m	gorm@v1.23.2/finisher_api.go:474	Database Query	{"sql": "SELECT SCHEMA_NAME from Information_schema.SCHEMATA where SCHEMA_NAME LIKE 'wechat_member%' ORDER BY SCHEMA_NAME='wechat_member' DESC limit 1", "took time": "15.000ms", "affected rows": 1}
+2026-04-07 16:14:02	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'wechat_member' AND table_name = 'raw_data' AND table_type = 'BASE TABLE'", "took time": "18.000ms", "affected rows": -1}
+2026-04-07 16:14:02	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT DATABASE()", "took time": "8.000ms", "affected rows": -1}
+2026-04-07 16:14:02	[35mDEBUG[0m	gorm@v1.23.2/finisher_api.go:474	Database Query	{"sql": "SELECT SCHEMA_NAME from Information_schema.SCHEMATA where SCHEMA_NAME LIKE 'wechat_member%' ORDER BY SCHEMA_NAME='wechat_member' DESC limit 1", "took time": "16.000ms", "affected rows": 1}
+2026-04-07 16:14:02	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT * FROM `raw_data` LIMIT 1", "took time": "9.000ms", "affected rows": -1}
+2026-04-07 16:14:02	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT column_name, column_default, is_nullable = 'YES', data_type, character_maximum_length, column_type, column_key, extra, column_comment, numeric_precision, numeric_scale , datetime_precision FROM information_schema.columns WHERE table_schema = 'wechat_member' AND table_name = 'raw_data' ORDER BY ORDINAL_POSITION", "took time": "18.000ms", "affected rows": -1}
+2026-04-07 16:14:02	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT DATABASE()", "took time": "7.000ms", "affected rows": -1}
+2026-04-07 16:14:02	[35mDEBUG[0m	gorm@v1.23.2/finisher_api.go:474	Database Query	{"sql": "SELECT SCHEMA_NAME from Information_schema.SCHEMATA where SCHEMA_NAME LIKE 'wechat_member%' ORDER BY SCHEMA_NAME='wechat_member' DESC limit 1", "took time": "15.000ms", "affected rows": 1}
+2026-04-07 16:14:02	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'wechat_member' AND table_name = 'processed_data' AND table_type = 'BASE TABLE'", "took time": "20.000ms", "affected rows": -1}
+2026-04-07 16:14:02	[33mWARN[0m	gorm@v1.23.2/callbacks.go:134	Database Slow Log	{"sql": "SELECT DATABASE()", "took time": "227.000ms", "affected rows": -1}
+2026-04-07 16:14:02	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT DATABASE()", "took time": "227.000ms", "affected rows": -1}
+2026-04-07 16:14:02	[35mDEBUG[0m	gorm@v1.23.2/finisher_api.go:474	Database Query	{"sql": "SELECT SCHEMA_NAME from Information_schema.SCHEMATA where SCHEMA_NAME LIKE 'wechat_member%' ORDER BY SCHEMA_NAME='wechat_member' DESC limit 1", "took time": "16.000ms", "affected rows": 1}
+2026-04-07 16:14:02	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT * FROM `processed_data` LIMIT 1", "took time": "6.000ms", "affected rows": -1}
+2026-04-07 16:14:02	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT column_name, column_default, is_nullable = 'YES', data_type, character_maximum_length, column_type, column_key, extra, column_comment, numeric_precision, numeric_scale , datetime_precision FROM information_schema.columns WHERE table_schema = 'wechat_member' AND table_name = 'processed_data' ORDER BY ORDINAL_POSITION", "took time": "18.000ms", "affected rows": -1}
+2026-04-07 16:14:02	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "ALTER TABLE `processed_data` MODIFY COLUMN `is_current` boolean DEFAULT true", "took time": "10.000ms", "affected rows": 0}
+2026-04-07 16:14:02	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT DATABASE()", "took time": "7.000ms", "affected rows": -1}
+2026-04-07 16:14:02	[35mDEBUG[0m	gorm@v1.23.2/finisher_api.go:474	Database Query	{"sql": "SELECT SCHEMA_NAME from Information_schema.SCHEMATA where SCHEMA_NAME LIKE 'wechat_member%' ORDER BY SCHEMA_NAME='wechat_member' DESC limit 1", "took time": "21.000ms", "affected rows": 1}
+2026-04-07 16:14:02	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'wechat_member' AND table_name = 'data_statistics' AND table_type = 'BASE TABLE'", "took time": "17.000ms", "affected rows": -1}
+2026-04-07 16:14:02	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT DATABASE()", "took time": "5.000ms", "affected rows": -1}
+2026-04-07 16:14:02	[35mDEBUG[0m	gorm@v1.23.2/finisher_api.go:474	Database Query	{"sql": "SELECT SCHEMA_NAME from Information_schema.SCHEMATA where SCHEMA_NAME LIKE 'wechat_member%' ORDER BY SCHEMA_NAME='wechat_member' DESC limit 1", "took time": "19.000ms", "affected rows": 1}
+2026-04-07 16:14:02	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT * FROM `data_statistics` LIMIT 1", "took time": "10.000ms", "affected rows": -1}
+2026-04-07 16:14:02	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT column_name, column_default, is_nullable = 'YES', data_type, character_maximum_length, column_type, column_key, extra, column_comment, numeric_precision, numeric_scale , datetime_precision FROM information_schema.columns WHERE table_schema = 'wechat_member' AND table_name = 'data_statistics' ORDER BY ORDINAL_POSITION", "took time": "15.000ms", "affected rows": -1}
+2026-04-07 16:14:02	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "ALTER TABLE `data_statistics` MODIFY COLUMN `avg_quality_score` decimal(5,2) DEFAULT 0.000000", "took time": "9.000ms", "affected rows": 0}
+2026-04-07 16:14:02	[34mINFO[0m	bootstrap/crontab.go:49	加入定时任务成功：	{"task": "ClearLogsCrontab", "entryID": 1}
+2026-04-07 16:14:02	[34mINFO[0m	bootstrap/crontab.go:49	加入定时任务成功：	{"task": "DataCollectCrontab", "entryID": 2}
+2026-04-07 16:14:02	[34mINFO[0m	crontab/crontab.go:37	【定时任务：】	{"start": "null"}
+2026-04-07 16:14:02	[34mINFO[0m	crontab/crontab.go:37	【定时任务：】	{"schedule": "[\"now\",\"2026-04-07T16:14:02.6751046+08:00\",\"entry\",1,\"next\",\"2026-04-08T00:00:00+08:00\"]"}
+2026-04-07 16:14:02	[34mINFO[0m	crontab/crontab.go:37	【定时任务：】	{"schedule": "[\"now\",\"2026-04-07T16:14:02.6751046+08:00\",\"entry\",2,\"next\",\"2026-04-07T16:30:00+08:00\"]"}
+2026-04-07 16:17:43	[33mWARN[0m	bootstrap/server.go:59	Server	{"gracefulShutdown": "正在关闭服务器……"}
+2026-04-07 16:17:43	[33mWARN[0m	bootstrap/server.go:69	Server	{"gracefulShutdown": "服务已经退出"}
+2026-04-07 16:22:37	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT DATABASE()", "took time": "15.000ms", "affected rows": -1}
+2026-04-07 16:22:37	[35mDEBUG[0m	gorm@v1.23.2/finisher_api.go:474	Database Query	{"sql": "SELECT SCHEMA_NAME from Information_schema.SCHEMATA where SCHEMA_NAME LIKE 'wechat_member%' ORDER BY SCHEMA_NAME='wechat_member' DESC limit 1", "took time": "18.000ms", "affected rows": 1}
+2026-04-07 16:22:37	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'wechat_member' AND table_name = 'data_sources' AND table_type = 'BASE TABLE'", "took time": "24.000ms", "affected rows": -1}
+2026-04-07 16:22:37	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT DATABASE()", "took time": "7.000ms", "affected rows": -1}
+2026-04-07 16:22:37	[35mDEBUG[0m	gorm@v1.23.2/finisher_api.go:474	Database Query	{"sql": "SELECT SCHEMA_NAME from Information_schema.SCHEMATA where SCHEMA_NAME LIKE 'wechat_member%' ORDER BY SCHEMA_NAME='wechat_member' DESC limit 1", "took time": "17.000ms", "affected rows": 1}
+2026-04-07 16:22:37	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT * FROM `data_sources` LIMIT 1", "took time": "8.000ms", "affected rows": -1}
+2026-04-07 16:22:37	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT column_name, column_default, is_nullable = 'YES', data_type, character_maximum_length, column_type, column_key, extra, column_comment, numeric_precision, numeric_scale , datetime_precision FROM information_schema.columns WHERE table_schema = 'wechat_member' AND table_name = 'data_sources' ORDER BY ORDINAL_POSITION", "took time": "61.000ms", "affected rows": -1}
+2026-04-07 16:22:37	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT DATABASE()", "took time": "9.000ms", "affected rows": -1}
+2026-04-07 16:22:37	[35mDEBUG[0m	gorm@v1.23.2/finisher_api.go:474	Database Query	{"sql": "SELECT SCHEMA_NAME from Information_schema.SCHEMATA where SCHEMA_NAME LIKE 'wechat_member%' ORDER BY SCHEMA_NAME='wechat_member' DESC limit 1", "took time": "19.000ms", "affected rows": 1}
+2026-04-07 16:22:37	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'wechat_member' AND table_name = 'raw_data' AND table_type = 'BASE TABLE'", "took time": "17.000ms", "affected rows": -1}
+2026-04-07 16:22:37	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT DATABASE()", "took time": "8.000ms", "affected rows": -1}
+2026-04-07 16:22:37	[35mDEBUG[0m	gorm@v1.23.2/finisher_api.go:474	Database Query	{"sql": "SELECT SCHEMA_NAME from Information_schema.SCHEMATA where SCHEMA_NAME LIKE 'wechat_member%' ORDER BY SCHEMA_NAME='wechat_member' DESC limit 1", "took time": "19.000ms", "affected rows": 1}
+2026-04-07 16:22:37	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT * FROM `raw_data` LIMIT 1", "took time": "10.000ms", "affected rows": -1}
+2026-04-07 16:22:37	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT column_name, column_default, is_nullable = 'YES', data_type, character_maximum_length, column_type, column_key, extra, column_comment, numeric_precision, numeric_scale , datetime_precision FROM information_schema.columns WHERE table_schema = 'wechat_member' AND table_name = 'raw_data' ORDER BY ORDINAL_POSITION", "took time": "20.000ms", "affected rows": -1}
+2026-04-07 16:22:37	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT DATABASE()", "took time": "17.000ms", "affected rows": -1}
+2026-04-07 16:22:37	[35mDEBUG[0m	gorm@v1.23.2/finisher_api.go:474	Database Query	{"sql": "SELECT SCHEMA_NAME from Information_schema.SCHEMATA where SCHEMA_NAME LIKE 'wechat_member%' ORDER BY SCHEMA_NAME='wechat_member' DESC limit 1", "took time": "21.000ms", "affected rows": 1}
+2026-04-07 16:22:37	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'wechat_member' AND table_name = 'processed_data' AND table_type = 'BASE TABLE'", "took time": "19.000ms", "affected rows": -1}
+2026-04-07 16:22:37	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT DATABASE()", "took time": "9.000ms", "affected rows": -1}
+2026-04-07 16:22:37	[35mDEBUG[0m	gorm@v1.23.2/finisher_api.go:474	Database Query	{"sql": "SELECT SCHEMA_NAME from Information_schema.SCHEMATA where SCHEMA_NAME LIKE 'wechat_member%' ORDER BY SCHEMA_NAME='wechat_member' DESC limit 1", "took time": "20.000ms", "affected rows": 1}
+2026-04-07 16:22:37	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT * FROM `processed_data` LIMIT 1", "took time": "8.000ms", "affected rows": -1}
+2026-04-07 16:22:37	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT column_name, column_default, is_nullable = 'YES', data_type, character_maximum_length, column_type, column_key, extra, column_comment, numeric_precision, numeric_scale , datetime_precision FROM information_schema.columns WHERE table_schema = 'wechat_member' AND table_name = 'processed_data' ORDER BY ORDINAL_POSITION", "took time": "18.000ms", "affected rows": -1}
+2026-04-07 16:22:37	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "ALTER TABLE `processed_data` MODIFY COLUMN `is_current` boolean DEFAULT true", "took time": "12.000ms", "affected rows": 0}
+2026-04-07 16:22:37	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT DATABASE()", "took time": "10.000ms", "affected rows": -1}
+2026-04-07 16:22:37	[35mDEBUG[0m	gorm@v1.23.2/finisher_api.go:474	Database Query	{"sql": "SELECT SCHEMA_NAME from Information_schema.SCHEMATA where SCHEMA_NAME LIKE 'wechat_member%' ORDER BY SCHEMA_NAME='wechat_member' DESC limit 1", "took time": "17.000ms", "affected rows": 1}
+2026-04-07 16:22:37	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT count(*) FROM information_schema.tables WHERE table_schema = 'wechat_member' AND table_name = 'data_statistics' AND table_type = 'BASE TABLE'", "took time": "19.000ms", "affected rows": -1}
+2026-04-07 16:22:37	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT DATABASE()", "took time": "12.000ms", "affected rows": -1}
+2026-04-07 16:22:37	[35mDEBUG[0m	gorm@v1.23.2/finisher_api.go:474	Database Query	{"sql": "SELECT SCHEMA_NAME from Information_schema.SCHEMATA where SCHEMA_NAME LIKE 'wechat_member%' ORDER BY SCHEMA_NAME='wechat_member' DESC limit 1", "took time": "20.000ms", "affected rows": 1}
+2026-04-07 16:22:37	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT * FROM `data_statistics` LIMIT 1", "took time": "9.000ms", "affected rows": -1}
+2026-04-07 16:22:37	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT column_name, column_default, is_nullable = 'YES', data_type, character_maximum_length, column_type, column_key, extra, column_comment, numeric_precision, numeric_scale , datetime_precision FROM information_schema.columns WHERE table_schema = 'wechat_member' AND table_name = 'data_statistics' ORDER BY ORDINAL_POSITION", "took time": "18.000ms", "affected rows": -1}
+2026-04-07 16:22:37	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "ALTER TABLE `data_statistics` MODIFY COLUMN `avg_quality_score` decimal(5,2) DEFAULT 0.000000", "took time": "18.000ms", "affected rows": 0}
+2026-04-07 16:22:37	[34mINFO[0m	bootstrap/crontab.go:49	加入定时任务成功：	{"task": "ClearLogsCrontab", "entryID": 1}
+2026-04-07 16:22:37	[34mINFO[0m	bootstrap/crontab.go:49	加入定时任务成功：	{"task": "DataCollectCrontab", "entryID": 2}
+2026-04-07 16:22:37	[34mINFO[0m	crontab/crontab.go:37	【定时任务：】	{"start": "null"}
+2026-04-07 16:22:37	[34mINFO[0m	crontab/crontab.go:37	【定时任务：】	{"schedule": "[\"now\",\"2026-04-07T16:22:37.8627682+08:00\",\"entry\",1,\"next\",\"2026-04-08T00:00:00+08:00\"]"}
+2026-04-07 16:22:37	[34mINFO[0m	crontab/crontab.go:37	【定时任务：】	{"schedule": "[\"now\",\"2026-04-07T16:22:37.8627682+08:00\",\"entry\",2,\"next\",\"2026-04-07T16:30:00+08:00\"]"}
+2026-04-07 16:30:00	[34mINFO[0m	crontab/crontab.go:37	【定时任务：】	{"wake": "[\"now\",\"2026-04-07T16:30:00.0010798+08:00\"]"}
+2026-04-07 16:30:00	[34mINFO[0m	crontab/crontab.go:37	【定时任务：】	{"run": "[\"now\",\"2026-04-07T16:30:00.0010798+08:00\",\"entry\",2,\"next\",\"2026-04-07T17:00:00+08:00\"]"}
+2026-04-07 16:30:00	[34mINFO[0m	crontab/data_collect_crontab.go:24	开始执行数据采集定时任务
+2026-04-07 16:30:00	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT * FROM `data_sources` WHERE status = 'active'", "took time": "91.000ms", "affected rows": 0}
+2026-04-07 16:30:00	[34mINFO[0m	crontab/data_collect_crontab.go:34	获取到活跃数据源	{"count": 0}
+2026-04-07 16:30:00	[34mINFO[0m	crontab/data_collect_crontab.go:54	数据采集定时任务执行完成
+2026-04-07 17:00:00	[34mINFO[0m	crontab/crontab.go:37	【定时任务：】	{"wake": "[\"now\",\"2026-04-07T17:00:00.0021633+08:00\"]"}
+2026-04-07 17:00:00	[34mINFO[0m	crontab/crontab.go:37	【定时任务：】	{"run": "[\"now\",\"2026-04-07T17:00:00.0021633+08:00\",\"entry\",2,\"next\",\"2026-04-07T17:30:00+08:00\"]"}
+2026-04-07 17:00:00	[34mINFO[0m	crontab/data_collect_crontab.go:24	开始执行数据采集定时任务
+2026-04-07 17:00:00	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT * FROM `data_sources` WHERE status = 'active'", "took time": "125.000ms", "affected rows": 0}
+2026-04-07 17:00:00	[34mINFO[0m	crontab/data_collect_crontab.go:34	获取到活跃数据源	{"count": 0}
+2026-04-07 17:00:00	[34mINFO[0m	crontab/data_collect_crontab.go:54	数据采集定时任务执行完成
+2026-04-07 17:08:19	[34mINFO[0m	middleware/access_log_middleware.go:101	HTTP Access Log [ 200 ]	{"request_method": "POST", "request_url": "localhost:8501/v1/data/ingest/raw", "request_path": "/v1/data/ingest/raw", "request_uri": "/v1/data/ingest/raw", "request_query": "", "client_ip": "::1", "remote_addr": "[::1]:61591", "user_agent": "Apifox/1.0.0 (https://apifox.com)", "headers": {"Accept":["*/*"],"Accept-Encoding":["gzip, deflate, br"],"Connection":["keep-alive"],"Content-Length":["16"],"Content-Type":["application/json"],"User-Agent":["Apifox/1.0.0 (https://apifox.com)"]}, "errors": "", "response_status": 200, "code_execute_time": "0.000ms", "request_body": "{\r\n    \"id\":1\r\n}", "response_body": "{\"code\":100404,\"msg\":\"路由未定义\",\"data\":null}"}
+2026-04-07 17:08:55	[34mINFO[0m	middleware/access_log_middleware.go:101	HTTP Access Log [ 200 ]	{"request_method": "POST", "request_url": "localhost:8501/api/v1/data/raw", "request_path": "/api/v1/data/raw", "request_uri": "/api/v1/data/raw", "request_query": "", "client_ip": "::1", "remote_addr": "[::1]:61591", "user_agent": "Apifox/1.0.0 (https://apifox.com)", "headers": {"Accept":["*/*"],"Accept-Encoding":["gzip, deflate, br"],"Connection":["keep-alive"],"Content-Length":["16"],"Content-Type":["application/json"],"User-Agent":["Apifox/1.0.0 (https://apifox.com)"]}, "errors": "", "response_status": 200, "code_execute_time": "0.000ms", "request_body": "{\r\n    \"id\":1\r\n}", "response_body": "{\"code\":100404,\"msg\":\"路由未定义\",\"data\":null}"}
+2026-04-07 17:09:29	[31mERROR[0m	responses/response.go:77	ToErrorResponse	{"details": "[\"无法找到令牌\"]"}
+gin-biz-web-api/pkg/responses.(*Response).ToErrorResponse
+	D:/go_demo/Data_Warehouse_Go/pkg/responses/response.go:77
+gin-biz-web-api/routers.apiData.AuthJWT.func1
+	D:/go_demo/Data_Warehouse_Go/internal/middleware/auth_jwt_middleware.go:26
+github.com/gin-gonic/gin.(*Context).Next
+	C:/Users/易理志/go/pkg/mod/github.com/gin-gonic/gin@v1.7.7/context.go:168
+gin-biz-web-api/routers.RegisterAPIRoutes.LimitIP.func1
+	D:/go_demo/Data_Warehouse_Go/internal/middleware/rate_limiter_middleware.go:37
+github.com/gin-gonic/gin.(*Context).Next
+	C:/Users/易理志/go/pkg/mod/github.com/gin-gonic/gin@v1.7.7/context.go:168
+gin-biz-web-api/bootstrap.registerGlobalMiddleWare.ContextTimeout.func4
+	D:/go_demo/Data_Warehouse_Go/internal/middleware/context_timeout_middleware.go:21
+github.com/gin-gonic/gin.(*Context).Next
+	C:/Users/易理志/go/pkg/mod/github.com/gin-gonic/gin@v1.7.7/context.go:168
+gin-biz-web-api/bootstrap.registerGlobalMiddleWare.Recovery.func3
+	D:/go_demo/Data_Warehouse_Go/internal/middleware/recovery_middleware.go:68
+github.com/gin-gonic/gin.(*Context).Next
+	C:/Users/易理志/go/pkg/mod/github.com/gin-gonic/gin@v1.7.7/context.go:168
+gin-biz-web-api/bootstrap.registerGlobalMiddleWare.Cors.func2
+	D:/go_demo/Data_Warehouse_Go/internal/middleware/cors_middleware.go:27
+github.com/gin-gonic/gin.(*Context).Next
+	C:/Users/易理志/go/pkg/mod/github.com/gin-gonic/gin@v1.7.7/context.go:168
+gin-biz-web-api/bootstrap.registerGlobalMiddleWare.AccessLog.func1
+	D:/go_demo/Data_Warehouse_Go/internal/middleware/access_log_middleware.go:62
+github.com/gin-gonic/gin.(*Context).Next
+	C:/Users/易理志/go/pkg/mod/github.com/gin-gonic/gin@v1.7.7/context.go:168
+github.com/gin-gonic/gin.LoggerWithConfig.func1
+	C:/Users/易理志/go/pkg/mod/github.com/gin-gonic/gin@v1.7.7/logger.go:241
+github.com/gin-gonic/gin.(*Context).Next
+	C:/Users/易理志/go/pkg/mod/github.com/gin-gonic/gin@v1.7.7/context.go:168
+github.com/gin-gonic/gin.(*Engine).handleHTTPRequest
+	C:/Users/易理志/go/pkg/mod/github.com/gin-gonic/gin@v1.7.7/gin.go:555
+github.com/gin-gonic/gin.(*Engine).ServeHTTP
+	C:/Users/易理志/go/pkg/mod/github.com/gin-gonic/gin@v1.7.7/gin.go:511
+net/http.serverHandler.ServeHTTP
+	D:/Go/src/net/http/server.go:3340
+net/http.(*conn).serve
+	D:/Go/src/net/http/server.go:2109
+2026-04-07 17:09:29	[34mINFO[0m	middleware/access_log_middleware.go:101	HTTP Access Log [ 200 ]	{"request_method": "POST", "request_url": "localhost:8501/api/v1/data/ingest/raw", "request_path": "/api/v1/data/ingest/raw", "request_uri": "/api/v1/data/ingest/raw", "request_query": "", "client_ip": "::1", "remote_addr": "[::1]:61591", "user_agent": "Apifox/1.0.0 (https://apifox.com)", "headers": {"Accept":["*/*"],"Accept-Encoding":["gzip, deflate, br"],"Connection":["keep-alive"],"Content-Length":["16"],"Content-Type":["application/json"],"User-Agent":["Apifox/1.0.0 (https://apifox.com)"]}, "errors": "", "response_status": 200, "code_execute_time": "94.000ms", "request_body": "{\r\n    \"id\":1\r\n}", "response_body": "{\"code\":100400,\"msg\":\"无法找到令牌\",\"data\":null}"}
+2026-04-07 17:30:00	[34mINFO[0m	crontab/crontab.go:37	【定时任务：】	{"wake": "[\"now\",\"2026-04-07T17:30:00.0055539+08:00\"]"}
+2026-04-07 17:30:00	[34mINFO[0m	crontab/crontab.go:37	【定时任务：】	{"run": "[\"now\",\"2026-04-07T17:30:00.0055539+08:00\",\"entry\",2,\"next\",\"2026-04-07T18:00:00+08:00\"]"}
+2026-04-07 17:30:00	[34mINFO[0m	crontab/data_collect_crontab.go:24	开始执行数据采集定时任务
+2026-04-07 17:30:00	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT * FROM `data_sources` WHERE status = 'active'", "took time": "86.000ms", "affected rows": 0}
+2026-04-07 17:30:00	[34mINFO[0m	crontab/data_collect_crontab.go:34	获取到活跃数据源	{"count": 0}
+2026-04-07 17:30:00	[34mINFO[0m	crontab/data_collect_crontab.go:54	数据采集定时任务执行完成
+2026-04-07 18:00:00	[34mINFO[0m	crontab/crontab.go:37	【定时任务：】	{"wake": "[\"now\",\"2026-04-07T18:00:00.0009483+08:00\"]"}
+2026-04-07 18:00:00	[34mINFO[0m	crontab/crontab.go:37	【定时任务：】	{"run": "[\"now\",\"2026-04-07T18:00:00.0009483+08:00\",\"entry\",2,\"next\",\"2026-04-07T18:30:00+08:00\"]"}
+2026-04-07 18:00:00	[34mINFO[0m	crontab/data_collect_crontab.go:24	开始执行数据采集定时任务
+2026-04-07 18:00:00	[35mDEBUG[0m	gorm@v1.23.2/callbacks.go:134	Database Query	{"sql": "SELECT * FROM `data_sources` WHERE status = 'active'", "took time": "111.000ms", "affected rows": 0}
+2026-04-07 18:00:00	[34mINFO[0m	crontab/data_collect_crontab.go:34	获取到活跃数据源	{"count": 0}
+2026-04-07 18:00:00	[34mINFO[0m	crontab/data_collect_crontab.go:54	数据采集定时任务执行完成
+2026-04-07 18:25:35	[33mWARN[0m	bootstrap/server.go:59	Server	{"gracefulShutdown": "正在关闭服务器……"}
+2026-04-07 18:25:35	[33mWARN[0m	bootstrap/server.go:69	Server	{"gracefulShutdown": "服务已经退出"}
