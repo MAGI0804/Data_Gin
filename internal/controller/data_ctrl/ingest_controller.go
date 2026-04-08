@@ -136,12 +136,26 @@ func (ctrl *IngestController) RawIngestData(c *gin.Context) {
 			req = requestbody.RawIngestRequest{
 				RawContent: rawContent,
 			}
+		} else {
+			// 如果解析成功但 RawContent 为 nil，说明是直接发送数据的情况
+			if req.RawContent == nil {
+				// 解析整个请求体作为原始内容
+				var rawContent interface{}
+				if err := json.Unmarshal(rawData, &rawContent); err != nil {
+					c.JSON(400, msg.ErrResponse("无效的请求参数", err))
+					return
+				}
+				req.RawContent = rawContent
+			}
 		}
 	} else {
 		// 如果请求体为空，创建一个空的请求对象
 		req = requestbody.RawIngestRequest{}
 		logger.Info("Empty request body, creating empty request")
 	}
+
+	// 打印解析后的请求体
+	logger.Info("Parsed request body", zap.String("raw_data", string(rawData)))
 
 	// 从查询参数中获取 remark
 	req.Remark = c.Query("remark")
