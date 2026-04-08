@@ -123,10 +123,9 @@ func initServer(router *gin.Engine) *http.Server {
 
 	// 检查是否启用 SSL
 	if config.GetBool("cfg.app.ssl.enabled") {
-		// 使用 SSL 域名和端口
-		domain := config.GetString("cfg.app.ssl.domain")
+		// 使用 0.0.0.0 绑定到所有网络接口，使用 SSL 端口
 		sslPort := config.GetString("cfg.app.ssl.port")
-		addr = fmt.Sprintf("%s:%s", domain, sslPort)
+		addr = fmt.Sprintf(":%s", sslPort)
 	} else {
 		// 使用默认端口
 		addr = fmt.Sprintf(":%d", config.GetInt("cfg.app.port"))
