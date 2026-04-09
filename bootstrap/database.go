@@ -88,13 +88,13 @@ func autoMigrateTables() {
 
 	// 迁移数据存储相关表
 	err := db.AutoMigrate(
-		&model.User{},           // 用户表
-		&model.DataSource{},     // 数据源配置表
-		&model.RawData{},        // 原始数据表
-		&model.ProcessedData{},  // 处理结果表
-		&model.DataStatistics{}, // 数据统计表
-		&model.ProcessedData{},  //企迈订单表
-		&model.TokenData{},      //验证信息表
+		&model.User{},             // 用户表
+		&model.DataSource{},       // 数据源配置表
+		&model.RawData{},          // 原始数据表
+		&model.ProcessedData{},    // 处理结果表
+		&model.DataStatistics{},   // 数据统计表
+		&model.QIMAI_ORDER_DATA{}, //企迈订单表
+		&model.TokenData{},        //验证信息表
 	)
 
 	if err != nil {

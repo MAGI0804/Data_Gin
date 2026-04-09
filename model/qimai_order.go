@@ -8,6 +8,8 @@ import (
 
 // QIMAI_ORDER_DATA 企迈订单数据模型
 type QIMAI_ORDER_DATA struct {
+	ID              uint           `gorm:"primaryKey" json:"id"`
+	RawDataID       uint           `gorm:"column:raw_data_id;not null" json:"rawDataId"`
 	OrderType       int            `gorm:"column:order_type;not null" json:"orderType"`                        // 订单类型：11=堂食;12=自提、外带;13=外卖(餐饮)
 	Source          int            `gorm:"column:source;not null" json:"source"`                               // 渠道类型：1=微信;2=支付宝;8=三方pos;9=代客点单;17=自助点餐屏;19=企迈门店助手;20=云闪付小程序
 	UserID          string         `gorm:"column:user_id;size:50;null" json:"userId"`                          // 用户id

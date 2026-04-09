@@ -56,6 +56,7 @@ func setupQueueJob() {
 // addQueueJob 添加异步队列任务
 func addQueueJob(mux *asynq.ServeMux) {
 	mux.HandleFunc(job.TypeFoo, job.HandFooTask)
+	mux.HandleFunc(job.TypeDataProcess, job.HandleDataProcessTask)
 }
 
 // jobLoggingMiddleware 异步任务执行日志中间件
