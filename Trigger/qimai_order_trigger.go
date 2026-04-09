@@ -14,24 +14,30 @@ import (
 
 // QimaiOrderTrigger 企迈订单触发器
 type QimaiOrderTrigger struct {
-	tokenDataDAO    *auth_dao.TokenDataDAO
-	rawDataDAO      *data_dao.RawDataDAO
-	qimaiDataDAO    *data_dao.QimaiDataDAO
+	tokenDataDAO *auth_dao.TokenDataDAO
+	rawDataDAO   *data_dao.RawDataDAO
+	qimaiDataDAO *data_dao.QimaiDataDAO
 }
 
 // NewQimaiOrderTrigger 创建企迈订单触发器实例
 func NewQimaiOrderTrigger() *QimaiOrderTrigger {
 	return &QimaiOrderTrigger{
-		tokenDataDAO:    auth_dao.NewTokenDataDAO(),
-		rawDataDAO:      data_dao.NewRawDataDAO(),
-		qimaiDataDAO:    data_dao.NewQimaiDataDAO(),
+		tokenDataDAO: auth_dao.NewTokenDataDAO(),
+		rawDataDAO:   data_dao.NewRawDataDAO(),
+		qimaiDataDAO: data_dao.NewQimaiDataDAO(),
 	}
 }
 
 // Trigger 触发企迈订单处理
 func (t *QimaiOrderTrigger) Trigger(ctx context.Context, rawData *model.RawData) error {
 	// 1. 检查remark是否为qimai_order
-	if rawData.Remark != "qimai_order" {
+	var metadata map[string]interface{}
+	if err := json.Unmarshal([]byte(rawData.Metadata), &metadata); err != nil {
+		return fmt.Errorf("解析元数据失败: %w", err)
+	}
+
+	remark, ok := metadata["remark"].(string)
+	if !ok || remark != "qimai_order" {
 		return nil // 不是企迈订单，不处理
 	}
 
