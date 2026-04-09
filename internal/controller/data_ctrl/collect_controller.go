@@ -92,3 +92,53 @@ func (ctrl *CollectController) CollectStatus(c *gin.Context) {
 	// 返回成功响应
 	c.JSON(200, msg.SuccessResponse("查询成功", &data))
 }
+
+// CreateTask 创建任务
+// @Summary 创建任务
+// @Description 从原始数据获取数据，查询并存储结果
+// @Tags 数据采集
+// @Accept json
+// @Produce json
+// @Param source_id path int true "数据源ID"
+// @Success 200 {object} msg.Response
+// @Failure 400 {object} msg.ErrResponseST
+// @Failure 500 {object} msg.ErrResponseST
+// @Router /api/v1/data/task/create/{source_id} [post]
+func (ctrl *CollectController) CreateTask(c *gin.Context) {
+	// 解析数据源ID
+	sourceIDStr := c.Param("source_id")
+	sourceID, err := strconv.ParseUint(sourceIDStr, 10, 32)
+	if err != nil {
+		c.JSON(400, msg.ErrResponse("无效的数据源ID", err))
+		return
+	}
+
+	// 1. 从原始数据中获取数据
+	result, err := ctrl.service.CollectFromSource(c.Request.Context(), uint(sourceID))
+	if err != nil {
+		c.JSON(500, msg.ErrResponse("数据采集失败", err))
+		return
+	}
+
+	// 2. 使用查询方法获取数据
+	queryService := data_svc.NewQueryService()
+	rawData, err := queryService.GetRawData(c.Request.Context(), "", uint(sourceID), "", 100)
+	if err != nil {
+		c.JSON(500, msg.ErrResponse("查询原始数据失败", err))
+		return
+	}
+
+	// 3. 将数据存储到表中（这里已经在CollectFromSource中完成）
+	// 实际应用中，可能需要根据业务逻辑进行额外的存储处理
+
+	// 构建响应数据
+	data := map[string]any{
+		"status":         "completed",
+		"message":        result,
+		"raw_data_count": len(rawData),
+		"source_id":      sourceID,
+	}
+
+	// 返回成功响应
+	c.JSON(200, msg.SuccessResponse("任务创建成功", &data))
+}

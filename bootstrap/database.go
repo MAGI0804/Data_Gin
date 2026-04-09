@@ -93,6 +93,8 @@ func autoMigrateTables() {
 		&model.RawData{},        // 原始数据表
 		&model.ProcessedData{},  // 处理结果表
 		&model.DataStatistics{}, // 数据统计表
+		&model.ProcessedData{},  //企迈订单表
+		&model.TokenData{},      //验证信息表
 	)
 
 	if err != nil {

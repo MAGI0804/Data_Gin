@@ -299,9 +299,14 @@ func (j *JWT) parseTokenString(tokenStr string) (*jwtPkg.Token, error) {
 
 				if signature == expectedSignatureHex {
 					// 签名验证通过，创建claims
+					tokenType := "r" // 默认类型
+					// 根据过期时间判断是否为永久令牌（100年以上）
+					if expire > time.Now().Add(99*365*24*time.Hour).Unix() {
+						tokenType = "p"
+					}
 					claims := &JWTCustomClaims{
 						U: uid,
-						T: "r", // 默认类型
+						T: tokenType,
 						E: expire,
 						I: time.Now().Unix(), // 使用当前时间作为签发时间
 					}

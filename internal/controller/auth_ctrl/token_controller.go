@@ -77,3 +77,39 @@ func (ctrl *TokenController) RefreshToken(c *gin.Context) {
 		"token":      newToken,
 	})
 }
+
+// GetTokenInfo 根据token查询当前的信息
+// curl --location --request GET '0.0.0.0:3000/api/auth/token/info'
+// --header 'token: {your_token}'
+func (ctrl *TokenController) GetTokenInfo(c *gin.Context) {
+	response := responses.New(c)
+
+	// 获取令牌
+	tokenStr, err := jwt.NewJWT().GetToken(c)
+	if err != nil {
+		response.ToErrorResponse(errcode.Unauthorized.WithDetails(err.Error()), err.Error())
+		return
+	}
+
+	// 解析令牌
+	claims, err := jwt.NewJWT().ParseToken(c, tokenStr)
+	if err != nil {
+		response.ToErrorResponse(errcode.Unauthorized.WithDetails(err.Error()), err.Error())
+		return
+	}
+
+	// 计算令牌剩余过期时间
+	ttl, err := jwt.NewJWT().GetTTL(c, tokenStr)
+	if err != nil {
+		ttl = 0
+	}
+
+	// 返回令牌信息
+	response.ToResponse(gin.H{
+		"user_id":     claims.U,
+		"token_type":  claims.T,
+		"expire_time": claims.E,
+		"issued_time": claims.I,
+		"ttl":         ttl,
+	})
+}

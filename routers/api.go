@@ -91,6 +91,15 @@ func apiAuth(api *gin.RouterGroup) {
 
 		tokenCtrl := new(auth_ctrl.TokenController)
 		authGroup.POST("/token/refresh", tokenCtrl.RefreshToken) // 刷新令牌
+		authGroup.GET("/token/info", tokenCtrl.GetTokenInfo)     // 根据token查询当前的信息
+
+		// token数据管理
+		tokenDataCtrl := auth_ctrl.NewTokenDataController()
+		authGroup.POST("/token-data", tokenDataCtrl.CreateTokenData)            // 创建token数据
+		authGroup.GET("/token-data", tokenDataCtrl.GetAllTokenData)             // 获取所有token数据
+		authGroup.GET("/token-data/:id", tokenDataCtrl.GetTokenDataByID)        // 根据ID获取token数据
+		authGroup.POST("/token-data/update/:id", tokenDataCtrl.UpdateTokenData) // 更新token数据
+		authGroup.POST("/token-data/delete/:id", tokenDataCtrl.DeleteTokenData) // 删除token数据
 	}
 }
 

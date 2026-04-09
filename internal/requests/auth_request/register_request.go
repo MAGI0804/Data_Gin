@@ -64,14 +64,26 @@ func SignupUsingEmail(data interface{}, c *gin.Context) map[string][]string {
 
 // RefreshTokenRequest 刷新令牌的请求信息
 type RefreshTokenRequest struct {
-	TokenType string `form:"token_type" json:"token_type,omitempty" valid:"token_type"`
+	TokenType    string `form:"token_type" json:"token_type,omitempty" valid:"token_type"`
+	TokenTypeAlt string `json:"TokenType,omitempty"`
 }
 
 // RefreshToken 刷新令牌验证器方法
 func RefreshToken(data interface{}, c *gin.Context) map[string][]string {
+	req := data.(*RefreshTokenRequest)
+
+	// 如果TokenType为空但TokenTypeAlt不为空，使用TokenTypeAlt的值
+	if req.TokenType == "" && req.TokenTypeAlt != "" {
+		req.TokenType = req.TokenTypeAlt
+	}
+
+	// 如果token_type为空，直接返回空错误信息（通过验证）
+	if req.TokenType == "" {
+		return nil
+	}
 
 	rules := govalidator.MapData{
-		"token_type": []string{"omitempty", "in:refreshable,permanent"},
+		"token_type": []string{"in:refreshable,permanent"},
 	}
 
 	messages := govalidator.MapData{

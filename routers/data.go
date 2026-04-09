@@ -16,6 +16,8 @@ func apiData(api *gin.RouterGroup) {
 		// 数据采集
 		dataGroup.POST("/collect/:source_id", dataCtrl.CollectController.ManualCollect)
 		dataGroup.GET("/collect/status/:job_id", dataCtrl.CollectController.CollectStatus)
+		// 任务创建
+		dataGroup.POST("/task/create/:source_id", dataCtrl.CollectController.CreateTask)
 
 		// 数据接收
 		dataGroup.POST("/ingest", dataCtrl.IngestController.IngestData)
