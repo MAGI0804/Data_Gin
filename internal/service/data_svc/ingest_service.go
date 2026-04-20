@@ -42,11 +42,20 @@ func (s *IngestService) IngestData(ctx context.Context, req *requestbody.IngestR
 	var acceptedCount, failedCount int
 
 	for _, item := range req.Data {
+		ingestedTime := time.Now()
+		metadata := map[string]interface{}{
+			"ingested_at": ingestedTime.Unix(),
+			"source":      req.DataSource,
+		}
+		metadataJSON, _ := json.Marshal(metadata)
+
 		rawData := &model.RawData{
 			DataType:   req.DataType,
 			RawContent: fmt.Sprintf("%v", item),
-			Metadata:   fmt.Sprintf(`{"ingested_at": %d, "source": "%s"}`, time.Now().Unix(), req.DataSource),
+			Metadata:   string(metadataJSON),
 			Status:     "pending",
+			Source:     req.DataSource,
+			IngestedAt: &ingestedTime,
 		}
 
 		id, err := s.rawDataDAO.Create(ctx, rawData)
@@ -92,11 +101,21 @@ func (s *IngestService) IngestBatchData(ctx context.Context, req *requestbody.Ba
 
 	for _, item := range req.Items {
 		for _, data := range item.Data {
+			ingestedTime := time.Now()
+			metadata := map[string]interface{}{
+				"ingested_at": ingestedTime.Unix(),
+				"source":      item.DataSource,
+				"batch_id":    req.BatchID,
+			}
+			metadataJSON, _ := json.Marshal(metadata)
+
 			rawData := &model.RawData{
 				DataType:   item.DataType,
 				RawContent: fmt.Sprintf("%v", data),
-				Metadata:   fmt.Sprintf(`{"ingested_at": %d, "source": "%s", "batch_id": "%s"}`, time.Now().Unix(), item.DataSource, req.BatchID),
+				Metadata:   string(metadataJSON),
 				Status:     "pending",
+				Source:     item.DataSource,
+				IngestedAt: &ingestedTime,
 			}
 
 			id, err := s.rawDataDAO.Create(ctx, rawData)
@@ -168,8 +187,9 @@ func (s *IngestService) RawIngestData(ctx context.Context, req *requestbody.RawI
 	}
 
 	// 构建元数据 JSON
+	ingestedTime := time.Now()
 	metadata := map[string]interface{}{
-		"ingested_at": time.Now().Unix(),
+		"ingested_at": ingestedTime.Unix(),
 		"source":      dataSource,
 		"format":      "raw",
 		"client_ip":   clientIP,
@@ -187,6 +207,18 @@ func (s *IngestService) RawIngestData(ctx context.Context, req *requestbody.RawI
 		logger.Warn("Failed to marshal metadata, using empty object", zap.Error(err))
 	}
 
+	// 从metadata中提取字段
+	var remark, clientIPStr string
+	if v, ok := metadata["remark"].(string); ok {
+		remark = v
+	}
+	if v, ok := metadata["client_ip"].(string); ok {
+		clientIPStr = v
+	}
+
+	// source的值与remark一样
+	source := remark
+
 	// 直接保存原始数据，不进行任何格式验证或转换
 	rawData := &model.RawData{
 		DataSourceID: 0, // 设置默认值，因为该字段在数据库中是 not null
@@ -194,6 +226,10 @@ func (s *IngestService) RawIngestData(ctx context.Context, req *requestbody.RawI
 		RawContent:   string(rawContentJSON),
 		Metadata:     string(metadataJSON),
 		Status:       "pending",
+		Remark:       remark,
+		Source:       source,
+		ClientIP:     clientIPStr,
+		IngestedAt:   &ingestedTime,
 	}
 
 	id, err := s.rawDataDAO.Create(ctx, rawData)

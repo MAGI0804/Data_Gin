@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log"
 	"strconv"
+	"time"
 
 	"gin-biz-web-api/internal/dao/auth_dao"
 	"gin-biz-web-api/internal/dao/data_dao"
@@ -144,81 +145,144 @@ func (t *QimaiOrderTrigger) Trigger(ctx context.Context, rawData *model.RawData)
 
 	// 映射API返回的数据到模型
 	if data, ok := orderDetail["data"].(map[string]interface{}); ok {
-		if v, ok := data["orderType"].(float64); ok {
-			orderData.OrderType = int(v)
-		}
-		if v, ok := data["source"].(float64); ok {
-			orderData.Source = int(v)
-		}
-		if v, ok := data["userId"].(string); ok {
-			orderData.UserID = v
-		}
-		if v, ok := data["multiStoreId"].(string); ok {
-			orderData.MultiStoreID = v
-		}
-		if v, ok := data["scene"].(string); ok {
-			orderData.Scene = v
-		}
-		if v, ok := data["status"].(string); ok {
-			orderData.Status = v
-		}
-		if v, ok := data["orderNo"].(string); ok {
-			orderData.OrderNo = v
-		}
-		if v, ok := data["payNo"].(string); ok {
-			orderData.PayNo = v
-		}
-		if v, ok := data["thirdPayNo"].(string); ok {
-			orderData.ThirdPayNo = v
-		}
-		if v, ok := data["storeOrderNo"].(string); ok {
-			orderData.StoreOrderNo = v
-		}
-		if v, ok := data["totalAmount"].(string); ok {
-			if amount, err := strconv.Atoi(v); err == nil {
-				orderData.TotalAmount = amount
+		// 处理整数字段
+		setIntField := func(key string, setter func(int)) {
+			if v, ok := data[key].(float64); ok {
+				setter(int(v))
+			} else if v, ok := data[key].(int); ok {
+				setter(v)
+			} else if v, ok := data[key].(string); ok {
+				if num, err := strconv.Atoi(v); err == nil {
+					setter(num)
+				}
 			}
 		}
-		if v, ok := data["actualAmount"].(string); ok {
-			if amount, err := strconv.Atoi(v); err == nil {
-				orderData.ActualAmount = amount
+
+		// 处理字符串字段
+		setStringField := func(key string, setter func(string)) {
+			if v, ok := data[key].(string); ok {
+				setter(v)
 			}
 		}
-		if v, ok := data["discountAmount"].(string); ok {
-			if amount, err := strconv.Atoi(v); err == nil {
-				orderData.DiscountAmount = amount
+
+		// 处理状态字段（可能是数字或字符串）
+		if v, ok := data["status"]; ok {
+			switch val := v.(type) {
+			case float64:
+				orderData.Status = strconv.Itoa(int(val))
+			case int:
+				orderData.Status = strconv.Itoa(val)
+			case string:
+				orderData.Status = val
 			}
 		}
-		if v, ok := data["itemAmount"].(string); ok {
-			if amount, err := strconv.Atoi(v); err == nil {
-				orderData.ItemAmount = amount
+
+		setIntField("orderType", func(v int) { orderData.OrderType = v })
+		setIntField("source", func(v int) { orderData.Source = v })
+		setIntField("payStatus", func(v int) { orderData.PayStatus = v })
+		setIntField("totalAmount", func(v int) { orderData.TotalAmount = v })
+		setIntField("actualAmount", func(v int) { orderData.ActualAmount = v })
+		setIntField("discountAmount", func(v int) { orderData.DiscountAmount = v })
+		setIntField("itemAmount", func(v int) { orderData.ItemAmount = v })
+		setIntField("packAmount", func(v int) { orderData.PackAmount = v })
+		setIntField("freightAmount", func(v int) { orderData.FreightAmount = v })
+
+		setStringField("userId", func(v string) { orderData.UserID = v })
+		setStringField("multiStoreId", func(v string) { orderData.MultiStoreID = v })
+		setStringField("scene", func(v string) { orderData.Scene = v })
+		setStringField("orderNo", func(v string) { orderData.OrderNo = v })
+		setStringField("payNo", func(v string) { orderData.PayNo = v })
+		setStringField("thirdPayNo", func(v string) { orderData.ThirdPayNo = v })
+		setStringField("storeOrderNo", func(v string) { orderData.StoreOrderNo = v })
+		setStringField("buyerRemarks", func(v string) { orderData.BuyerRemarks = v })
+		setStringField("shopCode", func(v string) { orderData.ShopCode = v })
+		setStringField("shopName", func(v string) { orderData.ShopName = v })
+		setStringField("contactTel", func(v string) { orderData.ContactTel = v })
+		setStringField("contactName", func(v string) { orderData.ContactName = v })
+
+		// 处理收货信息
+		if addr, ok := data["addr"].(map[string]interface{}); ok {
+			if v, ok := addr["acceptName"].(string); ok {
+				orderData.AddrAcceptName = v
+			}
+			if v, ok := addr["mobile"].(string); ok {
+				orderData.AddrMobile = v
+			}
+			if v, ok := addr["sex"].(float64); ok {
+				orderData.AddrSex = int(v)
+			} else if v, ok := addr["sex"].(int); ok {
+				orderData.AddrSex = v
+			}
+			if v, ok := addr["provinceName"].(string); ok {
+				orderData.AddrProvinceName = v
+			}
+			if v, ok := addr["cityName"].(string); ok {
+				orderData.AddrCityName = v
+			}
+			if v, ok := addr["areaName"].(string); ok {
+				orderData.AddrAreaName = v
+			}
+			if v, ok := addr["acceptAddr"].(string); ok {
+				orderData.AddrAcceptAddr = v
 			}
 		}
-		if v, ok := data["packAmount"].(string); ok {
-			if amount, err := strconv.Atoi(v); err == nil {
-				orderData.PackAmount = amount
+
+		// 处理JSON数组字段（itemList, payList, discountList）
+		if itemList, ok := data["itemList"]; ok {
+			if jsonBytes, err := json.Marshal(itemList); err == nil {
+				orderData.ItemListJSON = string(jsonBytes)
 			}
 		}
-		if v, ok := data["freightAmount"].(string); ok {
-			if amount, err := strconv.Atoi(v); err == nil {
-				orderData.FreightAmount = amount
+		if payList, ok := data["payList"]; ok {
+			if jsonBytes, err := json.Marshal(payList); err == nil {
+				orderData.PayListJSON = string(jsonBytes)
 			}
 		}
-		if v, ok := data["buyerRemarks"].(string); ok {
-			orderData.BuyerRemarks = v
+		if discountList, ok := data["discountList"]; ok {
+			if jsonBytes, err := json.Marshal(discountList); err == nil {
+				orderData.DiscountListJSON = string(jsonBytes)
+			}
 		}
-		if v, ok := data["shopCode"].(string); ok {
-			orderData.ShopCode = v
+
+		// 处理额外数据（除了已知字段外的其他数据）
+		knownKeys := map[string]bool{
+			"shopCode": true, "orderType": true, "completedAt": true, "orderNo": true,
+			"freightAmount": true, "actualAmount": true, "discountAmount": true, "shopName": true,
+			"source": true, "payList": true, "packAmount": true, "payNo": true, "createdAt": true,
+			"totalAmount": true, "thirdPayNo": true, "itemAmount": true, "itemList": true, "status": true,
+			"userId": true, "multiStoreId": true, "scene": true, "addr": true, "discountList": true,
+			"contactTel": true, "contactName": true,
 		}
-		if v, ok := data["shopName"].(string); ok {
-			orderData.ShopName = v
+		extraData := make(map[string]interface{})
+		for k, v := range data {
+			if !knownKeys[k] {
+				extraData[k] = v
+			}
 		}
-		if v, ok := data["contactTel"].(string); ok {
-			orderData.ContactTel = v
+		if len(extraData) > 0 {
+			if jsonBytes, err := json.Marshal(extraData); err == nil {
+				orderData.ExtraDataJSON = string(jsonBytes)
+			}
 		}
-		if v, ok := data["contactName"].(string); ok {
-			orderData.ContactName = v
+
+		// 处理时间字段（可能是字符串或数字）
+		parseTimestamp := func(key string, setter func(*time.Time)) {
+			var timestamp int64
+			if v, ok := data[key].(float64); ok {
+				timestamp = int64(v)
+			} else if v, ok := data[key].(string); ok {
+				if t, err := strconv.ParseInt(v, 10, 64); err == nil {
+					timestamp = t
+				}
+			}
+			if timestamp > 0 {
+				t := time.Unix(0, timestamp*int64(time.Millisecond)).Local()
+				setter(&t)
+			}
 		}
+
+		parseTimestamp("orderAt", func(t *time.Time) { orderData.OrderAt = t })
+		parseTimestamp("completedAt", func(t *time.Time) { orderData.CompletedAt = t })
 	}
 
 	_, err = t.qimaiDataDAO.Create(ctx, orderData)

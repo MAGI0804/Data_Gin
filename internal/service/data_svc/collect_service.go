@@ -2,6 +2,7 @@ package data_svc
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -60,12 +61,21 @@ func (s *CollectService) CollectFromSource(ctx context.Context, sourceID uint) (
 	// 3. 保存原始数据
 	var rawDataIDs []uint
 	for _, item := range data {
+		ingestedTime := time.Now()
+		metadata := map[string]interface{}{
+			"ingested_at": ingestedTime.Unix(),
+			"source":      source.Name,
+		}
+		metadataJSON, _ := json.Marshal(metadata)
+
 		rawData := &model.RawData{
 			DataSourceID: sourceID,
 			DataType:     source.Type,
 			RawContent:   fmt.Sprintf("%v", item),
-			Metadata:     fmt.Sprintf(`{"collected_at": %d, "source": "%s"}`, time.Now().Unix(), source.Name),
+			Metadata:     string(metadataJSON),
 			Status:       "pending",
+			Source:       source.Name,
+			IngestedAt:   &ingestedTime,
 		}
 
 		id, err := s.rawDataDAO.Create(ctx, rawData)

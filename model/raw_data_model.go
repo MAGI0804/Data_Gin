@@ -1,6 +1,10 @@
 // package model 原始数据模型
 package model
 
+import (
+	"time"
+)
+
 // RawData 原始数据模型
 // 存储从外部API获取或接收的原始数据
 type RawData struct {
@@ -22,6 +26,14 @@ type RawData struct {
 	ErrorMessage string `gorm:"column:error_message;type:text" json:"error_message"`
 	// 处理完成时间
 	ProcessedAt int `gorm:"column:processed_at;default:0" json:"processed_at"`
+	// 备注
+	Remark string `gorm:"column:remark;size:255" json:"remark"`
+	// 来源
+	Source string `gorm:"column:source;size:100" json:"source"`
+	// 客户端IP
+	ClientIP string `gorm:"column:client_ip;size:50" json:"client_ip"`
+	// 接收时间，格式：yyyy-mm-dd hh:mm:ss
+	IngestedAt *time.Time `gorm:"column:ingested_at" json:"ingested_at"`
 
 	*CommonTimestampsField
 }

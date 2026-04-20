@@ -35,8 +35,11 @@ func NewDataProcessTask(rawDataID uint) *asynq.Task {
 
 // HandleDataProcessTask 处理数据处理任务
 func HandleDataProcessTask(ctx context.Context, t *asynq.Task) error {
+	logger.Info("收到数据处理任务", zap.String("task_type", t.Type()), zap.ByteString("payload", t.Payload()))
+
 	var payload DataProcessPayload
 	if err := json.Unmarshal(t.Payload(), &payload); err != nil {
+		logger.Error("解析任务payload失败", zap.Error(err))
 		return err
 	}
 
