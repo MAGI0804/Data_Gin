@@ -256,6 +256,73 @@ button svg,
   line-height: 1.1;
 }
 
+.section-tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  border-bottom: 1px solid #e4e8eb;
+  padding-bottom: 10px;
+}
+
+.section-tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  border: 1px solid #d8dee4;
+  border-radius: 8px;
+  background: #fff;
+  color: #4b5963;
+  font-size: 13px;
+  font-weight: 700;
+  padding: 7px 10px;
+}
+
+.section-tab strong {
+  min-width: 22px;
+  border-radius: 999px;
+  background: #edf2f4;
+  color: #4b5963;
+  font-size: 12px;
+  line-height: 20px;
+  text-align: center;
+}
+
+.section-tab.active {
+  border-color: #236b5d;
+  background: #236b5d;
+  color: #fff;
+}
+
+.section-tab.active strong {
+  background: rgba(255, 255, 255, 0.18);
+  color: #fff;
+}
+
+.template-note {
+  border: 1px solid #d8dee4;
+  border-radius: 8px;
+  background: #fbfcfd;
+  padding: 12px;
+}
+
+.template-note h3 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.template-note p {
+  margin: 6px 0 12px;
+  color: #4b5963;
+  line-height: 1.6;
+}
+
+.template-points {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 10px;
+}
+
 .list-stack {
   display: grid;
   gap: 16px;

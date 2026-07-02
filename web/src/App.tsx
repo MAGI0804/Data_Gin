@@ -30,6 +30,7 @@ type ApiClientOptions = {
 type ApiClient = (path: string, options?: ApiClientOptions) => Promise<ApiResult>
 type RefreshAction = (showResult?: boolean) => Promise<void>
 type NavKey = 'sources' | 'transform' | 'delivery' | 'runs'
+type SourceView = 'list' | 'legacy' | 'create' | 'debug'
 
 const authStorageKey = 'warehouse-auth'
 const tokenStorageKey = 'warehouse-token'
@@ -160,6 +161,161 @@ const defaultMappingConfig = JSON.stringify(
   null,
   2,
 )
+
+const sourceConfigTemplates = [
+  {
+    code: 'youzan_order_api',
+    sourceCode: 'youzan_order_api',
+    name: '有赞订单 API 拉取',
+    description: '先请求有赞 token_url 获取 access_token，再把 token 注入订单接口 query 参数，body 使用最近 5 分钟支付成功时间窗口。',
+    sourceType: 'api_poll',
+    sourceQueryKey: 'data_source',
+    dedupeKeys: ['order_info.tid'],
+    schema: { target_table: 'youzan_order_data', primary_key: 'tid' },
+    config: {
+      description: '有赞订单拉取配置。动态值来自 cfg.youzan.*，不在页面保存真实密钥。',
+      url: { source: 'config', path: 'cfg.youzan.orders_url' },
+      method: 'POST',
+      timeout_seconds: 30,
+      auth: {
+        type: 'request_token',
+        request: {
+          url: { source: 'config', path: 'cfg.youzan.token_url' },
+          method: 'POST',
+          headers: [{ name: 'Content-Type', value: 'application/json' }],
+          body_json: {
+            authorize_type: 'silent',
+            client_id: { source: 'config', path: 'cfg.youzan.client_id' },
+            client_secret: { source: 'config', path: 'cfg.youzan.client_secret' },
+            grant_id: { source: 'config', path: 'cfg.youzan.grant_id' },
+            refresh: false,
+          },
+        },
+        token_path: 'data.access_token',
+        inject: { in: 'query', name: 'access_token' },
+      },
+      headers: [{ name: 'Content-Type', value: 'application/json' }],
+      body_json: {
+        page_size: 100,
+        page_no: 1,
+        start_success: { source: 'time', format: '2006-01-02 15:04:05', offset_seconds: -300 },
+        end_success: { source: 'time', format: '2006-01-02 15:04:05' },
+      },
+      records_path: 'data.full_order_info_list',
+      parameter_docs: [
+        { location: 'url', name: 'url', value: 'cfg.youzan.orders_url', source: '配置文件或环境变量 YOUZAN_ORDERS_URL' },
+        { location: 'query', name: 'access_token', value: 'auth.data.access_token', source: 'token 前置请求返回' },
+        { location: 'body', name: 'start_success/end_success', value: '当前时间窗口', source: '运行时动态计算' },
+      ],
+    },
+  },
+  {
+    code: 'youzan_refund_api',
+    sourceCode: 'youzan_refund_api',
+    name: '有赞退款 API 拉取',
+    description: '先获取有赞 access_token，再请求退款接口，body 使用最近 5 分钟 Unix 时间窗口。',
+    sourceType: 'api_poll',
+    sourceQueryKey: 'data_source',
+    dedupeKeys: ['refund_id'],
+    schema: { target_table: 'youzan_return_data', primary_key: 'refund_id' },
+    config: {
+      description: '有赞退款拉取配置。node_kdt_id 和接口地址从 cfg.youzan.* 获取。',
+      url: { source: 'config', path: 'cfg.youzan.refund_url' },
+      method: 'POST',
+      timeout_seconds: 30,
+      auth: {
+        type: 'request_token',
+        request: {
+          url: { source: 'config', path: 'cfg.youzan.token_url' },
+          method: 'POST',
+          headers: [{ name: 'Content-Type', value: 'application/json' }],
+          body_json: {
+            authorize_type: 'silent',
+            client_id: { source: 'config', path: 'cfg.youzan.client_id' },
+            client_secret: { source: 'config', path: 'cfg.youzan.client_secret' },
+            grant_id: { source: 'config', path: 'cfg.youzan.grant_id' },
+            refresh: false,
+          },
+        },
+        token_path: 'data.access_token',
+        inject: { in: 'query', name: 'access_token' },
+      },
+      headers: [{ name: 'Content-Type', value: 'application/json' }],
+      body_json: {
+        create_time_start: { source: 'time', unix: true, offset_seconds: -300 },
+        create_time_end: { source: 'time', unix: true },
+        page_no: 1,
+        page_size: 100,
+      },
+      records_path: 'data.refunds',
+      parameter_docs: [
+        { location: 'url', name: 'url', value: 'cfg.youzan.refund_url', source: '配置文件或环境变量 YOUZAN_REFUND_URL' },
+        { location: 'query', name: 'access_token', value: 'auth.data.access_token', source: 'token 前置请求返回' },
+        { location: 'body', name: 'create_time_start/create_time_end', value: 'Unix 时间戳', source: '运行时动态计算' },
+      ],
+    },
+  },
+  {
+    code: 'qimai_order_enrich_api',
+    sourceCode: 'qimai_order_enrich_api',
+    name: '企迈订单详情补数 API',
+    description: '企迈订单详情涉及签名 token，当前旧逻辑由 Trigger/qimai_order_trigger.go 执行；此模板用于显式记录 URL、凭证来源、body 字段和落表。',
+    sourceType: 'api_poll',
+    sourceQueryKey: 'source',
+    dedupeKeys: ['params.orderNo'],
+    schema: { target_table: 'qimai_order_data', primary_key: 'orderNo' },
+    config: {
+      description: '企迈订单详情补数配置说明。实际签名逻辑仍由旧 Trigger 处理，避免页面保存 open_key 明文。',
+      url: { source: 'config', path: 'cfg.qimai.order_detail_url' },
+      method: 'POST',
+      timeout_seconds: 30,
+      headers: [{ name: 'Content-Type', value: 'application/json' }],
+      body_json: {
+        openId: { source: 'config', path: 'cfg.qimai.open_id' },
+        grantCode: { source: 'config', path: 'cfg.qimai.grant_code' },
+        nonce: { source: 'config', path: 'cfg.qimai.nonce' },
+        timestamp: { source: 'time', unix: true },
+        token: { source: 'static', value: '由 openId/grantCode/timestamp/nonce/openKey 生成，旧 Trigger 中执行' },
+        params: {
+          bizType: 7,
+          orderNo: { source: 'static', value: '从 raw_data.raw_content.params.orderNo 获取' },
+        },
+      },
+      records_path: 'data',
+      parameter_docs: [
+        { location: 'body', name: 'openId/grantCode/nonce', value: 'cfg.qimai.*', source: '配置文件或 token_data' },
+        { location: 'body', name: 'token', value: 'HMAC-SHA1 签名', source: 'Trigger/qimai_order_trigger.go' },
+        { location: 'body', name: 'orderNo', value: '$.params.orderNo', source: '接收到的原始数据' },
+      ],
+    },
+  },
+  {
+    code: 'generic_api',
+    sourceCode: 'generic_api_source',
+    name: '通用 API 拉取',
+    description: '适合普通 HTTP API。可配置 URL、query 参数、header、body、响应列表路径和动态参数来源。',
+    sourceType: 'api_poll',
+    sourceQueryKey: 'source',
+    dedupeKeys: ['id'],
+    schema: { target_table: 'clean_records', primary_key: 'id' },
+    config: {
+      description: '通用 API 拉取配置模板。',
+      url: 'https://example.com/api/orders',
+      method: 'POST',
+      timeout_seconds: 30,
+      query_params: [{ name: 'shop', value: { source: 'env', name: 'SHOP_CODE', fallback: '' } }],
+      headers: [
+        { name: 'Content-Type', value: 'application/json' },
+        { name: 'Authorization', value: { source: 'env', name: 'API_AUTHORIZATION', fallback: '' } },
+      ],
+      body_json: {
+        start_time: { source: 'time', format: '2006-01-02 15:04:05', offset_seconds: -300 },
+        end_time: { source: 'time', format: '2006-01-02 15:04:05' },
+      },
+      records_path: 'data.items',
+    },
+  },
+] as const
 
 function App() {
   const [authenticated, setAuthenticated] = useState(() => Boolean(sessionStorage.getItem(tokenStorageKey)))
@@ -493,7 +649,11 @@ function SourcesPanel({
   onRefresh: RefreshAction
 }) {
   const [sourceID, setSourceID] = useState('1')
+  const [sourceView, setSourceView] = useState<SourceView>('list')
+  const [selectedTemplateCode, setSelectedTemplateCode] = useState<string>(sourceConfigTemplates[0].code)
   const [selectedSource, setSelectedSource] = useState<SourceDefinition | null>(null)
+  const selectedTemplate =
+    sourceConfigTemplates.find((template) => template.code === selectedTemplateCode) ?? sourceConfigTemplates[0]
 
   async function createSource(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -503,8 +663,11 @@ function SourcesPanel({
         name: form.get('name'),
         code: form.get('code'),
         source_type: form.get('source_type'),
+        auth_type: form.get('auth_type'),
         source_query_key: form.get('source_query_key'),
         config_json: form.get('config_json'),
+        schema_json: form.get('schema_json'),
+        dedupe_keys: form.get('dedupe_keys'),
         enabled: true,
       },
     })
@@ -550,6 +713,18 @@ function SourcesPanel({
           { label: '迁移拉取/补数规则', value: legacyTasks.length },
         ]}
       />
+      <SectionTabs
+        active={sourceView}
+        onChange={setSourceView}
+        tabs={[
+          { key: 'list', label: '已配置数据源', count: sources.length },
+          { key: 'legacy', label: '迁移拉取/补数规则', count: legacyTasks.length },
+          { key: 'create', label: '新增数据源' },
+          { key: 'debug', label: '调试执行' },
+        ]}
+      />
+      {sourceView === 'list' && (
+        <>
       <ListHeader title="已配置数据源" count={sources.length} refreshing={refreshing} onRefresh={onRefresh} />
       <DataTable
         rows={sources}
@@ -594,7 +769,11 @@ function SourcesPanel({
           </form>
         </DetailPanel>
       )}
+        </>
+      )}
 
+      {sourceView === 'legacy' && (
+        <>
       <ListHeader title="已迁移拉取/补数规则" count={legacyTasks.length} refreshing={refreshing} onRefresh={onRefresh} />
       <LegacyTaskTable
         client={client}
@@ -603,26 +782,53 @@ function SourcesPanel({
         emptyText="暂无迁移的拉取或补数规则。"
         onRefresh={onRefresh}
       />
+        </>
+      )}
 
+      {sourceView === 'create' && (
+        <>
       <div className="panel-heading form-heading">
         <Plus aria-hidden="true" />
         <h3>新增数据源</h3>
       </div>
-      <form className="form-grid" onSubmit={createSource}>
-        <Field label="名称" name="name" defaultValue="企迈 Webhook" />
-        <Field label="编码" name="code" defaultValue="qimai_order" />
-        <SourceTypeSelect defaultValue="webhook" />
-        <Field label="来源参数名" name="source_query_key" defaultValue="source" />
-        <label className="wide">
-          配置 JSON
-          <textarea name="config_json" defaultValue={'{}'} rows={6} />
+      <div className="template-note">
+        <h3>{selectedTemplate.name}</h3>
+        <p>{selectedTemplate.description}</p>
+        <div className="template-points">
+          <MetaItem label="数据源类型" value={sourceTypeLabel(selectedTemplate.sourceType)} />
+          <MetaItem label="来源参数" value={selectedTemplate.sourceQueryKey} />
+          <MetaItem label="目标表" value={selectedTemplate.schema.target_table} />
+          <MetaItem label="去重字段" value={selectedTemplate.dedupeKeys.join(', ')} />
+        </div>
+      </div>
+      <form className="form-grid" key={selectedTemplate.code} onSubmit={createSource}>
+        <label>
+          配置模板
+          <select value={selectedTemplateCode} onChange={(event) => setSelectedTemplateCode(event.target.value)}>
+            {sourceConfigTemplates.map((template) => (
+              <option key={template.code} value={template.code}>
+                {template.name}
+              </option>
+            ))}
+          </select>
         </label>
+        <Field label="名称" name="name" defaultValue={selectedTemplate.name} />
+        <Field label="编码" name="code" defaultValue={selectedTemplate.sourceCode} />
+        <SourceTypeSelect defaultValue={selectedTemplate.sourceType} />
+        <AuthTypeSelect defaultValue="none" />
+        <Field label="来源参数名" name="source_query_key" defaultValue={selectedTemplate.sourceQueryKey} />
+        <JsonField label="配置 JSON" name="config_json" value={jsonText(selectedTemplate.config)} rows={16} />
+        <JsonField label="结构定义 JSON" name="schema_json" value={jsonText(selectedTemplate.schema)} rows={5} />
+        <JsonField label="去重字段 JSON" name="dedupe_keys" value={jsonText(selectedTemplate.dedupeKeys)} rows={4} />
         <button className="primary" disabled={loading}>
           <Plus aria-hidden="true" />
           创建
         </button>
       </form>
+        </>
+      )}
 
+      {sourceView === 'debug' && (
       <div className="inline-actions">
         <label>
           数据源 ID
@@ -637,6 +843,7 @@ function SourcesPanel({
           拉取
         </button>
       </div>
+      )}
     </>
   )
 }
@@ -1310,6 +1517,32 @@ function ListHeader({
         <RefreshCcw aria-hidden="true" />
         刷新
       </button>
+    </div>
+  )
+}
+
+function SectionTabs<T extends string>({
+  tabs,
+  active,
+  onChange,
+}: {
+  tabs: Array<{ key: T; label: string; count?: number }>
+  active: T
+  onChange: (key: T) => void
+}) {
+  return (
+    <div className="section-tabs">
+      {tabs.map((tab) => (
+        <button
+          className={`section-tab ${active === tab.key ? 'active' : ''}`}
+          key={tab.key}
+          type="button"
+          onClick={() => onChange(tab.key)}
+        >
+          <span>{tab.label}</span>
+          {typeof tab.count === 'number' && <strong>{tab.count}</strong>}
+        </button>
+      ))}
     </div>
   )
 }
