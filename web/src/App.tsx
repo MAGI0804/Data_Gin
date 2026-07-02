@@ -543,6 +543,13 @@ function SourcesPanel({
 
   return (
     <>
+      <SummaryGrid
+        items={[
+          { label: '已配置数据源', value: sources.length },
+          { label: '已启用数据源', value: sources.filter((source) => source.enabled).length },
+          { label: '迁移拉取/补数规则', value: legacyTasks.length },
+        ]}
+      />
       <ListHeader title="已配置数据源" count={sources.length} refreshing={refreshing} onRefresh={onRefresh} />
       <DataTable
         rows={sources}
@@ -551,7 +558,7 @@ function SourcesPanel({
           { label: 'ID', render: (source) => source.id },
           { label: '名称', render: (source) => source.name },
           { label: '编码', render: (source) => source.code },
-          { label: '类型', render: (source) => source.source_type },
+          { label: '类型', render: (source) => sourceTypeLabel(source.source_type) },
           { label: '状态', render: (source) => <StatusBadge active={source.enabled} /> },
           { label: '来源参数', render: (source) => source.source_query_key || '-' },
           { label: '创建时间', render: (source) => formatUnixTime(source.created_at) },
@@ -571,15 +578,15 @@ function SourcesPanel({
           <form className="form-grid compact" key={selectedSource.id} onSubmit={updateSource}>
             <Field label="名称" name="name" defaultValue={selectedSource.name} />
             <Field label="编码" name="code" defaultValue={selectedSource.code} />
-            <Field label="类型" name="source_type" defaultValue={selectedSource.source_type} />
-            <Field label="认证类型" name="auth_type" defaultValue={selectedSource.auth_type || 'none'} />
+            <SourceTypeSelect defaultValue={selectedSource.source_type} />
+            <AuthTypeSelect defaultValue={selectedSource.auth_type || 'none'} />
             <Field label="来源参数名" name="source_query_key" defaultValue={selectedSource.source_query_key || ''} />
             <label className="checkbox-label">
               <input name="enabled" type="checkbox" defaultChecked={selectedSource.enabled} />
               启用
             </label>
             <JsonField label="配置 JSON" name="config_json" value={selectedSource.config_json || '{}'} rows={7} />
-            <JsonField label="Schema JSON" name="schema_json" value={selectedSource.schema_json || '{}'} rows={5} />
+            <JsonField label="结构定义 JSON" name="schema_json" value={selectedSource.schema_json || '{}'} rows={5} />
             <JsonField label="去重字段 JSON" name="dedupe_keys" value={selectedSource.dedupe_keys || '[]'} rows={4} />
             <button className="primary" disabled={loading}>
               保存数据源
@@ -604,14 +611,7 @@ function SourcesPanel({
       <form className="form-grid" onSubmit={createSource}>
         <Field label="名称" name="name" defaultValue="企迈 Webhook" />
         <Field label="编码" name="code" defaultValue="qimai_order" />
-        <label>
-          类型
-          <select name="source_type" defaultValue="webhook">
-            <option value="webhook">webhook</option>
-            <option value="api_poll">api_poll</option>
-            <option value="database">database</option>
-          </select>
-        </label>
+        <SourceTypeSelect defaultValue="webhook" />
         <Field label="来源参数名" name="source_query_key" defaultValue="source" />
         <label className="wide">
           配置 JSON
@@ -667,7 +667,7 @@ function TransformPanel({
       body: {
         source_id: Number(form.get('source_id')),
         name: form.get('name'),
-        rule_type: 'mapping',
+        rule_type: form.get('rule_type') || 'mapping',
         order_index: Number(form.get('order_index')),
         config_json: form.get('config_json'),
         enabled: true,
@@ -716,6 +716,13 @@ function TransformPanel({
 
   return (
     <>
+      <SummaryGrid
+        items={[
+          { label: '数据库清洗规则', value: rules.length },
+          { label: '已启用规则', value: rules.filter((rule) => rule.enabled).length },
+          { label: '旧清洗规则', value: legacyRules.length },
+        ]}
+      />
       <ListHeader title="已有清洗规则" count={rules.length} refreshing={refreshing} onRefresh={onRefresh} />
       <DataTable
         rows={rules}
@@ -724,7 +731,7 @@ function TransformPanel({
           { label: 'ID', render: (rule) => rule.id },
           { label: '数据源 ID', render: (rule) => rule.source_id },
           { label: '名称', render: (rule) => rule.name },
-          { label: '类型', render: (rule) => rule.rule_type },
+          { label: '类型', render: (rule) => transformRuleTypeLabel(rule.rule_type) },
           { label: '排序', render: (rule) => rule.order_index },
           { label: '状态', render: (rule) => <StatusBadge active={rule.enabled} /> },
           { label: '创建时间', render: (rule) => formatUnixTime(rule.created_at) },
@@ -744,7 +751,7 @@ function TransformPanel({
           <form className="form-grid compact" key={selectedRule.id} onSubmit={updateRule}>
             <Field label="数据源 ID" name="source_id" defaultValue={String(selectedRule.source_id)} />
             <Field label="规则名称" name="name" defaultValue={selectedRule.name} />
-            <Field label="规则类型" name="rule_type" defaultValue={selectedRule.rule_type} />
+            <TransformRuleTypeSelect defaultValue={selectedRule.rule_type} />
             <Field label="排序" name="order_index" defaultValue={String(selectedRule.order_index)} />
             <label className="checkbox-label">
               <input name="enabled" type="checkbox" defaultChecked={selectedRule.enabled} />
@@ -765,11 +772,11 @@ function TransformPanel({
         columns={[
           { label: '名称', render: (rule) => rule.name },
           { label: '来源', render: (rule) => `${rule.source_name || '-'} / ${rule.source_code || '-'}` },
-          { label: '类型', render: (rule) => rule.rule_type },
-          { label: '触发', render: (rule) => rule.trigger_mode },
+          { label: '类型', render: (rule) => transformRuleTypeLabel(rule.rule_type) },
+          { label: '触发', render: (rule) => legacyTriggerModeLabel(rule.trigger_mode) },
           { label: '输入', render: (rule) => rule.input_table || '-' },
           { label: '输出', render: (rule) => rule.output_table || '-' },
-          { label: 'Handler', render: (rule) => <span className="muted-text">{rule.handler}</span> },
+          { label: '处理文件', render: (rule) => <span className="muted-text">{rule.handler}</span> },
           {
             label: '操作',
             render: (rule) => (
@@ -785,10 +792,10 @@ function TransformPanel({
         <DetailPanel title={`旧清洗规则详情：${selectedLegacyRule.name}`} onClose={() => setSelectedLegacyRule(null)}>
           <div className="detail-grid">
             <MetaItem label="来源" value={`${selectedLegacyRule.source_name} / ${selectedLegacyRule.source_code}`} />
-            <MetaItem label="触发方式" value={selectedLegacyRule.trigger_mode} />
+            <MetaItem label="触发方式" value={legacyTriggerModeLabel(selectedLegacyRule.trigger_mode)} />
             <MetaItem label="输入" value={selectedLegacyRule.input_table} />
             <MetaItem label="输出" value={selectedLegacyRule.output_table} />
-            <MetaItem label="Handler" value={selectedLegacyRule.handler} />
+            <MetaItem label="处理文件" value={selectedLegacyRule.handler} />
             <MetaItem label="说明" value={selectedLegacyRule.description} />
           </div>
           <div className="step-list">
@@ -807,6 +814,7 @@ function TransformPanel({
       <form className="form-grid" onSubmit={createRule}>
         <Field label="数据源 ID" name="source_id" defaultValue="1" />
         <Field label="规则名称" name="name" defaultValue="订单字段映射" />
+        <TransformRuleTypeSelect defaultValue="mapping" />
         <Field label="排序" name="order_index" defaultValue="1" />
         <label className="wide">
           映射配置
@@ -961,6 +969,14 @@ function DeliveryPanel({
 
   return (
     <>
+      <SummaryGrid
+        items={[
+          { label: '推送目标', value: destinations.length },
+          { label: '数据库推送任务', value: tasks.length },
+          { label: '迁移自动推送任务', value: legacyTasks.length },
+          { label: '近期推送日志', value: logs.length },
+        ]}
+      />
       <div className="list-stack">
         <ListHeader title="已配置推送目标" count={destinations.length} refreshing={refreshing} onRefresh={onRefresh} />
         <DataTable
@@ -970,7 +986,7 @@ function DeliveryPanel({
             { label: 'ID', render: (destination) => destination.id },
             { label: '名称', render: (destination) => destination.name },
             { label: '编码', render: (destination) => destination.code },
-            { label: '类型', render: (destination) => destination.destination_type },
+            { label: '类型', render: (destination) => destinationTypeLabel(destination.destination_type) },
             { label: '状态', render: (destination) => <StatusBadge active={destination.enabled} /> },
             { label: '创建时间', render: (destination) => formatUnixTime(destination.created_at) },
             {
@@ -989,7 +1005,7 @@ function DeliveryPanel({
             <form className="form-grid compact" key={selectedDestination.id} onSubmit={updateDestination}>
               <Field label="目标名称" name="name" defaultValue={selectedDestination.name} />
               <Field label="目标编码" name="code" defaultValue={selectedDestination.code} />
-              <Field label="类型" name="destination_type" defaultValue={selectedDestination.destination_type} />
+              <DestinationTypeSelect defaultValue={selectedDestination.destination_type} />
               <label className="checkbox-label">
                 <input name="enabled" type="checkbox" defaultChecked={selectedDestination.enabled} />
                 启用
@@ -1012,8 +1028,8 @@ function DeliveryPanel({
             { label: '数据源', render: (task) => task.source_id },
             { label: '清洗表', render: (task) => task.clean_table },
             { label: '目标', render: (task) => task.destination_id },
-            { label: '触发', render: (task) => task.trigger_type },
-            { label: 'Cron', render: (task) => task.cron_expr || '-' },
+            { label: '触发', render: (task) => triggerTypeLabel(task.trigger_type) },
+            { label: '调度表达式', render: (task) => task.cron_expr || '-' },
             { label: '状态', render: (task) => <StatusBadge active={task.enabled} /> },
             {
               label: '操作',
@@ -1033,8 +1049,8 @@ function DeliveryPanel({
               <Field label="数据源 ID" name="source_id" defaultValue={String(selectedTask.source_id)} />
               <Field label="清洗表" name="clean_table" defaultValue={selectedTask.clean_table} />
               <Field label="目标 ID" name="destination_id" defaultValue={String(selectedTask.destination_id)} />
-              <Field label="触发方式" name="trigger_type" defaultValue={selectedTask.trigger_type} />
-              <Field label="Cron" name="cron_expr" defaultValue={selectedTask.cron_expr || ''} />
+              <TriggerTypeSelect defaultValue={selectedTask.trigger_type} />
+              <Field label="调度表达式" name="cron_expr" defaultValue={selectedTask.cron_expr || ''} />
               <label className="checkbox-label">
                 <input name="enabled" type="checkbox" defaultChecked={selectedTask.enabled} />
                 启用
@@ -1066,10 +1082,10 @@ function DeliveryPanel({
           emptyText="暂无推送日志。执行推送任务后会显示最近 50 条。"
           columns={[
             { label: 'ID', render: (log) => log.id },
-            { label: 'Trace', render: (log) => shortText(log.trace_id) },
-            { label: 'Run', render: (log) => log.run_id || '-' },
+            { label: '追踪号', render: (log) => shortText(log.trace_id) },
+            { label: '运行ID', render: (log) => log.run_id || '-' },
             { label: '业务键', render: (log) => log.business_key || '-' },
-            { label: 'HTTP', render: (log) => log.http_status || '-' },
+            { label: 'HTTP 状态', render: (log) => log.http_status || '-' },
             { label: '结果', render: (log) => <StatusBadge active={log.success} activeText="成功" inactiveText="失败" /> },
             { label: '发送时间', render: (log) => log.sent_at || '-' },
           ]}
@@ -1083,13 +1099,7 @@ function DeliveryPanel({
       <form className="form-grid" onSubmit={createDestination}>
         <Field label="目标名称" name="name" defaultValue="HTTP 推送目标" />
         <Field label="目标编码" name="code" defaultValue="http_sink" />
-        <label>
-          类型
-          <select name="destination_type" defaultValue="http">
-            <option value="http">http</option>
-            <option value="soap">soap</option>
-          </select>
-        </label>
+        <DestinationTypeSelect defaultValue="http" />
         <label className="wide">
           配置 JSON
           <textarea name="config_json" rows={6} defaultValue={'{"url":"http://localhost:9000/orders","method":"POST"}'} />
@@ -1105,15 +1115,8 @@ function DeliveryPanel({
         <Field label="数据源 ID" name="source_id" defaultValue="1" />
         <Field label="清洗表" name="clean_table" defaultValue="clean_orders" />
         <Field label="目标 ID" name="destination_id" defaultValue="1" />
-        <label>
-          触发方式
-          <select name="trigger_type" defaultValue="manual">
-            <option value="manual">manual</option>
-            <option value="schedule">schedule</option>
-            <option value="event">event</option>
-          </select>
-        </label>
-        <Field label="Cron" name="cron_expr" defaultValue="@every 5m" />
+        <TriggerTypeSelect defaultValue="manual" />
+        <Field label="调度表达式" name="cron_expr" defaultValue="@every 5m" />
         <label className="wide">
           报文模板
           <textarea name="payload_template" rows={5} defaultValue={'{"order_no":"{{order_no}}","amount":"{{actual_amount}}"}'} />
@@ -1188,7 +1191,7 @@ function LegacyTaskTable({
           { label: '输入', render: (task) => task.input_table || '-' },
           { label: '输出', render: (task) => task.output_table || '-' },
           { label: '目标', render: (task) => task.target_system || '-' },
-          { label: 'Handler', render: (task) => <span className="muted-text">{task.handler || '-'}</span> },
+          { label: '处理文件', render: (task) => <span className="muted-text">{task.handler || '-'}</span> },
           {
             label: '操作',
             render: (task) => (
@@ -1222,7 +1225,7 @@ function LegacyTaskTable({
             <MetaItem label="输入" value={selectedTask.input_table} />
             <MetaItem label="输出" value={selectedTask.output_table} />
             <MetaItem label="目标系统" value={selectedTask.target_system || '-'} />
-            <MetaItem label="Handler" value={selectedTask.handler || '-'} />
+            <MetaItem label="处理文件" value={selectedTask.handler || '-'} />
             <MetaItem label="说明" value={selectedTask.description || '-'} />
           </div>
           <label className="wide">
@@ -1257,18 +1260,26 @@ function RunsPanel({
 }) {
   return (
     <>
+      <SummaryGrid
+        items={[
+          { label: '近期运行', value: runs.length },
+          { label: '成功', value: runs.filter((run) => run.status === 'success').length },
+          { label: '失败', value: runs.filter((run) => run.status === 'failed').length },
+          { label: '运行中', value: runs.filter((run) => run.status === 'running').length },
+        ]}
+      />
       <ListHeader title="近期运行记录" count={runs.length} refreshing={refreshing} onRefresh={onRefresh} />
       <DataTable
         rows={runs}
         emptyText="暂无运行记录。拉取、清洗或推送后会显示最近 50 条。"
         columns={[
           { label: 'ID', render: (run) => run.id },
-          { label: 'Trace', render: (run) => shortText(run.trace_id) },
-          { label: '类型', render: (run) => run.run_type },
-          { label: '触发', render: (run) => run.trigger_type },
+          { label: '追踪号', render: (run) => shortText(run.trace_id) },
+          { label: '类型', render: (run) => runTypeLabel(run.run_type) },
+          { label: '触发', render: (run) => triggerTypeLabel(run.trigger_type) },
           { label: '数据源', render: (run) => run.source_id || '-' },
           { label: '目标', render: (run) => run.destination_id || '-' },
-          { label: '状态', render: (run) => run.status },
+          { label: '状态', render: (run) => runStatusLabel(run.status) },
           { label: '数量', render: (run) => `${run.success_count}/${run.total_count}` },
           { label: '开始时间', render: (run) => run.started_at || '-' },
           { label: '结束时间', render: (run) => run.finished_at || '-' },
@@ -1300,6 +1311,86 @@ function ListHeader({
         刷新
       </button>
     </div>
+  )
+}
+
+function SummaryGrid({ items }: { items: Array<{ label: string; value: ReactNode }> }) {
+  return (
+    <div className="summary-grid">
+      {items.map((item) => (
+        <div className="summary-tile" key={item.label}>
+          <span>{item.label}</span>
+          <strong>{item.value}</strong>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+function SourceTypeSelect({ defaultValue }: { defaultValue: string }) {
+  return (
+    <label>
+      数据源类型
+      <select name="source_type" defaultValue={defaultValue}>
+        <option value="webhook">Webhook 接收</option>
+        <option value="api_poll">接口轮询拉取</option>
+        <option value="database">数据库读取</option>
+      </select>
+    </label>
+  )
+}
+
+function AuthTypeSelect({ defaultValue }: { defaultValue: string }) {
+  return (
+    <label>
+      认证方式
+      <select name="auth_type" defaultValue={defaultValue}>
+        <option value="none">无需认证</option>
+        <option value="token">Token 认证</option>
+        <option value="basic">账号密码认证</option>
+        <option value="signature">签名认证</option>
+      </select>
+    </label>
+  )
+}
+
+function TransformRuleTypeSelect({ defaultValue }: { defaultValue: string }) {
+  return (
+    <label>
+      清洗规则类型
+      <select name="rule_type" defaultValue={defaultValue}>
+        <option value="mapping">字段映射</option>
+        <option value="http_enrich">接口补数</option>
+        <option value="db_enrich">数据库补数</option>
+        <option value="script">脚本转换</option>
+        <option value="validator">数据校验</option>
+      </select>
+    </label>
+  )
+}
+
+function DestinationTypeSelect({ defaultValue }: { defaultValue: string }) {
+  return (
+    <label>
+      推送目标类型
+      <select name="destination_type" defaultValue={defaultValue}>
+        <option value="http">HTTP 接口</option>
+        <option value="soap">SOAP 接口</option>
+      </select>
+    </label>
+  )
+}
+
+function TriggerTypeSelect({ defaultValue }: { defaultValue: string }) {
+  return (
+    <label>
+      触发方式
+      <select name="trigger_type" defaultValue={defaultValue}>
+        <option value="manual">手动执行</option>
+        <option value="schedule">定时调度</option>
+        <option value="event">事件触发</option>
+      </select>
+    </label>
   )
 }
 
@@ -1470,6 +1561,100 @@ function formatUnixTime(value: number) {
 function shortText(value: string) {
   if (!value) return '-'
   return value.length > 14 ? `${value.slice(0, 14)}...` : value
+}
+
+function sourceTypeLabel(value: string) {
+  return labelFromMap(
+    value,
+    {
+      webhook: 'Webhook 接收',
+      api_poll: '接口轮询拉取',
+      api: '接口轮询拉取',
+      database: '数据库读取',
+    },
+    '未知数据源类型',
+  )
+}
+
+function destinationTypeLabel(value: string) {
+  return labelFromMap(
+    value,
+    {
+      http: 'HTTP 接口',
+      soap: 'SOAP 接口',
+    },
+    '未知推送目标',
+  )
+}
+
+function transformRuleTypeLabel(value: string) {
+  return labelFromMap(
+    value,
+    {
+      mapping: '字段映射',
+      http_enrich: '接口补数',
+      db_enrich: '数据库补数',
+      script: '脚本转换',
+      validator: '数据校验',
+    },
+    '未知清洗类型',
+  )
+}
+
+function triggerTypeLabel(value: string) {
+  return labelFromMap(
+    value,
+    {
+      manual: '手动执行',
+      schedule: '定时调度',
+      event: '事件触发',
+      api: '接口触发',
+    },
+    '未知触发方式',
+  )
+}
+
+function legacyTriggerModeLabel(value: string) {
+  return labelFromMap(
+    value,
+    {
+      'data:process': '数据处理任务触发',
+      'youzan:sync': '有赞订单拉取任务触发',
+      'youzan:return': '有赞退款拉取任务触发',
+    },
+    '旧任务触发',
+  )
+}
+
+function runTypeLabel(value: string) {
+  return labelFromMap(
+    value,
+    {
+      fetch: '数据拉取',
+      ingest: '数据接收',
+      transform: '数据清洗',
+      delivery: '数据推送',
+    },
+    '未知运行类型',
+  )
+}
+
+function runStatusLabel(value: string) {
+  return labelFromMap(
+    value,
+    {
+      running: '运行中',
+      success: '成功',
+      failed: '失败',
+      partial_success: '部分成功',
+    },
+    '未知状态',
+  )
+}
+
+function labelFromMap(value: string, labels: Record<string, string>, fallback: string) {
+  if (!value) return '-'
+  return labels[value] ? `${labels[value]}（${value}）` : `${fallback}（${value}）`
 }
 
 function jsonText(value: unknown) {
