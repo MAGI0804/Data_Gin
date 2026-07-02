@@ -8,6 +8,13 @@ import (
 )
 
 func apiData(api *gin.RouterGroup) {
+	sourceGroup := api.Group("/v1/sources")
+	sourceGroup.Use(middleware.AuthJWT())
+	{
+		sourceCtrl := data_ctrl.NewSourceController()
+		sourceGroup.POST("", sourceCtrl.CreateSource)
+	}
+
 	dataGroup := api.Group("/v1/data")
 	dataGroup.Use(middleware.AuthJWT()) // 需要认证
 	{

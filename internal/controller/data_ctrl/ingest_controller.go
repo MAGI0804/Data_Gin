@@ -167,7 +167,7 @@ func (ctrl *IngestController) RawIngestData(c *gin.Context) {
 	logger.Info("Request sent to service", zap.Any("req", req))
 
 	// 调用服务处理数据，传递客户端IP
-	_, err = ctrl.service.RawIngestData(c.Request.Context(), &req, c.ClientIP())
+	_, err = ctrl.service.RawIngestData(c.Request.Context(), &req, c.ClientIP(), c.Request.URL.Query(), c.Request.Header)
 	if err != nil {
 		c.JSON(500, msg.ErrResponse("原始数据接收失败", err))
 		return
