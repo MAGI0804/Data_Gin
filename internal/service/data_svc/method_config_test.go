@@ -82,3 +82,31 @@ func TestBuildGeneratedStepConfigBuildsMappingFields(t *testing.T) {
 		t.Fatalf("field source_path = %v", fields[0]["source_path"])
 	}
 }
+
+func TestBuildGeneratedStepConfigBuildsDeliveryAsSeparatedFields(t *testing.T) {
+	config, err := BuildGeneratedStepConfigMap(MethodStepDefinition{
+		Step: model.MethodStep{Code: "push_sales", MethodType: "delivery"},
+		Params: []model.MethodParam{
+			{Location: "url", Name: "url", ValueSource: "config", Value: "cfg.henglong.sales_url"},
+			{Location: "request", Name: "method", ValueSource: "static", Value: "POST"},
+			{Location: "header", Name: "Content-Type", ValueSource: "static", Value: "application/json"},
+			{Location: "body", Name: "order_no", ValueSource: "binding", Value: "steps.map_order.outputs.order_no"},
+		},
+		Outputs: []model.MethodOutput{
+			{Name: "http_status", SourcePath: "http_status", ValueType: "int", Required: true},
+		},
+	})
+	if err != nil {
+		t.Fatalf("BuildGeneratedStepConfigMap returned error: %v", err)
+	}
+
+	headers := config["headers"].([]map[string]interface{})
+	if headers[0]["name"] != "Content-Type" {
+		t.Fatalf("header name = %v", headers[0]["name"])
+	}
+	bodyParams := config["body_params"].([]map[string]interface{})
+	bodyValue := bodyParams[0]["value"].(map[string]interface{})
+	if bodyValue["path"] != "steps.map_order.outputs.order_no" {
+		t.Fatalf("body binding = %v", bodyValue["path"])
+	}
+}
