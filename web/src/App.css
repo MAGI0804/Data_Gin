@@ -166,6 +166,14 @@ button svg,
   padding: 10px;
 }
 
+.connection-status {
+  align-self: center;
+  color: #236b5d;
+  font-size: 13px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+
 .content-grid {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 360px;

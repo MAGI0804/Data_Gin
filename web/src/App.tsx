@@ -31,6 +31,9 @@ type ApiClient = (path: string, options?: ApiClientOptions) => Promise<ApiResult
 type RefreshAction = (showResult?: boolean) => Promise<void>
 type NavKey = 'sources' | 'transform' | 'delivery' | 'runs'
 
+const authStorageKey = 'warehouse-auth'
+const tokenStorageKey = 'warehouse-token'
+
 type SourceDefinition = {
   id: number
   name: string
@@ -117,9 +120,9 @@ const defaultMappingConfig = JSON.stringify(
 )
 
 function App() {
-  const [authenticated, setAuthenticated] = useState(() => sessionStorage.getItem('warehouse-auth') === 'ok')
+  const [authenticated, setAuthenticated] = useState(() => Boolean(sessionStorage.getItem(tokenStorageKey)))
   const [active, setActive] = useState<NavKey>('sources')
-  const [token, setToken] = useState('')
+  const [token, setToken] = useState(() => sessionStorage.getItem(tokenStorageKey) ?? '')
   const [result, setResult] = useState<ApiResult | null>(null)
   const [loading, setLoading] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
@@ -142,12 +145,12 @@ function App() {
           method,
           headers: {
             'Content-Type': 'application/json',
-            ...(token ? { Authorization: `Bearer ${token}` } : {}),
+            ...(token ? { token } : {}),
           },
           body: method === 'GET' || options.body === undefined ? undefined : JSON.stringify(options.body),
         })
         const data = await response.json().catch(() => ({}))
-        const nextResult = { ok: response.ok, status: response.status, data }
+        const nextResult = { ok: response.ok && isSuccessPayload(data), status: response.status, data }
         if (options.showResult !== false) {
           setResult(nextResult)
         }
@@ -176,7 +179,7 @@ function App() {
       if (!token) {
         clearLists(setSources, setRules, setDestinations, setTasks, setLogs, setRuns)
         if (showResult) {
-          setResult({ ok: false, status: 0, data: '请先填写后端 JWT 后再刷新列表。' })
+          setResult({ ok: false, status: 0, data: '登录状态已失效，请重新登录。' })
         }
         return
       }
@@ -231,13 +234,17 @@ function App() {
     void refreshLists(false)
   }, [authenticated, refreshLists, token])
 
-  function handleLoginSuccess() {
-    sessionStorage.setItem('warehouse-auth', 'ok')
+  function handleLoginSuccess(nextToken: string) {
+    sessionStorage.setItem(authStorageKey, 'ok')
+    sessionStorage.setItem(tokenStorageKey, nextToken)
+    setToken(nextToken)
     setAuthenticated(true)
   }
 
   function handleLogout() {
-    sessionStorage.removeItem('warehouse-auth')
+    sessionStorage.removeItem(authStorageKey)
+    sessionStorage.removeItem(tokenStorageKey)
+    setToken('')
     setAuthenticated(false)
     setResult(null)
     clearLists(setSources, setRules, setDestinations, setTasks, setLogs, setRuns)
@@ -273,16 +280,7 @@ function App() {
           </div>
           <div className="connection-panel" aria-label="接口设置">
             <Settings aria-hidden="true" />
-            <label>
-              JWT
-              <input
-                value={token}
-                type="password"
-                autoComplete="off"
-                placeholder="粘贴后端登录 token"
-                onChange={(event) => setToken(event.target.value)}
-              />
-            </label>
+            <span className="connection-status">已连接后端认证</span>
             <button type="button" onClick={() => refreshLists(true)} disabled={loading || refreshing}>
               <RefreshCcw aria-hidden="true" />
               刷新
@@ -324,7 +322,7 @@ function App() {
             {result ? (
               <pre className={result.ok ? 'result success' : 'result error'}>{JSON.stringify(result, null, 2)}</pre>
             ) : (
-              <div className="empty-state">还没有发送请求。填写 JWT 后可刷新列表。</div>
+              <div className="empty-state">还没有发送请求。登录后会自动关联后端接口。</div>
             )}
           </aside>
         </div>
@@ -333,22 +331,37 @@ function App() {
   )
 }
 
-function LoginScreen({ onLogin }: { onLogin: () => void }) {
+function LoginScreen({ onLogin }: { onLogin: (token: string) => void }) {
   const [error, setError] = useState('')
+  const [loading, setLoading] = useState(false)
 
-  function submitLogin(event: FormEvent<HTMLFormElement>) {
+  async function submitLogin(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const form = new FormData(event.currentTarget)
     const username = String(form.get('username') ?? '')
     const password = String(form.get('password') ?? '')
 
-    if (username === 'admin' && password === 'youlan123') {
-      setError('')
-      onLogin()
-      return
-    }
+    setLoading(true)
+    try {
+      const response = await fetch('/api/auth/login', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username, password }),
+      })
+      const data = await response.json().catch(() => ({}))
+      const nextToken = readToken(data)
+      if (response.ok && isSuccessPayload(data) && nextToken) {
+        setError('')
+        onLogin(nextToken)
+        return
+      }
 
-    setError('账号或密码不正确')
+      setError(readMessage(data) || '账号或密码不正确')
+    } catch (loginError) {
+      setError(loginError instanceof Error ? loginError.message : '无法连接后端登录接口')
+    } finally {
+      setLoading(false)
+    }
   }
 
   return (
@@ -364,14 +377,14 @@ function LoginScreen({ onLogin }: { onLogin: () => void }) {
         <form className="login-form" onSubmit={submitLogin}>
           <label>
             账号
-            <input name="username" autoComplete="username" autoFocus />
+            <input name="username" autoComplete="username" defaultValue="admin" autoFocus />
           </label>
           <label>
             密码
-            <input name="password" type="password" autoComplete="current-password" />
+            <input name="password" type="password" autoComplete="current-password" defaultValue="youlan123" />
           </label>
           {error && <div className="login-error">{error}</div>}
-          <button className="primary" type="submit">
+          <button className="primary" type="submit" disabled={loading}>
             <ShieldCheck aria-hidden="true" />
             登录
           </button>
@@ -422,7 +435,7 @@ function SourcesPanel({
       <ListHeader title="已配置数据源" count={sources.length} refreshing={refreshing} onRefresh={onRefresh} />
       <DataTable
         rows={sources}
-        emptyText="暂无数据源。填写 JWT 并刷新，或创建一个新的数据源。"
+        emptyText="暂无数据源。登录后刷新，或创建一个新的数据源。"
         columns={[
           { label: 'ID', render: (source) => source.id },
           { label: '名称', render: (source) => source.name },
@@ -530,7 +543,7 @@ function TransformPanel({
       <ListHeader title="已有清洗规则" count={rules.length} refreshing={refreshing} onRefresh={onRefresh} />
       <DataTable
         rows={rules}
-        emptyText="暂无清洗规则。填写 JWT 并刷新，或新增映射规则。"
+        emptyText="暂无清洗规则。登录后刷新，或新增映射规则。"
         columns={[
           { label: 'ID', render: (rule) => rule.id },
           { label: '数据源 ID', render: (rule) => rule.source_id },
@@ -907,6 +920,22 @@ function readList<T>(result: ApiResult, key: string): T[] {
   const envelope = result.data as { data?: Record<string, unknown> }
   const value = envelope.data?.[key]
   return Array.isArray(value) ? (value as T[]) : []
+}
+
+function readToken(data: unknown) {
+  const envelope = data as { data?: Record<string, unknown> }
+  const token = envelope.data?.token
+  return typeof token === 'string' ? token : ''
+}
+
+function readMessage(data: unknown) {
+  const envelope = data as { msg?: unknown }
+  return typeof envelope.msg === 'string' ? envelope.msg : ''
+}
+
+function isSuccessPayload(data: unknown) {
+  const envelope = data as { code?: unknown }
+  return envelope.code === 0 || envelope.code === 200
 }
 
 function clearLists(
