@@ -215,6 +215,15 @@ func (dao *DeliveryTaskDAO) FindByID(ctx context.Context, id uint) (*model.Deliv
 	return &task, err
 }
 
+func (dao *DeliveryTaskDAO) FindEnabledScheduled(ctx context.Context) ([]model.DeliveryTask, error) {
+	var tasks []model.DeliveryTask
+	err := dao.db.WithContext(ctx).
+		Where("enabled = ? AND trigger_type = ? AND cron_expr <> ?", true, "schedule", "").
+		Find(&tasks).
+		Error
+	return tasks, err
+}
+
 type DeliveryLogDAO struct {
 	db *gorm.DB
 }

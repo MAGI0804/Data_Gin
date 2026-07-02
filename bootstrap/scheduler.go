@@ -1,9 +1,11 @@
 package bootstrap
 
 import (
+	"context"
 	"time"
 
 	"gin-biz-web-api/global"
+	"gin-biz-web-api/internal/dao/data_dao"
 	"gin-biz-web-api/job"
 	"gin-biz-web-api/pkg/config"
 	"gin-biz-web-api/pkg/console"
@@ -107,6 +109,8 @@ func setupScheduler() {
 		}
 	}
 
+	registerDatabaseDeliveryTasks(scheduler)
+
 	go func(scheduler *asynq.Scheduler) {
 		if err := scheduler.Run(); err != nil {
 			console.Warning("Scheduler Failed: %v", err)
@@ -117,4 +121,26 @@ func setupScheduler() {
 	global.QueueJobScheduler = scheduler
 
 	console.Success("Scheduler started successfully")
+}
+
+func registerDatabaseDeliveryTasks(scheduler *asynq.Scheduler) {
+	tasks, err := data_dao.NewDeliveryTaskDAO().FindEnabledScheduled(context.Background())
+	if err != nil {
+		console.Warning("Failed to load database delivery tasks: %v", err)
+		return
+	}
+
+	for _, task := range tasks {
+		asynqTask, err := job.NewDeliveryTaskRunTask(job.DeliveryTaskRunPayload{
+			TaskID: task.ID,
+		})
+		if err != nil {
+			console.Warning("Failed to create DeliveryTaskRun task %d: %v", task.ID, err)
+			continue
+		}
+
+		if _, err := scheduler.Register(task.CronExpr, asynqTask); err != nil {
+			console.Warning("Failed to register DeliveryTaskRun task %d: %v", task.ID, err)
+		}
+	}
 }

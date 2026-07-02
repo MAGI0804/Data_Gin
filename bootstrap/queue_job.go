@@ -2,9 +2,11 @@ package bootstrap
 
 import (
 	"context"
+	"encoding/json"
 	"time"
 
 	"gin-biz-web-api/global"
+	"gin-biz-web-api/internal/service/data_svc"
 	"gin-biz-web-api/job"
 	"gin-biz-web-api/pkg/config"
 	"gin-biz-web-api/pkg/console"
@@ -63,6 +65,17 @@ func addQueueJob(mux *asynq.ServeMux) {
 	mux.HandleFunc(job.TypeYouzanSalesSync, job.HandleYouzanSalesSyncTask)
 	mux.HandleFunc(job.TypeYouzanRefundSync, job.HandleYouzanRefundSyncTask)
 	mux.HandleFunc(job.TypeXianOrderSync, job.HandleXianOrderSyncTask)
+	mux.HandleFunc(job.TypeDeliveryTaskRun, handleDeliveryTaskRun)
+}
+
+func handleDeliveryTaskRun(ctx context.Context, task *asynq.Task) error {
+	var payload job.DeliveryTaskRunPayload
+	if err := json.Unmarshal(task.Payload(), &payload); err != nil {
+		return err
+	}
+
+	_, err := data_svc.NewDeliveryService().RunDeliveryTask(ctx, payload.TaskID)
+	return err
 }
 
 // jobLoggingMiddleware 异步任务执行日志中间件
