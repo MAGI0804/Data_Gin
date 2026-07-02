@@ -41,73 +41,7 @@ func setupScheduler() {
 		},
 	)
 
-	youzanSyncTask, err := job.NewYouzanSyncTask(job.YouzanSyncPayload{})
-	if err != nil {
-		console.Warning("Failed to create YouzanSync task: %v", err)
-	} else {
-		_, err = scheduler.Register("@every 1m", youzanSyncTask)
-		if err != nil {
-			console.Warning("Failed to register YouzanSync task: %v", err)
-		}
-	}
-
-	youzanReturnTask, err := job.NewYouzanReturnTask(job.YouzanReturnPayload{})
-	if err != nil {
-		console.Warning("Failed to create YouzanReturn task: %v", err)
-	} else {
-		_, err = scheduler.Register("@every 1m", youzanReturnTask)
-		if err != nil {
-			console.Warning("Failed to register YouzanReturn task: %v", err)
-		}
-	}
-
-	youzanSalesSyncTask, err := job.NewYouzanSalesSyncTask(job.YouzanSalesSyncPayload{})
-	if err != nil {
-		console.Warning("Failed to create YouzanSalesSync task: %v", err)
-	} else {
-		_, err = scheduler.Register("@every 1m", youzanSalesSyncTask)
-		if err != nil {
-			console.Warning("Failed to register YouzanSalesSync task: %v", err)
-		}
-	}
-
-	youzanRefundSyncTask, err := job.NewYouzanRefundSyncTask(job.YouzanRefundSyncPayload{})
-	if err != nil {
-		console.Warning("Failed to create YouzanRefundSync task: %v", err)
-	} else {
-		_, err = scheduler.Register("@every 1m", youzanRefundSyncTask)
-		if err != nil {
-			console.Warning("Failed to register YouzanRefundSync task: %v", err)
-		}
-	}
-
-	salesSyncTask, err := job.NewSalesSyncTask(job.SalesSyncPayload{
-		ShopCode:     config.GetString("cfg.henglong.sync.shop_code"),
-		Status:       config.GetString("cfg.henglong.sync.status", "70"),
-		StoreCode:    config.GetString("cfg.henglong.sync.store_code"),
-		MallItemCode: config.GetString("cfg.henglong.sync.mall_item_code"),
-	})
-	if err != nil {
-		console.Warning("Failed to create SalesSync task: %v", err)
-	} else {
-		_, err = scheduler.Register("@every 1m", salesSyncTask)
-		if err != nil {
-			console.Warning("Failed to register SalesSync task: %v", err)
-		}
-	}
-
-	xianOrderSyncTask, err := job.NewXianOrderSyncTask(job.XianOrderSyncPayload{
-		ShopCode: config.GetString("cfg.xian.sync.shop_code"),
-		Status:   config.GetString("cfg.xian.sync.status", "70"),
-	})
-	if err != nil {
-		console.Warning("Failed to create XianOrderSync task: %v", err)
-	} else {
-		_, err = scheduler.Register("@every 1m", xianOrderSyncTask)
-		if err != nil {
-			console.Warning("Failed to register XianOrderSync task: %v", err)
-		}
-	}
+	registerLegacyScheduledTasks(scheduler)
 
 	registerDatabaseDeliveryTasks(scheduler)
 
@@ -121,6 +55,20 @@ func setupScheduler() {
 	global.QueueJobScheduler = scheduler
 
 	console.Success("Scheduler started successfully")
+}
+
+func registerLegacyScheduledTasks(scheduler *asynq.Scheduler) {
+	for _, definition := range job.ScheduledLegacyTaskDefinitions() {
+		asynqTask, err := job.NewLegacyTask(definition.Code, definition.DefaultPayload)
+		if err != nil {
+			console.Warning("Failed to create legacy task %s: %v", definition.Code, err)
+			continue
+		}
+
+		if _, err := scheduler.Register(definition.CronExpr, asynqTask); err != nil {
+			console.Warning("Failed to register legacy task %s: %v", definition.Code, err)
+		}
+	}
 }
 
 func registerDatabaseDeliveryTasks(scheduler *asynq.Scheduler) {

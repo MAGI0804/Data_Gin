@@ -66,6 +66,14 @@ func apiData(api *gin.RouterGroup) {
 		runGroup.GET("", runCtrl.ListRuns)
 	}
 
+	legacyTaskGroup := api.Group("/v1/legacy-tasks")
+	legacyTaskGroup.Use(middleware.AuthJWT())
+	{
+		legacyTaskCtrl := data_ctrl.NewLegacyTaskController()
+		legacyTaskGroup.GET("", legacyTaskCtrl.List)
+		legacyTaskGroup.POST("/:code/run", legacyTaskCtrl.Run)
+	}
+
 	dataGroup := api.Group("/v1/data")
 	dataGroup.Use(middleware.AuthJWT()) // 需要认证
 	{
