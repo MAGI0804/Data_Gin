@@ -30,3 +30,6 @@ Thumbs.db
 *.swo
 
 node_modules/
+
+docker-compose.yml
+Dockerfile
