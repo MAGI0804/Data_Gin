@@ -27,6 +27,15 @@ func (dao *SourceDefinitionDAO) Create(ctx context.Context, source *model.Source
 	return source.ID, err
 }
 
+func (dao *SourceDefinitionDAO) FindByID(ctx context.Context, id uint) (*model.SourceDefinition, error) {
+	var source model.SourceDefinition
+	err := dao.db.WithContext(ctx).
+		Where("id = ?", id).
+		First(&source).
+		Error
+	return &source, err
+}
+
 func (dao *SourceDefinitionDAO) FindByCode(ctx context.Context, code string) (*model.SourceDefinition, error) {
 	var source model.SourceDefinition
 	err := dao.db.WithContext(ctx).

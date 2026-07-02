@@ -13,6 +13,8 @@ func apiData(api *gin.RouterGroup) {
 	{
 		sourceCtrl := data_ctrl.NewSourceController()
 		sourceGroup.POST("", sourceCtrl.CreateSource)
+		sourceGroup.POST("/:id/test", sourceCtrl.TestSource)
+		sourceGroup.POST("/:id/fetch", sourceCtrl.FetchSource)
 	}
 
 	dataGroup := api.Group("/v1/data")
