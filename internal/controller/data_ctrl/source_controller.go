@@ -20,6 +20,18 @@ func NewSourceController() *SourceController {
 	}
 }
 
+func (ctrl *SourceController) ListSources(c *gin.Context) {
+	sources, err := ctrl.service.ListSourceDefinitions(c.Request.Context())
+	if err != nil {
+		c.JSON(500, msg.ErrResponse("查询数据源失败", err))
+		return
+	}
+
+	c.JSON(200, msg.SuccessResponse("查询数据源成功", &map[string]any{
+		"sources": sources,
+	}))
+}
+
 func (ctrl *SourceController) CreateSource(c *gin.Context) {
 	var req requestbody.SourceDefinitionCreateRequest
 	if err := c.ShouldBindJSON(&req); err != nil {

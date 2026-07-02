@@ -45,6 +45,15 @@ func (dao *SourceDefinitionDAO) FindByCode(ctx context.Context, code string) (*m
 	return &source, err
 }
 
+func (dao *SourceDefinitionDAO) FindAll(ctx context.Context) ([]model.SourceDefinition, error) {
+	var sources []model.SourceDefinition
+	err := dao.db.WithContext(ctx).
+		Order("id DESC").
+		Find(&sources).
+		Error
+	return sources, err
+}
+
 func (dao *SourceDefinitionDAO) FindEnabledWithQueryKey(ctx context.Context) ([]model.SourceDefinition, error) {
 	var sources []model.SourceDefinition
 	err := dao.db.WithContext(ctx).
@@ -123,6 +132,15 @@ func (dao *TransformRuleDAO) FindEnabledBySourceID(ctx context.Context, sourceID
 	return rules, err
 }
 
+func (dao *TransformRuleDAO) FindAll(ctx context.Context) ([]model.TransformRule, error) {
+	var rules []model.TransformRule
+	err := dao.db.WithContext(ctx).
+		Order("source_id ASC, order_index ASC, id DESC").
+		Find(&rules).
+		Error
+	return rules, err
+}
+
 type CleanRecordDAO struct {
 	db *gorm.DB
 }
@@ -189,6 +207,15 @@ func (dao *DestinationDefinitionDAO) FindByID(ctx context.Context, id uint) (*mo
 	return &destination, err
 }
 
+func (dao *DestinationDefinitionDAO) FindAll(ctx context.Context) ([]model.DestinationDefinition, error) {
+	var destinations []model.DestinationDefinition
+	err := dao.db.WithContext(ctx).
+		Order("id DESC").
+		Find(&destinations).
+		Error
+	return destinations, err
+}
+
 type DeliveryTaskDAO struct {
 	db *gorm.DB
 }
@@ -224,6 +251,15 @@ func (dao *DeliveryTaskDAO) FindEnabledScheduled(ctx context.Context) ([]model.D
 	return tasks, err
 }
 
+func (dao *DeliveryTaskDAO) FindAll(ctx context.Context) ([]model.DeliveryTask, error) {
+	var tasks []model.DeliveryTask
+	err := dao.db.WithContext(ctx).
+		Order("id DESC").
+		Find(&tasks).
+		Error
+	return tasks, err
+}
+
 type DeliveryLogDAO struct {
 	db *gorm.DB
 }
@@ -239,6 +275,20 @@ func (dao *DeliveryLogDAO) Create(ctx context.Context, log *model.DeliveryLog) (
 
 	err := dao.db.WithContext(ctx).Create(log).Error
 	return log.ID, err
+}
+
+func (dao *DeliveryLogDAO) FindRecent(ctx context.Context, limit int) ([]model.DeliveryLog, error) {
+	if limit <= 0 || limit > 200 {
+		limit = 50
+	}
+
+	var logs []model.DeliveryLog
+	err := dao.db.WithContext(ctx).
+		Order("id DESC").
+		Limit(limit).
+		Find(&logs).
+		Error
+	return logs, err
 }
 
 type PipelineRunDAO struct {
@@ -275,4 +325,18 @@ func (dao *PipelineRunDAO) Finish(ctx context.Context, id uint, status string, s
 		Where("id = ?", id).
 		Updates(updates).
 		Error
+}
+
+func (dao *PipelineRunDAO) FindRecent(ctx context.Context, limit int) ([]model.PipelineRun, error) {
+	if limit <= 0 || limit > 200 {
+		limit = 50
+	}
+
+	var runs []model.PipelineRun
+	err := dao.db.WithContext(ctx).
+		Order("id DESC").
+		Limit(limit).
+		Find(&runs).
+		Error
+	return runs, err
 }

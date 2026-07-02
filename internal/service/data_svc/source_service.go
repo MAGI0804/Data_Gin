@@ -59,6 +59,10 @@ func (s *SourceService) CreateSourceDefinition(ctx context.Context, req *request
 	return source, nil
 }
 
+func (s *SourceService) ListSourceDefinitions(ctx context.Context) ([]model.SourceDefinition, error) {
+	return s.sourceDAO.FindAll(ctx)
+}
+
 func (s *SourceService) TestSourceDefinition(ctx context.Context, id uint) error {
 	source, err := s.sourceDAO.FindByID(ctx, id)
 	if err != nil {

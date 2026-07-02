@@ -12,6 +12,7 @@ func apiData(api *gin.RouterGroup) {
 	sourceGroup.Use(middleware.AuthJWT())
 	{
 		sourceCtrl := data_ctrl.NewSourceController()
+		sourceGroup.GET("", sourceCtrl.ListSources)
 		sourceGroup.POST("", sourceCtrl.CreateSource)
 		sourceGroup.POST("/:id/test", sourceCtrl.TestSource)
 		sourceGroup.POST("/:id/fetch", sourceCtrl.FetchSource)
@@ -21,6 +22,7 @@ func apiData(api *gin.RouterGroup) {
 	transformGroup.Use(middleware.AuthJWT())
 	{
 		transformCtrl := data_ctrl.NewTransformController()
+		transformGroup.GET("", transformCtrl.ListRules)
 		transformGroup.POST("", transformCtrl.CreateRule)
 		transformGroup.POST("/test", transformCtrl.TestRule)
 	}
@@ -36,6 +38,7 @@ func apiData(api *gin.RouterGroup) {
 	destinationGroup.Use(middleware.AuthJWT())
 	{
 		deliveryCtrl := data_ctrl.NewDeliveryController()
+		destinationGroup.GET("", deliveryCtrl.ListDestinations)
 		destinationGroup.POST("", deliveryCtrl.CreateDestination)
 		destinationGroup.POST("/:id/test", deliveryCtrl.TestDestination)
 	}
@@ -44,8 +47,23 @@ func apiData(api *gin.RouterGroup) {
 	deliveryTaskGroup.Use(middleware.AuthJWT())
 	{
 		deliveryCtrl := data_ctrl.NewDeliveryController()
+		deliveryTaskGroup.GET("", deliveryCtrl.ListTasks)
 		deliveryTaskGroup.POST("", deliveryCtrl.CreateTask)
 		deliveryTaskGroup.POST("/:id/run", deliveryCtrl.RunTask)
+	}
+
+	deliveryLogGroup := api.Group("/v1/delivery-logs")
+	deliveryLogGroup.Use(middleware.AuthJWT())
+	{
+		deliveryCtrl := data_ctrl.NewDeliveryController()
+		deliveryLogGroup.GET("", deliveryCtrl.ListLogs)
+	}
+
+	runGroup := api.Group("/v1/runs")
+	runGroup.Use(middleware.AuthJWT())
+	{
+		runCtrl := data_ctrl.NewRunController()
+		runGroup.GET("", runCtrl.ListRuns)
 	}
 
 	dataGroup := api.Group("/v1/data")

@@ -20,6 +20,18 @@ func NewTransformController() *TransformController {
 	}
 }
 
+func (ctrl *TransformController) ListRules(c *gin.Context) {
+	rules, err := ctrl.service.ListTransformRules(c.Request.Context())
+	if err != nil {
+		c.JSON(500, msg.ErrResponse("查询清洗规则失败", err))
+		return
+	}
+
+	c.JSON(200, msg.SuccessResponse("查询清洗规则成功", &map[string]any{
+		"rules": rules,
+	}))
+}
+
 func (ctrl *TransformController) CreateRule(c *gin.Context) {
 	var req requestbody.TransformRuleCreateRequest
 	if err := c.ShouldBindJSON(&req); err != nil {

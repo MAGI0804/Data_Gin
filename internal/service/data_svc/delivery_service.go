@@ -56,6 +56,10 @@ func (s *DeliveryService) CreateDestination(ctx context.Context, req *requestbod
 	return destination, nil
 }
 
+func (s *DeliveryService) ListDestinations(ctx context.Context) ([]model.DestinationDefinition, error) {
+	return s.destinationDAO.FindAll(ctx)
+}
+
 func (s *DeliveryService) TestDestination(ctx context.Context, id uint) error {
 	destination, err := s.destinationDAO.FindByID(ctx, id)
 	if err != nil {
@@ -91,6 +95,14 @@ func (s *DeliveryService) CreateDeliveryTask(ctx context.Context, req *requestbo
 		return nil, err
 	}
 	return task, nil
+}
+
+func (s *DeliveryService) ListDeliveryTasks(ctx context.Context) ([]model.DeliveryTask, error) {
+	return s.taskDAO.FindAll(ctx)
+}
+
+func (s *DeliveryService) ListDeliveryLogs(ctx context.Context, limit int) ([]model.DeliveryLog, error) {
+	return s.logDAO.FindRecent(ctx, limit)
 }
 
 type DeliveryRunResult struct {

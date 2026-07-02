@@ -54,6 +54,10 @@ func (s *TransformService) CreateTransformRule(ctx context.Context, req *request
 	return rule, nil
 }
 
+func (s *TransformService) ListTransformRules(ctx context.Context) ([]model.TransformRule, error) {
+	return s.ruleDAO.FindAll(ctx)
+}
+
 func (s *TransformService) TestMappingRule(ctx context.Context, req *requestbody.TransformRuleTestRequest) (map[string]interface{}, error) {
 	_ = ctx
 
