@@ -88,22 +88,24 @@ func autoMigrateTables() {
 
 	// 迁移数据存储相关表
 	err := db.AutoMigrate(
-		&model.User{},                 // 用户表
-		&model.DataSource{},           // 数据源配置表
-		&model.RawData{},              // 原始数据表
-		&model.ProcessedData{},        // 处理结果表
-		&model.DataStatistics{},       // 数据统计表
-		&model.QIMAI_ORDER_DATA{},     //企迈订单表
-		&model.TokenData{},            //验证信息表
-		&model.YOUZAN_ORDER_DATA{},    //有赞订单表
-		&model.YOUZAN_RETURN_DATA{},   //有赞退款订单表
-		&model.SourceDefinition{},     //通用数据源配置表
-		&model.RawRecord{},            //通用原始记录表
-		&model.CleanTableDefinition{}, //清洗表配置表
-		&model.CleanRecord{},          //通用清洗记录表
-		&model.TransformRule{},        //清洗规则表
-		&model.PipelineRun{},          //运行记录表
-		&model.DeliveryLog{},          //推送日志表
+		&model.User{},                  // 用户表
+		&model.DataSource{},            // 数据源配置表
+		&model.RawData{},               // 原始数据表
+		&model.ProcessedData{},         // 处理结果表
+		&model.DataStatistics{},        // 数据统计表
+		&model.QIMAI_ORDER_DATA{},      //企迈订单表
+		&model.TokenData{},             //验证信息表
+		&model.YOUZAN_ORDER_DATA{},     //有赞订单表
+		&model.YOUZAN_RETURN_DATA{},    //有赞退款订单表
+		&model.SourceDefinition{},      //通用数据源配置表
+		&model.RawRecord{},             //通用原始记录表
+		&model.CleanTableDefinition{},  //清洗表配置表
+		&model.CleanRecord{},           //通用清洗记录表
+		&model.TransformRule{},         //清洗规则表
+		&model.DestinationDefinition{}, //通用推送目标表
+		&model.DeliveryTask{},          //通用推送任务表
+		&model.PipelineRun{},           //运行记录表
+		&model.DeliveryLog{},           //推送日志表
 	)
 
 	if err != nil {

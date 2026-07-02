@@ -101,6 +101,44 @@ func (TransformRule) TableName() string {
 	return "transform_rules"
 }
 
+// DestinationDefinition 通用推送目标配置。
+type DestinationDefinition struct {
+	*BaseModel
+
+	Name            string `gorm:"column:name;size:100;not null" json:"name"`
+	Code            string `gorm:"column:code;size:100;not null;uniqueIndex" json:"code"`
+	DestinationType string `gorm:"column:destination_type;size:50;not null" json:"destination_type"`
+	ConfigJSON      string `gorm:"column:config_json;type:json;not null" json:"config_json"`
+	Enabled         bool   `gorm:"column:enabled;default:true;index" json:"enabled"`
+
+	*CommonTimestampsField
+}
+
+func (DestinationDefinition) TableName() string {
+	return "destination_definitions"
+}
+
+// DeliveryTask 通用推送任务。
+type DeliveryTask struct {
+	*BaseModel
+
+	Name            string `gorm:"column:name;size:100;not null" json:"name"`
+	SourceID        uint   `gorm:"column:source_id;not null;index" json:"source_id"`
+	CleanTable      string `gorm:"column:clean_table;size:100;not null;index" json:"clean_table"`
+	DestinationID   uint   `gorm:"column:destination_id;not null;index" json:"destination_id"`
+	TriggerType     string `gorm:"column:trigger_type;type:enum('manual','schedule','event');not null;index" json:"trigger_type"`
+	CronExpr        string `gorm:"column:cron_expr;size:100" json:"cron_expr"`
+	FilterJSON      string `gorm:"column:filter_json;type:json" json:"filter_json"`
+	PayloadTemplate string `gorm:"column:payload_template;type:text" json:"payload_template"`
+	Enabled         bool   `gorm:"column:enabled;default:true;index" json:"enabled"`
+
+	*CommonTimestampsField
+}
+
+func (DeliveryTask) TableName() string {
+	return "delivery_tasks"
+}
+
 // PipelineRun 接收、清洗、推送运行记录。
 type PipelineRun struct {
 	*BaseModel

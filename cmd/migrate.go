@@ -34,6 +34,8 @@ var migrateDataTablesCmd = &cobra.Command{
 			&model.CleanTableDefinition{},
 			&model.CleanRecord{},
 			&model.TransformRule{},
+			&model.DestinationDefinition{},
+			&model.DeliveryTask{},
 			&model.PipelineRun{},
 			&model.DeliveryLog{},
 		)
