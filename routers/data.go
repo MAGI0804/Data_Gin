@@ -32,6 +32,22 @@ func apiData(api *gin.RouterGroup) {
 		rawRecordsGroup.POST("/:id/retransform", transformCtrl.RetransformRawRecord)
 	}
 
+	destinationGroup := api.Group("/v1/destinations")
+	destinationGroup.Use(middleware.AuthJWT())
+	{
+		deliveryCtrl := data_ctrl.NewDeliveryController()
+		destinationGroup.POST("", deliveryCtrl.CreateDestination)
+		destinationGroup.POST("/:id/test", deliveryCtrl.TestDestination)
+	}
+
+	deliveryTaskGroup := api.Group("/v1/delivery-tasks")
+	deliveryTaskGroup.Use(middleware.AuthJWT())
+	{
+		deliveryCtrl := data_ctrl.NewDeliveryController()
+		deliveryTaskGroup.POST("", deliveryCtrl.CreateTask)
+		deliveryTaskGroup.POST("/:id/run", deliveryCtrl.RunTask)
+	}
+
 	dataGroup := api.Group("/v1/data")
 	dataGroup.Use(middleware.AuthJWT()) // 需要认证
 	{

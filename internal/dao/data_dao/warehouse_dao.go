@@ -140,6 +140,98 @@ func (dao *CleanRecordDAO) Create(ctx context.Context, cleanRecord *model.CleanR
 	return cleanRecord.ID, err
 }
 
+func (dao *CleanRecordDAO) FindReadyBySourceAndTable(ctx context.Context, sourceID uint, tableName string, limit int) ([]model.CleanRecord, error) {
+	var records []model.CleanRecord
+	query := dao.db.WithContext(ctx).
+		Where("source_id = ? AND table_name = ? AND status = ?", sourceID, tableName, "ready")
+	if limit > 0 {
+		query = query.Limit(limit)
+	}
+
+	err := query.Order("id ASC").Find(&records).Error
+	return records, err
+}
+
+func (dao *CleanRecordDAO) MarkDelivered(ctx context.Context, id uint) error {
+	return dao.db.WithContext(ctx).
+		Model(&model.CleanRecord{}).
+		Where("id = ?", id).
+		Updates(map[string]interface{}{
+			"status":     "delivered",
+			"updated_at": time.Now().Unix(),
+		}).
+		Error
+}
+
+type DestinationDefinitionDAO struct {
+	db *gorm.DB
+}
+
+func NewDestinationDefinitionDAO() *DestinationDefinitionDAO {
+	return &DestinationDefinitionDAO{db: database.DB}
+}
+
+func (dao *DestinationDefinitionDAO) Create(ctx context.Context, destination *model.DestinationDefinition) (uint, error) {
+	now := int(time.Now().Unix())
+	destination.CreatedAt = now
+	destination.UpdatedAt = now
+
+	err := dao.db.WithContext(ctx).Create(destination).Error
+	return destination.ID, err
+}
+
+func (dao *DestinationDefinitionDAO) FindByID(ctx context.Context, id uint) (*model.DestinationDefinition, error) {
+	var destination model.DestinationDefinition
+	err := dao.db.WithContext(ctx).
+		Where("id = ?", id).
+		First(&destination).
+		Error
+	return &destination, err
+}
+
+type DeliveryTaskDAO struct {
+	db *gorm.DB
+}
+
+func NewDeliveryTaskDAO() *DeliveryTaskDAO {
+	return &DeliveryTaskDAO{db: database.DB}
+}
+
+func (dao *DeliveryTaskDAO) Create(ctx context.Context, task *model.DeliveryTask) (uint, error) {
+	now := int(time.Now().Unix())
+	task.CreatedAt = now
+	task.UpdatedAt = now
+
+	err := dao.db.WithContext(ctx).Create(task).Error
+	return task.ID, err
+}
+
+func (dao *DeliveryTaskDAO) FindByID(ctx context.Context, id uint) (*model.DeliveryTask, error) {
+	var task model.DeliveryTask
+	err := dao.db.WithContext(ctx).
+		Where("id = ?", id).
+		First(&task).
+		Error
+	return &task, err
+}
+
+type DeliveryLogDAO struct {
+	db *gorm.DB
+}
+
+func NewDeliveryLogDAO() *DeliveryLogDAO {
+	return &DeliveryLogDAO{db: database.DB}
+}
+
+func (dao *DeliveryLogDAO) Create(ctx context.Context, log *model.DeliveryLog) (uint, error) {
+	now := int(time.Now().Unix())
+	log.CreatedAt = now
+	log.UpdatedAt = now
+
+	err := dao.db.WithContext(ctx).Create(log).Error
+	return log.ID, err
+}
+
 type PipelineRunDAO struct {
 	db *gorm.DB
 }
