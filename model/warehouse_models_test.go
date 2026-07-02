@@ -31,6 +31,36 @@ func TestWarehouseModelsHaveInitializedCommonFields(t *testing.T) {
 			model.CreatedAt = 1
 			model.UpdatedAt = 2
 		}},
+		{"pipeline definition", func() {
+			model := &PipelineDefinition{}
+			model.ID = 1
+			model.CreatedAt = 1
+			model.UpdatedAt = 2
+		}},
+		{"method step", func() {
+			model := &MethodStep{}
+			model.ID = 1
+			model.CreatedAt = 1
+			model.UpdatedAt = 2
+		}},
+		{"method param", func() {
+			model := &MethodParam{}
+			model.ID = 1
+			model.CreatedAt = 1
+			model.UpdatedAt = 2
+		}},
+		{"method output", func() {
+			model := &MethodOutput{}
+			model.ID = 1
+			model.CreatedAt = 1
+			model.UpdatedAt = 2
+		}},
+		{"step run", func() {
+			model := &StepRun{}
+			model.ID = 1
+			model.CreatedAt = 1
+			model.UpdatedAt = 2
+		}},
 	}
 
 	for _, tt := range tests {

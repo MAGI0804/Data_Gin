@@ -106,6 +106,11 @@ func autoMigrateTables() {
 		&model.DeliveryTask{},          //通用推送任务表
 		&model.PipelineRun{},           //运行记录表
 		&model.DeliveryLog{},           //推送日志表
+		&model.PipelineDefinition{},    //方法拼接流水线表
+		&model.MethodStep{},            //方法步骤表
+		&model.MethodParam{},           //方法入参表
+		&model.MethodOutput{},          //方法出参表
+		&model.StepRun{},               //方法步骤运行明细表
 	)
 
 	if err != nil {
