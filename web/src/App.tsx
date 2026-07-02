@@ -27,6 +27,9 @@ type ApiClientOptions = {
 }
 
 type ApiClient = (path: string, options?: ApiClientOptions) => Promise<ApiResult>
+type StageType = 'fetch' | 'process' | 'push' | 'log'
+type MethodType = 'request' | 'extract' | 'mapping' | 'validate' | 'db_query' | 'db_write' | 'template' | 'delivery' | 'log'
+type ResultRecord = Record<string, unknown>
 
 type PipelineDefinition = {
   id: number
@@ -35,6 +38,25 @@ type PipelineDefinition = {
   description: string
   enabled: boolean
   created_at: number
+}
+
+type PipelineStage = {
+  id: number
+  pipeline_id: number
+  stage_type: StageType
+  name: string
+  order_index: number
+  enabled: boolean
+}
+
+type StageGeneratedConfig = {
+  id: number
+  stage_id: number
+  stage_type: StageType
+  generated_config_json: string
+  target_ref_type: string
+  target_ref_id: number
+  version: number
 }
 
 type MethodParam = {
@@ -63,6 +85,7 @@ type MethodOutput = {
 type MethodStep = {
   id: number
   pipeline_id: number
+  stage_id: number
   code: string
   name: string
   method_type: MethodType
@@ -78,8 +101,15 @@ type MethodStepDetail = {
   outputs: MethodOutput[]
 }
 
+type PipelineStageDetail = {
+  stage: PipelineStage
+  steps: MethodStepDetail[]
+  generated_config?: StageGeneratedConfig | null
+}
+
 type PipelineDetail = {
   pipeline: PipelineDefinition
+  stages: PipelineStageDetail[]
   steps: MethodStepDetail[]
 }
 
@@ -105,8 +135,6 @@ type StepRun = {
   input_json: string
   output_json: string
   error_message: string
-  started_at: string | null
-  finished_at: string | null
 }
 
 type SourceDefinition = {
@@ -125,22 +153,20 @@ type DestinationDefinition = {
   enabled: boolean
 }
 
-type MethodType = 'request' | 'extract' | 'mapping' | 'delivery'
-type ResultRecord = Record<string, unknown>
-
 const tokenStorageKey = 'warehouse-token'
-const methodTypes: MethodType[] = ['request', 'extract', 'mapping', 'delivery']
-
-const requestTemplateParams: MethodParam[] = [
-  param('url', 'url', 'config', 'cfg.youzan.orders_url', 'string', true, false, '请求地址引用'),
-  param('request', 'method', 'static', 'POST', 'string', true, false, 'HTTP 方法'),
-  param('query', 'access_token', 'binding', 'steps.get_token.outputs.access_token', 'string', true, true, '上一步捕获 token'),
-  param('header', 'Content-Type', 'static', 'application/json', 'string', true, false, '请求内容类型'),
-  param('body', 'page_size', 'static', '100', 'int', true, false, '分页大小'),
-  param('response', 'records_path', 'static', 'data.full_order_info_list', 'string', true, false, '响应列表路径'),
+const stageOrder: StageType[] = ['fetch', 'process', 'push', 'log']
+const methodLibrary: Array<{ type: MethodType; label: string; stage: StageType; description: string }> = [
+  { type: 'request', label: 'Request 请求', stage: 'fetch', description: '配置 URL、Query、Header、Body 和响应捕获' },
+  { type: 'extract', label: 'Extract 提取', stage: 'fetch', description: '从响应中提取 records 或业务字段' },
+  { type: 'mapping', label: 'Mapping 清洗', stage: 'process', description: '字段映射、类型转换、业务主键' },
+  { type: 'validate', label: 'Validate 校验', stage: 'process', description: '必填、枚举、数据质量规则' },
+  { type: 'template', label: 'Template 模板', stage: 'push', description: '把清洗数据渲染成推送报文' },
+  { type: 'delivery', label: 'Delivery 推送', stage: 'push', description: 'HTTP/SOAP 推送和响应记录' },
+  { type: 'log', label: 'Log 记录', stage: 'log', description: '记录运行、输入、输出、错误和耗时' },
 ]
 
 const samplePipelineSteps: Array<{
+  stage_type: StageType
   code: string
   name: string
   method_type: MethodType
@@ -149,6 +175,7 @@ const samplePipelineSteps: Array<{
   outputs: MethodOutput[]
 }> = [
   {
+    stage_type: 'fetch',
     code: 'get_token',
     name: '获取有赞 Token',
     method_type: 'request',
@@ -164,31 +191,41 @@ const samplePipelineSteps: Array<{
     outputs: [output('access_token', 'data.access_token', 'string', true, '授权令牌')],
   },
   {
+    stage_type: 'fetch',
     code: 'fetch_orders',
     name: '拉取有赞订单',
     method_type: 'request',
     order_index: 2,
-    params: requestTemplateParams,
+    params: [
+      param('url', 'url', 'config', 'cfg.youzan.orders_url', 'string', true, false, '订单接口地址'),
+      param('request', 'method', 'static', 'POST', 'string', true, false, 'HTTP 方法'),
+      param('query', 'access_token', 'binding', 'steps.get_token.outputs.access_token', 'string', true, true, '上一步 token'),
+      param('header', 'Content-Type', 'static', 'application/json', 'string', true, false, '请求内容类型'),
+      param('body', 'page_size', 'static', '100', 'int', true, false, '分页大小'),
+      param('response', 'records_path', 'static', 'data.full_order_info_list', 'string', true, false, '订单列表路径'),
+    ],
     outputs: [output('records', 'data.full_order_info_list', 'array', true, '订单列表')],
   },
   {
+    stage_type: 'process',
     code: 'map_order',
     name: '清洗订单字段',
     method_type: 'mapping',
-    order_index: 3,
+    order_index: 1,
     params: [
-      param('mapping', 'table_name', 'static', 'clean_orders', 'string', true, false, '目标清洗表'),
+      param('mapping', 'table_name', 'static', 'clean_orders', 'string', true, false, '清洗表'),
       param('mapping', 'business_key_field', 'static', 'order_no', 'string', true, false, '业务主键'),
       param('field', 'order_no', 'static', '$.order_info.tid', 'string', true, false, '订单号'),
       param('field', 'actual_amount', 'static', '$.pay_info.payment', 'decimal', false, false, '实付金额'),
     ],
-    outputs: [output('record', 'record', 'object', true, '清洗后的单条记录')],
+    outputs: [output('record', 'record', 'object', true, '清洗记录')],
   },
   {
+    stage_type: 'push',
     code: 'push_sales',
     name: '推送销售数据',
     method_type: 'delivery',
-    order_index: 4,
+    order_index: 1,
     params: [
       param('url', 'url', 'config', 'cfg.henglong.sales_url', 'string', true, false, '推送地址'),
       param('request', 'method', 'static', 'POST', 'string', true, false, 'HTTP 方法'),
@@ -196,6 +233,15 @@ const samplePipelineSteps: Array<{
       param('body', 'order_no', 'binding', 'steps.map_order.outputs.record', 'string', true, false, '清洗记录'),
     ],
     outputs: [output('http_status', 'http_status', 'int', true, 'HTTP 状态码')],
+  },
+  {
+    stage_type: 'log',
+    code: 'record_step_run',
+    name: '记录步骤日志',
+    method_type: 'log',
+    order_index: 1,
+    params: [param('runtime', 'trace_id', 'binding', 'steps.push_sales.outputs.http_status', 'string', false, false, '运行上下文')],
+    outputs: [output('logged', 'success', 'bool', false, '日志写入结果')],
   },
 ]
 
@@ -208,6 +254,7 @@ function App() {
   const [pipelines, setPipelines] = useState<PipelineDefinition[]>([])
   const [selectedPipelineId, setSelectedPipelineId] = useState<number | null>(null)
   const [pipelineDetail, setPipelineDetail] = useState<PipelineDetail | null>(null)
+  const [selectedStageId, setSelectedStageId] = useState<number | null>(null)
   const [selectedStepId, setSelectedStepId] = useState<number | 'new'>('new')
   const [preview, setPreview] = useState<unknown>(null)
   const [runs, setRuns] = useState<PipelineRun[]>([])
@@ -262,13 +309,7 @@ function App() {
         if (runResult.ok) setRuns(readList<PipelineRun>(runResult, 'runs'))
         if (sourceResult.ok) setSources(readList<SourceDefinition>(sourceResult, 'sources'))
         if (destinationResult.ok) setDestinations(readList<DestinationDefinition>(destinationResult, 'destinations'))
-        if (showResult) {
-          setResult({
-            ok: pipelineResult.ok && runResult.ok,
-            status: pipelineResult.status,
-            data: { pipelines: pipelineResult.data, runs: runResult.data },
-          })
-        }
+        if (showResult) setResult({ ok: pipelineResult.ok && runResult.ok, status: pipelineResult.status, data: pipelineResult.data })
       } finally {
         setRefreshing(false)
       }
@@ -290,11 +331,12 @@ function App() {
       if (detailResult.ok) {
         const detail = readObject<PipelineDetail>(detailResult, 'pipeline')
         setPipelineDetail(detail)
-        if (detail?.steps?.length && selectedStepId === 'new') setSelectedStepId(detail.steps[0].step.id)
+        const firstStage = detail?.stages?.[0]?.stage.id ?? null
+        if (!selectedStageId && firstStage) setSelectedStageId(firstStage)
       }
       if (previewResult.ok) setPreview(readObject<unknown>(previewResult, 'preview'))
     },
-    [client, selectedStepId],
+    [client, selectedStageId],
   )
 
   useEffect(() => {
@@ -341,16 +383,26 @@ function App() {
   }
 
   async function saveStep(payload: StepEditorPayload) {
-    if (!selectedPipelineId) return
-    const path = payload.id === 'new' ? `/v1/pipelines/${selectedPipelineId}/steps` : `/v1/pipelines/${selectedPipelineId}/steps/${payload.id}`
-    const response = await client(path, {
-      method: payload.id === 'new' ? 'POST' : 'PUT',
-      body: payload.body,
-    })
+    if (!selectedPipelineId || !payload.stageId) return
+    const path =
+      payload.id === 'new'
+        ? `/v1/pipeline-stages/${payload.stageId}/steps`
+        : `/v1/pipeline-stages/${payload.stageId}/steps/${payload.id}`
+    const response = await client(path, { method: payload.id === 'new' ? 'POST' : 'PUT', body: payload.body })
     if (response.ok) {
       await refreshDetail(selectedPipelineId)
       await refreshAll(false)
     }
+  }
+
+  async function generateStageConfig(stageId: number) {
+    const response = await client(`/v1/pipeline-stages/${stageId}/generate-config`)
+    if (response.ok) await refreshDetail(selectedPipelineId)
+  }
+
+  async function publishStageConfig(stageId: number) {
+    const response = await client(`/v1/pipeline-stages/${stageId}/publish-config`)
+    if (response.ok) await refreshDetail(selectedPipelineId)
   }
 
   async function runSelectedPipeline() {
@@ -372,17 +424,23 @@ function App() {
   async function createSamplePipeline() {
     const pipelineResponse = await client('/v1/pipelines', {
       body: {
-        name: '有赞订单方法流水线',
+        name: '有赞订单大块流水线',
         code: `youzan_order_${Date.now()}`,
-        description: '获取 token -> 拉订单 -> 清洗字段 -> 推送销售数据',
+        description: '数据获取 -> 数据处理 -> 数据推送 -> 日志记录',
         enabled: true,
       },
     })
     const pipeline = readObject<PipelineDefinition>(pipelineResponse, 'pipeline')
     if (!pipelineResponse.ok || !pipeline) return
+
+    const stageResult = await client(`/v1/pipelines/${pipeline.id}/stages`, { method: 'GET', showResult: false })
+    const stages = readList<PipelineStageDetail>(stageResult, 'stages')
     for (const step of samplePipelineSteps) {
-      await client(`/v1/pipelines/${pipeline.id}/steps`, {
+      const stage = stages.find((item) => item.stage.stage_type === step.stage_type)
+      if (!stage) continue
+      await client(`/v1/pipeline-stages/${stage.stage.id}/steps`, {
         body: {
+          stage_id: stage.stage.id,
           code: step.code,
           name: step.name,
           method_type: step.method_type,
@@ -400,6 +458,11 @@ function App() {
     await refreshDetail(pipeline.id)
   }
 
+  const selectedStage = useMemo(() => {
+    if (!pipelineDetail || !selectedStageId) return null
+    return pipelineDetail.stages.find((item) => item.stage.id === selectedStageId) ?? null
+  }, [pipelineDetail, selectedStageId])
+
   const selectedStep = useMemo(() => {
     if (!pipelineDetail || selectedStepId === 'new') return null
     return pipelineDetail.steps.find((item) => item.step.id === selectedStepId) ?? null
@@ -409,12 +472,12 @@ function App() {
 
   return (
     <main className="pipeline-shell">
-      <aside className="pipeline-sidebar" aria-label="流水线列表">
+      <aside className="pipeline-sidebar" aria-label="流水线和基础方法块">
         <div className="brand">
           <Database aria-hidden="true" />
           <div>
             <h1>数据仓库</h1>
-            <span>方法流水线工作台</span>
+            <span>大块流水线工作台</span>
           </div>
         </div>
         <div className="sidebar-actions">
@@ -428,13 +491,14 @@ function App() {
           </button>
         </div>
         <PipelineList pipelines={pipelines} selectedId={selectedPipelineId} onSelect={setSelectedPipelineId} />
+        <MethodLibrary selectedStageType={selectedStage?.stage.stage_type ?? 'fetch'} />
         <form className="compact-form" onSubmit={createPipeline}>
           <h2>新建流水线</h2>
           <Field label="名称" name="name" defaultValue="订单同步流水线" />
           <Field label="编码" name="code" defaultValue={`pipeline_${Date.now()}`} />
           <label>
             描述
-            <textarea name="description" rows={3} defaultValue="由多个小方法拼接的数据同步任务" />
+            <textarea name="description" rows={3} defaultValue="由四个大块阶段和多个基础方法拼接" />
           </label>
           <button className="primary" type="submit" disabled={loading}>
             <Plus aria-hidden="true" />
@@ -450,13 +514,13 @@ function App() {
       <section className="pipeline-workspace">
         <header className="workspace-header">
           <div>
-            <p className="eyebrow">method pipeline</p>
+            <p className="eyebrow">staged method pipeline</p>
             <h2>{pipelineDetail?.pipeline.name ?? '选择或创建流水线'}</h2>
           </div>
           <div className="header-actions">
-            <button type="button" onClick={() => setSelectedStepId('new')} disabled={!selectedPipelineId}>
+            <button type="button" onClick={() => setSelectedStepId('new')} disabled={!selectedStage}>
               <Plus aria-hidden="true" />
-              新增方法
+              新增基础方法
             </button>
             <button className="primary" type="button" onClick={runSelectedPipeline} disabled={!selectedPipelineId || loading}>
               <Play aria-hidden="true" />
@@ -467,34 +531,45 @@ function App() {
 
         <section className="overview-grid">
           <Metric label="流水线" value={pipelines.length} />
-          <Metric label="方法步骤" value={pipelineDetail?.steps.length ?? 0} />
-          <Metric label="旧数据源" value={sources.length} />
-          <Metric label="旧推送目标" value={destinations.length} />
+          <Metric label="大块阶段" value={pipelineDetail?.stages.length ?? 0} />
+          <Metric label="基础方法" value={pipelineDetail?.steps.length ?? 0} />
+          <Metric label="旧配置出口" value={`${sources.length}/${destinations.length}`} />
         </section>
 
-        <div className="workbench-grid">
-          <section className="workbench-panel step-panel">
-            <PanelTitle icon={<Settings />} title="步骤编排" meta="按顺序拼接小方法" />
-            <StepTimeline
-              steps={pipelineDetail?.steps ?? []}
-              selectedId={selectedStepId}
-              onSelect={setSelectedStepId}
+        <div className="stage-workbench">
+          <section className="workbench-panel stage-board-panel">
+            <PanelTitle icon={<Settings />} title="四阶段编排" meta="基础方法块拼成业务大块" />
+            <StageBoard
+              stages={orderedStages(pipelineDetail?.stages ?? [])}
+              selectedStageId={selectedStageId}
+              selectedStepId={selectedStepId}
+              onSelectStage={(id) => {
+                setSelectedStageId(id)
+                setSelectedStepId('new')
+              }}
+              onSelectStep={(stageId, stepId) => {
+                setSelectedStageId(stageId)
+                setSelectedStepId(stepId)
+              }}
+              onGenerate={generateStageConfig}
+              onPublish={publishStageConfig}
             />
           </section>
 
           <section className="workbench-panel editor-panel">
-            <PanelTitle icon={<ShieldCheck />} title="方法配置" meta="编辑分散字段，不直接改 JSON" />
+            <PanelTitle icon={<ShieldCheck />} title="基础方法配置" meta="编辑入参、出参和绑定" />
             <StepEditor
-              key={selectedStep?.step.id ?? `new-${selectedPipelineId}`}
+              key={`${selectedStage?.stage.id ?? 'none'}-${selectedStep?.step.id ?? 'new'}`}
               selected={selectedStep}
-              disabled={!selectedPipelineId}
+              selectedStage={selectedStage?.stage ?? null}
+              disabled={!selectedStage}
               onSave={saveStep}
             />
           </section>
 
           <section className="workbench-panel preview-panel">
-            <PanelTitle icon={<FileJson />} title="只读 JSON 预览" meta="由分散配置生成" />
-            <ReadonlyJSON value={preview ?? selectedStep?.step.generated_config_json ?? {}} />
+            <PanelTitle icon={<FileJson />} title="大块配置预览" meta={selectedStage ? stageLabel(selectedStage.stage.stage_type) : '选择阶段'} />
+            <ReadonlyJSON value={selectedStage?.generated_config?.generated_config_json ?? selectedStageConfigFromPreview(preview, selectedStage?.stage.stage_type)} />
           </section>
         </div>
 
@@ -511,7 +586,9 @@ function App() {
 
 type StepEditorPayload = {
   id: number | 'new'
+  stageId: number
   body: {
+    stage_id: number
     code: string
     name: string
     method_type: MethodType
@@ -532,10 +609,7 @@ function LoginScreen({ onLogin }: { onLogin: (token: string) => void }) {
     const response = await fetch('/api/auth/login', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        username: formValue(form, 'username'),
-        password: formValue(form, 'password'),
-      }),
+      body: JSON.stringify({ username: formValue(form, 'username'), password: formValue(form, 'password') }),
     })
     const data: unknown = await response.json().catch(() => ({}))
     const token = readToken(data)
@@ -553,41 +627,26 @@ function LoginScreen({ onLogin }: { onLogin: (token: string) => void }) {
           <Database aria-hidden="true" />
           <div>
             <h1>数据仓库</h1>
-            <p>登录后配置方法流水线</p>
+            <p>登录后配置大块流水线</p>
           </div>
         </div>
         <form className="login-form" onSubmit={submit}>
           <Field label="用户名" name="username" defaultValue="admin" />
           <Field label="密码" name="password" defaultValue="123456" type="password" />
           {error && <div className="login-error">{error}</div>}
-          <button className="primary" type="submit">
-            登录
-          </button>
+          <button className="primary" type="submit">登录</button>
         </form>
       </section>
     </main>
   )
 }
 
-function PipelineList({
-  pipelines,
-  selectedId,
-  onSelect,
-}: {
-  pipelines: PipelineDefinition[]
-  selectedId: number | null
-  onSelect: (id: number) => void
-}) {
+function PipelineList({ pipelines, selectedId, onSelect }: { pipelines: PipelineDefinition[]; selectedId: number | null; onSelect: (id: number) => void }) {
   if (pipelines.length === 0) return <div className="empty-state">暂无流水线，先创建一个业务链路。</div>
   return (
     <div className="pipeline-list">
       {pipelines.map((pipeline) => (
-        <button
-          className={pipeline.id === selectedId ? 'pipeline-item active' : 'pipeline-item'}
-          key={pipeline.id}
-          type="button"
-          onClick={() => onSelect(pipeline.id)}
-        >
+        <button className={pipeline.id === selectedId ? 'pipeline-item active' : 'pipeline-item'} key={pipeline.id} type="button" onClick={() => onSelect(pipeline.id)}>
           <strong>{pipeline.name}</strong>
           <span>{pipeline.code}</span>
         </button>
@@ -596,31 +655,72 @@ function PipelineList({
   )
 }
 
-function StepTimeline({
-  steps,
-  selectedId,
-  onSelect,
-}: {
-  steps: MethodStepDetail[]
-  selectedId: number | 'new'
-  onSelect: (id: number | 'new') => void
-}) {
-  if (steps.length === 0) return <div className="empty-state">还没有方法步骤。新增 request、mapping 或 delivery 方法。</div>
+function MethodLibrary({ selectedStageType }: { selectedStageType: StageType }) {
   return (
-    <div className="step-timeline">
-      {steps.map((detail) => (
-        <button
-          className={detail.step.id === selectedId ? 'step-card active' : 'step-card'}
-          key={detail.step.id}
-          type="button"
-          onClick={() => onSelect(detail.step.id)}
-        >
-          <span className="step-index">{detail.step.order_index || '-'}</span>
-          <span>
-            <strong>{detail.step.name}</strong>
-            <small>{detail.step.method_type} / {detail.step.code}</small>
-          </span>
-        </button>
+    <section className="method-library">
+      <h2>基础方法块</h2>
+      {methodLibrary.map((item) => (
+        <div className={item.stage === selectedStageType ? 'method-chip active' : 'method-chip'} key={item.type}>
+          <strong>{item.label}</strong>
+          <span>{stageLabel(item.stage)} / {item.description}</span>
+        </div>
+      ))}
+    </section>
+  )
+}
+
+function StageBoard({
+  stages,
+  selectedStageId,
+  selectedStepId,
+  onSelectStage,
+  onSelectStep,
+  onGenerate,
+  onPublish,
+}: {
+  stages: PipelineStageDetail[]
+  selectedStageId: number | null
+  selectedStepId: number | 'new'
+  onSelectStage: (id: number) => void
+  onSelectStep: (stageId: number, stepId: number) => void
+  onGenerate: (stageId: number) => void
+  onPublish: (stageId: number) => void
+}) {
+  if (stages.length === 0) return <div className="empty-state">还没有阶段。创建流水线后会自动生成四个大块。</div>
+  return (
+    <div className="stage-lanes">
+      {stages.map((detail) => (
+        <section className={detail.stage.id === selectedStageId ? 'stage-lane active' : 'stage-lane'} key={detail.stage.id}>
+          <button className="stage-title" type="button" onClick={() => onSelectStage(detail.stage.id)}>
+            <span>{detail.stage.order_index}</span>
+            <strong>{detail.stage.name}</strong>
+            <small>{detail.stage.stage_type}</small>
+          </button>
+          <div className="stage-actions">
+            <button type="button" onClick={() => onGenerate(detail.stage.id)}>生成配置</button>
+            <button type="button" onClick={() => onPublish(detail.stage.id)}>发布</button>
+          </div>
+          <div className="step-timeline">
+            {detail.steps.length === 0 ? (
+              <div className="empty-state compact">这个大块还没有基础方法。</div>
+            ) : (
+              detail.steps.map((step) => (
+                <button
+                  className={step.step.id === selectedStepId ? 'step-card active' : 'step-card'}
+                  key={step.step.id}
+                  type="button"
+                  onClick={() => onSelectStep(detail.stage.id, step.step.id)}
+                >
+                  <span className="step-index">{step.step.order_index || '-'}</span>
+                  <span>
+                    <strong>{step.step.name}</strong>
+                    <small>{methodTypeLabel(step.step.method_type)} / {step.step.code}</small>
+                  </span>
+                </button>
+              ))
+            )}
+          </div>
+        </section>
       ))}
     </div>
   )
@@ -628,25 +728,31 @@ function StepTimeline({
 
 function StepEditor({
   selected,
+  selectedStage,
   disabled,
   onSave,
 }: {
   selected: MethodStepDetail | null
+  selectedStage: PipelineStage | null
   disabled: boolean
   onSave: (payload: StepEditorPayload) => Promise<void>
 }) {
-  const [code, setCode] = useState(selected?.step.code ?? 'fetch_orders')
-  const [name, setName] = useState(selected?.step.name ?? '拉取订单')
-  const [methodType, setMethodType] = useState<MethodType>(selected?.step.method_type ?? 'request')
+  const allowedTypes = methodTypesForStage(selectedStage?.stage_type ?? 'fetch')
+  const defaultType = selected?.step.method_type ?? allowedTypes[0]
+  const [code, setCode] = useState(selected?.step.code ?? defaultCodeForMethod(defaultType))
+  const [name, setName] = useState(selected?.step.name ?? methodTypeLabel(defaultType))
+  const [methodType, setMethodType] = useState<MethodType>(defaultType)
   const [orderIndex, setOrderIndex] = useState(String(selected?.step.order_index ?? 1))
   const [timeoutSeconds, setTimeoutSeconds] = useState(String(selected?.step.timeout_seconds || 30))
   const [enabled, setEnabled] = useState(selected?.step.enabled ?? true)
-  const [params, setParams] = useState<MethodParam[]>(selected?.params?.length ? selected.params : defaultParams('request'))
-  const [outputs, setOutputs] = useState<MethodOutput[]>(selected?.outputs?.length ? selected.outputs : [output('records', 'data.items', 'array', false, '')])
+  const [params, setParams] = useState<MethodParam[]>(selected?.params?.length ? selected.params : defaultParams(defaultType))
+  const [outputs, setOutputs] = useState<MethodOutput[]>(selected?.outputs?.length ? selected.outputs : defaultOutputs(defaultType))
 
   function changeMethodType(nextType: MethodType) {
     setMethodType(nextType)
     if (!selected) {
+      setCode(defaultCodeForMethod(nextType))
+      setName(methodTypeLabel(nextType))
       setParams(defaultParams(nextType))
       setOutputs(defaultOutputs(nextType))
     }
@@ -654,9 +760,12 @@ function StepEditor({
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
+    if (!selectedStage) return
     await onSave({
       id: selected?.step.id ?? 'new',
+      stageId: selectedStage.id,
       body: {
+        stage_id: selectedStage.id,
         code,
         name,
         method_type: methodType,
@@ -671,11 +780,15 @@ function StepEditor({
 
   return (
     <form className="step-editor" onSubmit={submit}>
+      <div className="selected-stage-strip">
+        <strong>{selectedStage ? stageLabel(selectedStage.stage_type) : '未选择阶段'}</strong>
+        <span>基础方法会保存到这个大块阶段中。</span>
+      </div>
       <div className="form-grid">
         <label>
           方法类型
           <select value={methodType} onChange={(event) => changeMethodType(event.target.value as MethodType)} disabled={disabled}>
-            {methodTypes.map((type) => <option key={type} value={type}>{methodTypeLabel(type)}</option>)}
+            {allowedTypes.map((type) => <option key={type} value={type}>{methodTypeLabel(type)}</option>)}
           </select>
         </label>
         <label>
@@ -699,29 +812,17 @@ function StepEditor({
           启用
         </label>
       </div>
-
       <ParamTable params={params} onChange={setParams} disabled={disabled} methodType={methodType} />
       <OutputTable outputs={outputs} onChange={setOutputs} disabled={disabled} />
-
       <button className="primary" type="submit" disabled={disabled}>
         <Settings aria-hidden="true" />
-        保存方法
+        保存基础方法
       </button>
     </form>
   )
 }
 
-function ParamTable({
-  params,
-  onChange,
-  disabled,
-  methodType,
-}: {
-  params: MethodParam[]
-  onChange: (params: MethodParam[]) => void
-  disabled: boolean
-  methodType: MethodType
-}) {
+function ParamTable({ params, onChange, disabled, methodType }: { params: MethodParam[]; onChange: (params: MethodParam[]) => void; disabled: boolean; methodType: MethodType }) {
   function update(index: number, patch: Partial<MethodParam>) {
     onChange(params.map((item, itemIndex) => (itemIndex === index ? { ...item, ...patch } : item)))
   }
@@ -771,15 +872,7 @@ function ParamTable({
   )
 }
 
-function OutputTable({
-  outputs,
-  onChange,
-  disabled,
-}: {
-  outputs: MethodOutput[]
-  onChange: (outputs: MethodOutput[]) => void
-  disabled: boolean
-}) {
+function OutputTable({ outputs, onChange, disabled }: { outputs: MethodOutput[]; onChange: (outputs: MethodOutput[]) => void; disabled: boolean }) {
   function update(index: number, patch: Partial<MethodOutput>) {
     onChange(outputs.map((item, itemIndex) => (itemIndex === index ? { ...item, ...patch } : item)))
   }
@@ -888,49 +981,90 @@ function Field({ label, name, defaultValue, type = 'text' }: { label: string; na
   )
 }
 
+function methodTypesForStage(stageType: StageType): MethodType[] {
+  switch (stageType) {
+    case 'fetch':
+      return ['request', 'extract', 'db_query']
+    case 'process':
+      return ['mapping', 'validate', 'db_query', 'db_write', 'template', 'request']
+    case 'push':
+      return ['template', 'delivery', 'request']
+    case 'log':
+      return ['log', 'db_write', 'delivery']
+  }
+}
+
 function defaultParams(type: MethodType) {
   switch (type) {
     case 'request':
-      return requestTemplateParams.map((item) => ({ ...item }))
+      return [
+        param('url', 'url', 'config', 'cfg.api.url', 'string', true, false, '请求地址'),
+        param('request', 'method', 'static', 'POST', 'string', true, false, 'HTTP 方法'),
+        param('header', 'Content-Type', 'static', 'application/json', 'string', true, false, '内容类型'),
+      ]
     case 'extract':
       return [param('response', 'records_path', 'static', 'data.items', 'string', true, false, '响应列表路径')]
     case 'mapping':
       return [
-        param('mapping', 'table_name', 'static', 'clean_orders', 'string', true, false, '目标表'),
-        param('field', 'order_no', 'static', '$.order_no', 'string', true, false, '订单号'),
+        param('mapping', 'table_name', 'static', 'clean_records', 'string', true, false, '目标表'),
+        param('field', 'business_key', 'static', '$.id', 'string', false, false, '业务主键'),
       ]
+    case 'validate':
+      return [param('rule', 'required_fields', 'static', '[]', 'json', false, false, '必填字段')]
+    case 'db_query':
+      return [param('query', 'table', 'static', 'source_table', 'string', true, false, '查询表')]
+    case 'db_write':
+      return [param('write', 'table', 'static', 'target_table', 'string', true, false, '写入表')]
+    case 'template':
+      return [param('template', 'payload', 'static', '{}', 'json', true, false, '报文模板')]
     case 'delivery':
       return [
         param('url', 'url', 'config', 'cfg.destination.url', 'string', true, false, '推送地址'),
         param('request', 'method', 'static', 'POST', 'string', true, false, 'HTTP 方法'),
-        param('header', 'Content-Type', 'static', 'application/json', 'string', true, false, '请求内容类型'),
       ]
+    case 'log':
+      return [param('runtime', 'trace_id', 'binding', 'steps.previous.outputs.trace_id', 'string', false, false, '追踪号')]
   }
 }
 
 function defaultOutputs(type: MethodType) {
   switch (type) {
     case 'request':
-      return [output('records', 'data.items', 'array', false, '响应列表')]
+      return [output('response_body', 'response_body', 'string', false, '响应文本')]
     case 'extract':
       return [output('records', 'data.items', 'array', true, '提取结果')]
     case 'mapping':
       return [output('record', 'record', 'object', true, '清洗结果')]
+    case 'validate':
+      return [output('valid', 'valid', 'bool', false, '校验结果')]
+    case 'db_query':
+      return [output('rows', 'rows', 'array', false, '查询结果')]
+    case 'db_write':
+      return [output('affected_rows', 'affected_rows', 'int', false, '写入行数')]
+    case 'template':
+      return [output('payload', 'payload', 'object', false, '渲染报文')]
     case 'delivery':
       return [output('http_status', 'http_status', 'int', true, 'HTTP 状态')]
+    case 'log':
+      return [output('logged', 'success', 'bool', false, '日志结果')]
   }
 }
 
 function defaultParamForMethod(type: MethodType) {
   if (type === 'request' || type === 'delivery') return param('query', 'name', 'static', '', 'string', false, false, '')
   if (type === 'mapping') return param('field', 'field_name', 'static', '$.path', 'string', false, false, '')
-  return param('response', 'records_path', 'static', 'data.items', 'string', false, false, '')
+  if (type === 'template') return param('template', 'field', 'static', '', 'string', false, false, '')
+  return param('runtime', 'name', 'static', '', 'string', false, false, '')
 }
 
 function locationOptions(type: MethodType) {
   if (type === 'request' || type === 'delivery') return ['url', 'request', 'query', 'header', 'body', 'response']
   if (type === 'mapping') return ['mapping', 'field']
-  return ['response', 'runtime']
+  if (type === 'template') return ['template', 'body', 'runtime']
+  if (type === 'validate') return ['rule', 'field', 'runtime']
+  if (type === 'db_query') return ['query', 'where', 'runtime']
+  if (type === 'db_write') return ['write', 'field', 'runtime']
+  return ['runtime', 'log']
 }
 
 function methodTypeLabel(type: MethodType) {
@@ -938,21 +1072,46 @@ function methodTypeLabel(type: MethodType) {
     request: 'Request 请求',
     extract: 'Extract 提取',
     mapping: 'Mapping 清洗',
+    validate: 'Validate 校验',
+    db_query: 'DB Query 查询',
+    db_write: 'DB Write 写入',
+    template: 'Template 模板',
     delivery: 'Delivery 推送',
+    log: 'Log 记录',
   }
   return labels[type]
 }
 
-function param(
-  location: string,
-  name: string,
-  valueSource: string,
-  value: string,
-  valueType: string,
-  required: boolean,
-  secret: boolean,
-  description: string,
-): MethodParam {
+function stageLabel(type: StageType) {
+  const labels: Record<StageType, string> = {
+    fetch: '数据获取',
+    process: '数据处理',
+    push: '数据推送',
+    log: '日志记录',
+  }
+  return labels[type]
+}
+
+function defaultCodeForMethod(type: MethodType) {
+  return `${type}_${Date.now()}`
+}
+
+function orderedStages(stages: PipelineStageDetail[]) {
+  return [...stages].sort((a, b) => {
+    const left = stageOrder.indexOf(a.stage.stage_type)
+    const right = stageOrder.indexOf(b.stage.stage_type)
+    return left === right ? a.stage.order_index - b.stage.order_index : left - right
+  })
+}
+
+function selectedStageConfigFromPreview(preview: unknown, stageType?: StageType) {
+  if (!preview || !stageType || typeof preview !== 'object') return {}
+  const stages = (preview as { stages?: unknown }).stages
+  if (!Array.isArray(stages)) return {}
+  return stages.find((item) => item && typeof item === 'object' && (item as { stage_type?: unknown }).stage_type === stageType) ?? {}
+}
+
+function param(location: string, name: string, valueSource: string, value: string, valueType: string, required: boolean, secret: boolean, description: string): MethodParam {
   return { location, name, value_source: valueSource, value, value_type: valueType, required, secret, description, order_index: 0 }
 }
 
