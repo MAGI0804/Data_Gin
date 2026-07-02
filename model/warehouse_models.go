@@ -2,7 +2,7 @@ package model
 
 // SourceDefinition 通用数据源配置。
 type SourceDefinition struct {
-	*BaseModel
+	BaseModel
 
 	Name           string `gorm:"column:name;size:100;not null" json:"name"`
 	Code           string `gorm:"column:code;size:100;not null;uniqueIndex" json:"code"`
@@ -14,7 +14,7 @@ type SourceDefinition struct {
 	DedupeKeys     string `gorm:"column:dedupe_keys;type:json" json:"dedupe_keys"`
 	SourceQueryKey string `gorm:"column:source_query_key;size:100" json:"source_query_key"`
 
-	*CommonTimestampsField
+	CommonTimestampsField
 }
 
 func (SourceDefinition) TableName() string {
@@ -23,7 +23,7 @@ func (SourceDefinition) TableName() string {
 
 // RawRecord 通用原始记录，兼容 raw_data 逐步迁移。
 type RawRecord struct {
-	*BaseModel
+	BaseModel
 
 	SourceID     uint        `gorm:"column:source_id;default:0;index" json:"source_id"`
 	SourceCode   string      `gorm:"column:source_code;size:100;index" json:"source_code"`
@@ -38,7 +38,7 @@ type RawRecord struct {
 	TraceID      string      `gorm:"column:trace_id;size:64;index" json:"trace_id"`
 	ReceivedAt   *TimeNormal `gorm:"column:received_at" json:"received_at"`
 
-	*CommonTimestampsField
+	CommonTimestampsField
 }
 
 func (RawRecord) TableName() string {
@@ -47,7 +47,7 @@ func (RawRecord) TableName() string {
 
 // CleanTableDefinition 清洗表配置。
 type CleanTableDefinition struct {
-	*BaseModel
+	BaseModel
 
 	SourceID        uint   `gorm:"column:source_id;not null;index" json:"source_id"`
 	TableNameValue  string `gorm:"column:table_name;size:100;not null" json:"table_name"`
@@ -57,7 +57,7 @@ type CleanTableDefinition struct {
 	IndexesJSON     string `gorm:"column:indexes_json;type:json" json:"indexes_json"`
 	Enabled         bool   `gorm:"column:enabled;default:true" json:"enabled"`
 
-	*CommonTimestampsField
+	CommonTimestampsField
 }
 
 func (CleanTableDefinition) TableName() string {
@@ -66,7 +66,7 @@ func (CleanTableDefinition) TableName() string {
 
 // CleanRecord 通用清洗结果。
 type CleanRecord struct {
-	*BaseModel
+	BaseModel
 
 	RawRecordID      uint    `gorm:"column:raw_record_id;not null;index" json:"raw_record_id"`
 	SourceID         uint    `gorm:"column:source_id;not null;index" json:"source_id"`
@@ -76,7 +76,7 @@ type CleanRecord struct {
 	QualityScore     float64 `gorm:"column:quality_score;type:decimal(5,2);default:100.00" json:"quality_score"`
 	Status           string  `gorm:"column:status;type:enum('ready','invalid','delivered');default:'ready';index" json:"status"`
 
-	*CommonTimestampsField
+	CommonTimestampsField
 }
 
 func (CleanRecord) TableName() string {
@@ -85,7 +85,7 @@ func (CleanRecord) TableName() string {
 
 // TransformRule 通用清洗规则。
 type TransformRule struct {
-	*BaseModel
+	BaseModel
 
 	SourceID   uint   `gorm:"column:source_id;not null;index" json:"source_id"`
 	Name       string `gorm:"column:name;size:100;not null" json:"name"`
@@ -94,7 +94,7 @@ type TransformRule struct {
 	ConfigJSON string `gorm:"column:config_json;type:json;not null" json:"config_json"`
 	Enabled    bool   `gorm:"column:enabled;default:true;index" json:"enabled"`
 
-	*CommonTimestampsField
+	CommonTimestampsField
 }
 
 func (TransformRule) TableName() string {
@@ -103,7 +103,7 @@ func (TransformRule) TableName() string {
 
 // DestinationDefinition 通用推送目标配置。
 type DestinationDefinition struct {
-	*BaseModel
+	BaseModel
 
 	Name            string `gorm:"column:name;size:100;not null" json:"name"`
 	Code            string `gorm:"column:code;size:100;not null;uniqueIndex" json:"code"`
@@ -111,7 +111,7 @@ type DestinationDefinition struct {
 	ConfigJSON      string `gorm:"column:config_json;type:json;not null" json:"config_json"`
 	Enabled         bool   `gorm:"column:enabled;default:true;index" json:"enabled"`
 
-	*CommonTimestampsField
+	CommonTimestampsField
 }
 
 func (DestinationDefinition) TableName() string {
@@ -120,7 +120,7 @@ func (DestinationDefinition) TableName() string {
 
 // DeliveryTask 通用推送任务。
 type DeliveryTask struct {
-	*BaseModel
+	BaseModel
 
 	Name            string `gorm:"column:name;size:100;not null" json:"name"`
 	SourceID        uint   `gorm:"column:source_id;not null;index" json:"source_id"`
@@ -132,7 +132,7 @@ type DeliveryTask struct {
 	PayloadTemplate string `gorm:"column:payload_template;type:text" json:"payload_template"`
 	Enabled         bool   `gorm:"column:enabled;default:true;index" json:"enabled"`
 
-	*CommonTimestampsField
+	CommonTimestampsField
 }
 
 func (DeliveryTask) TableName() string {
@@ -141,7 +141,7 @@ func (DeliveryTask) TableName() string {
 
 // PipelineRun 接收、清洗、推送运行记录。
 type PipelineRun struct {
-	*BaseModel
+	BaseModel
 
 	TraceID       string      `gorm:"column:trace_id;size:64;not null;index" json:"trace_id"`
 	RunType       string      `gorm:"column:run_type;type:enum('fetch','ingest','transform','delivery');not null;index" json:"run_type"`
@@ -156,7 +156,7 @@ type PipelineRun struct {
 	FinishedAt    *TimeNormal `gorm:"column:finished_at" json:"finished_at"`
 	ErrorMessage  string      `gorm:"column:error_message;type:text" json:"error_message"`
 
-	*CommonTimestampsField
+	CommonTimestampsField
 }
 
 func (PipelineRun) TableName() string {
@@ -165,7 +165,7 @@ func (PipelineRun) TableName() string {
 
 // DeliveryLog 单条推送日志。
 type DeliveryLog struct {
-	*BaseModel
+	BaseModel
 
 	TraceID       string      `gorm:"column:trace_id;size:64;not null;index" json:"trace_id"`
 	RunID         uint        `gorm:"column:run_id;default:0;index" json:"run_id"`
@@ -180,7 +180,7 @@ type DeliveryLog struct {
 	RetryCount    int         `gorm:"column:retry_count;default:0" json:"retry_count"`
 	SentAt        *TimeNormal `gorm:"column:sent_at" json:"sent_at"`
 
-	*CommonTimestampsField
+	CommonTimestampsField
 }
 
 func (DeliveryLog) TableName() string {
