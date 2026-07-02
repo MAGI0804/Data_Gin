@@ -82,6 +82,9 @@ func apiAuth(api *gin.RouterGroup) {
 	authGroup := api.Group("/auth")
 	authGroup.Use(middleware.LimitIP("60-H"))
 	{
+		loginCtrl := auth_ctrl.NewLoginController()
+		authGroup.POST("/login", loginCtrl.ConsoleLogin) // 管理台登录
+
 		registerCtrl := new(auth_ctrl.RegisterController)
 		authGroup.POST("/register/using-email", middleware.LimitRoute("30-H"), registerCtrl.SignupUsingEmail) // 使用邮箱注册用户
 
