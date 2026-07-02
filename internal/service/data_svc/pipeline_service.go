@@ -29,6 +29,10 @@ type PipelineService struct {
 	stageConfigDAO *data_dao.StageGeneratedConfigDAO
 	stepRunDAO     *data_dao.StepRunDAO
 	pipelineRunDAO *data_dao.PipelineRunDAO
+	sourceDAO      *data_dao.SourceDefinitionDAO
+	transformDAO   *data_dao.TransformRuleDAO
+	destinationDAO *data_dao.DestinationDefinitionDAO
+	deliveryDAO    *data_dao.DeliveryTaskDAO
 }
 
 func NewPipelineService() *PipelineService {
@@ -41,6 +45,10 @@ func NewPipelineService() *PipelineService {
 		stageConfigDAO: data_dao.NewStageGeneratedConfigDAO(),
 		stepRunDAO:     data_dao.NewStepRunDAO(),
 		pipelineRunDAO: data_dao.NewPipelineRunDAO(),
+		sourceDAO:      data_dao.NewSourceDefinitionDAO(),
+		transformDAO:   data_dao.NewTransformRuleDAO(),
+		destinationDAO: data_dao.NewDestinationDefinitionDAO(),
+		deliveryDAO:    data_dao.NewDeliveryTaskDAO(),
 	}
 }
 
@@ -417,7 +425,43 @@ func (s *PipelineService) PublishStageConfig(ctx context.Context, stageID uint) 
 	if cfg.TargetRefType == "" {
 		cfg.TargetRefType = targetRefTypeForStage(cfg.StageType)
 	}
+	if cfg.TargetRefID != 0 || cfg.StageType == "log" {
+		return cfg, nil
+	}
+	targetRefType, targetRefID, err := s.publishStageConfigSnapshot(ctx, cfg)
+	if err != nil {
+		return nil, err
+	}
+	cfg.TargetRefType = targetRefType
+	cfg.TargetRefID = targetRefID
+	if err := s.stageConfigDAO.Update(ctx, cfg); err != nil {
+		return nil, err
+	}
 	return cfg, nil
+}
+
+func (s *PipelineService) publishStageConfigSnapshot(ctx context.Context, cfg *model.StageGeneratedConfig) (string, uint, error) {
+	switch cfg.StageType {
+	case "fetch":
+		source := buildSourceDefinitionFromStageConfig(cfg)
+		id, err := s.sourceDAO.Create(ctx, source)
+		return "source_definition", id, err
+	case "process":
+		rule := buildTransformRuleFromStageConfig(cfg)
+		id, err := s.transformDAO.Create(ctx, rule)
+		return "transform_rule", id, err
+	case "push":
+		destination := buildDestinationDefinitionFromStageConfig(cfg)
+		destinationID, err := s.destinationDAO.Create(ctx, destination)
+		if err != nil {
+			return "destination_delivery_task", 0, err
+		}
+		task := buildDeliveryTaskFromStageConfig(cfg, destinationID)
+		taskID, err := s.deliveryDAO.Create(ctx, task)
+		return "destination_delivery_task", taskID, err
+	default:
+		return targetRefTypeForStage(cfg.StageType), 0, nil
+	}
 }
 
 func (s *PipelineService) GetStageSteps(ctx context.Context, stageID uint) ([]MethodStepDetail, error) {
@@ -955,4 +999,61 @@ func targetRefTypeForStage(stageType string) string {
 	default:
 		return ""
 	}
+}
+
+func buildSourceDefinitionFromStageConfig(cfg *model.StageGeneratedConfig) *model.SourceDefinition {
+	code := legacyConfigCode("source", cfg)
+	return &model.SourceDefinition{
+		Name:           legacyConfigName("数据获取", cfg),
+		Code:           code,
+		SourceType:     "api_poll",
+		Enabled:        true,
+		AuthType:       "pipeline_stage",
+		ConfigJSON:     cfg.GeneratedConfigJSON,
+		SchemaJSON:     "{}",
+		DedupeKeys:     "[]",
+		SourceQueryKey: code,
+	}
+}
+
+func buildTransformRuleFromStageConfig(cfg *model.StageGeneratedConfig) *model.TransformRule {
+	return &model.TransformRule{
+		SourceID:   0,
+		Name:       legacyConfigName("数据处理", cfg),
+		RuleType:   "mapping",
+		OrderIndex: cfg.Version,
+		ConfigJSON: cfg.GeneratedConfigJSON,
+		Enabled:    true,
+	}
+}
+
+func buildDestinationDefinitionFromStageConfig(cfg *model.StageGeneratedConfig) *model.DestinationDefinition {
+	return &model.DestinationDefinition{
+		Name:            legacyConfigName("数据推送", cfg),
+		Code:            legacyConfigCode("destination", cfg),
+		DestinationType: "http",
+		ConfigJSON:      cfg.GeneratedConfigJSON,
+		Enabled:         true,
+	}
+}
+
+func buildDeliveryTaskFromStageConfig(cfg *model.StageGeneratedConfig, destinationID uint) *model.DeliveryTask {
+	return &model.DeliveryTask{
+		Name:            legacyConfigName("推送任务", cfg),
+		SourceID:        0,
+		CleanTable:      fmt.Sprintf("pipeline_%d_stage_%d_clean", cfg.PipelineID, cfg.StageID),
+		DestinationID:   destinationID,
+		TriggerType:     "manual",
+		FilterJSON:      "{}",
+		PayloadTemplate: cfg.GeneratedConfigJSON,
+		Enabled:         true,
+	}
+}
+
+func legacyConfigCode(prefix string, cfg *model.StageGeneratedConfig) string {
+	return fmt.Sprintf("%s_pipeline_%d_stage_%d_v%d", prefix, cfg.PipelineID, cfg.StageID, cfg.Version)
+}
+
+func legacyConfigName(label string, cfg *model.StageGeneratedConfig) string {
+	return fmt.Sprintf("%s配置 P%d-S%d-v%d", label, cfg.PipelineID, cfg.StageID, cfg.Version)
 }

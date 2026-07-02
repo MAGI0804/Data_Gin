@@ -73,3 +73,45 @@ func TestDefaultStageTypeForMethod(t *testing.T) {
 		t.Fatalf("mapping stage = %s", got)
 	}
 }
+
+func TestBuildLegacyConfigModelsFromStageConfig(t *testing.T) {
+	cfg := &model.StageGeneratedConfig{
+		PipelineID:          7,
+		StageID:             9,
+		StageType:           "fetch",
+		GeneratedConfigJSON: `{"stage_type":"fetch","steps":[]}`,
+		Version:             3,
+	}
+
+	source := buildSourceDefinitionFromStageConfig(cfg)
+	if source.Code != "source_pipeline_7_stage_9_v3" {
+		t.Fatalf("source code = %s", source.Code)
+	}
+	if source.ConfigJSON != cfg.GeneratedConfigJSON {
+		t.Fatalf("source config json = %s", source.ConfigJSON)
+	}
+	if source.SourceType != "api_poll" || source.AuthType != "pipeline_stage" {
+		t.Fatalf("source type/auth = %s/%s", source.SourceType, source.AuthType)
+	}
+
+	rule := buildTransformRuleFromStageConfig(cfg)
+	if rule.RuleType != "mapping" || rule.OrderIndex != 3 {
+		t.Fatalf("rule type/order = %s/%d", rule.RuleType, rule.OrderIndex)
+	}
+
+	destination := buildDestinationDefinitionFromStageConfig(cfg)
+	if destination.Code != "destination_pipeline_7_stage_9_v3" {
+		t.Fatalf("destination code = %s", destination.Code)
+	}
+	if destination.DestinationType != "http" {
+		t.Fatalf("destination type = %s", destination.DestinationType)
+	}
+
+	task := buildDeliveryTaskFromStageConfig(cfg, 22)
+	if task.DestinationID != 22 || task.TriggerType != "manual" {
+		t.Fatalf("task destination/trigger = %d/%s", task.DestinationID, task.TriggerType)
+	}
+	if task.PayloadTemplate != cfg.GeneratedConfigJSON {
+		t.Fatalf("task payload template = %s", task.PayloadTemplate)
+	}
+}

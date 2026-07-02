@@ -241,6 +241,11 @@ func (dao *StageGeneratedConfigDAO) FindByPipelineID(ctx context.Context, pipeli
 	return configs, err
 }
 
+func (dao *StageGeneratedConfigDAO) Update(ctx context.Context, cfg *model.StageGeneratedConfig) error {
+	cfg.UpdatedAt = int(time.Now().Unix())
+	return dao.db.WithContext(ctx).Save(cfg).Error
+}
+
 func (dao *StageGeneratedConfigDAO) NextVersion(ctx context.Context, stageID uint) (int, error) {
 	var cfg model.StageGeneratedConfig
 	err := dao.db.WithContext(ctx).
