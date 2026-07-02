@@ -37,6 +37,12 @@ func TestWarehouseModelsHaveInitializedCommonFields(t *testing.T) {
 			model.CreatedAt = 1
 			model.UpdatedAt = 2
 		}},
+		{"pipeline stage", func() {
+			model := &PipelineStage{}
+			model.ID = 1
+			model.CreatedAt = 1
+			model.UpdatedAt = 2
+		}},
 		{"method step", func() {
 			model := &MethodStep{}
 			model.ID = 1
@@ -51,6 +57,12 @@ func TestWarehouseModelsHaveInitializedCommonFields(t *testing.T) {
 		}},
 		{"method output", func() {
 			model := &MethodOutput{}
+			model.ID = 1
+			model.CreatedAt = 1
+			model.UpdatedAt = 2
+		}},
+		{"stage generated config", func() {
+			model := &StageGeneratedConfig{}
 			model.ID = 1
 			model.CreatedAt = 1
 			model.UpdatedAt = 2

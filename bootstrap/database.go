@@ -86,6 +86,8 @@ func autoMigrateTables() {
 		return
 	}
 
+	prepareMethodPipelineIndexes(db)
+
 	// 迁移数据存储相关表
 	err := db.AutoMigrate(
 		&model.User{},                  // 用户表
@@ -107,9 +109,11 @@ func autoMigrateTables() {
 		&model.PipelineRun{},           //运行记录表
 		&model.DeliveryLog{},           //推送日志表
 		&model.PipelineDefinition{},    //方法拼接流水线表
+		&model.PipelineStage{},         //流水线大块阶段表
 		&model.MethodStep{},            //方法步骤表
 		&model.MethodParam{},           //方法入参表
 		&model.MethodOutput{},          //方法出参表
+		&model.StageGeneratedConfig{},  //阶段生成配置表
 		&model.StepRun{},               //方法步骤运行明细表
 	)
 
@@ -120,4 +124,20 @@ func autoMigrateTables() {
 	}
 
 	console.Success("数据表自动迁移完成")
+}
+
+func prepareMethodPipelineIndexes(db *gorm.DB) {
+	if !db.Migrator().HasTable(&model.MethodStep{}) {
+		return
+	}
+
+	const indexName = "idx_pipeline_step_code"
+	if !db.Migrator().HasIndex(&model.MethodStep{}, indexName) {
+		return
+	}
+
+	if err := db.Migrator().DropIndex(&model.MethodStep{}, indexName); err != nil {
+		logger.Error("删除旧方法步骤唯一索引失败", zap.String("index", indexName), zap.Error(err))
+		console.Warning("删除旧方法步骤唯一索引失败: %v", err)
+	}
 }

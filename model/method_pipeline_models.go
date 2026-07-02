@@ -16,12 +16,30 @@ func (PipelineDefinition) TableName() string {
 	return "pipeline_definitions"
 }
 
+// PipelineStage is a large business block built from small method steps.
+type PipelineStage struct {
+	BaseModel
+
+	PipelineID uint   `gorm:"column:pipeline_id;not null;index:idx_pipeline_stage_type,unique" json:"pipeline_id"`
+	StageType  string `gorm:"column:stage_type;size:50;not null;index:idx_pipeline_stage_type,unique" json:"stage_type"`
+	Name       string `gorm:"column:name;size:100;not null" json:"name"`
+	OrderIndex int    `gorm:"column:order_index;default:0;index" json:"order_index"`
+	Enabled    bool   `gorm:"column:enabled;default:true;index" json:"enabled"`
+
+	CommonTimestampsField
+}
+
+func (PipelineStage) TableName() string {
+	return "pipeline_stages"
+}
+
 // MethodStep is one executable method inside a pipeline.
 type MethodStep struct {
 	BaseModel
 
-	PipelineID          uint   `gorm:"column:pipeline_id;not null;index" json:"pipeline_id"`
-	Code                string `gorm:"column:code;size:100;not null;index:idx_pipeline_step_code,unique" json:"code"`
+	PipelineID          uint   `gorm:"column:pipeline_id;not null;index;uniqueIndex:idx_pipeline_step_code" json:"pipeline_id"`
+	StageID             uint   `gorm:"column:stage_id;default:0;index" json:"stage_id"`
+	Code                string `gorm:"column:code;size:100;not null;uniqueIndex:idx_pipeline_step_code" json:"code"`
 	Name                string `gorm:"column:name;size:100;not null" json:"name"`
 	MethodType          string `gorm:"column:method_type;size:50;not null;index" json:"method_type"`
 	OrderIndex          int    `gorm:"column:order_index;default:0;index" json:"order_index"`
@@ -75,6 +93,25 @@ type MethodOutput struct {
 
 func (MethodOutput) TableName() string {
 	return "method_outputs"
+}
+
+// StageGeneratedConfig stores the generated large-block config for a stage.
+type StageGeneratedConfig struct {
+	BaseModel
+
+	PipelineID          uint   `gorm:"column:pipeline_id;not null;index" json:"pipeline_id"`
+	StageID             uint   `gorm:"column:stage_id;not null;index" json:"stage_id"`
+	StageType           string `gorm:"column:stage_type;size:50;not null;index" json:"stage_type"`
+	GeneratedConfigJSON string `gorm:"column:generated_config_json;type:json;not null" json:"generated_config_json"`
+	TargetRefType       string `gorm:"column:target_ref_type;size:50" json:"target_ref_type"`
+	TargetRefID         uint   `gorm:"column:target_ref_id;default:0" json:"target_ref_id"`
+	Version             int    `gorm:"column:version;default:1" json:"version"`
+
+	CommonTimestampsField
+}
+
+func (StageGeneratedConfig) TableName() string {
+	return "stage_generated_configs"
 }
 
 // StepRun records the execution result for one method step.

@@ -43,6 +43,43 @@ func (dao *PipelineDefinitionDAO) Update(ctx context.Context, pipeline *model.Pi
 	return dao.db.WithContext(ctx).Save(pipeline).Error
 }
 
+type PipelineStageDAO struct {
+	db *gorm.DB
+}
+
+func NewPipelineStageDAO() *PipelineStageDAO {
+	return &PipelineStageDAO{db: database.DB}
+}
+
+func (dao *PipelineStageDAO) Create(ctx context.Context, stage *model.PipelineStage) (uint, error) {
+	now := int(time.Now().Unix())
+	stage.CreatedAt = now
+	stage.UpdatedAt = now
+	err := dao.db.WithContext(ctx).Create(stage).Error
+	return stage.ID, err
+}
+
+func (dao *PipelineStageDAO) FindByID(ctx context.Context, id uint) (*model.PipelineStage, error) {
+	var stage model.PipelineStage
+	err := dao.db.WithContext(ctx).Where("id = ?", id).First(&stage).Error
+	return &stage, err
+}
+
+func (dao *PipelineStageDAO) FindByPipelineID(ctx context.Context, pipelineID uint) ([]model.PipelineStage, error) {
+	var stages []model.PipelineStage
+	err := dao.db.WithContext(ctx).
+		Where("pipeline_id = ?", pipelineID).
+		Order("order_index ASC, id ASC").
+		Find(&stages).
+		Error
+	return stages, err
+}
+
+func (dao *PipelineStageDAO) Update(ctx context.Context, stage *model.PipelineStage) error {
+	stage.UpdatedAt = int(time.Now().Unix())
+	return dao.db.WithContext(ctx).Save(stage).Error
+}
+
 type MethodStepDAO struct {
 	db *gorm.DB
 }
@@ -69,6 +106,16 @@ func (dao *MethodStepDAO) FindByPipelineID(ctx context.Context, pipelineID uint)
 	var steps []model.MethodStep
 	err := dao.db.WithContext(ctx).
 		Where("pipeline_id = ?", pipelineID).
+		Order("order_index ASC, id ASC").
+		Find(&steps).
+		Error
+	return steps, err
+}
+
+func (dao *MethodStepDAO) FindByStageID(ctx context.Context, stageID uint) ([]model.MethodStep, error) {
+	var steps []model.MethodStep
+	err := dao.db.WithContext(ctx).
+		Where("stage_id = ?", stageID).
 		Order("order_index ASC, id ASC").
 		Find(&steps).
 		Error
@@ -156,6 +203,58 @@ func (dao *MethodOutputDAO) FindByStepIDs(ctx context.Context, stepIDs []uint) (
 		Find(&outputs).
 		Error
 	return outputs, err
+}
+
+type StageGeneratedConfigDAO struct {
+	db *gorm.DB
+}
+
+func NewStageGeneratedConfigDAO() *StageGeneratedConfigDAO {
+	return &StageGeneratedConfigDAO{db: database.DB}
+}
+
+func (dao *StageGeneratedConfigDAO) Create(ctx context.Context, cfg *model.StageGeneratedConfig) (uint, error) {
+	now := int(time.Now().Unix())
+	cfg.CreatedAt = now
+	cfg.UpdatedAt = now
+	err := dao.db.WithContext(ctx).Create(cfg).Error
+	return cfg.ID, err
+}
+
+func (dao *StageGeneratedConfigDAO) FindLatestByStageID(ctx context.Context, stageID uint) (*model.StageGeneratedConfig, error) {
+	var cfg model.StageGeneratedConfig
+	err := dao.db.WithContext(ctx).
+		Where("stage_id = ?", stageID).
+		Order("version DESC, id DESC").
+		First(&cfg).
+		Error
+	return &cfg, err
+}
+
+func (dao *StageGeneratedConfigDAO) FindByPipelineID(ctx context.Context, pipelineID uint) ([]model.StageGeneratedConfig, error) {
+	var configs []model.StageGeneratedConfig
+	err := dao.db.WithContext(ctx).
+		Where("pipeline_id = ?", pipelineID).
+		Order("stage_id ASC, version DESC, id DESC").
+		Find(&configs).
+		Error
+	return configs, err
+}
+
+func (dao *StageGeneratedConfigDAO) NextVersion(ctx context.Context, stageID uint) (int, error) {
+	var cfg model.StageGeneratedConfig
+	err := dao.db.WithContext(ctx).
+		Where("stage_id = ?", stageID).
+		Order("version DESC, id DESC").
+		First(&cfg).
+		Error
+	if err != nil {
+		if err == gorm.ErrRecordNotFound {
+			return 1, nil
+		}
+		return 0, err
+	}
+	return cfg.Version + 1, nil
 }
 
 type StepRunDAO struct {
