@@ -7,9 +7,10 @@ export default defineConfig({
   server: {
     host: '127.0.0.1',
     port: 5173,
+    hmr: true,
     proxy: {
       '/api': {
-        target: 'http://127.0.0.1:8502',
+        target: 'http://127.0.0.1:8501',
         changeOrigin: true,
       },
     },

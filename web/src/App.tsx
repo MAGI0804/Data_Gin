@@ -1,4 +1,4 @@
-import { FormEvent, ReactNode, useMemo, useState } from 'react'
+import { FormEvent, ReactNode, useCallback, useEffect, useState } from 'react'
 import {
   Activity,
   Database,
@@ -20,7 +20,88 @@ type ApiResult = {
   data: unknown
 }
 
+type ApiClientOptions = {
+  method?: 'GET' | 'POST'
+  body?: unknown
+  showResult?: boolean
+  silentLoading?: boolean
+}
+
+type ApiClient = (path: string, options?: ApiClientOptions) => Promise<ApiResult>
+type RefreshAction = (showResult?: boolean) => Promise<void>
 type NavKey = 'sources' | 'transform' | 'delivery' | 'runs'
+
+type SourceDefinition = {
+  id: number
+  name: string
+  code: string
+  source_type: string
+  enabled: boolean
+  source_query_key: string
+  created_at: number
+}
+
+type TransformRule = {
+  id: number
+  source_id: number
+  name: string
+  rule_type: string
+  order_index: number
+  enabled: boolean
+  created_at: number
+}
+
+type DestinationDefinition = {
+  id: number
+  name: string
+  code: string
+  destination_type: string
+  enabled: boolean
+  created_at: number
+}
+
+type DeliveryTask = {
+  id: number
+  name: string
+  source_id: number
+  clean_table: string
+  destination_id: number
+  trigger_type: string
+  cron_expr: string
+  enabled: boolean
+  created_at: number
+}
+
+type DeliveryLog = {
+  id: number
+  trace_id: string
+  run_id: number
+  business_key: string
+  http_status: number
+  success: boolean
+  error_message: string
+  sent_at: string | null
+}
+
+type PipelineRun = {
+  id: number
+  trace_id: string
+  run_type: string
+  trigger_type: string
+  source_id: number
+  destination_id: number
+  status: string
+  total_count: number
+  success_count: number
+  failed_count: number
+  started_at: string | null
+  finished_at: string | null
+}
+
+type Column<T> = {
+  label: string
+  render: (row: T) => ReactNode
+}
 
 const defaultMappingConfig = JSON.stringify(
   {
@@ -41,32 +122,114 @@ function App() {
   const [token, setToken] = useState('')
   const [result, setResult] = useState<ApiResult | null>(null)
   const [loading, setLoading] = useState(false)
+  const [refreshing, setRefreshing] = useState(false)
+  const [sources, setSources] = useState<SourceDefinition[]>([])
+  const [rules, setRules] = useState<TransformRule[]>([])
+  const [destinations, setDestinations] = useState<DestinationDefinition[]>([])
+  const [tasks, setTasks] = useState<DeliveryTask[]>([])
+  const [logs, setLogs] = useState<DeliveryLog[]>([])
+  const [runs, setRuns] = useState<PipelineRun[]>([])
 
-  const client = useMemo(() => {
-    return async (path: string, body?: unknown) => {
-      setLoading(true)
+  const client = useCallback<ApiClient>(
+    async (path, options = {}) => {
+      const method = options.method ?? 'POST'
+      if (!options.silentLoading) {
+        setLoading(true)
+      }
+
       try {
         const response = await fetch(`/api${path}`, {
-          method: 'POST',
+          method,
           headers: {
             'Content-Type': 'application/json',
             ...(token ? { Authorization: `Bearer ${token}` } : {}),
           },
-          body: body === undefined ? undefined : JSON.stringify(body),
+          body: method === 'GET' || options.body === undefined ? undefined : JSON.stringify(options.body),
         })
         const data = await response.json().catch(() => ({}))
-        setResult({ ok: response.ok, status: response.status, data })
+        const nextResult = { ok: response.ok, status: response.status, data }
+        if (options.showResult !== false) {
+          setResult(nextResult)
+        }
+        return nextResult
       } catch (error) {
-        setResult({
+        const nextResult = {
           ok: false,
           status: 0,
           data: error instanceof Error ? error.message : String(error),
-        })
+        }
+        if (options.showResult !== false) {
+          setResult(nextResult)
+        }
+        return nextResult
       } finally {
-        setLoading(false)
+        if (!options.silentLoading) {
+          setLoading(false)
+        }
       }
+    },
+    [token],
+  )
+
+  const refreshLists = useCallback<RefreshAction>(
+    async (showResult = false) => {
+      if (!token) {
+        clearLists(setSources, setRules, setDestinations, setTasks, setLogs, setRuns)
+        if (showResult) {
+          setResult({ ok: false, status: 0, data: '请先填写后端 JWT 后再刷新列表。' })
+        }
+        return
+      }
+
+      setRefreshing(true)
+      try {
+        const [sourceResult, ruleResult, destinationResult, taskResult, logResult, runResult] = await Promise.all([
+          client('/v1/sources', { method: 'GET', showResult: false, silentLoading: true }),
+          client('/v1/transform-rules', { method: 'GET', showResult: false, silentLoading: true }),
+          client('/v1/destinations', { method: 'GET', showResult: false, silentLoading: true }),
+          client('/v1/delivery-tasks', { method: 'GET', showResult: false, silentLoading: true }),
+          client('/v1/delivery-logs?limit=50', { method: 'GET', showResult: false, silentLoading: true }),
+          client('/v1/runs?limit=50', { method: 'GET', showResult: false, silentLoading: true }),
+        ])
+
+        if (sourceResult.ok) setSources(readList<SourceDefinition>(sourceResult, 'sources'))
+        if (ruleResult.ok) setRules(readList<TransformRule>(ruleResult, 'rules'))
+        if (destinationResult.ok) setDestinations(readList<DestinationDefinition>(destinationResult, 'destinations'))
+        if (taskResult.ok) setTasks(readList<DeliveryTask>(taskResult, 'tasks'))
+        if (logResult.ok) setLogs(readList<DeliveryLog>(logResult, 'logs'))
+        if (runResult.ok) setRuns(readList<PipelineRun>(runResult, 'runs'))
+
+        if (showResult) {
+          const results = [sourceResult, ruleResult, destinationResult, taskResult, logResult, runResult]
+          const failed = results.find((item) => !item.ok)
+          setResult({
+            ok: !failed,
+            status: failed?.status ?? 200,
+            data: {
+              sources: sourceResult.data,
+              rules: ruleResult.data,
+              destinations: destinationResult.data,
+              tasks: taskResult.data,
+              logs: logResult.data,
+              runs: runResult.data,
+            },
+          })
+        }
+      } finally {
+        setRefreshing(false)
+      }
+    },
+    [client, token],
+  )
+
+  useEffect(() => {
+    if (!authenticated) return
+    if (!token) {
+      clearLists(setSources, setRules, setDestinations, setTasks, setLogs, setRuns)
+      return
     }
-  }, [token])
+    void refreshLists(false)
+  }, [authenticated, refreshLists, token])
 
   function handleLoginSuccess() {
     sessionStorage.setItem('warehouse-auth', 'ok')
@@ -77,6 +240,7 @@ function App() {
     sessionStorage.removeItem('warehouse-auth')
     setAuthenticated(false)
     setResult(null)
+    clearLists(setSources, setRules, setDestinations, setTasks, setLogs, setRuns)
   }
 
   if (!authenticated) {
@@ -115,9 +279,14 @@ function App() {
                 value={token}
                 type="password"
                 autoComplete="off"
+                placeholder="粘贴后端登录 token"
                 onChange={(event) => setToken(event.target.value)}
               />
             </label>
+            <button type="button" onClick={() => refreshLists(true)} disabled={loading || refreshing}>
+              <RefreshCcw aria-hidden="true" />
+              刷新
+            </button>
             <button type="button" onClick={handleLogout}>
               <LogOut aria-hidden="true" />
               退出
@@ -127,10 +296,24 @@ function App() {
 
         <div className="content-grid">
           <section className="panel">
-            {active === 'sources' && <SourcesPanel client={client} loading={loading} />}
-            {active === 'transform' && <TransformPanel client={client} loading={loading} />}
-            {active === 'delivery' && <DeliveryPanel client={client} loading={loading} />}
-            {active === 'runs' && <RunsPanel />}
+            {active === 'sources' && (
+              <SourcesPanel client={client} loading={loading} refreshing={refreshing} sources={sources} onRefresh={refreshLists} />
+            )}
+            {active === 'transform' && (
+              <TransformPanel client={client} loading={loading} refreshing={refreshing} rules={rules} onRefresh={refreshLists} />
+            )}
+            {active === 'delivery' && (
+              <DeliveryPanel
+                client={client}
+                loading={loading}
+                refreshing={refreshing}
+                destinations={destinations}
+                tasks={tasks}
+                logs={logs}
+                onRefresh={refreshLists}
+              />
+            )}
+            {active === 'runs' && <RunsPanel refreshing={refreshing} runs={runs} onRefresh={refreshLists} />}
           </section>
 
           <aside className="result-panel" aria-live="polite">
@@ -141,7 +324,7 @@ function App() {
             {result ? (
               <pre className={result.ok ? 'result success' : 'result error'}>{JSON.stringify(result, null, 2)}</pre>
             ) : (
-              <div className="empty-state">还没有发送请求。</div>
+              <div className="empty-state">还没有发送请求。填写 JWT 后可刷新列表。</div>
             )}
           </aside>
         </div>
@@ -198,27 +381,62 @@ function LoginScreen({ onLogin }: { onLogin: () => void }) {
   )
 }
 
-function SourcesPanel({ client, loading }: { client: (path: string, body?: unknown) => Promise<void>; loading: boolean }) {
+function SourcesPanel({
+  client,
+  loading,
+  refreshing,
+  sources,
+  onRefresh,
+}: {
+  client: ApiClient
+  loading: boolean
+  refreshing: boolean
+  sources: SourceDefinition[]
+  onRefresh: RefreshAction
+}) {
   const [sourceID, setSourceID] = useState('1')
 
-  function createSource(event: FormEvent<HTMLFormElement>) {
+  async function createSource(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const form = new FormData(event.currentTarget)
-    client('/v1/sources', {
-      name: form.get('name'),
-      code: form.get('code'),
-      source_type: form.get('source_type'),
-      source_query_key: form.get('source_query_key'),
-      config_json: form.get('config_json'),
-      enabled: true,
+    const response = await client('/v1/sources', {
+      body: {
+        name: form.get('name'),
+        code: form.get('code'),
+        source_type: form.get('source_type'),
+        source_query_key: form.get('source_query_key'),
+        config_json: form.get('config_json'),
+        enabled: true,
+      },
     })
+    if (response.ok) await onRefresh(false)
+  }
+
+  async function runSourceAction(path: string) {
+    const response = await client(path)
+    if (response.ok) await onRefresh(false)
   }
 
   return (
     <>
-      <div className="panel-heading">
+      <ListHeader title="已配置数据源" count={sources.length} refreshing={refreshing} onRefresh={onRefresh} />
+      <DataTable
+        rows={sources}
+        emptyText="暂无数据源。填写 JWT 并刷新，或创建一个新的数据源。"
+        columns={[
+          { label: 'ID', render: (source) => source.id },
+          { label: '名称', render: (source) => source.name },
+          { label: '编码', render: (source) => source.code },
+          { label: '类型', render: (source) => source.source_type },
+          { label: '状态', render: (source) => <StatusBadge active={source.enabled} /> },
+          { label: '来源参数', render: (source) => source.source_query_key || '-' },
+          { label: '创建时间', render: (source) => formatUnixTime(source.created_at) },
+        ]}
+      />
+
+      <div className="panel-heading form-heading">
         <Plus aria-hidden="true" />
-        <h3>数据源配置</h3>
+        <h3>新增数据源</h3>
       </div>
       <form className="form-grid" onSubmit={createSource}>
         <Field label="名称" name="name" defaultValue="企迈 Webhook" />
@@ -247,11 +465,11 @@ function SourcesPanel({ client, loading }: { client: (path: string, body?: unkno
           数据源 ID
           <input value={sourceID} onChange={(event) => setSourceID(event.target.value)} />
         </label>
-        <button type="button" onClick={() => client(`/v1/sources/${sourceID}/test`)} disabled={loading}>
+        <button type="button" onClick={() => runSourceAction(`/v1/sources/${sourceID}/test`)} disabled={loading}>
           <RefreshCcw aria-hidden="true" />
           测试
         </button>
-        <button type="button" onClick={() => client(`/v1/sources/${sourceID}/fetch`)} disabled={loading}>
+        <button type="button" onClick={() => runSourceAction(`/v1/sources/${sourceID}/fetch`)} disabled={loading}>
           <Play aria-hidden="true" />
           拉取
         </button>
@@ -260,36 +478,73 @@ function SourcesPanel({ client, loading }: { client: (path: string, body?: unkno
   )
 }
 
-function TransformPanel({ client, loading }: { client: (path: string, body?: unknown) => Promise<void>; loading: boolean }) {
+function TransformPanel({
+  client,
+  loading,
+  refreshing,
+  rules,
+  onRefresh,
+}: {
+  client: ApiClient
+  loading: boolean
+  refreshing: boolean
+  rules: TransformRule[]
+  onRefresh: RefreshAction
+}) {
   const [rawRecordID, setRawRecordID] = useState('1')
 
-  function createRule(event: FormEvent<HTMLFormElement>) {
+  async function createRule(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const form = new FormData(event.currentTarget)
-    client('/v1/transform-rules', {
-      source_id: Number(form.get('source_id')),
-      name: form.get('name'),
-      rule_type: 'mapping',
-      order_index: Number(form.get('order_index')),
-      config_json: form.get('config_json'),
-      enabled: true,
+    const response = await client('/v1/transform-rules', {
+      body: {
+        source_id: Number(form.get('source_id')),
+        name: form.get('name'),
+        rule_type: 'mapping',
+        order_index: Number(form.get('order_index')),
+        config_json: form.get('config_json'),
+        enabled: true,
+      },
     })
+    if (response.ok) await onRefresh(false)
   }
 
   function testRule(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const form = new FormData(event.currentTarget)
     client('/v1/transform-rules/test', {
-      raw_content: JSON.parse(String(form.get('raw_content'))),
-      config_json: form.get('config_json'),
+      body: {
+        raw_content: JSON.parse(String(form.get('raw_content'))),
+        config_json: form.get('config_json'),
+      },
     })
+  }
+
+  async function retransformRecord() {
+    const response = await client(`/v1/raw-records/${rawRecordID}/retransform`)
+    if (response.ok) await onRefresh(false)
   }
 
   return (
     <>
-      <div className="panel-heading">
+      <ListHeader title="已有清洗规则" count={rules.length} refreshing={refreshing} onRefresh={onRefresh} />
+      <DataTable
+        rows={rules}
+        emptyText="暂无清洗规则。填写 JWT 并刷新，或新增映射规则。"
+        columns={[
+          { label: 'ID', render: (rule) => rule.id },
+          { label: '数据源 ID', render: (rule) => rule.source_id },
+          { label: '名称', render: (rule) => rule.name },
+          { label: '类型', render: (rule) => rule.rule_type },
+          { label: '排序', render: (rule) => rule.order_index },
+          { label: '状态', render: (rule) => <StatusBadge active={rule.enabled} /> },
+          { label: '创建时间', render: (rule) => formatUnixTime(rule.created_at) },
+        ]}
+      />
+
+      <div className="panel-heading form-heading">
         <FileJson aria-hidden="true" />
-        <h3>清洗规则</h3>
+        <h3>新增清洗规则</h3>
       </div>
       <form className="form-grid" onSubmit={createRule}>
         <Field label="数据源 ID" name="source_id" defaultValue="1" />
@@ -329,7 +584,7 @@ function TransformPanel({ client, loading }: { client: (path: string, body?: unk
           原始记录 ID
           <input value={rawRecordID} onChange={(event) => setRawRecordID(event.target.value)} />
         </label>
-        <button type="button" onClick={() => client(`/v1/raw-records/${rawRecordID}/retransform`)} disabled={loading}>
+        <button type="button" onClick={retransformRecord} disabled={loading}>
           <Play aria-hidden="true" />
           重新清洗
         </button>
@@ -338,42 +593,115 @@ function TransformPanel({ client, loading }: { client: (path: string, body?: unk
   )
 }
 
-function DeliveryPanel({ client, loading }: { client: (path: string, body?: unknown) => Promise<void>; loading: boolean }) {
+function DeliveryPanel({
+  client,
+  loading,
+  refreshing,
+  destinations,
+  tasks,
+  logs,
+  onRefresh,
+}: {
+  client: ApiClient
+  loading: boolean
+  refreshing: boolean
+  destinations: DestinationDefinition[]
+  tasks: DeliveryTask[]
+  logs: DeliveryLog[]
+  onRefresh: RefreshAction
+}) {
   const [destinationID, setDestinationID] = useState('1')
   const [taskID, setTaskID] = useState('1')
 
-  function createDestination(event: FormEvent<HTMLFormElement>) {
+  async function createDestination(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const form = new FormData(event.currentTarget)
-    client('/v1/destinations', {
-      name: form.get('name'),
-      code: form.get('code'),
-      destination_type: form.get('destination_type'),
-      config_json: form.get('config_json'),
-      enabled: true,
+    const response = await client('/v1/destinations', {
+      body: {
+        name: form.get('name'),
+        code: form.get('code'),
+        destination_type: form.get('destination_type'),
+        config_json: form.get('config_json'),
+        enabled: true,
+      },
     })
+    if (response.ok) await onRefresh(false)
   }
 
-  function createTask(event: FormEvent<HTMLFormElement>) {
+  async function createTask(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const form = new FormData(event.currentTarget)
-    client('/v1/delivery-tasks', {
-      name: form.get('name'),
-      source_id: Number(form.get('source_id')),
-      clean_table: form.get('clean_table'),
-      destination_id: Number(form.get('destination_id')),
-      trigger_type: form.get('trigger_type'),
-      cron_expr: form.get('cron_expr'),
-      payload_template: form.get('payload_template'),
-      enabled: true,
+    const response = await client('/v1/delivery-tasks', {
+      body: {
+        name: form.get('name'),
+        source_id: Number(form.get('source_id')),
+        clean_table: form.get('clean_table'),
+        destination_id: Number(form.get('destination_id')),
+        trigger_type: form.get('trigger_type'),
+        cron_expr: form.get('cron_expr'),
+        payload_template: form.get('payload_template'),
+        enabled: true,
+      },
     })
+    if (response.ok) await onRefresh(false)
+  }
+
+  async function runDeliveryAction(path: string) {
+    const response = await client(path)
+    if (response.ok) await onRefresh(false)
   }
 
   return (
     <>
-      <div className="panel-heading">
+      <div className="list-stack">
+        <ListHeader title="已配置推送目标" count={destinations.length} refreshing={refreshing} onRefresh={onRefresh} />
+        <DataTable
+          rows={destinations}
+          emptyText="暂无推送目标。"
+          columns={[
+            { label: 'ID', render: (destination) => destination.id },
+            { label: '名称', render: (destination) => destination.name },
+            { label: '编码', render: (destination) => destination.code },
+            { label: '类型', render: (destination) => destination.destination_type },
+            { label: '状态', render: (destination) => <StatusBadge active={destination.enabled} /> },
+            { label: '创建时间', render: (destination) => formatUnixTime(destination.created_at) },
+          ]}
+        />
+
+        <ListHeader title="已配置推送任务" count={tasks.length} refreshing={refreshing} onRefresh={onRefresh} />
+        <DataTable
+          rows={tasks}
+          emptyText="暂无推送任务。"
+          columns={[
+            { label: 'ID', render: (task) => task.id },
+            { label: '任务名称', render: (task) => task.name },
+            { label: '数据源', render: (task) => task.source_id },
+            { label: '清洗表', render: (task) => task.clean_table },
+            { label: '目标', render: (task) => task.destination_id },
+            { label: '触发', render: (task) => task.trigger_type },
+            { label: '状态', render: (task) => <StatusBadge active={task.enabled} /> },
+          ]}
+        />
+
+        <ListHeader title="近期推送日志" count={logs.length} refreshing={refreshing} onRefresh={onRefresh} />
+        <DataTable
+          rows={logs}
+          emptyText="暂无推送日志。执行推送任务后会显示最近 50 条。"
+          columns={[
+            { label: 'ID', render: (log) => log.id },
+            { label: 'Trace', render: (log) => shortText(log.trace_id) },
+            { label: 'Run', render: (log) => log.run_id || '-' },
+            { label: '业务键', render: (log) => log.business_key || '-' },
+            { label: 'HTTP', render: (log) => log.http_status || '-' },
+            { label: '结果', render: (log) => <StatusBadge active={log.success} activeText="成功" inactiveText="失败" /> },
+            { label: '发送时间', render: (log) => log.sent_at || '-' },
+          ]}
+        />
+      </div>
+
+      <div className="panel-heading form-heading">
         <Send aria-hidden="true" />
-        <h3>推送任务</h3>
+        <h3>新增推送配置</h3>
       </div>
       <form className="form-grid" onSubmit={createDestination}>
         <Field label="目标名称" name="name" defaultValue="HTTP 推送目标" />
@@ -424,7 +752,7 @@ function DeliveryPanel({ client, loading }: { client: (path: string, body?: unkn
           目标 ID
           <input value={destinationID} onChange={(event) => setDestinationID(event.target.value)} />
         </label>
-        <button type="button" onClick={() => client(`/v1/destinations/${destinationID}/test`)} disabled={loading}>
+        <button type="button" onClick={() => runDeliveryAction(`/v1/destinations/${destinationID}/test`)} disabled={loading}>
           <RefreshCcw aria-hidden="true" />
           测试
         </button>
@@ -432,7 +760,7 @@ function DeliveryPanel({ client, loading }: { client: (path: string, body?: unkn
           任务 ID
           <input value={taskID} onChange={(event) => setTaskID(event.target.value)} />
         </label>
-        <button type="button" onClick={() => client(`/v1/delivery-tasks/${taskID}/run`)} disabled={loading}>
+        <button type="button" onClick={() => runDeliveryAction(`/v1/delivery-tasks/${taskID}/run`)} disabled={loading}>
           <Play aria-hidden="true" />
           执行
         </button>
@@ -441,32 +769,110 @@ function DeliveryPanel({ client, loading }: { client: (path: string, body?: unkn
   )
 }
 
-function RunsPanel() {
-  const stats = [
-    ['数据源', 'source_definitions'],
-    ['原始记录', 'raw_records'],
-    ['清洗结果', 'clean_records'],
-    ['运行记录', 'pipeline_runs'],
-    ['推送日志', 'delivery_logs'],
-  ]
-
+function RunsPanel({
+  refreshing,
+  runs,
+  onRefresh,
+}: {
+  refreshing: boolean
+  runs: PipelineRun[]
+  onRefresh: RefreshAction
+}) {
   return (
     <>
-      <div className="panel-heading">
-        <Activity aria-hidden="true" />
-        <h3>运行追踪</h3>
-      </div>
-      <div className="metric-grid">
-        {stats.map(([label, table]) => (
-          <div className="metric" key={table}>
-            <span>{label}</span>
-            <strong>{table}</strong>
-          </div>
-        ))}
-      </div>
-      <div className="empty-state">运行记录和链路查询接口会在下一步后端切片中补齐。</div>
+      <ListHeader title="近期运行记录" count={runs.length} refreshing={refreshing} onRefresh={onRefresh} />
+      <DataTable
+        rows={runs}
+        emptyText="暂无运行记录。拉取、清洗或推送后会显示最近 50 条。"
+        columns={[
+          { label: 'ID', render: (run) => run.id },
+          { label: 'Trace', render: (run) => shortText(run.trace_id) },
+          { label: '类型', render: (run) => run.run_type },
+          { label: '触发', render: (run) => run.trigger_type },
+          { label: '数据源', render: (run) => run.source_id || '-' },
+          { label: '目标', render: (run) => run.destination_id || '-' },
+          { label: '状态', render: (run) => run.status },
+          { label: '数量', render: (run) => `${run.success_count}/${run.total_count}` },
+          { label: '开始时间', render: (run) => run.started_at || '-' },
+          { label: '结束时间', render: (run) => run.finished_at || '-' },
+        ]}
+      />
     </>
   )
+}
+
+function ListHeader({
+  title,
+  count,
+  refreshing,
+  onRefresh,
+}: {
+  title: string
+  count: number
+  refreshing: boolean
+  onRefresh: RefreshAction
+}) {
+  return (
+    <div className="list-header">
+      <div>
+        <h3>{title}</h3>
+        <span>{count} 条记录</span>
+      </div>
+      <button type="button" onClick={() => onRefresh(true)} disabled={refreshing}>
+        <RefreshCcw aria-hidden="true" />
+        刷新
+      </button>
+    </div>
+  )
+}
+
+function DataTable<T extends { id: number }>({
+  rows,
+  columns,
+  emptyText,
+}: {
+  rows: T[]
+  columns: Column<T>[]
+  emptyText: string
+}) {
+  if (rows.length === 0) {
+    return <div className="empty-state">{emptyText}</div>
+  }
+
+  return (
+    <div className="table-wrap">
+      <table className="data-table">
+        <thead>
+          <tr>
+            {columns.map((column) => (
+              <th key={column.label}>{column.label}</th>
+            ))}
+          </tr>
+        </thead>
+        <tbody>
+          {rows.map((row) => (
+            <tr key={row.id}>
+              {columns.map((column) => (
+                <td key={column.label}>{column.render(row)}</td>
+              ))}
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
+  )
+}
+
+function StatusBadge({
+  active,
+  activeText = '启用',
+  inactiveText = '停用',
+}: {
+  active: boolean
+  activeText?: string
+  inactiveText?: string
+}) {
+  return <span className={active ? 'status-badge active' : 'status-badge inactive'}>{active ? activeText : inactiveText}</span>
 }
 
 function Field({ label, name, defaultValue }: { label: string; name: string; defaultValue: string }) {
@@ -495,6 +901,38 @@ function NavButton({
       <span>{label}</span>
     </button>
   )
+}
+
+function readList<T>(result: ApiResult, key: string): T[] {
+  const envelope = result.data as { data?: Record<string, unknown> }
+  const value = envelope.data?.[key]
+  return Array.isArray(value) ? (value as T[]) : []
+}
+
+function clearLists(
+  setSources: (value: SourceDefinition[]) => void,
+  setRules: (value: TransformRule[]) => void,
+  setDestinations: (value: DestinationDefinition[]) => void,
+  setTasks: (value: DeliveryTask[]) => void,
+  setLogs: (value: DeliveryLog[]) => void,
+  setRuns: (value: PipelineRun[]) => void,
+) {
+  setSources([])
+  setRules([])
+  setDestinations([])
+  setTasks([])
+  setLogs([])
+  setRuns([])
+}
+
+function formatUnixTime(value: number) {
+  if (!value) return '-'
+  return new Date(value * 1000).toLocaleString('zh-CN', { hour12: false })
+}
+
+function shortText(value: string) {
+  if (!value) return '-'
+  return value.length > 14 ? `${value.slice(0, 14)}...` : value
 }
 
 function sectionTitle(key: NavKey) {
