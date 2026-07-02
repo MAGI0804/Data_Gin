@@ -28,6 +28,11 @@ func (s *LegacyTaskService) ListDefinitions(ctx context.Context) []job.LegacyTas
 	return job.LegacyTaskDefinitions()
 }
 
+func (s *LegacyTaskService) ListTransformRules(ctx context.Context) []job.LegacyTransformRuleDefinition {
+	_ = ctx
+	return job.LegacyTransformRuleDefinitions()
+}
+
 func (s *LegacyTaskService) Enqueue(ctx context.Context, code string, payload map[string]interface{}) (*LegacyTaskRunResult, error) {
 	_ = ctx
 

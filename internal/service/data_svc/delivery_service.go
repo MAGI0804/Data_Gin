@@ -60,6 +60,37 @@ func (s *DeliveryService) ListDestinations(ctx context.Context) ([]model.Destina
 	return s.destinationDAO.FindAll(ctx)
 }
 
+func (s *DeliveryService) GetDestination(ctx context.Context, id uint) (*model.DestinationDefinition, error) {
+	return s.destinationDAO.FindByID(ctx, id)
+}
+
+func (s *DeliveryService) UpdateDestination(ctx context.Context, id uint, req *requestbody.DestinationUpdateRequest) (*model.DestinationDefinition, error) {
+	if !json.Valid([]byte(req.ConfigJSON)) {
+		return nil, fmt.Errorf("config_json must be valid json")
+	}
+
+	destination, err := s.destinationDAO.FindByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+
+	enabled := true
+	if req.Enabled != nil {
+		enabled = *req.Enabled
+	}
+
+	destination.Name = req.Name
+	destination.Code = req.Code
+	destination.DestinationType = req.DestinationType
+	destination.ConfigJSON = req.ConfigJSON
+	destination.Enabled = enabled
+
+	if err := s.destinationDAO.Update(ctx, destination); err != nil {
+		return nil, err
+	}
+	return destination, nil
+}
+
 func (s *DeliveryService) TestDestination(ctx context.Context, id uint) error {
 	destination, err := s.destinationDAO.FindByID(ctx, id)
 	if err != nil {
@@ -99,6 +130,37 @@ func (s *DeliveryService) CreateDeliveryTask(ctx context.Context, req *requestbo
 
 func (s *DeliveryService) ListDeliveryTasks(ctx context.Context) ([]model.DeliveryTask, error) {
 	return s.taskDAO.FindAll(ctx)
+}
+
+func (s *DeliveryService) GetDeliveryTask(ctx context.Context, id uint) (*model.DeliveryTask, error) {
+	return s.taskDAO.FindByID(ctx, id)
+}
+
+func (s *DeliveryService) UpdateDeliveryTask(ctx context.Context, id uint, req *requestbody.DeliveryTaskUpdateRequest) (*model.DeliveryTask, error) {
+	task, err := s.taskDAO.FindByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+
+	enabled := true
+	if req.Enabled != nil {
+		enabled = *req.Enabled
+	}
+
+	task.Name = req.Name
+	task.SourceID = req.SourceID
+	task.CleanTable = req.CleanTable
+	task.DestinationID = req.DestinationID
+	task.TriggerType = req.TriggerType
+	task.CronExpr = req.CronExpr
+	task.FilterJSON = defaultJSON(req.FilterJSON, "{}")
+	task.PayloadTemplate = req.PayloadTemplate
+	task.Enabled = enabled
+
+	if err := s.taskDAO.Update(ctx, task); err != nil {
+		return nil, err
+	}
+	return task, nil
 }
 
 func (s *DeliveryService) ListDeliveryLogs(ctx context.Context, limit int) ([]model.DeliveryLog, error) {

@@ -19,3 +19,7 @@ type DeliveryTaskCreateRequest struct {
 	PayloadTemplate string `json:"payload_template"`
 	Enabled         *bool  `json:"enabled"`
 }
+
+type DestinationUpdateRequest DestinationCreateRequest
+
+type DeliveryTaskUpdateRequest DeliveryTaskCreateRequest

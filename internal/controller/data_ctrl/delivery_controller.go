@@ -32,6 +32,24 @@ func (ctrl *DeliveryController) ListDestinations(c *gin.Context) {
 	}))
 }
 
+func (ctrl *DeliveryController) GetDestination(c *gin.Context) {
+	id, err := parseUintParam(c, "id")
+	if err != nil {
+		c.JSON(400, msg.ErrResponse("无效的推送目标ID", err))
+		return
+	}
+
+	destination, err := ctrl.service.GetDestination(c.Request.Context(), id)
+	if err != nil {
+		c.JSON(500, msg.ErrResponse("查询推送目标详情失败", err))
+		return
+	}
+
+	c.JSON(200, msg.SuccessResponse("查询推送目标详情成功", &map[string]any{
+		"destination": destination,
+	}))
+}
+
 func (ctrl *DeliveryController) CreateDestination(c *gin.Context) {
 	var req requestbody.DestinationCreateRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -46,6 +64,30 @@ func (ctrl *DeliveryController) CreateDestination(c *gin.Context) {
 	}
 
 	c.JSON(200, msg.SuccessResponse("创建推送目标成功", &map[string]any{
+		"destination": destination,
+	}))
+}
+
+func (ctrl *DeliveryController) UpdateDestination(c *gin.Context) {
+	id, err := parseUintParam(c, "id")
+	if err != nil {
+		c.JSON(400, msg.ErrResponse("无效的推送目标ID", err))
+		return
+	}
+
+	var req requestbody.DestinationUpdateRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(400, msg.ErrResponse("无效的推送目标参数", err))
+		return
+	}
+
+	destination, err := ctrl.service.UpdateDestination(c.Request.Context(), id, &req)
+	if err != nil {
+		c.JSON(500, msg.ErrResponse("更新推送目标失败", err))
+		return
+	}
+
+	c.JSON(200, msg.SuccessResponse("更新推送目标成功", &map[string]any{
 		"destination": destination,
 	}))
 }
@@ -80,6 +122,24 @@ func (ctrl *DeliveryController) ListTasks(c *gin.Context) {
 	}))
 }
 
+func (ctrl *DeliveryController) GetTask(c *gin.Context) {
+	id, err := parseUintParam(c, "id")
+	if err != nil {
+		c.JSON(400, msg.ErrResponse("无效的推送任务ID", err))
+		return
+	}
+
+	task, err := ctrl.service.GetDeliveryTask(c.Request.Context(), id)
+	if err != nil {
+		c.JSON(500, msg.ErrResponse("查询推送任务详情失败", err))
+		return
+	}
+
+	c.JSON(200, msg.SuccessResponse("查询推送任务详情成功", &map[string]any{
+		"task": task,
+	}))
+}
+
 func (ctrl *DeliveryController) CreateTask(c *gin.Context) {
 	var req requestbody.DeliveryTaskCreateRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -94,6 +154,30 @@ func (ctrl *DeliveryController) CreateTask(c *gin.Context) {
 	}
 
 	c.JSON(200, msg.SuccessResponse("创建推送任务成功", &map[string]any{
+		"task": task,
+	}))
+}
+
+func (ctrl *DeliveryController) UpdateTask(c *gin.Context) {
+	id, err := parseUintParam(c, "id")
+	if err != nil {
+		c.JSON(400, msg.ErrResponse("无效的推送任务ID", err))
+		return
+	}
+
+	var req requestbody.DeliveryTaskUpdateRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(400, msg.ErrResponse("无效的推送任务参数", err))
+		return
+	}
+
+	task, err := ctrl.service.UpdateDeliveryTask(c.Request.Context(), id, &req)
+	if err != nil {
+		c.JSON(500, msg.ErrResponse("更新推送任务失败", err))
+		return
+	}
+
+	c.JSON(200, msg.SuccessResponse("更新推送任务成功", &map[string]any{
 		"task": task,
 	}))
 }

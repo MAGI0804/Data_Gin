@@ -54,6 +54,11 @@ func (dao *SourceDefinitionDAO) FindAll(ctx context.Context) ([]model.SourceDefi
 	return sources, err
 }
 
+func (dao *SourceDefinitionDAO) Update(ctx context.Context, source *model.SourceDefinition) error {
+	source.UpdatedAt = int(time.Now().Unix())
+	return dao.db.WithContext(ctx).Save(source).Error
+}
+
 func (dao *SourceDefinitionDAO) FindEnabledWithQueryKey(ctx context.Context) ([]model.SourceDefinition, error) {
 	var sources []model.SourceDefinition
 	err := dao.db.WithContext(ctx).
@@ -141,6 +146,20 @@ func (dao *TransformRuleDAO) FindAll(ctx context.Context) ([]model.TransformRule
 	return rules, err
 }
 
+func (dao *TransformRuleDAO) FindByID(ctx context.Context, id uint) (*model.TransformRule, error) {
+	var rule model.TransformRule
+	err := dao.db.WithContext(ctx).
+		Where("id = ?", id).
+		First(&rule).
+		Error
+	return &rule, err
+}
+
+func (dao *TransformRuleDAO) Update(ctx context.Context, rule *model.TransformRule) error {
+	rule.UpdatedAt = int(time.Now().Unix())
+	return dao.db.WithContext(ctx).Save(rule).Error
+}
+
 type CleanRecordDAO struct {
 	db *gorm.DB
 }
@@ -216,6 +235,11 @@ func (dao *DestinationDefinitionDAO) FindAll(ctx context.Context) ([]model.Desti
 	return destinations, err
 }
 
+func (dao *DestinationDefinitionDAO) Update(ctx context.Context, destination *model.DestinationDefinition) error {
+	destination.UpdatedAt = int(time.Now().Unix())
+	return dao.db.WithContext(ctx).Save(destination).Error
+}
+
 type DeliveryTaskDAO struct {
 	db *gorm.DB
 }
@@ -258,6 +282,11 @@ func (dao *DeliveryTaskDAO) FindAll(ctx context.Context) ([]model.DeliveryTask, 
 		Find(&tasks).
 		Error
 	return tasks, err
+}
+
+func (dao *DeliveryTaskDAO) Update(ctx context.Context, task *model.DeliveryTask) error {
+	task.UpdatedAt = int(time.Now().Unix())
+	return dao.db.WithContext(ctx).Save(task).Error
 }
 
 type DeliveryLogDAO struct {

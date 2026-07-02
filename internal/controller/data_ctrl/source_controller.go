@@ -32,6 +32,24 @@ func (ctrl *SourceController) ListSources(c *gin.Context) {
 	}))
 }
 
+func (ctrl *SourceController) GetSource(c *gin.Context) {
+	sourceID, err := parseSourceID(c)
+	if err != nil {
+		c.JSON(400, msg.ErrResponse("无效的数据源ID", err))
+		return
+	}
+
+	source, err := ctrl.service.GetSourceDefinition(c.Request.Context(), sourceID)
+	if err != nil {
+		c.JSON(500, msg.ErrResponse("查询数据源详情失败", err))
+		return
+	}
+
+	c.JSON(200, msg.SuccessResponse("查询数据源详情成功", &map[string]any{
+		"source": source,
+	}))
+}
+
 func (ctrl *SourceController) CreateSource(c *gin.Context) {
 	var req requestbody.SourceDefinitionCreateRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -46,6 +64,30 @@ func (ctrl *SourceController) CreateSource(c *gin.Context) {
 	}
 
 	c.JSON(200, msg.SuccessResponse("创建数据源成功", &map[string]any{
+		"source": source,
+	}))
+}
+
+func (ctrl *SourceController) UpdateSource(c *gin.Context) {
+	sourceID, err := parseSourceID(c)
+	if err != nil {
+		c.JSON(400, msg.ErrResponse("无效的数据源ID", err))
+		return
+	}
+
+	var req requestbody.SourceDefinitionUpdateRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(400, msg.ErrResponse("无效的数据源参数", err))
+		return
+	}
+
+	source, err := ctrl.service.UpdateSourceDefinition(c.Request.Context(), sourceID, &req)
+	if err != nil {
+		c.JSON(500, msg.ErrResponse("更新数据源失败", err))
+		return
+	}
+
+	c.JSON(200, msg.SuccessResponse("更新数据源成功", &map[string]any{
 		"source": source,
 	}))
 }

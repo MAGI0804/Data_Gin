@@ -9,6 +9,8 @@ type TransformRuleCreateRequest struct {
 	Enabled    *bool  `json:"enabled"`
 }
 
+type TransformRuleUpdateRequest TransformRuleCreateRequest
+
 type TransformRuleTestRequest struct {
 	RawContent map[string]interface{} `json:"raw_content" binding:"required"`
 	ConfigJSON string                 `json:"config_json" binding:"required"`

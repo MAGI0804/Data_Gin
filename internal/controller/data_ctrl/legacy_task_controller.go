@@ -24,6 +24,13 @@ func (ctrl *LegacyTaskController) List(c *gin.Context) {
 	}))
 }
 
+func (ctrl *LegacyTaskController) ListTransformRules(c *gin.Context) {
+	rules := ctrl.service.ListTransformRules(c.Request.Context())
+	c.JSON(200, msg.SuccessResponse("查询旧清洗规则成功", &map[string]any{
+		"rules": rules,
+	}))
+}
+
 func (ctrl *LegacyTaskController) Run(c *gin.Context) {
 	payload := map[string]interface{}{}
 	if c.Request.ContentLength > 0 {

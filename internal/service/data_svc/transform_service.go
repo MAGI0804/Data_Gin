@@ -58,6 +58,38 @@ func (s *TransformService) ListTransformRules(ctx context.Context) ([]model.Tran
 	return s.ruleDAO.FindAll(ctx)
 }
 
+func (s *TransformService) GetTransformRule(ctx context.Context, id uint) (*model.TransformRule, error) {
+	return s.ruleDAO.FindByID(ctx, id)
+}
+
+func (s *TransformService) UpdateTransformRule(ctx context.Context, id uint, req *requestbody.TransformRuleUpdateRequest) (*model.TransformRule, error) {
+	if !json.Valid([]byte(req.ConfigJSON)) {
+		return nil, fmt.Errorf("config_json must be valid json")
+	}
+
+	rule, err := s.ruleDAO.FindByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+
+	enabled := true
+	if req.Enabled != nil {
+		enabled = *req.Enabled
+	}
+
+	rule.SourceID = req.SourceID
+	rule.Name = req.Name
+	rule.RuleType = req.RuleType
+	rule.OrderIndex = req.OrderIndex
+	rule.ConfigJSON = req.ConfigJSON
+	rule.Enabled = enabled
+
+	if err := s.ruleDAO.Update(ctx, rule); err != nil {
+		return nil, err
+	}
+	return rule, nil
+}
+
 func (s *TransformService) TestMappingRule(ctx context.Context, req *requestbody.TransformRuleTestRequest) (map[string]interface{}, error) {
 	_ = ctx
 

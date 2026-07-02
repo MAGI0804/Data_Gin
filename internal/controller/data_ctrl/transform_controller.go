@@ -32,6 +32,24 @@ func (ctrl *TransformController) ListRules(c *gin.Context) {
 	}))
 }
 
+func (ctrl *TransformController) GetRule(c *gin.Context) {
+	ruleID, err := parseUintParam(c, "id")
+	if err != nil {
+		c.JSON(400, msg.ErrResponse("无效的清洗规则ID", err))
+		return
+	}
+
+	rule, err := ctrl.service.GetTransformRule(c.Request.Context(), ruleID)
+	if err != nil {
+		c.JSON(500, msg.ErrResponse("查询清洗规则详情失败", err))
+		return
+	}
+
+	c.JSON(200, msg.SuccessResponse("查询清洗规则详情成功", &map[string]any{
+		"rule": rule,
+	}))
+}
+
 func (ctrl *TransformController) CreateRule(c *gin.Context) {
 	var req requestbody.TransformRuleCreateRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -46,6 +64,30 @@ func (ctrl *TransformController) CreateRule(c *gin.Context) {
 	}
 
 	c.JSON(200, msg.SuccessResponse("创建清洗规则成功", &map[string]any{
+		"rule": rule,
+	}))
+}
+
+func (ctrl *TransformController) UpdateRule(c *gin.Context) {
+	ruleID, err := parseUintParam(c, "id")
+	if err != nil {
+		c.JSON(400, msg.ErrResponse("无效的清洗规则ID", err))
+		return
+	}
+
+	var req requestbody.TransformRuleUpdateRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(400, msg.ErrResponse("无效的清洗规则参数", err))
+		return
+	}
+
+	rule, err := ctrl.service.UpdateTransformRule(c.Request.Context(), ruleID, &req)
+	if err != nil {
+		c.JSON(500, msg.ErrResponse("更新清洗规则失败", err))
+		return
+	}
+
+	c.JSON(200, msg.SuccessResponse("更新清洗规则成功", &map[string]any{
 		"rule": rule,
 	}))
 }

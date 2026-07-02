@@ -63,6 +63,37 @@ func (s *SourceService) ListSourceDefinitions(ctx context.Context) ([]model.Sour
 	return s.sourceDAO.FindAll(ctx)
 }
 
+func (s *SourceService) GetSourceDefinition(ctx context.Context, id uint) (*model.SourceDefinition, error) {
+	return s.sourceDAO.FindByID(ctx, id)
+}
+
+func (s *SourceService) UpdateSourceDefinition(ctx context.Context, id uint, req *requestbody.SourceDefinitionUpdateRequest) (*model.SourceDefinition, error) {
+	source, err := s.sourceDAO.FindByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+
+	enabled := true
+	if req.Enabled != nil {
+		enabled = *req.Enabled
+	}
+
+	source.Name = strings.TrimSpace(req.Name)
+	source.Code = strings.TrimSpace(req.Code)
+	source.SourceType = strings.TrimSpace(req.SourceType)
+	source.Enabled = enabled
+	source.AuthType = defaultString(strings.TrimSpace(req.AuthType), "none")
+	source.ConfigJSON = defaultJSON(req.ConfigJSON, "{}")
+	source.SchemaJSON = defaultJSON(req.SchemaJSON, "{}")
+	source.DedupeKeys = defaultJSON(req.DedupeKeys, "[]")
+	source.SourceQueryKey = strings.TrimSpace(req.SourceQueryKey)
+
+	if err := s.sourceDAO.Update(ctx, source); err != nil {
+		return nil, err
+	}
+	return source, nil
+}
+
 func (s *SourceService) TestSourceDefinition(ctx context.Context, id uint) error {
 	source, err := s.sourceDAO.FindByID(ctx, id)
 	if err != nil {

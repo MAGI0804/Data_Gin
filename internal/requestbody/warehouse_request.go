@@ -11,3 +11,5 @@ type SourceDefinitionCreateRequest struct {
 	DedupeKeys     string `json:"dedupe_keys"`
 	SourceQueryKey string `json:"source_query_key" binding:"max=100"`
 }
+
+type SourceDefinitionUpdateRequest SourceDefinitionCreateRequest

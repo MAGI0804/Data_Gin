@@ -13,7 +13,9 @@ func apiData(api *gin.RouterGroup) {
 	{
 		sourceCtrl := data_ctrl.NewSourceController()
 		sourceGroup.GET("", sourceCtrl.ListSources)
+		sourceGroup.GET("/:id", sourceCtrl.GetSource)
 		sourceGroup.POST("", sourceCtrl.CreateSource)
+		sourceGroup.PUT("/:id", sourceCtrl.UpdateSource)
 		sourceGroup.POST("/:id/test", sourceCtrl.TestSource)
 		sourceGroup.POST("/:id/fetch", sourceCtrl.FetchSource)
 	}
@@ -23,7 +25,9 @@ func apiData(api *gin.RouterGroup) {
 	{
 		transformCtrl := data_ctrl.NewTransformController()
 		transformGroup.GET("", transformCtrl.ListRules)
+		transformGroup.GET("/:id", transformCtrl.GetRule)
 		transformGroup.POST("", transformCtrl.CreateRule)
+		transformGroup.PUT("/:id", transformCtrl.UpdateRule)
 		transformGroup.POST("/test", transformCtrl.TestRule)
 	}
 
@@ -39,7 +43,9 @@ func apiData(api *gin.RouterGroup) {
 	{
 		deliveryCtrl := data_ctrl.NewDeliveryController()
 		destinationGroup.GET("", deliveryCtrl.ListDestinations)
+		destinationGroup.GET("/:id", deliveryCtrl.GetDestination)
 		destinationGroup.POST("", deliveryCtrl.CreateDestination)
+		destinationGroup.PUT("/:id", deliveryCtrl.UpdateDestination)
 		destinationGroup.POST("/:id/test", deliveryCtrl.TestDestination)
 	}
 
@@ -48,7 +54,9 @@ func apiData(api *gin.RouterGroup) {
 	{
 		deliveryCtrl := data_ctrl.NewDeliveryController()
 		deliveryTaskGroup.GET("", deliveryCtrl.ListTasks)
+		deliveryTaskGroup.GET("/:id", deliveryCtrl.GetTask)
 		deliveryTaskGroup.POST("", deliveryCtrl.CreateTask)
+		deliveryTaskGroup.PUT("/:id", deliveryCtrl.UpdateTask)
 		deliveryTaskGroup.POST("/:id/run", deliveryCtrl.RunTask)
 	}
 
@@ -72,6 +80,13 @@ func apiData(api *gin.RouterGroup) {
 		legacyTaskCtrl := data_ctrl.NewLegacyTaskController()
 		legacyTaskGroup.GET("", legacyTaskCtrl.List)
 		legacyTaskGroup.POST("/:code/run", legacyTaskCtrl.Run)
+	}
+
+	legacyTransformRuleGroup := api.Group("/v1/legacy-transform-rules")
+	legacyTransformRuleGroup.Use(middleware.AuthJWT())
+	{
+		legacyTaskCtrl := data_ctrl.NewLegacyTaskController()
+		legacyTransformRuleGroup.GET("", legacyTaskCtrl.ListTransformRules)
 	}
 
 	dataGroup := api.Group("/v1/data")
