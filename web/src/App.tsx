@@ -101,6 +101,17 @@ type PipelineRun = {
   finished_at: string | null
 }
 
+type LegacyTask = {
+  code: string
+  name: string
+  category: 'fetch' | 'delivery' | 'process'
+  task_type: string
+  queue: string
+  cron_expr: string
+  description: string
+  default_payload: Record<string, unknown>
+}
+
 type Column<T> = {
   label: string
   render: (row: T) => ReactNode
@@ -132,6 +143,7 @@ function App() {
   const [tasks, setTasks] = useState<DeliveryTask[]>([])
   const [logs, setLogs] = useState<DeliveryLog[]>([])
   const [runs, setRuns] = useState<PipelineRun[]>([])
+  const [legacyTasks, setLegacyTasks] = useState<LegacyTask[]>([])
 
   const client = useCallback<ApiClient>(
     async (path, options = {}) => {
@@ -177,7 +189,7 @@ function App() {
   const refreshLists = useCallback<RefreshAction>(
     async (showResult = false) => {
       if (!token) {
-        clearLists(setSources, setRules, setDestinations, setTasks, setLogs, setRuns)
+        clearLists(setSources, setRules, setDestinations, setTasks, setLogs, setRuns, setLegacyTasks)
         if (showResult) {
           setResult({ ok: false, status: 0, data: '登录状态已失效，请重新登录。' })
         }
@@ -186,13 +198,14 @@ function App() {
 
       setRefreshing(true)
       try {
-        const [sourceResult, ruleResult, destinationResult, taskResult, logResult, runResult] = await Promise.all([
+        const [sourceResult, ruleResult, destinationResult, taskResult, logResult, runResult, legacyTaskResult] = await Promise.all([
           client('/v1/sources', { method: 'GET', showResult: false, silentLoading: true }),
           client('/v1/transform-rules', { method: 'GET', showResult: false, silentLoading: true }),
           client('/v1/destinations', { method: 'GET', showResult: false, silentLoading: true }),
           client('/v1/delivery-tasks', { method: 'GET', showResult: false, silentLoading: true }),
           client('/v1/delivery-logs?limit=50', { method: 'GET', showResult: false, silentLoading: true }),
           client('/v1/runs?limit=50', { method: 'GET', showResult: false, silentLoading: true }),
+          client('/v1/legacy-tasks', { method: 'GET', showResult: false, silentLoading: true }),
         ])
 
         if (sourceResult.ok) setSources(readList<SourceDefinition>(sourceResult, 'sources'))
@@ -201,9 +214,10 @@ function App() {
         if (taskResult.ok) setTasks(readList<DeliveryTask>(taskResult, 'tasks'))
         if (logResult.ok) setLogs(readList<DeliveryLog>(logResult, 'logs'))
         if (runResult.ok) setRuns(readList<PipelineRun>(runResult, 'runs'))
+        if (legacyTaskResult.ok) setLegacyTasks(readList<LegacyTask>(legacyTaskResult, 'tasks'))
 
         if (showResult) {
-          const results = [sourceResult, ruleResult, destinationResult, taskResult, logResult, runResult]
+          const results = [sourceResult, ruleResult, destinationResult, taskResult, logResult, runResult, legacyTaskResult]
           const failed = results.find((item) => !item.ok)
           setResult({
             ok: !failed,
@@ -215,6 +229,7 @@ function App() {
               tasks: taskResult.data,
               logs: logResult.data,
               runs: runResult.data,
+              legacy_tasks: legacyTaskResult.data,
             },
           })
         }
@@ -228,7 +243,7 @@ function App() {
   useEffect(() => {
     if (!authenticated) return
     if (!token) {
-      clearLists(setSources, setRules, setDestinations, setTasks, setLogs, setRuns)
+      clearLists(setSources, setRules, setDestinations, setTasks, setLogs, setRuns, setLegacyTasks)
       return
     }
     void refreshLists(false)
@@ -247,7 +262,7 @@ function App() {
     setToken('')
     setAuthenticated(false)
     setResult(null)
-    clearLists(setSources, setRules, setDestinations, setTasks, setLogs, setRuns)
+    clearLists(setSources, setRules, setDestinations, setTasks, setLogs, setRuns, setLegacyTasks)
   }
 
   if (!authenticated) {
@@ -295,7 +310,14 @@ function App() {
         <div className="content-grid">
           <section className="panel">
             {active === 'sources' && (
-              <SourcesPanel client={client} loading={loading} refreshing={refreshing} sources={sources} onRefresh={refreshLists} />
+              <SourcesPanel
+                client={client}
+                loading={loading}
+                refreshing={refreshing}
+                sources={sources}
+                legacyTasks={legacyTasks.filter((task) => task.category === 'fetch' || task.category === 'process')}
+                onRefresh={refreshLists}
+              />
             )}
             {active === 'transform' && (
               <TransformPanel client={client} loading={loading} refreshing={refreshing} rules={rules} onRefresh={refreshLists} />
@@ -308,6 +330,7 @@ function App() {
                 destinations={destinations}
                 tasks={tasks}
                 logs={logs}
+                legacyTasks={legacyTasks.filter((task) => task.category === 'delivery')}
                 onRefresh={refreshLists}
               />
             )}
@@ -399,12 +422,14 @@ function SourcesPanel({
   loading,
   refreshing,
   sources,
+  legacyTasks,
   onRefresh,
 }: {
   client: ApiClient
   loading: boolean
   refreshing: boolean
   sources: SourceDefinition[]
+  legacyTasks: LegacyTask[]
   onRefresh: RefreshAction
 }) {
   const [sourceID, setSourceID] = useState('1')
@@ -445,6 +470,15 @@ function SourcesPanel({
           { label: '来源参数', render: (source) => source.source_query_key || '-' },
           { label: '创建时间', render: (source) => formatUnixTime(source.created_at) },
         ]}
+      />
+
+      <ListHeader title="已迁移拉取/补数规则" count={legacyTasks.length} refreshing={refreshing} onRefresh={onRefresh} />
+      <LegacyTaskTable
+        client={client}
+        loading={loading}
+        tasks={legacyTasks}
+        emptyText="暂无迁移的拉取或补数规则。"
+        onRefresh={onRefresh}
       />
 
       <div className="panel-heading form-heading">
@@ -613,6 +647,7 @@ function DeliveryPanel({
   destinations,
   tasks,
   logs,
+  legacyTasks,
   onRefresh,
 }: {
   client: ApiClient
@@ -621,6 +656,7 @@ function DeliveryPanel({
   destinations: DestinationDefinition[]
   tasks: DeliveryTask[]
   logs: DeliveryLog[]
+  legacyTasks: LegacyTask[]
   onRefresh: RefreshAction
 }) {
   const [destinationID, setDestinationID] = useState('1')
@@ -694,6 +730,15 @@ function DeliveryPanel({
             { label: '触发', render: (task) => task.trigger_type },
             { label: '状态', render: (task) => <StatusBadge active={task.enabled} /> },
           ]}
+        />
+
+        <ListHeader title="已迁移自动推送任务" count={legacyTasks.length} refreshing={refreshing} onRefresh={onRefresh} />
+        <LegacyTaskTable
+          client={client}
+          loading={loading}
+          tasks={legacyTasks}
+          emptyText="暂无迁移的自动推送任务。"
+          onRefresh={onRefresh}
         />
 
         <ListHeader title="近期推送日志" count={logs.length} refreshing={refreshing} onRefresh={onRefresh} />
@@ -782,6 +827,59 @@ function DeliveryPanel({
   )
 }
 
+function LegacyTaskTable({
+  client,
+  loading,
+  tasks,
+  emptyText,
+  onRefresh,
+}: {
+  client: ApiClient
+  loading: boolean
+  tasks: LegacyTask[]
+  emptyText: string
+  onRefresh: RefreshAction
+}) {
+  async function runLegacyTask(task: LegacyTask) {
+    const response = await client(`/v1/legacy-tasks/${task.code}/run`, {
+      body: task.default_payload ?? {},
+    })
+    if (response.ok) await onRefresh(false)
+  }
+
+  return (
+    <DataTable
+      rows={tasks.map((task) => ({ ...task, id: task.code }))}
+      emptyText={emptyText}
+      columns={[
+        { label: '名称', render: (task) => task.name },
+        { label: '分类', render: (task) => legacyCategoryLabel(task.category) },
+        { label: '队列', render: (task) => task.queue || '-' },
+        { label: '调度', render: (task) => task.cron_expr || '手动' },
+        { label: '说明', render: (task) => <span className="muted-text">{task.description || '-'}</span> },
+        {
+          label: '执行',
+          render: (task) => {
+            const runnable = canRunLegacyTask(task)
+            return (
+              <button
+                className="table-action"
+                type="button"
+                disabled={loading || !runnable}
+                title={runnable ? '立即投递任务' : '该任务需要 raw_data_id 后才能手动执行'}
+                onClick={() => runLegacyTask(task)}
+              >
+                <Play aria-hidden="true" />
+                执行
+              </button>
+            )
+          },
+        },
+      ]}
+    />
+  )
+}
+
 function RunsPanel({
   refreshing,
   runs,
@@ -839,7 +937,7 @@ function ListHeader({
   )
 }
 
-function DataTable<T extends { id: number }>({
+function DataTable<T extends { id: number | string }>({
   rows,
   columns,
   emptyText,
@@ -945,6 +1043,7 @@ function clearLists(
   setTasks: (value: DeliveryTask[]) => void,
   setLogs: (value: DeliveryLog[]) => void,
   setRuns: (value: PipelineRun[]) => void,
+  setLegacyTasks: (value: LegacyTask[]) => void,
 ) {
   setSources([])
   setRules([])
@@ -952,6 +1051,7 @@ function clearLists(
   setTasks([])
   setLogs([])
   setRuns([])
+  setLegacyTasks([])
 }
 
 function formatUnixTime(value: number) {
@@ -962,6 +1062,23 @@ function formatUnixTime(value: number) {
 function shortText(value: string) {
   if (!value) return '-'
   return value.length > 14 ? `${value.slice(0, 14)}...` : value
+}
+
+function canRunLegacyTask(task: LegacyTask) {
+  if (task.code !== 'qimai_order_enrich') return true
+  const rawDataID = task.default_payload?.raw_data_id
+  return typeof rawDataID === 'number' && rawDataID > 0
+}
+
+function legacyCategoryLabel(category: LegacyTask['category']) {
+  switch (category) {
+    case 'fetch':
+      return '数据拉取'
+    case 'delivery':
+      return '数据推送'
+    case 'process':
+      return '补数处理'
+  }
 }
 
 function sectionTitle(key: NavKey) {

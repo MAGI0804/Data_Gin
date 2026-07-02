@@ -274,6 +274,15 @@ button svg,
   background: #f7fafb;
 }
 
+.muted-text {
+  display: inline-block;
+  max-width: 320px;
+  color: #64747e;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  vertical-align: middle;
+}
+
 .status-badge {
   display: inline-flex;
   align-items: center;
@@ -368,6 +377,13 @@ button.primary {
   border-color: #236b5d;
   background: #236b5d;
   color: #ffffff;
+}
+
+.table-action {
+  min-height: 30px;
+  border-radius: 6px;
+  font-size: 12px;
+  padding: 5px 8px;
 }
 
 .inline-actions {
