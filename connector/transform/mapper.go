@@ -18,7 +18,9 @@ type FieldRule struct {
 }
 
 type MappingConfig struct {
-	Fields []FieldRule `json:"fields"`
+	TableName        string      `json:"table_name"`
+	BusinessKeyField string      `json:"business_key_field"`
+	Fields           []FieldRule `json:"fields"`
 }
 
 func ApplyMapping(raw map[string]interface{}, cfg MappingConfig) (map[string]interface{}, error) {

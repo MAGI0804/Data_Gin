@@ -71,6 +71,15 @@ func (dao *RawRecordDAO) Create(ctx context.Context, rawRecord *model.RawRecord)
 	return rawRecord.ID, err
 }
 
+func (dao *RawRecordDAO) FindByID(ctx context.Context, id uint) (*model.RawRecord, error) {
+	var rawRecord model.RawRecord
+	err := dao.db.WithContext(ctx).
+		Where("id = ?", id).
+		First(&rawRecord).
+		Error
+	return &rawRecord, err
+}
+
 func (dao *RawRecordDAO) UpdateStatus(ctx context.Context, id uint, status, errorMessage string) error {
 	updates := map[string]interface{}{
 		"status":     status,
@@ -85,6 +94,50 @@ func (dao *RawRecordDAO) UpdateStatus(ctx context.Context, id uint, status, erro
 		Where("id = ?", id).
 		Updates(updates).
 		Error
+}
+
+type TransformRuleDAO struct {
+	db *gorm.DB
+}
+
+func NewTransformRuleDAO() *TransformRuleDAO {
+	return &TransformRuleDAO{db: database.DB}
+}
+
+func (dao *TransformRuleDAO) Create(ctx context.Context, rule *model.TransformRule) (uint, error) {
+	now := int(time.Now().Unix())
+	rule.CreatedAt = now
+	rule.UpdatedAt = now
+
+	err := dao.db.WithContext(ctx).Create(rule).Error
+	return rule.ID, err
+}
+
+func (dao *TransformRuleDAO) FindEnabledBySourceID(ctx context.Context, sourceID uint) ([]model.TransformRule, error) {
+	var rules []model.TransformRule
+	err := dao.db.WithContext(ctx).
+		Where("source_id = ? AND enabled = ?", sourceID, true).
+		Order("order_index ASC, id ASC").
+		Find(&rules).
+		Error
+	return rules, err
+}
+
+type CleanRecordDAO struct {
+	db *gorm.DB
+}
+
+func NewCleanRecordDAO() *CleanRecordDAO {
+	return &CleanRecordDAO{db: database.DB}
+}
+
+func (dao *CleanRecordDAO) Create(ctx context.Context, cleanRecord *model.CleanRecord) (uint, error) {
+	now := int(time.Now().Unix())
+	cleanRecord.CreatedAt = now
+	cleanRecord.UpdatedAt = now
+
+	err := dao.db.WithContext(ctx).Create(cleanRecord).Error
+	return cleanRecord.ID, err
 }
 
 type PipelineRunDAO struct {

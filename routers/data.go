@@ -17,6 +17,21 @@ func apiData(api *gin.RouterGroup) {
 		sourceGroup.POST("/:id/fetch", sourceCtrl.FetchSource)
 	}
 
+	transformGroup := api.Group("/v1/transform-rules")
+	transformGroup.Use(middleware.AuthJWT())
+	{
+		transformCtrl := data_ctrl.NewTransformController()
+		transformGroup.POST("", transformCtrl.CreateRule)
+		transformGroup.POST("/test", transformCtrl.TestRule)
+	}
+
+	rawRecordsGroup := api.Group("/v1/raw-records")
+	rawRecordsGroup.Use(middleware.AuthJWT())
+	{
+		transformCtrl := data_ctrl.NewTransformController()
+		rawRecordsGroup.POST("/:id/retransform", transformCtrl.RetransformRawRecord)
+	}
+
 	dataGroup := api.Group("/v1/data")
 	dataGroup.Use(middleware.AuthJWT()) // 需要认证
 	{
