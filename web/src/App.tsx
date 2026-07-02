@@ -38,7 +38,6 @@ const defaultMappingConfig = JSON.stringify(
 function App() {
   const [authenticated, setAuthenticated] = useState(() => sessionStorage.getItem('warehouse-auth') === 'ok')
   const [active, setActive] = useState<NavKey>('sources')
-  const [baseUrl, setBaseUrl] = useState('/api')
   const [token, setToken] = useState('')
   const [result, setResult] = useState<ApiResult | null>(null)
   const [loading, setLoading] = useState(false)
@@ -47,7 +46,7 @@ function App() {
     return async (path: string, body?: unknown) => {
       setLoading(true)
       try {
-        const response = await fetch(`${baseUrl}${path}`, {
+        const response = await fetch(`/api${path}`, {
           method: 'POST',
           headers: {
             'Content-Type': 'application/json',
@@ -67,7 +66,7 @@ function App() {
         setLoading(false)
       }
     }
-  }, [baseUrl, token])
+  }, [token])
 
   function handleLoginSuccess() {
     sessionStorage.setItem('warehouse-auth', 'ok')
@@ -110,10 +109,6 @@ function App() {
           </div>
           <div className="connection-panel" aria-label="接口设置">
             <Settings aria-hidden="true" />
-            <label>
-              接口地址
-              <input value={baseUrl} onChange={(event) => setBaseUrl(event.target.value)} />
-            </label>
             <label>
               JWT
               <input
