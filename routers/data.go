@@ -74,6 +74,28 @@ func apiData(api *gin.RouterGroup) {
 		runGroup.GET("", runCtrl.ListRuns)
 	}
 
+	pipelineGroup := api.Group("/v1/pipelines")
+	pipelineGroup.Use(middleware.AuthJWT())
+	{
+		pipelineCtrl := data_ctrl.NewPipelineController()
+		pipelineGroup.GET("", pipelineCtrl.ListPipelines)
+		pipelineGroup.GET("/:id", pipelineCtrl.GetPipeline)
+		pipelineGroup.POST("", pipelineCtrl.CreatePipeline)
+		pipelineGroup.PUT("/:id", pipelineCtrl.UpdatePipeline)
+		pipelineGroup.GET("/:id/steps", pipelineCtrl.ListSteps)
+		pipelineGroup.POST("/:id/steps", pipelineCtrl.CreateStep)
+		pipelineGroup.PUT("/:id/steps/:step_id", pipelineCtrl.UpdateStep)
+		pipelineGroup.GET("/:id/preview-json", pipelineCtrl.PreviewJSON)
+		pipelineGroup.POST("/:id/run", pipelineCtrl.RunPipeline)
+	}
+
+	stepRunGroup := api.Group("/v1/pipeline-runs")
+	stepRunGroup.Use(middleware.AuthJWT())
+	{
+		pipelineCtrl := data_ctrl.NewPipelineController()
+		stepRunGroup.GET("/:id/steps", pipelineCtrl.ListStepRuns)
+	}
+
 	legacyTaskGroup := api.Group("/v1/legacy-tasks")
 	legacyTaskGroup.Use(middleware.AuthJWT())
 	{
