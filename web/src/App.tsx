@@ -21,7 +21,7 @@ type ApiResult = {
 }
 
 type ApiClientOptions = {
-  method?: 'GET' | 'POST'
+  method?: 'GET' | 'POST' | 'PUT'
   body?: unknown
   showResult?: boolean
   silentLoading?: boolean
@@ -40,6 +40,10 @@ type SourceDefinition = {
   code: string
   source_type: string
   enabled: boolean
+  auth_type: string
+  config_json: string
+  schema_json: string
+  dedupe_keys: string
   source_query_key: string
   created_at: number
 }
@@ -50,6 +54,7 @@ type TransformRule = {
   name: string
   rule_type: string
   order_index: number
+  config_json: string
   enabled: boolean
   created_at: number
 }
@@ -59,6 +64,7 @@ type DestinationDefinition = {
   name: string
   code: string
   destination_type: string
+  config_json: string
   enabled: boolean
   created_at: number
 }
@@ -71,6 +77,8 @@ type DeliveryTask = {
   destination_id: number
   trigger_type: string
   cron_expr: string
+  filter_json: string
+  payload_template: string
   enabled: boolean
   created_at: number
 }
@@ -105,11 +113,34 @@ type LegacyTask = {
   code: string
   name: string
   category: 'fetch' | 'delivery' | 'process'
+  source_code: string
+  source_name: string
   task_type: string
   queue: string
   cron_expr: string
+  input_table: string
+  output_table: string
+  target_system: string
+  handler: string
   description: string
+  editable: boolean
   default_payload: Record<string, unknown>
+}
+
+type LegacyTransformRule = {
+  code: string
+  name: string
+  source_code: string
+  source_name: string
+  rule_type: string
+  trigger_mode: string
+  input_table: string
+  output_table: string
+  handler: string
+  description: string
+  editable: boolean
+  config: Record<string, unknown>
+  steps: string[]
 }
 
 type Column<T> = {
@@ -144,6 +175,7 @@ function App() {
   const [logs, setLogs] = useState<DeliveryLog[]>([])
   const [runs, setRuns] = useState<PipelineRun[]>([])
   const [legacyTasks, setLegacyTasks] = useState<LegacyTask[]>([])
+  const [legacyTransformRules, setLegacyTransformRules] = useState<LegacyTransformRule[]>([])
 
   const client = useCallback<ApiClient>(
     async (path, options = {}) => {
@@ -189,7 +221,7 @@ function App() {
   const refreshLists = useCallback<RefreshAction>(
     async (showResult = false) => {
       if (!token) {
-        clearLists(setSources, setRules, setDestinations, setTasks, setLogs, setRuns, setLegacyTasks)
+        clearLists(setSources, setRules, setDestinations, setTasks, setLogs, setRuns, setLegacyTasks, setLegacyTransformRules)
         if (showResult) {
           setResult({ ok: false, status: 0, data: '登录状态已失效，请重新登录。' })
         }
@@ -198,7 +230,16 @@ function App() {
 
       setRefreshing(true)
       try {
-        const [sourceResult, ruleResult, destinationResult, taskResult, logResult, runResult, legacyTaskResult] = await Promise.all([
+        const [
+          sourceResult,
+          ruleResult,
+          destinationResult,
+          taskResult,
+          logResult,
+          runResult,
+          legacyTaskResult,
+          legacyTransformRuleResult,
+        ] = await Promise.all([
           client('/v1/sources', { method: 'GET', showResult: false, silentLoading: true }),
           client('/v1/transform-rules', { method: 'GET', showResult: false, silentLoading: true }),
           client('/v1/destinations', { method: 'GET', showResult: false, silentLoading: true }),
@@ -206,6 +247,7 @@ function App() {
           client('/v1/delivery-logs?limit=50', { method: 'GET', showResult: false, silentLoading: true }),
           client('/v1/runs?limit=50', { method: 'GET', showResult: false, silentLoading: true }),
           client('/v1/legacy-tasks', { method: 'GET', showResult: false, silentLoading: true }),
+          client('/v1/legacy-transform-rules', { method: 'GET', showResult: false, silentLoading: true }),
         ])
 
         if (sourceResult.ok) setSources(readList<SourceDefinition>(sourceResult, 'sources'))
@@ -215,9 +257,19 @@ function App() {
         if (logResult.ok) setLogs(readList<DeliveryLog>(logResult, 'logs'))
         if (runResult.ok) setRuns(readList<PipelineRun>(runResult, 'runs'))
         if (legacyTaskResult.ok) setLegacyTasks(readList<LegacyTask>(legacyTaskResult, 'tasks'))
+        if (legacyTransformRuleResult.ok) setLegacyTransformRules(readList<LegacyTransformRule>(legacyTransformRuleResult, 'rules'))
 
         if (showResult) {
-          const results = [sourceResult, ruleResult, destinationResult, taskResult, logResult, runResult, legacyTaskResult]
+          const results = [
+            sourceResult,
+            ruleResult,
+            destinationResult,
+            taskResult,
+            logResult,
+            runResult,
+            legacyTaskResult,
+            legacyTransformRuleResult,
+          ]
           const failed = results.find((item) => !item.ok)
           setResult({
             ok: !failed,
@@ -230,6 +282,7 @@ function App() {
               logs: logResult.data,
               runs: runResult.data,
               legacy_tasks: legacyTaskResult.data,
+              legacy_transform_rules: legacyTransformRuleResult.data,
             },
           })
         }
@@ -243,7 +296,7 @@ function App() {
   useEffect(() => {
     if (!authenticated) return
     if (!token) {
-      clearLists(setSources, setRules, setDestinations, setTasks, setLogs, setRuns, setLegacyTasks)
+      clearLists(setSources, setRules, setDestinations, setTasks, setLogs, setRuns, setLegacyTasks, setLegacyTransformRules)
       return
     }
     void refreshLists(false)
@@ -262,7 +315,7 @@ function App() {
     setToken('')
     setAuthenticated(false)
     setResult(null)
-    clearLists(setSources, setRules, setDestinations, setTasks, setLogs, setRuns, setLegacyTasks)
+    clearLists(setSources, setRules, setDestinations, setTasks, setLogs, setRuns, setLegacyTasks, setLegacyTransformRules)
   }
 
   if (!authenticated) {
@@ -320,7 +373,14 @@ function App() {
               />
             )}
             {active === 'transform' && (
-              <TransformPanel client={client} loading={loading} refreshing={refreshing} rules={rules} onRefresh={refreshLists} />
+              <TransformPanel
+                client={client}
+                loading={loading}
+                refreshing={refreshing}
+                rules={rules}
+                legacyRules={legacyTransformRules}
+                onRefresh={refreshLists}
+              />
             )}
             {active === 'delivery' && (
               <DeliveryPanel
@@ -433,6 +493,7 @@ function SourcesPanel({
   onRefresh: RefreshAction
 }) {
   const [sourceID, setSourceID] = useState('1')
+  const [selectedSource, setSelectedSource] = useState<SourceDefinition | null>(null)
 
   async function createSource(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -455,6 +516,31 @@ function SourcesPanel({
     if (response.ok) await onRefresh(false)
   }
 
+  async function updateSource(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!selectedSource) return
+
+    const form = new FormData(event.currentTarget)
+    const response = await client(`/v1/sources/${selectedSource.id}`, {
+      method: 'PUT',
+      body: {
+        name: form.get('name'),
+        code: form.get('code'),
+        source_type: form.get('source_type'),
+        auth_type: form.get('auth_type'),
+        source_query_key: form.get('source_query_key'),
+        config_json: form.get('config_json'),
+        schema_json: form.get('schema_json'),
+        dedupe_keys: form.get('dedupe_keys'),
+        enabled: form.get('enabled') === 'on',
+      },
+    })
+    if (response.ok) {
+      setSelectedSource(null)
+      await onRefresh(false)
+    }
+  }
+
   return (
     <>
       <ListHeader title="已配置数据源" count={sources.length} refreshing={refreshing} onRefresh={onRefresh} />
@@ -469,8 +555,38 @@ function SourcesPanel({
           { label: '状态', render: (source) => <StatusBadge active={source.enabled} /> },
           { label: '来源参数', render: (source) => source.source_query_key || '-' },
           { label: '创建时间', render: (source) => formatUnixTime(source.created_at) },
+          {
+            label: '操作',
+            render: (source) => (
+              <button className="table-action" type="button" onClick={() => setSelectedSource(source)}>
+                详情/编辑
+              </button>
+            ),
+          },
         ]}
       />
+
+      {selectedSource && (
+        <DetailPanel title={`数据源详情：${selectedSource.name}`} onClose={() => setSelectedSource(null)}>
+          <form className="form-grid compact" key={selectedSource.id} onSubmit={updateSource}>
+            <Field label="名称" name="name" defaultValue={selectedSource.name} />
+            <Field label="编码" name="code" defaultValue={selectedSource.code} />
+            <Field label="类型" name="source_type" defaultValue={selectedSource.source_type} />
+            <Field label="认证类型" name="auth_type" defaultValue={selectedSource.auth_type || 'none'} />
+            <Field label="来源参数名" name="source_query_key" defaultValue={selectedSource.source_query_key || ''} />
+            <label className="checkbox-label">
+              <input name="enabled" type="checkbox" defaultChecked={selectedSource.enabled} />
+              启用
+            </label>
+            <JsonField label="配置 JSON" name="config_json" value={selectedSource.config_json || '{}'} rows={7} />
+            <JsonField label="Schema JSON" name="schema_json" value={selectedSource.schema_json || '{}'} rows={5} />
+            <JsonField label="去重字段 JSON" name="dedupe_keys" value={selectedSource.dedupe_keys || '[]'} rows={4} />
+            <button className="primary" disabled={loading}>
+              保存数据源
+            </button>
+          </form>
+        </DetailPanel>
+      )}
 
       <ListHeader title="已迁移拉取/补数规则" count={legacyTasks.length} refreshing={refreshing} onRefresh={onRefresh} />
       <LegacyTaskTable
@@ -530,15 +646,19 @@ function TransformPanel({
   loading,
   refreshing,
   rules,
+  legacyRules,
   onRefresh,
 }: {
   client: ApiClient
   loading: boolean
   refreshing: boolean
   rules: TransformRule[]
+  legacyRules: LegacyTransformRule[]
   onRefresh: RefreshAction
 }) {
   const [rawRecordID, setRawRecordID] = useState('1')
+  const [selectedRule, setSelectedRule] = useState<TransformRule | null>(null)
+  const [selectedLegacyRule, setSelectedLegacyRule] = useState<LegacyTransformRule | null>(null)
 
   async function createRule(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -572,6 +692,28 @@ function TransformPanel({
     if (response.ok) await onRefresh(false)
   }
 
+  async function updateRule(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!selectedRule) return
+
+    const form = new FormData(event.currentTarget)
+    const response = await client(`/v1/transform-rules/${selectedRule.id}`, {
+      method: 'PUT',
+      body: {
+        source_id: Number(form.get('source_id')),
+        name: form.get('name'),
+        rule_type: form.get('rule_type'),
+        order_index: Number(form.get('order_index')),
+        config_json: form.get('config_json'),
+        enabled: form.get('enabled') === 'on',
+      },
+    })
+    if (response.ok) {
+      setSelectedRule(null)
+      await onRefresh(false)
+    }
+  }
+
   return (
     <>
       <ListHeader title="已有清洗规则" count={rules.length} refreshing={refreshing} onRefresh={onRefresh} />
@@ -586,8 +728,77 @@ function TransformPanel({
           { label: '排序', render: (rule) => rule.order_index },
           { label: '状态', render: (rule) => <StatusBadge active={rule.enabled} /> },
           { label: '创建时间', render: (rule) => formatUnixTime(rule.created_at) },
+          {
+            label: '操作',
+            render: (rule) => (
+              <button className="table-action" type="button" onClick={() => setSelectedRule(rule)}>
+                详情/编辑
+              </button>
+            ),
+          },
         ]}
       />
+
+      {selectedRule && (
+        <DetailPanel title={`清洗规则详情：${selectedRule.name}`} onClose={() => setSelectedRule(null)}>
+          <form className="form-grid compact" key={selectedRule.id} onSubmit={updateRule}>
+            <Field label="数据源 ID" name="source_id" defaultValue={String(selectedRule.source_id)} />
+            <Field label="规则名称" name="name" defaultValue={selectedRule.name} />
+            <Field label="规则类型" name="rule_type" defaultValue={selectedRule.rule_type} />
+            <Field label="排序" name="order_index" defaultValue={String(selectedRule.order_index)} />
+            <label className="checkbox-label">
+              <input name="enabled" type="checkbox" defaultChecked={selectedRule.enabled} />
+              启用
+            </label>
+            <JsonField label="配置 JSON" name="config_json" value={selectedRule.config_json || '{}'} rows={12} />
+            <button className="primary" disabled={loading}>
+              保存清洗规则
+            </button>
+          </form>
+        </DetailPanel>
+      )}
+
+      <ListHeader title="已迁移旧清洗规则" count={legacyRules.length} refreshing={refreshing} onRefresh={onRefresh} />
+      <DataTable
+        rows={legacyRules.map((rule) => ({ ...rule, id: rule.code }))}
+        emptyText="暂无迁移的旧清洗规则。"
+        columns={[
+          { label: '名称', render: (rule) => rule.name },
+          { label: '来源', render: (rule) => `${rule.source_name || '-'} / ${rule.source_code || '-'}` },
+          { label: '类型', render: (rule) => rule.rule_type },
+          { label: '触发', render: (rule) => rule.trigger_mode },
+          { label: '输入', render: (rule) => rule.input_table || '-' },
+          { label: '输出', render: (rule) => rule.output_table || '-' },
+          { label: 'Handler', render: (rule) => <span className="muted-text">{rule.handler}</span> },
+          {
+            label: '操作',
+            render: (rule) => (
+              <button className="table-action" type="button" onClick={() => setSelectedLegacyRule(rule)}>
+                详情/编辑
+              </button>
+            ),
+          },
+        ]}
+      />
+
+      {selectedLegacyRule && (
+        <DetailPanel title={`旧清洗规则详情：${selectedLegacyRule.name}`} onClose={() => setSelectedLegacyRule(null)}>
+          <div className="detail-grid">
+            <MetaItem label="来源" value={`${selectedLegacyRule.source_name} / ${selectedLegacyRule.source_code}`} />
+            <MetaItem label="触发方式" value={selectedLegacyRule.trigger_mode} />
+            <MetaItem label="输入" value={selectedLegacyRule.input_table} />
+            <MetaItem label="输出" value={selectedLegacyRule.output_table} />
+            <MetaItem label="Handler" value={selectedLegacyRule.handler} />
+            <MetaItem label="说明" value={selectedLegacyRule.description} />
+          </div>
+          <div className="step-list">
+            {selectedLegacyRule.steps.map((step) => (
+              <span key={step}>{step}</span>
+            ))}
+          </div>
+          <JsonField label="规则配置 JSON" name="legacy_rule_config" value={jsonText(selectedLegacyRule.config)} rows={10} />
+        </DetailPanel>
+      )}
 
       <div className="panel-heading form-heading">
         <FileJson aria-hidden="true" />
@@ -661,6 +872,8 @@ function DeliveryPanel({
 }) {
   const [destinationID, setDestinationID] = useState('1')
   const [taskID, setTaskID] = useState('1')
+  const [selectedDestination, setSelectedDestination] = useState<DestinationDefinition | null>(null)
+  const [selectedTask, setSelectedTask] = useState<DeliveryTask | null>(null)
 
   async function createDestination(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -700,6 +913,52 @@ function DeliveryPanel({
     if (response.ok) await onRefresh(false)
   }
 
+  async function updateDestination(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!selectedDestination) return
+
+    const form = new FormData(event.currentTarget)
+    const response = await client(`/v1/destinations/${selectedDestination.id}`, {
+      method: 'PUT',
+      body: {
+        name: form.get('name'),
+        code: form.get('code'),
+        destination_type: form.get('destination_type'),
+        config_json: form.get('config_json'),
+        enabled: form.get('enabled') === 'on',
+      },
+    })
+    if (response.ok) {
+      setSelectedDestination(null)
+      await onRefresh(false)
+    }
+  }
+
+  async function updateTask(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!selectedTask) return
+
+    const form = new FormData(event.currentTarget)
+    const response = await client(`/v1/delivery-tasks/${selectedTask.id}`, {
+      method: 'PUT',
+      body: {
+        name: form.get('name'),
+        source_id: Number(form.get('source_id')),
+        clean_table: form.get('clean_table'),
+        destination_id: Number(form.get('destination_id')),
+        trigger_type: form.get('trigger_type'),
+        cron_expr: form.get('cron_expr'),
+        filter_json: form.get('filter_json'),
+        payload_template: form.get('payload_template'),
+        enabled: form.get('enabled') === 'on',
+      },
+    })
+    if (response.ok) {
+      setSelectedTask(null)
+      await onRefresh(false)
+    }
+  }
+
   return (
     <>
       <div className="list-stack">
@@ -714,8 +973,34 @@ function DeliveryPanel({
             { label: '类型', render: (destination) => destination.destination_type },
             { label: '状态', render: (destination) => <StatusBadge active={destination.enabled} /> },
             { label: '创建时间', render: (destination) => formatUnixTime(destination.created_at) },
+            {
+              label: '操作',
+              render: (destination) => (
+                <button className="table-action" type="button" onClick={() => setSelectedDestination(destination)}>
+                  详情/编辑
+                </button>
+              ),
+            },
           ]}
         />
+
+        {selectedDestination && (
+          <DetailPanel title={`推送目标详情：${selectedDestination.name}`} onClose={() => setSelectedDestination(null)}>
+            <form className="form-grid compact" key={selectedDestination.id} onSubmit={updateDestination}>
+              <Field label="目标名称" name="name" defaultValue={selectedDestination.name} />
+              <Field label="目标编码" name="code" defaultValue={selectedDestination.code} />
+              <Field label="类型" name="destination_type" defaultValue={selectedDestination.destination_type} />
+              <label className="checkbox-label">
+                <input name="enabled" type="checkbox" defaultChecked={selectedDestination.enabled} />
+                启用
+              </label>
+              <JsonField label="配置 JSON" name="config_json" value={selectedDestination.config_json || '{}'} rows={8} />
+              <button className="primary" disabled={loading}>
+                保存推送目标
+              </button>
+            </form>
+          </DetailPanel>
+        )}
 
         <ListHeader title="已配置推送任务" count={tasks.length} refreshing={refreshing} onRefresh={onRefresh} />
         <DataTable
@@ -728,9 +1013,43 @@ function DeliveryPanel({
             { label: '清洗表', render: (task) => task.clean_table },
             { label: '目标', render: (task) => task.destination_id },
             { label: '触发', render: (task) => task.trigger_type },
+            { label: 'Cron', render: (task) => task.cron_expr || '-' },
             { label: '状态', render: (task) => <StatusBadge active={task.enabled} /> },
+            {
+              label: '操作',
+              render: (task) => (
+                <button className="table-action" type="button" onClick={() => setSelectedTask(task)}>
+                  详情/编辑
+                </button>
+              ),
+            },
           ]}
         />
+
+        {selectedTask && (
+          <DetailPanel title={`推送任务详情：${selectedTask.name}`} onClose={() => setSelectedTask(null)}>
+            <form className="form-grid compact" key={selectedTask.id} onSubmit={updateTask}>
+              <Field label="任务名称" name="name" defaultValue={selectedTask.name} />
+              <Field label="数据源 ID" name="source_id" defaultValue={String(selectedTask.source_id)} />
+              <Field label="清洗表" name="clean_table" defaultValue={selectedTask.clean_table} />
+              <Field label="目标 ID" name="destination_id" defaultValue={String(selectedTask.destination_id)} />
+              <Field label="触发方式" name="trigger_type" defaultValue={selectedTask.trigger_type} />
+              <Field label="Cron" name="cron_expr" defaultValue={selectedTask.cron_expr || ''} />
+              <label className="checkbox-label">
+                <input name="enabled" type="checkbox" defaultChecked={selectedTask.enabled} />
+                启用
+              </label>
+              <JsonField label="过滤条件 JSON" name="filter_json" value={selectedTask.filter_json || '{}'} rows={5} />
+              <label className="wide">
+                报文模板
+                <textarea name="payload_template" defaultValue={selectedTask.payload_template || ''} rows={8} />
+              </label>
+              <button className="primary" disabled={loading}>
+                保存推送任务
+              </button>
+            </form>
+          </DetailPanel>
+        )}
 
         <ListHeader title="已迁移自动推送任务" count={legacyTasks.length} refreshing={refreshing} onRefresh={onRefresh} />
         <LegacyTaskTable
@@ -840,43 +1159,90 @@ function LegacyTaskTable({
   emptyText: string
   onRefresh: RefreshAction
 }) {
-  async function runLegacyTask(task: LegacyTask) {
+  const [selectedTask, setSelectedTask] = useState<LegacyTask | null>(null)
+  const [payloadText, setPayloadText] = useState('{}')
+
+  function openLegacyTask(task: LegacyTask) {
+    setSelectedTask(task)
+    setPayloadText(jsonText(task.default_payload ?? {}))
+  }
+
+  async function runLegacyTask(task: LegacyTask, payload = task.default_payload) {
     const response = await client(`/v1/legacy-tasks/${task.code}/run`, {
-      body: task.default_payload ?? {},
+      body: payload ?? {},
     })
     if (response.ok) await onRefresh(false)
   }
 
   return (
-    <DataTable
-      rows={tasks.map((task) => ({ ...task, id: task.code }))}
-      emptyText={emptyText}
-      columns={[
-        { label: '名称', render: (task) => task.name },
-        { label: '分类', render: (task) => legacyCategoryLabel(task.category) },
-        { label: '队列', render: (task) => task.queue || '-' },
-        { label: '调度', render: (task) => task.cron_expr || '手动' },
-        { label: '说明', render: (task) => <span className="muted-text">{task.description || '-'}</span> },
-        {
-          label: '执行',
-          render: (task) => {
-            const runnable = canRunLegacyTask(task)
-            return (
-              <button
-                className="table-action"
-                type="button"
-                disabled={loading || !runnable}
-                title={runnable ? '立即投递任务' : '该任务需要 raw_data_id 后才能手动执行'}
-                onClick={() => runLegacyTask(task)}
-              >
-                <Play aria-hidden="true" />
-                执行
-              </button>
-            )
+    <>
+      <DataTable
+        rows={tasks.map((task) => ({ ...task, id: task.code }))}
+        emptyText={emptyText}
+        columns={[
+          { label: '名称', render: (task) => task.name },
+          { label: '来源', render: (task) => `${task.source_name || '-'} / ${task.source_code || '-'}` },
+          { label: '分类', render: (task) => legacyCategoryLabel(task.category) },
+          { label: '队列', render: (task) => task.queue || '-' },
+          { label: '调度', render: (task) => task.cron_expr || '手动' },
+          { label: '输入', render: (task) => task.input_table || '-' },
+          { label: '输出', render: (task) => task.output_table || '-' },
+          { label: '目标', render: (task) => task.target_system || '-' },
+          { label: 'Handler', render: (task) => <span className="muted-text">{task.handler || '-'}</span> },
+          {
+            label: '操作',
+            render: (task) => (
+              <div className="row-actions">
+                <button className="table-action" type="button" onClick={() => openLegacyTask(task)}>
+                  详情/编辑
+                </button>
+                <button
+                  className="table-action"
+                  type="button"
+                  disabled={loading || !canRunLegacyTask(task)}
+                  title={canRunLegacyTask(task) ? '立即投递任务' : '该任务需要 raw_data_id 后才能手动执行'}
+                  onClick={() => runLegacyTask(task)}
+                >
+                  <Play aria-hidden="true" />
+                  执行
+                </button>
+              </div>
+            ),
           },
-        },
-      ]}
-    />
+        ]}
+      />
+
+      {selectedTask && (
+        <DetailPanel title={`迁移任务详情：${selectedTask.name}`} onClose={() => setSelectedTask(null)}>
+          <div className="detail-grid">
+            <MetaItem label="来源" value={`${selectedTask.source_name} / ${selectedTask.source_code}`} />
+            <MetaItem label="任务类型" value={selectedTask.task_type} />
+            <MetaItem label="队列" value={selectedTask.queue} />
+            <MetaItem label="调度" value={selectedTask.cron_expr || '手动'} />
+            <MetaItem label="输入" value={selectedTask.input_table} />
+            <MetaItem label="输出" value={selectedTask.output_table} />
+            <MetaItem label="目标系统" value={selectedTask.target_system || '-'} />
+            <MetaItem label="Handler" value={selectedTask.handler || '-'} />
+            <MetaItem label="说明" value={selectedTask.description || '-'} />
+          </div>
+          <label className="wide">
+            运行参数 JSON
+            <textarea value={payloadText} onChange={(event) => setPayloadText(event.target.value)} rows={8} />
+          </label>
+          <div className="inline-actions compact-actions">
+            <button
+              className="primary"
+              type="button"
+              disabled={loading}
+              onClick={() => runLegacyTask(selectedTask, parseJSONPayload(payloadText))}
+            >
+              <Play aria-hidden="true" />
+              使用当前参数执行
+            </button>
+          </div>
+        </DetailPanel>
+      )}
+    </>
   )
 }
 
@@ -934,6 +1300,46 @@ function ListHeader({
         刷新
       </button>
     </div>
+  )
+}
+
+function DetailPanel({
+  title,
+  children,
+  onClose,
+}: {
+  title: string
+  children: ReactNode
+  onClose: () => void
+}) {
+  return (
+    <section className="detail-panel">
+      <div className="detail-header">
+        <h3>{title}</h3>
+        <button type="button" onClick={onClose}>
+          关闭
+        </button>
+      </div>
+      {children}
+    </section>
+  )
+}
+
+function MetaItem({ label, value }: { label: string; value: ReactNode }) {
+  return (
+    <div className="meta-item">
+      <span>{label}</span>
+      <strong>{value || '-'}</strong>
+    </div>
+  )
+}
+
+function JsonField({ label, name, value, rows }: { label: string; name: string; value: string; rows: number }) {
+  return (
+    <label className="wide">
+      {label}
+      <textarea name={name} defaultValue={formatJSONText(value)} rows={rows} />
+    </label>
   )
 }
 
@@ -1044,6 +1450,7 @@ function clearLists(
   setLogs: (value: DeliveryLog[]) => void,
   setRuns: (value: PipelineRun[]) => void,
   setLegacyTasks: (value: LegacyTask[]) => void,
+  setLegacyTransformRules: (value: LegacyTransformRule[]) => void,
 ) {
   setSources([])
   setRules([])
@@ -1052,6 +1459,7 @@ function clearLists(
   setLogs([])
   setRuns([])
   setLegacyTasks([])
+  setLegacyTransformRules([])
 }
 
 function formatUnixTime(value: number) {
@@ -1062,6 +1470,28 @@ function formatUnixTime(value: number) {
 function shortText(value: string) {
   if (!value) return '-'
   return value.length > 14 ? `${value.slice(0, 14)}...` : value
+}
+
+function jsonText(value: unknown) {
+  return JSON.stringify(value ?? {}, null, 2)
+}
+
+function formatJSONText(value: string) {
+  if (!value) return '{}'
+  try {
+    return JSON.stringify(JSON.parse(value), null, 2)
+  } catch {
+    return value
+  }
+}
+
+function parseJSONPayload(value: string) {
+  try {
+    const parsed = JSON.parse(value)
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : {}
+  } catch {
+    return {}
+  }
 }
 
 function canRunLegacyTask(task: LegacyTask) {
