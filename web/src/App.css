@@ -6,6 +6,66 @@
   color: #172026;
 }
 
+.login-shell {
+  display: grid;
+  min-height: 100vh;
+  place-items: center;
+  background: #f4f6f7;
+  padding: 20px;
+}
+
+.login-panel {
+  width: min(420px, 100%);
+  border: 1px solid #d8dee4;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 24px;
+}
+
+.login-title {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.login-title svg {
+  width: 32px;
+  height: 32px;
+  color: #236b5d;
+}
+
+.login-title h1 {
+  margin: 0;
+  font-size: 22px;
+  line-height: 1.2;
+}
+
+.login-title p {
+  margin: 5px 0 0;
+  color: #64747e;
+  font-size: 13px;
+}
+
+.login-form {
+  display: grid;
+  gap: 12px;
+}
+
+.login-form button.primary {
+  width: 100%;
+  margin-top: 4px;
+}
+
+.login-error {
+  border: 1px solid #f1bf98;
+  border-radius: 8px;
+  background: #fff3e6;
+  color: #5f3100;
+  font-size: 13px;
+  padding: 9px 10px;
+}
+
 .sidebar {
   border-right: 1px solid #d8dee4;
   background: #11191f;
