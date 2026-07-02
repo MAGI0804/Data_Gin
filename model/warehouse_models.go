@@ -83,6 +83,24 @@ func (CleanRecord) TableName() string {
 	return "clean_records"
 }
 
+// TransformRule 通用清洗规则。
+type TransformRule struct {
+	*BaseModel
+
+	SourceID   uint   `gorm:"column:source_id;not null;index" json:"source_id"`
+	Name       string `gorm:"column:name;size:100;not null" json:"name"`
+	RuleType   string `gorm:"column:rule_type;type:enum('mapping','http_enrich','db_enrich','script','validator');not null;index" json:"rule_type"`
+	OrderIndex int    `gorm:"column:order_index;default:0;index" json:"order_index"`
+	ConfigJSON string `gorm:"column:config_json;type:json;not null" json:"config_json"`
+	Enabled    bool   `gorm:"column:enabled;default:true;index" json:"enabled"`
+
+	*CommonTimestampsField
+}
+
+func (TransformRule) TableName() string {
+	return "transform_rules"
+}
+
 // PipelineRun 接收、清洗、推送运行记录。
 type PipelineRun struct {
 	*BaseModel

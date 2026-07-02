@@ -101,6 +101,7 @@ func autoMigrateTables() {
 		&model.RawRecord{},            //通用原始记录表
 		&model.CleanTableDefinition{}, //清洗表配置表
 		&model.CleanRecord{},          //通用清洗记录表
+		&model.TransformRule{},        //清洗规则表
 		&model.PipelineRun{},          //运行记录表
 		&model.DeliveryLog{},          //推送日志表
 	)
