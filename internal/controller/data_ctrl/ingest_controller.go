@@ -167,21 +167,16 @@ func (ctrl *IngestController) RawIngestData(c *gin.Context) {
 	logger.Info("Request sent to service", zap.Any("req", req))
 
 	// 调用服务处理数据，传递客户端IP
-	result, err := ctrl.service.RawIngestData(c.Request.Context(), &req, c.ClientIP())
+	_, err = ctrl.service.RawIngestData(c.Request.Context(), &req, c.ClientIP())
 	if err != nil {
 		c.JSON(500, msg.ErrResponse("原始数据接收失败", err))
 		return
 	}
 
-	// 构建响应数据
-	data := map[string]any{
-		"request_id":     result.RequestID,
-		"status":         "accepted",
-		"accepted_count": result.AcceptedCount,
-		"failed_count":   result.FailedCount,
-		"message":        "原始数据接收成功，已进入处理队列",
-	}
-
 	// 返回成功响应
-	c.JSON(200, msg.SuccessResponse("原始数据接收成功", &data))
+	c.JSON(200, gin.H{
+		"status":  true,
+		"code":    0,
+		"message": "ok",
+	})
 }

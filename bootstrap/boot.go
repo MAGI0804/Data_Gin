@@ -34,4 +34,7 @@ func Initialize() {
 	// 开启异步任务
 	setupQueueJob()
 
+	// 启动定时任务调度器
+	setupScheduler()
+
 }

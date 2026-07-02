@@ -26,6 +26,7 @@ func apiData(api *gin.RouterGroup) {
 
 		// 数据查询
 		dataGroup.GET("/raw", dataCtrl.QueryController.GetRawData)
+		dataGroup.POST("/raw/list", dataCtrl.QueryController.GetRawDataList)
 		dataGroup.GET("/processed", dataCtrl.QueryController.GetProcessedData)
 		dataGroup.GET("/statistics", dataCtrl.QueryController.GetStatistics)
 	}

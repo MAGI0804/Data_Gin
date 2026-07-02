@@ -1,0 +1,45 @@
+version: '3.8'
+
+services:
+  app:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: gin-biz-web-api
+    ports:
+      - "443:443"
+      - "8501:8501"
+    volumes:
+      - ./storage:/app/storage
+      - ./app.log:/app/app.log
+      - ./etc/config.yaml:/app/etc/config.yaml:ro
+    environment:
+      - TZ=Asia/Shanghai
+      - ENV=${ENV:-docker}
+      - DEBUG=${DEBUG:-false}
+      - APP_URL=${APP_URL:-https://shop-test.youlankids.com}
+      - APP_PORT=${APP_PORT:-8501}
+      - GIN_MODE=${GIN_MODE:-release}
+      - SSL_ENABLED=${SSL_ENABLED:-true}
+      - SSL_DOMAIN=${SSL_DOMAIN:-shop-test.youlankids.com}
+      - SSL_PORT=${SSL_PORT:-443}
+      - DB_HOST=${DB_HOST:-rm-uf623nc5tc2icc2u9uo.mysql.rds.aliyuncs.com}
+      - DB_PORT=${DB_PORT:-3306}
+      - DB_DATABASE=${DB_DATABASE:-wechat_member}
+      - DB_USERNAME=${DB_USERNAME:-youlansy}
+      - DB_PASSWORD=${DB_PASSWORD:-Allblu2022#}
+      - REDIS_HOST=${REDIS_HOST:-host.docker.internal}
+      - REDIS_PORT=${REDIS_PORT:-6379}
+      - REDIS_USERNAME=${REDIS_USERNAME:-}
+      - REDIS_PASSWORD=${REDIS_PASSWORD:-Youlan20250416}
+    restart: unless-stopped
+    cap_add:
+      - NET_BIND_SERVICE
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - gin-network
+
+networks:
+  gin-network:
+    driver: bridge

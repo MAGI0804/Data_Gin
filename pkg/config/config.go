@@ -4,6 +4,9 @@
 package config
 
 import (
+	"os"
+	"regexp"
+
 	"github.com/fsnotify/fsnotify"
 	"github.com/spf13/cast"
 	"github.com/spf13/viper"
@@ -21,6 +24,42 @@ type CfgFunc func() map[string]interface{}
 
 // CfgFuncS 先将预定义配置信息加载到此字典中，再通过 LoadConfig() 方法获取配置文件中的信息进行覆写
 var CfgFuncS map[string]CfgFunc
+
+// envVarPattern matches ${VAR} or ${VAR:-default}
+var envVarPattern = regexp.MustCompile(`\$\{([A-Za-z_][A-Za-z0-9_]*)(?::-([^}]*))?\}`)
+
+// expandEnvVars recursively expands environment variable references in a string
+func expandEnvVars(s string) string {
+	return envVarPattern.ReplaceAllStringFunc(s, func(match string) string {
+		parts := envVarPattern.FindStringSubmatch(match)
+		if len(parts) < 3 {
+			return match
+		}
+		envVar := parts[1]
+		defaultVal := parts[2]
+
+		if val, exists := os.LookupEnv(envVar); exists {
+			return val
+		}
+		return defaultVal
+	})
+}
+
+// expandEnvVarsInMap expands environment variables in a map[string]interface{}
+func expandEnvVarsInMap(m map[string]interface{}) map[string]interface{} {
+	result := make(map[string]interface{})
+	for k, v := range m {
+		switch val := v.(type) {
+		case string:
+			result[k] = expandEnvVars(val)
+		case map[string]interface{}:
+			result[k] = expandEnvVarsInMap(val)
+		default:
+			result[k] = val
+		}
+	}
+	return result
+}
 
 // NewConfig 初始化 viper
 func NewConfig(env string, configs ...string) {
@@ -62,6 +101,13 @@ func NewConfig(env string, configs ...string) {
 
 	// 将读取的配置文件信息覆写自定义配置
 	LoadConfig()
+
+	// 展开配置文件中的环境变量
+	allSettings := vp.AllSettings()
+	expanded := expandEnvVarsInMap(allSettings)
+	for k, v := range expanded {
+		vp.Set(k, v)
+	}
 
 	WatchConfigurationChange()
 }

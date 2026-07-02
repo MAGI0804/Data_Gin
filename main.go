@@ -44,6 +44,7 @@ func registerChildrenCmd() {
 		cmd.GenerateCmd,  // 代码生成命令
 		cmd.MakeCmd,      // 快速创建文件命令
 		cmd.MigrateCmd,   // 数据库迁移命令
+		cmd.BackfillCmd,  // 数据补拉命令（有赞订单/退款）
 	)
 }
 

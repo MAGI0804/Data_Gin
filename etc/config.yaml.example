@@ -1,50 +1,110 @@
 App:
-  Name: gin-biz-web-api # 项目名称，会在缓存中用到
-  Env: local # 当前项目运行环境
-  Debug: true # 只有开启 debug 模式时，日志记录才会有换行且高亮
-  Url: http://localhost:8501 # http 服务的访问地址
-  Port: 8501 # 默认的 HTTP 监听端口
-  GinRunMode: debug # 设置 gin 框架的运行模式
-  ContextTimeout: 60 # 上下文超时时间，单位：s
+  Name: gin-biz-web-api
+  Env: ${ENV:-local}
+  Debug: ${DEBUG:-true}
+  Url: ${APP_URL:-http://localhost:8501}
+  Port: ${APP_PORT:-8501}
+  GinRunMode: ${GIN_MODE:-debug}
+  ContextTimeout: 60
+  SSL:
+    Enabled: ${SSL_ENABLED:-false}
+    Domain: ${SSL_DOMAIN:-your-domain.com}
+    CertFile: ssl/cert.pem
+    KeyFile: ssl/key.pem
+    Port: ${SSL_PORT:-443}
 Log:
   Type: daily
   MaxAge: 7
   MaxSize: 64
 JWT:
-  Key: zBqYyQrPNaIUsnRhsGtHLivjqiMjBVLS # 加密 key
-  ExpireTime: 120 # jwt 过期时间，单位：min
-  MaxRefreshTime: 86400 # 允许刷新时间，单位：min
+  Key: ${JWT_KEY:-your-jwt-secret-key}
+  ExpireTime: 120
+  MaxRefreshTime: 86400
 Email:
-  Host: smtp.qq.com
-  Port: 465
-  UserName: 123@qq.com
-  Password: xxx
-  FromAddress: 123@qq.com
-  FromName: alex
+  Host: ${EMAIL_HOST:-smtp.example.com}
+  Port: ${EMAIL_PORT:-465}
+  UserName: ${EMAIL_USERNAME:-}
+  Password: ${EMAIL_PASSWORD:-}
+  FromAddress: ${EMAIL_FROM_ADDRESS:-}
+  FromName: ${EMAIL_FROM_NAME:-}
 DB:
   Driver: mysql
-  Host: mysql8_0_19
-  Port: 3306
-  Database: gin_biz_web_api
-  Username: root
-  Password: 123456
+  Host: ${DB_HOST:-127.0.0.1}
+  Port: ${DB_PORT:-3306}
+  Database: ${DB_DATABASE:-your_database}
+  Username: ${DB_USERNAME:-your_username}
+  Password: ${DB_PASSWORD:-your_password}
   Charset: utf8mb4
-Redis: # redis 相关配置
-  Host: redis_6_2_6
-  Port: 6379
-  Username:
-  Password:
+Redis:
+  Host: ${REDIS_HOST:-127.0.0.1}
+  Port: ${REDIS_PORT:-6379}
+  Username: ${REDIS_USERNAME:-}
+  Password: ${REDIS_PASSWORD:-}
   DB: 0
-Cache: # 缓存相关配置，默认使用的也是 redis 驱动
-  Host: redis_6_2_6
-  Port: 6379
-  Username:
-  Password:
-  DB: 1 # 建议将缓存存储位置和业务 redis 存储位置区分开来
+Cache:
+  Host: ${REDIS_HOST:-127.0.0.1}
+  Port: ${REDIS_PORT:-6379}
+  Username: ${REDIS_USERNAME:-}
+  Password: ${REDIS_PASSWORD:-}
+  DB: 1
 QueueJob:
   Redis:
-    Host: redis_6_2_6
-    Port: 6379
-    Username:
-    Password:
-    DB: 2
+    Host: ${REDIS_HOST:-127.0.0.1}
+    Port: ${REDIS_PORT:-6379}
+    Username: ${REDIS_USERNAME:-}
+    Password: ${REDIS_PASSWORD:-}
+    DB: 0
+
+Youzan:
+  ClientID: ${YOUZAN_CLIENT_ID:-}
+  ClientSecret: ${YOUZAN_CLIENT_SECRET:-}
+  GrantID: ${YOUZAN_GRANT_ID:-}
+  TokenURL: ${YOUZAN_TOKEN_URL:-https://open.youzanyun.com/auth/token}
+  OrdersURL: ${YOUZAN_ORDERS_URL:-https://open.youzanyun.com/api/youzan.trades.sold.get/4.0.4}
+  ValueCardURL: ${YOUZAN_VALUE_CARD_URL:-https://open.youzanyun.com/api/youzan.cardvoucher.valuecard.pay.rcd.bypub.search/3.0.1}
+  RefundURL: ${YOUZAN_REFUND_URL:-https://open.youzanyun.com/api/youzan.trade.refund.search/3.0.1}
+  NodeKdtID: ${YOUZAN_NODE_KDT_ID:-0}
+
+DingTalk:
+  Default:
+    Token: ${DINGTALK_DEFAULT_TOKEN:-}
+    Secret: ${DINGTALK_DEFAULT_SECRET:-}
+  Xian:
+    Token: ${DINGTALK_XIAN_TOKEN:-}
+    Secret: ${DINGTALK_XIAN_SECRET:-}
+
+Xian:
+  AppSecret: ${XIAN_APP_SECRET:-}
+  ShopID: ${XIAN_SHOP_ID:-}
+  ShopName: ${XIAN_SHOP_NAME:-}
+  URL: ${XIAN_URL:-}
+  Sync:
+    ShopCode: ${XIAN_SYNC_SHOP_CODE:-}
+    Status: ${XIAN_SYNC_STATUS:-70}
+
+HengLong:
+  SalesAPIURL: ${HENGLONG_SALES_API_URL:-https://wlkpos.hanglung.com.cn:8280/HLD/salestrans.asmx}
+  Username: ${HENGLONG_USERNAME:-}
+  Password: ${HENGLONG_PASSWORD:-}
+  LicenseKey: ${HENGLONG_LICENSE_KEY:-}
+  StoreCode: ${HENGLONG_STORE_CODE:-}
+  TillID: ${HENGLONG_TILL_ID:-01}
+  MallItemCode: ${HENGLONG_MALL_ITEM_CODE:-}
+  MallID: ${HENGLONG_MALL_ID:-}
+  Cashier: ${HENGLONG_CASHIER:-}
+  PLUCode: ${HENGLONG_PLU_CODE:-}
+  RefundStoreCode: ${HENGLONG_REFUND_STORE_CODE:-}
+  RefundMallItemCode: ${HENGLONG_REFUND_MALL_ITEM_CODE:-}
+  Sync:
+    ShopCode: ${HENGLONG_SYNC_SHOP_CODE:-}
+    Status: ${HENGLONG_SYNC_STATUS:-70}
+    StoreCode: ${HENGLONG_SYNC_STORE_CODE:-}
+    MallItemCode: ${HENGLONG_SYNC_MALL_ITEM_CODE:-}
+
+Qimai:
+  OpenID: ${QIMAI_OPEN_ID:-}
+  GrantCode: ${QIMAI_GRANT_CODE:-}
+  OpenKey: ${QIMAI_OPEN_KEY:-}
+  Nonce: ${QIMAI_NONCE:-11886}
+  OrderDetailURL: ${QIMAI_ORDER_DETAIL_URL:-https://openapi.qmai.cn/v3/order/getDetail}
+  BusinessRecordURL: ${QIMAI_BUSINESS_RECORD_URL:-https://openapi.qmai.cn/v3/dataone/finance/summary/businessRecord}

@@ -160,3 +160,47 @@ func (ctrl *QueryController) GetStatistics(c *gin.Context) {
 	// 返回成功响应
 	c.JSON(200, msg.SuccessResponse("查询成功", &data))
 }
+
+// GetRawDataList 查询原始数据列表（分页）
+// @Summary 查询原始数据列表
+// @Description 查询原始数据列表，支持分页、source筛选、创建时间范围筛选
+// @Tags 数据查询
+// @Accept json
+// @Produce json
+// @Param data body requestbody.RawDataListQueryRequest true "查询参数"
+// @Success 200 {object} msg.Response
+// @Failure 400 {object} msg.ErrResponseST
+// @Failure 500 {object} msg.ErrResponseST
+// @Router /api/v1/data/raw/list [post]
+func (ctrl *QueryController) GetRawDataList(c *gin.Context) {
+	// 解析查询参数
+	var req requestbody.RawDataListQueryRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(400, msg.ErrResponse("无效的请求参数", err))
+		return
+	}
+
+	// 设置默认值
+	if req.Page <= 0 {
+		req.Page = 1
+	}
+	if req.PageSize <= 0 {
+		req.PageSize = 20
+	}
+
+	// 调用服务查询数据
+	result, err := ctrl.service.GetRawDataList(c.Request.Context(), req.Page, req.PageSize, req.Source, req.StartTime, req.EndTime)
+	if err != nil {
+		c.JSON(500, msg.ErrResponse("查询原始数据列表失败", err))
+		return
+	}
+
+	// 返回成功响应
+	c.JSON(200, msg.SuccessResponse("查询成功", &map[string]any{
+		"list":        result.List,
+		"total":       result.Total,
+		"page":        result.Page,
+		"page_size":   result.PageSize,
+		"total_pages": result.TotalPages,
+	}))
+}

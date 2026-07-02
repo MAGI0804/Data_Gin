@@ -47,9 +47,9 @@ func setupDBMySQL() {
 		charset := config.GetString(cfgPrefix + "charset")
 
 		// 构建 dsn 信息。DSN 全称为 Data Source Name，表示【数据源信息】
-		// user:pass@tcp(127.0.0.1:3306)/dbname?charset=utf8mb4&parseTime=True&loc=Local
+		// user:pass@tcp(127.0.0.1:3306)/dbname?charset=utf8mb4&parseTime=True&loc=Asia%2FShanghai
 		dsn := fmt.Sprintf(
-			"%s:%s@tcp(%s:%s)/%s?charset=%s&parseTime=True&loc=Local",
+			"%s:%s@tcp(%s:%s)/%s?charset=%s&parseTime=True&loc=Asia%%2FShanghai",
 			username, password, host, port, db, charset)
 
 		var dbConfig gorm.Dialector
@@ -88,13 +88,15 @@ func autoMigrateTables() {
 
 	// 迁移数据存储相关表
 	err := db.AutoMigrate(
-		&model.User{},           // 用户表
-		&model.DataSource{},     // 数据源配置表
-		&model.RawData{},        // 原始数据表
-		&model.ProcessedData{},  // 处理结果表
-		&model.DataStatistics{}, // 数据统计表
-		&model.ProcessedData{},  //企迈订单表
-		&model.TokenData{},      //验证信息表
+		&model.User{},               // 用户表
+		&model.DataSource{},         // 数据源配置表
+		&model.RawData{},            // 原始数据表
+		&model.ProcessedData{},      // 处理结果表
+		&model.DataStatistics{},     // 数据统计表
+		&model.QIMAI_ORDER_DATA{},   //企迈订单表
+		&model.TokenData{},          //验证信息表
+		&model.YOUZAN_ORDER_DATA{},  //有赞订单表
+		&model.YOUZAN_RETURN_DATA{}, //有赞退款订单表
 	)
 
 	if err != nil {
