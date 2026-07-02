@@ -9,6 +9,15 @@ type PipelineCreateRequest struct {
 
 type PipelineUpdateRequest PipelineCreateRequest
 
+type PipelineStageCreateRequest struct {
+	StageType  string `json:"stage_type" binding:"required,max=50"`
+	Name       string `json:"name" binding:"required,max=100"`
+	OrderIndex int    `json:"order_index"`
+	Enabled    *bool  `json:"enabled"`
+}
+
+type PipelineStageUpdateRequest PipelineStageCreateRequest
+
 type MethodParamRequest struct {
 	Location    string `json:"location" binding:"required,max=50"`
 	Name        string `json:"name" binding:"required,max=100"`
@@ -31,6 +40,7 @@ type MethodOutputRequest struct {
 }
 
 type MethodStepCreateRequest struct {
+	StageID        uint                  `json:"stage_id"`
 	Code           string                `json:"code" binding:"required,max=100"`
 	Name           string                `json:"name" binding:"required,max=100"`
 	MethodType     string                `json:"method_type" binding:"required,max=50"`

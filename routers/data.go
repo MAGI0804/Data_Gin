@@ -82,11 +82,24 @@ func apiData(api *gin.RouterGroup) {
 		pipelineGroup.GET("/:id", pipelineCtrl.GetPipeline)
 		pipelineGroup.POST("", pipelineCtrl.CreatePipeline)
 		pipelineGroup.PUT("/:id", pipelineCtrl.UpdatePipeline)
+		pipelineGroup.GET("/:id/stages", pipelineCtrl.ListStages)
+		pipelineGroup.POST("/:id/stages", pipelineCtrl.CreateStage)
 		pipelineGroup.GET("/:id/steps", pipelineCtrl.ListSteps)
 		pipelineGroup.POST("/:id/steps", pipelineCtrl.CreateStep)
 		pipelineGroup.PUT("/:id/steps/:step_id", pipelineCtrl.UpdateStep)
 		pipelineGroup.GET("/:id/preview-json", pipelineCtrl.PreviewJSON)
 		pipelineGroup.POST("/:id/run", pipelineCtrl.RunPipeline)
+	}
+
+	pipelineStageGroup := api.Group("/v1/pipeline-stages")
+	pipelineStageGroup.Use(middleware.AuthJWT())
+	{
+		pipelineCtrl := data_ctrl.NewPipelineController()
+		pipelineStageGroup.PUT("/:stage_id", pipelineCtrl.UpdateStage)
+		pipelineStageGroup.POST("/:stage_id/steps", pipelineCtrl.CreateStageStep)
+		pipelineStageGroup.PUT("/:stage_id/steps/:step_id", pipelineCtrl.UpdateStep)
+		pipelineStageGroup.POST("/:stage_id/generate-config", pipelineCtrl.GenerateStageConfig)
+		pipelineStageGroup.POST("/:stage_id/publish-config", pipelineCtrl.PublishStageConfig)
 	}
 
 	stepRunGroup := api.Group("/v1/pipeline-runs")

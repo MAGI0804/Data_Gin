@@ -22,9 +22,11 @@ import (
 
 type PipelineService struct {
 	pipelineDAO    *data_dao.PipelineDefinitionDAO
+	stageDAO       *data_dao.PipelineStageDAO
 	stepDAO        *data_dao.MethodStepDAO
 	paramDAO       *data_dao.MethodParamDAO
 	outputDAO      *data_dao.MethodOutputDAO
+	stageConfigDAO *data_dao.StageGeneratedConfigDAO
 	stepRunDAO     *data_dao.StepRunDAO
 	pipelineRunDAO *data_dao.PipelineRunDAO
 }
@@ -32,12 +34,20 @@ type PipelineService struct {
 func NewPipelineService() *PipelineService {
 	return &PipelineService{
 		pipelineDAO:    data_dao.NewPipelineDefinitionDAO(),
+		stageDAO:       data_dao.NewPipelineStageDAO(),
 		stepDAO:        data_dao.NewMethodStepDAO(),
 		paramDAO:       data_dao.NewMethodParamDAO(),
 		outputDAO:      data_dao.NewMethodOutputDAO(),
+		stageConfigDAO: data_dao.NewStageGeneratedConfigDAO(),
 		stepRunDAO:     data_dao.NewStepRunDAO(),
 		pipelineRunDAO: data_dao.NewPipelineRunDAO(),
 	}
+}
+
+type PipelineStageDetail struct {
+	Stage           model.PipelineStage         `json:"stage"`
+	Steps           []MethodStepDetail          `json:"steps"`
+	GeneratedConfig *model.StageGeneratedConfig `json:"generated_config"`
 }
 
 type MethodStepDetail struct {
@@ -48,6 +58,7 @@ type MethodStepDetail struct {
 
 type PipelineDetail struct {
 	Pipeline model.PipelineDefinition `json:"pipeline"`
+	Stages   []PipelineStageDetail    `json:"stages"`
 	Steps    []MethodStepDetail       `json:"steps"`
 }
 
@@ -63,7 +74,13 @@ func (s *PipelineService) CreatePipeline(ctx context.Context, req *requestbody.P
 		Enabled:     enabled,
 	}
 	_, err := s.pipelineDAO.Create(ctx, pipeline)
-	return pipeline, err
+	if err != nil {
+		return nil, err
+	}
+	if err := s.ensureDefaultStages(ctx, pipeline.ID); err != nil {
+		return nil, err
+	}
+	return pipeline, nil
 }
 
 func (s *PipelineService) ListPipelines(ctx context.Context) ([]model.PipelineDefinition, error) {
@@ -79,7 +96,11 @@ func (s *PipelineService) GetPipeline(ctx context.Context, id uint) (*PipelineDe
 	if err != nil {
 		return nil, err
 	}
-	return &PipelineDetail{Pipeline: *pipeline, Steps: steps}, nil
+	stages, err := s.GetPipelineStages(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	return &PipelineDetail{Pipeline: *pipeline, Stages: stages, Steps: steps}, nil
 }
 
 func (s *PipelineService) UpdatePipeline(ctx context.Context, id uint, req *requestbody.PipelineUpdateRequest) (*model.PipelineDefinition, error) {
@@ -99,7 +120,27 @@ func (s *PipelineService) UpdatePipeline(ctx context.Context, id uint, req *requ
 }
 
 func (s *PipelineService) CreateStep(ctx context.Context, pipelineID uint, req *requestbody.MethodStepCreateRequest) (*MethodStepDetail, error) {
-	step, params, outputs, err := s.buildStepModel(pipelineID, req)
+	stageID := req.StageID
+	if stageID == 0 {
+		stage, err := s.findDefaultStageForMethod(ctx, pipelineID, req.MethodType)
+		if err != nil {
+			return nil, err
+		}
+		stageID = stage.ID
+	}
+	return s.CreateStepInStage(ctx, stageID, req)
+}
+
+func (s *PipelineService) CreateStepInStage(ctx context.Context, stageID uint, req *requestbody.MethodStepCreateRequest) (*MethodStepDetail, error) {
+	stage, err := s.stageDAO.FindByID(ctx, stageID)
+	if err != nil {
+		return nil, err
+	}
+	if err := validateStageMethodType(stage.StageType, req.MethodType); err != nil {
+		return nil, err
+	}
+
+	step, params, outputs, err := s.buildStepModel(stage.PipelineID, stage.ID, req)
 	if err != nil {
 		return nil, err
 	}
@@ -121,7 +162,20 @@ func (s *PipelineService) UpdateStep(ctx context.Context, stepID uint, req *requ
 	if err != nil {
 		return nil, err
 	}
-	step, params, outputs, err := s.buildStepModel(current.PipelineID, (*requestbody.MethodStepCreateRequest)(req))
+	stageID := current.StageID
+	if req.StageID != 0 {
+		stageID = req.StageID
+	}
+	if stageID != 0 {
+		stage, err := s.stageDAO.FindByID(ctx, stageID)
+		if err != nil {
+			return nil, err
+		}
+		if err := validateStageMethodType(stage.StageType, req.MethodType); err != nil {
+			return nil, err
+		}
+	}
+	step, params, outputs, err := s.buildStepModel(current.PipelineID, stageID, (*requestbody.MethodStepCreateRequest)(req))
 	if err != nil {
 		return nil, err
 	}
@@ -139,13 +193,14 @@ func (s *PipelineService) UpdateStep(ctx context.Context, stepID uint, req *requ
 	return s.GetStep(ctx, step.ID)
 }
 
-func (s *PipelineService) buildStepModel(pipelineID uint, req *requestbody.MethodStepCreateRequest) (*model.MethodStep, []model.MethodParam, []model.MethodOutput, error) {
+func (s *PipelineService) buildStepModel(pipelineID, stageID uint, req *requestbody.MethodStepCreateRequest) (*model.MethodStep, []model.MethodParam, []model.MethodOutput, error) {
 	enabled := true
 	if req.Enabled != nil {
 		enabled = *req.Enabled
 	}
 	step := &model.MethodStep{
 		PipelineID:     pipelineID,
+		StageID:        stageID,
 		Code:           strings.TrimSpace(req.Code),
 		Name:           strings.TrimSpace(req.Name),
 		MethodType:     strings.TrimSpace(req.MethodType),
@@ -161,6 +216,82 @@ func (s *PipelineService) buildStepModel(pipelineID uint, req *requestbody.Metho
 	}
 	step.GeneratedConfigJSON = generated
 	return step, params, outputs, nil
+}
+
+func (s *PipelineService) CreateStage(ctx context.Context, pipelineID uint, req *requestbody.PipelineStageCreateRequest) (*model.PipelineStage, error) {
+	enabled := true
+	if req.Enabled != nil {
+		enabled = *req.Enabled
+	}
+	stage := &model.PipelineStage{
+		PipelineID: pipelineID,
+		StageType:  strings.TrimSpace(req.StageType),
+		Name:       strings.TrimSpace(req.Name),
+		OrderIndex: req.OrderIndex,
+		Enabled:    enabled,
+	}
+	if _, err := s.stageDAO.Create(ctx, stage); err != nil {
+		return nil, err
+	}
+	return stage, nil
+}
+
+func (s *PipelineService) UpdateStage(ctx context.Context, stageID uint, req *requestbody.PipelineStageUpdateRequest) (*model.PipelineStage, error) {
+	stage, err := s.stageDAO.FindByID(ctx, stageID)
+	if err != nil {
+		return nil, err
+	}
+	enabled := true
+	if req.Enabled != nil {
+		enabled = *req.Enabled
+	}
+	stage.StageType = strings.TrimSpace(req.StageType)
+	stage.Name = strings.TrimSpace(req.Name)
+	stage.OrderIndex = req.OrderIndex
+	stage.Enabled = enabled
+	return stage, s.stageDAO.Update(ctx, stage)
+}
+
+func (s *PipelineService) GetPipelineStages(ctx context.Context, pipelineID uint) ([]PipelineStageDetail, error) {
+	if err := s.ensureDefaultStages(ctx, pipelineID); err != nil {
+		return nil, err
+	}
+	stages, err := s.stageDAO.FindByPipelineID(ctx, pipelineID)
+	if err != nil {
+		return nil, err
+	}
+	stepDetails, err := s.GetPipelineSteps(ctx, pipelineID)
+	if err != nil {
+		return nil, err
+	}
+	stepsByStage := map[uint][]MethodStepDetail{}
+	for _, step := range stepDetails {
+		stepsByStage[step.Step.StageID] = append(stepsByStage[step.Step.StageID], step)
+	}
+	configs, err := s.stageConfigDAO.FindByPipelineID(ctx, pipelineID)
+	if err != nil {
+		return nil, err
+	}
+	latestConfigByStage := map[uint]model.StageGeneratedConfig{}
+	for _, cfg := range configs {
+		if _, ok := latestConfigByStage[cfg.StageID]; !ok {
+			latestConfigByStage[cfg.StageID] = cfg
+		}
+	}
+	details := make([]PipelineStageDetail, 0, len(stages))
+	for _, stage := range stages {
+		var cfgPtr *model.StageGeneratedConfig
+		if cfg, ok := latestConfigByStage[stage.ID]; ok {
+			cfgCopy := cfg
+			cfgPtr = &cfgCopy
+		}
+		details = append(details, PipelineStageDetail{
+			Stage:           stage,
+			Steps:           stepsByStage[stage.ID],
+			GeneratedConfig: cfgPtr,
+		})
+	}
+	return details, nil
 }
 
 func (s *PipelineService) GetPipelineSteps(ctx context.Context, pipelineID uint) ([]MethodStepDetail, error) {
@@ -223,6 +354,14 @@ func (s *PipelineService) PreviewPipelineJSON(ctx context.Context, pipelineID ui
 	if err != nil {
 		return nil, err
 	}
+	stages := make([]map[string]interface{}, 0, len(detail.Stages))
+	for _, stage := range detail.Stages {
+		stageConfig, err := buildStageGeneratedConfigMap(stage.Stage, stage.Steps)
+		if err != nil {
+			return nil, err
+		}
+		stages = append(stages, stageConfig)
+	}
 	steps := make([]map[string]interface{}, 0, len(detail.Steps))
 	for _, step := range detail.Steps {
 		cfg, err := BuildGeneratedStepConfigMap(MethodStepDefinition{Step: step.Step, Params: step.Params, Outputs: step.Outputs})
@@ -231,7 +370,62 @@ func (s *PipelineService) PreviewPipelineJSON(ctx context.Context, pipelineID ui
 		}
 		steps = append(steps, cfg)
 	}
-	return map[string]interface{}{"pipeline": detail.Pipeline, "steps": steps}, nil
+	return map[string]interface{}{"pipeline": detail.Pipeline, "stages": stages, "steps": steps}, nil
+}
+
+func (s *PipelineService) GenerateStageConfig(ctx context.Context, stageID uint) (*model.StageGeneratedConfig, error) {
+	stage, err := s.stageDAO.FindByID(ctx, stageID)
+	if err != nil {
+		return nil, err
+	}
+	steps, err := s.GetStageSteps(ctx, stageID)
+	if err != nil {
+		return nil, err
+	}
+	configMap, err := buildStageGeneratedConfigMap(*stage, steps)
+	if err != nil {
+		return nil, err
+	}
+	configJSON, err := json.Marshal(configMap)
+	if err != nil {
+		return nil, err
+	}
+	version, err := s.stageConfigDAO.NextVersion(ctx, stageID)
+	if err != nil {
+		return nil, err
+	}
+	cfg := &model.StageGeneratedConfig{
+		PipelineID:          stage.PipelineID,
+		StageID:             stage.ID,
+		StageType:           stage.StageType,
+		GeneratedConfigJSON: string(configJSON),
+		TargetRefType:       targetRefTypeForStage(stage.StageType),
+		Version:             version,
+	}
+	_, err = s.stageConfigDAO.Create(ctx, cfg)
+	return cfg, err
+}
+
+func (s *PipelineService) PublishStageConfig(ctx context.Context, stageID uint) (*model.StageGeneratedConfig, error) {
+	cfg, err := s.stageConfigDAO.FindLatestByStageID(ctx, stageID)
+	if err != nil {
+		cfg, err = s.GenerateStageConfig(ctx, stageID)
+		if err != nil {
+			return nil, err
+		}
+	}
+	if cfg.TargetRefType == "" {
+		cfg.TargetRefType = targetRefTypeForStage(cfg.StageType)
+	}
+	return cfg, nil
+}
+
+func (s *PipelineService) GetStageSteps(ctx context.Context, stageID uint) ([]MethodStepDetail, error) {
+	steps, err := s.stepDAO.FindByStageID(ctx, stageID)
+	if err != nil {
+		return nil, err
+	}
+	return s.hydrateStepDetails(ctx, steps)
 }
 
 type PipelineRunResult struct {
@@ -638,4 +832,127 @@ func outputsFromRequest(items []requestbody.MethodOutputRequest) []model.MethodO
 		})
 	}
 	return outputs
+}
+
+func (s *PipelineService) ensureDefaultStages(ctx context.Context, pipelineID uint) error {
+	stages, err := s.stageDAO.FindByPipelineID(ctx, pipelineID)
+	if err != nil {
+		return err
+	}
+	if len(stages) > 0 {
+		return nil
+	}
+	for _, stage := range defaultPipelineStages(pipelineID) {
+		if _, err := s.stageDAO.Create(ctx, &stage); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *PipelineService) findDefaultStageForMethod(ctx context.Context, pipelineID uint, methodType string) (*model.PipelineStage, error) {
+	if err := s.ensureDefaultStages(ctx, pipelineID); err != nil {
+		return nil, err
+	}
+	stageType := defaultStageTypeForMethod(methodType)
+	stages, err := s.stageDAO.FindByPipelineID(ctx, pipelineID)
+	if err != nil {
+		return nil, err
+	}
+	for _, stage := range stages {
+		if stage.StageType == stageType {
+			return &stage, nil
+		}
+	}
+	return nil, fmt.Errorf("default stage %q not found for pipeline %d", stageType, pipelineID)
+}
+
+func defaultPipelineStages(pipelineID uint) []model.PipelineStage {
+	return []model.PipelineStage{
+		{PipelineID: pipelineID, StageType: "fetch", Name: "数据获取", OrderIndex: 1, Enabled: true},
+		{PipelineID: pipelineID, StageType: "process", Name: "数据处理", OrderIndex: 2, Enabled: true},
+		{PipelineID: pipelineID, StageType: "push", Name: "数据推送", OrderIndex: 3, Enabled: true},
+		{PipelineID: pipelineID, StageType: "log", Name: "日志记录", OrderIndex: 4, Enabled: true},
+	}
+}
+
+func defaultStageTypeForMethod(methodType string) string {
+	switch methodType {
+	case "request", "extract":
+		return "fetch"
+	case "delivery":
+		return "push"
+	case "log":
+		return "log"
+	default:
+		return "process"
+	}
+}
+
+func validateStageMethodType(stageType, methodType string) error {
+	allowed := map[string]map[string]bool{
+		"fetch": {
+			"request":  true,
+			"extract":  true,
+			"db_query": true,
+		},
+		"process": {
+			"mapping":  true,
+			"validate": true,
+			"db_query": true,
+			"db_write": true,
+			"template": true,
+			"request":  true,
+		},
+		"push": {
+			"template": true,
+			"delivery": true,
+			"request":  true,
+		},
+		"log": {
+			"log":      true,
+			"db_write": true,
+			"delivery": true,
+		},
+	}
+	if allowed[stageType] == nil {
+		return fmt.Errorf("unsupported stage_type %q", stageType)
+	}
+	if !allowed[stageType][methodType] {
+		return fmt.Errorf("method_type %q is not allowed in stage_type %q", methodType, stageType)
+	}
+	return nil
+}
+
+func buildStageGeneratedConfigMap(stage model.PipelineStage, steps []MethodStepDetail) (map[string]interface{}, error) {
+	stepConfigs := make([]map[string]interface{}, 0, len(steps))
+	for _, step := range steps {
+		cfg, err := BuildGeneratedStepConfigMap(MethodStepDefinition{Step: step.Step, Params: step.Params, Outputs: step.Outputs})
+		if err != nil {
+			return nil, err
+		}
+		stepConfigs = append(stepConfigs, cfg)
+	}
+	return map[string]interface{}{
+		"stage_id":        stage.ID,
+		"stage_type":      stage.StageType,
+		"stage_name":      stage.Name,
+		"target_ref_type": targetRefTypeForStage(stage.StageType),
+		"steps":           stepConfigs,
+	}, nil
+}
+
+func targetRefTypeForStage(stageType string) string {
+	switch stageType {
+	case "fetch":
+		return "source_definition"
+	case "process":
+		return "transform_rule"
+	case "push":
+		return "destination_delivery_task"
+	case "log":
+		return "pipeline_step_log"
+	default:
+		return ""
+	}
 }

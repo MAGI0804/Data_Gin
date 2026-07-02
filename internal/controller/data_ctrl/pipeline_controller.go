@@ -74,6 +74,58 @@ func (ctrl *PipelineController) UpdatePipeline(c *gin.Context) {
 	c.JSON(200, msg.SuccessResponse("更新流水线成功", &map[string]any{"pipeline": pipeline}))
 }
 
+func (ctrl *PipelineController) ListStages(c *gin.Context) {
+	id, err := parsePipelineID(c)
+	if err != nil {
+		c.JSON(400, msg.ErrResponse("无效的流水线ID", err))
+		return
+	}
+	stages, err := ctrl.service.GetPipelineStages(c.Request.Context(), id)
+	if err != nil {
+		c.JSON(500, msg.ErrResponse("查询流水线阶段失败", err))
+		return
+	}
+	c.JSON(200, msg.SuccessResponse("查询流水线阶段成功", &map[string]any{"stages": stages}))
+}
+
+func (ctrl *PipelineController) CreateStage(c *gin.Context) {
+	id, err := parsePipelineID(c)
+	if err != nil {
+		c.JSON(400, msg.ErrResponse("无效的流水线ID", err))
+		return
+	}
+	var req requestbody.PipelineStageCreateRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(400, msg.ErrResponse("无效的流水线阶段参数", err))
+		return
+	}
+	stage, err := ctrl.service.CreateStage(c.Request.Context(), id, &req)
+	if err != nil {
+		c.JSON(500, msg.ErrResponse("创建流水线阶段失败", err))
+		return
+	}
+	c.JSON(200, msg.SuccessResponse("创建流水线阶段成功", &map[string]any{"stage": stage}))
+}
+
+func (ctrl *PipelineController) UpdateStage(c *gin.Context) {
+	stageID, err := parseStageID(c)
+	if err != nil {
+		c.JSON(400, msg.ErrResponse("无效的流水线阶段ID", err))
+		return
+	}
+	var req requestbody.PipelineStageUpdateRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(400, msg.ErrResponse("无效的流水线阶段参数", err))
+		return
+	}
+	stage, err := ctrl.service.UpdateStage(c.Request.Context(), stageID, &req)
+	if err != nil {
+		c.JSON(500, msg.ErrResponse("更新流水线阶段失败", err))
+		return
+	}
+	c.JSON(200, msg.SuccessResponse("更新流水线阶段成功", &map[string]any{"stage": stage}))
+}
+
 func (ctrl *PipelineController) ListSteps(c *gin.Context) {
 	id, err := parsePipelineID(c)
 	if err != nil {
@@ -86,6 +138,25 @@ func (ctrl *PipelineController) ListSteps(c *gin.Context) {
 		return
 	}
 	c.JSON(200, msg.SuccessResponse("查询方法步骤成功", &map[string]any{"steps": steps}))
+}
+
+func (ctrl *PipelineController) CreateStageStep(c *gin.Context) {
+	stageID, err := parseStageID(c)
+	if err != nil {
+		c.JSON(400, msg.ErrResponse("无效的流水线阶段ID", err))
+		return
+	}
+	var req requestbody.MethodStepCreateRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(400, msg.ErrResponse("无效的方法步骤参数", err))
+		return
+	}
+	step, err := ctrl.service.CreateStepInStage(c.Request.Context(), stageID, &req)
+	if err != nil {
+		c.JSON(500, msg.ErrResponse("创建阶段方法步骤失败", err))
+		return
+	}
+	c.JSON(200, msg.SuccessResponse("创建阶段方法步骤成功", &map[string]any{"step": step}))
 }
 
 func (ctrl *PipelineController) CreateStep(c *gin.Context) {
@@ -124,6 +195,34 @@ func (ctrl *PipelineController) UpdateStep(c *gin.Context) {
 		return
 	}
 	c.JSON(200, msg.SuccessResponse("更新方法步骤成功", &map[string]any{"step": step}))
+}
+
+func (ctrl *PipelineController) GenerateStageConfig(c *gin.Context) {
+	stageID, err := parseStageID(c)
+	if err != nil {
+		c.JSON(400, msg.ErrResponse("无效的流水线阶段ID", err))
+		return
+	}
+	config, err := ctrl.service.GenerateStageConfig(c.Request.Context(), stageID)
+	if err != nil {
+		c.JSON(500, msg.ErrResponse("生成阶段大块配置失败", err))
+		return
+	}
+	c.JSON(200, msg.SuccessResponse("生成阶段大块配置成功", &map[string]any{"config": config}))
+}
+
+func (ctrl *PipelineController) PublishStageConfig(c *gin.Context) {
+	stageID, err := parseStageID(c)
+	if err != nil {
+		c.JSON(400, msg.ErrResponse("无效的流水线阶段ID", err))
+		return
+	}
+	config, err := ctrl.service.PublishStageConfig(c.Request.Context(), stageID)
+	if err != nil {
+		c.JSON(500, msg.ErrResponse("发布阶段大块配置失败", err))
+		return
+	}
+	c.JSON(200, msg.SuccessResponse("发布阶段大块配置成功", &map[string]any{"config": config}))
 }
 
 func (ctrl *PipelineController) PreviewJSON(c *gin.Context) {
@@ -175,5 +274,10 @@ func parsePipelineID(c *gin.Context) (uint, error) {
 
 func parseStepID(c *gin.Context) (uint, error) {
 	id, err := strconv.ParseUint(c.Param("step_id"), 10, 32)
+	return uint(id), err
+}
+
+func parseStageID(c *gin.Context) (uint, error) {
+	id, err := strconv.ParseUint(c.Param("stage_id"), 10, 32)
 	return uint(id), err
 }
