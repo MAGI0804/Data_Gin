@@ -167,18 +167,21 @@ func (PipelineRun) TableName() string {
 type DeliveryLog struct {
 	BaseModel
 
-	TraceID       string      `gorm:"column:trace_id;size:64;not null;index" json:"trace_id"`
-	RunID         uint        `gorm:"column:run_id;default:0;index" json:"run_id"`
-	CleanRecordID uint        `gorm:"column:clean_record_id;not null;index" json:"clean_record_id"`
-	DestinationID uint        `gorm:"column:destination_id;not null;index" json:"destination_id"`
-	BusinessKey   string      `gorm:"column:business_key;size:255;index" json:"business_key"`
-	RequestBody   string      `gorm:"column:request_body;type:longtext" json:"request_body"`
-	ResponseBody  string      `gorm:"column:response_body;type:longtext" json:"response_body"`
-	HTTPStatus    int         `gorm:"column:http_status;default:0" json:"http_status"`
-	Success       bool        `gorm:"column:success;default:false;index" json:"success"`
-	ErrorMessage  string      `gorm:"column:error_message;type:text" json:"error_message"`
-	RetryCount    int         `gorm:"column:retry_count;default:0" json:"retry_count"`
-	SentAt        *TimeNormal `gorm:"column:sent_at" json:"sent_at"`
+	TraceID         string      `gorm:"column:trace_id;size:64;not null;index" json:"trace_id"`
+	RunID           uint        `gorm:"column:run_id;default:0;index" json:"run_id"`
+	CleanRecordID   uint        `gorm:"column:clean_record_id;not null;index" json:"clean_record_id"`
+	DestinationID   uint        `gorm:"column:destination_id;not null;index" json:"destination_id"`
+	SourceCode      string      `gorm:"column:source_code;size:100;index" json:"source_code"`
+	DestinationCode string      `gorm:"column:destination_code;size:100;index" json:"destination_code"`
+	DestinationName string      `gorm:"column:destination_name;size:100;index" json:"destination_name"`
+	BusinessKey     string      `gorm:"column:business_key;size:255;index" json:"business_key"`
+	RequestBody     string      `gorm:"column:request_body;type:longtext" json:"request_body"`
+	ResponseBody    string      `gorm:"column:response_body;type:longtext" json:"response_body"`
+	HTTPStatus      int         `gorm:"column:http_status;default:0" json:"http_status"`
+	Success         bool        `gorm:"column:success;default:false;index" json:"success"`
+	ErrorMessage    string      `gorm:"column:error_message;type:text" json:"error_message"`
+	RetryCount      int         `gorm:"column:retry_count;default:0" json:"retry_count"`
+	SentAt          *TimeNormal `gorm:"column:sent_at" json:"sent_at"`
 
 	CommonTimestampsField
 }

@@ -241,13 +241,19 @@ type LegacyTransformRule = {
 type DeliveryLog = {
   id: number
   trace_id: string
+  run_id: number
+  source_code: string
+  destination_code: string
+  destination_name: string
   destination_id: number
   clean_record_id: number
-  status: string
-  request_json: string
-  response_json: string
+  business_key: string
+  request_body: string
+  response_body: string
+  http_status: number
+  success: boolean
   error_message: string
-  delivered_at: string | null
+  sent_at: string | null
 }
 
 const tokenStorageKey = 'warehouse-token'
@@ -603,7 +609,7 @@ function ModuleHeader({ activeNav, loading }: { activeNav: NavKey; loading: bool
 
 function PushStatusView({ runs, deliveryLogs, onLoadSteps }: { runs: PipelineRun[]; deliveryLogs: DeliveryLog[]; onLoadSteps: (runId: number) => void }) {
   const deliveryRuns = runs.filter((run) => run.run_type === 'delivery')
-  const failedLogs = deliveryLogs.filter((log) => log.status !== 'success')
+  const failedLogs = deliveryLogs.filter((log) => !log.success)
   return (
     <div className="view-stack">
       <section className="overview-grid">
@@ -823,14 +829,31 @@ function DeliveryLogList({ logs }: { logs: DeliveryLog[] }) {
       {logs.slice(0, 20).map((log) => (
         <article className="record-row" key={log.id}>
           <div>
-            <strong>#{log.id} / {log.status}</strong>
-            <span>{log.error_message || `trace: ${log.trace_id || '-'}`}</span>
+            <strong>#{log.id} / {log.destination_name || log.destination_code || `目标 ${log.destination_id || '-'}`}</strong>
+            <span>
+              {log.success ? '成功' : '失败'} / 来源 {log.source_code || '-'} / 单号 {log.business_key || '-'} / HTTP {log.http_status || '-'}
+            </span>
+            <span>{log.error_message || deliveryLogPreview(log)}</span>
           </div>
-          <small>{formatDate(log.delivered_at)}</small>
+          <small>{formatDate(log.sent_at)}</small>
         </article>
       ))}
     </div>
   )
+}
+
+function deliveryLogPreview(log: DeliveryLog) {
+  const response = compactText(log.response_body)
+  if (response) return response
+  const request = compactText(log.request_body)
+  if (request) return `请求 ${request}`
+  return `trace: ${log.trace_id || '-'}`
+}
+
+function compactText(value: string) {
+  const text = (value || '').replace(/\s+/g, ' ').trim()
+  if (text.length <= 120) return text
+  return `${text.slice(0, 120)}...`
 }
 
 function RawDataList({ records }: { records: RawData[] }) {

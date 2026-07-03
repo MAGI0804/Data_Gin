@@ -3,6 +3,8 @@ package data_svc
 import (
 	"encoding/json"
 	"testing"
+
+	"gin-biz-web-api/pkg/shanghaimall"
 )
 
 func TestBuildBojunOrderRequestBody(t *testing.T) {
@@ -164,5 +166,32 @@ func TestBuildBojunRetailOrderMapsExchangeOrder(t *testing.T) {
 	}
 	if order.RelatedNormalNo != "E20260629145733101806231" {
 		t.Fatalf("related normal docno = %s", order.RelatedNormalNo)
+	}
+}
+
+func TestBojunTargetForStoreMapsPushUnits(t *testing.T) {
+	cases := map[string]string{
+		"ABCN001A001": string(shanghaimall.TargetShangsheng),
+		"ABCN001A004": string(shanghaimall.TargetJialiCheng),
+		"ABCN001A005": string(shanghaimall.TargetPanlong),
+		"ABCN001A003": string(shanghaimall.TargetXintiandi),
+		"ABCN001P012": string(shanghaimall.TargetQiantan),
+		"ABCN002A001": bojunPushTargetHangzhouHenglong,
+	}
+
+	for storeCode, wantTarget := range cases {
+		target, ok := bojunTargetForStore(storeCode)
+		if !ok {
+			t.Fatalf("store %s did not resolve target", storeCode)
+		}
+		if target.Code != wantTarget {
+			t.Fatalf("store %s target = %s, want %s", storeCode, target.Code, wantTarget)
+		}
+	}
+}
+
+func TestBojunTargetForStoreRejectsUnknownStore(t *testing.T) {
+	if _, ok := bojunTargetForStore("UNKNOWN"); ok {
+		t.Fatal("unknown store unexpectedly resolved target")
 	}
 }

@@ -22,7 +22,7 @@ type rawDataCreator interface {
 }
 
 type bojunRetailOrderWriter interface {
-	CreateOrUpdate(ctx context.Context, order *model.BojunRetailOrder) error
+	CreateOrUpdateWithCreated(ctx context.Context, order *model.BojunRetailOrder) (bool, error)
 }
 
 type pipelineRunRecorder interface {
@@ -34,6 +34,7 @@ type BojunOrderService struct {
 	rawDataDAO     rawDataCreator
 	retailOrderDAO bojunRetailOrderWriter
 	pipelineRunDAO pipelineRunRecorder
+	pushService    *BojunOrderPushService
 }
 
 type BojunOrderSyncResult struct {
@@ -53,6 +54,7 @@ func NewBojunOrderService() *BojunOrderService {
 		rawDataDAO:     data_dao.NewRawDataDAO(),
 		retailOrderDAO: data_dao.NewBojunRetailOrderDAO(),
 		pipelineRunDAO: data_dao.NewPipelineRunDAO(),
+		pushService:    NewBojunOrderPushService(),
 	}
 }
 
@@ -115,11 +117,18 @@ func (s *BojunOrderService) SyncOrders(ctx context.Context, startTime, endTime s
 				result.FailedCount++
 				continue
 			}
-			if err := s.retailOrderDAO.CreateOrUpdate(ctx, retailOrder); err != nil {
+			created, err := s.retailOrderDAO.CreateOrUpdateWithCreated(ctx, retailOrder)
+			if err != nil {
 				result.FailedCount++
 				continue
 			}
 			result.RetailCount++
+			if created && s.pushService != nil {
+				pushResult := s.pushService.PushNewOrder(ctx, retailOrder)
+				if pushResult.Error != nil && !pushResult.Skipped {
+					result.FailedCount++
+				}
+			}
 		}
 
 		if pageInfo.TotalPage <= 0 || pageInfo.Current >= pageInfo.TotalPage || len(records) == 0 {

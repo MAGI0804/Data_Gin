@@ -42,16 +42,32 @@ func (dao *BojunRetailOrderDAO) Update(ctx context.Context, order *model.BojunRe
 }
 
 func (dao *BojunRetailOrderDAO) CreateOrUpdate(ctx context.Context, order *model.BojunRetailOrder) error {
+	_, err := dao.CreateOrUpdateWithCreated(ctx, order)
+	return err
+}
+
+func (dao *BojunRetailOrderDAO) CreateOrUpdateWithCreated(ctx context.Context, order *model.BojunRetailOrder) (bool, error) {
 	existing, err := dao.FindByDocNo(ctx, order.DocNo)
 	if err != nil {
 		if err == gorm.ErrRecordNotFound {
 			_, err = dao.Create(ctx, order)
-			return err
+			return err == nil, err
 		}
-		return err
+		return false, err
 	}
 
 	order.ID = existing.ID
 	order.CreatedAt = existing.CreatedAt
-	return dao.Update(ctx, order)
+	return false, dao.Update(ctx, order)
+}
+
+func (dao *BojunRetailOrderDAO) UpdateSyncStatus(ctx context.Context, id uint, synced int) error {
+	return dao.db.WithContext(ctx).
+		Model(&model.BojunRetailOrder{}).
+		Where("id = ?", id).
+		Updates(map[string]interface{}{
+			"synced":     synced,
+			"updated_at": time.Now().Unix(),
+		}).
+		Error
 }

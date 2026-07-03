@@ -258,7 +258,7 @@ func (s *DeliveryService) publishCleanRecord(
 ) bool {
 	var content map[string]interface{}
 	if err := json.Unmarshal([]byte(cleanRecord.CleanContent), &content); err != nil {
-		s.createDeliveryLog(ctx, traceID, runID, destination.ID, cleanRecord, nil, err)
+		s.createDeliveryLog(ctx, traceID, runID, destination, cleanRecord, nil, err)
 		return false
 	}
 
@@ -267,7 +267,7 @@ func (s *DeliveryService) publishCleanRecord(
 		BusinessKey: cleanRecord.BusinessKey,
 		Content:     content,
 	})
-	s.createDeliveryLog(ctx, traceID, runID, destination.ID, cleanRecord, result, err)
+	s.createDeliveryLog(ctx, traceID, runID, destination, cleanRecord, result, err)
 	if err != nil || result == nil || !result.Success {
 		return false
 	}
@@ -279,18 +279,21 @@ func (s *DeliveryService) createDeliveryLog(
 	ctx context.Context,
 	traceID string,
 	runID uint,
-	destinationID uint,
+	destination *model.DestinationDefinition,
 	cleanRecord model.CleanRecord,
 	result *destinationconnector.PublishResult,
 	publishErr error,
 ) {
 	log := &model.DeliveryLog{
-		TraceID:       traceID,
-		RunID:         runID,
-		CleanRecordID: cleanRecord.ID,
-		DestinationID: destinationID,
-		BusinessKey:   cleanRecord.BusinessKey,
-		SentAt:        &model.TimeNormal{Time: time.Now()},
+		TraceID:         traceID,
+		RunID:           runID,
+		CleanRecordID:   cleanRecord.ID,
+		DestinationID:   destination.ID,
+		SourceCode:      cleanRecord.LogicalTableName,
+		DestinationCode: destination.Code,
+		DestinationName: destination.Name,
+		BusinessKey:     cleanRecord.BusinessKey,
+		SentAt:          &model.TimeNormal{Time: time.Now()},
 	}
 	if result != nil {
 		log.RequestBody = result.RequestBody

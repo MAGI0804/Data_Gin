@@ -80,3 +80,13 @@ func TestNewLegacyTaskRequiresRawDataIDForQimaiEnrich(t *testing.T) {
 		t.Fatal("NewLegacyTask returned nil error, want raw_data_id error")
 	}
 }
+
+func TestScheduledLegacyTaskDefinitionsExcludeStoppedYouzanTriggers(t *testing.T) {
+	definitions := ScheduledLegacyTaskDefinitions()
+	for _, definition := range definitions {
+		switch definition.Code {
+		case "youzan_order_fetch", "youzan_refund_fetch", "youzan_sales_push", "youzan_refund_push":
+			t.Fatalf("stopped youzan trigger %s should not be scheduled", definition.Code)
+		}
+	}
+}
