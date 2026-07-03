@@ -14,16 +14,6 @@ COPY . .
 
 RUN CGO_ENABLED=0 GOOS=linux go build -a -installsuffix cgo -o main .
 
-FROM node:22-alpine AS web-builder
-
-WORKDIR /app/web
-
-COPY web/package*.json ./
-RUN npm ci
-
-COPY web ./
-RUN npm run build
-
 FROM alpine:latest
 
 # 使用阿里云镜像源
@@ -35,7 +25,6 @@ WORKDIR /app
 COPY --from=builder /app/main .
 COPY --from=builder /app/etc ./etc
 COPY --from=builder /app/ssl ./ssl
-COPY --from=web-builder /app/web/dist ./web/dist
 
 RUN mkdir -p /app/storage/logs /app/storage/cache
 

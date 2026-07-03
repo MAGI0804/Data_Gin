@@ -40,9 +40,11 @@ var methodTokenBucketLimiters = limiter.NewTokenBucketMethodLimiter().AddBuckets
 func RegisterAPIRoutes(r *gin.Engine) {
 	// 设置静态资源访问
 	setStaticURL(r)
+	r.GET("/health", healthCheck)
 
 	var api *gin.RouterGroup
 	api = r.Group("/api")
+	api.GET("/health", healthCheck)
 
 	// 全局限流中间件
 	// 作为参考 Github API 每小时最多 60 个请求（根据 IP）
@@ -57,6 +59,13 @@ func RegisterAPIRoutes(r *gin.Engine) {
 	// 数据存储相关
 	apiData(api)
 
+}
+
+func healthCheck(c *gin.Context) {
+	c.JSON(http.StatusOK, gin.H{
+		"status":  "ok",
+		"service": "gin-biz-web-api",
+	})
 }
 
 // setStaticURL 设置静态资源访问
