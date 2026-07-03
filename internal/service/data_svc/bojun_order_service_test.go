@@ -89,3 +89,80 @@ func TestBuildBojunOrderRawDataMarksSource(t *testing.T) {
 		t.Fatalf("raw docno = %v", rawContent["docno"])
 	}
 }
+
+func TestBuildBojunRetailOrderMapsNormalOrder(t *testing.T) {
+	record := map[string]interface{}{
+		"docno":          "ABCN001P012P12607031240270004",
+		"billdate":       float64(20260703),
+		"retailbilltype": "CMR",
+		"retailsaletype": "CMR",
+		"cStoreCode":     "ABCN001P012",
+		"cStoreName":     "ALLBLU幼岚（上海浦东新区晶耀前滩店）",
+		"totQty":         float64(2),
+		"totAmtActual":   float64(446.4),
+		"items":          []interface{}{map[string]interface{}{"no": "SKU001"}},
+		"payItems":       []interface{}{map[string]interface{}{"cPaywayName": "微信"}},
+	}
+
+	order, err := buildBojunRetailOrder(9, record)
+	if err != nil {
+		t.Fatalf("buildBojunRetailOrder returned error: %v", err)
+	}
+	if order.RawDataID != 9 || order.DocNo != "ABCN001P012P12607031240270004" {
+		t.Fatalf("order key = %d/%s", order.RawDataID, order.DocNo)
+	}
+	if order.OrderTypeCode != "CMR" || order.OrderTypeName != "正常零售" {
+		t.Fatalf("order type = %s/%s", order.OrderTypeCode, order.OrderTypeName)
+	}
+	if order.RelatedNormalNo != "" {
+		t.Fatalf("related normal docno = %s", order.RelatedNormalNo)
+	}
+	if order.TotalQty != 2 || order.TotalAmtActual != 446.4 {
+		t.Fatalf("totals = %d/%v", order.TotalQty, order.TotalAmtActual)
+	}
+}
+
+func TestBuildBojunRetailOrderMapsRefundOrder(t *testing.T) {
+	record := map[string]interface{}{
+		"docno":          "ABCN001A004P12606301701270020",
+		"description":    "由单据ABCN001A004P12606301638550019退货产生",
+		"retailsaletype": "RET",
+		"items": []interface{}{
+			map[string]interface{}{"orgdocno": "ABCN001A004P12606301638550019", "qty": float64(-1)},
+		},
+	}
+
+	order, err := buildBojunRetailOrder(10, record)
+	if err != nil {
+		t.Fatalf("buildBojunRetailOrder returned error: %v", err)
+	}
+	if order.OrderTypeCode != "RET" || order.OrderTypeName != "退货" {
+		t.Fatalf("order type = %s/%s", order.OrderTypeCode, order.OrderTypeName)
+	}
+	if order.RelatedNormalNo != "ABCN001A004P12606301638550019" {
+		t.Fatalf("related normal docno = %s", order.RelatedNormalNo)
+	}
+}
+
+func TestBuildBojunRetailOrderMapsExchangeOrder(t *testing.T) {
+	record := map[string]interface{}{
+		"docno":          "ABCN001A001P12607011137100006",
+		"description":    "由单据E20260629145733101806231退货产生",
+		"retailsaletype": "EXP",
+		"items": []interface{}{
+			map[string]interface{}{"orgdocno": "E20260629145733101806231", "qty": float64(-1)},
+			map[string]interface{}{"qty": float64(1)},
+		},
+	}
+
+	order, err := buildBojunRetailOrder(11, record)
+	if err != nil {
+		t.Fatalf("buildBojunRetailOrder returned error: %v", err)
+	}
+	if order.OrderTypeCode != "EXP" || order.OrderTypeName != "换货" {
+		t.Fatalf("order type = %s/%s", order.OrderTypeCode, order.OrderTypeName)
+	}
+	if order.RelatedNormalNo != "E20260629145733101806231" {
+		t.Fatalf("related normal docno = %s", order.RelatedNormalNo)
+	}
+}

@@ -99,6 +99,7 @@ func autoMigrateTables() {
 		&model.TokenData{},             //验证信息表
 		&model.YOUZAN_ORDER_DATA{},     //有赞订单表
 		&model.YOUZAN_RETURN_DATA{},    //有赞退款订单表
+		&model.BojunRetailOrder{},      //伯俊零售单表
 		&model.SourceDefinition{},      //通用数据源配置表
 		&model.RawRecord{},             //通用原始记录表
 		&model.CleanTableDefinition{},  //清洗表配置表

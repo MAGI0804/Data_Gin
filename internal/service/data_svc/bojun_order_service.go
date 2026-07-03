@@ -21,22 +21,29 @@ type rawDataCreator interface {
 	Create(ctx context.Context, rawData *model.RawData) (uint, error)
 }
 
+type bojunRetailOrderWriter interface {
+	CreateOrUpdate(ctx context.Context, order *model.BojunRetailOrder) error
+}
+
 type BojunOrderService struct {
-	rawDataDAO rawDataCreator
+	rawDataDAO     rawDataCreator
+	retailOrderDAO bojunRetailOrderWriter
 }
 
 type BojunOrderSyncResult struct {
-	StartTime  string `json:"start_time"`
-	EndTime    string `json:"end_time"`
-	PageSize   int    `json:"page_size"`
-	MaxPages   int    `json:"max_pages"`
-	FetchPages int    `json:"fetch_pages"`
-	SavedCount int    `json:"saved_count"`
+	StartTime   string `json:"start_time"`
+	EndTime     string `json:"end_time"`
+	PageSize    int    `json:"page_size"`
+	MaxPages    int    `json:"max_pages"`
+	FetchPages  int    `json:"fetch_pages"`
+	SavedCount  int    `json:"saved_count"`
+	RetailCount int    `json:"retail_count"`
 }
 
 func NewBojunOrderService() *BojunOrderService {
 	return &BojunOrderService{
-		rawDataDAO: data_dao.NewRawDataDAO(),
+		rawDataDAO:     data_dao.NewRawDataDAO(),
+		retailOrderDAO: data_dao.NewBojunRetailOrderDAO(),
 	}
 }
 
@@ -79,10 +86,20 @@ func (s *BojunOrderService) SyncOrders(ctx context.Context, startTime, endTime s
 			if err != nil {
 				return result, err
 			}
-			if _, err := s.rawDataDAO.Create(ctx, rawData); err != nil {
+			rawDataID, err := s.rawDataDAO.Create(ctx, rawData)
+			if err != nil {
 				return result, err
 			}
 			result.SavedCount++
+
+			retailOrder, err := buildBojunRetailOrder(rawDataID, record)
+			if err != nil {
+				return result, err
+			}
+			if err := s.retailOrderDAO.CreateOrUpdate(ctx, retailOrder); err != nil {
+				return result, err
+			}
+			result.RetailCount++
 		}
 
 		if pageInfo.TotalPage <= 0 || pageInfo.Current >= pageInfo.TotalPage || len(records) == 0 {
@@ -177,6 +194,118 @@ func buildBojunOrderRawData(record map[string]interface{}, method, startTime, en
 	}, nil
 }
 
+func buildBojunRetailOrder(rawDataID uint, record map[string]interface{}) (*model.BojunRetailOrder, error) {
+	itemsJSON, err := marshalBojunJSON(record["items"])
+	if err != nil {
+		return nil, err
+	}
+	payItemsJSON, err := marshalBojunJSON(record["payItems"])
+	if err != nil {
+		return nil, err
+	}
+	rawContentJSON, err := marshalBojunJSON(record)
+	if err != nil {
+		return nil, err
+	}
+
+	retailSaleType := stringFromAny(record["retailsaletype"])
+	orderTypeCode, orderTypeName := bojunOrderType(retailSaleType)
+	docNo := stringFromAny(record["docno"])
+	if docNo == "" {
+		return nil, fmt.Errorf("bojun retail order docno is required")
+	}
+	relatedNormalNo := ""
+	if orderTypeCode == "RET" || orderTypeCode == "EXP" {
+		relatedNormalNo = relatedBojunNormalDocNo(record)
+	}
+
+	return &model.BojunRetailOrder{
+		RawDataID:       rawDataID,
+		OtherDocNo:      stringFromAny(record["otherdocno"]),
+		DocNo:           docNo,
+		BillDate:        intFromAny(record["billdate"]),
+		RetailBillType:  stringFromAny(record["retailbilltype"]),
+		StoreCode:       stringFromAny(record["cStoreCode"]),
+		StoreName:       stringFromAny(record["cStoreName"]),
+		UploadType:      stringFromAny(record["uploadtype"]),
+		VIPNo:           stringFromAny(record["vipno"]),
+		RetailTypeName:  stringFromAny(record["cRetailtypeName"]),
+		SalesRep:        stringFromAny(record["salesrep"]),
+		IsDiscount:      stringFromAny(record["isDis"]),
+		VouchersNo:      stringFromAny(record["vouchersNo"]),
+		IsIntegral:      stringFromAny(record["isintl"]),
+		DocNoIntegral:   intFromAny(record["docnoIntegral"]),
+		OrderMark:       stringFromAny(record["ordermark"]),
+		RetailSaleType:  retailSaleType,
+		OrderTypeCode:   orderTypeCode,
+		OrderTypeName:   orderTypeName,
+		Description:     stringFromAny(record["description"]),
+		TotalLines:      intFromAny(record["totLines"]),
+		O2OSoDocNo:      stringFromAny(record["o2oSoDocno"]),
+		TotalQty:        intFromAny(record["totQty"]),
+		TotalAmtList:    floatFromAny(record["totAmtList"]),
+		TotalAmtActual:  floatFromAny(record["totAmtActual"]),
+		AvgDiscount:     floatFromAny(record["avgDiscount"]),
+		TotalAmtAcc:     floatFromAny(record["totAmtAcc"]),
+		TotalAmtAcc1:    floatFromAny(record["totAmtAcc1"]),
+		OzID:            stringFromAny(record["ozid"]),
+		RelatedNormalNo: relatedNormalNo,
+		ItemsJSON:       itemsJSON,
+		PayItemsJSON:    payItemsJSON,
+		RawContentJSON:  rawContentJSON,
+	}, nil
+}
+
+func bojunOrderType(retailSaleType string) (string, string) {
+	switch strings.ToUpper(strings.TrimSpace(retailSaleType)) {
+	case "EXP":
+		return "EXP", "换货"
+	case "RET":
+		return "RET", "退货"
+	default:
+		return "CMR", "正常零售"
+	}
+}
+
+func relatedBojunNormalDocNo(record map[string]interface{}) string {
+	for _, key := range []string{"otherdocno", "o2oSoDocno", "orgdocno"} {
+		if value := stringFromAny(record[key]); value != "" {
+			return value
+		}
+	}
+
+	items, _ := record["items"].([]interface{})
+	for _, item := range items {
+		itemMap, ok := item.(map[string]interface{})
+		if !ok {
+			continue
+		}
+		if value := stringFromAny(itemMap["orgdocno"]); value != "" {
+			return value
+		}
+	}
+
+	description := stringFromAny(record["description"])
+	if strings.HasPrefix(description, "由单据") {
+		rest := strings.TrimPrefix(description, "由单据")
+		if index := strings.Index(rest, "退货产生"); index > 0 {
+			return rest[:index]
+		}
+	}
+	return ""
+}
+
+func marshalBojunJSON(value interface{}) (string, error) {
+	if value == nil {
+		return "{}", nil
+	}
+	data, err := json.Marshal(value)
+	if err != nil {
+		return "", err
+	}
+	return string(data), nil
+}
+
 func positiveBojunInt(value, fallback int) int {
 	if value <= 0 {
 		return fallback
@@ -211,6 +340,22 @@ func intFromAny(value interface{}) int {
 	case string:
 		var parsed int
 		_, _ = fmt.Sscan(typed, &parsed)
+		return parsed
+	default:
+		return 0
+	}
+}
+
+func floatFromAny(value interface{}) float64 {
+	switch typed := value.(type) {
+	case int:
+		return float64(typed)
+	case int64:
+		return float64(typed)
+	case float64:
+		return typed
+	case string:
+		parsed, _ := strconv.ParseFloat(typed, 64)
 		return parsed
 	default:
 		return 0
