@@ -12,7 +12,6 @@ import (
 	"gin-biz-web-api/internal/dao/data_dao"
 	"gin-biz-web-api/model"
 	"gin-biz-web-api/pkg/app"
-	"gin-biz-web-api/pkg/config"
 	"gin-biz-web-api/pkg/shanghaimall"
 
 	"github.com/google/uuid"
@@ -23,6 +22,7 @@ const (
 
 	bojunPushTargetHangzhouHenglong = "hangzhou_henglong"
 	bojunHangzhouHenglongStoreCode  = "416201"
+	bojunHangzhouHenglongItemCode   = "E6600000099"
 )
 
 type bojunRetailOrderSyncUpdater interface {
@@ -159,16 +159,16 @@ func (s *BojunOrderPushService) pushHangzhouHenglong(
 	retailOrder := shanghaimall.RetailOrderFromBojun(*order)
 	salesType := "SA"
 	storeCode := bojunHangzhouHenglongStoreCode
-	mallItemCode := config.GetString("cfg.henglong.mall_item_code")
+	mallItemCode := bojunHangzhouHenglongItemCode
 	if retailOrder.IsRefund() {
 		salesType = "SR"
-		mallItemCode = config.GetString("cfg.henglong.refund_mall_item_code", mallItemCode)
 	}
+	issuedAt := app.TimeNowInTimezone()
 
 	result, err := send.SendSalesDataWithResult(
 		retailOrder.Amount,
 		order.DocNo,
-		bojunBillDateTime(order.BillDate),
+		&issuedAt,
 		storeCode,
 		mallItemCode,
 		salesType,

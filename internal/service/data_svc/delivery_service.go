@@ -22,6 +22,17 @@ type DeliveryService struct {
 	publishers     map[string]destinationconnector.Publisher
 }
 
+type DeliveryLogRetryResult struct {
+	LogID        uint   `json:"log_id"`
+	SourceCode   string `json:"source_code"`
+	BusinessKey  string `json:"business_key"`
+	TargetCode   string `json:"target_code"`
+	TargetName   string `json:"target_name"`
+	Success      bool   `json:"success"`
+	Skipped      bool   `json:"skipped"`
+	ErrorMessage string `json:"error_message"`
+}
+
 func NewDeliveryService() *DeliveryService {
 	return &DeliveryService{
 		destinationDAO: data_dao.NewDestinationDefinitionDAO(),
@@ -166,6 +177,45 @@ func (s *DeliveryService) UpdateDeliveryTask(ctx context.Context, id uint, req *
 
 func (s *DeliveryService) ListDeliveryLogs(ctx context.Context, limit int) ([]model.DeliveryLog, error) {
 	return s.logDAO.FindRecent(ctx, limit)
+}
+
+func (s *DeliveryService) RetryDeliveryLog(ctx context.Context, id uint) (*DeliveryLogRetryResult, error) {
+	log, err := s.logDAO.FindByID(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("find delivery log: %w", err)
+	}
+	if log.Success {
+		return nil, fmt.Errorf("delivery log %d is already successful", id)
+	}
+	if log.SourceCode != bojunOrderPushSource {
+		return nil, fmt.Errorf("delivery log %d source %q does not support retry", id, log.SourceCode)
+	}
+	if log.CleanRecordID == 0 {
+		return nil, fmt.Errorf("delivery log %d missing clean record id", id)
+	}
+
+	order, err := data_dao.NewBojunRetailOrderDAO().FindByID(ctx, log.CleanRecordID)
+	if err != nil {
+		return nil, fmt.Errorf("find bojun retail order: %w", err)
+	}
+	if err := s.logDAO.IncrementRetryCount(ctx, id); err != nil {
+		return nil, fmt.Errorf("increment retry count: %w", err)
+	}
+
+	pushResult := NewBojunOrderPushService().PushNewOrder(ctx, order)
+	result := &DeliveryLogRetryResult{
+		LogID:       id,
+		SourceCode:  log.SourceCode,
+		BusinessKey: log.BusinessKey,
+		TargetCode:  pushResult.Target.Code,
+		TargetName:  pushResult.Target.Name,
+		Success:     pushResult.Success,
+		Skipped:     pushResult.Skipped,
+	}
+	if pushResult.Error != nil {
+		result.ErrorMessage = pushResult.Error.Error()
+	}
+	return result, nil
 }
 
 type DeliveryRunResult struct {

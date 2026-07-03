@@ -255,6 +255,7 @@ type DeliveryLog = {
   http_status: number
   success: boolean
   error_message: string
+  retry_count: number
   sent_at: string | null
 }
 
@@ -520,6 +521,11 @@ function App() {
     if (response.ok) await refreshAll(false)
   }
 
+  async function retryDeliveryLog(logId: number) {
+    const response = await client(`/v1/delivery-logs/${logId}/retry`, { method: 'POST' })
+    if (response.ok) await refreshAll(false)
+  }
+
   const receivedData = useMemo(() => rawData.filter((item) => !isPulledOrigin(rawDataOrigin(item))), [rawData])
   const pulledData = useMemo(() => rawData.filter((item) => isPulledOrigin(rawDataOrigin(item))), [rawData])
   const coreMethods = useMemo(
@@ -567,7 +573,7 @@ function App() {
         {activeNav === 'pull' && <PullView sources={sources} records={pulledData} coreMethods={coreMethods.filter((item) => item.key === 'youzan_fetch' || item.key === 'bojun_order_fetch')} onToggle={toggleTarget} />}
         {activeNav === 'process' && <ProcessView rules={transformRules} records={processedData} coreMethod={coreMethods.find((item) => item.key === 'qimai_process')} onToggle={toggleTarget} />}
         {activeNav === 'push' && <PushConfigView destinations={destinations} tasks={deliveryTasks} coreMethod={coreMethods.find((item) => item.key === 'mall_push')} onToggle={toggleTarget} />}
-        {activeNav === 'logs' && <LogsView runs={runs} stepRuns={stepRuns} deliveryLogs={deliveryLogs} onLoadSteps={loadStepRuns} />}
+        {activeNav === 'logs' && <LogsView runs={runs} stepRuns={stepRuns} deliveryLogs={deliveryLogs} onLoadSteps={loadStepRuns} onRetryLog={retryDeliveryLog} />}
       </section>
 
       <ResultPanel result={result} />
@@ -812,7 +818,7 @@ function ToggleButton({ enabled, target, onToggle }: { enabled: boolean; target:
   )
 }
 
-function LogsView({ runs, stepRuns, deliveryLogs, onLoadSteps }: { runs: PipelineRun[]; stepRuns: StepRun[]; deliveryLogs: DeliveryLog[]; onLoadSteps: (runId: number) => void }) {
+function LogsView({ runs, stepRuns, deliveryLogs, onLoadSteps, onRetryLog }: { runs: PipelineRun[]; stepRuns: StepRun[]; deliveryLogs: DeliveryLog[]; onLoadSteps: (runId: number) => void; onRetryLog: (logId: number) => void }) {
   const [selection, setSelection] = useState<LogSelection | null>(() => readLogSelection())
 
   useEffect(() => {
@@ -864,7 +870,7 @@ function LogsView({ runs, stepRuns, deliveryLogs, onLoadSteps }: { runs: Pipelin
           <RunTable runs={runs} onLoadSteps={onLoadSteps} onSelectRun={(run) => openLog({ type: 'run', id: run.id })} />
         </Panel>
         <Panel title="推送日志" icon={<Send />} meta="delivery logs">
-          <DeliveryLogList logs={deliveryLogs} onSelectLog={(log) => openLog({ type: 'delivery', id: log.id })} />
+          <DeliveryLogList logs={deliveryLogs} onSelectLog={(log) => openLog({ type: 'delivery', id: log.id })} onRetryLog={onRetryLog} />
         </Panel>
       </section>
       <Panel title="步骤日志" icon={<BookOpen />} meta="选择运行记录查看步骤">
@@ -915,7 +921,7 @@ function RunTable({ runs, onLoadSteps, onSelectRun }: { runs: PipelineRun[]; onL
   )
 }
 
-function DeliveryLogList({ logs, onSelectLog }: { logs: DeliveryLog[]; onSelectLog?: (log: DeliveryLog) => void }) {
+function DeliveryLogList({ logs, onSelectLog, onRetryLog }: { logs: DeliveryLog[]; onSelectLog?: (log: DeliveryLog) => void; onRetryLog?: (logId: number) => void }) {
   const [storeFilter, setStoreFilter] = useState('all')
   const matchedLogs = useMemo(
     () => logs.map((log) => ({ log, store: matchDeliveryStore(log) })).filter((item): item is DeliveryLogWithStore => Boolean(item.store)),
@@ -967,11 +973,13 @@ function DeliveryLogList({ logs, onSelectLog }: { logs: DeliveryLog[]; onSelectL
                         <strong>#{log.id} / {log.business_key || '-'}</strong>
                         <span>
                           {log.success ? '成功' : '失败'} / 来源 {log.source_code || '-'} / HTTP {log.http_status || '-'}
+                          {!log.success && ` / 重试 ${log.retry_count || 0}`}
                         </span>
                         <span>{log.error_message || deliveryLogPreview(log)}</span>
                       </div>
                       <div className="record-actions">
                         <small>{formatDate(log.sent_at)}</small>
+                        {!log.success && onRetryLog && <button type="button" onClick={() => onRetryLog(log.id)}>重试</button>}
                         {onSelectLog && <button type="button" onClick={() => onSelectLog(log)}>详情</button>}
                       </div>
                     </article>

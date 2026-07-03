@@ -306,6 +306,20 @@ func (dao *DeliveryLogDAO) Create(ctx context.Context, log *model.DeliveryLog) (
 	return log.ID, err
 }
 
+func (dao *DeliveryLogDAO) FindByID(ctx context.Context, id uint) (*model.DeliveryLog, error) {
+	var log model.DeliveryLog
+	err := dao.db.WithContext(ctx).First(&log, id).Error
+	return &log, err
+}
+
+func (dao *DeliveryLogDAO) IncrementRetryCount(ctx context.Context, id uint) error {
+	return dao.db.WithContext(ctx).
+		Model(&model.DeliveryLog{}).
+		Where("id = ?", id).
+		UpdateColumn("retry_count", gorm.Expr("retry_count + ?", 1)).
+		Error
+}
+
 func (dao *DeliveryLogDAO) FindRecent(ctx context.Context, limit int) ([]model.DeliveryLog, error) {
 	if limit <= 0 || limit > 200 {
 		limit = 50

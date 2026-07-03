@@ -196,8 +196,11 @@ func TestBojunTargetForStoreRejectsUnknownStore(t *testing.T) {
 	}
 }
 
-func TestBojunHangzhouHenglongStoreCodeIsSeparatedFromQimai(t *testing.T) {
+func TestBojunHangzhouHenglongCodesAreSeparatedFromQimai(t *testing.T) {
 	if bojunHangzhouHenglongStoreCode != "416201" {
 		t.Fatalf("bojun hangzhou henglong store code = %s, want 416201", bojunHangzhouHenglongStoreCode)
+	}
+	if bojunHangzhouHenglongItemCode != "E6600000099" {
+		t.Fatalf("bojun hangzhou henglong item code = %s, want E6600000099", bojunHangzhouHenglongItemCode)
 	}
 }

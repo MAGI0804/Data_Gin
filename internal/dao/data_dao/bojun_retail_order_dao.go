@@ -36,6 +36,12 @@ func (dao *BojunRetailOrderDAO) FindByDocNo(ctx context.Context, docNo string) (
 	return &order, err
 }
 
+func (dao *BojunRetailOrderDAO) FindByID(ctx context.Context, id uint) (*model.BojunRetailOrder, error) {
+	var order model.BojunRetailOrder
+	err := dao.db.WithContext(ctx).First(&order, id).Error
+	return &order, err
+}
+
 func (dao *BojunRetailOrderDAO) Update(ctx context.Context, order *model.BojunRetailOrder) error {
 	order.UpdatedAt = int(time.Now().Unix())
 	return dao.db.WithContext(ctx).Save(order).Error

@@ -65,6 +65,7 @@ func apiData(api *gin.RouterGroup) {
 	{
 		deliveryCtrl := data_ctrl.NewDeliveryController()
 		deliveryLogGroup.GET("", deliveryCtrl.ListLogs)
+		deliveryLogGroup.POST("/:id/retry", deliveryCtrl.RetryLog)
 	}
 
 	runGroup := api.Group("/v1/runs")

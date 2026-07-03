@@ -218,6 +218,24 @@ func (ctrl *DeliveryController) ListLogs(c *gin.Context) {
 	}))
 }
 
+func (ctrl *DeliveryController) RetryLog(c *gin.Context) {
+	id, err := parseUintParam(c, "id")
+	if err != nil {
+		c.JSON(400, msg.ErrResponse("无效的日志ID", err))
+		return
+	}
+
+	result, err := ctrl.service.RetryDeliveryLog(c.Request.Context(), id)
+	if err != nil {
+		c.JSON(500, msg.ErrResponse("重试推送日志失败", err))
+		return
+	}
+
+	c.JSON(200, msg.SuccessResponse("重试推送日志完成", &map[string]any{
+		"result": result,
+	}))
+}
+
 func parseUintParam(c *gin.Context, name string) (uint, error) {
 	id, err := strconv.ParseUint(c.Param(name), 10, 32)
 	if err != nil {
