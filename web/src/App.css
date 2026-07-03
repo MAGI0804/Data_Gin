@@ -45,12 +45,26 @@ button:disabled {
 }
 
 button svg,
-.brand svg,
 .panel-title svg,
 .nav-item svg {
   width: 18px;
   height: 18px;
   flex: 0 0 auto;
+}
+
+.brand-logo {
+  width: 32px;
+  height: 32px;
+  flex: 0 0 32px;
+  border-radius: 6px;
+  object-fit: cover;
+  border: 1px solid #d1d1d1;
+}
+
+.brand-logo.large {
+  width: 44px;
+  height: 44px;
+  flex-basis: 44px;
 }
 
 button.primary {

@@ -62,8 +62,8 @@ func addQueueJob(mux *asynq.ServeMux) {
 	mux.HandleFunc(job.TypeYouzanSync, job.HandleYouzanSyncTask)
 	mux.HandleFunc(job.TypeYouzanReturn, job.HandleYouzanReturnTask)
 	mux.HandleFunc(job.TypeSalesSync, job.HandleSalesSyncTask)
-	mux.HandleFunc(job.TypeYouzanSalesSync, job.HandleYouzanSalesSyncTask)
-	mux.HandleFunc(job.TypeYouzanRefundSync, job.HandleYouzanRefundSyncTask)
+	//mux.HandleFunc(job.TypeYouzanSalesSync, job.HandleYouzanSalesSyncTask)
+	//mux.HandleFunc(job.TypeYouzanRefundSync, job.HandleYouzanRefundSyncTask)
 	mux.HandleFunc(job.TypeXianOrderSync, job.HandleXianOrderSyncTask)
 	mux.HandleFunc(job.TypeDeliveryTaskRun, handleDeliveryTaskRun)
 }

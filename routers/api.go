@@ -25,14 +25,14 @@ var methodTokenBucketLimiters = limiter.NewTokenBucketMethodLimiter().AddBuckets
 	limiter.TokenBucketLimiterRule{
 		Key:          "/api/test", // 自定义键值对名称
 		FillInterval: time.Minute, // 间隔多久时间放 N 个令牌
-		Capacity:     3,           // 令牌桶的容量
-		Quantum:      1,           // 每次到达间隔时间后所放的具体令牌数量
+		Capacity:     60,          // 令牌桶的容量
+		Quantum:      60,          // 每次到达间隔时间后所放的具体令牌数量
 	},
 	limiter.TokenBucketLimiterRule{
 		Key:          "abc", // 默认采用的是路由地址作为 key，如果自己自定义了 key，那么则需要将自定义 key 传入中间件中
-		FillInterval: time.Second * 5,
-		Capacity:     5,
-		Quantum:      1,
+		FillInterval: time.Second,
+		Capacity:     60,
+		Quantum:      60,
 	},
 )
 
@@ -46,7 +46,7 @@ func RegisterAPIRoutes(r *gin.Engine) {
 
 	// 全局限流中间件
 	// 作为参考 Github API 每小时最多 60 个请求（根据 IP）
-	api.Use(middleware.LimitIP("200-H"))
+	api.Use(middleware.LimitIP("200000-H"))
 
 	// 测试
 	apiTest(api)
@@ -80,13 +80,13 @@ func apiTest(api *gin.RouterGroup) {
 
 func apiAuth(api *gin.RouterGroup) {
 	authGroup := api.Group("/auth")
-	authGroup.Use(middleware.LimitIP("60-H"))
+	authGroup.Use(middleware.LimitIP("60000-H"))
 	{
 		loginCtrl := auth_ctrl.NewLoginController()
 		authGroup.POST("/login", loginCtrl.ConsoleLogin) // 管理台登录
 
 		registerCtrl := new(auth_ctrl.RegisterController)
-		authGroup.POST("/register/using-email", middleware.LimitRoute("30-H"), registerCtrl.SignupUsingEmail) // 使用邮箱注册用户
+		authGroup.POST("/register/using-email", middleware.LimitRoute("300-H"), registerCtrl.SignupUsingEmail) // 使用邮箱注册用户
 
 		userCtrl := new(auth_ctrl.UserController)
 		authGroup.GET("/user", userCtrl.Index)                       // 用户列表

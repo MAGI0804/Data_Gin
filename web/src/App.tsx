@@ -502,7 +502,7 @@ function App() {
     <main className="ops-shell">
       <aside className="ops-sidebar" aria-label="数据仓库导航">
         <div className="brand">
-          <Database aria-hidden="true" />
+          <img className="brand-logo" src="/logo.jpg" alt="数据仓库" />
           <div>
             <h1>数据仓库</h1>
             <span>运行与方法总览</span>
@@ -568,15 +568,15 @@ function LoginScreen({ onLogin }: { onLogin: (token: string) => void }) {
     <main className="login-shell">
       <section className="login-panel">
         <div className="login-title">
-          <Database aria-hidden="true" />
+          <img className="brand-logo large" src="/logo.jpg" alt="数据仓库" />
           <div>
             <h1>数据仓库</h1>
             <p>登录后查看运行情况和现有方法</p>
           </div>
         </div>
         <form className="login-form" onSubmit={submit}>
-          <Field label="用户名" name="username" defaultValue="admin" />
-          <Field label="密码" name="password" defaultValue="123456" type="password" />
+          <Field label="用户名" name="username" />
+          <Field label="密码" name="password" type="password" />
           {error && <div className="login-error">{error}</div>}
           <button className="primary" type="submit">登录</button>
         </form>
@@ -1014,7 +1014,7 @@ function EmptyState({ text }: { text: string }) {
   return <div className="empty-state">{text}</div>
 }
 
-function Field({ label, name, defaultValue, type = 'text' }: { label: string; name: string; defaultValue: string; type?: string }) {
+function Field({ label, name, defaultValue = '', type = 'text' }: { label: string; name: string; defaultValue?: string; type?: string }) {
   return (
     <label>
       {label}

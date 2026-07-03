@@ -25,7 +25,15 @@ func NewLegacyTaskService() *LegacyTaskService {
 
 func (s *LegacyTaskService) ListDefinitions(ctx context.Context) []job.LegacyTaskDefinition {
 	_ = ctx
-	return job.LegacyTaskDefinitions()
+	definitions := job.LegacyTaskDefinitions()
+	active := make([]job.LegacyTaskDefinition, 0, len(definitions))
+	for _, definition := range definitions {
+		if job.IsStoppedLegacyTask(definition.Code) {
+			continue
+		}
+		active = append(active, definition)
+	}
+	return active
 }
 
 func (s *LegacyTaskService) ListTransformRules(ctx context.Context) []job.LegacyTransformRuleDefinition {
@@ -35,6 +43,9 @@ func (s *LegacyTaskService) ListTransformRules(ctx context.Context) []job.Legacy
 
 func (s *LegacyTaskService) Enqueue(ctx context.Context, code string, payload map[string]interface{}) (*LegacyTaskRunResult, error) {
 	_ = ctx
+	if job.IsStoppedLegacyTask(code) {
+		return nil, fmt.Errorf("legacy task %q is stopped", code)
+	}
 
 	task, err := job.NewLegacyTask(code, payload)
 	if err != nil {

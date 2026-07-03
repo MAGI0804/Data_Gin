@@ -42,6 +42,15 @@ type LegacyTransformRuleDefinition struct {
 	Steps       []string               `json:"steps"`
 }
 
+func IsStoppedLegacyTask(code string) bool {
+	switch code {
+	case "youzan_sales_push", "youzan_refund_push":
+		return true
+	default:
+		return false
+	}
+}
+
 func LegacyTaskDefinitions() []LegacyTaskDefinition {
 	return []LegacyTaskDefinition{
 		{
