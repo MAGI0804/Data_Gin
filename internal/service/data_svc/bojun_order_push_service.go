@@ -22,6 +22,7 @@ const (
 	bojunOrderPushSource = "bojun_order"
 
 	bojunPushTargetHangzhouHenglong = "hangzhou_henglong"
+	bojunHangzhouHenglongStoreCode  = "416201"
 )
 
 type bojunRetailOrderSyncUpdater interface {
@@ -157,11 +158,10 @@ func (s *BojunOrderPushService) pushHangzhouHenglong(
 ) (bool, error) {
 	retailOrder := shanghaimall.RetailOrderFromBojun(*order)
 	salesType := "SA"
-	storeCode := config.GetString("cfg.henglong.store_code")
+	storeCode := bojunHangzhouHenglongStoreCode
 	mallItemCode := config.GetString("cfg.henglong.mall_item_code")
 	if retailOrder.IsRefund() {
 		salesType = "SR"
-		storeCode = config.GetString("cfg.henglong.refund_store_code", storeCode)
 		mallItemCode = config.GetString("cfg.henglong.refund_mall_item_code", mallItemCode)
 	}
 

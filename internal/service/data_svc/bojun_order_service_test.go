@@ -195,3 +195,9 @@ func TestBojunTargetForStoreRejectsUnknownStore(t *testing.T) {
 		t.Fatal("unknown store unexpectedly resolved target")
 	}
 }
+
+func TestBojunHangzhouHenglongStoreCodeIsSeparatedFromQimai(t *testing.T) {
+	if bojunHangzhouHenglongStoreCode != "416201" {
+		t.Fatalf("bojun hangzhou henglong store code = %s, want 416201", bojunHangzhouHenglongStoreCode)
+	}
+}
