@@ -19,6 +19,7 @@ import (
 	"gin-biz-web-api/model"
 	"gin-biz-web-api/pkg/bojun"
 	"gin-biz-web-api/pkg/config"
+	"gin-biz-web-api/pkg/shanghaimall"
 )
 
 type PipelineService struct {
@@ -588,6 +589,8 @@ func executeMethodStep(ctx context.Context, detail MethodStepDetail, inputs map[
 		return executeMappingStep(detail, inputs)
 	case "delivery":
 		return executeDeliveryStep(ctx, detail, inputs)
+	case "shanghai_mall_push":
+		return executeShanghaiMallPushStep(ctx, inputs)
 	default:
 		return inputs, nil
 	}
@@ -723,6 +726,36 @@ func executeDeliveryStep(ctx context.Context, detail MethodStepDetail, inputs ma
 	return outputs, err
 }
 
+func executeShanghaiMallPushStep(ctx context.Context, inputs map[string]interface{}) (map[string]interface{}, error) {
+	target := stringValue(inputs, "target", "")
+	if target == "" {
+		target = stringValue(scopedMap(inputs, "request"), "target", "")
+	}
+	orderData := scopedMap(inputs, "order")
+	if len(orderData) == 0 {
+		orderData = inputs
+	}
+	order := shanghaimall.RetailOrder{
+		DocNo:         firstString(orderData, "docno", "doc_no", "order_no"),
+		OrderTypeCode: firstString(orderData, "order_type_code", "retailsaletype"),
+		SaleTime:      firstString(orderData, "sale_time", "success_time", "tran_time"),
+		Amount:        firstFloat(orderData, "amount", "tot_amt_actual", "total_amt_actual", "payment"),
+		ListAmount:    firstFloat(orderData, "list_amount", "tot_amt_list", "total_amt_list", "total_fee"),
+		Quantity:      firstInt(orderData, "quantity", "tot_qty", "total_qty"),
+	}
+	result, err := shanghaimall.Push(ctx, shanghaimall.Target(target), order)
+	outputs := map[string]interface{}{}
+	if result != nil {
+		outputs["target"] = result.Target
+		outputs["success"] = result.Success
+		outputs["http_status"] = result.HTTPStatus
+		outputs["request_body"] = result.RequestBody
+		outputs["response_body"] = result.ResponseBody
+		outputs["response_json"] = result.ResponseJSON
+	}
+	return outputs, err
+}
+
 func resolveStepInputs(params []model.MethodParam, runtime map[string]map[string]interface{}) (map[string]interface{}, error) {
 	inputs := map[string]interface{}{}
 	for _, param := range params {
@@ -851,6 +884,33 @@ func stringValue(input map[string]interface{}, key, fallback string) string {
 	return fmt.Sprintf("%v", value)
 }
 
+func firstString(input map[string]interface{}, keys ...string) string {
+	for _, key := range keys {
+		if value := stringFromAny(input[key]); value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func firstFloat(input map[string]interface{}, keys ...string) float64 {
+	for _, key := range keys {
+		if value, ok := input[key]; ok && value != nil {
+			return floatFromAny(value)
+		}
+	}
+	return 0
+}
+
+func firstInt(input map[string]interface{}, keys ...string) int {
+	for _, key := range keys {
+		if value, ok := input[key]; ok && value != nil {
+			return intFromAny(value)
+		}
+	}
+	return 0
+}
+
 func flattenRuntime(runtime map[string]map[string]interface{}) map[string]interface{} {
 	flattened := map[string]interface{}{}
 	for stepCode, outputs := range runtime {
@@ -940,6 +1000,8 @@ func defaultStageTypeForMethod(methodType string) string {
 		return "fetch"
 	case "delivery":
 		return "push"
+	case "shanghai_mall_push":
+		return "push"
 	case "log":
 		return "log"
 	default:
@@ -965,9 +1027,10 @@ func validateStageMethodType(stageType, methodType string) error {
 			"bojun_signed_request": true,
 		},
 		"push": {
-			"template": true,
-			"delivery": true,
-			"request":  true,
+			"template":           true,
+			"delivery":           true,
+			"request":            true,
+			"shanghai_mall_push": true,
 		},
 		"log": {
 			"log":      true,

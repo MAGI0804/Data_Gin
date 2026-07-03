@@ -33,7 +33,7 @@ type ApiClientOptions = {
 type ApiClient = (path: string, options?: ApiClientOptions) => Promise<ApiResult>
 type NavKey = 'push_status' | 'methods' | 'receive' | 'pull' | 'process' | 'push' | 'logs'
 type MethodKind = 'configured' | 'builtin'
-type MethodType = 'request' | 'bojun_signed_request' | 'extract' | 'mapping' | 'validate' | 'db_query' | 'db_write' | 'template' | 'delivery' | 'log' | 'utility'
+type MethodType = 'request' | 'bojun_signed_request' | 'extract' | 'mapping' | 'validate' | 'db_query' | 'db_write' | 'template' | 'delivery' | 'shanghai_mall_push' | 'log' | 'utility'
 type JsonRecord = Record<string, unknown>
 
 type PipelineDefinition = {
@@ -318,6 +318,23 @@ const builtinMethods: MethodDisplay[] = [
     description: 'Go 系统方法 pkg/bojun.SendSignedRequest，入参 method 和 body，凭据从 BOJUN_* 环境变量读取，出参为接口 JSON。',
     enabled: true,
   },
+  ...[
+    ['builtin-push-jialicheng', '推送嘉里城', 'push_jialicheng', 'jialicheng'],
+    ['builtin-push-panlong', '推送蟠龙', 'push_panlong', 'panlong'],
+    ['builtin-push-qiantan', '推送前滩', 'push_qiantan', 'qiantan'],
+    ['builtin-push-shangsheng', '推送上生新所', 'push_shangsheng', 'shangsheng'],
+    ['builtin-push-xintiandi', '推送新天地', 'push_xintiandi', 'xintiandi'],
+  ].map(([key, name, code, target]) => ({
+    key,
+    kind: 'builtin' as const,
+    name,
+    code,
+    method_type: 'shanghai_mall_push' as const,
+    category: '商场推送方法',
+    owner: '系统内置',
+    description: `Go 系统方法 pkg/shanghaimall.Push，target=${target}，按正常单/换货/退货生成对应商场请求。`,
+    enabled: true,
+  })),
 ]
 
 function App() {
@@ -998,6 +1015,7 @@ function methodCategory(methodType: MethodType) {
     db_write: '数据处理方法',
     template: '数据推送方法',
     delivery: '推送方法',
+    shanghai_mall_push: '商场推送方法',
     log: '日志方法',
     utility: '内置工具方法',
   }
@@ -1259,6 +1277,7 @@ function methodTypeLabel(type: MethodType) {
     db_write: 'DB Write 写入',
     template: 'Template 模板',
     delivery: 'Delivery 推送',
+    shanghai_mall_push: '上海商场推送',
     log: 'Log 记录',
     utility: 'Utility 工具',
   }

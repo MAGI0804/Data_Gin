@@ -17,6 +17,7 @@ func TestValidateStageMethodTypeEnforcesStageBoundaries(t *testing.T) {
 		{"fetch bojun signed request allowed", "fetch", "bojun_signed_request", false},
 		{"process mapping allowed", "process", "mapping", false},
 		{"push delivery allowed", "push", "delivery", false},
+		{"push shanghai mall allowed", "push", "shanghai_mall_push", false},
 		{"log log allowed", "log", "log", false},
 		{"fetch delivery rejected", "fetch", "delivery", true},
 		{"push mapping rejected", "push", "mapping", true},
@@ -72,6 +73,9 @@ func TestDefaultStageTypeForMethod(t *testing.T) {
 	}
 	if got := defaultStageTypeForMethod("delivery"); got != "push" {
 		t.Fatalf("delivery stage = %s", got)
+	}
+	if got := defaultStageTypeForMethod("shanghai_mall_push"); got != "push" {
+		t.Fatalf("shanghai mall push stage = %s", got)
 	}
 	if got := defaultStageTypeForMethod("mapping"); got != "process" {
 		t.Fatalf("mapping stage = %s", got)

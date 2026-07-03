@@ -120,3 +120,16 @@ Bojun:
   OrderLookbackMinutes: ${BOJUN_ORDER_LOOKBACK_MINUTES:-1}
   OrderMaxPages: ${BOJUN_ORDER_MAX_PAGES:-20}
   OrderCronExpr: "${BOJUN_ORDER_CRON_EXPR:-0 */1 * * * *}"
+
+ShanghaiMall:
+  TimeoutSeconds: ${SHANGHAI_MALL_TIMEOUT_SECONDS:-10}
+  Syandata:
+    URL: ${SHANGHAI_PANLONG_SYANDATA_URL:-http://api.syandata.com/oapi/rest}
+  Jialicheng:
+    LoginURL: ${SHANGHAI_JIALICHENG_KERRY_LOGIN_URL:-}
+    SalesURL: ${SHANGHAI_JIALICHENG_KERRY_SALES_URL:-}
+  Qiantan:
+    TokenURL: ${SHANGHAI_QIANTAN_XIAN_TOKEN_URL:-}
+    PostURL: ${SHANGHAI_QIANTAN_XIAN_POST_URL:-}
+  Shangsheng:
+    URL: ${SHANGHAI_SHANGSHENG_URL:-}
