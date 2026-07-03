@@ -17,6 +17,8 @@ import {
 } from 'lucide-react'
 import './App.css'
 
+const defaultApiBaseURL = import.meta.env.VITE_API_BASE_URL ?? ''
+
 type ApiResult = {
   ok: boolean
   status: number
@@ -256,6 +258,10 @@ type DeliveryLog = {
   sent_at: string | null
 }
 
+type LogDetail =
+  | { type: 'run'; title: string; value: unknown }
+  | { type: 'delivery'; title: string; value: unknown }
+
 const tokenStorageKey = 'warehouse-token'
 
 const navItems: Array<{ key: NavKey; label: string; icon: ReactNode }> = [
@@ -368,7 +374,7 @@ function App() {
       const method = options.method ?? 'POST'
       if (!options.silentLoading) setLoading(true)
       try {
-        const response = await fetch(`/api${path}`, {
+        const response = await fetch(apiURL(path), {
           method,
           headers: {
             'Content-Type': 'application/json',
@@ -550,7 +556,7 @@ function LoginScreen({ onLogin }: { onLogin: (token: string) => void }) {
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const form = new FormData(event.currentTarget)
-    const response = await fetch('/api/auth/login', {
+    const response = await fetch(apiURL('/auth/login'), {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ username: formValue(form, 'username'), password: formValue(form, 'password') }),
@@ -782,16 +788,39 @@ function ToggleButton({ enabled, target, onToggle }: { enabled: boolean; target:
 }
 
 function LogsView({ runs, stepRuns, deliveryLogs, onLoadSteps }: { runs: PipelineRun[]; stepRuns: StepRun[]; deliveryLogs: DeliveryLog[]; onLoadSteps: (runId: number) => void }) {
+  const [detail, setDetail] = useState<LogDetail | null>(null)
+
+  function showRun(run: PipelineRun) {
+    setDetail({
+      type: 'run',
+      title: `运行日志 #${run.id}`,
+      value: pipelineRunDetail(run),
+    })
+  }
+
+  function showDelivery(log: DeliveryLog) {
+    setDetail({
+      type: 'delivery',
+      title: `推送日志 #${log.id}`,
+      value: deliveryLogDetail(log),
+    })
+  }
+
   return (
     <div className="view-stack">
       <section className="content-grid two">
         <Panel title="运行日志" icon={<ScrollText />} meta="pipeline runs">
-          <RunTable runs={runs} onLoadSteps={onLoadSteps} />
+          <RunTable runs={runs} onLoadSteps={onLoadSteps} onSelectRun={showRun} />
         </Panel>
         <Panel title="推送日志" icon={<Send />} meta="delivery logs">
-          <DeliveryLogList logs={deliveryLogs} />
+          <DeliveryLogList logs={deliveryLogs} onSelectLog={showDelivery} />
         </Panel>
       </section>
+      {detail && (
+        <Panel title={detail.title} icon={<FileJson />} meta={detail.type === 'delivery' ? 'request / response / error' : 'run detail'}>
+          <ReadonlyJSON value={detail.value} />
+        </Panel>
+      )}
       <Panel title="步骤日志" icon={<BookOpen />} meta="选择运行记录查看步骤">
         <StepRunList stepRuns={stepRuns} />
       </Panel>
@@ -799,7 +828,7 @@ function LogsView({ runs, stepRuns, deliveryLogs, onLoadSteps }: { runs: Pipelin
   )
 }
 
-function RunTable({ runs, onLoadSteps }: { runs: PipelineRun[]; onLoadSteps: (runId: number) => void }) {
+function RunTable({ runs, onLoadSteps, onSelectRun }: { runs: PipelineRun[]; onLoadSteps: (runId: number) => void; onSelectRun?: (run: PipelineRun) => void }) {
   if (runs.length === 0) return <EmptyState text="暂无运行记录。" />
   return (
     <div className="data-table-wrap">
@@ -813,7 +842,12 @@ function RunTable({ runs, onLoadSteps }: { runs: PipelineRun[]; onLoadSteps: (ru
               <td>{run.status}</td>
               <td>{run.success_count}/{run.total_count}</td>
               <td>{formatDate(run.started_at)}</td>
-              <td><button type="button" onClick={() => onLoadSteps(run.id)}>查看</button></td>
+              <td>
+                <div className="table-actions">
+                  <button type="button" onClick={() => onSelectRun?.(run)}>详情</button>
+                  <button type="button" onClick={() => onLoadSteps(run.id)}>步骤</button>
+                </div>
+              </td>
             </tr>
           ))}
         </tbody>
@@ -822,7 +856,7 @@ function RunTable({ runs, onLoadSteps }: { runs: PipelineRun[]; onLoadSteps: (ru
   )
 }
 
-function DeliveryLogList({ logs }: { logs: DeliveryLog[] }) {
+function DeliveryLogList({ logs, onSelectLog }: { logs: DeliveryLog[]; onSelectLog?: (log: DeliveryLog) => void }) {
   if (logs.length === 0) return <EmptyState text="暂无推送日志。" />
   return (
     <div className="record-list">
@@ -835,11 +869,64 @@ function DeliveryLogList({ logs }: { logs: DeliveryLog[] }) {
             </span>
             <span>{log.error_message || deliveryLogPreview(log)}</span>
           </div>
-          <small>{formatDate(log.sent_at)}</small>
+          <div className="record-actions">
+            <small>{formatDate(log.sent_at)}</small>
+            <button type="button" onClick={() => onSelectLog?.(log)}>详情</button>
+          </div>
         </article>
       ))}
     </div>
   )
+}
+
+function apiURL(path: string) {
+  const normalizedPath = path.startsWith('/api') ? path : `/api${path.startsWith('/') ? path : `/${path}`}`
+  const base = defaultApiBaseURL.replace(/\/$/, '')
+  return `${base}${normalizedPath}`
+}
+
+function pipelineRunDetail(run: PipelineRun) {
+  return {
+    id: run.id,
+    trace_id: run.trace_id,
+    run_type: run.run_type,
+    trigger_type: run.trigger_type,
+    status: run.status,
+    counts: {
+      total: run.total_count,
+      success: run.success_count,
+      failed: run.failed_count,
+    },
+    refs: {
+      source_id: run.source_id,
+      destination_id: run.destination_id,
+    },
+    error_message: run.error_message,
+    started_at: run.started_at,
+    finished_at: run.finished_at,
+  }
+}
+
+function deliveryLogDetail(log: DeliveryLog) {
+  return {
+    id: log.id,
+    trace_id: log.trace_id,
+    run_id: log.run_id,
+    target: {
+      destination_id: log.destination_id,
+      destination_code: log.destination_code,
+      destination_name: log.destination_name,
+    },
+    source_code: log.source_code,
+    clean_record_id: log.clean_record_id,
+    business_key: log.business_key,
+    http_status: log.http_status,
+    success: log.success,
+    error_message: log.error_message,
+    sent_at: log.sent_at,
+    request_body: parseJsonText(log.request_body),
+    response_body: parseJsonText(log.response_body),
+  }
 }
 
 function deliveryLogPreview(log: DeliveryLog) {

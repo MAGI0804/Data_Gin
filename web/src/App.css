@@ -324,6 +324,28 @@ button:focus-visible {
   max-width: 220px;
 }
 
+.record-actions,
+.table-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.record-actions {
+  justify-content: flex-end;
+  flex-wrap: wrap;
+}
+
+.table-actions {
+  min-width: max-content;
+}
+
+.record-actions button,
+.table-actions button {
+  min-height: 30px;
+  padding: 5px 9px;
+}
+
 code {
   max-width: 220px;
   overflow-wrap: anywhere;
@@ -448,6 +470,10 @@ summary {
   .method-meta {
     justify-items: start;
     max-width: none;
+  }
+
+  .record-actions {
+    justify-content: flex-start;
   }
 
   .ops-workspace {
