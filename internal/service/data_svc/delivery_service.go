@@ -10,6 +10,7 @@ import (
 	"gin-biz-web-api/internal/dao/data_dao"
 	"gin-biz-web-api/internal/requestbody"
 	"gin-biz-web-api/model"
+	"gin-biz-web-api/pkg/app"
 )
 
 type DeliveryService struct {
@@ -293,7 +294,7 @@ func (s *DeliveryService) createDeliveryLog(
 		DestinationCode: destination.Code,
 		DestinationName: destination.Name,
 		BusinessKey:     cleanRecord.BusinessKey,
-		SentAt:          &model.TimeNormal{Time: time.Now()},
+		SentAt:          &model.TimeNormal{Time: app.TimeNowInTimezone()},
 	}
 	if result != nil {
 		log.RequestBody = result.RequestBody

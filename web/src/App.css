@@ -346,6 +346,56 @@ button:focus-visible {
   padding: 5px 9px;
 }
 
+.store-log-layout,
+.store-log-groups {
+  display: grid;
+  gap: 12px;
+}
+
+.log-filter-bar,
+.store-log-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.log-filter-bar {
+  border: 1px solid #d0d0d0;
+  border-radius: 8px;
+  background: #fafafa;
+  padding: 10px;
+}
+
+.log-filter-bar label {
+  min-width: min(240px, 100%);
+}
+
+.log-filter-bar span,
+.store-log-title span {
+  color: #666666;
+  font-size: 12px;
+}
+
+.store-log-group {
+  display: grid;
+  gap: 10px;
+  border: 1px solid #111111;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 12px;
+}
+
+.store-log-title {
+  border-bottom: 1px solid #d0d0d0;
+  padding-bottom: 10px;
+}
+
+.store-log-title strong,
+.store-log-title span {
+  display: block;
+}
+
 .detail-toolbar {
   display: flex;
   align-items: center;
@@ -480,6 +530,12 @@ summary {
 
   .record-actions {
     justify-content: flex-start;
+  }
+
+  .log-filter-bar,
+  .store-log-title {
+    align-items: stretch;
+    flex-direction: column;
   }
 
   .ops-workspace {

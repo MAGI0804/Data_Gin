@@ -11,6 +11,7 @@ import (
 	send "gin-biz-web-api/Trigger/Send_Data"
 	"gin-biz-web-api/internal/dao/data_dao"
 	"gin-biz-web-api/model"
+	"gin-biz-web-api/pkg/app"
 	"gin-biz-web-api/pkg/config"
 	"gin-biz-web-api/pkg/shanghaimall"
 
@@ -226,7 +227,7 @@ func (s *BojunOrderPushService) writeDeliveryLog(ctx context.Context, payload de
 		ResponseBody:    payload.ResponseBody,
 		HTTPStatus:      payload.HTTPStatus,
 		Success:         payload.Success,
-		SentAt:          &model.TimeNormal{Time: time.Now()},
+		SentAt:          &model.TimeNormal{Time: app.TimeNowInTimezone()},
 	}
 	if payload.DeliveryError != nil {
 		log.ErrorMessage = payload.DeliveryError.Error()
@@ -245,7 +246,7 @@ func (s *BojunOrderPushService) writeSkippedLog(ctx context.Context, order *mode
 		BusinessKey:     order.DocNo,
 		Success:         false,
 		ErrorMessage:    skipErr.Error(),
-		SentAt:          &model.TimeNormal{Time: time.Now()},
+		SentAt:          &model.TimeNormal{Time: app.TimeNowInTimezone()},
 	})
 }
 

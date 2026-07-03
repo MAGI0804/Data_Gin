@@ -267,6 +267,17 @@ type LogSelection = {
   id: number
 }
 
+type DeliveryStore = {
+  key: string
+  name: string
+  aliases: string[]
+}
+
+type DeliveryLogWithStore = {
+  log: DeliveryLog
+  store: DeliveryStore
+}
+
 const tokenStorageKey = 'warehouse-token'
 
 const navItems: Array<{ key: NavKey; label: string; icon: ReactNode }> = [
@@ -277,6 +288,15 @@ const navItems: Array<{ key: NavKey; label: string; icon: ReactNode }> = [
   { key: 'process', label: '数据处理', icon: <ListChecks aria-hidden="true" /> },
   { key: 'push', label: '数据推送', icon: <ArrowUpFromLine aria-hidden="true" /> },
   { key: 'logs', label: '日志', icon: <ScrollText aria-hidden="true" /> },
+]
+
+const deliveryStores: DeliveryStore[] = [
+  { key: 'shangsheng', name: '上生新所', aliases: ['ABCN001A001', 'shangsheng', '上生新所', '上升新所'] },
+  { key: 'jialicheng', name: '嘉里城', aliases: ['ABCN001A004', 'jialicheng', 'kerry', '嘉里城'] },
+  { key: 'panlong', name: '蟠龙', aliases: ['ABCN001A005', 'panlong', '蟠龙'] },
+  { key: 'xintiandi', name: '新天地', aliases: ['ABCN001A003', 'xintiandi', '新天地'] },
+  { key: 'qiantan', name: '前滩', aliases: ['ABCN001P012', 'qiantan', '前滩'] },
+  { key: 'hangzhou_henglong', name: '杭州恒隆', aliases: ['ABCN002A001', 'hangzhou_henglong', 'henglong', '杭州恒隆'] },
 ]
 
 const builtinMethods: MethodDisplay[] = [
@@ -896,24 +916,72 @@ function RunTable({ runs, onLoadSteps, onSelectRun }: { runs: PipelineRun[]; onL
 }
 
 function DeliveryLogList({ logs, onSelectLog }: { logs: DeliveryLog[]; onSelectLog?: (log: DeliveryLog) => void }) {
-  if (logs.length === 0) return <EmptyState text="暂无推送日志。" />
+  const [storeFilter, setStoreFilter] = useState('all')
+  const matchedLogs = useMemo(
+    () => logs.map((log) => ({ log, store: matchDeliveryStore(log) })).filter((item): item is DeliveryLogWithStore => Boolean(item.store)),
+    [logs],
+  )
+  const visibleLogs = storeFilter === 'all' ? matchedLogs : matchedLogs.filter((item) => item.store.key === storeFilter)
+  const groupedLogs = useMemo(() => {
+    return deliveryStores
+      .map((store) => ({
+        store,
+        logs: visibleLogs.filter((item) => item.store.key === store.key).map((item) => item.log),
+      }))
+      .filter((group) => group.logs.length > 0)
+  }, [visibleLogs])
+
+  if (matchedLogs.length === 0) return <EmptyState text="暂无匹配门店的推送日志。" />
   return (
-    <div className="record-list">
-      {logs.slice(0, 20).map((log) => (
-        <article className="record-row" key={log.id}>
-          <div>
-            <strong>#{log.id} / {log.destination_name || log.destination_code || `目标 ${log.destination_id || '-'}`}</strong>
-            <span>
-              {log.success ? '成功' : '失败'} / 来源 {log.source_code || '-'} / 单号 {log.business_key || '-'} / HTTP {log.http_status || '-'}
-            </span>
-            <span>{log.error_message || deliveryLogPreview(log)}</span>
-          </div>
-          <div className="record-actions">
-            <small>{formatDate(log.sent_at)}</small>
-            <button type="button" onClick={() => onSelectLog?.(log)}>详情</button>
-          </div>
-        </article>
-      ))}
+    <div className="store-log-layout">
+      <div className="log-filter-bar">
+        <label>
+          门店
+          <select value={storeFilter} onChange={(event) => setStoreFilter(event.target.value)}>
+            <option value="all">全部匹配门店</option>
+            {deliveryStores.map((store) => (
+              <option key={store.key} value={store.key}>{store.name}</option>
+            ))}
+          </select>
+        </label>
+        <span>已匹配 {matchedLogs.length} 条，当前显示 {visibleLogs.length} 条</span>
+      </div>
+      {groupedLogs.length === 0 ? <EmptyState text="当前门店暂无推送日志。" /> : (
+        <div className="store-log-groups">
+          {groupedLogs.map((group) => {
+            const successCount = group.logs.filter((log) => log.success).length
+            const failedCount = group.logs.length - successCount
+            return (
+              <section className="store-log-group" key={group.store.key}>
+                <div className="store-log-title">
+                  <div>
+                    <strong>{group.store.name}</strong>
+                    <span>{group.logs.length} 条 / 成功 {successCount} / 失败 {failedCount}</span>
+                  </div>
+                  <StatusPill label={failedCount > 0 ? '存在失败' : '全部成功'} />
+                </div>
+                <div className="record-list">
+                  {group.logs.slice(0, 8).map((log) => (
+                    <article className="record-row" key={log.id}>
+                      <div>
+                        <strong>#{log.id} / {log.business_key || '-'}</strong>
+                        <span>
+                          {log.success ? '成功' : '失败'} / 来源 {log.source_code || '-'} / HTTP {log.http_status || '-'}
+                        </span>
+                        <span>{log.error_message || deliveryLogPreview(log)}</span>
+                      </div>
+                      <div className="record-actions">
+                        <small>{formatDate(log.sent_at)}</small>
+                        {onSelectLog && <button type="button" onClick={() => onSelectLog(log)}>详情</button>}
+                      </div>
+                    </article>
+                  ))}
+                </div>
+              </section>
+            )
+          })}
+        </div>
+      )}
     </div>
   )
 }
@@ -983,6 +1051,20 @@ function deliveryLogDetail(log: DeliveryLog) {
     request_body: parseJsonText(log.request_body),
     response_body: parseJsonText(log.response_body),
   }
+}
+
+function matchDeliveryStore(log: DeliveryLog) {
+  const text = [
+    log.destination_code,
+    log.destination_name,
+    log.source_code,
+    log.business_key,
+    log.request_body,
+    log.response_body,
+    log.error_message,
+  ].join(' ').toLowerCase()
+
+  return deliveryStores.find((store) => store.aliases.some((alias) => text.includes(alias.toLowerCase()))) ?? null
 }
 
 function deliveryLogPreview(log: DeliveryLog) {
@@ -1536,7 +1618,19 @@ function parseMaybeJson(value: unknown) {
 
 function formatDate(value: string | null) {
   if (!value) return '-'
-  return value
+  const normalized = value.includes('T') ? value : `${value.replace(' ', 'T')}+08:00`
+  const date = new Date(normalized)
+  if (Number.isNaN(date.getTime())) return value
+  return new Intl.DateTimeFormat('zh-CN', {
+    timeZone: 'Asia/Shanghai',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  }).format(date).replace(/\//g, '-')
 }
 
 function groupBy<T>(items: T[], keyFn: (item: T) => string) {
