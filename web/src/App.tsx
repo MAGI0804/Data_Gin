@@ -160,11 +160,14 @@ type SourceDefinition = {
 type RawData = {
   id: number
   data_source_id: number
+  external_id: string
   data_type: string
   raw_content: unknown
   rawContent?: unknown
   metadata: unknown
   status: string
+  remark: string
+  source: string
   created_at: number
   updated_at: number
 }
@@ -463,8 +466,8 @@ function App() {
     if (response.ok) await refreshAll(false)
   }
 
-  const receivedData = useMemo(() => rawData.filter((item) => rawDataOrigin(item) !== 'fetch'), [rawData])
-  const pulledData = useMemo(() => rawData.filter((item) => rawDataOrigin(item) === 'fetch'), [rawData])
+  const receivedData = useMemo(() => rawData.filter((item) => !isPulledOrigin(rawDataOrigin(item))), [rawData])
+  const pulledData = useMemo(() => rawData.filter((item) => isPulledOrigin(rawDataOrigin(item))), [rawData])
   const coreMethods = useMemo(
     () => buildCoreMethods({ sources, transformRules, destinations, deliveryTasks, legacyTasks, legacyRules }),
     [deliveryTasks, destinations, legacyRules, legacyTasks, sources, transformRules],
@@ -507,7 +510,7 @@ function App() {
         {activeNav === 'push_status' && <PushStatusView runs={runs} deliveryLogs={deliveryLogs} onLoadSteps={loadStepRuns} />}
         {activeNav === 'methods' && <MethodsView methods={methods} coreMethods={coreMethods} onToggle={toggleTarget} />}
         {activeNav === 'receive' && <ReceiveView records={receivedData} coreMethod={coreMethods.find((item) => item.key === 'interface_ingest')} />}
-        {activeNav === 'pull' && <PullView sources={sources} records={pulledData} coreMethod={coreMethods.find((item) => item.key === 'youzan_fetch')} onToggle={toggleTarget} />}
+        {activeNav === 'pull' && <PullView sources={sources} records={pulledData} coreMethods={coreMethods.filter((item) => item.key === 'youzan_fetch' || item.key === 'bojun_order_fetch')} onToggle={toggleTarget} />}
         {activeNav === 'process' && <ProcessView rules={transformRules} records={processedData} coreMethod={coreMethods.find((item) => item.key === 'qimai_process')} onToggle={toggleTarget} />}
         {activeNav === 'push' && <PushConfigView destinations={destinations} tasks={deliveryTasks} coreMethod={coreMethods.find((item) => item.key === 'mall_push')} onToggle={toggleTarget} />}
         {activeNav === 'logs' && <LogsView runs={runs} stepRuns={stepRuns} deliveryLogs={deliveryLogs} onLoadSteps={loadStepRuns} />}
@@ -660,10 +663,10 @@ function ReceiveView({ records, coreMethod }: { records: RawData[]; coreMethod?:
   )
 }
 
-function PullView({ sources, records, coreMethod, onToggle }: { sources: SourceDefinition[]; records: RawData[]; coreMethod?: CoreMethod; onToggle: (target: ToggleTarget, enabled: boolean) => void }) {
+function PullView({ sources, records, coreMethods, onToggle }: { sources: SourceDefinition[]; records: RawData[]; coreMethods: CoreMethod[]; onToggle: (target: ToggleTarget, enabled: boolean) => void }) {
   return (
     <div className="view-stack">
-      {coreMethod && <Panel title="有赞数据拉取方法" icon={<ArrowDownToLine />} meta="现有拉取能力"><CoreMethodList methods={[coreMethod]} onToggle={onToggle} /></Panel>}
+      {coreMethods.length > 0 && <Panel title="数据拉取方法" icon={<ArrowDownToLine />} meta="现有拉取能力"><CoreMethodList methods={coreMethods} onToggle={onToggle} /></Panel>}
       <section className="overview-grid">
         <Metric label="拉取数据源" value={sources.length} />
         <Metric label="启用数据源" value={sources.filter((item) => item.enabled).length} />
@@ -1117,6 +1120,15 @@ function buildCoreMethods({ sources, transformRules, destinations, deliveryTasks
       refs: youzanSources.map((source) => ({ type: 'source' as const, id: source.id })),
     },
     {
+      key: 'bojun_order_fetch',
+      title: '伯俊订单拉取',
+      category: '数据拉取方法',
+      description: '每分钟调用伯俊 `/retail/retail.query` 拉取订单，逐条写入原始表并标记来源 `bojun_order`。',
+      enabled: true,
+      status: '系统定时任务：每分钟执行，运行参数来自 BOJUN_ORDER_* 环境变量。',
+      refs: [],
+    },
+    {
       key: 'qimai_process',
       title: '企迈标签数据处理',
       category: '数据处理方法',
@@ -1255,9 +1267,17 @@ function methodTypeLabel(type: MethodType) {
 
 function rawDataOrigin(record: RawData) {
   const metadata = parseMaybeJson(record.metadata)
+  if (record.source) return record.source
+  if (record.remark) return record.remark
+  if (metadata && typeof metadata === 'object' && typeof (metadata as JsonRecord).source === 'string') return String((metadata as JsonRecord).source)
+  if (metadata && typeof metadata === 'object' && typeof (metadata as JsonRecord).remark === 'string') return String((metadata as JsonRecord).remark)
   if (metadata && typeof metadata === 'object' && (metadata as JsonRecord).format === 'fetch') return 'fetch'
   if (metadata && typeof metadata === 'object' && typeof (metadata as JsonRecord).format === 'string') return String((metadata as JsonRecord).format)
   return 'ingest'
+}
+
+function isPulledOrigin(origin: string) {
+  return origin === 'fetch' || origin === 'bojun_order' || origin === 'youzan_order' || origin === 'youzan_refund'
 }
 
 function readList<T>(result: ApiResult, key: string): T[] {

@@ -1,6 +1,9 @@
 package bootstrap
 
 import (
+	"os"
+	"strings"
+
 	crontabTask "gin-biz-web-api/crontab"
 	"gin-biz-web-api/global"
 	"gin-biz-web-api/pkg/config"
@@ -35,6 +38,17 @@ func addScheduleTask() {
 	dataCollectCrontabEntryID, err := global.Crontab.AddJob("0 */30 * * * *", crontabTask.DataCollectCrontab{})
 	ifError(err, int(dataCollectCrontabEntryID), "DataCollectCrontab")
 
+	bojunOrderCronExpr := resolveBojunOrderCronExpr()
+	bojunOrderCrontabEntryID, err := global.Crontab.AddJob(bojunOrderCronExpr, crontabTask.BojunOrderCrontab{})
+	ifError(err, int(bojunOrderCrontabEntryID), "BojunOrderCrontab")
+
+}
+
+func resolveBojunOrderCronExpr() string {
+	if value := strings.TrimSpace(os.Getenv("BOJUN_ORDER_CRON_EXPR")); value != "" {
+		return value
+	}
+	return config.GetString("cfg.bojun.order_cron_expr", "0 */1 * * * *")
 }
 
 func ifError(err error, entryID int, taskName string) {
