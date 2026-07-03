@@ -17,6 +17,7 @@ import (
 	"gin-biz-web-api/internal/dao/data_dao"
 	"gin-biz-web-api/internal/requestbody"
 	"gin-biz-web-api/model"
+	"gin-biz-web-api/pkg/bojun"
 	"gin-biz-web-api/pkg/config"
 )
 
@@ -579,6 +580,8 @@ func executeMethodStep(ctx context.Context, detail MethodStepDetail, inputs map[
 	switch detail.Step.MethodType {
 	case "request":
 		return executeRequestStep(ctx, detail, inputs)
+	case "bojun_signed_request":
+		return executeBojunSignedRequestStep(ctx, inputs)
 	case "extract":
 		return executeExtractStep(detail, inputs)
 	case "mapping":
@@ -588,6 +591,17 @@ func executeMethodStep(ctx context.Context, detail MethodStepDetail, inputs map[
 	default:
 		return inputs, nil
 	}
+}
+
+func executeBojunSignedRequestStep(ctx context.Context, inputs map[string]interface{}) (map[string]interface{}, error) {
+	method := stringValue(inputs, "method", "")
+	if method == "" {
+		method = stringValue(scopedMap(inputs, "request"), "method", "")
+	}
+	if method == "" {
+		return nil, fmt.Errorf("bojun signed request requires method")
+	}
+	return bojun.SendSignedRequest(ctx, method, scopedMap(inputs, "body"))
 }
 
 func executeRequestStep(ctx context.Context, detail MethodStepDetail, inputs map[string]interface{}) (map[string]interface{}, error) {
@@ -922,7 +936,7 @@ func defaultPipelineStages(pipelineID uint) []model.PipelineStage {
 
 func defaultStageTypeForMethod(methodType string) string {
 	switch methodType {
-	case "request", "extract":
+	case "request", "extract", "bojun_signed_request":
 		return "fetch"
 	case "delivery":
 		return "push"
@@ -936,17 +950,19 @@ func defaultStageTypeForMethod(methodType string) string {
 func validateStageMethodType(stageType, methodType string) error {
 	allowed := map[string]map[string]bool{
 		"fetch": {
-			"request":  true,
-			"extract":  true,
-			"db_query": true,
+			"request":              true,
+			"bojun_signed_request": true,
+			"extract":              true,
+			"db_query":             true,
 		},
 		"process": {
-			"mapping":  true,
-			"validate": true,
-			"db_query": true,
-			"db_write": true,
-			"template": true,
-			"request":  true,
+			"mapping":              true,
+			"validate":             true,
+			"db_query":             true,
+			"db_write":             true,
+			"template":             true,
+			"request":              true,
+			"bojun_signed_request": true,
 		},
 		"push": {
 			"template": true,

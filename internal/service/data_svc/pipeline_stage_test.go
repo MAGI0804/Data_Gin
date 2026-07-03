@@ -14,6 +14,7 @@ func TestValidateStageMethodTypeEnforcesStageBoundaries(t *testing.T) {
 		wantErr    bool
 	}{
 		{"fetch request allowed", "fetch", "request", false},
+		{"fetch bojun signed request allowed", "fetch", "bojun_signed_request", false},
 		{"process mapping allowed", "process", "mapping", false},
 		{"push delivery allowed", "push", "delivery", false},
 		{"log log allowed", "log", "log", false},
@@ -65,6 +66,9 @@ func TestBuildStageGeneratedConfigMapKeepsLargeStageAndSteps(t *testing.T) {
 func TestDefaultStageTypeForMethod(t *testing.T) {
 	if got := defaultStageTypeForMethod("request"); got != "fetch" {
 		t.Fatalf("request stage = %s", got)
+	}
+	if got := defaultStageTypeForMethod("bojun_signed_request"); got != "fetch" {
+		t.Fatalf("bojun signed request stage = %s", got)
 	}
 	if got := defaultStageTypeForMethod("delivery"); got != "push" {
 		t.Fatalf("delivery stage = %s", got)

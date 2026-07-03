@@ -108,3 +108,10 @@ Qimai:
   Nonce: ${QIMAI_NONCE:-11886}
   OrderDetailURL: ${QIMAI_ORDER_DETAIL_URL:-https://openapi.qmai.cn/v3/order/getDetail}
   BusinessRecordURL: ${QIMAI_BUSINESS_RECORD_URL:-https://openapi.qmai.cn/v3/dataone/finance/summary/businessRecord}
+
+Bojun:
+  BaseURL: ${BOJUN_BASE_URL:-http://47.116.189.190:9100/bos/standard}
+  AppKey: ${BOJUN_APP_KEY:-}
+  Secret: ${BOJUN_SECRET:-}
+  Format: ${BOJUN_FORMAT:-json}
+  TimeoutSeconds: ${BOJUN_TIMEOUT_SECONDS:-10}

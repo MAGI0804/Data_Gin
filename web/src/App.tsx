@@ -33,7 +33,7 @@ type ApiClientOptions = {
 type ApiClient = (path: string, options?: ApiClientOptions) => Promise<ApiResult>
 type NavKey = 'push_status' | 'methods' | 'receive' | 'pull' | 'process' | 'push' | 'logs'
 type MethodKind = 'configured' | 'builtin'
-type MethodType = 'request' | 'extract' | 'mapping' | 'validate' | 'db_query' | 'db_write' | 'template' | 'delivery' | 'log' | 'utility'
+type MethodType = 'request' | 'bojun_signed_request' | 'extract' | 'mapping' | 'validate' | 'db_query' | 'db_write' | 'template' | 'delivery' | 'log' | 'utility'
 type JsonRecord = Record<string, unknown>
 
 type PipelineDefinition = {
@@ -302,6 +302,17 @@ const builtinMethods: MethodDisplay[] = [
     category: '数据拉取方法',
     owner: '系统内置',
     description: '按数据源配置请求第三方 API 并落原始数据。',
+    enabled: true,
+  },
+  {
+    key: 'builtin-bojun-signed-request',
+    kind: 'builtin',
+    name: '伯俊签名请求',
+    code: 'bojun_signed_request',
+    method_type: 'bojun_signed_request',
+    category: '数据拉取方法',
+    owner: '系统内置',
+    description: 'Go 系统方法 pkg/bojun.SendSignedRequest，入参 method 和 body，凭据从 BOJUN_* 环境变量读取，出参为接口 JSON。',
     enabled: true,
   },
 ]
@@ -976,6 +987,7 @@ function ReadonlyJSON({ value }: { value: unknown }) {
 function methodCategory(methodType: MethodType) {
   const categories: Record<MethodType, string> = {
     request: '数据拉取方法',
+    bojun_signed_request: '数据拉取方法',
     extract: '数据拉取方法',
     mapping: '数据处理方法',
     validate: '前置验证方法',
@@ -1227,6 +1239,7 @@ function methodDescription(detail: MethodStepDetail) {
 function methodTypeLabel(type: MethodType) {
   const labels: Record<MethodType, string> = {
     request: 'Request 请求',
+    bojun_signed_request: '伯俊签名请求',
     extract: 'Extract 提取',
     mapping: 'Mapping 清洗',
     validate: 'Validate 校验',
