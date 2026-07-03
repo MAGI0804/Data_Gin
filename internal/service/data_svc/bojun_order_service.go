@@ -25,9 +25,15 @@ type bojunRetailOrderWriter interface {
 	CreateOrUpdate(ctx context.Context, order *model.BojunRetailOrder) error
 }
 
+type pipelineRunRecorder interface {
+	Create(ctx context.Context, run *model.PipelineRun) (uint, error)
+	Finish(ctx context.Context, id uint, status string, successCount, failedCount int, errorMessage string) error
+}
+
 type BojunOrderService struct {
 	rawDataDAO     rawDataCreator
 	retailOrderDAO bojunRetailOrderWriter
+	pipelineRunDAO pipelineRunRecorder
 }
 
 type BojunOrderSyncResult struct {
@@ -36,14 +42,17 @@ type BojunOrderSyncResult struct {
 	PageSize    int    `json:"page_size"`
 	MaxPages    int    `json:"max_pages"`
 	FetchPages  int    `json:"fetch_pages"`
+	TotalCount  int    `json:"total_count"`
 	SavedCount  int    `json:"saved_count"`
 	RetailCount int    `json:"retail_count"`
+	FailedCount int    `json:"failed_count"`
 }
 
 func NewBojunOrderService() *BojunOrderService {
 	return &BojunOrderService{
 		rawDataDAO:     data_dao.NewRawDataDAO(),
 		retailOrderDAO: data_dao.NewBojunRetailOrderDAO(),
+		pipelineRunDAO: data_dao.NewPipelineRunDAO(),
 	}
 }
 
@@ -68,36 +77,47 @@ func (s *BojunOrderService) SyncOrders(ctx context.Context, startTime, endTime s
 		PageSize:  pageSize,
 		MaxPages:  maxPages,
 	}
+	runID, err := s.createBojunOrderRun(ctx, startTime, endTime)
+	if err != nil {
+		return result, err
+	}
 
 	for page := 1; page <= maxPages; page++ {
 		payload, err := bojun.SendSignedRequest(ctx, method, buildBojunOrderRequestBody(page, pageSize, startTime, endTime))
 		if err != nil {
-			return result, err
+			result.FailedCount++
+			return result, s.finishBojunOrderRun(ctx, runID, result, err)
 		}
 
 		records, pageInfo, err := extractBojunOrderRecords(payload)
 		if err != nil {
-			return result, err
+			result.FailedCount++
+			return result, s.finishBojunOrderRun(ctx, runID, result, err)
 		}
 		result.FetchPages++
 
 		for _, record := range records {
+			result.TotalCount++
 			rawData, err := buildBojunOrderRawData(record, method, startTime, endTime, pageInfo.Current)
 			if err != nil {
-				return result, err
+				result.FailedCount++
+				continue
 			}
 			rawDataID, err := s.rawDataDAO.Create(ctx, rawData)
 			if err != nil {
-				return result, err
+				result.FailedCount++
+				continue
 			}
 			result.SavedCount++
 
 			retailOrder, err := buildBojunRetailOrder(rawDataID, record)
 			if err != nil {
-				return result, err
+				result.FailedCount++
+				continue
 			}
 			if err := s.retailOrderDAO.CreateOrUpdate(ctx, retailOrder); err != nil {
-				return result, err
+				result.FailedCount++
+				continue
 			}
 			result.RetailCount++
 		}
@@ -107,7 +127,51 @@ func (s *BojunOrderService) SyncOrders(ctx context.Context, startTime, endTime s
 		}
 	}
 
+	if err := s.finishBojunOrderRun(ctx, runID, result, nil); err != nil {
+		return result, err
+	}
 	return result, nil
+}
+
+func (s *BojunOrderService) createBojunOrderRun(ctx context.Context, startTime, endTime string) (uint, error) {
+	startedAt := time.Now()
+	return s.pipelineRunDAO.Create(ctx, &model.PipelineRun{
+		TraceID:      newTraceID(),
+		RunType:      "fetch",
+		TriggerType:  "schedule",
+		Status:       "running",
+		TotalCount:   0,
+		SuccessCount: 0,
+		FailedCount:  0,
+		StartedAt:    &model.TimeNormal{Time: startedAt},
+		ErrorMessage: fmt.Sprintf("bojun_order %s - %s", startTime, endTime),
+	})
+}
+
+func (s *BojunOrderService) finishBojunOrderRun(
+	ctx context.Context,
+	runID uint,
+	result *BojunOrderSyncResult,
+	runErr error,
+) error {
+	status := "success"
+	if result.FailedCount > 0 && result.RetailCount > 0 {
+		status = "partial_success"
+	} else if result.FailedCount > 0 {
+		status = "failed"
+	}
+
+	errorMessage := ""
+	if runErr != nil {
+		errorMessage = runErr.Error()
+	}
+	if err := s.pipelineRunDAO.Finish(ctx, runID, status, result.RetailCount, result.FailedCount, errorMessage); err != nil {
+		if runErr != nil {
+			return fmt.Errorf("%w; finish run: %v", runErr, err)
+		}
+		return err
+	}
+	return runErr
 }
 
 type bojunOrderPageInfo struct {

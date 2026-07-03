@@ -340,6 +340,7 @@ func (dao *PipelineRunDAO) Create(ctx context.Context, run *model.PipelineRun) (
 func (dao *PipelineRunDAO) Finish(ctx context.Context, id uint, status string, successCount, failedCount int, errorMessage string) error {
 	updates := map[string]interface{}{
 		"status":        status,
+		"total_count":   successCount + failedCount,
 		"success_count": successCount,
 		"failed_count":  failedCount,
 		"finished_at":   model.TimeNormal{Time: time.Now()},

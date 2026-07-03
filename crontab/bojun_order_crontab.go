@@ -33,5 +33,7 @@ func (b BojunOrderCrontab) Run() {
 		zap.String("end_time", result.EndTime),
 		zap.Int("fetch_pages", result.FetchPages),
 		zap.Int("saved_count", result.SavedCount),
+		zap.Int("retail_count", result.RetailCount),
+		zap.Int("failed_count", result.FailedCount),
 	)
 }
