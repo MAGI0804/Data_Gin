@@ -98,6 +98,23 @@ type MethodDisplay = {
   enabled: boolean
   params?: MethodParam[]
   outputs?: MethodOutput[]
+  toggle?: ToggleTarget
+}
+
+type ToggleTarget =
+  | { type: 'source'; id: number }
+  | { type: 'transform_rule'; id: number }
+  | { type: 'destination'; id: number }
+  | { type: 'delivery_task'; id: number }
+
+type CoreMethod = {
+  key: string
+  title: string
+  category: string
+  description: string
+  enabled: boolean
+  status: string
+  refs: ToggleTarget[]
 }
 
 type PipelineRun = {
@@ -134,6 +151,9 @@ type SourceDefinition = {
   source_type: string
   enabled: boolean
   auth_type: string
+  config_json: string
+  schema_json: string
+  dedupe_keys: string
   source_query_key: string
 }
 
@@ -164,6 +184,7 @@ type TransformRule = {
   name: string
   rule_type: string
   order_index: number
+  config_json: string
   enabled: boolean
 }
 
@@ -172,6 +193,7 @@ type DestinationDefinition = {
   name: string
   code: string
   destination_type: string
+  config_json: string
   enabled: boolean
 }
 
@@ -182,7 +204,35 @@ type DeliveryTask = {
   clean_table: string
   destination_id: number
   trigger_type: string
+  cron_expr: string
+  filter_json: string
+  payload_template: string
   enabled: boolean
+}
+
+type LegacyTask = {
+  code: string
+  name: string
+  category: string
+  source_code: string
+  source_name: string
+  cron_expr: string
+  input_table: string
+  output_table: string
+  target_system: string
+  description: string
+}
+
+type LegacyTransformRule = {
+  code: string
+  name: string
+  source_code: string
+  source_name: string
+  rule_type: string
+  trigger_mode: string
+  input_table: string
+  output_table: string
+  description: string
 }
 
 type DeliveryLog = {
@@ -273,6 +323,8 @@ function App() {
   const [destinations, setDestinations] = useState<DestinationDefinition[]>([])
   const [deliveryTasks, setDeliveryTasks] = useState<DeliveryTask[]>([])
   const [deliveryLogs, setDeliveryLogs] = useState<DeliveryLog[]>([])
+  const [legacyTasks, setLegacyTasks] = useState<LegacyTask[]>([])
+  const [legacyRules, setLegacyRules] = useState<LegacyTransformRule[]>([])
 
   const client = useCallback<ApiClient>(
     async (path, options = {}) => {
@@ -330,7 +382,7 @@ function App() {
       if (!token) return
       setRefreshing(true)
       try {
-        const [pipelineResult, runResult, sourceResult, rawResult, processedResult, ruleResult, destinationResult, taskResult, logResult] = await Promise.all([
+        const [pipelineResult, runResult, sourceResult, rawResult, processedResult, ruleResult, destinationResult, taskResult, logResult, legacyTaskResult, legacyRuleResult] = await Promise.all([
           client('/v1/pipelines', { method: 'GET', showResult: false, silentLoading: true }),
           client('/v1/runs?limit=50', { method: 'GET', showResult: false, silentLoading: true }),
           client('/v1/sources', { method: 'GET', showResult: false, silentLoading: true }),
@@ -340,20 +392,30 @@ function App() {
           client('/v1/destinations', { method: 'GET', showResult: false, silentLoading: true }),
           client('/v1/delivery-tasks', { method: 'GET', showResult: false, silentLoading: true }),
           client('/v1/delivery-logs?limit=50', { method: 'GET', showResult: false, silentLoading: true }),
+          client('/v1/legacy-tasks', { method: 'GET', showResult: false, silentLoading: true }),
+          client('/v1/legacy-transform-rules', { method: 'GET', showResult: false, silentLoading: true }),
         ])
 
         if (runResult.ok) setRuns(readList<PipelineRun>(runResult, 'runs'))
-        if (sourceResult.ok) setSources(readList<SourceDefinition>(sourceResult, 'sources'))
+        const nextSources = sourceResult.ok ? readList<SourceDefinition>(sourceResult, 'sources') : []
+        const nextRules = ruleResult.ok ? readList<TransformRule>(ruleResult, 'rules') : []
+        const nextDestinations = destinationResult.ok ? readList<DestinationDefinition>(destinationResult, 'destinations') : []
+        const nextTasks = taskResult.ok ? readList<DeliveryTask>(taskResult, 'tasks') : []
+        const nextLegacyTasks = legacyTaskResult.ok ? readList<LegacyTask>(legacyTaskResult, 'tasks') : []
+        const nextLegacyRules = legacyRuleResult.ok ? readList<LegacyTransformRule>(legacyRuleResult, 'rules') : []
+        if (sourceResult.ok) setSources(nextSources)
         if (rawResult.ok) setRawData(readList<RawData>(rawResult, 'data'))
         if (processedResult.ok) setProcessedData(readList<ProcessedData>(processedResult, 'data'))
-        if (ruleResult.ok) setTransformRules(readList<TransformRule>(ruleResult, 'rules'))
-        if (destinationResult.ok) setDestinations(readList<DestinationDefinition>(destinationResult, 'destinations'))
-        if (taskResult.ok) setDeliveryTasks(readList<DeliveryTask>(taskResult, 'tasks'))
+        if (ruleResult.ok) setTransformRules(nextRules)
+        if (destinationResult.ok) setDestinations(nextDestinations)
+        if (taskResult.ok) setDeliveryTasks(nextTasks)
         if (logResult.ok) setDeliveryLogs(readList<DeliveryLog>(logResult, 'logs'))
+        if (legacyTaskResult.ok) setLegacyTasks(nextLegacyTasks)
+        if (legacyRuleResult.ok) setLegacyRules(nextLegacyRules)
         if (pipelineResult.ok) {
           const pipelines = readList<PipelineDefinition>(pipelineResult, 'pipelines')
           const configuredMethods = await loadConfiguredMethods(pipelines)
-          setMethods([...configuredMethods, ...builtinMethods])
+          setMethods([...buildConfiguredMethodDisplays(nextSources, nextRules, nextDestinations, nextTasks), ...buildLegacyMethodDisplays(nextLegacyTasks, nextLegacyRules), ...configuredMethods, ...builtinMethods])
         }
         if (showResult) setResult({ ok: true, status: 200, data: { refreshed_at: new Date().toISOString() } })
       } finally {
@@ -385,8 +447,17 @@ function App() {
     if (response.ok) setStepRuns(readList<StepRun>(response, 'step_runs'))
   }
 
+  async function toggleTarget(target: ToggleTarget, enabled: boolean) {
+    const response = await updateTargetEnabled(client, target, enabled, { sources, transformRules, destinations, deliveryTasks })
+    if (response.ok) await refreshAll(false)
+  }
+
   const receivedData = useMemo(() => rawData.filter((item) => rawDataOrigin(item) !== 'fetch'), [rawData])
   const pulledData = useMemo(() => rawData.filter((item) => rawDataOrigin(item) === 'fetch'), [rawData])
+  const coreMethods = useMemo(
+    () => buildCoreMethods({ sources, transformRules, destinations, deliveryTasks, legacyTasks, legacyRules }),
+    [deliveryTasks, destinations, legacyRules, legacyTasks, sources, transformRules],
+  )
 
   if (!authenticated) return <LoginScreen onLogin={handleLogin} />
 
@@ -423,11 +494,11 @@ function App() {
       <section className="ops-workspace">
         <ModuleHeader activeNav={activeNav} loading={loading || refreshing} />
         {activeNav === 'push_status' && <PushStatusView runs={runs} deliveryLogs={deliveryLogs} onLoadSteps={loadStepRuns} />}
-        {activeNav === 'methods' && <MethodsView methods={methods} />}
-        {activeNav === 'receive' && <ReceiveView records={receivedData} />}
-        {activeNav === 'pull' && <PullView sources={sources} records={pulledData} />}
-        {activeNav === 'process' && <ProcessView rules={transformRules} records={processedData} />}
-        {activeNav === 'push' && <PushConfigView destinations={destinations} tasks={deliveryTasks} />}
+        {activeNav === 'methods' && <MethodsView methods={methods} coreMethods={coreMethods} onToggle={toggleTarget} />}
+        {activeNav === 'receive' && <ReceiveView records={receivedData} coreMethod={coreMethods.find((item) => item.key === 'interface_ingest')} />}
+        {activeNav === 'pull' && <PullView sources={sources} records={pulledData} coreMethod={coreMethods.find((item) => item.key === 'youzan_fetch')} onToggle={toggleTarget} />}
+        {activeNav === 'process' && <ProcessView rules={transformRules} records={processedData} coreMethod={coreMethods.find((item) => item.key === 'qimai_process')} onToggle={toggleTarget} />}
+        {activeNav === 'push' && <PushConfigView destinations={destinations} tasks={deliveryTasks} coreMethod={coreMethods.find((item) => item.key === 'mall_push')} onToggle={toggleTarget} />}
         {activeNav === 'logs' && <LogsView runs={runs} stepRuns={stepRuns} deliveryLogs={deliveryLogs} onLoadSteps={loadStepRuns} />}
       </section>
 
@@ -522,7 +593,7 @@ function PushStatusView({ runs, deliveryLogs, onLoadSteps }: { runs: PipelineRun
   )
 }
 
-function MethodsView({ methods }: { methods: MethodDisplay[] }) {
+function MethodsView({ methods, coreMethods, onToggle }: { methods: MethodDisplay[]; coreMethods: CoreMethod[]; onToggle: (target: ToggleTarget, enabled: boolean) => void }) {
   const groups = groupBy(methods, (method) => method.category)
   return (
     <div className="view-stack">
@@ -532,6 +603,9 @@ function MethodsView({ methods }: { methods: MethodDisplay[] }) {
         <Metric label="启用方法" value={methods.filter((item) => item.enabled).length} />
         <Metric label="方法类型" value={new Set(methods.map((item) => item.method_type)).size} />
       </section>
+      <Panel title="当前已有核心方法" icon={<Wrench />} meta="可开启的真实配置会显示操作按钮">
+        <CoreMethodList methods={coreMethods} onToggle={onToggle} />
+      </Panel>
       <section className="method-groups">
         {Object.entries(groups).map(([category, items]) => (
           <Panel title={category} icon={<Wrench />} meta={`${items.length} 个方法`} key={category}>
@@ -546,6 +620,7 @@ function MethodsView({ methods }: { methods: MethodDisplay[] }) {
                     <StatusPill label={method.kind === 'builtin' ? '内置' : '已配置'} />
                     <code>{method.code}</code>
                     <small>{method.owner}</small>
+                    {method.toggle && <ToggleButton enabled={method.enabled} target={method.toggle} onToggle={onToggle} />}
                   </div>
                 </article>
               ))}
@@ -557,9 +632,10 @@ function MethodsView({ methods }: { methods: MethodDisplay[] }) {
   )
 }
 
-function ReceiveView({ records }: { records: RawData[] }) {
+function ReceiveView({ records, coreMethod }: { records: RawData[]; coreMethod?: CoreMethod }) {
   return (
     <div className="view-stack">
+      {coreMethod && <Panel title="接口数据接收方法" icon={<Inbox />} meta="现有接收入口"><CoreMethodList methods={[coreMethod]} /></Panel>}
       <section className="overview-grid">
         <Metric label="接收记录" value={records.length} />
         <Metric label="已排队" value={records.filter((item) => item.status === 'queued').length} />
@@ -573,9 +649,10 @@ function ReceiveView({ records }: { records: RawData[] }) {
   )
 }
 
-function PullView({ sources, records }: { sources: SourceDefinition[]; records: RawData[] }) {
+function PullView({ sources, records, coreMethod, onToggle }: { sources: SourceDefinition[]; records: RawData[]; coreMethod?: CoreMethod; onToggle: (target: ToggleTarget, enabled: boolean) => void }) {
   return (
     <div className="view-stack">
+      {coreMethod && <Panel title="有赞数据拉取方法" icon={<ArrowDownToLine />} meta="现有拉取能力"><CoreMethodList methods={[coreMethod]} onToggle={onToggle} /></Panel>}
       <section className="overview-grid">
         <Metric label="拉取数据源" value={sources.length} />
         <Metric label="启用数据源" value={sources.filter((item) => item.enabled).length} />
@@ -594,9 +671,10 @@ function PullView({ sources, records }: { sources: SourceDefinition[]; records: 
   )
 }
 
-function ProcessView({ rules, records }: { rules: TransformRule[]; records: ProcessedData[] }) {
+function ProcessView({ rules, records, coreMethod, onToggle }: { rules: TransformRule[]; records: ProcessedData[]; coreMethod?: CoreMethod; onToggle: (target: ToggleTarget, enabled: boolean) => void }) {
   return (
     <div className="view-stack">
+      {coreMethod && <Panel title="企迈标签数据处理方法" icon={<ListChecks />} meta="现有处理能力"><CoreMethodList methods={[coreMethod]} onToggle={onToggle} /></Panel>}
       <section className="overview-grid">
         <Metric label="处理规则" value={rules.length} />
         <Metric label="启用规则" value={rules.filter((item) => item.enabled).length} />
@@ -615,9 +693,10 @@ function ProcessView({ rules, records }: { rules: TransformRule[]; records: Proc
   )
 }
 
-function PushConfigView({ destinations, tasks }: { destinations: DestinationDefinition[]; tasks: DeliveryTask[] }) {
+function PushConfigView({ destinations, tasks, coreMethod, onToggle }: { destinations: DestinationDefinition[]; tasks: DeliveryTask[]; coreMethod?: CoreMethod; onToggle: (target: ToggleTarget, enabled: boolean) => void }) {
   return (
     <div className="view-stack">
+      {coreMethod && <Panel title="商场数据推送方法" icon={<Send />} meta="现有推送能力"><CoreMethodList methods={[coreMethod]} onToggle={onToggle} /></Panel>}
       <section className="overview-grid">
         <Metric label="推送目标" value={destinations.length} />
         <Metric label="启用目标" value={destinations.filter((item) => item.enabled).length} />
@@ -633,6 +712,35 @@ function PushConfigView({ destinations, tasks }: { destinations: DestinationDefi
         </Panel>
       </section>
     </div>
+  )
+}
+
+function CoreMethodList({ methods, onToggle }: { methods: CoreMethod[]; onToggle?: (target: ToggleTarget, enabled: boolean) => void }) {
+  return (
+    <div className="method-list">
+      {methods.map((method) => (
+        <article className="method-row" key={method.key}>
+          <div>
+            <strong>{method.title}</strong>
+            <span>{method.description}</span>
+          </div>
+          <div className="method-meta">
+            <StatusPill label={method.enabled ? '已开启' : '已关闭'} />
+            <code>{method.category}</code>
+            <small>{method.status}</small>
+            {onToggle && method.refs.map((target) => <ToggleButton enabled={method.enabled} key={`${target.type}-${target.id}`} target={target} onToggle={onToggle} />)}
+          </div>
+        </article>
+      ))}
+    </div>
+  )
+}
+
+function ToggleButton({ enabled, target, onToggle }: { enabled: boolean; target: ToggleTarget; onToggle: (target: ToggleTarget, enabled: boolean) => void }) {
+  return (
+    <button type="button" onClick={() => onToggle(target, !enabled)}>
+      {enabled ? '停用' : '开启'}
+    </button>
   )
 }
 
@@ -879,6 +987,235 @@ function methodCategory(methodType: MethodType) {
     utility: '内置工具方法',
   }
   return categories[methodType] ?? '其它方法'
+}
+
+function buildConfiguredMethodDisplays(sources: SourceDefinition[], rules: TransformRule[], destinations: DestinationDefinition[], tasks: DeliveryTask[]): MethodDisplay[] {
+  return [
+    ...sources.map((source) => ({
+      key: `source-${source.id}`,
+      kind: 'configured' as const,
+      name: source.name,
+      code: source.code,
+      method_type: 'request' as const,
+      category: source.code.includes('youzan') || source.name.includes('有赞') ? '有赞数据拉取' : '数据拉取方法',
+      owner: '数据源配置',
+      description: `${source.source_type} 数据源，接收键 ${source.source_query_key || '-'}。`,
+      enabled: source.enabled,
+      toggle: { type: 'source' as const, id: source.id },
+    })),
+    ...rules.map((rule) => ({
+      key: `rule-${rule.id}`,
+      kind: 'configured' as const,
+      name: rule.name,
+      code: `transform_rule_${rule.id}`,
+      method_type: rule.rule_type === 'validator' ? 'validate' as const : 'mapping' as const,
+      category: rule.name.includes('企迈') || rule.config_json.includes('qimai') ? '企迈数据处理' : '数据处理方法',
+      owner: '清洗规则配置',
+      description: `${rule.rule_type} 规则，source #${rule.source_id}，顺序 ${rule.order_index}。`,
+      enabled: rule.enabled,
+      toggle: { type: 'transform_rule' as const, id: rule.id },
+    })),
+    ...destinations.map((destination) => ({
+      key: `destination-${destination.id}`,
+      kind: 'configured' as const,
+      name: destination.name,
+      code: destination.code,
+      method_type: 'delivery' as const,
+      category: isMallText(`${destination.name} ${destination.code}`) ? '商场数据推送' : '推送方法',
+      owner: '推送目标配置',
+      description: `${destination.destination_type} 推送目标。`,
+      enabled: destination.enabled,
+      toggle: { type: 'destination' as const, id: destination.id },
+    })),
+    ...tasks.map((task) => ({
+      key: `delivery-task-${task.id}`,
+      kind: 'configured' as const,
+      name: task.name,
+      code: `delivery_task_${task.id}`,
+      method_type: 'delivery' as const,
+      category: isMallText(`${task.name} ${task.clean_table}`) ? '商场数据推送' : '推送方法',
+      owner: '推送任务配置',
+      description: `${task.clean_table} -> destination #${task.destination_id}，触发方式 ${task.trigger_type}。`,
+      enabled: task.enabled,
+      toggle: { type: 'delivery_task' as const, id: task.id },
+    })),
+  ]
+}
+
+function buildLegacyMethodDisplays(tasks: LegacyTask[], rules: LegacyTransformRule[]): MethodDisplay[] {
+  return [
+    ...tasks.map((task) => ({
+      key: `legacy-task-${task.code}`,
+      kind: 'builtin' as const,
+      name: task.name,
+      code: task.code,
+      method_type: task.category === 'delivery' ? 'delivery' as const : task.category === 'process' ? 'mapping' as const : 'request' as const,
+      category: legacyCategory(task),
+      owner: '旧任务注册表',
+      description: task.description,
+      enabled: true,
+    })),
+    ...rules.map((rule) => ({
+      key: `legacy-rule-${rule.code}`,
+      kind: 'builtin' as const,
+      name: rule.name,
+      code: rule.code,
+      method_type: rule.rule_type === 'http_enrich' ? 'request' as const : 'mapping' as const,
+      category: rule.source_code === 'qimai_order' ? '企迈数据处理' : '数据处理方法',
+      owner: '旧清洗规则',
+      description: rule.description,
+      enabled: true,
+    })),
+  ]
+}
+
+function buildCoreMethods({ sources, transformRules, destinations, deliveryTasks, legacyTasks, legacyRules }: {
+  sources: SourceDefinition[]
+  transformRules: TransformRule[]
+  destinations: DestinationDefinition[]
+  deliveryTasks: DeliveryTask[]
+  legacyTasks: LegacyTask[]
+  legacyRules: LegacyTransformRule[]
+}): CoreMethod[] {
+  const youzanSources = sources.filter((source) => isYouzanText(`${source.name} ${source.code} ${source.source_type}`))
+  const youzanLegacy = legacyTasks.filter((task) => task.category === 'fetch' && isYouzanText(`${task.name} ${task.code} ${task.source_code}`))
+  const qimaiRules = transformRules.filter((rule) => isQimaiText(`${rule.name} ${rule.config_json}`))
+  const qimaiLegacy = [...legacyTasks.filter((task) => task.code === 'qimai_order_enrich'), ...legacyRules.filter((rule) => rule.code === 'qimai_order_http_enrich')]
+  const mallDestinations = destinations.filter((destination) => isMallText(`${destination.name} ${destination.code} ${destination.config_json}`))
+  const mallTasks = deliveryTasks.filter((task) => isMallText(`${task.name} ${task.clean_table} ${task.payload_template}`) || mallDestinations.some((destination) => destination.id === task.destination_id))
+  const mallLegacy = legacyTasks.filter((task) => task.category === 'delivery' && isMallText(`${task.name} ${task.target_system} ${task.output_table}`))
+
+  return [
+    {
+      key: 'interface_ingest',
+      title: '接口数据接收',
+      category: '数据接收方法',
+      description: '对方通过 `/api/v1/data/ingest/raw` 等接口发送数据，系统保存原始数据并进入后续处理。',
+      enabled: true,
+      status: '接口入口已存在，无单独配置开关。',
+      refs: [],
+    },
+    {
+      key: 'youzan_fetch',
+      title: '有赞数据拉取',
+      category: '数据拉取方法',
+      description: '现有有赞订单/退款拉取能力，包含旧任务和数据源配置。',
+      enabled: youzanSources.length > 0 ? youzanSources.some((source) => source.enabled) : youzanLegacy.length > 0,
+      status: youzanSources.length > 0 ? `${youzanSources.length} 个数据源配置` : `${youzanLegacy.length} 个旧任务注册`,
+      refs: youzanSources.map((source) => ({ type: 'source' as const, id: source.id })),
+    },
+    {
+      key: 'qimai_process',
+      title: '企迈标签数据处理',
+      category: '数据处理方法',
+      description: '接收到带 qimai/remark=qimai_order 标签的原始数据后，请求企迈订单详情并写入 `qimai_order_data`。',
+      enabled: qimaiRules.length > 0 ? qimaiRules.some((rule) => rule.enabled) : qimaiLegacy.length > 0,
+      status: qimaiRules.length > 0 ? `${qimaiRules.length} 条清洗规则配置` : `${qimaiLegacy.length} 条旧处理规则`,
+      refs: qimaiRules.map((rule) => ({ type: 'transform_rule' as const, id: rule.id })),
+    },
+    {
+      key: 'mall_push',
+      title: '商场数据推送',
+      category: '数据推送方法',
+      description: '现有推送到商场/杭州恒隆/西岸的销售数据推送能力；如果已关闭，可在这里开启对应推送任务。',
+      enabled: [...mallDestinations, ...mallTasks].length > 0 ? mallDestinations.some((destination) => destination.enabled) && mallTasks.some((task) => task.enabled) : mallLegacy.length > 0,
+      status: mallTasks.length > 0 ? `${mallTasks.length} 个推送任务，${mallDestinations.length} 个推送目标` : `${mallLegacy.length} 个旧推送任务`,
+      refs: [
+        ...mallDestinations.map((destination) => ({ type: 'destination' as const, id: destination.id })),
+        ...mallTasks.map((task) => ({ type: 'delivery_task' as const, id: task.id })),
+      ],
+    },
+  ]
+}
+
+async function updateTargetEnabled(client: ApiClient, target: ToggleTarget, enabled: boolean, data: {
+  sources: SourceDefinition[]
+  transformRules: TransformRule[]
+  destinations: DestinationDefinition[]
+  deliveryTasks: DeliveryTask[]
+}) {
+  if (target.type === 'source') {
+    const source = data.sources.find((item) => item.id === target.id)
+    if (!source) return { ok: false, status: 404, data: 'source not found' }
+    return client(`/v1/sources/${target.id}`, {
+      method: 'PUT',
+      body: {
+        name: source.name,
+        code: source.code,
+        source_type: source.source_type,
+        enabled,
+        auth_type: source.auth_type,
+        config_json: source.config_json || '{}',
+        schema_json: source.schema_json || '{}',
+        dedupe_keys: source.dedupe_keys || '[]',
+        source_query_key: source.source_query_key,
+      },
+    })
+  }
+  if (target.type === 'transform_rule') {
+    const rule = data.transformRules.find((item) => item.id === target.id)
+    if (!rule) return { ok: false, status: 404, data: 'transform rule not found' }
+    return client(`/v1/transform-rules/${target.id}`, {
+      method: 'PUT',
+      body: {
+        source_id: rule.source_id,
+        name: rule.name,
+        rule_type: rule.rule_type,
+        order_index: rule.order_index,
+        config_json: rule.config_json || '{}',
+        enabled,
+      },
+    })
+  }
+  if (target.type === 'destination') {
+    const destination = data.destinations.find((item) => item.id === target.id)
+    if (!destination) return { ok: false, status: 404, data: 'destination not found' }
+    return client(`/v1/destinations/${target.id}`, {
+      method: 'PUT',
+      body: {
+        name: destination.name,
+        code: destination.code,
+        destination_type: destination.destination_type,
+        config_json: destination.config_json || '{}',
+        enabled,
+      },
+    })
+  }
+  const task = data.deliveryTasks.find((item) => item.id === target.id)
+  if (!task) return { ok: false, status: 404, data: 'delivery task not found' }
+  return client(`/v1/delivery-tasks/${target.id}`, {
+    method: 'PUT',
+    body: {
+      name: task.name,
+      source_id: task.source_id,
+      clean_table: task.clean_table,
+      destination_id: task.destination_id,
+      trigger_type: task.trigger_type,
+      cron_expr: task.cron_expr,
+      filter_json: task.filter_json || '{}',
+      payload_template: task.payload_template,
+      enabled,
+    },
+  })
+}
+
+function legacyCategory(task: LegacyTask) {
+  if (task.category === 'fetch' && isYouzanText(`${task.name} ${task.code}`)) return '有赞数据拉取'
+  if (task.category === 'process' && isQimaiText(`${task.name} ${task.code}`)) return '企迈数据处理'
+  if (task.category === 'delivery' && isMallText(`${task.name} ${task.target_system}`)) return '商场数据推送'
+  return methodCategory(task.category === 'delivery' ? 'delivery' : task.category === 'process' ? 'mapping' : 'request')
+}
+
+function isYouzanText(value: string) {
+  return /youzan|有赞/i.test(value)
+}
+
+function isQimaiText(value: string) {
+  return /qimai|企迈/i.test(value)
+}
+
+function isMallText(value: string) {
+  return /商场|商城|mall|henglong|恒隆|西岸|xian|plaza/i.test(value)
 }
 
 function methodDescription(detail: MethodStepDetail) {
