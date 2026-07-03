@@ -15,7 +15,12 @@ import (
 	"gin-biz-web-api/pkg/config"
 )
 
-const bojunOrderSource = "bojun_order"
+const (
+	bojunOrderSource               = "bojun_order"
+	defaultBojunOrderMethod        = "/retail/middleretail.query"
+	legacyBojunOrderMethod         = "/retail/retail.query"
+	bojunStandardOrderMethodPrefix = "/bos/standard"
+)
 
 type rawDataCreator interface {
 	Create(ctx context.Context, rawData *model.RawData) (uint, error)
@@ -70,7 +75,7 @@ func (s *BojunOrderService) SyncRecentOrders(ctx context.Context) (*BojunOrderSy
 }
 
 func (s *BojunOrderService) SyncOrders(ctx context.Context, startTime, endTime string) (*BojunOrderSyncResult, error) {
-	method := bojunEnvString("BOJUN_ORDER_METHOD", config.GetString("Bojun.OrderMethod", "/retail/retail.query"))
+	method := bojunOrderMethod()
 	pageSize := positiveBojunInt(bojunEnvInt("BOJUN_ORDER_PAGE_SIZE", config.GetInt("Bojun.OrderPageSize", 100)), 100)
 	maxPages := positiveBojunInt(bojunEnvInt("BOJUN_ORDER_MAX_PAGES", config.GetInt("Bojun.OrderMaxPages", 20)), 20)
 	result := &BojunOrderSyncResult{
@@ -140,6 +145,25 @@ func (s *BojunOrderService) SyncOrders(ctx context.Context, startTime, endTime s
 		return result, err
 	}
 	return result, nil
+}
+
+func bojunOrderMethod() string {
+	method := bojunEnvString("BOJUN_ORDER_METHOD", config.GetString("Bojun.OrderMethod", defaultBojunOrderMethod))
+	return normalizeBojunOrderMethod(method)
+}
+
+func normalizeBojunOrderMethod(method string) string {
+	method = strings.TrimSpace(method)
+	if method == "" || method == legacyBojunOrderMethod {
+		return defaultBojunOrderMethod
+	}
+	if strings.HasPrefix(method, bojunStandardOrderMethodPrefix) {
+		method = strings.TrimPrefix(method, bojunStandardOrderMethodPrefix)
+	}
+	if !strings.HasPrefix(method, "/") {
+		method = "/" + method
+	}
+	return method
 }
 
 func (s *BojunOrderService) createBojunOrderRun(ctx context.Context, startTime, endTime string) (uint, error) {

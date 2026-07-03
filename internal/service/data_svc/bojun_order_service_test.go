@@ -60,7 +60,7 @@ func TestBuildBojunOrderRawDataMarksSource(t *testing.T) {
 
 	rawData, err := buildBojunOrderRawData(
 		record,
-		"/retail/retail.query",
+		defaultBojunOrderMethod,
 		"2026-07-03 12:00:00",
 		"2026-07-03 12:01:00",
 		1,
@@ -89,6 +89,25 @@ func TestBuildBojunOrderRawDataMarksSource(t *testing.T) {
 	}
 	if rawContent["docno"] != "ABCN001P012P12607031240270004" {
 		t.Fatalf("raw docno = %v", rawContent["docno"])
+	}
+}
+
+func TestNormalizeBojunOrderMethodDefaultsToAsyncEndpoint(t *testing.T) {
+	if got := normalizeBojunOrderMethod(""); got != defaultBojunOrderMethod {
+		t.Fatalf("method = %s", got)
+	}
+}
+
+func TestNormalizeBojunOrderMethodUpgradesLegacyEndpoint(t *testing.T) {
+	if got := normalizeBojunOrderMethod("/retail/retail.query"); got != defaultBojunOrderMethod {
+		t.Fatalf("method = %s", got)
+	}
+}
+
+func TestNormalizeBojunOrderMethodStripsStandardPrefix(t *testing.T) {
+	got := normalizeBojunOrderMethod("/bos/standard/retail/middleretail.query")
+	if got != defaultBojunOrderMethod {
+		t.Fatalf("method = %s", got)
 	}
 }
 

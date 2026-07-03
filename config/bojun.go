@@ -12,7 +12,7 @@ func init() {
 			"secret":                 config.Get("Bojun.Secret", ""),
 			"format":                 config.Get("Bojun.Format", "json"),
 			"timeout_seconds":        config.GetInt("Bojun.TimeoutSeconds", 10),
-			"order_method":           config.Get("Bojun.OrderMethod", "/retail/retail.query"),
+			"order_method":           config.Get("Bojun.OrderMethod", "/retail/middleretail.query"),
 			"order_page_size":        config.GetInt("Bojun.OrderPageSize", 100),
 			"order_lookback_minutes": config.GetInt("Bojun.OrderLookbackMinutes", 1),
 			"order_max_pages":        config.GetInt("Bojun.OrderMaxPages", 20),

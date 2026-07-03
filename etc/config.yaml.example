@@ -115,7 +115,7 @@ Bojun:
   Secret: ${BOJUN_SECRET:-}
   Format: ${BOJUN_FORMAT:-json}
   TimeoutSeconds: ${BOJUN_TIMEOUT_SECONDS:-10}
-  OrderMethod: ${BOJUN_ORDER_METHOD:-/retail/retail.query}
+  OrderMethod: ${BOJUN_ORDER_METHOD:-/retail/middleretail.query}
   OrderPageSize: ${BOJUN_ORDER_PAGE_SIZE:-100}
   OrderLookbackMinutes: ${BOJUN_ORDER_LOOKBACK_MINUTES:-1}
   OrderMaxPages: ${BOJUN_ORDER_MAX_PAGES:-20}
