@@ -17,7 +17,7 @@ import {
 } from 'lucide-react'
 import './App.css'
 
-const defaultApiBaseURL = import.meta.env.VITE_API_BASE_URL ?? ''
+const defaultApiBaseURL = import.meta.env.VITE_API_BASE_URL ?? 'https://shop-test.youlankids.com'
 
 type ApiResult = {
   ok: boolean
@@ -261,6 +261,11 @@ type DeliveryLog = {
 type LogDetail =
   | { type: 'run'; title: string; value: unknown }
   | { type: 'delivery'; title: string; value: unknown }
+
+type LogSelection = {
+  type: 'run' | 'delivery'
+  id: number
+}
 
 const tokenStorageKey = 'warehouse-token'
 
@@ -788,41 +793,75 @@ function ToggleButton({ enabled, target, onToggle }: { enabled: boolean; target:
 }
 
 function LogsView({ runs, stepRuns, deliveryLogs, onLoadSteps }: { runs: PipelineRun[]; stepRuns: StepRun[]; deliveryLogs: DeliveryLog[]; onLoadSteps: (runId: number) => void }) {
-  const [detail, setDetail] = useState<LogDetail | null>(null)
+  const [selection, setSelection] = useState<LogSelection | null>(() => readLogSelection())
 
-  function showRun(run: PipelineRun) {
-    setDetail({
-      type: 'run',
-      title: `运行日志 #${run.id}`,
-      value: pipelineRunDetail(run),
-    })
-  }
+  useEffect(() => {
+    const syncRoute = () => setSelection(readLogSelection())
+    window.addEventListener('hashchange', syncRoute)
+    window.addEventListener('popstate', syncRoute)
+    return () => {
+      window.removeEventListener('hashchange', syncRoute)
+      window.removeEventListener('popstate', syncRoute)
+    }
+  }, [])
 
-  function showDelivery(log: DeliveryLog) {
-    setDetail({
-      type: 'delivery',
+  const detail = useMemo(() => {
+    if (!selection) return null
+    if (selection.type === 'run') {
+      const run = runs.find((item) => item.id === selection.id)
+      if (!run) return null
+      return {
+        type: 'run' as const,
+        title: `运行日志 #${run.id}`,
+        value: pipelineRunDetail(run),
+      }
+    }
+    const log = deliveryLogs.find((item) => item.id === selection.id)
+    if (!log) return null
+    return {
+      type: 'delivery' as const,
       title: `推送日志 #${log.id}`,
       value: deliveryLogDetail(log),
-    })
+    }
+  }, [deliveryLogs, runs, selection])
+
+  function openLog(nextSelection: LogSelection) {
+    pushLogSelection(nextSelection)
+    setSelection(nextSelection)
   }
+
+  function closeLog() {
+    clearLogSelection()
+    setSelection(null)
+  }
+
+  if (selection) return <LogDetailPage detail={detail} onBack={closeLog} />
 
   return (
     <div className="view-stack">
       <section className="content-grid two">
         <Panel title="运行日志" icon={<ScrollText />} meta="pipeline runs">
-          <RunTable runs={runs} onLoadSteps={onLoadSteps} onSelectRun={showRun} />
+          <RunTable runs={runs} onLoadSteps={onLoadSteps} onSelectRun={(run) => openLog({ type: 'run', id: run.id })} />
         </Panel>
         <Panel title="推送日志" icon={<Send />} meta="delivery logs">
-          <DeliveryLogList logs={deliveryLogs} onSelectLog={showDelivery} />
+          <DeliveryLogList logs={deliveryLogs} onSelectLog={(log) => openLog({ type: 'delivery', id: log.id })} />
         </Panel>
       </section>
-      {detail && (
-        <Panel title={detail.title} icon={<FileJson />} meta={detail.type === 'delivery' ? 'request / response / error' : 'run detail'}>
-          <ReadonlyJSON value={detail.value} />
-        </Panel>
-      )}
       <Panel title="步骤日志" icon={<BookOpen />} meta="选择运行记录查看步骤">
         <StepRunList stepRuns={stepRuns} />
+      </Panel>
+    </div>
+  )
+}
+
+function LogDetailPage({ detail, onBack }: { detail: LogDetail | null; onBack: () => void }) {
+  return (
+    <div className="view-stack">
+      <div className="detail-toolbar">
+        <button type="button" onClick={onBack}>返回日志列表</button>
+      </div>
+      <Panel title={detail?.title ?? '日志详情'} icon={<FileJson />} meta={detail?.type === 'delivery' ? 'request / response / error' : 'run detail'}>
+        {detail ? <ReadonlyJSON value={detail.value} /> : <EmptyState text="当前日志不存在或还未加载。" />}
       </Panel>
     </div>
   )
@@ -883,6 +922,23 @@ function apiURL(path: string) {
   const normalizedPath = path.startsWith('/api') ? path : `/api${path.startsWith('/') ? path : `/${path}`}`
   const base = defaultApiBaseURL.replace(/\/$/, '')
   return `${base}${normalizedPath}`
+}
+
+function readLogSelection(): LogSelection | null {
+  const match = window.location.hash.match(/^#\/logs\/(run|delivery)\/(\d+)$/)
+  if (!match) return null
+  return {
+    type: match[1] as LogSelection['type'],
+    id: Number(match[2]),
+  }
+}
+
+function pushLogSelection(selection: LogSelection) {
+  window.history.pushState(null, '', `#/logs/${selection.type}/${selection.id}`)
+}
+
+function clearLogSelection() {
+  window.history.pushState(null, '', `${window.location.pathname}${window.location.search}`)
 }
 
 function pipelineRunDetail(run: PipelineRun) {
