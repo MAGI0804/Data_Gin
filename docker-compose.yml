@@ -6,6 +6,8 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: gin-biz-web-api
+    env_file:
+      - .env
     expose:
       - "8501"
     volumes:
