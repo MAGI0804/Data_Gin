@@ -3,12 +3,22 @@ package send
 import (
 	"bytes"
 	"fmt"
-	"io/ioutil"
+	"io"
 	"net/http"
+	"regexp"
 	"time"
 
 	"gin-biz-web-api/pkg/config"
 )
+
+var salesXMLSensitiveTags = regexp.MustCompile(`(?is)<(password|licensekey)>(.*?)</(password|licensekey)>`)
+
+type SalesDataResult struct {
+	RequestBody  string
+	ResponseBody string
+	HTTPStatus   int
+	Success      bool
+}
 
 func GetYesterdayDate() string {
 	yesterday := time.Now().AddDate(0, 0, -1)
@@ -136,6 +146,14 @@ func buildSoapXML(payAmount float64, tid string, completedAt *time.Time, storeco
 }
 
 func sendPostRequest(xmlData string) (string, error) {
+	result, err := sendPostRequestWithResult(xmlData)
+	if result != nil {
+		return result.ResponseBody, err
+	}
+	return "", err
+}
+
+func sendPostRequestWithResult(xmlData string) (*SalesDataResult, error) {
 	headers := map[string]string{
 		"Content-Type": "text/xml; charset=utf-8",
 		"SOAPAction":   "http://tempurl.org/postsalescreate",
@@ -145,7 +163,7 @@ func sendPostRequest(xmlData string) (string, error) {
 
 	req, err := http.NewRequest("POST", salesAPIURL, bytes.NewBufferString(xmlData))
 	if err != nil {
-		return "", err
+		return nil, err
 	}
 
 	for key, value := range headers {
@@ -155,21 +173,46 @@ func sendPostRequest(xmlData string) (string, error) {
 	client := &http.Client{}
 	resp, err := client.Do(req)
 	if err != nil {
-		return "", err
+		return &SalesDataResult{RequestBody: redactSalesXML(xmlData)}, err
 	}
 	defer resp.Body.Close()
 
-	body, err := ioutil.ReadAll(resp.Body)
+	body, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return "", err
+		return &SalesDataResult{
+			RequestBody: redactSalesXML(xmlData),
+			HTTPStatus:  resp.StatusCode,
+		}, err
 	}
 
-	return string(body), nil
+	responseBody := string(body)
+	return &SalesDataResult{
+		RequestBody:  redactSalesXML(xmlData),
+		ResponseBody: responseBody,
+		HTTPStatus:   resp.StatusCode,
+		Success:      Contains(responseBody, "responsecode>0<") || Contains(responseBody, "上传成功"),
+	}, nil
 }
 
 func SendSalesData(payAmount float64, tid string, completedAt *time.Time, storecode, mallitemcode, salestype string) (string, error) {
 	xmlData := buildSoapXML(payAmount, tid, completedAt, storecode, mallitemcode, salestype)
 	return sendPostRequest(xmlData)
+}
+
+func SendSalesDataWithResult(
+	payAmount float64,
+	tid string,
+	completedAt *time.Time,
+	storecode string,
+	mallitemcode string,
+	salestype string,
+) (*SalesDataResult, error) {
+	xmlData := buildSoapXML(payAmount, tid, completedAt, storecode, mallitemcode, salestype)
+	return sendPostRequestWithResult(xmlData)
+}
+
+func redactSalesXML(xmlData string) string {
+	return salesXMLSensitiveTags.ReplaceAllString(xmlData, "<$1>***</$3>")
 }
 
 func Contains(s, substr string) bool {

@@ -108,3 +108,28 @@ Qimai:
   Nonce: ${QIMAI_NONCE:-11886}
   OrderDetailURL: ${QIMAI_ORDER_DETAIL_URL:-https://openapi.qmai.cn/v3/order/getDetail}
   BusinessRecordURL: ${QIMAI_BUSINESS_RECORD_URL:-https://openapi.qmai.cn/v3/dataone/finance/summary/businessRecord}
+
+Bojun:
+  BaseURL: ${BOJUN_BASE_URL:-http://47.116.189.190:9100/bos/standard}
+  AppKey: ${BOJUN_APP_KEY:-}
+  Secret: ${BOJUN_SECRET:-}
+  Format: ${BOJUN_FORMAT:-json}
+  TimeoutSeconds: ${BOJUN_TIMEOUT_SECONDS:-10}
+  OrderMethod: ${BOJUN_ORDER_METHOD:-/retail/retail.query}
+  OrderPageSize: ${BOJUN_ORDER_PAGE_SIZE:-100}
+  OrderLookbackMinutes: ${BOJUN_ORDER_LOOKBACK_MINUTES:-1}
+  OrderMaxPages: ${BOJUN_ORDER_MAX_PAGES:-20}
+  OrderCronExpr: "${BOJUN_ORDER_CRON_EXPR:-0 */1 * * * *}"
+
+ShanghaiMall:
+  TimeoutSeconds: ${SHANGHAI_MALL_TIMEOUT_SECONDS:-10}
+  Syandata:
+    URL: ${SHANGHAI_PANLONG_SYANDATA_URL:-http://api.syandata.com/oapi/rest}
+  Jialicheng:
+    LoginURL: ${SHANGHAI_JIALICHENG_KERRY_LOGIN_URL:-}
+    SalesURL: ${SHANGHAI_JIALICHENG_KERRY_SALES_URL:-}
+  Qiantan:
+    TokenURL: ${SHANGHAI_QIANTAN_XIAN_TOKEN_URL:-}
+    PostURL: ${SHANGHAI_QIANTAN_XIAN_POST_URL:-}
+  Shangsheng:
+    URL: ${SHANGHAI_SHANGSHENG_URL:-}
