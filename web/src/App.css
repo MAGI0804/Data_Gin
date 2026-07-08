@@ -444,6 +444,27 @@ button svg,
   margin-top: 0;
 }
 
+.excel-upload-form {
+  align-items: end;
+}
+
+.file-input-label {
+  border: 1px dashed #b8c3ca;
+  border-radius: 8px;
+  background: #f7fafb;
+  padding: 12px;
+}
+
+.file-input-label input {
+  background: #ffffff;
+}
+
+.file-input-label span {
+  color: #64747e;
+  font-size: 12px;
+  font-weight: 500;
+}
+
 label {
   display: grid;
   gap: 5px;
