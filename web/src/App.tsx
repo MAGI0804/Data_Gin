@@ -163,6 +163,38 @@ type ExcelMatchJobLog = {
   created_at: number
 }
 
+type BojunOrderBackfillSample = {
+  docno: string
+  otherdocno: string
+  c_store_code: string
+  c_store_name: string
+  order_type_code: string
+  order_type_name: string
+  billdate: number
+  tot_qty: number
+  tot_amt_actual: number
+  status: string
+  reason: string
+}
+
+type BojunOrderBackfillResult = {
+  start_time: string
+  end_time: string
+  page_size: number
+  max_pages: number
+  fetch_pages: number
+  total_count: number
+  preview_count: number
+  writable_count: number
+  existing_count: number
+  saved_count: number
+  retail_count: number
+  skipped_count: number
+  failed_count: number
+  samples: BojunOrderBackfillSample[]
+  failed_samples: BojunOrderBackfillSample[]
+}
+
 type StepRun = {
   id: number
   run_id: number
@@ -555,12 +587,24 @@ function App() {
     if (response.ok) await refreshAll(false)
   }
 
-  async function runBojunOrderBackfill(payload: { start_time: string; end_time: string }) {
-    const response = await client('/v1/legacy-tasks/bojun_order_fetch/run', {
+  async function previewBojunOrderBackfill(payload: { start_time: string; end_time: string }) {
+    const response = await client('/v1/bojun-order-backfill/preview', {
       method: 'POST',
       body: payload,
     })
-    if (response.ok) await refreshAll(false)
+    return response.ok ? readObject<BojunOrderBackfillResult>(response, 'result') : null
+  }
+
+  async function confirmBojunOrderBackfill(payload: { start_time: string; end_time: string }) {
+    const response = await client('/v1/bojun-order-backfill/confirm', {
+      method: 'POST',
+      body: payload,
+    })
+    if (response.ok) {
+      await refreshAll(false)
+      return readObject<BojunOrderBackfillResult>(response, 'result')
+    }
+    return null
   }
 
   const receivedData = useMemo(() => rawData.filter((item) => !isPulledOrigin(rawDataOrigin(item))), [rawData])
@@ -613,7 +657,8 @@ function App() {
             records={pulledData}
             coreMethods={coreMethods.filter((item) => item.key === 'youzan_fetch' || item.key === 'bojun_order_fetch')}
             loading={loading || refreshing}
-            onBojunBackfill={runBojunOrderBackfill}
+            onBojunBackfillPreview={previewBojunOrderBackfill}
+            onBojunBackfillConfirm={confirmBojunOrderBackfill}
             onToggle={toggleTarget}
           />
         )}
@@ -776,30 +821,48 @@ function PullView({
   records,
   coreMethods,
   loading,
-  onBojunBackfill,
+  onBojunBackfillPreview,
+  onBojunBackfillConfirm,
   onToggle,
 }: {
   sources: SourceDefinition[]
   records: RawData[]
   coreMethods: CoreMethod[]
   loading: boolean
-  onBojunBackfill: (payload: { start_time: string; end_time: string }) => Promise<void>
+  onBojunBackfillPreview: (payload: { start_time: string; end_time: string }) => Promise<BojunOrderBackfillResult | null>
+  onBojunBackfillConfirm: (payload: { start_time: string; end_time: string }) => Promise<BojunOrderBackfillResult | null>
   onToggle: (target: ToggleTarget, enabled: boolean) => void
 }) {
-  async function submitBojunBackfill(event: FormEvent<HTMLFormElement>) {
+  const [backfillPayload, setBackfillPayload] = useState<{ start_time: string; end_time: string } | null>(null)
+  const [backfillPreview, setBackfillPreview] = useState<BojunOrderBackfillResult | null>(null)
+  const [backfillConfirmed, setBackfillConfirmed] = useState<BojunOrderBackfillResult | null>(null)
+
+  async function previewBojunBackfill(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const form = new FormData(event.currentTarget)
-    await onBojunBackfill({
+    const payload = {
       start_time: formValue(form, 'start_time'),
       end_time: formValue(form, 'end_time'),
-    })
+    }
+    setBackfillConfirmed(null)
+    const result = await onBojunBackfillPreview(payload)
+    setBackfillPayload(result ? payload : null)
+    setBackfillPreview(result)
+  }
+
+  async function confirmBojunBackfill() {
+    if (!backfillPayload || !backfillPreview) return
+    const ok = window.confirm(`确认写入伯俊补拉数据？预计可写入 ${backfillPreview.writable_count} 条，已存在 ${backfillPreview.existing_count} 条，失败 ${backfillPreview.failed_count} 条。`)
+    if (!ok) return
+    const result = await onBojunBackfillConfirm(backfillPayload)
+    setBackfillConfirmed(result)
   }
 
   return (
     <div className="view-stack">
       {coreMethods.length > 0 && <Panel title="数据拉取方法" icon={<ArrowDownToLine />} meta="现有拉取能力"><CoreMethodList methods={coreMethods} onToggle={onToggle} /></Panel>}
-      <Panel title="伯俊订单补拉" icon={<ArrowDownToLine />} meta="按时间范围投递异步补拉任务">
-        <form className="bojun-backfill-form" onSubmit={submitBojunBackfill}>
+      <Panel title="伯俊订单补拉" icon={<ArrowDownToLine />} meta="先预览伯俊返回数据，确认后再写入数据库">
+        <form className="bojun-backfill-form" onSubmit={previewBojunBackfill}>
           <label>
             开始时间
             <input name="start_time" type="datetime-local" defaultValue={datetimeLocalMinutesAgo(60)} required />
@@ -810,10 +873,16 @@ function PullView({
           </label>
           <button className="primary" type="submit" disabled={loading}>
             <ArrowDownToLine aria-hidden="true" />
-            投递补拉
+            预览补拉
+          </button>
+          <button type="button" disabled={loading || !backfillPreview || backfillPreview.writable_count === 0} onClick={confirmBojunBackfill}>
+            <CheckCircle2 aria-hidden="true" />
+            确认写入
           </button>
         </form>
-        <p className="backfill-note">按伯俊订单号 docno 判重：已存在的数据不覆盖，未存在的数据写入 raw_data 和 bojun_retail_orders。</p>
+        <p className="backfill-note">预览不会写数据库；确认后按伯俊订单号 docno 判重，已存在不覆盖，未存在才写入 raw_data 和 bojun_retail_orders。</p>
+        {backfillPreview && <BojunBackfillResultView title="预览结果" result={backfillPreview} />}
+        {backfillConfirmed && <BojunBackfillResultView title="写入结果" result={backfillConfirmed} />}
       </Panel>
       <section className="overview-grid">
         <Metric label="拉取数据源" value={sources.length} />
@@ -830,6 +899,55 @@ function PullView({
         </Panel>
       </section>
     </div>
+  )
+}
+
+function BojunBackfillResultView({ title, result }: { title: string; result: BojunOrderBackfillResult }) {
+  const samples = [...(result.samples ?? []), ...(result.failed_samples ?? [])].slice(0, 12)
+  return (
+    <section className="backfill-result">
+      <div className="backfill-result-title">
+        <strong>{title}</strong>
+        <span>{result.start_time} ~ {result.end_time} / 拉取 {result.fetch_pages} 页</span>
+      </div>
+      <div className="overview-grid compact">
+        <Metric label="伯俊返回" value={result.total_count} />
+        <Metric label="可写入" value={result.writable_count} />
+        <Metric label="已存在" value={result.existing_count} />
+        <Metric label="已写入" value={result.retail_count} />
+        <Metric label="失败" value={result.failed_count} />
+      </div>
+      {samples.length === 0 ? <EmptyState text="暂无样例数据。" /> : (
+        <div className="data-table-wrap">
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>状态</th>
+                <th>订单号</th>
+                <th>门店</th>
+                <th>类型</th>
+                <th>数量</th>
+                <th>金额</th>
+                <th>说明</th>
+              </tr>
+            </thead>
+            <tbody>
+              {samples.map((sample, index) => (
+                <tr key={`${sample.docno || 'empty'}-${sample.status}-${index}`}>
+                  <td>{bojunBackfillStatusLabel(sample.status)}</td>
+                  <td>{sample.docno || '-'}</td>
+                  <td>{sample.c_store_name || sample.c_store_code || '-'}</td>
+                  <td>{sample.order_type_name || sample.order_type_code || '-'}</td>
+                  <td>{sample.tot_qty ?? '-'}</td>
+                  <td>{sample.tot_amt_actual ?? '-'}</td>
+                  <td>{sample.reason || '-'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
   )
 }
 
@@ -2145,6 +2263,18 @@ function excelLogLevelLabel(value: string) {
     info: '信息',
     warn: '警告',
     error: '错误',
+  }
+  return labels[value] ?? (value || '-')
+}
+
+function bojunBackfillStatusLabel(value: string) {
+  const labels: Record<string, string> = {
+    pending: '待写入',
+    created: '已写入',
+    exists: '已存在',
+    invalid: '无效',
+    failed: '失败',
+    push_failed: '推送失败',
   }
   return labels[value] ?? (value || '-')
 }

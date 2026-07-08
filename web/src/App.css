@@ -430,7 +430,7 @@ button:focus-visible {
 
 .bojun-backfill-form {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto auto;
   gap: 12px;
   align-items: end;
 }
@@ -440,6 +440,30 @@ button:focus-visible {
   color: #666666;
   font-size: 12px;
   line-height: 1.5;
+}
+
+.backfill-result {
+  display: grid;
+  gap: 12px;
+  margin-top: 12px;
+}
+
+.backfill-result-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border-top: 1px solid #d0d0d0;
+  padding-top: 12px;
+}
+
+.backfill-result-title span {
+  color: #666666;
+  font-size: 12px;
+}
+
+.overview-grid.compact {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
 }
 
 .excel-upload-form,
