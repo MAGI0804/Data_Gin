@@ -168,7 +168,8 @@ button:focus-visible {
 .ops-shell {
   display: grid;
   grid-template-columns: 240px minmax(0, 1fr) 340px;
-  min-height: 100vh;
+  height: 100vh;
+  overflow: hidden;
 }
 
 .ops-sidebar,
@@ -180,11 +181,13 @@ button:focus-visible {
 .ops-sidebar {
   border-right: 1px solid #111111;
   align-content: start;
+  overflow-y: auto;
 }
 
 .result-panel {
   border-left: 1px solid #111111;
   min-width: 0;
+  overflow-y: auto;
 }
 
 .module-nav {
@@ -213,6 +216,7 @@ button:focus-visible {
 .ops-workspace {
   min-width: 0;
   padding: 18px;
+  overflow-y: auto;
 }
 
 .workspace-header {
@@ -396,6 +400,23 @@ button:focus-visible {
   display: block;
 }
 
+.log-board {
+  display: grid;
+  grid-template-columns: minmax(0, 1.05fr) minmax(0, 1.25fr) minmax(0, 0.9fr);
+  gap: 14px;
+  height: calc(100vh - 116px);
+  min-height: 0;
+}
+
+.log-column {
+  min-width: 0;
+  overflow-y: auto;
+}
+
+.log-column .workbench-panel {
+  min-height: 100%;
+}
+
 .detail-toolbar {
   display: flex;
   align-items: center;
@@ -436,6 +457,13 @@ button:focus-visible {
 .excel-job-detail {
   grid-template-columns: repeat(3, minmax(0, 1fr));
   margin-bottom: 12px;
+}
+
+.excel-job-log-list {
+  display: grid;
+  gap: 8px;
+  max-height: 560px;
+  overflow-y: auto;
 }
 
 .file-input-label {
@@ -550,8 +578,13 @@ summary {
   }
 
   .content-grid.two,
-  .method-groups {
+  .method-groups,
+  .log-board {
     grid-template-columns: 1fr;
+  }
+
+  .log-board {
+    height: auto;
   }
 }
 
@@ -566,6 +599,17 @@ summary {
   .ops-sidebar {
     border-right: 0;
     border-bottom: 1px solid #111111;
+  }
+
+  .ops-shell {
+    height: auto;
+    overflow: visible;
+  }
+
+  .ops-sidebar,
+  .ops-workspace,
+  .result-panel {
+    overflow: visible;
   }
 
   .workspace-header,
