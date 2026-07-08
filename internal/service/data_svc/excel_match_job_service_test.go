@@ -23,6 +23,7 @@ type fakeExcelImportUpdater struct {
 	existing map[string]struct{}
 	updated  map[string]string
 	keys     []string
+	writes   int
 }
 
 func (f *fakeExcelImportUpdater) FindKeys(ctx context.Context, matchField string, keys []string) (map[string]struct{}, error) {
@@ -36,14 +37,13 @@ func (f *fakeExcelImportUpdater) FindKeys(ctx context.Context, matchField string
 	return result, nil
 }
 
-func (f *fakeExcelImportUpdater) UpdateByKeys(ctx context.Context, matchField, writeField string, values map[string]string) (int64, error) {
+func (f *fakeExcelImportUpdater) UpdateByKey(ctx context.Context, matchField, key, writeField, value string) (int64, error) {
 	if f.updated == nil {
 		f.updated = map[string]string{}
 	}
-	for key, value := range values {
-		f.updated[key] = value
-	}
-	return int64(len(values)), nil
+	f.updated[key] = value
+	f.writes++
+	return 1, nil
 }
 
 func TestNormalizeExcelMatchConfigRejectsUnknownBojunField(t *testing.T) {
@@ -228,6 +228,7 @@ func TestProcessExcelImportUpdateFileUpdatesMatchedRowsOnly(t *testing.T) {
 		MatchExcelColumn: "订单号",
 		DBWriteField:     "matched_docno",
 		WriteExcelColumn: "匹配单号",
+		ConfirmWrite:     true,
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -242,5 +243,99 @@ func TestProcessExcelImportUpdateFileUpdatesMatchedRowsOnly(t *testing.T) {
 	}
 	if !reflect.DeepEqual(updater.updated, map[string]string{"B001": "M001"}) {
 		t.Fatalf("updated = %#v", updater.updated)
+	}
+}
+
+func TestProcessExcelImportUpdateFileDryRunDoesNotWrite(t *testing.T) {
+	dir := t.TempDir()
+	inputPath := filepath.Join(dir, "source.xlsx")
+
+	f := excelize.NewFile()
+	sheet := f.GetSheetName(0)
+	rows := [][]interface{}{
+		{"订单号", "匹配单号"},
+		{"B001", "M001"},
+	}
+	for i, row := range rows {
+		cell, _ := excelize.CoordinatesToCellName(1, i+1)
+		if err := f.SetSheetRow(sheet, cell, &row); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := f.SaveAs(inputPath); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := normalizeExcelMatchConfig(ExcelMatchConfig{
+		Operation:        excelOperationImportUpdate,
+		SheetName:        "Sheet1",
+		TableName:        "bojun_retail_orders",
+		DBMatchField:     "docno",
+		MatchExcelColumn: "订单号",
+		DBWriteField:     "matched_docno",
+		WriteExcelColumn: "匹配单号",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cfg.DryRun {
+		t.Fatal("DryRun = false, want true when confirmWrite is not set")
+	}
+	updater := &fakeExcelImportUpdater{existing: map[string]struct{}{"B001": {}}}
+	stats, err := processExcelImportUpdateFileWithProgress(context.Background(), inputPath, cfg, updater, nil)
+	if err != nil {
+		t.Fatalf("processExcelImportUpdateFileWithProgress returned error: %v", err)
+	}
+	if stats.MatchedRows != 1 || stats.UnmatchedRows != 0 {
+		t.Fatalf("stats = %+v, want one matched row", stats)
+	}
+	if updater.writes != 0 || len(updater.updated) != 0 {
+		t.Fatalf("dry run wrote rows: writes=%d updated=%#v", updater.writes, updater.updated)
+	}
+}
+
+func TestProcessExcelImportUpdateFileClearsMatchedDocNo(t *testing.T) {
+	dir := t.TempDir()
+	inputPath := filepath.Join(dir, "source.xlsx")
+
+	f := excelize.NewFile()
+	sheet := f.GetSheetName(0)
+	rows := [][]interface{}{
+		{"外部订单编号", "订单号"},
+		{"B001", "M001"},
+		{"B002", "M002"},
+	}
+	for i, row := range rows {
+		cell, _ := excelize.CoordinatesToCellName(1, i+1)
+		if err := f.SetSheetRow(sheet, cell, &row); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := f.SaveAs(inputPath); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := normalizeExcelMatchConfig(ExcelMatchConfig{
+		Operation:        excelOperationClearMatched,
+		SheetName:        "Sheet1",
+		TableName:        "bojun_retail_orders",
+		DBMatchField:     "docno",
+		MatchExcelColumn: "外部订单编号",
+		DBWriteField:     "matched_docno",
+		ConfirmWrite:     true,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	updater := &fakeExcelImportUpdater{existing: map[string]struct{}{"B001": {}, "B002": {}}}
+	stats, err := processExcelImportUpdateFileWithProgress(context.Background(), inputPath, cfg, updater, nil)
+	if err != nil {
+		t.Fatalf("processExcelImportUpdateFileWithProgress returned error: %v", err)
+	}
+	if stats.MatchedRows != 2 || stats.UnmatchedRows != 0 {
+		t.Fatalf("stats = %+v, want two matched rows", stats)
+	}
+	if !reflect.DeepEqual(updater.updated, map[string]string{"B001": "", "B002": ""}) {
+		t.Fatalf("updated = %#v, want matched_docno cleared", updater.updated)
 	}
 }

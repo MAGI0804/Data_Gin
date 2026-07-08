@@ -17,6 +17,24 @@ type ExcelMatchJobDAO struct {
 	db *gorm.DB
 }
 
+var allowedBojunExcelFields = map[string]struct{}{
+	"billdate":             {},
+	"c_store_code":         {},
+	"c_store_name":         {},
+	"docno":                {},
+	"matched_docno":        {},
+	"o2o_so_docno":         {},
+	"order_type_code":      {},
+	"order_type_name":      {},
+	"otherdocno":           {},
+	"related_normal_docno": {},
+	"retailbilltype":       {},
+	"tot_amt_actual":       {},
+	"tot_amt_list":         {},
+	"tot_qty":              {},
+	"vipno":                {},
+}
+
 func NewExcelMatchJobDAO() *ExcelMatchJobDAO {
 	return &ExcelMatchJobDAO{db: database.DB}
 }
@@ -162,6 +180,9 @@ func (dao *ExcelMatchJobDAO) FindBojunFieldByDocNos(ctx context.Context, docNos 
 	if len(docNos) == 0 {
 		return result, nil
 	}
+	if !isAllowedBojunExcelField(valueField) {
+		return nil, fmt.Errorf("bojun field is not allowed: %s", valueField)
+	}
 
 	query := fmt.Sprintf("SELECT docno, CAST(%s AS CHAR) AS matched_value FROM bojun_retail_orders WHERE docno IN ?", valueField)
 	rows, err := dao.db.WithContext(ctx).Raw(query, docNos).Rows()
@@ -195,6 +216,9 @@ func (dao *ExcelMatchJobDAO) FindBojunKeys(ctx context.Context, matchField strin
 	if len(keys) == 0 {
 		return result, nil
 	}
+	if !isAllowedBojunExcelField(matchField) {
+		return nil, fmt.Errorf("bojun match field is not allowed: %s", matchField)
+	}
 
 	query := fmt.Sprintf("SELECT CAST(%s AS CHAR) AS match_key FROM bojun_retail_orders WHERE %s IN ?", matchField, matchField)
 	rows, err := dao.db.WithContext(ctx).Raw(query, keys).Rows()
@@ -222,6 +246,9 @@ func (dao *ExcelMatchJobDAO) BatchUpdateBojunFieldByKeys(ctx context.Context, ma
 	if len(values) == 0 {
 		return 0, nil
 	}
+	if !isAllowedBojunExcelField(matchField) || writeField != "matched_docno" {
+		return 0, fmt.Errorf("bojun update field is not allowed")
+	}
 
 	keys := make([]string, 0, len(values))
 	caseSQL := strings.Builder{}
@@ -243,4 +270,30 @@ func (dao *ExcelMatchJobDAO) BatchUpdateBojunFieldByKeys(ctx context.Context, ma
 	)
 	result := dao.db.WithContext(ctx).Exec(query, args...)
 	return result.RowsAffected, result.Error
+}
+
+func (dao *ExcelMatchJobDAO) UpdateBojunFieldByKey(ctx context.Context, matchField, key, writeField, value string) (int64, error) {
+	if key == "" {
+		return 0, nil
+	}
+	if !isAllowedBojunExcelField(matchField) || writeField != "matched_docno" {
+		return 0, fmt.Errorf("bojun update field is not allowed")
+	}
+
+	query := fmt.Sprintf(
+		"UPDATE bojun_retail_orders SET %s = ? WHERE %s = ?",
+		writeField,
+		matchField,
+	)
+	args := []interface{}{value, key}
+	if writeField == "matched_docno" && value != "" {
+		query += " AND (matched_docno IS NULL OR matched_docno = '')"
+	}
+	result := dao.db.WithContext(ctx).Exec(query, args...)
+	return result.RowsAffected, result.Error
+}
+
+func isAllowedBojunExcelField(field string) bool {
+	_, ok := allowedBojunExcelFields[field]
+	return ok
 }

@@ -25,6 +25,7 @@ import (
 const (
 	excelOperationExportMatch  = "export_match"
 	excelOperationImportUpdate = "import_update"
+	excelOperationClearMatched = "clear_matched_docno"
 
 	excelMatchStatusPending = "pending"
 	excelMatchStatusSuccess = "success"
@@ -105,6 +106,8 @@ type ExcelMatchConfig struct {
 	WriteExcelColumn string             `json:"writeExcelColumn"`
 	OutputColumnName string             `json:"outputColumnName"`
 	BatchSize        int                `json:"batchSize"`
+	DryRun           bool               `json:"dryRun"`
+	ConfirmWrite     bool               `json:"confirmWrite"`
 }
 
 type ExcelMatchJobStats = data_dao.ExcelMatchJobStats
@@ -115,7 +118,7 @@ type ExcelMatchLookup interface {
 
 type ExcelImportUpdater interface {
 	FindKeys(ctx context.Context, matchField string, keys []string) (map[string]struct{}, error)
-	UpdateByKeys(ctx context.Context, matchField, writeField string, values map[string]string) (int64, error)
+	UpdateByKey(ctx context.Context, matchField, key, writeField, value string) (int64, error)
 }
 
 type bojunExcelMatchLookup struct {
@@ -134,8 +137,8 @@ func (u bojunExcelImportUpdater) FindKeys(ctx context.Context, matchField string
 	return u.dao.FindBojunKeys(ctx, matchField, keys)
 }
 
-func (u bojunExcelImportUpdater) UpdateByKeys(ctx context.Context, matchField, writeField string, values map[string]string) (int64, error) {
-	return u.dao.BatchUpdateBojunFieldByKeys(ctx, matchField, writeField, values)
+func (u bojunExcelImportUpdater) UpdateByKey(ctx context.Context, matchField, key, writeField, value string) (int64, error) {
+	return u.dao.UpdateBojunFieldByKey(ctx, matchField, key, writeField, value)
 }
 
 func (s *ExcelMatchJobService) CreateJob(ctx context.Context, fileHeader *multipart.FileHeader, rawConfig string) (*model.ExcelMatchJob, error) {
@@ -280,11 +283,11 @@ func (s *ExcelMatchJobService) ProcessJob(ctx context.Context, id uint) error {
 	})
 
 	var stats ExcelMatchJobStats
-	if config.Operation == excelOperationImportUpdate {
+	if config.Operation == excelOperationImportUpdate || config.Operation == excelOperationClearMatched {
 		updater := bojunExcelImportUpdater{dao: s.jobDAO}
 		stats, err = processExcelImportUpdateFileWithProgress(ctx, matchJob.SourceFilePath, config, updater, func(stats ExcelMatchJobStats) {
 			_ = s.jobDAO.UpdateProgress(ctx, id, stats)
-			s.logJob(ctx, id, "info", "导入更新进度", statsDetail(stats))
+			s.logJob(ctx, id, "info", "导入匹配进度", statsDetail(stats))
 		})
 	} else {
 		lookup := bojunExcelMatchLookup{dao: s.jobDAO}
@@ -348,7 +351,7 @@ func normalizeExcelMatchConfig(config ExcelMatchConfig) (ExcelMatchConfig, error
 	switch config.Operation {
 	case excelOperationExportMatch:
 		return normalizeExcelExportConfig(config)
-	case excelOperationImportUpdate:
+	case excelOperationImportUpdate, excelOperationClearMatched:
 		return normalizeExcelImportConfig(config)
 	default:
 		return config, fmt.Errorf("暂不支持Excel任务操作: %s", config.Operation)
@@ -418,9 +421,13 @@ func normalizeExcelImportConfig(config ExcelMatchConfig) (ExcelMatchConfig, erro
 	if _, ok := allowedBojunImportWriteFields[config.DBWriteField]; !ok {
 		return config, fmt.Errorf("导入写入字段不在白名单: %s", config.DBWriteField)
 	}
-	if config.WriteExcelColumn == "" {
+	if config.Operation == excelOperationClearMatched {
+		config.DBWriteField = "matched_docno"
+		config.WriteExcelColumn = ""
+	} else if config.WriteExcelColumn == "" {
 		return config, errors.New("写入值Excel列名不能为空")
 	}
+	config.DryRun = !config.ConfirmWrite
 	return config, nil
 }
 
@@ -701,17 +708,17 @@ func processExcelImportUpdateFileWithProgress(
 		if err != nil {
 			return err
 		}
-		updateValues := map[string]string{}
 		for _, row := range buffered {
 			if _, ok := existing[row.key]; ok {
 				stats.MatchedRows++
-				updateValues[row.key] = row.value
+				if !config.DryRun {
+					if _, err := updater.UpdateByKey(ctx, config.DBMatchField, row.key, config.DBWriteField, row.value); err != nil {
+						return err
+					}
+				}
 			} else {
 				stats.UnmatchedRows++
 			}
-		}
-		if _, err := updater.UpdateByKeys(ctx, config.DBMatchField, config.DBWriteField, updateValues); err != nil {
-			return err
 		}
 		stats.ProcessedRows += len(buffered)
 		if onProgress != nil {
@@ -743,9 +750,11 @@ func processExcelImportUpdateFileWithProgress(
 			if !ok {
 				return stats, fmt.Errorf("Excel 缺少匹配列: %s", config.MatchExcelColumn)
 			}
-			writeColumnIndex, ok = columnIndexes[config.WriteExcelColumn]
-			if !ok {
-				return stats, fmt.Errorf("Excel 缺少写入值列: %s", config.WriteExcelColumn)
+			if config.Operation != excelOperationClearMatched {
+				writeColumnIndex, ok = columnIndexes[config.WriteExcelColumn]
+				if !ok {
+					return stats, fmt.Errorf("Excel 缺少写入值列: %s", config.WriteExcelColumn)
+				}
 			}
 			headerRead = true
 			continue
@@ -754,7 +763,10 @@ func processExcelImportUpdateFileWithProgress(
 		stats.TotalRows++
 		normalized := normalizeExcelRow(columns, len(headers))
 		key := strings.TrimSpace(normalized[matchColumnIndex])
-		value := strings.TrimSpace(normalized[writeColumnIndex])
+		value := ""
+		if config.Operation != excelOperationClearMatched {
+			value = strings.TrimSpace(normalized[writeColumnIndex])
+		}
 		if key == "" {
 			stats.UnmatchedRows++
 			stats.ProcessedRows++
