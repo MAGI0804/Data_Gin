@@ -53,6 +53,12 @@ func setupQueueJob() {
 		}
 	}(mux, server)
 
+	go func() {
+		if err := data_svc.NewExcelMatchJobService().CleanupExpiredJobs(context.Background()); err != nil {
+			logger.Error("Excel Match Job Cleanup Failed", zap.Error(err))
+		}
+	}()
+
 }
 
 // addQueueJob 添加异步队列任务
@@ -66,6 +72,7 @@ func addQueueJob(mux *asynq.ServeMux) {
 	//mux.HandleFunc(job.TypeYouzanRefundSync, job.HandleYouzanRefundSyncTask)
 	mux.HandleFunc(job.TypeXianOrderSync, job.HandleXianOrderSyncTask)
 	mux.HandleFunc(job.TypeDeliveryTaskRun, handleDeliveryTaskRun)
+	mux.HandleFunc(job.TypeExcelMatchExport, handleExcelMatchExport)
 }
 
 func handleDeliveryTaskRun(ctx context.Context, task *asynq.Task) error {
@@ -76,6 +83,15 @@ func handleDeliveryTaskRun(ctx context.Context, task *asynq.Task) error {
 
 	_, err := data_svc.NewDeliveryService().RunDeliveryTask(ctx, payload.TaskID)
 	return err
+}
+
+func handleExcelMatchExport(ctx context.Context, task *asynq.Task) error {
+	var payload job.ExcelMatchExportPayload
+	if err := json.Unmarshal(task.Payload(), &payload); err != nil {
+		return err
+	}
+
+	return data_svc.NewExcelMatchJobService().ProcessJob(ctx, payload.JobID)
 }
 
 // jobLoggingMiddleware 异步任务执行日志中间件

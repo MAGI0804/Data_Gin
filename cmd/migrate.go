@@ -38,6 +38,7 @@ var migrateDataTablesCmd = &cobra.Command{
 			&model.DeliveryTask{},
 			&model.PipelineRun{},
 			&model.DeliveryLog{},
+			&model.ExcelMatchJob{},
 		)
 
 		console.ExitIf(err)

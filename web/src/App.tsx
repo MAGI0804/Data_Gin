@@ -6,6 +6,7 @@ import {
   BookOpen,
   CheckCircle2,
   Database,
+  Download,
   FileJson,
   Inbox,
   ListChecks,
@@ -13,6 +14,7 @@ import {
   RefreshCcw,
   ScrollText,
   Send,
+  Upload,
   Wrench,
 } from 'lucide-react'
 import './App.css'
@@ -33,7 +35,7 @@ type ApiClientOptions = {
 }
 
 type ApiClient = (path: string, options?: ApiClientOptions) => Promise<ApiResult>
-type NavKey = 'push_status' | 'methods' | 'receive' | 'pull' | 'process' | 'push' | 'logs'
+type NavKey = 'push_status' | 'methods' | 'receive' | 'pull' | 'process' | 'push' | 'excel' | 'logs'
 type MethodKind = 'configured' | 'builtin'
 type MethodType = 'request' | 'bojun_signed_request' | 'extract' | 'mapping' | 'validate' | 'db_query' | 'db_write' | 'template' | 'delivery' | 'shanghai_mall_push' | 'log' | 'utility'
 type JsonRecord = Record<string, unknown>
@@ -133,6 +135,23 @@ type PipelineRun = {
   error_message: string
   started_at: string | null
   finished_at: string | null
+}
+
+type ExcelMatchJob = {
+  id: number
+  source_file_name: string
+  config_json: string
+  status: string
+  total_rows: number
+  processed_rows: number
+  filtered_rows: number
+  matched_rows: number
+  unmatched_rows: number
+  error_message: string
+  started_at: string | null
+  finished_at: string | null
+  expires_at: string | null
+  created_at: number
 }
 
 type StepRun = {
@@ -288,6 +307,7 @@ const navItems: Array<{ key: NavKey; label: string; icon: ReactNode }> = [
   { key: 'pull', label: '数据拉取', icon: <ArrowDownToLine aria-hidden="true" /> },
   { key: 'process', label: '数据处理', icon: <ListChecks aria-hidden="true" /> },
   { key: 'push', label: '数据推送', icon: <ArrowUpFromLine aria-hidden="true" /> },
+  { key: 'excel', label: 'Excel 匹配', icon: <Upload aria-hidden="true" /> },
   { key: 'logs', label: '日志', icon: <ScrollText aria-hidden="true" /> },
 ]
 
@@ -573,6 +593,7 @@ function App() {
         {activeNav === 'pull' && <PullView sources={sources} records={pulledData} coreMethods={coreMethods.filter((item) => item.key === 'youzan_fetch' || item.key === 'bojun_order_fetch')} onToggle={toggleTarget} />}
         {activeNav === 'process' && <ProcessView rules={transformRules} records={processedData} coreMethod={coreMethods.find((item) => item.key === 'qimai_process')} onToggle={toggleTarget} />}
         {activeNav === 'push' && <PushConfigView destinations={destinations} tasks={deliveryTasks} coreMethod={coreMethods.find((item) => item.key === 'mall_push')} onToggle={toggleTarget} />}
+        {activeNav === 'excel' && <ExcelMatchView token={token} loading={loading} setLoading={setLoading} setResult={setResult} />}
         {activeNav === 'logs' && <LogsView runs={runs} stepRuns={stepRuns} deliveryLogs={deliveryLogs} onLoadSteps={loadStepRuns} onRetryLog={retryDeliveryLog} />}
       </section>
 
@@ -630,6 +651,7 @@ function ModuleHeader({ activeNav, loading }: { activeNav: NavKey; loading: bool
     pull: { title: '数据拉取', subtitle: '查看 API 数据源配置和通过 API 拉取落库的数据。' },
     process: { title: '数据处理', subtitle: '查看清洗规则和已处理数据。' },
     push: { title: '数据推送', subtitle: '查看配置好的推送目标和推送任务。' },
+    excel: { title: 'Excel 匹配导出', subtitle: '上传大 Excel，按筛选条件匹配伯俊零售单并导出追加列结果。' },
     logs: { title: '日志', subtitle: '查看流水线运行日志、步骤日志和推送日志。' },
   }
   return (
@@ -785,6 +807,220 @@ function PushConfigView({ destinations, tasks, coreMethod, onToggle }: { destina
           <DeliveryTaskList tasks={tasks} />
         </Panel>
       </section>
+    </div>
+  )
+}
+
+function ExcelMatchView({
+  token,
+  loading,
+  setLoading,
+  setResult,
+}: {
+  token: string
+  loading: boolean
+  setLoading: (value: boolean) => void
+  setResult: (value: ApiResult | null) => void
+}) {
+  const [jobID, setJobID] = useState('')
+  const [job, setJob] = useState<ExcelMatchJob | null>(null)
+  const [selectedFileName, setSelectedFileName] = useState('')
+
+  async function createJob(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const form = new FormData(event.currentTarget)
+    const file = form.get('file')
+    if (!(file instanceof File) || file.size === 0) {
+      setResult({ ok: false, status: 0, data: '请选择 .xlsx 文件' })
+      return
+    }
+
+    const payload = new FormData()
+    payload.append('file', file)
+    payload.append('config', JSON.stringify({
+      filters: [
+        {
+          column: formValue(form, 'filterColumn').trim(),
+          op: 'eq',
+          value: formValue(form, 'filterValue').trim(),
+        },
+      ],
+      matchExcelColumn: formValue(form, 'matchExcelColumn').trim(),
+      dbTemplate: 'bojun_retail_order',
+      dbMatchField: 'docno',
+      dbValueField: formValue(form, 'dbValueField').trim(),
+      outputColumnName: formValue(form, 'outputColumnName').trim(),
+      batchSize: Number(formValue(form, 'batchSize') || 1000),
+    }))
+
+    setLoading(true)
+    try {
+      const response = await fetch(apiURL('/v1/excel-match-jobs'), {
+        method: 'POST',
+        headers: token ? { token } : undefined,
+        body: payload,
+      })
+      const data = await response.json().catch(() => ({}))
+      const nextResult = { ok: response.ok && isSuccessPayload(data), status: response.status, data }
+      setResult(nextResult)
+      if (nextResult.ok) {
+        const nextJob = readObject<ExcelMatchJob>(nextResult, 'job')
+        if (nextJob) {
+          setJob(nextJob)
+          setJobID(String(nextJob.id))
+        }
+      }
+    } catch (error) {
+      setResult({ ok: false, status: 0, data: error instanceof Error ? error.message : String(error) })
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function refreshJob() {
+    const id = Number(jobID)
+    if (!id) {
+      setResult({ ok: false, status: 0, data: '请输入任务 ID' })
+      return
+    }
+
+    setLoading(true)
+    try {
+      const response = await fetch(apiURL(`/v1/excel-match-jobs/${id}`), {
+        method: 'GET',
+        headers: token ? { token } : undefined,
+      })
+      const data = await response.json().catch(() => ({}))
+      const nextResult = { ok: response.ok && isSuccessPayload(data), status: response.status, data }
+      setResult(nextResult)
+      if (nextResult.ok) {
+        const nextJob = readObject<ExcelMatchJob>(nextResult, 'job')
+        if (nextJob) setJob(nextJob)
+      }
+    } catch (error) {
+      setResult({ ok: false, status: 0, data: error instanceof Error ? error.message : String(error) })
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function downloadJob() {
+    const id = Number(jobID || job?.id)
+    if (!id) {
+      setResult({ ok: false, status: 0, data: '请输入任务 ID' })
+      return
+    }
+
+    setLoading(true)
+    try {
+      const response = await fetch(apiURL(`/v1/excel-match-jobs/${id}/download`), {
+        method: 'GET',
+        headers: token ? { token } : undefined,
+      })
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}))
+        setResult({ ok: false, status: response.status, data })
+        return
+      }
+
+      const blob = await response.blob()
+      const url = URL.createObjectURL(blob)
+      const anchor = document.createElement('a')
+      anchor.href = url
+      anchor.download = readDownloadFilename(response.headers.get('Content-Disposition')) ?? `excel_match_job_${id}.xlsx`
+      document.body.appendChild(anchor)
+      anchor.click()
+      anchor.remove()
+      URL.revokeObjectURL(url)
+      setResult({ ok: true, status: response.status, data: `任务 ${id} 结果文件已开始下载` })
+    } catch (error) {
+      setResult({ ok: false, status: 0, data: error instanceof Error ? error.message : String(error) })
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <div className="view-stack">
+      <section className="overview-grid">
+        <Metric label="当前任务" value={job?.id ?? '-'} />
+        <Metric label="任务状态" value={job ? excelJobStatusLabel(job.status) : '-'} />
+        <Metric label="已处理行" value={job ? `${job.processed_rows}/${job.total_rows}` : '-'} />
+        <Metric label="匹配结果" value={job ? `${job.matched_rows} 匹配 / ${job.unmatched_rows} 未匹配` : '-'} />
+      </section>
+
+      <Panel title="百万行 Excel 匹配导出" icon={<Upload />} meta="临时目录处理，结果 24 小时保留">
+        <form className="excel-upload-form" onSubmit={createJob}>
+          <label className="file-input-label">
+            Excel 文件
+            <input
+              name="file"
+              type="file"
+              accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+              onChange={(event) => setSelectedFileName(event.currentTarget.files?.[0]?.name ?? '')}
+            />
+            <span>{selectedFileName || '请选择需要匹配的 .xlsx 文件'}</span>
+          </label>
+          <Field label="筛选列名" name="filterColumn" defaultValue="店铺名称" />
+          <Field label="筛选值" name="filterValue" defaultValue="杭州恒隆" />
+          <Field label="Excel 订单号列" name="matchExcelColumn" defaultValue="订单号" />
+          <label>
+            伯俊写回字段
+            <select name="dbValueField" defaultValue="tot_amt_actual">
+              <option value="tot_amt_actual">实付金额 tot_amt_actual</option>
+              <option value="tot_amt_list">吊牌金额 tot_amt_list</option>
+              <option value="tot_qty">数量 tot_qty</option>
+              <option value="c_store_code">门店编码 c_store_code</option>
+              <option value="c_store_name">门店名称 c_store_name</option>
+              <option value="order_type_name">单据类型 order_type_name</option>
+              <option value="order_type_code">单据类型编码 order_type_code</option>
+              <option value="retailbilltype">零售单类型 retailbilltype</option>
+              <option value="billdate">单据日期 billdate</option>
+              <option value="vipno">会员号 vipno</option>
+              <option value="related_normal_docno">关联原单 related_normal_docno</option>
+              <option value="o2o_so_docno">线上订单号 o2o_so_docno</option>
+            </select>
+          </label>
+          <Field label="追加列名" name="outputColumnName" defaultValue="伯俊匹配金额" />
+          <Field label="批量查询大小" name="batchSize" defaultValue="1000" />
+          <button className="primary" type="submit" disabled={loading}>
+            <Upload aria-hidden="true" />
+            创建匹配任务
+          </button>
+        </form>
+      </Panel>
+
+      <Panel title="任务查询与下载" icon={<Download />} meta="只通过鉴权接口下载结果">
+        <div className="excel-job-actions">
+          <label>
+            任务 ID
+            <input value={jobID} onChange={(event) => setJobID(event.target.value)} />
+          </label>
+          <button type="button" onClick={refreshJob} disabled={loading}>
+            <RefreshCcw aria-hidden="true" />
+            查询状态
+          </button>
+          <button type="button" onClick={downloadJob} disabled={loading || job?.status !== 'success'}>
+            <Download aria-hidden="true" />
+            下载结果
+          </button>
+        </div>
+      </Panel>
+
+      {job && (
+        <Panel title={`Excel 匹配任务 #${job.id}`} icon={<FileJson />} meta={job.source_file_name || 'job detail'}>
+          <div className="excel-job-detail">
+            <Metric label="源文件" value={job.source_file_name || '-'} />
+            <Metric label="筛选命中" value={job.filtered_rows || '-'} />
+            <Metric label="未匹配" value={job.unmatched_rows || '-'} />
+            <Metric label="结果过期" value={formatDate(job.expires_at)} />
+            <Metric label="开始时间" value={formatDate(job.started_at)} />
+            <Metric label="结束时间" value={formatDate(job.finished_at)} />
+          </div>
+          {job.error_message && <div className="login-error">{job.error_message}</div>}
+          <ReadonlyJSON value={job.config_json || '{}'} />
+        </Panel>
+      )}
     </div>
   )
 }
@@ -1602,6 +1838,25 @@ function jsonText(value: unknown) {
     }
   }
   return JSON.stringify(value ?? {}, null, 2)
+}
+
+function excelJobStatusLabel(value: string) {
+  const labels: Record<string, string> = {
+    pending: '等待处理',
+    running: '处理中',
+    success: '成功',
+    failed: '失败',
+    expired: '已过期',
+  }
+  return labels[value] ?? (value || '-')
+}
+
+function readDownloadFilename(contentDisposition: string | null) {
+  if (!contentDisposition) return null
+  const utf8Match = contentDisposition.match(/filename\*=UTF-8''([^;]+)/i)
+  if (utf8Match?.[1]) return decodeURIComponent(utf8Match[1])
+  const plainMatch = contentDisposition.match(/filename="?([^";]+)"?/i)
+  return plainMatch?.[1] ?? null
 }
 
 function parseJsonText(value: string) {

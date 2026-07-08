@@ -110,6 +110,15 @@ func apiData(api *gin.RouterGroup) {
 		stepRunGroup.GET("/:id/steps", pipelineCtrl.ListStepRuns)
 	}
 
+	excelMatchJobGroup := api.Group("/v1/excel-match-jobs")
+	excelMatchJobGroup.Use(middleware.AuthJWT())
+	{
+		excelMatchJobCtrl := data_ctrl.NewExcelMatchJobController()
+		excelMatchJobGroup.POST("", excelMatchJobCtrl.CreateJob)
+		excelMatchJobGroup.GET("/:id", excelMatchJobCtrl.GetJob)
+		excelMatchJobGroup.GET("/:id/download", excelMatchJobCtrl.Download)
+	}
+
 	legacyTaskGroup := api.Group("/v1/legacy-tasks")
 	legacyTaskGroup.Use(middleware.AuthJWT())
 	{

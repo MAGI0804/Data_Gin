@@ -402,6 +402,43 @@ button:focus-visible {
   justify-content: flex-start;
 }
 
+.excel-upload-form,
+.excel-job-actions,
+.excel-job-detail {
+  display: grid;
+  gap: 12px;
+}
+
+.excel-upload-form {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  align-items: end;
+}
+
+.excel-job-actions {
+  grid-template-columns: minmax(160px, 1fr) auto auto;
+  align-items: end;
+}
+
+.excel-job-detail {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  margin-bottom: 12px;
+}
+
+.file-input-label {
+  grid-column: 1 / -1;
+  border: 1px dashed #777777;
+  border-radius: 8px;
+  background: #fafafa;
+  padding: 12px;
+}
+
+.file-input-label span {
+  color: #666666;
+  font-size: 12px;
+  font-weight: 500;
+  overflow-wrap: anywhere;
+}
+
 code {
   max-width: 220px;
   overflow-wrap: anywhere;
@@ -536,6 +573,12 @@ summary {
   .store-log-title {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .excel-upload-form,
+  .excel-job-actions,
+  .excel-job-detail {
+    grid-template-columns: 1fr;
   }
 
   .ops-workspace {
