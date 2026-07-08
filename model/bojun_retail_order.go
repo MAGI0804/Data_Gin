@@ -35,6 +35,7 @@ type BojunRetailOrder struct {
 	TotalAmtAcc1    float64 `gorm:"column:tot_amt_acc1;type:decimal(18,2);default:0" json:"totAmtAcc1"`
 	OzID            string  `gorm:"column:ozid;size:255" json:"ozid"`
 	RelatedNormalNo string  `gorm:"column:related_normal_docno;size:255;index" json:"related_normal_docno"`
+	MatchedDocNo    string  `gorm:"column:matched_docno;size:255;index" json:"matched_docno"`
 
 	ItemsJSON      string `gorm:"column:items_json;type:json" json:"items_json"`
 	PayItemsJSON   string `gorm:"column:pay_items_json;type:json" json:"pay_items_json"`

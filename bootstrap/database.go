@@ -117,6 +117,7 @@ func autoMigrateTables() {
 		&model.StageGeneratedConfig{},  //阶段生成配置表
 		&model.StepRun{},               //方法步骤运行明细表
 		&model.ExcelMatchJob{},         //Excel匹配导出任务表
+		&model.ExcelMatchJobLog{},      //Excel任务处理日志表
 	)
 
 	if err != nil {

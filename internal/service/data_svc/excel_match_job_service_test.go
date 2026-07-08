@@ -19,6 +19,33 @@ func (f *fakeExcelMatchLookup) Lookup(ctx context.Context, keys []string, valueF
 	return f.value, nil
 }
 
+type fakeExcelImportUpdater struct {
+	existing map[string]struct{}
+	updated  map[string]string
+	keys     []string
+}
+
+func (f *fakeExcelImportUpdater) FindKeys(ctx context.Context, matchField string, keys []string) (map[string]struct{}, error) {
+	f.keys = append(f.keys, keys...)
+	result := map[string]struct{}{}
+	for _, key := range keys {
+		if _, ok := f.existing[key]; ok {
+			result[key] = struct{}{}
+		}
+	}
+	return result, nil
+}
+
+func (f *fakeExcelImportUpdater) UpdateByKeys(ctx context.Context, matchField, writeField string, values map[string]string) (int64, error) {
+	if f.updated == nil {
+		f.updated = map[string]string{}
+	}
+	for key, value := range values {
+		f.updated[key] = value
+	}
+	return int64(len(values)), nil
+}
+
 func TestNormalizeExcelMatchConfigRejectsUnknownBojunField(t *testing.T) {
 	_, err := normalizeExcelMatchConfig(ExcelMatchConfig{
 		Filters: []ExcelMatchFilter{
@@ -32,6 +59,20 @@ func TestNormalizeExcelMatchConfigRejectsUnknownBojunField(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("normalizeExcelMatchConfig returned nil error, want invalid field error")
+	}
+}
+
+func TestNormalizeExcelImportConfigRejectsUnknownWriteField(t *testing.T) {
+	_, err := normalizeExcelMatchConfig(ExcelMatchConfig{
+		Operation:        excelOperationImportUpdate,
+		TableName:        "bojun_retail_orders",
+		DBMatchField:     "docno",
+		MatchExcelColumn: "订单号",
+		DBWriteField:     "tot_amt_actual",
+		WriteExcelColumn: "匹配单号",
+	})
+	if err == nil {
+		t.Fatal("normalizeExcelMatchConfig returned nil error, want invalid import write field error")
 	}
 }
 
@@ -65,6 +106,7 @@ func TestProcessExcelMatchFileFiltersBeforeLookupAndKeepsAllRows(t *testing.T) {
 		value: map[string]string{"B001": "100.50"},
 	}
 	cfg, err := normalizeExcelMatchConfig(ExcelMatchConfig{
+		SheetName: "Sheet1",
 		Filters: []ExcelMatchFilter{
 			{Column: "店铺名称", Op: "eq", Value: "杭州恒隆"},
 		},
@@ -108,5 +150,97 @@ func TestProcessExcelMatchFileFiltersBeforeLookupAndKeepsAllRows(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("result rows = %#v, want %#v", got, want)
+	}
+}
+
+func TestProcessExcelMatchFileUsesConfiguredSheet(t *testing.T) {
+	dir := t.TempDir()
+	inputPath := filepath.Join(dir, "source.xlsx")
+	outputPath := filepath.Join(dir, "result.xlsx")
+
+	f := excelize.NewFile()
+	defaultSheet := f.GetSheetName(0)
+	if err := f.SetSheetRow(defaultSheet, "A1", &[]interface{}{"错误列"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.NewSheet("Data"); err != nil {
+		t.Fatal(err)
+	}
+	rows := [][]interface{}{
+		{"店铺名称", "订单号", "金额"},
+		{"杭州恒隆", "B001", "10"},
+	}
+	for i, row := range rows {
+		cell, _ := excelize.CoordinatesToCellName(1, i+1)
+		if err := f.SetSheetRow("Data", cell, &row); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := f.SaveAs(inputPath); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := normalizeExcelMatchConfig(ExcelMatchConfig{
+		SheetName:        "Data",
+		Filters:          []ExcelMatchFilter{{Column: "店铺名称", Op: "eq", Value: "杭州恒隆"}},
+		MatchExcelColumn: "订单号",
+		DBTemplate:       "bojun_retail_order",
+		DBMatchField:     "docno",
+		DBValueField:     "tot_amt_actual",
+		OutputColumnName: "伯俊金额",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = processExcelMatchFile(context.Background(), inputPath, outputPath, cfg, &fakeExcelMatchLookup{value: map[string]string{"B001": "10"}})
+	if err != nil {
+		t.Fatalf("processExcelMatchFile returned error: %v", err)
+	}
+}
+
+func TestProcessExcelImportUpdateFileUpdatesMatchedRowsOnly(t *testing.T) {
+	dir := t.TempDir()
+	inputPath := filepath.Join(dir, "source.xlsx")
+
+	f := excelize.NewFile()
+	sheet := f.GetSheetName(0)
+	rows := [][]interface{}{
+		{"订单号", "匹配单号"},
+		{"B001", "M001"},
+		{"B002", "M002"},
+		{"", "M003"},
+	}
+	for i, row := range rows {
+		cell, _ := excelize.CoordinatesToCellName(1, i+1)
+		if err := f.SetSheetRow(sheet, cell, &row); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := f.SaveAs(inputPath); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := normalizeExcelMatchConfig(ExcelMatchConfig{
+		Operation:        excelOperationImportUpdate,
+		SheetName:        "Sheet1",
+		TableName:        "bojun_retail_orders",
+		DBMatchField:     "docno",
+		MatchExcelColumn: "订单号",
+		DBWriteField:     "matched_docno",
+		WriteExcelColumn: "匹配单号",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	updater := &fakeExcelImportUpdater{existing: map[string]struct{}{"B001": {}}}
+	stats, err := processExcelImportUpdateFileWithProgress(context.Background(), inputPath, cfg, updater, nil)
+	if err != nil {
+		t.Fatalf("processExcelImportUpdateFileWithProgress returned error: %v", err)
+	}
+	if stats.TotalRows != 3 || stats.ProcessedRows != 3 || stats.MatchedRows != 1 || stats.UnmatchedRows != 2 {
+		t.Fatalf("stats = %+v, want total=3 processed=3 matched=1 unmatched=2", stats)
+	}
+	if !reflect.DeepEqual(updater.updated, map[string]string{"B001": "M001"}) {
+		t.Fatalf("updated = %#v", updater.updated)
 	}
 }

@@ -29,6 +29,7 @@ var migrateDataTablesCmd = &cobra.Command{
 			&model.RawData{},
 			&model.ProcessedData{},
 			&model.DataStatistics{},
+			&model.BojunRetailOrder{},
 			&model.SourceDefinition{},
 			&model.RawRecord{},
 			&model.CleanTableDefinition{},
@@ -39,6 +40,7 @@ var migrateDataTablesCmd = &cobra.Command{
 			&model.PipelineRun{},
 			&model.DeliveryLog{},
 			&model.ExcelMatchJob{},
+			&model.ExcelMatchJobLog{},
 		)
 
 		console.ExitIf(err)

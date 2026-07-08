@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
 
 	"gin-biz-web-api/model"
@@ -32,6 +33,26 @@ func (dao *ExcelMatchJobDAO) FindByID(ctx context.Context, id uint) (*model.Exce
 	var job model.ExcelMatchJob
 	err := dao.db.WithContext(ctx).First(&job, id).Error
 	return &job, err
+}
+
+func (dao *ExcelMatchJobDAO) CreateLog(ctx context.Context, log *model.ExcelMatchJobLog) error {
+	now := int(time.Now().Unix())
+	log.CreatedAt = now
+	log.UpdatedAt = now
+	return dao.db.WithContext(ctx).Create(log).Error
+}
+
+func (dao *ExcelMatchJobDAO) FindLogsByJobID(ctx context.Context, jobID uint, limit int) ([]model.ExcelMatchJobLog, error) {
+	if limit <= 0 || limit > 500 {
+		limit = 200
+	}
+	var logs []model.ExcelMatchJobLog
+	err := dao.db.WithContext(ctx).
+		Where("job_id = ?", jobID).
+		Order("id ASC").
+		Limit(limit).
+		Find(&logs).Error
+	return logs, err
 }
 
 func (dao *ExcelMatchJobDAO) UpdatePaths(ctx context.Context, id uint, workDir, sourcePath, resultPath string) error {
@@ -167,4 +188,59 @@ func (dao *ExcelMatchJobDAO) FindBojunFieldByDocNos(ctx context.Context, docNos 
 	}
 
 	return result, nil
+}
+
+func (dao *ExcelMatchJobDAO) FindBojunKeys(ctx context.Context, matchField string, keys []string) (map[string]struct{}, error) {
+	result := make(map[string]struct{}, len(keys))
+	if len(keys) == 0 {
+		return result, nil
+	}
+
+	query := fmt.Sprintf("SELECT CAST(%s AS CHAR) AS match_key FROM bojun_retail_orders WHERE %s IN ?", matchField, matchField)
+	rows, err := dao.db.WithContext(ctx).Raw(query, keys).Rows()
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	for rows.Next() {
+		var key sql.NullString
+		if err := rows.Scan(&key); err != nil {
+			return nil, err
+		}
+		if key.Valid {
+			result[key.String] = struct{}{}
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+func (dao *ExcelMatchJobDAO) BatchUpdateBojunFieldByKeys(ctx context.Context, matchField, writeField string, values map[string]string) (int64, error) {
+	if len(values) == 0 {
+		return 0, nil
+	}
+
+	keys := make([]string, 0, len(values))
+	caseSQL := strings.Builder{}
+	args := make([]interface{}, 0, len(values)*2+2)
+	for key, value := range values {
+		keys = append(keys, key)
+		caseSQL.WriteString(" WHEN ? THEN ?")
+		args = append(args, key, value)
+	}
+	args = append(args, time.Now().Unix(), keys)
+
+	query := fmt.Sprintf(
+		"UPDATE bojun_retail_orders SET %s = CASE %s%s ELSE %s END, updated_at = ? WHERE %s IN ?",
+		writeField,
+		matchField,
+		caseSQL.String(),
+		writeField,
+		matchField,
+	)
+	result := dao.db.WithContext(ctx).Exec(query, args...)
+	return result.RowsAffected, result.Error
 }

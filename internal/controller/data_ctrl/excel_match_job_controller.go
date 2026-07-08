@@ -36,9 +36,11 @@ func (ctrl *ExcelMatchJobController) CreateJob(c *gin.Context) {
 		c.JSON(400, msg.ErrResponse("创建 Excel 匹配任务失败", err))
 		return
 	}
+	logs, _ := ctrl.service.GetJobLogs(c.Request.Context(), matchJob.ID)
 
 	c.JSON(200, msg.SuccessResponse("Excel 匹配任务已创建", &map[string]any{
 		"job":          matchJob,
+		"logs":         logs,
 		"downloadPath": "/api/v1/excel-match-jobs/" + strconv.FormatUint(uint64(matchJob.ID), 10) + "/download",
 	}))
 }
@@ -55,9 +57,15 @@ func (ctrl *ExcelMatchJobController) GetJob(c *gin.Context) {
 		c.JSON(404, msg.ErrResponse("查询 Excel 匹配任务失败", err))
 		return
 	}
+	logs, err := ctrl.service.GetJobLogs(c.Request.Context(), id)
+	if err != nil {
+		c.JSON(500, msg.ErrResponse("查询 Excel 任务日志失败", err))
+		return
+	}
 
 	c.JSON(200, msg.SuccessResponse("查询 Excel 匹配任务成功", &map[string]any{
 		"job":          matchJob,
+		"logs":         logs,
 		"downloadPath": "/api/v1/excel-match-jobs/" + strconv.FormatUint(uint64(matchJob.ID), 10) + "/download",
 	}))
 }

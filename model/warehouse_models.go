@@ -190,7 +190,7 @@ func (DeliveryLog) TableName() string {
 	return "delivery_logs"
 }
 
-// ExcelMatchJob 记录大文件 Excel 匹配导出任务。
+// ExcelMatchJob 记录大文件 Excel 匹配/导入任务。
 type ExcelMatchJob struct {
 	BaseModel
 
@@ -215,4 +215,20 @@ type ExcelMatchJob struct {
 
 func (ExcelMatchJob) TableName() string {
 	return "excel_match_jobs"
+}
+
+// ExcelMatchJobLog 记录 Excel 任务处理过程。
+type ExcelMatchJobLog struct {
+	BaseModel
+
+	JobID      uint   `gorm:"column:job_id;not null;index" json:"job_id"`
+	Level      string `gorm:"column:level;size:20;not null;default:'info';index" json:"level"`
+	Message    string `gorm:"column:message;size:255;not null" json:"message"`
+	DetailJSON string `gorm:"column:detail_json;type:json" json:"detail_json"`
+
+	CommonTimestampsField
+}
+
+func (ExcelMatchJobLog) TableName() string {
+	return "excel_match_job_logs"
 }

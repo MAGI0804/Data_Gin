@@ -23,6 +23,9 @@ import (
 )
 
 const (
+	excelOperationExportMatch  = "export_match"
+	excelOperationImportUpdate = "import_update"
+
 	excelMatchStatusPending = "pending"
 	excelMatchStatusSuccess = "success"
 	excelMatchStatusExpired = "expired"
@@ -34,8 +37,10 @@ const (
 	excelMaxRowsPerSheet     = 1048576
 	defaultExcelMatchBatch   = 1000
 	maxBufferedExcelRows     = 5000
+	defaultExcelSheetName    = "Sheet1"
 	defaultExcelResultSheet  = "Result_1"
 	bojunRetailOrderTemplate = "bojun_retail_order"
+	bojunRetailOrdersTable   = "bojun_retail_orders"
 )
 
 var allowedBojunValueFields = map[string]struct{}{
@@ -51,6 +56,24 @@ var allowedBojunValueFields = map[string]struct{}{
 	"vipno":                {},
 	"related_normal_docno": {},
 	"o2o_so_docno":         {},
+	"matched_docno":        {},
+}
+
+var allowedExcelImportTables = map[string]struct{}{
+	bojunRetailOrdersTable:   {},
+	bojunRetailOrderTemplate: {},
+}
+
+var allowedBojunImportMatchFields = map[string]struct{}{
+	"docno":                {},
+	"otherdocno":           {},
+	"o2o_so_docno":         {},
+	"related_normal_docno": {},
+	"matched_docno":        {},
+}
+
+var allowedBojunImportWriteFields = map[string]struct{}{
+	"matched_docno": {},
 }
 
 type ExcelMatchJobService struct {
@@ -70,11 +93,16 @@ type ExcelMatchFilter struct {
 }
 
 type ExcelMatchConfig struct {
+	Operation        string             `json:"operation"`
+	SheetName        string             `json:"sheetName"`
 	Filters          []ExcelMatchFilter `json:"filters"`
 	MatchExcelColumn string             `json:"matchExcelColumn"`
 	DBTemplate       string             `json:"dbTemplate"`
 	DBMatchField     string             `json:"dbMatchField"`
 	DBValueField     string             `json:"dbValueField"`
+	TableName        string             `json:"tableName"`
+	DBWriteField     string             `json:"dbWriteField"`
+	WriteExcelColumn string             `json:"writeExcelColumn"`
 	OutputColumnName string             `json:"outputColumnName"`
 	BatchSize        int                `json:"batchSize"`
 }
@@ -85,12 +113,29 @@ type ExcelMatchLookup interface {
 	Lookup(ctx context.Context, keys []string, valueField string) (map[string]string, error)
 }
 
+type ExcelImportUpdater interface {
+	FindKeys(ctx context.Context, matchField string, keys []string) (map[string]struct{}, error)
+	UpdateByKeys(ctx context.Context, matchField, writeField string, values map[string]string) (int64, error)
+}
+
 type bojunExcelMatchLookup struct {
 	dao *data_dao.ExcelMatchJobDAO
 }
 
 func (l bojunExcelMatchLookup) Lookup(ctx context.Context, keys []string, valueField string) (map[string]string, error) {
 	return l.dao.FindBojunFieldByDocNos(ctx, keys, valueField)
+}
+
+type bojunExcelImportUpdater struct {
+	dao *data_dao.ExcelMatchJobDAO
+}
+
+func (u bojunExcelImportUpdater) FindKeys(ctx context.Context, matchField string, keys []string) (map[string]struct{}, error) {
+	return u.dao.FindBojunKeys(ctx, matchField, keys)
+}
+
+func (u bojunExcelImportUpdater) UpdateByKeys(ctx context.Context, matchField, writeField string, values map[string]string) (int64, error) {
+	return u.dao.BatchUpdateBojunFieldByKeys(ctx, matchField, writeField, values)
 }
 
 func (s *ExcelMatchJobService) CreateJob(ctx context.Context, fileHeader *multipart.FileHeader, rawConfig string) (*model.ExcelMatchJob, error) {
@@ -124,39 +169,52 @@ func (s *ExcelMatchJobService) CreateJob(ctx context.Context, fileHeader *multip
 	if _, err := s.jobDAO.Create(ctx, matchJob); err != nil {
 		return nil, err
 	}
+	s.logJob(ctx, matchJob.ID, "info", "Excel任务已创建", map[string]interface{}{
+		"operation": normalizedConfig.Operation,
+		"sheet":     normalizedConfig.SheetName,
+		"file":      matchJob.SourceFileName,
+	})
 
 	workDir := excelMatchJobDir(matchJob.ID)
 	sourcePath := filepath.Join(workDir, excelMatchSourceFileName)
 	resultPath := filepath.Join(workDir, excelMatchResultFileName)
 	if err := os.MkdirAll(workDir, 0700); err != nil {
 		_ = s.jobDAO.MarkFailed(ctx, matchJob.ID, err.Error(), expiresAt)
+		s.logJob(ctx, matchJob.ID, "error", "创建任务临时目录失败", map[string]interface{}{"error": err.Error()})
 		return nil, err
 	}
 	if err := saveUploadedExcel(fileHeader, sourcePath); err != nil {
 		_ = s.jobDAO.MarkFailed(ctx, matchJob.ID, err.Error(), expiresAt)
 		_ = os.RemoveAll(workDir)
+		s.logJob(ctx, matchJob.ID, "error", "保存上传Excel失败", map[string]interface{}{"error": err.Error()})
 		return nil, err
 	}
+	s.logJob(ctx, matchJob.ID, "info", "上传Excel已保存到临时目录", map[string]interface{}{"source_file_name": matchJob.SourceFileName})
 	if err := s.jobDAO.UpdatePaths(ctx, matchJob.ID, workDir, sourcePath, resultPath); err != nil {
 		_ = s.jobDAO.MarkFailed(ctx, matchJob.ID, err.Error(), expiresAt)
 		_ = os.RemoveAll(workDir)
+		s.logJob(ctx, matchJob.ID, "error", "更新任务文件路径失败", map[string]interface{}{"error": err.Error()})
 		return nil, err
 	}
 
 	task, err := job.NewExcelMatchExportTask(matchJob.ID)
 	if err != nil {
 		_ = s.jobDAO.MarkFailed(ctx, matchJob.ID, err.Error(), expiresAt)
+		s.logJob(ctx, matchJob.ID, "error", "创建异步任务失败", map[string]interface{}{"error": err.Error()})
 		return nil, err
 	}
 	if global.QueueJobClient == nil {
 		err := errors.New("异步任务客户端未初始化")
 		_ = s.jobDAO.MarkFailed(ctx, matchJob.ID, err.Error(), expiresAt)
+		s.logJob(ctx, matchJob.ID, "error", "异步任务客户端未初始化", nil)
 		return nil, err
 	}
 	if _, err := global.QueueJobClient.Enqueue(task, asynq.MaxRetry(1)); err != nil {
 		_ = s.jobDAO.MarkFailed(ctx, matchJob.ID, err.Error(), expiresAt)
+		s.logJob(ctx, matchJob.ID, "error", "投递异步任务失败", map[string]interface{}{"error": err.Error()})
 		return nil, err
 	}
+	s.logJob(ctx, matchJob.ID, "info", "异步任务已投递", nil)
 
 	return s.jobDAO.FindByID(ctx, matchJob.ID)
 }
@@ -172,6 +230,10 @@ func (s *ExcelMatchJobService) GetJob(ctx context.Context, id uint) (*model.Exce
 		matchJob.Status = excelMatchStatusExpired
 	}
 	return matchJob, nil
+}
+
+func (s *ExcelMatchJobService) GetJobLogs(ctx context.Context, id uint) ([]model.ExcelMatchJobLog, error) {
+	return s.jobDAO.FindLogsByJobID(ctx, id, 200)
 }
 
 func (s *ExcelMatchJobService) Download(ctx context.Context, id uint) (*model.ExcelMatchJob, string, string, error) {
@@ -205,24 +267,42 @@ func (s *ExcelMatchJobService) ProcessJob(ctx context.Context, id uint) error {
 	config, err = normalizeExcelMatchConfig(config)
 	if err != nil {
 		_ = s.jobDAO.MarkFailed(ctx, id, err.Error(), time.Now().Add(excelMatchRetention))
+		s.logJob(ctx, id, "error", "任务配置校验失败", map[string]interface{}{"error": err.Error()})
 		return err
 	}
 
 	if err := s.jobDAO.MarkRunning(ctx, id); err != nil {
 		return err
 	}
-
-	lookup := bojunExcelMatchLookup{dao: s.jobDAO}
-	stats, err := processExcelMatchFileWithProgress(ctx, matchJob.SourceFilePath, matchJob.ResultFilePath, config, lookup, func(stats ExcelMatchJobStats) {
-		_ = s.jobDAO.UpdateProgress(ctx, id, stats)
+	s.logJob(ctx, id, "info", "任务开始处理", map[string]interface{}{
+		"operation": config.Operation,
+		"sheet":     config.SheetName,
 	})
+
+	var stats ExcelMatchJobStats
+	if config.Operation == excelOperationImportUpdate {
+		updater := bojunExcelImportUpdater{dao: s.jobDAO}
+		stats, err = processExcelImportUpdateFileWithProgress(ctx, matchJob.SourceFilePath, config, updater, func(stats ExcelMatchJobStats) {
+			_ = s.jobDAO.UpdateProgress(ctx, id, stats)
+			s.logJob(ctx, id, "info", "导入更新进度", statsDetail(stats))
+		})
+	} else {
+		lookup := bojunExcelMatchLookup{dao: s.jobDAO}
+		stats, err = processExcelMatchFileWithProgress(ctx, matchJob.SourceFilePath, matchJob.ResultFilePath, config, lookup, func(stats ExcelMatchJobStats) {
+			_ = s.jobDAO.UpdateProgress(ctx, id, stats)
+			s.logJob(ctx, id, "info", "匹配导出进度", statsDetail(stats))
+		})
+	}
 	expiresAt := time.Now().Add(excelMatchRetention)
 	if err != nil {
 		_ = s.jobDAO.MarkFailed(ctx, id, err.Error(), expiresAt)
+		s.logJob(ctx, id, "error", "任务处理失败", map[string]interface{}{"error": err.Error()})
 		return err
 	}
 
 	_ = os.Remove(matchJob.SourceFilePath)
+	s.logJob(ctx, id, "info", "源文件已删除", nil)
+	s.logJob(ctx, id, "info", "任务处理成功", statsDetail(stats))
 	return s.jobDAO.MarkSuccess(ctx, id, stats, expiresAt)
 }
 
@@ -241,12 +321,41 @@ func (s *ExcelMatchJobService) CleanupExpiredJobs(ctx context.Context) error {
 }
 
 func normalizeExcelMatchConfig(config ExcelMatchConfig) (ExcelMatchConfig, error) {
+	config.Operation = strings.TrimSpace(config.Operation)
+	config.SheetName = strings.TrimSpace(config.SheetName)
 	config.MatchExcelColumn = strings.TrimSpace(config.MatchExcelColumn)
 	config.DBTemplate = strings.TrimSpace(config.DBTemplate)
 	config.DBMatchField = strings.TrimSpace(config.DBMatchField)
 	config.DBValueField = strings.TrimSpace(config.DBValueField)
+	config.TableName = strings.TrimSpace(config.TableName)
+	config.DBWriteField = strings.TrimSpace(config.DBWriteField)
+	config.WriteExcelColumn = strings.TrimSpace(config.WriteExcelColumn)
 	config.OutputColumnName = strings.TrimSpace(config.OutputColumnName)
 
+	if config.Operation == "" {
+		config.Operation = excelOperationExportMatch
+	}
+	if config.SheetName == "" {
+		config.SheetName = defaultExcelSheetName
+	}
+	if config.BatchSize == 0 {
+		config.BatchSize = defaultExcelMatchBatch
+	}
+	if config.BatchSize < 500 || config.BatchSize > 2000 {
+		return config, errors.New("batchSize 必须在 500 到 2000 之间")
+	}
+
+	switch config.Operation {
+	case excelOperationExportMatch:
+		return normalizeExcelExportConfig(config)
+	case excelOperationImportUpdate:
+		return normalizeExcelImportConfig(config)
+	default:
+		return config, fmt.Errorf("暂不支持Excel任务操作: %s", config.Operation)
+	}
+}
+
+func normalizeExcelExportConfig(config ExcelMatchConfig) (ExcelMatchConfig, error) {
 	if len(config.Filters) == 0 {
 		return config, errors.New("至少需要一个 Excel 前置筛选条件")
 	}
@@ -282,13 +391,36 @@ func normalizeExcelMatchConfig(config ExcelMatchConfig) (ExcelMatchConfig, error
 	if config.OutputColumnName == "" {
 		return config, errors.New("输出列名不能为空")
 	}
-	if config.BatchSize == 0 {
-		config.BatchSize = defaultExcelMatchBatch
-	}
-	if config.BatchSize < 500 || config.BatchSize > 2000 {
-		return config, errors.New("batchSize 必须在 500 到 2000 之间")
-	}
 
+	return config, nil
+}
+
+func normalizeExcelImportConfig(config ExcelMatchConfig) (ExcelMatchConfig, error) {
+	if config.TableName == "" {
+		config.TableName = bojunRetailOrdersTable
+	}
+	if _, ok := allowedExcelImportTables[config.TableName]; !ok {
+		return config, fmt.Errorf("导入匹配表不在白名单: %s", config.TableName)
+	}
+	config.TableName = bojunRetailOrdersTable
+	if config.DBMatchField == "" {
+		config.DBMatchField = "docno"
+	}
+	if _, ok := allowedBojunImportMatchFields[config.DBMatchField]; !ok {
+		return config, fmt.Errorf("导入匹配字段不在白名单: %s", config.DBMatchField)
+	}
+	if config.MatchExcelColumn == "" {
+		return config, errors.New("匹配Excel列名不能为空")
+	}
+	if config.DBWriteField == "" {
+		config.DBWriteField = "matched_docno"
+	}
+	if _, ok := allowedBojunImportWriteFields[config.DBWriteField]; !ok {
+		return config, fmt.Errorf("导入写入字段不在白名单: %s", config.DBWriteField)
+	}
+	if config.WriteExcelColumn == "" {
+		return config, errors.New("写入值Excel列名不能为空")
+	}
 	return config, nil
 }
 
@@ -314,7 +446,10 @@ func processExcelMatchFileWithProgress(
 	if len(sheets) == 0 {
 		return ExcelMatchJobStats{}, errors.New("Excel 没有可读取的 sheet")
 	}
-	rows, err := input.Rows(sheets[0])
+	if !sheetExists(sheets, config.SheetName) {
+		return ExcelMatchJobStats{}, fmt.Errorf("Excel 不存在 sheet: %s", config.SheetName)
+	}
+	rows, err := input.Rows(config.SheetName)
 	if err != nil {
 		return ExcelMatchJobStats{}, err
 	}
@@ -516,6 +651,134 @@ func processExcelMatchFileWithProgress(
 	return stats, nil
 }
 
+func processExcelImportUpdateFileWithProgress(
+	ctx context.Context,
+	inputPath string,
+	config ExcelMatchConfig,
+	updater ExcelImportUpdater,
+	onProgress func(ExcelMatchJobStats),
+) (ExcelMatchJobStats, error) {
+	input, err := excelize.OpenFile(inputPath)
+	if err != nil {
+		return ExcelMatchJobStats{}, err
+	}
+	defer func() { _ = input.Close() }()
+
+	sheets := input.GetSheetList()
+	if len(sheets) == 0 {
+		return ExcelMatchJobStats{}, errors.New("Excel 没有可读取的 sheet")
+	}
+	if !sheetExists(sheets, config.SheetName) {
+		return ExcelMatchJobStats{}, fmt.Errorf("Excel 不存在 sheet: %s", config.SheetName)
+	}
+	rows, err := input.Rows(config.SheetName)
+	if err != nil {
+		return ExcelMatchJobStats{}, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	var headers []string
+	columnIndexes := map[string]int{}
+	matchColumnIndex := -1
+	writeColumnIndex := -1
+	stats := ExcelMatchJobStats{}
+
+	type importRow struct {
+		key   string
+		value string
+	}
+	var buffered []importRow
+
+	flush := func() error {
+		if len(buffered) == 0 {
+			return nil
+		}
+		keys := make([]string, 0, len(buffered))
+		for _, row := range buffered {
+			keys = append(keys, row.key)
+		}
+		existing, err := updater.FindKeys(ctx, config.DBMatchField, keys)
+		if err != nil {
+			return err
+		}
+		updateValues := map[string]string{}
+		for _, row := range buffered {
+			if _, ok := existing[row.key]; ok {
+				stats.MatchedRows++
+				updateValues[row.key] = row.value
+			} else {
+				stats.UnmatchedRows++
+			}
+		}
+		if _, err := updater.UpdateByKeys(ctx, config.DBMatchField, config.DBWriteField, updateValues); err != nil {
+			return err
+		}
+		stats.ProcessedRows += len(buffered)
+		if onProgress != nil {
+			onProgress(stats)
+		}
+		buffered = buffered[:0]
+		return nil
+	}
+
+	headerRead := false
+	for rows.Next() {
+		if err := ctx.Err(); err != nil {
+			return stats, err
+		}
+		columns, err := rows.Columns()
+		if err != nil {
+			return stats, err
+		}
+		if !headerRead {
+			headers = normalizeHeaders(columns)
+			if len(headers) == 0 {
+				return stats, errors.New("Excel 表头不能为空")
+			}
+			for i, header := range headers {
+				columnIndexes[header] = i
+			}
+			var ok bool
+			matchColumnIndex, ok = columnIndexes[config.MatchExcelColumn]
+			if !ok {
+				return stats, fmt.Errorf("Excel 缺少匹配列: %s", config.MatchExcelColumn)
+			}
+			writeColumnIndex, ok = columnIndexes[config.WriteExcelColumn]
+			if !ok {
+				return stats, fmt.Errorf("Excel 缺少写入值列: %s", config.WriteExcelColumn)
+			}
+			headerRead = true
+			continue
+		}
+
+		stats.TotalRows++
+		normalized := normalizeExcelRow(columns, len(headers))
+		key := strings.TrimSpace(normalized[matchColumnIndex])
+		value := strings.TrimSpace(normalized[writeColumnIndex])
+		if key == "" {
+			stats.UnmatchedRows++
+			stats.ProcessedRows++
+			continue
+		}
+		buffered = append(buffered, importRow{key: key, value: value})
+		if len(buffered) >= config.BatchSize {
+			if err := flush(); err != nil {
+				return stats, err
+			}
+		}
+	}
+	if err := rows.Error(); err != nil {
+		return stats, err
+	}
+	if !headerRead {
+		return stats, errors.New("Excel 表头不能为空")
+	}
+	if err := flush(); err != nil {
+		return stats, err
+	}
+	return stats, nil
+}
+
 func initExcelMatchWriter(output *excelize.File) (*excelize.StreamWriter, string, error) {
 	defaultSheet := output.GetSheetName(0)
 	if err := output.SetSheetName(defaultSheet, defaultExcelResultSheet); err != nil {
@@ -550,6 +813,43 @@ func excelRowMatchesFilters(row []string, columnIndexes map[string]int, filters 
 		}
 	}
 	return true
+}
+
+func sheetExists(sheets []string, target string) bool {
+	for _, sheet := range sheets {
+		if sheet == target {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *ExcelMatchJobService) logJob(ctx context.Context, jobID uint, level, message string, detail map[string]interface{}) {
+	if jobID == 0 {
+		return
+	}
+	detailJSON := "{}"
+	if detail != nil {
+		if data, err := json.Marshal(detail); err == nil {
+			detailJSON = string(data)
+		}
+	}
+	_ = s.jobDAO.CreateLog(ctx, &model.ExcelMatchJobLog{
+		JobID:      jobID,
+		Level:      level,
+		Message:    message,
+		DetailJSON: detailJSON,
+	})
+}
+
+func statsDetail(stats ExcelMatchJobStats) map[string]interface{} {
+	return map[string]interface{}{
+		"total_rows":     stats.TotalRows,
+		"processed_rows": stats.ProcessedRows,
+		"filtered_rows":  stats.FilteredRows,
+		"matched_rows":   stats.MatchedRows,
+		"unmatched_rows": stats.UnmatchedRows,
+	}
 }
 
 func saveUploadedExcel(fileHeader *multipart.FileHeader, dst string) error {
