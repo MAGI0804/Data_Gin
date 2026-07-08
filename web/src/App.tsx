@@ -546,6 +546,14 @@ function App() {
     if (response.ok) await refreshAll(false)
   }
 
+  async function runBojunOrderBackfill(payload: { start_time: string; end_time: string }) {
+    const response = await client('/v1/legacy-tasks/bojun_order_fetch/run', {
+      method: 'POST',
+      body: payload,
+    })
+    if (response.ok) await refreshAll(false)
+  }
+
   const receivedData = useMemo(() => rawData.filter((item) => !isPulledOrigin(rawDataOrigin(item))), [rawData])
   const pulledData = useMemo(() => rawData.filter((item) => isPulledOrigin(rawDataOrigin(item))), [rawData])
   const coreMethods = useMemo(
@@ -590,7 +598,16 @@ function App() {
         {activeNav === 'push_status' && <PushStatusView runs={runs} deliveryLogs={deliveryLogs} onLoadSteps={loadStepRuns} />}
         {activeNav === 'methods' && <MethodsView methods={methods} coreMethods={coreMethods} onToggle={toggleTarget} />}
         {activeNav === 'receive' && <ReceiveView records={receivedData} coreMethod={coreMethods.find((item) => item.key === 'interface_ingest')} />}
-        {activeNav === 'pull' && <PullView sources={sources} records={pulledData} coreMethods={coreMethods.filter((item) => item.key === 'youzan_fetch' || item.key === 'bojun_order_fetch')} onToggle={toggleTarget} />}
+        {activeNav === 'pull' && (
+          <PullView
+            sources={sources}
+            records={pulledData}
+            coreMethods={coreMethods.filter((item) => item.key === 'youzan_fetch' || item.key === 'bojun_order_fetch')}
+            loading={loading || refreshing}
+            onBojunBackfill={runBojunOrderBackfill}
+            onToggle={toggleTarget}
+          />
+        )}
         {activeNav === 'process' && <ProcessView rules={transformRules} records={processedData} coreMethod={coreMethods.find((item) => item.key === 'qimai_process')} onToggle={toggleTarget} />}
         {activeNav === 'push' && <PushConfigView destinations={destinations} tasks={deliveryTasks} coreMethod={coreMethods.find((item) => item.key === 'mall_push')} onToggle={toggleTarget} />}
         {activeNav === 'excel' && <ExcelMatchView token={token} loading={loading} setLoading={setLoading} setResult={setResult} />}
@@ -745,10 +762,50 @@ function ReceiveView({ records, coreMethod }: { records: RawData[]; coreMethod?:
   )
 }
 
-function PullView({ sources, records, coreMethods, onToggle }: { sources: SourceDefinition[]; records: RawData[]; coreMethods: CoreMethod[]; onToggle: (target: ToggleTarget, enabled: boolean) => void }) {
+function PullView({
+  sources,
+  records,
+  coreMethods,
+  loading,
+  onBojunBackfill,
+  onToggle,
+}: {
+  sources: SourceDefinition[]
+  records: RawData[]
+  coreMethods: CoreMethod[]
+  loading: boolean
+  onBojunBackfill: (payload: { start_time: string; end_time: string }) => Promise<void>
+  onToggle: (target: ToggleTarget, enabled: boolean) => void
+}) {
+  async function submitBojunBackfill(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const form = new FormData(event.currentTarget)
+    await onBojunBackfill({
+      start_time: formValue(form, 'start_time'),
+      end_time: formValue(form, 'end_time'),
+    })
+  }
+
   return (
     <div className="view-stack">
       {coreMethods.length > 0 && <Panel title="数据拉取方法" icon={<ArrowDownToLine />} meta="现有拉取能力"><CoreMethodList methods={coreMethods} onToggle={onToggle} /></Panel>}
+      <Panel title="伯俊订单补拉" icon={<ArrowDownToLine />} meta="按时间范围投递异步补拉任务">
+        <form className="bojun-backfill-form" onSubmit={submitBojunBackfill}>
+          <label>
+            开始时间
+            <input name="start_time" type="datetime-local" defaultValue={datetimeLocalMinutesAgo(60)} required />
+          </label>
+          <label>
+            结束时间
+            <input name="end_time" type="datetime-local" defaultValue={datetimeLocalMinutesAgo(0)} required />
+          </label>
+          <button className="primary" type="submit" disabled={loading}>
+            <ArrowDownToLine aria-hidden="true" />
+            投递补拉
+          </button>
+        </form>
+        <p className="backfill-note">按伯俊订单号 docno 判重：已存在的数据不覆盖，未存在的数据写入 raw_data 和 bojun_retail_orders。</p>
+      </Panel>
       <section className="overview-grid">
         <Metric label="拉取数据源" value={sources.length} />
         <Metric label="启用数据源" value={sources.filter((item) => item.enabled).length} />
@@ -1633,9 +1690,9 @@ function buildCoreMethods({ sources, transformRules, destinations, deliveryTasks
       key: 'bojun_order_fetch',
       title: '伯俊订单拉取',
       category: '数据拉取方法',
-      description: '每分钟调用伯俊 `/retail/retail.query` 拉取订单，逐条写入原始表并标记来源 `bojun_order`。',
+      description: '每分钟调用伯俊 `/retail/middleretail.query` 拉取订单，也支持按开始/结束时间手动补拉。',
       enabled: true,
-      status: '系统定时任务：每分钟执行，运行参数来自 BOJUN_ORDER_* 环境变量。',
+      status: '系统定时任务每分钟执行；补拉时 docno 已存在不覆盖，未存在才写入。',
       refs: [],
     },
     {
@@ -1894,6 +1951,12 @@ function formatDate(value: string | null) {
     second: '2-digit',
     hour12: false,
   }).format(date).replace(/\//g, '-')
+}
+
+function datetimeLocalMinutesAgo(minutes: number) {
+  const date = new Date(Date.now() - minutes * 60 * 1000)
+  const pad = (value: number) => String(value).padStart(2, '0')
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`
 }
 
 function groupBy<T>(items: T[], keyFn: (item: T) => string) {

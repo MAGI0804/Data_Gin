@@ -402,6 +402,20 @@ button:focus-visible {
   justify-content: flex-start;
 }
 
+.bojun-backfill-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: end;
+}
+
+.backfill-note {
+  margin: 10px 0 0;
+  color: #666666;
+  font-size: 12px;
+  line-height: 1.5;
+}
+
 .excel-upload-form,
 .excel-job-actions,
 .excel-job-detail {
@@ -577,7 +591,8 @@ summary {
 
   .excel-upload-form,
   .excel-job-actions,
-  .excel-job-detail {
+  .excel-job-detail,
+  .bojun-backfill-form {
     grid-template-columns: 1fr;
   }
 
