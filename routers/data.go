@@ -127,6 +127,14 @@ func apiData(api *gin.RouterGroup) {
 		legacyTaskGroup.POST("/:code/run", legacyTaskCtrl.Run)
 	}
 
+	bojunOrderBackfillGroup := api.Group("/v1/bojun-order-backfill")
+	bojunOrderBackfillGroup.Use(middleware.AuthJWT())
+	{
+		bojunOrderBackfillCtrl := data_ctrl.NewBojunOrderBackfillController()
+		bojunOrderBackfillGroup.POST("/preview", bojunOrderBackfillCtrl.Preview)
+		bojunOrderBackfillGroup.POST("/confirm", bojunOrderBackfillCtrl.Confirm)
+	}
+
 	legacyTransformRuleGroup := api.Group("/v1/legacy-transform-rules")
 	legacyTransformRuleGroup.Use(middleware.AuthJWT())
 	{

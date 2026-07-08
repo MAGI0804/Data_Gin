@@ -1,11 +1,52 @@
 package data_svc
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 
+	"gin-biz-web-api/model"
 	"gin-biz-web-api/pkg/shanghaimall"
 )
+
+type fakeBojunRawDataCreator struct {
+	created int
+	nextID  uint
+}
+
+func (f *fakeBojunRawDataCreator) Create(ctx context.Context, rawData *model.RawData) (uint, error) {
+	_ = ctx
+	f.created++
+	if f.nextID == 0 {
+		f.nextID = 100
+	}
+	return f.nextID, nil
+}
+
+type fakeBojunRetailOrderWriter struct {
+	existing map[string]bool
+	created  []string
+	failFind bool
+}
+
+func (f *fakeBojunRetailOrderWriter) ExistsByDocNo(ctx context.Context, docNo string) (bool, error) {
+	_ = ctx
+	if f.failFind {
+		return false, errors.New("find failed")
+	}
+	return f.existing[docNo], nil
+}
+
+func (f *fakeBojunRetailOrderWriter) CreateIfNotExists(ctx context.Context, order *model.BojunRetailOrder) (bool, error) {
+	_ = ctx
+	if f.existing[order.DocNo] {
+		return false, nil
+	}
+	f.created = append(f.created, order.DocNo)
+	f.existing[order.DocNo] = true
+	return true, nil
+}
 
 func TestBuildBojunOrderRequestBody(t *testing.T) {
 	body := buildBojunOrderRequestBody(
@@ -89,6 +130,103 @@ func TestBuildBojunOrderRawDataMarksSource(t *testing.T) {
 	}
 	if rawContent["docno"] != "ABCN001P012P12607031240270004" {
 		t.Fatalf("raw docno = %v", rawContent["docno"])
+	}
+}
+
+func TestProcessBojunOrderRecordPreviewDoesNotWrite(t *testing.T) {
+	rawCreator := &fakeBojunRawDataCreator{}
+	orderWriter := &fakeBojunRetailOrderWriter{existing: map[string]bool{}}
+	service := &BojunOrderService{
+		rawDataDAO:     rawCreator,
+		retailOrderDAO: orderWriter,
+	}
+	result := &BojunOrderSyncResult{}
+	record := map[string]interface{}{
+		"docno":        "B001",
+		"cStoreCode":   "ABCN001P012",
+		"cStoreName":   "前滩",
+		"totQty":       float64(1),
+		"totAmtActual": float64(99.5),
+	}
+
+	service.processBojunOrderRecord(context.Background(), record, defaultBojunOrderMethod, "2026-07-08 10:00:00", "2026-07-08 10:30:00", 1, false, result)
+
+	if result.TotalCount != 1 || result.PreviewCount != 1 || result.WritableCount != 1 || result.RetailCount != 0 {
+		t.Fatalf("result = %+v, want preview without retail write", result)
+	}
+	if rawCreator.created != 0 || len(orderWriter.created) != 0 {
+		t.Fatalf("preview wrote data: raw=%d orders=%v", rawCreator.created, orderWriter.created)
+	}
+	if len(result.Samples) != 1 || result.Samples[0].Status != "pending" {
+		t.Fatalf("samples = %+v, want pending preview sample", result.Samples)
+	}
+}
+
+func TestProcessBojunOrderRecordConfirmWritesOnlyNewRows(t *testing.T) {
+	rawCreator := &fakeBojunRawDataCreator{}
+	orderWriter := &fakeBojunRetailOrderWriter{existing: map[string]bool{}}
+	service := &BojunOrderService{
+		rawDataDAO:     rawCreator,
+		retailOrderDAO: orderWriter,
+		pushService:    nil,
+	}
+	result := &BojunOrderSyncResult{}
+	record := map[string]interface{}{
+		"docno":        "B001",
+		"cStoreCode":   "ABCN001P012",
+		"cStoreName":   "前滩",
+		"totQty":       float64(1),
+		"totAmtActual": float64(99.5),
+	}
+
+	service.processBojunOrderRecord(context.Background(), record, defaultBojunOrderMethod, "2026-07-08 10:00:00", "2026-07-08 10:30:00", 1, true, result)
+
+	if result.TotalCount != 1 || result.SavedCount != 1 || result.RetailCount != 1 || result.FailedCount != 0 {
+		t.Fatalf("result = %+v, want saved retail row", result)
+	}
+	if rawCreator.created != 1 || len(orderWriter.created) != 1 || orderWriter.created[0] != "B001" {
+		t.Fatalf("writes raw=%d orders=%v", rawCreator.created, orderWriter.created)
+	}
+	if len(result.Samples) != 1 || result.Samples[0].Status != "created" {
+		t.Fatalf("samples = %+v, want created sample", result.Samples)
+	}
+}
+
+func TestProcessBojunOrderRecordSkipsExistingRows(t *testing.T) {
+	rawCreator := &fakeBojunRawDataCreator{}
+	orderWriter := &fakeBojunRetailOrderWriter{existing: map[string]bool{"B001": true}}
+	service := &BojunOrderService{
+		rawDataDAO:     rawCreator,
+		retailOrderDAO: orderWriter,
+	}
+	result := &BojunOrderSyncResult{}
+
+	service.processBojunOrderRecord(context.Background(), map[string]interface{}{"docno": "B001"}, defaultBojunOrderMethod, "", "", 1, true, result)
+
+	if result.SkippedCount != 1 || result.ExistingCount != 1 || result.RetailCount != 0 {
+		t.Fatalf("result = %+v, want existing skip", result)
+	}
+	if rawCreator.created != 0 || len(orderWriter.created) != 0 {
+		t.Fatalf("existing row wrote data: raw=%d orders=%v", rawCreator.created, orderWriter.created)
+	}
+}
+
+func TestProcessBojunOrderRecordInvalidDocNoDoesNotWriteRawData(t *testing.T) {
+	rawCreator := &fakeBojunRawDataCreator{}
+	orderWriter := &fakeBojunRetailOrderWriter{existing: map[string]bool{}}
+	service := &BojunOrderService{
+		rawDataDAO:     rawCreator,
+		retailOrderDAO: orderWriter,
+	}
+	result := &BojunOrderSyncResult{}
+
+	service.processBojunOrderRecord(context.Background(), map[string]interface{}{"cStoreCode": "ABCN001P012"}, defaultBojunOrderMethod, "", "", 1, true, result)
+
+	if result.FailedCount != 1 || len(result.FailedSamples) != 1 {
+		t.Fatalf("result = %+v, want failed sample", result)
+	}
+	if rawCreator.created != 0 || len(orderWriter.created) != 0 {
+		t.Fatalf("invalid row wrote data: raw=%d orders=%v", rawCreator.created, orderWriter.created)
 	}
 }
 
