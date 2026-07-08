@@ -893,6 +893,7 @@ function ExcelMatchView({
   const [jobLogs, setJobLogs] = useState<ExcelMatchJobLog[]>([])
   const [selectedExportFileName, setSelectedExportFileName] = useState('')
   const [selectedImportFileName, setSelectedImportFileName] = useState('')
+  const [selectedClearFileName, setSelectedClearFileName] = useState('')
 
   function applyJobResult(result: ApiResult) {
     const nextJob = readObject<ExcelMatchJob>(result, 'job')
@@ -960,6 +961,10 @@ function ExcelMatchView({
     }
 
     const payload = new FormData()
+    const confirmWrite = form.get('confirmWrite') === 'on'
+    if (confirmWrite && !window.confirm('确认写入数据库？本次只会填充空的 matched_docno，不会覆盖已有匹配单号。')) {
+      return
+    }
     payload.append('file', file)
     payload.append('config', JSON.stringify({
       operation: 'import_update',
@@ -970,6 +975,54 @@ function ExcelMatchView({
       dbWriteField: formValue(form, 'dbWriteField').trim(),
       writeExcelColumn: formValue(form, 'writeExcelColumn').trim(),
       batchSize: Number(formValue(form, 'batchSize') || 1000),
+      dryRun: !confirmWrite,
+      confirmWrite,
+    }))
+
+    setLoading(true)
+    try {
+      const response = await fetch(apiURL('/v1/excel-match-jobs'), {
+        method: 'POST',
+        headers: token ? { token } : undefined,
+        body: payload,
+      })
+      const data = await response.json().catch(() => ({}))
+      const nextResult = { ok: response.ok && isSuccessPayload(data), status: response.status, data }
+      setResult(nextResult)
+      if (nextResult.ok) applyJobResult(nextResult)
+    } catch (error) {
+      setResult({ ok: false, status: 0, data: error instanceof Error ? error.message : String(error) })
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function createClearMatchedJob(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const form = new FormData(event.currentTarget)
+    const file = form.get('file')
+    if (!(file instanceof File) || file.size === 0) {
+      setResult({ ok: false, status: 0, data: '请选择 .xlsx 文件' })
+      return
+    }
+
+    const confirmWrite = form.get('confirmWrite') === 'on'
+    if (confirmWrite && !window.confirm('确认清空命中行的 matched_docno？该操作用于退回未匹配状态。')) {
+      return
+    }
+
+    const payload = new FormData()
+    payload.append('file', file)
+    payload.append('config', JSON.stringify({
+      operation: 'clear_matched_docno',
+      sheetName: formValue(form, 'sheetName').trim() || 'Sheet1',
+      tableName: formValue(form, 'tableName').trim(),
+      dbMatchField: formValue(form, 'dbMatchField').trim(),
+      matchExcelColumn: formValue(form, 'matchExcelColumn').trim(),
+      dbWriteField: 'matched_docno',
+      batchSize: Number(formValue(form, 'batchSize') || 1000),
+      dryRun: !confirmWrite,
+      confirmWrite,
     }))
 
     setLoading(true)
@@ -1103,7 +1156,7 @@ function ExcelMatchView({
           </form>
         </Panel>
 
-        <Panel title="Excel 匹配导入" icon={<Database />} meta="按Excel列匹配数据库并写入白名单字段">
+        <Panel title="Excel 匹配导入" icon={<Database />} meta="默认预检；确认后只填空的 matched_docno">
           <form className="excel-upload-form" onSubmit={createImportJob}>
             <label className="file-input-label">
               Excel 文件
@@ -1132,18 +1185,70 @@ function ExcelMatchView({
                 <option value="matched_docno">匹配单号 matched_docno</option>
               </select>
             </label>
-            <Field label="Excel 匹配列名" name="matchExcelColumn" defaultValue="订单号" />
+            <Field label="Excel 匹配列名" name="matchExcelColumn" defaultValue="外部订单编号" />
             <label>
               写入字段
               <select name="dbWriteField" defaultValue="matched_docno">
                 <option value="matched_docno">匹配单号 matched_docno</option>
               </select>
             </label>
-            <Field label="Excel 写入值列名" name="writeExcelColumn" defaultValue="匹配单号" />
+            <Field label="Excel 写入值列名" name="writeExcelColumn" defaultValue="订单号" />
             <Field label="批量更新大小" name="batchSize" defaultValue="1000" />
+            <label className="checkbox-label">
+              <input name="confirmWrite" type="checkbox" />
+              确认写入数据库
+            </label>
+            <p className="excel-mode-note">
+              不勾选时只预检匹配数量，不写库；勾选后只写入空的 matched_docno，不覆盖已有匹配单号，不修改伯俊原始字段。
+            </p>
             <button className="primary" type="submit" disabled={loading}>
               <Upload aria-hidden="true" />
-              创建导入任务
+              创建预检/导入任务
+            </button>
+          </form>
+        </Panel>
+
+        <Panel title="退回未匹配状态" icon={<RefreshCcw />} meta="按同一Excel匹配范围清空 matched_docno">
+          <form className="excel-upload-form" onSubmit={createClearMatchedJob}>
+            <label className="file-input-label">
+              Excel 文件
+              <input
+                name="file"
+                type="file"
+                accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                onChange={(event) => setSelectedClearFileName(event.currentTarget.files?.[0]?.name ?? '')}
+              />
+              <span>{selectedClearFileName || '请选择需要退回的 .xlsx 文件'}</span>
+            </label>
+            <Field label="Sheet 页名称" name="sheetName" defaultValue="Sheet1" />
+            <label>
+              匹配表名
+              <select name="tableName" defaultValue="bojun_retail_orders">
+                <option value="bojun_retail_orders">伯俊零售单 bojun_retail_orders</option>
+              </select>
+            </label>
+            <label>
+              数据库匹配字段
+              <select name="dbMatchField" defaultValue="docno">
+                <option value="docno">订单号 docno</option>
+                <option value="otherdocno">外部单号 otherdocno</option>
+                <option value="o2o_so_docno">线上订单号 o2o_so_docno</option>
+                <option value="related_normal_docno">关联原单 related_normal_docno</option>
+                <option value="matched_docno">匹配单号 matched_docno</option>
+              </select>
+            </label>
+            <Field label="Excel 匹配列名" name="matchExcelColumn" defaultValue="外部订单编号" />
+            <Field label="批量处理大小" name="batchSize" defaultValue="1000" />
+            <label className="checkbox-label">
+              <input name="confirmWrite" type="checkbox" />
+              确认清空 matched_docno
+            </label>
+            <p className="excel-mode-note">
+              不勾选时只预检会命中的行；勾选后会把命中行的 matched_docno 清空，用于退回未匹配状态。
+            </p>
+            <button type="submit" disabled={loading}>
+              <RefreshCcw aria-hidden="true" />
+              创建预检/退回任务
             </button>
           </form>
         </Panel>
