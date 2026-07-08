@@ -2,6 +2,7 @@ import { FormEvent, ReactNode, useCallback, useEffect, useState } from 'react'
 import {
   Activity,
   Database,
+  Download,
   FileJson,
   LockKeyhole,
   LogOut,
@@ -11,6 +12,7 @@ import {
   Send,
   Settings,
   ShieldCheck,
+  Upload,
 } from 'lucide-react'
 import './App.css'
 
@@ -29,7 +31,7 @@ type ApiClientOptions = {
 
 type ApiClient = (path: string, options?: ApiClientOptions) => Promise<ApiResult>
 type RefreshAction = (showResult?: boolean) => Promise<void>
-type NavKey = 'sources' | 'transform' | 'delivery' | 'runs'
+type NavKey = 'sources' | 'transform' | 'delivery' | 'excel' | 'runs'
 type SourceView = 'list' | 'legacy' | 'create' | 'debug'
 
 const authStorageKey = 'warehouse-auth'
@@ -108,6 +110,23 @@ type PipelineRun = {
   failed_count: number
   started_at: string | null
   finished_at: string | null
+}
+
+type ExcelMatchJob = {
+  id: number
+  source_file_name: string
+  config_json: string
+  status: string
+  total_rows: number
+  processed_rows: number
+  filtered_rows: number
+  matched_rows: number
+  unmatched_rows: number
+  error_message: string
+  started_at: string | null
+  finished_at: string | null
+  expires_at: string | null
+  created_at: number
 }
 
 type LegacyTask = {
@@ -492,6 +511,7 @@ function App() {
           <NavButton active={active === 'sources'} icon={<Database />} label="数据源" onClick={() => setActive('sources')} />
           <NavButton active={active === 'transform'} icon={<FileJson />} label="清洗规则" onClick={() => setActive('transform')} />
           <NavButton active={active === 'delivery'} icon={<Send />} label="推送任务" onClick={() => setActive('delivery')} />
+          <NavButton active={active === 'excel'} icon={<Upload />} label="Excel 匹配" onClick={() => setActive('excel')} />
           <NavButton active={active === 'runs'} icon={<Activity />} label="运行记录" onClick={() => setActive('runs')} />
         </nav>
       </aside>
@@ -549,6 +569,9 @@ function App() {
                 legacyTasks={legacyTasks.filter((task) => task.category === 'delivery')}
                 onRefresh={refreshLists}
               />
+            )}
+            {active === 'excel' && (
+              <ExcelMatchPanel token={token} loading={loading} setLoading={setLoading} setResult={setResult} />
             )}
             {active === 'runs' && <RunsPanel refreshing={refreshing} runs={runs} onRefresh={refreshLists} />}
           </section>
@@ -1356,6 +1379,243 @@ function DeliveryPanel({
   )
 }
 
+function ExcelMatchPanel({
+  token,
+  loading,
+  setLoading,
+  setResult,
+}: {
+  token: string
+  loading: boolean
+  setLoading: (value: boolean) => void
+  setResult: (value: ApiResult | null) => void
+}) {
+  const [jobID, setJobID] = useState('')
+  const [job, setJob] = useState<ExcelMatchJob | null>(null)
+  const [selectedFileName, setSelectedFileName] = useState('')
+
+  async function createExcelMatchJob(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const form = new FormData(event.currentTarget)
+    const file = form.get('file')
+    if (!(file instanceof File) || file.size === 0) {
+      setResult({ ok: false, status: 0, data: '请选择 .xlsx 文件' })
+      return
+    }
+
+    const config = {
+      filters: [
+        {
+          column: String(form.get('filterColumn') ?? '').trim(),
+          op: 'eq',
+          value: String(form.get('filterValue') ?? '').trim(),
+        },
+      ],
+      matchExcelColumn: String(form.get('matchExcelColumn') ?? '').trim(),
+      dbTemplate: 'bojun_retail_order',
+      dbMatchField: 'docno',
+      dbValueField: String(form.get('dbValueField') ?? '').trim(),
+      outputColumnName: String(form.get('outputColumnName') ?? '').trim(),
+      batchSize: Number(form.get('batchSize') || 1000),
+    }
+
+    const payload = new FormData()
+    payload.append('file', file)
+    payload.append('config', JSON.stringify(config))
+
+    setLoading(true)
+    try {
+      const response = await fetch('/api/v1/excel-match-jobs', {
+        method: 'POST',
+        headers: token ? { token } : undefined,
+        body: payload,
+      })
+      const data = await response.json().catch(() => ({}))
+      const nextResult = { ok: response.ok && isSuccessPayload(data), status: response.status, data }
+      setResult(nextResult)
+      if (nextResult.ok) {
+        const nextJob = readObject<ExcelMatchJob>(nextResult, 'job')
+        if (nextJob) {
+          setJob(nextJob)
+          setJobID(String(nextJob.id))
+        }
+      }
+    } catch (error) {
+      setResult({
+        ok: false,
+        status: 0,
+        data: error instanceof Error ? error.message : String(error),
+      })
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function refreshJob() {
+    const id = Number(jobID)
+    if (!id) {
+      setResult({ ok: false, status: 0, data: '请输入任务 ID' })
+      return
+    }
+
+    setLoading(true)
+    try {
+      const response = await fetch(`/api/v1/excel-match-jobs/${id}`, {
+        method: 'GET',
+        headers: token ? { token } : undefined,
+      })
+      const data = await response.json().catch(() => ({}))
+      const nextResult = { ok: response.ok && isSuccessPayload(data), status: response.status, data }
+      setResult(nextResult)
+      if (nextResult.ok) {
+        const nextJob = readObject<ExcelMatchJob>(nextResult, 'job')
+        if (nextJob) setJob(nextJob)
+      }
+    } catch (error) {
+      setResult({
+        ok: false,
+        status: 0,
+        data: error instanceof Error ? error.message : String(error),
+      })
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function downloadJob() {
+    const id = Number(jobID || job?.id)
+    if (!id) {
+      setResult({ ok: false, status: 0, data: '请输入任务 ID' })
+      return
+    }
+
+    setLoading(true)
+    try {
+      const response = await fetch(`/api/v1/excel-match-jobs/${id}/download`, {
+        method: 'GET',
+        headers: token ? { token } : undefined,
+      })
+      if (!response.ok) {
+        const data = await response.json().catch(() => ({}))
+        setResult({ ok: false, status: response.status, data })
+        return
+      }
+
+      const blob = await response.blob()
+      const url = URL.createObjectURL(blob)
+      const anchor = document.createElement('a')
+      anchor.href = url
+      anchor.download = readDownloadFilename(response.headers.get('Content-Disposition')) ?? `excel_match_job_${id}.xlsx`
+      document.body.appendChild(anchor)
+      anchor.click()
+      anchor.remove()
+      URL.revokeObjectURL(url)
+      setResult({ ok: true, status: response.status, data: `任务 ${id} 结果文件已开始下载` })
+    } catch (error) {
+      setResult({
+        ok: false,
+        status: 0,
+        data: error instanceof Error ? error.message : String(error),
+      })
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <>
+      <SummaryGrid
+        items={[
+          { label: '当前任务', value: job?.id ?? '-' },
+          { label: '任务状态', value: job ? excelJobStatusLabel(job.status) : '-' },
+          { label: '已处理行', value: job ? `${job.processed_rows}/${job.total_rows}` : '-' },
+          { label: '匹配结果', value: job ? `${job.matched_rows} 匹配 / ${job.unmatched_rows} 未匹配` : '-' },
+        ]}
+      />
+
+      <div className="template-note">
+        <h3>百万行 Excel 匹配导出</h3>
+        <p>文件只上传到系统临时目录，后端成功处理后删除源文件。结果必须通过鉴权下载接口获取，默认 24 小时后清理。</p>
+        <div className="template-points">
+          <MetaItem label="前置筛选" value="例如 店铺名称 = 杭州恒隆" />
+          <MetaItem label="数据库匹配" value="bojun_retail_orders.docno" />
+          <MetaItem label="导出策略" value="保留全量原行，追加新列" />
+          <MetaItem label="查询方式" value="筛选命中行批量 IN 查询" />
+        </div>
+      </div>
+
+      <form className="form-grid excel-upload-form" onSubmit={createExcelMatchJob}>
+        <label className="wide file-input-label">
+          Excel 文件
+          <input
+            name="file"
+            type="file"
+            accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+            onChange={(event) => setSelectedFileName(event.currentTarget.files?.[0]?.name ?? '')}
+          />
+          <span>{selectedFileName || '请选择需要匹配的 .xlsx 文件'}</span>
+        </label>
+        <Field label="筛选列名" name="filterColumn" defaultValue="店铺名称" />
+        <Field label="筛选值" name="filterValue" defaultValue="杭州恒隆" />
+        <Field label="Excel 订单号列" name="matchExcelColumn" defaultValue="订单号" />
+        <label>
+          伯俊写回字段
+          <select name="dbValueField" defaultValue="tot_amt_actual">
+            <option value="tot_amt_actual">实付金额 tot_amt_actual</option>
+            <option value="tot_amt_list">吊牌金额 tot_amt_list</option>
+            <option value="tot_qty">数量 tot_qty</option>
+            <option value="c_store_code">门店编码 c_store_code</option>
+            <option value="c_store_name">门店名称 c_store_name</option>
+            <option value="order_type_name">单据类型 order_type_name</option>
+            <option value="retailbilltype">零售单类型 retailbilltype</option>
+            <option value="related_normal_docno">关联原单 related_normal_docno</option>
+          </select>
+        </label>
+        <Field label="追加列名" name="outputColumnName" defaultValue="伯俊匹配金额" />
+        <Field label="批量查询大小" name="batchSize" defaultValue="1000" />
+        <button className="primary" disabled={loading}>
+          <Upload aria-hidden="true" />
+          创建匹配任务
+        </button>
+      </form>
+
+      <div className="inline-actions">
+        <label>
+          任务 ID
+          <input value={jobID} onChange={(event) => setJobID(event.target.value)} />
+        </label>
+        <button type="button" onClick={refreshJob} disabled={loading}>
+          <RefreshCcw aria-hidden="true" />
+          查询状态
+        </button>
+        <button type="button" onClick={downloadJob} disabled={loading || job?.status !== 'success'}>
+          <Download aria-hidden="true" />
+          下载结果
+        </button>
+      </div>
+
+      {job && (
+        <DetailPanel title={`Excel 匹配任务：${job.id}`} onClose={() => setJob(null)}>
+          <div className="detail-grid">
+            <MetaItem label="源文件" value={job.source_file_name || '-'} />
+            <MetaItem label="状态" value={excelJobStatusLabel(job.status)} />
+            <MetaItem label="总行数" value={job.total_rows || '-'} />
+            <MetaItem label="已处理" value={job.processed_rows || '-'} />
+            <MetaItem label="筛选命中" value={job.filtered_rows || '-'} />
+            <MetaItem label="匹配成功" value={job.matched_rows || '-'} />
+            <MetaItem label="未匹配" value={job.unmatched_rows || '-'} />
+            <MetaItem label="结果过期" value={job.expires_at || '-'} />
+            <MetaItem label="开始时间" value={job.started_at || '-'} />
+            <MetaItem label="结束时间" value={job.finished_at || '-'} />
+            <MetaItem label="错误信息" value={job.error_message || '-'} />
+          </div>
+          <JsonField label="任务配置 JSON" name="excel_match_config" value={job.config_json || '{}'} rows={10} />
+        </DetailPanel>
+      )}
+    </>
+  )
+}
+
 function LegacyTaskTable({
   client,
   loading,
@@ -1750,6 +2010,12 @@ function readList<T>(result: ApiResult, key: string): T[] {
   return Array.isArray(value) ? (value as T[]) : []
 }
 
+function readObject<T>(result: ApiResult, key: string): T | null {
+  const envelope = result.data as { data?: Record<string, unknown> }
+  const value = envelope.data?.[key]
+  return value && typeof value === 'object' && !Array.isArray(value) ? (value as T) : null
+}
+
 function readToken(data: unknown) {
   const envelope = data as { data?: Record<string, unknown> }
   const token = envelope.data?.token
@@ -1885,6 +2151,20 @@ function runStatusLabel(value: string) {
   )
 }
 
+function excelJobStatusLabel(value: string) {
+  return labelFromMap(
+    value,
+    {
+      pending: '等待处理',
+      running: '处理中',
+      success: '成功',
+      failed: '失败',
+      expired: '已过期',
+    },
+    '未知状态',
+  )
+}
+
 function labelFromMap(value: string, labels: Record<string, string>, fallback: string) {
   if (!value) return '-'
   return labels[value] ? `${labels[value]}（${value}）` : `${fallback}（${value}）`
@@ -1929,6 +2209,14 @@ function legacyCategoryLabel(category: LegacyTask['category']) {
   }
 }
 
+function readDownloadFilename(contentDisposition: string | null) {
+  if (!contentDisposition) return null
+  const utf8Match = contentDisposition.match(/filename\*=UTF-8''([^;]+)/i)
+  if (utf8Match?.[1]) return decodeURIComponent(utf8Match[1])
+  const asciiMatch = contentDisposition.match(/filename="?([^";]+)"?/i)
+  return asciiMatch?.[1] ?? null
+}
+
 function sectionTitle(key: NavKey) {
   switch (key) {
     case 'sources':
@@ -1937,6 +2225,8 @@ function sectionTitle(key: NavKey) {
       return '清洗流水线'
     case 'delivery':
       return '推送流水线'
+    case 'excel':
+      return 'Excel 匹配导出'
     case 'runs':
       return '运行记录'
   }
