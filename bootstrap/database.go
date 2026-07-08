@@ -106,6 +106,7 @@ func autoMigrateTables() {
 		&model.DeliveryTask{},          //通用推送任务表
 		&model.PipelineRun{},           //运行记录表
 		&model.DeliveryLog{},           //推送日志表
+		&model.ExcelMatchJob{},         //Excel匹配导出任务表
 	)
 
 	if err != nil {
