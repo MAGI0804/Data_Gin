@@ -186,3 +186,30 @@ type DeliveryLog struct {
 func (DeliveryLog) TableName() string {
 	return "delivery_logs"
 }
+
+// ExcelMatchJob 记录大文件 Excel 匹配导出任务。
+type ExcelMatchJob struct {
+	BaseModel
+
+	SourceFileName string      `gorm:"column:source_file_name;size:255" json:"source_file_name"`
+	SourceFilePath string      `gorm:"column:source_file_path;size:1024" json:"-"`
+	ResultFilePath string      `gorm:"column:result_file_path;size:1024" json:"-"`
+	WorkDir        string      `gorm:"column:work_dir;size:1024" json:"-"`
+	ConfigJSON     string      `gorm:"column:config_json;type:json;not null" json:"config_json"`
+	Status         string      `gorm:"column:status;size:30;not null;default:'pending';index" json:"status"`
+	TotalRows      int         `gorm:"column:total_rows;default:0" json:"total_rows"`
+	ProcessedRows  int         `gorm:"column:processed_rows;default:0" json:"processed_rows"`
+	FilteredRows   int         `gorm:"column:filtered_rows;default:0" json:"filtered_rows"`
+	MatchedRows    int         `gorm:"column:matched_rows;default:0" json:"matched_rows"`
+	UnmatchedRows  int         `gorm:"column:unmatched_rows;default:0" json:"unmatched_rows"`
+	ErrorMessage   string      `gorm:"column:error_message;type:text" json:"error_message"`
+	StartedAt      *TimeNormal `gorm:"column:started_at" json:"started_at"`
+	FinishedAt     *TimeNormal `gorm:"column:finished_at" json:"finished_at"`
+	ExpiresAt      *TimeNormal `gorm:"column:expires_at;index" json:"expires_at"`
+
+	CommonTimestampsField
+}
+
+func (ExcelMatchJob) TableName() string {
+	return "excel_match_jobs"
+}
