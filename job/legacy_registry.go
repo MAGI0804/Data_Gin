@@ -91,6 +91,25 @@ func LegacyTaskDefinitions() []LegacyTaskDefinition {
 			},
 		},
 		{
+			Code:        "bojun_order_fetch",
+			Name:        "伯俊订单补拉",
+			Category:    "fetch",
+			SourceCode:  "bojun_order",
+			SourceName:  "伯俊订单",
+			TaskType:    TypeBojunOrderFetch,
+			Queue:       DefaultQueueName,
+			CronExpr:    "",
+			InputTable:  "伯俊 middleretail.query",
+			OutputTable: "raw_data / bojun_retail_orders",
+			Handler:     "internal/service/data_svc/bojun_order_service.go",
+			Description: "按开始时间和结束时间补拉伯俊订单；docno 已存在的数据不覆盖，未存在的数据写入并触发后续推送。",
+			Editable:    true,
+			DefaultPayload: map[string]interface{}{
+				"start_time": "",
+				"end_time":   "",
+			},
+		},
+		{
 			Code:         "youzan_sales_push",
 			Name:         "有赞订单销售推送",
 			Category:     "delivery",
@@ -296,6 +315,11 @@ func NewLegacyTask(code string, payload map[string]interface{}) (*asynq.Task, er
 	case "youzan_refund_fetch":
 		return NewYouzanReturnTask(YouzanReturnPayload{
 			NodeKdtID: int64Value(payload, "node_kdt_id"),
+		})
+	case "bojun_order_fetch":
+		return NewBojunOrderFetchTask(BojunOrderFetchPayload{
+			StartTime: stringValue(payload, "start_time"),
+			EndTime:   stringValue(payload, "end_time"),
 		})
 	case "youzan_sales_push":
 		return NewYouzanSalesSyncTask(YouzanSalesSyncPayload{

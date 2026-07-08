@@ -73,6 +73,7 @@ func addQueueJob(mux *asynq.ServeMux) {
 	mux.HandleFunc(job.TypeXianOrderSync, job.HandleXianOrderSyncTask)
 	mux.HandleFunc(job.TypeDeliveryTaskRun, handleDeliveryTaskRun)
 	mux.HandleFunc(job.TypeExcelMatchExport, handleExcelMatchExport)
+	mux.HandleFunc(job.TypeBojunOrderFetch, handleBojunOrderFetch)
 }
 
 func handleDeliveryTaskRun(ctx context.Context, task *asynq.Task) error {
@@ -92,6 +93,16 @@ func handleExcelMatchExport(ctx context.Context, task *asynq.Task) error {
 	}
 
 	return data_svc.NewExcelMatchJobService().ProcessJob(ctx, payload.JobID)
+}
+
+func handleBojunOrderFetch(ctx context.Context, task *asynq.Task) error {
+	var payload job.BojunOrderFetchPayload
+	if err := json.Unmarshal(task.Payload(), &payload); err != nil {
+		return err
+	}
+
+	_, err := data_svc.NewBojunOrderService().SyncOrders(ctx, payload.StartTime, payload.EndTime)
+	return err
 }
 
 // jobLoggingMiddleware 异步任务执行日志中间件

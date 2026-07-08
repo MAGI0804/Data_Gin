@@ -52,6 +52,29 @@ func (dao *BojunRetailOrderDAO) CreateOrUpdate(ctx context.Context, order *model
 	return err
 }
 
+func (dao *BojunRetailOrderDAO) ExistsByDocNo(ctx context.Context, docNo string) (bool, error) {
+	var count int64
+	err := dao.db.WithContext(ctx).
+		Model(&model.BojunRetailOrder{}).
+		Where("docno = ?", docNo).
+		Count(&count).
+		Error
+	return count > 0, err
+}
+
+func (dao *BojunRetailOrderDAO) CreateIfNotExists(ctx context.Context, order *model.BojunRetailOrder) (bool, error) {
+	exists, err := dao.ExistsByDocNo(ctx, order.DocNo)
+	if err != nil {
+		return false, err
+	}
+	if exists {
+		return false, nil
+	}
+
+	_, err = dao.Create(ctx, order)
+	return err == nil, err
+}
+
 func (dao *BojunRetailOrderDAO) CreateOrUpdateWithCreated(ctx context.Context, order *model.BojunRetailOrder) (bool, error) {
 	existing, err := dao.FindByDocNo(ctx, order.DocNo)
 	if err != nil {

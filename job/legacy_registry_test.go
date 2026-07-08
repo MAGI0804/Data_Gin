@@ -12,6 +12,7 @@ func TestLegacyTaskDefinitionsExposeConfiguredFetchAndDeliveryJobs(t *testing.T)
 	for _, code := range []string{
 		"youzan_order_fetch",
 		"youzan_refund_fetch",
+		"bojun_order_fetch",
 		"youzan_sales_push",
 		"youzan_refund_push",
 		"qimai_sales_push",
@@ -25,6 +26,9 @@ func TestLegacyTaskDefinitionsExposeConfiguredFetchAndDeliveryJobs(t *testing.T)
 
 	if byCode["youzan_order_fetch"].Category != "fetch" {
 		t.Fatalf("youzan_order_fetch category = %s, want fetch", byCode["youzan_order_fetch"].Category)
+	}
+	if byCode["bojun_order_fetch"].TaskType != TypeBojunOrderFetch {
+		t.Fatalf("bojun_order_fetch task type = %s, want %s", byCode["bojun_order_fetch"].TaskType, TypeBojunOrderFetch)
 	}
 	if byCode["qimai_sales_push"].Category != "delivery" {
 		t.Fatalf("qimai_sales_push category = %s, want delivery", byCode["qimai_sales_push"].Category)
@@ -71,6 +75,26 @@ func TestNewLegacyTaskBuildsRegisteredTasks(t *testing.T) {
 	}
 	if task.Type() != TypeSalesSync {
 		t.Fatalf("task type = %s, want %s", task.Type(), TypeSalesSync)
+	}
+}
+
+func TestNewLegacyTaskBuildsBojunOrderFetchTask(t *testing.T) {
+	task, err := NewLegacyTask("bojun_order_fetch", map[string]interface{}{
+		"start_time": "2026-07-08 10:00:00",
+		"end_time":   "2026-07-08 11:00:00",
+	})
+	if err != nil {
+		t.Fatalf("NewLegacyTask returned error: %v", err)
+	}
+	if task.Type() != TypeBojunOrderFetch {
+		t.Fatalf("task type = %s, want %s", task.Type(), TypeBojunOrderFetch)
+	}
+}
+
+func TestNewLegacyTaskRequiresBojunOrderTimeRange(t *testing.T) {
+	_, err := NewLegacyTask("bojun_order_fetch", map[string]interface{}{})
+	if err == nil {
+		t.Fatal("NewLegacyTask returned nil error, want time range error")
 	}
 }
 

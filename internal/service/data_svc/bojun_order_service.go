@@ -27,7 +27,8 @@ type rawDataCreator interface {
 }
 
 type bojunRetailOrderWriter interface {
-	CreateOrUpdateWithCreated(ctx context.Context, order *model.BojunRetailOrder) (bool, error)
+	ExistsByDocNo(ctx context.Context, docNo string) (bool, error)
+	CreateIfNotExists(ctx context.Context, order *model.BojunRetailOrder) (bool, error)
 }
 
 type pipelineRunRecorder interface {
@@ -43,15 +44,16 @@ type BojunOrderService struct {
 }
 
 type BojunOrderSyncResult struct {
-	StartTime   string `json:"start_time"`
-	EndTime     string `json:"end_time"`
-	PageSize    int    `json:"page_size"`
-	MaxPages    int    `json:"max_pages"`
-	FetchPages  int    `json:"fetch_pages"`
-	TotalCount  int    `json:"total_count"`
-	SavedCount  int    `json:"saved_count"`
-	RetailCount int    `json:"retail_count"`
-	FailedCount int    `json:"failed_count"`
+	StartTime    string `json:"start_time"`
+	EndTime      string `json:"end_time"`
+	PageSize     int    `json:"page_size"`
+	MaxPages     int    `json:"max_pages"`
+	FetchPages   int    `json:"fetch_pages"`
+	TotalCount   int    `json:"total_count"`
+	SavedCount   int    `json:"saved_count"`
+	RetailCount  int    `json:"retail_count"`
+	SkippedCount int    `json:"skipped_count"`
+	FailedCount  int    `json:"failed_count"`
 }
 
 func NewBojunOrderService() *BojunOrderService {
@@ -75,22 +77,28 @@ func (s *BojunOrderService) SyncRecentOrders(ctx context.Context) (*BojunOrderSy
 }
 
 func (s *BojunOrderService) SyncOrders(ctx context.Context, startTime, endTime string) (*BojunOrderSyncResult, error) {
+	normalizedStart, normalizedEnd, err := normalizeBojunOrderTimeRange(startTime, endTime)
+	result := &BojunOrderSyncResult{
+		StartTime: normalizedStart,
+		EndTime:   normalizedEnd,
+	}
+	if err != nil {
+		return result, err
+	}
+
 	method := bojunOrderMethod()
 	pageSize := positiveBojunInt(bojunEnvInt("BOJUN_ORDER_PAGE_SIZE", config.GetInt("Bojun.OrderPageSize", 100)), 100)
 	maxPages := positiveBojunInt(bojunEnvInt("BOJUN_ORDER_MAX_PAGES", config.GetInt("Bojun.OrderMaxPages", 20)), 20)
-	result := &BojunOrderSyncResult{
-		StartTime: startTime,
-		EndTime:   endTime,
-		PageSize:  pageSize,
-		MaxPages:  maxPages,
-	}
-	runID, err := s.createBojunOrderRun(ctx, startTime, endTime)
+	result.PageSize = pageSize
+	result.MaxPages = maxPages
+
+	runID, err := s.createBojunOrderRun(ctx, normalizedStart, normalizedEnd)
 	if err != nil {
 		return result, err
 	}
 
 	for page := 1; page <= maxPages; page++ {
-		payload, err := bojun.SendSignedRequest(ctx, method, buildBojunOrderRequestBody(page, pageSize, startTime, endTime))
+		payload, err := bojun.SendSignedRequest(ctx, method, buildBojunOrderRequestBody(page, pageSize, normalizedStart, normalizedEnd))
 		if err != nil {
 			result.FailedCount++
 			return result, s.finishBojunOrderRun(ctx, runID, result, err)
@@ -105,7 +113,22 @@ func (s *BojunOrderService) SyncOrders(ctx context.Context, startTime, endTime s
 
 		for _, record := range records {
 			result.TotalCount++
-			rawData, err := buildBojunOrderRawData(record, method, startTime, endTime, pageInfo.Current)
+			docNo := stringFromAny(record["docno"])
+			if docNo == "" {
+				result.FailedCount++
+				continue
+			}
+			exists, err := s.retailOrderDAO.ExistsByDocNo(ctx, docNo)
+			if err != nil {
+				result.FailedCount++
+				continue
+			}
+			if exists {
+				result.SkippedCount++
+				continue
+			}
+
+			rawData, err := buildBojunOrderRawData(record, method, normalizedStart, normalizedEnd, pageInfo.Current)
 			if err != nil {
 				result.FailedCount++
 				continue
@@ -122,9 +145,13 @@ func (s *BojunOrderService) SyncOrders(ctx context.Context, startTime, endTime s
 				result.FailedCount++
 				continue
 			}
-			created, err := s.retailOrderDAO.CreateOrUpdateWithCreated(ctx, retailOrder)
+			created, err := s.retailOrderDAO.CreateIfNotExists(ctx, retailOrder)
 			if err != nil {
 				result.FailedCount++
+				continue
+			}
+			if !created {
+				result.SkippedCount++
 				continue
 			}
 			result.RetailCount++
@@ -145,6 +172,38 @@ func (s *BojunOrderService) SyncOrders(ctx context.Context, startTime, endTime s
 		return result, err
 	}
 	return result, nil
+}
+
+func normalizeBojunOrderTimeRange(startTime, endTime string) (string, string, error) {
+	start, err := parseBojunOrderTime(startTime)
+	if err != nil {
+		return "", "", fmt.Errorf("start_time invalid: %w", err)
+	}
+	end, err := parseBojunOrderTime(endTime)
+	if err != nil {
+		return start.Format("2006-01-02 15:04:05"), "", fmt.Errorf("end_time invalid: %w", err)
+	}
+	if !start.Before(end) {
+		return start.Format("2006-01-02 15:04:05"), end.Format("2006-01-02 15:04:05"), fmt.Errorf("start_time must be before end_time")
+	}
+	return start.Format("2006-01-02 15:04:05"), end.Format("2006-01-02 15:04:05"), nil
+}
+
+func parseBojunOrderTime(value string) (time.Time, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return time.Time{}, fmt.Errorf("required")
+	}
+	for _, layout := range []string{
+		"2006-01-02 15:04:05",
+		"2006-01-02T15:04:05",
+		"2006-01-02T15:04",
+	} {
+		if parsed, err := time.ParseInLocation(layout, value, time.Local); err == nil {
+			return parsed, nil
+		}
+	}
+	return time.Time{}, fmt.Errorf("must use YYYY-MM-DD HH:mm:ss")
 }
 
 func bojunOrderMethod() string {
@@ -198,7 +257,7 @@ func (s *BojunOrderService) finishBojunOrderRun(
 	if runErr != nil {
 		errorMessage = runErr.Error()
 	}
-	if err := s.pipelineRunDAO.Finish(ctx, runID, status, result.RetailCount, result.FailedCount, errorMessage); err != nil {
+	if err := s.pipelineRunDAO.Finish(ctx, runID, status, result.RetailCount+result.SkippedCount, result.FailedCount, errorMessage); err != nil {
 		if runErr != nil {
 			return fmt.Errorf("%w; finish run: %v", runErr, err)
 		}

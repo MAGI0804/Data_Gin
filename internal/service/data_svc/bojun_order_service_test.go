@@ -111,6 +111,23 @@ func TestNormalizeBojunOrderMethodStripsStandardPrefix(t *testing.T) {
 	}
 }
 
+func TestNormalizeBojunOrderTimeRangeAcceptsDatetimeLocal(t *testing.T) {
+	start, end, err := normalizeBojunOrderTimeRange("2026-07-08T10:00", "2026-07-08T10:30")
+	if err != nil {
+		t.Fatalf("normalizeBojunOrderTimeRange returned error: %v", err)
+	}
+	if start != "2026-07-08 10:00:00" || end != "2026-07-08 10:30:00" {
+		t.Fatalf("range = %s/%s", start, end)
+	}
+}
+
+func TestNormalizeBojunOrderTimeRangeRequiresStartBeforeEnd(t *testing.T) {
+	_, _, err := normalizeBojunOrderTimeRange("2026-07-08 10:30:00", "2026-07-08 10:00:00")
+	if err == nil {
+		t.Fatal("normalizeBojunOrderTimeRange returned nil error, want range error")
+	}
+}
+
 func TestBuildBojunRetailOrderMapsNormalOrder(t *testing.T) {
 	record := map[string]interface{}{
 		"docno":          "ABCN001P012P12607031240270004",
