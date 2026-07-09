@@ -541,6 +541,23 @@ button:focus-visible {
   margin-bottom: 12px;
 }
 
+.excel-detail-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  flex-wrap: wrap;
+  margin-bottom: 12px;
+}
+
+.excel-detail-actions span {
+  color: #666666;
+  font-size: 12px;
+}
+
+.excel-history-table {
+  min-width: 980px;
+}
+
 .excel-job-log-list {
   display: grid;
   gap: 8px;

@@ -1150,7 +1150,9 @@ function ExcelMatchView({
 }) {
   const [jobID, setJobID] = useState('')
   const [job, setJob] = useState<ExcelMatchJob | null>(null)
+  const [jobHistory, setJobHistory] = useState<ExcelMatchJob[]>([])
   const [jobLogs, setJobLogs] = useState<ExcelMatchJobLog[]>([])
+  const [downloadingJobID, setDownloadingJobID] = useState<number | null>(null)
   const [selectedExportFileName, setSelectedExportFileName] = useState('')
   const [selectedImportFileName, setSelectedImportFileName] = useState('')
   const [selectedClearFileName, setSelectedClearFileName] = useState('')
@@ -1247,10 +1249,28 @@ function ExcelMatchView({
     }
   }, [fetchSchemes, setResult])
 
+  const loadJobHistory = useCallback(async () => {
+    try {
+      const response = await fetch(apiURL('/v1/excel-match-jobs?limit=30'), {
+        method: 'GET',
+        headers: token ? { token } : undefined,
+      })
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok || !isSuccessPayload(data)) {
+        throw new Error(readMessage(data) || '查询 Excel 任务历史失败')
+      }
+      const value = readDataField(data, 'jobs')
+      setJobHistory(Array.isArray(value) ? (value as ExcelMatchJob[]) : [])
+    } catch (error) {
+      setResult({ ok: false, status: 0, data: error instanceof Error ? error.message : String(error) })
+    }
+  }, [setResult, token])
+
   useEffect(() => {
     if (!token) return
     void loadSchemes()
-  }, [loadSchemes, token])
+    void loadJobHistory()
+  }, [loadJobHistory, loadSchemes, token])
 
   async function ensureExcelUpload(slot: ExcelUploadSlot, file: File) {
     const existing = uploadRefs[slot]
@@ -1383,6 +1403,7 @@ function ExcelMatchView({
       setResult(nextResult)
       if (nextResult.ok) {
         applyJobResult(nextResult)
+        await loadJobHistory()
         setExcelDialog(null)
       }
     } catch (error) {
@@ -1450,6 +1471,7 @@ function ExcelMatchView({
       setResult(nextResult)
       if (nextResult.ok) {
         applyJobResult(nextResult)
+        await loadJobHistory()
         setExcelDialog(null)
       }
     } catch (error) {
@@ -1497,6 +1519,7 @@ function ExcelMatchView({
       setResult(nextResult)
       if (nextResult.ok) {
         applyJobResult(nextResult)
+        await loadJobHistory()
         setExcelDialog(null)
       }
     } catch (error) {
@@ -1512,7 +1535,10 @@ function ExcelMatchView({
       setResult({ ok: false, status: 0, data: '请输入任务 ID' })
       return
     }
+    await refreshJobByID(id)
+  }
 
+  async function refreshJobByID(id: number) {
     setLoading(true)
     try {
       const response = await fetch(apiURL(`/v1/excel-match-jobs/${id}`), {
@@ -1522,7 +1548,10 @@ function ExcelMatchView({
       const data = await response.json().catch(() => ({}))
       const nextResult = { ok: response.ok && isSuccessPayload(data), status: response.status, data }
       setResult(nextResult)
-      if (nextResult.ok) applyJobResult(nextResult)
+      if (nextResult.ok) {
+        applyJobResult(nextResult)
+        await loadJobHistory()
+      }
     } catch (error) {
       setResult({ ok: false, status: 0, data: error instanceof Error ? error.message : String(error) })
     } finally {
@@ -1530,21 +1559,31 @@ function ExcelMatchView({
     }
   }
 
-  async function downloadJob() {
-    const id = Number(jobID || job?.id)
+  async function downloadJob(targetID?: number) {
+    const id = targetID ?? Number(jobID || job?.id)
     if (!id) {
       setResult({ ok: false, status: 0, data: '请输入任务 ID' })
       return
     }
+    const targetJob = job?.id === id ? job : jobHistory.find((item) => item.id === id) ?? null
+    if (targetJob && !canDownloadExcelJob(targetJob)) {
+      setResult({ ok: false, status: 0, data: '只有“匹配导出”且状态为成功的任务才有结果文件可下载' })
+      return
+    }
 
     setLoading(true)
+    setDownloadingJobID(id)
+    setResult({ ok: true, status: 0, data: `正在下载任务 ${id} 的结果文件，大文件需要等待浏览器接收完成。` })
     try {
       const response = await fetch(apiURL(`/v1/excel-match-jobs/${id}/download`), {
         method: 'GET',
         headers: token ? { token } : undefined,
       })
       if (!response.ok) {
-        const data = await response.json().catch(() => ({}))
+        const contentType = response.headers.get('Content-Type') || ''
+        const data = contentType.includes('application/json')
+          ? await response.json().catch(() => ({}))
+          : await response.text().catch(() => '')
         setResult({ ok: false, status: response.status, data })
         return
       }
@@ -1557,11 +1596,13 @@ function ExcelMatchView({
       document.body.appendChild(anchor)
       anchor.click()
       anchor.remove()
-      URL.revokeObjectURL(url)
+      window.setTimeout(() => URL.revokeObjectURL(url), 1000)
       setResult({ ok: true, status: response.status, data: `任务 ${id} 结果文件已开始下载` })
+      await loadJobHistory()
     } catch (error) {
       setResult({ ok: false, status: 0, data: error instanceof Error ? error.message : String(error) })
     } finally {
+      setDownloadingJobID(null)
       setLoading(false)
     }
   }
@@ -1600,16 +1641,42 @@ function ExcelMatchView({
         </div>
       </Panel>
 
+      <Panel title="最近 Excel 任务" icon={<ListChecks />} meta="最多显示最近 30 条，可直接查看和下载">
+        <ExcelJobHistoryTable
+          jobs={jobHistory}
+          loading={loading}
+          downloadingJobID={downloadingJobID}
+          onDownload={downloadJob}
+          onView={refreshJobByID}
+        />
+      </Panel>
+
       {job && (
         <Panel title={`Excel 任务 #${job.id}`} icon={<FileJson />} meta={job.source_file_name || 'job detail'}>
           <div className="excel-job-detail">
             <Metric label="源文件" value={job.source_file_name || '-'} />
+            <Metric label="任务类型" value={excelJobOperationLabel(excelJobOperation(job))} />
             <Metric label="筛选/命中" value={job.filtered_rows || '-'} />
             <Metric label="匹配/更新" value={job.matched_rows || '-'} />
             <Metric label="未匹配" value={job.unmatched_rows || '-'} />
             <Metric label="结果过期" value={formatDate(job.expires_at)} />
             <Metric label="开始时间" value={formatDate(job.started_at)} />
             <Metric label="结束时间" value={formatDate(job.finished_at)} />
+          </div>
+          <div className="excel-detail-actions">
+            <button type="button" onClick={() => void refreshJobByID(job.id)} disabled={loading}>
+              <RefreshCcw aria-hidden="true" />
+              刷新状态
+            </button>
+            <button
+              type="button"
+              onClick={() => void downloadJob(job.id)}
+              disabled={loading || downloadingJobID === job.id || !canDownloadExcelJob(job)}
+            >
+              <Download aria-hidden="true" />
+              {downloadingJobID === job.id ? '下载中' : '下载结果'}
+            </button>
+            {!canDownloadExcelJob(job) && <span>只有匹配导出成功任务会生成可下载结果文件。</span>}
           </div>
           {job.error_message && <div className="login-error">{job.error_message}</div>}
           <section className="content-grid two">
@@ -1825,13 +1892,76 @@ function ExcelMatchView({
               <RefreshCcw aria-hidden="true" />
               查询状态
             </button>
-            <button type="button" onClick={downloadJob} disabled={loading || job?.status !== 'success'}>
+            <button type="button" onClick={() => void downloadJob()} disabled={loading || !job || !canDownloadExcelJob(job)}>
               <Download aria-hidden="true" />
-              下载结果
+              {downloadingJobID === Number(jobID || job?.id) ? '下载中' : '下载结果'}
             </button>
           </div>
         </Modal>
       )}
+    </div>
+  )
+}
+
+function ExcelJobHistoryTable({
+  jobs,
+  loading,
+  downloadingJobID,
+  onView,
+  onDownload,
+}: {
+  jobs: ExcelMatchJob[]
+  loading: boolean
+  downloadingJobID: number | null
+  onView: (id: number) => void
+  onDownload: (id: number) => void
+}) {
+  if (jobs.length === 0) return <EmptyState text="暂无 Excel 任务历史。" />
+  return (
+    <div className="data-table-wrap">
+      <table className="data-table excel-history-table">
+        <thead>
+          <tr>
+            <th>ID</th>
+            <th>文件</th>
+            <th>类型</th>
+            <th>状态</th>
+            <th>处理行</th>
+            <th>匹配/未匹配</th>
+            <th>创建时间</th>
+            <th>过期时间</th>
+            <th>操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          {jobs.map((item) => (
+            <tr key={item.id}>
+              <td>{item.id}</td>
+              <td>{item.source_file_name || '-'}</td>
+              <td>{excelJobOperationLabel(excelJobOperation(item))}</td>
+              <td>{excelJobStatusLabel(item.status)}</td>
+              <td>{item.processed_rows}/{item.total_rows}</td>
+              <td>{item.matched_rows}/{item.unmatched_rows}</td>
+              <td>{formatUnixTime(item.created_at)}</td>
+              <td>{formatDate(item.expires_at)}</td>
+              <td>
+                <div className="table-actions">
+                  <button type="button" onClick={() => onView(item.id)} disabled={loading}>
+                    查看
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => onDownload(item.id)}
+                    disabled={loading || downloadingJobID === item.id || !canDownloadExcelJob(item)}
+                  >
+                    {downloadingJobID === item.id ? '下载中' : '下载'}
+                  </button>
+                </div>
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   )
 }
@@ -2771,6 +2901,27 @@ function excelJobStatusLabel(value: string) {
     expired: '已过期',
   }
   return labels[value] ?? (value || '-')
+}
+
+function excelJobOperation(job: ExcelMatchJob) {
+  const config = parseMaybeJson(job.config_json)
+  if (config && typeof config === 'object' && typeof (config as JsonRecord).operation === 'string') {
+    return String((config as JsonRecord).operation)
+  }
+  return ''
+}
+
+function excelJobOperationLabel(value: string) {
+  const labels: Record<string, string> = {
+    export_match: '匹配导出',
+    import_update: '匹配导入',
+    clear_matched_docno: '退回未匹配',
+  }
+  return labels[value] ?? (value || '-')
+}
+
+function canDownloadExcelJob(job: ExcelMatchJob) {
+  return job.status === 'success' && excelJobOperation(job) === 'export_match'
 }
 
 function excelPreviewStat(stats: ExcelMatchPreviewStats, key: keyof ExcelMatchPreviewStats) {
