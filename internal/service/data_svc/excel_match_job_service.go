@@ -34,25 +34,26 @@ const (
 	excelMatchStatusSuccess = "success"
 	excelMatchStatusExpired = "expired"
 
-	excelMatchRetention      = 24 * time.Hour
-	excelMatchRootDirName    = "data-warehouse-excel-jobs"
-	excelUploadRootDirName   = "data-warehouse-excel-uploads"
-	excelMatchSourceFileName = "source.xlsx"
-	excelMatchResultFileName = "result.xlsx"
-	excelUploadChunksDirName = "chunks"
-	excelUploadMetaFileName  = "meta.json"
-	excelUploadMergedFile    = "source.xlsx"
-	excelMaxRowsPerSheet     = 1048576
-	defaultExcelMatchBatch   = 1000
-	maxBufferedExcelRows     = 5000
-	maxExcelUploadChunks     = 10000
-	maxExcelUploadChunkBytes = 8 * 1024 * 1024
-	defaultExcelSheetName    = "Sheet1"
-	defaultExcelResultSheet  = "Result_1"
-	bojunRetailOrderTemplate = "bojun_retail_order"
-	bojunRetailOrdersTable   = "bojun_retail_orders"
-	defaultExcelPreviewRows  = 5000
-	defaultExcelPreviewItems = 50
+	excelMatchRetention        = 24 * time.Hour
+	excelMatchRootDirName      = "data-warehouse-excel-jobs"
+	excelUploadRootDirName     = "data-warehouse-excel-uploads"
+	excelMatchSourceFileName   = "source.xlsx"
+	excelMatchResultFileName   = "result.xlsx"
+	excelUploadChunksDirName   = "chunks"
+	excelUploadMetaFileName    = "meta.json"
+	excelUploadMergedFile      = "source.xlsx"
+	excelMaxRowsPerSheet       = 1048576
+	defaultExcelMatchBatch     = 1000
+	maxBufferedExcelRows       = 5000
+	maxExcelUploadChunks       = 10000
+	maxExcelUploadChunkBytes   = 8 * 1024 * 1024
+	defaultExcelSheetName      = "Sheet1"
+	defaultExcelResultSheet    = "Result_1"
+	bojunRetailOrderTemplate   = "bojun_retail_order"
+	bojunRetailOrdersTable     = "bojun_retail_orders"
+	defaultExcelPreviewRows    = 5000
+	defaultExcelPreviewItems   = 50
+	excelMatchOSSUploadTimeout = 90 * time.Second
 )
 
 var allowedBojunValueFields = map[string]struct{}{
@@ -644,23 +645,34 @@ func (s *ExcelMatchJobService) ProcessJob(ctx context.Context, id uint) error {
 		s.logJob(ctx, id, "error", "任务处理失败", map[string]interface{}{"error": err.Error()})
 		return err
 	}
+	_ = os.Remove(matchJob.SourceFilePath)
+	s.logJob(ctx, id, "info", "源文件已删除", nil)
+	if err := s.jobDAO.MarkSuccess(ctx, id, stats, expiresAt); err != nil {
+		s.logJob(ctx, id, "error", "更新任务成功状态失败", map[string]interface{}{"error": err.Error()})
+		return err
+	}
+	s.logJob(ctx, id, "info", "任务处理成功", statsDetail(stats))
+
 	if config.Operation == excelOperationExportMatch && storage.OSSStorageEnabled() {
+		fileSize := int64(0)
+		if info, statErr := os.Stat(matchJob.ResultFilePath); statErr == nil {
+			fileSize = info.Size()
+		}
+		s.logJob(ctx, id, "info", "开始上传结果文件到OSS", map[string]interface{}{
+			"file_size":       fileSize,
+			"timeout_seconds": int(excelMatchOSSUploadTimeout.Seconds()),
+		})
 		result, err := s.uploadExcelResultToOSS(ctx, matchJob)
 		if err != nil {
-			_ = s.jobDAO.MarkFailed(ctx, id, err.Error(), expiresAt)
-			s.logJob(ctx, id, "error", "上传结果文件到OSS失败", map[string]interface{}{"error": err.Error()})
-			return err
+			s.logJob(ctx, id, "warn", "上传结果文件到OSS失败，保留本地结果文件用于下载", map[string]interface{}{"error": err.Error()})
+			return nil
 		}
 		s.logJob(ctx, id, "info", "结果文件已上传OSS", map[string]interface{}{
 			"object_key": result.ObjectKey,
 		})
 		_ = os.Remove(matchJob.ResultFilePath)
 	}
-
-	_ = os.Remove(matchJob.SourceFilePath)
-	s.logJob(ctx, id, "info", "源文件已删除", nil)
-	s.logJob(ctx, id, "info", "任务处理成功", statsDetail(stats))
-	return s.jobDAO.MarkSuccess(ctx, id, stats, expiresAt)
+	return nil
 }
 
 func (s *ExcelMatchJobService) CleanupExpiredJobs(ctx context.Context) error {
@@ -1453,7 +1465,9 @@ func (s *ExcelMatchJobService) uploadExcelResultToOSS(ctx context.Context, match
 		strconv.FormatUint(uint64(matchJob.ID), 10),
 		excelMatchResultFileName,
 	)
-	result, err := client.UploadFile(ctx, objectKey, matchJob.ResultFilePath, fmt.Sprintf("excel_match_job_%d.xlsx", matchJob.ID))
+	uploadCtx, cancel := context.WithTimeout(ctx, excelMatchOSSUploadTimeout)
+	defer cancel()
+	result, err := client.UploadFile(uploadCtx, objectKey, matchJob.ResultFilePath, fmt.Sprintf("excel_match_job_%d.xlsx", matchJob.ID))
 	if err != nil {
 		return storage.UploadResult{}, err
 	}
