@@ -42,6 +42,8 @@ const (
 	defaultExcelResultSheet  = "Result_1"
 	bojunRetailOrderTemplate = "bojun_retail_order"
 	bojunRetailOrdersTable   = "bojun_retail_orders"
+	defaultExcelPreviewRows  = 5000
+	defaultExcelPreviewItems = 50
 )
 
 var allowedBojunValueFields = map[string]struct{}{
@@ -110,6 +112,24 @@ type ExcelMatchConfig struct {
 	BatchSize        int                `json:"batchSize"`
 	DryRun           bool               `json:"dryRun"`
 	ConfirmWrite     bool               `json:"confirmWrite"`
+}
+
+type ExcelMatchPreviewResult struct {
+	Config      ExcelMatchConfig          `json:"config"`
+	Stats       ExcelMatchJobStats        `json:"stats"`
+	ScanLimit   int                       `json:"scanLimit"`
+	SampleLimit int                       `json:"sampleLimit"`
+	Truncated   bool                      `json:"truncated"`
+	Samples     []ExcelMatchPreviewSample `json:"samples"`
+}
+
+type ExcelMatchPreviewSample struct {
+	RowNumber    int               `json:"rowNumber"`
+	MatchKey     string            `json:"matchKey"`
+	MatchedValue string            `json:"matchedValue"`
+	Status       string            `json:"status"`
+	Reason       string            `json:"reason"`
+	Values       map[string]string `json:"values"`
 }
 
 type ExcelMatchJobStats = data_dao.ExcelMatchJobStats
@@ -239,6 +259,39 @@ func (s *ExcelMatchJobService) GetJob(ctx context.Context, id uint) (*model.Exce
 
 func (s *ExcelMatchJobService) GetJobLogs(ctx context.Context, id uint) ([]model.ExcelMatchJobLog, error) {
 	return s.jobDAO.FindLogsByJobID(ctx, id, 200)
+}
+
+func (s *ExcelMatchJobService) Preview(ctx context.Context, fileHeader *multipart.FileHeader, rawConfig string) (*ExcelMatchPreviewResult, error) {
+	if fileHeader == nil {
+		return nil, errors.New("上传文件不能为空")
+	}
+	if strings.ToLower(filepath.Ext(fileHeader.Filename)) != ".xlsx" {
+		return nil, errors.New("仅支持 .xlsx 文件")
+	}
+	var config ExcelMatchConfig
+	if err := json.Unmarshal([]byte(rawConfig), &config); err != nil {
+		return nil, fmt.Errorf("解析匹配配置失败: %w", err)
+	}
+	config.Operation = excelOperationExportMatch
+	normalizedConfig, err := normalizeExcelMatchConfig(config)
+	if err != nil {
+		return nil, err
+	}
+
+	src, err := fileHeader.Open()
+	if err != nil {
+		return nil, err
+	}
+	defer src.Close()
+
+	input, err := excelize.OpenReader(src)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = input.Close() }()
+
+	lookup := bojunExcelMatchLookup{dao: s.jobDAO}
+	return processExcelMatchPreview(ctx, input, normalizedConfig, lookup, defaultExcelPreviewRows, defaultExcelPreviewItems)
 }
 
 func (s *ExcelMatchJobService) Download(ctx context.Context, id uint) (*model.ExcelMatchJob, string, string, error) {
@@ -435,6 +488,192 @@ func normalizeExcelImportConfig(config ExcelMatchConfig) (ExcelMatchConfig, erro
 
 func processExcelMatchFile(ctx context.Context, inputPath, outputPath string, config ExcelMatchConfig, lookup ExcelMatchLookup) (ExcelMatchJobStats, error) {
 	return processExcelMatchFileWithProgress(ctx, inputPath, outputPath, config, lookup, nil)
+}
+
+func processExcelMatchPreview(
+	ctx context.Context,
+	input *excelize.File,
+	config ExcelMatchConfig,
+	lookup ExcelMatchLookup,
+	scanLimit int,
+	sampleLimit int,
+) (*ExcelMatchPreviewResult, error) {
+	if scanLimit <= 0 || scanLimit > defaultExcelPreviewRows {
+		scanLimit = defaultExcelPreviewRows
+	}
+	if sampleLimit <= 0 || sampleLimit > defaultExcelPreviewItems {
+		sampleLimit = defaultExcelPreviewItems
+	}
+
+	sheets := input.GetSheetList()
+	if len(sheets) == 0 {
+		return nil, errors.New("Excel 没有可读取的 sheet")
+	}
+	if !sheetExists(sheets, config.SheetName) {
+		return nil, fmt.Errorf("Excel 不存在 sheet: %s", config.SheetName)
+	}
+	rows, err := input.Rows(config.SheetName)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = rows.Close() }()
+
+	result := &ExcelMatchPreviewResult{
+		Config:      config,
+		ScanLimit:   scanLimit,
+		SampleLimit: sampleLimit,
+	}
+	var headers []string
+	columnIndexes := map[string]int{}
+	matchColumnIndex := -1
+
+	type previewRow struct {
+		rowNumber int
+		values    []string
+		eligible  bool
+		key       string
+	}
+	var buffered []previewRow
+	var lookupKeys []string
+	lookupKeySet := map[string]struct{}{}
+
+	addSample := func(row previewRow, matchedValue, status, reason string) {
+		if len(result.Samples) >= sampleLimit {
+			return
+		}
+		values := make(map[string]string, len(headers))
+		for i, header := range headers {
+			if i < len(row.values) {
+				values[header] = row.values[i]
+			} else {
+				values[header] = ""
+			}
+		}
+		result.Samples = append(result.Samples, ExcelMatchPreviewSample{
+			RowNumber:    row.rowNumber,
+			MatchKey:     row.key,
+			MatchedValue: matchedValue,
+			Status:       status,
+			Reason:       reason,
+			Values:       values,
+		})
+	}
+
+	flush := func() error {
+		if len(buffered) == 0 {
+			return nil
+		}
+		matches := map[string]string{}
+		if len(lookupKeys) > 0 {
+			var err error
+			matches, err = lookup.Lookup(ctx, config.DBMatchField, lookupKeys, config.DBValueField)
+			if err != nil {
+				return err
+			}
+		}
+		for _, row := range buffered {
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			status := "skipped"
+			reason := "未命中前置筛选"
+			matchedValue := ""
+			if row.eligible {
+				if row.key == "" {
+					status = "unmatched"
+					reason = "匹配键为空"
+					result.Stats.UnmatchedRows++
+				} else if value, ok := matches[row.key]; ok {
+					status = "matched"
+					reason = "已匹配"
+					matchedValue = value
+					result.Stats.MatchedRows++
+				} else {
+					status = "unmatched"
+					reason = "数据库无匹配记录"
+					result.Stats.UnmatchedRows++
+				}
+			}
+			addSample(row, matchedValue, status, reason)
+			result.Stats.ProcessedRows++
+		}
+		buffered = buffered[:0]
+		lookupKeys = lookupKeys[:0]
+		lookupKeySet = map[string]struct{}{}
+		return nil
+	}
+
+	headerRead := false
+	for rows.Next() {
+		if err := ctx.Err(); err != nil {
+			return result, err
+		}
+		columns, err := rows.Columns()
+		if err != nil {
+			return result, err
+		}
+		if !headerRead {
+			headers = normalizeHeaders(columns)
+			if len(headers) == 0 {
+				return result, errors.New("Excel 表头不能为空")
+			}
+			for i, header := range headers {
+				columnIndexes[header] = i
+			}
+			for _, filter := range config.Filters {
+				if _, ok := columnIndexes[filter.Column]; !ok {
+					return result, fmt.Errorf("Excel 缺少筛选列: %s", filter.Column)
+				}
+			}
+			var ok bool
+			matchColumnIndex, ok = columnIndexes[config.MatchExcelColumn]
+			if !ok {
+				return result, fmt.Errorf("Excel 缺少订单号列: %s", config.MatchExcelColumn)
+			}
+			headerRead = true
+			continue
+		}
+
+		result.Stats.TotalRows++
+		normalized := normalizeExcelRow(columns, len(headers))
+		eligible := excelRowMatchesFilters(normalized, columnIndexes, config.Filters)
+		key := ""
+		if eligible {
+			result.Stats.FilteredRows++
+			key = strings.TrimSpace(normalized[matchColumnIndex])
+			if key != "" {
+				if _, ok := lookupKeySet[key]; !ok {
+					lookupKeys = append(lookupKeys, key)
+					lookupKeySet[key] = struct{}{}
+				}
+			}
+		}
+		buffered = append(buffered, previewRow{
+			rowNumber: result.Stats.TotalRows + 1,
+			values:    normalized,
+			eligible:  eligible,
+			key:       key,
+		})
+		if len(lookupKeys) >= config.BatchSize || len(buffered) >= maxBufferedExcelRows {
+			if err := flush(); err != nil {
+				return result, err
+			}
+		}
+		if result.Stats.TotalRows >= scanLimit {
+			result.Truncated = true
+			break
+		}
+	}
+	if err := rows.Error(); err != nil {
+		return result, err
+	}
+	if !headerRead {
+		return result, errors.New("Excel 表头不能为空")
+	}
+	if err := flush(); err != nil {
+		return result, err
+	}
+	return result, nil
 }
 
 func processExcelMatchFileWithProgress(

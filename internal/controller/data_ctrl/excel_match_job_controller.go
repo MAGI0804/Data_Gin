@@ -45,6 +45,29 @@ func (ctrl *ExcelMatchJobController) CreateJob(c *gin.Context) {
 	}))
 }
 
+func (ctrl *ExcelMatchJobController) Preview(c *gin.Context) {
+	fileHeader, err := c.FormFile("file")
+	if err != nil {
+		c.JSON(400, msg.ErrResponse("读取 Excel 文件失败", err))
+		return
+	}
+	config := c.PostForm("config")
+	if config == "" {
+		c.JSON(400, msg.ErrResponseStr("匹配配置不能为空"))
+		return
+	}
+
+	preview, err := ctrl.service.Preview(c.Request.Context(), fileHeader, config)
+	if err != nil {
+		c.JSON(400, msg.ErrResponse("预览 Excel 匹配失败", err))
+		return
+	}
+
+	c.JSON(200, msg.SuccessResponse("预览 Excel 匹配成功", &map[string]any{
+		"preview": preview,
+	}))
+}
+
 func (ctrl *ExcelMatchJobController) GetJob(c *gin.Context) {
 	id, err := parseUintParam(c, "id")
 	if err != nil {

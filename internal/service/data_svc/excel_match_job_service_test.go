@@ -229,6 +229,79 @@ func TestProcessExcelMatchFileUsesConfiguredDBMatchField(t *testing.T) {
 	}
 }
 
+func TestProcessExcelMatchPreviewReturnsSamplesWithoutWritingOutput(t *testing.T) {
+	dir := t.TempDir()
+	inputPath := filepath.Join(dir, "source.xlsx")
+	outputPath := filepath.Join(dir, "result.xlsx")
+
+	f := excelize.NewFile()
+	sheet := f.GetSheetName(0)
+	rows := [][]interface{}{
+		{"店铺名称", "外部订单编号", "金额"},
+		{"杭州恒隆", "EXT001", "10"},
+		{"上海前滩", "EXT002", "20"},
+	}
+	for i, row := range rows {
+		cell, err := excelize.CoordinatesToCellName(1, i+1)
+		if err != nil {
+			t.Fatalf("CoordinatesToCellName failed: %v", err)
+		}
+		if err := f.SetSheetRow(sheet, cell, &row); err != nil {
+			t.Fatalf("SetSheetRow failed: %v", err)
+		}
+	}
+	if err := f.SaveAs(inputPath); err != nil {
+		t.Fatalf("SaveAs failed: %v", err)
+	}
+
+	input, err := excelize.OpenFile(inputPath)
+	if err != nil {
+		t.Fatalf("OpenFile source failed: %v", err)
+	}
+	defer func() { _ = input.Close() }()
+
+	lookup := &fakeExcelMatchLookup{value: map[string]string{"EXT001": "BOJUN001"}}
+	cfg, err := normalizeExcelMatchConfig(ExcelMatchConfig{
+		SheetName:        "Sheet1",
+		Filters:          []ExcelMatchFilter{{Column: "店铺名称", Op: "eq", Value: "杭州恒隆"}},
+		MatchExcelColumn: "外部订单编号",
+		DBTemplate:       "bojun_retail_order",
+		DBMatchField:     "otherdocno",
+		DBValueField:     "docno",
+		OutputColumnName: "伯俊单号",
+	})
+	if err != nil {
+		t.Fatalf("normalizeExcelMatchConfig failed: %v", err)
+	}
+
+	preview, err := processExcelMatchPreview(context.Background(), input, cfg, lookup, 100, 10)
+	if err != nil {
+		t.Fatalf("processExcelMatchPreview failed: %v", err)
+	}
+
+	if !reflect.DeepEqual(lookup.matchFields, []string{"otherdocno"}) {
+		t.Fatalf("lookup match fields = %#v, want otherdocno", lookup.matchFields)
+	}
+	if !reflect.DeepEqual(lookup.keys, []string{"EXT001"}) {
+		t.Fatalf("lookup keys = %#v, want only filtered row key", lookup.keys)
+	}
+	if preview.Stats.TotalRows != 2 || preview.Stats.FilteredRows != 1 || preview.Stats.MatchedRows != 1 || preview.Stats.UnmatchedRows != 0 {
+		t.Fatalf("stats = %+v, want total=2 filtered=1 matched=1 unmatched=0", preview.Stats)
+	}
+	if len(preview.Samples) != 2 {
+		t.Fatalf("samples length = %d, want 2", len(preview.Samples))
+	}
+	if preview.Samples[0].Status != "matched" || preview.Samples[0].MatchedValue != "BOJUN001" {
+		t.Fatalf("first sample = %+v, want matched BOJUN001", preview.Samples[0])
+	}
+	if preview.Samples[1].Status != "skipped" {
+		t.Fatalf("second sample = %+v, want skipped", preview.Samples[1])
+	}
+	if _, err := excelize.OpenFile(outputPath); err == nil {
+		t.Fatal("preview unexpectedly wrote result.xlsx")
+	}
+}
+
 func TestProcessExcelMatchFileUsesConfiguredSheet(t *testing.T) {
 	dir := t.TempDir()
 	inputPath := filepath.Join(dir, "source.xlsx")

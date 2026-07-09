@@ -115,6 +115,7 @@ func apiData(api *gin.RouterGroup) {
 	{
 		excelMatchJobCtrl := data_ctrl.NewExcelMatchJobController()
 		excelMatchJobGroup.POST("", excelMatchJobCtrl.CreateJob)
+		excelMatchJobGroup.POST("/preview", excelMatchJobCtrl.Preview)
 		excelMatchJobGroup.GET("/:id", excelMatchJobCtrl.GetJob)
 		excelMatchJobGroup.GET("/:id/download", excelMatchJobCtrl.Download)
 	}
