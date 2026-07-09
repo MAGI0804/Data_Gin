@@ -151,6 +151,8 @@ type ExcelMatchJob = {
   started_at: string | null
   finished_at: string | null
   expires_at: string | null
+  can_download?: boolean
+  download_message?: string
   created_at: number
 }
 
@@ -1653,7 +1655,7 @@ function ExcelMatchView({
               <Download aria-hidden="true" />
               {downloadingJobID === job.id ? '下载中' : '下载结果'}
             </button>
-            {!canDownloadExcelJob(job) && <span>只有匹配导出成功任务会生成可下载结果文件。</span>}
+            {!canDownloadExcelJob(job) && <span>{job.download_message || '只有匹配导出成功任务会生成可下载结果文件。'}</span>}
           </div>
           {job.error_message && <div className="login-error">{job.error_message}</div>}
           <section className="content-grid two">
@@ -1930,6 +1932,7 @@ function ExcelJobHistoryTable({
                     type="button"
                     onClick={() => onDownload(item.id)}
                     disabled={loading || downloadingJobID === item.id || !canDownloadExcelJob(item)}
+                    title={item.download_message || undefined}
                   >
                     {downloadingJobID === item.id ? '下载中' : '下载'}
                   </button>
@@ -2898,6 +2901,7 @@ function excelJobOperationLabel(value: string) {
 }
 
 function canDownloadExcelJob(job: ExcelMatchJob) {
+  if (typeof job.can_download === 'boolean') return job.can_download
   return job.status === 'success' && excelJobOperation(job) === 'export_match'
 }
 

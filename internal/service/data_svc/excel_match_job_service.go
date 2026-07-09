@@ -313,6 +313,7 @@ func (s *ExcelMatchJobService) GetJob(ctx context.Context, id uint) (*model.Exce
 		return nil, err
 	}
 	s.refreshExpiredJob(ctx, matchJob)
+	s.refreshDownloadState(ctx, matchJob)
 	return matchJob, nil
 }
 
@@ -327,6 +328,7 @@ func (s *ExcelMatchJobService) ListJobs(ctx context.Context, limit int) ([]model
 	}
 	for i := range jobs {
 		s.refreshExpiredJob(ctx, &jobs[i])
+		s.refreshDownloadState(ctx, &jobs[i])
 	}
 	return jobs, nil
 }
@@ -573,11 +575,21 @@ func (s *ExcelMatchJobService) Download(ctx context.Context, id uint) (*model.Ex
 	if matchJob.Status != excelMatchStatusSuccess {
 		return nil, "", "", fmt.Errorf("任务状态为 %s，无法下载", matchJob.Status)
 	}
+	if excelJobOperationFromConfigJSON(matchJob.ConfigJSON) != excelOperationExportMatch {
+		return nil, "", "", errors.New("该任务不是匹配导出任务，不会生成结果文件")
+	}
 	if !isPathInside(excelMatchJobDir(matchJob.ID), matchJob.ResultFilePath) {
 		return nil, "", "", errors.New("结果文件路径非法")
 	}
 	if _, err := os.Stat(matchJob.ResultFilePath); err != nil {
-		return nil, "", "", err
+		if os.IsNotExist(err) {
+			if s.jobDAO != nil {
+				_ = s.jobDAO.MarkExpired(ctx, matchJob.ID)
+			}
+			s.logJob(ctx, matchJob.ID, "warn", "结果文件不存在，任务已标记为过期", nil)
+			return nil, "", "", errors.New("结果文件不存在或已被清理，请重新创建匹配导出任务")
+		}
+		return nil, "", "", errors.New("读取结果文件失败，请稍后重试")
 	}
 	return matchJob, matchJob.ResultFilePath, fmt.Sprintf("excel_match_job_%d.xlsx", matchJob.ID), nil
 }
@@ -1396,7 +1408,7 @@ func sheetExists(sheets []string, target string) bool {
 }
 
 func (s *ExcelMatchJobService) logJob(ctx context.Context, jobID uint, level, message string, detail map[string]interface{}) {
-	if jobID == 0 {
+	if jobID == 0 || s.jobDAO == nil {
 		return
 	}
 	detailJSON := "{}"
@@ -1618,6 +1630,47 @@ func (s *ExcelMatchJobService) refreshExpiredJob(ctx context.Context, matchJob *
 	_ = os.RemoveAll(matchJob.WorkDir)
 	_ = s.jobDAO.MarkExpired(ctx, matchJob.ID)
 	matchJob.Status = excelMatchStatusExpired
+}
+
+func (s *ExcelMatchJobService) refreshDownloadState(ctx context.Context, matchJob *model.ExcelMatchJob) {
+	matchJob.CanDownload = false
+	matchJob.DownloadMessage = ""
+	if matchJob.Status != excelMatchStatusSuccess {
+		return
+	}
+	if excelJobOperationFromConfigJSON(matchJob.ConfigJSON) != excelOperationExportMatch {
+		matchJob.DownloadMessage = "该任务不会生成结果文件"
+		return
+	}
+	if !isPathInside(excelMatchJobDir(matchJob.ID), matchJob.ResultFilePath) {
+		matchJob.DownloadMessage = "结果文件路径非法"
+		return
+	}
+	if _, err := os.Stat(matchJob.ResultFilePath); err != nil {
+		if os.IsNotExist(err) {
+			if s.jobDAO != nil {
+				_ = s.jobDAO.MarkExpired(ctx, matchJob.ID)
+			}
+			matchJob.Status = excelMatchStatusExpired
+			matchJob.DownloadMessage = "结果文件不存在或已被清理，请重新创建匹配导出任务"
+			return
+		}
+		matchJob.DownloadMessage = "读取结果文件失败，请稍后重试"
+		return
+	}
+	matchJob.CanDownload = true
+}
+
+func excelJobOperationFromConfigJSON(rawConfig string) string {
+	var config ExcelMatchConfig
+	if err := json.Unmarshal([]byte(rawConfig), &config); err != nil {
+		return ""
+	}
+	config.Operation = strings.TrimSpace(config.Operation)
+	if config.Operation == "" {
+		return excelOperationExportMatch
+	}
+	return config.Operation
 }
 
 func isPathInside(basePath, targetPath string) bool {

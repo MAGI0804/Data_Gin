@@ -2,6 +2,7 @@ package data_svc
 
 import (
 	"context"
+	"gin-biz-web-api/model"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -536,5 +537,58 @@ func TestProcessExcelImportUpdateFileClearsMatchedDocNo(t *testing.T) {
 	}
 	if !reflect.DeepEqual(updater.updated, map[string]string{"B001": "", "B002": ""}) {
 		t.Fatalf("updated = %#v, want matched_docno cleared", updater.updated)
+	}
+}
+
+func TestRefreshDownloadStateRejectsNonExportJobs(t *testing.T) {
+	job := &model.ExcelMatchJob{
+		ConfigJSON: `{"operation":"import_update"}`,
+		Status:     excelMatchStatusSuccess,
+	}
+
+	(&ExcelMatchJobService{}).refreshDownloadState(context.Background(), job)
+
+	if job.CanDownload {
+		t.Fatal("CanDownload = true, want false for import_update job")
+	}
+	if job.DownloadMessage == "" {
+		t.Fatal("DownloadMessage is empty, want reason for non-export job")
+	}
+}
+
+func TestRefreshDownloadStateRequiresExistingResultFile(t *testing.T) {
+	jobID := uint(987654)
+	workDir := excelMatchJobDir(jobID)
+	if err := os.MkdirAll(workDir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	defer os.RemoveAll(workDir)
+
+	resultPath := filepath.Join(workDir, excelMatchResultFileName)
+	job := &model.ExcelMatchJob{
+		BaseModel:      model.BaseModel{ID: jobID},
+		ConfigJSON:     `{"operation":"export_match"}`,
+		Status:         excelMatchStatusSuccess,
+		ResultFilePath: resultPath,
+	}
+
+	(&ExcelMatchJobService{}).refreshDownloadState(context.Background(), job)
+	if job.CanDownload {
+		t.Fatal("CanDownload = true, want false when result file is missing")
+	}
+	if job.Status != excelMatchStatusExpired {
+		t.Fatalf("Status = %s, want expired when result file is missing", job.Status)
+	}
+	if job.DownloadMessage == "" {
+		t.Fatal("DownloadMessage is empty, want missing file reason")
+	}
+
+	if err := os.WriteFile(resultPath, []byte("xlsx"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	job.Status = excelMatchStatusSuccess
+	(&ExcelMatchJobService{}).refreshDownloadState(context.Background(), job)
+	if !job.CanDownload {
+		t.Fatalf("CanDownload = false, want true when result file exists: %s", job.DownloadMessage)
 	}
 }
