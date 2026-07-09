@@ -135,6 +135,17 @@ func (dao *ExcelMatchJobDAO) UpdatePaths(ctx context.Context, id uint, workDir, 
 		}).Error
 }
 
+func (dao *ExcelMatchJobDAO) UpdateResultStorage(ctx context.Context, id uint, objectKey, resultURL string) error {
+	return dao.db.WithContext(ctx).
+		Model(&model.ExcelMatchJob{}).
+		Where("id = ?", id).
+		Updates(map[string]interface{}{
+			"result_object_key": objectKey,
+			"result_url":        resultURL,
+			"updated_at":        time.Now().Unix(),
+		}).Error
+}
+
 func (dao *ExcelMatchJobDAO) MarkRunning(ctx context.Context, id uint) error {
 	now := time.Now()
 	return dao.db.WithContext(ctx).

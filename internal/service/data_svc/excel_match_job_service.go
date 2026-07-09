@@ -19,6 +19,7 @@ import (
 	"gin-biz-web-api/internal/dao/data_dao"
 	"gin-biz-web-api/job"
 	"gin-biz-web-api/model"
+	"gin-biz-web-api/pkg/storage"
 
 	"github.com/hibiken/asynq"
 	"github.com/xuri/excelize/v2"
@@ -578,6 +579,9 @@ func (s *ExcelMatchJobService) Download(ctx context.Context, id uint) (*model.Ex
 	if excelJobOperationFromConfigJSON(matchJob.ConfigJSON) != excelOperationExportMatch {
 		return nil, "", "", errors.New("该任务不是匹配导出任务，不会生成结果文件")
 	}
+	if strings.TrimSpace(matchJob.ResultURL) != "" {
+		return matchJob, "", fmt.Sprintf("excel_match_job_%d.xlsx", matchJob.ID), nil
+	}
 	if !isPathInside(excelMatchJobDir(matchJob.ID), matchJob.ResultFilePath) {
 		return nil, "", "", errors.New("结果文件路径非法")
 	}
@@ -640,6 +644,18 @@ func (s *ExcelMatchJobService) ProcessJob(ctx context.Context, id uint) error {
 		s.logJob(ctx, id, "error", "任务处理失败", map[string]interface{}{"error": err.Error()})
 		return err
 	}
+	if config.Operation == excelOperationExportMatch && storage.OSSStorageEnabled() {
+		result, err := s.uploadExcelResultToOSS(ctx, matchJob)
+		if err != nil {
+			_ = s.jobDAO.MarkFailed(ctx, id, err.Error(), expiresAt)
+			s.logJob(ctx, id, "error", "上传结果文件到OSS失败", map[string]interface{}{"error": err.Error()})
+			return err
+		}
+		s.logJob(ctx, id, "info", "结果文件已上传OSS", map[string]interface{}{
+			"object_key": result.ObjectKey,
+		})
+		_ = os.Remove(matchJob.ResultFilePath)
+	}
 
 	_ = os.Remove(matchJob.SourceFilePath)
 	s.logJob(ctx, id, "info", "源文件已删除", nil)
@@ -653,6 +669,7 @@ func (s *ExcelMatchJobService) CleanupExpiredJobs(ctx context.Context) error {
 		return err
 	}
 	for _, matchJob := range jobs {
+		s.cleanupResultObject(ctx, matchJob)
 		if matchJob.WorkDir != "" && isPathInside(excelMatchJobDir(matchJob.ID), matchJob.WorkDir) {
 			_ = os.RemoveAll(matchJob.WorkDir)
 		}
@@ -1425,6 +1442,43 @@ func (s *ExcelMatchJobService) logJob(ctx context.Context, jobID uint, level, me
 	})
 }
 
+func (s *ExcelMatchJobService) uploadExcelResultToOSS(ctx context.Context, matchJob *model.ExcelMatchJob) (storage.UploadResult, error) {
+	client, err := storage.NewOSSClientFromConfig()
+	if err != nil {
+		return storage.UploadResult{}, err
+	}
+	objectKey := storage.BuildObjectKey(
+		"excel-match-results",
+		time.Now().Format("2006/01/02"),
+		strconv.FormatUint(uint64(matchJob.ID), 10),
+		excelMatchResultFileName,
+	)
+	result, err := client.UploadFile(ctx, objectKey, matchJob.ResultFilePath, fmt.Sprintf("excel_match_job_%d.xlsx", matchJob.ID))
+	if err != nil {
+		return storage.UploadResult{}, err
+	}
+	if err := s.jobDAO.UpdateResultStorage(ctx, matchJob.ID, result.ObjectKey, result.URL); err != nil {
+		return storage.UploadResult{}, err
+	}
+	matchJob.ResultObjectKey = result.ObjectKey
+	matchJob.ResultURL = result.URL
+	return result, nil
+}
+
+func (s *ExcelMatchJobService) cleanupResultObject(ctx context.Context, matchJob model.ExcelMatchJob) {
+	if strings.TrimSpace(matchJob.ResultObjectKey) == "" || !storage.OSSStorageEnabled() {
+		return
+	}
+	client, err := storage.NewOSSClientFromConfig()
+	if err != nil {
+		s.logJob(ctx, matchJob.ID, "warn", "初始化OSS清理客户端失败", map[string]interface{}{"error": err.Error()})
+		return
+	}
+	if err := client.DeleteObject(ctx, matchJob.ResultObjectKey); err != nil {
+		s.logJob(ctx, matchJob.ID, "warn", "删除OSS结果文件失败", map[string]interface{}{"error": err.Error()})
+	}
+}
+
 func statsDetail(stats ExcelMatchJobStats) map[string]interface{} {
 	return map[string]interface{}{
 		"total_rows":     stats.TotalRows,
@@ -1640,6 +1694,10 @@ func (s *ExcelMatchJobService) refreshDownloadState(ctx context.Context, matchJo
 	}
 	if excelJobOperationFromConfigJSON(matchJob.ConfigJSON) != excelOperationExportMatch {
 		matchJob.DownloadMessage = "该任务不会生成结果文件"
+		return
+	}
+	if strings.TrimSpace(matchJob.ResultURL) != "" {
+		matchJob.CanDownload = true
 		return
 	}
 	if !isPathInside(excelMatchJobDir(matchJob.ID), matchJob.ResultFilePath) {

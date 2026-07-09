@@ -133,3 +133,18 @@ ShanghaiMall:
     PostURL: ${SHANGHAI_QIANTAN_XIAN_POST_URL:-}
   Shangsheng:
     URL: ${SHANGHAI_SHANGSHENG_URL:-}
+
+Storage:
+  Driver: ${STORAGE_DRIVER:-local}
+  OSS:
+    Enabled: ${ALIYUN_OSS_ENABLED:-false}
+    Region: ${ALIYUN_OSS_REGION:-}
+    Endpoint: ${ALIYUN_OSS_ENDPOINT:-}
+    Bucket: ${ALIYUN_OSS_BUCKET:-}
+    CDNBaseURL: ${ALIYUN_OSS_CDN_BASE_URL:-}
+    Prefix: ${ALIYUN_OSS_PREFIX:-data-warehouse}
+    UseInternal: ${ALIYUN_OSS_USE_INTERNAL:-false}
+    UseCName: ${ALIYUN_OSS_USE_CNAME:-false}
+    DisableSSL: ${ALIYUN_OSS_DISABLE_SSL:-false}
+    ConnectTimeoutSeconds: ${ALIYUN_OSS_CONNECT_TIMEOUT_SECONDS:-10}
+    ReadWriteTimeoutSeconds: ${ALIYUN_OSS_READ_WRITE_TIMEOUT_SECONDS:-300}

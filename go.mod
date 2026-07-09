@@ -3,6 +3,7 @@ module gin-biz-web-api
 go 1.24.0
 
 require (
+	github.com/aliyun/alibabacloud-oss-go-sdk-v2 v1.5.2
 	github.com/disintegration/imaging v1.6.2
 	github.com/fsnotify/fsnotify v1.5.1
 	github.com/gertd/go-pluralize v0.2.0

@@ -197,6 +197,8 @@ type ExcelMatchJob struct {
 	SourceFileName  string      `gorm:"column:source_file_name;size:255" json:"source_file_name"`
 	SourceFilePath  string      `gorm:"column:source_file_path;size:1024" json:"-"`
 	ResultFilePath  string      `gorm:"column:result_file_path;size:1024" json:"-"`
+	ResultObjectKey string      `gorm:"column:result_object_key;size:1024" json:"result_object_key"`
+	ResultURL       string      `gorm:"column:result_url;size:2048" json:"result_url"`
 	WorkDir         string      `gorm:"column:work_dir;size:1024" json:"-"`
 	ConfigJSON      string      `gorm:"column:config_json;type:json;not null" json:"config_json"`
 	Status          string      `gorm:"column:status;size:30;not null;default:'pending';index" json:"status"`

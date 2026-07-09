@@ -2,7 +2,9 @@ package data_ctrl
 
 import (
 	"encoding/json"
+	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
@@ -244,9 +246,13 @@ func (ctrl *ExcelMatchJobController) Download(c *gin.Context) {
 		return
 	}
 
-	_, resultPath, filename, err := ctrl.service.Download(c.Request.Context(), id)
+	matchJob, resultPath, filename, err := ctrl.service.Download(c.Request.Context(), id)
 	if err != nil {
 		c.JSON(400, msg.ErrResponse("下载 Excel 匹配结果失败", err))
+		return
+	}
+	if strings.TrimSpace(matchJob.ResultURL) != "" {
+		c.Redirect(http.StatusFound, matchJob.ResultURL)
 		return
 	}
 
