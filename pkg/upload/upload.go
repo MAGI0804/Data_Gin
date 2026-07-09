@@ -2,6 +2,7 @@
 package upload
 
 import (
+	"context"
 	"fmt"
 	"mime/multipart"
 	"os"
@@ -17,6 +18,7 @@ import (
 	"gin-biz-web-api/pkg/config"
 	"gin-biz-web-api/pkg/file"
 	"gin-biz-web-api/pkg/logger"
+	"gin-biz-web-api/pkg/storage"
 )
 
 type FileType string
@@ -33,6 +35,7 @@ type FileInfo struct {
 	AbsPath        string `json:"abs_path"`         // 文件绝对路径（相对本项目的绝对路径）
 	AccessPath     string `json:"access_path"`      // 静态资源访问连接
 	AccessUrl      string `json:"access_url"`       // 文件资源访问地址
+	ObjectKey      string `json:"object_key"`       // OSS 对象 Key
 }
 
 // SaveUploadFile 保存上传文件
@@ -86,13 +89,17 @@ func SaveUploadFile(fileType FileType, files multipart.File, fileHeader *multipa
 
 	accessPath := app.URL(config.GetString("cfg.upload.static_fs_relative_path")) // `http://localhost:3000/static`
 
-	return &FileInfo{
+	fileInfo := &FileInfo{
 		OriginFileName: fileHeader.Filename,
 		FileName:       fileName,
 		AbsPath:        dst,
 		AccessPath:     accessPath,
 		AccessUrl:      accessUrl,
-	}, nil
+	}
+	if err := uploadStaticFileToOSS(fileInfo, dirName, fileName, dst, fileHeader.Filename); err != nil {
+		return nil, err
+	}
+	return fileInfo, nil
 
 }
 
@@ -117,6 +124,9 @@ func SaveUploadAvatar(files multipart.File, fileHeader *multipart.FileHeader) (*
 	if err != nil {
 		logger.LogErrorIf(err)
 		return fileInfo, nil
+	}
+	if fileInfo.ObjectKey != "" {
+		deleteStaticObject(fileInfo.ObjectKey)
 	}
 
 	return resizeFileInfo, nil
@@ -169,8 +179,42 @@ func TailoringImage(fileType FileType, fileHeader *multipart.FileHeader, src str
 	fileInfo.AbsPath = filePath
 	fileInfo.AccessPath = accessPath
 	fileInfo.AccessUrl = accessUrl
+	if err := uploadStaticFileToOSS(&fileInfo, dirName, fileName, filePath, fileHeader.Filename); err != nil {
+		return nil, err
+	}
 
 	return &fileInfo, nil
+}
+
+func uploadStaticFileToOSS(fileInfo *FileInfo, dirName, fileName, localPath, originFileName string) error {
+	if !storage.OSSStorageEnabled() {
+		return nil
+	}
+	client, err := storage.NewOSSClientFromConfig()
+	if err != nil {
+		return err
+	}
+	objectKey := storage.BuildObjectKey("uploads", dirName, fileName)
+	result, err := client.UploadFile(context.Background(), objectKey, localPath, originFileName)
+	if err != nil {
+		return err
+	}
+	fileInfo.ObjectKey = result.ObjectKey
+	fileInfo.AccessPath = strings.TrimSuffix(result.URL, "/"+result.ObjectKey)
+	fileInfo.AccessUrl = "/" + result.ObjectKey
+	return nil
+}
+
+func deleteStaticObject(objectKey string) {
+	if !storage.OSSStorageEnabled() {
+		return
+	}
+	client, err := storage.NewOSSClientFromConfig()
+	if err != nil {
+		logger.LogErrorIf(err)
+		return
+	}
+	logger.LogErrorIf(client.DeleteObject(context.Background(), objectKey))
 }
 
 // CheckContainExt 检查文件后缀是否包含在约定的后缀配置项中
