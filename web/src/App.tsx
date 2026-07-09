@@ -164,6 +164,41 @@ type ExcelMatchJobLog = {
 }
 
 type ExcelDialogMode = 'export' | 'import' | 'clear' | 'query'
+type ExcelUploadSlot = 'export' | 'import' | 'clear'
+
+type ExcelUploadSession = {
+  uploadId: string
+  fileName: string
+  totalChunks: number
+  uploadedChunks: number
+  complete: boolean
+  expiresAt: string
+}
+
+type ExcelUploadRef = {
+  uploadId: string
+  fileName: string
+  size: number
+  lastModified: number
+  totalChunks: number
+}
+
+type ExcelExportSchemeConfig = {
+  sheetName: string
+  filterColumn: string
+  filterValue: string
+  matchExcelColumn: string
+  dbMatchField: string
+  dbValueField: string
+  outputColumnName: string
+  batchSize: string
+}
+
+type ExcelExportScheme = {
+  id: string
+  name: string
+  config: ExcelExportSchemeConfig
+}
 
 type ExcelMatchPreviewStats = {
   TotalRows?: number
@@ -215,6 +250,20 @@ const bojunValueFieldOptions = [
   { value: 'o2o_so_docno', label: '线上订单号 o2o_so_docno' },
   { value: 'matched_docno', label: '匹配单号 matched_docno' },
 ]
+
+const excelChunkSize = 4 * 1024 * 1024
+const excelExportSchemesStorageKey = 'data_warehouse_excel_export_schemes'
+
+const defaultExcelExportScheme: ExcelExportSchemeConfig = {
+  sheetName: 'Sheet1',
+  filterColumn: '店铺',
+  filterValue: '幼岚-有赞',
+  matchExcelColumn: '原始线上订单号',
+  dbMatchField: 'matched_docno',
+  dbValueField: 'c_store_name',
+  outputColumnName: '线下店名称',
+  batchSize: '1000',
+}
 
 type BojunOrderBackfillSample = {
   docno: string
@@ -1067,6 +1116,11 @@ function ExcelMatchView({
   const [selectedClearFileName, setSelectedClearFileName] = useState('')
   const [excelDialog, setExcelDialog] = useState<ExcelDialogMode | null>(null)
   const [previewResult, setPreviewResult] = useState<ExcelMatchPreviewResult | null>(null)
+  const [uploadRefs, setUploadRefs] = useState<Partial<Record<ExcelUploadSlot, ExcelUploadRef>>>({})
+  const [uploadProgress, setUploadProgress] = useState('')
+  const [exportSchemes, setExportSchemes] = useState<ExcelExportScheme[]>(() => loadExcelExportSchemes())
+  const [exportDefaults, setExportDefaults] = useState<ExcelExportSchemeConfig>(defaultExcelExportScheme)
+  const [exportFormKey, setExportFormKey] = useState(0)
 
   function applyJobResult(result: ApiResult) {
     const nextJob = readObject<ExcelMatchJob>(result, 'job')
@@ -1077,10 +1131,13 @@ function ExcelMatchView({
     setJobLogs(readList<ExcelMatchJobLog>(result, 'logs'))
   }
 
-  function buildExportPayload(form: FormData, file: File) {
-    const payload = new FormData()
-    payload.append('file', file)
-    payload.append('config', JSON.stringify({
+  function clearUploadRef(slot: ExcelUploadSlot) {
+    setUploadRefs((current) => ({ ...current, [slot]: undefined }))
+    setUploadProgress('')
+  }
+
+  function buildExportConfig(form: FormData) {
+    return {
       operation: 'export_match',
       sheetName: formValue(form, 'sheetName').trim() || 'Sheet1',
       filters: [
@@ -1096,8 +1153,115 @@ function ExcelMatchView({
       dbValueField: formValue(form, 'dbValueField').trim(),
       outputColumnName: formValue(form, 'outputColumnName').trim(),
       batchSize: Number(formValue(form, 'batchSize') || 1000),
-    }))
+    }
+  }
+
+  function readExportSchemeConfig(form: FormData): ExcelExportSchemeConfig {
+    return {
+      sheetName: formValue(form, 'sheetName').trim() || 'Sheet1',
+      filterColumn: formValue(form, 'filterColumn').trim(),
+      filterValue: formValue(form, 'filterValue').trim(),
+      matchExcelColumn: formValue(form, 'matchExcelColumn').trim(),
+      dbMatchField: formValue(form, 'dbMatchField').trim(),
+      dbValueField: formValue(form, 'dbValueField').trim(),
+      outputColumnName: formValue(form, 'outputColumnName').trim(),
+      batchSize: formValue(form, 'batchSize').trim() || '1000',
+    }
+  }
+
+  function buildConfigPayload(uploadId: string, config: unknown) {
+    const payload = new FormData()
+    payload.append('uploadId', uploadId)
+    payload.append('config', JSON.stringify(config))
     return payload
+  }
+
+  async function ensureExcelUpload(slot: ExcelUploadSlot, file: File) {
+    const existing = uploadRefs[slot]
+    if (existing && sameExcelFile(file, existing)) {
+      return existing.uploadId
+    }
+
+    const totalChunks = Math.ceil(file.size / excelChunkSize)
+    setUploadProgress(`准备上传 ${file.name}，共 ${totalChunks} 个分片`)
+
+    const createResponse = await fetch(apiURL('/v1/excel-match-jobs/uploads'), {
+      method: 'POST',
+      headers: token ? { token, 'Content-Type': 'application/json' } : { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fileName: file.name, totalChunks }),
+    })
+    const createData = await createResponse.json().catch(() => ({}))
+    if (!createResponse.ok || !isSuccessPayload(createData)) {
+      throw new Error(readMessage(createData) || '创建分片上传会话失败')
+    }
+    const session = readObjectFromData<ExcelUploadSession>(createData, 'upload')
+    if (!session?.uploadId) throw new Error('上传会话返回缺少 uploadId')
+
+    for (let index = 0; index < totalChunks; index++) {
+      const start = index * excelChunkSize
+      const end = Math.min(file.size, start + excelChunkSize)
+      const chunkForm = new FormData()
+      chunkForm.append('index', String(index))
+      chunkForm.append('totalChunks', String(totalChunks))
+      chunkForm.append('chunk', file.slice(start, end), `${file.name}.part${index}`)
+      setUploadProgress(`上传分片 ${index + 1}/${totalChunks}`)
+      const chunkResponse = await fetch(apiURL(`/v1/excel-match-jobs/uploads/${session.uploadId}/chunks`), {
+        method: 'POST',
+        headers: token ? { token } : undefined,
+        body: chunkForm,
+      })
+      const chunkData = await chunkResponse.json().catch(() => ({}))
+      if (!chunkResponse.ok || !isSuccessPayload(chunkData)) {
+        throw new Error(readMessage(chunkData) || `上传分片 ${index + 1} 失败`)
+      }
+    }
+
+    setUploadProgress('合并 Excel 分片')
+    const completeResponse = await fetch(apiURL(`/v1/excel-match-jobs/uploads/${session.uploadId}/complete`), {
+      method: 'POST',
+      headers: token ? { token, 'Content-Type': 'application/json' } : { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ totalChunks }),
+    })
+    const completeData = await completeResponse.json().catch(() => ({}))
+    if (!completeResponse.ok || !isSuccessPayload(completeData)) {
+      throw new Error(readMessage(completeData) || '合并 Excel 分片失败')
+    }
+
+    const nextRef = {
+      uploadId: session.uploadId,
+      fileName: file.name,
+      size: file.size,
+      lastModified: file.lastModified,
+      totalChunks,
+    }
+    setUploadRefs((current) => ({ ...current, [slot]: nextRef }))
+    setUploadProgress(`上传完成：${file.name}`)
+    return session.uploadId
+  }
+
+  function saveExportScheme(formElement: HTMLFormElement) {
+    const name = window.prompt('请输入方案名称')
+    if (!name?.trim()) return
+    const config = readExportSchemeConfig(new FormData(formElement))
+    const scheme: ExcelExportScheme = {
+      id: `${Date.now()}`,
+      name: name.trim(),
+      config,
+    }
+    const nextSchemes = [scheme, ...exportSchemes.filter((item) => item.name !== scheme.name)].slice(0, 20)
+    setExportSchemes(nextSchemes)
+    saveExcelExportSchemes(nextSchemes)
+    setResult({ ok: true, status: 0, data: `已保存方案：${scheme.name}` })
+  }
+
+  function applyExportScheme(schemeID: string) {
+    const scheme = exportSchemes.find((item) => item.id === schemeID)
+    if (!scheme) return
+    setExportDefaults(scheme.config)
+    setExportFormKey((value) => value + 1)
+    setPreviewResult(null)
+    setSelectedExportFileName('')
+    clearUploadRef('export')
   }
 
   async function createExportJob(event: FormEvent<HTMLFormElement>) {
@@ -1109,9 +1273,10 @@ function ExcelMatchView({
       return
     }
 
-    const payload = buildExportPayload(form, file)
     setLoading(true)
     try {
+      const uploadId = await ensureExcelUpload('export', file)
+      const payload = buildConfigPayload(uploadId, buildExportConfig(form))
       const response = await fetch(apiURL('/v1/excel-match-jobs'), {
         method: 'POST',
         headers: token ? { token } : undefined,
@@ -1139,9 +1304,10 @@ function ExcelMatchView({
       return
     }
 
-    const payload = buildExportPayload(form, file)
     setLoading(true)
     try {
+      const uploadId = await ensureExcelUpload('export', file)
+      const payload = buildConfigPayload(uploadId, buildExportConfig(form))
       const response = await fetch(apiURL('/v1/excel-match-jobs/preview'), {
         method: 'POST',
         headers: token ? { token } : undefined,
@@ -1169,27 +1335,26 @@ function ExcelMatchView({
       return
     }
 
-    const payload = new FormData()
     const confirmWrite = form.get('confirmWrite') === 'on'
     if (confirmWrite && !window.confirm('确认写入数据库？本次只会填充空的 matched_docno，不会覆盖已有匹配单号。')) {
       return
     }
-    payload.append('file', file)
-    payload.append('config', JSON.stringify({
-      operation: 'import_update',
-      sheetName: formValue(form, 'sheetName').trim() || 'Sheet1',
-      tableName: formValue(form, 'tableName').trim(),
-      dbMatchField: formValue(form, 'dbMatchField').trim(),
-      matchExcelColumn: formValue(form, 'matchExcelColumn').trim(),
-      dbWriteField: formValue(form, 'dbWriteField').trim(),
-      writeExcelColumn: formValue(form, 'writeExcelColumn').trim(),
-      batchSize: Number(formValue(form, 'batchSize') || 1000),
-      dryRun: !confirmWrite,
-      confirmWrite,
-    }))
 
     setLoading(true)
     try {
+      const uploadId = await ensureExcelUpload('import', file)
+      const payload = buildConfigPayload(uploadId, {
+        operation: 'import_update',
+        sheetName: formValue(form, 'sheetName').trim() || 'Sheet1',
+        tableName: formValue(form, 'tableName').trim(),
+        dbMatchField: formValue(form, 'dbMatchField').trim(),
+        matchExcelColumn: formValue(form, 'matchExcelColumn').trim(),
+        dbWriteField: formValue(form, 'dbWriteField').trim(),
+        writeExcelColumn: formValue(form, 'writeExcelColumn').trim(),
+        batchSize: Number(formValue(form, 'batchSize') || 1000),
+        dryRun: !confirmWrite,
+        confirmWrite,
+      })
       const response = await fetch(apiURL('/v1/excel-match-jobs'), {
         method: 'POST',
         headers: token ? { token } : undefined,
@@ -1223,22 +1388,20 @@ function ExcelMatchView({
       return
     }
 
-    const payload = new FormData()
-    payload.append('file', file)
-    payload.append('config', JSON.stringify({
-      operation: 'clear_matched_docno',
-      sheetName: formValue(form, 'sheetName').trim() || 'Sheet1',
-      tableName: formValue(form, 'tableName').trim(),
-      dbMatchField: formValue(form, 'dbMatchField').trim(),
-      matchExcelColumn: formValue(form, 'matchExcelColumn').trim(),
-      dbWriteField: 'matched_docno',
-      batchSize: Number(formValue(form, 'batchSize') || 1000),
-      dryRun: !confirmWrite,
-      confirmWrite,
-    }))
-
     setLoading(true)
     try {
+      const uploadId = await ensureExcelUpload('clear', file)
+      const payload = buildConfigPayload(uploadId, {
+        operation: 'clear_matched_docno',
+        sheetName: formValue(form, 'sheetName').trim() || 'Sheet1',
+        tableName: formValue(form, 'tableName').trim(),
+        dbMatchField: formValue(form, 'dbMatchField').trim(),
+        matchExcelColumn: formValue(form, 'matchExcelColumn').trim(),
+        dbWriteField: 'matched_docno',
+        batchSize: Number(formValue(form, 'batchSize') || 1000),
+        dryRun: !confirmWrite,
+        confirmWrite,
+      })
       const response = await fetch(apiURL('/v1/excel-match-jobs'), {
         method: 'POST',
         headers: token ? { token } : undefined,
@@ -1373,35 +1536,56 @@ function ExcelMatchView({
 
       {excelDialog === 'export' && (
         <Modal title="匹配导出参数" onClose={() => setExcelDialog(null)}>
-          <form className="excel-upload-form" onSubmit={createExportJob}>
+          <form className="excel-upload-form" onSubmit={createExportJob} key={exportFormKey}>
+            <label>
+              已保存方案
+              <select defaultValue="" onChange={(event) => applyExportScheme(event.currentTarget.value)}>
+                <option value="">选择方案</option>
+                {exportSchemes.map((scheme) => <option value={scheme.id} key={scheme.id}>{scheme.name}</option>)}
+              </select>
+            </label>
+            <button
+              type="button"
+              onClick={(event) => {
+                const form = event.currentTarget.form
+                if (form) saveExportScheme(form)
+              }}
+            >
+              保存当前方案
+            </button>
             <label className="file-input-label">
               Excel 文件
               <input
                 name="file"
                 type="file"
                 accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                onChange={(event) => setSelectedExportFileName(event.currentTarget.files?.[0]?.name ?? '')}
+                onChange={(event) => {
+                  setSelectedExportFileName(event.currentTarget.files?.[0]?.name ?? '')
+                  clearUploadRef('export')
+                  setPreviewResult(null)
+                }}
               />
               <span>{selectedExportFileName || '请选择需要匹配导出的 .xlsx 文件'}</span>
             </label>
-            <Field label="Sheet 页名称" name="sheetName" defaultValue="Sheet1" />
-            <Field label="筛选列名" name="filterColumn" defaultValue="店铺名称" />
-            <Field label="筛选值" name="filterValue" defaultValue="杭州恒隆" />
-            <Field label="Excel 匹配列名" name="matchExcelColumn" defaultValue="外部订单编号" />
+            <Field label="Sheet 页名称" name="sheetName" defaultValue={exportDefaults.sheetName} />
+            <Field label="筛选列名" name="filterColumn" defaultValue={exportDefaults.filterColumn} />
+            <Field label="筛选值" name="filterValue" defaultValue={exportDefaults.filterValue} />
+            <Field label="Excel 匹配列名" name="matchExcelColumn" defaultValue={exportDefaults.matchExcelColumn} />
             <label>
               数据库匹配字段
-              <select name="dbMatchField" defaultValue="otherdocno">
+              <select name="dbMatchField" defaultValue={exportDefaults.dbMatchField}>
                 {bojunMatchFieldOptions.map((option) => <option value={option.value} key={option.value}>{option.label}</option>)}
               </select>
             </label>
             <label>
               伯俊取值字段
-              <select name="dbValueField" defaultValue="docno">
+              <select name="dbValueField" defaultValue={exportDefaults.dbValueField}>
                 {bojunValueFieldOptions.map((option) => <option value={option.value} key={option.value}>{option.label}</option>)}
               </select>
             </label>
-            <Field label="追加列名" name="outputColumnName" defaultValue="伯俊单号" />
-            <Field label="批量查询大小" name="batchSize" defaultValue="1000" />
+            <Field label="追加列名" name="outputColumnName" defaultValue={exportDefaults.outputColumnName} />
+            <Field label="批量查询大小" name="batchSize" defaultValue={exportDefaults.batchSize} />
+            {uploadProgress && <p className="excel-mode-note">{uploadProgress}</p>}
             <div className="excel-form-actions">
               <button
                 type="button"
@@ -1433,7 +1617,10 @@ function ExcelMatchView({
                 name="file"
                 type="file"
                 accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                onChange={(event) => setSelectedImportFileName(event.currentTarget.files?.[0]?.name ?? '')}
+                onChange={(event) => {
+                  setSelectedImportFileName(event.currentTarget.files?.[0]?.name ?? '')
+                  clearUploadRef('import')
+                }}
               />
               <span>{selectedImportFileName || '请选择需要导入更新的 .xlsx 文件'}</span>
             </label>
@@ -1466,6 +1653,7 @@ function ExcelMatchView({
             <p className="excel-mode-note">
               不勾选时只预检匹配数量，不写库；勾选后只写入空的 matched_docno，不覆盖已有匹配单号，不修改伯俊原始字段。
             </p>
+            {uploadProgress && <p className="excel-mode-note">{uploadProgress}</p>}
             <div className="excel-form-actions">
               <button className="primary" type="submit" disabled={loading}>
                 <Upload aria-hidden="true" />
@@ -1485,7 +1673,10 @@ function ExcelMatchView({
                 name="file"
                 type="file"
                 accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                onChange={(event) => setSelectedClearFileName(event.currentTarget.files?.[0]?.name ?? '')}
+                onChange={(event) => {
+                  setSelectedClearFileName(event.currentTarget.files?.[0]?.name ?? '')
+                  clearUploadRef('clear')
+                }}
               />
               <span>{selectedClearFileName || '请选择需要退回的 .xlsx 文件'}</span>
             </label>
@@ -1511,6 +1702,7 @@ function ExcelMatchView({
             <p className="excel-mode-note">
               不勾选时只预检会命中的行；勾选后会把命中行的 matched_docno 清空，用于退回未匹配状态。
             </p>
+            {uploadProgress && <p className="excel-mode-note">{uploadProgress}</p>}
             <div className="excel-form-actions">
               <button type="submit" disabled={loading}>
                 <RefreshCcw aria-hidden="true" />
@@ -1576,6 +1768,7 @@ function ExcelMatchPreviewPanel({ preview }: { preview: ExcelMatchPreviewResult 
               <th>状态</th>
               <th>追加值</th>
               <th>原因</th>
+              <th>Excel 行内容</th>
             </tr>
           </thead>
           <tbody>
@@ -1586,6 +1779,7 @@ function ExcelMatchPreviewPanel({ preview }: { preview: ExcelMatchPreviewResult 
                 <td>{excelPreviewStatusLabel(sample.status)}</td>
                 <td>{sample.matchedValue || '-'}</td>
                 <td>{sample.reason || '-'}</td>
+                <td>{compactText(JSON.stringify(sample.values || {})) || '-'}</td>
               </tr>
             ))}
           </tbody>
@@ -2393,6 +2587,11 @@ function readObject<T>(result: ApiResult, key: string): T | null {
   return value && typeof value === 'object' ? (value as T) : null
 }
 
+function readObjectFromData<T>(data: unknown, key: string): T | null {
+  const value = readDataField(data, key)
+  return value && typeof value === 'object' ? (value as T) : null
+}
+
 function readDataField(data: unknown, key: string) {
   if (!data || typeof data !== 'object') return undefined
   const envelope = data as { data?: Record<string, unknown> }
@@ -2419,6 +2618,31 @@ function isSuccessPayload(data: unknown) {
 function formValue(form: FormData, key: string) {
   const value = form.get(key)
   return typeof value === 'string' ? value : ''
+}
+
+function sameExcelFile(file: File, ref: ExcelUploadRef) {
+  return file.name === ref.fileName && file.size === ref.size && file.lastModified === ref.lastModified
+}
+
+function loadExcelExportSchemes(): ExcelExportScheme[] {
+  try {
+    const raw = window.localStorage.getItem(excelExportSchemesStorageKey)
+    if (!raw) return []
+    const value = JSON.parse(raw)
+    return Array.isArray(value) ? value.filter(isExcelExportScheme).slice(0, 20) : []
+  } catch {
+    return []
+  }
+}
+
+function saveExcelExportSchemes(schemes: ExcelExportScheme[]) {
+  window.localStorage.setItem(excelExportSchemesStorageKey, JSON.stringify(schemes.slice(0, 20)))
+}
+
+function isExcelExportScheme(value: unknown): value is ExcelExportScheme {
+  if (!value || typeof value !== 'object') return false
+  const scheme = value as Partial<ExcelExportScheme>
+  return typeof scheme.id === 'string' && typeof scheme.name === 'string' && !!scheme.config
 }
 
 function jsonText(value: unknown) {
