@@ -125,6 +125,7 @@ func apiData(api *gin.RouterGroup) {
 		excelMatchJobGroup.DELETE("/schemes/:scheme_id", excelMatchJobCtrl.DeleteScheme)
 		excelMatchJobGroup.GET("/:id", excelMatchJobCtrl.GetJob)
 		excelMatchJobGroup.GET("/:id/download", excelMatchJobCtrl.Download)
+		excelMatchJobGroup.POST("/:id/download", excelMatchJobCtrl.Download)
 	}
 
 	legacyTaskGroup := api.Group("/v1/legacy-tasks")

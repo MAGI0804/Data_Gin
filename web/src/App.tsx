@@ -1571,39 +1571,16 @@ function ExcelMatchView({
       return
     }
 
-    setLoading(true)
     setDownloadingJobID(id)
-    setResult({ ok: true, status: 0, data: `正在下载任务 ${id} 的结果文件，大文件需要等待浏览器接收完成。` })
+    setResult({ ok: true, status: 0, data: `正在提交任务 ${id} 的下载请求，浏览器会接管文件下载。` })
     try {
-      const response = await fetch(apiURL(`/v1/excel-match-jobs/${id}/download`), {
-        method: 'GET',
-        headers: token ? { token } : undefined,
-      })
-      if (!response.ok) {
-        const contentType = response.headers.get('Content-Type') || ''
-        const data = contentType.includes('application/json')
-          ? await response.json().catch(() => ({}))
-          : await response.text().catch(() => '')
-        setResult({ ok: false, status: response.status, data })
-        return
-      }
-
-      const blob = await response.blob()
-      const url = URL.createObjectURL(blob)
-      const anchor = document.createElement('a')
-      anchor.href = url
-      anchor.download = readDownloadFilename(response.headers.get('Content-Disposition')) ?? `excel_match_job_${id}.xlsx`
-      document.body.appendChild(anchor)
-      anchor.click()
-      anchor.remove()
-      window.setTimeout(() => URL.revokeObjectURL(url), 1000)
-      setResult({ ok: true, status: response.status, data: `任务 ${id} 结果文件已开始下载` })
+      submitExcelDownloadForm(id, token)
+      setResult({ ok: true, status: 0, data: `任务 ${id} 下载请求已提交，请查看浏览器下载栏。` })
       await loadJobHistory()
     } catch (error) {
       setResult({ ok: false, status: 0, data: error instanceof Error ? error.message : String(error) })
     } finally {
       setDownloadingJobID(null)
-      setLoading(false)
     }
   }
 
@@ -2964,12 +2941,37 @@ function formatUnixTime(value: number) {
   return formatDate(new Date(value * 1000).toISOString())
 }
 
-function readDownloadFilename(contentDisposition: string | null) {
-  if (!contentDisposition) return null
-  const utf8Match = contentDisposition.match(/filename\*=UTF-8''([^;]+)/i)
-  if (utf8Match?.[1]) return decodeURIComponent(utf8Match[1])
-  const plainMatch = contentDisposition.match(/filename="?([^";]+)"?/i)
-  return plainMatch?.[1] ?? null
+function submitExcelDownloadForm(jobID: number, token: string) {
+  if (!token) throw new Error('登录状态已失效，请重新登录后下载')
+
+  const frameName = `excel-download-frame-${jobID}`
+  let iframe = document.querySelector<HTMLIFrameElement>(`iframe[name="${frameName}"]`)
+  if (!iframe) {
+    iframe = document.createElement('iframe')
+    iframe.name = frameName
+    iframe.style.display = 'none'
+    document.body.appendChild(iframe)
+  }
+
+  const form = document.createElement('form')
+  form.method = 'POST'
+  form.action = apiURL(`/v1/excel-match-jobs/${jobID}/download`)
+  form.target = frameName
+  form.style.display = 'none'
+
+  const tokenInput = document.createElement('input')
+  tokenInput.type = 'hidden'
+  tokenInput.name = 'token'
+  tokenInput.value = token
+  form.appendChild(tokenInput)
+
+  document.body.appendChild(form)
+  form.submit()
+  form.remove()
+
+  window.setTimeout(() => {
+    iframe?.remove()
+  }, 5 * 60 * 1000)
 }
 
 function parseJsonText(value: string) {
