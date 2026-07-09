@@ -54,6 +54,18 @@ func (dao *ExcelMatchJobDAO) FindByID(ctx context.Context, id uint) (*model.Exce
 	return &job, err
 }
 
+func (dao *ExcelMatchJobDAO) ListJobs(ctx context.Context, limit int) ([]model.ExcelMatchJob, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 30
+	}
+	var jobs []model.ExcelMatchJob
+	err := dao.db.WithContext(ctx).
+		Order("id DESC").
+		Limit(limit).
+		Find(&jobs).Error
+	return jobs, err
+}
+
 func (dao *ExcelMatchJobDAO) CreateLog(ctx context.Context, log *model.ExcelMatchJobLog) error {
 	now := int(time.Now().Unix())
 	log.CreatedAt = now

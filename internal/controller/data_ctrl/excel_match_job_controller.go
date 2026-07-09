@@ -196,6 +196,22 @@ func (ctrl *ExcelMatchJobController) DeleteScheme(c *gin.Context) {
 	c.JSON(200, msg.SuccessResponseStr("删除 Excel 匹配方案成功"))
 }
 
+func (ctrl *ExcelMatchJobController) ListJobs(c *gin.Context) {
+	limit, err := strconv.Atoi(c.DefaultQuery("limit", "30"))
+	if err != nil {
+		c.JSON(400, msg.ErrResponse("无效的 Excel 匹配任务数量", err))
+		return
+	}
+	jobs, err := ctrl.service.ListJobs(c.Request.Context(), limit)
+	if err != nil {
+		c.JSON(500, msg.ErrResponse("查询 Excel 匹配任务列表失败", err))
+		return
+	}
+	c.JSON(200, msg.SuccessResponse("查询 Excel 匹配任务列表成功", &map[string]any{
+		"jobs": jobs,
+	}))
+}
+
 func (ctrl *ExcelMatchJobController) GetJob(c *gin.Context) {
 	id, err := parseUintParam(c, "id")
 	if err != nil {

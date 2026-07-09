@@ -312,16 +312,23 @@ func (s *ExcelMatchJobService) GetJob(ctx context.Context, id uint) (*model.Exce
 	if err != nil {
 		return nil, err
 	}
-	if isExcelMatchJobExpired(matchJob) {
-		_ = os.RemoveAll(matchJob.WorkDir)
-		_ = s.jobDAO.MarkExpired(ctx, matchJob.ID)
-		matchJob.Status = excelMatchStatusExpired
-	}
+	s.refreshExpiredJob(ctx, matchJob)
 	return matchJob, nil
 }
 
 func (s *ExcelMatchJobService) GetJobLogs(ctx context.Context, id uint) ([]model.ExcelMatchJobLog, error) {
 	return s.jobDAO.FindLogsByJobID(ctx, id, 200)
+}
+
+func (s *ExcelMatchJobService) ListJobs(ctx context.Context, limit int) ([]model.ExcelMatchJob, error) {
+	jobs, err := s.jobDAO.ListJobs(ctx, limit)
+	if err != nil {
+		return nil, err
+	}
+	for i := range jobs {
+		s.refreshExpiredJob(ctx, &jobs[i])
+	}
+	return jobs, nil
 }
 
 func (s *ExcelMatchJobService) ListSchemes(ctx context.Context, operation string) ([]ExcelMatchScheme, error) {
@@ -1602,6 +1609,15 @@ func excelUploadSessionFromMeta(meta excelUploadMeta) *ExcelUploadSession {
 
 func isExcelMatchJobExpired(matchJob *model.ExcelMatchJob) bool {
 	return matchJob.ExpiresAt != nil && time.Now().After(matchJob.ExpiresAt.Time)
+}
+
+func (s *ExcelMatchJobService) refreshExpiredJob(ctx context.Context, matchJob *model.ExcelMatchJob) {
+	if !isExcelMatchJobExpired(matchJob) || matchJob.Status == excelMatchStatusExpired {
+		return
+	}
+	_ = os.RemoveAll(matchJob.WorkDir)
+	_ = s.jobDAO.MarkExpired(ctx, matchJob.ID)
+	matchJob.Status = excelMatchStatusExpired
 }
 
 func isPathInside(basePath, targetPath string) bool {

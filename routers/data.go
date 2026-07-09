@@ -114,6 +114,7 @@ func apiData(api *gin.RouterGroup) {
 	excelMatchJobGroup.Use(middleware.AuthJWT())
 	{
 		excelMatchJobCtrl := data_ctrl.NewExcelMatchJobController()
+		excelMatchJobGroup.GET("", excelMatchJobCtrl.ListJobs)
 		excelMatchJobGroup.POST("", excelMatchJobCtrl.CreateJob)
 		excelMatchJobGroup.POST("/preview", excelMatchJobCtrl.Preview)
 		excelMatchJobGroup.POST("/uploads", excelMatchJobCtrl.CreateUploadSession)
