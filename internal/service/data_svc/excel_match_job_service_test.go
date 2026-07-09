@@ -10,11 +10,13 @@ import (
 )
 
 type fakeExcelMatchLookup struct {
-	keys  []string
-	value map[string]string
+	matchFields []string
+	keys        []string
+	value       map[string]string
 }
 
-func (f *fakeExcelMatchLookup) Lookup(ctx context.Context, keys []string, valueField string) (map[string]string, error) {
+func (f *fakeExcelMatchLookup) Lookup(ctx context.Context, matchField string, keys []string, valueField string) (map[string]string, error) {
+	f.matchFields = append(f.matchFields, matchField)
 	f.keys = append(f.keys, keys...)
 	return f.value, nil
 }
@@ -147,6 +149,80 @@ func TestProcessExcelMatchFileFiltersBeforeLookupAndKeepsAllRows(t *testing.T) {
 		{"杭州恒隆", "B001", "10", "100.50"},
 		{"上海前滩", "B002", "20"},
 		{"杭州恒隆", "B003", "30"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("result rows = %#v, want %#v", got, want)
+	}
+}
+
+func TestProcessExcelMatchFileUsesConfiguredDBMatchField(t *testing.T) {
+	dir := t.TempDir()
+	inputPath := filepath.Join(dir, "source.xlsx")
+	outputPath := filepath.Join(dir, "result.xlsx")
+
+	f := excelize.NewFile()
+	sheet := f.GetSheetName(0)
+	rows := [][]interface{}{
+		{"店铺名称", "外部订单编号"},
+		{"杭州恒隆", "EXT001"},
+	}
+	for i, row := range rows {
+		cell, err := excelize.CoordinatesToCellName(1, i+1)
+		if err != nil {
+			t.Fatalf("CoordinatesToCellName failed: %v", err)
+		}
+		if err := f.SetSheetRow(sheet, cell, &row); err != nil {
+			t.Fatalf("SetSheetRow failed: %v", err)
+		}
+	}
+	if err := f.SaveAs(inputPath); err != nil {
+		t.Fatalf("SaveAs failed: %v", err)
+	}
+
+	lookup := &fakeExcelMatchLookup{
+		value: map[string]string{"EXT001": "BOJUN001"},
+	}
+	cfg, err := normalizeExcelMatchConfig(ExcelMatchConfig{
+		SheetName:        "Sheet1",
+		Filters:          []ExcelMatchFilter{{Column: "店铺名称", Op: "eq", Value: "杭州恒隆"}},
+		MatchExcelColumn: "外部订单编号",
+		DBTemplate:       "bojun_retail_order",
+		DBMatchField:     "otherdocno",
+		DBValueField:     "docno",
+		OutputColumnName: "伯俊单号",
+	})
+	if err != nil {
+		t.Fatalf("normalizeExcelMatchConfig failed: %v", err)
+	}
+
+	stats, err := processExcelMatchFile(context.Background(), inputPath, outputPath, cfg, lookup)
+	if err != nil {
+		t.Fatalf("processExcelMatchFile failed: %v", err)
+	}
+
+	if !reflect.DeepEqual(lookup.matchFields, []string{"otherdocno"}) {
+		t.Fatalf("lookup match fields = %#v, want otherdocno", lookup.matchFields)
+	}
+	if !reflect.DeepEqual(lookup.keys, []string{"EXT001"}) {
+		t.Fatalf("lookup keys = %#v, want EXT001", lookup.keys)
+	}
+	if stats.MatchedRows != 1 || stats.UnmatchedRows != 0 {
+		t.Fatalf("stats = %+v, want one matched row", stats)
+	}
+
+	out, err := excelize.OpenFile(outputPath)
+	if err != nil {
+		t.Fatalf("OpenFile result failed: %v", err)
+	}
+	defer func() { _ = out.Close() }()
+
+	got, err := out.GetRows("Result_1")
+	if err != nil {
+		t.Fatalf("GetRows result failed: %v", err)
+	}
+	want := [][]string{
+		{"店铺名称", "外部订单编号", "伯俊单号"},
+		{"杭州恒隆", "EXT001", "BOJUN001"},
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("result rows = %#v, want %#v", got, want)

@@ -48,9 +48,11 @@ var allowedBojunValueFields = map[string]struct{}{
 	"billdate":             {},
 	"c_store_code":         {},
 	"c_store_name":         {},
+	"docno":                {},
 	"retailbilltype":       {},
 	"order_type_code":      {},
 	"order_type_name":      {},
+	"otherdocno":           {},
 	"tot_amt_actual":       {},
 	"tot_amt_list":         {},
 	"tot_qty":              {},
@@ -113,7 +115,7 @@ type ExcelMatchConfig struct {
 type ExcelMatchJobStats = data_dao.ExcelMatchJobStats
 
 type ExcelMatchLookup interface {
-	Lookup(ctx context.Context, keys []string, valueField string) (map[string]string, error)
+	Lookup(ctx context.Context, matchField string, keys []string, valueField string) (map[string]string, error)
 }
 
 type ExcelImportUpdater interface {
@@ -125,8 +127,8 @@ type bojunExcelMatchLookup struct {
 	dao *data_dao.ExcelMatchJobDAO
 }
 
-func (l bojunExcelMatchLookup) Lookup(ctx context.Context, keys []string, valueField string) (map[string]string, error) {
-	return l.dao.FindBojunFieldByDocNos(ctx, keys, valueField)
+func (l bojunExcelMatchLookup) Lookup(ctx context.Context, matchField string, keys []string, valueField string) (map[string]string, error) {
+	return l.dao.FindBojunFieldByKeys(ctx, matchField, keys, valueField)
 }
 
 type bojunExcelImportUpdater struct {
@@ -385,11 +387,11 @@ func normalizeExcelExportConfig(config ExcelMatchConfig) (ExcelMatchConfig, erro
 	if config.DBMatchField == "" {
 		config.DBMatchField = "docno"
 	}
-	if config.DBMatchField != "docno" {
-		return config, errors.New("伯俊零售单仅支持按 docno 匹配")
+	if _, ok := allowedBojunImportMatchFields[config.DBMatchField]; !ok {
+		return config, fmt.Errorf("伯俊匹配字段不在白名单: %s", config.DBMatchField)
 	}
 	if _, ok := allowedBojunValueFields[config.DBValueField]; !ok {
-		return config, fmt.Errorf("伯俊写回字段不在白名单: %s", config.DBValueField)
+		return config, fmt.Errorf("伯俊取值字段不在白名单: %s", config.DBValueField)
 	}
 	if config.OutputColumnName == "" {
 		return config, errors.New("输出列名不能为空")
@@ -548,7 +550,7 @@ func processExcelMatchFileWithProgress(
 		matches := map[string]string{}
 		if len(lookupKeys) > 0 {
 			var err error
-			matches, err = lookup.Lookup(ctx, lookupKeys, config.DBValueField)
+			matches, err = lookup.Lookup(ctx, config.DBMatchField, lookupKeys, config.DBValueField)
 			if err != nil {
 				return err
 			}

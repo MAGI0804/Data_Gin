@@ -175,32 +175,40 @@ type ExcelMatchJobStats struct {
 	UnmatchedRows int
 }
 
-func (dao *ExcelMatchJobDAO) FindBojunFieldByDocNos(ctx context.Context, docNos []string, valueField string) (map[string]string, error) {
-	result := make(map[string]string, len(docNos))
-	if len(docNos) == 0 {
+func (dao *ExcelMatchJobDAO) FindBojunFieldByKeys(ctx context.Context, matchField string, keys []string, valueField string) (map[string]string, error) {
+	result := make(map[string]string, len(keys))
+	if len(keys) == 0 {
 		return result, nil
+	}
+	if !isAllowedBojunExcelField(matchField) {
+		return nil, fmt.Errorf("bojun match field is not allowed: %s", matchField)
 	}
 	if !isAllowedBojunExcelField(valueField) {
 		return nil, fmt.Errorf("bojun field is not allowed: %s", valueField)
 	}
 
-	query := fmt.Sprintf("SELECT docno, CAST(%s AS CHAR) AS matched_value FROM bojun_retail_orders WHERE docno IN ?", valueField)
-	rows, err := dao.db.WithContext(ctx).Raw(query, docNos).Rows()
+	query := fmt.Sprintf(
+		"SELECT CAST(%s AS CHAR) AS match_key, CAST(%s AS CHAR) AS matched_value FROM bojun_retail_orders WHERE %s IN ?",
+		matchField,
+		valueField,
+		matchField,
+	)
+	rows, err := dao.db.WithContext(ctx).Raw(query, keys).Rows()
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
 	for rows.Next() {
-		var docNo, value sql.NullString
-		if err := rows.Scan(&docNo, &value); err != nil {
+		var key, value sql.NullString
+		if err := rows.Scan(&key, &value); err != nil {
 			return nil, err
 		}
-		if docNo.Valid {
+		if key.Valid {
 			if value.Valid {
-				result[docNo.String] = value.String
+				result[key.String] = value.String
 			} else {
-				result[docNo.String] = ""
+				result[key.String] = ""
 			}
 		}
 	}
