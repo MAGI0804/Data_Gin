@@ -2,6 +2,8 @@ package data_svc
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -33,11 +35,17 @@ const (
 
 	excelMatchRetention      = 24 * time.Hour
 	excelMatchRootDirName    = "data-warehouse-excel-jobs"
+	excelUploadRootDirName   = "data-warehouse-excel-uploads"
 	excelMatchSourceFileName = "source.xlsx"
 	excelMatchResultFileName = "result.xlsx"
+	excelUploadChunksDirName = "chunks"
+	excelUploadMetaFileName  = "meta.json"
+	excelUploadMergedFile    = "source.xlsx"
 	excelMaxRowsPerSheet     = 1048576
 	defaultExcelMatchBatch   = 1000
 	maxBufferedExcelRows     = 5000
+	maxExcelUploadChunks     = 10000
+	maxExcelUploadChunkBytes = 8 * 1024 * 1024
 	defaultExcelSheetName    = "Sheet1"
 	defaultExcelResultSheet  = "Result_1"
 	bojunRetailOrderTemplate = "bojun_retail_order"
@@ -114,6 +122,25 @@ type ExcelMatchConfig struct {
 	ConfirmWrite     bool               `json:"confirmWrite"`
 }
 
+type ExcelUploadSession struct {
+	UploadID       string `json:"uploadId"`
+	FileName       string `json:"fileName"`
+	TotalChunks    int    `json:"totalChunks"`
+	UploadedChunks int    `json:"uploadedChunks"`
+	Complete       bool   `json:"complete"`
+	ExpiresAt      string `json:"expiresAt"`
+}
+
+type excelUploadMeta struct {
+	UploadID       string    `json:"uploadId"`
+	FileName       string    `json:"fileName"`
+	TotalChunks    int       `json:"totalChunks"`
+	UploadedChunks int       `json:"uploadedChunks"`
+	Complete       bool      `json:"complete"`
+	CreatedAt      time.Time `json:"createdAt"`
+	ExpiresAt      time.Time `json:"expiresAt"`
+}
+
 type ExcelMatchPreviewResult struct {
 	Config      ExcelMatchConfig          `json:"config"`
 	Stats       ExcelMatchJobStats        `json:"stats"`
@@ -163,6 +190,11 @@ func (u bojunExcelImportUpdater) UpdateByKey(ctx context.Context, matchField, ke
 	return u.dao.UpdateBojunFieldByKey(ctx, matchField, key, writeField, value)
 }
 
+type excelJobSource struct {
+	fileName string
+	save     func(dst string) error
+}
+
 func (s *ExcelMatchJobService) CreateJob(ctx context.Context, fileHeader *multipart.FileHeader, rawConfig string) (*model.ExcelMatchJob, error) {
 	if fileHeader == nil {
 		return nil, errors.New("上传文件不能为空")
@@ -170,7 +202,28 @@ func (s *ExcelMatchJobService) CreateJob(ctx context.Context, fileHeader *multip
 	if strings.ToLower(filepath.Ext(fileHeader.Filename)) != ".xlsx" {
 		return nil, errors.New("仅支持 .xlsx 文件")
 	}
+	return s.createJobFromSource(ctx, excelJobSource{
+		fileName: filepath.Base(fileHeader.Filename),
+		save: func(dst string) error {
+			return saveUploadedExcel(fileHeader, dst)
+		},
+	}, rawConfig)
+}
 
+func (s *ExcelMatchJobService) CreateJobFromUpload(ctx context.Context, uploadID, rawConfig string) (*model.ExcelMatchJob, error) {
+	meta, sourcePath, err := s.requireCompletedUpload(uploadID)
+	if err != nil {
+		return nil, err
+	}
+	return s.createJobFromSource(ctx, excelJobSource{
+		fileName: meta.FileName,
+		save: func(dst string) error {
+			return copyFile(sourcePath, dst)
+		},
+	}, rawConfig)
+}
+
+func (s *ExcelMatchJobService) createJobFromSource(ctx context.Context, source excelJobSource, rawConfig string) (*model.ExcelMatchJob, error) {
 	var config ExcelMatchConfig
 	if err := json.Unmarshal([]byte(rawConfig), &config); err != nil {
 		return nil, fmt.Errorf("解析匹配配置失败: %w", err)
@@ -186,7 +239,7 @@ func (s *ExcelMatchJobService) CreateJob(ctx context.Context, fileHeader *multip
 
 	expiresAt := time.Now().Add(excelMatchRetention)
 	matchJob := &model.ExcelMatchJob{
-		SourceFileName: filepath.Base(fileHeader.Filename),
+		SourceFileName: filepath.Base(source.fileName),
 		ConfigJSON:     string(configBytes),
 		Status:         excelMatchStatusPending,
 		ExpiresAt:      &model.TimeNormal{Time: expiresAt},
@@ -208,7 +261,7 @@ func (s *ExcelMatchJobService) CreateJob(ctx context.Context, fileHeader *multip
 		s.logJob(ctx, matchJob.ID, "error", "创建任务临时目录失败", map[string]interface{}{"error": err.Error()})
 		return nil, err
 	}
-	if err := saveUploadedExcel(fileHeader, sourcePath); err != nil {
+	if err := source.save(sourcePath); err != nil {
 		_ = s.jobDAO.MarkFailed(ctx, matchJob.ID, err.Error(), expiresAt)
 		_ = os.RemoveAll(workDir)
 		s.logJob(ctx, matchJob.ID, "error", "保存上传Excel失败", map[string]interface{}{"error": err.Error()})
@@ -261,6 +314,103 @@ func (s *ExcelMatchJobService) GetJobLogs(ctx context.Context, id uint) ([]model
 	return s.jobDAO.FindLogsByJobID(ctx, id, 200)
 }
 
+func (s *ExcelMatchJobService) CreateUploadSession(ctx context.Context, fileName string, totalChunks int) (*ExcelUploadSession, error) {
+	if strings.ToLower(filepath.Ext(fileName)) != ".xlsx" {
+		return nil, errors.New("仅支持 .xlsx 文件")
+	}
+	if totalChunks <= 0 || totalChunks > maxExcelUploadChunks {
+		return nil, fmt.Errorf("分片数量必须在 1 到 %d 之间", maxExcelUploadChunks)
+	}
+	uploadID, err := newExcelUploadID()
+	if err != nil {
+		return nil, err
+	}
+	now := time.Now()
+	meta := excelUploadMeta{
+		UploadID:       uploadID,
+		FileName:       filepath.Base(fileName),
+		TotalChunks:    totalChunks,
+		UploadedChunks: 0,
+		Complete:       false,
+		CreatedAt:      now,
+		ExpiresAt:      now.Add(excelMatchRetention),
+	}
+	if err := os.MkdirAll(excelUploadChunksDir(uploadID), 0700); err != nil {
+		return nil, err
+	}
+	if err := writeExcelUploadMeta(uploadID, meta); err != nil {
+		_ = os.RemoveAll(excelUploadDir(uploadID))
+		return nil, err
+	}
+	_ = ctx
+	return excelUploadSessionFromMeta(meta), nil
+}
+
+func (s *ExcelMatchJobService) SaveUploadChunk(ctx context.Context, uploadID string, index int, totalChunks int, fileHeader *multipart.FileHeader) (*ExcelUploadSession, error) {
+	if fileHeader == nil {
+		return nil, errors.New("分片文件不能为空")
+	}
+	if fileHeader.Size > maxExcelUploadChunkBytes {
+		return nil, fmt.Errorf("单个分片不能超过 %d MB", maxExcelUploadChunkBytes/(1024*1024))
+	}
+	meta, err := readExcelUploadMeta(uploadID)
+	if err != nil {
+		return nil, err
+	}
+	if time.Now().After(meta.ExpiresAt) {
+		_ = os.RemoveAll(excelUploadDir(uploadID))
+		return nil, errors.New("上传会话已过期")
+	}
+	if totalChunks != meta.TotalChunks {
+		return nil, errors.New("分片总数与上传会话不一致")
+	}
+	if index < 0 || index >= meta.TotalChunks {
+		return nil, errors.New("分片序号超出范围")
+	}
+
+	dst := filepath.Join(excelUploadChunksDir(uploadID), excelUploadChunkName(index))
+	if !isPathInside(excelUploadDir(uploadID), dst) {
+		return nil, errors.New("分片路径非法")
+	}
+	if err := saveUploadedExcel(fileHeader, dst); err != nil {
+		return nil, err
+	}
+	uploaded, err := countExcelUploadChunks(uploadID, meta.TotalChunks)
+	if err != nil {
+		return nil, err
+	}
+	meta.UploadedChunks = uploaded
+	if err := writeExcelUploadMeta(uploadID, meta); err != nil {
+		return nil, err
+	}
+	_ = ctx
+	return excelUploadSessionFromMeta(meta), nil
+}
+
+func (s *ExcelMatchJobService) CompleteUpload(ctx context.Context, uploadID string, totalChunks int) (*ExcelUploadSession, error) {
+	meta, err := readExcelUploadMeta(uploadID)
+	if err != nil {
+		return nil, err
+	}
+	if time.Now().After(meta.ExpiresAt) {
+		_ = os.RemoveAll(excelUploadDir(uploadID))
+		return nil, errors.New("上传会话已过期")
+	}
+	if totalChunks != meta.TotalChunks {
+		return nil, errors.New("分片总数与上传会话不一致")
+	}
+	if err := assembleExcelUpload(uploadID, meta.TotalChunks); err != nil {
+		return nil, err
+	}
+	meta.Complete = true
+	meta.UploadedChunks = meta.TotalChunks
+	if err := writeExcelUploadMeta(uploadID, meta); err != nil {
+		return nil, err
+	}
+	_ = ctx
+	return excelUploadSessionFromMeta(meta), nil
+}
+
 func (s *ExcelMatchJobService) Preview(ctx context.Context, fileHeader *multipart.FileHeader, rawConfig string) (*ExcelMatchPreviewResult, error) {
 	if fileHeader == nil {
 		return nil, errors.New("上传文件不能为空")
@@ -285,6 +435,30 @@ func (s *ExcelMatchJobService) Preview(ctx context.Context, fileHeader *multipar
 	defer src.Close()
 
 	input, err := excelize.OpenReader(src)
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = input.Close() }()
+
+	lookup := bojunExcelMatchLookup{dao: s.jobDAO}
+	return processExcelMatchPreview(ctx, input, normalizedConfig, lookup, defaultExcelPreviewRows, defaultExcelPreviewItems)
+}
+
+func (s *ExcelMatchJobService) PreviewUploaded(ctx context.Context, uploadID, rawConfig string) (*ExcelMatchPreviewResult, error) {
+	_, sourcePath, err := s.requireCompletedUpload(uploadID)
+	if err != nil {
+		return nil, err
+	}
+	var config ExcelMatchConfig
+	if err := json.Unmarshal([]byte(rawConfig), &config); err != nil {
+		return nil, fmt.Errorf("解析匹配配置失败: %w", err)
+	}
+	config.Operation = excelOperationExportMatch
+	normalizedConfig, err := normalizeExcelMatchConfig(config)
+	if err != nil {
+		return nil, err
+	}
+	input, err := excelize.OpenFile(sourcePath)
 	if err != nil {
 		return nil, err
 	}
@@ -375,7 +549,54 @@ func (s *ExcelMatchJobService) CleanupExpiredJobs(ctx context.Context) error {
 		}
 		_ = s.jobDAO.MarkExpired(ctx, matchJob.ID)
 	}
+	return s.CleanupExpiredUploads(ctx)
+}
+
+func (s *ExcelMatchJobService) CleanupExpiredUploads(ctx context.Context) error {
+	root := excelUploadRootDir()
+	entries, err := os.ReadDir(root)
+	if err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	now := time.Now()
+	for _, entry := range entries {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		if !entry.IsDir() || !isValidExcelUploadID(entry.Name()) {
+			continue
+		}
+		meta, err := readExcelUploadMeta(entry.Name())
+		if err != nil || now.After(meta.ExpiresAt) {
+			_ = os.RemoveAll(excelUploadDir(entry.Name()))
+		}
+	}
 	return nil
+}
+
+func (s *ExcelMatchJobService) requireCompletedUpload(uploadID string) (excelUploadMeta, string, error) {
+	meta, err := readExcelUploadMeta(uploadID)
+	if err != nil {
+		return excelUploadMeta{}, "", err
+	}
+	if time.Now().After(meta.ExpiresAt) {
+		_ = os.RemoveAll(excelUploadDir(uploadID))
+		return excelUploadMeta{}, "", errors.New("上传会话已过期")
+	}
+	if !meta.Complete {
+		return excelUploadMeta{}, "", errors.New("上传会话尚未合并完成")
+	}
+	sourcePath := filepath.Join(excelUploadDir(uploadID), excelUploadMergedFile)
+	if !isPathInside(excelUploadDir(uploadID), sourcePath) {
+		return excelUploadMeta{}, "", errors.New("上传文件路径非法")
+	}
+	if _, err := os.Stat(sourcePath); err != nil {
+		return excelUploadMeta{}, "", err
+	}
+	return meta, sourcePath, nil
 }
 
 func normalizeExcelMatchConfig(config ExcelMatchConfig) (ExcelMatchConfig, error) {
@@ -1122,8 +1343,155 @@ func saveUploadedExcel(fileHeader *multipart.FileHeader, dst string) error {
 	return err
 }
 
+func copyFile(srcPath, dstPath string) error {
+	src, err := os.Open(srcPath)
+	if err != nil {
+		return err
+	}
+	defer src.Close()
+
+	dst, err := os.OpenFile(dstPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
+	if err != nil {
+		return err
+	}
+	defer dst.Close()
+	_, err = io.Copy(dst, src)
+	return err
+}
+
 func excelMatchJobDir(id uint) string {
 	return filepath.Join(os.TempDir(), excelMatchRootDirName, strconv.FormatUint(uint64(id), 10))
+}
+
+func excelUploadRootDir() string {
+	return filepath.Join(os.TempDir(), excelUploadRootDirName)
+}
+
+func excelUploadDir(uploadID string) string {
+	return filepath.Join(excelUploadRootDir(), uploadID)
+}
+
+func excelUploadChunksDir(uploadID string) string {
+	return filepath.Join(excelUploadDir(uploadID), excelUploadChunksDirName)
+}
+
+func excelUploadMetaPath(uploadID string) string {
+	return filepath.Join(excelUploadDir(uploadID), excelUploadMetaFileName)
+}
+
+func excelUploadChunkName(index int) string {
+	return fmt.Sprintf("%06d.part", index)
+}
+
+func newExcelUploadID() (string, error) {
+	buf := make([]byte, 16)
+	if _, err := rand.Read(buf); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(buf), nil
+}
+
+func isValidExcelUploadID(uploadID string) bool {
+	if len(uploadID) != 32 {
+		return false
+	}
+	for _, ch := range uploadID {
+		if (ch < '0' || ch > '9') && (ch < 'a' || ch > 'f') {
+			return false
+		}
+	}
+	return true
+}
+
+func writeExcelUploadMeta(uploadID string, meta excelUploadMeta) error {
+	if !isValidExcelUploadID(uploadID) || uploadID != meta.UploadID {
+		return errors.New("上传会话ID非法")
+	}
+	data, err := json.Marshal(meta)
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(excelUploadMetaPath(uploadID), data, 0600)
+}
+
+func readExcelUploadMeta(uploadID string) (excelUploadMeta, error) {
+	if !isValidExcelUploadID(uploadID) {
+		return excelUploadMeta{}, errors.New("上传会话ID非法")
+	}
+	metaPath := excelUploadMetaPath(uploadID)
+	if !isPathInside(excelUploadDir(uploadID), metaPath) {
+		return excelUploadMeta{}, errors.New("上传会话路径非法")
+	}
+	data, err := os.ReadFile(metaPath)
+	if err != nil {
+		return excelUploadMeta{}, err
+	}
+	var meta excelUploadMeta
+	if err := json.Unmarshal(data, &meta); err != nil {
+		return excelUploadMeta{}, err
+	}
+	if meta.UploadID != uploadID {
+		return excelUploadMeta{}, errors.New("上传会话元数据不一致")
+	}
+	return meta, nil
+}
+
+func countExcelUploadChunks(uploadID string, totalChunks int) (int, error) {
+	count := 0
+	for i := 0; i < totalChunks; i++ {
+		chunkPath := filepath.Join(excelUploadChunksDir(uploadID), excelUploadChunkName(i))
+		if !isPathInside(excelUploadDir(uploadID), chunkPath) {
+			return 0, errors.New("分片路径非法")
+		}
+		if _, err := os.Stat(chunkPath); err == nil {
+			count++
+		} else if !os.IsNotExist(err) {
+			return 0, err
+		}
+	}
+	return count, nil
+}
+
+func assembleExcelUpload(uploadID string, totalChunks int) error {
+	mergedPath := filepath.Join(excelUploadDir(uploadID), excelUploadMergedFile)
+	if !isPathInside(excelUploadDir(uploadID), mergedPath) {
+		return errors.New("合并文件路径非法")
+	}
+	out, err := os.OpenFile(mergedPath, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0600)
+	if err != nil {
+		return err
+	}
+	defer out.Close()
+
+	for i := 0; i < totalChunks; i++ {
+		chunkPath := filepath.Join(excelUploadChunksDir(uploadID), excelUploadChunkName(i))
+		if !isPathInside(excelUploadDir(uploadID), chunkPath) {
+			return errors.New("分片路径非法")
+		}
+		in, err := os.Open(chunkPath)
+		if err != nil {
+			return fmt.Errorf("读取分片 %d 失败: %w", i, err)
+		}
+		if _, err := io.Copy(out, in); err != nil {
+			_ = in.Close()
+			return err
+		}
+		if err := in.Close(); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func excelUploadSessionFromMeta(meta excelUploadMeta) *ExcelUploadSession {
+	return &ExcelUploadSession{
+		UploadID:       meta.UploadID,
+		FileName:       meta.FileName,
+		TotalChunks:    meta.TotalChunks,
+		UploadedChunks: meta.UploadedChunks,
+		Complete:       meta.Complete,
+		ExpiresAt:      meta.ExpiresAt.Format(time.RFC3339),
+	}
 }
 
 func isExcelMatchJobExpired(matchJob *model.ExcelMatchJob) bool {

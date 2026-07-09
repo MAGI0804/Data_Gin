@@ -7,7 +7,17 @@ import (
 
 	"gin-biz-web-api/internal/msg"
 	"gin-biz-web-api/internal/service/data_svc"
+	"gin-biz-web-api/model"
 )
+
+type excelUploadSessionRequest struct {
+	FileName    string `json:"fileName"`
+	TotalChunks int    `json:"totalChunks"`
+}
+
+type excelUploadCompleteRequest struct {
+	TotalChunks int `json:"totalChunks"`
+}
 
 type ExcelMatchJobController struct {
 	service *data_svc.ExcelMatchJobService
@@ -21,17 +31,22 @@ func NewExcelMatchJobController() *ExcelMatchJobController {
 
 func (ctrl *ExcelMatchJobController) CreateJob(c *gin.Context) {
 	fileHeader, err := c.FormFile("file")
-	if err != nil {
-		c.JSON(400, msg.ErrResponse("读取 Excel 文件失败", err))
-		return
-	}
 	config := c.PostForm("config")
 	if config == "" {
 		c.JSON(400, msg.ErrResponseStr("匹配配置不能为空"))
 		return
 	}
 
-	matchJob, err := ctrl.service.CreateJob(c.Request.Context(), fileHeader, config)
+	uploadID := c.PostForm("uploadId")
+	var matchJob *model.ExcelMatchJob
+	if err == nil {
+		matchJob, err = ctrl.service.CreateJob(c.Request.Context(), fileHeader, config)
+	} else if uploadID != "" {
+		matchJob, err = ctrl.service.CreateJobFromUpload(c.Request.Context(), uploadID, config)
+	} else {
+		c.JSON(400, msg.ErrResponse("读取 Excel 文件失败", err))
+		return
+	}
 	if err != nil {
 		c.JSON(400, msg.ErrResponse("创建 Excel 匹配任务失败", err))
 		return
@@ -47,17 +62,22 @@ func (ctrl *ExcelMatchJobController) CreateJob(c *gin.Context) {
 
 func (ctrl *ExcelMatchJobController) Preview(c *gin.Context) {
 	fileHeader, err := c.FormFile("file")
-	if err != nil {
-		c.JSON(400, msg.ErrResponse("读取 Excel 文件失败", err))
-		return
-	}
 	config := c.PostForm("config")
 	if config == "" {
 		c.JSON(400, msg.ErrResponseStr("匹配配置不能为空"))
 		return
 	}
 
-	preview, err := ctrl.service.Preview(c.Request.Context(), fileHeader, config)
+	uploadID := c.PostForm("uploadId")
+	var preview *data_svc.ExcelMatchPreviewResult
+	if err == nil {
+		preview, err = ctrl.service.Preview(c.Request.Context(), fileHeader, config)
+	} else if uploadID != "" {
+		preview, err = ctrl.service.PreviewUploaded(c.Request.Context(), uploadID, config)
+	} else {
+		c.JSON(400, msg.ErrResponse("读取 Excel 文件失败", err))
+		return
+	}
 	if err != nil {
 		c.JSON(400, msg.ErrResponse("预览 Excel 匹配失败", err))
 		return
@@ -65,6 +85,67 @@ func (ctrl *ExcelMatchJobController) Preview(c *gin.Context) {
 
 	c.JSON(200, msg.SuccessResponse("预览 Excel 匹配成功", &map[string]any{
 		"preview": preview,
+	}))
+}
+
+func (ctrl *ExcelMatchJobController) CreateUploadSession(c *gin.Context) {
+	var req excelUploadSessionRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(400, msg.ErrResponse("读取上传会话参数失败", err))
+		return
+	}
+	session, err := ctrl.service.CreateUploadSession(c.Request.Context(), req.FileName, req.TotalChunks)
+	if err != nil {
+		c.JSON(400, msg.ErrResponse("创建 Excel 分片上传会话失败", err))
+		return
+	}
+	c.JSON(200, msg.SuccessResponse("Excel 分片上传会话已创建", &map[string]any{
+		"upload": session,
+	}))
+}
+
+func (ctrl *ExcelMatchJobController) UploadChunk(c *gin.Context) {
+	uploadID := c.Param("upload_id")
+	index, err := strconv.Atoi(c.PostForm("index"))
+	if err != nil {
+		c.JSON(400, msg.ErrResponse("无效的分片序号", err))
+		return
+	}
+	totalChunks, err := strconv.Atoi(c.PostForm("totalChunks"))
+	if err != nil {
+		c.JSON(400, msg.ErrResponse("无效的分片总数", err))
+		return
+	}
+	fileHeader, err := c.FormFile("chunk")
+	if err != nil {
+		c.JSON(400, msg.ErrResponse("读取 Excel 分片失败", err))
+		return
+	}
+
+	session, err := ctrl.service.SaveUploadChunk(c.Request.Context(), uploadID, index, totalChunks, fileHeader)
+	if err != nil {
+		c.JSON(400, msg.ErrResponse("保存 Excel 分片失败", err))
+		return
+	}
+	c.JSON(200, msg.SuccessResponse("Excel 分片已保存", &map[string]any{
+		"upload": session,
+	}))
+}
+
+func (ctrl *ExcelMatchJobController) CompleteUpload(c *gin.Context) {
+	uploadID := c.Param("upload_id")
+	var req excelUploadCompleteRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(400, msg.ErrResponse("读取上传合并参数失败", err))
+		return
+	}
+	session, err := ctrl.service.CompleteUpload(c.Request.Context(), uploadID, req.TotalChunks)
+	if err != nil {
+		c.JSON(400, msg.ErrResponse("合并 Excel 分片失败", err))
+		return
+	}
+	c.JSON(200, msg.SuccessResponse("Excel 分片已合并", &map[string]any{
+		"upload": session,
 	}))
 }
 

@@ -2,9 +2,11 @@ package data_svc
 
 import (
 	"context"
+	"os"
 	"path/filepath"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/xuri/excelize/v2"
 )
@@ -299,6 +301,54 @@ func TestProcessExcelMatchPreviewReturnsSamplesWithoutWritingOutput(t *testing.T
 	}
 	if _, err := excelize.OpenFile(outputPath); err == nil {
 		t.Fatal("preview unexpectedly wrote result.xlsx")
+	}
+}
+
+func TestExcelUploadAssemblesChunksAndRejectsInvalidID(t *testing.T) {
+	uploadID := "0123456789abcdef0123456789abcdef"
+	defer func() { _ = os.RemoveAll(excelUploadDir(uploadID)) }()
+
+	meta := excelUploadMeta{
+		UploadID:       uploadID,
+		FileName:       "source.xlsx",
+		TotalChunks:    2,
+		UploadedChunks: 0,
+		Complete:       false,
+		CreatedAt:      time.Now(),
+		ExpiresAt:      time.Now().Add(time.Hour),
+	}
+	if err := os.MkdirAll(excelUploadChunksDir(uploadID), 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := writeExcelUploadMeta(uploadID, meta); err != nil {
+		t.Fatalf("writeExcelUploadMeta failed: %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(excelUploadChunksDir(uploadID), excelUploadChunkName(0)), []byte("hello "), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(excelUploadChunksDir(uploadID), excelUploadChunkName(1)), []byte("world"), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	count, err := countExcelUploadChunks(uploadID, 2)
+	if err != nil {
+		t.Fatalf("countExcelUploadChunks failed: %v", err)
+	}
+	if count != 2 {
+		t.Fatalf("count = %d, want 2", count)
+	}
+	if err := assembleExcelUpload(uploadID, 2); err != nil {
+		t.Fatalf("assembleExcelUpload failed: %v", err)
+	}
+	got, err := os.ReadFile(filepath.Join(excelUploadDir(uploadID), excelUploadMergedFile))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if string(got) != "hello world" {
+		t.Fatalf("merged content = %q, want hello world", string(got))
+	}
+	if _, err := readExcelUploadMeta("../bad"); err == nil {
+		t.Fatal("readExcelUploadMeta accepted invalid upload id")
 	}
 }
 
