@@ -194,10 +194,41 @@ type ExcelExportSchemeConfig = {
   batchSize: string
 }
 
-type ExcelExportScheme = {
-  id: string
+type ExcelImportSchemeConfig = {
+  sheetName: string
+  tableName: string
+  dbMatchField: string
+  matchExcelColumn: string
+  dbWriteField: string
+  writeExcelColumn: string
+  batchSize: string
+}
+
+type ExcelMatchSchemeConfig = {
+  operation?: string
+  sheetName?: string
+  filters?: Array<{ column?: string; op?: string; value?: string }>
+  matchExcelColumn?: string
+  dbTemplate?: string
+  dbMatchField?: string
+  dbValueField?: string
+  tableName?: string
+  dbWriteField?: string
+  writeExcelColumn?: string
+  outputColumnName?: string
+  batchSize?: number
+  dryRun?: boolean
+  confirmWrite?: boolean
+}
+
+type ExcelMatchScheme = {
+  id: number
   name: string
-  config: ExcelExportSchemeConfig
+  operation: string
+  config: ExcelMatchSchemeConfig
+  config_json: string
+  created_at: number
+  updated_at: number
 }
 
 type ExcelMatchPreviewStats = {
@@ -252,7 +283,6 @@ const bojunValueFieldOptions = [
 ]
 
 const excelChunkSize = 4 * 1024 * 1024
-const excelExportSchemesStorageKey = 'data_warehouse_excel_export_schemes'
 
 const defaultExcelExportScheme: ExcelExportSchemeConfig = {
   sheetName: 'Sheet1',
@@ -262,6 +292,16 @@ const defaultExcelExportScheme: ExcelExportSchemeConfig = {
   dbMatchField: 'matched_docno',
   dbValueField: 'c_store_name',
   outputColumnName: '线下店名称',
+  batchSize: '1000',
+}
+
+const defaultExcelImportScheme: ExcelImportSchemeConfig = {
+  sheetName: 'Sheet1',
+  tableName: 'bojun_retail_orders',
+  dbMatchField: 'docno',
+  matchExcelColumn: '外部订单编号',
+  dbWriteField: 'matched_docno',
+  writeExcelColumn: '订单号',
   batchSize: '1000',
 }
 
@@ -1118,9 +1158,12 @@ function ExcelMatchView({
   const [previewResult, setPreviewResult] = useState<ExcelMatchPreviewResult | null>(null)
   const [uploadRefs, setUploadRefs] = useState<Partial<Record<ExcelUploadSlot, ExcelUploadRef>>>({})
   const [uploadProgress, setUploadProgress] = useState('')
-  const [exportSchemes, setExportSchemes] = useState<ExcelExportScheme[]>(() => loadExcelExportSchemes())
+  const [exportSchemes, setExportSchemes] = useState<ExcelMatchScheme[]>([])
+  const [importSchemes, setImportSchemes] = useState<ExcelMatchScheme[]>([])
   const [exportDefaults, setExportDefaults] = useState<ExcelExportSchemeConfig>(defaultExcelExportScheme)
+  const [importDefaults, setImportDefaults] = useState<ExcelImportSchemeConfig>(defaultExcelImportScheme)
   const [exportFormKey, setExportFormKey] = useState(0)
+  const [importFormKey, setImportFormKey] = useState(0)
 
   function applyJobResult(result: ApiResult) {
     const nextJob = readObject<ExcelMatchJob>(result, 'job')
@@ -1156,16 +1199,18 @@ function ExcelMatchView({
     }
   }
 
-  function readExportSchemeConfig(form: FormData): ExcelExportSchemeConfig {
+  function buildImportConfig(form: FormData, confirmWrite: boolean) {
     return {
+      operation: 'import_update',
       sheetName: formValue(form, 'sheetName').trim() || 'Sheet1',
-      filterColumn: formValue(form, 'filterColumn').trim(),
-      filterValue: formValue(form, 'filterValue').trim(),
-      matchExcelColumn: formValue(form, 'matchExcelColumn').trim(),
+      tableName: formValue(form, 'tableName').trim(),
       dbMatchField: formValue(form, 'dbMatchField').trim(),
-      dbValueField: formValue(form, 'dbValueField').trim(),
-      outputColumnName: formValue(form, 'outputColumnName').trim(),
-      batchSize: formValue(form, 'batchSize').trim() || '1000',
+      matchExcelColumn: formValue(form, 'matchExcelColumn').trim(),
+      dbWriteField: formValue(form, 'dbWriteField').trim(),
+      writeExcelColumn: formValue(form, 'writeExcelColumn').trim(),
+      batchSize: Number(formValue(form, 'batchSize') || 1000),
+      dryRun: !confirmWrite,
+      confirmWrite,
     }
   }
 
@@ -1175,6 +1220,37 @@ function ExcelMatchView({
     payload.append('config', JSON.stringify(config))
     return payload
   }
+
+  const fetchSchemes = useCallback(async (operation: 'export_match' | 'import_update') => {
+    const response = await fetch(apiURL(`/v1/excel-match-jobs/schemes?operation=${operation}`), {
+      method: 'GET',
+      headers: token ? { token } : undefined,
+    })
+    const data = await response.json().catch(() => ({}))
+    if (!response.ok || !isSuccessPayload(data)) {
+      throw new Error(readMessage(data) || '查询 Excel 方案失败')
+    }
+    const value = readDataField(data, 'schemes')
+    return Array.isArray(value) ? (value as ExcelMatchScheme[]) : []
+  }, [token])
+
+  const loadSchemes = useCallback(async () => {
+    try {
+      const [nextExportSchemes, nextImportSchemes] = await Promise.all([
+        fetchSchemes('export_match'),
+        fetchSchemes('import_update'),
+      ])
+      setExportSchemes(nextExportSchemes)
+      setImportSchemes(nextImportSchemes)
+    } catch (error) {
+      setResult({ ok: false, status: 0, data: error instanceof Error ? error.message : String(error) })
+    }
+  }, [fetchSchemes, setResult])
+
+  useEffect(() => {
+    if (!token) return
+    void loadSchemes()
+  }, [loadSchemes, token])
 
   async function ensureExcelUpload(slot: ExcelUploadSlot, file: File) {
     const existing = uploadRefs[slot]
@@ -1239,29 +1315,49 @@ function ExcelMatchView({
     return session.uploadId
   }
 
-  function saveExportScheme(formElement: HTMLFormElement) {
+  async function saveScheme(formElement: HTMLFormElement, operation: 'export_match' | 'import_update') {
     const name = window.prompt('请输入方案名称')
     if (!name?.trim()) return
-    const config = readExportSchemeConfig(new FormData(formElement))
-    const scheme: ExcelExportScheme = {
-      id: `${Date.now()}`,
-      name: name.trim(),
-      config,
+    const form = new FormData(formElement)
+    const config = operation === 'export_match'
+      ? buildExportConfig(form)
+      : buildImportConfig(form, false)
+
+    setLoading(true)
+    try {
+      const response = await fetch(apiURL('/v1/excel-match-jobs/schemes'), {
+        method: 'POST',
+        headers: token ? { token, 'Content-Type': 'application/json' } : { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: name.trim(), operation, config }),
+      })
+      const data = await response.json().catch(() => ({}))
+      const nextResult = { ok: response.ok && isSuccessPayload(data), status: response.status, data }
+      setResult(nextResult)
+      if (nextResult.ok) await loadSchemes()
+    } catch (error) {
+      setResult({ ok: false, status: 0, data: error instanceof Error ? error.message : String(error) })
+    } finally {
+      setLoading(false)
     }
-    const nextSchemes = [scheme, ...exportSchemes.filter((item) => item.name !== scheme.name)].slice(0, 20)
-    setExportSchemes(nextSchemes)
-    saveExcelExportSchemes(nextSchemes)
-    setResult({ ok: true, status: 0, data: `已保存方案：${scheme.name}` })
   }
 
   function applyExportScheme(schemeID: string) {
-    const scheme = exportSchemes.find((item) => item.id === schemeID)
+    const scheme = exportSchemes.find((item) => String(item.id) === schemeID)
     if (!scheme) return
-    setExportDefaults(scheme.config)
+    setExportDefaults(exportSchemeDefaults(scheme.config))
     setExportFormKey((value) => value + 1)
     setPreviewResult(null)
     setSelectedExportFileName('')
     clearUploadRef('export')
+  }
+
+  function applyImportScheme(schemeID: string) {
+    const scheme = importSchemes.find((item) => String(item.id) === schemeID)
+    if (!scheme) return
+    setImportDefaults(importSchemeDefaults(scheme.config))
+    setImportFormKey((value) => value + 1)
+    setSelectedImportFileName('')
+    clearUploadRef('import')
   }
 
   async function createExportJob(event: FormEvent<HTMLFormElement>) {
@@ -1343,18 +1439,7 @@ function ExcelMatchView({
     setLoading(true)
     try {
       const uploadId = await ensureExcelUpload('import', file)
-      const payload = buildConfigPayload(uploadId, {
-        operation: 'import_update',
-        sheetName: formValue(form, 'sheetName').trim() || 'Sheet1',
-        tableName: formValue(form, 'tableName').trim(),
-        dbMatchField: formValue(form, 'dbMatchField').trim(),
-        matchExcelColumn: formValue(form, 'matchExcelColumn').trim(),
-        dbWriteField: formValue(form, 'dbWriteField').trim(),
-        writeExcelColumn: formValue(form, 'writeExcelColumn').trim(),
-        batchSize: Number(formValue(form, 'batchSize') || 1000),
-        dryRun: !confirmWrite,
-        confirmWrite,
-      })
+      const payload = buildConfigPayload(uploadId, buildImportConfig(form, confirmWrite))
       const response = await fetch(apiURL('/v1/excel-match-jobs'), {
         method: 'POST',
         headers: token ? { token } : undefined,
@@ -1548,7 +1633,7 @@ function ExcelMatchView({
               type="button"
               onClick={(event) => {
                 const form = event.currentTarget.form
-                if (form) saveExportScheme(form)
+                if (form) void saveScheme(form, 'export_match')
               }}
             >
               保存当前方案
@@ -1610,7 +1695,23 @@ function ExcelMatchView({
 
       {excelDialog === 'import' && (
         <Modal title="匹配导入参数" onClose={() => setExcelDialog(null)}>
-          <form className="excel-upload-form" onSubmit={createImportJob}>
+          <form className="excel-upload-form" onSubmit={createImportJob} key={importFormKey}>
+            <label>
+              已保存方案
+              <select defaultValue="" onChange={(event) => applyImportScheme(event.currentTarget.value)}>
+                <option value="">选择方案</option>
+                {importSchemes.map((scheme) => <option value={scheme.id} key={scheme.id}>{scheme.name}</option>)}
+              </select>
+            </label>
+            <button
+              type="button"
+              onClick={(event) => {
+                const form = event.currentTarget.form
+                if (form) void saveScheme(form, 'import_update')
+              }}
+            >
+              保存当前方案
+            </button>
             <label className="file-input-label">
               Excel 文件
               <input
@@ -1624,28 +1725,28 @@ function ExcelMatchView({
               />
               <span>{selectedImportFileName || '请选择需要导入更新的 .xlsx 文件'}</span>
             </label>
-            <Field label="Sheet 页名称" name="sheetName" defaultValue="Sheet1" />
+            <Field label="Sheet 页名称" name="sheetName" defaultValue={importDefaults.sheetName} />
             <label>
               匹配表名
-              <select name="tableName" defaultValue="bojun_retail_orders">
+              <select name="tableName" defaultValue={importDefaults.tableName}>
                 <option value="bojun_retail_orders">伯俊零售单 bojun_retail_orders</option>
               </select>
             </label>
             <label>
               数据库匹配字段
-              <select name="dbMatchField" defaultValue="docno">
+              <select name="dbMatchField" defaultValue={importDefaults.dbMatchField}>
                 {bojunMatchFieldOptions.map((option) => <option value={option.value} key={option.value}>{option.label}</option>)}
               </select>
             </label>
-            <Field label="Excel 匹配列名" name="matchExcelColumn" defaultValue="外部订单编号" />
+            <Field label="Excel 匹配列名" name="matchExcelColumn" defaultValue={importDefaults.matchExcelColumn} />
             <label>
               写入字段
-              <select name="dbWriteField" defaultValue="matched_docno">
+              <select name="dbWriteField" defaultValue={importDefaults.dbWriteField}>
                 <option value="matched_docno">匹配单号 matched_docno</option>
               </select>
             </label>
-            <Field label="Excel 写入值列名" name="writeExcelColumn" defaultValue="订单号" />
-            <Field label="批量更新大小" name="batchSize" defaultValue="1000" />
+            <Field label="Excel 写入值列名" name="writeExcelColumn" defaultValue={importDefaults.writeExcelColumn} />
+            <Field label="批量更新大小" name="batchSize" defaultValue={importDefaults.batchSize} />
             <label className="checkbox-label">
               <input name="confirmWrite" type="checkbox" />
               确认写入数据库
@@ -2624,25 +2725,30 @@ function sameExcelFile(file: File, ref: ExcelUploadRef) {
   return file.name === ref.fileName && file.size === ref.size && file.lastModified === ref.lastModified
 }
 
-function loadExcelExportSchemes(): ExcelExportScheme[] {
-  try {
-    const raw = window.localStorage.getItem(excelExportSchemesStorageKey)
-    if (!raw) return []
-    const value = JSON.parse(raw)
-    return Array.isArray(value) ? value.filter(isExcelExportScheme).slice(0, 20) : []
-  } catch {
-    return []
+function exportSchemeDefaults(config: ExcelMatchSchemeConfig): ExcelExportSchemeConfig {
+  const filter = Array.isArray(config.filters) && config.filters.length > 0 ? config.filters[0] : {}
+  return {
+    sheetName: config.sheetName || defaultExcelExportScheme.sheetName,
+    filterColumn: filter.column || defaultExcelExportScheme.filterColumn,
+    filterValue: filter.value || defaultExcelExportScheme.filterValue,
+    matchExcelColumn: config.matchExcelColumn || defaultExcelExportScheme.matchExcelColumn,
+    dbMatchField: config.dbMatchField || defaultExcelExportScheme.dbMatchField,
+    dbValueField: config.dbValueField || defaultExcelExportScheme.dbValueField,
+    outputColumnName: config.outputColumnName || defaultExcelExportScheme.outputColumnName,
+    batchSize: config.batchSize ? String(config.batchSize) : defaultExcelExportScheme.batchSize,
   }
 }
 
-function saveExcelExportSchemes(schemes: ExcelExportScheme[]) {
-  window.localStorage.setItem(excelExportSchemesStorageKey, JSON.stringify(schemes.slice(0, 20)))
-}
-
-function isExcelExportScheme(value: unknown): value is ExcelExportScheme {
-  if (!value || typeof value !== 'object') return false
-  const scheme = value as Partial<ExcelExportScheme>
-  return typeof scheme.id === 'string' && typeof scheme.name === 'string' && !!scheme.config
+function importSchemeDefaults(config: ExcelMatchSchemeConfig): ExcelImportSchemeConfig {
+  return {
+    sheetName: config.sheetName || defaultExcelImportScheme.sheetName,
+    tableName: config.tableName || defaultExcelImportScheme.tableName,
+    dbMatchField: config.dbMatchField || defaultExcelImportScheme.dbMatchField,
+    matchExcelColumn: config.matchExcelColumn || defaultExcelImportScheme.matchExcelColumn,
+    dbWriteField: config.dbWriteField || defaultExcelImportScheme.dbWriteField,
+    writeExcelColumn: config.writeExcelColumn || defaultExcelImportScheme.writeExcelColumn,
+    batchSize: config.batchSize ? String(config.batchSize) : defaultExcelImportScheme.batchSize,
+  }
 }
 
 function jsonText(value: unknown) {
