@@ -232,3 +232,18 @@ type ExcelMatchJobLog struct {
 func (ExcelMatchJobLog) TableName() string {
 	return "excel_match_job_logs"
 }
+
+// ExcelMatchScheme 保存 Excel 匹配导出/导入参数方案。
+type ExcelMatchScheme struct {
+	BaseModel
+
+	Name       string `gorm:"column:name;size:100;not null;uniqueIndex:idx_excel_match_scheme_name_operation" json:"name"`
+	Operation  string `gorm:"column:operation;size:50;not null;uniqueIndex:idx_excel_match_scheme_name_operation;index" json:"operation"`
+	ConfigJSON string `gorm:"column:config_json;type:json;not null" json:"config_json"`
+
+	CommonTimestampsField
+}
+
+func (ExcelMatchScheme) TableName() string {
+	return "excel_match_schemes"
+}

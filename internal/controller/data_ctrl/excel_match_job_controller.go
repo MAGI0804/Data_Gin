@@ -1,6 +1,7 @@
 package data_ctrl
 
 import (
+	"encoding/json"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
@@ -17,6 +18,12 @@ type excelUploadSessionRequest struct {
 
 type excelUploadCompleteRequest struct {
 	TotalChunks int `json:"totalChunks"`
+}
+
+type excelMatchSchemeRequest struct {
+	Name      string          `json:"name"`
+	Operation string          `json:"operation"`
+	Config    json.RawMessage `json:"config"`
 }
 
 type ExcelMatchJobController struct {
@@ -147,6 +154,46 @@ func (ctrl *ExcelMatchJobController) CompleteUpload(c *gin.Context) {
 	c.JSON(200, msg.SuccessResponse("Excel 分片已合并", &map[string]any{
 		"upload": session,
 	}))
+}
+
+func (ctrl *ExcelMatchJobController) ListSchemes(c *gin.Context) {
+	schemes, err := ctrl.service.ListSchemes(c.Request.Context(), c.Query("operation"))
+	if err != nil {
+		c.JSON(400, msg.ErrResponse("查询 Excel 匹配方案失败", err))
+		return
+	}
+	c.JSON(200, msg.SuccessResponse("查询 Excel 匹配方案成功", &map[string]any{
+		"schemes": schemes,
+	}))
+}
+
+func (ctrl *ExcelMatchJobController) SaveScheme(c *gin.Context) {
+	var req excelMatchSchemeRequest
+	if err := c.ShouldBindJSON(&req); err != nil {
+		c.JSON(400, msg.ErrResponse("读取 Excel 匹配方案失败", err))
+		return
+	}
+	scheme, err := ctrl.service.SaveScheme(c.Request.Context(), req.Name, req.Operation, string(req.Config))
+	if err != nil {
+		c.JSON(400, msg.ErrResponse("保存 Excel 匹配方案失败", err))
+		return
+	}
+	c.JSON(200, msg.SuccessResponse("保存 Excel 匹配方案成功", &map[string]any{
+		"scheme": scheme,
+	}))
+}
+
+func (ctrl *ExcelMatchJobController) DeleteScheme(c *gin.Context) {
+	id, err := parseUintParam(c, "scheme_id")
+	if err != nil {
+		c.JSON(400, msg.ErrResponse("无效的 Excel 匹配方案ID", err))
+		return
+	}
+	if err := ctrl.service.DeleteScheme(c.Request.Context(), id); err != nil {
+		c.JSON(400, msg.ErrResponse("删除 Excel 匹配方案失败", err))
+		return
+	}
+	c.JSON(200, msg.SuccessResponseStr("删除 Excel 匹配方案成功"))
 }
 
 func (ctrl *ExcelMatchJobController) GetJob(c *gin.Context) {

@@ -3,6 +3,7 @@ package data_dao
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -71,6 +72,43 @@ func (dao *ExcelMatchJobDAO) FindLogsByJobID(ctx context.Context, jobID uint, li
 		Limit(limit).
 		Find(&logs).Error
 	return logs, err
+}
+
+func (dao *ExcelMatchJobDAO) ListSchemes(ctx context.Context, operation string) ([]model.ExcelMatchScheme, error) {
+	var schemes []model.ExcelMatchScheme
+	query := dao.db.WithContext(ctx).Model(&model.ExcelMatchScheme{})
+	if operation != "" {
+		query = query.Where("operation = ?", operation)
+	}
+	err := query.Order("updated_at DESC, id DESC").Find(&schemes).Error
+	return schemes, err
+}
+
+func (dao *ExcelMatchJobDAO) SaveScheme(ctx context.Context, scheme *model.ExcelMatchScheme) error {
+	now := int(time.Now().Unix())
+	var existing model.ExcelMatchScheme
+	err := dao.db.WithContext(ctx).
+		Where("operation = ? AND name = ?", scheme.Operation, scheme.Name).
+		First(&existing).Error
+	if err == nil {
+		return dao.db.WithContext(ctx).
+			Model(&model.ExcelMatchScheme{}).
+			Where("id = ?", existing.ID).
+			Updates(map[string]interface{}{
+				"config_json": scheme.ConfigJSON,
+				"updated_at":  now,
+			}).Error
+	}
+	if !errors.Is(err, gorm.ErrRecordNotFound) {
+		return err
+	}
+	scheme.CreatedAt = now
+	scheme.UpdatedAt = now
+	return dao.db.WithContext(ctx).Create(scheme).Error
+}
+
+func (dao *ExcelMatchJobDAO) DeleteScheme(ctx context.Context, id uint) error {
+	return dao.db.WithContext(ctx).Delete(&model.ExcelMatchScheme{}, id).Error
 }
 
 func (dao *ExcelMatchJobDAO) UpdatePaths(ctx context.Context, id uint, workDir, sourcePath, resultPath string) error {

@@ -159,6 +159,16 @@ type ExcelMatchPreviewSample struct {
 	Values       map[string]string `json:"values"`
 }
 
+type ExcelMatchScheme struct {
+	ID         uint             `json:"id"`
+	Name       string           `json:"name"`
+	Operation  string           `json:"operation"`
+	Config     ExcelMatchConfig `json:"config"`
+	ConfigJSON string           `json:"config_json"`
+	CreatedAt  int              `json:"created_at"`
+	UpdatedAt  int              `json:"updated_at"`
+}
+
 type ExcelMatchJobStats = data_dao.ExcelMatchJobStats
 
 type ExcelMatchLookup interface {
@@ -312,6 +322,86 @@ func (s *ExcelMatchJobService) GetJob(ctx context.Context, id uint) (*model.Exce
 
 func (s *ExcelMatchJobService) GetJobLogs(ctx context.Context, id uint) ([]model.ExcelMatchJobLog, error) {
 	return s.jobDAO.FindLogsByJobID(ctx, id, 200)
+}
+
+func (s *ExcelMatchJobService) ListSchemes(ctx context.Context, operation string) ([]ExcelMatchScheme, error) {
+	operation = strings.TrimSpace(operation)
+	if operation != "" && operation != excelOperationExportMatch && operation != excelOperationImportUpdate {
+		return nil, fmt.Errorf("暂不支持方案类型: %s", operation)
+	}
+	rows, err := s.jobDAO.ListSchemes(ctx, operation)
+	if err != nil {
+		return nil, err
+	}
+	schemes := make([]ExcelMatchScheme, 0, len(rows))
+	for _, row := range rows {
+		scheme, err := excelMatchSchemeFromModel(row)
+		if err != nil {
+			return nil, err
+		}
+		schemes = append(schemes, scheme)
+	}
+	return schemes, nil
+}
+
+func (s *ExcelMatchJobService) SaveScheme(ctx context.Context, name, operation, rawConfig string) (*ExcelMatchScheme, error) {
+	name = strings.TrimSpace(name)
+	if name == "" {
+		return nil, errors.New("方案名称不能为空")
+	}
+	if len([]rune(name)) > 100 {
+		return nil, errors.New("方案名称不能超过 100 个字符")
+	}
+	operation = strings.TrimSpace(operation)
+	if operation != excelOperationExportMatch && operation != excelOperationImportUpdate {
+		return nil, fmt.Errorf("暂不支持方案类型: %s", operation)
+	}
+	var config ExcelMatchConfig
+	if err := json.Unmarshal([]byte(rawConfig), &config); err != nil {
+		return nil, fmt.Errorf("解析方案配置失败: %w", err)
+	}
+	config.Operation = operation
+	normalizedConfig, err := normalizeExcelMatchConfig(config)
+	if err != nil {
+		return nil, err
+	}
+	configBytes, err := json.Marshal(normalizedConfig)
+	if err != nil {
+		return nil, err
+	}
+	row := &model.ExcelMatchScheme{
+		Name:       name,
+		Operation:  operation,
+		ConfigJSON: string(configBytes),
+	}
+	if err := s.jobDAO.SaveScheme(ctx, row); err != nil {
+		return nil, err
+	}
+	rows, err := s.jobDAO.ListSchemes(ctx, operation)
+	if err != nil {
+		return nil, err
+	}
+	for _, item := range rows {
+		if item.Name == name {
+			scheme, err := excelMatchSchemeFromModel(item)
+			if err != nil {
+				return nil, err
+			}
+			return &scheme, nil
+		}
+	}
+	scheme, err := excelMatchSchemeFromModel(*row)
+	if err != nil {
+		return nil, err
+	}
+	return &scheme, nil
+}
+
+func (s *ExcelMatchJobService) DeleteScheme(ctx context.Context, id uint) error {
+	if id == 0 {
+		return errors.New("方案ID不能为空")
+	}
+	return s.jobDAO.DeleteScheme(ctx, id)
 }
 
 func (s *ExcelMatchJobService) CreateUploadSession(ctx context.Context, fileName string, totalChunks int) (*ExcelUploadSession, error) {
@@ -1324,6 +1414,22 @@ func statsDetail(stats ExcelMatchJobStats) map[string]interface{} {
 		"matched_rows":   stats.MatchedRows,
 		"unmatched_rows": stats.UnmatchedRows,
 	}
+}
+
+func excelMatchSchemeFromModel(row model.ExcelMatchScheme) (ExcelMatchScheme, error) {
+	var config ExcelMatchConfig
+	if err := json.Unmarshal([]byte(row.ConfigJSON), &config); err != nil {
+		return ExcelMatchScheme{}, err
+	}
+	return ExcelMatchScheme{
+		ID:         row.ID,
+		Name:       row.Name,
+		Operation:  row.Operation,
+		Config:     config,
+		ConfigJSON: row.ConfigJSON,
+		CreatedAt:  row.CreatedAt,
+		UpdatedAt:  row.UpdatedAt,
+	}, nil
 }
 
 func saveUploadedExcel(fileHeader *multipart.FileHeader, dst string) error {

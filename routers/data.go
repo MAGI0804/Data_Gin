@@ -119,6 +119,9 @@ func apiData(api *gin.RouterGroup) {
 		excelMatchJobGroup.POST("/uploads", excelMatchJobCtrl.CreateUploadSession)
 		excelMatchJobGroup.POST("/uploads/:upload_id/chunks", excelMatchJobCtrl.UploadChunk)
 		excelMatchJobGroup.POST("/uploads/:upload_id/complete", excelMatchJobCtrl.CompleteUpload)
+		excelMatchJobGroup.GET("/schemes", excelMatchJobCtrl.ListSchemes)
+		excelMatchJobGroup.POST("/schemes", excelMatchJobCtrl.SaveScheme)
+		excelMatchJobGroup.DELETE("/schemes/:scheme_id", excelMatchJobCtrl.DeleteScheme)
 		excelMatchJobGroup.GET("/:id", excelMatchJobCtrl.GetJob)
 		excelMatchJobGroup.GET("/:id/download", excelMatchJobCtrl.Download)
 	}

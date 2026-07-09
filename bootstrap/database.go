@@ -118,6 +118,7 @@ func autoMigrateTables() {
 		&model.StepRun{},               //方法步骤运行明细表
 		&model.ExcelMatchJob{},         //Excel匹配导出任务表
 		&model.ExcelMatchJobLog{},      //Excel任务处理日志表
+		&model.ExcelMatchScheme{},      //Excel匹配参数方案表
 	)
 
 	if err != nil {
