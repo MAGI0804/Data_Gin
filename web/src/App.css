@@ -466,6 +466,32 @@ button:focus-visible {
   grid-template-columns: repeat(5, minmax(0, 1fr));
 }
 
+.excel-action-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.excel-action-card {
+  display: grid;
+  justify-items: start;
+  gap: 6px;
+  min-height: 112px;
+  text-align: left;
+}
+
+.excel-action-card span {
+  font-size: 15px;
+  font-weight: 750;
+}
+
+.excel-action-card small {
+  color: #666666;
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.4;
+}
+
 .excel-upload-form,
 .excel-job-actions,
 .excel-job-detail {
@@ -476,6 +502,14 @@ button:focus-visible {
 .excel-upload-form {
   grid-template-columns: repeat(4, minmax(0, 1fr));
   align-items: end;
+}
+
+.excel-form-actions {
+  grid-column: 1 / -1;
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+  flex-wrap: wrap;
 }
 
 .checkbox-label {
@@ -514,6 +548,14 @@ button:focus-visible {
   overflow-y: auto;
 }
 
+.excel-preview-panel {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 12px;
+  border-top: 1px solid #d0d0d0;
+  padding-top: 12px;
+}
+
 .file-input-label {
   grid-column: 1 / -1;
   border: 1px dashed #777777;
@@ -527,6 +569,39 @@ button:focus-visible {
   font-size: 12px;
   font-weight: 500;
   overflow-wrap: anywhere;
+}
+
+.modal-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  display: grid;
+  place-items: center;
+  background: rgba(17, 17, 17, 0.42);
+  padding: 24px;
+}
+
+.modal-panel {
+  width: min(1040px, 100%);
+  max-height: min(820px, calc(100vh - 48px));
+  overflow-y: auto;
+  border: 1px solid #111111;
+  border-radius: 8px;
+  background: #ffffff;
+  padding: 16px;
+}
+
+.modal-title {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin-bottom: 14px;
+}
+
+.modal-title h3 {
+  margin: 0;
+  font-size: 16px;
 }
 
 code {
@@ -627,7 +702,8 @@ summary {
 
   .content-grid.two,
   .method-groups,
-  .log-board {
+  .log-board,
+  .excel-action-grid {
     grid-template-columns: 1fr;
   }
 
@@ -686,6 +762,15 @@ summary {
   .excel-job-detail,
   .bojun-backfill-form {
     grid-template-columns: 1fr;
+  }
+
+  .modal-backdrop {
+    padding: 12px;
+  }
+
+  .modal-panel {
+    max-height: calc(100vh - 24px);
+    padding: 12px;
   }
 
   .ops-workspace {

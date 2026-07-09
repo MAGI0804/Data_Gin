@@ -163,6 +163,59 @@ type ExcelMatchJobLog = {
   created_at: number
 }
 
+type ExcelDialogMode = 'export' | 'import' | 'clear' | 'query'
+
+type ExcelMatchPreviewStats = {
+  TotalRows?: number
+  ProcessedRows?: number
+  FilteredRows?: number
+  MatchedRows?: number
+  UnmatchedRows?: number
+}
+
+type ExcelMatchPreviewSample = {
+  rowNumber: number
+  matchKey: string
+  matchedValue: string
+  status: string
+  reason: string
+  values: Record<string, string>
+}
+
+type ExcelMatchPreviewResult = {
+  stats: ExcelMatchPreviewStats
+  scanLimit: number
+  sampleLimit: number
+  truncated: boolean
+  samples: ExcelMatchPreviewSample[]
+}
+
+const bojunMatchFieldOptions = [
+  { value: 'docno', label: '订单号 docno' },
+  { value: 'otherdocno', label: '外部单号 otherdocno' },
+  { value: 'o2o_so_docno', label: '线上订单号 o2o_so_docno' },
+  { value: 'related_normal_docno', label: '关联原单 related_normal_docno' },
+  { value: 'matched_docno', label: '匹配单号 matched_docno' },
+]
+
+const bojunValueFieldOptions = [
+  { value: 'docno', label: '订单号 docno' },
+  { value: 'otherdocno', label: '外部单号 otherdocno' },
+  { value: 'tot_amt_actual', label: '实付金额 tot_amt_actual' },
+  { value: 'tot_amt_list', label: '吊牌金额 tot_amt_list' },
+  { value: 'tot_qty', label: '数量 tot_qty' },
+  { value: 'c_store_code', label: '门店编码 c_store_code' },
+  { value: 'c_store_name', label: '门店名称 c_store_name' },
+  { value: 'order_type_name', label: '单据类型 order_type_name' },
+  { value: 'order_type_code', label: '单据类型编码 order_type_code' },
+  { value: 'retailbilltype', label: '零售单类型 retailbilltype' },
+  { value: 'billdate', label: '单据日期 billdate' },
+  { value: 'vipno', label: '会员号 vipno' },
+  { value: 'related_normal_docno', label: '关联原单 related_normal_docno' },
+  { value: 'o2o_so_docno', label: '线上订单号 o2o_so_docno' },
+  { value: 'matched_docno', label: '匹配单号 matched_docno' },
+]
+
 type BojunOrderBackfillSample = {
   docno: string
   otherdocno: string
@@ -1012,6 +1065,8 @@ function ExcelMatchView({
   const [selectedExportFileName, setSelectedExportFileName] = useState('')
   const [selectedImportFileName, setSelectedImportFileName] = useState('')
   const [selectedClearFileName, setSelectedClearFileName] = useState('')
+  const [excelDialog, setExcelDialog] = useState<ExcelDialogMode | null>(null)
+  const [previewResult, setPreviewResult] = useState<ExcelMatchPreviewResult | null>(null)
 
   function applyJobResult(result: ApiResult) {
     const nextJob = readObject<ExcelMatchJob>(result, 'job')
@@ -1022,15 +1077,7 @@ function ExcelMatchView({
     setJobLogs(readList<ExcelMatchJobLog>(result, 'logs'))
   }
 
-  async function createExportJob(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    const form = new FormData(event.currentTarget)
-    const file = form.get('file')
-    if (!(file instanceof File) || file.size === 0) {
-      setResult({ ok: false, status: 0, data: '请选择 .xlsx 文件' })
-      return
-    }
-
+  function buildExportPayload(form: FormData, file: File) {
     const payload = new FormData()
     payload.append('file', file)
     payload.append('config', JSON.stringify({
@@ -1045,12 +1092,24 @@ function ExcelMatchView({
       ],
       matchExcelColumn: formValue(form, 'matchExcelColumn').trim(),
       dbTemplate: 'bojun_retail_order',
-      dbMatchField: 'docno',
+      dbMatchField: formValue(form, 'dbMatchField').trim(),
       dbValueField: formValue(form, 'dbValueField').trim(),
       outputColumnName: formValue(form, 'outputColumnName').trim(),
       batchSize: Number(formValue(form, 'batchSize') || 1000),
     }))
+    return payload
+  }
 
+  async function createExportJob(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const form = new FormData(event.currentTarget)
+    const file = form.get('file')
+    if (!(file instanceof File) || file.size === 0) {
+      setResult({ ok: false, status: 0, data: '请选择 .xlsx 文件' })
+      return
+    }
+
+    const payload = buildExportPayload(form, file)
     setLoading(true)
     try {
       const response = await fetch(apiURL('/v1/excel-match-jobs'), {
@@ -1061,7 +1120,39 @@ function ExcelMatchView({
       const data = await response.json().catch(() => ({}))
       const nextResult = { ok: response.ok && isSuccessPayload(data), status: response.status, data }
       setResult(nextResult)
-      if (nextResult.ok) applyJobResult(nextResult)
+      if (nextResult.ok) {
+        applyJobResult(nextResult)
+        setExcelDialog(null)
+      }
+    } catch (error) {
+      setResult({ ok: false, status: 0, data: error instanceof Error ? error.message : String(error) })
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function previewExportJob(formElement: HTMLFormElement) {
+    const form = new FormData(formElement)
+    const file = form.get('file')
+    if (!(file instanceof File) || file.size === 0) {
+      setResult({ ok: false, status: 0, data: '请选择 .xlsx 文件' })
+      return
+    }
+
+    const payload = buildExportPayload(form, file)
+    setLoading(true)
+    try {
+      const response = await fetch(apiURL('/v1/excel-match-jobs/preview'), {
+        method: 'POST',
+        headers: token ? { token } : undefined,
+        body: payload,
+      })
+      const data = await response.json().catch(() => ({}))
+      const nextResult = { ok: response.ok && isSuccessPayload(data), status: response.status, data }
+      setResult(nextResult)
+      if (nextResult.ok) {
+        setPreviewResult(readObject<ExcelMatchPreviewResult>(nextResult, 'preview'))
+      }
     } catch (error) {
       setResult({ ok: false, status: 0, data: error instanceof Error ? error.message : String(error) })
     } finally {
@@ -1107,7 +1198,10 @@ function ExcelMatchView({
       const data = await response.json().catch(() => ({}))
       const nextResult = { ok: response.ok && isSuccessPayload(data), status: response.status, data }
       setResult(nextResult)
-      if (nextResult.ok) applyJobResult(nextResult)
+      if (nextResult.ok) {
+        applyJobResult(nextResult)
+        setExcelDialog(null)
+      }
     } catch (error) {
       setResult({ ok: false, status: 0, data: error instanceof Error ? error.message : String(error) })
     } finally {
@@ -1153,7 +1247,10 @@ function ExcelMatchView({
       const data = await response.json().catch(() => ({}))
       const nextResult = { ok: response.ok && isSuccessPayload(data), status: response.status, data }
       setResult(nextResult)
-      if (nextResult.ok) applyJobResult(nextResult)
+      if (nextResult.ok) {
+        applyJobResult(nextResult)
+        setExcelDialog(null)
+      }
     } catch (error) {
       setResult({ ok: false, status: 0, data: error instanceof Error ? error.message : String(error) })
     } finally {
@@ -1230,161 +1327,27 @@ function ExcelMatchView({
         <Metric label="匹配结果" value={job ? `${job.matched_rows} 匹配 / ${job.unmatched_rows} 未匹配` : '-'} />
       </section>
 
-      <section className="content-grid two">
-        <Panel title="Excel 匹配导出" icon={<Upload />} meta="筛选命中行后查询伯俊并导出追加列">
-          <form className="excel-upload-form" onSubmit={createExportJob}>
-            <label className="file-input-label">
-              Excel 文件
-              <input
-                name="file"
-                type="file"
-                accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                onChange={(event) => setSelectedExportFileName(event.currentTarget.files?.[0]?.name ?? '')}
-              />
-              <span>{selectedExportFileName || '请选择需要匹配导出的 .xlsx 文件'}</span>
-            </label>
-            <Field label="Sheet 页名称" name="sheetName" defaultValue="Sheet1" />
-            <Field label="筛选列名" name="filterColumn" defaultValue="店铺名称" />
-            <Field label="筛选值" name="filterValue" defaultValue="杭州恒隆" />
-            <Field label="Excel 订单号列" name="matchExcelColumn" defaultValue="订单号" />
-            <label>
-              伯俊读取字段
-              <select name="dbValueField" defaultValue="tot_amt_actual">
-                <option value="tot_amt_actual">实付金额 tot_amt_actual</option>
-                <option value="tot_amt_list">吊牌金额 tot_amt_list</option>
-                <option value="tot_qty">数量 tot_qty</option>
-                <option value="c_store_code">门店编码 c_store_code</option>
-                <option value="c_store_name">门店名称 c_store_name</option>
-                <option value="order_type_name">单据类型 order_type_name</option>
-                <option value="order_type_code">单据类型编码 order_type_code</option>
-                <option value="retailbilltype">零售单类型 retailbilltype</option>
-                <option value="billdate">单据日期 billdate</option>
-                <option value="vipno">会员号 vipno</option>
-                <option value="related_normal_docno">关联原单 related_normal_docno</option>
-                <option value="o2o_so_docno">线上订单号 o2o_so_docno</option>
-                <option value="matched_docno">匹配单号 matched_docno</option>
-              </select>
-            </label>
-            <Field label="追加列名" name="outputColumnName" defaultValue="伯俊匹配金额" />
-            <Field label="批量查询大小" name="batchSize" defaultValue="1000" />
-            <button className="primary" type="submit" disabled={loading}>
-              <Upload aria-hidden="true" />
-              创建导出任务
-            </button>
-          </form>
-        </Panel>
-
-        <Panel title="Excel 匹配导入" icon={<Database />} meta="默认预检；确认后只填空的 matched_docno">
-          <form className="excel-upload-form" onSubmit={createImportJob}>
-            <label className="file-input-label">
-              Excel 文件
-              <input
-                name="file"
-                type="file"
-                accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                onChange={(event) => setSelectedImportFileName(event.currentTarget.files?.[0]?.name ?? '')}
-              />
-              <span>{selectedImportFileName || '请选择需要导入更新的 .xlsx 文件'}</span>
-            </label>
-            <Field label="Sheet 页名称" name="sheetName" defaultValue="Sheet1" />
-            <label>
-              匹配表名
-              <select name="tableName" defaultValue="bojun_retail_orders">
-                <option value="bojun_retail_orders">伯俊零售单 bojun_retail_orders</option>
-              </select>
-            </label>
-            <label>
-              数据库匹配字段
-              <select name="dbMatchField" defaultValue="docno">
-                <option value="docno">订单号 docno</option>
-                <option value="otherdocno">外部单号 otherdocno</option>
-                <option value="o2o_so_docno">线上订单号 o2o_so_docno</option>
-                <option value="related_normal_docno">关联原单 related_normal_docno</option>
-                <option value="matched_docno">匹配单号 matched_docno</option>
-              </select>
-            </label>
-            <Field label="Excel 匹配列名" name="matchExcelColumn" defaultValue="外部订单编号" />
-            <label>
-              写入字段
-              <select name="dbWriteField" defaultValue="matched_docno">
-                <option value="matched_docno">匹配单号 matched_docno</option>
-              </select>
-            </label>
-            <Field label="Excel 写入值列名" name="writeExcelColumn" defaultValue="订单号" />
-            <Field label="批量更新大小" name="batchSize" defaultValue="1000" />
-            <label className="checkbox-label">
-              <input name="confirmWrite" type="checkbox" />
-              确认写入数据库
-            </label>
-            <p className="excel-mode-note">
-              不勾选时只预检匹配数量，不写库；勾选后只写入空的 matched_docno，不覆盖已有匹配单号，不修改伯俊原始字段。
-            </p>
-            <button className="primary" type="submit" disabled={loading}>
-              <Upload aria-hidden="true" />
-              创建预检/导入任务
-            </button>
-          </form>
-        </Panel>
-
-        <Panel title="退回未匹配状态" icon={<RefreshCcw />} meta="按同一Excel匹配范围清空 matched_docno">
-          <form className="excel-upload-form" onSubmit={createClearMatchedJob}>
-            <label className="file-input-label">
-              Excel 文件
-              <input
-                name="file"
-                type="file"
-                accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
-                onChange={(event) => setSelectedClearFileName(event.currentTarget.files?.[0]?.name ?? '')}
-              />
-              <span>{selectedClearFileName || '请选择需要退回的 .xlsx 文件'}</span>
-            </label>
-            <Field label="Sheet 页名称" name="sheetName" defaultValue="Sheet1" />
-            <label>
-              匹配表名
-              <select name="tableName" defaultValue="bojun_retail_orders">
-                <option value="bojun_retail_orders">伯俊零售单 bojun_retail_orders</option>
-              </select>
-            </label>
-            <label>
-              数据库匹配字段
-              <select name="dbMatchField" defaultValue="docno">
-                <option value="docno">订单号 docno</option>
-                <option value="otherdocno">外部单号 otherdocno</option>
-                <option value="o2o_so_docno">线上订单号 o2o_so_docno</option>
-                <option value="related_normal_docno">关联原单 related_normal_docno</option>
-                <option value="matched_docno">匹配单号 matched_docno</option>
-              </select>
-            </label>
-            <Field label="Excel 匹配列名" name="matchExcelColumn" defaultValue="外部订单编号" />
-            <Field label="批量处理大小" name="batchSize" defaultValue="1000" />
-            <label className="checkbox-label">
-              <input name="confirmWrite" type="checkbox" />
-              确认清空 matched_docno
-            </label>
-            <p className="excel-mode-note">
-              不勾选时只预检会命中的行；勾选后会把命中行的 matched_docno 清空，用于退回未匹配状态。
-            </p>
-            <button type="submit" disabled={loading}>
-              <RefreshCcw aria-hidden="true" />
-              创建预检/退回任务
-            </button>
-          </form>
-        </Panel>
-      </section>
-
-      <Panel title="任务查询、下载与日志" icon={<Download />} meta="结果文件仅导出任务可下载，导入任务查看日志确认写入">
-        <div className="excel-job-actions">
-          <label>
-            任务 ID
-            <input value={jobID} onChange={(event) => setJobID(event.target.value)} />
-          </label>
-          <button type="button" onClick={refreshJob} disabled={loading}>
-            <RefreshCcw aria-hidden="true" />
-            查询状态
+      <Panel title="Excel 操作" icon={<Upload />} meta="参数在弹出框内填写，页面只保留状态和结果">
+        <div className="excel-action-grid">
+          <button type="button" className="excel-action-card" onClick={() => setExcelDialog('export')}>
+            <Upload aria-hidden="true" />
+            <span>匹配导出</span>
+            <small>筛选命中行，查询伯俊字段并追加导出</small>
           </button>
-          <button type="button" onClick={downloadJob} disabled={loading || job?.status !== 'success'}>
+          <button type="button" className="excel-action-card" onClick={() => setExcelDialog('import')}>
+            <Database aria-hidden="true" />
+            <span>匹配导入</span>
+            <small>默认预检，确认后写入空的 matched_docno</small>
+          </button>
+          <button type="button" className="excel-action-card" onClick={() => setExcelDialog('clear')}>
+            <RefreshCcw aria-hidden="true" />
+            <span>退回未匹配</span>
+            <small>按 Excel 匹配范围清空 matched_docno</small>
+          </button>
+          <button type="button" className="excel-action-card" onClick={() => setExcelDialog('query')}>
             <Download aria-hidden="true" />
-            下载结果
+            <span>查询下载</span>
+            <small>按任务 ID 查询状态、下载导出结果</small>
           </button>
         </div>
       </Panel>
@@ -1407,6 +1370,228 @@ function ExcelMatchView({
           </section>
         </Panel>
       )}
+
+      {excelDialog === 'export' && (
+        <Modal title="匹配导出参数" onClose={() => setExcelDialog(null)}>
+          <form className="excel-upload-form" onSubmit={createExportJob}>
+            <label className="file-input-label">
+              Excel 文件
+              <input
+                name="file"
+                type="file"
+                accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                onChange={(event) => setSelectedExportFileName(event.currentTarget.files?.[0]?.name ?? '')}
+              />
+              <span>{selectedExportFileName || '请选择需要匹配导出的 .xlsx 文件'}</span>
+            </label>
+            <Field label="Sheet 页名称" name="sheetName" defaultValue="Sheet1" />
+            <Field label="筛选列名" name="filterColumn" defaultValue="店铺名称" />
+            <Field label="筛选值" name="filterValue" defaultValue="杭州恒隆" />
+            <Field label="Excel 匹配列名" name="matchExcelColumn" defaultValue="外部订单编号" />
+            <label>
+              数据库匹配字段
+              <select name="dbMatchField" defaultValue="otherdocno">
+                {bojunMatchFieldOptions.map((option) => <option value={option.value} key={option.value}>{option.label}</option>)}
+              </select>
+            </label>
+            <label>
+              伯俊取值字段
+              <select name="dbValueField" defaultValue="docno">
+                {bojunValueFieldOptions.map((option) => <option value={option.value} key={option.value}>{option.label}</option>)}
+              </select>
+            </label>
+            <Field label="追加列名" name="outputColumnName" defaultValue="伯俊单号" />
+            <Field label="批量查询大小" name="batchSize" defaultValue="1000" />
+            <div className="excel-form-actions">
+              <button
+                type="button"
+                onClick={(event) => {
+                  const form = event.currentTarget.form
+                  if (form) void previewExportJob(form)
+                }}
+                disabled={loading}
+              >
+                <FileJson aria-hidden="true" />
+                预览匹配
+              </button>
+              <button className="primary" type="submit" disabled={loading}>
+                <Upload aria-hidden="true" />
+                创建导出任务
+              </button>
+            </div>
+            {previewResult && <ExcelMatchPreviewPanel preview={previewResult} />}
+          </form>
+        </Modal>
+      )}
+
+      {excelDialog === 'import' && (
+        <Modal title="匹配导入参数" onClose={() => setExcelDialog(null)}>
+          <form className="excel-upload-form" onSubmit={createImportJob}>
+            <label className="file-input-label">
+              Excel 文件
+              <input
+                name="file"
+                type="file"
+                accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                onChange={(event) => setSelectedImportFileName(event.currentTarget.files?.[0]?.name ?? '')}
+              />
+              <span>{selectedImportFileName || '请选择需要导入更新的 .xlsx 文件'}</span>
+            </label>
+            <Field label="Sheet 页名称" name="sheetName" defaultValue="Sheet1" />
+            <label>
+              匹配表名
+              <select name="tableName" defaultValue="bojun_retail_orders">
+                <option value="bojun_retail_orders">伯俊零售单 bojun_retail_orders</option>
+              </select>
+            </label>
+            <label>
+              数据库匹配字段
+              <select name="dbMatchField" defaultValue="docno">
+                {bojunMatchFieldOptions.map((option) => <option value={option.value} key={option.value}>{option.label}</option>)}
+              </select>
+            </label>
+            <Field label="Excel 匹配列名" name="matchExcelColumn" defaultValue="外部订单编号" />
+            <label>
+              写入字段
+              <select name="dbWriteField" defaultValue="matched_docno">
+                <option value="matched_docno">匹配单号 matched_docno</option>
+              </select>
+            </label>
+            <Field label="Excel 写入值列名" name="writeExcelColumn" defaultValue="订单号" />
+            <Field label="批量更新大小" name="batchSize" defaultValue="1000" />
+            <label className="checkbox-label">
+              <input name="confirmWrite" type="checkbox" />
+              确认写入数据库
+            </label>
+            <p className="excel-mode-note">
+              不勾选时只预检匹配数量，不写库；勾选后只写入空的 matched_docno，不覆盖已有匹配单号，不修改伯俊原始字段。
+            </p>
+            <div className="excel-form-actions">
+              <button className="primary" type="submit" disabled={loading}>
+                <Upload aria-hidden="true" />
+                创建预检/导入任务
+              </button>
+            </div>
+          </form>
+        </Modal>
+      )}
+
+      {excelDialog === 'clear' && (
+        <Modal title="退回未匹配参数" onClose={() => setExcelDialog(null)}>
+          <form className="excel-upload-form" onSubmit={createClearMatchedJob}>
+            <label className="file-input-label">
+              Excel 文件
+              <input
+                name="file"
+                type="file"
+                accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
+                onChange={(event) => setSelectedClearFileName(event.currentTarget.files?.[0]?.name ?? '')}
+              />
+              <span>{selectedClearFileName || '请选择需要退回的 .xlsx 文件'}</span>
+            </label>
+            <Field label="Sheet 页名称" name="sheetName" defaultValue="Sheet1" />
+            <label>
+              匹配表名
+              <select name="tableName" defaultValue="bojun_retail_orders">
+                <option value="bojun_retail_orders">伯俊零售单 bojun_retail_orders</option>
+              </select>
+            </label>
+            <label>
+              数据库匹配字段
+              <select name="dbMatchField" defaultValue="docno">
+                {bojunMatchFieldOptions.map((option) => <option value={option.value} key={option.value}>{option.label}</option>)}
+              </select>
+            </label>
+            <Field label="Excel 匹配列名" name="matchExcelColumn" defaultValue="外部订单编号" />
+            <Field label="批量处理大小" name="batchSize" defaultValue="1000" />
+            <label className="checkbox-label">
+              <input name="confirmWrite" type="checkbox" />
+              确认清空 matched_docno
+            </label>
+            <p className="excel-mode-note">
+              不勾选时只预检会命中的行；勾选后会把命中行的 matched_docno 清空，用于退回未匹配状态。
+            </p>
+            <div className="excel-form-actions">
+              <button type="submit" disabled={loading}>
+                <RefreshCcw aria-hidden="true" />
+                创建预检/退回任务
+              </button>
+            </div>
+          </form>
+        </Modal>
+      )}
+
+      {excelDialog === 'query' && (
+        <Modal title="任务查询与下载" onClose={() => setExcelDialog(null)}>
+          <div className="excel-job-actions">
+            <label>
+              任务 ID
+              <input value={jobID} onChange={(event) => setJobID(event.target.value)} />
+            </label>
+            <button type="button" onClick={refreshJob} disabled={loading}>
+              <RefreshCcw aria-hidden="true" />
+              查询状态
+            </button>
+            <button type="button" onClick={downloadJob} disabled={loading || job?.status !== 'success'}>
+              <Download aria-hidden="true" />
+              下载结果
+            </button>
+          </div>
+        </Modal>
+      )}
+    </div>
+  )
+}
+
+function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
+  return (
+    <div className="modal-backdrop" role="presentation">
+      <section className="modal-panel" role="dialog" aria-modal="true" aria-label={title}>
+        <div className="modal-title">
+          <h3>{title}</h3>
+          <button type="button" onClick={onClose}>关闭</button>
+        </div>
+        {children}
+      </section>
+    </div>
+  )
+}
+
+function ExcelMatchPreviewPanel({ preview }: { preview: ExcelMatchPreviewResult }) {
+  return (
+    <div className="excel-preview-panel">
+      <div className="overview-grid compact">
+        <Metric label="扫描行" value={excelPreviewStat(preview.stats, 'TotalRows')} />
+        <Metric label="命中筛选" value={excelPreviewStat(preview.stats, 'FilteredRows')} />
+        <Metric label="已匹配" value={excelPreviewStat(preview.stats, 'MatchedRows')} />
+        <Metric label="未匹配" value={excelPreviewStat(preview.stats, 'UnmatchedRows')} />
+        <Metric label="扫描上限" value={preview.truncated ? `${preview.scanLimit}+` : preview.scanLimit} />
+      </div>
+      <div className="data-table-wrap">
+        <table className="data-table">
+          <thead>
+            <tr>
+              <th>行号</th>
+              <th>匹配键</th>
+              <th>状态</th>
+              <th>追加值</th>
+              <th>原因</th>
+            </tr>
+          </thead>
+          <tbody>
+            {preview.samples.map((sample) => (
+              <tr key={`${sample.rowNumber}-${sample.matchKey}-${sample.status}`}>
+                <td>{sample.rowNumber}</td>
+                <td>{sample.matchKey || '-'}</td>
+                <td>{excelPreviewStatusLabel(sample.status)}</td>
+                <td>{sample.matchedValue || '-'}</td>
+                <td>{sample.reason || '-'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {preview.samples.length === 0 && <EmptyState text="预览没有返回样例。" />}
     </div>
   )
 }
@@ -2254,6 +2439,20 @@ function excelJobStatusLabel(value: string) {
     success: '成功',
     failed: '失败',
     expired: '已过期',
+  }
+  return labels[value] ?? (value || '-')
+}
+
+function excelPreviewStat(stats: ExcelMatchPreviewStats, key: keyof ExcelMatchPreviewStats) {
+  const value = stats[key]
+  return typeof value === 'number' ? value : 0
+}
+
+function excelPreviewStatusLabel(value: string) {
+  const labels: Record<string, string> = {
+    matched: '已匹配',
+    unmatched: '未匹配',
+    skipped: '已跳过',
   }
   return labels[value] ?? (value || '-')
 }
