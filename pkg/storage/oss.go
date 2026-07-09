@@ -90,7 +90,7 @@ func LoadOSSConfig() OSSConfig {
 	}
 	return OSSConfig{
 		Enabled:                 OSSStorageEnabled(),
-		Region:                  strings.TrimSpace(config.GetString("cfg.storage.oss.region")),
+		Region:                  normalizeOSSRegion(config.GetString("cfg.storage.oss.region")),
 		Endpoint:                strings.TrimSpace(config.GetString("cfg.storage.oss.endpoint")),
 		Bucket:                  strings.TrimSpace(config.GetString("cfg.storage.oss.bucket")),
 		CDNBaseURL:              strings.TrimRight(strings.TrimSpace(config.GetString("cfg.storage.oss.cdn_base_url")), "/"),
@@ -154,9 +154,18 @@ func (c *OSSClient) PublicURL(objectKey string) string {
 		return fmt.Sprintf("%s://%s/%s", scheme, strings.TrimRight(host, "/"), objectKey)
 	}
 	if host == "" {
-		host = fmt.Sprintf("oss-%s.aliyuncs.com", c.cfg.Region)
+		host = fmt.Sprintf("oss-%s.aliyuncs.com", normalizeOSSRegion(c.cfg.Region))
 	}
 	return fmt.Sprintf("%s://%s.%s/%s", scheme, c.cfg.Bucket, strings.TrimRight(host, "/"), objectKey)
+}
+
+func normalizeOSSRegion(region string) string {
+	region = strings.TrimSpace(region)
+	region = strings.TrimPrefix(region, "https://")
+	region = strings.TrimPrefix(region, "http://")
+	region = strings.TrimSuffix(region, ".aliyuncs.com")
+	region = strings.TrimPrefix(region, "oss-")
+	return strings.Trim(region, "/")
 }
 
 func BuildObjectKey(parts ...string) string {

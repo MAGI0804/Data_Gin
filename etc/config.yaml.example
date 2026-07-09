@@ -138,8 +138,9 @@ Storage:
   Driver: ${STORAGE_DRIVER:-local}
   OSS:
     Enabled: ${ALIYUN_OSS_ENABLED:-false}
-    Region: ${ALIYUN_OSS_REGION:-}
-    Endpoint: ${ALIYUN_OSS_ENDPOINT:-}
+    # Region uses cn-shanghai; endpoint uses https://oss-cn-shanghai.aliyuncs.com.
+    Region: ${ALIYUN_OSS_REGION:-cn-shanghai}
+    Endpoint: ${ALIYUN_OSS_ENDPOINT:-https://oss-cn-shanghai.aliyuncs.com}
     Bucket: ${ALIYUN_OSS_BUCKET:-}
     CDNBaseURL: ${ALIYUN_OSS_CDN_BASE_URL:-}
     Prefix: ${ALIYUN_OSS_PREFIX:-data-warehouse}
