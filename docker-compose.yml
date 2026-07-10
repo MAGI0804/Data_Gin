@@ -10,6 +10,7 @@ services:
       - "8501"
     volumes:
       - ./storage:/app/storage
+      - ${EXCEL_TEMP_HOST_DIR:-./storage/tmp/data-warehouse-excel}:${DATA_WAREHOUSE_EXCEL_TEMP_DIR:-/data/data-warehouse-excel}
       - ./app.log:/app/app.log
       - ./etc/config.yaml:/app/etc/config.yaml:ro
     environment:
@@ -29,6 +30,7 @@ services:
       - REDIS_PORT=${REDIS_PORT:-6379}
       - REDIS_USERNAME=${REDIS_USERNAME:-}
       - REDIS_PASSWORD=${REDIS_PASSWORD:-}
+      - DATA_WAREHOUSE_EXCEL_TEMP_DIR=${DATA_WAREHOUSE_EXCEL_TEMP_DIR:-/data/data-warehouse-excel}
     restart: unless-stopped
     extra_hosts:
       - "host.docker.internal:host-gateway"
