@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"strings"
 	"testing"
 	"time"
 
@@ -351,6 +352,48 @@ func TestExcelUploadAssemblesChunksAndRejectsInvalidID(t *testing.T) {
 	if _, err := readExcelUploadMeta("../bad"); err == nil {
 		t.Fatal("readExcelUploadMeta accepted invalid upload id")
 	}
+}
+
+func TestExcelTempRootDirCanBeConfigured(t *testing.T) {
+	root := filepath.Join(t.TempDir(), "excel-work")
+	t.Setenv(excelTempRootEnvName, root)
+
+	jobDir := excelMatchJobDir(42)
+	if !strings.HasPrefix(filepath.Clean(jobDir), filepath.Clean(root)) {
+		t.Fatalf("excelMatchJobDir() = %s, want under %s", jobDir, root)
+	}
+	uploadDir := excelUploadRootDir()
+	if !strings.HasPrefix(filepath.Clean(uploadDir), filepath.Clean(root)) {
+		t.Fatalf("excelUploadRootDir() = %s, want under %s", uploadDir, root)
+	}
+}
+
+func TestWithExcelizeTempDirSetsAndRestoresTempEnvironment(t *testing.T) {
+	originalTmpDir, hadTmpDir := os.LookupEnv("TMPDIR")
+	originalTmp, hadTmp := os.LookupEnv("TMP")
+	originalTemp, hadTemp := os.LookupEnv("TEMP")
+	tempDir := filepath.Join(t.TempDir(), "excelize")
+
+	if err := withExcelizeTempDir(tempDir, func() error {
+		for _, key := range []string{"TMPDIR", "TMP", "TEMP"} {
+			if got := os.Getenv(key); filepath.Clean(got) != filepath.Clean(tempDir) {
+				t.Fatalf("%s = %s, want %s", key, got, tempDir)
+			}
+		}
+		return nil
+	}); err != nil {
+		t.Fatalf("withExcelizeTempDir returned error: %v", err)
+	}
+
+	assertEnvRestored := func(key, want string, existed bool) {
+		got, exists := os.LookupEnv(key)
+		if exists != existed || got != want {
+			t.Fatalf("%s restored to (%q,%v), want (%q,%v)", key, got, exists, want, existed)
+		}
+	}
+	assertEnvRestored("TMPDIR", originalTmpDir, hadTmpDir)
+	assertEnvRestored("TMP", originalTmp, hadTmp)
+	assertEnvRestored("TEMP", originalTemp, hadTemp)
 }
 
 func TestProcessExcelMatchFileUsesConfiguredSheet(t *testing.T) {

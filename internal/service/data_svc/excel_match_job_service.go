@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"gin-biz-web-api/global"
@@ -37,6 +38,9 @@ const (
 	excelMatchRetention        = 24 * time.Hour
 	excelMatchRootDirName      = "data-warehouse-excel-jobs"
 	excelUploadRootDirName     = "data-warehouse-excel-uploads"
+	excelPreviewRootDirName    = "data-warehouse-excel-previews"
+	excelizeTempDirName        = "excelize-tmp"
+	excelTempRootEnvName       = "DATA_WAREHOUSE_EXCEL_TEMP_DIR"
 	excelMatchSourceFileName   = "source.xlsx"
 	excelMatchResultFileName   = "result.xlsx"
 	excelUploadChunksDirName   = "chunks"
@@ -55,6 +59,8 @@ const (
 	defaultExcelPreviewItems   = 50
 	excelMatchOSSUploadTimeout = 90 * time.Second
 )
+
+var excelizeTempMu sync.Mutex
 
 var allowedBojunValueFields = map[string]struct{}{
 	"billdate":             {},
@@ -535,14 +541,24 @@ func (s *ExcelMatchJobService) Preview(ctx context.Context, fileHeader *multipar
 	}
 	defer src.Close()
 
-	input, err := excelize.OpenReader(src)
+	lookup := bojunExcelMatchLookup{dao: s.jobDAO}
+	var result *ExcelMatchPreviewResult
+	previewID, err := newExcelUploadID()
 	if err != nil {
 		return nil, err
 	}
-	defer func() { _ = input.Close() }()
-
-	lookup := bojunExcelMatchLookup{dao: s.jobDAO}
-	return processExcelMatchPreview(ctx, input, normalizedConfig, lookup, defaultExcelPreviewRows, defaultExcelPreviewItems)
+	tempDir := filepath.Join(excelPreviewRootDir(), previewID, excelizeTempDirName)
+	defer func() { _ = os.RemoveAll(filepath.Dir(tempDir)) }()
+	err = withExcelizeTempDir(tempDir, func() error {
+		input, err := excelize.OpenReader(src)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = input.Close() }()
+		result, err = processExcelMatchPreview(ctx, input, normalizedConfig, lookup, defaultExcelPreviewRows, defaultExcelPreviewItems)
+		return err
+	})
+	return result, err
 }
 
 func (s *ExcelMatchJobService) PreviewUploaded(ctx context.Context, uploadID, rawConfig string) (*ExcelMatchPreviewResult, error) {
@@ -559,14 +575,18 @@ func (s *ExcelMatchJobService) PreviewUploaded(ctx context.Context, uploadID, ra
 	if err != nil {
 		return nil, err
 	}
-	input, err := excelize.OpenFile(sourcePath)
-	if err != nil {
-		return nil, err
-	}
-	defer func() { _ = input.Close() }()
-
 	lookup := bojunExcelMatchLookup{dao: s.jobDAO}
-	return processExcelMatchPreview(ctx, input, normalizedConfig, lookup, defaultExcelPreviewRows, defaultExcelPreviewItems)
+	var result *ExcelMatchPreviewResult
+	err = withExcelizeTempDir(excelizeTempDirForPath(sourcePath), func() error {
+		input, err := excelize.OpenFile(sourcePath)
+		if err != nil {
+			return err
+		}
+		defer func() { _ = input.Close() }()
+		result, err = processExcelMatchPreview(ctx, input, normalizedConfig, lookup, defaultExcelPreviewRows, defaultExcelPreviewItems)
+		return err
+	})
+	return result, err
 }
 
 func (s *ExcelMatchJobService) Download(ctx context.Context, id uint) (*model.ExcelMatchJob, string, string, error) {
@@ -626,19 +646,26 @@ func (s *ExcelMatchJobService) ProcessJob(ctx context.Context, id uint) error {
 	})
 
 	var stats ExcelMatchJobStats
-	if config.Operation == excelOperationImportUpdate || config.Operation == excelOperationClearMatched {
-		updater := bojunExcelImportUpdater{dao: s.jobDAO}
-		stats, err = processExcelImportUpdateFileWithProgress(ctx, matchJob.SourceFilePath, config, updater, func(stats ExcelMatchJobStats) {
-			_ = s.jobDAO.UpdateProgress(ctx, id, stats)
-			s.logJob(ctx, id, "info", "导入匹配进度", statsDetail(stats))
-		})
-	} else {
+	excelTempDir := filepath.Join(matchJob.WorkDir, excelizeTempDirName)
+	s.logJob(ctx, id, "info", "Excel临时目录已设置", map[string]interface{}{"temp_dir": excelTempDir})
+	err = withExcelizeTempDir(excelTempDir, func() error {
+		if config.Operation == excelOperationImportUpdate || config.Operation == excelOperationClearMatched {
+			updater := bojunExcelImportUpdater{dao: s.jobDAO}
+			var processErr error
+			stats, processErr = processExcelImportUpdateFileWithProgress(ctx, matchJob.SourceFilePath, config, updater, func(stats ExcelMatchJobStats) {
+				_ = s.jobDAO.UpdateProgress(ctx, id, stats)
+				s.logJob(ctx, id, "info", "导入匹配进度", statsDetail(stats))
+			})
+			return processErr
+		}
 		lookup := bojunExcelMatchLookup{dao: s.jobDAO}
-		stats, err = processExcelMatchFileWithProgress(ctx, matchJob.SourceFilePath, matchJob.ResultFilePath, config, lookup, func(stats ExcelMatchJobStats) {
+		var processErr error
+		stats, processErr = processExcelMatchFileWithProgress(ctx, matchJob.SourceFilePath, matchJob.ResultFilePath, config, lookup, func(stats ExcelMatchJobStats) {
 			_ = s.jobDAO.UpdateProgress(ctx, id, stats)
 			s.logJob(ctx, id, "info", "匹配导出进度", statsDetail(stats))
 		})
-	}
+		return processErr
+	})
 	expiresAt := time.Now().Add(excelMatchRetention)
 	if err != nil {
 		_ = s.jobDAO.MarkFailed(ctx, id, err.Error(), expiresAt)
@@ -1063,6 +1090,7 @@ func processExcelMatchFileWithProgress(
 	defer func() { _ = rows.Close() }()
 
 	output := excelize.NewFile()
+	defer func() { _ = output.Close() }()
 	writer, currentSheet, err := initExcelMatchWriter(output)
 	if err != nil {
 		return ExcelMatchJobStats{}, err
@@ -1553,11 +1581,66 @@ func copyFile(srcPath, dstPath string) error {
 }
 
 func excelMatchJobDir(id uint) string {
-	return filepath.Join(os.TempDir(), excelMatchRootDirName, strconv.FormatUint(uint64(id), 10))
+	return filepath.Join(excelTempRootDir(), excelMatchRootDirName, strconv.FormatUint(uint64(id), 10))
 }
 
 func excelUploadRootDir() string {
-	return filepath.Join(os.TempDir(), excelUploadRootDirName)
+	return filepath.Join(excelTempRootDir(), excelUploadRootDirName)
+}
+
+func excelPreviewRootDir() string {
+	return filepath.Join(excelTempRootDir(), excelPreviewRootDirName)
+}
+
+func excelTempRootDir() string {
+	for _, key := range []string{excelTempRootEnvName, "EXCEL_MATCH_TEMP_DIR"} {
+		if value := strings.TrimSpace(os.Getenv(key)); value != "" {
+			return filepath.Clean(value)
+		}
+	}
+	if abs, err := filepath.Abs(filepath.Join("storage", "tmp", "data-warehouse-excel")); err == nil {
+		return abs
+	}
+	return filepath.Join(os.TempDir(), "data-warehouse-excel")
+}
+
+func excelizeTempDirForPath(filePath string) string {
+	base := filepath.Dir(filePath)
+	if base == "." || strings.TrimSpace(base) == "" {
+		base = excelTempRootDir()
+	}
+	return filepath.Join(base, excelizeTempDirName)
+}
+
+func withExcelizeTempDir(tempDir string, fn func() error) error {
+	if err := os.MkdirAll(tempDir, 0700); err != nil {
+		return err
+	}
+	excelizeTempMu.Lock()
+	defer excelizeTempMu.Unlock()
+
+	keys := []string{"TMPDIR", "TMP", "TEMP"}
+	previous := make(map[string]string, len(keys))
+	present := make(map[string]bool, len(keys))
+	for _, key := range keys {
+		value, ok := os.LookupEnv(key)
+		previous[key] = value
+		present[key] = ok
+		if err := os.Setenv(key, tempDir); err != nil {
+			return err
+		}
+	}
+	defer func() {
+		for _, key := range keys {
+			if present[key] {
+				_ = os.Setenv(key, previous[key])
+			} else {
+				_ = os.Unsetenv(key)
+			}
+		}
+	}()
+
+	return fn()
 }
 
 func excelUploadDir(uploadID string) string {
