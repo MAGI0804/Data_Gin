@@ -35,29 +35,32 @@ const (
 	excelMatchStatusSuccess = "success"
 	excelMatchStatusExpired = "expired"
 
-	excelMatchRetention        = 24 * time.Hour
-	excelMatchRootDirName      = "data-warehouse-excel-jobs"
-	excelUploadRootDirName     = "data-warehouse-excel-uploads"
-	excelPreviewRootDirName    = "data-warehouse-excel-previews"
-	excelizeTempDirName        = "excelize-tmp"
-	excelTempRootEnvName       = "DATA_WAREHOUSE_EXCEL_TEMP_DIR"
-	excelMatchSourceFileName   = "source.xlsx"
-	excelMatchResultFileName   = "result.xlsx"
-	excelUploadChunksDirName   = "chunks"
-	excelUploadMetaFileName    = "meta.json"
-	excelUploadMergedFile      = "source.xlsx"
-	excelMaxRowsPerSheet       = 1048576
-	defaultExcelMatchBatch     = 1000
-	maxBufferedExcelRows       = 5000
-	maxExcelUploadChunks       = 10000
-	maxExcelUploadChunkBytes   = 8 * 1024 * 1024
-	defaultExcelSheetName      = "Sheet1"
-	defaultExcelResultSheet    = "Result_1"
-	bojunRetailOrderTemplate   = "bojun_retail_order"
-	bojunRetailOrdersTable     = "bojun_retail_orders"
-	defaultExcelPreviewRows    = 5000
-	defaultExcelPreviewItems   = 50
-	excelMatchOSSUploadTimeout = 90 * time.Second
+	excelMatchRetention               = 24 * time.Hour
+	excelMatchRootDirName             = "data-warehouse-excel-jobs"
+	excelUploadRootDirName            = "data-warehouse-excel-uploads"
+	excelPreviewRootDirName           = "data-warehouse-excel-previews"
+	excelizeTempDirName               = "excelize-tmp"
+	excelTempRootEnvName              = "DATA_WAREHOUSE_EXCEL_TEMP_DIR"
+	excelMatchSourceFileName          = "source.xlsx"
+	excelMatchResultFileName          = "result.xlsx"
+	excelUploadChunksDirName          = "chunks"
+	excelUploadMetaFileName           = "meta.json"
+	excelUploadMergedFile             = "source.xlsx"
+	excelMaxRowsPerSheet              = 1048576
+	defaultExcelMatchBatch            = 1000
+	maxBufferedExcelRows              = 5000
+	maxExcelUploadChunks              = 10000
+	maxExcelUploadChunkBytes          = 8 * 1024 * 1024
+	defaultExcelSheetName             = "Sheet1"
+	defaultExcelResultSheet           = "Result_1"
+	bojunRetailOrderTemplate          = "bojun_retail_order"
+	bojunRetailOrdersTable            = "bojun_retail_orders"
+	defaultExcelPreviewRows           = 5000
+	defaultExcelPreviewItems          = 50
+	excelMatchOSSUploadTimeoutEnvName = "EXCEL_MATCH_OSS_UPLOAD_TIMEOUT_SECONDS"
+	excelMatchOSSUploadMinTimeout     = 10 * time.Minute
+	excelMatchOSSUploadMaxTimeout     = 2 * time.Hour
+	excelMatchOSSUploadBytesPerMinute = 32 * 1024 * 1024
 )
 
 var excelizeTempMu sync.Mutex
@@ -616,6 +619,15 @@ func (s *ExcelMatchJobService) Download(ctx context.Context, id uint) (*model.Ex
 		}
 		return nil, "", "", errors.New("读取结果文件失败，请稍后重试")
 	}
+	if storage.OSSStorageEnabled() {
+		s.logJob(ctx, matchJob.ID, "info", "下载前尝试补传结果文件到OSS", nil)
+		result, uploadErr := s.uploadExcelResultToOSS(ctx, matchJob)
+		if uploadErr == nil {
+			s.logJob(ctx, matchJob.ID, "info", "下载前补传结果文件到OSS成功", map[string]interface{}{"object_key": result.ObjectKey})
+			return matchJob, "", fmt.Sprintf("excel_match_job_%d.xlsx", matchJob.ID), nil
+		}
+		s.logJob(ctx, matchJob.ID, "warn", "下载前补传结果文件到OSS失败，继续本地下载", map[string]interface{}{"error": uploadErr.Error()})
+	}
 	return matchJob, matchJob.ResultFilePath, fmt.Sprintf("excel_match_job_%d.xlsx", matchJob.ID), nil
 }
 
@@ -681,13 +693,11 @@ func (s *ExcelMatchJobService) ProcessJob(ctx context.Context, id uint) error {
 	s.logJob(ctx, id, "info", "任务处理成功", statsDetail(stats))
 
 	if config.Operation == excelOperationExportMatch && storage.OSSStorageEnabled() {
-		fileSize := int64(0)
-		if info, statErr := os.Stat(matchJob.ResultFilePath); statErr == nil {
-			fileSize = info.Size()
-		}
+		fileSize := fileSizeOrZero(matchJob.ResultFilePath)
+		uploadTimeout := excelMatchOSSUploadTimeout(fileSize)
 		s.logJob(ctx, id, "info", "开始上传结果文件到OSS", map[string]interface{}{
 			"file_size":       fileSize,
-			"timeout_seconds": int(excelMatchOSSUploadTimeout.Seconds()),
+			"timeout_seconds": int(uploadTimeout.Seconds()),
 		})
 		result, err := s.uploadExcelResultToOSS(ctx, matchJob)
 		if err != nil {
@@ -1493,7 +1503,7 @@ func (s *ExcelMatchJobService) uploadExcelResultToOSS(ctx context.Context, match
 		strconv.FormatUint(uint64(matchJob.ID), 10),
 		excelMatchResultFileName,
 	)
-	uploadCtx, cancel := context.WithTimeout(ctx, excelMatchOSSUploadTimeout)
+	uploadCtx, cancel := context.WithTimeout(ctx, excelMatchOSSUploadTimeout(fileSizeOrZero(matchJob.ResultFilePath)))
 	defer cancel()
 	result, err := client.UploadFile(uploadCtx, objectKey, matchJob.ResultFilePath, fmt.Sprintf("excel_match_job_%d.xlsx", matchJob.ID))
 	if err != nil {
@@ -1529,6 +1539,37 @@ func statsDetail(stats ExcelMatchJobStats) map[string]interface{} {
 		"matched_rows":   stats.MatchedRows,
 		"unmatched_rows": stats.UnmatchedRows,
 	}
+}
+
+func fileSizeOrZero(filePath string) int64 {
+	info, err := os.Stat(filePath)
+	if err != nil {
+		return 0
+	}
+	return info.Size()
+}
+
+func excelMatchOSSUploadTimeout(fileSize int64) time.Duration {
+	if override := strings.TrimSpace(os.Getenv(excelMatchOSSUploadTimeoutEnvName)); override != "" {
+		if seconds, err := strconv.Atoi(override); err == nil && seconds > 0 {
+			return time.Duration(seconds) * time.Second
+		}
+	}
+	if fileSize <= 0 {
+		return excelMatchOSSUploadMinTimeout
+	}
+	minutes := fileSize / excelMatchOSSUploadBytesPerMinute
+	if fileSize%excelMatchOSSUploadBytesPerMinute != 0 {
+		minutes++
+	}
+	timeout := time.Duration(minutes) * time.Minute
+	if timeout < excelMatchOSSUploadMinTimeout {
+		return excelMatchOSSUploadMinTimeout
+	}
+	if timeout > excelMatchOSSUploadMaxTimeout {
+		return excelMatchOSSUploadMaxTimeout
+	}
+	return timeout
 }
 
 func excelMatchSchemeFromModel(row model.ExcelMatchScheme) (ExcelMatchScheme, error) {

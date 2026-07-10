@@ -396,6 +396,31 @@ func TestWithExcelizeTempDirSetsAndRestoresTempEnvironment(t *testing.T) {
 	assertEnvRestored("TEMP", originalTemp, hadTemp)
 }
 
+func TestExcelMatchOSSUploadTimeoutScalesWithFileSize(t *testing.T) {
+	t.Setenv(excelMatchOSSUploadTimeoutEnvName, "")
+
+	if got := excelMatchOSSUploadTimeout(0); got != excelMatchOSSUploadMinTimeout {
+		t.Fatalf("timeout for empty size = %s, want %s", got, excelMatchOSSUploadMinTimeout)
+	}
+	largeFile := int64(500 * 1024 * 1024)
+	got := excelMatchOSSUploadTimeout(largeFile)
+	if got <= 90*time.Second {
+		t.Fatalf("timeout for 500MB = %s, want greater than 90s", got)
+	}
+	if got < excelMatchOSSUploadMinTimeout {
+		t.Fatalf("timeout for 500MB = %s, want at least %s", got, excelMatchOSSUploadMinTimeout)
+	}
+}
+
+func TestExcelMatchOSSUploadTimeoutCanBeOverridden(t *testing.T) {
+	t.Setenv(excelMatchOSSUploadTimeoutEnvName, "7200")
+
+	got := excelMatchOSSUploadTimeout(500 * 1024 * 1024)
+	if got != 2*time.Hour {
+		t.Fatalf("timeout override = %s, want 2h", got)
+	}
+}
+
 func TestProcessExcelMatchFileUsesConfiguredSheet(t *testing.T) {
 	dir := t.TempDir()
 	inputPath := filepath.Join(dir, "source.xlsx")
