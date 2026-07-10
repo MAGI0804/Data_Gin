@@ -619,16 +619,7 @@ func (s *ExcelMatchJobService) Download(ctx context.Context, id uint) (*model.Ex
 		}
 		return nil, "", "", errors.New("读取结果文件失败，请稍后重试")
 	}
-	if storage.OSSStorageEnabled() {
-		s.logJob(ctx, matchJob.ID, "info", "下载前尝试补传结果文件到OSS", nil)
-		result, uploadErr := s.uploadExcelResultToOSS(ctx, matchJob)
-		if uploadErr == nil {
-			s.logJob(ctx, matchJob.ID, "info", "下载前补传结果文件到OSS成功", map[string]interface{}{"object_key": result.ObjectKey})
-			return matchJob, "", fmt.Sprintf("excel_match_job_%d.xlsx", matchJob.ID), nil
-		}
-		s.logJob(ctx, matchJob.ID, "warn", "下载前补传结果文件到OSS失败，继续本地下载", map[string]interface{}{"error": uploadErr.Error()})
-	}
-	return matchJob, matchJob.ResultFilePath, fmt.Sprintf("excel_match_job_%d.xlsx", matchJob.ID), nil
+	return nil, "", "", errors.New("结果文件尚未上传到OSS，上传成功后才能下载，请稍后刷新任务状态")
 }
 
 func (s *ExcelMatchJobService) ProcessJob(ctx context.Context, id uint) error {
@@ -1838,23 +1829,7 @@ func (s *ExcelMatchJobService) refreshDownloadState(ctx context.Context, matchJo
 		matchJob.CanDownload = true
 		return
 	}
-	if !isPathInside(excelMatchJobDir(matchJob.ID), matchJob.ResultFilePath) {
-		matchJob.DownloadMessage = "结果文件路径非法"
-		return
-	}
-	if _, err := os.Stat(matchJob.ResultFilePath); err != nil {
-		if os.IsNotExist(err) {
-			if s.jobDAO != nil {
-				_ = s.jobDAO.MarkExpired(ctx, matchJob.ID)
-			}
-			matchJob.Status = excelMatchStatusExpired
-			matchJob.DownloadMessage = "结果文件不存在或已被清理，请重新创建匹配导出任务"
-			return
-		}
-		matchJob.DownloadMessage = "读取结果文件失败，请稍后重试"
-		return
-	}
-	matchJob.CanDownload = true
+	matchJob.DownloadMessage = "结果文件正在上传OSS，上传成功后才能下载，请稍后刷新任务状态"
 }
 
 func excelJobOperationFromConfigJSON(rawConfig string) string {

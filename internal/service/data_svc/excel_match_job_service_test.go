@@ -624,7 +624,7 @@ func TestRefreshDownloadStateRejectsNonExportJobs(t *testing.T) {
 	}
 }
 
-func TestRefreshDownloadStateRequiresExistingResultFile(t *testing.T) {
+func TestRefreshDownloadStateRequiresResultURL(t *testing.T) {
 	jobID := uint(987654)
 	workDir := excelMatchJobDir(jobID)
 	if err := os.MkdirAll(workDir, 0700); err != nil {
@@ -644,9 +644,6 @@ func TestRefreshDownloadStateRequiresExistingResultFile(t *testing.T) {
 	if job.CanDownload {
 		t.Fatal("CanDownload = true, want false when result file is missing")
 	}
-	if job.Status != excelMatchStatusExpired {
-		t.Fatalf("Status = %s, want expired when result file is missing", job.Status)
-	}
 	if job.DownloadMessage == "" {
 		t.Fatal("DownloadMessage is empty, want missing file reason")
 	}
@@ -656,7 +653,12 @@ func TestRefreshDownloadStateRequiresExistingResultFile(t *testing.T) {
 	}
 	job.Status = excelMatchStatusSuccess
 	(&ExcelMatchJobService{}).refreshDownloadState(context.Background(), job)
+	if job.CanDownload {
+		t.Fatal("CanDownload = true, want false before OSS result URL exists")
+	}
+	job.ResultURL = "https://warehouse.youlankids.com/data-warehouse/excel-match-results/987654/result.xlsx"
+	(&ExcelMatchJobService{}).refreshDownloadState(context.Background(), job)
 	if !job.CanDownload {
-		t.Fatalf("CanDownload = false, want true when result file exists: %s", job.DownloadMessage)
+		t.Fatalf("CanDownload = false, want true when result URL exists: %s", job.DownloadMessage)
 	}
 }

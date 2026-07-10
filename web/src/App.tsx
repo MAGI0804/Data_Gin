@@ -151,6 +151,7 @@ type ExcelMatchJob = {
   started_at: string | null
   finished_at: string | null
   expires_at: string | null
+  result_url?: string
   can_download?: boolean
   download_message?: string
   created_at: number
@@ -1569,7 +1570,7 @@ function ExcelMatchView({
     }
     const targetJob = job?.id === id ? job : jobHistory.find((item) => item.id === id) ?? null
     if (targetJob && !canDownloadExcelJob(targetJob)) {
-      setResult({ ok: false, status: 0, data: '只有“匹配导出”且状态为成功的任务才有结果文件可下载' })
+      setResult({ ok: false, status: 0, data: targetJob.download_message || '结果文件尚未上传到OSS，上传成功后才能下载，请稍后刷新任务状态' })
       return
     }
 
@@ -2902,7 +2903,7 @@ function excelJobOperationLabel(value: string) {
 
 function canDownloadExcelJob(job: ExcelMatchJob) {
   if (typeof job.can_download === 'boolean') return job.can_download
-  return job.status === 'success' && excelJobOperation(job) === 'export_match'
+  return job.status === 'success' && excelJobOperation(job) === 'export_match' && Boolean(job.result_url)
 }
 
 function excelPreviewStat(stats: ExcelMatchPreviewStats, key: keyof ExcelMatchPreviewStats) {
