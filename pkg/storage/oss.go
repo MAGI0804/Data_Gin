@@ -30,6 +30,11 @@ type OSSConfig struct {
 	DisableSSL              bool
 	ConnectTimeoutSeconds   int
 	ReadWriteTimeoutSeconds int
+	MultipartThresholdBytes int64
+	PartSizeBytes           int64
+	ParallelNum             int
+	EnableCheckpoint        bool
+	CheckpointDir           string
 }
 
 type OSSClient struct {
@@ -50,6 +55,17 @@ type UploadProgress struct {
 }
 
 type UploadProgressFunc func(progress UploadProgress)
+
+type UploadPlan struct {
+	Endpoint                string
+	UseInternal             bool
+	Multipart               bool
+	MultipartThresholdBytes int64
+	PartSizeBytes           int64
+	ParallelNum             int
+	EnableCheckpoint        bool
+	CheckpointDir           string
+}
 
 func OSSStorageEnabled() bool {
 	return strings.EqualFold(config.GetString("cfg.storage.driver"), "oss") || config.GetBool("cfg.storage.oss.enabled")
@@ -78,8 +94,8 @@ func NewOSSClientFromConfig() (*OSSClient, error) {
 		WithConnectTimeout(time.Duration(cfg.ConnectTimeoutSeconds) * time.Second).
 		WithReadWriteTimeout(time.Duration(cfg.ReadWriteTimeoutSeconds) * time.Second).
 		WithCredentialsProvider(credentialsProviderFromEnv())
-	if cfg.Endpoint != "" {
-		ossCfg = ossCfg.WithEndpoint(cfg.Endpoint)
+	if endpoint := clientEndpoint(cfg); endpoint != "" {
+		ossCfg = ossCfg.WithEndpoint(endpoint)
 	}
 
 	return &OSSClient{
@@ -97,6 +113,22 @@ func LoadOSSConfig() OSSConfig {
 	if readWriteTimeout <= 0 {
 		readWriteTimeout = 300
 	}
+	multipartThreshold := config.GetInt64("cfg.storage.oss.multipart_threshold_bytes")
+	if multipartThreshold <= 0 {
+		multipartThreshold = 64 * 1024 * 1024
+	}
+	partSize := config.GetInt64("cfg.storage.oss.part_size_bytes")
+	if partSize <= 0 {
+		partSize = 64 * 1024 * 1024
+	}
+	parallelNum := config.GetInt("cfg.storage.oss.parallel_num")
+	if parallelNum <= 0 {
+		parallelNum = 3
+	}
+	checkpointDir := strings.TrimSpace(config.GetString("cfg.storage.oss.checkpoint_dir"))
+	if checkpointDir == "" {
+		checkpointDir = filepath.Join(os.TempDir(), "data-warehouse-oss-checkpoints")
+	}
 	return OSSConfig{
 		Enabled:                 OSSStorageEnabled(),
 		Region:                  normalizeOSSRegion(config.GetString("cfg.storage.oss.region")),
@@ -109,6 +141,11 @@ func LoadOSSConfig() OSSConfig {
 		DisableSSL:              config.GetBool("cfg.storage.oss.disable_ssl"),
 		ConnectTimeoutSeconds:   connectTimeout,
 		ReadWriteTimeoutSeconds: readWriteTimeout,
+		MultipartThresholdBytes: multipartThreshold,
+		PartSizeBytes:           partSize,
+		ParallelNum:             parallelNum,
+		EnableCheckpoint:        config.GetBool("cfg.storage.oss.enable_checkpoint", true),
+		CheckpointDir:           checkpointDir,
 	}
 }
 
@@ -151,13 +188,43 @@ func (c *OSSClient) UploadFileWithProgress(ctx context.Context, objectKey, local
 			})
 		}
 	}
-	if _, err := c.client.PutObjectFromFile(ctx, request, localPath); err != nil {
-		return UploadResult{}, err
+	if fileInfo.Size() >= c.cfg.MultipartThresholdBytes {
+		if c.cfg.EnableCheckpoint {
+			if err := os.MkdirAll(c.cfg.CheckpointDir, 0700); err != nil {
+				return UploadResult{}, err
+			}
+		}
+		uploader := c.client.NewUploader(func(options *alioss.UploaderOptions) {
+			options.PartSize = c.cfg.PartSizeBytes
+			options.ParallelNum = c.cfg.ParallelNum
+			options.EnableCheckpoint = c.cfg.EnableCheckpoint
+			options.CheckpointDir = c.cfg.CheckpointDir
+		})
+		if _, err := uploader.UploadFile(ctx, request, localPath); err != nil {
+			return UploadResult{}, err
+		}
+	} else {
+		if _, err := c.client.PutObjectFromFile(ctx, request, localPath); err != nil {
+			return UploadResult{}, err
+		}
 	}
 	return UploadResult{
 		ObjectKey: objectKey,
 		URL:       c.PublicURL(objectKey),
 	}, nil
+}
+
+func (c *OSSClient) UploadPlan(fileSize int64) UploadPlan {
+	return UploadPlan{
+		Endpoint:                clientEndpoint(c.cfg),
+		UseInternal:             c.cfg.UseInternal,
+		Multipart:               fileSize >= c.cfg.MultipartThresholdBytes,
+		MultipartThresholdBytes: c.cfg.MultipartThresholdBytes,
+		PartSizeBytes:           c.cfg.PartSizeBytes,
+		ParallelNum:             c.cfg.ParallelNum,
+		EnableCheckpoint:        c.cfg.EnableCheckpoint,
+		CheckpointDir:           c.cfg.CheckpointDir,
+	}
 }
 
 func (c *OSSClient) DeleteObject(ctx context.Context, objectKey string) error {
@@ -198,6 +265,26 @@ func normalizeOSSRegion(region string) string {
 	region = strings.TrimSuffix(region, ".aliyuncs.com")
 	region = strings.TrimPrefix(region, "oss-")
 	return strings.Trim(region, "/")
+}
+
+func clientEndpoint(cfg OSSConfig) string {
+	endpoint := strings.TrimSpace(cfg.Endpoint)
+	if cfg.UseInternal && !cfg.UseCName {
+		return internalEndpoint(cfg.Region, cfg.DisableSSL)
+	}
+	return endpoint
+}
+
+func internalEndpoint(region string, disableSSL bool) string {
+	region = normalizeOSSRegion(region)
+	if region == "" {
+		return ""
+	}
+	scheme := "https"
+	if disableSSL {
+		scheme = "http"
+	}
+	return fmt.Sprintf("%s://oss-%s-internal.aliyuncs.com", scheme, region)
 }
 
 func BuildObjectKey(parts ...string) string {

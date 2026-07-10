@@ -1502,6 +1502,17 @@ func (s *ExcelMatchJobService) uploadExcelResultToOSS(ctx context.Context, match
 		return storage.UploadResult{}, err
 	}
 	fileSize := fileSizeOrZero(matchJob.ResultFilePath)
+	uploadPlan := client.UploadPlan(fileSize)
+	s.logJob(ctx, matchJob.ID, "info", "OSS上传配置", map[string]interface{}{
+		"endpoint":                  uploadPlan.Endpoint,
+		"use_internal":              uploadPlan.UseInternal,
+		"multipart":                 uploadPlan.Multipart,
+		"multipart_threshold_bytes": uploadPlan.MultipartThresholdBytes,
+		"part_size_bytes":           uploadPlan.PartSizeBytes,
+		"parallel_num":              uploadPlan.ParallelNum,
+		"enable_checkpoint":         uploadPlan.EnableCheckpoint,
+		"checkpoint_dir":            uploadPlan.CheckpointDir,
+	})
 	uploadCtx, cancel := context.WithTimeout(ctx, uploadTimeout)
 	defer cancel()
 	progressLogger := newExcelOSSProgressLogger(func(progress storage.UploadProgress, elapsed time.Duration) {

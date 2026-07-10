@@ -139,6 +139,9 @@ Storage:
   OSS:
     Enabled: ${ALIYUN_OSS_ENABLED:-false}
     # Region uses cn-shanghai; endpoint uses https://oss-cn-shanghai.aliyuncs.com.
+    # If backend runs on Alibaba Cloud ECS in the same region as the bucket,
+    # set ALIYUN_OSS_USE_INTERNAL=true to upload through
+    # https://oss-cn-shanghai-internal.aliyuncs.com.
     Region: ${ALIYUN_OSS_REGION:-cn-shanghai}
     Endpoint: ${ALIYUN_OSS_ENDPOINT:-https://oss-cn-shanghai.aliyuncs.com}
     Bucket: ${ALIYUN_OSS_BUCKET:-}
@@ -149,3 +152,8 @@ Storage:
     DisableSSL: ${ALIYUN_OSS_DISABLE_SSL:-false}
     ConnectTimeoutSeconds: ${ALIYUN_OSS_CONNECT_TIMEOUT_SECONDS:-10}
     ReadWriteTimeoutSeconds: ${ALIYUN_OSS_READ_WRITE_TIMEOUT_SECONDS:-300}
+    MultipartThresholdBytes: ${ALIYUN_OSS_MULTIPART_THRESHOLD_BYTES:-67108864}
+    PartSizeBytes: ${ALIYUN_OSS_PART_SIZE_BYTES:-67108864}
+    ParallelNum: ${ALIYUN_OSS_PARALLEL_NUM:-3}
+    EnableCheckpoint: ${ALIYUN_OSS_ENABLE_CHECKPOINT:-true}
+    CheckpointDir: ${ALIYUN_OSS_CHECKPOINT_DIR:-}
