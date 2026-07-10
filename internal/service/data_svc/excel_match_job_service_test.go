@@ -3,6 +3,7 @@ package data_svc
 import (
 	"context"
 	"gin-biz-web-api/model"
+	"gin-biz-web-api/pkg/storage"
 	"os"
 	"path/filepath"
 	"reflect"
@@ -418,6 +419,39 @@ func TestExcelMatchOSSUploadTimeoutCanBeOverridden(t *testing.T) {
 	got := excelMatchOSSUploadTimeout(500 * 1024 * 1024)
 	if got != 2*time.Hour {
 		t.Fatalf("timeout override = %s, want 2h", got)
+	}
+}
+
+func TestExcelOSSProgressLoggerThrottlesAndFlushes(t *testing.T) {
+	var logged []storage.UploadProgress
+	logger := newExcelOSSProgressLogger(func(progress storage.UploadProgress, elapsed time.Duration) {
+		logged = append(logged, progress)
+		if elapsed < 0 {
+			t.Fatalf("elapsed = %s, want non-negative", elapsed)
+		}
+	})
+
+	logger.Handle(storage.UploadProgress{Transferred: 1024, Total: 100 * 1024 * 1024})
+	if len(logged) != 0 {
+		t.Fatalf("logged %d progress events before threshold, want 0", len(logged))
+	}
+
+	logger.Handle(storage.UploadProgress{Transferred: excelMatchOSSProgressBytes, Total: 100 * 1024 * 1024})
+	if len(logged) != 1 {
+		t.Fatalf("logged %d progress events at byte threshold, want 1", len(logged))
+	}
+
+	logger.Handle(storage.UploadProgress{Transferred: excelMatchOSSProgressBytes + 1024, Total: 100 * 1024 * 1024})
+	if len(logged) != 1 {
+		t.Fatalf("logged %d progress events below next threshold, want 1", len(logged))
+	}
+
+	logger.Flush()
+	if len(logged) != 2 {
+		t.Fatalf("logged %d progress events after flush, want 2", len(logged))
+	}
+	if logged[1].Transferred != excelMatchOSSProgressBytes+1024 {
+		t.Fatalf("flushed transferred = %d, want %d", logged[1].Transferred, excelMatchOSSProgressBytes+1024)
 	}
 }
 

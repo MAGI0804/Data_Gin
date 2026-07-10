@@ -61,6 +61,8 @@ const (
 	excelMatchOSSUploadMinTimeout     = 10 * time.Minute
 	excelMatchOSSUploadMaxTimeout     = 2 * time.Hour
 	excelMatchOSSUploadBytesPerMinute = 32 * 1024 * 1024
+	excelMatchOSSProgressBytes        = 32 * 1024 * 1024
+	excelMatchOSSProgressInterval     = 15 * time.Second
 )
 
 var excelizeTempMu sync.Mutex
@@ -677,29 +679,40 @@ func (s *ExcelMatchJobService) ProcessJob(ctx context.Context, id uint) error {
 	}
 	_ = os.Remove(matchJob.SourceFilePath)
 	s.logJob(ctx, id, "info", "源文件已删除", nil)
+
+	if config.Operation == excelOperationExportMatch && storage.OSSStorageEnabled() {
+		fileSize := fileSizeOrZero(matchJob.ResultFilePath)
+		uploadTimeout := excelMatchOSSUploadTimeout(fileSize)
+		objectKey := excelMatchResultObjectKey(id, time.Now())
+		s.logJob(ctx, id, "info", "Excel匹配完成，开始上传结果文件到OSS", map[string]interface{}{
+			"object_key":      objectKey,
+			"file_size":       fileSize,
+			"timeout_seconds": int(uploadTimeout.Seconds()),
+		})
+		result, err := s.uploadExcelResultToOSS(ctx, matchJob, objectKey, uploadTimeout)
+		if err != nil {
+			errorMessage := fmt.Sprintf("上传结果文件到OSS失败: %v", err)
+			_ = s.jobDAO.MarkFailed(ctx, id, errorMessage, expiresAt)
+			s.logJob(ctx, id, "error", "上传结果文件到OSS失败", map[string]interface{}{
+				"object_key":      objectKey,
+				"file_size":       fileSize,
+				"timeout_seconds": int(uploadTimeout.Seconds()),
+				"error":           err.Error(),
+			})
+			return nil
+		}
+		s.logJob(ctx, id, "info", "结果文件已上传OSS", map[string]interface{}{
+			"object_key": result.ObjectKey,
+			"result_url": result.URL,
+			"file_size":  fileSize,
+		})
+		_ = os.Remove(matchJob.ResultFilePath)
+	}
 	if err := s.jobDAO.MarkSuccess(ctx, id, stats, expiresAt); err != nil {
 		s.logJob(ctx, id, "error", "更新任务成功状态失败", map[string]interface{}{"error": err.Error()})
 		return err
 	}
 	s.logJob(ctx, id, "info", "任务处理成功", statsDetail(stats))
-
-	if config.Operation == excelOperationExportMatch && storage.OSSStorageEnabled() {
-		fileSize := fileSizeOrZero(matchJob.ResultFilePath)
-		uploadTimeout := excelMatchOSSUploadTimeout(fileSize)
-		s.logJob(ctx, id, "info", "开始上传结果文件到OSS", map[string]interface{}{
-			"file_size":       fileSize,
-			"timeout_seconds": int(uploadTimeout.Seconds()),
-		})
-		result, err := s.uploadExcelResultToOSS(ctx, matchJob)
-		if err != nil {
-			s.logJob(ctx, id, "warn", "上传结果文件到OSS失败，保留本地结果文件用于下载", map[string]interface{}{"error": err.Error()})
-			return nil
-		}
-		s.logJob(ctx, id, "info", "结果文件已上传OSS", map[string]interface{}{
-			"object_key": result.ObjectKey,
-		})
-		_ = os.Remove(matchJob.ResultFilePath)
-	}
 	return nil
 }
 
@@ -1483,20 +1496,28 @@ func (s *ExcelMatchJobService) logJob(ctx context.Context, jobID uint, level, me
 	})
 }
 
-func (s *ExcelMatchJobService) uploadExcelResultToOSS(ctx context.Context, matchJob *model.ExcelMatchJob) (storage.UploadResult, error) {
+func (s *ExcelMatchJobService) uploadExcelResultToOSS(ctx context.Context, matchJob *model.ExcelMatchJob, objectKey string, uploadTimeout time.Duration) (storage.UploadResult, error) {
 	client, err := storage.NewOSSClientFromConfig()
 	if err != nil {
 		return storage.UploadResult{}, err
 	}
-	objectKey := storage.BuildObjectKey(
-		"excel-match-results",
-		time.Now().Format("2006/01/02"),
-		strconv.FormatUint(uint64(matchJob.ID), 10),
-		excelMatchResultFileName,
-	)
-	uploadCtx, cancel := context.WithTimeout(ctx, excelMatchOSSUploadTimeout(fileSizeOrZero(matchJob.ResultFilePath)))
+	fileSize := fileSizeOrZero(matchJob.ResultFilePath)
+	uploadCtx, cancel := context.WithTimeout(ctx, uploadTimeout)
 	defer cancel()
-	result, err := client.UploadFile(uploadCtx, objectKey, matchJob.ResultFilePath, fmt.Sprintf("excel_match_job_%d.xlsx", matchJob.ID))
+	progressLogger := newExcelOSSProgressLogger(func(progress storage.UploadProgress, elapsed time.Duration) {
+		s.logJob(ctx, matchJob.ID, "info", "OSS结果文件上传进度", map[string]interface{}{
+			"object_key":  objectKey,
+			"transferred": progress.Transferred,
+			"total":       progress.Total,
+			"percent":     fmt.Sprintf("%.2f", progress.Percent),
+			"increment":   progress.Increment,
+			"file_size":   fileSize,
+			"timeout_sec": int(uploadTimeout.Seconds()),
+			"elapsed_sec": int(elapsed.Seconds()),
+		})
+	})
+	defer progressLogger.Flush()
+	result, err := client.UploadFileWithProgress(uploadCtx, objectKey, matchJob.ResultFilePath, fmt.Sprintf("excel_match_job_%d.xlsx", matchJob.ID), progressLogger.Handle)
 	if err != nil {
 		return storage.UploadResult{}, err
 	}
@@ -1506,6 +1527,15 @@ func (s *ExcelMatchJobService) uploadExcelResultToOSS(ctx context.Context, match
 	matchJob.ResultObjectKey = result.ObjectKey
 	matchJob.ResultURL = result.URL
 	return result, nil
+}
+
+func excelMatchResultObjectKey(jobID uint, now time.Time) string {
+	return storage.BuildObjectKey(
+		"excel-match-results",
+		now.Format("2006/01/02"),
+		strconv.FormatUint(uint64(jobID), 10),
+		excelMatchResultFileName,
+	)
 }
 
 func (s *ExcelMatchJobService) cleanupResultObject(ctx context.Context, matchJob model.ExcelMatchJob) {
@@ -1561,6 +1591,51 @@ func excelMatchOSSUploadTimeout(fileSize int64) time.Duration {
 		return excelMatchOSSUploadMaxTimeout
 	}
 	return timeout
+}
+
+type excelOSSProgressLogger struct {
+	startedAt       time.Time
+	lastLoggedAt    time.Time
+	lastLoggedBytes int64
+	latest          storage.UploadProgress
+	log             func(storage.UploadProgress, time.Duration)
+}
+
+func newExcelOSSProgressLogger(log func(storage.UploadProgress, time.Duration)) *excelOSSProgressLogger {
+	now := time.Now()
+	return &excelOSSProgressLogger{
+		startedAt:    now,
+		lastLoggedAt: now,
+		log:          log,
+	}
+}
+
+func (l *excelOSSProgressLogger) Handle(progress storage.UploadProgress) {
+	l.latest = progress
+	now := time.Now()
+	if progress.Total > 0 && progress.Transferred >= progress.Total {
+		l.emit(progress, now)
+		return
+	}
+	if progress.Transferred-l.lastLoggedBytes >= excelMatchOSSProgressBytes || now.Sub(l.lastLoggedAt) >= excelMatchOSSProgressInterval {
+		l.emit(progress, now)
+	}
+}
+
+func (l *excelOSSProgressLogger) Flush() {
+	if l.latest.Transferred <= 0 || l.latest.Transferred == l.lastLoggedBytes {
+		return
+	}
+	l.emit(l.latest, time.Now())
+}
+
+func (l *excelOSSProgressLogger) emit(progress storage.UploadProgress, now time.Time) {
+	if l.log == nil {
+		return
+	}
+	l.lastLoggedAt = now
+	l.lastLoggedBytes = progress.Transferred
+	l.log(progress, now.Sub(l.startedAt))
 }
 
 func excelMatchSchemeFromModel(row model.ExcelMatchScheme) (ExcelMatchScheme, error) {

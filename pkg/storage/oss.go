@@ -42,6 +42,15 @@ type UploadResult struct {
 	URL       string
 }
 
+type UploadProgress struct {
+	Increment   int64
+	Transferred int64
+	Total       int64
+	Percent     float64
+}
+
+type UploadProgressFunc func(progress UploadProgress)
+
 func OSSStorageEnabled() bool {
 	return strings.EqualFold(config.GetString("cfg.storage.driver"), "oss") || config.GetBool("cfg.storage.oss.enabled")
 }
@@ -104,9 +113,17 @@ func LoadOSSConfig() OSSConfig {
 }
 
 func (c *OSSClient) UploadFile(ctx context.Context, objectKey, localPath, downloadName string) (UploadResult, error) {
+	return c.UploadFileWithProgress(ctx, objectKey, localPath, downloadName, nil)
+}
+
+func (c *OSSClient) UploadFileWithProgress(ctx context.Context, objectKey, localPath, downloadName string, onProgress UploadProgressFunc) (UploadResult, error) {
 	objectKey = cleanObjectKey(objectKey)
 	if objectKey == "" {
-		return UploadResult{}, errors.New("OSS object key 不能为空")
+		return UploadResult{}, errors.New("OSS object key cannot be empty")
+	}
+	fileInfo, err := os.Stat(localPath)
+	if err != nil {
+		return UploadResult{}, err
 	}
 	contentType := mime.TypeByExtension(strings.ToLower(filepath.Ext(localPath)))
 	if contentType == "" {
@@ -115,9 +132,24 @@ func (c *OSSClient) UploadFile(ctx context.Context, objectKey, localPath, downlo
 	request := &alioss.PutObjectRequest{
 		Bucket:             alioss.Ptr(c.cfg.Bucket),
 		Key:                alioss.Ptr(objectKey),
+		ContentLength:      alioss.Ptr(fileInfo.Size()),
 		ContentType:        alioss.Ptr(contentType),
 		CacheControl:       alioss.Ptr("private, max-age=86400"),
 		ContentDisposition: alioss.Ptr(contentDisposition(downloadName)),
+	}
+	if onProgress != nil {
+		request.ProgressFn = func(increment, transferred, total int64) {
+			percent := float64(0)
+			if total > 0 {
+				percent = float64(transferred) * 100 / float64(total)
+			}
+			onProgress(UploadProgress{
+				Increment:   increment,
+				Transferred: transferred,
+				Total:       total,
+				Percent:     percent,
+			})
+		}
 	}
 	if _, err := c.client.PutObjectFromFile(ctx, request, localPath); err != nil {
 		return UploadResult{}, err
