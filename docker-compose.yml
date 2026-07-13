@@ -4,8 +4,6 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: gin-biz-web-api
-    cpus: "${APP_CPU_LIMIT:-1.50}"
-    mem_limit: ${APP_MEMORY_LIMIT:-3g}
     env_file:
       - .env
     expose:
@@ -22,8 +20,6 @@ services:
       - APP_URL=${APP_URL:-http://localhost}
       - APP_PORT=${APP_PORT:-8501}
       - GIN_MODE=${GIN_MODE:-release}
-      - GOMAXPROCS=${GOMAXPROCS:-2}
-      - GOMEMLIMIT=${GOMEMLIMIT:-2500MiB}
       - SSL_ENABLED=${SSL_ENABLED:-false}
       - DB_HOST=${DB_HOST:?set DB_HOST}
       - DB_PORT=${DB_PORT:-3306}
@@ -35,13 +31,6 @@ services:
       - REDIS_USERNAME=${REDIS_USERNAME:-}
       - REDIS_PASSWORD=${REDIS_PASSWORD:-}
       - DATA_WAREHOUSE_EXCEL_TEMP_DIR=${DATA_WAREHOUSE_EXCEL_TEMP_DIR:-/data/data-warehouse-excel}
-      - EXCEL_JOB_MAX_SOURCE_FILE_BYTES=${EXCEL_JOB_MAX_SOURCE_FILE_BYTES:-300mb}
-      - EXCEL_JOB_MIN_FREE_DISK_BYTES=${EXCEL_JOB_MIN_FREE_DISK_BYTES:-10gb}
-      - EXCEL_JOB_DISK_MULTIPLIER=${EXCEL_JOB_DISK_MULTIPLIER:-20}
-      - EXCEL_JOB_MIN_FREE_MEMORY_BYTES=${EXCEL_JOB_MIN_FREE_MEMORY_BYTES:-2gb}
-      - EXCEL_JOB_MAX_CONCURRENT=${EXCEL_JOB_MAX_CONCURRENT:-1}
-      - EXCEL_JOB_THROTTLE_ROWS=${EXCEL_JOB_THROTTLE_ROWS:-100}
-      - EXCEL_JOB_THROTTLE_SLEEP_MS=${EXCEL_JOB_THROTTLE_SLEEP_MS:-20}
     restart: unless-stopped
     extra_hosts:
       - "host.docker.internal:host-gateway"
