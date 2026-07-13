@@ -770,3 +770,142 @@ func TestRefreshDownloadStateRequiresResultURL(t *testing.T) {
 		t.Fatalf("CanDownload = false, want true when result URL exists: %s", job.DownloadMessage)
 	}
 }
+
+func TestExcelJobResourcePreflightRejectsLargeSourceFile(t *testing.T) {
+	sourcePath := filepath.Join(t.TempDir(), "source.xlsx")
+	if err := os.WriteFile(sourcePath, []byte("0123456789"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(excelJobMaxSourceBytesEnvName, "5")
+	t.Setenv(excelJobMinFreeDiskBytesEnvName, "0")
+	t.Setenv(excelJobMinFreeMemoryBytesEnvName, "0")
+	restoreDisk, restoreMemory := stubExcelResources(t, 1024*1024*1024, 1024*1024*1024)
+	defer restoreDisk()
+	defer restoreMemory()
+
+	preflight, err := runExcelJobResourcePreflight(sourcePath)
+	if err == nil {
+		t.Fatal("runExcelJobResourcePreflight returned nil error, want oversized source error")
+	}
+	if preflight.SourceFileSize != 10 {
+		t.Fatalf("SourceFileSize = %d, want 10", preflight.SourceFileSize)
+	}
+	if !strings.Contains(err.Error(), excelJobMaxSourceBytesEnvName) {
+		t.Fatalf("error = %q, want env name hint", err.Error())
+	}
+}
+
+func TestExcelJobResourcePreflightRejectsLowDisk(t *testing.T) {
+	sourcePath := filepath.Join(t.TempDir(), "source.xlsx")
+	if err := os.WriteFile(sourcePath, []byte("0123456789"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(excelJobMaxSourceBytesEnvName, "1mb")
+	t.Setenv(excelJobMinFreeDiskBytesEnvName, "100")
+	t.Setenv(excelJobDiskMultiplierEnvName, "20")
+	t.Setenv(excelJobMinFreeMemoryBytesEnvName, "0")
+	restoreDisk, restoreMemory := stubExcelResources(t, 99, 1024*1024*1024)
+	defer restoreDisk()
+	defer restoreMemory()
+
+	preflight, err := runExcelJobResourcePreflight(sourcePath)
+	if err == nil {
+		t.Fatal("runExcelJobResourcePreflight returned nil error, want low disk error")
+	}
+	if preflight.RequiredDiskBytes != 200 {
+		t.Fatalf("RequiredDiskBytes = %d, want 200", preflight.RequiredDiskBytes)
+	}
+	if !strings.Contains(err.Error(), "剩余空间不足") {
+		t.Fatalf("error = %q, want low disk message", err.Error())
+	}
+}
+
+func TestExcelJobResourcePreflightRejectsLowMemory(t *testing.T) {
+	sourcePath := filepath.Join(t.TempDir(), "source.xlsx")
+	if err := os.WriteFile(sourcePath, []byte("0123456789"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv(excelJobMaxSourceBytesEnvName, "1mb")
+	t.Setenv(excelJobMinFreeDiskBytesEnvName, "0")
+	t.Setenv(excelJobMinFreeMemoryBytesEnvName, "2gb")
+	restoreDisk, restoreMemory := stubExcelResources(t, 1024*1024*1024, 1024)
+	defer restoreDisk()
+	defer restoreMemory()
+
+	preflight, err := runExcelJobResourcePreflight(sourcePath)
+	if err == nil {
+		t.Fatal("runExcelJobResourcePreflight returned nil error, want low memory error")
+	}
+	if preflight.AvailableMemory != 1024 {
+		t.Fatalf("AvailableMemory = %d, want 1024", preflight.AvailableMemory)
+	}
+	if !strings.Contains(err.Error(), "可用内存不足") {
+		t.Fatalf("error = %q, want low memory message", err.Error())
+	}
+}
+
+func TestAcquireExcelJobSlotAllowsOnlyConfiguredConcurrency(t *testing.T) {
+	t.Setenv(excelJobMaxConcurrentEnvName, "1")
+	resetExcelJobSlot(t)
+
+	release, ok := acquireExcelJobSlot()
+	if !ok {
+		t.Fatal("first acquireExcelJobSlot failed, want success")
+	}
+	if _, ok := acquireExcelJobSlot(); ok {
+		t.Fatal("second acquireExcelJobSlot succeeded, want concurrency rejection")
+	}
+	release()
+	release()
+	releaseAgain, ok := acquireExcelJobSlot()
+	if !ok {
+		t.Fatal("acquireExcelJobSlot after release failed, want success")
+	}
+	releaseAgain()
+}
+
+func TestParseByteSizeSupportsUnits(t *testing.T) {
+	tests := map[string]int64{
+		"12":   12,
+		"3kb":  3 * 1024,
+		"2MB":  2 * 1024 * 1024,
+		"1 g":  1024 * 1024 * 1024,
+		"4gb":  4 * 1024 * 1024 * 1024,
+		"0":    0,
+		"128b": 128,
+	}
+	for input, want := range tests {
+		got, err := parseByteSize(input)
+		if err != nil {
+			t.Fatalf("parseByteSize(%q) returned error: %v", input, err)
+		}
+		if got != want {
+			t.Fatalf("parseByteSize(%q) = %d, want %d", input, got, want)
+		}
+	}
+}
+
+func stubExcelResources(t *testing.T, freeDiskBytes, availableMemoryBytes int64) (func(), func()) {
+	t.Helper()
+	previousDisk := excelDiskFreeBytes
+	previousMemory := excelMemoryAvailableBytes
+	excelDiskFreeBytes = func(string) (int64, error) {
+		return freeDiskBytes, nil
+	}
+	excelMemoryAvailableBytes = func() (int64, error) {
+		return availableMemoryBytes, nil
+	}
+	return func() { excelDiskFreeBytes = previousDisk }, func() { excelMemoryAvailableBytes = previousMemory }
+}
+
+func resetExcelJobSlot(t *testing.T) {
+	t.Helper()
+	excelJobSlotMu.Lock()
+	excelJobRunning = 0
+	excelJobSlotMu.Unlock()
+	t.Cleanup(func() {
+		excelJobSlotMu.Lock()
+		excelJobRunning = 0
+		excelJobSlotMu.Unlock()
+	})
+}

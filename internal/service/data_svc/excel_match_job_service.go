@@ -23,6 +23,8 @@ import (
 	"gin-biz-web-api/pkg/storage"
 
 	"github.com/hibiken/asynq"
+	"github.com/shirou/gopsutil/disk"
+	"github.com/shirou/gopsutil/mem"
 	"github.com/xuri/excelize/v2"
 )
 
@@ -34,6 +36,7 @@ const (
 	excelMatchStatusPending = "pending"
 	excelMatchStatusSuccess = "success"
 	excelMatchStatusExpired = "expired"
+	excelMatchStatusFailed  = "failed"
 
 	excelMatchRetention               = 24 * time.Hour
 	excelMatchRootDirName             = "data-warehouse-excel-jobs"
@@ -63,9 +66,24 @@ const (
 	excelMatchOSSUploadBytesPerMinute = 32 * 1024 * 1024
 	excelMatchOSSProgressBytes        = 32 * 1024 * 1024
 	excelMatchOSSProgressInterval     = 15 * time.Second
+	excelJobMaxSourceBytesEnvName     = "EXCEL_JOB_MAX_SOURCE_FILE_BYTES"
+	excelJobMinFreeDiskBytesEnvName   = "EXCEL_JOB_MIN_FREE_DISK_BYTES"
+	excelJobDiskMultiplierEnvName     = "EXCEL_JOB_DISK_MULTIPLIER"
+	excelJobMinFreeMemoryBytesEnvName = "EXCEL_JOB_MIN_FREE_MEMORY_BYTES"
+	excelJobMaxConcurrentEnvName      = "EXCEL_JOB_MAX_CONCURRENT"
+	defaultExcelJobMaxSourceBytes     = 300 * 1024 * 1024
+	defaultExcelJobMinFreeDiskBytes   = 10 * 1024 * 1024 * 1024
+	defaultExcelJobDiskMultiplier     = 20
+	defaultExcelJobMinFreeMemoryBytes = 2 * 1024 * 1024 * 1024
+	defaultExcelJobMaxConcurrent      = 1
 )
 
 var excelizeTempMu sync.Mutex
+var excelJobSlotMu sync.Mutex
+var excelJobRunning int
+
+var excelDiskFreeBytes = diskFreeBytes
+var excelMemoryAvailableBytes = memoryAvailableBytes
 
 var allowedBojunValueFields = map[string]struct{}{
 	"billdate":             {},
@@ -297,6 +315,18 @@ func (s *ExcelMatchJobService) createJobFromSource(ctx context.Context, source e
 		s.logJob(ctx, matchJob.ID, "error", "更新任务文件路径失败", map[string]interface{}{"error": err.Error()})
 		return nil, err
 	}
+	matchJob.WorkDir = workDir
+	matchJob.SourceFilePath = sourcePath
+	matchJob.ResultFilePath = resultPath
+	preflight, err := runExcelJobResourcePreflight(sourcePath)
+	if err != nil {
+		_ = s.jobDAO.MarkFailed(ctx, matchJob.ID, err.Error(), expiresAt)
+		s.logJob(ctx, matchJob.ID, "error", "Excel任务创建资源预检失败", preflight.detailWithError(err))
+		matchJob.Status = excelMatchStatusFailed
+		matchJob.ErrorMessage = err.Error()
+		return matchJob, nil
+	}
+	s.logJob(ctx, matchJob.ID, "info", "Excel任务创建资源预检通过", preflight.detail())
 
 	task, err := job.NewExcelMatchExportTask(matchJob.ID)
 	if err != nil {
@@ -641,6 +671,25 @@ func (s *ExcelMatchJobService) ProcessJob(ctx context.Context, id uint) error {
 		s.logJob(ctx, id, "error", "任务配置校验失败", map[string]interface{}{"error": err.Error()})
 		return err
 	}
+
+	releaseSlot, acquired := acquireExcelJobSlot()
+	if !acquired {
+		err := errors.New("已有 Excel 任务正在处理，请稍后重新创建任务")
+		expiresAt := time.Now().Add(excelMatchRetention)
+		_ = s.jobDAO.MarkFailed(ctx, id, err.Error(), expiresAt)
+		s.logJob(ctx, id, "warn", "Excel任务并发保护已拒绝", map[string]interface{}{"error": err.Error(), "max_concurrent": excelJobMaxConcurrent()})
+		return nil
+	}
+	defer releaseSlot()
+
+	preflight, err := runExcelJobResourcePreflight(matchJob.SourceFilePath)
+	if err != nil {
+		expiresAt := time.Now().Add(excelMatchRetention)
+		_ = s.jobDAO.MarkFailed(ctx, id, err.Error(), expiresAt)
+		s.logJob(ctx, id, "error", "Excel任务资源预检失败", preflight.detailWithError(err))
+		return nil
+	}
+	s.logJob(ctx, id, "info", "Excel任务资源预检通过", preflight.detail())
 
 	if err := s.jobDAO.MarkRunning(ctx, id); err != nil {
 		return err
@@ -1670,6 +1719,233 @@ func fileSizeOrZero(filePath string) int64 {
 		return 0
 	}
 	return info.Size()
+}
+
+type excelJobResourcePreflight struct {
+	SourceFileSize      int64
+	TempRoot            string
+	FreeDiskBytes       int64
+	RequiredDiskBytes   int64
+	MaxSourceFileBytes  int64
+	DiskMultiplier      int64
+	AvailableMemory     int64
+	RequiredMemoryBytes int64
+	MaxConcurrent       int
+}
+
+func (p excelJobResourcePreflight) detail() map[string]interface{} {
+	return map[string]interface{}{
+		"source_file_size":       p.SourceFileSize,
+		"temp_root":              p.TempRoot,
+		"free_disk_bytes":        p.FreeDiskBytes,
+		"required_disk_bytes":    p.RequiredDiskBytes,
+		"max_source_file_bytes":  p.MaxSourceFileBytes,
+		"disk_multiplier":        p.DiskMultiplier,
+		"available_memory_bytes": p.AvailableMemory,
+		"required_memory_bytes":  p.RequiredMemoryBytes,
+		"max_concurrent":         p.MaxConcurrent,
+	}
+}
+
+func (p excelJobResourcePreflight) detailWithError(err error) map[string]interface{} {
+	detail := p.detail()
+	if err != nil {
+		detail["error"] = err.Error()
+	}
+	return detail
+}
+
+func runExcelJobResourcePreflight(sourcePath string) (excelJobResourcePreflight, error) {
+	maxSourceBytes := excelJobMaxSourceBytes()
+	minFreeDiskBytes := excelJobMinFreeDiskBytes()
+	diskMultiplier := excelJobDiskMultiplier()
+	minFreeMemoryBytes := excelJobMinFreeMemoryBytes()
+	tempRoot := excelTempRootDir()
+	preflight := excelJobResourcePreflight{
+		TempRoot:            tempRoot,
+		MaxSourceFileBytes:  maxSourceBytes,
+		DiskMultiplier:      diskMultiplier,
+		RequiredMemoryBytes: minFreeMemoryBytes,
+		MaxConcurrent:       excelJobMaxConcurrent(),
+	}
+
+	info, err := os.Stat(sourcePath)
+	if err != nil {
+		return preflight, fmt.Errorf("读取源文件失败: %w", err)
+	}
+	if info.IsDir() {
+		return preflight, errors.New("源文件路径不是文件")
+	}
+	preflight.SourceFileSize = info.Size()
+	if maxSourceBytes > 0 && preflight.SourceFileSize > maxSourceBytes {
+		return preflight, fmt.Errorf("源Excel文件过大: %d 字节，当前上限 %d 字节，可通过 %s 调整", preflight.SourceFileSize, maxSourceBytes, excelJobMaxSourceBytesEnvName)
+	}
+
+	if err := os.MkdirAll(tempRoot, 0700); err != nil {
+		return preflight, fmt.Errorf("创建Excel临时根目录失败: %w", err)
+	}
+	requiredDiskBytes := minFreeDiskBytes
+	byMultiplier := maxInt64()
+	if preflight.SourceFileSize <= maxInt64()/diskMultiplier {
+		byMultiplier = preflight.SourceFileSize * diskMultiplier
+	}
+	if byMultiplier > requiredDiskBytes {
+		requiredDiskBytes = byMultiplier
+	}
+	preflight.RequiredDiskBytes = requiredDiskBytes
+	freeDiskBytes, err := excelDiskFreeBytes(tempRoot)
+	if err != nil {
+		return preflight, fmt.Errorf("检查Excel临时盘剩余空间失败: %w", err)
+	}
+	preflight.FreeDiskBytes = freeDiskBytes
+	if requiredDiskBytes > 0 && freeDiskBytes < requiredDiskBytes {
+		return preflight, fmt.Errorf("Excel临时盘剩余空间不足: 当前 %d 字节，需要至少 %d 字节", freeDiskBytes, requiredDiskBytes)
+	}
+
+	availableMemory, err := excelMemoryAvailableBytes()
+	if err != nil {
+		return preflight, fmt.Errorf("检查可用内存失败: %w", err)
+	}
+	preflight.AvailableMemory = availableMemory
+	if minFreeMemoryBytes > 0 && availableMemory < minFreeMemoryBytes {
+		return preflight, fmt.Errorf("服务器可用内存不足: 当前 %d 字节，需要至少 %d 字节", availableMemory, minFreeMemoryBytes)
+	}
+	return preflight, nil
+}
+
+func acquireExcelJobSlot() (func(), bool) {
+	maxConcurrent := excelJobMaxConcurrent()
+	excelJobSlotMu.Lock()
+	defer excelJobSlotMu.Unlock()
+	if excelJobRunning >= maxConcurrent {
+		return nil, false
+	}
+	excelJobRunning++
+	var once sync.Once
+	return func() {
+		once.Do(func() {
+			excelJobSlotMu.Lock()
+			defer excelJobSlotMu.Unlock()
+			if excelJobRunning > 0 {
+				excelJobRunning--
+			}
+		})
+	}, true
+}
+
+func excelJobMaxSourceBytes() int64 {
+	return bytesFromEnv(excelJobMaxSourceBytesEnvName, defaultExcelJobMaxSourceBytes)
+}
+
+func excelJobMinFreeDiskBytes() int64 {
+	return bytesFromEnv(excelJobMinFreeDiskBytesEnvName, defaultExcelJobMinFreeDiskBytes)
+}
+
+func excelJobMinFreeMemoryBytes() int64 {
+	return bytesFromEnv(excelJobMinFreeMemoryBytesEnvName, defaultExcelJobMinFreeMemoryBytes)
+}
+
+func excelJobDiskMultiplier() int64 {
+	value := int64FromEnv(excelJobDiskMultiplierEnvName, defaultExcelJobDiskMultiplier)
+	if value < 1 {
+		return defaultExcelJobDiskMultiplier
+	}
+	return value
+}
+
+func excelJobMaxConcurrent() int {
+	value := int64FromEnv(excelJobMaxConcurrentEnvName, defaultExcelJobMaxConcurrent)
+	if value < 1 {
+		return defaultExcelJobMaxConcurrent
+	}
+	if value > 16 {
+		return 16
+	}
+	return int(value)
+}
+
+func bytesFromEnv(key string, fallback int64) int64 {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return fallback
+	}
+	value, err := parseByteSize(raw)
+	if err != nil || value < 0 {
+		return fallback
+	}
+	return value
+}
+
+func int64FromEnv(key string, fallback int64) int64 {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return fallback
+	}
+	value, err := strconv.ParseInt(raw, 10, 64)
+	if err != nil {
+		return fallback
+	}
+	return value
+}
+
+func parseByteSize(raw string) (int64, error) {
+	value := strings.TrimSpace(strings.ToLower(raw))
+	if value == "" {
+		return 0, errors.New("empty byte size")
+	}
+	multiplier := int64(1)
+	for _, suffix := range []struct {
+		text       string
+		multiplier int64
+	}{
+		{"gb", 1024 * 1024 * 1024},
+		{"g", 1024 * 1024 * 1024},
+		{"mb", 1024 * 1024},
+		{"m", 1024 * 1024},
+		{"kb", 1024},
+		{"k", 1024},
+		{"b", 1},
+	} {
+		if strings.HasSuffix(value, suffix.text) {
+			multiplier = suffix.multiplier
+			value = strings.TrimSpace(strings.TrimSuffix(value, suffix.text))
+			break
+		}
+	}
+	number, err := strconv.ParseInt(value, 10, 64)
+	if err != nil {
+		return 0, err
+	}
+	if number > 0 && number > maxInt64()/multiplier {
+		return 0, errors.New("byte size overflows int64")
+	}
+	return number * multiplier, nil
+}
+
+func diskFreeBytes(path string) (int64, error) {
+	usage, err := disk.Usage(path)
+	if err != nil {
+		return 0, err
+	}
+	if usage.Free > uint64(maxInt64()) {
+		return maxInt64(), nil
+	}
+	return int64(usage.Free), nil
+}
+
+func memoryAvailableBytes() (int64, error) {
+	stat, err := mem.VirtualMemory()
+	if err != nil {
+		return 0, err
+	}
+	if stat.Available > uint64(maxInt64()) {
+		return maxInt64(), nil
+	}
+	return int64(stat.Available), nil
+}
+
+func maxInt64() int64 {
+	return int64(^uint64(0) >> 1)
 }
 
 func excelMatchOSSUploadTimeout(fileSize int64) time.Duration {
