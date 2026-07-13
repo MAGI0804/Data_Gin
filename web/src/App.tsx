@@ -186,6 +186,11 @@ type ExcelUploadRef = {
   totalChunks: number
 }
 
+type ExcelExportColumnFormat = {
+  column: string
+  format: string
+}
+
 type ExcelExportSchemeConfig = {
   sheetName: string
   filterColumn: string
@@ -194,6 +199,7 @@ type ExcelExportSchemeConfig = {
   dbMatchField: string
   dbValueField: string
   outputColumnName: string
+  exportColumnFormats: string
   batchSize: string
 }
 
@@ -219,6 +225,7 @@ type ExcelMatchSchemeConfig = {
   dbWriteField?: string
   writeExcelColumn?: string
   outputColumnName?: string
+  exportColumnFormats?: ExcelExportColumnFormat[]
   batchSize?: number
   dryRun?: boolean
   confirmWrite?: boolean
@@ -295,6 +302,7 @@ const defaultExcelExportScheme: ExcelExportSchemeConfig = {
   dbMatchField: 'matched_docno',
   dbValueField: 'c_store_name',
   outputColumnName: '线下店名称',
+  exportColumnFormats: '',
   batchSize: '1000',
 }
 
@@ -1200,6 +1208,7 @@ function ExcelMatchView({
       dbMatchField: formValue(form, 'dbMatchField').trim(),
       dbValueField: formValue(form, 'dbValueField').trim(),
       outputColumnName: formValue(form, 'outputColumnName').trim(),
+      exportColumnFormats: parseExportColumnFormats(formValue(form, 'exportColumnFormats')),
       batchSize: Number(formValue(form, 'batchSize') || 1000),
     }
   }
@@ -1716,6 +1725,16 @@ function ExcelMatchView({
               </select>
             </label>
             <Field label="追加列名" name="outputColumnName" defaultValue={exportDefaults.outputColumnName} />
+            <label>
+              导出列内容格式
+              <textarea
+                name="exportColumnFormats"
+                defaultValue={exportDefaults.exportColumnFormats}
+                rows={4}
+                placeholder={'每行一个：列名=格式\n例如：金额=number\n下单时间=date'}
+              />
+              <small>支持格式：text、number、integer、bool、date。列名可填原 Excel 表头或追加列名。</small>
+            </label>
             <Field label="批量查询大小" name="batchSize" defaultValue={exportDefaults.batchSize} />
             {uploadProgress && <p className="excel-mode-note">{uploadProgress}</p>}
             <div className="excel-form-actions">
@@ -2832,6 +2851,30 @@ function formValue(form: FormData, key: string) {
   return typeof value === 'string' ? value : ''
 }
 
+function parseExportColumnFormats(raw: string): ExcelExportColumnFormat[] {
+  return raw
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean)
+    .map((line) => {
+      const separator = line.includes('=') ? '=' : ':'
+      const [column = '', format = ''] = line.split(separator)
+      return {
+        column: column.trim(),
+        format: format.trim().toLowerCase(),
+      }
+    })
+    .filter((item) => item.column && item.format)
+}
+
+function exportColumnFormatsText(formats: ExcelExportColumnFormat[] | undefined) {
+  if (!Array.isArray(formats)) return ''
+  return formats
+    .filter((item) => item.column && item.format)
+    .map((item) => `${item.column}=${item.format}`)
+    .join('\n')
+}
+
 function sameExcelFile(file: File, ref: ExcelUploadRef) {
   return file.name === ref.fileName && file.size === ref.size && file.lastModified === ref.lastModified
 }
@@ -2846,6 +2889,7 @@ function exportSchemeDefaults(config: ExcelMatchSchemeConfig): ExcelExportScheme
     dbMatchField: config.dbMatchField || defaultExcelExportScheme.dbMatchField,
     dbValueField: config.dbValueField || defaultExcelExportScheme.dbValueField,
     outputColumnName: config.outputColumnName || defaultExcelExportScheme.outputColumnName,
+    exportColumnFormats: exportColumnFormatsText(config.exportColumnFormats) || defaultExcelExportScheme.exportColumnFormats,
     batchSize: config.batchSize ? String(config.batchSize) : defaultExcelExportScheme.batchSize,
   }
 }

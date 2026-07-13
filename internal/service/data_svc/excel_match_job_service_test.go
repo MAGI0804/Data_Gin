@@ -234,6 +234,87 @@ func TestProcessExcelMatchFileUsesConfiguredDBMatchField(t *testing.T) {
 	}
 }
 
+func TestProcessExcelMatchFileUsesConfiguredExportColumnFormat(t *testing.T) {
+	dir := t.TempDir()
+	inputPath := filepath.Join(dir, "source.xlsx")
+	outputPath := filepath.Join(dir, "result.xlsx")
+
+	f := excelize.NewFile()
+	sheet := f.GetSheetName(0)
+	rows := [][]interface{}{
+		{"店铺名称", "订单号", "金额"},
+		{"杭州恒隆", "B001", "123.45"},
+	}
+	for i, row := range rows {
+		cell, err := excelize.CoordinatesToCellName(1, i+1)
+		if err != nil {
+			t.Fatalf("CoordinatesToCellName failed: %v", err)
+		}
+		if err := f.SetSheetRow(sheet, cell, &row); err != nil {
+			t.Fatalf("SetSheetRow failed: %v", err)
+		}
+	}
+	if err := f.SaveAs(inputPath); err != nil {
+		t.Fatalf("SaveAs failed: %v", err)
+	}
+
+	cfg, err := normalizeExcelMatchConfig(ExcelMatchConfig{
+		SheetName:        "Sheet1",
+		Filters:          []ExcelMatchFilter{{Column: "店铺名称", Op: "eq", Value: "杭州恒隆"}},
+		MatchExcelColumn: "订单号",
+		DBTemplate:       "bojun_retail_order",
+		DBMatchField:     "docno",
+		DBValueField:     "c_store_name",
+		OutputColumnName: "线下金额",
+		ExportColumnFormats: []ExcelExportColumnFormat{
+			{Column: "金额", Format: "number"},
+			{Column: "线下金额", Format: "number"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("normalizeExcelMatchConfig failed: %v", err)
+	}
+	_, err = processExcelMatchFile(context.Background(), inputPath, outputPath, cfg, &fakeExcelMatchLookup{value: map[string]string{"B001": "456.78"}})
+	if err != nil {
+		t.Fatalf("processExcelMatchFile returned error: %v", err)
+	}
+
+	out, err := excelize.OpenFile(outputPath)
+	if err != nil {
+		t.Fatalf("OpenFile result failed: %v", err)
+	}
+	defer func() { _ = out.Close() }()
+
+	rawAmount, err := out.GetCellValue("Result_1", "C2", excelize.Options{RawCellValue: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rawAmount != "123.45" {
+		t.Fatalf("raw amount = %q, want numeric raw value 123.45", rawAmount)
+	}
+	cellType, err := out.GetCellType("Result_1", "C2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cellType == excelize.CellTypeInlineString || cellType == excelize.CellTypeSharedString {
+		t.Fatalf("amount cell type = %v, want numeric cell from configured format", cellType)
+	}
+	rawAppended, err := out.GetCellValue("Result_1", "D2", excelize.Options{RawCellValue: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rawAppended != "456.78" {
+		t.Fatalf("raw appended = %q, want numeric raw value 456.78", rawAppended)
+	}
+	appendedType, err := out.GetCellType("Result_1", "D2")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if appendedType == excelize.CellTypeInlineString || appendedType == excelize.CellTypeSharedString {
+		t.Fatalf("appended cell type = %v, want numeric cell from configured format", appendedType)
+	}
+}
+
 func TestProcessExcelMatchPreviewReturnsSamplesWithoutWritingOutput(t *testing.T) {
 	dir := t.TempDir()
 	inputPath := filepath.Join(dir, "source.xlsx")

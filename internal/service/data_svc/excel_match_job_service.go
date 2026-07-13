@@ -102,6 +102,14 @@ var allowedBojunImportWriteFields = map[string]struct{}{
 	"matched_docno": {},
 }
 
+var allowedExcelExportColumnFormats = map[string]struct{}{
+	"text":    {},
+	"number":  {},
+	"integer": {},
+	"bool":    {},
+	"date":    {},
+}
+
 type ExcelMatchJobService struct {
 	jobDAO *data_dao.ExcelMatchJobDAO
 }
@@ -118,21 +126,27 @@ type ExcelMatchFilter struct {
 	Value  string `json:"value"`
 }
 
+type ExcelExportColumnFormat struct {
+	Column string `json:"column"`
+	Format string `json:"format"`
+}
+
 type ExcelMatchConfig struct {
-	Operation        string             `json:"operation"`
-	SheetName        string             `json:"sheetName"`
-	Filters          []ExcelMatchFilter `json:"filters"`
-	MatchExcelColumn string             `json:"matchExcelColumn"`
-	DBTemplate       string             `json:"dbTemplate"`
-	DBMatchField     string             `json:"dbMatchField"`
-	DBValueField     string             `json:"dbValueField"`
-	TableName        string             `json:"tableName"`
-	DBWriteField     string             `json:"dbWriteField"`
-	WriteExcelColumn string             `json:"writeExcelColumn"`
-	OutputColumnName string             `json:"outputColumnName"`
-	BatchSize        int                `json:"batchSize"`
-	DryRun           bool               `json:"dryRun"`
-	ConfirmWrite     bool               `json:"confirmWrite"`
+	Operation           string                    `json:"operation"`
+	SheetName           string                    `json:"sheetName"`
+	Filters             []ExcelMatchFilter        `json:"filters"`
+	MatchExcelColumn    string                    `json:"matchExcelColumn"`
+	DBTemplate          string                    `json:"dbTemplate"`
+	DBMatchField        string                    `json:"dbMatchField"`
+	DBValueField        string                    `json:"dbValueField"`
+	TableName           string                    `json:"tableName"`
+	DBWriteField        string                    `json:"dbWriteField"`
+	WriteExcelColumn    string                    `json:"writeExcelColumn"`
+	OutputColumnName    string                    `json:"outputColumnName"`
+	ExportColumnFormats []ExcelExportColumnFormat `json:"exportColumnFormats"`
+	BatchSize           int                       `json:"batchSize"`
+	DryRun              bool                      `json:"dryRun"`
+	ConfirmWrite        bool                      `json:"confirmWrite"`
 }
 
 type ExcelUploadSession struct {
@@ -849,6 +863,33 @@ func normalizeExcelExportConfig(config ExcelMatchConfig) (ExcelMatchConfig, erro
 	if config.OutputColumnName == "" {
 		return config, errors.New("输出列名不能为空")
 	}
+	normalizedFormats := make([]ExcelExportColumnFormat, 0, len(config.ExportColumnFormats))
+	seenFormatColumns := map[string]struct{}{}
+	for _, item := range config.ExportColumnFormats {
+		column := strings.TrimSpace(item.Column)
+		format := strings.ToLower(strings.TrimSpace(item.Format))
+		if column == "" && format == "" {
+			continue
+		}
+		if column == "" {
+			return config, errors.New("导出格式配置列名不能为空")
+		}
+		if _, ok := seenFormatColumns[column]; ok {
+			return config, fmt.Errorf("导出格式配置列名重复: %s", column)
+		}
+		seenFormatColumns[column] = struct{}{}
+		if format == "" {
+			format = "text"
+		}
+		if _, ok := allowedExcelExportColumnFormats[format]; !ok {
+			return config, fmt.Errorf("导出格式配置不支持: %s", format)
+		}
+		normalizedFormats = append(normalizedFormats, ExcelExportColumnFormat{
+			Column: column,
+			Format: format,
+		})
+	}
+	config.ExportColumnFormats = normalizedFormats
 
 	return config, nil
 }
@@ -1113,6 +1154,8 @@ func processExcelMatchFileWithProgress(
 	var headers []string
 	columnIndexes := map[string]int{}
 	var matchColumnIndex int
+	var columnFormats []string
+	appendedColumnFormat := ""
 	stats := ExcelMatchJobStats{}
 	rowInSheet := 1
 	sheetIndex := 1
@@ -1168,10 +1211,14 @@ func processExcelMatchFileWithProgress(
 			return err
 		}
 		row := make([]interface{}, 0, len(headers)+1)
-		for _, value := range normalizeExcelRow(values, len(headers)) {
-			row = append(row, value)
+		for index, value := range normalizeExcelRow(values, len(headers)) {
+			format := ""
+			if index < len(columnFormats) {
+				format = columnFormats[index]
+			}
+			row = append(row, excelExportValueForFormat(value, format))
 		}
-		row = append(row, appended)
+		row = append(row, excelExportValueForFormat(appended, appendedColumnFormat))
 		cell, err := excelize.CoordinatesToCellName(1, rowInSheet)
 		if err != nil {
 			return err
@@ -1249,6 +1296,14 @@ func processExcelMatchFileWithProgress(
 			if !ok {
 				return stats, fmt.Errorf("Excel 缺少订单号列: %s", config.MatchExcelColumn)
 			}
+			formatByColumn := excelExportColumnFormatMap(config.ExportColumnFormats)
+			for column := range formatByColumn {
+				if _, ok := columnIndexes[column]; !ok && column != config.OutputColumnName {
+					return stats, fmt.Errorf("导出格式配置列不存在: %s", column)
+				}
+			}
+			columnFormats = excelExportColumnFormatsForHeaders(headers, formatByColumn)
+			appendedColumnFormat = formatByColumn[config.OutputColumnName]
 			if err := writeHeader(); err != nil {
 				return stats, err
 			}
@@ -1454,6 +1509,73 @@ func normalizeExcelRow(values []string, width int) []string {
 	row := make([]string, width)
 	copy(row, values)
 	return row
+}
+
+func excelExportColumnFormatMap(formats []ExcelExportColumnFormat) map[string]string {
+	byColumn := make(map[string]string, len(formats))
+	for _, item := range formats {
+		byColumn[item.Column] = item.Format
+	}
+	return byColumn
+}
+
+func excelExportColumnFormatsForHeaders(headers []string, byColumn map[string]string) []string {
+	result := make([]string, len(headers))
+	for index, header := range headers {
+		result[index] = byColumn[header]
+	}
+	return result
+}
+
+func excelExportValueForFormat(raw string, format string) interface{} {
+	value := strings.TrimSpace(raw)
+	if value == "" {
+		return ""
+	}
+	switch format {
+	case "number":
+		if number, err := strconv.ParseFloat(strings.ReplaceAll(value, ",", ""), 64); err == nil {
+			return number
+		}
+	case "integer":
+		normalized := strings.ReplaceAll(value, ",", "")
+		if integer, err := strconv.ParseInt(normalized, 10, 64); err == nil {
+			return integer
+		}
+		if number, err := strconv.ParseFloat(normalized, 64); err == nil {
+			return int64(number)
+		}
+	case "bool":
+		if value == "1" || strings.EqualFold(value, "true") || strings.EqualFold(value, "yes") || value == "是" {
+			return true
+		}
+		if value == "0" || strings.EqualFold(value, "false") || strings.EqualFold(value, "no") || value == "否" {
+			return false
+		}
+	case "date":
+		if parsed, ok := parseExcelExportDateValue(value); ok {
+			return parsed
+		}
+	}
+	return raw
+}
+
+func parseExcelExportDateValue(value string) (time.Time, bool) {
+	layouts := []string{
+		time.RFC3339,
+		"2006-01-02 15:04:05",
+		"2006-01-02 15:04",
+		"2006-01-02",
+		"2006/01/02 15:04:05",
+		"2006/01/02 15:04",
+		"2006/01/02",
+	}
+	for _, layout := range layouts {
+		if parsed, err := time.ParseInLocation(layout, value, time.Local); err == nil {
+			return parsed, true
+		}
+	}
+	return time.Time{}, false
 }
 
 func excelRowMatchesFilters(row []string, columnIndexes map[string]int, filters []ExcelMatchFilter) bool {
