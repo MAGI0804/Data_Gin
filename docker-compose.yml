@@ -4,7 +4,7 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: gin-biz-web-api
-    cpus: "${APP_CPU_LIMIT:-0.60}"
+    cpus: "${APP_CPU_LIMIT:-1.50}"
     mem_limit: ${APP_MEMORY_LIMIT:-3g}
     env_file:
       - .env
@@ -22,7 +22,7 @@ services:
       - APP_URL=${APP_URL:-http://localhost}
       - APP_PORT=${APP_PORT:-8501}
       - GIN_MODE=${GIN_MODE:-release}
-      - GOMAXPROCS=${GOMAXPROCS:-1}
+      - GOMAXPROCS=${GOMAXPROCS:-2}
       - GOMEMLIMIT=${GOMEMLIMIT:-2500MiB}
       - SSL_ENABLED=${SSL_ENABLED:-false}
       - DB_HOST=${DB_HOST:?set DB_HOST}
