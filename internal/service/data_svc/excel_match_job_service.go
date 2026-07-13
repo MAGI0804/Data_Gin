@@ -71,11 +71,15 @@ const (
 	excelJobDiskMultiplierEnvName     = "EXCEL_JOB_DISK_MULTIPLIER"
 	excelJobMinFreeMemoryBytesEnvName = "EXCEL_JOB_MIN_FREE_MEMORY_BYTES"
 	excelJobMaxConcurrentEnvName      = "EXCEL_JOB_MAX_CONCURRENT"
+	excelJobThrottleRowsEnvName       = "EXCEL_JOB_THROTTLE_ROWS"
+	excelJobThrottleSleepMsEnvName    = "EXCEL_JOB_THROTTLE_SLEEP_MS"
 	defaultExcelJobMaxSourceBytes     = 300 * 1024 * 1024
 	defaultExcelJobMinFreeDiskBytes   = 10 * 1024 * 1024 * 1024
 	defaultExcelJobDiskMultiplier     = 20
 	defaultExcelJobMinFreeMemoryBytes = 2 * 1024 * 1024 * 1024
 	defaultExcelJobMaxConcurrent      = 1
+	defaultExcelJobThrottleRows       = 100
+	defaultExcelJobThrottleSleepMs    = 20
 )
 
 var excelizeTempMu sync.Mutex
@@ -985,6 +989,7 @@ func processExcelMatchPreview(
 	var buffered []previewRow
 	var lookupKeys []string
 	lookupKeySet := map[string]struct{}{}
+	throttle := newExcelJobThrottle()
 
 	addSample := func(row previewRow, matchedValue, status, reason string) {
 		if len(result.Samples) >= sampleLimit {
@@ -1055,6 +1060,9 @@ func processExcelMatchPreview(
 	headerRead := false
 	for rows.Next() {
 		if err := ctx.Err(); err != nil {
+			return result, err
+		}
+		if err := throttle.Step(ctx); err != nil {
 			return result, err
 		}
 		columns, err := rows.Columns()
@@ -1176,6 +1184,7 @@ func processExcelMatchFileWithProgress(
 	lookupKeySet := map[string]struct{}{}
 	styleMap := map[int]int{}
 	columnFormats := []excelColumnExportFormat{}
+	throttle := newExcelJobThrottle()
 
 	copyStyle := func(styleID int) (int, error) {
 		if styleID <= 0 {
@@ -1279,6 +1288,9 @@ func processExcelMatchFileWithProgress(
 			if err := ctx.Err(); err != nil {
 				return err
 			}
+			if err := throttle.Step(ctx); err != nil {
+				return err
+			}
 			appendValue := ""
 			if row.eligible {
 				if value, ok := matches[row.key]; ok && row.key != "" {
@@ -1307,6 +1319,9 @@ func processExcelMatchFileWithProgress(
 	for rows.Next() {
 		sourceRowNumber++
 		if err := ctx.Err(); err != nil {
+			return stats, err
+		}
+		if err := throttle.Step(ctx); err != nil {
 			return stats, err
 		}
 		columns, err := rows.Columns()
@@ -1424,6 +1439,7 @@ func processExcelImportUpdateFileWithProgress(
 		value string
 	}
 	var buffered []importRow
+	throttle := newExcelJobThrottle()
 
 	flush := func() error {
 		if len(buffered) == 0 {
@@ -1460,6 +1476,9 @@ func processExcelImportUpdateFileWithProgress(
 	headerRead := false
 	for rows.Next() {
 		if err := ctx.Err(); err != nil {
+			return stats, err
+		}
+		if err := throttle.Step(ctx); err != nil {
 			return stats, err
 		}
 		columns, err := rows.Columns()
@@ -1869,6 +1888,45 @@ func excelJobMaxConcurrent() int {
 		return 16
 	}
 	return int(value)
+}
+
+type excelJobThrottle struct {
+	rows    int
+	sleep   time.Duration
+	handled int
+}
+
+func newExcelJobThrottle() *excelJobThrottle {
+	rows := int64FromEnv(excelJobThrottleRowsEnvName, defaultExcelJobThrottleRows)
+	sleepMs := int64FromEnv(excelJobThrottleSleepMsEnvName, defaultExcelJobThrottleSleepMs)
+	if rows <= 0 || sleepMs <= 0 {
+		return &excelJobThrottle{}
+	}
+	return &excelJobThrottle{
+		rows:  int(rows),
+		sleep: time.Duration(sleepMs) * time.Millisecond,
+	}
+}
+
+func (t *excelJobThrottle) Step(ctx context.Context) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	if t == nil || t.rows <= 0 || t.sleep <= 0 {
+		return nil
+	}
+	t.handled++
+	if t.handled%t.rows != 0 {
+		return nil
+	}
+	timer := time.NewTimer(t.sleep)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
 }
 
 func bytesFromEnv(key string, fallback int64) int64 {
