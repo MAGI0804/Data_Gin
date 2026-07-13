@@ -1175,7 +1175,7 @@ func processExcelMatchFileWithProgress(
 	var lookupKeys []string
 	lookupKeySet := map[string]struct{}{}
 	styleMap := map[int]int{}
-	var columnFormats []excelColumnExportFormat
+	columnFormats := []excelColumnExportFormat{}
 
 	copyStyle := func(styleID int) (int, error) {
 		if styleID <= 0 {
@@ -1334,18 +1334,15 @@ func processExcelMatchFileWithProgress(
 			if err := writeHeader(headers); err != nil {
 				return stats, err
 			}
+			columnFormats = make([]excelColumnExportFormat, len(headers))
 			headerRead = true
 			continue
 		}
 
 		stats.TotalRows++
 		normalized := normalizeExcelRow(columns, len(headers))
-		if columnFormats == nil {
-			var err error
-			columnFormats, err = inferExcelColumnExportFormats(input, config.SheetName, len(headers), sourceRowNumber, copyStyle)
-			if err != nil {
-				return stats, err
-			}
+		if err := updateExcelColumnExportFormats(input, config.SheetName, normalized, sourceRowNumber, columnFormats, copyStyle); err != nil {
+			return stats, err
 		}
 		sourceCells := buildSourceRowCells(normalized)
 		eligible := excelRowMatchesFilters(normalized, columnIndexes, config.Filters)
@@ -1549,36 +1546,43 @@ func normalizeExcelRow(values []string, width int) []string {
 type excelColumnExportFormat struct {
 	StyleID int
 	Kind    excelize.CellType
+	Ready   bool
 }
 
-func inferExcelColumnExportFormats(input *excelize.File, sheet string, width int, sampleRowNumber int, copyStyle func(int) (int, error)) ([]excelColumnExportFormat, error) {
-	formats := make([]excelColumnExportFormat, width)
-	for colIndex := 1; colIndex <= width; colIndex++ {
-		cellRef, err := excelize.CoordinatesToCellName(colIndex, sampleRowNumber)
+func updateExcelColumnExportFormats(input *excelize.File, sheet string, values []string, rowNumber int, formats []excelColumnExportFormat, copyStyle func(int) (int, error)) error {
+	for index, value := range values {
+		if index >= len(formats) || formats[index].Ready || strings.TrimSpace(value) == "" {
+			continue
+		}
+		cellRef, err := excelize.CoordinatesToCellName(index+1, rowNumber)
 		if err != nil {
-			return nil, err
+			return err
 		}
 		sourceStyleID, err := input.GetCellStyle(sheet, cellRef)
 		if err != nil {
-			return nil, err
+			return err
 		}
 		outputStyleID, err := copyStyle(sourceStyleID)
 		if err != nil {
-			return nil, err
+			return err
 		}
 		cellType, err := input.GetCellType(sheet, cellRef)
 		if err != nil {
-			return nil, err
+			return err
 		}
-		formats[colIndex-1] = excelColumnExportFormat{
+		formats[index] = excelColumnExportFormat{
 			StyleID: outputStyleID,
 			Kind:    cellType,
+			Ready:   true,
 		}
 	}
-	return formats, nil
+	return nil
 }
 
 func excelCellFromColumnFormat(raw string, format excelColumnExportFormat) excelize.Cell {
+	if !format.Ready {
+		return excelize.Cell{Value: raw}
+	}
 	value := strings.TrimSpace(raw)
 	if value == "" {
 		return excelize.Cell{StyleID: format.StyleID, Value: ""}

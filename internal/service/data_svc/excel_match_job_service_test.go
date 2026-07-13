@@ -234,6 +234,83 @@ func TestProcessExcelMatchFilePreservesSourceCellTypesAndStyles(t *testing.T) {
 	}
 }
 
+func TestProcessExcelMatchFileInfersColumnFormatFromFirstNonEmptyDataCell(t *testing.T) {
+	dir := t.TempDir()
+	inputPath := filepath.Join(dir, "source.xlsx")
+	outputPath := filepath.Join(dir, "result.xlsx")
+
+	f := excelize.NewFile()
+	sheet := f.GetSheetName(0)
+	if err := f.SetSheetRow(sheet, "A1", &[]interface{}{"店铺名称", "订单号", "金额"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.SetSheetRow(sheet, "A2", &[]interface{}{"杭州恒隆", "B001", ""}); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.SetSheetRow(sheet, "A3", &[]interface{}{"杭州恒隆", "B002", 456.78}); err != nil {
+		t.Fatal(err)
+	}
+	amountStyle, err := f.NewStyle(&excelize.Style{NumFmt: 2})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := f.SetCellStyle(sheet, "C3", "C3", amountStyle); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.SaveAs(inputPath); err != nil {
+		t.Fatalf("SaveAs failed: %v", err)
+	}
+
+	cfg, err := normalizeExcelMatchConfig(ExcelMatchConfig{
+		SheetName:        "Sheet1",
+		Filters:          []ExcelMatchFilter{{Column: "店铺名称", Op: "eq", Value: "杭州恒隆"}},
+		MatchExcelColumn: "订单号",
+		DBTemplate:       "bojun_retail_order",
+		DBMatchField:     "docno",
+		DBValueField:     "c_store_name",
+		OutputColumnName: "线下店名称",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, err = processExcelMatchFile(context.Background(), inputPath, outputPath, cfg, &fakeExcelMatchLookup{value: map[string]string{"B001": "杭州恒隆店", "B002": "杭州恒隆店"}})
+	if err != nil {
+		t.Fatalf("processExcelMatchFile failed: %v", err)
+	}
+
+	out, err := excelize.OpenFile(outputPath)
+	if err != nil {
+		t.Fatalf("OpenFile result failed: %v", err)
+	}
+	defer func() { _ = out.Close() }()
+
+	rawAmount, err := out.GetCellValue("Result_1", "C3", excelize.Options{RawCellValue: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rawAmount != "456.78" {
+		t.Fatalf("raw amount = %q, want numeric raw value 456.78", rawAmount)
+	}
+	cellType, err := out.GetCellType("Result_1", "C3")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if cellType == excelize.CellTypeInlineString || cellType == excelize.CellTypeSharedString {
+		t.Fatalf("amount cell type = %v, want numeric cell inferred from first non-empty value", cellType)
+	}
+	styleID, err := out.GetCellStyle("Result_1", "C3")
+	if err != nil {
+		t.Fatal(err)
+	}
+	style, err := out.GetStyle(styleID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if style.NumFmt != 2 {
+		t.Fatalf("amount style NumFmt = %d, want copied NumFmt 2 from first non-empty data cell", style.NumFmt)
+	}
+}
+
 func TestProcessExcelMatchFileUsesConfiguredDBMatchField(t *testing.T) {
 	dir := t.TempDir()
 	inputPath := filepath.Join(dir, "source.xlsx")
