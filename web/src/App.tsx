@@ -1177,6 +1177,8 @@ function ExcelMatchView({
   const [importDefaults, setImportDefaults] = useState<ExcelImportSchemeConfig>(defaultExcelImportScheme)
   const [exportFormKey, setExportFormKey] = useState(0)
   const [importFormKey, setImportFormKey] = useState(0)
+  const [selectedExportSchemeID, setSelectedExportSchemeID] = useState('')
+  const [selectedImportSchemeID, setSelectedImportSchemeID] = useState('')
 
   function applyJobResult(result: ApiResult) {
     const nextJob = readObject<ExcelMatchJob>(result, 'job')
@@ -1347,9 +1349,16 @@ function ExcelMatchView({
     return session.uploadId
   }
 
-  async function saveScheme(formElement: HTMLFormElement, operation: 'export_match' | 'import_update') {
-    const name = window.prompt('请输入方案名称')
-    if (!name?.trim()) return
+  async function saveScheme(formElement: HTMLFormElement, operation: 'export_match' | 'import_update', mode: 'current' | 'new') {
+    const selectedSchemeID = operation === 'export_match' ? selectedExportSchemeID : selectedImportSchemeID
+    const schemes = operation === 'export_match' ? exportSchemes : importSchemes
+    const selectedScheme = schemes.find((item) => String(item.id) === selectedSchemeID)
+    let name = selectedScheme?.name ?? ''
+    if (mode === 'new' || !name) {
+      const prompted = window.prompt('请输入方案名称', name)
+      if (!prompted?.trim()) return
+      name = prompted.trim()
+    }
     const form = new FormData(formElement)
     const config = operation === 'export_match'
       ? buildExportConfig(form)
@@ -1365,7 +1374,17 @@ function ExcelMatchView({
       const data = await response.json().catch(() => ({}))
       const nextResult = { ok: response.ok && isSuccessPayload(data), status: response.status, data }
       setResult(nextResult)
-      if (nextResult.ok) await loadSchemes()
+      if (nextResult.ok) {
+        const savedScheme = readObjectFromData<ExcelMatchScheme>(data, 'scheme')
+        if (savedScheme?.id) {
+          if (operation === 'export_match') {
+            setSelectedExportSchemeID(String(savedScheme.id))
+          } else {
+            setSelectedImportSchemeID(String(savedScheme.id))
+          }
+        }
+        await loadSchemes()
+      }
     } catch (error) {
       setResult({ ok: false, status: 0, data: error instanceof Error ? error.message : String(error) })
     } finally {
@@ -1374,6 +1393,15 @@ function ExcelMatchView({
   }
 
   function applyExportScheme(schemeID: string) {
+    setSelectedExportSchemeID(schemeID)
+    if (!schemeID) {
+      setExportDefaults(defaultExcelExportScheme)
+      setExportFormKey((value) => value + 1)
+      setPreviewResult(null)
+      setSelectedExportFileName('')
+      clearUploadRef('export')
+      return
+    }
     const scheme = exportSchemes.find((item) => String(item.id) === schemeID)
     if (!scheme) return
     setExportDefaults(exportSchemeDefaults(scheme.config))
@@ -1384,6 +1412,14 @@ function ExcelMatchView({
   }
 
   function applyImportScheme(schemeID: string) {
+    setSelectedImportSchemeID(schemeID)
+    if (!schemeID) {
+      setImportDefaults(defaultExcelImportScheme)
+      setImportFormKey((value) => value + 1)
+      setSelectedImportFileName('')
+      clearUploadRef('import')
+      return
+    }
     const scheme = importSchemes.find((item) => String(item.id) === schemeID)
     if (!scheme) return
     setImportDefaults(importSchemeDefaults(scheme.config))
@@ -1680,19 +1716,30 @@ function ExcelMatchView({
           <form className="excel-upload-form" onSubmit={createExportJob} key={exportFormKey}>
             <label>
               已保存方案
-              <select defaultValue="" onChange={(event) => applyExportScheme(event.currentTarget.value)}>
+              <select value={selectedExportSchemeID} onChange={(event) => applyExportScheme(event.currentTarget.value)}>
                 <option value="">选择方案</option>
                 {exportSchemes.map((scheme) => <option value={scheme.id} key={scheme.id}>{scheme.name}</option>)}
               </select>
             </label>
             <button
               type="button"
+              disabled={!selectedExportSchemeID || loading}
               onClick={(event) => {
                 const form = event.currentTarget.form
-                if (form) void saveScheme(form, 'export_match')
+                if (form) void saveScheme(form, 'export_match', 'current')
               }}
             >
-              保存当前方案
+              保存到当前方案
+            </button>
+            <button
+              type="button"
+              disabled={loading}
+              onClick={(event) => {
+                const form = event.currentTarget.form
+                if (form) void saveScheme(form, 'export_match', 'new')
+              }}
+            >
+              另存为新方案
             </button>
             <label className="file-input-label">
               Excel 文件
@@ -1764,19 +1811,30 @@ function ExcelMatchView({
           <form className="excel-upload-form" onSubmit={createImportJob} key={importFormKey}>
             <label>
               已保存方案
-              <select defaultValue="" onChange={(event) => applyImportScheme(event.currentTarget.value)}>
+              <select value={selectedImportSchemeID} onChange={(event) => applyImportScheme(event.currentTarget.value)}>
                 <option value="">选择方案</option>
                 {importSchemes.map((scheme) => <option value={scheme.id} key={scheme.id}>{scheme.name}</option>)}
               </select>
             </label>
             <button
               type="button"
+              disabled={!selectedImportSchemeID || loading}
               onClick={(event) => {
                 const form = event.currentTarget.form
-                if (form) void saveScheme(form, 'import_update')
+                if (form) void saveScheme(form, 'import_update', 'current')
               }}
             >
-              保存当前方案
+              保存到当前方案
+            </button>
+            <button
+              type="button"
+              disabled={loading}
+              onClick={(event) => {
+                const form = event.currentTarget.form
+                if (form) void saveScheme(form, 'import_update', 'new')
+              }}
+            >
+              另存为新方案
             </button>
             <label className="file-input-label">
               Excel 文件
