@@ -68,6 +68,14 @@ func apiData(api *gin.RouterGroup) {
 		deliveryLogGroup.POST("/:id/retry", deliveryCtrl.RetryLog)
 	}
 
+	orderPushConfigGroup := api.Group("/v1/order-push-skip-config")
+	orderPushConfigGroup.Use(middleware.AuthJWT())
+	{
+		orderPushConfigCtrl := data_ctrl.NewOrderPushConfigController()
+		orderPushConfigGroup.GET("", orderPushConfigCtrl.GetSkipPolicy)
+		orderPushConfigGroup.PUT("", orderPushConfigCtrl.SaveSkipPolicy)
+	}
+
 	runGroup := api.Group("/v1/runs")
 	runGroup.Use(middleware.AuthJWT())
 	{

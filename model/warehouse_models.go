@@ -190,6 +190,20 @@ func (DeliveryLog) TableName() string {
 	return "delivery_logs"
 }
 
+// RuntimeConfig stores small runtime-editable JSON configuration blocks.
+type RuntimeConfig struct {
+	BaseModel
+
+	ConfigKey  string `gorm:"column:config_key;size:100;not null;uniqueIndex" json:"config_key"`
+	ConfigJSON string `gorm:"column:config_json;type:json;not null" json:"config_json"`
+
+	CommonTimestampsField
+}
+
+func (RuntimeConfig) TableName() string {
+	return "runtime_configs"
+}
+
 // ExcelMatchJob 记录大文件 Excel 匹配/导入任务。
 type ExcelMatchJob struct {
 	BaseModel

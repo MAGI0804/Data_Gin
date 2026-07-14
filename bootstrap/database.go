@@ -109,6 +109,7 @@ func autoMigrateTables() {
 		&model.DeliveryTask{},          //通用推送任务表
 		&model.PipelineRun{},           //运行记录表
 		&model.DeliveryLog{},           //推送日志表
+		&model.RuntimeConfig{},         //运行配置表
 		&model.PipelineDefinition{},    //方法拼接流水线表
 		&model.PipelineStage{},         //流水线大块阶段表
 		&model.MethodStep{},            //方法步骤表
