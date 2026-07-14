@@ -48,6 +48,29 @@ func (f *fakeBojunRetailOrderWriter) CreateIfNotExists(ctx context.Context, orde
 	return true, nil
 }
 
+type fakeBojunSyncUpdater struct {
+	updates map[uint]int
+}
+
+func (f *fakeBojunSyncUpdater) UpdateSyncStatus(ctx context.Context, id uint, synced int) error {
+	_ = ctx
+	if f.updates == nil {
+		f.updates = map[uint]int{}
+	}
+	f.updates[id] = synced
+	return nil
+}
+
+type fakeDeliveryLogCreator struct {
+	logs []model.DeliveryLog
+}
+
+func (f *fakeDeliveryLogCreator) Create(ctx context.Context, log *model.DeliveryLog) (uint, error) {
+	_ = ctx
+	f.logs = append(f.logs, *log)
+	return uint(len(f.logs)), nil
+}
+
 func TestBuildBojunOrderRequestBody(t *testing.T) {
 	body := buildBojunOrderRequestBody(
 		2,
@@ -133,6 +156,37 @@ func TestBuildBojunOrderRawDataMarksSource(t *testing.T) {
 	}
 }
 
+func TestBojunOrderPushSkipsByConfiguredPolicy(t *testing.T) {
+	updater := &fakeBojunSyncUpdater{}
+	logCreator := &fakeDeliveryLogCreator{}
+	service := &BojunOrderPushService{
+		retailOrderDAO: updater,
+		logDAO:         logCreator,
+	}
+
+	result := service.PushNewOrderWithPolicy(context.Background(), &model.BojunRetailOrder{
+		BaseModel:      model.BaseModel{ID: 7},
+		DocNo:          "B005",
+		StoreCode:      "ABCN001P012",
+		StoreName:      "前滩",
+		TotalQty:       1,
+		TotalAmtActual: 99,
+	}, 5, OrderPushSkipPolicy{Cycle: 5, Skip: 1})
+
+	if !result.Success || !result.Skipped || result.Error != nil {
+		t.Fatalf("result = %+v, want successful skipped push", result)
+	}
+	if updater.updates[7] != 1 {
+		t.Fatalf("sync update = %v, want id 7 synced to 1", updater.updates)
+	}
+	if len(logCreator.logs) != 1 {
+		t.Fatalf("logs length = %d, want 1", len(logCreator.logs))
+	}
+	if logCreator.logs[0].ResponseBody != "skipped_by_order_push_policy" || !logCreator.logs[0].Success {
+		t.Fatalf("log = %+v, want successful policy skip log", logCreator.logs[0])
+	}
+}
+
 func TestProcessBojunOrderRecordPreviewDoesNotWrite(t *testing.T) {
 	rawCreator := &fakeBojunRawDataCreator{}
 	orderWriter := &fakeBojunRetailOrderWriter{existing: map[string]bool{}}
@@ -149,7 +203,7 @@ func TestProcessBojunOrderRecordPreviewDoesNotWrite(t *testing.T) {
 		"totAmtActual": float64(99.5),
 	}
 
-	service.processBojunOrderRecord(context.Background(), record, defaultBojunOrderMethod, "2026-07-08 10:00:00", "2026-07-08 10:30:00", 1, false, result)
+	service.processBojunOrderRecord(context.Background(), record, defaultBojunOrderMethod, "2026-07-08 10:00:00", "2026-07-08 10:30:00", 1, false, result, OrderPushSkipPolicy{})
 
 	if result.TotalCount != 1 || result.PreviewCount != 1 || result.WritableCount != 1 || result.RetailCount != 0 {
 		t.Fatalf("result = %+v, want preview without retail write", result)
@@ -179,7 +233,7 @@ func TestProcessBojunOrderRecordConfirmWritesOnlyNewRows(t *testing.T) {
 		"totAmtActual": float64(99.5),
 	}
 
-	service.processBojunOrderRecord(context.Background(), record, defaultBojunOrderMethod, "2026-07-08 10:00:00", "2026-07-08 10:30:00", 1, true, result)
+	service.processBojunOrderRecord(context.Background(), record, defaultBojunOrderMethod, "2026-07-08 10:00:00", "2026-07-08 10:30:00", 1, true, result, OrderPushSkipPolicy{})
 
 	if result.TotalCount != 1 || result.SavedCount != 1 || result.RetailCount != 1 || result.FailedCount != 0 {
 		t.Fatalf("result = %+v, want saved retail row", result)
@@ -201,7 +255,7 @@ func TestProcessBojunOrderRecordSkipsExistingRows(t *testing.T) {
 	}
 	result := &BojunOrderSyncResult{}
 
-	service.processBojunOrderRecord(context.Background(), map[string]interface{}{"docno": "B001"}, defaultBojunOrderMethod, "", "", 1, true, result)
+	service.processBojunOrderRecord(context.Background(), map[string]interface{}{"docno": "B001"}, defaultBojunOrderMethod, "", "", 1, true, result, OrderPushSkipPolicy{})
 
 	if result.SkippedCount != 1 || result.ExistingCount != 1 || result.RetailCount != 0 {
 		t.Fatalf("result = %+v, want existing skip", result)
@@ -220,7 +274,7 @@ func TestProcessBojunOrderRecordInvalidDocNoDoesNotWriteRawData(t *testing.T) {
 	}
 	result := &BojunOrderSyncResult{}
 
-	service.processBojunOrderRecord(context.Background(), map[string]interface{}{"cStoreCode": "ABCN001P012"}, defaultBojunOrderMethod, "", "", 1, true, result)
+	service.processBojunOrderRecord(context.Background(), map[string]interface{}{"cStoreCode": "ABCN001P012"}, defaultBojunOrderMethod, "", "", 1, true, result, OrderPushSkipPolicy{})
 
 	if result.FailedCount != 1 || len(result.FailedSamples) != 1 {
 		t.Fatalf("result = %+v, want failed sample", result)

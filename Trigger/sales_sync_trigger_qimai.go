@@ -2,22 +2,44 @@ package Trigger
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"time"
 
 	send "gin-biz-web-api/Trigger/Send_Data"
 	"gin-biz-web-api/internal/dao/data_dao"
+	"gin-biz-web-api/internal/service/config_svc"
 	"gin-biz-web-api/model"
 	"gin-biz-web-api/pkg/config"
+	"gin-biz-web-api/pkg/orderpush"
 
 	"github.com/google/uuid"
 )
 
 type SalesSyncTrigger struct {
-	qimaiDataDAO   *data_dao.QimaiDataDAO
-	logDAO         *data_dao.DeliveryLogDAO
-	pipelineRunDAO *data_dao.PipelineRunDAO
+	qimaiDataDAO   qimaiSalesSyncDAO
+	logDAO         qimaiDeliveryLogCreator
+	pipelineRunDAO qimaiPipelineRunRecorder
+	skipPolicy     qimaiOrderPushSkipPolicyGetter
+}
+
+type qimaiSalesSyncDAO interface {
+	FindByShopCodeAndStatus(ctx context.Context, shopCode, status string) ([]model.QIMAI_ORDER_DATA, error)
+	MarkAsSynced(ctx context.Context, id uint) error
+}
+
+type qimaiDeliveryLogCreator interface {
+	Create(ctx context.Context, log *model.DeliveryLog) (uint, error)
+}
+
+type qimaiPipelineRunRecorder interface {
+	Create(ctx context.Context, run *model.PipelineRun) (uint, error)
+	Finish(ctx context.Context, id uint, status string, successCount, failedCount int, errorMessage string) error
+}
+
+type qimaiOrderPushSkipPolicyGetter interface {
+	Get(ctx context.Context) (orderpush.SkipPolicy, error)
 }
 
 func NewSalesSyncTrigger() *SalesSyncTrigger {
@@ -25,6 +47,7 @@ func NewSalesSyncTrigger() *SalesSyncTrigger {
 		qimaiDataDAO:   data_dao.NewQimaiDataDAO(),
 		logDAO:         data_dao.NewDeliveryLogDAO(),
 		pipelineRunDAO: data_dao.NewPipelineRunDAO(),
+		skipPolicy:     config_svc.NewOrderPushSkipConfigService(),
 	}
 }
 
@@ -56,14 +79,30 @@ func (t *SalesSyncTrigger) TriggerWithParams(ctx context.Context, shopCode, stat
 	if err != nil {
 		return fmt.Errorf("创建企迈推送运行日志失败: %w", err)
 	}
+	pushSkipPolicy, err := t.qimaiPushSkipPolicy(ctx)
+	if err != nil {
+		return fmt.Errorf("查询企迈少推送配置失败: %w", err)
+	}
 
 	dingtalkToken := config.GetString("cfg.dingtalk.default.token")
 	dingtalkSecret := config.GetString("cfg.dingtalk.default.secret")
 
 	successCount := 0
 	failedCount := 0
-	for _, order := range orders {
+	for index, order := range orders {
 		tid := order.OrderNo
+		position := index + 1
+		if pushSkipPolicy.ShouldSkip(position) {
+			log.Printf("企迈订单按少推送规则跳过: order_no=%s, position=%d", tid, position)
+			t.writeQimaiSkippedLog(ctx, traceID, runID, order.ID, tid, pushSkipPolicy, position)
+			if err := t.qimaiDataDAO.MarkAsSynced(ctx, order.ID); err != nil {
+				log.Printf("标记少推送订单已处理失败，订单号: %s, 错误: %v", tid, err)
+				failedCount++
+			} else {
+				successCount++
+			}
+			continue
+		}
 		payAmount := float64(order.ActualAmount) / 100.0
 
 		log.Printf("处理订单: order_no=%s, actual_amount=%d, payAmount=%.2f", tid, order.ActualAmount, payAmount)
@@ -122,6 +161,13 @@ func (t *SalesSyncTrigger) TriggerWithParams(ctx context.Context, shopCode, stat
 	return t.pipelineRunDAO.Finish(ctx, runID, statusResult, successCount, failedCount, "")
 }
 
+func (t *SalesSyncTrigger) qimaiPushSkipPolicy(ctx context.Context) (orderpush.SkipPolicy, error) {
+	if t.skipPolicy == nil {
+		return orderpush.SkipPolicy{}, nil
+	}
+	return t.skipPolicy.Get(ctx)
+}
+
 func (t *SalesSyncTrigger) writeQimaiDeliveryLog(
 	ctx context.Context,
 	traceID string,
@@ -153,4 +199,35 @@ func (t *SalesSyncTrigger) writeQimaiDeliveryLog(
 		logItem.ErrorMessage = pushErr.Error()
 	}
 	_, _ = t.logDAO.Create(ctx, logItem)
+}
+
+func (t *SalesSyncTrigger) writeQimaiSkippedLog(
+	ctx context.Context,
+	traceID string,
+	runID uint,
+	cleanRecordID uint,
+	businessKey string,
+	policy orderpush.SkipPolicy,
+	position int,
+) {
+	requestBody, _ := json.Marshal(map[string]interface{}{
+		"push_skip_policy": policy,
+		"position":         position,
+		"reason":           policy.Reason(position),
+	})
+	_, _ = t.logDAO.Create(ctx, &model.DeliveryLog{
+		TraceID:         traceID,
+		RunID:           runID,
+		CleanRecordID:   cleanRecordID,
+		DestinationID:   0,
+		SourceCode:      "qimai_order",
+		DestinationCode: "hangzhou_henglong",
+		DestinationName: "杭州恒隆",
+		BusinessKey:     businessKey,
+		RequestBody:     string(requestBody),
+		ResponseBody:    "skipped_by_order_push_policy",
+		Success:         true,
+		ErrorMessage:    policy.Reason(position),
+		SentAt:          &model.TimeNormal{Time: time.Now()},
+	})
 }

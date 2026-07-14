@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"gin-biz-web-api/internal/dao/data_dao"
+	"gin-biz-web-api/internal/service/config_svc"
 	"gin-biz-web-api/model"
 	"gin-biz-web-api/pkg/bojun"
 	"gin-biz-web-api/pkg/config"
@@ -41,6 +42,7 @@ type BojunOrderService struct {
 	retailOrderDAO bojunRetailOrderWriter
 	pipelineRunDAO pipelineRunRecorder
 	pushService    *BojunOrderPushService
+	skipPolicy     orderPushSkipPolicyGetter
 }
 
 type BojunOrderSyncResult struct {
@@ -59,6 +61,7 @@ type BojunOrderSyncResult struct {
 	FailedCount   int                     `json:"failed_count"`
 	Samples       []BojunOrderPreviewItem `json:"samples"`
 	FailedSamples []BojunOrderPreviewItem `json:"failed_samples"`
+	pushPosition  int
 }
 
 type BojunOrderPreviewItem struct {
@@ -81,6 +84,7 @@ func NewBojunOrderService() *BojunOrderService {
 		retailOrderDAO: data_dao.NewBojunRetailOrderDAO(),
 		pipelineRunDAO: data_dao.NewPipelineRunDAO(),
 		pushService:    NewBojunOrderPushService(),
+		skipPolicy:     config_svc.NewOrderPushSkipConfigService(),
 	}
 }
 
@@ -126,6 +130,10 @@ func (s *BojunOrderService) runOrders(ctx context.Context, startTime, endTime st
 			return result, err
 		}
 	}
+	pushSkipPolicy, err := s.bojunPushSkipPolicy(ctx, confirmWrite)
+	if err != nil {
+		return result, err
+	}
 
 	for page := 1; page <= maxPages; page++ {
 		payload, err := bojun.SendSignedRequest(ctx, method, buildBojunOrderRequestBody(page, pageSize, normalizedStart, normalizedEnd))
@@ -142,7 +150,7 @@ func (s *BojunOrderService) runOrders(ctx context.Context, startTime, endTime st
 		result.FetchPages++
 
 		for _, record := range records {
-			s.processBojunOrderRecord(ctx, record, method, normalizedStart, normalizedEnd, pageInfo.Current, confirmWrite, result)
+			s.processBojunOrderRecord(ctx, record, method, normalizedStart, normalizedEnd, pageInfo.Current, confirmWrite, result, pushSkipPolicy)
 		}
 
 		if pageInfo.TotalPage <= 0 || pageInfo.Current >= pageInfo.TotalPage || len(records) == 0 {
@@ -165,6 +173,7 @@ func (s *BojunOrderService) processBojunOrderRecord(
 	page int,
 	confirmWrite bool,
 	result *BojunOrderSyncResult,
+	pushSkipPolicy OrderPushSkipPolicy,
 ) {
 	result.TotalCount++
 	sample := buildBojunOrderPreviewItem(record)
@@ -253,7 +262,7 @@ func (s *BojunOrderService) processBojunOrderRecord(
 	sample.Reason = "已写入"
 	addBojunOrderSample(result, sample)
 	if s.pushService != nil {
-		pushResult := s.pushService.PushNewOrder(ctx, retailOrder)
+		pushResult := s.pushService.PushNewOrderWithPolicy(ctx, retailOrder, result.nextPushPosition(), pushSkipPolicy)
 		if pushResult.Error != nil && !pushResult.Skipped {
 			result.FailedCount++
 			failedSample := sample
@@ -262,6 +271,18 @@ func (s *BojunOrderService) processBojunOrderRecord(
 			addBojunOrderFailedSample(result, failedSample)
 		}
 	}
+}
+
+func (r *BojunOrderSyncResult) nextPushPosition() int {
+	r.pushPosition++
+	return r.pushPosition
+}
+
+func (s *BojunOrderService) bojunPushSkipPolicy(ctx context.Context, confirmWrite bool) (OrderPushSkipPolicy, error) {
+	if !confirmWrite || s.skipPolicy == nil {
+		return OrderPushSkipPolicy{}, nil
+	}
+	return s.skipPolicy.Get(ctx)
 }
 
 func normalizeBojunOrderTimeRange(startTime, endTime string) (string, string, error) {

@@ -1,4 +1,4 @@
-package data_svc
+package config_svc
 
 import (
 	"context"
@@ -6,15 +6,18 @@ import (
 	"fmt"
 
 	"gin-biz-web-api/internal/dao/data_dao"
+	"gin-biz-web-api/pkg/orderpush"
 )
 
-type runtimeConfigStore interface {
+const orderPushSkipConfigKey = "order_push_skip_policy"
+
+type RuntimeConfigStore interface {
 	GetValue(ctx context.Context, key string) (string, bool, error)
 	SetValue(ctx context.Context, key string, value string) error
 }
 
 type OrderPushSkipConfigService struct {
-	configDAO runtimeConfigStore
+	configDAO RuntimeConfigStore
 }
 
 func NewOrderPushSkipConfigService() *OrderPushSkipConfigService {
@@ -23,28 +26,28 @@ func NewOrderPushSkipConfigService() *OrderPushSkipConfigService {
 	}
 }
 
-func (s *OrderPushSkipConfigService) Get(ctx context.Context) (OrderPushSkipPolicy, error) {
+func (s *OrderPushSkipConfigService) Get(ctx context.Context) (orderpush.SkipPolicy, error) {
 	value, exists, err := s.configDAO.GetValue(ctx, orderPushSkipConfigKey)
 	if err != nil {
-		return OrderPushSkipPolicy{}, err
+		return orderpush.SkipPolicy{}, err
 	}
 	if !exists {
-		return OrderPushSkipPolicy{}, nil
+		return orderpush.SkipPolicy{}, nil
 	}
-	return parseOrderPushSkipPolicyJSON(value)
+	return orderpush.ParseSkipPolicyJSON(value)
 }
 
-func (s *OrderPushSkipConfigService) Save(ctx context.Context, policy OrderPushSkipPolicy) (OrderPushSkipPolicy, error) {
+func (s *OrderPushSkipConfigService) Save(ctx context.Context, policy orderpush.SkipPolicy) (orderpush.SkipPolicy, error) {
 	normalized, err := policy.Normalized()
 	if err != nil {
-		return OrderPushSkipPolicy{}, err
+		return orderpush.SkipPolicy{}, err
 	}
 	data, err := json.Marshal(normalized)
 	if err != nil {
-		return OrderPushSkipPolicy{}, fmt.Errorf("marshal order push skip config: %w", err)
+		return orderpush.SkipPolicy{}, fmt.Errorf("marshal order push skip config: %w", err)
 	}
 	if err := s.configDAO.SetValue(ctx, orderPushSkipConfigKey, string(data)); err != nil {
-		return OrderPushSkipPolicy{}, err
+		return orderpush.SkipPolicy{}, err
 	}
 	return normalized, nil
 }

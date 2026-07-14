@@ -4,16 +4,17 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"gin-biz-web-api/internal/msg"
-	"gin-biz-web-api/internal/service/data_svc"
+	"gin-biz-web-api/internal/service/config_svc"
+	"gin-biz-web-api/pkg/orderpush"
 )
 
 type OrderPushConfigController struct {
-	service *data_svc.OrderPushSkipConfigService
+	service *config_svc.OrderPushSkipConfigService
 }
 
 func NewOrderPushConfigController() *OrderPushConfigController {
 	return &OrderPushConfigController{
-		service: data_svc.NewOrderPushSkipConfigService(),
+		service: config_svc.NewOrderPushSkipConfigService(),
 	}
 }
 
@@ -30,7 +31,7 @@ func (ctrl *OrderPushConfigController) GetSkipPolicy(c *gin.Context) {
 }
 
 func (ctrl *OrderPushConfigController) SaveSkipPolicy(c *gin.Context) {
-	var req data_svc.OrderPushSkipPolicy
+	var req orderpush.SkipPolicy
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(400, msg.ErrResponse("无效的订单少推送配置", err))
 		return

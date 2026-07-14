@@ -61,11 +61,22 @@ func NewBojunOrderPushService() *BojunOrderPushService {
 }
 
 func (s *BojunOrderPushService) PushNewOrder(ctx context.Context, order *model.BojunRetailOrder) bojunOrderPushResult {
+	return s.PushNewOrderWithPolicy(ctx, order, 0, OrderPushSkipPolicy{})
+}
+
+func (s *BojunOrderPushService) PushNewOrderWithPolicy(ctx context.Context, order *model.BojunRetailOrder, position int, policy OrderPushSkipPolicy) bojunOrderPushResult {
 	target, ok := bojunTargetForStore(order.StoreCode)
 	if !ok {
 		err := fmt.Errorf("bojun store %q has no configured push target", order.StoreCode)
 		s.writeSkippedLog(ctx, order, err)
 		return bojunOrderPushResult{Skipped: true, Error: err}
+	}
+	if policy.ShouldSkip(position) {
+		s.writePolicySkippedLog(ctx, order, target, policy, position)
+		if err := s.retailOrderDAO.UpdateSyncStatus(ctx, order.ID, 1); err != nil {
+			return bojunOrderPushResult{Target: target, Skipped: true, Error: err}
+		}
+		return bojunOrderPushResult{Target: target, Success: true, Skipped: true}
 	}
 
 	traceID := uuid.NewString()
@@ -247,6 +258,28 @@ func (s *BojunOrderPushService) writeSkippedLog(ctx context.Context, order *mode
 		Success:         false,
 		ErrorMessage:    skipErr.Error(),
 		SentAt:          &model.TimeNormal{Time: app.TimeNowInTimezone()},
+	})
+}
+
+func (s *BojunOrderPushService) writePolicySkippedLog(ctx context.Context, order *model.BojunRetailOrder, target bojunOrderPushTarget, policy OrderPushSkipPolicy, position int) {
+	requestBody := marshalLogJSON(map[string]interface{}{
+		"push_skip_policy": policy,
+		"position":         position,
+		"reason":           policy.Reason(position),
+	})
+	_, _ = s.logDAO.Create(ctx, &model.DeliveryLog{
+		TraceID:         uuid.NewString(),
+		CleanRecordID:   order.ID,
+		DestinationID:   0,
+		SourceCode:      bojunOrderPushSource,
+		DestinationCode: target.Code,
+		DestinationName: target.Name,
+		BusinessKey:     order.DocNo,
+		RequestBody:     requestBody,
+		ResponseBody:    "skipped_by_order_push_policy",
+		Success:         true,
+		ErrorMessage:    policy.Reason(position),
+		SentAt:          &model.TimeNormal{Time: time.Now()},
 	})
 }
 

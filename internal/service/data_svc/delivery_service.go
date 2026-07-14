@@ -9,6 +9,7 @@ import (
 	destinationconnector "gin-biz-web-api/connector/destination"
 	"gin-biz-web-api/internal/dao/data_dao"
 	"gin-biz-web-api/internal/requestbody"
+	"gin-biz-web-api/internal/service/config_svc"
 	"gin-biz-web-api/model"
 	"gin-biz-web-api/pkg/app"
 )
@@ -19,6 +20,7 @@ type DeliveryService struct {
 	cleanDAO       *data_dao.CleanRecordDAO
 	logDAO         *data_dao.DeliveryLogDAO
 	pipelineRunDAO *data_dao.PipelineRunDAO
+	skipPolicy     orderPushSkipPolicyGetter
 	publishers     map[string]destinationconnector.Publisher
 }
 
@@ -40,6 +42,7 @@ func NewDeliveryService() *DeliveryService {
 		cleanDAO:       data_dao.NewCleanRecordDAO(),
 		logDAO:         data_dao.NewDeliveryLogDAO(),
 		pipelineRunDAO: data_dao.NewPipelineRunDAO(),
+		skipPolicy:     config_svc.NewOrderPushSkipConfigService(),
 		publishers:     destinationconnector.Builtins(),
 	}
 }
@@ -223,6 +226,7 @@ type DeliveryRunResult struct {
 	TotalCount   int    `json:"total_count"`
 	SuccessCount int    `json:"success_count"`
 	FailedCount  int    `json:"failed_count"`
+	SkippedCount int    `json:"skipped_count"`
 }
 
 func (s *DeliveryService) RunDeliveryTask(ctx context.Context, taskID uint) (*DeliveryRunResult, error) {
@@ -254,6 +258,10 @@ func (s *DeliveryService) RunDeliveryTask(ctx context.Context, taskID uint) (*De
 	if err != nil {
 		return nil, err
 	}
+	skipPolicy, err := s.skipPolicyForTask(ctx, task)
+	if err != nil {
+		return nil, err
+	}
 
 	traceID := newTraceID()
 	runID, err := s.pipelineRunDAO.Create(ctx, &model.PipelineRun{
@@ -272,7 +280,18 @@ func (s *DeliveryService) RunDeliveryTask(ctx context.Context, taskID uint) (*De
 
 	successCount := 0
 	failedCount := 0
-	for _, cleanRecord := range cleanRecords {
+	skippedCount := 0
+	for index, cleanRecord := range cleanRecords {
+		position := index + 1
+		if skipPolicy.ShouldSkip(position) {
+			if s.createSkippedDeliveryLog(ctx, traceID, runID, destination, cleanRecord, skipPolicy, position) {
+				successCount++
+			} else {
+				failedCount++
+			}
+			skippedCount++
+			continue
+		}
 		if s.publishCleanRecord(ctx, runID, traceID, destination, publisher, cfg, cleanRecord) {
 			successCount++
 			continue
@@ -295,6 +314,7 @@ func (s *DeliveryService) RunDeliveryTask(ctx context.Context, taskID uint) (*De
 		TotalCount:   len(cleanRecords),
 		SuccessCount: successCount,
 		FailedCount:  failedCount,
+		SkippedCount: skippedCount,
 	}, nil
 }
 
@@ -323,6 +343,30 @@ func (s *DeliveryService) publishCleanRecord(
 		return false
 	}
 
+	return s.cleanDAO.MarkDelivered(ctx, cleanRecord.ID) == nil
+}
+
+func (s *DeliveryService) createSkippedDeliveryLog(
+	ctx context.Context,
+	traceID string,
+	runID uint,
+	destination *model.DestinationDefinition,
+	cleanRecord model.CleanRecord,
+	policy OrderPushSkipPolicy,
+	position int,
+) bool {
+	body, _ := json.Marshal(map[string]interface{}{
+		"push_skip_policy": policy,
+		"position":         position,
+		"reason":           policy.Reason(position),
+	})
+	s.createDeliveryLog(ctx, traceID, runID, destination, cleanRecord, &destinationconnector.PublishResult{
+		RequestBody:  string(body),
+		ResponseBody: "skipped_by_order_push_policy",
+		HTTPStatus:   0,
+		Success:      true,
+		ErrorMessage: policy.Reason(position),
+	}, nil)
 	return s.cleanDAO.MarkDelivered(ctx, cleanRecord.ID) == nil
 }
 
@@ -358,6 +402,20 @@ func (s *DeliveryService) createDeliveryLog(
 		log.ErrorMessage = publishErr.Error()
 	}
 	_, _ = s.logDAO.Create(ctx, log)
+}
+
+func (s *DeliveryService) skipPolicyForTask(ctx context.Context, task *model.DeliveryTask) (OrderPushSkipPolicy, error) {
+	taskPolicy, err := parseOrderPushSkipPolicyJSON(task.FilterJSON)
+	if err != nil {
+		return OrderPushSkipPolicy{}, fmt.Errorf("decode delivery task push skip policy: %w", err)
+	}
+	if taskPolicy.Enabled() {
+		return taskPolicy, nil
+	}
+	if s.skipPolicy == nil {
+		return OrderPushSkipPolicy{}, nil
+	}
+	return s.skipPolicy.Get(ctx)
 }
 
 func (s *DeliveryService) publisherForDestination(destination *model.DestinationDefinition) (destinationconnector.Publisher, destinationconnector.Config, error) {
