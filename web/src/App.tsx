@@ -627,6 +627,7 @@ function App() {
   const [deliveryTasks, setDeliveryTasks] = useState<DeliveryTask[]>([])
   const [deliveryLogs, setDeliveryLogs] = useState<DeliveryLog[]>([])
   const [orderPushSkipConfig, setOrderPushSkipConfig] = useState<OrderPushSkipConfig>(defaultOrderPushSkipConfig)
+  const [orderPushTargets, setOrderPushTargets] = useState<OrderPushTargetOption[]>([])
   const [legacyTasks, setLegacyTasks] = useState<LegacyTask[]>([])
   const [legacyRules, setLegacyRules] = useState<LegacyTransformRule[]>([])
 
@@ -715,7 +716,10 @@ function App() {
         if (destinationResult.ok) setDestinations(nextDestinations)
         if (taskResult.ok) setDeliveryTasks(nextTasks)
         if (logResult.ok) setDeliveryLogs(readList<DeliveryLog>(logResult, 'logs'))
-        if (orderPushSkipResult.ok) setOrderPushSkipConfig(normalizeOrderPushSkipConfig(readObject<OrderPushSkipConfig>(orderPushSkipResult, 'config')))
+        if (orderPushSkipResult.ok) {
+          setOrderPushSkipConfig(normalizeOrderPushSkipConfig(readObject<OrderPushSkipConfig>(orderPushSkipResult, 'config')))
+          setOrderPushTargets(readList<OrderPushTargetOption>(orderPushSkipResult, 'targets'))
+        }
         if (legacyTaskResult.ok) setLegacyTasks(nextLegacyTasks)
         if (legacyRuleResult.ok) setLegacyRules(nextLegacyRules)
         if (pipelineResult.ok) {
@@ -856,6 +860,7 @@ function App() {
             tasks={deliveryTasks}
             coreMethod={coreMethods.find((item) => item.key === 'mall_push')}
             orderPushSkipConfig={orderPushSkipConfig}
+            orderPushTargets={orderPushTargets}
             onSaveOrderPushSkipConfig={saveOrderPushSkipConfig}
             onToggle={toggleTarget}
           />
@@ -1174,6 +1179,7 @@ function PushConfigView({
   tasks,
   coreMethod,
   orderPushSkipConfig,
+  orderPushTargets,
   onSaveOrderPushSkipConfig,
   onToggle,
 }: {
@@ -1181,10 +1187,10 @@ function PushConfigView({
   tasks: DeliveryTask[]
   coreMethod?: CoreMethod
   orderPushSkipConfig: OrderPushSkipConfig
+  orderPushTargets: OrderPushTargetOption[]
   onSaveOrderPushSkipConfig: (config: OrderPushSkipConfig) => void
   onToggle: (target: ToggleTarget, enabled: boolean) => void
 }) {
-  const targetOptions = useMemo(() => buildOrderPushTargetOptions(destinations), [destinations])
   return (
     <div className="view-stack">
       {coreMethod && <Panel title="商场数据推送方法" icon={<Send />} meta="现有推送能力"><CoreMethodList methods={[coreMethod]} onToggle={onToggle} /></Panel>}
@@ -1195,7 +1201,7 @@ function PushConfigView({
         <Metric label="启用任务" value={tasks.filter((item) => item.enabled).length} />
       </section>
       <Panel title="订单少推送配置" icon={<ListChecks />} meta="qimai / bojun / delivery tasks">
-        <OrderPushSkipConfigForm config={orderPushSkipConfig} targets={targetOptions} onSave={onSaveOrderPushSkipConfig} />
+        <OrderPushSkipConfigForm config={orderPushSkipConfig} targets={orderPushTargets} onSave={onSaveOrderPushSkipConfig} />
       </Panel>
       <section className="content-grid two">
         <Panel title="推送目标" icon={<Send />} meta="destinations">
@@ -1231,7 +1237,7 @@ function OrderPushSkipConfigForm({ config, targets, onSave }: { config: OrderPus
         <StatusPill label={enabledCount > 0 ? `已启用 ${enabledCount} 个目标` : '未启用'} />
         <span>只对下方配置的推送目标生效；未配置或填 0 的目标不少推。</span>
       </div>
-      <div className="push-skip-list">
+      {targets.length === 0 ? <EmptyState text="后端未返回可配置推送目标。" /> : <div className="push-skip-list">
         {targets.map((target, index) => {
           const value = orderPushTargetConfig(config, target.code)
           return (
@@ -1245,7 +1251,7 @@ function OrderPushSkipConfigForm({ config, targets, onSave }: { config: OrderPus
             </div>
           )
         })}
-      </div>
+      </div>}
       <button className="primary" type="submit">保存配置</button>
     </form>
   )
@@ -2406,29 +2412,6 @@ function DeliveryLogList({ logs, onSelectLog, onRetryLog }: { logs: DeliveryLog[
       )}
     </div>
   )
-}
-
-const builtinOrderPushTargets: OrderPushTargetOption[] = [
-  { code: 'hangzhou_henglong', name: '杭州恒隆' },
-  { code: 'jialicheng', name: '嘉里城' },
-  { code: 'panlong', name: '蟠龙' },
-  { code: 'qiantan', name: '前滩' },
-  { code: 'shangsheng', name: '上生新所' },
-  { code: 'xintiandi', name: '新天地' },
-]
-
-function buildOrderPushTargetOptions(destinations: DestinationDefinition[]) {
-  const result: OrderPushTargetOption[] = []
-  const seen = new Set<string>()
-  const add = (target: OrderPushTargetOption) => {
-    const code = target.code.trim()
-    if (!code || seen.has(code.toLowerCase())) return
-    seen.add(code.toLowerCase())
-    result.push({ code, name: target.name.trim() || code })
-  }
-  builtinOrderPushTargets.forEach(add)
-  destinations.forEach((destination) => add({ code: destination.code, name: destination.name }))
-  return result
 }
 
 function orderPushTargetConfig(config: OrderPushSkipConfig, targetCode: string): OrderPushSkipTargetConfig {
