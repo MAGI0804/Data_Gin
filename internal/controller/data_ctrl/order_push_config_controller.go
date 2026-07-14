@@ -24,9 +24,15 @@ func (ctrl *OrderPushConfigController) GetSkipPolicy(c *gin.Context) {
 		c.JSON(500, msg.ErrResponse("查询订单少推送配置失败", err))
 		return
 	}
+	targets, err := ctrl.service.ListTargets(c.Request.Context())
+	if err != nil {
+		c.JSON(500, msg.ErrResponse("查询订单少推送目标失败", err))
+		return
+	}
 
 	c.JSON(200, msg.SuccessResponse("查询订单少推送配置成功", &map[string]any{
-		"config": config,
+		"config":  config,
+		"targets": targets,
 	}))
 }
 

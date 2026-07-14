@@ -18,6 +18,11 @@ type TargetSkipPolicy struct {
 	Skip       int    `json:"skip"`
 }
 
+type TargetOption struct {
+	Code string `json:"code"`
+	Name string `json:"name"`
+}
+
 type SkipConfig struct {
 	Targets []TargetSkipPolicy `json:"targets"`
 }
