@@ -317,8 +317,7 @@ const defaultExcelImportScheme: ExcelImportSchemeConfig = {
 }
 
 const defaultOrderPushSkipConfig: OrderPushSkipConfig = {
-  cycle: 0,
-  skip: 0,
+  targets: [],
 }
 
 type BojunOrderBackfillSample = {
@@ -434,8 +433,19 @@ type DeliveryTask = {
 }
 
 type OrderPushSkipConfig = {
+  targets: OrderPushSkipTargetConfig[]
+}
+
+type OrderPushSkipTargetConfig = {
+  target_code: string
+  target_name: string
   cycle: number
   skip: number
+}
+
+type OrderPushTargetOption = {
+  code: string
+  name: string
 }
 
 type LegacyTask = {
@@ -705,7 +715,7 @@ function App() {
         if (destinationResult.ok) setDestinations(nextDestinations)
         if (taskResult.ok) setDeliveryTasks(nextTasks)
         if (logResult.ok) setDeliveryLogs(readList<DeliveryLog>(logResult, 'logs'))
-        if (orderPushSkipResult.ok) setOrderPushSkipConfig(readObject<OrderPushSkipConfig>(orderPushSkipResult, 'config') ?? defaultOrderPushSkipConfig)
+        if (orderPushSkipResult.ok) setOrderPushSkipConfig(normalizeOrderPushSkipConfig(readObject<OrderPushSkipConfig>(orderPushSkipResult, 'config')))
         if (legacyTaskResult.ok) setLegacyTasks(nextLegacyTasks)
         if (legacyRuleResult.ok) setLegacyRules(nextLegacyRules)
         if (pipelineResult.ok) {
@@ -759,7 +769,7 @@ function App() {
       body: config,
     })
     if (response.ok) {
-      setOrderPushSkipConfig(readObject<OrderPushSkipConfig>(response, 'config') ?? config)
+      setOrderPushSkipConfig(normalizeOrderPushSkipConfig(readObject<OrderPushSkipConfig>(response, 'config')) ?? config)
       await refreshAll(false)
     }
   }
@@ -1174,6 +1184,7 @@ function PushConfigView({
   onSaveOrderPushSkipConfig: (config: OrderPushSkipConfig) => void
   onToggle: (target: ToggleTarget, enabled: boolean) => void
 }) {
+  const targetOptions = useMemo(() => buildOrderPushTargetOptions(destinations), [destinations])
   return (
     <div className="view-stack">
       {coreMethod && <Panel title="商场数据推送方法" icon={<Send />} meta="现有推送能力"><CoreMethodList methods={[coreMethod]} onToggle={onToggle} /></Panel>}
@@ -1184,7 +1195,7 @@ function PushConfigView({
         <Metric label="启用任务" value={tasks.filter((item) => item.enabled).length} />
       </section>
       <Panel title="订单少推送配置" icon={<ListChecks />} meta="qimai / bojun / delivery tasks">
-        <OrderPushSkipConfigForm config={orderPushSkipConfig} onSave={onSaveOrderPushSkipConfig} />
+        <OrderPushSkipConfigForm config={orderPushSkipConfig} targets={targetOptions} onSave={onSaveOrderPushSkipConfig} />
       </Panel>
       <section className="content-grid two">
         <Panel title="推送目标" icon={<Send />} meta="destinations">
@@ -1198,25 +1209,42 @@ function PushConfigView({
   )
 }
 
-function OrderPushSkipConfigForm({ config, onSave }: { config: OrderPushSkipConfig; onSave: (config: OrderPushSkipConfig) => void }) {
-  const enabled = config.cycle > 0 && config.skip > 0
+function OrderPushSkipConfigForm({ config, targets, onSave }: { config: OrderPushSkipConfig; targets: OrderPushTargetOption[]; onSave: (config: OrderPushSkipConfig) => void }) {
+  const enabledCount = config.targets.filter((target) => target.cycle > 0 && target.skip > 0).length
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const form = new FormData(event.currentTarget)
     onSave({
-      cycle: Number(formValue(form, 'cycle') || 0),
-      skip: Number(formValue(form, 'skip') || 0),
+      targets: targets.map((target, index) => ({
+        target_code: target.code,
+        target_name: target.name,
+        cycle: Number(formValue(form, `cycle_${index}`) || 0),
+        skip: Number(formValue(form, `skip_${index}`) || 0),
+      })),
     })
   }
 
   return (
-    <form className="push-skip-form" key={`${config.cycle}-${config.skip}`} onSubmit={submit}>
-      <Field label="一次循环总单数" name="cycle" defaultValue={String(config.cycle || 0)} type="number" />
-      <Field label="每轮少推单数" name="skip" defaultValue={String(config.skip || 0)} type="number" />
+    <form className="push-skip-form" key={JSON.stringify(config.targets)} onSubmit={submit}>
       <div className="push-skip-summary">
-        <StatusPill label={enabled ? '已启用' : '未启用'} />
-        <span>{enabled ? `当前规则：每 ${config.cycle} 单少推 ${config.skip} 单。` : '设置为 0 表示不启用少推送。'}</span>
+        <StatusPill label={enabledCount > 0 ? `已启用 ${enabledCount} 个目标` : '未启用'} />
+        <span>只对下方配置的推送目标生效；未配置或填 0 的目标不少推。</span>
+      </div>
+      <div className="push-skip-list">
+        {targets.map((target, index) => {
+          const value = orderPushTargetConfig(config, target.code)
+          return (
+            <div className="push-skip-row" key={target.code}>
+              <div>
+                <strong>{target.name}</strong>
+                <span>{target.code}</span>
+              </div>
+              <Field label="循环总单数" name={`cycle_${index}`} defaultValue={String(value.cycle || 0)} type="number" />
+              <Field label="少推单数" name={`skip_${index}`} defaultValue={String(value.skip || 0)} type="number" />
+            </div>
+          )
+        })}
       </div>
       <button className="primary" type="submit">保存配置</button>
     </form>
@@ -2378,6 +2406,46 @@ function DeliveryLogList({ logs, onSelectLog, onRetryLog }: { logs: DeliveryLog[
       )}
     </div>
   )
+}
+
+const builtinOrderPushTargets: OrderPushTargetOption[] = [
+  { code: 'hangzhou_henglong', name: '杭州恒隆' },
+  { code: 'jialicheng', name: '嘉里城' },
+  { code: 'panlong', name: '蟠龙' },
+  { code: 'qiantan', name: '前滩' },
+  { code: 'shangsheng', name: '上生新所' },
+  { code: 'xintiandi', name: '新天地' },
+]
+
+function buildOrderPushTargetOptions(destinations: DestinationDefinition[]) {
+  const result: OrderPushTargetOption[] = []
+  const seen = new Set<string>()
+  const add = (target: OrderPushTargetOption) => {
+    const code = target.code.trim()
+    if (!code || seen.has(code.toLowerCase())) return
+    seen.add(code.toLowerCase())
+    result.push({ code, name: target.name.trim() || code })
+  }
+  builtinOrderPushTargets.forEach(add)
+  destinations.forEach((destination) => add({ code: destination.code, name: destination.name }))
+  return result
+}
+
+function orderPushTargetConfig(config: OrderPushSkipConfig, targetCode: string): OrderPushSkipTargetConfig {
+  const target = config.targets.find((item) => item.target_code.toLowerCase() === targetCode.toLowerCase())
+  return target ?? { target_code: targetCode, target_name: '', cycle: 0, skip: 0 }
+}
+
+function normalizeOrderPushSkipConfig(config: OrderPushSkipConfig | null): OrderPushSkipConfig {
+  if (!config || !Array.isArray(config.targets)) return defaultOrderPushSkipConfig
+  return {
+    targets: config.targets.map((target) => ({
+      target_code: target.target_code || '',
+      target_name: target.target_name || '',
+      cycle: Number(target.cycle || 0),
+      skip: Number(target.skip || 0),
+    })),
+  }
 }
 
 function apiURL(path: string) {
