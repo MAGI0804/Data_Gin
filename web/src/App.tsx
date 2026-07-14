@@ -316,6 +316,11 @@ const defaultExcelImportScheme: ExcelImportSchemeConfig = {
   batchSize: '1000',
 }
 
+const defaultOrderPushSkipConfig: OrderPushSkipConfig = {
+  cycle: 0,
+  skip: 0,
+}
+
 type BojunOrderBackfillSample = {
   docno: string
   otherdocno: string
@@ -426,6 +431,11 @@ type DeliveryTask = {
   filter_json: string
   payload_template: string
   enabled: boolean
+}
+
+type OrderPushSkipConfig = {
+  cycle: number
+  skip: number
 }
 
 type LegacyTask = {
@@ -606,6 +616,7 @@ function App() {
   const [destinations, setDestinations] = useState<DestinationDefinition[]>([])
   const [deliveryTasks, setDeliveryTasks] = useState<DeliveryTask[]>([])
   const [deliveryLogs, setDeliveryLogs] = useState<DeliveryLog[]>([])
+  const [orderPushSkipConfig, setOrderPushSkipConfig] = useState<OrderPushSkipConfig>(defaultOrderPushSkipConfig)
   const [legacyTasks, setLegacyTasks] = useState<LegacyTask[]>([])
   const [legacyRules, setLegacyRules] = useState<LegacyTransformRule[]>([])
 
@@ -665,7 +676,7 @@ function App() {
       if (!token) return
       setRefreshing(true)
       try {
-        const [pipelineResult, runResult, sourceResult, rawResult, processedResult, ruleResult, destinationResult, taskResult, logResult, legacyTaskResult, legacyRuleResult] = await Promise.all([
+        const [pipelineResult, runResult, sourceResult, rawResult, processedResult, ruleResult, destinationResult, taskResult, logResult, orderPushSkipResult, legacyTaskResult, legacyRuleResult] = await Promise.all([
           client('/v1/pipelines', { method: 'GET', showResult: false, silentLoading: true }),
           client('/v1/runs?limit=50', { method: 'GET', showResult: false, silentLoading: true }),
           client('/v1/sources', { method: 'GET', showResult: false, silentLoading: true }),
@@ -675,6 +686,7 @@ function App() {
           client('/v1/destinations', { method: 'GET', showResult: false, silentLoading: true }),
           client('/v1/delivery-tasks', { method: 'GET', showResult: false, silentLoading: true }),
           client('/v1/delivery-logs?limit=50', { method: 'GET', showResult: false, silentLoading: true }),
+          client('/v1/order-push-skip-config', { method: 'GET', showResult: false, silentLoading: true }),
           client('/v1/legacy-tasks', { method: 'GET', showResult: false, silentLoading: true }),
           client('/v1/legacy-transform-rules', { method: 'GET', showResult: false, silentLoading: true }),
         ])
@@ -693,6 +705,7 @@ function App() {
         if (destinationResult.ok) setDestinations(nextDestinations)
         if (taskResult.ok) setDeliveryTasks(nextTasks)
         if (logResult.ok) setDeliveryLogs(readList<DeliveryLog>(logResult, 'logs'))
+        if (orderPushSkipResult.ok) setOrderPushSkipConfig(readObject<OrderPushSkipConfig>(orderPushSkipResult, 'config') ?? defaultOrderPushSkipConfig)
         if (legacyTaskResult.ok) setLegacyTasks(nextLegacyTasks)
         if (legacyRuleResult.ok) setLegacyRules(nextLegacyRules)
         if (pipelineResult.ok) {
@@ -738,6 +751,17 @@ function App() {
   async function retryDeliveryLog(logId: number) {
     const response = await client(`/v1/delivery-logs/${logId}/retry`, { method: 'POST' })
     if (response.ok) await refreshAll(false)
+  }
+
+  async function saveOrderPushSkipConfig(config: OrderPushSkipConfig) {
+    const response = await client('/v1/order-push-skip-config', {
+      method: 'PUT',
+      body: config,
+    })
+    if (response.ok) {
+      setOrderPushSkipConfig(readObject<OrderPushSkipConfig>(response, 'config') ?? config)
+      await refreshAll(false)
+    }
   }
 
   async function previewBojunOrderBackfill(payload: { start_time: string; end_time: string }) {
@@ -816,7 +840,16 @@ function App() {
           />
         )}
         {activeNav === 'process' && <ProcessView rules={transformRules} records={processedData} coreMethod={coreMethods.find((item) => item.key === 'qimai_process')} onToggle={toggleTarget} />}
-        {activeNav === 'push' && <PushConfigView destinations={destinations} tasks={deliveryTasks} coreMethod={coreMethods.find((item) => item.key === 'mall_push')} onToggle={toggleTarget} />}
+        {activeNav === 'push' && (
+          <PushConfigView
+            destinations={destinations}
+            tasks={deliveryTasks}
+            coreMethod={coreMethods.find((item) => item.key === 'mall_push')}
+            orderPushSkipConfig={orderPushSkipConfig}
+            onSaveOrderPushSkipConfig={saveOrderPushSkipConfig}
+            onToggle={toggleTarget}
+          />
+        )}
         {activeNav === 'excel' && <ExcelMatchView token={token} loading={loading} setLoading={setLoading} setResult={setResult} />}
         {activeNav === 'logs' && <LogsView runs={runs} stepRuns={stepRuns} deliveryLogs={deliveryLogs} onLoadSteps={loadStepRuns} onRetryLog={retryDeliveryLog} />}
       </section>
@@ -1126,7 +1159,21 @@ function ProcessView({ rules, records, coreMethod, onToggle }: { rules: Transfor
   )
 }
 
-function PushConfigView({ destinations, tasks, coreMethod, onToggle }: { destinations: DestinationDefinition[]; tasks: DeliveryTask[]; coreMethod?: CoreMethod; onToggle: (target: ToggleTarget, enabled: boolean) => void }) {
+function PushConfigView({
+  destinations,
+  tasks,
+  coreMethod,
+  orderPushSkipConfig,
+  onSaveOrderPushSkipConfig,
+  onToggle,
+}: {
+  destinations: DestinationDefinition[]
+  tasks: DeliveryTask[]
+  coreMethod?: CoreMethod
+  orderPushSkipConfig: OrderPushSkipConfig
+  onSaveOrderPushSkipConfig: (config: OrderPushSkipConfig) => void
+  onToggle: (target: ToggleTarget, enabled: boolean) => void
+}) {
   return (
     <div className="view-stack">
       {coreMethod && <Panel title="商场数据推送方法" icon={<Send />} meta="现有推送能力"><CoreMethodList methods={[coreMethod]} onToggle={onToggle} /></Panel>}
@@ -1136,6 +1183,9 @@ function PushConfigView({ destinations, tasks, coreMethod, onToggle }: { destina
         <Metric label="推送任务" value={tasks.length} />
         <Metric label="启用任务" value={tasks.filter((item) => item.enabled).length} />
       </section>
+      <Panel title="订单少推送配置" icon={<ListChecks />} meta="qimai / bojun / delivery tasks">
+        <OrderPushSkipConfigForm config={orderPushSkipConfig} onSave={onSaveOrderPushSkipConfig} />
+      </Panel>
       <section className="content-grid two">
         <Panel title="推送目标" icon={<Send />} meta="destinations">
           <DestinationList destinations={destinations} />
@@ -1145,6 +1195,31 @@ function PushConfigView({ destinations, tasks, coreMethod, onToggle }: { destina
         </Panel>
       </section>
     </div>
+  )
+}
+
+function OrderPushSkipConfigForm({ config, onSave }: { config: OrderPushSkipConfig; onSave: (config: OrderPushSkipConfig) => void }) {
+  const enabled = config.cycle > 0 && config.skip > 0
+
+  function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const form = new FormData(event.currentTarget)
+    onSave({
+      cycle: Number(formValue(form, 'cycle') || 0),
+      skip: Number(formValue(form, 'skip') || 0),
+    })
+  }
+
+  return (
+    <form className="push-skip-form" key={`${config.cycle}-${config.skip}`} onSubmit={submit}>
+      <Field label="一次循环总单数" name="cycle" defaultValue={String(config.cycle || 0)} type="number" />
+      <Field label="每轮少推单数" name="skip" defaultValue={String(config.skip || 0)} type="number" />
+      <div className="push-skip-summary">
+        <StatusPill label={enabled ? '已启用' : '未启用'} />
+        <span>{enabled ? `当前规则：每 ${config.cycle} 单少推 ${config.skip} 单。` : '设置为 0 表示不启用少推送。'}</span>
+      </div>
+      <button className="primary" type="submit">保存配置</button>
+    </form>
   )
 }
 

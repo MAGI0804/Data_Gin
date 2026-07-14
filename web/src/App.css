@@ -435,6 +435,23 @@ button:focus-visible {
   align-items: end;
 }
 
+.push-skip-form {
+  display: grid;
+  grid-template-columns: minmax(120px, 180px) minmax(120px, 180px) minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: end;
+}
+
+.push-skip-summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  min-height: 36px;
+  color: #666666;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
 .backfill-note {
   margin: 10px 0 0;
   color: #666666;
@@ -720,7 +737,8 @@ summary {
   .content-grid.two,
   .method-groups,
   .log-board,
-  .excel-action-grid {
+  .excel-action-grid,
+  .push-skip-form {
     grid-template-columns: 1fr;
   }
 
