@@ -31,7 +31,7 @@ func (ctrl *OrderPushConfigController) GetSkipPolicy(c *gin.Context) {
 }
 
 func (ctrl *OrderPushConfigController) SaveSkipPolicy(c *gin.Context) {
-	var req orderpush.SkipPolicy
+	var req orderpush.SkipConfig
 	if err := c.ShouldBindJSON(&req); err != nil {
 		c.JSON(400, msg.ErrResponse("无效的订单少推送配置", err))
 		return

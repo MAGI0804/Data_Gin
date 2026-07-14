@@ -39,7 +39,7 @@ type qimaiPipelineRunRecorder interface {
 }
 
 type qimaiOrderPushSkipPolicyGetter interface {
-	Get(ctx context.Context) (orderpush.SkipPolicy, error)
+	Get(ctx context.Context) (orderpush.SkipConfig, error)
 }
 
 func NewSalesSyncTrigger() *SalesSyncTrigger {
@@ -165,7 +165,11 @@ func (t *SalesSyncTrigger) qimaiPushSkipPolicy(ctx context.Context) (orderpush.S
 	if t.skipPolicy == nil {
 		return orderpush.SkipPolicy{}, nil
 	}
-	return t.skipPolicy.Get(ctx)
+	config, err := t.skipPolicy.Get(ctx)
+	if err != nil {
+		return orderpush.SkipPolicy{}, err
+	}
+	return config.PolicyForTarget("hangzhou_henglong"), nil
 }
 
 func (t *SalesSyncTrigger) writeQimaiDeliveryLog(

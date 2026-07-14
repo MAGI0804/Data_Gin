@@ -20,7 +20,7 @@ type DeliveryService struct {
 	cleanDAO       *data_dao.CleanRecordDAO
 	logDAO         *data_dao.DeliveryLogDAO
 	pipelineRunDAO *data_dao.PipelineRunDAO
-	skipPolicy     orderPushSkipPolicyGetter
+	skipPolicy     orderPushSkipConfigGetter
 	publishers     map[string]destinationconnector.Publisher
 }
 
@@ -258,7 +258,7 @@ func (s *DeliveryService) RunDeliveryTask(ctx context.Context, taskID uint) (*De
 	if err != nil {
 		return nil, err
 	}
-	skipPolicy, err := s.skipPolicyForTask(ctx, task)
+	skipPolicy, err := s.skipPolicyForTask(ctx, task, destination)
 	if err != nil {
 		return nil, err
 	}
@@ -404,7 +404,7 @@ func (s *DeliveryService) createDeliveryLog(
 	_, _ = s.logDAO.Create(ctx, log)
 }
 
-func (s *DeliveryService) skipPolicyForTask(ctx context.Context, task *model.DeliveryTask) (OrderPushSkipPolicy, error) {
+func (s *DeliveryService) skipPolicyForTask(ctx context.Context, task *model.DeliveryTask, destination *model.DestinationDefinition) (OrderPushSkipPolicy, error) {
 	taskPolicy, err := parseOrderPushSkipPolicyJSON(task.FilterJSON)
 	if err != nil {
 		return OrderPushSkipPolicy{}, fmt.Errorf("decode delivery task push skip policy: %w", err)
@@ -415,7 +415,11 @@ func (s *DeliveryService) skipPolicyForTask(ctx context.Context, task *model.Del
 	if s.skipPolicy == nil {
 		return OrderPushSkipPolicy{}, nil
 	}
-	return s.skipPolicy.Get(ctx)
+	config, err := s.skipPolicy.Get(ctx)
+	if err != nil {
+		return OrderPushSkipPolicy{}, err
+	}
+	return config.PolicyForTarget(destination.Code), nil
 }
 
 func (s *DeliveryService) publisherForDestination(destination *model.DestinationDefinition) (destinationconnector.Publisher, destinationconnector.Config, error) {

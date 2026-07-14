@@ -9,9 +9,10 @@ import (
 const orderPushSkipConfigKey = "order_push_skip_policy"
 
 type OrderPushSkipPolicy = orderpush.SkipPolicy
+type OrderPushSkipConfig = orderpush.SkipConfig
 
-type orderPushSkipPolicyGetter interface {
-	Get(ctx context.Context) (OrderPushSkipPolicy, error)
+type orderPushSkipConfigGetter interface {
+	Get(ctx context.Context) (OrderPushSkipConfig, error)
 }
 
 func parseOrderPushSkipPolicyJSON(raw string) (OrderPushSkipPolicy, error) {

@@ -42,7 +42,7 @@ type BojunOrderService struct {
 	retailOrderDAO bojunRetailOrderWriter
 	pipelineRunDAO pipelineRunRecorder
 	pushService    *BojunOrderPushService
-	skipPolicy     orderPushSkipPolicyGetter
+	skipPolicy     orderPushSkipConfigGetter
 }
 
 type BojunOrderSyncResult struct {
@@ -130,7 +130,7 @@ func (s *BojunOrderService) runOrders(ctx context.Context, startTime, endTime st
 			return result, err
 		}
 	}
-	pushSkipPolicy, err := s.bojunPushSkipPolicy(ctx, confirmWrite)
+	pushSkipConfig, err := s.bojunPushSkipConfig(ctx, confirmWrite)
 	if err != nil {
 		return result, err
 	}
@@ -150,7 +150,7 @@ func (s *BojunOrderService) runOrders(ctx context.Context, startTime, endTime st
 		result.FetchPages++
 
 		for _, record := range records {
-			s.processBojunOrderRecord(ctx, record, method, normalizedStart, normalizedEnd, pageInfo.Current, confirmWrite, result, pushSkipPolicy)
+			s.processBojunOrderRecord(ctx, record, method, normalizedStart, normalizedEnd, pageInfo.Current, confirmWrite, result, pushSkipConfig)
 		}
 
 		if pageInfo.TotalPage <= 0 || pageInfo.Current >= pageInfo.TotalPage || len(records) == 0 {
@@ -173,7 +173,7 @@ func (s *BojunOrderService) processBojunOrderRecord(
 	page int,
 	confirmWrite bool,
 	result *BojunOrderSyncResult,
-	pushSkipPolicy OrderPushSkipPolicy,
+	pushSkipConfig OrderPushSkipConfig,
 ) {
 	result.TotalCount++
 	sample := buildBojunOrderPreviewItem(record)
@@ -262,6 +262,10 @@ func (s *BojunOrderService) processBojunOrderRecord(
 	sample.Reason = "已写入"
 	addBojunOrderSample(result, sample)
 	if s.pushService != nil {
+		pushSkipPolicy := OrderPushSkipPolicy{}
+		if target, ok := bojunTargetForStore(retailOrder.StoreCode); ok {
+			pushSkipPolicy = pushSkipConfig.PolicyForTarget(target.Code)
+		}
 		pushResult := s.pushService.PushNewOrderWithPolicy(ctx, retailOrder, result.nextPushPosition(), pushSkipPolicy)
 		if pushResult.Error != nil && !pushResult.Skipped {
 			result.FailedCount++
@@ -278,9 +282,9 @@ func (r *BojunOrderSyncResult) nextPushPosition() int {
 	return r.pushPosition
 }
 
-func (s *BojunOrderService) bojunPushSkipPolicy(ctx context.Context, confirmWrite bool) (OrderPushSkipPolicy, error) {
+func (s *BojunOrderService) bojunPushSkipConfig(ctx context.Context, confirmWrite bool) (OrderPushSkipConfig, error) {
 	if !confirmWrite || s.skipPolicy == nil {
-		return OrderPushSkipPolicy{}, nil
+		return OrderPushSkipConfig{}, nil
 	}
 	return s.skipPolicy.Get(ctx)
 }
