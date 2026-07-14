@@ -13,6 +13,28 @@ type fakeQimaiDeliveryLogCreator struct {
 	logs []model.DeliveryLog
 }
 
+func TestWriteXianSkippedLogRecordsQimaiXianTarget(t *testing.T) {
+	logCreator := &fakeQimaiDeliveryLogCreator{}
+	trigger := &XianOrderTrigger{logDAO: logCreator}
+	policy := orderpush.SkipPolicy{Cycle: 5, Skip: 1}
+
+	trigger.writeXianSkippedLog(context.Background(), 12, "X005", policy, 5)
+
+	if len(logCreator.logs) != 1 {
+		t.Fatalf("logs length = %d, want 1", len(logCreator.logs))
+	}
+	log := logCreator.logs[0]
+	if !log.Success {
+		t.Fatal("skip log success = false, want true")
+	}
+	if log.SourceCode != "qimai_order" || log.DestinationCode != orderpush.TargetQimaiXian {
+		t.Fatalf("log source/destination = %s/%s", log.SourceCode, log.DestinationCode)
+	}
+	if log.DestinationName != "企迈-西岸野选" {
+		t.Fatalf("destination name = %s", log.DestinationName)
+	}
+}
+
 func (f *fakeQimaiDeliveryLogCreator) Create(ctx context.Context, log *model.DeliveryLog) (uint, error) {
 	_ = ctx
 	f.logs = append(f.logs, *log)
@@ -33,7 +55,7 @@ func TestWriteQimaiSkippedLogRecordsPolicySkipAsSuccessfulDeliveryLog(t *testing
 	if !log.Success {
 		t.Fatal("skip log success = false, want true")
 	}
-	if log.SourceCode != "qimai_order" || log.DestinationCode != "hangzhou_henglong" {
+	if log.SourceCode != "qimai_order" || log.DestinationCode != orderpush.TargetQimaiHangzhouHenglong {
 		t.Fatalf("log source/destination = %s/%s", log.SourceCode, log.DestinationCode)
 	}
 	if log.ResponseBody != "skipped_by_order_push_policy" {

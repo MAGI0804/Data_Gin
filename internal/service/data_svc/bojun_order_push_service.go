@@ -12,6 +12,7 @@ import (
 	"gin-biz-web-api/internal/dao/data_dao"
 	"gin-biz-web-api/model"
 	"gin-biz-web-api/pkg/app"
+	"gin-biz-web-api/pkg/orderpush"
 	"gin-biz-web-api/pkg/shanghaimall"
 
 	"github.com/google/uuid"
@@ -20,7 +21,7 @@ import (
 const (
 	bojunOrderPushSource = "bojun_order"
 
-	bojunPushTargetHangzhouHenglong = "hangzhou_henglong"
+	bojunPushTargetHangzhouHenglong = orderpush.TargetBojunHangzhouHenglong
 	bojunHangzhouHenglongStoreCode  = "416201"
 	bojunHangzhouHenglongItemCode   = "E6600000099"
 )

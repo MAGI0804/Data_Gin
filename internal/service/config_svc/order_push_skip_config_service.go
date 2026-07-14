@@ -77,12 +77,14 @@ func (s *OrderPushSkipConfigService) ListTargets(ctx context.Context) ([]orderpu
 
 func builtinOrderPushTargets() []orderpush.TargetOption {
 	targets := []orderpush.TargetOption{}
-	targets = appendOrderPushTarget(targets, "hangzhou_henglong", "杭州恒隆")
-	targets = appendOrderPushTarget(targets, "jialicheng", "嘉里城")
-	targets = appendOrderPushTarget(targets, "panlong", "蟠龙")
-	targets = appendOrderPushTarget(targets, "qiantan", "前滩")
-	targets = appendOrderPushTarget(targets, "shangsheng", "上生新所")
-	targets = appendOrderPushTarget(targets, "xintiandi", "新天地")
+	targets = appendOrderPushTarget(targets, orderpush.TargetQimaiHangzhouHenglong, "企迈-杭州恒隆")
+	targets = appendOrderPushTarget(targets, orderpush.TargetQimaiXian, "企迈-西岸野选")
+	targets = appendOrderPushTarget(targets, "jialicheng", "伯俊-嘉里城")
+	targets = appendOrderPushTarget(targets, "panlong", "伯俊-蟠龙")
+	targets = appendOrderPushTarget(targets, "qiantan", "伯俊-前滩")
+	targets = appendOrderPushTarget(targets, "shangsheng", "伯俊-上生新所")
+	targets = appendOrderPushTarget(targets, "xintiandi", "伯俊-新天地")
+	targets = appendOrderPushTarget(targets, orderpush.TargetBojunHangzhouHenglong, "伯俊-杭州恒隆")
 	return targets
 }
 

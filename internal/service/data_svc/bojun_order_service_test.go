@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"gin-biz-web-api/model"
+	"gin-biz-web-api/pkg/orderpush"
 	"gin-biz-web-api/pkg/shanghaimall"
 )
 
@@ -425,6 +426,12 @@ func TestBojunTargetForStoreRejectsUnknownStore(t *testing.T) {
 }
 
 func TestBojunHangzhouHenglongCodesAreSeparatedFromQimai(t *testing.T) {
+	if bojunPushTargetHangzhouHenglong != orderpush.TargetBojunHangzhouHenglong {
+		t.Fatalf("bojun hangzhou target = %s, want %s", bojunPushTargetHangzhouHenglong, orderpush.TargetBojunHangzhouHenglong)
+	}
+	if bojunPushTargetHangzhouHenglong == orderpush.TargetQimaiHangzhouHenglong {
+		t.Fatalf("bojun and qimai hangzhou target codes must differ: %s", bojunPushTargetHangzhouHenglong)
+	}
 	if bojunHangzhouHenglongStoreCode != "416201" {
 		t.Fatalf("bojun hangzhou henglong store code = %s, want 416201", bojunHangzhouHenglongStoreCode)
 	}

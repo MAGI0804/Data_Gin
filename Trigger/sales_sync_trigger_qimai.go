@@ -169,7 +169,7 @@ func (t *SalesSyncTrigger) qimaiPushSkipPolicy(ctx context.Context) (orderpush.S
 	if err != nil {
 		return orderpush.SkipPolicy{}, err
 	}
-	return config.PolicyForTarget("hangzhou_henglong"), nil
+	return config.PolicyForTarget(orderpush.TargetQimaiHangzhouHenglong), nil
 }
 
 func (t *SalesSyncTrigger) writeQimaiDeliveryLog(
@@ -187,8 +187,8 @@ func (t *SalesSyncTrigger) writeQimaiDeliveryLog(
 		CleanRecordID:   cleanRecordID,
 		DestinationID:   0,
 		SourceCode:      "qimai_order",
-		DestinationCode: "hangzhou_henglong",
-		DestinationName: "杭州恒隆",
+		DestinationCode: orderpush.TargetQimaiHangzhouHenglong,
+		DestinationName: "企迈-杭州恒隆",
 		BusinessKey:     businessKey,
 		SentAt:          &model.TimeNormal{Time: time.Now()},
 	}
@@ -225,8 +225,8 @@ func (t *SalesSyncTrigger) writeQimaiSkippedLog(
 		CleanRecordID:   cleanRecordID,
 		DestinationID:   0,
 		SourceCode:      "qimai_order",
-		DestinationCode: "hangzhou_henglong",
-		DestinationName: "杭州恒隆",
+		DestinationCode: orderpush.TargetQimaiHangzhouHenglong,
+		DestinationName: "企迈-杭州恒隆",
 		BusinessKey:     businessKey,
 		RequestBody:     string(requestBody),
 		ResponseBody:    "skipped_by_order_push_policy",

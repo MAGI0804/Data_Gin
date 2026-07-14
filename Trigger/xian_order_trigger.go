@@ -2,22 +2,32 @@ package Trigger
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log"
 	"time"
 
 	send "gin-biz-web-api/Trigger/Send_Data"
 	"gin-biz-web-api/internal/dao/data_dao"
+	"gin-biz-web-api/internal/service/config_svc"
+	"gin-biz-web-api/model"
 	"gin-biz-web-api/pkg/config"
+	"gin-biz-web-api/pkg/orderpush"
+
+	"github.com/google/uuid"
 )
 
 type XianOrderTrigger struct {
-	qimaiDataDAO *data_dao.QimaiDataDAO
+	qimaiDataDAO qimaiSalesSyncDAO
+	logDAO       qimaiDeliveryLogCreator
+	skipPolicy   qimaiOrderPushSkipPolicyGetter
 }
 
 func NewXianOrderTrigger() *XianOrderTrigger {
 	return &XianOrderTrigger{
 		qimaiDataDAO: data_dao.NewQimaiDataDAO(),
+		logDAO:       data_dao.NewDeliveryLogDAO(),
+		skipPolicy:   config_svc.NewOrderPushSkipConfigService(),
 	}
 }
 
@@ -40,8 +50,22 @@ func (t *XianOrderTrigger) Trigger(ctx context.Context) error {
 	dingtalkToken := config.GetString("cfg.dingtalk.xian.token")
 	dingtalkSecret := config.GetString("cfg.dingtalk.xian.secret")
 
-	for _, order := range orders {
+	pushSkipPolicy, err := t.xianPushSkipPolicy(ctx)
+	if err != nil {
+		return fmt.Errorf("查询西岸少推送配置失败: %w", err)
+	}
+
+	for index, order := range orders {
 		dealNo := order.OrderNo
+		position := index + 1
+		if pushSkipPolicy.ShouldSkip(position) {
+			log.Printf("西岸企迈订单按少推送规则跳过: order_no=%s, position=%d", dealNo, position)
+			t.writeXianSkippedLog(ctx, order.ID, dealNo, pushSkipPolicy, position)
+			if err := t.qimaiDataDAO.MarkAsSynced(ctx, order.ID); err != nil {
+				log.Printf("标记西岸少推送订单已处理失败，订单号: %s, 错误: %v", dealNo, err)
+			}
+			continue
+		}
 		money := fmt.Sprintf("%.2f", float64(order.ActualAmount)/100.0)
 		discountMoney := "0"
 		receivableMoney := money
@@ -85,4 +109,40 @@ func (t *XianOrderTrigger) Trigger(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+func (t *XianOrderTrigger) xianPushSkipPolicy(ctx context.Context) (orderpush.SkipPolicy, error) {
+	if t.skipPolicy == nil {
+		return orderpush.SkipPolicy{}, nil
+	}
+	config, err := t.skipPolicy.Get(ctx)
+	if err != nil {
+		return orderpush.SkipPolicy{}, err
+	}
+	return config.PolicyForTarget(orderpush.TargetQimaiXian), nil
+}
+
+func (t *XianOrderTrigger) writeXianSkippedLog(ctx context.Context, cleanRecordID uint, businessKey string, policy orderpush.SkipPolicy, position int) {
+	if t.logDAO == nil {
+		return
+	}
+	requestBody, _ := json.Marshal(map[string]interface{}{
+		"push_skip_policy": policy,
+		"position":         position,
+		"reason":           policy.Reason(position),
+	})
+	_, _ = t.logDAO.Create(ctx, &model.DeliveryLog{
+		TraceID:         uuid.NewString(),
+		CleanRecordID:   cleanRecordID,
+		DestinationID:   0,
+		SourceCode:      "qimai_order",
+		DestinationCode: orderpush.TargetQimaiXian,
+		DestinationName: "企迈-西岸野选",
+		BusinessKey:     businessKey,
+		RequestBody:     string(requestBody),
+		ResponseBody:    "skipped_by_order_push_policy",
+		Success:         true,
+		ErrorMessage:    policy.Reason(position),
+		SentAt:          &model.TimeNormal{Time: time.Now()},
+	})
 }

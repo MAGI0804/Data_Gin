@@ -30,8 +30,14 @@ func TestListTargetsMergesBuiltinAndConfiguredDestinations(t *testing.T) {
 		t.Fatalf("ListTargets returned error: %v", err)
 	}
 
-	if !hasTarget(targets, "hangzhou_henglong") {
-		t.Fatal("targets missing hangzhou_henglong")
+	if !hasTarget(targets, orderpush.TargetQimaiHangzhouHenglong) {
+		t.Fatal("targets missing qimai hangzhou")
+	}
+	if !hasTarget(targets, orderpush.TargetQimaiXian) {
+		t.Fatal("targets missing qimai xian")
+	}
+	if !hasTarget(targets, orderpush.TargetBojunHangzhouHenglong) {
+		t.Fatal("targets missing bojun hangzhou")
 	}
 	if !hasTarget(targets, "custom_target") {
 		t.Fatal("targets missing custom destination")

@@ -6,6 +6,12 @@ import (
 	"strings"
 )
 
+const (
+	TargetQimaiHangzhouHenglong = "qimai_hangzhou_henglong"
+	TargetQimaiXian             = "qimai_xian"
+	TargetBojunHangzhouHenglong = "bojun_hangzhou_henglong"
+)
+
 type SkipPolicy struct {
 	Cycle int `json:"cycle"`
 	Skip  int `json:"skip"`
