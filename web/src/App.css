@@ -1,6 +1,12 @@
 :root {
+  --ink: #111111;
+  --muted: #666666;
+  --line: #b8b8b8;
+  --paper: #ffffff;
+  --canvas: #eeeeee;
+  --surface: #f7f7f7;
   color: #111111;
-  background: #f5f5f5;
+  background: var(--canvas);
   font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
 }
 
@@ -10,7 +16,7 @@
 
 body {
   margin: 0;
-  background: #f5f5f5;
+  background: var(--canvas);
 }
 
 button,
@@ -27,7 +33,7 @@ button {
   gap: 8px;
   min-height: 36px;
   border: 1px solid #111111;
-  border-radius: 6px;
+  border-radius: 0;
   background: #ffffff;
   color: #111111;
   cursor: pointer;
@@ -56,7 +62,7 @@ button svg,
   width: 32px;
   height: 32px;
   flex: 0 0 32px;
-  border-radius: 6px;
+  border-radius: 0;
   object-fit: cover;
   border: 1px solid #d1d1d1;
 }
@@ -86,7 +92,7 @@ textarea {
   width: 100%;
   min-width: 0;
   border: 1px solid #9b9b9b;
-  border-radius: 6px;
+  border-radius: 0;
   background: #ffffff;
   color: #111111;
   font-size: 13px;
@@ -116,7 +122,7 @@ button:focus-visible {
 .login-panel {
   width: min(420px, 100%);
   border: 1px solid #111111;
-  border-radius: 8px;
+  border-radius: 0;
   background: #ffffff;
   padding: 24px;
 }
@@ -165,14 +171,14 @@ button:focus-visible {
 
 .login-error {
   border: 1px solid #111111;
-  border-radius: 6px;
+  border-radius: 0;
   background: #f0f0f0;
   padding: 8px 10px;
 }
 
 .ops-shell {
   display: grid;
-  grid-template-columns: 240px minmax(0, 1fr) 340px;
+  grid-template-columns: 272px minmax(0, 1fr);
   height: 100vh;
   overflow: hidden;
 }
@@ -190,13 +196,36 @@ button:focus-visible {
 }
 
 .result-panel {
+  position: fixed;
+  z-index: 60;
+  top: 0;
+  right: 0;
+  width: min(520px, 100vw);
+  height: 100vh;
   border-left: 1px solid #111111;
+  box-shadow: -12px 0 32px rgba(0, 0, 0, 0.16);
   min-width: 0;
   overflow-y: auto;
 }
 
+.result-panel-header {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.result-panel-header .panel-title {
+  flex: 1;
+}
+
+.result-panel-header > button {
+  width: 36px;
+  padding: 0;
+}
+
 .module-nav {
-  gap: 8px;
+  gap: 16px;
   border-top: 1px solid #d0d0d0;
   border-bottom: 1px solid #d0d0d0;
   padding: 12px 0;
@@ -205,12 +234,38 @@ button:focus-visible {
 .nav-item {
   justify-content: flex-start;
   width: 100%;
-  min-height: 42px;
+  min-height: 52px;
+  text-align: left;
+}
+
+.nav-item > span,
+.nav-item strong,
+.nav-item small {
+  display: block;
+}
+
+.nav-item > span {
+  min-width: 0;
+}
+
+.nav-item strong {
+  font-size: 13px;
+}
+
+.nav-item small {
+  margin-top: 2px;
+  color: #666666;
+  font-size: 10px;
+  font-weight: 500;
 }
 
 .nav-item.active {
   background: #111111;
   color: #ffffff;
+}
+
+.nav-item.active small {
+  color: #d6d6d6;
 }
 
 .sidebar-actions {
@@ -222,6 +277,45 @@ button:focus-visible {
   min-width: 0;
   padding: 18px;
   overflow-y: auto;
+}
+
+.nav-search {
+  gap: 7px;
+}
+
+.nav-search > div {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  border: 1px solid #111111;
+  background: #ffffff;
+  padding: 0 9px;
+}
+
+.nav-search svg {
+  width: 16px;
+  height: 16px;
+}
+
+.nav-search input {
+  border: 0;
+  outline: 0;
+  padding-inline: 0;
+}
+
+.nav-group {
+  display: grid;
+  gap: 6px;
+}
+
+.nav-group h2 {
+  margin: 0;
+  color: #666666;
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
 }
 
 .workspace-header {
@@ -253,7 +347,7 @@ button:focus-visible {
 .metric,
 .workbench-panel {
   border: 1px solid #111111;
-  border-radius: 8px;
+  border-radius: 0;
   background: #ffffff;
 }
 
@@ -304,7 +398,7 @@ button:focus-visible {
   gap: 12px;
   align-items: center;
   border: 1px solid #d0d0d0;
-  border-radius: 8px;
+  border-radius: 0;
   background: #fafafa;
   padding: 10px;
 }
@@ -371,7 +465,7 @@ button:focus-visible {
 
 .log-filter-bar {
   border: 1px solid #d0d0d0;
-  border-radius: 8px;
+  border-radius: 0;
   background: #fafafa;
   padding: 10px;
 }
@@ -390,7 +484,7 @@ button:focus-visible {
   display: grid;
   gap: 10px;
   border: 1px solid #111111;
-  border-radius: 8px;
+  border-radius: 0;
   background: #ffffff;
   padding: 12px;
 }
@@ -461,7 +555,7 @@ button:focus-visible {
   gap: 12px;
   align-items: end;
   border: 1px solid #d0d0d0;
-  border-radius: 8px;
+  border-radius: 0;
   background: #fafafa;
   padding: 10px;
 }
@@ -566,7 +660,7 @@ button:focus-visible {
   grid-column: 1 / -1;
   margin: 0;
   border: 1px solid #d0d0d0;
-  border-radius: 6px;
+  border-radius: 0;
   background: #fafafa;
   color: #3b3b3b;
   font-size: 12px;
@@ -619,7 +713,7 @@ button:focus-visible {
 .file-input-label {
   grid-column: 1 / -1;
   border: 1px dashed #777777;
-  border-radius: 8px;
+  border-radius: 0;
   background: #fafafa;
   padding: 12px;
 }
@@ -646,7 +740,7 @@ button:focus-visible {
   max-height: min(820px, calc(100vh - 48px));
   overflow-y: auto;
   border: 1px solid #111111;
-  border-radius: 8px;
+  border-radius: 0;
   background: #ffffff;
   padding: 16px;
 }
@@ -668,7 +762,7 @@ code {
   max-width: 220px;
   overflow-wrap: anywhere;
   border: 1px solid #d0d0d0;
-  border-radius: 5px;
+  border-radius: 0;
   background: #ffffff;
   font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
   font-size: 12px;
@@ -681,7 +775,7 @@ code {
   justify-content: center;
   min-height: 24px;
   border: 1px solid #111111;
-  border-radius: 999px;
+  border-radius: 0;
   background: #ffffff;
   color: #111111;
   font-size: 12px;
@@ -718,7 +812,7 @@ code {
   max-height: 560px;
   overflow: auto;
   border: 1px solid #111111;
-  border-radius: 8px;
+  border-radius: 0;
   background: #f8f8f8;
   color: #111111;
   font-family: ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", monospace;
@@ -732,7 +826,7 @@ code {
 
 details {
   border: 1px solid #d0d0d0;
-  border-radius: 8px;
+  border-radius: 0;
   background: #ffffff;
   padding: 10px;
 }
@@ -744,20 +838,14 @@ summary {
 
 .empty-state {
   border: 1px dashed #777777;
-  border-radius: 8px;
+  border-radius: 0;
   color: #555555;
   padding: 14px;
 }
 
 @media (max-width: 1280px) {
   .ops-shell {
-    grid-template-columns: 220px minmax(0, 1fr);
-  }
-
-  .result-panel {
-    grid-column: 1 / -1;
-    border-top: 1px solid #111111;
-    border-left: 0;
+    grid-template-columns: 240px minmax(0, 1fr);
   }
 
   .content-grid.two,
@@ -793,8 +881,7 @@ summary {
   }
 
   .ops-sidebar,
-  .ops-workspace,
-  .result-panel {
+  .ops-workspace {
     overflow: visible;
   }
 

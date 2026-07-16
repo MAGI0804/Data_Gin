@@ -12,10 +12,12 @@ import {
   ListChecks,
   LogOut,
   RefreshCcw,
+  Search,
   ScrollText,
   Send,
   Upload,
   Wrench,
+  X,
 } from 'lucide-react'
 import './App.css'
 
@@ -36,6 +38,8 @@ type ApiClientOptions = {
 
 type ApiClient = (path: string, options?: ApiClientOptions) => Promise<ApiResult>
 type NavKey = 'push_status' | 'methods' | 'receive' | 'pull' | 'process' | 'push' | 'excel' | 'logs'
+type NavItem = { key: NavKey; label: string; description: string; icon: ReactNode }
+type NavGroup = { label: string; items: NavItem[] }
 type MethodKind = 'configured' | 'builtin'
 type MethodType = 'request' | 'bojun_signed_request' | 'extract' | 'mapping' | 'validate' | 'db_query' | 'db_write' | 'template' | 'delivery' | 'shanghai_mall_push' | 'log' | 'utility'
 type JsonRecord = Record<string, unknown>
@@ -514,16 +518,43 @@ type DeliveryLogWithStore = {
 
 const tokenStorageKey = 'warehouse-token'
 
-const navItems: Array<{ key: NavKey; label: string; icon: ReactNode }> = [
-  { key: 'push_status', label: '推送情况', icon: <Activity aria-hidden="true" /> },
-  { key: 'methods', label: '方法', icon: <Wrench aria-hidden="true" /> },
-  { key: 'receive', label: '数据接收', icon: <Inbox aria-hidden="true" /> },
-  { key: 'pull', label: '数据拉取', icon: <ArrowDownToLine aria-hidden="true" /> },
-  { key: 'process', label: '数据处理', icon: <ListChecks aria-hidden="true" /> },
-  { key: 'push', label: '数据推送', icon: <ArrowUpFromLine aria-hidden="true" /> },
-  { key: 'excel', label: 'Excel 匹配', icon: <Upload aria-hidden="true" /> },
-  { key: 'logs', label: '日志', icon: <ScrollText aria-hidden="true" /> },
+const navGroups: NavGroup[] = [
+  {
+    label: '监控',
+    items: [
+      { key: 'push_status', label: '运行总览', description: '运行与推送健康度', icon: <Activity aria-hidden="true" /> },
+      { key: 'logs', label: '日志查询', description: '运行、步骤与交付日志', icon: <ScrollText aria-hidden="true" /> },
+    ],
+  },
+  {
+    label: '数据接入',
+    items: [
+      { key: 'receive', label: '接口接收', description: '外部推送入库记录', icon: <Inbox aria-hidden="true" /> },
+      { key: 'pull', label: '数据拉取', description: '数据源与主动拉取记录', icon: <ArrowDownToLine aria-hidden="true" /> },
+    ],
+  },
+  {
+    label: '处理与交付',
+    items: [
+      { key: 'process', label: '数据处理', description: '规则与处理后数据', icon: <ListChecks aria-hidden="true" /> },
+      { key: 'push', label: '数据推送', description: '目标、任务与推送策略', icon: <ArrowUpFromLine aria-hidden="true" /> },
+      { key: 'methods', label: '方法目录', description: '配置与系统方法', icon: <Wrench aria-hidden="true" /> },
+    ],
+  },
+  {
+    label: '工具',
+    items: [
+      { key: 'excel', label: 'Excel 工作台', description: '匹配、导入与任务查询', icon: <Upload aria-hidden="true" /> },
+    ],
+  },
 ]
+
+const navItems = navGroups.flatMap((group) => group.items)
+
+function navFromHash(): NavKey {
+  const value = window.location.hash.replace(/^#\/?/, '') as NavKey
+  return navItems.some((item) => item.key === value) ? value : 'push_status'
+}
 
 const deliveryStores: DeliveryStore[] = [
   { key: 'shangsheng', name: '上生新所', aliases: ['ABCN001A001', 'shangsheng', '上生新所', '上升新所'] },
@@ -612,7 +643,8 @@ const builtinMethods: MethodDisplay[] = [
 function App() {
   const [authenticated, setAuthenticated] = useState(() => Boolean(sessionStorage.getItem(tokenStorageKey)))
   const [token, setToken] = useState(() => sessionStorage.getItem(tokenStorageKey) ?? '')
-  const [activeNav, setActiveNav] = useState<NavKey>('push_status')
+  const [activeNav, setActiveNav] = useState<NavKey>(navFromHash)
+  const [navQuery, setNavQuery] = useState('')
   const [loading, setLoading] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
   const [result, setResult] = useState<ApiResult | null>(null)
@@ -739,6 +771,17 @@ function App() {
     if (authenticated) void refreshAll(false)
   }, [authenticated, refreshAll])
 
+  useEffect(() => {
+    const handleHashChange = () => setActiveNav(navFromHash())
+    window.addEventListener('hashchange', handleHashChange)
+    return () => window.removeEventListener('hashchange', handleHashChange)
+  }, [])
+
+  function navigate(key: NavKey) {
+    window.location.hash = key
+    setActiveNav(key)
+  }
+
   function handleLogin(nextToken: string) {
     sessionStorage.setItem(tokenStorageKey, nextToken)
     setToken(nextToken)
@@ -814,16 +857,33 @@ function App() {
           <img className="brand-logo" src="/logo.jpg" alt="数据仓库" />
           <div>
             <h1>数据仓库</h1>
-            <span>运行与方法总览</span>
+            <span>DATA OPERATIONS</span>
           </div>
         </div>
+        <label className="nav-search">
+          <span>查找页面</span>
+          <div>
+            <Search aria-hidden="true" />
+            <input value={navQuery} onChange={(event) => setNavQuery(event.currentTarget.value)} placeholder="输入页面名称或用途" />
+          </div>
+        </label>
         <nav className="module-nav">
-          {navItems.map((item) => (
-            <button className={item.key === activeNav ? 'nav-item active' : 'nav-item'} key={item.key} type="button" onClick={() => setActiveNav(item.key)}>
-              {item.icon}
-              {item.label}
-            </button>
-          ))}
+          {navGroups.map((group) => {
+            const query = navQuery.trim().toLowerCase()
+            const items = group.items.filter((item) => !query || `${item.label} ${item.description}`.toLowerCase().includes(query))
+            if (items.length === 0) return null
+            return (
+              <section className="nav-group" key={group.label}>
+                <h2>{group.label}</h2>
+                {items.map((item) => (
+                  <button className={item.key === activeNav ? 'nav-item active' : 'nav-item'} key={item.key} type="button" onClick={() => navigate(item.key)}>
+                    {item.icon}
+                    <span><strong>{item.label}</strong><small>{item.description}</small></span>
+                  </button>
+                ))}
+              </section>
+            )
+          })}
         </nav>
         <div className="sidebar-actions">
           <button type="button" onClick={() => refreshAll(true)} disabled={refreshing}>
@@ -869,7 +929,7 @@ function App() {
         {activeNav === 'logs' && <LogsView runs={runs} stepRuns={stepRuns} deliveryLogs={deliveryLogs} onLoadSteps={loadStepRuns} onRetryLog={retryDeliveryLog} />}
       </section>
 
-      <ResultPanel result={result} />
+      <ResultPanel result={result} onClose={() => setResult(null)} />
     </main>
   )
 }
@@ -2685,11 +2745,15 @@ function StepRunList({ stepRuns }: { stepRuns: StepRun[] }) {
   )
 }
 
-function ResultPanel({ result }: { result: ApiResult | null }) {
+function ResultPanel({ result, onClose }: { result: ApiResult | null; onClose: () => void }) {
+  if (!result) return null
   return (
-    <aside className="result-panel">
-      <PanelTitle icon={<FileJson />} title="接口结果" meta={result ? String(result.status) : '等待操作'} />
-      <ReadonlyJSON value={result?.data ?? {}} />
+    <aside className="result-panel" aria-label="接口结果">
+      <div className="result-panel-header">
+        <PanelTitle icon={<FileJson />} title="接口结果" meta={String(result.status)} />
+        <button type="button" onClick={onClose} aria-label="关闭接口结果"><X aria-hidden="true" /></button>
+      </div>
+      <ReadonlyJSON value={result.data} />
     </aside>
   )
 }
