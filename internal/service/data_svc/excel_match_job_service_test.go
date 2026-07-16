@@ -2,6 +2,7 @@ package data_svc
 
 import (
 	"context"
+	"errors"
 	"gin-biz-web-api/model"
 	"gin-biz-web-api/pkg/storage"
 	"os"
@@ -31,6 +32,88 @@ type fakeExcelImportUpdater struct {
 	updated  map[string]string
 	keys     []string
 	writes   int
+}
+
+type fakeExcelMatchSchemaValidator struct {
+	tables map[string]map[string]struct{}
+}
+
+func (f fakeExcelMatchSchemaValidator) ValidateTableColumns(_ context.Context, tableName string, columns []string) error {
+	table, ok := f.tables[tableName]
+	if !ok {
+		return errors.New("table does not exist")
+	}
+	for _, column := range columns {
+		if _, ok := table[column]; !ok {
+			return errors.New("column does not exist")
+		}
+	}
+	return nil
+}
+
+func TestNormalizeExcelMatchConfigConvertsLegacyExportToOneStep(t *testing.T) {
+	cfg, err := normalizeExcelMatchConfig(ExcelMatchConfig{
+		Filters:          []ExcelMatchFilter{{Column: "店铺", Op: "eq", Value: "幼岚-有赞"}},
+		MatchExcelColumn: "原始线上订单号",
+		DBTemplate:       "bojun_retail_order",
+		DBMatchField:     "matched_docno",
+		DBValueField:     "c_store_name",
+		OutputColumnName: "线下店名称",
+	})
+	if err != nil {
+		t.Fatalf("normalizeExcelMatchConfig returned error: %v", err)
+	}
+	if len(cfg.Steps) != 1 {
+		t.Fatalf("steps length = %d, want 1", len(cfg.Steps))
+	}
+	step := cfg.Steps[0]
+	if step.TableName != "bojun_retail_orders" || step.MatchExcelColumn != "原始线上订单号" || step.DBMatchField != "matched_docno" || step.DBValueField != "c_store_name" || step.OutputColumnName != "线下店名称" {
+		t.Fatalf("legacy step = %#v", step)
+	}
+}
+
+func TestNormalizeExcelMatchConfigAcceptsOrderedCustomSteps(t *testing.T) {
+	cfg, err := normalizeExcelMatchConfig(ExcelMatchConfig{
+		Operation: "export_match",
+		Steps: []ExcelMatchStep{
+			{TableName: "bojun_retail_orders", MatchExcelColumn: "原始线上订单号", DBMatchField: "matched_docno", DBValueField: "c_store_name", OutputColumnName: "线下店名称"},
+			{TableName: "store_mappings", MatchExcelColumn: "线下店名称", DBMatchField: "source_name", DBValueField: "target_code", OutputColumnName: "目标编码"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("normalizeExcelMatchConfig returned error: %v", err)
+	}
+	if len(cfg.Steps) != 2 || cfg.Steps[0].Name != "步骤 1" || cfg.Steps[1].Name != "步骤 2" {
+		t.Fatalf("normalized steps = %#v", cfg.Steps)
+	}
+}
+
+func TestNormalizeExcelMatchConfigRejectsDuplicateStepOutput(t *testing.T) {
+	_, err := normalizeExcelMatchConfig(ExcelMatchConfig{
+		Operation: "export_match",
+		Steps: []ExcelMatchStep{
+			{TableName: "bojun_retail_orders", MatchExcelColumn: "订单号", DBMatchField: "docno", DBValueField: "c_store_name", OutputColumnName: "匹配结果"},
+			{TableName: "store_mappings", MatchExcelColumn: "匹配结果", DBMatchField: "source_name", DBValueField: "target_code", OutputColumnName: "匹配结果"},
+		},
+	})
+	if err == nil {
+		t.Fatal("normalizeExcelMatchConfig returned nil error, want duplicate output error")
+	}
+}
+
+func TestValidateExcelExportStepsRejectsMissingColumn(t *testing.T) {
+	config := ExcelMatchConfig{Steps: []ExcelMatchStep{{
+		TableName:        "bojun_retail_orders",
+		DBMatchField:     "docno",
+		DBValueField:     "missing_field",
+		OutputColumnName: "匹配结果",
+	}}}
+	validator := fakeExcelMatchSchemaValidator{tables: map[string]map[string]struct{}{
+		"bojun_retail_orders": {"docno": {}},
+	}}
+	if err := validateExcelExportSteps(context.Background(), config, validator); err == nil {
+		t.Fatal("validateExcelExportSteps returned nil error, want missing column error")
+	}
 }
 
 func (f *fakeExcelImportUpdater) FindKeys(ctx context.Context, matchField string, keys []string) (map[string]struct{}, error) {

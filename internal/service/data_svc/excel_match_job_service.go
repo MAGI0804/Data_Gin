@@ -57,6 +57,7 @@ const (
 	bojunRetailOrdersTable            = "bojun_retail_orders"
 	defaultExcelPreviewRows           = 5000
 	defaultExcelPreviewItems          = 50
+	maxExcelMatchSteps                = 20
 	excelMatchOSSUploadTimeoutEnvName = "EXCEL_MATCH_OSS_UPLOAD_TIMEOUT_SECONDS"
 	excelMatchOSSUploadMinTimeout     = 10 * time.Minute
 	excelMatchOSSUploadMaxTimeout     = 2 * time.Hour
@@ -131,6 +132,15 @@ type ExcelExportColumnFormat struct {
 	Format string `json:"format"`
 }
 
+type ExcelMatchStep struct {
+	Name             string `json:"name"`
+	TableName        string `json:"tableName"`
+	MatchExcelColumn string `json:"matchExcelColumn"`
+	DBMatchField     string `json:"dbMatchField"`
+	DBValueField     string `json:"dbValueField"`
+	OutputColumnName string `json:"outputColumnName"`
+}
+
 type ExcelMatchConfig struct {
 	Operation           string                    `json:"operation"`
 	SheetName           string                    `json:"sheetName"`
@@ -143,6 +153,7 @@ type ExcelMatchConfig struct {
 	DBWriteField        string                    `json:"dbWriteField"`
 	WriteExcelColumn    string                    `json:"writeExcelColumn"`
 	OutputColumnName    string                    `json:"outputColumnName"`
+	Steps               []ExcelMatchStep          `json:"steps,omitempty"`
 	ExportColumnFormats []ExcelExportColumnFormat `json:"exportColumnFormats"`
 	BatchSize           int                       `json:"batchSize"`
 	DryRun              bool                      `json:"dryRun"`
@@ -200,6 +211,10 @@ type ExcelMatchJobStats = data_dao.ExcelMatchJobStats
 
 type ExcelMatchLookup interface {
 	Lookup(ctx context.Context, matchField string, keys []string, valueField string) (map[string]string, error)
+}
+
+type ExcelMatchSchemaValidator interface {
+	ValidateTableColumns(ctx context.Context, tableName string, columns []string) error
 }
 
 type ExcelImportUpdater interface {
@@ -268,6 +283,11 @@ func (s *ExcelMatchJobService) createJobFromSource(ctx context.Context, source e
 	normalizedConfig, err := normalizeExcelMatchConfig(config)
 	if err != nil {
 		return nil, err
+	}
+	if normalizedConfig.Operation == excelOperationExportMatch {
+		if err := validateExcelExportSteps(ctx, normalizedConfig, s.jobDAO); err != nil {
+			return nil, err
+		}
 	}
 	configBytes, err := json.Marshal(normalizedConfig)
 	if err != nil {
@@ -400,6 +420,11 @@ func (s *ExcelMatchJobService) SaveScheme(ctx context.Context, name, operation, 
 	normalizedConfig, err := normalizeExcelMatchConfig(config)
 	if err != nil {
 		return nil, err
+	}
+	if normalizedConfig.Operation == excelOperationExportMatch {
+		if err := validateExcelExportSteps(ctx, normalizedConfig, s.jobDAO); err != nil {
+			return nil, err
+		}
 	}
 	configBytes, err := json.Marshal(normalizedConfig)
 	if err != nil {
@@ -553,6 +578,9 @@ func (s *ExcelMatchJobService) Preview(ctx context.Context, fileHeader *multipar
 	if err != nil {
 		return nil, err
 	}
+	if err := validateExcelExportSteps(ctx, normalizedConfig, s.jobDAO); err != nil {
+		return nil, err
+	}
 
 	src, err := fileHeader.Open()
 	if err != nil {
@@ -592,6 +620,9 @@ func (s *ExcelMatchJobService) PreviewUploaded(ctx context.Context, uploadID, ra
 	config.Operation = excelOperationExportMatch
 	normalizedConfig, err := normalizeExcelMatchConfig(config)
 	if err != nil {
+		return nil, err
+	}
+	if err := validateExcelExportSteps(ctx, normalizedConfig, s.jobDAO); err != nil {
 		return nil, err
 	}
 	lookup := bojunExcelMatchLookup{dao: s.jobDAO}
@@ -654,6 +685,13 @@ func (s *ExcelMatchJobService) ProcessJob(ctx context.Context, id uint) error {
 		_ = s.jobDAO.MarkFailed(ctx, id, err.Error(), time.Now().Add(excelMatchRetention))
 		s.logJob(ctx, id, "error", "任务配置校验失败", map[string]interface{}{"error": err.Error()})
 		return err
+	}
+	if config.Operation == excelOperationExportMatch {
+		if err := validateExcelExportSteps(ctx, config, s.jobDAO); err != nil {
+			_ = s.jobDAO.MarkFailed(ctx, id, err.Error(), time.Now().Add(excelMatchRetention))
+			s.logJob(ctx, id, "error", "任务数据库字段校验失败", map[string]interface{}{"error": err.Error()})
+			return err
+		}
 	}
 
 	if err := s.jobDAO.MarkRunning(ctx, id); err != nil {
@@ -828,13 +866,14 @@ func normalizeExcelMatchConfig(config ExcelMatchConfig) (ExcelMatchConfig, error
 }
 
 func normalizeExcelExportConfig(config ExcelMatchConfig) (ExcelMatchConfig, error) {
-	if len(config.Filters) == 0 {
-		return config, errors.New("至少需要一个 Excel 前置筛选条件")
-	}
+	normalizedFilters := make([]ExcelMatchFilter, 0, len(config.Filters))
 	for i := range config.Filters {
 		config.Filters[i].Column = strings.TrimSpace(config.Filters[i].Column)
 		config.Filters[i].Op = strings.TrimSpace(config.Filters[i].Op)
 		config.Filters[i].Value = strings.TrimSpace(config.Filters[i].Value)
+		if config.Filters[i].Column == "" && config.Filters[i].Value == "" {
+			continue
+		}
 		if config.Filters[i].Column == "" {
 			return config, errors.New("筛选列不能为空")
 		}
@@ -844,24 +883,60 @@ func normalizeExcelExportConfig(config ExcelMatchConfig) (ExcelMatchConfig, erro
 		if config.Filters[i].Op != "eq" {
 			return config, fmt.Errorf("暂不支持筛选操作: %s", config.Filters[i].Op)
 		}
+		normalizedFilters = append(normalizedFilters, config.Filters[i])
 	}
-	if config.MatchExcelColumn == "" {
-		return config, errors.New("Excel 订单号列不能为空")
+	config.Filters = normalizedFilters
+
+	if len(config.Steps) == 0 {
+		if config.MatchExcelColumn == "" {
+			return config, errors.New("Excel 订单号列不能为空")
+		}
+		if config.DBTemplate != bojunRetailOrderTemplate {
+			return config, fmt.Errorf("暂不支持数据库模板: %s", config.DBTemplate)
+		}
+		if config.DBMatchField == "" {
+			config.DBMatchField = "docno"
+		}
+		if _, ok := allowedBojunImportMatchFields[config.DBMatchField]; !ok {
+			return config, fmt.Errorf("伯俊匹配字段不在白名单: %s", config.DBMatchField)
+		}
+		if _, ok := allowedBojunValueFields[config.DBValueField]; !ok {
+			return config, fmt.Errorf("伯俊取值字段不在白名单: %s", config.DBValueField)
+		}
+		if config.OutputColumnName == "" {
+			return config, errors.New("输出列名不能为空")
+		}
+		config.Steps = []ExcelMatchStep{{
+			Name:             "步骤 1",
+			TableName:        bojunRetailOrdersTable,
+			MatchExcelColumn: config.MatchExcelColumn,
+			DBMatchField:     config.DBMatchField,
+			DBValueField:     config.DBValueField,
+			OutputColumnName: config.OutputColumnName,
+		}}
 	}
-	if config.DBTemplate != bojunRetailOrderTemplate {
-		return config, fmt.Errorf("暂不支持数据库模板: %s", config.DBTemplate)
+	if len(config.Steps) > maxExcelMatchSteps {
+		return config, fmt.Errorf("匹配步骤不能超过 %d 个", maxExcelMatchSteps)
 	}
-	if config.DBMatchField == "" {
-		config.DBMatchField = "docno"
-	}
-	if _, ok := allowedBojunImportMatchFields[config.DBMatchField]; !ok {
-		return config, fmt.Errorf("伯俊匹配字段不在白名单: %s", config.DBMatchField)
-	}
-	if _, ok := allowedBojunValueFields[config.DBValueField]; !ok {
-		return config, fmt.Errorf("伯俊取值字段不在白名单: %s", config.DBValueField)
-	}
-	if config.OutputColumnName == "" {
-		return config, errors.New("输出列名不能为空")
+	seenOutputs := make(map[string]struct{}, len(config.Steps))
+	for i := range config.Steps {
+		step := &config.Steps[i]
+		step.Name = strings.TrimSpace(step.Name)
+		step.TableName = strings.TrimSpace(step.TableName)
+		step.MatchExcelColumn = strings.TrimSpace(step.MatchExcelColumn)
+		step.DBMatchField = strings.TrimSpace(step.DBMatchField)
+		step.DBValueField = strings.TrimSpace(step.DBValueField)
+		step.OutputColumnName = strings.TrimSpace(step.OutputColumnName)
+		if step.Name == "" {
+			step.Name = fmt.Sprintf("步骤 %d", i+1)
+		}
+		if step.TableName == "" || step.MatchExcelColumn == "" || step.DBMatchField == "" || step.DBValueField == "" || step.OutputColumnName == "" {
+			return config, fmt.Errorf("第 %d 个匹配步骤配置不完整", i+1)
+		}
+		if _, exists := seenOutputs[step.OutputColumnName]; exists {
+			return config, fmt.Errorf("匹配步骤输出列名重复: %s", step.OutputColumnName)
+		}
+		seenOutputs[step.OutputColumnName] = struct{}{}
 	}
 	normalizedFormats := make([]ExcelExportColumnFormat, 0, len(config.ExportColumnFormats))
 	seenFormatColumns := map[string]struct{}{}
@@ -892,6 +967,18 @@ func normalizeExcelExportConfig(config ExcelMatchConfig) (ExcelMatchConfig, erro
 	config.ExportColumnFormats = normalizedFormats
 
 	return config, nil
+}
+
+func validateExcelExportSteps(ctx context.Context, config ExcelMatchConfig, validator ExcelMatchSchemaValidator) error {
+	if validator == nil {
+		return errors.New("数据库结构校验器未初始化")
+	}
+	for i, step := range config.Steps {
+		if err := validator.ValidateTableColumns(ctx, step.TableName, []string{step.DBMatchField, step.DBValueField}); err != nil {
+			return fmt.Errorf("第 %d 个匹配步骤数据库字段校验失败: %w", i+1, err)
+		}
+	}
+	return nil
 }
 
 func normalizeExcelImportConfig(config ExcelMatchConfig) (ExcelMatchConfig, error) {

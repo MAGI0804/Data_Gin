@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
@@ -35,6 +36,8 @@ var allowedBojunExcelFields = map[string]struct{}{
 	"tot_qty":              {},
 	"vipno":                {},
 }
+
+var excelSQLIdentifierPattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
 
 func NewExcelMatchJobDAO() *ExcelMatchJobDAO {
 	return &ExcelMatchJobDAO{db: database.DB}
@@ -280,6 +283,69 @@ func (dao *ExcelMatchJobDAO) FindBojunFieldByKeys(ctx context.Context, matchFiel
 	return result, nil
 }
 
+func (dao *ExcelMatchJobDAO) ValidateTableColumns(ctx context.Context, tableName string, columns []string) error {
+	if !isSafeExcelSQLIdentifier(tableName) {
+		return fmt.Errorf("数据库表名不合法: %s", tableName)
+	}
+	for _, column := range columns {
+		if !isSafeExcelSQLIdentifier(column) {
+			return fmt.Errorf("数据库字段名不合法: %s", column)
+		}
+	}
+	if dao.db == nil {
+		return errors.New("数据库未初始化")
+	}
+	if !dao.db.WithContext(ctx).Migrator().HasTable(tableName) {
+		return fmt.Errorf("数据库表不存在: %s", tableName)
+	}
+	columnTypes, err := dao.db.WithContext(ctx).Migrator().ColumnTypes(tableName)
+	if err != nil {
+		return err
+	}
+	existing := make(map[string]struct{}, len(columnTypes))
+	for _, columnType := range columnTypes {
+		existing[columnType.Name()] = struct{}{}
+	}
+	for _, column := range columns {
+		if _, ok := existing[column]; !ok {
+			return fmt.Errorf("数据库表 %s 不存在字段: %s", tableName, column)
+		}
+	}
+	return nil
+}
+
+func (dao *ExcelMatchJobDAO) FindTableFieldByKeys(ctx context.Context, tableName, matchField string, keys []string, valueField string) (map[string]string, error) {
+	result := make(map[string]string, len(keys))
+	if len(keys) == 0 {
+		return result, nil
+	}
+	if err := dao.ValidateTableColumns(ctx, tableName, []string{matchField, valueField}); err != nil {
+		return nil, err
+	}
+	query := fmt.Sprintf(
+		"SELECT CAST(`%s` AS CHAR) AS match_key, CAST(`%s` AS CHAR) AS matched_value FROM `%s` WHERE `%s` IN ?",
+		matchField,
+		valueField,
+		tableName,
+		matchField,
+	)
+	rows, err := dao.db.WithContext(ctx).Raw(query, keys).Rows()
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var key, value sql.NullString
+		if err := rows.Scan(&key, &value); err != nil {
+			return nil, err
+		}
+		if key.Valid {
+			result[key.String] = value.String
+		}
+	}
+	return result, rows.Err()
+}
+
 func (dao *ExcelMatchJobDAO) FindBojunKeys(ctx context.Context, matchField string, keys []string) (map[string]struct{}, error) {
 	result := make(map[string]struct{}, len(keys))
 	if len(keys) == 0 {
@@ -365,4 +431,8 @@ func (dao *ExcelMatchJobDAO) UpdateBojunFieldByKey(ctx context.Context, matchFie
 func isAllowedBojunExcelField(field string) bool {
 	_, ok := allowedBojunExcelFields[field]
 	return ok
+}
+
+func isSafeExcelSQLIdentifier(value string) bool {
+	return excelSQLIdentifierPattern.MatchString(value)
 }
