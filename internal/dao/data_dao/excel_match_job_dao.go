@@ -319,8 +319,8 @@ func (dao *ExcelMatchJobDAO) FindTableFieldByKeys(ctx context.Context, tableName
 	if len(keys) == 0 {
 		return result, nil
 	}
-	if err := dao.ValidateTableColumns(ctx, tableName, []string{matchField, valueField}); err != nil {
-		return nil, err
+	if !isSafeExcelSQLIdentifier(tableName) || !isSafeExcelSQLIdentifier(matchField) || !isSafeExcelSQLIdentifier(valueField) {
+		return nil, errors.New("数据库表名或字段名不合法")
 	}
 	query := fmt.Sprintf(
 		"SELECT CAST(`%s` AS CHAR) AS match_key, CAST(`%s` AS CHAR) AS matched_value FROM `%s` WHERE `%s` IN ?",

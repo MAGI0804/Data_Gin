@@ -16,14 +16,20 @@ import (
 )
 
 type fakeExcelMatchLookup struct {
+	tables      []string
 	matchFields []string
 	keys        []string
 	value       map[string]string
+	stepValues  map[string]map[string]string
 }
 
-func (f *fakeExcelMatchLookup) Lookup(ctx context.Context, matchField string, keys []string, valueField string) (map[string]string, error) {
-	f.matchFields = append(f.matchFields, matchField)
+func (f *fakeExcelMatchLookup) Lookup(ctx context.Context, step ExcelMatchStep, keys []string) (map[string]string, error) {
+	f.tables = append(f.tables, step.TableName)
+	f.matchFields = append(f.matchFields, step.DBMatchField)
 	f.keys = append(f.keys, keys...)
+	if value, ok := f.stepValues[step.OutputColumnName]; ok {
+		return value, nil
+	}
 	return f.value, nil
 }
 
@@ -240,6 +246,65 @@ func TestProcessExcelMatchFileFiltersBeforeLookupAndKeepsAllRows(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("result rows = %#v, want %#v", got, want)
+	}
+}
+
+func TestProcessExcelMatchFileUsesPreviousStepOutputAsNextStepInput(t *testing.T) {
+	dir := t.TempDir()
+	inputPath := filepath.Join(dir, "source.xlsx")
+	outputPath := filepath.Join(dir, "result.xlsx")
+
+	f := excelize.NewFile()
+	if err := f.SetSheetRow("Sheet1", "A1", &[]interface{}{"订单号"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.SetSheetRow("Sheet1", "A2", &[]interface{}{"B001"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.SaveAs(inputPath); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := normalizeExcelMatchConfig(ExcelMatchConfig{
+		Operation: "export_match",
+		Steps: []ExcelMatchStep{
+			{Name: "匹配门店", TableName: "bojun_retail_orders", MatchExcelColumn: "订单号", DBMatchField: "docno", DBValueField: "c_store_name", OutputColumnName: "门店名称"},
+			{Name: "匹配区域", TableName: "store_mappings", MatchExcelColumn: "门店名称", DBMatchField: "store_name", DBValueField: "region_name", OutputColumnName: "区域"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	lookup := &fakeExcelMatchLookup{stepValues: map[string]map[string]string{
+		"门店名称": {"B001": "杭州恒隆"},
+		"区域":   {"杭州恒隆": "华东"},
+	}}
+	stats, err := processExcelMatchFile(context.Background(), inputPath, outputPath, cfg, lookup)
+	if err != nil {
+		t.Fatalf("processExcelMatchFile returned error: %v", err)
+	}
+	if !reflect.DeepEqual(lookup.tables, []string{"bojun_retail_orders", "store_mappings"}) {
+		t.Fatalf("lookup tables = %#v", lookup.tables)
+	}
+	if !reflect.DeepEqual(lookup.keys, []string{"B001", "杭州恒隆"}) {
+		t.Fatalf("lookup keys = %#v, want chained keys", lookup.keys)
+	}
+	if stats.MatchedRows != 1 || stats.UnmatchedRows != 0 {
+		t.Fatalf("stats = %+v, want one final matched row", stats)
+	}
+
+	out, err := excelize.OpenFile(outputPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = out.Close() }()
+	rows, err := out.GetRows("Result_1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := [][]string{{"订单号", "门店名称", "区域"}, {"B001", "杭州恒隆", "华东"}}
+	if !reflect.DeepEqual(rows, want) {
+		t.Fatalf("result rows = %#v, want %#v", rows, want)
 	}
 }
 
@@ -462,6 +527,9 @@ func TestProcessExcelMatchPreviewReturnsSamplesWithoutWritingOutput(t *testing.T
 	}
 	if preview.Samples[0].Status != "matched" || preview.Samples[0].MatchedValue != "BOJUN001" {
 		t.Fatalf("first sample = %+v, want matched BOJUN001", preview.Samples[0])
+	}
+	if len(preview.Samples[0].StepResults) != 1 || preview.Samples[0].StepResults[0].StepName != "步骤 1" {
+		t.Fatalf("preview step results = %#v", preview.Samples[0].StepResults)
 	}
 	if preview.Samples[1].Status != "skipped" {
 		t.Fatalf("second sample = %+v, want skipped", preview.Samples[1])
