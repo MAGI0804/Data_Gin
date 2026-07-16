@@ -195,14 +195,20 @@ type ExcelExportColumnFormat = {
   format: string
 }
 
-type ExcelExportSchemeConfig = {
-  sheetName: string
-  filterColumn: string
-  filterValue: string
+type ExcelMatchStepConfig = {
+  name: string
+  tableName: string
   matchExcelColumn: string
   dbMatchField: string
   dbValueField: string
   outputColumnName: string
+}
+
+type ExcelExportSchemeConfig = {
+  sheetName: string
+  filterColumn: string
+  filterValue: string
+  steps: ExcelMatchStepConfig[]
   exportColumnFormats: string
   batchSize: string
 }
@@ -229,6 +235,7 @@ type ExcelMatchSchemeConfig = {
   dbWriteField?: string
   writeExcelColumn?: string
   outputColumnName?: string
+  steps?: ExcelMatchStepConfig[]
   exportColumnFormats?: ExcelExportColumnFormat[]
   batchSize?: number
   dryRun?: boolean
@@ -260,6 +267,7 @@ type ExcelMatchPreviewSample = {
   status: string
   reason: string
   values: Record<string, string>
+  stepResults?: Array<{ stepIndex: number; stepName: string; matchKey: string; matchedValue: string; status: string; reason: string }>
 }
 
 type ExcelMatchPreviewResult = {
@@ -278,34 +286,20 @@ const bojunMatchFieldOptions = [
   { value: 'matched_docno', label: '匹配单号 matched_docno' },
 ]
 
-const bojunValueFieldOptions = [
-  { value: 'docno', label: '订单号 docno' },
-  { value: 'otherdocno', label: '外部单号 otherdocno' },
-  { value: 'tot_amt_actual', label: '实付金额 tot_amt_actual' },
-  { value: 'tot_amt_list', label: '吊牌金额 tot_amt_list' },
-  { value: 'tot_qty', label: '数量 tot_qty' },
-  { value: 'c_store_code', label: '门店编码 c_store_code' },
-  { value: 'c_store_name', label: '门店名称 c_store_name' },
-  { value: 'order_type_name', label: '单据类型 order_type_name' },
-  { value: 'order_type_code', label: '单据类型编码 order_type_code' },
-  { value: 'retailbilltype', label: '零售单类型 retailbilltype' },
-  { value: 'billdate', label: '单据日期 billdate' },
-  { value: 'vipno', label: '会员号 vipno' },
-  { value: 'related_normal_docno', label: '关联原单 related_normal_docno' },
-  { value: 'o2o_so_docno', label: '线上订单号 o2o_so_docno' },
-  { value: 'matched_docno', label: '匹配单号 matched_docno' },
-]
-
 const excelChunkSize = 4 * 1024 * 1024
 
 const defaultExcelExportScheme: ExcelExportSchemeConfig = {
   sheetName: 'Sheet1',
   filterColumn: '店铺',
   filterValue: '幼岚-有赞',
-  matchExcelColumn: '原始线上订单号',
-  dbMatchField: 'matched_docno',
-  dbValueField: 'c_store_name',
-  outputColumnName: '线下店名称',
+  steps: [{
+    name: '匹配伯俊门店',
+    tableName: 'bojun_retail_orders',
+    matchExcelColumn: '原始线上订单号',
+    dbMatchField: 'matched_docno',
+    dbValueField: 'c_store_name',
+    outputColumnName: '线下店名称',
+  }],
   exportColumnFormats: '',
   batchSize: '1000',
 }
@@ -907,18 +901,10 @@ function App() {
         {activeNav === 'backfill' && <BojunBackfillPage loading={loading || refreshing} onPreview={previewBojunOrderBackfill} onConfirm={confirmBojunOrderBackfill} />}
         {activeNav === 'rules' && <RulesQueryPage rules={transformRules} />}
         {activeNav === 'processed' && <ProcessedQueryPage records={processedData} />}
-        {(activeNav === 'destinations' || activeNav === 'tasks' || activeNav === 'push_policy') && (
-          <PushConfigView
-            destinations={destinations}
-            tasks={deliveryTasks}
-            coreMethod={coreMethods.find((item) => item.key === 'mall_push')}
-            orderPushSkipConfig={orderPushSkipConfig}
-            orderPushTargets={orderPushTargets}
-            onSaveOrderPushSkipConfig={saveOrderPushSkipConfig}
-            onToggle={toggleTarget}
-          />
-        )}
-        {(activeNav === 'excel_jobs' || activeNav === 'excel_schemes' || activeNav === 'excel_write') && <ExcelMatchView token={token} loading={loading} setLoading={setLoading} setResult={setResult} />}
+        {activeNav === 'destinations' && <DestinationsQueryPage destinations={destinations} />}
+        {activeNav === 'tasks' && <DeliveryTasksQueryPage tasks={deliveryTasks} destinations={destinations} />}
+        {activeNav === 'push_policy' && <PushPolicyPage coreMethod={coreMethods.find((item) => item.key === 'mall_push')} config={orderPushSkipConfig} targets={orderPushTargets} onSave={saveOrderPushSkipConfig} onToggle={toggleTarget} />}
+        {(activeNav === 'excel_jobs' || activeNav === 'excel_schemes' || activeNav === 'excel_write') && <ExcelMatchView section={activeNav === 'excel_jobs' ? 'jobs' : activeNav === 'excel_schemes' ? 'schemes' : 'write'} token={token} loading={loading} setLoading={setLoading} setResult={setResult} />}
       </section>
 
       <ResultPanel result={result} onClose={() => setResult(null)} />
@@ -1023,7 +1009,13 @@ function PushStatusView({ runs, deliveryLogs, onLoadSteps }: { runs: PipelineRun
 }
 
 function MethodsView({ methods, coreMethods, onToggle }: { methods: MethodDisplay[]; coreMethods: CoreMethod[]; onToggle: (target: ToggleTarget, enabled: boolean) => void }) {
-  const groups = groupBy(methods, (method) => method.category)
+  const [query, setQuery] = useState('')
+  const [category, setCategory] = useState('all')
+  const [status, setStatus] = useState('all')
+  const filtered = methods.filter((method) => includesQuery([method.name, method.code, method.description, method.owner], query)
+    && (category === 'all' || method.category === category)
+    && (status === 'all' || (status === 'enabled' ? method.enabled : !method.enabled)))
+  const groups = groupBy(filtered, (method) => method.category)
   return (
     <div className="view-stack">
       <section className="overview-grid">
@@ -1035,6 +1027,11 @@ function MethodsView({ methods, coreMethods, onToggle }: { methods: MethodDispla
       <Panel title="当前已有核心方法" icon={<Wrench />} meta="可开启的真实配置会显示操作按钮">
         <CoreMethodList methods={coreMethods} onToggle={onToggle} />
       </Panel>
+      <QueryBar count={filtered.length} total={methods.length}>
+        <Field label="名称 / 编码 / 负责人" name="method_query" value={query} onChange={setQuery} />
+        <SelectFilter label="分类" value={category} onChange={setCategory} options={uniqueOptions(methods.map((method) => method.category))} />
+        <SelectFilter label="状态" value={status} onChange={setStatus} options={[{ value: 'enabled', label: '启用' }, { value: 'disabled', label: '停用' }]} />
+      </QueryBar>
       <section className="method-groups">
         {Object.entries(groups).map(([category, items]) => (
           <Panel title={category} icon={<Wrench />} meta={`${items.length} 个方法`} key={category}>
@@ -1107,47 +1104,6 @@ function BojunBackfillResultView({ title, result }: { title: string; result: Boj
         </div>
       )}
     </section>
-  )
-}
-
-function PushConfigView({
-  destinations,
-  tasks,
-  coreMethod,
-  orderPushSkipConfig,
-  orderPushTargets,
-  onSaveOrderPushSkipConfig,
-  onToggle,
-}: {
-  destinations: DestinationDefinition[]
-  tasks: DeliveryTask[]
-  coreMethod?: CoreMethod
-  orderPushSkipConfig: OrderPushSkipConfig
-  orderPushTargets: OrderPushTargetOption[]
-  onSaveOrderPushSkipConfig: (config: OrderPushSkipConfig) => void
-  onToggle: (target: ToggleTarget, enabled: boolean) => void
-}) {
-  return (
-    <div className="view-stack">
-      {coreMethod && <Panel title="商场数据推送方法" icon={<Send />} meta="现有推送能力"><CoreMethodList methods={[coreMethod]} onToggle={onToggle} /></Panel>}
-      <section className="overview-grid">
-        <Metric label="推送目标" value={destinations.length} />
-        <Metric label="启用目标" value={destinations.filter((item) => item.enabled).length} />
-        <Metric label="推送任务" value={tasks.length} />
-        <Metric label="启用任务" value={tasks.filter((item) => item.enabled).length} />
-      </section>
-      <Panel title="订单少推送配置" icon={<ListChecks />} meta="qimai / bojun / delivery tasks">
-        <OrderPushSkipConfigForm config={orderPushSkipConfig} targets={orderPushTargets} onSave={onSaveOrderPushSkipConfig} />
-      </Panel>
-      <section className="content-grid two">
-        <Panel title="推送目标" icon={<Send />} meta="destinations">
-          <DestinationList destinations={destinations} />
-        </Panel>
-        <Panel title="推送任务" icon={<ArrowUpFromLine />} meta="delivery tasks">
-          <DeliveryTaskList tasks={tasks} />
-        </Panel>
-      </section>
-    </div>
   )
 }
 
@@ -1319,6 +1275,60 @@ function BojunBackfillPage({ loading, onPreview, onConfirm }: {
   )
 }
 
+function DestinationsQueryPage({ destinations }: { destinations: DestinationDefinition[] }) {
+  const [query, setQuery] = useState('')
+  const [status, setStatus] = useState('all')
+  const [destinationType, setDestinationType] = useState('all')
+  const filtered = destinations.filter((destination) => includesQuery([destination.id, destination.name, destination.code, destination.config_json], query)
+    && (status === 'all' || (status === 'enabled' ? destination.enabled : !destination.enabled))
+    && (destinationType === 'all' || destination.destination_type === destinationType))
+  return (
+    <div className="view-stack">
+      <QueryBar count={filtered.length} total={destinations.length}>
+        <Field label="名称 / 编码 / 配置" name="destination_query" value={query} onChange={setQuery} />
+        <SelectFilter label="状态" value={status} onChange={setStatus} options={[{ value: 'enabled', label: '启用' }, { value: 'disabled', label: '停用' }]} />
+        <SelectFilter label="类型" value={destinationType} onChange={setDestinationType} options={uniqueOptions(destinations.map((destination) => destination.destination_type))} />
+      </QueryBar>
+      <Panel title="推送目标" icon={<Send />} meta={`查询命中 ${filtered.length} 条`}><DestinationList destinations={filtered} /></Panel>
+    </div>
+  )
+}
+
+function DeliveryTasksQueryPage({ tasks, destinations }: { tasks: DeliveryTask[]; destinations: DestinationDefinition[] }) {
+  const [query, setQuery] = useState('')
+  const [status, setStatus] = useState('all')
+  const [destinationID, setDestinationID] = useState('all')
+  const filtered = tasks.filter((task) => includesQuery([task.id, task.name, task.clean_table, task.trigger_type], query)
+    && (status === 'all' || (status === 'enabled' ? task.enabled : !task.enabled))
+    && (destinationID === 'all' || String(task.destination_id) === destinationID))
+  const destinationOptions = destinations.map((destination) => ({ value: String(destination.id), label: destination.name || destination.code }))
+  return (
+    <div className="view-stack">
+      <QueryBar count={filtered.length} total={tasks.length}>
+        <Field label="名称 / 表 / 触发方式" name="task_query" value={query} onChange={setQuery} />
+        <SelectFilter label="状态" value={status} onChange={setStatus} options={[{ value: 'enabled', label: '启用' }, { value: 'disabled', label: '停用' }]} />
+        <SelectFilter label="推送目标" value={destinationID} onChange={setDestinationID} options={destinationOptions} />
+      </QueryBar>
+      <Panel title="推送任务" icon={<ArrowUpFromLine />} meta={`查询命中 ${filtered.length} 条`}><DeliveryTaskList tasks={filtered} /></Panel>
+    </div>
+  )
+}
+
+function PushPolicyPage({ coreMethod, config, targets, onSave, onToggle }: {
+  coreMethod?: CoreMethod
+  config: OrderPushSkipConfig
+  targets: OrderPushTargetOption[]
+  onSave: (config: OrderPushSkipConfig) => void
+  onToggle: (target: ToggleTarget, enabled: boolean) => void
+}) {
+  return (
+    <div className="view-stack">
+      {coreMethod && <Panel title="商场推送方法" icon={<Send />} meta="当前推送能力"><CoreMethodList methods={[coreMethod]} onToggle={onToggle} /></Panel>}
+      <Panel title="订单少推送配置" icon={<ListChecks />} meta="按具体目标独立配置"><OrderPushSkipConfigForm config={config} targets={targets} onSave={onSave} /></Panel>
+    </div>
+  )
+}
+
 function OrderPushSkipConfigForm({ config, targets, onSave }: { config: OrderPushSkipConfig; targets: OrderPushTargetOption[]; onSave: (config: OrderPushSkipConfig) => void }) {
   const enabledCount = config.targets.filter((target) => target.cycle > 0 && target.skip > 0).length
 
@@ -1362,11 +1372,13 @@ function OrderPushSkipConfigForm({ config, targets, onSave }: { config: OrderPus
 }
 
 function ExcelMatchView({
+  section,
   token,
   loading,
   setLoading,
   setResult,
 }: {
+  section: 'jobs' | 'schemes' | 'write'
   token: string
   loading: boolean
   setLoading: (value: boolean) => void
@@ -1389,11 +1401,18 @@ function ExcelMatchView({
   const [exportSchemes, setExportSchemes] = useState<ExcelMatchScheme[]>([])
   const [importSchemes, setImportSchemes] = useState<ExcelMatchScheme[]>([])
   const [exportDefaults, setExportDefaults] = useState<ExcelExportSchemeConfig>(defaultExcelExportScheme)
+  const [exportSteps, setExportSteps] = useState<ExcelMatchStepConfig[]>(defaultExcelExportScheme.steps)
   const [importDefaults, setImportDefaults] = useState<ExcelImportSchemeConfig>(defaultExcelImportScheme)
   const [exportFormKey, setExportFormKey] = useState(0)
   const [importFormKey, setImportFormKey] = useState(0)
   const [selectedExportSchemeID, setSelectedExportSchemeID] = useState('')
   const [selectedImportSchemeID, setSelectedImportSchemeID] = useState('')
+  const [jobQuery, setJobQuery] = useState('')
+  const [jobStatus, setJobStatus] = useState('all')
+  const [jobOperation, setJobOperation] = useState('all')
+  const filteredJobHistory = useMemo(() => jobHistory.filter((item) => includesQuery([item.id, item.source_file_name, item.error_message], jobQuery)
+    && (jobStatus === 'all' || item.status === jobStatus)
+    && (jobOperation === 'all' || excelJobOperation(item) === jobOperation)), [jobHistory, jobOperation, jobQuery, jobStatus])
 
   const applyJobResult = useCallback((result: ApiResult, options: { track?: boolean } = {}) => {
     const nextJob = readObject<ExcelMatchJob>(result, 'job')
@@ -1413,25 +1432,74 @@ function ExcelMatchView({
     setUploadProgress('')
   }
 
+  function resetExcelDialogFiles() {
+    setSelectedExportFileName('')
+    setSelectedImportFileName('')
+    setSelectedClearFileName('')
+    setPreviewResult(null)
+    setUploadRefs({})
+    setUploadProgress('')
+  }
+
+  function openExcelDialog(mode: ExcelDialogMode) {
+    resetExcelDialogFiles()
+    setExcelDialog(mode)
+  }
+
+  function closeExcelDialog() {
+    setExcelDialog(null)
+    resetExcelDialogFiles()
+  }
+
   function buildExportConfig(form: FormData) {
+    const filterColumn = formValue(form, 'filterColumn').trim()
     return {
       operation: 'export_match',
       sheetName: formValue(form, 'sheetName').trim() || 'Sheet1',
-      filters: [
-        {
-          column: formValue(form, 'filterColumn').trim(),
-          op: 'eq',
-          value: formValue(form, 'filterValue').trim(),
-        },
-      ],
-      matchExcelColumn: formValue(form, 'matchExcelColumn').trim(),
-      dbTemplate: 'bojun_retail_order',
-      dbMatchField: formValue(form, 'dbMatchField').trim(),
-      dbValueField: formValue(form, 'dbValueField').trim(),
-      outputColumnName: formValue(form, 'outputColumnName').trim(),
+      filters: filterColumn ? [{ column: filterColumn, op: 'eq', value: formValue(form, 'filterValue').trim() }] : [],
+      steps: exportSteps.map((step) => ({
+        name: step.name.trim(),
+        tableName: step.tableName.trim(),
+        matchExcelColumn: step.matchExcelColumn.trim(),
+        dbMatchField: step.dbMatchField.trim(),
+        dbValueField: step.dbValueField.trim(),
+        outputColumnName: step.outputColumnName.trim(),
+      })),
       exportColumnFormats: parseExportColumnFormats(formValue(form, 'exportColumnFormats')),
       batchSize: Number(formValue(form, 'batchSize') || 1000),
     }
+  }
+
+  function updateExportStep(index: number, key: keyof ExcelMatchStepConfig, value: string) {
+    setExportSteps((current) => current.map((step, stepIndex) => stepIndex === index ? { ...step, [key]: value } : step))
+  }
+
+  function addExportStep() {
+    setExportSteps((current) => {
+      if (current.length >= 20) return current
+      return [...current, {
+        name: `步骤 ${current.length + 1}`,
+        tableName: '',
+        matchExcelColumn: current[current.length - 1]?.outputColumnName ?? '',
+        dbMatchField: '',
+        dbValueField: '',
+        outputColumnName: '',
+      }]
+    })
+  }
+
+  function removeExportStep(index: number) {
+    setExportSteps((current) => current.length === 1 ? current : current.filter((_, stepIndex) => stepIndex !== index))
+  }
+
+  function moveExportStep(index: number, direction: -1 | 1) {
+    setExportSteps((current) => {
+      const nextIndex = index + direction
+      if (nextIndex < 0 || nextIndex >= current.length) return current
+      const next = [...current]
+      ;[next[index], next[nextIndex]] = [next[nextIndex], next[index]]
+      return next
+    })
   }
 
   function buildImportConfig(form: FormData, confirmWrite: boolean) {
@@ -1501,9 +1569,19 @@ function ExcelMatchView({
 
   useEffect(() => {
     if (!token) return
-    void loadSchemes()
-    void loadJobHistory()
-  }, [loadJobHistory, loadSchemes, token])
+    if (section === 'jobs') void loadJobHistory()
+    if (section === 'schemes' || section === 'write') void loadSchemes()
+  }, [loadJobHistory, loadSchemes, section, token])
+
+  useEffect(() => {
+    setExcelDialog(null)
+    setSelectedExportFileName('')
+    setSelectedImportFileName('')
+    setSelectedClearFileName('')
+    setPreviewResult(null)
+    setUploadRefs({})
+    setUploadProgress('')
+  }, [section])
 
   const refreshJobByID = useCallback(async (id: number, options: { silent?: boolean; track?: boolean } = {}) => {
     if (!options.silent) setLoading(true)
@@ -1671,6 +1749,7 @@ function ExcelMatchView({
     setSelectedExportSchemeID(schemeID)
     if (!schemeID) {
       setExportDefaults(defaultExcelExportScheme)
+      setExportSteps(defaultExcelExportScheme.steps.map((step) => ({ ...step })))
       setExportFormKey((value) => value + 1)
       setPreviewResult(null)
       setSelectedExportFileName('')
@@ -1679,7 +1758,9 @@ function ExcelMatchView({
     }
     const scheme = exportSchemes.find((item) => String(item.id) === schemeID)
     if (!scheme) return
-    setExportDefaults(exportSchemeDefaults(scheme.config))
+    const defaults = exportSchemeDefaults(scheme.config)
+    setExportDefaults(defaults)
+    setExportSteps(defaults.steps.map((step) => ({ ...step })))
     setExportFormKey((value) => value + 1)
     setPreviewResult(null)
     setSelectedExportFileName('')
@@ -1727,7 +1808,7 @@ function ExcelMatchView({
       if (nextResult.ok) {
         applyJobResult(nextResult)
         await loadJobHistory()
-        setExcelDialog(null)
+        closeExcelDialog()
       }
     } catch (error) {
       setResult({ ok: false, status: 0, data: error instanceof Error ? error.message : String(error) })
@@ -1795,7 +1876,7 @@ function ExcelMatchView({
       if (nextResult.ok) {
         applyJobResult(nextResult)
         await loadJobHistory()
-        setExcelDialog(null)
+        closeExcelDialog()
       }
     } catch (error) {
       setResult({ ok: false, status: 0, data: error instanceof Error ? error.message : String(error) })
@@ -1843,7 +1924,7 @@ function ExcelMatchView({
       if (nextResult.ok) {
         applyJobResult(nextResult)
         await loadJobHistory()
-        setExcelDialog(null)
+        closeExcelDialog()
       }
     } catch (error) {
       setResult({ ok: false, status: 0, data: error instanceof Error ? error.message : String(error) })
@@ -1888,87 +1969,118 @@ function ExcelMatchView({
 
   return (
     <div className="view-stack">
-      <section className="overview-grid">
-        <Metric label="当前任务" value={job?.id ?? '-'} />
-        <Metric label="任务状态" value={job ? excelJobStatusLabel(job.status) : '-'} />
-        <Metric label="已处理行" value={job ? `${job.processed_rows}/${job.total_rows}` : '-'} />
-        <Metric label="匹配结果" value={job ? `${job.matched_rows} 匹配 / ${job.unmatched_rows} 未匹配` : '-'} />
-        <Metric label="自动跟踪" value={trackingJobID ? `#${trackingJobID}` : '-'} />
-      </section>
+      {section === 'jobs' && <>
+        <section className="overview-grid">
+          <Metric label="历史任务" value={jobHistory.length} />
+          <Metric label="当前任务" value={job?.id ?? '-'} />
+          <Metric label="任务状态" value={job ? excelJobStatusLabel(job.status) : '-'} />
+          <Metric label="已处理行" value={job ? `${job.processed_rows}/${job.total_rows}` : '-'} />
+          <Metric label="自动跟踪" value={trackingJobID ? `#${trackingJobID}` : '-'} />
+        </section>
+        <QueryBar count={filteredJobHistory.length} total={jobHistory.length}>
+          <Field label="任务 ID / 文件名 / 错误" name="excel_job_query" value={jobQuery} onChange={setJobQuery} />
+          <SelectFilter label="状态" value={jobStatus} onChange={setJobStatus} options={uniqueOptions(jobHistory.map((item) => item.status))} />
+          <SelectFilter label="操作" value={jobOperation} onChange={setJobOperation} options={Array.from(new Set(jobHistory.map(excelJobOperation).filter(Boolean))).map((value) => ({ value, label: excelJobOperationLabel(value) }))} />
+        </QueryBar>
+        <Panel title="Excel 任务" icon={<ListChecks />} meta="最多读取最近 30 条，可查询、查看和下载">
+          <ExcelJobHistoryTable
+            jobs={filteredJobHistory}
+            loading={loading}
+            downloadingJobID={downloadingJobID}
+            onDownload={downloadJob}
+            onView={(id) => void refreshJobByID(id)}
+          />
+        </Panel>
+        <Panel title="按任务 ID 定位" icon={<Download />} meta="直接查询历史任务并下载结果">
+          <button type="button" onClick={() => openExcelDialog('query')}>打开任务定位</button>
+        </Panel>
 
-      <Panel title="Excel 操作" icon={<Upload />} meta="参数在弹出框内填写，页面只保留状态和结果">
-        <div className="excel-action-grid">
-          <button type="button" className="excel-action-card" onClick={() => setExcelDialog('export')}>
+        {job && (
+          <Panel title={`Excel 任务 #${job.id}`} icon={<FileJson />} meta={job.source_file_name || 'job detail'}>
+            {autoRefreshText && <p className="excel-mode-note">{autoRefreshText}</p>}
+            <div className="excel-job-detail">
+              <Metric label="源文件" value={job.source_file_name || '-'} />
+              <Metric label="任务类型" value={excelJobOperationLabel(excelJobOperation(job))} />
+              <Metric label="筛选/命中" value={job.filtered_rows || '-'} />
+              <Metric label="匹配/更新" value={job.matched_rows || '-'} />
+              <Metric label="未匹配" value={job.unmatched_rows || '-'} />
+              <Metric label="结果过期" value={formatDate(job.expires_at)} />
+              <Metric label="开始时间" value={formatDate(job.started_at)} />
+              <Metric label="结束时间" value={formatDate(job.finished_at)} />
+            </div>
+            <div className="excel-detail-actions">
+              <button type="button" onClick={() => void refreshJobByID(job.id)} disabled={loading}>
+                <RefreshCcw aria-hidden="true" />
+                刷新状态
+              </button>
+              <button
+                type="button"
+                onClick={() => void downloadJob(job.id)}
+                disabled={loading || downloadingJobID === job.id || !canDownloadExcelJob(job)}
+              >
+                <Download aria-hidden="true" />
+                {downloadingJobID === job.id ? '下载中' : '下载结果'}
+              </button>
+              {!canDownloadExcelJob(job) && <span>{job.download_message || '只有匹配导出成功任务会生成可下载结果文件。'}</span>}
+            </div>
+            {job.error_message && <div className="login-error">{job.error_message}</div>}
+            <section className="content-grid two">
+              <ReadonlyJSON value={job.config_json || '{}'} />
+              <ExcelJobLogList logs={jobLogs} />
+            </section>
+          </Panel>
+        )}
+      </>}
+
+      {section === 'schemes' && <>
+        <section className="overview-grid">
+          <Metric label="导出方案" value={exportSchemes.length} />
+          <Metric label="当前步骤" value={exportSteps.length} />
+          <Metric label="最大步骤" value="20" />
+          <Metric label="筛选规则" value="可选" />
+        </section>
+        <Panel title="自定义匹配流程" icon={<Upload />} meta="每一步均可指定任意数据表与字段，后一步可使用前一步追加的列">
+          <div className="excel-action-grid compact-actions">
+          <button type="button" className="excel-action-card" onClick={() => openExcelDialog('export')}>
             <Upload aria-hidden="true" />
-            <span>匹配导出</span>
-            <small>筛选命中行，查询伯俊字段并追加导出</small>
+              <span>新建或编辑匹配方案</span>
+              <small>配置步骤顺序、预览匹配并创建导出任务</small>
           </button>
-          <button type="button" className="excel-action-card" onClick={() => setExcelDialog('import')}>
+          </div>
+        </Panel>
+        <Panel title="已保存导出方案" icon={<ListChecks />} meta={`${exportSchemes.length} 个方案`}>
+          <ExcelSchemeList schemes={exportSchemes} onOpen={(id) => { applyExportScheme(String(id)); openExcelDialog('export') }} />
+        </Panel>
+      </>}
+
+      {section === 'write' && <>
+        <section className="overview-grid">
+          <Metric label="导入方案" value={importSchemes.length} />
+          <Metric label="默认模式" value="只预检" />
+          <Metric label="写入保护" value="不覆盖" />
+          <Metric label="清空保护" value="需确认" />
+        </section>
+        <Panel title="数据库回写" icon={<Database />} meta="匹配导入与退回未匹配分开执行">
+          <div className="excel-action-grid compact-actions">
+          <button type="button" className="excel-action-card" onClick={() => openExcelDialog('import')}>
             <Database aria-hidden="true" />
             <span>匹配导入</span>
             <small>默认预检，确认后写入空的 matched_docno</small>
           </button>
-          <button type="button" className="excel-action-card" onClick={() => setExcelDialog('clear')}>
+          <button type="button" className="excel-action-card" onClick={() => openExcelDialog('clear')}>
             <RefreshCcw aria-hidden="true" />
             <span>退回未匹配</span>
             <small>按 Excel 匹配范围清空 matched_docno</small>
           </button>
-          <button type="button" className="excel-action-card" onClick={() => setExcelDialog('query')}>
-            <Download aria-hidden="true" />
-            <span>查询下载</span>
-            <small>按任务 ID 查询状态、下载导出结果</small>
-          </button>
         </div>
       </Panel>
-
-      <Panel title="最近 Excel 任务" icon={<ListChecks />} meta="最多显示最近 30 条，可直接查看和下载">
-        <ExcelJobHistoryTable
-          jobs={jobHistory}
-          loading={loading}
-          downloadingJobID={downloadingJobID}
-          onDownload={downloadJob}
-          onView={(id) => void refreshJobByID(id)}
-        />
-      </Panel>
-
-      {job && (
-        <Panel title={`Excel 任务 #${job.id}`} icon={<FileJson />} meta={job.source_file_name || 'job detail'}>
-          {autoRefreshText && <p className="excel-mode-note">{autoRefreshText}</p>}
-          <div className="excel-job-detail">
-            <Metric label="源文件" value={job.source_file_name || '-'} />
-            <Metric label="任务类型" value={excelJobOperationLabel(excelJobOperation(job))} />
-            <Metric label="筛选/命中" value={job.filtered_rows || '-'} />
-            <Metric label="匹配/更新" value={job.matched_rows || '-'} />
-            <Metric label="未匹配" value={job.unmatched_rows || '-'} />
-            <Metric label="结果过期" value={formatDate(job.expires_at)} />
-            <Metric label="开始时间" value={formatDate(job.started_at)} />
-            <Metric label="结束时间" value={formatDate(job.finished_at)} />
-          </div>
-          <div className="excel-detail-actions">
-            <button type="button" onClick={() => void refreshJobByID(job.id)} disabled={loading}>
-              <RefreshCcw aria-hidden="true" />
-              刷新状态
-            </button>
-            <button
-              type="button"
-              onClick={() => void downloadJob(job.id)}
-              disabled={loading || downloadingJobID === job.id || !canDownloadExcelJob(job)}
-            >
-              <Download aria-hidden="true" />
-              {downloadingJobID === job.id ? '下载中' : '下载结果'}
-            </button>
-            {!canDownloadExcelJob(job) && <span>{job.download_message || '只有匹配导出成功任务会生成可下载结果文件。'}</span>}
-          </div>
-          {job.error_message && <div className="login-error">{job.error_message}</div>}
-          <section className="content-grid two">
-            <ReadonlyJSON value={job.config_json || '{}'} />
-            <ExcelJobLogList logs={jobLogs} />
-          </section>
+        <Panel title="已保存导入方案" icon={<ListChecks />} meta={`${importSchemes.length} 个方案`}>
+          <ExcelSchemeList schemes={importSchemes} onOpen={(id) => { applyImportScheme(String(id)); openExcelDialog('import') }} />
         </Panel>
-      )}
+      </>}
 
       {excelDialog === 'export' && (
-        <Modal title="匹配导出参数" onClose={() => setExcelDialog(null)}>
+        <Modal title="匹配导出参数" onClose={closeExcelDialog}>
           <form className="excel-upload-form" onSubmit={createExportJob} key={exportFormKey}>
             <label>
               已保存方案
@@ -1982,7 +2094,7 @@ function ExcelMatchView({
               disabled={!selectedExportSchemeID || loading}
               onClick={(event) => {
                 const form = event.currentTarget.form
-                if (form) void saveScheme(form, 'export_match', 'current')
+                if (form?.reportValidity()) void saveScheme(form, 'export_match', 'current')
               }}
             >
               保存到当前方案
@@ -1992,7 +2104,7 @@ function ExcelMatchView({
               disabled={loading}
               onClick={(event) => {
                 const form = event.currentTarget.form
-                if (form) void saveScheme(form, 'export_match', 'new')
+                if (form?.reportValidity()) void saveScheme(form, 'export_match', 'new')
               }}
             >
               另存为新方案
@@ -2014,20 +2126,35 @@ function ExcelMatchView({
             <Field label="Sheet 页名称" name="sheetName" defaultValue={exportDefaults.sheetName} />
             <Field label="筛选列名" name="filterColumn" defaultValue={exportDefaults.filterColumn} />
             <Field label="筛选值" name="filterValue" defaultValue={exportDefaults.filterValue} />
-            <Field label="Excel 匹配列名" name="matchExcelColumn" defaultValue={exportDefaults.matchExcelColumn} />
-            <label>
-              数据库匹配字段
-              <select name="dbMatchField" defaultValue={exportDefaults.dbMatchField}>
-                {bojunMatchFieldOptions.map((option) => <option value={option.value} key={option.value}>{option.label}</option>)}
-              </select>
-            </label>
-            <label>
-              伯俊取值字段
-              <select name="dbValueField" defaultValue={exportDefaults.dbValueField}>
-                {bojunValueFieldOptions.map((option) => <option value={option.value} key={option.value}>{option.label}</option>)}
-              </select>
-            </label>
-            <Field label="追加列名" name="outputColumnName" defaultValue={exportDefaults.outputColumnName} />
+            <div className="excel-step-editor">
+              <div className="excel-step-editor-title">
+                <div>
+                  <strong>匹配步骤</strong>
+                  <span>步骤按顺序执行；后一步的 Excel 输入列可以填写前一步的追加列名。</span>
+                </div>
+                <button type="button" onClick={addExportStep} disabled={exportSteps.length >= 20}>添加步骤</button>
+              </div>
+              {exportSteps.map((step, index) => (
+                <article className="excel-step-card" key={`${exportFormKey}-${index}`}>
+                  <div className="excel-step-heading">
+                    <strong>步骤 {index + 1}</strong>
+                    <div className="table-actions">
+                      <button type="button" onClick={() => moveExportStep(index, -1)} disabled={index === 0}>上移</button>
+                      <button type="button" onClick={() => moveExportStep(index, 1)} disabled={index === exportSteps.length - 1}>下移</button>
+                      <button type="button" onClick={() => removeExportStep(index)} disabled={exportSteps.length === 1}>删除</button>
+                    </div>
+                  </div>
+                  <div className="excel-step-fields">
+                    <Field label="步骤名称" name={`step_name_${index}`} value={step.name} onChange={(value) => updateExportStep(index, 'name', value)} required />
+                    <Field label="数据库表名" name={`step_table_${index}`} value={step.tableName} onChange={(value) => updateExportStep(index, 'tableName', value)} required />
+                    <Field label="Excel 输入列" name={`step_excel_${index}`} value={step.matchExcelColumn} onChange={(value) => updateExportStep(index, 'matchExcelColumn', value)} required />
+                    <Field label="数据库匹配字段" name={`step_match_${index}`} value={step.dbMatchField} onChange={(value) => updateExportStep(index, 'dbMatchField', value)} required />
+                    <Field label="数据库取值字段" name={`step_value_${index}`} value={step.dbValueField} onChange={(value) => updateExportStep(index, 'dbValueField', value)} required />
+                    <Field label="追加输出列" name={`step_output_${index}`} value={step.outputColumnName} onChange={(value) => updateExportStep(index, 'outputColumnName', value)} required />
+                  </div>
+                </article>
+              ))}
+            </div>
             <label>
               导出列内容格式
               <textarea
@@ -2045,7 +2172,7 @@ function ExcelMatchView({
                 type="button"
                 onClick={(event) => {
                   const form = event.currentTarget.form
-                  if (form) void previewExportJob(form)
+                  if (form?.reportValidity()) void previewExportJob(form)
                 }}
                 disabled={loading}
               >
@@ -2063,7 +2190,7 @@ function ExcelMatchView({
       )}
 
       {excelDialog === 'import' && (
-        <Modal title="匹配导入参数" onClose={() => setExcelDialog(null)}>
+        <Modal title="匹配导入参数" onClose={closeExcelDialog}>
           <form className="excel-upload-form" onSubmit={createImportJob} key={importFormKey}>
             <label>
               已保存方案
@@ -2146,7 +2273,7 @@ function ExcelMatchView({
       )}
 
       {excelDialog === 'clear' && (
-        <Modal title="退回未匹配参数" onClose={() => setExcelDialog(null)}>
+        <Modal title="退回未匹配参数" onClose={closeExcelDialog}>
           <form className="excel-upload-form" onSubmit={createClearMatchedJob}>
             <label className="file-input-label">
               Excel 文件
@@ -2195,7 +2322,7 @@ function ExcelMatchView({
       )}
 
       {excelDialog === 'query' && (
-        <Modal title="任务查询与下载" onClose={() => setExcelDialog(null)}>
+        <Modal title="任务查询与下载" onClose={closeExcelDialog}>
           <div className="excel-job-actions">
             <label>
               任务 ID
@@ -2212,6 +2339,36 @@ function ExcelMatchView({
           </div>
         </Modal>
       )}
+    </div>
+  )
+}
+
+function ExcelSchemeList({ schemes, onOpen }: { schemes: ExcelMatchScheme[]; onOpen: (id: number) => void }) {
+  if (schemes.length === 0) return <EmptyState text="暂无已保存方案。" />
+  return (
+    <div className="data-table-wrap">
+      <table className="data-table">
+        <thead>
+          <tr>
+            <th>方案名称</th>
+            <th>操作类型</th>
+            <th>匹配步骤</th>
+            <th>更新时间</th>
+            <th>操作</th>
+          </tr>
+        </thead>
+        <tbody>
+          {schemes.map((scheme) => (
+            <tr key={scheme.id}>
+              <td>{scheme.name}</td>
+              <td>{excelJobOperationLabel(scheme.operation)}</td>
+              <td>{scheme.operation === 'export_match' ? (scheme.config.steps?.length || 1) : '-'}</td>
+              <td>{formatUnixTime(scheme.updated_at)}</td>
+              <td><button type="button" onClick={() => onOpen(scheme.id)}>打开配置</button></td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
     </div>
   )
 }
@@ -2312,6 +2469,7 @@ function ExcelMatchPreviewPanel({ preview }: { preview: ExcelMatchPreviewResult 
               <th>匹配键</th>
               <th>状态</th>
               <th>追加值</th>
+              <th>步骤结果</th>
               <th>原因</th>
               <th>Excel 行内容</th>
             </tr>
@@ -2323,6 +2481,17 @@ function ExcelMatchPreviewPanel({ preview }: { preview: ExcelMatchPreviewResult 
                 <td>{sample.matchKey || '-'}</td>
                 <td>{excelPreviewStatusLabel(sample.status)}</td>
                 <td>{sample.matchedValue || '-'}</td>
+                <td>
+                  {sample.stepResults?.length ? (
+                    <div className="excel-preview-steps">
+                      {sample.stepResults.map((step) => (
+                        <span key={`${step.stepIndex}-${step.stepName}`}>
+                          {step.stepIndex}. {step.stepName || '未命名'}：{step.matchedValue || excelPreviewStatusLabel(step.status)}
+                        </span>
+                      ))}
+                    </div>
+                  ) : '-'}
+                </td>
                 <td>{sample.reason || '-'}</td>
                 <td>{compactText(JSON.stringify(sample.values || {})) || '-'}</td>
               </tr>
@@ -3097,15 +3266,24 @@ function sameExcelFile(file: File, ref: ExcelUploadRef) {
 }
 
 function exportSchemeDefaults(config: ExcelMatchSchemeConfig): ExcelExportSchemeConfig {
-  const filter = Array.isArray(config.filters) && config.filters.length > 0 ? config.filters[0] : {}
+  const configuredFilters = Array.isArray(config.filters) ? config.filters : null
+  const hasFilterConfig = configuredFilters !== null
+  const filter = configuredFilters?.[0] ?? {}
+  const steps = Array.isArray(config.steps) && config.steps.length > 0
+    ? config.steps.map((step) => ({ ...step }))
+    : [{
+        name: '兼容旧方案',
+        tableName: config.tableName || 'bojun_retail_orders',
+        matchExcelColumn: config.matchExcelColumn || defaultExcelExportScheme.steps[0].matchExcelColumn,
+        dbMatchField: config.dbMatchField || defaultExcelExportScheme.steps[0].dbMatchField,
+        dbValueField: config.dbValueField || defaultExcelExportScheme.steps[0].dbValueField,
+        outputColumnName: config.outputColumnName || defaultExcelExportScheme.steps[0].outputColumnName,
+      }]
   return {
     sheetName: config.sheetName || defaultExcelExportScheme.sheetName,
-    filterColumn: filter.column || defaultExcelExportScheme.filterColumn,
-    filterValue: filter.value || defaultExcelExportScheme.filterValue,
-    matchExcelColumn: config.matchExcelColumn || defaultExcelExportScheme.matchExcelColumn,
-    dbMatchField: config.dbMatchField || defaultExcelExportScheme.dbMatchField,
-    dbValueField: config.dbValueField || defaultExcelExportScheme.dbValueField,
-    outputColumnName: config.outputColumnName || defaultExcelExportScheme.outputColumnName,
+    filterColumn: hasFilterConfig ? (filter.column || '') : defaultExcelExportScheme.filterColumn,
+    filterValue: hasFilterConfig ? (filter.value || '') : defaultExcelExportScheme.filterValue,
+    steps,
     exportColumnFormats: exportColumnFormatsText(config.exportColumnFormats) || defaultExcelExportScheme.exportColumnFormats,
     batchSize: config.batchSize ? String(config.batchSize) : defaultExcelExportScheme.batchSize,
   }

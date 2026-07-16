@@ -642,6 +642,10 @@ button:focus-visible {
   gap: 12px;
 }
 
+.excel-action-grid.compact-actions {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
 .excel-action-card {
   display: grid;
   justify-items: start;
@@ -680,6 +684,47 @@ button:focus-visible {
   justify-content: flex-end;
   gap: 10px;
   flex-wrap: wrap;
+}
+
+.excel-step-editor {
+  grid-column: 1 / -1;
+  display: grid;
+  gap: 12px;
+  border-top: 1px solid #111111;
+  border-bottom: 1px solid #111111;
+  padding: 14px 0;
+}
+
+.excel-step-editor-title,
+.excel-step-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.excel-step-editor-title > div {
+  display: grid;
+  gap: 3px;
+}
+
+.excel-step-editor-title span {
+  color: #555555;
+  font-size: 12px;
+}
+
+.excel-step-card {
+  display: grid;
+  gap: 12px;
+  border: 1px solid #b5b5b5;
+  background: #f7f7f7;
+  padding: 12px;
+}
+
+.excel-step-fields {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
 }
 
 .checkbox-label {
@@ -741,6 +786,18 @@ button:focus-visible {
   gap: 12px;
   border-top: 1px solid #d0d0d0;
   padding-top: 12px;
+}
+
+.excel-preview-steps {
+  display: grid;
+  gap: 3px;
+  min-width: 220px;
+  white-space: normal;
+}
+
+.excel-preview-steps span {
+  border-left: 2px solid #777777;
+  padding-left: 6px;
 }
 
 .file-input-label {
@@ -891,6 +948,10 @@ summary {
     grid-template-columns: 1fr;
   }
 
+  .excel-step-fields {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
   .log-board {
     height: auto;
   }
@@ -945,6 +1006,16 @@ summary {
   .excel-job-detail,
   .bojun-backfill-form {
     grid-template-columns: 1fr;
+  }
+
+  .excel-step-fields {
+    grid-template-columns: 1fr;
+  }
+
+  .excel-step-editor-title,
+  .excel-step-heading {
+    align-items: stretch;
+    flex-direction: column;
   }
 
   .modal-backdrop {
