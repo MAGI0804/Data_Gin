@@ -18,7 +18,7 @@ Log:
   MaxSize: 64
 JWT:
   Key: ${JWT_KEY:-your-jwt-secret-key}
-  ExpireTime: 120
+  ExpireTime: 1440
   MaxRefreshTime: 86400
 Email:
   Host: ${EMAIL_HOST:-smtp.example.com}

@@ -20,6 +20,7 @@ import {
   X,
 } from 'lucide-react'
 import './App.css'
+import { clearStoredToken, loadStoredToken, saveStoredToken, storedTokenExpiresAt } from './authStorage'
 
 const defaultApiBaseURL = import.meta.env.VITE_API_BASE_URL ?? 'https://shop-test.youlankids.com'
 
@@ -496,8 +497,6 @@ type DeliveryStore = {
   aliases: string[]
 }
 
-const tokenStorageKey = 'warehouse-token'
-
 const navGroups: NavGroup[] = [
   {
     label: '监控',
@@ -632,8 +631,8 @@ const builtinMethods: MethodDisplay[] = [
 ]
 
 function App() {
-  const [authenticated, setAuthenticated] = useState(() => Boolean(sessionStorage.getItem(tokenStorageKey)))
-  const [token, setToken] = useState(() => sessionStorage.getItem(tokenStorageKey) ?? '')
+  const [token, setToken] = useState(() => loadStoredToken(window.localStorage))
+  const [authenticated, setAuthenticated] = useState(() => Boolean(token))
   const [activeNav, setActiveNav] = useState<NavKey>(navFromHash)
   const [navQuery, setNavQuery] = useState('')
   const [loading, setLoading] = useState(false)
@@ -669,6 +668,11 @@ function App() {
         })
         const data = await response.json().catch(() => ({}))
         const nextResult = { ok: response.ok && isSuccessPayload(data), status: response.status, data }
+        if (response.status === 401) {
+          clearStoredToken(window.localStorage)
+          setToken('')
+          setAuthenticated(false)
+        }
         if (options.showResult !== false) setResult(nextResult)
         return nextResult
       } catch (error) {
@@ -763,6 +767,35 @@ function App() {
   }, [authenticated, refreshAll])
 
   useEffect(() => {
+    if (!token) return
+    const expiresAt = storedTokenExpiresAt(window.localStorage)
+
+    const expireSession = () => {
+      clearStoredToken(window.localStorage)
+      setToken('')
+      setAuthenticated(false)
+      setResult(null)
+    }
+
+    if (expiresAt === null || expiresAt <= Date.now()) {
+      expireSession()
+      return
+    }
+
+    let timer = 0
+    const scheduleExpiry = () => {
+      const remaining = expiresAt - Date.now()
+      if (remaining <= 0) {
+        expireSession()
+        return
+      }
+      timer = window.setTimeout(scheduleExpiry, Math.min(remaining, 2_147_000_000))
+    }
+    scheduleExpiry()
+    return () => window.clearTimeout(timer)
+  }, [token])
+
+  useEffect(() => {
     const handleHashChange = () => setActiveNav(navFromHash())
     window.addEventListener('hashchange', handleHashChange)
     return () => window.removeEventListener('hashchange', handleHashChange)
@@ -774,13 +807,13 @@ function App() {
   }
 
   function handleLogin(nextToken: string) {
-    sessionStorage.setItem(tokenStorageKey, nextToken)
+    saveStoredToken(nextToken, window.localStorage)
     setToken(nextToken)
     setAuthenticated(true)
   }
 
   function handleLogout() {
-    sessionStorage.removeItem(tokenStorageKey)
+    clearStoredToken(window.localStorage)
     setToken('')
     setAuthenticated(false)
     setResult(null)

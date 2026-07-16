@@ -9,6 +9,7 @@ lerna-debug.log*
 
 node_modules
 .vite
+.test-dist
 dist
 dist-ssr
 *.local
