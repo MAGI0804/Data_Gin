@@ -74,6 +74,7 @@ func addQueueJob(mux *asynq.ServeMux) {
 	mux.HandleFunc(job.TypeDeliveryTaskRun, handleDeliveryTaskRun)
 	mux.HandleFunc(job.TypeExcelMatchExport, handleExcelMatchExport)
 	mux.HandleFunc(job.TypeBojunOrderFetch, handleBojunOrderFetch)
+	mux.HandleFunc(job.TypeYouzanDistributionOrderSync, handleYouzanDistributionOrderSync)
 }
 
 func handleDeliveryTaskRun(ctx context.Context, task *asynq.Task) error {
@@ -103,6 +104,41 @@ func handleBojunOrderFetch(ctx context.Context, task *asynq.Task) error {
 
 	_, err := data_svc.NewBojunOrderService().SyncOrders(ctx, payload.StartTime, payload.EndTime)
 	return err
+}
+
+func handleYouzanDistributionOrderSync(ctx context.Context, task *asynq.Task) error {
+	var payload job.YouzanDistributionOrderSyncPayload
+	if err := json.Unmarshal(task.Payload(), &payload); err != nil {
+		return err
+	}
+
+	startTime, endTime := job.ResolveYouzanDistributionOrderRange(payload, time.Now())
+	logger.Info(
+		"开始拉取有赞分销订单",
+		zap.String("start_time", startTime),
+		zap.String("end_time", endTime),
+	)
+	result, err := data_svc.NewYouzanDistributionOrderService().SyncRange(ctx, startTime, endTime)
+	if err != nil {
+		logger.Error(
+			"有赞分销订单拉取失败",
+			zap.String("start_time", startTime),
+			zap.String("end_time", endTime),
+			zap.Error(err),
+		)
+		return err
+	}
+	logger.Info(
+		"有赞分销订单拉取完成",
+		zap.String("start_time", startTime),
+		zap.String("end_time", endTime),
+		zap.Int("fetch_pages", result.FetchPages),
+		zap.Int("total_count", result.TotalCount),
+		zap.Int("saved_count", result.SavedCount),
+		zap.Int("existing_count", result.ExistingCount),
+		zap.Int("failed_count", result.FailedCount),
+	)
+	return nil
 }
 
 // jobLoggingMiddleware 异步任务执行日志中间件

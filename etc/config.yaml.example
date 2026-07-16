@@ -62,6 +62,7 @@ Youzan:
   TokenURL: ${YOUZAN_TOKEN_URL:-https://open.youzanyun.com/auth/token}
   OrdersURL: ${YOUZAN_ORDERS_URL:-https://open.youzanyun.com/api/youzan.trades.sold.get/4.0.4}
   DecryptURL: ${YOUZAN_DECRYPT_URL:-https://open.youzanyun.com/api/youzan.cloud.secret.decrypt.batch/1.0.0}
+  DistributionCronExpr: ${YOUZAN_DISTRIBUTION_CRON_EXPR:-10 1 * * *}
   ValueCardURL: ${YOUZAN_VALUE_CARD_URL:-https://open.youzanyun.com/api/youzan.cardvoucher.valuecard.pay.rcd.bypub.search/3.0.1}
   RefundURL: ${YOUZAN_REFUND_URL:-https://open.youzanyun.com/api/youzan.trade.refund.search/3.0.1}
   NodeKdtID: ${YOUZAN_NODE_KDT_ID:-0}

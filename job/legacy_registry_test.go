@@ -11,6 +11,7 @@ func TestLegacyTaskDefinitionsExposeConfiguredFetchAndDeliveryJobs(t *testing.T)
 
 	for _, code := range []string{
 		"youzan_order_fetch",
+		"youzan_distribution_order_fetch",
 		"youzan_refund_fetch",
 		"bojun_order_fetch",
 		"youzan_sales_push",
@@ -26,6 +27,12 @@ func TestLegacyTaskDefinitionsExposeConfiguredFetchAndDeliveryJobs(t *testing.T)
 
 	if byCode["youzan_order_fetch"].Category != "fetch" {
 		t.Fatalf("youzan_order_fetch category = %s, want fetch", byCode["youzan_order_fetch"].Category)
+	}
+	if byCode["youzan_distribution_order_fetch"].OutputTable != "youzan_distribution_orders" {
+		t.Fatalf("youzan distribution output table = %s", byCode["youzan_distribution_order_fetch"].OutputTable)
+	}
+	if byCode["youzan_distribution_order_fetch"].CronExpr == "" {
+		t.Fatal("youzan distribution fetch must expose its daily cron expression")
 	}
 	if byCode["bojun_order_fetch"].TaskType != TypeBojunOrderFetch {
 		t.Fatalf("bojun_order_fetch task type = %s, want %s", byCode["bojun_order_fetch"].TaskType, TypeBojunOrderFetch)
@@ -91,6 +98,19 @@ func TestNewLegacyTaskBuildsBojunOrderFetchTask(t *testing.T) {
 	}
 }
 
+func TestNewLegacyTaskBuildsYouzanDistributionFetchTask(t *testing.T) {
+	task, err := NewLegacyTask("youzan_distribution_order_fetch", map[string]interface{}{
+		"start_time": "2026-07-05 00:00:00",
+		"end_time":   "2026-07-05 23:59:59",
+	})
+	if err != nil {
+		t.Fatalf("NewLegacyTask returned error: %v", err)
+	}
+	if task.Type() != TypeYouzanDistributionOrderSync {
+		t.Fatalf("task type = %s, want %s", task.Type(), TypeYouzanDistributionOrderSync)
+	}
+}
+
 func TestNewLegacyTaskRequiresBojunOrderTimeRange(t *testing.T) {
 	_, err := NewLegacyTask("bojun_order_fetch", map[string]interface{}{})
 	if err == nil {
@@ -107,10 +127,17 @@ func TestNewLegacyTaskRequiresRawDataIDForQimaiEnrich(t *testing.T) {
 
 func TestScheduledLegacyTaskDefinitionsExcludeStoppedYouzanTriggers(t *testing.T) {
 	definitions := ScheduledLegacyTaskDefinitions()
+	foundDistributionFetch := false
 	for _, definition := range definitions {
+		if definition.Code == "youzan_distribution_order_fetch" {
+			foundDistributionFetch = true
+		}
 		switch definition.Code {
 		case "youzan_order_fetch", "youzan_refund_fetch", "youzan_sales_push", "youzan_refund_push":
 			t.Fatalf("stopped youzan trigger %s should not be scheduled", definition.Code)
 		}
+	}
+	if !foundDistributionFetch {
+		t.Fatal("scheduled definitions must include youzan distribution order fetch")
 	}
 }
