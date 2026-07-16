@@ -460,10 +460,27 @@ type LegacyTask = {
   description: string
 }
 
-type LegacyTaskRunResult = {
-  id: string
-  queue: string
-  type: string
+type YouzanDistributionBackfillSample = {
+  tid: string
+  status: string
+  reason: string
+  success_time: string
+  payment: string
+  fans_nickname: string
+}
+
+type YouzanDistributionBackfillResult = {
+  start_time: string
+  end_time: string
+  page_size: number
+  fetch_pages: number
+  total_count: number
+  preview_count: number
+  writable_count: number
+  saved_count: number
+  existing_count: number
+  failed_count: number
+  samples: YouzanDistributionBackfillSample[]
 }
 
 type LegacyTransformRule = {
@@ -872,12 +889,20 @@ function App() {
     return null
   }
 
-  async function runYouzanDistributionBackfill(payload: { start_time: string; end_time: string }) {
-    const response = await client('/v1/legacy-tasks/youzan_distribution_order_fetch/run', {
+  async function previewYouzanDistributionBackfill(payload: { start_time: string; end_time: string }) {
+    const response = await client('/v1/youzan-distribution-order-backfill/preview', {
       method: 'POST',
       body: payload,
     })
-    return response.ok ? readObject<LegacyTaskRunResult>(response, 'result') : null
+    return response.ok ? readObject<YouzanDistributionBackfillResult>(response, 'result') : null
+  }
+
+  async function confirmYouzanDistributionBackfill(payload: { start_time: string; end_time: string }) {
+    const response = await client('/v1/youzan-distribution-order-backfill/confirm', {
+      method: 'POST',
+      body: payload,
+    })
+    return response.ok ? readObject<YouzanDistributionBackfillResult>(response, 'result') : null
   }
 
   const receivedData = useMemo(() => rawData.filter((item) => !isPulledOrigin(rawDataOrigin(item))), [rawData])
@@ -947,7 +972,7 @@ function App() {
         {activeNav === 'receive' && <RawRecordsQueryPage title="接口接收记录" records={receivedData} />}
         {activeNav === 'pull_records' && <RawRecordsQueryPage title="数据拉取记录" records={pulledData} />}
         {activeNav === 'backfill' && <BojunBackfillPage loading={loading || refreshing} onPreview={previewBojunOrderBackfill} onConfirm={confirmBojunOrderBackfill} />}
-        {activeNav === 'youzan_distribution' && <YouzanDistributionPage task={legacyTasks.find((item) => item.code === 'youzan_distribution_order_fetch')} loading={loading || refreshing} onRun={runYouzanDistributionBackfill} />}
+        {activeNav === 'youzan_distribution' && <YouzanDistributionPage task={legacyTasks.find((item) => item.code === 'youzan_distribution_order_fetch')} loading={loading || refreshing} onPreview={previewYouzanDistributionBackfill} onConfirm={confirmYouzanDistributionBackfill} />}
         {activeNav === 'rules' && <RulesQueryPage rules={transformRules} />}
         {activeNav === 'processed' && <ProcessedQueryPage records={processedData} />}
         {activeNav === 'destinations' && <DestinationsQueryPage destinations={destinations} />}
@@ -1325,24 +1350,40 @@ function BojunBackfillPage({ loading, onPreview, onConfirm }: {
   )
 }
 
-function YouzanDistributionPage({ task, loading, onRun }: {
+function YouzanDistributionPage({ task, loading, onPreview, onConfirm }: {
   task?: LegacyTask
   loading: boolean
-  onRun: (payload: { start_time: string; end_time: string }) => Promise<LegacyTaskRunResult | null>
+  onPreview: (payload: { start_time: string; end_time: string }) => Promise<YouzanDistributionBackfillResult | null>
+  onConfirm: (payload: { start_time: string; end_time: string }) => Promise<YouzanDistributionBackfillResult | null>
 }) {
   const [showBackfill, setShowBackfill] = useState(false)
-  const [lastRun, setLastRun] = useState<LegacyTaskRunResult | null>(null)
+  const [payload, setPayload] = useState<{ start_time: string; end_time: string } | null>(null)
+  const [preview, setPreview] = useState<YouzanDistributionBackfillResult | null>(null)
+  const [confirmed, setConfirmed] = useState<YouzanDistributionBackfillResult | null>(null)
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const form = new FormData(event.currentTarget)
-    const run = await onRun({
+    const nextPayload = {
       start_time: backendDateTime(formValue(form, 'start_time')),
       end_time: backendDateTime(formValue(form, 'end_time')),
-    })
-    if (!run) return
-    setLastRun(run)
-    setShowBackfill(false)
+    }
+    setConfirmed(null)
+    const result = await onPreview(nextPayload)
+    setPayload(result ? nextPayload : null)
+    setPreview(result)
+  }
+
+  async function confirm() {
+    if (!payload || !preview || !window.confirm(`确认写入 ${preview.writable_count} 条有赞分销订单？`)) return
+    setConfirmed(await onConfirm(payload))
+  }
+
+  function openBackfill() {
+    setPayload(null)
+    setPreview(null)
+    setConfirmed(null)
+    setShowBackfill(true)
   }
 
   return (
@@ -1359,19 +1400,15 @@ function YouzanDistributionPage({ task, loading, onRun }: {
               <div className="wide"><dt>昵称处理</dt><dd>所有非空 fans_nickname 必须先批量解密；解密失败时本页订单不写入。</dd></div>
             </dl>
             <div className="task-page-actions">
-              <button className="primary" type="button" onClick={() => setShowBackfill(true)} disabled={loading}>发起补拉</button>
+              <button className="primary" type="button" onClick={openBackfill} disabled={loading}>发起补拉</button>
             </div>
           </>
         )}
       </Panel>
 
-      {lastRun && (
-        <Panel title="最近提交" icon={<CheckCircle2 />} meta="异步任务已进入队列">
-          <div className="overview-grid compact">
-            <Metric label="任务编号" value={lastRun.id} />
-            <Metric label="队列" value={lastRun.queue} />
-            <Metric label="任务类型" value={lastRun.type} />
-          </div>
+      {confirmed && (
+        <Panel title="最近写入结果" icon={<CheckCircle2 />} meta={`${confirmed.start_time} ~ ${confirmed.end_time}`}>
+          <YouzanDistributionBackfillResultView title="写入结果" result={confirmed} />
         </Panel>
       )}
 
@@ -1380,12 +1417,61 @@ function YouzanDistributionPage({ task, loading, onRun }: {
           <form className="youzan-backfill-form" onSubmit={submit}>
             <Field label="开始时间" name="start_time" type="datetime-local" defaultValue={previousDayDateTimeLocal(false)} required />
             <Field label="结束时间" name="end_time" type="datetime-local" defaultValue={previousDayDateTimeLocal(true)} required />
-            <button className="primary" type="submit" disabled={loading}>{loading ? '提交中' : '提交补拉任务'}</button>
+            <button className="primary" type="submit" disabled={loading}>{loading ? '预览中' : '预览补拉'}</button>
+            <button type="button" disabled={loading || !preview || preview.writable_count === 0} onClick={confirm}>确认写入</button>
           </form>
-          <p className="backfill-note">任务会逐页拉取并逐页写入；已有 tid 不覆盖，非空昵称必须解密成功后才能落库。</p>
+          <p className="backfill-note">预览会真实拉取、解密并判重，但不写数据库；确认后重新拉取相同时间范围并写入，已有 tid 不覆盖。</p>
+          {preview && <YouzanDistributionBackfillResultView title="预览结果" result={preview} />}
+          {confirmed && <YouzanDistributionBackfillResultView title="写入结果" result={confirmed} />}
         </Modal>
       )}
     </div>
+  )
+}
+
+function YouzanDistributionBackfillResultView({ title, result }: { title: string; result: YouzanDistributionBackfillResult }) {
+  return (
+    <section className="backfill-result">
+      <div className="backfill-result-title">
+        <strong>{title}</strong>
+        <span>{result.start_time} ~ {result.end_time} / 拉取 {result.fetch_pages} 页</span>
+      </div>
+      <div className="overview-grid compact">
+        <Metric label="有赞返回" value={result.total_count} />
+        <Metric label="可写入" value={result.writable_count} />
+        <Metric label="已存在" value={result.existing_count} />
+        <Metric label="已写入" value={result.saved_count} />
+        <Metric label="失败" value={result.failed_count} />
+      </div>
+      {!result.samples?.length ? <EmptyState text="暂无样例数据。" /> : (
+        <div className="data-table-wrap">
+          <table className="data-table">
+            <thead>
+              <tr>
+                <th>状态</th>
+                <th>订单号</th>
+                <th>成功时间</th>
+                <th>实付金额</th>
+                <th>解密昵称</th>
+                <th>说明</th>
+              </tr>
+            </thead>
+            <tbody>
+              {result.samples.map((sample, index) => (
+                <tr key={`${sample.tid}-${sample.status}-${index}`}>
+                  <td>{youzanDistributionBackfillStatusLabel(sample.status)}</td>
+                  <td>{sample.tid || '-'}</td>
+                  <td>{sample.success_time || '-'}</td>
+                  <td>{sample.payment || '-'}</td>
+                  <td>{sample.fans_nickname || '-'}</td>
+                  <td>{sample.reason || '-'}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </section>
   )
 }
 
@@ -3598,6 +3684,17 @@ function datetimeLocalMinutesAgo(minutes: number) {
   const date = new Date(Date.now() - minutes * 60 * 1000)
   const pad = (value: number) => String(value).padStart(2, '0')
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`
+}
+
+function youzanDistributionBackfillStatusLabel(value: string) {
+  const labels: Record<string, string> = {
+    pending: '待写入',
+    created: '已写入',
+    exists: '已存在',
+    invalid: '无效',
+    failed: '失败',
+  }
+  return labels[value] ?? (value || '-')
 }
 
 function previousDayDateTimeLocal(endOfDay: boolean) {

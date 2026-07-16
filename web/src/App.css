@@ -564,7 +564,7 @@ button:focus-visible {
 
 .youzan-backfill-form {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto auto;
   gap: 12px;
   align-items: end;
 }
