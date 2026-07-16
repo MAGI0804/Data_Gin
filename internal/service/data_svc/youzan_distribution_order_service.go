@@ -21,6 +21,7 @@ import (
 const (
 	youzanDistributionPageSize         = 100
 	youzanDistributionDecryptBatchSize = 10000
+	youzanDistributionSampleLimit      = 20
 )
 
 type youzanDistributionClient interface {
@@ -29,6 +30,7 @@ type youzanDistributionClient interface {
 }
 
 type youzanDistributionWriter interface {
+	FindExistingTIDs(ctx context.Context, tids []string) (map[string]bool, error)
 	CreateBatchIfNotExists(ctx context.Context, orders []model.YouzanDistributionOrder) (int64, error)
 }
 
@@ -39,14 +41,26 @@ type YouzanDistributionOrderService struct {
 }
 
 type YouzanDistributionSyncResult struct {
-	StartTime     string `json:"start_time"`
-	EndTime       string `json:"end_time"`
-	PageSize      int    `json:"page_size"`
-	FetchPages    int    `json:"fetch_pages"`
-	TotalCount    int    `json:"total_count"`
-	SavedCount    int    `json:"saved_count"`
-	ExistingCount int    `json:"existing_count"`
-	FailedCount   int    `json:"failed_count"`
+	StartTime     string                          `json:"start_time"`
+	EndTime       string                          `json:"end_time"`
+	PageSize      int                             `json:"page_size"`
+	FetchPages    int                             `json:"fetch_pages"`
+	TotalCount    int                             `json:"total_count"`
+	PreviewCount  int                             `json:"preview_count"`
+	WritableCount int                             `json:"writable_count"`
+	SavedCount    int                             `json:"saved_count"`
+	ExistingCount int                             `json:"existing_count"`
+	FailedCount   int                             `json:"failed_count"`
+	Samples       []YouzanDistributionPreviewItem `json:"samples"`
+}
+
+type YouzanDistributionPreviewItem struct {
+	TID          string `json:"tid"`
+	Status       string `json:"status"`
+	Reason       string `json:"reason"`
+	SuccessTime  string `json:"success_time"`
+	Payment      string `json:"payment"`
+	FansNickname string `json:"fans_nickname"`
 }
 
 func NewYouzanDistributionOrderService() *YouzanDistributionOrderService {
@@ -67,8 +81,16 @@ func newYouzanDistributionOrderService(client youzanDistributionClient, writer y
 	return &YouzanDistributionOrderService{client: client, writer: writer, getAccessToken: getAccessToken}
 }
 
+func (s *YouzanDistributionOrderService) PreviewRange(ctx context.Context, startTime, endTime string) (*YouzanDistributionSyncResult, error) {
+	return s.runRange(ctx, startTime, endTime, false)
+}
+
 // SyncRange fetches and persists one page at a time, keeping memory bounded for large backfills.
 func (s *YouzanDistributionOrderService) SyncRange(ctx context.Context, startTime, endTime string) (*YouzanDistributionSyncResult, error) {
+	return s.runRange(ctx, startTime, endTime, true)
+}
+
+func (s *YouzanDistributionOrderService) runRange(ctx context.Context, startTime, endTime string, confirmWrite bool) (*YouzanDistributionSyncResult, error) {
 	startTime, endTime, err := normalizeYouzanDistributionRange(startTime, endTime)
 	result := &YouzanDistributionSyncResult{StartTime: startTime, EndTime: endTime, PageSize: youzanDistributionPageSize}
 	if err != nil {
@@ -97,12 +119,60 @@ func (s *YouzanDistributionOrderService) SyncRange(ctx context.Context, startTim
 		}
 		result.FailedCount += invalidCount
 
-		created, err := s.writer.CreateBatchIfNotExists(ctx, models)
+		tids := make([]string, 0, len(models))
+		for _, row := range models {
+			tids = append(tids, row.TID)
+		}
+		existingTIDs, err := s.writer.FindExistingTIDs(ctx, tids)
+		if err != nil {
+			return result, fmt.Errorf("check youzan distribution orders page %d: %w", pageNo, err)
+		}
+
+		writable := make([]model.YouzanDistributionOrder, 0, len(models))
+		for _, row := range models {
+			if existingTIDs[row.TID] {
+				result.ExistingCount++
+				continue
+			}
+			writable = append(writable, row)
+		}
+		result.WritableCount += len(writable)
+		if !confirmWrite {
+			result.PreviewCount += len(writable)
+			for _, row := range models {
+				if existingTIDs[row.TID] {
+					addYouzanDistributionSample(result, buildYouzanDistributionPreviewItem(row, "exists", "tid 已存在，不覆盖"))
+				} else {
+					addYouzanDistributionSample(result, buildYouzanDistributionPreviewItem(row, "pending", "可写入，预览未落库"))
+				}
+			}
+			logger.Info(
+				"有赞分销订单分页预览完成",
+				zap.Int("page", pageNo),
+				zap.Int("fetched", len(orders)),
+				zap.Int("writable", len(writable)),
+				zap.Int("existing", len(models)-len(writable)),
+				zap.Bool("has_next", hasNext),
+			)
+			if !hasNext {
+				break
+			}
+			continue
+		}
+
+		created, err := s.writer.CreateBatchIfNotExists(ctx, writable)
 		if err != nil {
 			return result, fmt.Errorf("save youzan distribution orders page %d: %w", pageNo, err)
 		}
 		result.SavedCount += int(created)
-		result.ExistingCount += len(models) - int(created)
+		result.ExistingCount += len(writable) - int(created)
+		for _, row := range models {
+			if existingTIDs[row.TID] {
+				addYouzanDistributionSample(result, buildYouzanDistributionPreviewItem(row, "exists", "tid 已存在，不覆盖"))
+			} else {
+				addYouzanDistributionSample(result, buildYouzanDistributionPreviewItem(row, "created", "已写入"))
+			}
+		}
 
 		logger.Info(
 			"有赞分销订单分页写入完成",
@@ -118,6 +188,27 @@ func (s *YouzanDistributionOrderService) SyncRange(ctx context.Context, startTim
 	}
 
 	return result, nil
+}
+
+func buildYouzanDistributionPreviewItem(row model.YouzanDistributionOrder, status, reason string) YouzanDistributionPreviewItem {
+	successTime := ""
+	if row.SuccessTime != nil {
+		successTime = row.SuccessTime.Format("2006-01-02 15:04:05")
+	}
+	return YouzanDistributionPreviewItem{
+		TID:          row.TID,
+		Status:       status,
+		Reason:       reason,
+		SuccessTime:  successTime,
+		Payment:      row.Payment,
+		FansNickname: row.FansNickname,
+	}
+}
+
+func addYouzanDistributionSample(result *YouzanDistributionSyncResult, sample YouzanDistributionPreviewItem) {
+	if len(result.Samples) < youzanDistributionSampleLimit {
+		result.Samples = append(result.Samples, sample)
+	}
 }
 
 func (s *YouzanDistributionOrderService) buildPageModels(ctx context.Context, accessToken string, orders []map[string]any) ([]model.YouzanDistributionOrder, int, error) {

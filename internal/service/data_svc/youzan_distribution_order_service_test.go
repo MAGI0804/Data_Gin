@@ -33,7 +33,18 @@ func (f *fakeYouzanDistributionClient) DecryptBatch(_ context.Context, _ string,
 }
 
 type fakeYouzanDistributionWriter struct {
-	batches [][]model.YouzanDistributionOrder
+	batches  [][]model.YouzanDistributionOrder
+	existing map[string]bool
+}
+
+func (f *fakeYouzanDistributionWriter) FindExistingTIDs(_ context.Context, tids []string) (map[string]bool, error) {
+	result := make(map[string]bool)
+	for _, tid := range tids {
+		if f.existing[tid] {
+			result[tid] = true
+		}
+	}
+	return result, nil
 }
 
 func (f *fakeYouzanDistributionWriter) CreateBatchIfNotExists(_ context.Context, orders []model.YouzanDistributionOrder) (int64, error) {
@@ -66,6 +77,33 @@ func TestYouzanDistributionOrderServiceSyncsEveryPageAndDecryptsNickname(t *test
 	}
 	if got := writer.batches[0][0].FansNicknameEncrypted; got != "encrypted-1" {
 		t.Fatalf("FansNicknameEncrypted = %q", got)
+	}
+}
+
+func TestYouzanDistributionOrderServicePreviewDecryptsAndDoesNotWrite(t *testing.T) {
+	initYouzanDistributionTestLogger()
+	client := &fakeYouzanDistributionClient{pages: [][]map[string]any{{
+		distributionOrderFixture("D100", "encrypted-1"),
+		distributionOrderFixture("D200", "encrypted-2"),
+	}}}
+	writer := &fakeYouzanDistributionWriter{existing: map[string]bool{"D200": true}}
+	service := newYouzanDistributionOrderService(client, writer, func() (string, error) { return "token", nil })
+
+	result, err := service.PreviewRange(context.Background(), "2026-07-05 00:00:00", "2026-07-05 23:59:59")
+	if err != nil {
+		t.Fatalf("PreviewRange() error = %v", err)
+	}
+	if len(writer.batches) != 0 {
+		t.Fatalf("preview must not write, got %d batches", len(writer.batches))
+	}
+	if result.WritableCount != 1 || result.ExistingCount != 1 || result.PreviewCount != 1 {
+		t.Fatalf("unexpected preview result: %+v", result)
+	}
+	if len(result.Samples) != 2 || result.Samples[0].FansNickname != "decrypted:encrypted-1" {
+		t.Fatalf("preview samples must include decrypted nickname: %#v", result.Samples)
+	}
+	if result.Samples[1].Status != "exists" {
+		t.Fatalf("existing order sample status = %q", result.Samples[1].Status)
 	}
 }
 
