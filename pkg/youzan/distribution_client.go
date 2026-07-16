@@ -91,7 +91,7 @@ func (c *DistributionClient) DecryptBatch(ctx context.Context, accessToken strin
 		return nil, fmt.Errorf("youzan nickname decrypt API failed: code=%d message=%s", response.Code, response.Message)
 	}
 
-	values, err := parseDecryptValues(response.Data)
+	values, err := parseDecryptValues(response.Data, sources)
 	if err != nil {
 		return nil, err
 	}
@@ -134,7 +134,7 @@ func (c *DistributionClient) post(ctx context.Context, endpoint, accessToken str
 	return nil
 }
 
-func parseDecryptValues(data json.RawMessage) ([]string, error) {
+func parseDecryptValues(data json.RawMessage, sources []string) ([]string, error) {
 	var direct []string
 	if err := json.Unmarshal(data, &direct); err == nil {
 		return direct, nil
@@ -162,6 +162,25 @@ func parseDecryptValues(data json.RawMessage) ([]string, error) {
 			values = append(values, value)
 		}
 		return values, nil
+	}
+
+	values := make([]string, len(sources))
+	matched := 0
+	for index, source := range sources {
+		raw, ok := object[source]
+		if !ok {
+			continue
+		}
+		if err := json.Unmarshal(raw, &values[index]); err != nil {
+			return nil, fmt.Errorf("youzan nickname decrypt value %d is not a string", index+1)
+		}
+		matched++
+	}
+	if matched == len(sources) {
+		return values, nil
+	}
+	if matched > 0 {
+		return nil, fmt.Errorf("youzan nickname decrypt response contains %d of %d requested items", matched, len(sources))
 	}
 	return nil, fmt.Errorf("youzan nickname decrypt response has unsupported data shape")
 }

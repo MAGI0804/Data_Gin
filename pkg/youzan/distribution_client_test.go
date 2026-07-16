@@ -48,6 +48,23 @@ func TestDistributionClientDecryptBatchAcceptsStringArray(t *testing.T) {
 	}
 }
 
+func TestDistributionClientDecryptBatchAcceptsSourceValueMap(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		fmt.Fprint(w, `{"trace_id":"test-trace","code":200,"data":{"encrypted-2":"nickname-2","encrypted-1":"nickname-1"},"success":true,"message":"successful"}`)
+	}))
+	defer server.Close()
+
+	client := NewDistributionClient(server.URL, server.URL, server.Client())
+	values, err := client.DecryptBatch(context.Background(), "test-token", []string{"encrypted-1", "encrypted-2"})
+	if err != nil {
+		t.Fatalf("DecryptBatch() error = %v", err)
+	}
+	if fmt.Sprint(values) != "[nickname-1 nickname-2]" {
+		t.Fatalf("values = %v", values)
+	}
+}
+
 func TestDistributionClientRejectsDecryptBatchOverLimit(t *testing.T) {
 	client := NewDistributionClient("http://unused", "http://unused", http.DefaultClient)
 	_, err := client.DecryptBatch(context.Background(), "test-token", make([]string, 10001))
