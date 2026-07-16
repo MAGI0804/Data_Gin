@@ -125,7 +125,7 @@ func (s *YouzanDistributionOrderService) buildPageModels(ctx context.Context, ac
 	seen := make(map[string]struct{}, len(orders))
 	for _, order := range orders {
 		nickname := nestedString(order, "buyer_info", "fans_nickname")
-		if !isYouzanEncryptedValue(nickname) {
+		if !shouldDecryptYouzanNickname(nickname) {
 			continue
 		}
 		if _, exists := seen[nickname]; exists {
@@ -193,9 +193,13 @@ func buildYouzanDistributionOrder(order map[string]any, decrypted map[string]str
 	}
 
 	encryptedNickname := nestedString(order, "buyer_info", "fans_nickname")
-	plainNickname := encryptedNickname
-	if isYouzanEncryptedValue(encryptedNickname) {
-		plainNickname = decrypted[encryptedNickname]
+	plainNickname := ""
+	if shouldDecryptYouzanNickname(encryptedNickname) {
+		var found bool
+		plainNickname, found = decrypted[encryptedNickname]
+		if !found {
+			return model.YouzanDistributionOrder{}, fmt.Errorf("decrypted fans_nickname is missing for order %s", tid)
+		}
 	}
 	return model.YouzanDistributionOrder{
 		TID:                   tid,
@@ -278,6 +282,6 @@ func nestedInt64(values map[string]any, section, key string) int64 {
 	return result
 }
 
-func isYouzanEncryptedValue(value string) bool {
-	return strings.HasPrefix(strings.TrimSpace(value), "$")
+func shouldDecryptYouzanNickname(value string) bool {
+	return strings.TrimSpace(value) != ""
 }

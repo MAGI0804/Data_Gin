@@ -45,8 +45,8 @@ func (f *fakeYouzanDistributionWriter) CreateBatchIfNotExists(_ context.Context,
 func TestYouzanDistributionOrderServiceSyncsEveryPageAndDecryptsNickname(t *testing.T) {
 	initYouzanDistributionTestLogger()
 	client := &fakeYouzanDistributionClient{pages: [][]map[string]any{
-		{distributionOrderFixture("D100", "$encrypted-1$")},
-		{distributionOrderFixture("D200", "$encrypted-2$")},
+		{distributionOrderFixture("D100", "encrypted-1")},
+		{distributionOrderFixture("D200", "encrypted-2")},
 	}}
 	writer := &fakeYouzanDistributionWriter{}
 	service := newYouzanDistributionOrderService(client, writer, func() (string, error) { return "token", nil })
@@ -61,10 +61,10 @@ func TestYouzanDistributionOrderServiceSyncsEveryPageAndDecryptsNickname(t *test
 	if len(writer.batches) != 2 || writer.batches[1][0].TID != "D200" {
 		t.Fatalf("expected one persisted batch per page, got %#v", writer.batches)
 	}
-	if got := writer.batches[0][0].FansNickname; got != "decrypted:$encrypted-1$" {
+	if got := writer.batches[0][0].FansNickname; got != "decrypted:encrypted-1" {
 		t.Fatalf("FansNickname = %q", got)
 	}
-	if got := writer.batches[0][0].FansNicknameEncrypted; got != "$encrypted-1$" {
+	if got := writer.batches[0][0].FansNicknameEncrypted; got != "encrypted-1" {
 		t.Fatalf("FansNicknameEncrypted = %q", got)
 	}
 }
