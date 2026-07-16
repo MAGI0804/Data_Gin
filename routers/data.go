@@ -152,6 +152,14 @@ func apiData(api *gin.RouterGroup) {
 		bojunOrderBackfillGroup.POST("/confirm", bojunOrderBackfillCtrl.Confirm)
 	}
 
+	youzanDistributionOrderBackfillGroup := api.Group("/v1/youzan-distribution-order-backfill")
+	youzanDistributionOrderBackfillGroup.Use(middleware.AuthJWT())
+	{
+		youzanDistributionOrderBackfillCtrl := data_ctrl.NewYouzanDistributionOrderBackfillController()
+		youzanDistributionOrderBackfillGroup.POST("/preview", youzanDistributionOrderBackfillCtrl.Preview)
+		youzanDistributionOrderBackfillGroup.POST("/confirm", youzanDistributionOrderBackfillCtrl.Confirm)
+	}
+
 	legacyTransformRuleGroup := api.Group("/v1/legacy-transform-rules")
 	legacyTransformRuleGroup.Use(middleware.AuthJWT())
 	{
