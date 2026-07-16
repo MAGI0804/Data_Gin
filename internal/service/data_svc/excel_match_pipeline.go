@@ -11,10 +11,10 @@ import (
 )
 
 type excelMatchPipelineRow struct {
-	rowNumber   int
-	values      []string
-	eligible    bool
-	stepResults []ExcelMatchPreviewStepResult
+	rowNumber    int
+	values       []string
+	participated bool
+	stepResults  []ExcelMatchPreviewStepResult
 }
 
 type excelMatchPipelineLayout struct {
@@ -34,12 +34,12 @@ func prepareExcelMatchPipeline(headers []string, config ExcelMatchConfig) (excel
 	for index, header := range headers {
 		layout.columnIndexes[header] = index
 	}
-	for _, filter := range config.Filters {
-		if _, ok := layout.columnIndexes[filter.Column]; !ok {
-			return layout, fmt.Errorf("Excel 缺少筛选列: %s", filter.Column)
-		}
-	}
 	for index, step := range config.Steps {
+		for _, filter := range step.Filters {
+			if _, ok := layout.columnIndexes[filter.Column]; !ok {
+				return layout, fmt.Errorf("第 %d 个匹配步骤缺少筛选列: %s", index+1, filter.Column)
+			}
+		}
 		inputIndex, ok := layout.columnIndexes[step.MatchExcelColumn]
 		if !ok {
 			return layout, fmt.Errorf("第 %d 个匹配步骤缺少输入列: %s", index+1, step.MatchExcelColumn)
@@ -65,11 +65,14 @@ func runExcelMatchSteps(ctx context.Context, config ExcelMatchConfig, lookup Exc
 	for stepIndex, step := range config.Steps {
 		keys := make([]string, 0, len(rows))
 		seen := make(map[string]struct{}, len(rows))
+		eligibleRows := make([]bool, len(rows))
 		inputIndex := layout.stepInputIndexes[stepIndex]
-		for _, row := range rows {
-			if !row.eligible || inputIndex >= len(row.values) {
+		for rowIndex, row := range rows {
+			eligibleRows[rowIndex] = excelRowMatchesFilters(row.values, layout.columnIndexes, step.Filters)
+			if !eligibleRows[rowIndex] || inputIndex >= len(row.values) {
 				continue
 			}
+			row.participated = true
 			key := strings.TrimSpace(row.values[inputIndex])
 			if key != "" {
 				if _, ok := seen[key]; !ok {
@@ -86,13 +89,13 @@ func runExcelMatchSteps(ctx context.Context, config ExcelMatchConfig, lookup Exc
 				return fmt.Errorf("执行第 %d 个匹配步骤失败: %w", stepIndex+1, err)
 			}
 		}
-		for _, row := range rows {
+		for rowIndex, row := range rows {
 			if err := ctx.Err(); err != nil {
 				return err
 			}
-			result := ExcelMatchPreviewStepResult{StepIndex: stepIndex + 1, StepName: step.Name, Status: "skipped", Reason: "未命中前置筛选"}
+			result := ExcelMatchPreviewStepResult{StepIndex: stepIndex + 1, StepName: step.Name, Status: "skipped", Reason: "未命中本步骤筛选"}
 			value := ""
-			if row.eligible {
+			if eligibleRows[rowIndex] {
 				if inputIndex < len(row.values) {
 					result.MatchKey = strings.TrimSpace(row.values[inputIndex])
 				}
@@ -118,8 +121,9 @@ func runExcelMatchSteps(ctx context.Context, config ExcelMatchConfig, lookup Exc
 
 func updateExcelMatchFinalStats(stats *ExcelMatchJobStats, rows []*excelMatchPipelineRow) {
 	for _, row := range rows {
-		if row.eligible {
-			if len(row.stepResults) > 0 && row.stepResults[len(row.stepResults)-1].Status == "matched" {
+		if row.participated {
+			stats.FilteredRows++
+			if result, ok := lastApplicableExcelMatchStepResult(row.stepResults); ok && result.Status == "matched" {
 				stats.MatchedRows++
 			} else {
 				stats.UnmatchedRows++
@@ -127,6 +131,15 @@ func updateExcelMatchFinalStats(stats *ExcelMatchJobStats, rows []*excelMatchPip
 		}
 		stats.ProcessedRows++
 	}
+}
+
+func lastApplicableExcelMatchStepResult(results []ExcelMatchPreviewStepResult) (ExcelMatchPreviewStepResult, bool) {
+	for index := len(results) - 1; index >= 0; index-- {
+		if results[index].Status != "skipped" {
+			return results[index], true
+		}
+	}
+	return ExcelMatchPreviewStepResult{}, false
 }
 
 func processExcelMatchPreview(ctx context.Context, input *excelize.File, config ExcelMatchConfig, lookup ExcelMatchLookup, scanLimit, sampleLimit int) (*ExcelMatchPreviewResult, error) {
@@ -170,9 +183,10 @@ func processExcelMatchPreview(ctx context.Context, input *excelize.File, config 
 					sample.Values[header] = row.values[index]
 				}
 			}
-			if len(row.stepResults) > 0 {
-				last := row.stepResults[len(row.stepResults)-1]
+			if last, ok := lastApplicableExcelMatchStepResult(row.stepResults); ok {
 				sample.MatchKey, sample.MatchedValue, sample.Status, sample.Reason = last.MatchKey, last.MatchedValue, last.Status, last.Reason
+			} else {
+				sample.Status, sample.Reason = "skipped", "未命中任一步骤筛选"
 			}
 			result.Samples = append(result.Samples, sample)
 		}
@@ -198,11 +212,7 @@ func processExcelMatchPreview(ctx context.Context, input *excelize.File, config 
 		}
 		result.Stats.TotalRows++
 		values := normalizeExcelRow(columns, len(layout.headers)-len(config.Steps))
-		eligible := excelRowMatchesFilters(values, layout.columnIndexes, config.Filters)
-		if eligible {
-			result.Stats.FilteredRows++
-		}
-		buffered = append(buffered, &excelMatchPipelineRow{rowNumber: result.Stats.TotalRows + 1, values: values, eligible: eligible})
+		buffered = append(buffered, &excelMatchPipelineRow{rowNumber: result.Stats.TotalRows + 1, values: values})
 		if len(buffered) >= config.BatchSize {
 			if err := flush(); err != nil {
 				return result, err
@@ -339,11 +349,7 @@ func processExcelMatchFileWithProgress(ctx context.Context, inputPath, outputPat
 		}
 		stats.TotalRows++
 		values := normalizeExcelRow(columns, len(layout.headers)-len(config.Steps))
-		eligible := excelRowMatchesFilters(values, layout.columnIndexes, config.Filters)
-		if eligible {
-			stats.FilteredRows++
-		}
-		buffered = append(buffered, &excelMatchPipelineRow{values: values, eligible: eligible})
+		buffered = append(buffered, &excelMatchPipelineRow{values: values})
 		if len(buffered) >= config.BatchSize || len(buffered) >= maxBufferedExcelRows {
 			if err := flush(); err != nil {
 				return stats, err

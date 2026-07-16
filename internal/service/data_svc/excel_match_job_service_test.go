@@ -76,6 +76,13 @@ func TestNormalizeExcelMatchConfigConvertsLegacyExportToOneStep(t *testing.T) {
 	if step.TableName != "bojun_retail_orders" || step.MatchExcelColumn != "原始线上订单号" || step.DBMatchField != "matched_docno" || step.DBValueField != "c_store_name" || step.OutputColumnName != "线下店名称" {
 		t.Fatalf("legacy step = %#v", step)
 	}
+	if len(cfg.Filters) != 0 {
+		t.Fatalf("top-level filters = %#v, want migrated filters", cfg.Filters)
+	}
+	wantFilters := []ExcelMatchFilter{{Column: "店铺", Op: "eq", Value: "幼岚-有赞"}}
+	if !reflect.DeepEqual(step.Filters, wantFilters) {
+		t.Fatalf("step filters = %#v, want %#v", step.Filters, wantFilters)
+	}
 }
 
 func TestNormalizeExcelMatchConfigAcceptsOrderedCustomSteps(t *testing.T) {
@@ -104,6 +111,50 @@ func TestNormalizeExcelMatchConfigRejectsDuplicateStepOutput(t *testing.T) {
 	})
 	if err == nil {
 		t.Fatal("normalizeExcelMatchConfig returned nil error, want duplicate output error")
+	}
+}
+
+func TestExcelRowMatchesFiltersSupportsCustomOperators(t *testing.T) {
+	row := []string{"杭州恒隆店", "", "已完成"}
+	columns := map[string]int{"门店": 0, "备注": 1, "状态": 2}
+	tests := []struct {
+		name   string
+		filter ExcelMatchFilter
+		want   bool
+	}{
+		{name: "equals", filter: ExcelMatchFilter{Column: "状态", Op: "eq", Value: "已完成"}, want: true},
+		{name: "not equals", filter: ExcelMatchFilter{Column: "状态", Op: "neq", Value: "待处理"}, want: true},
+		{name: "contains", filter: ExcelMatchFilter{Column: "门店", Op: "contains", Value: "恒隆"}, want: true},
+		{name: "not contains", filter: ExcelMatchFilter{Column: "门店", Op: "not_contains", Value: "前滩"}, want: true},
+		{name: "starts with", filter: ExcelMatchFilter{Column: "门店", Op: "starts_with", Value: "杭州"}, want: true},
+		{name: "ends with", filter: ExcelMatchFilter{Column: "门店", Op: "ends_with", Value: "店"}, want: true},
+		{name: "empty", filter: ExcelMatchFilter{Column: "备注", Op: "empty"}, want: true},
+		{name: "not empty", filter: ExcelMatchFilter{Column: "状态", Op: "not_empty"}, want: true},
+		{name: "failed condition", filter: ExcelMatchFilter{Column: "状态", Op: "eq", Value: "待处理"}, want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := excelRowMatchesFilters(row, columns, []ExcelMatchFilter{tt.filter}); got != tt.want {
+				t.Fatalf("excelRowMatchesFilters() = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestNormalizeExcelMatchConfigRejectsUnknownStepFilterOperator(t *testing.T) {
+	_, err := normalizeExcelMatchConfig(ExcelMatchConfig{
+		Operation: "export_match",
+		Steps: []ExcelMatchStep{{
+			Filters:          []ExcelMatchFilter{{Column: "状态", Op: "regex", Value: ".*"}},
+			TableName:        "bojun_retail_orders",
+			MatchExcelColumn: "订单号",
+			DBMatchField:     "docno",
+			DBValueField:     "matched_docno",
+			OutputColumnName: "匹配结果",
+		}},
+	})
+	if err == nil {
+		t.Fatal("normalizeExcelMatchConfig returned nil error, want unsupported filter operator error")
 	}
 }
 
@@ -269,7 +320,7 @@ func TestProcessExcelMatchFileUsesPreviousStepOutputAsNextStepInput(t *testing.T
 		Operation: "export_match",
 		Steps: []ExcelMatchStep{
 			{Name: "匹配门店", TableName: "bojun_retail_orders", MatchExcelColumn: "订单号", DBMatchField: "docno", DBValueField: "c_store_name", OutputColumnName: "门店名称"},
-			{Name: "匹配区域", TableName: "store_mappings", MatchExcelColumn: "门店名称", DBMatchField: "store_name", DBValueField: "region_name", OutputColumnName: "区域"},
+			{Name: "匹配区域", Filters: []ExcelMatchFilter{{Column: "门店名称", Op: "contains", Value: "恒隆"}}, TableName: "store_mappings", MatchExcelColumn: "门店名称", DBMatchField: "store_name", DBValueField: "region_name", OutputColumnName: "区域"},
 		},
 	})
 	if err != nil {
@@ -305,6 +356,93 @@ func TestProcessExcelMatchFileUsesPreviousStepOutputAsNextStepInput(t *testing.T
 	want := [][]string{{"订单号", "门店名称", "区域"}, {"B001", "杭州恒隆", "华东"}}
 	if !reflect.DeepEqual(rows, want) {
 		t.Fatalf("result rows = %#v, want %#v", rows, want)
+	}
+}
+
+func TestProcessExcelMatchFileEvaluatesEachStepFilterAgainstAllRows(t *testing.T) {
+	dir := t.TempDir()
+	inputPath := filepath.Join(dir, "source.xlsx")
+	outputPath := filepath.Join(dir, "result.xlsx")
+
+	f := excelize.NewFile()
+	rows := [][]interface{}{
+		{"类型", "订单号"},
+		{"A", "A001"},
+		{"B", "B001"},
+		{"C", "C001"},
+	}
+	for index, row := range rows {
+		cell, err := excelize.CoordinatesToCellName(1, index+1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := f.SetSheetRow("Sheet1", cell, &row); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := f.SaveAs(inputPath); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := normalizeExcelMatchConfig(ExcelMatchConfig{
+		Operation: "export_match",
+		Steps: []ExcelMatchStep{
+			{
+				Name:             "匹配 A 类",
+				Filters:          []ExcelMatchFilter{{Column: "类型", Op: "eq", Value: "A"}},
+				TableName:        "a_orders",
+				MatchExcelColumn: "订单号",
+				DBMatchField:     "docno",
+				DBValueField:     "result",
+				OutputColumnName: "A结果",
+			},
+			{
+				Name:             "匹配 B 类",
+				Filters:          []ExcelMatchFilter{{Column: "类型", Op: "eq", Value: "B"}},
+				TableName:        "b_orders",
+				MatchExcelColumn: "订单号",
+				DBMatchField:     "docno",
+				DBValueField:     "result",
+				OutputColumnName: "B结果",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	lookup := &fakeExcelMatchLookup{stepValues: map[string]map[string]string{
+		"A结果": {"A001": "A命中"},
+		"B结果": {"B001": "B命中"},
+	}}
+
+	stats, err := processExcelMatchFile(context.Background(), inputPath, outputPath, cfg, lookup)
+	if err != nil {
+		t.Fatalf("processExcelMatchFile returned error: %v", err)
+	}
+	if !reflect.DeepEqual(lookup.keys, []string{"A001", "B001"}) {
+		t.Fatalf("lookup keys = %#v, want each step to use its own row set", lookup.keys)
+	}
+	if stats.TotalRows != 3 || stats.FilteredRows != 2 || stats.MatchedRows != 2 || stats.UnmatchedRows != 0 {
+		t.Fatalf("stats = %+v, want total=3 filtered=2 matched=2 unmatched=0", stats)
+	}
+
+	out, err := excelize.OpenFile(outputPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = out.Close() }()
+	got, err := out.GetRows("Result_1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := [][]string{
+		{"类型", "订单号", "A结果", "B结果"},
+		{"A", "A001", "A命中"},
+		{"B", "B001", "", "B命中"},
+		{"C", "C001"},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("result rows = %#v, want %#v", got, want)
 	}
 }
 

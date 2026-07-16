@@ -111,6 +111,17 @@ var allowedExcelExportColumnFormats = map[string]struct{}{
 	"date":    {},
 }
 
+var allowedExcelMatchFilterOps = map[string]struct{}{
+	"eq":           {},
+	"neq":          {},
+	"contains":     {},
+	"not_contains": {},
+	"starts_with":  {},
+	"ends_with":    {},
+	"empty":        {},
+	"not_empty":    {},
+}
+
 type ExcelMatchJobService struct {
 	jobDAO *data_dao.ExcelMatchJobDAO
 }
@@ -133,18 +144,19 @@ type ExcelExportColumnFormat struct {
 }
 
 type ExcelMatchStep struct {
-	Name             string `json:"name"`
-	TableName        string `json:"tableName"`
-	MatchExcelColumn string `json:"matchExcelColumn"`
-	DBMatchField     string `json:"dbMatchField"`
-	DBValueField     string `json:"dbValueField"`
-	OutputColumnName string `json:"outputColumnName"`
+	Name             string             `json:"name"`
+	Filters          []ExcelMatchFilter `json:"filters,omitempty"`
+	TableName        string             `json:"tableName"`
+	MatchExcelColumn string             `json:"matchExcelColumn"`
+	DBMatchField     string             `json:"dbMatchField"`
+	DBValueField     string             `json:"dbValueField"`
+	OutputColumnName string             `json:"outputColumnName"`
 }
 
 type ExcelMatchConfig struct {
 	Operation           string                    `json:"operation"`
 	SheetName           string                    `json:"sheetName"`
-	Filters             []ExcelMatchFilter        `json:"filters"`
+	Filters             []ExcelMatchFilter        `json:"filters,omitempty"`
 	MatchExcelColumn    string                    `json:"matchExcelColumn"`
 	DBTemplate          string                    `json:"dbTemplate"`
 	DBMatchField        string                    `json:"dbMatchField"`
@@ -876,26 +888,11 @@ func normalizeExcelMatchConfig(config ExcelMatchConfig) (ExcelMatchConfig, error
 }
 
 func normalizeExcelExportConfig(config ExcelMatchConfig) (ExcelMatchConfig, error) {
-	normalizedFilters := make([]ExcelMatchFilter, 0, len(config.Filters))
-	for i := range config.Filters {
-		config.Filters[i].Column = strings.TrimSpace(config.Filters[i].Column)
-		config.Filters[i].Op = strings.TrimSpace(config.Filters[i].Op)
-		config.Filters[i].Value = strings.TrimSpace(config.Filters[i].Value)
-		if config.Filters[i].Column == "" && config.Filters[i].Value == "" {
-			continue
-		}
-		if config.Filters[i].Column == "" {
-			return config, errors.New("筛选列不能为空")
-		}
-		if config.Filters[i].Op == "" {
-			config.Filters[i].Op = "eq"
-		}
-		if config.Filters[i].Op != "eq" {
-			return config, fmt.Errorf("暂不支持筛选操作: %s", config.Filters[i].Op)
-		}
-		normalizedFilters = append(normalizedFilters, config.Filters[i])
+	legacyFilters, err := normalizeExcelMatchFilters(config.Filters, "顶层")
+	if err != nil {
+		return config, err
 	}
-	config.Filters = normalizedFilters
+	config.Filters = nil
 
 	if len(config.Steps) == 0 {
 		if config.MatchExcelColumn == "" {
@@ -943,10 +940,17 @@ func normalizeExcelExportConfig(config ExcelMatchConfig) (ExcelMatchConfig, erro
 		if step.TableName == "" || step.MatchExcelColumn == "" || step.DBMatchField == "" || step.DBValueField == "" || step.OutputColumnName == "" {
 			return config, fmt.Errorf("第 %d 个匹配步骤配置不完整", i+1)
 		}
+		step.Filters, err = normalizeExcelMatchFilters(step.Filters, fmt.Sprintf("第 %d 个匹配步骤", i+1))
+		if err != nil {
+			return config, err
+		}
 		if _, exists := seenOutputs[step.OutputColumnName]; exists {
 			return config, fmt.Errorf("匹配步骤输出列名重复: %s", step.OutputColumnName)
 		}
 		seenOutputs[step.OutputColumnName] = struct{}{}
+	}
+	if len(legacyFilters) > 0 {
+		config.Steps[0].Filters = append(legacyFilters, config.Steps[0].Filters...)
 	}
 	normalizedFormats := make([]ExcelExportColumnFormat, 0, len(config.ExportColumnFormats))
 	seenFormatColumns := map[string]struct{}{}
@@ -977,6 +981,29 @@ func normalizeExcelExportConfig(config ExcelMatchConfig) (ExcelMatchConfig, erro
 	config.ExportColumnFormats = normalizedFormats
 
 	return config, nil
+}
+
+func normalizeExcelMatchFilters(filters []ExcelMatchFilter, scope string) ([]ExcelMatchFilter, error) {
+	normalized := make([]ExcelMatchFilter, 0, len(filters))
+	for _, filter := range filters {
+		filter.Column = strings.TrimSpace(filter.Column)
+		filter.Op = strings.ToLower(strings.TrimSpace(filter.Op))
+		filter.Value = strings.TrimSpace(filter.Value)
+		if filter.Column == "" && filter.Op == "" && filter.Value == "" {
+			continue
+		}
+		if filter.Column == "" {
+			return nil, fmt.Errorf("%s筛选列不能为空", scope)
+		}
+		if filter.Op == "" {
+			filter.Op = "eq"
+		}
+		if _, ok := allowedExcelMatchFilterOps[filter.Op]; !ok {
+			return nil, fmt.Errorf("%s暂不支持筛选操作: %s", scope, filter.Op)
+		}
+		normalized = append(normalized, filter)
+	}
+	return normalized, nil
 }
 
 func validateExcelExportSteps(ctx context.Context, config ExcelMatchConfig, validator ExcelMatchSchemaValidator) error {
@@ -1253,7 +1280,27 @@ func excelRowMatchesFilters(row []string, columnIndexes map[string]int, filters 
 		if !ok || index >= len(row) {
 			return false
 		}
-		if strings.TrimSpace(row[index]) != filter.Value {
+		value := strings.TrimSpace(row[index])
+		matched := false
+		switch filter.Op {
+		case "eq", "":
+			matched = value == filter.Value
+		case "neq":
+			matched = value != filter.Value
+		case "contains":
+			matched = strings.Contains(value, filter.Value)
+		case "not_contains":
+			matched = !strings.Contains(value, filter.Value)
+		case "starts_with":
+			matched = strings.HasPrefix(value, filter.Value)
+		case "ends_with":
+			matched = strings.HasSuffix(value, filter.Value)
+		case "empty":
+			matched = value == ""
+		case "not_empty":
+			matched = value != ""
+		}
+		if !matched {
 			return false
 		}
 	}
