@@ -21,6 +21,13 @@ import {
 } from 'lucide-react'
 import './App.css'
 import { clearStoredToken, loadStoredToken, saveStoredToken, storedTokenExpiresAt } from './authStorage'
+import {
+  buildExcelExportConfig,
+  cloneExcelMatchSteps,
+  migrateExcelMatchSteps,
+  type ExcelMatchFilterConfig,
+  type ExcelMatchStepConfig,
+} from './excelMatchConfig'
 
 const defaultApiBaseURL = import.meta.env.VITE_API_BASE_URL ?? 'https://shop-test.youlankids.com'
 
@@ -196,19 +203,8 @@ type ExcelExportColumnFormat = {
   format: string
 }
 
-type ExcelMatchStepConfig = {
-  name: string
-  tableName: string
-  matchExcelColumn: string
-  dbMatchField: string
-  dbValueField: string
-  outputColumnName: string
-}
-
 type ExcelExportSchemeConfig = {
   sheetName: string
-  filterColumn: string
-  filterValue: string
   steps: ExcelMatchStepConfig[]
   exportColumnFormats: string
   batchSize: string
@@ -227,7 +223,7 @@ type ExcelImportSchemeConfig = {
 type ExcelMatchSchemeConfig = {
   operation?: string
   sheetName?: string
-  filters?: Array<{ column?: string; op?: string; value?: string }>
+  filters?: Array<Partial<ExcelMatchFilterConfig>>
   matchExcelColumn?: string
   dbTemplate?: string
   dbMatchField?: string
@@ -289,12 +285,22 @@ const bojunMatchFieldOptions = [
 
 const excelChunkSize = 4 * 1024 * 1024
 
+const excelMatchFilterOperatorOptions = [
+  { value: 'eq', label: '等于' },
+  { value: 'neq', label: '不等于' },
+  { value: 'contains', label: '包含' },
+  { value: 'not_contains', label: '不包含' },
+  { value: 'starts_with', label: '开头是' },
+  { value: 'ends_with', label: '结尾是' },
+  { value: 'empty', label: '为空' },
+  { value: 'not_empty', label: '不为空' },
+]
+
 const defaultExcelExportScheme: ExcelExportSchemeConfig = {
   sheetName: 'Sheet1',
-  filterColumn: '店铺',
-  filterValue: '幼岚-有赞',
   steps: [{
     name: '匹配伯俊门店',
+    filters: [{ column: '店铺', op: 'eq', value: '幼岚-有赞' }],
     tableName: 'bojun_retail_orders',
     matchExcelColumn: '原始线上订单号',
     dbMatchField: 'matched_docno',
@@ -1601,7 +1607,7 @@ function ExcelMatchView({
   const [exportSchemes, setExportSchemes] = useState<ExcelMatchScheme[]>([])
   const [importSchemes, setImportSchemes] = useState<ExcelMatchScheme[]>([])
   const [exportDefaults, setExportDefaults] = useState<ExcelExportSchemeConfig>(defaultExcelExportScheme)
-  const [exportSteps, setExportSteps] = useState<ExcelMatchStepConfig[]>(defaultExcelExportScheme.steps)
+  const [exportSteps, setExportSteps] = useState<ExcelMatchStepConfig[]>(cloneExcelMatchSteps(defaultExcelExportScheme.steps))
   const [importDefaults, setImportDefaults] = useState<ExcelImportSchemeConfig>(defaultExcelImportScheme)
   const [exportFormKey, setExportFormKey] = useState(0)
   const [importFormKey, setImportFormKey] = useState(0)
@@ -1652,26 +1658,37 @@ function ExcelMatchView({
   }
 
   function buildExportConfig(form: FormData) {
-    const filterColumn = formValue(form, 'filterColumn').trim()
-    return {
-      operation: 'export_match',
+    return buildExcelExportConfig({
       sheetName: formValue(form, 'sheetName').trim() || 'Sheet1',
-      filters: filterColumn ? [{ column: filterColumn, op: 'eq', value: formValue(form, 'filterValue').trim() }] : [],
-      steps: exportSteps.map((step) => ({
-        name: step.name.trim(),
-        tableName: step.tableName.trim(),
-        matchExcelColumn: step.matchExcelColumn.trim(),
-        dbMatchField: step.dbMatchField.trim(),
-        dbValueField: step.dbValueField.trim(),
-        outputColumnName: step.outputColumnName.trim(),
-      })),
+      steps: exportSteps,
       exportColumnFormats: parseExportColumnFormats(formValue(form, 'exportColumnFormats')),
       batchSize: Number(formValue(form, 'batchSize') || 1000),
-    }
+    })
   }
 
-  function updateExportStep(index: number, key: keyof ExcelMatchStepConfig, value: string) {
+  function updateExportStep(index: number, key: Exclude<keyof ExcelMatchStepConfig, 'filters'>, value: string) {
     setExportSteps((current) => current.map((step, stepIndex) => stepIndex === index ? { ...step, [key]: value } : step))
+  }
+
+  function updateExportStepFilter(stepIndex: number, filterIndex: number, key: keyof ExcelMatchFilterConfig, value: string) {
+    setExportSteps((current) => current.map((step, currentStepIndex) => currentStepIndex === stepIndex
+      ? {
+          ...step,
+          filters: step.filters.map((filter, currentFilterIndex) => currentFilterIndex === filterIndex ? { ...filter, [key]: value } : filter),
+        }
+      : step))
+  }
+
+  function addExportStepFilter(stepIndex: number) {
+    setExportSteps((current) => current.map((step, currentStepIndex) => currentStepIndex === stepIndex
+      ? { ...step, filters: [...step.filters, { column: '', op: 'eq', value: '' }] }
+      : step))
+  }
+
+  function removeExportStepFilter(stepIndex: number, filterIndex: number) {
+    setExportSteps((current) => current.map((step, currentStepIndex) => currentStepIndex === stepIndex
+      ? { ...step, filters: step.filters.filter((_, currentFilterIndex) => currentFilterIndex !== filterIndex) }
+      : step))
   }
 
   function addExportStep() {
@@ -1679,6 +1696,7 @@ function ExcelMatchView({
       if (current.length >= 20) return current
       return [...current, {
         name: `步骤 ${current.length + 1}`,
+        filters: [],
         tableName: '',
         matchExcelColumn: current[current.length - 1]?.outputColumnName ?? '',
         dbMatchField: '',
@@ -1949,7 +1967,7 @@ function ExcelMatchView({
     setSelectedExportSchemeID(schemeID)
     if (!schemeID) {
       setExportDefaults(defaultExcelExportScheme)
-      setExportSteps(defaultExcelExportScheme.steps.map((step) => ({ ...step })))
+      setExportSteps(cloneExcelMatchSteps(defaultExcelExportScheme.steps))
       setExportFormKey((value) => value + 1)
       setPreviewResult(null)
       setSelectedExportFileName('')
@@ -1960,7 +1978,7 @@ function ExcelMatchView({
     if (!scheme) return
     const defaults = exportSchemeDefaults(scheme.config)
     setExportDefaults(defaults)
-    setExportSteps(defaults.steps.map((step) => ({ ...step })))
+    setExportSteps(cloneExcelMatchSteps(defaults.steps))
     setExportFormKey((value) => value + 1)
     setPreviewResult(null)
     setSelectedExportFileName('')
@@ -2324,13 +2342,11 @@ function ExcelMatchView({
               <span>{selectedExportFileName || '请选择需要匹配导出的 .xlsx 文件'}</span>
             </label>
             <Field label="Sheet 页名称" name="sheetName" defaultValue={exportDefaults.sheetName} />
-            <Field label="筛选列名" name="filterColumn" defaultValue={exportDefaults.filterColumn} />
-            <Field label="筛选值" name="filterValue" defaultValue={exportDefaults.filterValue} />
             <div className="excel-step-editor">
               <div className="excel-step-editor-title">
                 <div>
                   <strong>匹配步骤</strong>
-                  <span>步骤按顺序执行；后一步的 Excel 输入列可以填写前一步的追加列名。</span>
+                  <span>每一步都从完整 Excel 行集独立筛选；前一步跳过的行仍可进入后续步骤。</span>
                 </div>
                 <button type="button" onClick={addExportStep} disabled={exportSteps.length >= 20}>添加步骤</button>
               </div>
@@ -2351,6 +2367,50 @@ function ExcelMatchView({
                     <Field label="数据库匹配字段" name={`step_match_${index}`} value={step.dbMatchField} onChange={(value) => updateExportStep(index, 'dbMatchField', value)} required />
                     <Field label="数据库取值字段" name={`step_value_${index}`} value={step.dbValueField} onChange={(value) => updateExportStep(index, 'dbValueField', value)} required />
                     <Field label="追加输出列" name={`step_output_${index}`} value={step.outputColumnName} onChange={(value) => updateExportStep(index, 'outputColumnName', value)} required />
+                  </div>
+                  <div className="excel-step-filter-editor">
+                    <div className="excel-step-filter-heading">
+                      <div>
+                        <strong>本步骤筛选</strong>
+                        <span>只决定本步骤处理哪些行；多条条件需要同时满足。可引用原始列或前序步骤追加列。</span>
+                      </div>
+                      <button type="button" onClick={() => addExportStepFilter(index)}>添加条件</button>
+                    </div>
+                    {step.filters.length === 0 && <p className="excel-step-filter-empty">未设置条件，本步骤处理全部 Excel 行。</p>}
+                    {step.filters.map((filter, filterIndex) => {
+                      const valueNotRequired = filter.op === 'empty' || filter.op === 'not_empty'
+                      return (
+                        <div className="excel-step-filter-row" key={`${exportFormKey}-${index}-${filterIndex}`}>
+                          <Field
+                            label={`条件 ${filterIndex + 1} · Excel 列`}
+                            name={`step_filter_column_${index}_${filterIndex}`}
+                            value={filter.column}
+                            onChange={(value) => updateExportStepFilter(index, filterIndex, 'column', value)}
+                            required
+                          />
+                          <label>
+                            运算符
+                            <select
+                              name={`step_filter_op_${index}_${filterIndex}`}
+                              value={filter.op}
+                              onChange={(event) => updateExportStepFilter(index, filterIndex, 'op', event.currentTarget.value)}
+                            >
+                              {excelMatchFilterOperatorOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}
+                            </select>
+                          </label>
+                          {valueNotRequired
+                            ? <label>筛选值<input value="此运算无需填写" readOnly disabled /></label>
+                            : <Field
+                                label="筛选值"
+                                name={`step_filter_value_${index}_${filterIndex}`}
+                                value={filter.value}
+                                onChange={(value) => updateExportStepFilter(index, filterIndex, 'value', value)}
+                                required
+                              />}
+                          <button type="button" onClick={() => removeExportStepFilter(index, filterIndex)} aria-label={`删除步骤 ${index + 1} 的条件 ${filterIndex + 1}`}>删除条件</button>
+                        </div>
+                      )
+                    })}
                   </div>
                 </article>
               ))}
@@ -2669,7 +2729,7 @@ function ExcelMatchPreviewPanel({ preview }: { preview: ExcelMatchPreviewResult 
     <div className="excel-preview-panel">
       <div className="overview-grid compact">
         <Metric label="扫描行" value={excelPreviewStat(preview.stats, 'TotalRows')} />
-        <Metric label="命中筛选" value={excelPreviewStat(preview.stats, 'FilteredRows')} />
+        <Metric label="参与步骤行" value={excelPreviewStat(preview.stats, 'FilteredRows')} />
         <Metric label="已匹配" value={excelPreviewStat(preview.stats, 'MatchedRows')} />
         <Metric label="未匹配" value={excelPreviewStat(preview.stats, 'UnmatchedRows')} />
         <Metric label="扫描上限" value={preview.truncated ? `${preview.scanLimit}+` : preview.scanLimit} />
@@ -3479,23 +3539,9 @@ function sameExcelFile(file: File, ref: ExcelUploadRef) {
 }
 
 function exportSchemeDefaults(config: ExcelMatchSchemeConfig): ExcelExportSchemeConfig {
-  const configuredFilters = Array.isArray(config.filters) ? config.filters : null
-  const hasFilterConfig = configuredFilters !== null
-  const filter = configuredFilters?.[0] ?? {}
-  const steps = Array.isArray(config.steps) && config.steps.length > 0
-    ? config.steps.map((step) => ({ ...step }))
-    : [{
-        name: '兼容旧方案',
-        tableName: config.tableName || 'bojun_retail_orders',
-        matchExcelColumn: config.matchExcelColumn || defaultExcelExportScheme.steps[0].matchExcelColumn,
-        dbMatchField: config.dbMatchField || defaultExcelExportScheme.steps[0].dbMatchField,
-        dbValueField: config.dbValueField || defaultExcelExportScheme.steps[0].dbValueField,
-        outputColumnName: config.outputColumnName || defaultExcelExportScheme.steps[0].outputColumnName,
-      }]
+  const steps = migrateExcelMatchSteps(config, defaultExcelExportScheme.steps[0])
   return {
     sheetName: config.sheetName || defaultExcelExportScheme.sheetName,
-    filterColumn: hasFilterConfig ? (filter.column || '') : defaultExcelExportScheme.filterColumn,
-    filterValue: hasFilterConfig ? (filter.value || '') : defaultExcelExportScheme.filterValue,
     steps,
     exportColumnFormats: exportColumnFormatsText(config.exportColumnFormats) || defaultExcelExportScheme.exportColumnFormats,
     batchSize: config.batchSize ? String(config.batchSize) : defaultExcelExportScheme.batchSize,

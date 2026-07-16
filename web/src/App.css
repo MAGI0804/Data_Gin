@@ -775,6 +775,48 @@ button:focus-visible {
   gap: 10px;
 }
 
+.excel-step-filter-editor {
+  display: grid;
+  gap: 10px;
+  border-top: 1px solid #b5b5b5;
+  padding-top: 12px;
+}
+
+.excel-step-filter-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.excel-step-filter-heading > div {
+  display: grid;
+  gap: 3px;
+}
+
+.excel-step-filter-heading span,
+.excel-step-filter-empty {
+  color: #555555;
+  font-size: 12px;
+}
+
+.excel-step-filter-empty {
+  margin: 0;
+  border: 1px dashed #b5b5b5;
+  background: #ffffff;
+  padding: 10px;
+}
+
+.excel-step-filter-row {
+  display: grid;
+  grid-template-columns: minmax(160px, 1fr) 150px minmax(160px, 1fr) auto;
+  align-items: end;
+  gap: 10px;
+  border: 1px solid #d0d0d0;
+  background: #ffffff;
+  padding: 10px;
+}
+
 .checkbox-label {
   display: flex;
   align-items: center;
@@ -996,7 +1038,8 @@ summary {
     grid-template-columns: 1fr;
   }
 
-  .excel-step-fields {
+  .excel-step-fields,
+  .excel-step-filter-row {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
@@ -1069,12 +1112,14 @@ summary {
     padding-right: 0;
   }
 
-  .excel-step-fields {
+  .excel-step-fields,
+  .excel-step-filter-row {
     grid-template-columns: 1fr;
   }
 
   .excel-step-editor-title,
-  .excel-step-heading {
+  .excel-step-heading,
+  .excel-step-filter-heading {
     align-items: stretch;
     flex-direction: column;
   }
