@@ -120,6 +120,8 @@ func autoMigrateTables() {
 		&model.ExcelMatchJob{},         //Excel匹配导出任务表
 		&model.ExcelMatchJobLog{},      //Excel任务处理日志表
 		&model.ExcelMatchScheme{},      //Excel匹配参数方案表
+		// 有赞分销订单表
+		&model.YouzanDistributionOrder{},
 	)
 
 	if err != nil {
