@@ -562,6 +562,54 @@ button:focus-visible {
   align-items: end;
 }
 
+.youzan-backfill-form {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: end;
+}
+
+.task-definition-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin: 0;
+  border-top: 1px solid #d0d0d0;
+}
+
+.task-definition-grid > div {
+  display: grid;
+  grid-template-columns: 96px minmax(0, 1fr);
+  gap: 10px;
+  border-bottom: 1px solid #d0d0d0;
+  padding: 10px 0;
+}
+
+.task-definition-grid > div:nth-child(odd):not(.wide) {
+  padding-right: 16px;
+}
+
+.task-definition-grid .wide {
+  grid-column: 1 / -1;
+}
+
+.task-definition-grid dt {
+  color: #666666;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.task-definition-grid dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.task-page-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 12px;
+}
+
 .push-skip-form {
   display: grid;
   gap: 12px;
@@ -1004,8 +1052,21 @@ summary {
   .excel-upload-form,
   .excel-job-actions,
   .excel-job-detail,
-  .bojun-backfill-form {
+  .bojun-backfill-form,
+  .youzan-backfill-form {
     grid-template-columns: 1fr;
+  }
+
+  .task-definition-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .task-definition-grid .wide {
+    grid-column: auto;
+  }
+
+  .task-definition-grid > div:nth-child(odd):not(.wide) {
+    padding-right: 0;
   }
 
   .excel-step-fields {

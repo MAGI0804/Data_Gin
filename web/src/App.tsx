@@ -38,7 +38,7 @@ type ApiClientOptions = {
 }
 
 type ApiClient = (path: string, options?: ApiClientOptions) => Promise<ApiResult>
-type NavKey = 'overview' | 'runs' | 'delivery_logs' | 'step_runs' | 'sources' | 'receive' | 'pull_records' | 'backfill' | 'rules' | 'processed' | 'methods' | 'destinations' | 'tasks' | 'push_policy' | 'excel_jobs' | 'excel_schemes' | 'excel_write'
+type NavKey = 'overview' | 'runs' | 'delivery_logs' | 'step_runs' | 'sources' | 'receive' | 'pull_records' | 'backfill' | 'youzan_distribution' | 'rules' | 'processed' | 'methods' | 'destinations' | 'tasks' | 'push_policy' | 'excel_jobs' | 'excel_schemes' | 'excel_write'
 type NavItem = { key: NavKey; label: string; description: string; icon: ReactNode }
 type NavGroup = { label: string; items: NavItem[] }
 type MethodKind = 'configured' | 'builtin'
@@ -460,6 +460,12 @@ type LegacyTask = {
   description: string
 }
 
+type LegacyTaskRunResult = {
+  id: string
+  queue: string
+  type: string
+}
+
 type LegacyTransformRule = {
   code: string
   name: string
@@ -514,6 +520,7 @@ const navGroups: NavGroup[] = [
       { key: 'receive', label: '接口接收', description: '外部推送入库记录', icon: <Inbox aria-hidden="true" /> },
       { key: 'pull_records', label: '拉取记录', description: '主动拉取原始数据', icon: <ArrowDownToLine aria-hidden="true" /> },
       { key: 'backfill', label: '伯俊补拉', description: '预览并确认补写订单', icon: <Download aria-hidden="true" /> },
+      { key: 'youzan_distribution', label: '有赞分销', description: '每日拉取与手动补拉', icon: <Download aria-hidden="true" /> },
     ],
   },
   {
@@ -865,6 +872,14 @@ function App() {
     return null
   }
 
+  async function runYouzanDistributionBackfill(payload: { start_time: string; end_time: string }) {
+    const response = await client('/v1/legacy-tasks/youzan_distribution_order_fetch/run', {
+      method: 'POST',
+      body: payload,
+    })
+    return response.ok ? readObject<LegacyTaskRunResult>(response, 'result') : null
+  }
+
   const receivedData = useMemo(() => rawData.filter((item) => !isPulledOrigin(rawDataOrigin(item))), [rawData])
   const pulledData = useMemo(() => rawData.filter((item) => isPulledOrigin(rawDataOrigin(item))), [rawData])
   const coreMethods = useMemo(
@@ -932,6 +947,7 @@ function App() {
         {activeNav === 'receive' && <RawRecordsQueryPage title="接口接收记录" records={receivedData} />}
         {activeNav === 'pull_records' && <RawRecordsQueryPage title="数据拉取记录" records={pulledData} />}
         {activeNav === 'backfill' && <BojunBackfillPage loading={loading || refreshing} onPreview={previewBojunOrderBackfill} onConfirm={confirmBojunOrderBackfill} />}
+        {activeNav === 'youzan_distribution' && <YouzanDistributionPage task={legacyTasks.find((item) => item.code === 'youzan_distribution_order_fetch')} loading={loading || refreshing} onRun={runYouzanDistributionBackfill} />}
         {activeNav === 'rules' && <RulesQueryPage rules={transformRules} />}
         {activeNav === 'processed' && <ProcessedQueryPage records={processedData} />}
         {activeNav === 'destinations' && <DestinationsQueryPage destinations={destinations} />}
@@ -996,6 +1012,7 @@ function ModuleHeader({ activeNav, loading }: { activeNav: NavKey; loading: bool
     receive: { title: '接口接收', subtitle: '查询外部系统主动推送进来的原始数据。' },
     pull_records: { title: '拉取记录', subtitle: '查询系统主动从外部接口拉取的数据。' },
     backfill: { title: '伯俊补拉', subtitle: '先预览、再确认写入指定时间范围的伯俊订单。' },
+    youzan_distribution: { title: '有赞分销订单', subtitle: '查看每日自动任务，并按时间范围提交异步补拉。' },
     rules: { title: '清洗规则', subtitle: '查询规则类型、来源、顺序和启用状态。' },
     processed: { title: '处理结果', subtitle: '按业务键、类型和质量状态查询处理后数据。' },
     methods: { title: '方法目录', subtitle: '查询已配置方法和系统内置能力。' },
@@ -1304,6 +1321,70 @@ function BojunBackfillPage({ loading, onPreview, onConfirm }: {
         {preview && <BojunBackfillResultView title="预览结果" result={preview} />}
         {confirmed && <BojunBackfillResultView title="写入结果" result={confirmed} />}
       </Panel>
+    </div>
+  )
+}
+
+function YouzanDistributionPage({ task, loading, onRun }: {
+  task?: LegacyTask
+  loading: boolean
+  onRun: (payload: { start_time: string; end_time: string }) => Promise<LegacyTaskRunResult | null>
+}) {
+  const [showBackfill, setShowBackfill] = useState(false)
+  const [lastRun, setLastRun] = useState<LegacyTaskRunResult | null>(null)
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const form = new FormData(event.currentTarget)
+    const run = await onRun({
+      start_time: backendDateTime(formValue(form, 'start_time')),
+      end_time: backendDateTime(formValue(form, 'end_time')),
+    })
+    if (!run) return
+    setLastRun(run)
+    setShowBackfill(false)
+  }
+
+  return (
+    <div className="view-stack">
+      <Panel title="每日自动拉取" icon={<ArrowDownToLine />} meta={task?.cron_expr || '等待后端任务定义'}>
+        {!task ? <EmptyState text="后端尚未返回有赞分销任务定义，请确认服务已部署并刷新页面。" /> : (
+          <>
+            <dl className="task-definition-grid">
+              <div><dt>任务名称</dt><dd>{task.name}</dd></div>
+              <div><dt>Cron</dt><dd><code>{task.cron_expr}</code></dd></div>
+              <div><dt>数据来源</dt><dd>{task.input_table}</dd></div>
+              <div><dt>写入表</dt><dd><code>{task.output_table}</code></dd></div>
+              <div className="wide"><dt>执行规则</dt><dd>{task.description}</dd></div>
+              <div className="wide"><dt>昵称处理</dt><dd>所有非空 fans_nickname 必须先批量解密；解密失败时本页订单不写入。</dd></div>
+            </dl>
+            <div className="task-page-actions">
+              <button className="primary" type="button" onClick={() => setShowBackfill(true)} disabled={loading}>发起补拉</button>
+            </div>
+          </>
+        )}
+      </Panel>
+
+      {lastRun && (
+        <Panel title="最近提交" icon={<CheckCircle2 />} meta="异步任务已进入队列">
+          <div className="overview-grid compact">
+            <Metric label="任务编号" value={lastRun.id} />
+            <Metric label="队列" value={lastRun.queue} />
+            <Metric label="任务类型" value={lastRun.type} />
+          </div>
+        </Panel>
+      )}
+
+      {showBackfill && (
+        <Modal title="补拉有赞分销订单" onClose={() => { if (!loading) setShowBackfill(false) }}>
+          <form className="youzan-backfill-form" onSubmit={submit}>
+            <Field label="开始时间" name="start_time" type="datetime-local" defaultValue={previousDayDateTimeLocal(false)} required />
+            <Field label="结束时间" name="end_time" type="datetime-local" defaultValue={previousDayDateTimeLocal(true)} required />
+            <button className="primary" type="submit" disabled={loading}>{loading ? '提交中' : '提交补拉任务'}</button>
+          </form>
+          <p className="backfill-note">任务会逐页拉取并逐页写入；已有 tid 不覆盖，非空昵称必须解密成功后才能落库。</p>
+        </Modal>
+      )}
     </div>
   )
 }
@@ -3517,6 +3598,19 @@ function datetimeLocalMinutesAgo(minutes: number) {
   const date = new Date(Date.now() - minutes * 60 * 1000)
   const pad = (value: number) => String(value).padStart(2, '0')
   return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`
+}
+
+function previousDayDateTimeLocal(endOfDay: boolean) {
+  const date = new Date()
+  date.setDate(date.getDate() - 1)
+  date.setHours(endOfDay ? 23 : 0, endOfDay ? 59 : 0, endOfDay ? 59 : 0, 0)
+  const pad = (value: number) => String(value).padStart(2, '0')
+  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
+}
+
+function backendDateTime(value: string) {
+  const normalized = value.trim().replace('T', ' ')
+  return /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/.test(normalized) ? `${normalized}:00` : normalized
 }
 
 function groupBy<T>(items: T[], keyFn: (item: T) => string) {
