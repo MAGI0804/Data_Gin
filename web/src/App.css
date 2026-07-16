@@ -449,6 +449,39 @@ button:focus-visible {
   padding: 5px 9px;
 }
 
+.query-bar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 16px;
+  border: 1px solid #111111;
+  background: #ffffff;
+  padding: 12px;
+}
+
+.query-fields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+}
+
+.query-count {
+  display: flex;
+  align-items: baseline;
+  justify-content: flex-end;
+  min-width: 96px;
+  gap: 5px;
+}
+
+.query-count strong {
+  font-size: 28px;
+}
+
+.query-count span {
+  color: #666666;
+  font-size: 12px;
+}
+
 .store-log-layout,
 .store-log-groups {
   display: grid;
@@ -853,7 +886,8 @@ summary {
   .log-board,
   .excel-action-grid,
   .push-skip-form,
-  .push-skip-row {
+  .push-skip-row,
+  .query-bar {
     grid-template-columns: 1fr;
   }
 

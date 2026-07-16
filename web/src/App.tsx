@@ -37,7 +37,7 @@ type ApiClientOptions = {
 }
 
 type ApiClient = (path: string, options?: ApiClientOptions) => Promise<ApiResult>
-type NavKey = 'push_status' | 'methods' | 'receive' | 'pull' | 'process' | 'push' | 'excel' | 'logs'
+type NavKey = 'overview' | 'runs' | 'delivery_logs' | 'step_runs' | 'sources' | 'receive' | 'pull_records' | 'backfill' | 'rules' | 'processed' | 'methods' | 'destinations' | 'tasks' | 'push_policy' | 'excel_jobs' | 'excel_schemes' | 'excel_write'
 type NavItem = { key: NavKey; label: string; description: string; icon: ReactNode }
 type NavGroup = { label: string; items: NavItem[] }
 type MethodKind = 'configured' | 'builtin'
@@ -496,24 +496,10 @@ type DeliveryLog = {
   sent_at: string | null
 }
 
-type LogDetail =
-  | { type: 'run'; title: string; value: unknown }
-  | { type: 'delivery'; title: string; value: unknown }
-
-type LogSelection = {
-  type: 'run' | 'delivery'
-  id: number
-}
-
 type DeliveryStore = {
   key: string
   name: string
   aliases: string[]
-}
-
-type DeliveryLogWithStore = {
-  log: DeliveryLog
-  store: DeliveryStore
 }
 
 const tokenStorageKey = 'warehouse-token'
@@ -522,29 +508,38 @@ const navGroups: NavGroup[] = [
   {
     label: '监控',
     items: [
-      { key: 'push_status', label: '运行总览', description: '运行与推送健康度', icon: <Activity aria-hidden="true" /> },
-      { key: 'logs', label: '日志查询', description: '运行、步骤与交付日志', icon: <ScrollText aria-hidden="true" /> },
+      { key: 'overview', label: '运行总览', description: '运行与推送健康度', icon: <Activity aria-hidden="true" /> },
+      { key: 'runs', label: '流水线运行', description: '按状态与 Trace 查询', icon: <ListChecks aria-hidden="true" /> },
+      { key: 'delivery_logs', label: '推送日志', description: '按门店与业务键查询', icon: <Send aria-hidden="true" /> },
+      { key: 'step_runs', label: '步骤运行', description: '选择运行查看步骤', icon: <BookOpen aria-hidden="true" /> },
     ],
   },
   {
     label: '数据接入',
     items: [
+      { key: 'sources', label: '数据源', description: '接入配置与启用状态', icon: <Database aria-hidden="true" /> },
       { key: 'receive', label: '接口接收', description: '外部推送入库记录', icon: <Inbox aria-hidden="true" /> },
-      { key: 'pull', label: '数据拉取', description: '数据源与主动拉取记录', icon: <ArrowDownToLine aria-hidden="true" /> },
+      { key: 'pull_records', label: '拉取记录', description: '主动拉取原始数据', icon: <ArrowDownToLine aria-hidden="true" /> },
+      { key: 'backfill', label: '伯俊补拉', description: '预览并确认补写订单', icon: <Download aria-hidden="true" /> },
     ],
   },
   {
     label: '处理与交付',
     items: [
-      { key: 'process', label: '数据处理', description: '规则与处理后数据', icon: <ListChecks aria-hidden="true" /> },
-      { key: 'push', label: '数据推送', description: '目标、任务与推送策略', icon: <ArrowUpFromLine aria-hidden="true" /> },
+      { key: 'rules', label: '清洗规则', description: '规则类型与执行顺序', icon: <ListChecks aria-hidden="true" /> },
+      { key: 'processed', label: '处理结果', description: '质量与业务数据查询', icon: <CheckCircle2 aria-hidden="true" /> },
       { key: 'methods', label: '方法目录', description: '配置与系统方法', icon: <Wrench aria-hidden="true" /> },
+      { key: 'destinations', label: '推送目标', description: '目标接口配置', icon: <Send aria-hidden="true" /> },
+      { key: 'tasks', label: '推送任务', description: '任务与目标关系', icon: <ArrowUpFromLine aria-hidden="true" /> },
+      { key: 'push_policy', label: '推送策略', description: '订单少推送设置', icon: <ListChecks aria-hidden="true" /> },
     ],
   },
   {
     label: '工具',
     items: [
-      { key: 'excel', label: 'Excel 工作台', description: '匹配、导入与任务查询', icon: <Upload aria-hidden="true" /> },
+      { key: 'excel_jobs', label: 'Excel 任务', description: '状态与结果下载', icon: <ScrollText aria-hidden="true" /> },
+      { key: 'excel_schemes', label: 'Excel 匹配', description: '自定义多步骤方案', icon: <Upload aria-hidden="true" /> },
+      { key: 'excel_write', label: 'Excel 写入', description: '导入与退回未匹配', icon: <Database aria-hidden="true" /> },
     ],
   },
 ]
@@ -553,7 +548,7 @@ const navItems = navGroups.flatMap((group) => group.items)
 
 function navFromHash(): NavKey {
   const value = window.location.hash.replace(/^#\/?/, '') as NavKey
-  return navItems.some((item) => item.key === value) ? value : 'push_status'
+  return navItems.some((item) => item.key === value) ? value : 'overview'
 }
 
 const deliveryStores: DeliveryStore[] = [
@@ -564,6 +559,8 @@ const deliveryStores: DeliveryStore[] = [
   { key: 'qiantan', name: '前滩', aliases: ['ABCN001P012', 'qiantan', '前滩'] },
   { key: 'hangzhou_henglong', name: '杭州恒隆', aliases: ['ABCN002A001', 'hangzhou_henglong', 'henglong', '杭州恒隆'] },
 ]
+
+const otherDeliveryStore: DeliveryStore = { key: 'other', name: '其他目标', aliases: [] }
 
 const builtinMethods: MethodDisplay[] = [
   {
@@ -899,22 +896,18 @@ function App() {
 
       <section className="ops-workspace">
         <ModuleHeader activeNav={activeNav} loading={loading || refreshing} />
-        {activeNav === 'push_status' && <PushStatusView runs={runs} deliveryLogs={deliveryLogs} onLoadSteps={loadStepRuns} />}
+        {activeNav === 'overview' && <PushStatusView runs={runs} deliveryLogs={deliveryLogs} onLoadSteps={loadStepRuns} />}
+        {activeNav === 'runs' && <RunsQueryPage runs={runs} onLoadSteps={loadStepRuns} />}
+        {activeNav === 'delivery_logs' && <DeliveryLogsQueryPage logs={deliveryLogs} onRetryLog={retryDeliveryLog} />}
+        {activeNav === 'step_runs' && <StepRunsQueryPage runs={runs} stepRuns={stepRuns} onLoadSteps={loadStepRuns} />}
+        {activeNav === 'sources' && <SourcesQueryPage sources={sources} />}
         {activeNav === 'methods' && <MethodsView methods={methods} coreMethods={coreMethods} onToggle={toggleTarget} />}
-        {activeNav === 'receive' && <ReceiveView records={receivedData} coreMethod={coreMethods.find((item) => item.key === 'interface_ingest')} />}
-        {activeNav === 'pull' && (
-          <PullView
-            sources={sources}
-            records={pulledData}
-            coreMethods={coreMethods.filter((item) => item.key === 'youzan_fetch' || item.key === 'bojun_order_fetch')}
-            loading={loading || refreshing}
-            onBojunBackfillPreview={previewBojunOrderBackfill}
-            onBojunBackfillConfirm={confirmBojunOrderBackfill}
-            onToggle={toggleTarget}
-          />
-        )}
-        {activeNav === 'process' && <ProcessView rules={transformRules} records={processedData} coreMethod={coreMethods.find((item) => item.key === 'qimai_process')} onToggle={toggleTarget} />}
-        {activeNav === 'push' && (
+        {activeNav === 'receive' && <RawRecordsQueryPage title="接口接收记录" records={receivedData} />}
+        {activeNav === 'pull_records' && <RawRecordsQueryPage title="数据拉取记录" records={pulledData} />}
+        {activeNav === 'backfill' && <BojunBackfillPage loading={loading || refreshing} onPreview={previewBojunOrderBackfill} onConfirm={confirmBojunOrderBackfill} />}
+        {activeNav === 'rules' && <RulesQueryPage rules={transformRules} />}
+        {activeNav === 'processed' && <ProcessedQueryPage records={processedData} />}
+        {(activeNav === 'destinations' || activeNav === 'tasks' || activeNav === 'push_policy') && (
           <PushConfigView
             destinations={destinations}
             tasks={deliveryTasks}
@@ -925,8 +918,7 @@ function App() {
             onToggle={toggleTarget}
           />
         )}
-        {activeNav === 'excel' && <ExcelMatchView token={token} loading={loading} setLoading={setLoading} setResult={setResult} />}
-        {activeNav === 'logs' && <LogsView runs={runs} stepRuns={stepRuns} deliveryLogs={deliveryLogs} onLoadSteps={loadStepRuns} onRetryLog={retryDeliveryLog} />}
+        {(activeNav === 'excel_jobs' || activeNav === 'excel_schemes' || activeNav === 'excel_write') && <ExcelMatchView token={token} loading={loading} setLoading={setLoading} setResult={setResult} />}
       </section>
 
       <ResultPanel result={result} onClose={() => setResult(null)} />
@@ -977,14 +969,23 @@ function LoginScreen({ onLogin }: { onLogin: (token: string) => void }) {
 
 function ModuleHeader({ activeNav, loading }: { activeNav: NavKey; loading: boolean }) {
   const titles: Record<NavKey, { title: string; subtitle: string }> = {
-    push_status: { title: '推送情况', subtitle: '查看最近推送运行、成功失败数量和推送日志状态。' },
-    methods: { title: '方法', subtitle: '只展示当前已配置方法和系统内置方法；方法如何使用由后续模块决定。' },
-    receive: { title: '数据接收', subtitle: '查看对方通过接口发送过来的原始数据情况。' },
-    pull: { title: '数据拉取', subtitle: '查看 API 数据源配置和通过 API 拉取落库的数据。' },
-    process: { title: '数据处理', subtitle: '查看清洗规则和已处理数据。' },
-    push: { title: '数据推送', subtitle: '查看配置好的推送目标和推送任务。' },
-    excel: { title: 'Excel 匹配导出', subtitle: '上传大 Excel，按筛选条件匹配伯俊零售单并导出追加列结果。' },
-    logs: { title: '日志', subtitle: '查看流水线运行日志、步骤日志和推送日志。' },
+    overview: { title: '运行总览', subtitle: '只看当前运行与交付健康度，快速定位失败。' },
+    runs: { title: '流水线运行', subtitle: '按状态、运行类型和 Trace ID 查询执行记录。' },
+    delivery_logs: { title: '推送日志', subtitle: '按成功状态、门店和业务键查询外部交付结果。' },
+    step_runs: { title: '步骤运行', subtitle: '选择一次流水线运行并查看每个步骤的输入输出。' },
+    sources: { title: '数据源', subtitle: '查询数据接入配置、类型和启用状态。' },
+    receive: { title: '接口接收', subtitle: '查询外部系统主动推送进来的原始数据。' },
+    pull_records: { title: '拉取记录', subtitle: '查询系统主动从外部接口拉取的数据。' },
+    backfill: { title: '伯俊补拉', subtitle: '先预览、再确认写入指定时间范围的伯俊订单。' },
+    rules: { title: '清洗规则', subtitle: '查询规则类型、来源、顺序和启用状态。' },
+    processed: { title: '处理结果', subtitle: '按业务键、类型和质量状态查询处理后数据。' },
+    methods: { title: '方法目录', subtitle: '查询已配置方法和系统内置能力。' },
+    destinations: { title: '推送目标', subtitle: '查询目标系统和接口配置。' },
+    tasks: { title: '推送任务', subtitle: '查询交付任务、触发方式和目标关系。' },
+    push_policy: { title: '推送策略', subtitle: '配置各具体推送目标的订单跳过周期。' },
+    excel_jobs: { title: 'Excel 任务', subtitle: '查询任务状态、进度、日志和下载结果。' },
+    excel_schemes: { title: 'Excel 多步骤匹配', subtitle: '配置数据库表、字段和顺序匹配步骤。' },
+    excel_write: { title: 'Excel 写入', subtitle: '执行导入更新与退回未匹配操作。' },
   }
   return (
     <header className="workspace-header">
@@ -1060,109 +1061,6 @@ function MethodsView({ methods, coreMethods, onToggle }: { methods: MethodDispla
   )
 }
 
-function ReceiveView({ records, coreMethod }: { records: RawData[]; coreMethod?: CoreMethod }) {
-  return (
-    <div className="view-stack">
-      {coreMethod && <Panel title="接口数据接收方法" icon={<Inbox />} meta="现有接收入口"><CoreMethodList methods={[coreMethod]} /></Panel>}
-      <section className="overview-grid">
-        <Metric label="接收记录" value={records.length} />
-        <Metric label="已排队" value={records.filter((item) => item.status === 'queued').length} />
-        <Metric label="已清洗" value={records.filter((item) => item.status === 'cleaned').length} />
-        <Metric label="失败" value={records.filter((item) => item.status === 'failed').length} />
-      </section>
-      <Panel title="接口接收数据" icon={<Inbox />} meta="raw ingest">
-        <RawDataList records={records} />
-      </Panel>
-    </div>
-  )
-}
-
-function PullView({
-  sources,
-  records,
-  coreMethods,
-  loading,
-  onBojunBackfillPreview,
-  onBojunBackfillConfirm,
-  onToggle,
-}: {
-  sources: SourceDefinition[]
-  records: RawData[]
-  coreMethods: CoreMethod[]
-  loading: boolean
-  onBojunBackfillPreview: (payload: { start_time: string; end_time: string }) => Promise<BojunOrderBackfillResult | null>
-  onBojunBackfillConfirm: (payload: { start_time: string; end_time: string }) => Promise<BojunOrderBackfillResult | null>
-  onToggle: (target: ToggleTarget, enabled: boolean) => void
-}) {
-  const [backfillPayload, setBackfillPayload] = useState<{ start_time: string; end_time: string } | null>(null)
-  const [backfillPreview, setBackfillPreview] = useState<BojunOrderBackfillResult | null>(null)
-  const [backfillConfirmed, setBackfillConfirmed] = useState<BojunOrderBackfillResult | null>(null)
-
-  async function previewBojunBackfill(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    const form = new FormData(event.currentTarget)
-    const payload = {
-      start_time: formValue(form, 'start_time'),
-      end_time: formValue(form, 'end_time'),
-    }
-    setBackfillConfirmed(null)
-    const result = await onBojunBackfillPreview(payload)
-    setBackfillPayload(result ? payload : null)
-    setBackfillPreview(result)
-  }
-
-  async function confirmBojunBackfill() {
-    if (!backfillPayload || !backfillPreview) return
-    const ok = window.confirm(`确认写入伯俊补拉数据？预计可写入 ${backfillPreview.writable_count} 条，已存在 ${backfillPreview.existing_count} 条，失败 ${backfillPreview.failed_count} 条。`)
-    if (!ok) return
-    const result = await onBojunBackfillConfirm(backfillPayload)
-    setBackfillConfirmed(result)
-  }
-
-  return (
-    <div className="view-stack">
-      {coreMethods.length > 0 && <Panel title="数据拉取方法" icon={<ArrowDownToLine />} meta="现有拉取能力"><CoreMethodList methods={coreMethods} onToggle={onToggle} /></Panel>}
-      <Panel title="伯俊订单补拉" icon={<ArrowDownToLine />} meta="先预览伯俊返回数据，确认后再写入数据库">
-        <form className="bojun-backfill-form" onSubmit={previewBojunBackfill}>
-          <label>
-            开始时间
-            <input name="start_time" type="datetime-local" defaultValue={datetimeLocalMinutesAgo(60)} required />
-          </label>
-          <label>
-            结束时间
-            <input name="end_time" type="datetime-local" defaultValue={datetimeLocalMinutesAgo(0)} required />
-          </label>
-          <button className="primary" type="submit" disabled={loading}>
-            <ArrowDownToLine aria-hidden="true" />
-            预览补拉
-          </button>
-          <button type="button" disabled={loading || !backfillPreview || backfillPreview.writable_count === 0} onClick={confirmBojunBackfill}>
-            <CheckCircle2 aria-hidden="true" />
-            确认写入
-          </button>
-        </form>
-        <p className="backfill-note">预览不会写数据库；确认后按伯俊订单号 docno 判重，已存在不覆盖，未存在才写入 raw_data 和 bojun_retail_orders。</p>
-        {backfillPreview && <BojunBackfillResultView title="预览结果" result={backfillPreview} />}
-        {backfillConfirmed && <BojunBackfillResultView title="写入结果" result={backfillConfirmed} />}
-      </Panel>
-      <section className="overview-grid">
-        <Metric label="拉取数据源" value={sources.length} />
-        <Metric label="启用数据源" value={sources.filter((item) => item.enabled).length} />
-        <Metric label="拉取记录" value={records.length} />
-        <Metric label="API 类型" value={sources.filter((item) => item.source_type.includes('api')).length} />
-      </section>
-      <section className="content-grid two">
-        <Panel title="API 数据源" icon={<Database />} meta="sources">
-          <SourceList sources={sources} />
-        </Panel>
-        <Panel title="API 拉取数据" icon={<ArrowDownToLine />} meta="fetched raw data">
-          <RawDataList records={records} />
-        </Panel>
-      </section>
-    </div>
-  )
-}
-
 function BojunBackfillResultView({ title, result }: { title: string; result: BojunOrderBackfillResult }) {
   const samples = [...(result.samples ?? []), ...(result.failed_samples ?? [])].slice(0, 12)
   return (
@@ -1212,28 +1110,6 @@ function BojunBackfillResultView({ title, result }: { title: string; result: Boj
   )
 }
 
-function ProcessView({ rules, records, coreMethod, onToggle }: { rules: TransformRule[]; records: ProcessedData[]; coreMethod?: CoreMethod; onToggle: (target: ToggleTarget, enabled: boolean) => void }) {
-  return (
-    <div className="view-stack">
-      {coreMethod && <Panel title="企迈标签数据处理方法" icon={<ListChecks />} meta="现有处理能力"><CoreMethodList methods={[coreMethod]} onToggle={onToggle} /></Panel>}
-      <section className="overview-grid">
-        <Metric label="处理规则" value={rules.length} />
-        <Metric label="启用规则" value={rules.filter((item) => item.enabled).length} />
-        <Metric label="处理数据" value={records.length} />
-        <Metric label="平均质量" value={average(records.map((item) => item.quality_score)).toFixed(1)} />
-      </section>
-      <section className="content-grid two">
-        <Panel title="数据处理规则" icon={<ListChecks />} meta="transform rules">
-          <TransformRuleList rules={rules} />
-        </Panel>
-        <Panel title="已处理数据" icon={<CheckCircle2 />} meta="processed records">
-          <ProcessedDataList records={records} />
-        </Panel>
-      </section>
-    </div>
-  )
-}
-
 function PushConfigView({
   destinations,
   tasks,
@@ -1271,6 +1147,174 @@ function PushConfigView({
           <DeliveryTaskList tasks={tasks} />
         </Panel>
       </section>
+    </div>
+  )
+}
+
+function RunsQueryPage({ runs, onLoadSteps }: { runs: PipelineRun[]; onLoadSteps: (runId: number) => void }) {
+  const [query, setQuery] = useState('')
+  const [status, setStatus] = useState('all')
+  const [runType, setRunType] = useState('all')
+  const filtered = useMemo(() => runs.filter((run) => {
+    const matchesQuery = includesQuery([run.id, run.trace_id, run.trigger_type, run.error_message], query)
+    return matchesQuery && (status === 'all' || run.status === status) && (runType === 'all' || run.run_type === runType)
+  }), [query, runType, runs, status])
+  return (
+    <div className="view-stack">
+      <QueryBar count={filtered.length} total={runs.length}>
+        <Field label="ID / Trace / 错误" name="run_query" value={query} onChange={setQuery} />
+        <SelectFilter label="状态" value={status} onChange={setStatus} options={uniqueOptions(runs.map((run) => run.status))} />
+        <SelectFilter label="运行类型" value={runType} onChange={setRunType} options={uniqueOptions(runs.map((run) => run.run_type))} />
+      </QueryBar>
+      <Panel title="运行记录" icon={<Activity />} meta={`查询命中 ${filtered.length} 条`}><RunTable runs={filtered} onLoadSteps={onLoadSteps} /></Panel>
+    </div>
+  )
+}
+
+function DeliveryLogsQueryPage({ logs, onRetryLog }: { logs: DeliveryLog[]; onRetryLog: (logId: number) => void }) {
+  const [query, setQuery] = useState('')
+  const [status, setStatus] = useState('all')
+  const filtered = useMemo(() => logs.filter((log) => {
+    const matchesQuery = includesQuery([log.id, log.trace_id, log.business_key, log.source_code, log.destination_code, log.destination_name, log.error_message], query)
+    const matchesStatus = status === 'all' || (status === 'success' ? log.success : !log.success)
+    return matchesQuery && matchesStatus
+  }), [logs, query, status])
+  return (
+    <div className="view-stack">
+      <QueryBar count={filtered.length} total={logs.length}>
+        <Field label="业务键 / Trace / 来源 / 目标" name="delivery_query" value={query} onChange={setQuery} />
+        <SelectFilter label="交付状态" value={status} onChange={setStatus} options={[{ value: 'success', label: '成功' }, { value: 'failed', label: '失败' }]} />
+      </QueryBar>
+      <Panel title="推送日志" icon={<Send />} meta={`查询命中 ${filtered.length} 条`}><DeliveryLogList logs={filtered} onRetryLog={onRetryLog} /></Panel>
+    </div>
+  )
+}
+
+function StepRunsQueryPage({ runs, stepRuns, onLoadSteps }: { runs: PipelineRun[]; stepRuns: StepRun[]; onLoadSteps: (runId: number) => void }) {
+  const [runQuery, setRunQuery] = useState('')
+  const [stepQuery, setStepQuery] = useState('')
+  const visibleRuns = runs.filter((run) => includesQuery([run.id, run.trace_id, run.run_type], runQuery))
+  const visibleSteps = stepRuns.filter((step) => includesQuery([step.id, step.run_id, step.step_code, step.method_type, step.status, step.error_message], stepQuery))
+  return (
+    <div className="view-stack">
+      <QueryBar count={visibleRuns.length} total={runs.length}>
+        <Field label="先查询运行" name="step_run_query" value={runQuery} onChange={setRunQuery} />
+      </QueryBar>
+      <Panel title="选择运行" icon={<Activity />} meta="点击步骤加载该次运行"><RunTable runs={visibleRuns} onLoadSteps={onLoadSteps} /></Panel>
+      <QueryBar count={visibleSteps.length} total={stepRuns.length}>
+        <Field label="步骤编码 / 类型 / 状态" name="step_query" value={stepQuery} onChange={setStepQuery} />
+      </QueryBar>
+      <Panel title="步骤明细" icon={<BookOpen />} meta={`当前 ${visibleSteps.length} 条`}><StepRunList stepRuns={visibleSteps} /></Panel>
+    </div>
+  )
+}
+
+function SourcesQueryPage({ sources }: { sources: SourceDefinition[] }) {
+  const [query, setQuery] = useState('')
+  const [status, setStatus] = useState('all')
+  const [sourceType, setSourceType] = useState('all')
+  const filtered = sources.filter((source) => includesQuery([source.id, source.name, source.code, source.auth_type], query)
+    && (status === 'all' || (status === 'enabled' ? source.enabled : !source.enabled))
+    && (sourceType === 'all' || source.source_type === sourceType))
+  return (
+    <div className="view-stack">
+      <QueryBar count={filtered.length} total={sources.length}>
+        <Field label="名称 / 编码 / 鉴权" name="source_query" value={query} onChange={setQuery} />
+        <SelectFilter label="状态" value={status} onChange={setStatus} options={[{ value: 'enabled', label: '启用' }, { value: 'disabled', label: '停用' }]} />
+        <SelectFilter label="类型" value={sourceType} onChange={setSourceType} options={uniqueOptions(sources.map((source) => source.source_type))} />
+      </QueryBar>
+      <Panel title="数据源配置" icon={<Database />} meta={`查询命中 ${filtered.length} 条`}><SourceList sources={filtered} /></Panel>
+    </div>
+  )
+}
+
+function RawRecordsQueryPage({ title, records }: { title: string; records: RawData[] }) {
+  const [query, setQuery] = useState('')
+  const [status, setStatus] = useState('all')
+  const [origin, setOrigin] = useState('all')
+  const filtered = records.filter((record) => includesQuery([record.id, record.external_id, record.data_type, record.remark, record.source, JSON.stringify(record.raw_content ?? record.rawContent ?? '')], query)
+    && (status === 'all' || record.status === status)
+    && (origin === 'all' || rawDataOrigin(record) === origin))
+  return (
+    <div className="view-stack">
+      <QueryBar count={filtered.length} total={records.length}>
+        <Field label="ID / 外部编号 / 内容" name="raw_query" value={query} onChange={setQuery} />
+        <SelectFilter label="状态" value={status} onChange={setStatus} options={uniqueOptions(records.map((record) => record.status))} />
+        <SelectFilter label="来源" value={origin} onChange={setOrigin} options={uniqueOptions(records.map(rawDataOrigin))} />
+      </QueryBar>
+      <Panel title={title} icon={<Inbox />} meta={`查询命中 ${filtered.length} 条`}><RawDataList records={filtered} /></Panel>
+    </div>
+  )
+}
+
+function RulesQueryPage({ rules }: { rules: TransformRule[] }) {
+  const [query, setQuery] = useState('')
+  const [status, setStatus] = useState('all')
+  const [ruleType, setRuleType] = useState('all')
+  const filtered = rules.filter((rule) => includesQuery([rule.id, rule.name, rule.source_id, rule.config_json], query)
+    && (status === 'all' || (status === 'enabled' ? rule.enabled : !rule.enabled))
+    && (ruleType === 'all' || rule.rule_type === ruleType))
+  return (
+    <div className="view-stack">
+      <QueryBar count={filtered.length} total={rules.length}>
+        <Field label="名称 / 来源 ID / 配置" name="rule_query" value={query} onChange={setQuery} />
+        <SelectFilter label="状态" value={status} onChange={setStatus} options={[{ value: 'enabled', label: '启用' }, { value: 'disabled', label: '停用' }]} />
+        <SelectFilter label="规则类型" value={ruleType} onChange={setRuleType} options={uniqueOptions(rules.map((rule) => rule.rule_type))} />
+      </QueryBar>
+      <Panel title="清洗规则" icon={<ListChecks />} meta={`查询命中 ${filtered.length} 条`}><TransformRuleList rules={filtered} /></Panel>
+    </div>
+  )
+}
+
+function ProcessedQueryPage({ records }: { records: ProcessedData[] }) {
+  const [query, setQuery] = useState('')
+  const [quality, setQuality] = useState('all')
+  const filtered = records.filter((record) => includesQuery([record.id, record.raw_data_id, record.data_type, record.data_fields], query)
+    && (quality === 'all' || (quality === 'good' ? record.quality_score >= 80 : record.quality_score < 80)))
+  return (
+    <div className="view-stack">
+      <QueryBar count={filtered.length} total={records.length}>
+        <Field label="ID / Raw ID / 类型 / 内容" name="processed_query" value={query} onChange={setQuery} />
+        <SelectFilter label="质量" value={quality} onChange={setQuality} options={[{ value: 'good', label: '80 分及以上' }, { value: 'low', label: '低于 80 分' }]} />
+      </QueryBar>
+      <Panel title="处理结果" icon={<CheckCircle2 />} meta={`查询命中 ${filtered.length} 条`}><ProcessedDataList records={filtered} /></Panel>
+    </div>
+  )
+}
+
+function BojunBackfillPage({ loading, onPreview, onConfirm }: {
+  loading: boolean
+  onPreview: (payload: { start_time: string; end_time: string }) => Promise<BojunOrderBackfillResult | null>
+  onConfirm: (payload: { start_time: string; end_time: string }) => Promise<BojunOrderBackfillResult | null>
+}) {
+  const [payload, setPayload] = useState<{ start_time: string; end_time: string } | null>(null)
+  const [preview, setPreview] = useState<BojunOrderBackfillResult | null>(null)
+  const [confirmed, setConfirmed] = useState<BojunOrderBackfillResult | null>(null)
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const form = new FormData(event.currentTarget)
+    const nextPayload = { start_time: formValue(form, 'start_time'), end_time: formValue(form, 'end_time') }
+    setConfirmed(null)
+    const result = await onPreview(nextPayload)
+    setPayload(result ? nextPayload : null)
+    setPreview(result)
+  }
+  async function confirm() {
+    if (!payload || !preview || !window.confirm(`确认写入 ${preview.writable_count} 条伯俊订单？`)) return
+    setConfirmed(await onConfirm(payload))
+  }
+  return (
+    <div className="view-stack">
+      <Panel title="伯俊订单补拉" icon={<Download />} meta="预览不写库，确认后按 docno 判重">
+        <form className="bojun-backfill-form" onSubmit={submit}>
+          <Field label="开始时间" name="start_time" type="datetime-local" defaultValue={datetimeLocalMinutesAgo(60)} required />
+          <Field label="结束时间" name="end_time" type="datetime-local" defaultValue={datetimeLocalMinutesAgo(0)} required />
+          <button className="primary" type="submit" disabled={loading}>预览补拉</button>
+          <button type="button" disabled={loading || !preview || preview.writable_count === 0} onClick={confirm}>确认写入</button>
+        </form>
+        {preview && <BojunBackfillResultView title="预览结果" result={preview} />}
+        {confirmed && <BojunBackfillResultView title="写入结果" result={confirmed} />}
+      </Panel>
     </div>
   )
 }
@@ -2337,85 +2381,6 @@ function ToggleButton({ enabled, target, onToggle }: { enabled: boolean; target:
   )
 }
 
-function LogsView({ runs, stepRuns, deliveryLogs, onLoadSteps, onRetryLog }: { runs: PipelineRun[]; stepRuns: StepRun[]; deliveryLogs: DeliveryLog[]; onLoadSteps: (runId: number) => void; onRetryLog: (logId: number) => void }) {
-  const [selection, setSelection] = useState<LogSelection | null>(() => readLogSelection())
-
-  useEffect(() => {
-    const syncRoute = () => setSelection(readLogSelection())
-    window.addEventListener('hashchange', syncRoute)
-    window.addEventListener('popstate', syncRoute)
-    return () => {
-      window.removeEventListener('hashchange', syncRoute)
-      window.removeEventListener('popstate', syncRoute)
-    }
-  }, [])
-
-  const detail = useMemo(() => {
-    if (!selection) return null
-    if (selection.type === 'run') {
-      const run = runs.find((item) => item.id === selection.id)
-      if (!run) return null
-      return {
-        type: 'run' as const,
-        title: `运行日志 #${run.id}`,
-        value: pipelineRunDetail(run),
-      }
-    }
-    const log = deliveryLogs.find((item) => item.id === selection.id)
-    if (!log) return null
-    return {
-      type: 'delivery' as const,
-      title: `推送日志 #${log.id}`,
-      value: deliveryLogDetail(log),
-    }
-  }, [deliveryLogs, runs, selection])
-
-  function openLog(nextSelection: LogSelection) {
-    pushLogSelection(nextSelection)
-    setSelection(nextSelection)
-  }
-
-  function closeLog() {
-    clearLogSelection()
-    setSelection(null)
-  }
-
-  if (selection) return <LogDetailPage detail={detail} onBack={closeLog} />
-
-  return (
-    <div className="log-board">
-      <section className="log-column">
-        <Panel title="运行日志" icon={<ScrollText />} meta={`${runs.length} 条运行`}>
-          <RunTable runs={runs} onLoadSteps={onLoadSteps} onSelectRun={(run) => openLog({ type: 'run', id: run.id })} />
-        </Panel>
-      </section>
-      <section className="log-column">
-        <Panel title="推送日志" icon={<Send />} meta={`${deliveryLogs.length} 条推送`}>
-          <DeliveryLogList logs={deliveryLogs} onSelectLog={(log) => openLog({ type: 'delivery', id: log.id })} onRetryLog={onRetryLog} />
-        </Panel>
-      </section>
-      <section className="log-column">
-        <Panel title="步骤日志" icon={<BookOpen />} meta="选择运行记录后加载">
-          <StepRunList stepRuns={stepRuns} />
-        </Panel>
-      </section>
-    </div>
-  )
-}
-
-function LogDetailPage({ detail, onBack }: { detail: LogDetail | null; onBack: () => void }) {
-  return (
-    <div className="view-stack">
-      <div className="detail-toolbar">
-        <button type="button" onClick={onBack}>返回日志列表</button>
-      </div>
-      <Panel title={detail?.title ?? '日志详情'} icon={<FileJson />} meta={detail?.type === 'delivery' ? 'request / response / error' : 'run detail'}>
-        {detail ? <ReadonlyJSON value={detail.value} /> : <EmptyState text="当前日志不存在或还未加载。" />}
-      </Panel>
-    </div>
-  )
-}
-
 function RunTable({ runs, onLoadSteps, onSelectRun }: { runs: PipelineRun[]; onLoadSteps: (runId: number) => void; onSelectRun?: (run: PipelineRun) => void }) {
   if (runs.length === 0) return <EmptyState text="暂无运行记录。" />
   return (
@@ -2432,7 +2397,7 @@ function RunTable({ runs, onLoadSteps, onSelectRun }: { runs: PipelineRun[]; onL
               <td>{formatDate(run.started_at)}</td>
               <td>
                 <div className="table-actions">
-                  <button type="button" onClick={() => onSelectRun?.(run)}>详情</button>
+                  {onSelectRun && <button type="button" onClick={() => onSelectRun(run)}>详情</button>}
                   <button type="button" onClick={() => onLoadSteps(run.id)}>步骤</button>
                 </div>
               </td>
@@ -2447,12 +2412,12 @@ function RunTable({ runs, onLoadSteps, onSelectRun }: { runs: PipelineRun[]; onL
 function DeliveryLogList({ logs, onSelectLog, onRetryLog }: { logs: DeliveryLog[]; onSelectLog?: (log: DeliveryLog) => void; onRetryLog?: (logId: number) => void }) {
   const [storeFilter, setStoreFilter] = useState('all')
   const matchedLogs = useMemo(
-    () => logs.map((log) => ({ log, store: matchDeliveryStore(log) })).filter((item): item is DeliveryLogWithStore => Boolean(item.store)),
+	    () => logs.map((log) => ({ log, store: matchDeliveryStore(log) ?? otherDeliveryStore })),
     [logs],
   )
   const visibleLogs = storeFilter === 'all' ? matchedLogs : matchedLogs.filter((item) => item.store.key === storeFilter)
   const groupedLogs = useMemo(() => {
-    return deliveryStores
+    return [...deliveryStores, otherDeliveryStore]
       .map((store) => ({
         store,
         logs: visibleLogs.filter((item) => item.store.key === store.key).map((item) => item.log),
@@ -2460,7 +2425,7 @@ function DeliveryLogList({ logs, onSelectLog, onRetryLog }: { logs: DeliveryLog[
       .filter((group) => group.logs.length > 0)
   }, [visibleLogs])
 
-  if (matchedLogs.length === 0) return <EmptyState text="暂无匹配门店的推送日志。" />
+  if (matchedLogs.length === 0) return <EmptyState text="暂无推送日志。" />
   return (
     <div className="store-log-layout">
       <div className="log-filter-bar">
@@ -2471,9 +2436,10 @@ function DeliveryLogList({ logs, onSelectLog, onRetryLog }: { logs: DeliveryLog[
             {deliveryStores.map((store) => (
               <option key={store.key} value={store.key}>{store.name}</option>
             ))}
+			<option value={otherDeliveryStore.key}>{otherDeliveryStore.name}</option>
           </select>
         </label>
-        <span>已匹配 {matchedLogs.length} 条，当前显示 {visibleLogs.length} 条</span>
+        <span>共 {matchedLogs.length} 条，当前显示 {visibleLogs.length} 条</span>
       </div>
       {groupedLogs.length === 0 ? <EmptyState text="当前门店暂无推送日志。" /> : (
         <div className="store-log-groups">
@@ -2538,67 +2504,6 @@ function apiURL(path: string) {
   const normalizedPath = path.startsWith('/api') ? path : `/api${path.startsWith('/') ? path : `/${path}`}`
   const base = defaultApiBaseURL.replace(/\/$/, '')
   return `${base}${normalizedPath}`
-}
-
-function readLogSelection(): LogSelection | null {
-  const match = window.location.hash.match(/^#\/logs\/(run|delivery)\/(\d+)$/)
-  if (!match) return null
-  return {
-    type: match[1] as LogSelection['type'],
-    id: Number(match[2]),
-  }
-}
-
-function pushLogSelection(selection: LogSelection) {
-  window.history.pushState(null, '', `#/logs/${selection.type}/${selection.id}`)
-}
-
-function clearLogSelection() {
-  window.history.pushState(null, '', `${window.location.pathname}${window.location.search}`)
-}
-
-function pipelineRunDetail(run: PipelineRun) {
-  return {
-    id: run.id,
-    trace_id: run.trace_id,
-    run_type: run.run_type,
-    trigger_type: run.trigger_type,
-    status: run.status,
-    counts: {
-      total: run.total_count,
-      success: run.success_count,
-      failed: run.failed_count,
-    },
-    refs: {
-      source_id: run.source_id,
-      destination_id: run.destination_id,
-    },
-    error_message: run.error_message,
-    started_at: run.started_at,
-    finished_at: run.finished_at,
-  }
-}
-
-function deliveryLogDetail(log: DeliveryLog) {
-  return {
-    id: log.id,
-    trace_id: log.trace_id,
-    run_id: log.run_id,
-    target: {
-      destination_id: log.destination_id,
-      destination_code: log.destination_code,
-      destination_name: log.destination_name,
-    },
-    source_code: log.source_code,
-    clean_record_id: log.clean_record_id,
-    business_key: log.business_key,
-    http_status: log.http_status,
-    success: log.success,
-    error_message: log.error_message,
-    sent_at: log.sent_at,
-    request_body: parseJsonText(log.request_body),
-    response_body: parseJsonText(log.response_body),
-  }
 }
 
 function matchDeliveryStore(log: DeliveryLog) {
@@ -2779,6 +2684,27 @@ function PanelTitle({ icon, title, meta }: { icon: ReactNode; title: string; met
   )
 }
 
+function QueryBar({ count, total, children }: { count: number; total: number; children: ReactNode }) {
+  return (
+    <section className="query-bar" aria-label="查询条件">
+      <div className="query-fields">{children}</div>
+      <div className="query-count"><strong>{count}</strong><span>/ {total} 条</span></div>
+    </section>
+  )
+}
+
+function SelectFilter({ label, value, onChange, options }: { label: string; value: string; onChange: (value: string) => void; options: Array<{ value: string; label: string }> }) {
+  return (
+    <label>
+      {label}
+      <select value={value} onChange={(event) => onChange(event.currentTarget.value)}>
+        <option value="all">全部</option>
+        {options.map((option) => <option value={option.value} key={option.value}>{option.label}</option>)}
+      </select>
+    </label>
+  )
+}
+
 function Metric({ label, value }: { label: string; value: ReactNode }) {
   return <div className="metric"><span>{label}</span><strong>{value}</strong></div>
 }
@@ -2791,11 +2717,11 @@ function EmptyState({ text }: { text: string }) {
   return <div className="empty-state">{text}</div>
 }
 
-function Field({ label, name, defaultValue = '', type = 'text' }: { label: string; name: string; defaultValue?: string; type?: string }) {
+function Field({ label, name, defaultValue = '', type = 'text', value, onChange, required = false }: { label: string; name: string; defaultValue?: string; type?: string; value?: string; onChange?: (value: string) => void; required?: boolean }) {
   return (
     <label>
       {label}
-      <input name={name} defaultValue={defaultValue} type={type} />
+      <input name={name} defaultValue={value === undefined ? defaultValue : undefined} value={value} type={type} required={required} onChange={onChange ? (event) => onChange(event.currentTarget.value) : undefined} />
     </label>
   )
 }
@@ -3378,14 +3304,19 @@ function groupBy<T>(items: T[], keyFn: (item: T) => string) {
   }, {})
 }
 
+function includesQuery(values: Array<string | number | null | undefined>, query: string) {
+  const normalized = query.trim().toLowerCase()
+  if (!normalized) return true
+  return values.some((value) => String(value ?? '').toLowerCase().includes(normalized))
+}
+
+function uniqueOptions(values: string[]) {
+  return Array.from(new Set(values.filter(Boolean))).sort().map((value) => ({ value, label: value }))
+}
+
 function sum(items: PipelineRun[], key: 'success_count' | 'failed_count') {
   return items.reduce((total, item) => total + (Number(item[key]) || 0), 0)
 }
 
-function average(values: number[]) {
-  const filtered = values.filter((value) => Number.isFinite(value))
-  if (filtered.length === 0) return 0
-  return filtered.reduce((total, value) => total + value, 0) / filtered.length
-}
 
 export default App
