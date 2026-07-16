@@ -1272,6 +1272,8 @@ function ExcelMatchView({
   const [job, setJob] = useState<ExcelMatchJob | null>(null)
   const [jobHistory, setJobHistory] = useState<ExcelMatchJob[]>([])
   const [jobLogs, setJobLogs] = useState<ExcelMatchJobLog[]>([])
+  const [trackingJobID, setTrackingJobID] = useState<number | null>(null)
+  const [autoRefreshText, setAutoRefreshText] = useState('')
   const [downloadingJobID, setDownloadingJobID] = useState<number | null>(null)
   const [selectedExportFileName, setSelectedExportFileName] = useState('')
   const [selectedImportFileName, setSelectedImportFileName] = useState('')
@@ -1289,14 +1291,18 @@ function ExcelMatchView({
   const [selectedExportSchemeID, setSelectedExportSchemeID] = useState('')
   const [selectedImportSchemeID, setSelectedImportSchemeID] = useState('')
 
-  function applyJobResult(result: ApiResult) {
+  const applyJobResult = useCallback((result: ApiResult, options: { track?: boolean } = {}) => {
     const nextJob = readObject<ExcelMatchJob>(result, 'job')
     if (nextJob) {
       setJob(nextJob)
       setJobID(String(nextJob.id))
+      setJobHistory((current) => upsertExcelJobHistory(current, nextJob))
+      if (options.track !== false) {
+        setTrackingJobID(isExcelJobActive(nextJob) ? nextJob.id : null)
+      }
     }
     setJobLogs(readList<ExcelMatchJobLog>(result, 'logs'))
-  }
+  }, [])
 
   function clearUploadRef(slot: ExcelUploadSlot) {
     setUploadRefs((current) => ({ ...current, [slot]: undefined }))
@@ -1394,6 +1400,62 @@ function ExcelMatchView({
     void loadSchemes()
     void loadJobHistory()
   }, [loadJobHistory, loadSchemes, token])
+
+  const refreshJobByID = useCallback(async (id: number, options: { silent?: boolean; track?: boolean } = {}) => {
+    if (!options.silent) setLoading(true)
+    try {
+      const response = await fetch(apiURL(`/v1/excel-match-jobs/${id}`), {
+        method: 'GET',
+        headers: token ? { token } : undefined,
+      })
+      const data = await response.json().catch(() => ({}))
+      const nextResult = { ok: response.ok && isSuccessPayload(data), status: response.status, data }
+      if (!options.silent) setResult(nextResult)
+      if (nextResult.ok) {
+        applyJobResult(nextResult, { track: options.track })
+        if (!options.silent) await loadJobHistory()
+        return readObject<ExcelMatchJob>(nextResult, 'job')
+      }
+      if (options.silent) {
+        setAutoRefreshText(`自动刷新失败：${readMessage(data) || response.status}`)
+      }
+    } catch (error) {
+      if (!options.silent) {
+        setResult({ ok: false, status: 0, data: error instanceof Error ? error.message : String(error) })
+      } else {
+        setAutoRefreshText(`自动刷新失败：${error instanceof Error ? error.message : String(error)}`)
+      }
+    } finally {
+      if (!options.silent) setLoading(false)
+    }
+    return null
+  }, [applyJobResult, loadJobHistory, setLoading, setResult, token])
+
+  useEffect(() => {
+    if (!token || !trackingJobID) return
+
+    let cancelled = false
+    const refreshTrackedJob = async () => {
+      const nextJob = await refreshJobByID(trackingJobID, { silent: true })
+      if (cancelled || !nextJob) return
+
+      setAutoRefreshText(`自动刷新中：任务 #${nextJob.id}，${excelJobStatusLabel(nextJob.status)}，${new Date().toLocaleTimeString()}`)
+      if (!isExcelJobActive(nextJob)) {
+        setTrackingJobID(null)
+        void loadJobHistory()
+      }
+    }
+
+    void refreshTrackedJob()
+    const timer = window.setInterval(() => {
+      void refreshTrackedJob()
+    }, 2000)
+
+    return () => {
+      cancelled = true
+      window.clearInterval(timer)
+    }
+  }, [loadJobHistory, refreshJobByID, token, trackingJobID])
 
   async function ensureExcelUpload(slot: ExcelUploadSlot, file: File) {
     const existing = uploadRefs[slot]
@@ -1695,27 +1757,6 @@ function ExcelMatchView({
     await refreshJobByID(id)
   }
 
-  async function refreshJobByID(id: number) {
-    setLoading(true)
-    try {
-      const response = await fetch(apiURL(`/v1/excel-match-jobs/${id}`), {
-        method: 'GET',
-        headers: token ? { token } : undefined,
-      })
-      const data = await response.json().catch(() => ({}))
-      const nextResult = { ok: response.ok && isSuccessPayload(data), status: response.status, data }
-      setResult(nextResult)
-      if (nextResult.ok) {
-        applyJobResult(nextResult)
-        await loadJobHistory()
-      }
-    } catch (error) {
-      setResult({ ok: false, status: 0, data: error instanceof Error ? error.message : String(error) })
-    } finally {
-      setLoading(false)
-    }
-  }
-
   async function downloadJob(targetID?: number) {
     const id = targetID ?? Number(jobID || job?.id)
     if (!id) {
@@ -1748,6 +1789,7 @@ function ExcelMatchView({
         <Metric label="任务状态" value={job ? excelJobStatusLabel(job.status) : '-'} />
         <Metric label="已处理行" value={job ? `${job.processed_rows}/${job.total_rows}` : '-'} />
         <Metric label="匹配结果" value={job ? `${job.matched_rows} 匹配 / ${job.unmatched_rows} 未匹配` : '-'} />
+        <Metric label="自动跟踪" value={trackingJobID ? `#${trackingJobID}` : '-'} />
       </section>
 
       <Panel title="Excel 操作" icon={<Upload />} meta="参数在弹出框内填写，页面只保留状态和结果">
@@ -1781,12 +1823,13 @@ function ExcelMatchView({
           loading={loading}
           downloadingJobID={downloadingJobID}
           onDownload={downloadJob}
-          onView={refreshJobByID}
+          onView={(id) => void refreshJobByID(id)}
         />
       </Panel>
 
       {job && (
         <Panel title={`Excel 任务 #${job.id}`} icon={<FileJson />} meta={job.source_file_name || 'job detail'}>
+          {autoRefreshText && <p className="excel-mode-note">{autoRefreshText}</p>}
           <div className="excel-job-detail">
             <Metric label="源文件" value={job.source_file_name || '-'} />
             <Metric label="任务类型" value={excelJobOperationLabel(excelJobOperation(job))} />
@@ -3132,6 +3175,18 @@ function excelJobOperationLabel(value: string) {
 function canDownloadExcelJob(job: ExcelMatchJob) {
   if (typeof job.can_download === 'boolean') return job.can_download
   return job.status === 'success' && excelJobOperation(job) === 'export_match' && Boolean(job.result_url)
+}
+
+function isExcelJobActive(job: ExcelMatchJob | null | undefined) {
+  return Boolean(job && !['success', 'failed', 'expired'].includes(job.status))
+}
+
+function upsertExcelJobHistory(jobs: ExcelMatchJob[], nextJob: ExcelMatchJob) {
+  const index = jobs.findIndex((item) => item.id === nextJob.id)
+  if (index === -1) return [nextJob, ...jobs].slice(0, 30)
+  const nextJobs = [...jobs]
+  nextJobs[index] = nextJob
+  return nextJobs
 }
 
 function excelPreviewStat(stats: ExcelMatchPreviewStats, key: keyof ExcelMatchPreviewStats) {
