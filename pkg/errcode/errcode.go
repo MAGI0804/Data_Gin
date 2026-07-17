@@ -95,15 +95,17 @@ func (e *Error) HttpStatusCode() int {
 	case BadRequest.Code():
 		return http.StatusBadRequest
 	case Unauthorized.Code():
-		fallthrough
-	case Forbidden.Code():
 		return http.StatusUnauthorized
+	case Forbidden.Code():
+		return http.StatusForbidden
 	case NotFound.Code():
 		return http.StatusNotFound
 	case MethodNotAllowed.Code():
 		return http.StatusMethodNotAllowed
 	case RequestTimeout.Code():
 		return http.StatusRequestTimeout
+	case Conflict.Code():
+		return http.StatusConflict
 	case UnsupportedMediaType.Code():
 		return http.StatusUnsupportedMediaType
 	case UnprocessableEntity.Code():

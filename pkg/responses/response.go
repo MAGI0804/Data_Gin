@@ -46,6 +46,35 @@ func (r *Response) ToResponse(data interface{}) {
 	r.Ctx.JSON(http.StatusOK, response)
 }
 
+// ToResponseWithStatus returns a successful response with the real HTTP status
+// while preserving the existing application-level success code.
+func (r *Response) ToResponseWithStatus(status int, data interface{}) {
+	if data == nil {
+		data = gin.H{}
+	}
+	r.Ctx.JSON(status, ResponseData{
+		Code: errcode.Success.Code(),
+		Msg:  errcode.Success.Msg(),
+		Data: data,
+	})
+}
+
+// ToSafeErrorResponse returns a public error without serializing or logging the
+// underlying service or provider error. Callers should pass a stable message.
+func (r *Response) ToSafeErrorResponse(err *errcode.Error, message string) {
+	if err == nil {
+		err = errcode.InternalServerError
+	}
+	if message == "" {
+		message = err.Msg()
+	}
+	r.Ctx.AbortWithStatusJSON(err.HttpStatusCode(), ResponseData{
+		Code: err.Code(),
+		Msg:  message,
+		Data: nil,
+	})
+}
+
 // ToResponseWithPagination 返回分页数据
 func (r *Response) ToResponseWithPagination(result interface{}, pagination paginator.Pagination) {
 	r.ToResponse(gin.H{

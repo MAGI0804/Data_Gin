@@ -10,6 +10,7 @@ var (
 	NotFound             = NewError(100404, "%s数据找不到")
 	MethodNotAllowed     = NewError(100405, "不允许此请求方法")
 	RequestTimeout       = NewError(100408, "请求超时")
+	Conflict             = NewError(100409, "请求冲突")
 	UnsupportedMediaType = NewError(100415, "请求体错误")
 	UnprocessableEntity  = NewError(100422, "%s参数校验错误")
 	TooManyRequests      = NewError(100429, "请求太频繁")
