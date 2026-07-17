@@ -4,6 +4,8 @@ import test from 'node:test'
 import {
   buildExcelExportConfig,
   excelFieldSelectOptions,
+  excelJobDetailHash,
+  excelJobIDFromHash,
   excelModelSelectOptions,
   migrateExcelMatchSteps,
   selectExcelMatchStepModel,
@@ -152,4 +154,13 @@ test('catalog selectors preserve missing legacy table and field values as curren
     label: '当前配置：legacy_field（模型中不存在）',
     currentOnly: true,
   })
+})
+
+test('excel job detail navigation uses and parses a stable task-specific hash', () => {
+  assert.equal(excelJobDetailHash(321), 'excel_jobs?job=321')
+  assert.equal(excelJobDetailHash(0), 'excel_jobs')
+  assert.equal(excelJobIDFromHash('#excel_jobs?job=321'), 321)
+  assert.equal(excelJobIDFromHash('#/excel_jobs?job=321'), 321)
+  assert.equal(excelJobIDFromHash('#excel_jobs?job=invalid'), null)
+  assert.equal(excelJobIDFromHash('#excel_schemes?job=321'), null)
 })

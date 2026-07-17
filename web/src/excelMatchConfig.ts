@@ -118,6 +118,21 @@ export function selectExcelMatchStepModel(step: ExcelMatchStepConfig, tableName:
   }
 }
 
+export function excelJobDetailHash(jobID: number) {
+  const normalizedID = Math.trunc(jobID)
+  return Number.isSafeInteger(normalizedID) && normalizedID > 0
+    ? `excel_jobs?job=${normalizedID}`
+    : 'excel_jobs'
+}
+
+export function excelJobIDFromHash(hash: string) {
+  const normalizedHash = hash.replace(/^#\/?/, '')
+  const [route, query = ''] = normalizedHash.split('?', 2)
+  if (route !== 'excel_jobs') return null
+  const jobID = Number(new URLSearchParams(query).get('job'))
+  return Number.isSafeInteger(jobID) && jobID > 0 ? jobID : null
+}
+
 export function migrateExcelMatchSteps(config: ExcelMatchSchemeSource, fallbackStep: ExcelMatchStepConfig) {
   const configuredSteps = Array.isArray(config.steps) && config.steps.length > 0
     ? config.steps.map((step, index): ExcelMatchStepConfig => ({
