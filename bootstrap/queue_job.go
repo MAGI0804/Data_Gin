@@ -59,6 +59,8 @@ func setupQueueJob() {
 		}
 	}()
 
+	startMallWeatherOutboxDispatcher()
+
 }
 
 // addQueueJob 添加异步队列任务

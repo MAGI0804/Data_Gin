@@ -21,6 +21,11 @@ func init() {
 			"fetch_timeout_seconds":           config.Get("MallWeather.FetchTimeoutSeconds", 10),
 			"max_attempts":                    config.Get("MallWeather.MaxAttempts", 3),
 			"worker_concurrency":              config.Get("MallWeather.WorkerConcurrency", 20),
+			"outbox_poll_interval_ms":         config.Get("MallWeather.OutboxPollIntervalMS", 1000),
+			"outbox_lock_timeout_seconds":     config.Get("MallWeather.OutboxLockTimeoutSeconds", 60),
+			"outbox_batch_size":               config.Get("MallWeather.OutboxBatchSize", 100),
+			"outbox_retry_base_seconds":       config.Get("MallWeather.OutboxRetryBaseSeconds", 5),
+			"outbox_retry_max_seconds":        config.Get("MallWeather.OutboxRetryMaxSeconds", 300),
 			"raw_retention_days":              config.Get("MallWeather.RawRetentionDays", 30),
 			"forecast_version_retention_days": config.Get("MallWeather.ForecastVersionRetentionDays", 30),
 		}

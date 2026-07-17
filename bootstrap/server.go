@@ -18,6 +18,7 @@ import (
 
 // RunServer 启动服务
 func RunServer() {
+	defer stopMallWeatherOutboxDispatcher()
 
 	console.Info("run server ...")
 

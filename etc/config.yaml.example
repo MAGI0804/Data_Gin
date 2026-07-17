@@ -63,6 +63,11 @@ MallWeather:
   FetchTimeoutSeconds: 10
   MaxAttempts: 3
   WorkerConcurrency: 20
+  OutboxPollIntervalMS: 1000
+  OutboxLockTimeoutSeconds: 60
+  OutboxBatchSize: 100
+  OutboxRetryBaseSeconds: 5
+  OutboxRetryMaxSeconds: 300
   RawRetentionDays: 30
   ForecastVersionRetentionDays: 30
 
