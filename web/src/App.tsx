@@ -24,8 +24,13 @@ import { clearStoredToken, loadStoredToken, saveStoredToken, storedTokenExpiresA
 import {
   buildExcelExportConfig,
   cloneExcelMatchSteps,
+  excelFieldSelectOptions,
+  excelModelSelectOptions,
   migrateExcelMatchSteps,
+  selectExcelMatchStepModel,
   type ExcelMatchFilterConfig,
+  type ExcelMatchModel,
+  type ExcelMatchModelField,
   type ExcelMatchStepConfig,
 } from './excelMatchConfig'
 
@@ -1608,6 +1613,9 @@ function ExcelMatchView({
   const [importSchemes, setImportSchemes] = useState<ExcelMatchScheme[]>([])
   const [exportDefaults, setExportDefaults] = useState<ExcelExportSchemeConfig>(defaultExcelExportScheme)
   const [exportSteps, setExportSteps] = useState<ExcelMatchStepConfig[]>(cloneExcelMatchSteps(defaultExcelExportScheme.steps))
+  const [excelModels, setExcelModels] = useState<ExcelMatchModel[]>([])
+  const [excelModelsLoading, setExcelModelsLoading] = useState(false)
+  const [excelModelsError, setExcelModelsError] = useState('')
   const [importDefaults, setImportDefaults] = useState<ExcelImportSchemeConfig>(defaultExcelImportScheme)
   const [exportFormKey, setExportFormKey] = useState(0)
   const [importFormKey, setImportFormKey] = useState(0)
@@ -1668,6 +1676,12 @@ function ExcelMatchView({
 
   function updateExportStep(index: number, key: Exclude<keyof ExcelMatchStepConfig, 'filters'>, value: string) {
     setExportSteps((current) => current.map((step, stepIndex) => stepIndex === index ? { ...step, [key]: value } : step))
+  }
+
+  function selectExportStepModel(index: number, tableName: string) {
+    setExportSteps((current) => current.map((step, stepIndex) => stepIndex === index
+      ? selectExcelMatchStepModel(step, tableName, excelModels)
+      : step))
   }
 
   function updateExportStepFilter(stepIndex: number, filterIndex: number, key: keyof ExcelMatchFilterConfig, value: string) {
@@ -1755,6 +1769,27 @@ function ExcelMatchView({
     return Array.isArray(value) ? (value as ExcelMatchScheme[]) : []
   }, [token])
 
+  const loadExcelModels = useCallback(async () => {
+    setExcelModelsLoading(true)
+    setExcelModelsError('')
+    try {
+      const response = await fetch(apiURL('/v1/excel-match-jobs/models'), {
+        method: 'GET',
+        headers: token ? { token } : undefined,
+      })
+      const data = await response.json().catch(() => ({}))
+      if (!response.ok || !isSuccessPayload(data)) {
+        throw new Error(readMessage(data) || '查询模型与字段目录失败')
+      }
+      const value = readDataField(data, 'models')
+      setExcelModels(Array.isArray(value) ? (value as ExcelMatchModel[]) : [])
+    } catch (error) {
+      setExcelModelsError(error instanceof Error ? error.message : String(error))
+    } finally {
+      setExcelModelsLoading(false)
+    }
+  }, [token])
+
   const loadSchemes = useCallback(async () => {
     try {
       const [nextExportSchemes, nextImportSchemes] = await Promise.all([
@@ -1790,6 +1825,11 @@ function ExcelMatchView({
     if (section === 'jobs') void loadJobHistory()
     if (section === 'schemes' || section === 'write') void loadSchemes()
   }, [loadJobHistory, loadSchemes, section, token])
+
+  useEffect(() => {
+    if (!token || section !== 'schemes') return
+    void loadExcelModels()
+  }, [loadExcelModels, section, token])
 
   useEffect(() => {
     setExcelDialog(null)
@@ -2350,6 +2390,16 @@ function ExcelMatchView({
                 </div>
                 <button type="button" onClick={addExportStep} disabled={exportSteps.length >= 20}>添加步骤</button>
               </div>
+              {excelModelsLoading && <p className="excel-mode-note">正在加载模型与字段目录…</p>}
+              {excelModelsError && (
+                <div className="excel-catalog-error" role="alert">
+                  <span>模型与字段目录加载失败：{excelModelsError}</span>
+                  <button type="button" onClick={() => void loadExcelModels()}>重试加载</button>
+                </div>
+              )}
+              {!excelModelsLoading && !excelModelsError && excelModels.length === 0 && (
+                <p className="excel-mode-note">当前数据库没有返回可选择的模型；历史配置仍可查看，但新步骤需要先确认数据库连接和模型表。</p>
+              )}
               {exportSteps.map((step, index) => (
                 <article className="excel-step-card" key={`${exportFormKey}-${index}`}>
                   <div className="excel-step-heading">
@@ -2362,10 +2412,29 @@ function ExcelMatchView({
                   </div>
                   <div className="excel-step-fields">
                     <Field label="步骤名称" name={`step_name_${index}`} value={step.name} onChange={(value) => updateExportStep(index, 'name', value)} required />
-                    <Field label="数据库表名" name={`step_table_${index}`} value={step.tableName} onChange={(value) => updateExportStep(index, 'tableName', value)} required />
+                    <ExcelModelSelector
+                      name={`step_table_${index}`}
+                      models={excelModels}
+                      value={step.tableName}
+                      onChange={(value) => selectExportStepModel(index, value)}
+                    />
                     <Field label="Excel 输入列" name={`step_excel_${index}`} value={step.matchExcelColumn} onChange={(value) => updateExportStep(index, 'matchExcelColumn', value)} required />
-                    <Field label="数据库匹配字段" name={`step_match_${index}`} value={step.dbMatchField} onChange={(value) => updateExportStep(index, 'dbMatchField', value)} required />
-                    <Field label="数据库取值字段" name={`step_value_${index}`} value={step.dbValueField} onChange={(value) => updateExportStep(index, 'dbValueField', value)} required />
+                    <ExcelModelFieldSelector
+                      label="匹配模型字段"
+                      name={`step_match_${index}`}
+                      models={excelModels}
+                      tableName={step.tableName}
+                      value={step.dbMatchField}
+                      onChange={(value) => updateExportStep(index, 'dbMatchField', value)}
+                    />
+                    <ExcelModelFieldSelector
+                      label="取值模型字段"
+                      name={`step_value_${index}`}
+                      models={excelModels}
+                      tableName={step.tableName}
+                      value={step.dbValueField}
+                      onChange={(value) => updateExportStep(index, 'dbValueField', value)}
+                    />
                     <Field label="追加输出列" name={`step_output_${index}`} value={step.outputColumnName} onChange={(value) => updateExportStep(index, 'outputColumnName', value)} required />
                   </div>
                   <div className="excel-step-filter-editor">
@@ -3165,6 +3234,79 @@ function Field({ label, name, defaultValue = '', type = 'text', value, onChange,
       {label}
       <input name={name} defaultValue={value === undefined ? defaultValue : undefined} value={value} type={type} required={required} onChange={onChange ? (event) => onChange(event.currentTarget.value) : undefined} />
     </label>
+  )
+}
+
+function ExcelModelSelector({ name, models, value, onChange }: {
+  name: string
+  models: ExcelMatchModel[]
+  value: string
+  onChange: (value: string) => void
+}) {
+  const selectedModel = models.find((model) => model.tableName === value)
+  const options = excelModelSelectOptions(models, value)
+  return (
+    <label className="excel-catalog-control">
+      模型名称
+      <select aria-label="模型名称" name={name} value={value} required onChange={(event) => onChange(event.currentTarget.value)}>
+        <option value="">选择模型名称</option>
+        {options.map((option) => <option value={option.value} key={option.value}>{option.label}</option>)}
+      </select>
+      {selectedModel
+        ? <ExcelCatalogExplanation title={selectedModel.mapping} detail={selectedModel.description} />
+        : value
+          ? <ExcelCatalogExplanation title={`当前配置 → 数据库表 ${value}`} detail="该表不在当前模型目录中，保留它是为了兼容历史方案；保存前请确认表仍然存在。" />
+          : <ExcelCatalogExplanation title="模型名称 → 数据库表" detail="选择模型后，这里会直接解释对应的数据表，无需另行查表。" />}
+    </label>
+  )
+}
+
+function ExcelModelFieldSelector({ label, name, models, tableName, value, onChange }: {
+  label: string
+  name: string
+  models: ExcelMatchModel[]
+  tableName: string
+  value: string
+  onChange: (value: string) => void
+}) {
+  const selectedModel = models.find((model) => model.tableName === tableName)
+  const fields = selectedModel?.fields ?? []
+  const selectedField = fields.find((field) => field.columnName === value)
+  const options = excelFieldSelectOptions(fields, value)
+  return (
+    <label className="excel-catalog-control">
+      {label}
+      <select aria-label={label} name={name} value={value} required disabled={!tableName} onChange={(event) => onChange(event.currentTarget.value)}>
+        <option value="">选择模型字段</option>
+        {options.map((option) => <option value={option.value} key={option.value}>{option.label}</option>)}
+      </select>
+      {selectedField
+        ? <ExcelModelFieldExplanation field={selectedField} />
+        : value
+          ? <ExcelCatalogExplanation title={`当前配置字段 → ${tableName}.${value}`} detail="该字段不在当前模型目录中，已作为历史配置保留；保存前请确认字段仍然存在。" />
+          : selectedModel
+            ? <ExcelCatalogExplanation title={`${selectedModel.modelName}.字段 → ${selectedModel.tableName}.数据库列`} detail={`当前模型提供 ${fields.length} 个字段可选。`} />
+            : <ExcelCatalogExplanation title="模型字段 → 数据库列" detail="请先选择模型，再从该模型的字段列表中选择。" />}
+    </label>
+  )
+}
+
+function ExcelModelFieldExplanation({ field }: { field: ExcelMatchModelField }) {
+  const typeDetail = field.dataType && !field.description.includes(field.dataType) ? `；数据库类型 ${field.dataType}` : ''
+  return (
+    <ExcelCatalogExplanation
+      title={field.mapping}
+      detail={`${field.description}${typeDetail}；${field.nullable ? '允许为空' : '不允许为空'}`}
+    />
+  )
+}
+
+function ExcelCatalogExplanation({ title, detail }: { title: string; detail: string }) {
+  return (
+    <span className="excel-catalog-explanation">
+      <strong>{title}</strong>
+      <small>{detail}</small>
+    </span>
   )
 }
 

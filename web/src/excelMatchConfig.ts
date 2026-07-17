@@ -14,6 +14,31 @@ export type ExcelMatchStepConfig = {
   outputColumnName: string
 }
 
+export type ExcelMatchModelField = {
+  name: string
+  modelField: string
+  columnName: string
+  dataType: string
+  description: string
+  mapping: string
+  nullable: boolean
+}
+
+export type ExcelMatchModel = {
+  name: string
+  modelName: string
+  tableName: string
+  description: string
+  mapping: string
+  fields: ExcelMatchModelField[]
+}
+
+export type ExcelCatalogSelectOption = {
+  value: string
+  label: string
+  currentOnly?: boolean
+}
+
 type ExcelMatchSchemeSource = {
   filters?: Array<Partial<ExcelMatchFilterConfig>>
   matchExcelColumn?: string
@@ -45,6 +70,52 @@ export function cloneExcelMatchSteps(steps: ExcelMatchStepConfig[]) {
     ...step,
     filters: cloneFilters(step.filters),
   }))
+}
+
+export function excelModelSelectOptions(models: ExcelMatchModel[], currentValue: string): ExcelCatalogSelectOption[] {
+  const options: ExcelCatalogSelectOption[] = models.map((model) => ({
+    value: model.tableName,
+    label: `${model.name}（${model.modelName} → ${model.tableName}）`,
+  }))
+  const current = currentValue.trim()
+  if (current && !models.some((model) => model.tableName === current)) {
+    options.unshift({
+      value: current,
+      label: `当前配置：${current}（目录中不存在）`,
+      currentOnly: true,
+    })
+  }
+  return options
+}
+
+export function excelFieldSelectOptions(fields: ExcelMatchModelField[], currentValue: string): ExcelCatalogSelectOption[] {
+  const options: ExcelCatalogSelectOption[] = fields.map((field) => ({
+    value: field.columnName,
+    label: `${field.name}（${field.modelField} → ${field.columnName}）`,
+  }))
+  const current = currentValue.trim()
+  if (current && !fields.some((field) => field.columnName === current)) {
+    options.unshift({
+      value: current,
+      label: `当前配置：${current}（模型中不存在）`,
+      currentOnly: true,
+    })
+  }
+  return options
+}
+
+export function selectExcelMatchStepModel(step: ExcelMatchStepConfig, tableName: string, models: ExcelMatchModel[]): ExcelMatchStepConfig {
+  const model = models.find((item) => item.tableName === tableName)
+  if (!model) {
+    return { ...step, tableName }
+  }
+  const columns = new Set(model.fields.map((field) => field.columnName))
+  return {
+    ...step,
+    tableName,
+    dbMatchField: columns.has(step.dbMatchField) ? step.dbMatchField : '',
+    dbValueField: columns.has(step.dbValueField) ? step.dbValueField : '',
+  }
 }
 
 export function migrateExcelMatchSteps(config: ExcelMatchSchemeSource, fallbackStep: ExcelMatchStepConfig) {
