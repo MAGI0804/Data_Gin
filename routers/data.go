@@ -124,6 +124,7 @@ func apiData(api *gin.RouterGroup) {
 		excelMatchJobCtrl := data_ctrl.NewExcelMatchJobController()
 		excelMatchJobGroup.GET("", excelMatchJobCtrl.ListJobs)
 		excelMatchJobGroup.POST("", excelMatchJobCtrl.CreateJob)
+		excelMatchJobGroup.GET("/models", excelMatchJobCtrl.ListModels)
 		excelMatchJobGroup.POST("/preview", excelMatchJobCtrl.Preview)
 		excelMatchJobGroup.POST("/uploads", excelMatchJobCtrl.CreateUploadSession)
 		excelMatchJobGroup.POST("/uploads/:upload_id/chunks", excelMatchJobCtrl.UploadChunk)

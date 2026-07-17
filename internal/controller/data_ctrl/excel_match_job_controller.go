@@ -158,6 +158,17 @@ func (ctrl *ExcelMatchJobController) CompleteUpload(c *gin.Context) {
 	}))
 }
 
+func (ctrl *ExcelMatchJobController) ListModels(c *gin.Context) {
+	models, err := ctrl.service.ListModels(c.Request.Context())
+	if err != nil {
+		c.JSON(500, msg.ErrResponse("查询 Excel 可选模型失败", err))
+		return
+	}
+	c.JSON(200, msg.SuccessResponse("查询 Excel 可选模型成功", &map[string]any{
+		"models": models,
+	}))
+}
+
 func (ctrl *ExcelMatchJobController) ListSchemes(c *gin.Context) {
 	schemes, err := ctrl.service.ListSchemes(c.Request.Context(), c.Query("operation"))
 	if err != nil {

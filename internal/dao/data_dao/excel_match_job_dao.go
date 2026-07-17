@@ -239,6 +239,50 @@ type ExcelMatchJobStats struct {
 	UnmatchedRows int
 }
 
+// ExcelMatchModelColumn describes one application database column for the
+// Excel matching model catalog. The catalog query returns every model and
+// field in one round trip so the web UI can render cascading selectors.
+type ExcelMatchModelColumn struct {
+	TableName       string `gorm:"column:table_name"`
+	TableComment    string `gorm:"column:table_comment"`
+	ColumnName      string `gorm:"column:column_name"`
+	DataType        string `gorm:"column:data_type"`
+	ColumnType      string `gorm:"column:column_type"`
+	ColumnComment   string `gorm:"column:column_comment"`
+	OrdinalPosition int    `gorm:"column:ordinal_position"`
+	IsNullable      string `gorm:"column:is_nullable"`
+}
+
+// ListModelColumns reads the current MySQL schema with a single joined query.
+// Unknown/custom tables are intentionally included because Excel matching is
+// configurable and may target tables that do not have a Go model yet.
+func (dao *ExcelMatchJobDAO) ListModelColumns(ctx context.Context) ([]ExcelMatchModelColumn, error) {
+	if dao.db == nil {
+		return nil, errors.New("数据库未初始化")
+	}
+
+	var columns []ExcelMatchModelColumn
+	err := dao.db.WithContext(ctx).Raw(`
+		SELECT
+			c.TABLE_NAME AS table_name,
+			COALESCE(t.TABLE_COMMENT, '') AS table_comment,
+			c.COLUMN_NAME AS column_name,
+			c.DATA_TYPE AS data_type,
+			c.COLUMN_TYPE AS column_type,
+			COALESCE(c.COLUMN_COMMENT, '') AS column_comment,
+			c.ORDINAL_POSITION AS ordinal_position,
+			c.IS_NULLABLE AS is_nullable
+		FROM information_schema.COLUMNS AS c
+		INNER JOIN information_schema.TABLES AS t
+			ON t.TABLE_SCHEMA = c.TABLE_SCHEMA
+			AND t.TABLE_NAME = c.TABLE_NAME
+		WHERE c.TABLE_SCHEMA = DATABASE()
+			AND t.TABLE_TYPE = 'BASE TABLE'
+		ORDER BY c.TABLE_NAME ASC, c.ORDINAL_POSITION ASC
+	`).Scan(&columns).Error
+	return columns, err
+}
+
 func (dao *ExcelMatchJobDAO) FindBojunFieldByKeys(ctx context.Context, matchField string, keys []string, valueField string) (map[string]string, error) {
 	result := make(map[string]string, len(keys))
 	if len(keys) == 0 {
