@@ -20,6 +20,7 @@ func TestAPIDataRegistersMallCRUDRoutes(t *testing.T) {
 	}
 	for _, expected := range []string{
 		http.MethodPost + " /api/v1/malls",
+		http.MethodPost + " /api/v1/malls/import",
 		http.MethodGet + " /api/v1/malls",
 		http.MethodGet + " /api/v1/malls/:id",
 		http.MethodPatch + " /api/v1/malls/:id",

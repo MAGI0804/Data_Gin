@@ -34,6 +34,7 @@ const (
 
 	mallCreateOperationScope = "mall.create"
 	maxIdempotencyKeyLength  = 255
+	maxMallImportRows        = 200
 )
 
 var (
@@ -102,6 +103,21 @@ type MallListResult struct {
 	NextAfterID uint      `json:"nextAfterId,omitempty"`
 }
 
+type MallImportRowResult struct {
+	Row          int               `json:"row"`
+	Status       string            `json:"status"`
+	ReviewStatus string            `json:"reviewStatus,omitempty"`
+	Mall         *MallCreateResult `json:"mall,omitempty"`
+	ErrorCode    string            `json:"errorCode,omitempty"`
+}
+
+type MallImportResult struct {
+	Rows     []MallImportRowResult `json:"rows"`
+	Created  int                   `json:"created"`
+	Replayed int                   `json:"replayed"`
+	Failed   int                   `json:"failed"`
+}
+
 func NewMallService() *MallService {
 	return &MallService{
 		db:                    database.DB,
@@ -117,6 +133,49 @@ func (service *MallService) Create(ctx context.Context, actorUserID uint, idempo
 	if err := service.authorize(ctx, actorUserID, PermissionMallWrite); err != nil {
 		return nil, false, err
 	}
+	return service.createAuthorized(ctx, actorUserID, idempotencyKey, request)
+}
+
+func (service *MallService) Import(ctx context.Context, actorUserID uint, batchIdempotencyKey string, items []requestbody.MallCreateRequest) (*MallImportResult, error) {
+	if err := service.authorize(ctx, actorUserID, PermissionMallWrite); err != nil {
+		return nil, err
+	}
+	if !validIdempotencyKey(batchIdempotencyKey) {
+		return nil, fmt.Errorf("%w: idempotency key is required", ErrMallInvalidInput)
+	}
+	if len(items) == 0 || len(items) > maxMallImportRows {
+		return nil, fmt.Errorf("%w: import items must contain 1 to %d rows", ErrMallInvalidInput, maxMallImportRows)
+	}
+
+	result := &MallImportResult{Rows: make([]MallImportRowResult, 0, len(items))}
+	for index, item := range items {
+		if err := ctx.Err(); err != nil {
+			return nil, err
+		}
+		rowKey := sha256Hex([]byte(fmt.Sprintf("%s\x1f%d", batchIdempotencyKey, index+1)))
+		mall, replayed, err := service.createAuthorized(ctx, actorUserID, rowKey, item)
+		row := MallImportRowResult{Row: index + 1}
+		if err != nil {
+			row.Status = "FAILED"
+			row.ErrorCode = classifyMallImportError(err)
+			result.Failed++
+		} else {
+			row.Mall = mall
+			row.ReviewStatus = "PENDING_GEOCODE"
+			if replayed {
+				row.Status = "REPLAYED"
+				result.Replayed++
+			} else {
+				row.Status = "CREATED"
+				result.Created++
+			}
+		}
+		result.Rows = append(result.Rows, row)
+	}
+	return result, nil
+}
+
+func (service *MallService) createAuthorized(ctx context.Context, actorUserID uint, idempotencyKey string, request requestbody.MallCreateRequest) (*MallCreateResult, bool, error) {
 	normalized, err := normalizeMallCreateRequest(request)
 	if err != nil {
 		return nil, false, err
@@ -202,6 +261,17 @@ func (service *MallService) Create(ctx context.Context, actorUserID uint, idempo
 		return nil, false, err
 	}
 	return result, replayed, nil
+}
+
+func classifyMallImportError(err error) string {
+	switch {
+	case errors.Is(err, ErrMallInvalidInput):
+		return "INVALID_INPUT"
+	case errors.Is(err, ErrMallConflict), errors.Is(err, ErrMallIdempotencyConflict), errors.Is(err, ErrMallIdempotencyPending):
+		return "CONFLICT"
+	default:
+		return "UNAVAILABLE"
+	}
 }
 
 func (service *MallService) Get(ctx context.Context, actorUserID, mallID uint) (*MallDTO, error) {

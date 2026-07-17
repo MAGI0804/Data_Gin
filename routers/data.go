@@ -199,6 +199,7 @@ func registerMallRoutes(api *gin.RouterGroup, mallCtrl *data_ctrl.MallController
 	mallGroup.Use(middleware.AuthJWT())
 	{
 		mallGroup.POST("", mallCtrl.Create)
+		mallGroup.POST("/import", mallCtrl.Import)
 		mallGroup.GET("", mallCtrl.List)
 		mallGroup.GET("/:id", mallCtrl.Get)
 		mallGroup.PATCH("/:id", mallCtrl.Update)

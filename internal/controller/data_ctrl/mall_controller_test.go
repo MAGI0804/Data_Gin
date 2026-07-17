@@ -69,6 +69,28 @@ func TestMallControllerRejectsUnsafeJSONBeforeService(t *testing.T) {
 	}
 }
 
+func TestMallControllerImportReturnsPerRowResult(t *testing.T) {
+	service := &fakeMallService{importItems: func(_ context.Context, actor uint, key string, items []requestbody.MallCreateRequest) (*data_svc.MallImportResult, error) {
+		if actor != 17 || key != "84c2e4a0-1234-4567-8901-123456789012" || len(items) != 2 {
+			t.Fatalf("actor=%d key=%q items=%+v", actor, key, items)
+		}
+		return &data_svc.MallImportResult{
+			Rows: []data_svc.MallImportRowResult{
+				{Row: 1, Status: "CREATED", ReviewStatus: "PENDING_GEOCODE", Mall: &data_svc.MallCreateResult{ID: 1}},
+				{Row: 2, Status: "FAILED", ErrorCode: "INVALID_INPUT"},
+			},
+			Created: 1,
+			Failed:  1,
+		}, nil
+	}}
+	recorder := performMallRequest(t, service, http.MethodPost, "/api/v1/malls/import", `{"items":[{"mallCode":"SH-001"},{"mallCode":"bad"}]}`, map[string]string{
+		"Idempotency-Key": "84c2e4a0-1234-4567-8901-123456789012",
+	})
+	if recorder.Code != http.StatusOK || !strings.Contains(recorder.Body.String(), "PENDING_GEOCODE") || !strings.Contains(recorder.Body.String(), "INVALID_INPUT") {
+		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+}
+
 func TestMallControllerMapsServiceErrorsWithoutLeakingDetails(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -170,6 +192,7 @@ func performMallRequest(t *testing.T, service MallService, method, path, body st
 	controller := NewMallControllerWithService(service)
 	group := router.Group("/api/v1/malls")
 	group.POST("", controller.Create)
+	group.POST("/import", controller.Import)
 	group.GET("", controller.List)
 	group.GET("/:id", controller.Get)
 	group.PATCH("/:id", controller.Update)
@@ -186,11 +209,19 @@ func performMallRequest(t *testing.T, service MallService, method, path, body st
 }
 
 type fakeMallService struct {
-	create func(context.Context, uint, string, requestbody.MallCreateRequest) (*data_svc.MallCreateResult, bool, error)
-	get    func(context.Context, uint, uint) (*data_svc.MallDTO, error)
-	list   func(context.Context, uint, requestbody.MallListRequest) (*data_svc.MallListResult, error)
-	update func(context.Context, uint, uint, requestbody.MallPatchRequest) (*data_svc.MallDTO, error)
-	delete func(context.Context, uint, uint, uint64) error
+	create      func(context.Context, uint, string, requestbody.MallCreateRequest) (*data_svc.MallCreateResult, bool, error)
+	importItems func(context.Context, uint, string, []requestbody.MallCreateRequest) (*data_svc.MallImportResult, error)
+	get         func(context.Context, uint, uint) (*data_svc.MallDTO, error)
+	list        func(context.Context, uint, requestbody.MallListRequest) (*data_svc.MallListResult, error)
+	update      func(context.Context, uint, uint, requestbody.MallPatchRequest) (*data_svc.MallDTO, error)
+	delete      func(context.Context, uint, uint, uint64) error
+}
+
+func (service *fakeMallService) Import(ctx context.Context, actor uint, key string, items []requestbody.MallCreateRequest) (*data_svc.MallImportResult, error) {
+	if service.importItems == nil {
+		panic("unexpected Import call")
+	}
+	return service.importItems(ctx, actor, key, items)
 }
 
 func (service *fakeMallService) Create(ctx context.Context, actor uint, key string, request requestbody.MallCreateRequest) (*data_svc.MallCreateResult, bool, error) {

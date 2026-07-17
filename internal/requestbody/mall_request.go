@@ -49,3 +49,7 @@ type MallListRequest struct {
 	GeocodeStatus  string
 	WeatherEnabled *bool
 }
+
+type MallImportRequest struct {
+	Items []MallCreateRequest `json:"items"`
+}

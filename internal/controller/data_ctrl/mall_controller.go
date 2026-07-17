@@ -25,6 +25,7 @@ const maxMallRequestBodyBytes int64 = 1 << 20
 
 type MallService interface {
 	Create(context.Context, uint, string, requestbody.MallCreateRequest) (*data_svc.MallCreateResult, bool, error)
+	Import(context.Context, uint, string, []requestbody.MallCreateRequest) (*data_svc.MallImportResult, error)
 	Get(context.Context, uint, uint) (*data_svc.MallDTO, error)
 	List(context.Context, uint, requestbody.MallListRequest) (*data_svc.MallListResult, error)
 	Update(context.Context, uint, uint, requestbody.MallPatchRequest) (*data_svc.MallDTO, error)
@@ -66,6 +67,25 @@ func (controller *MallController) Create(c *gin.Context) {
 		c.Header("Idempotency-Replayed", "true")
 	}
 	responses.New(c).ToResponseWithStatus(http.StatusCreated, result)
+}
+
+func (controller *MallController) Import(c *gin.Context) {
+	var request requestbody.MallImportRequest
+	if err := decodeMallJSON(c, &request); err != nil {
+		writeMallError(c, fmt.Errorf("%w: invalid JSON body", data_svc.ErrMallInvalidInput))
+		return
+	}
+	result, err := controller.service.Import(
+		c.Request.Context(),
+		auth.CurrentUserID(c),
+		c.GetHeader("Idempotency-Key"),
+		request.Items,
+	)
+	if err != nil {
+		writeMallError(c, err)
+		return
+	}
+	responses.New(c).ToResponseWithStatus(http.StatusOK, result)
 }
 
 func (controller *MallController) Get(c *gin.Context) {

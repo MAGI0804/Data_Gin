@@ -3,6 +3,7 @@ package data_svc
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -165,6 +166,22 @@ func TestMallIdempotencyAndDuplicateHelpers(t *testing.T) {
 	}
 	if !isDuplicateKeyError(&mysqlDriver.MySQLError{Number: 1062}) || isDuplicateKeyError(errors.New("duplicate")) {
 		t.Fatal("isDuplicateKeyError() misclassified error")
+	}
+}
+
+func TestClassifyMallImportErrorUsesStablePublicCodes(t *testing.T) {
+	tests := []struct {
+		err  error
+		want string
+	}{
+		{err: fmt.Errorf("wrapped: %w", ErrMallInvalidInput), want: "INVALID_INPUT"},
+		{err: ErrMallConflict, want: "CONFLICT"},
+		{err: errors.New("database password=secret unavailable"), want: "UNAVAILABLE"},
+	}
+	for _, test := range tests {
+		if got := classifyMallImportError(test.err); got != test.want {
+			t.Errorf("classifyMallImportError(%v) = %q, want %q", test.err, got, test.want)
+		}
 	}
 }
 
