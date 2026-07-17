@@ -17,7 +17,6 @@ Log:
   MaxAge: 7
   MaxSize: 64
 JWT:
-  Key: ${JWT_KEY:-your-jwt-secret-key}
   ExpireTime: 1440
   MaxRefreshTime: 86400
 Email:
@@ -32,28 +31,48 @@ DB:
   Host: ${DB_HOST:-127.0.0.1}
   Port: ${DB_PORT:-3306}
   Database: ${DB_DATABASE:-your_database}
-  Username: ${DB_USERNAME:-your_username}
-  Password: ${DB_PASSWORD:-your_password}
   Charset: utf8mb4
 Redis:
   Host: ${REDIS_HOST:-127.0.0.1}
   Port: ${REDIS_PORT:-6379}
-  Username: ${REDIS_USERNAME:-}
-  Password: ${REDIS_PASSWORD:-}
   DB: 0
 Cache:
   Host: ${REDIS_HOST:-127.0.0.1}
   Port: ${REDIS_PORT:-6379}
-  Username: ${REDIS_USERNAME:-}
-  Password: ${REDIS_PASSWORD:-}
   DB: 1
 QueueJob:
   Redis:
     Host: ${REDIS_HOST:-127.0.0.1}
     Port: ${REDIS_PORT:-6379}
-    Username: ${REDIS_USERNAME:-}
-    Password: ${REDIS_PASSWORD:-}
     DB: 0
+
+MallWeather:
+  Enabled: false
+  FeishuEnabled: false
+  Provider: caiyun
+  CoverageRadiusM: 1000
+  SamplingMode: center
+  DefaultDetailProfile: full
+  FastCron: "*/10 * * * *"
+  FullCron: "7 * * * *"
+  LifeIndexCron: "17 * * * *"
+  HourlySteps: 360
+  DailySteps: 15
+  Unit: metric:v2
+  AlertEnabled: true
+  FetchTimeoutSeconds: 10
+  MaxAttempts: 3
+  WorkerConcurrency: 20
+  RawRetentionDays: 30
+  ForecastVersionRetentionDays: 30
+
+Caiyun:
+  BaseURL: https://api.caiyunapp.com
+  LifeIndexBaseURL: https://singer.caiyunhub.com
+  QPS: 0
+
+Amap:
+  BaseURL: https://restapi.amap.com
 
 Youzan:
   ClientID: ${YOUZAN_CLIENT_ID:-}

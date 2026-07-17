@@ -3,6 +3,7 @@ package bootstrap
 import (
 	"fmt"
 
+	"gin-biz-web-api/global"
 	"gin-biz-web-api/pkg/config"
 	"gin-biz-web-api/pkg/console"
 	"gin-biz-web-api/pkg/redis"
@@ -20,13 +21,17 @@ func setupRedis() {
 
 	for group := range configs {
 		cfgPrefix := "cfg.redis." + group + "."
+		username, password := global.Credentials.RedisUsername(), global.Credentials.RedisPassword()
+		if group == "cache" {
+			username, password = global.Credentials.CacheUsername(), global.Credentials.CachePassword()
+		}
 		rdsConfigs[group] = &redis.RdsClientConfig{
 			Addr: fmt.Sprintf(
 				"%v:%v",
 				config.GetString(cfgPrefix+"host"),
 				config.GetString(cfgPrefix+"port")),
-			Username: config.GetString(cfgPrefix + "username"),
-			Password: config.GetString(cfgPrefix + "password"),
+			Username: username,
+			Password: password,
 			DB:       config.GetInt(cfgPrefix + "db"),
 		}
 	}

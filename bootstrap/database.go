@@ -8,6 +8,7 @@ import (
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 
+	"gin-biz-web-api/global"
 	"gin-biz-web-api/model"
 	"gin-biz-web-api/pkg/config"
 	"gin-biz-web-api/pkg/console"
@@ -39,8 +40,8 @@ func setupDBMySQL() {
 
 	for group := range configs.(map[string]interface{}) {
 		cfgPrefix := "cfg.database.mysql." + group + "."
-		username := config.GetString(cfgPrefix + "username")
-		password := config.GetString(cfgPrefix + "password")
+		username := global.Credentials.DBUsername()
+		password := global.Credentials.DBPassword()
 		host := config.GetString(cfgPrefix + "host")
 		port := config.GetString(cfgPrefix + "port")
 		db := config.GetString(cfgPrefix + "database")

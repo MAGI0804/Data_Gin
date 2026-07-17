@@ -9,11 +9,9 @@ func init() {
 	config.Add("cfg.queue_job", func() map[string]interface{} {
 		return map[string]interface{}{
 			"redis": map[string]interface{}{
-				"host":     config.Get("QueueJob.Redis.Host", "127.0.0.1"),
-				"port":     config.Get("QueueJob.Redis.Port", 6379),
-				"username": config.Get("QueueJob.Redis.Username", ""),
-				"password": config.Get("QueueJob.Redis.Password", ""),
-				"db":       config.Get("QueueJob.Redis.DB", 3),
+				"host": config.Get("QueueJob.Redis.Host", "127.0.0.1"),
+				"port": config.Get("QueueJob.Redis.Port", 6379),
+				"db":   config.Get("QueueJob.Redis.DB", 3),
 			},
 			"config_opt": map[string]interface{}{
 				// 指定使用多少个并发工作进程
