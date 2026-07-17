@@ -4,6 +4,7 @@ import (
 	"database/sql/driver"
 	"encoding/json"
 	"reflect"
+	"strings"
 	"sync"
 	"testing"
 
@@ -34,6 +35,8 @@ func TestMallWeatherModelSchemas(t *testing.T) {
 		{"export job", &MallWeatherExportJob{}, "mall_weather_export_jobs"},
 		{"sheet row", &MallWeatherSheetRow{}, "mall_weather_sheet_rows"},
 		{"outbox", &AsyncJobOutbox{}, "async_job_outbox"},
+		{"user permission", &MallWeatherUserPermission{}, "mall_weather_user_permissions"},
+		{"API idempotency", &APIIdempotencyRecord{}, "api_idempotency_records"},
 	}
 
 	for _, tt := range tests {
@@ -71,6 +74,8 @@ func TestMallWeatherBusinessIndexes(t *testing.T) {
 		{"life index", &MallWeatherLifeIndex{}, "uk_life_version", []string{"mall_id", "provider", "source_api", "forecast_date_local", "index_type", "issued_at_utc"}},
 		{"latest", &MallWeatherLatest{}, "uk_weather_latest", []string{"mall_id", "data_kind", "business_key"}},
 		{"sheet row", &MallWeatherSheetRow{}, "uk_weather_sheet_row", []string{"destination_id", "dataset_kind", "business_key"}},
+		{"user permission", &MallWeatherUserPermission{}, "uk_mall_weather_permission", []string{"user_id", "permission"}},
+		{"API idempotency", &APIIdempotencyRecord{}, "uk_api_idempotency", []string{"operation_scope", "actor_user_id", "key_hash"}},
 	}
 
 	for _, tt := range tests {
@@ -94,6 +99,22 @@ func TestMallWeatherBusinessIndexes(t *testing.T) {
 				t.Fatalf("index %q fields = %v, want %v", tt.indexName, got, tt.fieldNames)
 			}
 		})
+	}
+}
+
+func TestAPIIdempotencySecretsAreNotSerialized(t *testing.T) {
+	data, err := json.Marshal(APIIdempotencyRecord{
+		KeyHash:      "private-key-hash",
+		RequestHash:  "private-request-hash",
+		ResponseJSON: JSONText(`{"id":123}`),
+	})
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+	for _, value := range []string{"private-key-hash", "private-request-hash", `\"id\":123`} {
+		if strings.Contains(string(data), value) {
+			t.Fatalf("serialized idempotency record leaked %q", value)
+		}
 	}
 }
 

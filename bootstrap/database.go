@@ -156,6 +156,8 @@ func mallWeatherMigrationModels() []interface{} {
 		&model.MallWeatherExportJob{},
 		&model.MallWeatherSheetRow{},
 		&model.AsyncJobOutbox{},
+		&model.MallWeatherUserPermission{},
+		&model.APIIdempotencyRecord{},
 	}
 }
 
