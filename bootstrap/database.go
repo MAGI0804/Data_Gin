@@ -90,7 +90,7 @@ func autoMigrateTables() {
 	prepareMethodPipelineIndexes(db)
 
 	// 迁移数据存储相关表
-	err := db.AutoMigrate(
+	models := []interface{}{
 		&model.User{},                  // 用户表
 		&model.DataSource{},            // 数据源配置表
 		&model.RawData{},               // 原始数据表
@@ -123,7 +123,9 @@ func autoMigrateTables() {
 		&model.ExcelMatchScheme{},      //Excel匹配参数方案表
 		// 有赞分销订单表
 		&model.YouzanDistributionOrder{},
-	)
+	}
+	models = append(models, mallWeatherMigrationModels()...)
+	err := db.AutoMigrate(models...)
 
 	if err != nil {
 		logger.Error("数据表自动迁移失败", zap.Error(err))
@@ -132,6 +134,29 @@ func autoMigrateTables() {
 	}
 
 	console.Success("数据表自动迁移完成")
+}
+
+func mallWeatherMigrationModels() []interface{} {
+	return []interface{}{
+		&model.Mall{},
+		&model.MallGeocodeRun{},
+		&model.MallGeocodeCandidate{},
+		&model.ProviderRawSnapshot{},
+		&model.MallWeatherFetchRun{},
+		&model.MallWeatherFetchAttempt{},
+		&model.MallWeatherRealtime{},
+		&model.MallWeatherMinutely{},
+		&model.MallWeatherHourly{},
+		&model.MallWeatherDaily{},
+		&model.MallWeatherAlert{},
+		&model.MallWeatherAlertRelation{},
+		&model.MallWeatherLifeIndex{},
+		&model.MallWeatherLatest{},
+		&model.MallWeatherExportProfile{},
+		&model.MallWeatherExportJob{},
+		&model.MallWeatherSheetRow{},
+		&model.AsyncJobOutbox{},
+	}
 }
 
 func prepareMethodPipelineIndexes(db *gorm.DB) {
