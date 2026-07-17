@@ -8,6 +8,8 @@ import (
 )
 
 func apiData(api *gin.RouterGroup) {
+	registerMallRoutes(api, data_ctrl.NewMallController())
+
 	sourceGroup := api.Group("/v1/sources")
 	sourceGroup.Use(middleware.AuthJWT())
 	{
@@ -189,5 +191,17 @@ func apiData(api *gin.RouterGroup) {
 		dataGroup.POST("/raw/list", dataCtrl.QueryController.GetRawDataList)
 		dataGroup.GET("/processed", dataCtrl.QueryController.GetProcessedData)
 		dataGroup.GET("/statistics", dataCtrl.QueryController.GetStatistics)
+	}
+}
+
+func registerMallRoutes(api *gin.RouterGroup, mallCtrl *data_ctrl.MallController) {
+	mallGroup := api.Group("/v1/malls")
+	mallGroup.Use(middleware.AuthJWT())
+	{
+		mallGroup.POST("", mallCtrl.Create)
+		mallGroup.GET("", mallCtrl.List)
+		mallGroup.GET("/:id", mallCtrl.Get)
+		mallGroup.PATCH("/:id", mallCtrl.Update)
+		mallGroup.DELETE("/:id", mallCtrl.Delete)
 	}
 }
