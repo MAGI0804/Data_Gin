@@ -153,6 +153,14 @@ func marshalJSONText(value interface{}) (model.JSONText, error) {
 	return model.JSONText(raw), nil
 }
 
+func validOptionalJSON(raw []byte) bool {
+	return len(raw) == 0 || json.Valid(raw)
+}
+
+func validRequiredJSON(raw []byte) bool {
+	return len(raw) > 0 && json.Valid(raw)
+}
+
 func cloneFloat(value *float64) *float64 {
 	if value == nil {
 		return nil
