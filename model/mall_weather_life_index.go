@@ -9,7 +9,10 @@ const (
 	MallWeatherDataKindDaily    = "daily"
 	MallWeatherDataKindLife     = "life_index"
 
-	MallWeatherFreshnessFresh = "fresh"
+	MallWeatherFreshnessFresh    = "fresh"
+	MallWeatherFreshnessWarning  = "warning"
+	MallWeatherFreshnessCritical = "critical"
+	MallWeatherFreshnessStale    = "stale"
 )
 
 type MallWeatherLifeIndex struct {
