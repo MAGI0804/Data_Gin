@@ -2,6 +2,7 @@ package data_dao
 
 import (
 	"context"
+	"encoding/hex"
 	"errors"
 	"strings"
 	"time"
@@ -417,6 +418,43 @@ func (dao *DeliveryLogDAO) FinishWeatherBatch(
 	}
 	if result.RowsAffected != 1 {
 		return errors.New("delivery log: weather batch is not running")
+	}
+	return nil
+}
+
+func (dao *DeliveryLogDAO) ReconcileWeatherBatchSuccess(
+	ctx context.Context,
+	id uint,
+	requestChecksum string,
+	rowStart int64,
+	rowEnd int64,
+	finishedAt time.Time,
+) error {
+	checksum, checksumErr := hex.DecodeString(requestChecksum)
+	if dao == nil || dao.db == nil || ctx == nil || id == 0 || checksumErr != nil || len(checksum) != 32 ||
+		rowStart < 1 || rowEnd < rowStart || finishedAt.IsZero() {
+		return errors.New("delivery log: invalid weather batch reconciliation")
+	}
+	finished := model.TimeNormal{Time: finishedAt.UTC()}
+	result := dao.db.WithContext(ctx).
+		Model(&model.DeliveryLog{}).
+		Where("id = ? AND request_checksum = ? AND status IN ?", id, requestChecksum, []string{"running", "unknown"}).
+		Updates(map[string]interface{}{
+			"status":           "success",
+			"row_start":        rowStart,
+			"row_end":          rowEnd,
+			"success":          true,
+			"response_summary": "remote range checksum matched",
+			"error_message":    "",
+			"finished_at":      finished,
+			"sent_at":          finished,
+			"updated_at":       finishedAt.UTC().Unix(),
+		})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected != 1 {
+		return errors.New("delivery log: weather batch cannot be reconciled")
 	}
 	return nil
 }

@@ -5,6 +5,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"math"
 	"strconv"
 	"time"
 
@@ -55,7 +56,6 @@ func renderMallWeatherFeishuBatch(
 		return result, errors.New("mall weather feishu rows: invalid columns")
 	}
 	result.Rows = make([][]feishu.SheetCell, len(dataRows))
-	canonical := make([][]mallWeatherFeishuCanonicalCell, len(dataRows))
 	var previousCursor uint
 	for rowIndex, dataRow := range dataRows {
 		if dataRow.CursorID == 0 || dataRow.CursorID <= previousCursor || len(dataRow.Values) != len(columns) {
@@ -63,7 +63,6 @@ func renderMallWeatherFeishuBatch(
 		}
 		previousCursor = dataRow.CursorID
 		result.Rows[rowIndex] = make([]feishu.SheetCell, len(columns))
-		canonical[rowIndex] = make([]mallWeatherFeishuCanonicalCell, len(columns))
 		for columnIndex, column := range columns {
 			value, exists := dataRow.Values[column.Field]
 			if !exists {
@@ -82,20 +81,17 @@ func renderMallWeatherFeishuBatch(
 			if err != nil {
 				return mallWeatherFeishuRenderedBatch{}, errors.New("mall weather feishu rows: render value failed")
 			}
-			cell, canonicalCell, err := mallWeatherFeishuCellFromRenderedValue(excelCell.Value)
+			cell, err := mallWeatherFeishuCellFromRenderedValue(excelCell.Value)
 			if err != nil {
 				return mallWeatherFeishuRenderedBatch{}, err
 			}
 			result.Rows[rowIndex][columnIndex] = cell
-			canonical[rowIndex][columnIndex] = canonicalCell
 		}
 	}
-	encoded, err := json.Marshal(canonical)
+	result.Checksum, err = checksumMallWeatherFeishuRows(result.Rows, len(result.Rows), len(columns))
 	if err != nil {
-		return mallWeatherFeishuRenderedBatch{}, errors.New("mall weather feishu rows: checksum encoding failed")
+		return mallWeatherFeishuRenderedBatch{}, err
 	}
-	digest := sha256.Sum256(encoded)
-	result.Checksum = hex.EncodeToString(digest[:])
 	result.FirstCursor = dataRows[0].CursorID
 	result.LastCursor = dataRows[len(dataRows)-1].CursorID
 	return result, nil
@@ -103,23 +99,87 @@ func renderMallWeatherFeishuBatch(
 
 func mallWeatherFeishuCellFromRenderedValue(
 	value interface{},
-) (feishu.SheetCell, mallWeatherFeishuCanonicalCell, error) {
+) (feishu.SheetCell, error) {
 	switch typed := value.(type) {
 	case nil:
-		return feishu.SheetCell{Type: feishu.SheetCellBlank},
-			mallWeatherFeishuCanonicalCell{Type: feishu.SheetCellBlank}, nil
+		return feishu.SheetCell{Type: feishu.SheetCellBlank}, nil
 	case string:
-		return feishu.SheetCell{Type: feishu.SheetCellString, Text: typed},
-			mallWeatherFeishuCanonicalCell{Type: feishu.SheetCellString, Text: typed}, nil
+		return feishu.SheetCell{Type: feishu.SheetCellString, Text: typed}, nil
 	case bool:
-		return feishu.SheetCell{Type: feishu.SheetCellBoolean, Boolean: typed},
-			mallWeatherFeishuCanonicalCell{Type: feishu.SheetCellBoolean, Boolean: typed}, nil
+		return feishu.SheetCell{Type: feishu.SheetCellBoolean, Boolean: typed}, nil
 	case float64:
 		number := strconv.FormatFloat(typed, 'g', -1, 64)
-		return feishu.SheetCell{Type: feishu.SheetCellNumber, Number: json.Number(number)},
-			mallWeatherFeishuCanonicalCell{Type: feishu.SheetCellNumber, Number: number}, nil
+		return feishu.SheetCell{Type: feishu.SheetCellNumber, Number: json.Number(number)}, nil
 	default:
-		return feishu.SheetCell{}, mallWeatherFeishuCanonicalCell{},
-			errors.New("mall weather feishu rows: unsupported rendered value")
+		return feishu.SheetCell{}, errors.New("mall weather feishu rows: unsupported rendered value")
+	}
+}
+
+func checksumMallWeatherFeishuRows(rows [][]feishu.SheetCell, expectedRows int, expectedColumns int) (string, error) {
+	if expectedRows < 1 || expectedRows > maxMallWeatherFeishuBatchRows || expectedColumns < 1 ||
+		expectedColumns > maxMallWeatherFeishuColumns || len(rows) > expectedRows {
+		return "", errors.New("mall weather feishu rows: invalid checksum dimensions")
+	}
+	canonical := make([][]mallWeatherFeishuCanonicalCell, expectedRows)
+	for rowIndex := 0; rowIndex < expectedRows; rowIndex++ {
+		canonical[rowIndex] = make([]mallWeatherFeishuCanonicalCell, expectedColumns)
+		for columnIndex := range canonical[rowIndex] {
+			canonical[rowIndex][columnIndex].Type = feishu.SheetCellBlank
+		}
+		if rowIndex >= len(rows) {
+			continue
+		}
+		if len(rows[rowIndex]) > expectedColumns {
+			return "", errors.New("mall weather feishu rows: invalid checksum dimensions")
+		}
+		for columnIndex, cell := range rows[rowIndex] {
+			normalized, err := canonicalMallWeatherFeishuCell(cell)
+			if err != nil {
+				return "", err
+			}
+			canonical[rowIndex][columnIndex] = normalized
+		}
+	}
+	encoded, err := json.Marshal(canonical)
+	if err != nil {
+		return "", errors.New("mall weather feishu rows: checksum encoding failed")
+	}
+	digest := sha256.Sum256(encoded)
+	return hex.EncodeToString(digest[:]), nil
+}
+
+func canonicalMallWeatherFeishuCell(cell feishu.SheetCell) (mallWeatherFeishuCanonicalCell, error) {
+	switch cell.Type {
+	case feishu.SheetCellBlank:
+		if cell.Text != "" || cell.Number != "" || cell.Boolean {
+			return mallWeatherFeishuCanonicalCell{}, errors.New("mall weather feishu rows: invalid blank cell")
+		}
+		return mallWeatherFeishuCanonicalCell{Type: feishu.SheetCellBlank}, nil
+	case feishu.SheetCellString:
+		if cell.Number != "" || cell.Boolean {
+			return mallWeatherFeishuCanonicalCell{}, errors.New("mall weather feishu rows: invalid string cell")
+		}
+		if cell.Text == "" {
+			return mallWeatherFeishuCanonicalCell{Type: feishu.SheetCellBlank}, nil
+		}
+		return mallWeatherFeishuCanonicalCell{Type: feishu.SheetCellString, Text: cell.Text}, nil
+	case feishu.SheetCellBoolean:
+		if cell.Text != "" || cell.Number != "" {
+			return mallWeatherFeishuCanonicalCell{}, errors.New("mall weather feishu rows: invalid boolean cell")
+		}
+		return mallWeatherFeishuCanonicalCell{Type: feishu.SheetCellBoolean, Boolean: cell.Boolean}, nil
+	case feishu.SheetCellNumber:
+		if cell.Text != "" || cell.Number == "" || cell.Boolean {
+			return mallWeatherFeishuCanonicalCell{}, errors.New("mall weather feishu rows: invalid number cell")
+		}
+		number, err := strconv.ParseFloat(cell.Number.String(), 64)
+		if err != nil || math.IsNaN(number) || math.IsInf(number, 0) {
+			return mallWeatherFeishuCanonicalCell{}, errors.New("mall weather feishu rows: invalid number cell")
+		}
+		return mallWeatherFeishuCanonicalCell{
+			Type: feishu.SheetCellNumber, Number: strconv.FormatFloat(number, 'g', -1, 64),
+		}, nil
+	default:
+		return mallWeatherFeishuCanonicalCell{}, errors.New("mall weather feishu rows: unsupported cell type")
 	}
 }

@@ -18,6 +18,11 @@ func TestDeliveryLogDAORejectsInvalidWeatherBatchOperationsBeforeDatabase(t *tes
 	}); err == nil {
 		t.Fatal("FinishWeatherBatch() accepted unavailable database")
 	}
+	if err := dao.ReconcileWeatherBatchSuccess(
+		context.Background(), 1, strings.Repeat("a", 64), 2, 3, time.Now(),
+	); err == nil {
+		t.Fatal("ReconcileWeatherBatchSuccess() accepted unavailable database")
+	}
 }
 
 func TestDeliveryLogDAORejectsInconsistentWeatherBatchCompletion(t *testing.T) {
