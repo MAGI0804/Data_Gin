@@ -204,6 +204,7 @@ func registerMallWeatherRoutes(api *gin.RouterGroup, weatherCtrl *data_ctrl.Mall
 		weatherGroup.GET("/:id/weather/minutely", weatherCtrl.Minutely)
 		weatherGroup.GET("/:id/weather/hourly", weatherCtrl.Hourly)
 		weatherGroup.GET("/:id/weather/daily", weatherCtrl.Daily)
+		weatherGroup.GET("/:id/weather/alerts", weatherCtrl.Alerts)
 	}
 }
 
