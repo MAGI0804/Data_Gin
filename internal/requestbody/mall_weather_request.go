@@ -142,3 +142,10 @@ type MallWeatherExportCreateRequest struct {
 	ExpectedProfileVersion *uint64                   `json:"expectedProfileVersion,omitempty"`
 	Filters                *MallWeatherExportFilters `json:"filters,omitempty"`
 }
+
+type MallWeatherFeishuPushRequest struct {
+	DestinationID          uint                      `json:"destinationId"`
+	ProfileID              uint                      `json:"profileId"`
+	ExpectedProfileVersion *uint64                   `json:"expectedProfileVersion,omitempty"`
+	Filters                *MallWeatherExportFilters `json:"filters,omitempty"`
+}

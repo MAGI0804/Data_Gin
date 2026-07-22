@@ -32,6 +32,7 @@ const (
 	PermissionWeatherRead         = "weather.read"
 	PermissionWeatherRefresh      = "weather.refresh"
 	PermissionWeatherExport       = "weather.export"
+	PermissionWeatherFeishuPush   = "weather.feishu.push"
 	PermissionWeatherConfigManage = "weather.config.manage"
 
 	mallCreateOperationScope = "mall.create"

@@ -418,12 +418,22 @@ func (service *MallWeatherExportJobService) authorize(ctx context.Context, actor
 }
 
 func (service *MallWeatherExportJobService) loadLimits(ctx context.Context) (mallWeatherExportLimits, error) {
+	return loadMallWeatherExportLimits(ctx, service.limits)
+}
+
+func loadMallWeatherExportLimits(
+	ctx context.Context,
+	reader mallWeatherExportLimitReader,
+) (mallWeatherExportLimits, error) {
 	limits := mallWeatherExportLimits{
 		MaxEstimatedRows:       defaultMallWeatherExportMaxEstimatedRows,
 		MaxRangeDays:           defaultMallWeatherExportMaxRangeDays,
 		EstimateTimeoutSeconds: int(defaultMallWeatherExportEstimateTimeout / time.Second),
 	}
-	value, exists, err := service.limits.GetValue(ctx, mallWeatherExportLimitConfigKey)
+	if ctx == nil || reader == nil {
+		return limits, fmt.Errorf("mall weather export: invalid limit reader")
+	}
+	value, exists, err := reader.GetValue(ctx, mallWeatherExportLimitConfigKey)
 	if err != nil {
 		return limits, fmt.Errorf("mall weather export: read limits: %w", err)
 	}
