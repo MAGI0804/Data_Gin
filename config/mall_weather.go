@@ -29,6 +29,8 @@ func init() {
 			"outbox_batch_size":               config.Get("MallWeather.OutboxBatchSize", 100),
 			"outbox_retry_base_seconds":       config.Get("MallWeather.OutboxRetryBaseSeconds", 5),
 			"outbox_retry_max_seconds":        config.Get("MallWeather.OutboxRetryMaxSeconds", 300),
+			"repair_max_rounds":               config.Get("MallWeather.RepairMaxRounds", 3),
+			"repair_spread_seconds":           config.Get("MallWeather.RepairSpreadSeconds", 900),
 			"raw_retention_days":              config.Get("MallWeather.RawRetentionDays", 30),
 			"forecast_version_retention_days": config.Get("MallWeather.ForecastVersionRetentionDays", 30),
 		}

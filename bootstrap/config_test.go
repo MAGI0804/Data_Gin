@@ -39,6 +39,16 @@ func TestValidateMallWeatherConfig(t *testing.T) {
 			wantError: "lock ttl",
 		},
 		{
+			name:      "repair rounds are bounded",
+			yaml:      "MallWeather:\n  Enabled: true\n  RepairMaxRounds: 11\nCaiyun:\n  QPS: 2\n",
+			wantError: "repair max rounds",
+		},
+		{
+			name:      "repair spread is bounded",
+			yaml:      "MallWeather:\n  Enabled: true\n  RepairSpreadSeconds: 3601\nCaiyun:\n  QPS: 2\n",
+			wantError: "repair spread",
+		},
+		{
 			name:      "enabled requires weather queue consumer",
 			yaml:      "MallWeather:\n  Enabled: true\nCaiyun:\n  QPS: 2\nQueueJob:\n  ConfigOpt:\n    Queues:\n      default: 1\n",
 			wantError: "weather queue",

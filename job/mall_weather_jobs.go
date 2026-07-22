@@ -186,6 +186,7 @@ func MallWeatherScheduleDefinitions(fastCron, fullCron, lifeCron string) ([]Mall
 		{CronExpr: lifeCron, Payload: MallWeatherSchedulePayload{TaskType: TypeMallWeatherLifeIndex, DetailProfile: "full"}},
 		{CronExpr: "17 */3 * * *", Payload: MallWeatherSchedulePayload{TaskType: TypeMallWeatherLifeIndex, DetailProfile: "standard"}},
 		{CronExpr: "17 */6 * * *", Payload: MallWeatherSchedulePayload{TaskType: TypeMallWeatherLifeIndex, DetailProfile: "economy"}},
+		{CronExpr: "*/15 * * * *", Payload: MallWeatherSchedulePayload{TaskType: TypeMallWeatherRepair}},
 	}, nil
 }
 
@@ -194,9 +195,10 @@ func DecodeMallWeatherSchedulePayload(payload []byte) (MallWeatherSchedulePayloa
 	if err := decodeStrictTaskPayload(payload, &decoded); err != nil {
 		return MallWeatherSchedulePayload{}, err
 	}
-	if !IsMallWeatherFetchTaskType(decoded.TaskType) ||
-		(decoded.TaskType != TypeMallWeatherFast && decoded.TaskType != TypeMallWeatherFull && decoded.TaskType != TypeMallWeatherLifeIndex) ||
-		(decoded.DetailProfile != "full" && decoded.DetailProfile != "standard" && decoded.DetailProfile != "economy") {
+	regularSchedule := (decoded.TaskType == TypeMallWeatherFast || decoded.TaskType == TypeMallWeatherFull || decoded.TaskType == TypeMallWeatherLifeIndex) &&
+		(decoded.DetailProfile == "full" || decoded.DetailProfile == "standard" || decoded.DetailProfile == "economy")
+	repairSchedule := decoded.TaskType == TypeMallWeatherRepair && decoded.DetailProfile == ""
+	if !regularSchedule && !repairSchedule {
 		return MallWeatherSchedulePayload{}, fmt.Errorf("mall weather task: invalid schedule payload")
 	}
 	return decoded, nil

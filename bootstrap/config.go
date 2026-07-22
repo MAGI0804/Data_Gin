@@ -84,6 +84,12 @@ func validateMallWeatherConfig() error {
 	if releaseTimeout := pkgConfig.GetInt("cfg.mall_weather.lock_release_timeout_seconds"); releaseTimeout < 1 || releaseTimeout > 10 {
 		return fmt.Errorf("weather lock release timeout must be between 1 and 10 seconds")
 	}
+	if repairRounds := pkgConfig.GetInt("cfg.mall_weather.repair_max_rounds"); repairRounds < 1 || repairRounds > 10 {
+		return fmt.Errorf("weather repair max rounds must be between 1 and 10")
+	}
+	if repairSpread := pkgConfig.GetInt("cfg.mall_weather.repair_spread_seconds"); repairSpread < 0 || repairSpread > 3600 {
+		return fmt.Errorf("weather repair spread must be between 0 and 3600 seconds")
+	}
 	queues, ok := pkgConfig.Get("cfg.queue_job.config_opt.queues").(map[string]int)
 	if !ok || queues["weather"] <= 0 {
 		return fmt.Errorf("weather queue must be configured with a positive weight")

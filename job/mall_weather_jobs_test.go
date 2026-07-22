@@ -66,10 +66,10 @@ func TestMallWeatherScheduleDefinitionsCoverProfiles(t *testing.T) {
 	if err != nil {
 		t.Fatalf("MallWeatherScheduleDefinitions() error=%v", err)
 	}
-	if len(definitions) != 9 {
+	if len(definitions) != 10 {
 		t.Fatalf("definitions=%v", definitions)
 	}
-	wantProfiles := map[string]int{"full": 3, "standard": 3, "economy": 3}
+	wantProfiles := map[string]int{"full": 3, "standard": 3, "economy": 3, "": 1}
 	gotProfiles := make(map[string]int)
 	for _, definition := range definitions {
 		gotProfiles[definition.Payload.DetailProfile]++
@@ -79,6 +79,9 @@ func TestMallWeatherScheduleDefinitionsCoverProfiles(t *testing.T) {
 	}
 	if !reflect.DeepEqual(gotProfiles, wantProfiles) {
 		t.Fatalf("profiles=%v", gotProfiles)
+	}
+	if definitions[len(definitions)-1].Payload.TaskType != TypeMallWeatherRepair || definitions[len(definitions)-1].CronExpr != "*/15 * * * *" {
+		t.Fatalf("repair definition=%+v", definitions[len(definitions)-1])
 	}
 }
 

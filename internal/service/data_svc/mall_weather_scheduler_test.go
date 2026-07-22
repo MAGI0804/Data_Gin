@@ -56,12 +56,114 @@ func TestMallWeatherSchedulePlannerUsesStableBusinessWindows(t *testing.T) {
 	}
 }
 
-type fakeMallWeatherScheduleStore struct {
-	malls []model.Mall
-	rows  []model.AsyncJobOutbox
+func TestMallWeatherSchedulePlannerCreatesBoundedRepairOutboxes(t *testing.T) {
+	store := &fakeMallWeatherScheduleStore{repairCandidates: []model.MallWeatherFetchRun{
+		{
+			BaseModel: model.BaseModel{ID: 31}, MallID: 7, TaskKind: "full", TaskWindow: "full:7:2026072211",
+			EndpointKind: "v26_weather", Status: "failed",
+		},
+		{
+			BaseModel: model.BaseModel{ID: 42}, MallID: 8, TaskKind: "repair", TaskWindow: "repair:41:1",
+			EndpointKind: "v3_life_index", Status: "partial_success",
+		},
+		{
+			BaseModel: model.BaseModel{ID: 53}, MallID: 9, TaskKind: "repair", TaskWindow: "repair:52:3",
+			EndpointKind: "v26_weather", Status: "failed",
+		},
+	}}
+	scheduledAt := time.Date(2026, 7, 22, 3, 15, 0, 0, time.UTC)
+	planner, err := newMallWeatherSchedulePlanner(store, func() time.Time { return scheduledAt }, time.UTC)
+	if err != nil {
+		t.Fatalf("newMallWeatherSchedulePlanner() error=%v", err)
+	}
+	planner.repairSpread = 0
+	if err := planner.Plan(context.Background(), job.MallWeatherSchedulePayload{TaskType: job.TypeMallWeatherRepair}); err != nil {
+		t.Fatalf("Plan(repair) error=%v", err)
+	}
+	if !store.reconciledAt.Equal(scheduledAt) || len(store.rows) != 2 {
+		t.Fatalf("reconciled=%s rows=%+v", store.reconciledAt, store.rows)
+	}
+	if store.rows[0].TaskKey != "mall:weather:repair:31:1" ||
+		string(store.rows[0].PayloadJSON) != `{"mall_id":7,"task_window":"repair:31:1","endpoint_kind":"v26_weather"}` ||
+		!store.rows[0].AvailableAt.Equal(scheduledAt) {
+		t.Fatalf("first repair=%+v", store.rows[0])
+	}
+	if store.rows[1].TaskKey != "mall:weather:repair:41:2" ||
+		string(store.rows[1].PayloadJSON) != `{"mall_id":8,"task_window":"repair:41:2","endpoint_kind":"v3_life_index"}` {
+		t.Fatalf("second repair=%+v", store.rows[1])
+	}
+}
 
-	listErr   error
-	createErr error
+func TestNextWeatherRepairIdentityValidatesHistory(t *testing.T) {
+	tests := []struct {
+		name         string
+		run          model.MallWeatherFetchRun
+		wantSource   uint
+		wantRound    int
+		wantSchedule bool
+		wantFailure  bool
+	}{
+		{name: "first repair", run: model.MallWeatherFetchRun{BaseModel: model.BaseModel{ID: 11}, TaskKind: "full"}, wantSource: 11, wantRound: 1, wantSchedule: true},
+		{name: "next repair", run: model.MallWeatherFetchRun{BaseModel: model.BaseModel{ID: 12}, TaskKind: "repair", TaskWindow: "repair:11:1"}, wantSource: 11, wantRound: 2, wantSchedule: true},
+		{name: "round budget exhausted", run: model.MallWeatherFetchRun{BaseModel: model.BaseModel{ID: 13}, TaskKind: "repair", TaskWindow: "repair:11:3"}, wantSource: 11, wantRound: 3},
+		{name: "malformed history", run: model.MallWeatherFetchRun{BaseModel: model.BaseModel{ID: 14}, TaskKind: "repair", TaskWindow: "repair:bad:1"}, wantFailure: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			source, round, schedule, err := nextWeatherRepairIdentity(&test.run, 3)
+			if test.wantFailure {
+				if err == nil {
+					t.Fatal("nextWeatherRepairIdentity() accepted malformed history")
+				}
+				return
+			}
+			if err != nil || source != test.wantSource || round != test.wantRound || schedule != test.wantSchedule {
+				t.Fatalf("identity=(%d,%d,%t,%v)", source, round, schedule, err)
+			}
+		})
+	}
+}
+
+func TestDeterministicRepairDelaySpreadsByRunID(t *testing.T) {
+	if got := deterministicRepairDelay(901, 15*time.Minute); got != time.Second {
+		t.Fatalf("deterministicRepairDelay()=%s", got)
+	}
+	if got := deterministicRepairDelay(901, 0); got != 0 {
+		t.Fatalf("zero spread delay=%s", got)
+	}
+}
+
+type fakeMallWeatherScheduleStore struct {
+	malls            []model.Mall
+	repairCandidates []model.MallWeatherFetchRun
+	rows             []model.AsyncJobOutbox
+	reconciledAt     time.Time
+
+	listErr       error
+	repairListErr error
+	reconcileErr  error
+	createErr     error
+}
+
+func (store *fakeMallWeatherScheduleStore) ListRepairCandidates(_ context.Context, afterID uint, limit int) ([]model.MallWeatherFetchRun, error) {
+	if store.repairListErr != nil {
+		return nil, store.repairListErr
+	}
+	rows := make([]model.MallWeatherFetchRun, 0, limit)
+	for _, run := range store.repairCandidates {
+		if run.ID > afterID && len(rows) < limit {
+			rows = append(rows, run)
+		}
+	}
+	return rows, nil
+}
+
+func (store *fakeMallWeatherScheduleStore) ReconcileLatestFreshness(_ context.Context, now time.Time) (int64, error) {
+	if store.reconcileErr != nil {
+		return 0, store.reconcileErr
+	}
+	store.reconciledAt = now
+	return 0, nil
 }
 
 func (store *fakeMallWeatherScheduleStore) ListEnabledMalls(_ context.Context, afterID uint, limit int) ([]model.Mall, error) {
