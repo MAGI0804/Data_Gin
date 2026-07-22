@@ -3,6 +3,8 @@ package bootstrap
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"time"
 
 	"gin-biz-web-api/global"
@@ -45,6 +47,13 @@ func setupQueueJob() {
 	mux.Use(jobLoggingMiddleware)
 
 	addQueueJob(mux)
+	if config.GetBool("cfg.mall_weather.enabled") {
+		processor, err := data_svc.NewMallGeocodeProcessor()
+		if err != nil {
+			console.Exit("Mall Geocode Worker Init Failed %v", err)
+		}
+		mux.HandleFunc(job.TypeMallGeocode, newMallGeocodeHandler(processor))
+	}
 
 	go func(mux *asynq.ServeMux, server *asynq.Server) {
 		if err := server.Run(mux); err != nil {
@@ -61,6 +70,30 @@ func setupQueueJob() {
 
 	startMallWeatherOutboxDispatcher()
 
+}
+
+type mallGeocodeProcessor interface {
+	Process(ctx context.Context, payload job.MallGeocodeTaskPayload) error
+}
+
+func newMallGeocodeHandler(processor mallGeocodeProcessor) asynq.HandlerFunc {
+	return func(ctx context.Context, task *asynq.Task) error {
+		if processor == nil {
+			return fmt.Errorf("mall geocode handler: processor is not configured")
+		}
+		payload, err := job.DecodeMallGeocodeTaskPayload(task.Payload())
+		if err != nil {
+			return fmt.Errorf("%w: %v", asynq.SkipRetry, err)
+		}
+		if err := processor.Process(ctx, payload); err != nil {
+			var processError *data_svc.MallGeocodeProcessError
+			if errors.As(err, &processError) && !processError.Retryable {
+				return fmt.Errorf("%w: %v", asynq.SkipRetry, err)
+			}
+			return err
+		}
+		return nil
+	}
 }
 
 // addQueueJob 添加异步队列任务

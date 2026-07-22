@@ -85,3 +85,15 @@ func TestMallWeatherTaskTypesReturnsCopy(t *testing.T) {
 		t.Fatal("MallWeatherTaskTypes returned shared storage")
 	}
 }
+
+func TestDecodeMallGeocodeTaskPayloadReturnsIdentity(t *testing.T) {
+	want := MallGeocodeTaskPayload{MallID: 11, MallVersion: 3, AddressHash: strings.Repeat("b", 64)}
+	data := []byte(`{"mall_id":11,"mall_version":3,"address_hash":"` + want.AddressHash + `"}`)
+	got, err := DecodeMallGeocodeTaskPayload(data)
+	if err != nil {
+		t.Fatalf("DecodeMallGeocodeTaskPayload() error = %v", err)
+	}
+	if got != want {
+		t.Fatalf("DecodeMallGeocodeTaskPayload() = %+v, want %+v", got, want)
+	}
+}

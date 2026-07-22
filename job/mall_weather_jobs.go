@@ -134,12 +134,8 @@ func NewMallWeatherTask(taskType string, payload []byte) (*asynq.Task, error) {
 
 	switch taskType {
 	case TypeMallGeocode:
-		var decoded MallGeocodeTaskPayload
-		if err := decodeStrictTaskPayload(payload, &decoded); err != nil {
+		if _, err := DecodeMallGeocodeTaskPayload(payload); err != nil {
 			return nil, err
-		}
-		if decoded.MallID == 0 || decoded.MallVersion == 0 || !sha256HexPattern.MatchString(decoded.AddressHash) {
-			return nil, fmt.Errorf("mall weather task: invalid geocode identity")
 		}
 	case TypeMallWeatherFast,
 		TypeMallWeatherFull,
@@ -172,6 +168,17 @@ func NewMallWeatherTask(taskType string, payload []byte) (*asynq.Task, error) {
 	}
 
 	return asynq.NewTask(taskType, append([]byte(nil), payload...), asynq.Queue(queue)), nil
+}
+
+func DecodeMallGeocodeTaskPayload(payload []byte) (MallGeocodeTaskPayload, error) {
+	var decoded MallGeocodeTaskPayload
+	if err := decodeStrictTaskPayload(payload, &decoded); err != nil {
+		return MallGeocodeTaskPayload{}, err
+	}
+	if decoded.MallID == 0 || decoded.MallVersion == 0 || !sha256HexPattern.MatchString(decoded.AddressHash) {
+		return MallGeocodeTaskPayload{}, fmt.Errorf("mall weather task: invalid geocode identity")
+	}
+	return decoded, nil
 }
 
 func decodeStrictTaskPayload(payload []byte, destination interface{}) error {
