@@ -1,8 +1,6 @@
 package data_svc
 
 import (
-	"bytes"
-	"compress/gzip"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -17,6 +15,7 @@ import (
 	"gin-biz-web-api/internal/dao/data_dao"
 	"gin-biz-web-api/job"
 	"gin-biz-web-api/model"
+	"gin-biz-web-api/pkg/compressutil"
 	"gin-biz-web-api/pkg/config"
 	"gin-biz-web-api/pkg/database"
 
@@ -299,7 +298,7 @@ func (store *gormMallGeocodeStore) rawSnapshot(mallID uint, outcome mallGeocodeO
 	if outcome.Response == nil || len(outcome.Response.RawJSON) == 0 {
 		return nil, nil
 	}
-	compressed, err := gzipBytes(outcome.Response.RawJSON)
+	compressed, err := compressutil.Gzip(outcome.Response.RawJSON)
 	if err != nil {
 		return nil, err
 	}
@@ -399,16 +398,4 @@ func setSafeGeocodeRunError(run *model.MallGeocodeRun, err error) {
 			run.ErrorCode = providerError.Code
 		}
 	}
-}
-
-func gzipBytes(data []byte) ([]byte, error) {
-	var buffer bytes.Buffer
-	writer := gzip.NewWriter(&buffer)
-	if _, err := writer.Write(data); err != nil {
-		return nil, fmt.Errorf("mall geocode: compress raw response: %w", err)
-	}
-	if err := writer.Close(); err != nil {
-		return nil, fmt.Errorf("mall geocode: close raw response compressor: %w", err)
-	}
-	return buffer.Bytes(), nil
 }
