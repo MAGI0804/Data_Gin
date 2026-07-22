@@ -175,12 +175,25 @@ type DeliveryLog struct {
 	DestinationCode string      `gorm:"column:destination_code;size:100;index" json:"destination_code"`
 	DestinationName string      `gorm:"column:destination_name;size:100;index" json:"destination_name"`
 	BusinessKey     string      `gorm:"column:business_key;size:255;index" json:"business_key"`
+	DatasetKind     string      `gorm:"column:dataset_kind;size:32;index" json:"dataset_kind,omitempty"`
+	BatchNo         int         `gorm:"column:batch_no;default:0;index" json:"batch_no,omitempty"`
+	RowStart        int64       `gorm:"column:row_start;default:0" json:"row_start,omitempty"`
+	RowEnd          int64       `gorm:"column:row_end;default:0" json:"row_end,omitempty"`
+	RecordCount     int         `gorm:"column:record_count;default:0" json:"record_count,omitempty"`
+	CellCount       int         `gorm:"column:cell_count;default:0" json:"cell_count,omitempty"`
+	RequestChecksum string      `gorm:"column:request_checksum;type:char(64);index" json:"request_checksum,omitempty"`
+	Status          string      `gorm:"column:status;size:32;index" json:"status,omitempty"`
+	FeishuCode      int         `gorm:"column:feishu_code;default:0" json:"feishu_code,omitempty"`
+	Attempt         int         `gorm:"column:attempt;default:0" json:"attempt,omitempty"`
 	RequestBody     string      `gorm:"column:request_body;type:longtext" json:"request_body"`
 	ResponseBody    string      `gorm:"column:response_body;type:longtext" json:"response_body"`
+	ResponseSummary string      `gorm:"column:response_summary;size:512" json:"response_summary,omitempty"`
 	HTTPStatus      int         `gorm:"column:http_status;default:0" json:"http_status"`
 	Success         bool        `gorm:"column:success;default:false;index" json:"success"`
 	ErrorMessage    string      `gorm:"column:error_message;type:text" json:"error_message"`
 	RetryCount      int         `gorm:"column:retry_count;default:0" json:"retry_count"`
+	StartedAt       *TimeNormal `gorm:"column:started_at" json:"started_at,omitempty"`
+	FinishedAt      *TimeNormal `gorm:"column:finished_at" json:"finished_at,omitempty"`
 	SentAt          *TimeNormal `gorm:"column:sent_at" json:"sent_at"`
 
 	CommonTimestampsField

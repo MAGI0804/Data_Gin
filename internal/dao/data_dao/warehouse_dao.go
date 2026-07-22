@@ -2,6 +2,8 @@ package data_dao
 
 import (
 	"context"
+	"errors"
+	"strings"
 	"time"
 
 	"gin-biz-web-api/model"
@@ -293,8 +295,16 @@ type DeliveryLogDAO struct {
 	db *gorm.DB
 }
 
-func NewDeliveryLogDAO() *DeliveryLogDAO {
-	return &DeliveryLogDAO{db: database.DB}
+func NewDeliveryLogDAO(databases ...*gorm.DB) *DeliveryLogDAO {
+	db := database.DB
+	if len(databases) > 0 && databases[0] != nil {
+		db = databases[0]
+	}
+	return &DeliveryLogDAO{db: db}
+}
+
+func (dao *DeliveryLogDAO) WithDB(db *gorm.DB) *DeliveryLogDAO {
+	return &DeliveryLogDAO{db: db}
 }
 
 func (dao *DeliveryLogDAO) Create(ctx context.Context, log *model.DeliveryLog) (uint, error) {
@@ -332,6 +342,83 @@ func (dao *DeliveryLogDAO) FindRecent(ctx context.Context, limit int) ([]model.D
 		Find(&logs).
 		Error
 	return logs, err
+}
+
+type DeliveryLogBatchFinish struct {
+	Status          string
+	HTTPStatus      int
+	FeishuCode      int
+	Success         bool
+	ResponseSummary string
+	SafeError       string
+	FinishedAt      time.Time
+}
+
+func (dao *DeliveryLogDAO) FindLatestWeatherBatch(
+	ctx context.Context,
+	runID uint,
+	destinationID uint,
+	datasetKind string,
+	batchNo int,
+) (*model.DeliveryLog, error) {
+	datasetKind = strings.TrimSpace(datasetKind)
+	if dao == nil || dao.db == nil || ctx == nil || runID == 0 || destinationID == 0 || datasetKind == "" ||
+		len(datasetKind) > 32 || batchNo < 1 {
+		return nil, errors.New("delivery log: invalid weather batch query")
+	}
+	var log model.DeliveryLog
+	err := dao.db.WithContext(ctx).
+		Where(
+			"run_id = ? AND destination_id = ? AND dataset_kind = ? AND batch_no = ?",
+			runID,
+			destinationID,
+			datasetKind,
+			batchNo,
+		).
+		Order("attempt DESC, id DESC").
+		First(&log).
+		Error
+	return &log, err
+}
+
+func (dao *DeliveryLogDAO) FinishWeatherBatch(
+	ctx context.Context,
+	id uint,
+	finish DeliveryLogBatchFinish,
+) error {
+	finish.Status = strings.TrimSpace(finish.Status)
+	if dao == nil || dao.db == nil || ctx == nil || id == 0 || !validDeliveryLogBatchFinish(finish) {
+		return errors.New("delivery log: invalid weather batch completion")
+	}
+	finishedAt := model.TimeNormal{Time: finish.FinishedAt.UTC()}
+	result := dao.db.WithContext(ctx).
+		Model(&model.DeliveryLog{}).
+		Where("id = ? AND status = ?", id, "running").
+		Updates(map[string]interface{}{
+			"status":           finish.Status,
+			"http_status":      finish.HTTPStatus,
+			"feishu_code":      finish.FeishuCode,
+			"success":          finish.Success,
+			"response_summary": finish.ResponseSummary,
+			"error_message":    finish.SafeError,
+			"finished_at":      finishedAt,
+			"sent_at":          finishedAt,
+			"updated_at":       finish.FinishedAt.UTC().Unix(),
+		})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected != 1 {
+		return errors.New("delivery log: weather batch is not running")
+	}
+	return nil
+}
+
+func validDeliveryLogBatchFinish(finish DeliveryLogBatchFinish) bool {
+	return !finish.FinishedAt.IsZero() &&
+		(finish.Status == "success" || finish.Status == "failed" || finish.Status == "unknown") &&
+		finish.HTTPStatus >= 0 && finish.FeishuCode >= 0 && len(finish.ResponseSummary) <= 512 &&
+		len(finish.SafeError) <= 2048 && (finish.Status == "success") == finish.Success
 }
 
 type PipelineRunDAO struct {
