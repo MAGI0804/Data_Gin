@@ -112,6 +112,8 @@ func (executor *mallWeatherFeishuAppendBatchExecutor) Execute(
 	acknowledgement, appendErr := executor.sheets.AppendValues(ctx, request.Destination.SpreadsheetToken, write)
 	if appendErr == nil && !validMallWeatherFeishuAppendAcknowledgement(
 		acknowledgement,
+		request.RowStart,
+		rowEnd,
 		recordCount,
 		len(request.Batch.Rows[0]),
 		cellCount,
@@ -142,6 +144,8 @@ func (executor *mallWeatherFeishuAppendBatchExecutor) Execute(
 
 func validMallWeatherFeishuAppendAcknowledgement(
 	acknowledgement *feishu.SheetWriteResult,
+	expectedRowStart int64,
+	expectedRowEnd int64,
 	rows int,
 	columns int,
 	cells int,
@@ -149,7 +153,8 @@ func validMallWeatherFeishuAppendAcknowledgement(
 	if acknowledgement == nil || rows < 1 || columns < 1 || cells < 1 ||
 		acknowledgement.UpdatedRows != int64(rows) || acknowledgement.UpdatedColumns != int64(columns) ||
 		acknowledgement.UpdatedCells != int64(cells) || acknowledgement.UpdatedRowStart < 2 ||
-		acknowledgement.UpdatedRowStart > maxMallWeatherFeishuSheetRow {
+		acknowledgement.UpdatedRowStart > maxMallWeatherFeishuSheetRow ||
+		acknowledgement.UpdatedRowStart != expectedRowStart || acknowledgement.UpdatedRowEnd != expectedRowEnd {
 		return false
 	}
 	return acknowledgement.UpdatedRowEnd == acknowledgement.UpdatedRowStart+int64(rows)-1 &&
@@ -177,7 +182,7 @@ func validateMallWeatherFeishuAppendBatchRequest(
 		return 0, 0, 0, errors.New("invalid batch checkpoint")
 	}
 	columns := len(request.Batch.Rows[0])
-	if columns == 0 || columns > maxMallWeatherExportColumns || len(request.Batch.Rows) > math.MaxInt/columns {
+	if columns == 0 || columns > maxMallWeatherFeishuColumns || len(request.Batch.Rows) > math.MaxInt/columns {
 		return 0, 0, 0, errors.New("invalid batch dimensions")
 	}
 	for _, row := range request.Batch.Rows {

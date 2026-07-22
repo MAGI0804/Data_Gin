@@ -156,7 +156,7 @@ func buildMallWeatherFeishuDatasetDryRunPlan(
 		return MallWeatherFeishuDatasetDryRunPlan{}, errors.New("mall weather feishu dry-run: dataset estimate is invalid")
 	}
 	columns, err := mallWeatherExportRenderColumns(dataset)
-	if err != nil || len(columns) == 0 || len(columns) > maxMallWeatherExportColumns {
+	if err != nil || len(columns) == 0 || len(columns) > maxMallWeatherFeishuColumns {
 		return MallWeatherFeishuDatasetDryRunPlan{}, errors.New("mall weather feishu dry-run: dataset columns are invalid")
 	}
 	uniqueKeys := input.Destination.Config.UniqueKeyFields[dataset.Kind]

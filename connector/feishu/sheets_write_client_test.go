@@ -19,8 +19,9 @@ func TestSheetsClientAppendsValidatedScalarBatch(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		if request.Method != http.MethodPost ||
 			request.URL.Path != "/open-apis/sheets/v2/spreadsheets/spreadsheet_abc/values_append" ||
+			request.URL.Query().Get("insertDataOption") != "INSERT_ROWS" || len(request.URL.Query()) != 1 ||
 			request.Header.Get("Authorization") != "Bearer tenant-token-value-123" ||
-			request.Header.Get("Content-Type") != "application/json" ||
+			request.Header.Get("Content-Type") != "application/json; charset=utf-8" ||
 			request.Header.Get("Accept") != "application/json" {
 			t.Fatalf("request method=%s path=%s headers=%v", request.Method, request.URL.Path, request.Header)
 		}
@@ -43,7 +44,7 @@ func TestSheetsClientAppendsValidatedScalarBatch(t *testing.T) {
 			t.Fatalf("request body=%s error=%v", body, err)
 		}
 		_, _ = response.Write([]byte(`{"code":0,"data":{"updates":{
-			"revision":11,"updatedRange":"sheet_hourly!B7:E7",
+			"revision":11,"updatedRange":"sheet_hourly!B2:E2",
 			"updatedRows":1,"updatedColumns":4,"updatedCells":4
 		}}}`))
 	}))
@@ -62,8 +63,8 @@ func TestSheetsClientAppendsValidatedScalarBatch(t *testing.T) {
 			{Type: SheetCellBlank},
 		}},
 	})
-	if err != nil || result == nil || result.Revision != 11 || result.UpdatedRowStart != 7 ||
-		result.UpdatedRowEnd != 7 || result.UpdatedRows != 1 || result.UpdatedColumns != 4 ||
+	if err != nil || result == nil || result.Revision != 11 || result.UpdatedRowStart != 2 ||
+		result.UpdatedRowEnd != 2 || result.UpdatedRows != 1 || result.UpdatedColumns != 4 ||
 		result.UpdatedCells != 4 || tokens.tokenCalls != 1 || tokens.refreshCalls != 0 {
 		t.Fatalf("AppendValues() result=%+v error=%v tokens=%+v", result, err, tokens)
 	}
@@ -73,7 +74,8 @@ func TestSheetsClientBatchUpdatesMultipleFixedRanges(t *testing.T) {
 	tokens := &fakeSheetsTokenProvider{token: "tenant-token-value-123"}
 	server := httptest.NewServer(http.HandlerFunc(func(response http.ResponseWriter, request *http.Request) {
 		if request.Method != http.MethodPost ||
-			request.URL.Path != "/open-apis/sheets/v2/spreadsheets/spreadsheet_abc/values_batch_update" {
+			request.URL.Path != "/open-apis/sheets/v2/spreadsheets/spreadsheet_abc/values_batch_update" ||
+			request.URL.RawQuery != "" {
 			t.Fatalf("request method=%s path=%s", request.Method, request.URL.Path)
 		}
 		var decoded struct {
@@ -131,7 +133,7 @@ func TestSheetsClientWriteRefreshesOnlyAfterUnauthorized(t *testing.T) {
 			t.Fatalf("refreshed authorization=%q", request.Header.Get("Authorization"))
 		}
 		_, _ = response.Write([]byte(`{"code":0,"data":{"revision":3,"updates":{
-			"updatedRange":"sheet_hourly!A9:A9","updatedRows":1,"updatedColumns":1,"updatedCells":1
+			"updatedRange":"sheet_hourly!A1:A1","updatedRows":1,"updatedColumns":1,"updatedCells":1
 		}}}`))
 	}))
 	defer server.Close()
@@ -240,6 +242,9 @@ func TestSheetsClientWriteRejectsUnsafeInputBeforeNetwork(t *testing.T) {
 		{name: "request body limit", spreadsheet: "spreadsheet_abc", write: singleStringWrite(
 			"sheet_hourly", strings.Repeat("x", maxSheetsWriteRequestBodyBytes),
 		)},
+		{name: "cell character limit", spreadsheet: "spreadsheet_abc", write: singleStringWrite(
+			"sheet_hourly", strings.Repeat("界", maxSheetWriteCellRunes+1),
+		)},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -267,14 +272,14 @@ func TestSheetsClientBatchUpdateRejectsAggregateCellOverflow(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newSheetsClient() error=%v", err)
 	}
-	rows := makeScalarRows(500, 128)
+	rows := makeScalarRows(600, 100)
 	writes := []SheetWriteRange{
 		{
-			Range: SheetRange{SheetID: "sheet_hourly", StartRow: 1, EndRow: 500, StartColumn: 1, EndColumn: 128},
+			Range: SheetRange{SheetID: "sheet_hourly", StartRow: 1, EndRow: 600, StartColumn: 1, EndColumn: 100},
 			Rows:  rows,
 		},
 		{
-			Range: SheetRange{SheetID: "sheet_hourly", StartRow: 501, EndRow: 1000, StartColumn: 1, EndColumn: 128},
+			Range: SheetRange{SheetID: "sheet_hourly", StartRow: 601, EndRow: 1200, StartColumn: 1, EndColumn: 100},
 			Rows:  rows,
 		},
 	}
@@ -298,6 +303,7 @@ func TestSheetsClientWriteRejectsMalformedResponses(t *testing.T) {
 		{name: "missing append acknowledgement", body: `{"code":0,"data":{"revision":1}}`},
 		{name: "unsafe updated range", body: `{"code":0,"data":{"updates":{"updatedRange":"../sheet!A1:A1","updatedRows":1,"updatedColumns":1,"updatedCells":1}}}`},
 		{name: "wrong append dimensions", body: `{"code":0,"data":{"updates":{"updatedRange":"sheet_hourly!A1:A2","updatedRows":2,"updatedColumns":1,"updatedCells":2}}}`},
+		{name: "shifted append range", body: `{"code":0,"data":{"updates":{"updatedRange":"sheet_hourly!A2:A2","updatedRows":1,"updatedColumns":1,"updatedCells":1}}}`},
 		{name: "oversized", body: strings.Repeat("x", maxSheetsResponseBodyBytes+1)},
 	}
 	for _, test := range tests {

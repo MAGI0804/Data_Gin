@@ -51,7 +51,7 @@ func renderMallWeatherFeishuBatch(
 		return result, errors.New("mall weather feishu rows: invalid profile format")
 	}
 	columns, err := mallWeatherExportRenderColumns(dataset)
-	if err != nil || len(columns) == 0 || len(columns) > maxMallWeatherExportColumns {
+	if err != nil || len(columns) == 0 || len(columns) > maxMallWeatherFeishuColumns {
 		return result, errors.New("mall weather feishu rows: invalid columns")
 	}
 	result.Rows = make([][]feishu.SheetCell, len(dataRows))

@@ -21,7 +21,7 @@ func TestMallWeatherFeishuAppendBatchExecutorCheckpointsSuccess(t *testing.T) {
 	sheets := &fakeMallWeatherFeishuAppender{
 		events: &events,
 		result: &feishu.SheetWriteResult{
-			Revision: 17, UpdatedRowStart: 20, UpdatedRowEnd: 21,
+			Revision: 17, UpdatedRowStart: 12, UpdatedRowEnd: 13,
 			UpdatedRows: 2, UpdatedColumns: 2, UpdatedCells: 4,
 		},
 	}
@@ -35,11 +35,11 @@ func TestMallWeatherFeishuAppendBatchExecutorCheckpointsSuccess(t *testing.T) {
 		t.Fatalf("Execute() error=%v", err)
 	}
 	if !slices.Equal(events, []string{"create", "append", "finish"}) || result.DeliveryLogID != 41 ||
-		result.BatchNo != 2 || result.RowStart != 20 || result.RowEnd != 21 || result.RecordCount != 2 ||
+		result.BatchNo != 2 || result.RowStart != 12 || result.RowEnd != 13 || result.RecordCount != 2 ||
 		result.CellCount != 4 || result.Revision != 17 || logs.created == nil || logs.created.Status != "running" ||
 		logs.created.RequestBody != "" || logs.created.ResponseBody != "" || logs.created.RequestChecksum != strings.Repeat("a", 64) ||
 		logs.finished.Status != "success" || !logs.finished.Success || logs.finished.HTTPStatus != http.StatusOK ||
-		logs.finished.RowStart != 20 || logs.finished.RowEnd != 21 {
+		logs.finished.RowStart != 12 || logs.finished.RowEnd != 13 {
 		t.Fatalf("events=%v result=%+v sheets=%+v logs=%+v", events, result, sheets, logs)
 	}
 	if sheets.write.Range.SheetID != "sheet-hourly-secret" || sheets.write.Range.StartRow != 12 ||

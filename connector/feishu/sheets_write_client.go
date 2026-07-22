@@ -18,11 +18,12 @@ import (
 )
 
 const maxSheetsWriteRequestBodyBytes = 2 * 1024 * 1024
+const maxSheetWriteCellRunes = 40_000
 
 const (
 	maxSheetWriteRanges  = 100
 	maxSheetWriteRows    = int64(5_000)
-	maxSheetWriteColumns = int64(128)
+	maxSheetWriteColumns = int64(100)
 	maxSheetWriteCells   = int64(100_000)
 )
 
@@ -199,7 +200,8 @@ func sheetCellWriteValue(cell SheetCell) (any, bool) {
 	case SheetCellBlank:
 		return nil, cell.Text == "" && cell.Number == "" && !cell.Boolean
 	case SheetCellString:
-		return cell.Text, utf8.ValidString(cell.Text) && cell.Number == "" && !cell.Boolean
+		return cell.Text, utf8.ValidString(cell.Text) && utf8.RuneCountInString(cell.Text) <= maxSheetWriteCellRunes &&
+			cell.Number == "" && !cell.Boolean
 	case SheetCellNumber:
 		if cell.Text != "" || cell.Number == "" || cell.Boolean {
 			return nil, false
@@ -260,13 +262,18 @@ func (client *SheetsClient) postSheetWriteOnce(
 	endpoint := *client.baseURL
 	endpoint.Path = strings.TrimRight(endpoint.Path, "/") + "/open-apis/sheets/v2/spreadsheets/" +
 		url.PathEscape(spreadsheetToken) + "/" + operation
+	if operation == "values_append" {
+		query := endpoint.Query()
+		query.Set("insertDataOption", "INSERT_ROWS")
+		endpoint.RawQuery = query.Encode()
+	}
 	request, err := http.NewRequestWithContext(ctx, http.MethodPost, endpoint.String(), bytes.NewReader(body))
 	if err != nil {
 		return nil, 0, errors.New("feishu sheets: create write request failed")
 	}
 	request.Header.Set("Authorization", "Bearer "+token)
 	request.Header.Set("Accept", "application/json")
-	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Content-Type", "application/json; charset=utf-8")
 	response, err := client.http.Do(request)
 	if err != nil {
 		classification := providerhttp.ClassifyRetry(0, err)
@@ -381,6 +388,7 @@ func normalizeSheetWriteResult(
 	updates := response.Data.Updates
 	updatedRange, err := parseSheetUpdatedRange(updates.UpdatedRange)
 	if err != nil || updatedRange.SheetID != appendSpec.rangeValue.SheetID ||
+		updatedRange.StartRow != appendSpec.rangeValue.StartRow || updatedRange.EndRow != appendSpec.rangeValue.EndRow ||
 		updatedRange.StartColumn != appendSpec.rangeValue.StartColumn ||
 		updatedRange.EndColumn != appendSpec.rangeValue.EndColumn ||
 		updatedRange.EndRow-updatedRange.StartRow+1 != appendSpec.rows ||

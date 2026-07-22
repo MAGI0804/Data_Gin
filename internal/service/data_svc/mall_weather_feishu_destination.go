@@ -20,6 +20,7 @@ const (
 	maxMallWeatherFeishuBatchRows     = 500
 	defaultMallWeatherFeishuTimeout   = 20
 	maxMallWeatherFeishuTimeout       = 120
+	maxMallWeatherFeishuColumns       = 100
 )
 
 var mallWeatherFeishuDatasetKinds = map[string]struct{}{

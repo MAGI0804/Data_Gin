@@ -106,7 +106,7 @@ func planMallWeatherFeishuHeaderWrite(
 	sheets mallWeatherFeishuHeaderSheets,
 ) (*feishu.SheetWriteRange, mallWeatherFeishuHeaderOutcome, error) {
 	columns, err := mallWeatherExportRenderColumns(dataset)
-	if err != nil || len(columns) == 0 || len(columns) > maxMallWeatherExportColumns {
+	if err != nil || len(columns) == 0 || len(columns) > maxMallWeatherFeishuColumns {
 		return nil, mallWeatherFeishuHeaderOutcome{}, errors.New("mall weather feishu headers: invalid columns")
 	}
 	for _, column := range columns {
