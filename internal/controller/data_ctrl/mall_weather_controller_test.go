@@ -17,6 +17,43 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+func TestMallWeatherControllerOverviewParsesContract(t *testing.T) {
+	var gotActor, gotMall uint
+	var gotTimeZone string
+	service := fakeMallWeatherControllerService{overview: func(_ context.Context, actor, mallID uint, timeZone string) (*data_svc.MallWeatherOverviewResult, error) {
+		gotActor, gotMall, gotTimeZone = actor, mallID, timeZone
+		return &data_svc.MallWeatherOverviewResult{
+			Minutely: []data_svc.MallWeatherMinutelyDTO{}, Hourly: []data_svc.MallWeatherHourlyDTO{}, Alerts: []data_svc.MallWeatherAlertDTO{},
+		}, nil
+	}}
+	recorder := performMallWeatherRequest(t, service, "/api/v1/malls/7/weather/overview?timezone=Asia%2FShanghai")
+	if recorder.Code != http.StatusOK || gotActor != 17 || gotMall != 7 || gotTimeZone != "Asia/Shanghai" ||
+		!strings.Contains(recorder.Body.String(), `"minutely":[]`) {
+		t.Fatalf("status=%d actor=%d mall=%d timezone=%q body=%s", recorder.Code, gotActor, gotMall, gotTimeZone, recorder.Body.String())
+	}
+}
+
+func TestMallWeatherControllerOverviewRejectsInvalidBoundaryValues(t *testing.T) {
+	calls := 0
+	service := fakeMallWeatherControllerService{overview: func(context.Context, uint, uint, string) (*data_svc.MallWeatherOverviewResult, error) {
+		calls++
+		return nil, nil
+	}}
+	paths := []string{
+		"/api/v1/malls/0/weather/overview",
+		"/api/v1/malls/7/weather/overview?timeZone=UTC&timezone=Asia%2FShanghai",
+	}
+	for _, path := range paths {
+		recorder := performMallWeatherRequest(t, service, path)
+		if recorder.Code != http.StatusUnprocessableEntity || strings.Contains(recorder.Body.String(), "conflicting") {
+			t.Fatalf("path=%s status=%d body=%s", path, recorder.Code, recorder.Body.String())
+		}
+	}
+	if calls != 0 {
+		t.Fatalf("service calls=%d", calls)
+	}
+}
+
 func TestMallWeatherControllerHourlyParsesContract(t *testing.T) {
 	var gotActor, gotMall uint
 	var gotRequest requestbody.MallWeatherHourlyQueryRequest
@@ -80,6 +117,7 @@ func performMallWeatherRequest(t *testing.T, service MallWeatherQueryService, pa
 		c.Next()
 	})
 	controller := NewMallWeatherControllerWithService(service)
+	router.GET("/api/v1/malls/:id/weather/overview", controller.Overview)
 	router.GET("/api/v1/malls/:id/weather/hourly", controller.Hourly)
 	recorder := httptest.NewRecorder()
 	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, path, nil))
@@ -87,7 +125,15 @@ func performMallWeatherRequest(t *testing.T, service MallWeatherQueryService, pa
 }
 
 type fakeMallWeatherControllerService struct {
-	hourly func(context.Context, uint, uint, requestbody.MallWeatherHourlyQueryRequest) (*data_svc.MallWeatherHourlyResult, error)
+	overview func(context.Context, uint, uint, string) (*data_svc.MallWeatherOverviewResult, error)
+	hourly   func(context.Context, uint, uint, requestbody.MallWeatherHourlyQueryRequest) (*data_svc.MallWeatherHourlyResult, error)
+}
+
+func (service fakeMallWeatherControllerService) Overview(ctx context.Context, actor, mallID uint, timeZone string) (*data_svc.MallWeatherOverviewResult, error) {
+	if service.overview == nil {
+		panic("unexpected Overview call")
+	}
+	return service.overview(ctx, actor, mallID, timeZone)
 }
 
 func (service fakeMallWeatherControllerService) Hourly(ctx context.Context, actor, mallID uint, request requestbody.MallWeatherHourlyQueryRequest) (*data_svc.MallWeatherHourlyResult, error) {

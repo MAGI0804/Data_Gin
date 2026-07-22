@@ -199,6 +199,7 @@ func registerMallWeatherRoutes(api *gin.RouterGroup, weatherCtrl *data_ctrl.Mall
 	weatherGroup := api.Group("/v1/malls")
 	weatherGroup.Use(middleware.AuthJWT())
 	{
+		weatherGroup.GET("/:id/weather/overview", weatherCtrl.Overview)
 		weatherGroup.GET("/:id/weather/hourly", weatherCtrl.Hourly)
 	}
 }

@@ -20,6 +20,7 @@ import (
 )
 
 type MallWeatherQueryService interface {
+	Overview(context.Context, uint, uint, string) (*data_svc.MallWeatherOverviewResult, error)
 	Hourly(context.Context, uint, uint, requestbody.MallWeatherHourlyQueryRequest) (*data_svc.MallWeatherHourlyResult, error)
 }
 
@@ -36,6 +37,25 @@ func NewMallWeatherControllerWithService(service MallWeatherQueryService) *MallW
 		panic("mall weather controller: nil service")
 	}
 	return &MallWeatherController{service: service}
+}
+
+func (controller *MallWeatherController) Overview(c *gin.Context) {
+	mallID, err := parseMallUint(c.Param("id"), "mall id")
+	if err != nil {
+		writeMallWeatherError(c, err)
+		return
+	}
+	timeZone, err := weatherAliasedQuery(c, "timeZone", "timezone")
+	if err != nil {
+		writeMallWeatherError(c, err)
+		return
+	}
+	result, err := controller.service.Overview(c.Request.Context(), auth.CurrentUserID(c), mallID, timeZone)
+	if err != nil {
+		writeMallWeatherError(c, err)
+		return
+	}
+	responses.New(c).ToResponseWithStatus(http.StatusOK, result)
 }
 
 func (controller *MallWeatherController) Hourly(c *gin.Context) {
