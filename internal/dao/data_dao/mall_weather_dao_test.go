@@ -1,12 +1,18 @@
 package data_dao
 
 import (
+	"context"
+	"database/sql"
 	"reflect"
 	"strings"
 	"testing"
 	"time"
 
 	"gin-biz-web-api/model"
+
+	"gorm.io/driver/mysql"
+	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 func TestNormalizePageSizes(t *testing.T) {
@@ -206,4 +212,84 @@ func TestBuildHourlyQuery(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestChecksumAwareUpdateSetPreservesIdentityAndOrdersChecksumLast(t *testing.T) {
+	db := dryRunWeatherDAOTestDB(t)
+	updates, err := checksumAwareUpdateSet(db, &model.MallWeatherAlert{}, []string{"provider", "alert_id"}, []string{"first_seen_at"})
+	if err != nil {
+		t.Fatalf("checksumAwareUpdateSet() error=%v", err)
+	}
+	byName := make(map[string]clause.Assignment, len(updates))
+	for _, update := range updates {
+		byName[update.Column.Name] = update
+	}
+	for _, forbidden := range []string{"id", "provider", "alert_id", "first_seen_at", "created_at"} {
+		if _, exists := byName[forbidden]; exists {
+			t.Fatalf("immutable column %q is updated", forbidden)
+		}
+	}
+	lastSeen, ok := byName["last_seen_at"].Value.(clause.Expr)
+	if !ok || lastSeen.SQL != "GREATEST(`last_seen_at`, VALUES(`last_seen_at`))" {
+		t.Fatalf("last_seen_at assignment=%+v", byName["last_seen_at"])
+	}
+	title, ok := byName["title"].Value.(clause.Expr)
+	if !ok || !strings.Contains(title.SQL, "IF(`raw_checksum` = VALUES(`raw_checksum`)") {
+		t.Fatalf("title assignment=%+v", byName["title"])
+	}
+	if updates[len(updates)-1].Column.Name != "raw_checksum" {
+		t.Fatalf("last assignment=%s want raw_checksum", updates[len(updates)-1].Column.Name)
+	}
+}
+
+func TestChecksumConflictPredicateIsParameterized(t *testing.T) {
+	issuedAt := time.Date(2026, 7, 22, 3, 0, 0, 0, time.UTC)
+	rows := []model.MallWeatherHourly{
+		{
+			MallID: 7, Provider: "caiyun", ForecastTimeUTC: issuedAt.Add(time.Hour), IssuedAtUTC: issuedAt,
+			WeatherQualityFields: model.WeatherQualityFields{RawChecksum: strings.Repeat("a", 64)},
+		},
+		{
+			MallID: 7, Provider: "caiyun", ForecastTimeUTC: issuedAt.Add(2 * time.Hour), IssuedAtUTC: issuedAt,
+			WeatherQualityFields: model.WeatherQualityFields{RawChecksum: strings.Repeat("b", 64)},
+		},
+	}
+	predicate, args, err := checksumConflictPredicate(context.Background(), dryRunWeatherDAOTestDB(t), rows,
+		[]string{"mall_id", "provider", "forecast_time_utc", "issued_at_utc"})
+	if err != nil {
+		t.Fatalf("checksumConflictPredicate() error=%v", err)
+	}
+	if strings.Contains(predicate, strings.Repeat("a", 64)) || strings.Count(predicate, "`raw_checksum` <> ?") != 2 || len(args) != 10 {
+		t.Fatalf("predicate=%s args=%v", predicate, args)
+	}
+	identityPredicate, identityArgs, err := checksumIdentityPredicate(context.Background(), dryRunWeatherDAOTestDB(t), rows,
+		[]string{"mall_id", "provider", "forecast_time_utc", "issued_at_utc"})
+	if err != nil {
+		t.Fatalf("checksumIdentityPredicate() error=%v", err)
+	}
+	if strings.Contains(identityPredicate, strings.Repeat("a", 64)) || strings.Contains(identityPredicate, "raw_checksum") || len(identityArgs) != 8 {
+		t.Fatalf("identity predicate=%s args=%v", identityPredicate, identityArgs)
+	}
+}
+
+func TestChecksumAwareUpdateSetSupportsEmbeddedWeatherQualityFields(t *testing.T) {
+	updates, err := checksumAwareUpdateSet(dryRunWeatherDAOTestDB(t), &model.MallWeatherHourly{},
+		[]string{"mall_id", "provider", "forecast_time_utc", "issued_at_utc"}, nil)
+	if err != nil {
+		t.Fatalf("checksumAwareUpdateSet() error=%v", err)
+	}
+	if len(updates) == 0 || updates[len(updates)-1].Column.Name != "raw_checksum" {
+		t.Fatalf("updates=%+v", updates)
+	}
+}
+
+func dryRunWeatherDAOTestDB(t *testing.T) *gorm.DB {
+	t.Helper()
+	db, err := gorm.Open(mysql.New(mysql.Config{
+		Conn: &sql.DB{}, SkipInitializeWithVersion: true,
+	}), &gorm.Config{DryRun: true, DisableAutomaticPing: true})
+	if err != nil {
+		t.Fatalf("gorm.Open() error=%v", err)
+	}
+	return db
 }

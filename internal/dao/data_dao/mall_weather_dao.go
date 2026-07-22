@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"reflect"
+	"regexp"
 	"strings"
 	"time"
 
@@ -12,12 +14,15 @@ import (
 
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
+	"gorm.io/gorm/schema"
 )
 
 const (
 	defaultWeatherBatchSize = 100
 	maxWeatherPageSize      = 500
 )
+
+var weatherColumnNamePattern = regexp.MustCompile(`^[a-z0-9_]+$`)
 
 type FetchAttemptDisposition uint8
 
@@ -29,7 +34,8 @@ const (
 )
 
 type UpsertResult struct {
-	AffectedRows int64
+	AffectedRows      int64
+	ChecksumConflicts int64
 }
 
 type FetchAttemptLease struct {
@@ -314,31 +320,48 @@ func sanitizeFetchRunUpdates(updates map[string]interface{}) (map[string]interfa
 }
 
 func (dao *MallWeatherDAO) UpsertRealtime(ctx context.Context, rows []model.MallWeatherRealtime) (UpsertResult, error) {
-	return upsertWeatherRows(ctx, dao.db, rows, []string{"mall_id", "provider", "snapshot_at_utc"}, 1)
+	return upsertChecksumAwareWeatherRows(ctx, dao.db, rows, []string{"mall_id", "provider", "snapshot_at_utc"}, nil, 1)
 }
 
 func (dao *MallWeatherDAO) UpsertMinutely(ctx context.Context, rows []model.MallWeatherMinutely) (UpsertResult, error) {
-	return upsertWeatherRows(ctx, dao.db, rows, []string{"mall_id", "provider", "forecast_minute_utc", "issued_at_utc"}, 120)
+	return upsertChecksumAwareWeatherRows(ctx, dao.db, rows, []string{"mall_id", "provider", "forecast_minute_utc", "issued_at_utc"}, nil, 120)
 }
 
 func (dao *MallWeatherDAO) UpsertHourly(ctx context.Context, rows []model.MallWeatherHourly) (UpsertResult, error) {
-	return upsertWeatherRows(ctx, dao.db, rows, []string{"mall_id", "provider", "forecast_time_utc", "issued_at_utc"}, 200)
+	return upsertChecksumAwareWeatherRows(ctx, dao.db, rows, []string{"mall_id", "provider", "forecast_time_utc", "issued_at_utc"}, nil, 200)
 }
 
 func (dao *MallWeatherDAO) UpsertDaily(ctx context.Context, rows []model.MallWeatherDaily) (UpsertResult, error) {
-	return upsertWeatherRows(ctx, dao.db, rows, []string{"mall_id", "provider", "forecast_date_local", "issued_at_utc"}, 15)
+	return upsertChecksumAwareWeatherRows(ctx, dao.db, rows, []string{"mall_id", "provider", "forecast_date_local", "issued_at_utc"}, nil, 15)
 }
 
 func (dao *MallWeatherDAO) UpsertAlerts(ctx context.Context, rows []model.MallWeatherAlert) (UpsertResult, error) {
-	return upsertWeatherRows(ctx, dao.db, rows, []string{"provider", "alert_id"}, defaultWeatherBatchSize)
+	return upsertChecksumAwareWeatherRows(ctx, dao.db, rows, []string{"provider", "alert_id"}, []string{"first_seen_at"}, defaultWeatherBatchSize)
 }
 
 func (dao *MallWeatherDAO) UpsertAlertRelations(ctx context.Context, rows []model.MallWeatherAlertRelation) (UpsertResult, error) {
-	return upsertWeatherRows(ctx, dao.db, rows, []string{"mall_id", "alert_pk"}, defaultWeatherBatchSize)
+	if len(rows) == 0 {
+		return UpsertResult{}, nil
+	}
+	result := dao.db.WithContext(ctx).
+		Clauses(clause.OnConflict{
+			Columns: []clause.Column{{Name: "mall_id"}, {Name: "alert_pk"}},
+			DoUpdates: clause.Set{
+				{Column: clause.Column{Name: "relation_reason"}, Value: clause.Expr{SQL: "VALUES(`relation_reason`)"}},
+				{Column: clause.Column{Name: "last_seen_at"}, Value: clause.Expr{SQL: "GREATEST(`last_seen_at`, VALUES(`last_seen_at`))"}},
+				{Column: clause.Column{Name: "is_active"}, Value: clause.Expr{SQL: "VALUES(`is_active`)"}},
+				{Column: clause.Column{Name: "updated_at"}, Value: clause.Expr{SQL: "VALUES(`updated_at`)"}},
+			},
+		}).
+		CreateInBatches(&rows, defaultWeatherBatchSize)
+	if result.Error != nil {
+		return UpsertResult{}, fmt.Errorf("mall weather: batch upsert alert relations: %w", result.Error)
+	}
+	return UpsertResult{AffectedRows: result.RowsAffected}, nil
 }
 
 func (dao *MallWeatherDAO) UpsertLifeIndices(ctx context.Context, rows []model.MallWeatherLifeIndex) (UpsertResult, error) {
-	return upsertWeatherRows(ctx, dao.db, rows, []string{"mall_id", "provider", "source_api", "forecast_date_local", "index_type", "issued_at_utc"}, 200)
+	return upsertChecksumAwareWeatherRows(ctx, dao.db, rows, []string{"mall_id", "provider", "source_api", "forecast_date_local", "index_type", "issued_at_utc"}, nil, 200)
 }
 
 func (dao *MallWeatherDAO) UpsertLatest(ctx context.Context, rows []model.MallWeatherLatest) (UpsertResult, error) {
@@ -379,6 +402,169 @@ func upsertWeatherRows[T any](ctx context.Context, db *gorm.DB, rows []T, confli
 		return UpsertResult{}, fmt.Errorf("mall weather: batch upsert: %w", result.Error)
 	}
 	return UpsertResult{AffectedRows: result.RowsAffected}, nil
+}
+
+func upsertChecksumAwareWeatherRows[T any](ctx context.Context, db *gorm.DB, rows []T, conflictColumns, immutableColumns []string, batchSize int) (UpsertResult, error) {
+	if len(rows) == 0 {
+		return UpsertResult{}, nil
+	}
+	columns := make([]clause.Column, 0, len(conflictColumns))
+	for _, name := range conflictColumns {
+		columns = append(columns, clause.Column{Name: name})
+	}
+	updates, err := checksumAwareUpdateSet(db, &rows[0], conflictColumns, immutableColumns)
+	if err != nil {
+		return UpsertResult{}, err
+	}
+	checksumConflicts, err := countChecksumConflicts(ctx, db, rows, conflictColumns)
+	if err != nil {
+		return UpsertResult{}, err
+	}
+	result := db.WithContext(ctx).
+		Clauses(clause.OnConflict{Columns: columns, DoUpdates: updates}).
+		CreateInBatches(&rows, batchSize)
+	if result.Error != nil {
+		return UpsertResult{}, fmt.Errorf("mall weather: checksum-aware batch upsert: %w", result.Error)
+	}
+	return UpsertResult{AffectedRows: result.RowsAffected, ChecksumConflicts: checksumConflicts}, nil
+}
+
+func checksumAwareUpdateSet(db *gorm.DB, row interface{}, conflictColumns, immutableColumns []string) (clause.Set, error) {
+	if db == nil || row == nil {
+		return nil, fmt.Errorf("mall weather: checksum-aware upsert is not configured")
+	}
+	statement := &gorm.Statement{DB: db}
+	if err := statement.Parse(row); err != nil {
+		return nil, fmt.Errorf("mall weather: parse checksum-aware model: %w", err)
+	}
+	excluded := map[string]struct{}{"created_at": {}}
+	for _, name := range append(append([]string(nil), conflictColumns...), immutableColumns...) {
+		excluded[name] = struct{}{}
+	}
+	updates := make(clause.Set, 0, len(statement.Schema.Fields))
+	hasChecksum := false
+	hasLastSeen := false
+	for _, field := range statement.Schema.Fields {
+		name := field.DBName
+		if name == "" || field.PrimaryKey {
+			continue
+		}
+		if !weatherColumnNamePattern.MatchString(name) {
+			return nil, fmt.Errorf("mall weather: unsafe model column name")
+		}
+		if _, skip := excluded[name]; skip {
+			continue
+		}
+		if name == "raw_checksum" {
+			hasChecksum = true
+			continue
+		}
+		quoted := "`" + name + "`"
+		if name == "last_seen_at" {
+			hasLastSeen = true
+			updates = append(updates, clause.Assignment{
+				Column: clause.Column{Name: name}, Value: clause.Expr{SQL: "GREATEST(" + quoted + ", VALUES(" + quoted + "))"},
+			})
+			continue
+		}
+		updates = append(updates, clause.Assignment{
+			Column: clause.Column{Name: name},
+			Value:  clause.Expr{SQL: "IF(`raw_checksum` = VALUES(`raw_checksum`), " + quoted + ", VALUES(" + quoted + "))"},
+		})
+	}
+	if !hasChecksum || !hasLastSeen {
+		return nil, fmt.Errorf("mall weather: model does not support checksum-aware upsert")
+	}
+	// MySQL evaluates ON DUPLICATE KEY assignments from left to right. Keep the
+	// new checksum last so every preceding IF compares against the stored value.
+	updates = append(updates, clause.Assignment{
+		Column: clause.Column{Name: "raw_checksum"}, Value: clause.Expr{SQL: "VALUES(`raw_checksum`)"},
+	})
+	return updates, nil
+}
+
+func countChecksumConflicts[T any](ctx context.Context, db *gorm.DB, rows []T, conflictColumns []string) (int64, error) {
+	identityPredicate, identityArgs, err := checksumIdentityPredicate(ctx, db, rows, conflictColumns)
+	if err != nil {
+		return 0, err
+	}
+	var lockedRows []struct {
+		ID uint `gorm:"column:id"`
+	}
+	if err := db.WithContext(ctx).
+		Model(&rows[0]).
+		Select("id").
+		Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where(identityPredicate, identityArgs...).
+		Find(&lockedRows).Error; err != nil {
+		return 0, fmt.Errorf("mall weather: lock checksum identities: %w", err)
+	}
+	predicate, args, err := checksumConflictPredicate(ctx, db, rows, conflictColumns)
+	if err != nil {
+		return 0, err
+	}
+	var count int64
+	if err := db.WithContext(ctx).Model(&rows[0]).Where(predicate, args...).Count(&count).Error; err != nil {
+		return 0, fmt.Errorf("mall weather: count checksum conflicts: %w", err)
+	}
+	return count, nil
+}
+
+func checksumConflictPredicate[T any](ctx context.Context, db *gorm.DB, rows []T, conflictColumns []string) (string, []interface{}, error) {
+	return checksumRowPredicate(ctx, db, rows, conflictColumns, true)
+}
+
+func checksumIdentityPredicate[T any](ctx context.Context, db *gorm.DB, rows []T, conflictColumns []string) (string, []interface{}, error) {
+	return checksumRowPredicate(ctx, db, rows, conflictColumns, false)
+}
+
+func checksumRowPredicate[T any](ctx context.Context, db *gorm.DB, rows []T, conflictColumns []string, includeChecksumDifference bool) (string, []interface{}, error) {
+	if ctx == nil || db == nil || len(rows) == 0 || len(conflictColumns) == 0 {
+		return "", nil, fmt.Errorf("mall weather: invalid checksum conflict query")
+	}
+	statement := &gorm.Statement{DB: db}
+	if err := statement.Parse(&rows[0]); err != nil {
+		return "", nil, fmt.Errorf("mall weather: parse checksum conflict model: %w", err)
+	}
+	var checksumField *schema.Field
+	if includeChecksumDifference {
+		checksumField = statement.Schema.LookUpField("raw_checksum")
+		if checksumField == nil {
+			return "", nil, fmt.Errorf("mall weather: checksum field is unavailable")
+		}
+	}
+	fields := make([]*schema.Field, len(conflictColumns))
+	for index, name := range conflictColumns {
+		if !weatherColumnNamePattern.MatchString(name) {
+			return "", nil, fmt.Errorf("mall weather: unsafe checksum conflict column")
+		}
+		fields[index] = statement.Schema.LookUpField(name)
+		if fields[index] == nil {
+			return "", nil, fmt.Errorf("mall weather: checksum conflict column is unavailable")
+		}
+	}
+	groups := make([]string, 0, len(rows))
+	conditionCount := len(fields)
+	if includeChecksumDifference {
+		conditionCount++
+	}
+	args := make([]interface{}, 0, len(rows)*conditionCount)
+	for index := range rows {
+		value := reflect.ValueOf(&rows[index])
+		conditions := make([]string, 0, conditionCount)
+		for fieldIndex, field := range fields {
+			fieldValue, _ := field.ValueOf(ctx, value)
+			conditions = append(conditions, "`"+conflictColumns[fieldIndex]+"` = ?")
+			args = append(args, fieldValue)
+		}
+		if includeChecksumDifference {
+			checksum, _ := checksumField.ValueOf(ctx, value)
+			conditions = append(conditions, "`raw_checksum` <> ?")
+			args = append(args, checksum)
+		}
+		groups = append(groups, "("+strings.Join(conditions, " AND ")+")")
+	}
+	return "(" + strings.Join(groups, " OR ") + ")", args, nil
 }
 
 func (dao *MallWeatherDAO) QueryHourly(ctx context.Context, query HourlyQuery) ([]model.MallWeatherHourly, error) {

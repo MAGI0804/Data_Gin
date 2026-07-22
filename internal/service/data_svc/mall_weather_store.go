@@ -2,6 +2,7 @@ package data_svc
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"time"
@@ -214,8 +215,14 @@ func (store *gormMallWeatherTaskStore) Persist(ctx context.Context, execution *m
 			return err
 		}
 		dao := data_dao.NewMallWeatherDAO(tx)
-		if err := persistWeatherModelRows(ctx, dao, execution.Mall.ID, batch); err != nil {
+		checksumConflicts, err := persistWeatherModelRows(ctx, dao, execution.Mall.ID, batch)
+		if err != nil {
 			return err
+		}
+		if checksumConflicts > 0 {
+			if err := addChecksumConflictWarning(batch, checksumConflicts); err != nil {
+				return err
+			}
 		}
 		attemptDuration := nonNegativeMilliseconds(batch.FinishedAt.Sub(attempt.StartedAt))
 		runDuration := int64(0)
@@ -241,41 +248,88 @@ func (store *gormMallWeatherTaskStore) Persist(ctx context.Context, execution *m
 	})
 }
 
-func persistWeatherModelRows(ctx context.Context, dao *data_dao.MallWeatherDAO, mallID uint, batch *mallWeatherModelBatch) error {
+func persistWeatherModelRows(ctx context.Context, dao *data_dao.MallWeatherDAO, mallID uint, batch *mallWeatherModelBatch) (int64, error) {
+	var checksumConflicts int64
 	if batch.Forecasts != nil {
 		if batch.Forecasts.Realtime != nil {
-			if _, err := dao.UpsertRealtime(ctx, []model.MallWeatherRealtime{*batch.Forecasts.Realtime}); err != nil {
-				return err
+			result, err := dao.UpsertRealtime(ctx, []model.MallWeatherRealtime{*batch.Forecasts.Realtime})
+			if err != nil {
+				return 0, err
 			}
+			checksumConflicts += result.ChecksumConflicts
 		}
-		if _, err := dao.UpsertMinutely(ctx, batch.Forecasts.Minutely); err != nil {
-			return err
+		result, err := dao.UpsertMinutely(ctx, batch.Forecasts.Minutely)
+		if err != nil {
+			return 0, err
 		}
-		if _, err := dao.UpsertHourly(ctx, batch.Forecasts.Hourly); err != nil {
-			return err
+		checksumConflicts += result.ChecksumConflicts
+		result, err = dao.UpsertHourly(ctx, batch.Forecasts.Hourly)
+		if err != nil {
+			return 0, err
 		}
+		checksumConflicts += result.ChecksumConflicts
 	}
 	if batch.Daily != nil {
-		if _, err := dao.UpsertDaily(ctx, batch.Daily.Daily); err != nil {
-			return err
+		result, err := dao.UpsertDaily(ctx, batch.Daily.Daily)
+		if err != nil {
+			return 0, err
 		}
-		if _, err := dao.UpsertLifeIndices(ctx, batch.Daily.LifeIndices); err != nil {
-			return err
+		checksumConflicts += result.ChecksumConflicts
+		result, err = dao.UpsertLifeIndices(ctx, batch.Daily.LifeIndices)
+		if err != nil {
+			return 0, err
 		}
+		checksumConflicts += result.ChecksumConflicts
 	}
 	if batch.Alerts != nil {
-		if _, err := dao.UpsertAlerts(ctx, batch.Alerts.Alerts); err != nil {
-			return err
+		result, err := dao.UpsertAlerts(ctx, batch.Alerts.Alerts)
+		if err != nil {
+			return 0, err
 		}
+		checksumConflicts += result.ChecksumConflicts
 		if err := persistWeatherAlertRelations(ctx, dao, mallID, batch.Alerts.Alerts, batch.FinishedAt); err != nil {
-			return err
+			return 0, err
 		}
 	}
 	if batch.LifeIndices != nil {
-		if _, err := dao.UpsertLifeIndices(ctx, batch.LifeIndices.LifeIndices); err != nil {
-			return err
+		result, err := dao.UpsertLifeIndices(ctx, batch.LifeIndices.LifeIndices)
+		if err != nil {
+			return 0, err
 		}
+		checksumConflicts += result.ChecksumConflicts
 	}
+	return checksumConflicts, nil
+}
+
+func addChecksumConflictWarning(batch *mallWeatherModelBatch, conflicts int64) error {
+	if batch == nil || conflicts <= 0 {
+		return fmt.Errorf("mall weather: invalid checksum conflict warning")
+	}
+	var warnings []caiyun.ParseWarning
+	if err := json.Unmarshal([]byte(batch.ParseWarningsJSON), &warnings); err != nil {
+		return fmt.Errorf("mall weather: decode persistence warnings: %w", err)
+	}
+	warnings = deduplicateWarnings(append(warnings, caiyun.ParseWarning{
+		Code: "CHECKSUM_CONFLICT", Path: "persistence.raw_checksum",
+	}))
+	warningsJSON, err := json.Marshal(warnings)
+	if err != nil {
+		return fmt.Errorf("mall weather: encode persistence warnings: %w", err)
+	}
+	var counts map[string]int64
+	if err := json.Unmarshal([]byte(batch.RowCountsJSON), &counts); err != nil {
+		return fmt.Errorf("mall weather: decode persistence row counts: %w", err)
+	}
+	if counts == nil {
+		counts = make(map[string]int64)
+	}
+	counts["checksum_conflicts"] += conflicts
+	countsJSON, err := json.Marshal(counts)
+	if err != nil {
+		return fmt.Errorf("mall weather: encode persistence row counts: %w", err)
+	}
+	batch.ParseWarningsJSON = model.JSONText(warningsJSON)
+	batch.RowCountsJSON = model.JSONText(countsJSON)
 	return nil
 }
 

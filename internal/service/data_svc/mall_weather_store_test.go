@@ -44,3 +44,22 @@ func TestNonNegativeMilliseconds(t *testing.T) {
 		t.Fatalf("nonNegativeMilliseconds(1.5s)=%d", got)
 	}
 }
+
+func TestAddChecksumConflictWarningIsDeterministic(t *testing.T) {
+	batch := &mallWeatherModelBatch{
+		ParseWarningsJSON: model.JSONText(`[{"code":"UNKNOWN_TYPE","path":"data[0]"}]`),
+		RowCountsJSON:     model.JSONText(`{"life_index":3}`),
+	}
+	if err := addChecksumConflictWarning(batch, 2); err != nil {
+		t.Fatalf("addChecksumConflictWarning() error=%v", err)
+	}
+	if string(batch.RowCountsJSON) != `{"checksum_conflicts":2,"life_index":3}` {
+		t.Fatalf("row counts=%s", batch.RowCountsJSON)
+	}
+	if err := addChecksumConflictWarning(batch, 1); err != nil {
+		t.Fatalf("addChecksumConflictWarning(second) error=%v", err)
+	}
+	if string(batch.RowCountsJSON) != `{"checksum_conflicts":3,"life_index":3}` {
+		t.Fatalf("row counts=%s", batch.RowCountsJSON)
+	}
+}
