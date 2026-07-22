@@ -19,11 +19,11 @@ var ErrMallWeatherFeishuAppendCheckpointConflict = errors.New(
 	"mall weather feishu append dataset: checkpoint conflicts with rendered batch",
 )
 
-type mallWeatherFeishuAppendDatasetPager interface {
+type mallWeatherFeishuDatasetPager interface {
 	Page(context.Context, data_dao.MallWeatherExportDataPageRequest) (*data_dao.MallWeatherExportDataPage, error)
 }
 
-type mallWeatherFeishuAppendCheckpointStore interface {
+type mallWeatherFeishuBatchCheckpointStore interface {
 	FindLatestWeatherBatch(context.Context, uint, uint, string, int) (*model.DeliveryLog, error)
 	ReconcileWeatherBatchSuccess(context.Context, uint, string, int64, int64, time.Time) error
 }
@@ -53,17 +53,17 @@ type mallWeatherFeishuAppendDatasetResult struct {
 }
 
 type mallWeatherFeishuAppendDatasetRunner struct {
-	pager       mallWeatherFeishuAppendDatasetPager
+	pager       mallWeatherFeishuDatasetPager
 	sheets      mallWeatherFeishuRangeReader
-	checkpoints mallWeatherFeishuAppendCheckpointStore
+	checkpoints mallWeatherFeishuBatchCheckpointStore
 	batches     mallWeatherFeishuAppendBatchRunner
 	now         func() time.Time
 }
 
 func newMallWeatherFeishuAppendDatasetRunner(
-	pager mallWeatherFeishuAppendDatasetPager,
+	pager mallWeatherFeishuDatasetPager,
 	sheets mallWeatherFeishuRangeReader,
-	checkpoints mallWeatherFeishuAppendCheckpointStore,
+	checkpoints mallWeatherFeishuBatchCheckpointStore,
 	batches mallWeatherFeishuAppendBatchRunner,
 	now func() time.Time,
 ) (*mallWeatherFeishuAppendDatasetRunner, error) {

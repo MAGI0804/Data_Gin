@@ -373,9 +373,9 @@ func (runner *fakeMallWeatherFeishuAppendBatchRunner) Execute(
 
 func newTestMallWeatherFeishuAppendDatasetRunner(
 	t *testing.T,
-	pager mallWeatherFeishuAppendDatasetPager,
+	pager mallWeatherFeishuDatasetPager,
 	sheets mallWeatherFeishuRangeReader,
-	checkpoints mallWeatherFeishuAppendCheckpointStore,
+	checkpoints mallWeatherFeishuBatchCheckpointStore,
 	batches mallWeatherFeishuAppendBatchRunner,
 ) *mallWeatherFeishuAppendDatasetRunner {
 	t.Helper()
