@@ -120,6 +120,22 @@ func TestMallWeatherTaskTypesReturnsCopy(t *testing.T) {
 	}
 }
 
+func TestMallWeatherFetchTaskTypesReturnsOnlyFetchHandlers(t *testing.T) {
+	types := MallWeatherFetchTaskTypes()
+	if len(types) != 5 {
+		t.Fatalf("fetch task types=%v", types)
+	}
+	for _, taskType := range types {
+		if taskType == TypeMallGeocode || taskType == TypeMallWeatherExport || taskType == TypeMallWeatherFeishu {
+			t.Fatalf("non-fetch task type %q was returned", taskType)
+		}
+	}
+	types[0] = "changed"
+	if MallWeatherFetchTaskTypes()[0] == "changed" {
+		t.Fatal("MallWeatherFetchTaskTypes returned shared storage")
+	}
+}
+
 func TestDecodeMallGeocodeTaskPayloadReturnsIdentity(t *testing.T) {
 	want := MallGeocodeTaskPayload{MallID: 11, MallVersion: 3, AddressHash: strings.Repeat("b", 64)}
 	data := []byte(`{"mall_id":11,"mall_version":3,"address_hash":"` + want.AddressHash + `"}`)

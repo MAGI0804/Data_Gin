@@ -38,6 +38,14 @@ var mallWeatherTaskTypes = []string{
 	TypeMallWeatherFeishu,
 }
 
+var mallWeatherFetchTaskTypes = []string{
+	TypeMallWeatherFast,
+	TypeMallWeatherFull,
+	TypeMallWeatherLifeIndex,
+	TypeMallWeatherRepair,
+	TypeMallWeatherManual,
+}
+
 // MallTaskPayload deliberately carries only the database identifier and
 // non-sensitive idempotency window needed by weather workers. Provider
 // credentials are resolved by the worker.
@@ -69,6 +77,10 @@ type MallWeatherFeishuTaskPayload struct {
 
 func MallWeatherTaskTypes() []string {
 	return append([]string(nil), mallWeatherTaskTypes...)
+}
+
+func MallWeatherFetchTaskTypes() []string {
+	return append([]string(nil), mallWeatherFetchTaskTypes...)
 }
 
 func ExpectedMallWeatherQueue(taskType string) (string, bool) {

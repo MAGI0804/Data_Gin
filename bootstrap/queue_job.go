@@ -48,11 +48,20 @@ func setupQueueJob() {
 
 	addQueueJob(mux)
 	if config.GetBool("cfg.mall_weather.enabled") {
-		processor, err := data_svc.NewMallGeocodeProcessor()
+		geocodeProcessor, err := data_svc.NewMallGeocodeProcessor()
 		if err != nil {
 			console.Exit("Mall Geocode Worker Init Failed %v", err)
 		}
-		mux.HandleFunc(job.TypeMallGeocode, newMallGeocodeHandler(processor))
+		mux.HandleFunc(job.TypeMallGeocode, newMallGeocodeHandler(geocodeProcessor))
+
+		weatherProcessor, err := data_svc.NewMallWeatherProcessor()
+		if err != nil {
+			console.Exit("Mall Weather Worker Init Failed %v", err)
+		}
+		weatherHandler := newMallWeatherHandler(weatherProcessor)
+		for _, taskType := range job.MallWeatherFetchTaskTypes() {
+			mux.HandleFunc(taskType, weatherHandler)
+		}
 	}
 
 	go func(mux *asynq.ServeMux, server *asynq.Server) {
@@ -76,6 +85,10 @@ type mallGeocodeProcessor interface {
 	Process(ctx context.Context, payload job.MallGeocodeTaskPayload) error
 }
 
+type mallWeatherProcessor interface {
+	Process(ctx context.Context, taskType string, payload job.MallTaskPayload) error
+}
+
 func newMallGeocodeHandler(processor mallGeocodeProcessor) asynq.HandlerFunc {
 	return func(ctx context.Context, task *asynq.Task) error {
 		if processor == nil {
@@ -88,6 +101,29 @@ func newMallGeocodeHandler(processor mallGeocodeProcessor) asynq.HandlerFunc {
 		if err := processor.Process(ctx, payload); err != nil {
 			var processError *data_svc.MallGeocodeProcessError
 			if errors.As(err, &processError) && !processError.Retryable {
+				return fmt.Errorf("%w: %v", asynq.SkipRetry, err)
+			}
+			return err
+		}
+		return nil
+	}
+}
+
+func newMallWeatherHandler(processor mallWeatherProcessor) asynq.HandlerFunc {
+	return func(ctx context.Context, task *asynq.Task) error {
+		if processor == nil {
+			return fmt.Errorf("mall weather handler: processor is not configured")
+		}
+		if task == nil {
+			return fmt.Errorf("%w: mall weather task is nil", asynq.SkipRetry)
+		}
+		payload, err := job.DecodeMallWeatherTaskPayload(task.Type(), task.Payload())
+		if err != nil {
+			return fmt.Errorf("%w: %v", asynq.SkipRetry, err)
+		}
+		if err := processor.Process(ctx, task.Type(), payload); err != nil {
+			var processError *data_svc.MallWeatherProcessError
+			if errors.As(err, &processError) && processError != nil && !processError.Retryable {
 				return fmt.Errorf("%w: %v", asynq.SkipRetry, err)
 			}
 			return err
