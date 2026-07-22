@@ -41,6 +41,7 @@ type mallWeatherQueryDAO interface {
 	QueryDaily(ctx context.Context, query data_dao.DailyQuery) ([]model.MallWeatherDaily, error)
 	QueryAlerts(ctx context.Context, query data_dao.AlertQuery) ([]model.MallWeatherAlert, error)
 	QueryLifeIndices(ctx context.Context, query data_dao.LifeIndexQuery) ([]model.MallWeatherLifeIndex, error)
+	QueryFetchRuns(ctx context.Context, query data_dao.FetchRunQuery) ([]model.MallWeatherFetchRun, error)
 	FindCurrentLatest(ctx context.Context, mallID uint, dataKind string) (*model.MallWeatherLatest, error)
 	FindOverviewRealtime(ctx context.Context, mallID uint) (*model.MallWeatherRealtime, error)
 	ListOverviewMinutely(ctx context.Context, mallID uint, startUTC, endUTC time.Time, limit int) ([]model.MallWeatherMinutely, error)
