@@ -78,3 +78,9 @@ type MallWeatherFetchRunQueryRequest struct {
 	Cursor       string
 	PageSize     int
 }
+
+type MallWeatherRefreshRequest struct {
+	Kinds  []string `json:"kinds"`
+	Force  bool     `json:"force"`
+	Reason string   `json:"reason"`
+}

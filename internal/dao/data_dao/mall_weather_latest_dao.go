@@ -98,6 +98,29 @@ func (dao *MallWeatherDAO) FindCurrentLatest(ctx context.Context, mallID uint, d
 	return &row, nil
 }
 
+func (dao *MallWeatherDAO) FindCurrentLatestLifeSource(ctx context.Context, mallID uint, sourceAPI string) (*model.MallWeatherLatest, error) {
+	if sourceAPI != weatherdomain.SourceAPIV26Daily && sourceAPI != weatherdomain.SourceAPIV3LifeIndex {
+		return nil, fmt.Errorf("mall weather: invalid life latest source")
+	}
+	if dao == nil || dao.db == nil || ctx == nil || mallID == 0 {
+		return nil, fmt.Errorf("mall weather: invalid life latest lookup")
+	}
+	var row model.MallWeatherLatest
+	err := dao.db.WithContext(ctx).
+		Where("mall_id = ? AND data_kind = ? AND subtype >= ? AND subtype < ?", mallID, model.MallWeatherDataKindLife, sourceAPI+":", sourceAPI+";").
+		Order("fetched_at_utc DESC").
+		Order("issued_at_utc DESC").
+		Order("id DESC").
+		First(&row).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, ErrMallWeatherLatestNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("mall weather: find current life latest pointer: %w", err)
+	}
+	return &row, nil
+}
+
 func (dao *MallWeatherDAO) ReconcileLatestFreshness(ctx context.Context, now time.Time) (int64, error) {
 	if dao == nil || dao.db == nil || ctx == nil || now.IsZero() {
 		return 0, fmt.Errorf("mall weather: latest freshness store is not configured")

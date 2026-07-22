@@ -1,6 +1,7 @@
 package data_dao
 
 import (
+	"context"
 	"reflect"
 	"strings"
 	"testing"
@@ -11,6 +12,12 @@ import (
 
 	"gorm.io/gorm/clause"
 )
+
+func TestFindCurrentLatestLifeSourceRejectsUnknownSource(t *testing.T) {
+	if _, err := (&MallWeatherDAO{}).FindCurrentLatestLifeSource(context.Background(), 7, "future_source"); err == nil {
+		t.Fatal("FindCurrentLatestLifeSource() accepted an unknown source")
+	}
+}
 
 func TestLatestConvertersBuildStableBusinessKeys(t *testing.T) {
 	issuedAt := time.Date(2026, 7, 22, 3, 4, 5, 678000000, time.UTC)
