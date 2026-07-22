@@ -1,0 +1,521 @@
+package data_svc
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"math"
+	"sort"
+	"time"
+
+	"gin-biz-web-api/connector/caiyun"
+	"gin-biz-web-api/internal/dao/data_dao"
+	weatherdomain "gin-biz-web-api/internal/weather"
+	"gin-biz-web-api/job"
+	"gin-biz-web-api/model"
+)
+
+const (
+	weatherFetchStatusSuccess        = "success"
+	weatherFetchStatusPartialSuccess = "partial_success"
+	weatherParserVersionV26          = "caiyun-v26-v1"
+	weatherParserVersionLifeV3       = "caiyun-v3-lifeindex-v1"
+)
+
+var partialWeatherWarningCodes = map[string]struct{}{
+	"CORE_FIELD_COVERAGE_LOW": {}, "EMPTY_DAY": {}, "FORECAST_DATE_OUT_OF_RANGE": {},
+	"FORECAST_TIME_OUT_OF_RANGE": {}, "INVALID_ALERT_ID": {}, "INVALID_DATE": {},
+	"INVALID_DATETIME": {}, "INVALID_ITEM": {}, "MODULE_PARSE_FAILED": {},
+	"MODULE_STATUS_NOT_OK": {}, "REQUEST_STATUS_NOT_OK": {},
+}
+
+type MallWeatherProcessError struct {
+	Retryable bool
+	Code      string
+	cause     error
+}
+
+func (processError *MallWeatherProcessError) Error() string {
+	return "mall weather: processing failed"
+}
+
+func (processError *MallWeatherProcessError) Unwrap() error {
+	if processError == nil {
+		return nil
+	}
+	return processError.cause
+}
+
+type mallWeatherProvider interface {
+	FetchWeather(ctx context.Context, input caiyun.WeatherRequest) (*caiyun.ProviderResponse, error)
+	FetchLifeIndices(ctx context.Context, input caiyun.LifeIndexRequest) (*caiyun.ProviderResponse, error)
+}
+
+type mallWeatherTaskStore interface {
+	Start(ctx context.Context, input mallWeatherTaskStart, startedAt time.Time) (*mallWeatherExecution, error)
+	RecordResponse(ctx context.Context, execution *mallWeatherExecution, response *caiyun.ProviderResponse, snapshot *model.ProviderRawSnapshot) error
+	Fail(ctx context.Context, execution *mallWeatherExecution, failure mallWeatherFailure) error
+	Persist(ctx context.Context, execution *mallWeatherExecution, batch *mallWeatherModelBatch) error
+}
+
+type mallWeatherTaskStart struct {
+	TaskType             string
+	TaskKind             string
+	Payload              job.MallTaskPayload
+	RequestedHourlySteps int
+	RequestedDailySteps  int
+	AttemptStaleAfter    time.Duration
+}
+
+type mallWeatherExecution struct {
+	Mall        model.Mall
+	Run         model.MallWeatherFetchRun
+	Attempt     model.MallWeatherFetchAttempt
+	Disposition data_dao.FetchAttemptDisposition
+}
+
+type mallWeatherFailure struct {
+	AttemptStatus    string
+	ErrorClass       string
+	ErrorCode        string
+	ErrorMessageSafe string
+	FinishedAt       time.Time
+}
+
+type mallWeatherModelBatch struct {
+	EndpointKind       string
+	Status             string
+	ParserVersion      string
+	ProviderServerTime *time.Time
+	Forecasts          *weatherdomain.ForecastModelBatch
+	Daily              *weatherdomain.DailyModelBatch
+	Alerts             *weatherdomain.AlertModelBatch
+	LifeIndices        *weatherdomain.LifeIndexModelBatch
+	ParseWarningsJSON  model.JSONText
+	RowCountsJSON      model.JSONText
+	FinishedAt         time.Time
+}
+
+type MallWeatherProcessorConfig struct {
+	FastHourlySteps        int
+	FastDailySteps         int
+	FullHourlySteps        int
+	FullDailySteps         int
+	LifeIndexDays          int
+	Unit                   string
+	AlertEnabled           bool
+	AttemptStaleAfter      time.Duration
+	FailureFinalizeTimeout time.Duration
+}
+
+type MallWeatherProcessor struct {
+	provider         mallWeatherProvider
+	store            mallWeatherTaskStore
+	weatherSnapshots *weatherdomain.RawSnapshotBuilder
+	lifeSnapshots    *weatherdomain.RawSnapshotBuilder
+	config           MallWeatherProcessorConfig
+	now              func() time.Time
+}
+
+func newMallWeatherProcessor(
+	provider mallWeatherProvider,
+	store mallWeatherTaskStore,
+	weatherSnapshots *weatherdomain.RawSnapshotBuilder,
+	lifeSnapshots *weatherdomain.RawSnapshotBuilder,
+	config MallWeatherProcessorConfig,
+	now func() time.Time,
+) (*MallWeatherProcessor, error) {
+	if provider == nil || store == nil || weatherSnapshots == nil || lifeSnapshots == nil || now == nil ||
+		config.FastHourlySteps < 1 || config.FastHourlySteps > 360 || config.FastDailySteps < 1 || config.FastDailySteps > 15 ||
+		config.FullHourlySteps < 1 || config.FullHourlySteps > 360 || config.FullDailySteps < 1 || config.FullDailySteps > 15 ||
+		config.LifeIndexDays < 1 || config.LifeIndexDays > 15 || config.Unit != "metric:v2" ||
+		config.AttemptStaleAfter <= 0 || config.FailureFinalizeTimeout <= 0 {
+		return nil, fmt.Errorf("mall weather: invalid processor configuration")
+	}
+	return &MallWeatherProcessor{
+		provider: provider, store: store, weatherSnapshots: weatherSnapshots, lifeSnapshots: lifeSnapshots,
+		config: config, now: now,
+	}, nil
+}
+
+func (processor *MallWeatherProcessor) Process(ctx context.Context, taskType string, payload job.MallTaskPayload) error {
+	if processor == nil || ctx == nil {
+		return &MallWeatherProcessError{Code: "INVALID_PROCESSOR"}
+	}
+	start, err := processor.taskStart(taskType, payload)
+	if err != nil {
+		return &MallWeatherProcessError{Code: "INVALID_TASK", cause: err}
+	}
+	startedAt := processor.now().UTC()
+	execution, err := processor.store.Start(ctx, start, startedAt)
+	if err != nil {
+		return &MallWeatherProcessError{Retryable: true, Code: "START_FAILED", cause: err}
+	}
+	if execution == nil || execution.Disposition == data_dao.FetchAttemptDispositionBusy ||
+		execution.Disposition == data_dao.FetchAttemptDispositionTerminal {
+		return nil
+	}
+	if execution.Disposition != data_dao.FetchAttemptDispositionAcquired || execution.Run.ID == 0 || execution.Attempt.ID == 0 {
+		return &MallWeatherProcessError{Retryable: true, Code: "INVALID_EXECUTION"}
+	}
+	if err := validateWeatherExecution(execution, start); err != nil {
+		return processor.finishFailure(ctx, execution, mallWeatherFailure{
+			AttemptStatus: "provider_failed", ErrorClass: "invalid_request", ErrorCode: "INVALID_MALL_WEATHER_POINT",
+			ErrorMessageSafe: "mall weather request point is not eligible", FinishedAt: processor.now().UTC(),
+		}, err, false)
+	}
+
+	response, providerErr := processor.fetch(ctx, start, &execution.Mall)
+	finishedAt := processor.now().UTC()
+	if response != nil && response.EndpointKind != start.Payload.EndpointKind {
+		providerErr = &caiyun.ProviderError{Class: "invalid_response"}
+	}
+	if response != nil && len(response.RawBody) > 0 {
+		snapshot, snapshotErr := processor.snapshotBuilder(start.Payload.EndpointKind).Build(ctx, weatherdomain.RawSnapshotInput{
+			Provider: weatherdomain.ProviderCaiyun, EndpointKind: start.Payload.EndpointKind,
+			MallID: &execution.Mall.ID, ReceivedAtUTC: finishedAt, Body: response.RawBody,
+		})
+		if snapshotErr != nil {
+			return processor.finishFailure(ctx, execution, mallWeatherFailure{
+				AttemptStatus: "persist_failed", ErrorClass: "snapshot", ErrorCode: "SNAPSHOT_FAILED",
+				ErrorMessageSafe: "weather response snapshot could not be stored", FinishedAt: finishedAt,
+			}, snapshotErr, true)
+		}
+		execution.Run.ResponseChecksum = snapshot.ResponseChecksum
+		if err := processor.store.RecordResponse(ctx, execution, response, snapshot); err != nil {
+			return processor.finishFailure(ctx, execution, mallWeatherFailure{
+				AttemptStatus: "persist_failed", ErrorClass: "database", ErrorCode: "SNAPSHOT_RECORD_FAILED",
+				ErrorMessageSafe: "weather response snapshot could not be recorded", FinishedAt: finishedAt,
+			}, err, true)
+		}
+	}
+	if providerErr == nil && (response == nil || len(response.RawBody) == 0) {
+		providerErr = &caiyun.ProviderError{Class: "invalid_response"}
+	}
+	if providerErr != nil {
+		failure, retryable := classifyWeatherProviderFailure(providerErr, response, finishedAt)
+		return processor.finishFailure(ctx, execution, failure, providerErr, retryable)
+	}
+
+	metadata := weatherdomain.MappingMetadata{
+		MallID: execution.Mall.ID, FetchRunID: execution.Run.ID,
+		FetchedAtUTC: finishedAt, RawChecksum: execution.Run.ResponseChecksum,
+	}
+	batch, err := parseMallWeatherBatch(start.Payload.EndpointKind, response.RawBody, metadata, finishedAt)
+	if err != nil {
+		return processor.finishFailure(ctx, execution, mallWeatherFailure{
+			AttemptStatus: "parse_failed", ErrorClass: "invalid_response", ErrorCode: "PARSE_FAILED",
+			ErrorMessageSafe: "weather provider response could not be parsed", FinishedAt: finishedAt,
+		}, err, false)
+	}
+	if err := processor.store.Persist(ctx, execution, batch); err != nil {
+		return processor.finishFailure(ctx, execution, mallWeatherFailure{
+			AttemptStatus: "persist_failed", ErrorClass: "database", ErrorCode: "PERSIST_FAILED",
+			ErrorMessageSafe: "weather business data could not be stored", FinishedAt: finishedAt,
+		}, err, true)
+	}
+	return nil
+}
+
+func (processor *MallWeatherProcessor) taskStart(taskType string, payload job.MallTaskPayload) (mallWeatherTaskStart, error) {
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return mallWeatherTaskStart{}, err
+	}
+	payload, err = job.DecodeMallWeatherTaskPayload(taskType, raw)
+	if err != nil {
+		return mallWeatherTaskStart{}, err
+	}
+	start := mallWeatherTaskStart{
+		TaskType: taskType, Payload: payload, AttemptStaleAfter: processor.config.AttemptStaleAfter,
+	}
+	switch taskType {
+	case job.TypeMallWeatherFast:
+		start.TaskKind = "fast"
+		start.RequestedHourlySteps = processor.config.FastHourlySteps
+		start.RequestedDailySteps = processor.config.FastDailySteps
+	case job.TypeMallWeatherFull:
+		start.TaskKind = "full"
+		start.RequestedHourlySteps = processor.config.FullHourlySteps
+		start.RequestedDailySteps = processor.config.FullDailySteps
+	case job.TypeMallWeatherLifeIndex:
+		start.TaskKind = "lifeindex"
+		start.RequestedDailySteps = processor.config.LifeIndexDays
+	case job.TypeMallWeatherRepair:
+		start.TaskKind = "repair"
+		processor.setEndpointSteps(&start)
+	case job.TypeMallWeatherManual:
+		start.TaskKind = "manual"
+		processor.setEndpointSteps(&start)
+	default:
+		return mallWeatherTaskStart{}, fmt.Errorf("unsupported task type")
+	}
+	return start, nil
+}
+
+func (processor *MallWeatherProcessor) setEndpointSteps(start *mallWeatherTaskStart) {
+	if start.Payload.EndpointKind == caiyun.EndpointLifeIndexV3 {
+		start.RequestedDailySteps = processor.config.LifeIndexDays
+		return
+	}
+	start.RequestedHourlySteps = processor.config.FullHourlySteps
+	start.RequestedDailySteps = processor.config.FullDailySteps
+}
+
+func (processor *MallWeatherProcessor) fetch(ctx context.Context, start mallWeatherTaskStart, mall *model.Mall) (*caiyun.ProviderResponse, error) {
+	if start.Payload.EndpointKind == caiyun.EndpointLifeIndexV3 {
+		return processor.provider.FetchLifeIndices(ctx, caiyun.LifeIndexRequest{
+			Longitude: *mall.WeatherLongitude, Latitude: *mall.WeatherLatitude,
+			Days: start.RequestedDailySteps, Fields: "all",
+		})
+	}
+	return processor.provider.FetchWeather(ctx, caiyun.WeatherRequest{
+		Longitude: *mall.WeatherLongitude, Latitude: *mall.WeatherLatitude,
+		HourlySteps: start.RequestedHourlySteps, DailySteps: start.RequestedDailySteps,
+		Alert: processor.config.AlertEnabled, Unit: processor.config.Unit,
+	})
+}
+
+func (processor *MallWeatherProcessor) snapshotBuilder(endpointKind string) *weatherdomain.RawSnapshotBuilder {
+	if endpointKind == caiyun.EndpointLifeIndexV3 {
+		return processor.lifeSnapshots
+	}
+	return processor.weatherSnapshots
+}
+
+func (processor *MallWeatherProcessor) finishFailure(ctx context.Context, execution *mallWeatherExecution, failure mallWeatherFailure, cause error, retryable bool) error {
+	failureParent := ctx
+	if ctx.Err() != nil {
+		failureParent = context.WithoutCancel(ctx)
+	}
+	failureCtx, cancel := context.WithTimeout(failureParent, processor.config.FailureFinalizeTimeout)
+	defer cancel()
+	if err := processor.store.Fail(failureCtx, execution, failure); err != nil {
+		return &MallWeatherProcessError{Retryable: true, Code: "FAILURE_AUDIT_FAILED", cause: err}
+	}
+	if errors.Is(cause, context.Canceled) || errors.Is(cause, context.DeadlineExceeded) {
+		return cause
+	}
+	return &MallWeatherProcessError{Retryable: retryable, Code: failure.ErrorCode, cause: cause}
+}
+
+func validateWeatherExecution(execution *mallWeatherExecution, start mallWeatherTaskStart) error {
+	mall := &execution.Mall
+	if mall.ID == 0 || !mall.WeatherEnabled || mall.Status != "active" || mall.WeatherProvider != weatherdomain.ProviderCaiyun ||
+		mall.GeocodeStatus != "confirmed" || mall.WeatherLongitude == nil || mall.WeatherLatitude == nil ||
+		mall.WeatherCoordinateSystem == "" || *mall.WeatherLongitude < -180 || *mall.WeatherLongitude > 180 ||
+		*mall.WeatherLatitude < -90 || *mall.WeatherLatitude > 90 || math.IsNaN(*mall.WeatherLongitude) ||
+		math.IsInf(*mall.WeatherLongitude, 0) || math.IsNaN(*mall.WeatherLatitude) || math.IsInf(*mall.WeatherLatitude, 0) ||
+		(start.Payload.EndpointKind != caiyun.EndpointWeatherV26 && start.Payload.EndpointKind != caiyun.EndpointLifeIndexV3) ||
+		execution.Run.MallID != mall.ID || execution.Run.EndpointKind != start.Payload.EndpointKind ||
+		execution.Run.TaskKind != start.TaskKind || execution.Run.TaskWindow != start.Payload.TaskWindow || execution.Run.Status != "running" ||
+		execution.Attempt.FetchRunID != execution.Run.ID || execution.Attempt.AttemptNo != execution.Run.AttemptCount ||
+		execution.Attempt.Status != "running" {
+		return fmt.Errorf("invalid mall weather execution")
+	}
+	return nil
+}
+
+func classifyWeatherProviderFailure(err error, response *caiyun.ProviderResponse, finishedAt time.Time) (mallWeatherFailure, bool) {
+	failure := mallWeatherFailure{
+		AttemptStatus: "transport_failed", ErrorClass: "transport", ErrorCode: "PROVIDER_REQUEST_FAILED",
+		ErrorMessageSafe: "weather provider request failed", FinishedAt: finishedAt,
+	}
+	if response != nil {
+		failure.AttemptStatus = "provider_failed"
+	}
+	var providerError *caiyun.ProviderError
+	if errors.As(err, &providerError) {
+		failure.ErrorClass = string(providerError.Class)
+		if providerError.Code != "" {
+			failure.ErrorCode = providerError.Code
+		}
+		return failure, providerError.Retryable
+	}
+	if errors.Is(err, context.Canceled) {
+		failure.ErrorClass = "canceled"
+		failure.ErrorCode = "CANCELED"
+	}
+	if errors.Is(err, context.DeadlineExceeded) {
+		failure.ErrorClass = "timeout"
+		failure.ErrorCode = "TIMEOUT"
+		return failure, true
+	}
+	return failure, true
+}
+
+func parseMallWeatherBatch(endpointKind string, raw []byte, metadata weatherdomain.MappingMetadata, finishedAt time.Time) (*mallWeatherModelBatch, error) {
+	if endpointKind == caiyun.EndpointLifeIndexV3 {
+		bundle, err := caiyun.ParseLifeIndexV3(raw)
+		if err != nil {
+			return nil, err
+		}
+		mapped, err := weatherdomain.MapLifeIndices(weatherdomain.LifeIndexMappingInput{
+			Metadata: metadata, IssuedAtUTC: finishedAt, LifeIndex: bundle,
+		})
+		if err != nil {
+			return nil, err
+		}
+		warnings, counts, err := aggregateBatchMetadata(mapped.ParseWarningsJSON, mapped.RowCountsJSON)
+		if err != nil {
+			return nil, err
+		}
+		status := weatherFetchStatusSuccess
+		if warningsRequirePartial(warnings) {
+			status = weatherFetchStatusPartialSuccess
+		}
+		return newMallWeatherModelBatch(endpointKind, status, weatherParserVersionLifeV3, nil, nil, nil, mapped, warnings, counts, finishedAt)
+	}
+
+	weatherBundle, err := caiyun.ParseWeatherV26(raw)
+	if err != nil {
+		return nil, err
+	}
+	moduleWarnings := make([]caiyun.ParseWarning, 0, 4)
+	partial := false
+	minutely, err := caiyun.ParseMinutelyV26(weatherBundle)
+	if err != nil {
+		partial = true
+		moduleWarnings = append(moduleWarnings, caiyun.ParseWarning{Code: "MODULE_PARSE_FAILED", Path: "result.minutely"})
+		minutely = nil
+	}
+	hourly, err := caiyun.ParseHourlyV26(weatherBundle)
+	if err != nil {
+		partial = true
+		moduleWarnings = append(moduleWarnings, caiyun.ParseWarning{Code: "MODULE_PARSE_FAILED", Path: "result.hourly"})
+		hourly = nil
+	}
+	daily, err := caiyun.ParseDailyV26(weatherBundle)
+	if err != nil {
+		partial = true
+		moduleWarnings = append(moduleWarnings, caiyun.ParseWarning{Code: "MODULE_PARSE_FAILED", Path: "result.daily"})
+		daily = nil
+	}
+	alerts, err := caiyun.ParseAlertsV26(weatherBundle)
+	if err != nil {
+		partial = true
+		moduleWarnings = append(moduleWarnings, caiyun.ParseWarning{Code: "MODULE_PARSE_FAILED", Path: "result.alert"})
+		alerts = nil
+	}
+
+	forecastBatch, err := weatherdomain.MapForecasts(weatherdomain.ForecastMappingInput{
+		Metadata: metadata, Weather: weatherBundle, Minutely: minutely, Hourly: hourly,
+	})
+	if err != nil {
+		return nil, err
+	}
+	var dailyBatch *weatherdomain.DailyModelBatch
+	if daily != nil {
+		dailyBatch, err = weatherdomain.MapDaily(weatherdomain.DailyMappingInput{Metadata: metadata, Weather: weatherBundle, Daily: daily})
+		if err != nil {
+			return nil, err
+		}
+	}
+	var alertBatch *weatherdomain.AlertModelBatch
+	if alerts != nil {
+		alertBatch, err = weatherdomain.MapAlerts(weatherdomain.AlertMappingInput{Metadata: metadata, Weather: weatherBundle, Alerts: alerts})
+		if err != nil {
+			return nil, err
+		}
+	}
+	jsonPairs := []model.JSONText{forecastBatch.ParseWarningsJSON, forecastBatch.RowCountsJSON}
+	if dailyBatch != nil {
+		jsonPairs = append(jsonPairs, dailyBatch.ParseWarningsJSON, dailyBatch.RowCountsJSON)
+	}
+	if alertBatch != nil {
+		jsonPairs = append(jsonPairs, alertBatch.ParseWarningsJSON, alertBatch.RowCountsJSON)
+	}
+	warnings, counts, err := aggregateBatchMetadata(jsonPairs...)
+	if err != nil {
+		return nil, err
+	}
+	warnings = deduplicateWarnings(append(warnings, moduleWarnings...))
+	status := weatherFetchStatusSuccess
+	if partial || warningsRequirePartial(warnings) {
+		status = weatherFetchStatusPartialSuccess
+	}
+	serverTime := weatherBundle.Metadata.ServerTimeUTC.UTC()
+	return newMallWeatherModelBatch(endpointKind, status, weatherParserVersionV26, forecastBatch, dailyBatch, alertBatch, nil, warnings, counts, finishedAt, &serverTime)
+}
+
+func newMallWeatherModelBatch(
+	endpointKind, status, parserVersion string,
+	forecasts *weatherdomain.ForecastModelBatch,
+	daily *weatherdomain.DailyModelBatch,
+	alerts *weatherdomain.AlertModelBatch,
+	lifeIndices *weatherdomain.LifeIndexModelBatch,
+	warnings []caiyun.ParseWarning,
+	counts map[string]int,
+	finishedAt time.Time,
+	serverTimes ...*time.Time,
+) (*mallWeatherModelBatch, error) {
+	warningsJSON, err := json.Marshal(warnings)
+	if err != nil {
+		return nil, err
+	}
+	countsJSON, err := json.Marshal(counts)
+	if err != nil {
+		return nil, err
+	}
+	var serverTime *time.Time
+	if len(serverTimes) > 0 {
+		serverTime = serverTimes[0]
+	}
+	return &mallWeatherModelBatch{
+		EndpointKind: endpointKind, Status: status, ParserVersion: parserVersion,
+		ProviderServerTime: serverTime, Forecasts: forecasts, Daily: daily, Alerts: alerts, LifeIndices: lifeIndices,
+		ParseWarningsJSON: model.JSONText(warningsJSON), RowCountsJSON: model.JSONText(countsJSON), FinishedAt: finishedAt,
+	}, nil
+}
+
+func aggregateBatchMetadata(values ...model.JSONText) ([]caiyun.ParseWarning, map[string]int, error) {
+	warnings := make([]caiyun.ParseWarning, 0)
+	counts := make(map[string]int)
+	for index := 0; index < len(values); index += 2 {
+		if index+1 >= len(values) {
+			return nil, nil, fmt.Errorf("mall weather: incomplete batch metadata")
+		}
+		var batchWarnings []caiyun.ParseWarning
+		if err := json.Unmarshal([]byte(values[index]), &batchWarnings); err != nil {
+			return nil, nil, err
+		}
+		var batchCounts map[string]int
+		if err := json.Unmarshal([]byte(values[index+1]), &batchCounts); err != nil {
+			return nil, nil, err
+		}
+		warnings = append(warnings, batchWarnings...)
+		for kind, count := range batchCounts {
+			counts[kind] += count
+		}
+	}
+	return deduplicateWarnings(warnings), counts, nil
+}
+
+func deduplicateWarnings(warnings []caiyun.ParseWarning) []caiyun.ParseWarning {
+	unique := make(map[string]caiyun.ParseWarning, len(warnings))
+	keys := make([]string, 0, len(warnings))
+	for _, warning := range warnings {
+		key := warning.Code + "\x00" + warning.Path
+		if _, exists := unique[key]; exists {
+			continue
+		}
+		unique[key] = warning
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	result := make([]caiyun.ParseWarning, 0, len(keys))
+	for _, key := range keys {
+		result = append(result, unique[key])
+	}
+	return result
+}
+
+func warningsRequirePartial(warnings []caiyun.ParseWarning) bool {
+	for _, warning := range warnings {
+		if _, ok := partialWeatherWarningCodes[warning.Code]; ok {
+			return true
+		}
+	}
+	return false
+}

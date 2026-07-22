@@ -22,8 +22,12 @@ func TestMallWeatherTaskConstructorsUseNonSensitivePayloads(t *testing.T) {
 		{"life index", TypeMallWeatherLifeIndex, MallWeatherQueueName, func() (*asynq.Task, error) {
 			return NewMallWeatherLifeIndexTask(weatherTaskPayload("life:11:2026072210"))
 		}},
-		{"repair", TypeMallWeatherRepair, MallWeatherQueueName, func() (*asynq.Task, error) { return NewMallWeatherRepairTask(weatherTaskPayload("repair:42:1")) }},
-		{"manual", TypeMallWeatherManual, MallWeatherQueueName, func() (*asynq.Task, error) { return NewMallWeatherManualTask(weatherTaskPayload("manual:4f8d2a")) }},
+		{"repair", TypeMallWeatherRepair, MallWeatherQueueName, func() (*asynq.Task, error) {
+			return NewMallWeatherRepairTask(weatherTaskPayloadForEndpoint("repair:42:1", "v26_weather"))
+		}},
+		{"manual", TypeMallWeatherManual, MallWeatherQueueName, func() (*asynq.Task, error) {
+			return NewMallWeatherManualTask(weatherTaskPayloadForEndpoint("manual:4f8d2a", "v3_life_index"))
+		}},
 		{"export", TypeMallWeatherExport, MallExportQueueName, func() (*asynq.Task, error) {
 			return NewMallWeatherExportTask(MallWeatherExportTaskPayload{ExportJobID: 22})
 		}},
@@ -68,6 +72,9 @@ func TestNewMallWeatherTaskRejectsInvalidPayload(t *testing.T) {
 		{"mismatched window", TypeMallWeatherFast, `{"mall_id":1,"task_window":"full:1:2026072210"}`},
 		{"mismatched mall", TypeMallWeatherFast, `{"mall_id":1,"task_window":"fast:2:202607221030"}`},
 		{"empty window identity", TypeMallWeatherManual, `{"mall_id":1,"task_window":"manual:"}`},
+		{"repair missing endpoint", TypeMallWeatherRepair, `{"mall_id":1,"task_window":"repair:42:1"}`},
+		{"manual invalid endpoint", TypeMallWeatherManual, `{"mall_id":1,"task_window":"manual:abc","endpoint_kind":"v4_unknown"}`},
+		{"fast mismatched endpoint", TypeMallWeatherFast, `{"mall_id":1,"task_window":"fast:1:202607221030","endpoint_kind":"v3_life_index"}`},
 		{"unsafe window", TypeMallWeatherFast, `{"mall_id":1,"task_window":"fast:../secret"}`},
 		{"credential field", TypeMallWeatherFast, `{"mall_id":1,"app_secret":"do-not-queue"}`},
 		{"URL field", TypeMallWeatherFast, `{"mall_id":1,"provider_url":"https://example.invalid"}`},
@@ -86,7 +93,7 @@ func TestNewMallWeatherTaskRejectsInvalidPayload(t *testing.T) {
 }
 
 func TestDecodeMallWeatherTaskPayloadReturnsStableIdentity(t *testing.T) {
-	want := weatherTaskPayload("fast:11:202607221030")
+	want := weatherTaskPayloadForEndpoint("fast:11:202607221030", "v26_weather")
 	data := []byte(`{"mall_id":11,"task_window":"fast:11:202607221030"}`)
 	got, err := DecodeMallWeatherTaskPayload(TypeMallWeatherFast, data)
 	if err != nil {
@@ -99,6 +106,10 @@ func TestDecodeMallWeatherTaskPayloadReturnsStableIdentity(t *testing.T) {
 
 func weatherTaskPayload(taskWindow string) MallTaskPayload {
 	return MallTaskPayload{MallID: 11, TaskWindow: taskWindow}
+}
+
+func weatherTaskPayloadForEndpoint(taskWindow, endpointKind string) MallTaskPayload {
+	return MallTaskPayload{MallID: 11, TaskWindow: taskWindow, EndpointKind: endpointKind}
 }
 
 func TestMallWeatherTaskTypesReturnsCopy(t *testing.T) {

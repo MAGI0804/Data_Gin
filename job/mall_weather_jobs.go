@@ -42,8 +42,9 @@ var mallWeatherTaskTypes = []string{
 // non-sensitive idempotency window needed by weather workers. Provider
 // credentials are resolved by the worker.
 type MallTaskPayload struct {
-	MallID     uint   `json:"mall_id"`
-	TaskWindow string `json:"task_window"`
+	MallID       uint   `json:"mall_id"`
+	TaskWindow   string `json:"task_window"`
+	EndpointKind string `json:"endpoint_kind,omitempty"`
 }
 
 type MallGeocodeTaskPayload struct {
@@ -182,10 +183,34 @@ func DecodeMallWeatherTaskPayload(taskType string, payload []byte) (MallTaskPayl
 	}
 	if decoded.MallID == 0 || !mallWeatherTaskWindowPattern.MatchString(decoded.TaskWindow) ||
 		!strings.HasPrefix(decoded.TaskWindow, prefix) || len(decoded.TaskWindow) <= len(prefix) ||
-		!weatherWindowMatchesMall(taskType, decoded) {
+		!weatherWindowMatchesMall(taskType, decoded) || !normalizeWeatherTaskEndpoint(taskType, &decoded) {
 		return MallTaskPayload{}, fmt.Errorf("mall weather task: invalid weather task identity")
 	}
 	return decoded, nil
+}
+
+func normalizeWeatherTaskEndpoint(taskType string, payload *MallTaskPayload) bool {
+	if payload == nil {
+		return false
+	}
+	switch taskType {
+	case TypeMallWeatherFast, TypeMallWeatherFull:
+		if payload.EndpointKind != "" && payload.EndpointKind != "v26_weather" {
+			return false
+		}
+		payload.EndpointKind = "v26_weather"
+		return true
+	case TypeMallWeatherLifeIndex:
+		if payload.EndpointKind != "" && payload.EndpointKind != "v3_life_index" {
+			return false
+		}
+		payload.EndpointKind = "v3_life_index"
+		return true
+	case TypeMallWeatherRepair, TypeMallWeatherManual:
+		return payload.EndpointKind == "v26_weather" || payload.EndpointKind == "v3_life_index"
+	default:
+		return false
+	}
 }
 
 func weatherWindowMatchesMall(taskType string, payload MallTaskPayload) bool {
