@@ -24,6 +24,7 @@ type MallWeatherExportJobServiceAPI interface {
 		requestbody.MallWeatherExportCreateRequest,
 	) (*data_svc.MallWeatherExportCreateResult, bool, error)
 	Get(context.Context, uint, string) (*data_svc.MallWeatherExportJobDTO, error)
+	Download(context.Context, uint, string) (*data_svc.MallWeatherExportDownloadResult, error)
 }
 
 type MallWeatherExportJobController struct {
@@ -81,6 +82,19 @@ func (controller *MallWeatherExportJobController) Get(c *gin.Context) {
 	responses.New(c).ToResponseWithStatus(http.StatusOK, result)
 }
 
+func (controller *MallWeatherExportJobController) Download(c *gin.Context) {
+	result, err := controller.service.Download(
+		c.Request.Context(),
+		auth.CurrentUserID(c),
+		c.Param("job_id"),
+	)
+	if err != nil {
+		writeMallWeatherExportJobError(c, err)
+		return
+	}
+	responses.New(c).ToResponseWithStatus(http.StatusOK, result)
+}
+
 func writeMallWeatherExportJobError(c *gin.Context, err error) {
 	code, message := classifyMallWeatherExportJobError(err)
 	responses.New(c).ToSafeErrorResponse(code, message)
@@ -98,6 +112,10 @@ func classifyMallWeatherExportJobError(err error) (*errcode.Error, string) {
 		errors.Is(err, data_svc.ErrMallIdempotencyPending),
 		errors.Is(err, data_svc.ErrMallWeatherExportProfileConflict):
 		return errcode.Conflict, "天气导出请求冲突，请稍后重试"
+	case errors.Is(err, data_svc.ErrMallWeatherExportNotReady):
+		return errcode.Conflict, "天气导出文件尚未生成"
+	case errors.Is(err, data_svc.ErrMallWeatherExportExpired):
+		return errcode.Conflict, "天气导出文件已过期"
 	case errors.Is(err, data_svc.ErrMallWeatherExportInvalid),
 		errors.Is(err, data_svc.ErrMallWeatherExportTooLarge):
 		return errcode.UnprocessableEntity, "天气导出参数校验失败"

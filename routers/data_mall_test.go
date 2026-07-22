@@ -42,6 +42,7 @@ func TestAPIDataRegistersMallCRUDRoutes(t *testing.T) {
 		http.MethodGet + " /api/v1/weather-export-profiles",
 		http.MethodPost + " /api/v1/weather-exports",
 		http.MethodGet + " /api/v1/weather-exports/:job_id",
+		http.MethodGet + " /api/v1/weather-exports/:job_id/download",
 	} {
 		if _, ok := routes[expected]; !ok {
 			t.Errorf("route %q is not registered", expected)

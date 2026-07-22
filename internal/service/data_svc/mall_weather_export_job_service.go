@@ -18,6 +18,7 @@ import (
 	"gin-biz-web-api/job"
 	"gin-biz-web-api/model"
 	"gin-biz-web-api/pkg/database"
+	"gin-biz-web-api/pkg/storage"
 
 	"github.com/google/uuid"
 	"gorm.io/gorm"
@@ -33,11 +34,14 @@ const (
 	defaultMallWeatherExportEstimateTimeout  = 10 * time.Second
 	maxMallWeatherExportConfiguredRows       = int64(20_000_000)
 	maxMallWeatherExportConfiguredRangeDays  = 3_660
+	defaultMallWeatherExportDownloadTTL      = 5 * time.Minute
 )
 
 var (
 	ErrMallWeatherExportInvalid  = errors.New("mall weather export: invalid input")
 	ErrMallWeatherExportTooLarge = errors.New("mall weather export: estimated rows exceed limit")
+	ErrMallWeatherExportNotReady = errors.New("mall weather export: result is not ready")
+	ErrMallWeatherExportExpired  = errors.New("mall weather export: result expired")
 )
 
 type MallWeatherExportCreateResult struct {
@@ -69,6 +73,11 @@ type MallWeatherExportJobDTO struct {
 	UpdatedAt        time.Time  `json:"updatedAt"`
 }
 
+type MallWeatherExportDownloadResult struct {
+	URL       string    `json:"url"`
+	ExpiresAt time.Time `json:"expiresAt"`
+}
+
 type MallWeatherExportProfileSnapshot struct {
 	ProfileID uint                           `json:"profileId"`
 	Code      string                         `json:"code"`
@@ -98,6 +107,12 @@ type mallWeatherExportJobReader interface {
 type mallWeatherExportLimitReader interface {
 	GetValue(context.Context, string) (string, bool, error)
 }
+
+type mallWeatherExportDownloadSigner interface {
+	PresignDownloadURL(context.Context, string, string, time.Duration) (string, error)
+}
+
+type mallWeatherExportDownloadSignerFactory func() (mallWeatherExportDownloadSigner, error)
 
 type mallWeatherExportCreateCommand struct {
 	ActorUserID         uint
@@ -131,6 +146,8 @@ type MallWeatherExportJobService struct {
 	jobs        mallWeatherExportJobReader
 	limits      mallWeatherExportLimitReader
 	store       mallWeatherExportJobStore
+	newSigner   mallWeatherExportDownloadSignerFactory
+	downloadTTL time.Duration
 	now         func() time.Time
 }
 
@@ -142,6 +159,10 @@ func NewMallWeatherExportJobService() *MallWeatherExportJobService {
 		jobs:        data_dao.NewMallWeatherExportJobDAO(database.DB),
 		limits:      data_dao.NewRuntimeConfigDAO(),
 		store:       gormMallWeatherExportJobStore{db: database.DB},
+		newSigner: func() (mallWeatherExportDownloadSigner, error) {
+			return storage.NewOSSClientFromConfig()
+		},
+		downloadTTL: defaultMallWeatherExportDownloadTTL,
 		now:         time.Now,
 	}
 }
@@ -160,7 +181,12 @@ func newMallWeatherExportJobService(
 	}
 	return &MallWeatherExportJobService{
 		profiles: profiles, permissions: permissions, estimator: estimator, jobs: jobs,
-		limits: limits, store: store, now: now,
+		limits: limits, store: store,
+		newSigner: func() (mallWeatherExportDownloadSigner, error) {
+			return storage.NewOSSClientFromConfig()
+		},
+		downloadTTL: defaultMallWeatherExportDownloadTTL,
+		now:         now,
 	}, nil
 }
 
@@ -180,11 +206,76 @@ func (service *MallWeatherExportJobService) Get(
 	if err != nil {
 		return nil, err
 	}
+	if row == nil {
+		return nil, fmt.Errorf("mall weather export: nil stored job")
+	}
 	dto, err := mallWeatherExportJobDTO(row)
 	if err != nil {
 		return nil, err
 	}
 	return &dto, nil
+}
+
+func (service *MallWeatherExportJobService) Download(
+	ctx context.Context,
+	actorUserID uint,
+	jobUUID string,
+) (*MallWeatherExportDownloadResult, error) {
+	jobUUID = strings.TrimSpace(jobUUID)
+	if service == nil || service.newSigner == nil || service.downloadTTL < time.Minute ||
+		service.downloadTTL > time.Hour || ctx == nil || actorUserID == 0 ||
+		len(jobUUID) != 36 || uuid.Validate(jobUUID) != nil {
+		return nil, fmt.Errorf("%w: invalid download request", ErrMallWeatherExportInvalid)
+	}
+	if err := service.authorize(ctx, actorUserID); err != nil {
+		return nil, err
+	}
+	row, err := service.jobs.FindByUUIDAndActor(ctx, jobUUID, actorUserID)
+	if err != nil {
+		return nil, err
+	}
+	if row == nil {
+		return nil, fmt.Errorf("mall weather export: nil stored job")
+	}
+	now := service.now().UTC()
+	if strings.ToLower(strings.TrimSpace(row.Status)) != "succeeded" {
+		return nil, ErrMallWeatherExportNotReady
+	}
+	if row.ExpiresAt == nil || !row.ExpiresAt.UTC().After(now) || !validMallWeatherExportDownloadObjectKey(row.ResultObjectKey) {
+		return nil, ErrMallWeatherExportExpired
+	}
+	validFor := service.downloadTTL
+	if remaining := row.ExpiresAt.UTC().Sub(now); remaining < validFor {
+		validFor = remaining
+	}
+	if validFor < time.Minute {
+		return nil, ErrMallWeatherExportExpired
+	}
+	signer, err := service.newSigner()
+	if err != nil {
+		return nil, fmt.Errorf("mall weather export: create download signer: %w", err)
+	}
+	if signer == nil {
+		return nil, fmt.Errorf("mall weather export: nil download signer")
+	}
+	fileName := "mall_weather_export_" + jobUUID + ".xlsx"
+	url, err := signer.PresignDownloadURL(ctx, row.ResultObjectKey, fileName, validFor)
+	if err != nil {
+		return nil, fmt.Errorf("mall weather export: sign download: %w", err)
+	}
+	return &MallWeatherExportDownloadResult{URL: url, ExpiresAt: now.Add(validFor)}, nil
+}
+
+func validMallWeatherExportDownloadObjectKey(value string) bool {
+	if value == "" || value != strings.TrimSpace(value) || strings.HasPrefix(value, "/") || strings.Contains(value, "\\") {
+		return false
+	}
+	for _, part := range strings.Split(value, "/") {
+		if part == "" || part == "." || part == ".." {
+			return false
+		}
+	}
+	return true
 }
 
 func mallWeatherExportJobDTO(row *model.MallWeatherExportJob) (MallWeatherExportJobDTO, error) {

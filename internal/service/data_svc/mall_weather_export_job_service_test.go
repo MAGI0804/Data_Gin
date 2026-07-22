@@ -172,6 +172,77 @@ func TestMallWeatherExportJobServiceGetsActorScopedSafeDTO(t *testing.T) {
 	}
 }
 
+func TestMallWeatherExportJobServiceSignsActorScopedDownload(t *testing.T) {
+	now := time.Date(2026, 7, 22, 8, 0, 0, 0, time.UTC)
+	jobUUID := uuid.NewString()
+	expiresAt := now.Add(10 * time.Minute)
+	jobs := &fakeMallWeatherExportJobReader{row: &model.MallWeatherExportJob{
+		BaseModel: model.BaseModel{ID: 22}, JobUUID: jobUUID, ProfileID: 9, ProfileVersion: 3,
+		Status: "succeeded", ResultObjectKey: "mall-weather-exports/job/result.xlsx", ExpiresAt: &expiresAt,
+		WeatherTimestamps: model.WeatherTimestamps{CreatedAt: now.Add(-time.Hour), UpdatedAt: now},
+	}}
+	service, err := newMallWeatherExportJobService(
+		fakeMallWeatherExportProfileReader{},
+		fakeMallPermissionChecker{allowed: true},
+		&fakeMallWeatherExportEstimator{},
+		jobs,
+		fakeMallWeatherExportLimitReader{},
+		&fakeMallWeatherExportJobStore{},
+		func() time.Time { return now },
+	)
+	if err != nil {
+		t.Fatalf("newMallWeatherExportJobService() error=%v", err)
+	}
+	signer := &fakeMallWeatherExportDownloadSigner{url: "https://signed.example/result"}
+	service.newSigner = func() (mallWeatherExportDownloadSigner, error) { return signer, nil }
+	result, err := service.Download(t.Context(), 17, jobUUID)
+	if err != nil {
+		t.Fatalf("Download() error=%v", err)
+	}
+	if result.URL != signer.url || !result.ExpiresAt.Equal(now.Add(5*time.Minute)) ||
+		jobs.actorUserID != 17 || signer.objectKey != jobs.row.ResultObjectKey || signer.expires != 5*time.Minute {
+		t.Fatalf("result=%+v signer=%+v actor=%d", result, signer, jobs.actorUserID)
+	}
+	encoded, err := json.Marshal(result)
+	if err != nil || strings.Contains(string(encoded), "mall-weather-exports") {
+		t.Fatalf("encoded=%s error=%v", encoded, err)
+	}
+}
+
+func TestMallWeatherExportJobServiceRejectsUnavailableDownload(t *testing.T) {
+	now := time.Date(2026, 7, 22, 8, 0, 0, 0, time.UTC)
+	jobUUID := uuid.NewString()
+	tests := []struct {
+		name   string
+		status string
+		expiry time.Time
+		want   error
+	}{
+		{name: "still running", status: "running", expiry: now.Add(time.Hour), want: ErrMallWeatherExportNotReady},
+		{name: "expired", status: "succeeded", expiry: now, want: ErrMallWeatherExportExpired},
+		{name: "inside final minute", status: "succeeded", expiry: now.Add(30 * time.Second), want: ErrMallWeatherExportExpired},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			jobs := &fakeMallWeatherExportJobReader{row: &model.MallWeatherExportJob{
+				BaseModel: model.BaseModel{ID: 22}, JobUUID: jobUUID, ProfileID: 9, ProfileVersion: 3,
+				Status: tt.status, ResultObjectKey: "mall-weather-exports/job/result.xlsx", ExpiresAt: &tt.expiry,
+			}}
+			service := &MallWeatherExportJobService{
+				permissions: fakeMallPermissionChecker{allowed: true}, jobs: jobs,
+				newSigner: func() (mallWeatherExportDownloadSigner, error) {
+					return &fakeMallWeatherExportDownloadSigner{}, nil
+				},
+				downloadTTL: 5 * time.Minute, now: func() time.Time { return now },
+			}
+			_, err := service.Download(t.Context(), 17, jobUUID)
+			if !errors.Is(err, tt.want) {
+				t.Fatalf("Download() error=%v, want %v", err, tt.want)
+			}
+		})
+	}
+}
+
 func TestMallWeatherExportJobServiceRejectsMalformedRuntimeLimits(t *testing.T) {
 	service := &MallWeatherExportJobService{
 		limits: fakeMallWeatherExportLimitReader{
@@ -300,6 +371,25 @@ type fakeMallWeatherExportJobStore struct {
 	replayed bool
 	err      error
 	calls    int
+}
+
+type fakeMallWeatherExportDownloadSigner struct {
+	url          string
+	objectKey    string
+	downloadName string
+	expires      time.Duration
+}
+
+func (signer *fakeMallWeatherExportDownloadSigner) PresignDownloadURL(
+	_ context.Context,
+	objectKey string,
+	downloadName string,
+	expires time.Duration,
+) (string, error) {
+	signer.objectKey = objectKey
+	signer.downloadName = downloadName
+	signer.expires = expires
+	return signer.url, nil
 }
 
 func (store *fakeMallWeatherExportJobStore) Create(

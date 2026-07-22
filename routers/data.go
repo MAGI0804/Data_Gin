@@ -237,6 +237,7 @@ func registerMallWeatherExportJobRoutes(
 	exportGroup.Use(middleware.AuthJWT())
 	exportGroup.POST("", exportCtrl.Create)
 	exportGroup.GET("/:job_id", exportCtrl.Get)
+	exportGroup.GET("/:job_id/download", exportCtrl.Download)
 }
 
 func registerMallRoutes(api *gin.RouterGroup, mallCtrl *data_ctrl.MallController) {

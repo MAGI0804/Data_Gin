@@ -71,6 +71,29 @@ func TestMallWeatherExportJobControllerGetsActorScopedJob(t *testing.T) {
 	}
 }
 
+func TestMallWeatherExportJobControllerReturnsSignedDownload(t *testing.T) {
+	service := fakeMallWeatherExportJobControllerService{
+		download: func(_ context.Context, actor uint, jobUUID string) (*data_svc.MallWeatherExportDownloadResult, error) {
+			if actor != 17 || jobUUID != mallWeatherExportJobTestUUID {
+				t.Fatalf("actor=%d job=%s", actor, jobUUID)
+			}
+			return &data_svc.MallWeatherExportDownloadResult{URL: "https://signed.example/result"}, nil
+		},
+	}
+	recorder := performMallWeatherExportJobRequest(
+		t,
+		service,
+		http.MethodGet,
+		"/api/v1/weather-exports/"+mallWeatherExportJobTestUUID+"/download",
+		"",
+		"",
+	)
+	if recorder.Code != http.StatusOK || strings.Contains(recorder.Body.String(), "object_key") ||
+		!strings.Contains(recorder.Body.String(), "https://signed.example/result") {
+		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+}
+
 func TestMallWeatherExportJobControllerRejectsUnknownJSONField(t *testing.T) {
 	calls := 0
 	service := fakeMallWeatherExportJobControllerService{
@@ -109,6 +132,8 @@ func TestMallWeatherExportJobControllerMapsSafeErrors(t *testing.T) {
 		{name: "job not found", err: data_dao.ErrMallWeatherExportJobNotFound, wantStatus: http.StatusNotFound},
 		{name: "idempotency conflict", err: data_svc.ErrMallIdempotencyConflict, wantStatus: http.StatusConflict},
 		{name: "profile conflict", err: data_svc.ErrMallWeatherExportProfileConflict, wantStatus: http.StatusConflict},
+		{name: "not ready", err: data_svc.ErrMallWeatherExportNotReady, wantStatus: http.StatusConflict},
+		{name: "expired", err: data_svc.ErrMallWeatherExportExpired, wantStatus: http.StatusConflict},
 		{name: "invalid", err: data_svc.ErrMallWeatherExportInvalid, wantStatus: http.StatusUnprocessableEntity},
 		{name: "too large", err: data_svc.ErrMallWeatherExportTooLarge, wantStatus: http.StatusUnprocessableEntity},
 		{name: "internal", err: errors.New("database password=secret"), wantStatus: http.StatusInternalServerError},
@@ -154,6 +179,7 @@ func performMallWeatherExportJobRequest(
 	controller := NewMallWeatherExportJobControllerWithService(service)
 	router.POST("/api/v1/weather-exports", controller.Create)
 	router.GET("/api/v1/weather-exports/:job_id", controller.Get)
+	router.GET("/api/v1/weather-exports/:job_id/download", controller.Download)
 	request := httptest.NewRequest(method, path, strings.NewReader(body))
 	request.Header.Set("Content-Type", "application/json")
 	if idempotencyKey != "" {
@@ -171,7 +197,8 @@ type fakeMallWeatherExportJobControllerService struct {
 		string,
 		requestbody.MallWeatherExportCreateRequest,
 	) (*data_svc.MallWeatherExportCreateResult, bool, error)
-	get func(context.Context, uint, string) (*data_svc.MallWeatherExportJobDTO, error)
+	get      func(context.Context, uint, string) (*data_svc.MallWeatherExportJobDTO, error)
+	download func(context.Context, uint, string) (*data_svc.MallWeatherExportDownloadResult, error)
 }
 
 func (service fakeMallWeatherExportJobControllerService) Create(
@@ -195,4 +222,15 @@ func (service fakeMallWeatherExportJobControllerService) Get(
 		panic("unexpected Get call")
 	}
 	return service.get(ctx, actor, jobUUID)
+}
+
+func (service fakeMallWeatherExportJobControllerService) Download(
+	ctx context.Context,
+	actor uint,
+	jobUUID string,
+) (*data_svc.MallWeatherExportDownloadResult, error) {
+	if service.download == nil {
+		return nil, errors.New("download not configured")
+	}
+	return service.download(ctx, actor, jobUUID)
 }
