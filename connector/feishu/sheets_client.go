@@ -17,7 +17,14 @@ import (
 	"gin-biz-web-api/pkg/providerhttp"
 )
 
-const maxSheetsMetadataBodyBytes = 1024 * 1024
+const maxSheetsResponseBodyBytes = 1024 * 1024
+
+const (
+	maxSheetReadRows    = int64(5_000)
+	maxSheetReadColumns = int64(128)
+	maxSheetReadCells   = int64(100_000)
+	maxSheetRowNumber   = int64(10_000_000)
+)
 
 var (
 	feishuSpreadsheetTokenPattern = regexp.MustCompile(`^[A-Za-z0-9_-]{8,128}$`)
@@ -50,6 +57,51 @@ type SpreadsheetMetadata struct {
 	Sheets           []SheetMetadata
 }
 
+type SheetRange struct {
+	SheetID     string `json:"-"`
+	StartRow    int64
+	EndRow      int64
+	StartColumn int64
+	EndColumn   int64
+}
+
+func (SheetRange) String() string   { return "feishu.SheetRange{redacted}" }
+func (SheetRange) GoString() string { return "feishu.SheetRange{redacted}" }
+
+type SheetCellType string
+
+const (
+	SheetCellBlank   SheetCellType = "blank"
+	SheetCellString  SheetCellType = "string"
+	SheetCellNumber  SheetCellType = "number"
+	SheetCellBoolean SheetCellType = "boolean"
+)
+
+type SheetCell struct {
+	Type    SheetCellType `json:"-"`
+	Text    string        `json:"-"`
+	Number  json.Number   `json:"-"`
+	Boolean bool          `json:"-"`
+}
+
+func (SheetCell) String() string   { return "feishu.SheetCell{redacted}" }
+func (SheetCell) GoString() string { return "feishu.SheetCell{redacted}" }
+
+type SheetValues struct {
+	Revision int64         `json:"revision"`
+	Rows     [][]SheetCell `json:"-"`
+}
+
+func (SheetValues) String() string   { return "feishu.SheetValues{redacted}" }
+func (SheetValues) GoString() string { return "feishu.SheetValues{redacted}" }
+
+type sheetReadSpec struct {
+	spreadsheetToken string
+	a1Range          string
+	rowCount         int64
+	columnCount      int64
+}
+
 type SheetsError struct {
 	Class     providerhttp.ErrorClass
 	Retryable bool
@@ -62,7 +114,7 @@ func (err *SheetsError) Error() string {
 	if err == nil {
 		return "feishu sheets: unknown error"
 	}
-	return fmt.Sprintf("feishu sheets: metadata request failed (%s)", err.Class)
+	return fmt.Sprintf("feishu sheets: request failed (%s)", err.Class)
 }
 
 func (err *SheetsError) Unwrap() error {
@@ -141,6 +193,120 @@ func (client *SheetsClient) Inspect(
 	return nil, &SheetsError{Class: providerhttp.ErrorClassAuth, HTTPCode: http.StatusUnauthorized}
 }
 
+func (client *SheetsClient) ReadRange(
+	ctx context.Context,
+	spreadsheetToken string,
+	readRange SheetRange,
+) (*SheetValues, error) {
+	if client == nil || client.baseURL == nil || client.tokens == nil || client.http == nil || ctx == nil ||
+		!validFeishuSpreadsheetToken(spreadsheetToken) {
+		return nil, errors.New("feishu sheets: invalid values request")
+	}
+	a1Range, err := buildSheetA1Range(readRange)
+	if err != nil {
+		return nil, err
+	}
+	spec := sheetReadSpec{
+		spreadsheetToken: spreadsheetToken,
+		a1Range:          a1Range,
+		rowCount:         readRange.EndRow - readRange.StartRow + 1,
+		columnCount:      readRange.EndColumn - readRange.StartColumn + 1,
+	}
+	token, err := client.tokens.Token(ctx)
+	if err != nil {
+		return nil, err
+	}
+	for attempt := 0; attempt < 2; attempt++ {
+		values, statusCode, err := client.readRangeOnce(ctx, spec, token)
+		if statusCode == http.StatusUnauthorized && attempt == 0 {
+			token, err = client.tokens.Refresh(ctx)
+			if err != nil {
+				return nil, err
+			}
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		return values, nil
+	}
+	return nil, &SheetsError{Class: providerhttp.ErrorClassAuth, HTTPCode: http.StatusUnauthorized}
+}
+
+func (client *SheetsClient) readRangeOnce(
+	ctx context.Context,
+	spec sheetReadSpec,
+	token string,
+) (*SheetValues, int, error) {
+	if !validTenantToken(token) {
+		return nil, 0, errors.New("feishu sheets: token provider returned invalid token")
+	}
+	endpoint := *client.baseURL
+	endpoint.Path = strings.TrimRight(endpoint.Path, "/") + "/open-apis/sheets/v2/spreadsheets/" +
+		url.PathEscape(spec.spreadsheetToken) + "/values/" + spec.a1Range
+	request, err := http.NewRequestWithContext(ctx, http.MethodGet, endpoint.String(), nil)
+	if err != nil {
+		return nil, 0, fmt.Errorf("feishu sheets: create values request: %w", err)
+	}
+	request.Header.Set("Authorization", "Bearer "+token)
+	request.Header.Set("Accept", "application/json")
+	response, err := client.http.Do(request)
+	if err != nil {
+		classification := providerhttp.ClassifyRetry(0, err)
+		return nil, 0, &SheetsError{Class: classification.Class, Retryable: classification.Retryable, cause: err}
+	}
+	defer response.Body.Close()
+	body, err := io.ReadAll(io.LimitReader(response.Body, maxSheetsResponseBodyBytes+1))
+	if err != nil {
+		return nil, response.StatusCode, &SheetsError{
+			Class: providerhttp.ErrorClassResponse, Retryable: true, HTTPCode: response.StatusCode, cause: err,
+		}
+	}
+	if len(body) > maxSheetsResponseBodyBytes {
+		return nil, response.StatusCode, &SheetsError{
+			Class:    providerhttp.ErrorClassResponse,
+			HTTPCode: response.StatusCode,
+			cause:    errors.New("response body exceeds limit"),
+		}
+	}
+	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
+		classification := providerhttp.ClassifyRetry(response.StatusCode, nil)
+		if classification.Class == providerhttp.ErrorClassNone {
+			classification.Class = providerhttp.ErrorClassResponse
+		}
+		return nil, response.StatusCode, &SheetsError{
+			Class: classification.Class, Retryable: classification.Retryable, HTTPCode: response.StatusCode,
+		}
+	}
+	decoded, err := decodeSheetValuesResponse(body, spec.a1Range)
+	if err != nil {
+		return nil, response.StatusCode, &SheetsError{
+			Class: providerhttp.ErrorClassResponse, HTTPCode: response.StatusCode, cause: err,
+		}
+	}
+	if decoded.Code != 0 {
+		return nil, response.StatusCode, &SheetsError{
+			Class: providerhttp.ErrorClassRequest, HTTPCode: response.StatusCode, Code: decoded.Code,
+		}
+	}
+	revision := decoded.Data.Revision
+	if revision == 0 {
+		revision = decoded.Data.ValueRange.Revision
+	}
+	values, err := normalizeSheetValues(
+		revision,
+		decoded.Data.ValueRange.Values,
+		spec.rowCount,
+		spec.columnCount,
+	)
+	if err != nil {
+		return nil, response.StatusCode, &SheetsError{
+			Class: providerhttp.ErrorClassResponse, HTTPCode: response.StatusCode, cause: err,
+		}
+	}
+	return values, response.StatusCode, nil
+}
+
 func (client *SheetsClient) inspectOnce(
 	ctx context.Context,
 	spreadsheetToken string,
@@ -164,15 +330,15 @@ func (client *SheetsClient) inspectOnce(
 		return nil, 0, &SheetsError{Class: classification.Class, Retryable: classification.Retryable, cause: err}
 	}
 	defer response.Body.Close()
-	body, err := io.ReadAll(io.LimitReader(response.Body, maxSheetsMetadataBodyBytes+1))
+	body, err := io.ReadAll(io.LimitReader(response.Body, maxSheetsResponseBodyBytes+1))
 	if err != nil {
 		return nil, response.StatusCode, &SheetsError{
 			Class: providerhttp.ErrorClassResponse, Retryable: true, HTTPCode: response.StatusCode, cause: err,
 		}
 	}
-	if len(body) > maxSheetsMetadataBodyBytes {
+	if len(body) > maxSheetsResponseBodyBytes {
 		return nil, response.StatusCode, &SheetsError{
-			Class: providerhttp.ErrorClassResponse, HTTPCode: response.StatusCode, cause: fmt.Errorf("response body exceeds limit"),
+			Class: providerhttp.ErrorClassResponse, HTTPCode: response.StatusCode, cause: errors.New("response body exceeds limit"),
 		}
 	}
 	if response.StatusCode < http.StatusOK || response.StatusCode >= http.StatusMultipleChoices {
@@ -224,6 +390,87 @@ type sheetMetadataResponseRow struct {
 		FrozenRowCount    int64 `json:"frozen_row_count"`
 		FrozenColumnCount int64 `json:"frozen_column_count"`
 	} `json:"grid_properties"`
+}
+
+type sheetValuesResponse struct {
+	Code int    `json:"code"`
+	Msg  string `json:"msg"`
+	Data struct {
+		Revision   int64 `json:"revision"`
+		ValueRange struct {
+			Range    string  `json:"range"`
+			Revision int64   `json:"revision"`
+			Values   [][]any `json:"values"`
+		} `json:"valueRange"`
+	} `json:"data"`
+}
+
+func decodeSheetValuesResponse(body []byte, expectedRange string) (sheetValuesResponse, error) {
+	var decoded sheetValuesResponse
+	decoder := json.NewDecoder(bytes.NewReader(body))
+	decoder.UseNumber()
+	if err := decoder.Decode(&decoded); err != nil {
+		return decoded, fmt.Errorf("decode values response: %w", err)
+	}
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		return decoded, errors.New("values response contains trailing data")
+	}
+	if decoded.Code != 0 {
+		return decoded, nil
+	}
+	if decoded.Data.ValueRange.Range != expectedRange || decoded.Data.Revision < 0 ||
+		decoded.Data.ValueRange.Revision < 0 {
+		return decoded, errors.New("values response metadata is invalid")
+	}
+	if decoded.Data.Revision > 0 && decoded.Data.ValueRange.Revision > 0 &&
+		decoded.Data.Revision != decoded.Data.ValueRange.Revision {
+		return decoded, errors.New("values response revision is inconsistent")
+	}
+	return decoded, nil
+}
+
+func normalizeSheetValues(
+	revision int64,
+	rows [][]any,
+	expectedRows int64,
+	expectedColumns int64,
+) (*SheetValues, error) {
+	if revision < 0 || expectedRows < 1 || expectedRows > maxSheetReadRows || expectedColumns < 1 ||
+		expectedColumns > maxSheetReadColumns || int64(len(rows)) > expectedRows {
+		return nil, errors.New("values response dimensions are invalid")
+	}
+	result := &SheetValues{Revision: revision, Rows: make([][]SheetCell, len(rows))}
+	var cellCount int64
+	for rowIndex, row := range rows {
+		if int64(len(row)) > expectedColumns || cellCount > maxSheetReadCells-int64(len(row)) {
+			return nil, errors.New("values response dimensions are invalid")
+		}
+		cellCount += int64(len(row))
+		result.Rows[rowIndex] = make([]SheetCell, len(row))
+		for columnIndex, value := range row {
+			cell, err := normalizeSheetCell(value)
+			if err != nil {
+				return nil, err
+			}
+			result.Rows[rowIndex][columnIndex] = cell
+		}
+	}
+	return result, nil
+}
+
+func normalizeSheetCell(value any) (SheetCell, error) {
+	switch typed := value.(type) {
+	case nil:
+		return SheetCell{Type: SheetCellBlank}, nil
+	case string:
+		return SheetCell{Type: SheetCellString, Text: typed}, nil
+	case json.Number:
+		return SheetCell{Type: SheetCellNumber, Number: typed}, nil
+	case bool:
+		return SheetCell{Type: SheetCellBoolean, Boolean: typed}, nil
+	default:
+		return SheetCell{}, errors.New("values response contains unsupported cell type")
+	}
 }
 
 func decodeSheetsMetadataResponse(body []byte) (sheetsMetadataResponse, error) {
@@ -319,6 +566,43 @@ func validFeishuSpreadsheetToken(value string) bool {
 
 func validFeishuSheetID(value string) bool {
 	return feishuSheetIDPattern.MatchString(value)
+}
+
+func buildSheetA1Range(readRange SheetRange) (string, error) {
+	invalidRows := readRange.StartRow < 1 || readRange.EndRow < readRange.StartRow ||
+		readRange.EndRow > maxSheetRowNumber
+	invalidColumns := readRange.StartColumn < 1 || readRange.EndColumn < readRange.StartColumn ||
+		readRange.EndColumn > maxSheetReadColumns
+	if !validFeishuSheetID(readRange.SheetID) || invalidRows || invalidColumns {
+		return "", errors.New("feishu sheets: invalid read range")
+	}
+	rowCount := readRange.EndRow - readRange.StartRow + 1
+	columnCount := readRange.EndColumn - readRange.StartColumn + 1
+	if rowCount > maxSheetReadRows || rowCount > maxSheetReadCells/columnCount {
+		return "", errors.New("feishu sheets: invalid read range")
+	}
+	startColumn := sheetColumnName(readRange.StartColumn)
+	endColumn := sheetColumnName(readRange.EndColumn)
+	return fmt.Sprintf(
+		"%s!%s%d:%s%d",
+		readRange.SheetID,
+		startColumn,
+		readRange.StartRow,
+		endColumn,
+		readRange.EndRow,
+	), nil
+}
+
+func sheetColumnName(column int64) string {
+	var result [3]byte
+	index := len(result)
+	for column > 0 {
+		column--
+		index--
+		result[index] = byte('A' + column%26)
+		column /= 26
+	}
+	return string(result[index:])
 }
 
 func validSheetTitle(value string) bool {
