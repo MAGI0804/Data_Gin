@@ -1,0 +1,49 @@
+{
+  "status": "ok",
+  "api_version": "v2.6",
+  "api_status": "active",
+  "lang": "zh_CN",
+  "unit": "metric:v2",
+  "tzshift": 28800,
+  "timezone": "Asia/Shanghai",
+  "server_time": 1784688000,
+  "location": [31.2285678, 121.4551234],
+  "primary": 0,
+  "forecast_keypoint": "未来两小时无降水",
+  "result": {
+    "realtime": {
+      "status": "ok",
+      "temperature": 33.2,
+      "apparent_temperature": 36.8,
+      "humidity": 0.63,
+      "pressure": 100412.5,
+      "wind": {"speed": 12.4, "direction": 165.5},
+      "cloudrate": 0.71,
+      "visibility": 18.3,
+      "dswrf": 544.6,
+      "skycon": "PARTLY_CLOUDY_DAY",
+      "precipitation": {
+        "local": {"status": "ok", "datasource": "radar", "intensity": 0.1},
+        "nearest": {"status": "ok", "distance": 8.5, "intensity": 0.4}
+      },
+      "air_quality": {
+        "pm25": 18.0,
+        "pm10": 31.0,
+        "o3": 102.0,
+        "so2": 8.0,
+        "no2": 22.0,
+        "co": 0.7,
+        "aqi": {"chn": 52, "usa": 48},
+        "description": {"chn": "良", "usa": "良"}
+      },
+      "life_index": {
+        "comfort": {"index": 5, "desc": "闷热"},
+        "ultraviolet": {"index": 4, "desc": "强"}
+      }
+    },
+    "minutely": {"status": "ok"},
+    "hourly": {"status": "ok"},
+    "daily": {"status": "ok"},
+    "alert": {"status": "ok"}
+  }
+}
