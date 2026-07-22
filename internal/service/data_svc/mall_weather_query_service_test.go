@@ -231,6 +231,7 @@ func (reader fakeMallWeatherQueryMallReader) FindByID(context.Context, uint) (*m
 type fakeMallWeatherQueryDAO struct {
 	rows             []model.MallWeatherHourly
 	realtimeRows     []model.MallWeatherRealtime
+	minutelyRows     []model.MallWeatherMinutely
 	latest           *model.MallWeatherLatest
 	latestByKind     map[string]*model.MallWeatherLatest
 	realtime         *model.MallWeatherRealtime
@@ -240,6 +241,7 @@ type fakeMallWeatherQueryDAO struct {
 	overviewError    error
 	query            data_dao.HourlyQuery
 	realtimeQuery    data_dao.RealtimeQuery
+	minutelyQuery    data_dao.MinutelyQuery
 	minutelyStartUTC time.Time
 	minutelyEndUTC   time.Time
 	minutelyLimit    int
@@ -249,6 +251,11 @@ type fakeMallWeatherQueryDAO struct {
 func (dao *fakeMallWeatherQueryDAO) QueryRealtime(_ context.Context, query data_dao.RealtimeQuery) ([]model.MallWeatherRealtime, error) {
 	dao.realtimeQuery = query
 	return append([]model.MallWeatherRealtime(nil), dao.realtimeRows...), dao.err
+}
+
+func (dao *fakeMallWeatherQueryDAO) QueryMinutely(_ context.Context, query data_dao.MinutelyQuery) ([]model.MallWeatherMinutely, error) {
+	dao.minutelyQuery = query
+	return append([]model.MallWeatherMinutely(nil), dao.minutelyRows...), dao.err
 }
 
 func (dao *fakeMallWeatherQueryDAO) QueryHourly(_ context.Context, query data_dao.HourlyQuery) ([]model.MallWeatherHourly, error) {

@@ -36,6 +36,7 @@ var (
 
 type mallWeatherQueryDAO interface {
 	QueryRealtime(ctx context.Context, query data_dao.RealtimeQuery) ([]model.MallWeatherRealtime, error)
+	QueryMinutely(ctx context.Context, query data_dao.MinutelyQuery) ([]model.MallWeatherMinutely, error)
 	QueryHourly(ctx context.Context, query data_dao.HourlyQuery) ([]model.MallWeatherHourly, error)
 	FindCurrentLatest(ctx context.Context, mallID uint, dataKind string) (*model.MallWeatherLatest, error)
 	FindOverviewRealtime(ctx context.Context, mallID uint) (*model.MallWeatherRealtime, error)
@@ -168,6 +169,8 @@ type MallWeatherMinutelyDTO struct {
 	PrecipitationMMH    *float64                `json:"precipitationMmH,omitempty"`
 	ProbabilityRatio    *float64                `json:"probabilityRatio,omitempty"`
 	ProbabilityPct      *float64                `json:"probabilityPct,omitempty"`
+	ProbabilityWindow   *int                    `json:"probabilityWindow,omitempty"`
+	Datasource          string                  `json:"datasource,omitempty"`
 	Description         string                  `json:"description,omitempty"`
 	ForecastKeypoint    string                  `json:"forecastKeypoint,omitempty"`
 	QualityStatus       string                  `json:"qualityStatus"`
@@ -540,6 +543,7 @@ func minutelyWeatherDTO(row *model.MallWeatherMinutely, location *time.Location)
 		FetchedAtUTC: row.FetchedAtUTC.UTC(), FetchedAtLocal: formatWeatherLocalTime(row.FetchedAtUTC, location),
 		MinuteOffset: row.MinuteOffset, PrecipitationMMH: row.PrecipitationMMH,
 		ProbabilityRatio: row.ProbabilityRatio, ProbabilityPct: ratioPercent(row.ProbabilityRatio),
+		ProbabilityWindow: row.ProbabilityWindow, Datasource: row.Datasource,
 		Description: row.Description, ForecastKeypoint: row.ForecastKeypoint,
 		QualityStatus: strings.ToUpper(row.QualityStatus), QualityWarnings: warnings,
 	}, nil

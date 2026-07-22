@@ -23,3 +23,14 @@ type MallWeatherRealtimeQueryRequest struct {
 	Cursor        string
 	PageSize      int
 }
+
+type MallWeatherMinutelyQueryRequest struct {
+	StartUTC      time.Time
+	EndUTC        time.Time
+	TimeZone      string
+	Latest        bool
+	AsOfUTC       *time.Time
+	QualityStatus string
+	Cursor        string
+	PageSize      int
+}
