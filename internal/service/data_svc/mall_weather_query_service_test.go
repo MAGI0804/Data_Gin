@@ -134,7 +134,8 @@ func TestMallWeatherQueryServiceOverviewReturnsBoundedSummary(t *testing.T) {
 	publishedAt := now.Add(-time.Hour)
 	weather := &fakeMallWeatherQueryDAO{
 		realtime: &model.MallWeatherRealtime{
-			BaseModel: model.BaseModel{ID: 21}, MallID: 7, SnapshotAtUTC: now.Add(-5 * time.Minute), FetchedAtUTC: now.Add(-5 * time.Minute),
+			BaseModel: model.BaseModel{ID: 21}, MallID: 7, SnapshotAtUTC: now.Add(-5 * time.Minute),
+			ProviderServerTimeUTC: now.Add(-5 * time.Minute), FetchedAtUTC: now.Add(-5 * time.Minute),
 			HumidityRatio: &humidity, WeatherQualityFields: model.WeatherQualityFields{QualityStatus: "valid", QualityFlagsJSON: model.JSONText("[]")},
 		},
 		minutely: []model.MallWeatherMinutely{{
@@ -229,6 +230,7 @@ func (reader fakeMallWeatherQueryMallReader) FindByID(context.Context, uint) (*m
 
 type fakeMallWeatherQueryDAO struct {
 	rows             []model.MallWeatherHourly
+	realtimeRows     []model.MallWeatherRealtime
 	latest           *model.MallWeatherLatest
 	latestByKind     map[string]*model.MallWeatherLatest
 	realtime         *model.MallWeatherRealtime
@@ -237,10 +239,16 @@ type fakeMallWeatherQueryDAO struct {
 	err              error
 	overviewError    error
 	query            data_dao.HourlyQuery
+	realtimeQuery    data_dao.RealtimeQuery
 	minutelyStartUTC time.Time
 	minutelyEndUTC   time.Time
 	minutelyLimit    int
 	alertLimit       int
+}
+
+func (dao *fakeMallWeatherQueryDAO) QueryRealtime(_ context.Context, query data_dao.RealtimeQuery) ([]model.MallWeatherRealtime, error) {
+	dao.realtimeQuery = query
+	return append([]model.MallWeatherRealtime(nil), dao.realtimeRows...), dao.err
 }
 
 func (dao *fakeMallWeatherQueryDAO) QueryHourly(_ context.Context, query data_dao.HourlyQuery) ([]model.MallWeatherHourly, error) {

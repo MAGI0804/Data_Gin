@@ -1,0 +1,170 @@
+package data_svc
+
+import (
+	"context"
+	"encoding/base64"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"strings"
+	"time"
+
+	"gin-biz-web-api/internal/dao/data_dao"
+	"gin-biz-web-api/internal/requestbody"
+	weatherdomain "gin-biz-web-api/internal/weather"
+	"gin-biz-web-api/model"
+)
+
+type MallWeatherRealtimeResult struct {
+	Items      []MallWeatherRealtimeDTO `json:"items"`
+	Meta       MallWeatherQueryMeta     `json:"meta"`
+	Pagination MallWeatherPagination    `json:"pagination"`
+}
+
+type weatherRealtimeCursor struct {
+	Version        int   `json:"v"`
+	SnapshotUnixMS int64 `json:"snapshotUnixMs"`
+	ID             uint  `json:"id"`
+}
+
+func (service *MallWeatherQueryService) Realtime(
+	ctx context.Context,
+	actorUserID uint,
+	mallID uint,
+	request requestbody.MallWeatherRealtimeQueryRequest,
+) (*MallWeatherRealtimeResult, error) {
+	if service == nil || ctx == nil || mallID == 0 {
+		return nil, fmt.Errorf("%w: invalid request", ErrMallWeatherInvalidQuery)
+	}
+	if err := service.authorize(ctx, actorUserID); err != nil {
+		return nil, err
+	}
+	mall, err := service.malls.FindByID(ctx, mallID)
+	if err != nil {
+		return nil, err
+	}
+	location, normalized, err := normalizeRealtimeWeatherRequest(request, mall)
+	if err != nil {
+		return nil, err
+	}
+	cursor, err := decodeWeatherRealtimeCursor(normalized.Cursor)
+	if err != nil {
+		return nil, err
+	}
+	query := data_dao.RealtimeQuery{
+		MallID: mallID, StartUTC: normalized.StartUTC, EndUTC: normalized.EndUTC,
+		AsOfUTC: normalized.AsOfUTC, QualityStatus: normalized.QualityStatus, Limit: normalized.PageSize + 1,
+	}
+	if cursor != nil {
+		snapshot := time.UnixMilli(cursor.SnapshotUnixMS).UTC()
+		query.AfterSnapshot = &snapshot
+		query.AfterID = cursor.ID
+	}
+	rows, err := service.weather.QueryRealtime(ctx, query)
+	if err != nil {
+		return nil, fmt.Errorf("mall weather query: realtime rows: %w", err)
+	}
+	hasMore := len(rows) > normalized.PageSize
+	if hasMore {
+		rows = rows[:normalized.PageSize]
+	}
+	items := make([]MallWeatherRealtimeDTO, len(rows))
+	for index := range rows {
+		items[index], err = realtimeWeatherDTO(&rows[index], location)
+		if err != nil {
+			return nil, err
+		}
+	}
+	result := &MallWeatherRealtimeResult{
+		Items:      items,
+		Meta:       weatherQueryMeta(mall, location, model.MallWeatherFreshnessFresh, nil),
+		Pagination: MallWeatherPagination{PageSize: normalized.PageSize},
+	}
+	latest, err := service.weather.FindCurrentLatest(ctx, mallID, model.MallWeatherDataKindRealtime)
+	if err != nil && !errors.Is(err, data_dao.ErrMallWeatherLatestNotFound) {
+		return nil, fmt.Errorf("mall weather query: realtime freshness: %w", err)
+	}
+	if latest == nil {
+		result.Meta.FreshnessStatus = "UNAVAILABLE"
+	} else {
+		status, age, err := currentWeatherFreshness(model.MallWeatherDataKindRealtime, latest, service.now().UTC())
+		if err != nil {
+			return nil, err
+		}
+		result.Meta.FreshnessStatus = strings.ToUpper(status)
+		result.Meta.DataAgeSeconds = &age
+	}
+	if hasMore && len(rows) > 0 {
+		result.Pagination.NextCursor, err = encodeWeatherRealtimeCursor(&rows[len(rows)-1])
+		if err != nil {
+			return nil, err
+		}
+	}
+	return result, nil
+}
+
+func normalizeRealtimeWeatherRequest(request requestbody.MallWeatherRealtimeQueryRequest, mall *model.Mall) (*time.Location, requestbody.MallWeatherRealtimeQueryRequest, error) {
+	location, err := weatherMallLocation(mall, request.TimeZone)
+	if err != nil {
+		return nil, request, err
+	}
+	if request.StartUTC.IsZero() || request.EndUTC.IsZero() || !request.StartUTC.Before(request.EndUTC) ||
+		request.EndUTC.Sub(request.StartUTC) > maxWeatherQueryRange {
+		return nil, request, fmt.Errorf("%w: invalid time range", ErrMallWeatherInvalidQuery)
+	}
+	request.StartUTC = request.StartUTC.UTC()
+	request.EndUTC = request.EndUTC.UTC()
+	if request.AsOfUTC != nil {
+		asOf := request.AsOfUTC.UTC()
+		request.AsOfUTC = &asOf
+	}
+	request.QualityStatus = strings.ToLower(strings.TrimSpace(request.QualityStatus))
+	if request.QualityStatus != "" && request.QualityStatus != weatherdomain.QualityStatusValid && request.QualityStatus != weatherdomain.QualityStatusWarning {
+		return nil, request, fmt.Errorf("%w: invalid quality status", ErrMallWeatherInvalidQuery)
+	}
+	if request.PageSize == 0 {
+		request.PageSize = defaultWeatherQueryPageSize
+	}
+	if request.PageSize < 1 || request.PageSize > maxWeatherQueryPageSize || len(request.Cursor) > maxWeatherCursorLength {
+		return nil, request, fmt.Errorf("%w: invalid pagination", ErrMallWeatherInvalidQuery)
+	}
+	request.TimeZone = location.String()
+	return location, request, nil
+}
+
+func encodeWeatherRealtimeCursor(row *model.MallWeatherRealtime) (string, error) {
+	if row == nil || row.ID == 0 || row.SnapshotAtUTC.IsZero() {
+		return "", fmt.Errorf("mall weather query: invalid realtime cursor row")
+	}
+	payload, err := json.Marshal(weatherRealtimeCursor{Version: 1, SnapshotUnixMS: row.SnapshotAtUTC.UTC().UnixMilli(), ID: row.ID})
+	if err != nil {
+		return "", fmt.Errorf("mall weather query: encode realtime cursor: %w", err)
+	}
+	return base64.RawURLEncoding.EncodeToString(payload), nil
+}
+
+func decodeWeatherRealtimeCursor(value string) (*weatherRealtimeCursor, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil, nil
+	}
+	if len(value) > maxWeatherCursorLength {
+		return nil, fmt.Errorf("%w: invalid cursor", ErrMallWeatherInvalidQuery)
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(value)
+	if err != nil {
+		return nil, fmt.Errorf("%w: invalid cursor", ErrMallWeatherInvalidQuery)
+	}
+	var cursor weatherRealtimeCursor
+	decoder := json.NewDecoder(strings.NewReader(string(raw)))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&cursor); err != nil || cursor.Version != 1 || cursor.ID == 0 ||
+		cursor.SnapshotUnixMS < minWeatherCursorUnixMS || cursor.SnapshotUnixMS >= maxWeatherCursorUnixMS {
+		return nil, fmt.Errorf("%w: invalid cursor", ErrMallWeatherInvalidQuery)
+	}
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		return nil, fmt.Errorf("%w: invalid cursor", ErrMallWeatherInvalidQuery)
+	}
+	return &cursor, nil
+}

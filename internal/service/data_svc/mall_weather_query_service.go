@@ -35,6 +35,7 @@ var (
 )
 
 type mallWeatherQueryDAO interface {
+	QueryRealtime(ctx context.Context, query data_dao.RealtimeQuery) ([]model.MallWeatherRealtime, error)
 	QueryHourly(ctx context.Context, query data_dao.HourlyQuery) ([]model.MallWeatherHourly, error)
 	FindCurrentLatest(ctx context.Context, mallID uint, dataKind string) (*model.MallWeatherLatest, error)
 	FindOverviewRealtime(ctx context.Context, mallID uint) (*model.MallWeatherRealtime, error)
@@ -115,29 +116,45 @@ type MallWeatherHourlyResult struct {
 }
 
 type MallWeatherRealtimeDTO struct {
-	SnapshotAtUTC           time.Time               `json:"snapshotAtUtc"`
-	SnapshotAtLocal         string                  `json:"snapshotAtLocal"`
-	FetchedAtUTC            time.Time               `json:"fetchedAtUtc"`
-	FetchedAtLocal          string                  `json:"fetchedAtLocal"`
-	TemperatureC            *float64                `json:"temperatureC,omitempty"`
-	ApparentTemperatureC    *float64                `json:"apparentTemperatureC,omitempty"`
-	HumidityRatio           *float64                `json:"humidityRatio,omitempty"`
-	HumidityPct             *float64                `json:"humidityPct,omitempty"`
-	PressurePa              *float64                `json:"pressurePa,omitempty"`
-	WindSpeedKPH            *float64                `json:"windSpeedKph,omitempty"`
-	WindDirectionDeg        *float64                `json:"windDirectionDeg,omitempty"`
-	CloudrateRatio          *float64                `json:"cloudrateRatio,omitempty"`
-	VisibilityKM            *float64                `json:"visibilityKm,omitempty"`
-	Skycon                  string                  `json:"skycon,omitempty"`
-	LocalPrecipitationMMH   *float64                `json:"localPrecipitationMmH,omitempty"`
-	NearestPrecipDistanceKM *float64                `json:"nearestPrecipitationDistanceKm,omitempty"`
-	NearestPrecipitationMMH *float64                `json:"nearestPrecipitationMmH,omitempty"`
-	PM25UGM3                *float64                `json:"pm25UgM3,omitempty"`
-	PM10UGM3                *float64                `json:"pm10UgM3,omitempty"`
-	AQIChn                  *int                    `json:"aqiChn,omitempty"`
-	AQIUSA                  *int                    `json:"aqiUsa,omitempty"`
-	QualityStatus           string                  `json:"qualityStatus"`
-	QualityWarnings         []MallWeatherWarningDTO `json:"qualityWarnings"`
+	SnapshotAtUTC              time.Time               `json:"snapshotAtUtc"`
+	SnapshotAtLocal            string                  `json:"snapshotAtLocal"`
+	ProviderServerTimeUTC      time.Time               `json:"providerServerTimeUtc"`
+	ProviderServerTimeLocal    string                  `json:"providerServerTimeLocal"`
+	FetchedAtUTC               time.Time               `json:"fetchedAtUtc"`
+	FetchedAtLocal             string                  `json:"fetchedAtLocal"`
+	TemperatureC               *float64                `json:"temperatureC,omitempty"`
+	ApparentTemperatureC       *float64                `json:"apparentTemperatureC,omitempty"`
+	HumidityRatio              *float64                `json:"humidityRatio,omitempty"`
+	HumidityPct                *float64                `json:"humidityPct,omitempty"`
+	PressurePa                 *float64                `json:"pressurePa,omitempty"`
+	WindSpeedKPH               *float64                `json:"windSpeedKph,omitempty"`
+	WindDirectionDeg           *float64                `json:"windDirectionDeg,omitempty"`
+	CloudrateRatio             *float64                `json:"cloudrateRatio,omitempty"`
+	VisibilityKM               *float64                `json:"visibilityKm,omitempty"`
+	DSWRFWM2                   *float64                `json:"dswrfWM2,omitempty"`
+	Skycon                     string                  `json:"skycon,omitempty"`
+	LocalPrecipitationStatus   string                  `json:"localPrecipitationStatus,omitempty"`
+	LocalPrecipitationMMH      *float64                `json:"localPrecipitationMmH,omitempty"`
+	LocalPrecipitationSource   string                  `json:"localPrecipitationSource,omitempty"`
+	NearestPrecipitationStatus string                  `json:"nearestPrecipitationStatus,omitempty"`
+	NearestPrecipDistanceKM    *float64                `json:"nearestPrecipitationDistanceKm,omitempty"`
+	NearestPrecipitationMMH    *float64                `json:"nearestPrecipitationMmH,omitempty"`
+	PM25UGM3                   *float64                `json:"pm25UgM3,omitempty"`
+	PM10UGM3                   *float64                `json:"pm10UgM3,omitempty"`
+	O3UGM3                     *float64                `json:"o3UgM3,omitempty"`
+	SO2UGM3                    *float64                `json:"so2UgM3,omitempty"`
+	NO2UGM3                    *float64                `json:"no2UgM3,omitempty"`
+	COMGM3                     *float64                `json:"coMgM3,omitempty"`
+	AQIChn                     *int                    `json:"aqiChn,omitempty"`
+	AQIUSA                     *int                    `json:"aqiUsa,omitempty"`
+	AQIDescriptionChn          string                  `json:"aqiDescriptionChn,omitempty"`
+	AQIDescriptionUSA          string                  `json:"aqiDescriptionUsa,omitempty"`
+	ComfortIndex               *int                    `json:"comfortIndex,omitempty"`
+	ComfortDescription         string                  `json:"comfortDescription,omitempty"`
+	UltravioletIndex           *int                    `json:"ultravioletIndex,omitempty"`
+	UltravioletDescription     string                  `json:"ultravioletDescription,omitempty"`
+	QualityStatus              string                  `json:"qualityStatus"`
+	QualityWarnings            []MallWeatherWarningDTO `json:"qualityWarnings"`
 }
 
 type MallWeatherMinutelyDTO struct {
@@ -451,7 +468,7 @@ func hourlyWeatherDTO(row *model.MallWeatherHourly, location *time.Location) (Ma
 }
 
 func realtimeWeatherDTO(row *model.MallWeatherRealtime, location *time.Location) (MallWeatherRealtimeDTO, error) {
-	if row == nil || row.ID == 0 || row.SnapshotAtUTC.IsZero() || row.FetchedAtUTC.IsZero() || location == nil {
+	if row == nil || row.ID == 0 || row.SnapshotAtUTC.IsZero() || row.ProviderServerTimeUTC.IsZero() || row.FetchedAtUTC.IsZero() || location == nil {
 		return MallWeatherRealtimeDTO{}, fmt.Errorf("mall weather query: invalid realtime row")
 	}
 	warnings, err := weatherQualityWarnings(row.QualityFlagsJSON)
@@ -460,13 +477,20 @@ func realtimeWeatherDTO(row *model.MallWeatherRealtime, location *time.Location)
 	}
 	return MallWeatherRealtimeDTO{
 		SnapshotAtUTC: row.SnapshotAtUTC.UTC(), SnapshotAtLocal: formatWeatherLocalTime(row.SnapshotAtUTC, location),
+		ProviderServerTimeUTC: row.ProviderServerTimeUTC.UTC(), ProviderServerTimeLocal: formatWeatherLocalTime(row.ProviderServerTimeUTC, location),
 		FetchedAtUTC: row.FetchedAtUTC.UTC(), FetchedAtLocal: formatWeatherLocalTime(row.FetchedAtUTC, location),
 		TemperatureC: row.TemperatureC, ApparentTemperatureC: row.ApparentTemperatureC,
 		HumidityRatio: row.HumidityRatio, HumidityPct: ratioPercent(row.HumidityRatio), PressurePa: row.PressurePa,
 		WindSpeedKPH: row.WindSpeedKPH, WindDirectionDeg: row.WindDirectionDeg, CloudrateRatio: row.CloudrateRatio,
-		VisibilityKM: row.VisibilityKM, Skycon: row.Skycon, LocalPrecipitationMMH: row.LocalPrecipMMH,
+		VisibilityKM: row.VisibilityKM, DSWRFWM2: row.DSWRFWM2, Skycon: row.Skycon,
+		LocalPrecipitationStatus: row.LocalPrecipStatus, LocalPrecipitationMMH: row.LocalPrecipMMH,
+		LocalPrecipitationSource: row.LocalPrecipDatasource, NearestPrecipitationStatus: row.NearestPrecipStatus,
 		NearestPrecipDistanceKM: row.NearestPrecipDistanceKM, NearestPrecipitationMMH: row.NearestPrecipMMH,
-		PM25UGM3: row.PM25UGM3, PM10UGM3: row.PM10UGM3, AQIChn: row.AQIChn, AQIUSA: row.AQIUSA,
+		PM25UGM3: row.PM25UGM3, PM10UGM3: row.PM10UGM3, O3UGM3: row.O3UGM3, SO2UGM3: row.SO2UGM3,
+		NO2UGM3: row.NO2UGM3, COMGM3: row.COMGM3, AQIChn: row.AQIChn, AQIUSA: row.AQIUSA,
+		AQIDescriptionChn: row.AQIDescChn, AQIDescriptionUSA: row.AQIDescUSA,
+		ComfortIndex: row.ComfortIndex, ComfortDescription: row.ComfortDesc,
+		UltravioletIndex: row.UltravioletIndex, UltravioletDescription: row.UltravioletDesc,
 		QualityStatus: strings.ToUpper(row.QualityStatus), QualityWarnings: warnings,
 	}, nil
 }
