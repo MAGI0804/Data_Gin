@@ -4,14 +4,53 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
 	"gin-biz-web-api/connector/feishu"
 	"gin-biz-web-api/internal/requestbody"
+	"gin-biz-web-api/job"
 	"gin-biz-web-api/model"
 	"gin-biz-web-api/pkg/credential"
+
+	"github.com/google/uuid"
 )
+
+func TestNewMallWeatherFeishuOutboxContainsOnlyPipelineRunID(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 7, 23, 8, 0, 0, 0, time.FixedZone("CST", 8*60*60))
+	traceID := uuid.NewString()
+	row, err := newMallWeatherFeishuOutbox(22, traceID, now)
+	if err != nil {
+		t.Fatalf("newMallWeatherFeishuOutbox() error=%v", err)
+	}
+	if row.TaskKey != "mall:weather:feishu:"+traceID || row.TaskType != job.TypeMallWeatherFeishu ||
+		row.QueueName != job.MallDeliveryQueueName || string(row.PayloadJSON) != `{"pipeline_run_id":22}` ||
+		!row.AvailableAt.Equal(now.UTC()) {
+		t.Fatalf("outbox=%+v", row)
+	}
+	lowerPayload := strings.ToLower(string(row.PayloadJSON))
+	for _, forbidden := range []string{"secret", "token", "sheet", "profile", "filter", "url"} {
+		if strings.Contains(lowerPayload, forbidden) {
+			t.Fatalf("payload contains forbidden marker %q: %s", forbidden, row.PayloadJSON)
+		}
+	}
+	for _, invalid := range []struct {
+		runID uint
+		trace string
+		at    time.Time
+	}{
+		{runID: 0, trace: traceID, at: now},
+		{runID: 22, trace: "not-a-uuid", at: now},
+		{runID: 22, trace: traceID},
+	} {
+		if _, err := newMallWeatherFeishuOutbox(invalid.runID, invalid.trace, invalid.at); err == nil {
+			t.Fatalf("newMallWeatherFeishuOutbox(%+v) accepted invalid identity", invalid)
+		}
+	}
+}
 
 func TestMallWeatherFeishuPushServiceDryRunOrchestratesReadOnlyPlan(t *testing.T) {
 	t.Parallel()

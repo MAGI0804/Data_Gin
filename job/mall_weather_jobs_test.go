@@ -108,6 +108,22 @@ func TestDecodeMallWeatherExportTaskPayloadIsStrict(t *testing.T) {
 	}
 }
 
+func TestDecodeMallWeatherFeishuTaskPayloadIsStrict(t *testing.T) {
+	payload, err := DecodeMallWeatherFeishuTaskPayload([]byte(`{"pipeline_run_id":17}`))
+	if err != nil || payload.PipelineRunID != 17 {
+		t.Fatalf("DecodeMallWeatherFeishuTaskPayload() payload=%+v error=%v", payload, err)
+	}
+	for _, invalid := range [][]byte{
+		[]byte(`{"pipeline_run_id":0}`),
+		[]byte(`{"pipeline_run_id":17,"spreadsheet_token":"secret"}`),
+		[]byte(`{"pipeline_run_id":17}{}`),
+	} {
+		if _, err := DecodeMallWeatherFeishuTaskPayload(invalid); err == nil {
+			t.Fatalf("DecodeMallWeatherFeishuTaskPayload(%s) accepted invalid payload", invalid)
+		}
+	}
+}
+
 func TestMallWeatherExportCleanupTaskPayloadIsStrictAndNonSensitive(t *testing.T) {
 	task, err := NewMallWeatherExportCleanupTask()
 	if err != nil {

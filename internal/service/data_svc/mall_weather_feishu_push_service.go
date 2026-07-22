@@ -2,6 +2,7 @@ package data_svc
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"sync"
@@ -11,10 +12,12 @@ import (
 	"gin-biz-web-api/global"
 	"gin-biz-web-api/internal/dao/data_dao"
 	"gin-biz-web-api/internal/requestbody"
+	"gin-biz-web-api/job"
 	"gin-biz-web-api/model"
 	"gin-biz-web-api/pkg/database"
 	projectredis "gin-biz-web-api/pkg/redis"
 
+	"github.com/google/uuid"
 	"gorm.io/gorm"
 )
 
@@ -275,4 +278,28 @@ func newRuntimeMallWeatherFeishuSheets() (mallWeatherFeishuSheetsReader, error) 
 		return nil, err
 	}
 	return feishu.NewSheetsClient(tokens, nil)
+}
+
+func newMallWeatherFeishuOutbox(
+	pipelineRunID uint,
+	traceID string,
+	availableAt time.Time,
+) (model.AsyncJobOutbox, error) {
+	if pipelineRunID == 0 || len(traceID) != 36 || uuid.Validate(traceID) != nil || availableAt.IsZero() {
+		return model.AsyncJobOutbox{}, fmt.Errorf("mall weather feishu push: invalid outbox identity")
+	}
+	payload, err := json.Marshal(job.MallWeatherFeishuTaskPayload{PipelineRunID: pipelineRunID})
+	if err != nil {
+		return model.AsyncJobOutbox{}, fmt.Errorf("mall weather feishu push: encode outbox payload: %w", err)
+	}
+	if _, err := job.DecodeMallWeatherFeishuTaskPayload(payload); err != nil {
+		return model.AsyncJobOutbox{}, fmt.Errorf("mall weather feishu push: validate outbox payload: %w", err)
+	}
+	return model.AsyncJobOutbox{
+		TaskKey:     "mall:weather:feishu:" + traceID,
+		TaskType:    job.TypeMallWeatherFeishu,
+		PayloadJSON: model.JSONText(payload),
+		QueueName:   job.MallDeliveryQueueName,
+		AvailableAt: availableAt.UTC(),
+	}, nil
 }

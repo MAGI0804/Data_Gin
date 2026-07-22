@@ -258,12 +258,8 @@ func NewMallWeatherTask(taskType string, payload []byte) (*asynq.Task, error) {
 			return nil, err
 		}
 	case TypeMallWeatherFeishu:
-		var decoded MallWeatherFeishuTaskPayload
-		if err := decodeStrictTaskPayload(payload, &decoded); err != nil {
+		if _, err := DecodeMallWeatherFeishuTaskPayload(payload); err != nil {
 			return nil, err
-		}
-		if decoded.PipelineRunID == 0 {
-			return nil, fmt.Errorf("mall weather task: pipeline_run_id is required")
 		}
 	}
 
@@ -299,6 +295,17 @@ func DecodeMallWeatherExportTaskPayload(payload []byte) (MallWeatherExportTaskPa
 	}
 	if decoded.ExportJobID == 0 {
 		return MallWeatherExportTaskPayload{}, fmt.Errorf("mall weather task: export_job_id is required")
+	}
+	return decoded, nil
+}
+
+func DecodeMallWeatherFeishuTaskPayload(payload []byte) (MallWeatherFeishuTaskPayload, error) {
+	var decoded MallWeatherFeishuTaskPayload
+	if err := decodeStrictTaskPayload(payload, &decoded); err != nil {
+		return MallWeatherFeishuTaskPayload{}, err
+	}
+	if decoded.PipelineRunID == 0 {
+		return MallWeatherFeishuTaskPayload{}, fmt.Errorf("mall weather task: pipeline_run_id is required")
 	}
 	return decoded, nil
 }
