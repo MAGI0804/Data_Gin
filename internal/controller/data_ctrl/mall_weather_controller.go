@@ -22,6 +22,7 @@ import (
 type MallWeatherQueryService interface {
 	Overview(context.Context, uint, uint, string) (*data_svc.MallWeatherOverviewResult, error)
 	Realtime(context.Context, uint, uint, requestbody.MallWeatherRealtimeQueryRequest) (*data_svc.MallWeatherRealtimeResult, error)
+	Minutely(context.Context, uint, uint, requestbody.MallWeatherMinutelyQueryRequest) (*data_svc.MallWeatherMinutelyResult, error)
 	Hourly(context.Context, uint, uint, requestbody.MallWeatherHourlyQueryRequest) (*data_svc.MallWeatherHourlyResult, error)
 }
 
@@ -78,6 +79,25 @@ func (controller *MallWeatherController) Realtime(c *gin.Context) {
 	responses.New(c).ToResponseWithStatus(http.StatusOK, result)
 }
 
+func (controller *MallWeatherController) Minutely(c *gin.Context) {
+	mallID, err := parseMallUint(c.Param("id"), "mall id")
+	if err != nil {
+		writeMallWeatherError(c, err)
+		return
+	}
+	request, err := parseMallWeatherMinutelyRequest(c)
+	if err != nil {
+		writeMallWeatherError(c, err)
+		return
+	}
+	result, err := controller.service.Minutely(c.Request.Context(), auth.CurrentUserID(c), mallID, request)
+	if err != nil {
+		writeMallWeatherError(c, err)
+		return
+	}
+	responses.New(c).ToResponseWithStatus(http.StatusOK, result)
+}
+
 func (controller *MallWeatherController) Hourly(c *gin.Context) {
 	mallID, err := parseMallUint(c.Param("id"), "mall id")
 	if err != nil {
@@ -103,6 +123,18 @@ func parseMallWeatherRealtimeRequest(c *gin.Context) (requestbody.MallWeatherRea
 		return requestbody.MallWeatherRealtimeQueryRequest{}, err
 	}
 	return requestbody.MallWeatherRealtimeQueryRequest{
+		StartUTC: shared.StartUTC, EndUTC: shared.EndUTC, TimeZone: shared.TimeZone,
+		Latest: shared.Latest, AsOfUTC: shared.AsOfUTC, QualityStatus: shared.QualityStatus,
+		Cursor: shared.Cursor, PageSize: shared.PageSize,
+	}, nil
+}
+
+func parseMallWeatherMinutelyRequest(c *gin.Context) (requestbody.MallWeatherMinutelyQueryRequest, error) {
+	shared, err := parseMallWeatherTimeSeriesRequest(c)
+	if err != nil {
+		return requestbody.MallWeatherMinutelyQueryRequest{}, err
+	}
+	return requestbody.MallWeatherMinutelyQueryRequest{
 		StartUTC: shared.StartUTC, EndUTC: shared.EndUTC, TimeZone: shared.TimeZone,
 		Latest: shared.Latest, AsOfUTC: shared.AsOfUTC, QualityStatus: shared.QualityStatus,
 		Cursor: shared.Cursor, PageSize: shared.PageSize,

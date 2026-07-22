@@ -74,6 +74,21 @@ func TestMallWeatherControllerRealtimeParsesSharedContract(t *testing.T) {
 	}
 }
 
+func TestMallWeatherControllerMinutelyParsesSharedContract(t *testing.T) {
+	var gotRequest requestbody.MallWeatherMinutelyQueryRequest
+	service := fakeMallWeatherControllerService{minutely: func(_ context.Context, _, _ uint, request requestbody.MallWeatherMinutelyQueryRequest) (*data_svc.MallWeatherMinutelyResult, error) {
+		gotRequest = request
+		return &data_svc.MallWeatherMinutelyResult{Items: []data_svc.MallWeatherMinutelyDTO{}, Pagination: data_svc.MallWeatherPagination{PageSize: 20}}, nil
+	}}
+	path := "/api/v1/malls/7/weather/minutely?start=2026-07-22T00:00:00Z&end=2026-07-22T02:00:00Z" +
+		"&timeZone=Asia%2FShanghai&latest=true&qualityStatus=warning&pageSize=20"
+	recorder := performMallWeatherRequest(t, service, path)
+	if recorder.Code != http.StatusOK || !gotRequest.Latest || gotRequest.PageSize != 20 ||
+		gotRequest.TimeZone != "Asia/Shanghai" || gotRequest.QualityStatus != "warning" {
+		t.Fatalf("status=%d request=%+v body=%s", recorder.Code, gotRequest, recorder.Body.String())
+	}
+}
+
 func TestMallWeatherControllerHourlyParsesContract(t *testing.T) {
 	var gotActor, gotMall uint
 	var gotRequest requestbody.MallWeatherHourlyQueryRequest
@@ -139,6 +154,7 @@ func performMallWeatherRequest(t *testing.T, service MallWeatherQueryService, pa
 	controller := NewMallWeatherControllerWithService(service)
 	router.GET("/api/v1/malls/:id/weather/overview", controller.Overview)
 	router.GET("/api/v1/malls/:id/weather/realtime", controller.Realtime)
+	router.GET("/api/v1/malls/:id/weather/minutely", controller.Minutely)
 	router.GET("/api/v1/malls/:id/weather/hourly", controller.Hourly)
 	recorder := httptest.NewRecorder()
 	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, path, nil))
@@ -148,6 +164,7 @@ func performMallWeatherRequest(t *testing.T, service MallWeatherQueryService, pa
 type fakeMallWeatherControllerService struct {
 	overview func(context.Context, uint, uint, string) (*data_svc.MallWeatherOverviewResult, error)
 	realtime func(context.Context, uint, uint, requestbody.MallWeatherRealtimeQueryRequest) (*data_svc.MallWeatherRealtimeResult, error)
+	minutely func(context.Context, uint, uint, requestbody.MallWeatherMinutelyQueryRequest) (*data_svc.MallWeatherMinutelyResult, error)
 	hourly   func(context.Context, uint, uint, requestbody.MallWeatherHourlyQueryRequest) (*data_svc.MallWeatherHourlyResult, error)
 }
 
@@ -163,6 +180,13 @@ func (service fakeMallWeatherControllerService) Realtime(ctx context.Context, ac
 		panic("unexpected Realtime call")
 	}
 	return service.realtime(ctx, actor, mallID, request)
+}
+
+func (service fakeMallWeatherControllerService) Minutely(ctx context.Context, actor, mallID uint, request requestbody.MallWeatherMinutelyQueryRequest) (*data_svc.MallWeatherMinutelyResult, error) {
+	if service.minutely == nil {
+		panic("unexpected Minutely call")
+	}
+	return service.minutely(ctx, actor, mallID, request)
 }
 
 func (service fakeMallWeatherControllerService) Hourly(ctx context.Context, actor, mallID uint, request requestbody.MallWeatherHourlyQueryRequest) (*data_svc.MallWeatherHourlyResult, error) {
