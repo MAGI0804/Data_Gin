@@ -1,6 +1,7 @@
 package job
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 
@@ -57,6 +58,33 @@ func TestMallWeatherTaskConstructorsUseNonSensitivePayloads(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestMallWeatherScheduleDefinitionsCoverProfiles(t *testing.T) {
+	definitions, err := MallWeatherScheduleDefinitions("*/10 * * * *", "7 * * * *", "17 * * * *")
+	if err != nil {
+		t.Fatalf("MallWeatherScheduleDefinitions() error=%v", err)
+	}
+	if len(definitions) != 9 {
+		t.Fatalf("definitions=%v", definitions)
+	}
+	wantProfiles := map[string]int{"full": 3, "standard": 3, "economy": 3}
+	gotProfiles := make(map[string]int)
+	for _, definition := range definitions {
+		gotProfiles[definition.Payload.DetailProfile]++
+		if _, err := NewMallWeatherScheduleTask(definition.Payload); err != nil {
+			t.Fatalf("NewMallWeatherScheduleTask(%+v) error=%v", definition.Payload, err)
+		}
+	}
+	if !reflect.DeepEqual(gotProfiles, wantProfiles) {
+		t.Fatalf("profiles=%v", gotProfiles)
+	}
+}
+
+func TestDecodeMallWeatherSchedulePayloadRejectsUnknownFields(t *testing.T) {
+	if _, err := DecodeMallWeatherSchedulePayload([]byte(`{"task_type":"mall:weather:fast","detail_profile":"full","secret":"x"}`)); err == nil {
+		t.Fatal("DecodeMallWeatherSchedulePayload() accepted unknown field")
 	}
 }
 

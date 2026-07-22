@@ -62,6 +62,12 @@ func setupQueueJob() {
 		for _, taskType := range job.MallWeatherFetchTaskTypes() {
 			mux.HandleFunc(taskType, weatherHandler)
 		}
+
+		schedulePlanner, err := data_svc.NewMallWeatherSchedulePlanner()
+		if err != nil {
+			console.Exit("Mall Weather Scheduler Worker Init Failed %v", err)
+		}
+		mux.HandleFunc(job.TypeMallWeatherSchedule, newMallWeatherScheduleHandler(schedulePlanner))
 	}
 
 	go func(mux *asynq.ServeMux, server *asynq.Server) {
@@ -87,6 +93,10 @@ type mallGeocodeProcessor interface {
 
 type mallWeatherProcessor interface {
 	Process(ctx context.Context, taskType string, payload job.MallTaskPayload) error
+}
+
+type mallWeatherSchedulePlanner interface {
+	Plan(ctx context.Context, payload job.MallWeatherSchedulePayload) error
 }
 
 func newMallGeocodeHandler(processor mallGeocodeProcessor) asynq.HandlerFunc {
@@ -129,6 +139,22 @@ func newMallWeatherHandler(processor mallWeatherProcessor) asynq.HandlerFunc {
 			return err
 		}
 		return nil
+	}
+}
+
+func newMallWeatherScheduleHandler(planner mallWeatherSchedulePlanner) asynq.HandlerFunc {
+	return func(ctx context.Context, task *asynq.Task) error {
+		if planner == nil {
+			return fmt.Errorf("mall weather schedule handler: planner is not configured")
+		}
+		if task == nil || task.Type() != job.TypeMallWeatherSchedule {
+			return fmt.Errorf("%w: invalid mall weather schedule task", asynq.SkipRetry)
+		}
+		payload, err := job.DecodeMallWeatherSchedulePayload(task.Payload())
+		if err != nil {
+			return fmt.Errorf("%w: %v", asynq.SkipRetry, err)
+		}
+		return planner.Plan(ctx, payload)
 	}
 }
 

@@ -45,6 +45,8 @@ func setupScheduler() {
 
 	registerDatabaseDeliveryTasks(scheduler)
 
+	registerMallWeatherScheduledTasks(scheduler)
+
 	go func(scheduler *asynq.Scheduler) {
 		if err := scheduler.Run(); err != nil {
 			console.Warning("Scheduler Failed: %v", err)
@@ -55,6 +57,32 @@ func setupScheduler() {
 	global.QueueJobScheduler = scheduler
 
 	console.Success("Scheduler started successfully")
+}
+
+func registerMallWeatherScheduledTasks(scheduler *asynq.Scheduler) {
+	if !config.GetBool("cfg.mall_weather.enabled") {
+		return
+	}
+	definitions, err := job.MallWeatherScheduleDefinitions(
+		config.GetString("cfg.mall_weather.fast_cron"),
+		config.GetString("cfg.mall_weather.full_cron"),
+		config.GetString("cfg.mall_weather.life_index_cron"),
+	)
+	if err != nil {
+		console.Warning("Failed to build mall weather schedules: %v", err)
+		return
+	}
+	for _, definition := range definitions {
+		task, err := job.NewMallWeatherScheduleTask(definition.Payload)
+		if err != nil {
+			console.Warning("Failed to create mall weather schedule task: %v", err)
+			continue
+		}
+		if _, err := scheduler.Register(definition.CronExpr, task); err != nil {
+			console.Warning("Failed to register mall weather schedule %s/%s: %v",
+				definition.Payload.TaskType, definition.Payload.DetailProfile, err)
+		}
+	}
 }
 
 func registerLegacyScheduledTasks(scheduler *asynq.Scheduler) {

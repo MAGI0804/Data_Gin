@@ -40,6 +40,22 @@ func (dao *AsyncJobOutboxDAO) Create(ctx context.Context, row *model.AsyncJobOut
 	return nil
 }
 
+func (dao *AsyncJobOutboxDAO) CreateBatchIgnoreTaskConflicts(ctx context.Context, rows []model.AsyncJobOutbox) (int64, error) {
+	if dao == nil || dao.db == nil || ctx == nil {
+		return 0, fmt.Errorf("outbox: batch store is not configured")
+	}
+	if len(rows) == 0 {
+		return 0, nil
+	}
+	result := dao.db.WithContext(ctx).
+		Clauses(clause.OnConflict{Columns: []clause.Column{{Name: "task_key"}}, DoNothing: true}).
+		CreateInBatches(&rows, 200)
+	if result.Error != nil {
+		return 0, fmt.Errorf("outbox: create batch: %w", result.Error)
+	}
+	return result.RowsAffected, nil
+}
+
 // ClaimBatch atomically claims ready unpublished tasks. MySQL 8 SKIP LOCKED
 // lets multiple dispatchers make progress without processing the same row.
 func (dao *AsyncJobOutboxDAO) ClaimBatch(ctx context.Context, workerID string, now time.Time, lockTimeout time.Duration, limit int) ([]model.AsyncJobOutbox, error) {

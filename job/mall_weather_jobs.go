@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/hibiken/asynq"
 )
@@ -21,6 +22,7 @@ const (
 	TypeMallWeatherManual    = "mall:weather:manual"
 	TypeMallWeatherExport    = "mall:weather:export"
 	TypeMallWeatherFeishu    = "mall:weather:feishu"
+	TypeMallWeatherSchedule  = "mall:weather:schedule"
 
 	MallWeatherQueueName  = "weather"
 	MallExportQueueName   = "export"
@@ -53,6 +55,16 @@ type MallTaskPayload struct {
 	MallID       uint   `json:"mall_id"`
 	TaskWindow   string `json:"task_window"`
 	EndpointKind string `json:"endpoint_kind,omitempty"`
+}
+
+type MallWeatherSchedulePayload struct {
+	TaskType      string `json:"task_type"`
+	DetailProfile string `json:"detail_profile"`
+}
+
+type MallWeatherScheduleDefinition struct {
+	CronExpr string
+	Payload  MallWeatherSchedulePayload
 }
 
 type MallGeocodeTaskPayload struct {
@@ -140,6 +152,54 @@ func NewMallWeatherExportTask(payload MallWeatherExportTaskPayload) (*asynq.Task
 
 func NewMallWeatherFeishuTask(payload MallWeatherFeishuTaskPayload) (*asynq.Task, error) {
 	return newTypedMallWeatherTask(TypeMallWeatherFeishu, payload)
+}
+
+func NewMallWeatherScheduleTask(payload MallWeatherSchedulePayload) (*asynq.Task, error) {
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("mall weather task: marshal schedule payload: %w", err)
+	}
+	if _, err := DecodeMallWeatherSchedulePayload(data); err != nil {
+		return nil, err
+	}
+	return asynq.NewTask(
+		TypeMallWeatherSchedule,
+		data,
+		asynq.Queue(MallWeatherQueueName),
+		asynq.MaxRetry(2),
+		asynq.Timeout(15*time.Minute),
+		asynq.Unique(30*time.Second),
+	), nil
+}
+
+func MallWeatherScheduleDefinitions(fastCron, fullCron, lifeCron string) ([]MallWeatherScheduleDefinition, error) {
+	if strings.TrimSpace(fastCron) == "" || strings.TrimSpace(fullCron) == "" || strings.TrimSpace(lifeCron) == "" {
+		return nil, fmt.Errorf("mall weather task: schedule cron is required")
+	}
+	return []MallWeatherScheduleDefinition{
+		{CronExpr: fastCron, Payload: MallWeatherSchedulePayload{TaskType: TypeMallWeatherFast, DetailProfile: "full"}},
+		{CronExpr: "*/15 * * * *", Payload: MallWeatherSchedulePayload{TaskType: TypeMallWeatherFast, DetailProfile: "standard"}},
+		{CronExpr: "0 * * * *", Payload: MallWeatherSchedulePayload{TaskType: TypeMallWeatherFast, DetailProfile: "economy"}},
+		{CronExpr: fullCron, Payload: MallWeatherSchedulePayload{TaskType: TypeMallWeatherFull, DetailProfile: "full"}},
+		{CronExpr: fullCron, Payload: MallWeatherSchedulePayload{TaskType: TypeMallWeatherFull, DetailProfile: "standard"}},
+		{CronExpr: "7 */3 * * *", Payload: MallWeatherSchedulePayload{TaskType: TypeMallWeatherFull, DetailProfile: "economy"}},
+		{CronExpr: lifeCron, Payload: MallWeatherSchedulePayload{TaskType: TypeMallWeatherLifeIndex, DetailProfile: "full"}},
+		{CronExpr: "17 */3 * * *", Payload: MallWeatherSchedulePayload{TaskType: TypeMallWeatherLifeIndex, DetailProfile: "standard"}},
+		{CronExpr: "17 */6 * * *", Payload: MallWeatherSchedulePayload{TaskType: TypeMallWeatherLifeIndex, DetailProfile: "economy"}},
+	}, nil
+}
+
+func DecodeMallWeatherSchedulePayload(payload []byte) (MallWeatherSchedulePayload, error) {
+	var decoded MallWeatherSchedulePayload
+	if err := decodeStrictTaskPayload(payload, &decoded); err != nil {
+		return MallWeatherSchedulePayload{}, err
+	}
+	if !IsMallWeatherFetchTaskType(decoded.TaskType) ||
+		(decoded.TaskType != TypeMallWeatherFast && decoded.TaskType != TypeMallWeatherFull && decoded.TaskType != TypeMallWeatherLifeIndex) ||
+		(decoded.DetailProfile != "full" && decoded.DetailProfile != "standard" && decoded.DetailProfile != "economy") {
+		return MallWeatherSchedulePayload{}, fmt.Errorf("mall weather task: invalid schedule payload")
+	}
+	return decoded, nil
 }
 
 func newTypedMallWeatherTask(taskType string, payload interface{}) (*asynq.Task, error) {
