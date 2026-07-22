@@ -234,6 +234,7 @@ type fakeMallWeatherQueryDAO struct {
 	realtimeRows     []model.MallWeatherRealtime
 	minutelyRows     []model.MallWeatherMinutely
 	dailyRows        []model.MallWeatherDaily
+	lifeIndexRows    []model.MallWeatherLifeIndex
 	alertRows        []model.MallWeatherAlert
 	latest           *model.MallWeatherLatest
 	latestByKind     map[string]*model.MallWeatherLatest
@@ -246,6 +247,7 @@ type fakeMallWeatherQueryDAO struct {
 	realtimeQuery    data_dao.RealtimeQuery
 	minutelyQuery    data_dao.MinutelyQuery
 	dailyQuery       data_dao.DailyQuery
+	lifeIndexQuery   data_dao.LifeIndexQuery
 	alertQuery       data_dao.AlertQuery
 	minutelyStartUTC time.Time
 	minutelyEndUTC   time.Time
@@ -271,6 +273,11 @@ func (dao *fakeMallWeatherQueryDAO) QueryDaily(_ context.Context, query data_dao
 func (dao *fakeMallWeatherQueryDAO) QueryAlerts(_ context.Context, query data_dao.AlertQuery) ([]model.MallWeatherAlert, error) {
 	dao.alertQuery = query
 	return append([]model.MallWeatherAlert(nil), dao.alertRows...), dao.err
+}
+
+func (dao *fakeMallWeatherQueryDAO) QueryLifeIndices(_ context.Context, query data_dao.LifeIndexQuery) ([]model.MallWeatherLifeIndex, error) {
+	dao.lifeIndexQuery = query
+	return append([]model.MallWeatherLifeIndex(nil), dao.lifeIndexRows...), dao.err
 }
 
 func (dao *fakeMallWeatherQueryDAO) QueryHourly(_ context.Context, query data_dao.HourlyQuery) ([]model.MallWeatherHourly, error) {
