@@ -71,6 +71,9 @@ func setupQueueJob() {
 
 		exportProcessor := data_svc.NewMallWeatherExportProcessor()
 		mux.HandleFunc(job.TypeMallWeatherExport, newMallWeatherExportHandler(exportProcessor))
+
+		exportCleaner := data_svc.NewMallWeatherExportCleaner()
+		mux.HandleFunc(job.TypeMallWeatherExportCleanup, newMallWeatherExportCleanupHandler(exportCleaner))
 	}
 
 	go func(mux *asynq.ServeMux, server *asynq.Server) {
@@ -104,6 +107,29 @@ type mallWeatherSchedulePlanner interface {
 
 type mallWeatherExportProcessor interface {
 	Process(ctx context.Context, jobID uint, retryAllowed bool) error
+}
+
+type mallWeatherExportCleaner interface {
+	Cleanup(context.Context) (data_svc.MallWeatherExportCleanupResult, error)
+}
+
+func newMallWeatherExportCleanupHandler(cleaner mallWeatherExportCleaner) asynq.HandlerFunc {
+	return func(ctx context.Context, task *asynq.Task) error {
+		if cleaner == nil {
+			return fmt.Errorf("mall weather export cleanup handler: cleaner is not configured")
+		}
+		if task == nil {
+			return fmt.Errorf("%w: mall weather export cleanup task is nil", asynq.SkipRetry)
+		}
+		if err := job.DecodeMallWeatherExportCleanupTaskPayload(task.Payload()); err != nil {
+			return fmt.Errorf("%w: %v", asynq.SkipRetry, err)
+		}
+		_, err := cleaner.Cleanup(ctx)
+		if err != nil {
+			return err
+		}
+		return nil
+	}
 }
 
 func newMallGeocodeHandler(processor mallGeocodeProcessor) asynq.HandlerFunc {

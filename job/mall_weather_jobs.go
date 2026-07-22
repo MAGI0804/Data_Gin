@@ -14,15 +14,16 @@ import (
 )
 
 const (
-	TypeMallGeocode          = "mall:geocode"
-	TypeMallWeatherFast      = "mall:weather:fast"
-	TypeMallWeatherFull      = "mall:weather:full"
-	TypeMallWeatherLifeIndex = "mall:weather:life_index"
-	TypeMallWeatherRepair    = "mall:weather:repair"
-	TypeMallWeatherManual    = "mall:weather:manual"
-	TypeMallWeatherExport    = "mall:weather:export"
-	TypeMallWeatherFeishu    = "mall:weather:feishu"
-	TypeMallWeatherSchedule  = "mall:weather:schedule"
+	TypeMallGeocode              = "mall:geocode"
+	TypeMallWeatherFast          = "mall:weather:fast"
+	TypeMallWeatherFull          = "mall:weather:full"
+	TypeMallWeatherLifeIndex     = "mall:weather:life_index"
+	TypeMallWeatherRepair        = "mall:weather:repair"
+	TypeMallWeatherManual        = "mall:weather:manual"
+	TypeMallWeatherExport        = "mall:weather:export"
+	TypeMallWeatherExportCleanup = "mall:weather:export_cleanup"
+	TypeMallWeatherFeishu        = "mall:weather:feishu"
+	TypeMallWeatherSchedule      = "mall:weather:schedule"
 
 	MallWeatherQueueName  = "weather"
 	MallExportQueueName   = "export"
@@ -37,10 +38,16 @@ var mallWeatherTaskTypes = []string{
 	TypeMallWeatherRepair,
 	TypeMallWeatherManual,
 	TypeMallWeatherExport,
+	TypeMallWeatherExportCleanup,
 	TypeMallWeatherFeishu,
 }
 
-const mallWeatherExportTaskTimeout = 6 * time.Hour
+const (
+	mallWeatherExportTaskTimeout        = 6 * time.Hour
+	mallWeatherExportCleanupTaskTimeout = 30 * time.Minute
+	mallWeatherExportCleanupTaskUnique  = 50 * time.Minute
+	MallWeatherExportCleanupCron        = "23 * * * *"
+)
 
 var mallWeatherFetchTaskTypes = []string{
 	TypeMallWeatherFast,
@@ -117,6 +124,8 @@ func ExpectedMallWeatherQueue(taskType string) (string, bool) {
 		return MallWeatherQueueName, true
 	case TypeMallWeatherExport:
 		return MallExportQueueName, true
+	case TypeMallWeatherExportCleanup:
+		return MallExportQueueName, true
 	case TypeMallWeatherFeishu:
 		return MallDeliveryQueueName, true
 	default:
@@ -150,6 +159,10 @@ func NewMallWeatherManualTask(payload MallTaskPayload) (*asynq.Task, error) {
 
 func NewMallWeatherExportTask(payload MallWeatherExportTaskPayload) (*asynq.Task, error) {
 	return newTypedMallWeatherTask(TypeMallWeatherExport, payload)
+}
+
+func NewMallWeatherExportCleanupTask() (*asynq.Task, error) {
+	return NewMallWeatherTask(TypeMallWeatherExportCleanup, []byte(`{}`))
 }
 
 func NewMallWeatherFeishuTask(payload MallWeatherFeishuTaskPayload) (*asynq.Task, error) {
@@ -240,6 +253,10 @@ func NewMallWeatherTask(taskType string, payload []byte) (*asynq.Task, error) {
 		if _, err := DecodeMallWeatherExportTaskPayload(payload); err != nil {
 			return nil, err
 		}
+	case TypeMallWeatherExportCleanup:
+		if err := DecodeMallWeatherExportCleanupTaskPayload(payload); err != nil {
+			return nil, err
+		}
 	case TypeMallWeatherFeishu:
 		var decoded MallWeatherFeishuTaskPayload
 		if err := decodeStrictTaskPayload(payload, &decoded); err != nil {
@@ -254,7 +271,25 @@ func NewMallWeatherTask(taskType string, payload []byte) (*asynq.Task, error) {
 	if taskType == TypeMallWeatherExport {
 		options = append(options, asynq.Timeout(mallWeatherExportTaskTimeout))
 	}
+	if taskType == TypeMallWeatherExportCleanup {
+		options = append(options,
+			asynq.Timeout(mallWeatherExportCleanupTaskTimeout),
+			asynq.MaxRetry(5),
+			asynq.Unique(mallWeatherExportCleanupTaskUnique),
+		)
+	}
 	return asynq.NewTask(taskType, append([]byte(nil), payload...), options...), nil
+}
+
+func DecodeMallWeatherExportCleanupTaskPayload(payload []byte) error {
+	var decoded map[string]json.RawMessage
+	if err := decodeStrictTaskPayload(payload, &decoded); err != nil {
+		return err
+	}
+	if decoded == nil || len(decoded) != 0 {
+		return fmt.Errorf("mall weather task: export cleanup payload must be an empty object")
+	}
+	return nil
 }
 
 func DecodeMallWeatherExportTaskPayload(payload []byte) (MallWeatherExportTaskPayload, error) {

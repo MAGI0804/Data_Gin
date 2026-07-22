@@ -32,6 +32,7 @@ func TestMallWeatherTaskConstructorsUseNonSensitivePayloads(t *testing.T) {
 		{"export", TypeMallWeatherExport, MallExportQueueName, func() (*asynq.Task, error) {
 			return NewMallWeatherExportTask(MallWeatherExportTaskPayload{ExportJobID: 22})
 		}},
+		{"export cleanup", TypeMallWeatherExportCleanup, MallExportQueueName, NewMallWeatherExportCleanupTask},
 		{"feishu", TypeMallWeatherFeishu, MallDeliveryQueueName, func() (*asynq.Task, error) {
 			return NewMallWeatherFeishuTask(MallWeatherFeishuTaskPayload{PipelineRunID: 33})
 		}},
@@ -103,6 +104,26 @@ func TestDecodeMallWeatherExportTaskPayloadIsStrict(t *testing.T) {
 	} {
 		if _, err := DecodeMallWeatherExportTaskPayload(invalid); err == nil {
 			t.Fatalf("DecodeMallWeatherExportTaskPayload(%s) accepted invalid payload", invalid)
+		}
+	}
+}
+
+func TestMallWeatherExportCleanupTaskPayloadIsStrictAndNonSensitive(t *testing.T) {
+	task, err := NewMallWeatherExportCleanupTask()
+	if err != nil {
+		t.Fatalf("NewMallWeatherExportCleanupTask() error=%v", err)
+	}
+	if task.Type() != TypeMallWeatherExportCleanup || string(task.Payload()) != `{}` {
+		t.Fatalf("cleanup task type=%q payload=%s", task.Type(), task.Payload())
+	}
+	for _, invalid := range [][]byte{
+		nil,
+		[]byte(`null`),
+		[]byte(`{"secret":"x"}`),
+		[]byte(`{}{}`),
+	} {
+		if err := DecodeMallWeatherExportCleanupTaskPayload(invalid); err == nil {
+			t.Fatalf("DecodeMallWeatherExportCleanupTaskPayload(%s) accepted invalid payload", invalid)
 		}
 	}
 }

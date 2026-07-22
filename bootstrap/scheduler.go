@@ -63,6 +63,12 @@ func registerMallWeatherScheduledTasks(scheduler *asynq.Scheduler) {
 	if !config.GetBool("cfg.mall_weather.enabled") {
 		return
 	}
+	cleanupTask, err := job.NewMallWeatherExportCleanupTask()
+	if err != nil {
+		console.Warning("Failed to create mall weather export cleanup task: %v", err)
+	} else if _, err := scheduler.Register(job.MallWeatherExportCleanupCron, cleanupTask); err != nil {
+		console.Warning("Failed to register mall weather export cleanup: %v", err)
+	}
 	definitions, err := job.MallWeatherScheduleDefinitions(
 		config.GetString("cfg.mall_weather.fast_cron"),
 		config.GetString("cfg.mall_weather.full_cron"),
