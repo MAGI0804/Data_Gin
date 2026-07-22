@@ -39,6 +39,7 @@ type mallWeatherQueryDAO interface {
 	QueryMinutely(ctx context.Context, query data_dao.MinutelyQuery) ([]model.MallWeatherMinutely, error)
 	QueryHourly(ctx context.Context, query data_dao.HourlyQuery) ([]model.MallWeatherHourly, error)
 	QueryDaily(ctx context.Context, query data_dao.DailyQuery) ([]model.MallWeatherDaily, error)
+	QueryAlerts(ctx context.Context, query data_dao.AlertQuery) ([]model.MallWeatherAlert, error)
 	FindCurrentLatest(ctx context.Context, mallID uint, dataKind string) (*model.MallWeatherLatest, error)
 	FindOverviewRealtime(ctx context.Context, mallID uint) (*model.MallWeatherRealtime, error)
 	ListOverviewMinutely(ctx context.Context, mallID uint, startUTC, endUTC time.Time, limit int) ([]model.MallWeatherMinutely, error)
@@ -191,6 +192,20 @@ type MallWeatherAlertDTO struct {
 	Source           string                  `json:"source,omitempty"`
 	PublishedAtUTC   *time.Time              `json:"publishedAtUtc,omitempty"`
 	PublishedAtLocal *string                 `json:"publishedAtLocal,omitempty"`
+	Province         string                  `json:"province,omitempty"`
+	City             string                  `json:"city,omitempty"`
+	County           string                  `json:"county,omitempty"`
+	Location         string                  `json:"location,omitempty"`
+	RegionID         string                  `json:"regionId,omitempty"`
+	Adcode           string                  `json:"adcode,omitempty"`
+	Latitude         *float64                `json:"latitude,omitempty"`
+	Longitude        *float64                `json:"longitude,omitempty"`
+	FirstSeenAtUTC   time.Time               `json:"firstSeenAtUtc"`
+	FirstSeenAtLocal string                  `json:"firstSeenAtLocal"`
+	LastSeenAtUTC    time.Time               `json:"lastSeenAtUtc"`
+	LastSeenAtLocal  string                  `json:"lastSeenAtLocal"`
+	EndedAtUTC       *time.Time              `json:"endedAtUtc,omitempty"`
+	EndedAtLocal     *string                 `json:"endedAtLocal,omitempty"`
 	QualityStatus    string                  `json:"qualityStatus"`
 	QualityWarnings  []MallWeatherWarningDTO `json:"qualityWarnings"`
 }
@@ -551,7 +566,7 @@ func minutelyWeatherDTO(row *model.MallWeatherMinutely, location *time.Location)
 }
 
 func alertWeatherDTO(row *model.MallWeatherAlert, location *time.Location) (MallWeatherAlertDTO, error) {
-	if row == nil || row.ID == 0 || strings.TrimSpace(row.AlertID) == "" || location == nil {
+	if row == nil || row.ID == 0 || strings.TrimSpace(row.AlertID) == "" || row.FirstSeenAt.IsZero() || row.LastSeenAt.IsZero() || location == nil {
 		return MallWeatherAlertDTO{}, fmt.Errorf("mall weather query: invalid alert row")
 	}
 	warnings, err := weatherQualityWarnings(row.QualityFlagsJSON)
@@ -563,6 +578,10 @@ func alertWeatherDTO(row *model.MallWeatherAlert, location *time.Location) (Mall
 		AlertTypeCode: row.AlertTypeCode, AlertLevelCode: row.AlertLevelCode,
 		AlertTypeName: row.AlertTypeName, AlertLevelName: row.AlertLevelName,
 		Title: row.Title, Description: row.Description, Source: row.Source,
+		Province: row.Province, City: row.City, County: row.County, Location: row.Location,
+		RegionID: row.RegionID, Adcode: row.Adcode, Latitude: row.Latitude, Longitude: row.Longitude,
+		FirstSeenAtUTC: row.FirstSeenAt.UTC(), FirstSeenAtLocal: formatWeatherLocalTime(row.FirstSeenAt, location),
+		LastSeenAtUTC: row.LastSeenAt.UTC(), LastSeenAtLocal: formatWeatherLocalTime(row.LastSeenAt, location),
 		QualityStatus: strings.ToUpper(row.QualityStatus), QualityWarnings: warnings,
 	}
 	if row.PublishedAtUTC != nil {
@@ -570,6 +589,12 @@ func alertWeatherDTO(row *model.MallWeatherAlert, location *time.Location) (Mall
 		publishedAtLocal := formatWeatherLocalTime(publishedAtUTC, location)
 		dto.PublishedAtUTC = &publishedAtUTC
 		dto.PublishedAtLocal = &publishedAtLocal
+	}
+	if row.EndedAt != nil {
+		endedAtUTC := row.EndedAt.UTC()
+		endedAtLocal := formatWeatherLocalTime(endedAtUTC, location)
+		dto.EndedAtUTC = &endedAtUTC
+		dto.EndedAtLocal = &endedAtLocal
 	}
 	return dto, nil
 }
