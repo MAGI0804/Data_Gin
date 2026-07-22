@@ -11,6 +11,7 @@ func apiData(api *gin.RouterGroup) {
 	registerMallRoutes(api, data_ctrl.NewMallController())
 	registerMallWeatherRoutes(api, data_ctrl.NewMallWeatherController())
 	registerMallWeatherRefreshRoutes(api, data_ctrl.NewMallWeatherRefreshController())
+	registerMallWeatherExportProfileRoutes(api, data_ctrl.NewMallWeatherExportProfileController())
 
 	sourceGroup := api.Group("/v1/sources")
 	sourceGroup.Use(middleware.AuthJWT())
@@ -215,6 +216,16 @@ func registerMallWeatherRefreshRoutes(api *gin.RouterGroup, refreshCtrl *data_ct
 	weatherGroup := api.Group("/v1/malls")
 	weatherGroup.Use(middleware.AuthJWT())
 	weatherGroup.POST("/:id/weather-refresh", refreshCtrl.Refresh)
+}
+
+func registerMallWeatherExportProfileRoutes(
+	api *gin.RouterGroup,
+	profileCtrl *data_ctrl.MallWeatherExportProfileController,
+) {
+	profileGroup := api.Group("/v1/weather-export-profiles")
+	profileGroup.Use(middleware.AuthJWT())
+	profileGroup.POST("", profileCtrl.Save)
+	profileGroup.GET("", profileCtrl.List)
 }
 
 func registerMallRoutes(api *gin.RouterGroup, mallCtrl *data_ctrl.MallController) {

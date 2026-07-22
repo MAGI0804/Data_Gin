@@ -11,7 +11,11 @@ func TestMallWeatherExportProfileDAORejectsInvalidStateBeforeDatabase(t *testing
 	if _, err := (&MallWeatherExportProfileDAO{}).Save(context.Background(), nil, nil); err == nil {
 		t.Fatal("Save() accepted an unconfigured DAO")
 	}
-	if _, err := (&MallWeatherExportProfileDAO{}).List(context.Background(), nil); err == nil {
+	_, err := (&MallWeatherExportProfileDAO{}).List(
+		context.Background(),
+		MallWeatherExportProfileListQuery{Limit: 10},
+	)
+	if err == nil {
 		t.Fatal("List() accepted an unconfigured DAO")
 	}
 }

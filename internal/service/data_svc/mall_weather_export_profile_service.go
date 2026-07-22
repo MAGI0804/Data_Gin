@@ -2,6 +2,7 @@ package data_svc
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -25,6 +26,8 @@ const (
 	maxMallWeatherExportRows     = 1_048_575
 	maxMallWeatherFilterMalls    = 1_000
 	maxMallWeatherFilterCities   = 100
+	defaultExportProfilePageSize = 50
+	maxExportProfilePageSize     = 100
 
 	defaultMallWeatherExportUnit           = "metric"
 	defaultMallWeatherExportDateFormat     = "2006-01-02"
@@ -41,7 +44,12 @@ var (
 
 type mallWeatherExportProfileStore interface {
 	Save(context.Context, *model.MallWeatherExportProfile, *uint64) (bool, error)
-	List(context.Context, *bool) ([]model.MallWeatherExportProfile, error)
+	List(context.Context, data_dao.MallWeatherExportProfileListQuery) ([]model.MallWeatherExportProfile, error)
+}
+
+type mallWeatherExportProfileCursor struct {
+	Version uint8  `json:"v"`
+	Code    string `json:"code"`
 }
 
 type MallWeatherExportProfileConfig struct {
@@ -74,7 +82,8 @@ type MallWeatherExportProfileDTO struct {
 }
 
 type MallWeatherExportProfileListResult struct {
-	Items []MallWeatherExportProfileDTO `json:"items"`
+	Items      []MallWeatherExportProfileDTO `json:"items"`
+	Pagination MallWeatherPagination         `json:"pagination"`
 }
 
 type MallWeatherExportProfileService struct {
@@ -91,14 +100,22 @@ func NewMallWeatherExportProfileService() *MallWeatherExportProfileService {
 	}
 }
 
-func newMallWeatherExportProfileService(store mallWeatherExportProfileStore, permissions mallPermissionChecker, now func() time.Time) (*MallWeatherExportProfileService, error) {
+func newMallWeatherExportProfileService(
+	store mallWeatherExportProfileStore,
+	permissions mallPermissionChecker,
+	now func() time.Time,
+) (*MallWeatherExportProfileService, error) {
 	if store == nil || permissions == nil || now == nil {
 		return nil, fmt.Errorf("mall weather export profile: invalid service configuration")
 	}
 	return &MallWeatherExportProfileService{store: store, permissions: permissions, now: now}, nil
 }
 
-func (service *MallWeatherExportProfileService) Save(ctx context.Context, actorUserID uint, request requestbody.MallWeatherExportProfileSaveRequest) (*MallWeatherExportProfileDTO, bool, error) {
+func (service *MallWeatherExportProfileService) Save(
+	ctx context.Context,
+	actorUserID uint,
+	request requestbody.MallWeatherExportProfileSaveRequest,
+) (*MallWeatherExportProfileDTO, bool, error) {
 	if service == nil || ctx == nil || actorUserID == 0 {
 		return nil, false, fmt.Errorf("%w: invalid request", ErrMallWeatherExportProfileInvalid)
 	}
@@ -134,20 +151,53 @@ func (service *MallWeatherExportProfileService) Save(ctx context.Context, actorU
 	return &dto, created, nil
 }
 
-func (service *MallWeatherExportProfileService) List(ctx context.Context, actorUserID uint, enabled *bool) (*MallWeatherExportProfileListResult, error) {
+func (service *MallWeatherExportProfileService) List(
+	ctx context.Context,
+	actorUserID uint,
+	enabled *bool,
+	cursorValue string,
+	pageSize int,
+) (*MallWeatherExportProfileListResult, error) {
 	if service == nil || ctx == nil || actorUserID == 0 {
 		return nil, fmt.Errorf("%w: invalid request", ErrMallWeatherExportProfileInvalid)
 	}
 	if err := service.authorize(ctx, actorUserID, PermissionWeatherExport); err != nil {
 		return nil, err
 	}
-	rows, err := service.store.List(ctx, enabled)
+	if pageSize == 0 {
+		pageSize = defaultExportProfilePageSize
+	}
+	if pageSize < 1 || pageSize > maxExportProfilePageSize || len(cursorValue) > maxWeatherCursorLength {
+		return nil, fmt.Errorf("%w: invalid pagination", ErrMallWeatherExportProfileInvalid)
+	}
+	cursor, err := decodeMallWeatherExportProfileCursor(cursorValue)
 	if err != nil {
 		return nil, err
 	}
-	result := &MallWeatherExportProfileListResult{Items: make([]MallWeatherExportProfileDTO, len(rows))}
+	query := data_dao.MallWeatherExportProfileListQuery{Enabled: enabled, Limit: pageSize + 1}
+	if cursor != nil {
+		query.AfterCode = cursor.Code
+	}
+	rows, err := service.store.List(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	hasNext := len(rows) > pageSize
+	if hasNext {
+		rows = rows[:pageSize]
+	}
+	result := &MallWeatherExportProfileListResult{
+		Items:      make([]MallWeatherExportProfileDTO, len(rows)),
+		Pagination: MallWeatherPagination{PageSize: pageSize},
+	}
 	for index := range rows {
 		result.Items[index], err = mallWeatherExportProfileDTO(&rows[index])
+		if err != nil {
+			return nil, err
+		}
+	}
+	if hasNext {
+		result.Pagination.NextCursor, err = encodeMallWeatherExportProfileCursor(&rows[len(rows)-1])
 		if err != nil {
 			return nil, err
 		}
@@ -155,7 +205,47 @@ func (service *MallWeatherExportProfileService) List(ctx context.Context, actorU
 	return result, nil
 }
 
-func (service *MallWeatherExportProfileService) authorize(ctx context.Context, actorUserID uint, permission string) error {
+func encodeMallWeatherExportProfileCursor(row *model.MallWeatherExportProfile) (string, error) {
+	if row == nil || !mallWeatherExportProfileCodePattern.MatchString(row.Code) {
+		return "", fmt.Errorf("mall weather export profile: invalid cursor row")
+	}
+	payload, err := json.Marshal(mallWeatherExportProfileCursor{Version: 1, Code: row.Code})
+	if err != nil {
+		return "", fmt.Errorf("mall weather export profile: encode cursor: %w", err)
+	}
+	return base64.RawURLEncoding.EncodeToString(payload), nil
+}
+
+func decodeMallWeatherExportProfileCursor(value string) (*mallWeatherExportProfileCursor, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return nil, nil
+	}
+	if len(value) > maxWeatherCursorLength {
+		return nil, fmt.Errorf("%w: invalid cursor", ErrMallWeatherExportProfileInvalid)
+	}
+	raw, err := base64.RawURLEncoding.DecodeString(value)
+	if err != nil {
+		return nil, fmt.Errorf("%w: invalid cursor", ErrMallWeatherExportProfileInvalid)
+	}
+	var cursor mallWeatherExportProfileCursor
+	decoder := json.NewDecoder(strings.NewReader(string(raw)))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&cursor); err != nil || cursor.Version != 1 ||
+		!mallWeatherExportProfileCodePattern.MatchString(cursor.Code) {
+		return nil, fmt.Errorf("%w: invalid cursor", ErrMallWeatherExportProfileInvalid)
+	}
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		return nil, fmt.Errorf("%w: invalid cursor", ErrMallWeatherExportProfileInvalid)
+	}
+	return &cursor, nil
+}
+
+func (service *MallWeatherExportProfileService) authorize(
+	ctx context.Context,
+	actorUserID uint,
+	permission string,
+) error {
 	allowed, err := service.permissions.HasPermission(ctx, actorUserID, permission, service.now().UTC())
 	if err != nil {
 		return fmt.Errorf("mall weather export profile: authorize: %w", err)
@@ -166,7 +256,9 @@ func (service *MallWeatherExportProfileService) authorize(ctx context.Context, a
 	return nil
 }
 
-func normalizeMallWeatherExportProfile(request requestbody.MallWeatherExportProfileSaveRequest) (requestbody.MallWeatherExportProfileSaveRequest, MallWeatherExportProfileConfig, error) {
+func normalizeMallWeatherExportProfile(
+	request requestbody.MallWeatherExportProfileSaveRequest,
+) (requestbody.MallWeatherExportProfileSaveRequest, MallWeatherExportProfileConfig, error) {
 	request.Code = strings.ToLower(strings.TrimSpace(request.Code))
 	request.Name = strings.TrimSpace(request.Name)
 	request.TimeZone = strings.TrimSpace(request.TimeZone)
@@ -174,22 +266,33 @@ func normalizeMallWeatherExportProfile(request requestbody.MallWeatherExportProf
 	request.DateFormat = strings.TrimSpace(request.DateFormat)
 	request.DateTimeFormat = strings.TrimSpace(request.DateTimeFormat)
 	request.FileNameTemplate = strings.TrimSpace(request.FileNameTemplate)
-	if !mallWeatherExportProfileCodePattern.MatchString(request.Code) || request.Name == "" || utf8.RuneCountInString(request.Name) > 255 {
-		return request, MallWeatherExportProfileConfig{}, fmt.Errorf("%w: invalid profile identity", ErrMallWeatherExportProfileInvalid)
+	invalidIdentity := !mallWeatherExportProfileCodePattern.MatchString(request.Code) ||
+		request.Name == "" || utf8.RuneCountInString(request.Name) > 255
+	if invalidIdentity {
+		return request, MallWeatherExportProfileConfig{}, fmt.Errorf(
+			"%w: invalid profile identity",
+			ErrMallWeatherExportProfileInvalid,
+		)
 	}
 	if request.TimeZone == "" {
 		request.TimeZone = "Asia/Shanghai"
 	}
 	location, err := time.LoadLocation(request.TimeZone)
 	if err != nil {
-		return request, MallWeatherExportProfileConfig{}, fmt.Errorf("%w: invalid time zone", ErrMallWeatherExportProfileInvalid)
+		return request, MallWeatherExportProfileConfig{}, fmt.Errorf(
+			"%w: invalid time zone",
+			ErrMallWeatherExportProfileInvalid,
+		)
 	}
 	request.TimeZone = location.String()
 	if request.UnitSystem == "" {
 		request.UnitSystem = defaultMallWeatherExportUnit
 	}
 	if request.UnitSystem != "metric" && request.UnitSystem != "imperial" {
-		return request, MallWeatherExportProfileConfig{}, fmt.Errorf("%w: invalid unit system", ErrMallWeatherExportProfileInvalid)
+		return request, MallWeatherExportProfileConfig{}, fmt.Errorf(
+			"%w: invalid unit system",
+			ErrMallWeatherExportProfileInvalid,
+		)
 	}
 	if request.DateFormat == "" {
 		request.DateFormat = defaultMallWeatherExportDateFormat
@@ -198,7 +301,10 @@ func normalizeMallWeatherExportProfile(request requestbody.MallWeatherExportProf
 		request.DateTimeFormat = defaultMallWeatherExportDateTimeFormat
 	}
 	if !validMallWeatherExportTimeFormat(request.DateFormat) || !validMallWeatherExportTimeFormat(request.DateTimeFormat) {
-		return request, MallWeatherExportProfileConfig{}, fmt.Errorf("%w: invalid date format", ErrMallWeatherExportProfileInvalid)
+		return request, MallWeatherExportProfileConfig{}, fmt.Errorf(
+			"%w: invalid date format",
+			ErrMallWeatherExportProfileInvalid,
+		)
 	}
 	if err := validateMallWeatherExportFileNameTemplate(request.FileNameTemplate); err != nil {
 		return request, MallWeatherExportProfileConfig{}, err
@@ -209,7 +315,10 @@ func normalizeMallWeatherExportProfile(request requestbody.MallWeatherExportProf
 	}
 	request.Filters = filters
 	if len(request.Datasets) == 0 || len(request.Datasets) > maxMallWeatherExportDatasets {
-		return request, MallWeatherExportProfileConfig{}, fmt.Errorf("%w: invalid datasets", ErrMallWeatherExportProfileInvalid)
+		return request, MallWeatherExportProfileConfig{}, fmt.Errorf(
+			"%w: invalid datasets",
+			ErrMallWeatherExportProfileInvalid,
+		)
 	}
 	if request.Enabled == nil {
 		enabled := true
@@ -223,11 +332,17 @@ func normalizeMallWeatherExportProfile(request requestbody.MallWeatherExportProf
 			return request, MallWeatherExportProfileConfig{}, err
 		}
 		if _, exists := seenKinds[dataset.Kind]; exists {
-			return request, MallWeatherExportProfileConfig{}, fmt.Errorf("%w: duplicate dataset", ErrMallWeatherExportProfileInvalid)
+			return request, MallWeatherExportProfileConfig{}, fmt.Errorf(
+				"%w: duplicate dataset",
+				ErrMallWeatherExportProfileInvalid,
+			)
 		}
 		sheetKey := strings.ToLower(dataset.SheetName)
 		if _, exists := seenSheets[sheetKey]; exists {
-			return request, MallWeatherExportProfileConfig{}, fmt.Errorf("%w: duplicate sheet name", ErrMallWeatherExportProfileInvalid)
+			return request, MallWeatherExportProfileConfig{}, fmt.Errorf(
+				"%w: duplicate sheet name",
+				ErrMallWeatherExportProfileInvalid,
+			)
 		}
 		seenKinds[dataset.Kind], seenSheets[sheetKey] = struct{}{}, struct{}{}
 		request.Datasets[index] = dataset
@@ -244,7 +359,9 @@ func normalizeMallWeatherExportProfile(request requestbody.MallWeatherExportProf
 	return request, config, nil
 }
 
-func normalizeMallWeatherExportDataset(dataset requestbody.MallWeatherExportDataset) (requestbody.MallWeatherExportDataset, error) {
+func normalizeMallWeatherExportDataset(
+	dataset requestbody.MallWeatherExportDataset,
+) (requestbody.MallWeatherExportDataset, error) {
 	dataset.Kind = strings.ToLower(strings.TrimSpace(dataset.Kind))
 	dataset.SheetName = strings.TrimSpace(dataset.SheetName)
 	dataset.SplitBy = strings.ToLower(strings.TrimSpace(dataset.SplitBy))
@@ -279,8 +396,10 @@ func normalizeMallWeatherExportDataset(dataset requestbody.MallWeatherExportData
 	if dataset.MaxRows == 0 {
 		dataset.MaxRows = maxMallWeatherExportRows
 	}
-	if dataset.MaxRows < 1 || dataset.MaxRows > maxMallWeatherExportRows || len(dataset.Columns) > maxMallWeatherExportColumns ||
-		len(dataset.ConditionalFormats) > maxMallWeatherExportRules {
+	invalidRows := dataset.MaxRows < 1 || dataset.MaxRows > maxMallWeatherExportRows
+	tooManyColumns := len(dataset.Columns) > maxMallWeatherExportColumns
+	tooManyRules := len(dataset.ConditionalFormats) > maxMallWeatherExportRules
+	if invalidRows || tooManyColumns || tooManyRules {
 		return dataset, fmt.Errorf("%w: invalid dataset limits", ErrMallWeatherExportProfileInvalid)
 	}
 	seenFields := make(map[string]struct{}, len(dataset.Columns))
@@ -292,9 +411,10 @@ func normalizeMallWeatherExportDataset(dataset requestbody.MallWeatherExportData
 		if column.Format == "" {
 			column.Format = "general"
 		}
-		if _, allowed := allowedFields[column.Field]; !allowed || column.Title == "" || utf8.RuneCountInString(column.Title) > 128 ||
-			column.Width < 0 || column.Width > 255 || math.IsNaN(column.Width) || math.IsInf(column.Width, 0) ||
-			!mallWeatherExportColumnFormats[column.Format] {
+		_, allowed := allowedFields[column.Field]
+		invalidTitle := column.Title == "" || utf8.RuneCountInString(column.Title) > 128
+		invalidWidth := column.Width < 0 || column.Width > 255 || math.IsNaN(column.Width) || math.IsInf(column.Width, 0)
+		if !allowed || invalidTitle || invalidWidth || !mallWeatherExportColumnFormats[column.Format] {
 			return dataset, fmt.Errorf("%w: invalid dataset column", ErrMallWeatherExportProfileInvalid)
 		}
 		if _, duplicate := seenFields[column.Field]; duplicate {
@@ -316,7 +436,9 @@ func normalizeMallWeatherExportDataset(dataset requestbody.MallWeatherExportData
 	return dataset, nil
 }
 
-func normalizeMallWeatherExportFilters(filters requestbody.MallWeatherExportFilters) (requestbody.MallWeatherExportFilters, error) {
+func normalizeMallWeatherExportFilters(
+	filters requestbody.MallWeatherExportFilters,
+) (requestbody.MallWeatherExportFilters, error) {
 	if len(filters.MallIDs) > maxMallWeatherFilterMalls || len(filters.Cities) > maxMallWeatherFilterCities {
 		return filters, fmt.Errorf("%w: export filter is too large", ErrMallWeatherExportProfileInvalid)
 	}
@@ -418,7 +540,11 @@ func normalizeMallWeatherExportConditionalFormat(
 	colorPresent := rule.BackgroundColor != "" || rule.FontColor != ""
 	colorsValid := (rule.BackgroundColor == "" || mallWeatherExportColorPattern.MatchString(rule.BackgroundColor)) &&
 		(rule.FontColor == "" || mallWeatherExportColorPattern.MatchString(rule.FontColor))
-	if !fieldAllowed || !colorPresent || !colorsValid || rule.Value == nil || math.IsNaN(*rule.Value) || math.IsInf(*rule.Value, 0) {
+	invalidFirstValue := rule.Value == nil
+	if rule.Value != nil {
+		invalidFirstValue = math.IsNaN(*rule.Value) || math.IsInf(*rule.Value, 0)
+	}
+	if !fieldAllowed || !colorPresent || !colorsValid || invalidFirstValue {
 		return rule, fmt.Errorf("%w: invalid conditional format", ErrMallWeatherExportProfileInvalid)
 	}
 	needsSecondValue := rule.Operator == "between" || rule.Operator == "not_between"
@@ -530,12 +656,39 @@ var mallWeatherExportConditionalOperators = map[string]bool{
 }
 
 var mallWeatherExportFields = map[string]map[string]struct{}{
-	"malls":        exportFieldSet("mall_code", "name_cn", "name_en", "province", "city", "district", "address", "longitude", "latitude", "coordinate_system", "coverage_radius_m", "status"),
-	"realtime":     exportFieldSet("mall_code", "snapshot_at", "temperature_c", "apparent_temperature_c", "humidity_pct", "pressure_pa", "wind_speed_kph", "precipitation_mm_h", "aqi_chn", "aqi_usa", "pm25_ug_m3", "pm10_ug_m3", "skycon", "quality_status", "issued_at", "fetched_at"),
-	"minutely":     exportFieldSet("mall_code", "forecast_minute", "minute_offset", "precipitation_mm_h", "probability_pct", "description", "quality_status", "issued_at", "fetched_at"),
-	"hourly":       exportFieldSet("mall_code", "forecast_time", "temperature_c", "apparent_temperature_c", "humidity_pct", "pressure_pa", "wind_speed_kph", "wind_direction_deg", "precipitation_mm_h", "precipitation_probability_pct", "aqi_chn", "aqi_usa", "pm25_ug_m3", "skycon", "quality_status", "issued_at", "fetched_at"),
-	"daily":        exportFieldSet("mall_code", "forecast_date", "temperature_max_c", "temperature_min_c", "humidity_avg_pct", "precipitation_probability_pct", "aqi_avg_chn", "pm25_avg_ug_m3", "skycon", "sunrise", "sunset", "quality_status", "issued_at", "fetched_at"),
-	"alerts":       exportFieldSet("mall_code", "alert_id", "status", "title", "description", "source", "published_at", "ended_at", "province", "city", "county", "quality_status"),
-	"life_indices": exportFieldSet("mall_code", "forecast_date", "source_api", "index_type", "index_code", "index_name", "level", "short_desc", "detail", "is_unknown_type", "quality_status", "issued_at", "fetched_at"),
-	"fetch_runs":   exportFieldSet("mall_code", "run_uuid", "task_kind", "endpoint_kind", "status", "attempt_count", "duration_ms", "http_status", "provider_status", "row_counts", "error_class", "error_code", "started_at", "finished_at"),
+	"malls": exportFieldSet(
+		"mall_code", "name_cn", "name_en", "province", "city", "district", "address", "longitude", "latitude",
+		"coordinate_system", "coverage_radius_m", "status",
+	),
+	"realtime": exportFieldSet(
+		"mall_code", "snapshot_at", "temperature_c", "apparent_temperature_c", "humidity_pct", "pressure_pa",
+		"wind_speed_kph", "precipitation_mm_h", "aqi_chn", "aqi_usa", "pm25_ug_m3", "pm10_ug_m3", "skycon",
+		"quality_status", "issued_at", "fetched_at",
+	),
+	"minutely": exportFieldSet(
+		"mall_code", "forecast_minute", "minute_offset", "precipitation_mm_h", "probability_pct", "description",
+		"quality_status", "issued_at", "fetched_at",
+	),
+	"hourly": exportFieldSet(
+		"mall_code", "forecast_time", "temperature_c", "apparent_temperature_c", "humidity_pct", "pressure_pa",
+		"wind_speed_kph", "wind_direction_deg", "precipitation_mm_h", "precipitation_probability_pct", "aqi_chn",
+		"aqi_usa", "pm25_ug_m3", "skycon", "quality_status", "issued_at", "fetched_at",
+	),
+	"daily": exportFieldSet(
+		"mall_code", "forecast_date", "temperature_max_c", "temperature_min_c", "humidity_avg_pct",
+		"precipitation_probability_pct", "aqi_avg_chn", "pm25_avg_ug_m3", "skycon", "sunrise", "sunset",
+		"quality_status", "issued_at", "fetched_at",
+	),
+	"alerts": exportFieldSet(
+		"mall_code", "alert_id", "status", "title", "description", "source", "published_at", "ended_at", "province",
+		"city", "county", "quality_status",
+	),
+	"life_indices": exportFieldSet(
+		"mall_code", "forecast_date", "source_api", "index_type", "index_code", "index_name", "level", "short_desc",
+		"detail", "is_unknown_type", "quality_status", "issued_at", "fetched_at",
+	),
+	"fetch_runs": exportFieldSet(
+		"mall_code", "run_uuid", "task_kind", "endpoint_kind", "status", "attempt_count", "duration_ms", "http_status",
+		"provider_status", "row_counts", "error_class", "error_code", "started_at", "finished_at",
+	),
 }

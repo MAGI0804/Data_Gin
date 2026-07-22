@@ -19,7 +19,13 @@ var (
 	ErrMallWeatherExportProfileConflict = errors.New("mall weather export profile: version conflict")
 )
 
-const maxMallWeatherExportProfiles = 1_000
+const maxMallWeatherExportProfileDAOPageSize = 101
+
+type MallWeatherExportProfileListQuery struct {
+	Enabled   *bool
+	AfterCode string
+	Limit     int
+}
 
 type MallWeatherExportProfileDAO struct {
 	db *gorm.DB
@@ -33,7 +39,11 @@ func NewMallWeatherExportProfileDAO(databases ...*gorm.DB) *MallWeatherExportPro
 	return &MallWeatherExportProfileDAO{db: db}
 }
 
-func (dao *MallWeatherExportProfileDAO) Save(ctx context.Context, row *model.MallWeatherExportProfile, expectedVersion *uint64) (bool, error) {
+func (dao *MallWeatherExportProfileDAO) Save(
+	ctx context.Context,
+	row *model.MallWeatherExportProfile,
+	expectedVersion *uint64,
+) (bool, error) {
 	if dao == nil || dao.db == nil || ctx == nil || row == nil || strings.TrimSpace(row.Code) == "" ||
 		strings.TrimSpace(row.Name) == "" || row.ProfileJSON == "" || row.UpdatedBy == 0 {
 		return false, fmt.Errorf("mall weather export profile: invalid save")
@@ -90,20 +100,24 @@ func (dao *MallWeatherExportProfileDAO) Save(ctx context.Context, row *model.Mal
 	return created, nil
 }
 
-func (dao *MallWeatherExportProfileDAO) List(ctx context.Context, enabled *bool) ([]model.MallWeatherExportProfile, error) {
-	if dao == nil || dao.db == nil || ctx == nil {
+func (dao *MallWeatherExportProfileDAO) List(
+	ctx context.Context,
+	filter MallWeatherExportProfileListQuery,
+) ([]model.MallWeatherExportProfile, error) {
+	invalidLimit := filter.Limit < 1 || filter.Limit > maxMallWeatherExportProfileDAOPageSize
+	if dao == nil || dao.db == nil || ctx == nil || invalidLimit {
 		return nil, fmt.Errorf("mall weather export profile: invalid list")
 	}
 	query := dao.db.WithContext(ctx).Model(&model.MallWeatherExportProfile{})
-	if enabled != nil {
-		query = query.Where("enabled = ?", *enabled)
+	if filter.Enabled != nil {
+		query = query.Where("enabled = ?", *filter.Enabled)
+	}
+	if filter.AfterCode != "" {
+		query = query.Where("code > ?", filter.AfterCode)
 	}
 	var rows []model.MallWeatherExportProfile
-	if err := query.Order("code ASC").Limit(maxMallWeatherExportProfiles + 1).Find(&rows).Error; err != nil {
+	if err := query.Order("code ASC").Limit(filter.Limit).Find(&rows).Error; err != nil {
 		return nil, fmt.Errorf("mall weather export profile: list: %w", err)
-	}
-	if len(rows) > maxMallWeatherExportProfiles {
-		return nil, fmt.Errorf("mall weather export profile: list limit exceeded")
 	}
 	return rows, nil
 }

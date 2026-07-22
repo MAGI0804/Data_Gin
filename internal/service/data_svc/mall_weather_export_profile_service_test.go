@@ -2,10 +2,12 @@ package data_svc
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
 
+	"gin-biz-web-api/internal/dao/data_dao"
 	"gin-biz-web-api/internal/requestbody"
 	"gin-biz-web-api/model"
 )
@@ -39,11 +41,16 @@ func TestMallWeatherExportProfileServiceNormalizesAndSavesVersionedConfig(t *tes
 	if err != nil || !created {
 		t.Fatalf("Save() result=%+v created=%v error=%v", result, created, err)
 	}
-	if store.saved.Code != "mall_weather_full" || store.saved.CreatedBy != 17 || store.saved.Version != 1 ||
-		result.UnitSystem != "imperial" || result.DateFormat != defaultMallWeatherExportDateFormat ||
-		len(result.Filters.MallIDs) != 2 || result.Filters.MallIDs[0] != 7 || result.Filters.Cities[0] != "shanghai" ||
-		result.Datasets[0].MaxRows != maxMallWeatherExportRows || result.Datasets[0].Latest == nil || !*result.Datasets[0].Latest ||
-		result.Datasets[0].Columns[0].Format != "general" || result.Datasets[0].ConditionalFormats[0].BackgroundColor != "#ff0000" {
+	invalidStoredProfile := store.saved.Code != "mall_weather_full" ||
+		store.saved.CreatedBy != 17 || store.saved.Version != 1
+	invalidPresentation := result.UnitSystem != "imperial" || result.DateFormat != defaultMallWeatherExportDateFormat
+	invalidFilters := len(result.Filters.MallIDs) != 2 || len(result.Filters.Cities) != 1 ||
+		result.Filters.MallIDs[0] != 7 ||
+		result.Filters.Cities[0] != "shanghai"
+	dataset := result.Datasets[0]
+	invalidDataset := dataset.MaxRows != maxMallWeatherExportRows || dataset.Latest == nil || !*dataset.Latest ||
+		dataset.Columns[0].Format != "general" || dataset.ConditionalFormats[0].BackgroundColor != "#ff0000"
+	if invalidStoredProfile || invalidPresentation || invalidFilters || invalidDataset {
 		t.Fatalf("saved=%+v result=%+v", store.saved, result)
 	}
 }
@@ -95,8 +102,42 @@ func TestMallWeatherExportProfileServiceAuthorizationFailsClosed(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newMallWeatherExportProfileService() error=%v", err)
 	}
-	if _, _, err := service.Save(context.Background(), 17, requestbody.MallWeatherExportProfileSaveRequest{}); !errors.Is(err, ErrMallForbidden) {
+	_, _, err = service.Save(context.Background(), 17, requestbody.MallWeatherExportProfileSaveRequest{})
+	if !errors.Is(err, ErrMallForbidden) {
 		t.Fatalf("Save() error=%v, want ErrMallForbidden", err)
+	}
+}
+
+func TestMallWeatherExportProfileServiceListsWithStableCursor(t *testing.T) {
+	store := &fakeMallWeatherExportProfileStore{rows: []model.MallWeatherExportProfile{
+		storedMallWeatherExportProfile(t, "alpha_profile", 1),
+		storedMallWeatherExportProfile(t, "beta_profile", 2),
+	}}
+	service, err := newMallWeatherExportProfileService(
+		store,
+		fakeMallPermissionChecker{allowed: true},
+		time.Now,
+	)
+	if err != nil {
+		t.Fatalf("newMallWeatherExportProfileService() error=%v", err)
+	}
+	result, err := service.List(context.Background(), 17, nil, "", 1)
+	if err != nil {
+		t.Fatalf("List() error=%v", err)
+	}
+	if len(result.Items) != 1 || result.Items[0].Code != "alpha_profile" || result.Pagination.NextCursor == "" ||
+		result.Pagination.PageSize != 1 || store.listQuery.Limit != 2 {
+		t.Fatalf("result=%+v query=%+v", result, store.listQuery)
+	}
+	if _, err := service.List(context.Background(), 17, nil, result.Pagination.NextCursor, 1); err != nil {
+		t.Fatalf("List() with cursor error=%v", err)
+	}
+	if store.listQuery.AfterCode != "alpha_profile" {
+		t.Fatalf("query=%+v", store.listQuery)
+	}
+	_, err = service.List(context.Background(), 17, nil, "not-base64", 1)
+	if !errors.Is(err, ErrMallWeatherExportProfileInvalid) {
+		t.Fatalf("List() invalid cursor error=%v", err)
 	}
 }
 
@@ -116,13 +157,43 @@ func validMallWeatherExportProfileRequest() requestbody.MallWeatherExportProfile
 	}
 }
 
-type fakeMallWeatherExportProfileStore struct {
-	saved *model.MallWeatherExportProfile
-	rows  []model.MallWeatherExportProfile
-	err   error
+func storedMallWeatherExportProfile(t *testing.T, code string, id uint) model.MallWeatherExportProfile {
+	t.Helper()
+	config := MallWeatherExportProfileConfig{
+		TimeZone:         "UTC",
+		UnitSystem:       "metric",
+		DateFormat:       defaultMallWeatherExportDateFormat,
+		DateTimeFormat:   defaultMallWeatherExportDateTimeFormat,
+		FileNameTemplate: "safe.xlsx",
+		Datasets:         []requestbody.MallWeatherExportDataset{{Kind: "hourly", SheetName: "hourly"}},
+	}
+	profileJSON, err := json.Marshal(config)
+	if err != nil {
+		t.Fatalf("json.Marshal() error=%v", err)
+	}
+	return model.MallWeatherExportProfile{
+		BaseModel:         model.BaseModel{ID: id},
+		Code:              code,
+		Name:              code,
+		Version:           1,
+		ProfileJSON:       model.JSONText(profileJSON),
+		Enabled:           true,
+		WeatherTimestamps: model.WeatherTimestamps{CreatedAt: time.Now(), UpdatedAt: time.Now()},
+	}
 }
 
-func (store *fakeMallWeatherExportProfileStore) Save(_ context.Context, row *model.MallWeatherExportProfile, _ *uint64) (bool, error) {
+type fakeMallWeatherExportProfileStore struct {
+	saved     *model.MallWeatherExportProfile
+	rows      []model.MallWeatherExportProfile
+	listQuery data_dao.MallWeatherExportProfileListQuery
+	err       error
+}
+
+func (store *fakeMallWeatherExportProfileStore) Save(
+	_ context.Context,
+	row *model.MallWeatherExportProfile,
+	_ *uint64,
+) (bool, error) {
 	if store.err != nil {
 		return false, store.err
 	}
@@ -136,6 +207,10 @@ func (store *fakeMallWeatherExportProfileStore) Save(_ context.Context, row *mod
 	return true, nil
 }
 
-func (store *fakeMallWeatherExportProfileStore) List(context.Context, *bool) ([]model.MallWeatherExportProfile, error) {
+func (store *fakeMallWeatherExportProfileStore) List(
+	_ context.Context,
+	query data_dao.MallWeatherExportProfileListQuery,
+) ([]model.MallWeatherExportProfile, error) {
+	store.listQuery = query
 	return append([]model.MallWeatherExportProfile(nil), store.rows...), store.err
 }
