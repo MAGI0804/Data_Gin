@@ -91,6 +91,22 @@ func TestDecodeMallWeatherSchedulePayloadRejectsUnknownFields(t *testing.T) {
 	}
 }
 
+func TestDecodeMallWeatherExportTaskPayloadIsStrict(t *testing.T) {
+	payload, err := DecodeMallWeatherExportTaskPayload([]byte(`{"export_job_id":17}`))
+	if err != nil || payload.ExportJobID != 17 {
+		t.Fatalf("DecodeMallWeatherExportTaskPayload() payload=%+v error=%v", payload, err)
+	}
+	for _, invalid := range [][]byte{
+		[]byte(`{"export_job_id":0}`),
+		[]byte(`{"export_job_id":17,"secret":"x"}`),
+		[]byte(`{"export_job_id":17}{}`),
+	} {
+		if _, err := DecodeMallWeatherExportTaskPayload(invalid); err == nil {
+			t.Fatalf("DecodeMallWeatherExportTaskPayload(%s) accepted invalid payload", invalid)
+		}
+	}
+}
+
 func TestNewMallWeatherTaskRejectsInvalidPayload(t *testing.T) {
 	tests := []struct {
 		name     string

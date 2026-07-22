@@ -68,6 +68,9 @@ func setupQueueJob() {
 			console.Exit("Mall Weather Scheduler Worker Init Failed %v", err)
 		}
 		mux.HandleFunc(job.TypeMallWeatherSchedule, newMallWeatherScheduleHandler(schedulePlanner))
+
+		exportProcessor := data_svc.NewMallWeatherExportProcessor()
+		mux.HandleFunc(job.TypeMallWeatherExport, newMallWeatherExportHandler(exportProcessor))
 	}
 
 	go func(mux *asynq.ServeMux, server *asynq.Server) {
@@ -97,6 +100,10 @@ type mallWeatherProcessor interface {
 
 type mallWeatherSchedulePlanner interface {
 	Plan(ctx context.Context, payload job.MallWeatherSchedulePayload) error
+}
+
+type mallWeatherExportProcessor interface {
+	Process(ctx context.Context, jobID uint, retryAllowed bool) error
 }
 
 func newMallGeocodeHandler(processor mallGeocodeProcessor) asynq.HandlerFunc {
@@ -156,6 +163,34 @@ func newMallWeatherScheduleHandler(planner mallWeatherSchedulePlanner) asynq.Han
 		}
 		return planner.Plan(ctx, payload)
 	}
+}
+
+func newMallWeatherExportHandler(processor mallWeatherExportProcessor) asynq.HandlerFunc {
+	return func(ctx context.Context, task *asynq.Task) error {
+		if processor == nil {
+			return fmt.Errorf("mall weather export handler: processor is not configured")
+		}
+		if task == nil || task.Type() != job.TypeMallWeatherExport {
+			return fmt.Errorf("%w: invalid mall weather export task", asynq.SkipRetry)
+		}
+		payload, err := job.DecodeMallWeatherExportTaskPayload(task.Payload())
+		if err != nil {
+			return fmt.Errorf("%w: %v", asynq.SkipRetry, err)
+		}
+		if err := processor.Process(ctx, payload.ExportJobID, mallWeatherExportRetryAllowed(ctx)); err != nil {
+			if errors.Is(err, data_svc.ErrMallWeatherExportProcessNonRetryable) {
+				return fmt.Errorf("%w: %v", asynq.SkipRetry, err)
+			}
+			return err
+		}
+		return nil
+	}
+}
+
+func mallWeatherExportRetryAllowed(ctx context.Context) bool {
+	retryCount, retryOK := asynq.GetRetryCount(ctx)
+	maxRetry, maxOK := asynq.GetMaxRetry(ctx)
+	return !retryOK || !maxOK || retryCount < maxRetry
 }
 
 // addQueueJob 添加异步队列任务

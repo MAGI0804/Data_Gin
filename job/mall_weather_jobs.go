@@ -40,6 +40,8 @@ var mallWeatherTaskTypes = []string{
 	TypeMallWeatherFeishu,
 }
 
+const mallWeatherExportTaskTimeout = 6 * time.Hour
+
 var mallWeatherFetchTaskTypes = []string{
 	TypeMallWeatherFast,
 	TypeMallWeatherFull,
@@ -235,12 +237,8 @@ func NewMallWeatherTask(taskType string, payload []byte) (*asynq.Task, error) {
 			return nil, err
 		}
 	case TypeMallWeatherExport:
-		var decoded MallWeatherExportTaskPayload
-		if err := decodeStrictTaskPayload(payload, &decoded); err != nil {
+		if _, err := DecodeMallWeatherExportTaskPayload(payload); err != nil {
 			return nil, err
-		}
-		if decoded.ExportJobID == 0 {
-			return nil, fmt.Errorf("mall weather task: export_job_id is required")
 		}
 	case TypeMallWeatherFeishu:
 		var decoded MallWeatherFeishuTaskPayload
@@ -252,7 +250,22 @@ func NewMallWeatherTask(taskType string, payload []byte) (*asynq.Task, error) {
 		}
 	}
 
-	return asynq.NewTask(taskType, append([]byte(nil), payload...), asynq.Queue(queue)), nil
+	options := []asynq.Option{asynq.Queue(queue)}
+	if taskType == TypeMallWeatherExport {
+		options = append(options, asynq.Timeout(mallWeatherExportTaskTimeout))
+	}
+	return asynq.NewTask(taskType, append([]byte(nil), payload...), options...), nil
+}
+
+func DecodeMallWeatherExportTaskPayload(payload []byte) (MallWeatherExportTaskPayload, error) {
+	var decoded MallWeatherExportTaskPayload
+	if err := decodeStrictTaskPayload(payload, &decoded); err != nil {
+		return MallWeatherExportTaskPayload{}, err
+	}
+	if decoded.ExportJobID == 0 {
+		return MallWeatherExportTaskPayload{}, fmt.Errorf("mall weather task: export_job_id is required")
+	}
+	return decoded, nil
 }
 
 func DecodeMallWeatherTaskPayload(taskType string, payload []byte) (MallTaskPayload, error) {
