@@ -231,6 +231,9 @@ func (store *gormMallWeatherTaskStore) Fail(ctx context.Context, execution *mall
 		if err := dao.UpdateFetchRun(ctx, run.ID, runUpdates); err != nil {
 			return err
 		}
+		if _, err := dao.MarkLatestStaleForEndpoint(ctx, execution.Mall.ID, execution.Run.EndpointKind, attempt.StartedAt); err != nil {
+			return err
+		}
 		return data_dao.NewMallDAO(tx).AdvanceLastWeatherErrorAt(ctx, execution.Mall.ID, failure.FinishedAt)
 	})
 }
@@ -247,7 +250,7 @@ func (store *gormMallWeatherTaskStore) Persist(ctx context.Context, execution *m
 			return err
 		}
 		dao := data_dao.NewMallWeatherDAO(tx)
-		checksumConflicts, err := persistWeatherModelRows(ctx, dao, execution.Mall.ID, batch)
+		checksumConflicts, err := persistWeatherModelRows(ctx, dao, execution.Mall.ID, attempt.StartedAt, batch)
 		if err != nil {
 			return err
 		}
@@ -283,7 +286,7 @@ func (store *gormMallWeatherTaskStore) Persist(ctx context.Context, execution *m
 	})
 }
 
-func persistWeatherModelRows(ctx context.Context, dao *data_dao.MallWeatherDAO, mallID uint, batch *mallWeatherModelBatch) (int64, error) {
+func persistWeatherModelRows(ctx context.Context, dao *data_dao.MallWeatherDAO, mallID uint, staleObservedBefore time.Time, batch *mallWeatherModelBatch) (int64, error) {
 	var checksumConflicts int64
 	if batch.Forecasts != nil {
 		if batch.Forecasts.Realtime != nil {
@@ -335,6 +338,11 @@ func persistWeatherModelRows(ctx context.Context, dao *data_dao.MallWeatherDAO, 
 	}
 	if _, err := dao.RefreshLatest(ctx, weatherLatestSources(batch)); err != nil {
 		return 0, err
+	}
+	if len(batch.StaleLatest.DataKinds)+len(batch.StaleLatest.LifeSourceAPIs) > 0 {
+		if _, err := dao.MarkLatestStale(ctx, mallID, batch.StaleLatest, staleObservedBefore); err != nil {
+			return 0, err
+		}
 	}
 	return checksumConflicts, nil
 }

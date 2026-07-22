@@ -97,6 +97,7 @@ type mallWeatherModelBatch struct {
 	Daily              *weatherdomain.DailyModelBatch
 	Alerts             *weatherdomain.AlertModelBatch
 	LifeIndices        *weatherdomain.LifeIndexModelBatch
+	StaleLatest        data_dao.MallWeatherLatestStaleScope
 	ParseWarningsJSON  model.JSONText
 	RowCountsJSON      model.JSONText
 	FinishedAt         time.Time
@@ -427,29 +428,57 @@ func parseMallWeatherBatch(endpointKind string, raw []byte, metadata weatherdoma
 		return nil, err
 	}
 	moduleWarnings := make([]caiyun.ParseWarning, 0, 4)
+	staleLatest := data_dao.MallWeatherLatestStaleScope{}
 	partial := false
-	minutely, err := caiyun.ParseMinutelyV26(weatherBundle)
-	if err != nil {
+	realtimeFailed := weatherBundle.Realtime.Status != "ok"
+	if realtimeFailed {
 		partial = true
-		moduleWarnings = append(moduleWarnings, caiyun.ParseWarning{Code: "MODULE_PARSE_FAILED", Path: "result.minutely"})
+		staleLatest.DataKinds = append(staleLatest.DataKinds, model.MallWeatherDataKindRealtime)
+	}
+	minutely, err := caiyun.ParseMinutelyV26(weatherBundle)
+	if err != nil || minutely == nil || minutely.Status != "ok" {
+		partial = true
+		staleLatest.DataKinds = append(staleLatest.DataKinds, model.MallWeatherDataKindMinutely)
+		if err != nil || minutely == nil {
+			moduleWarnings = append(moduleWarnings, caiyun.ParseWarning{Code: "MODULE_PARSE_FAILED", Path: "result.minutely"})
+		} else {
+			moduleWarnings = append(moduleWarnings, caiyun.ParseWarning{Code: "MODULE_STATUS_NOT_OK", Path: "result.minutely.status"})
+		}
 		minutely = nil
 	}
 	hourly, err := caiyun.ParseHourlyV26(weatherBundle)
-	if err != nil {
+	if err != nil || hourly == nil || hourly.Status != "ok" {
 		partial = true
-		moduleWarnings = append(moduleWarnings, caiyun.ParseWarning{Code: "MODULE_PARSE_FAILED", Path: "result.hourly"})
+		staleLatest.DataKinds = append(staleLatest.DataKinds, model.MallWeatherDataKindHourly)
+		if err != nil || hourly == nil {
+			moduleWarnings = append(moduleWarnings, caiyun.ParseWarning{Code: "MODULE_PARSE_FAILED", Path: "result.hourly"})
+		} else {
+			moduleWarnings = append(moduleWarnings, caiyun.ParseWarning{Code: "MODULE_STATUS_NOT_OK", Path: "result.hourly.status"})
+		}
 		hourly = nil
 	}
 	daily, err := caiyun.ParseDailyV26(weatherBundle)
-	if err != nil {
+	if err != nil || daily == nil || daily.Status != "ok" {
 		partial = true
-		moduleWarnings = append(moduleWarnings, caiyun.ParseWarning{Code: "MODULE_PARSE_FAILED", Path: "result.daily"})
+		staleLatest.DataKinds = append(staleLatest.DataKinds, model.MallWeatherDataKindDaily)
+		staleLatest.LifeSourceAPIs = append(staleLatest.LifeSourceAPIs, weatherdomain.SourceAPIV26Daily)
+		if err != nil || daily == nil {
+			moduleWarnings = append(moduleWarnings, caiyun.ParseWarning{Code: "MODULE_PARSE_FAILED", Path: "result.daily"})
+		} else {
+			moduleWarnings = append(moduleWarnings, caiyun.ParseWarning{Code: "MODULE_STATUS_NOT_OK", Path: "result.daily.status"})
+		}
 		daily = nil
 	}
 	alerts, err := caiyun.ParseAlertsV26(weatherBundle)
-	if err != nil {
+	if err != nil || alerts == nil || alerts.Status != "ok" || (alerts.RequestStatus != "" && alerts.RequestStatus != "ok") {
 		partial = true
-		moduleWarnings = append(moduleWarnings, caiyun.ParseWarning{Code: "MODULE_PARSE_FAILED", Path: "result.alert"})
+		if err != nil || alerts == nil {
+			moduleWarnings = append(moduleWarnings, caiyun.ParseWarning{Code: "MODULE_PARSE_FAILED", Path: "result.alert"})
+		} else if alerts.Status != "ok" {
+			moduleWarnings = append(moduleWarnings, caiyun.ParseWarning{Code: "MODULE_STATUS_NOT_OK", Path: "result.alert.status"})
+		} else {
+			moduleWarnings = append(moduleWarnings, caiyun.ParseWarning{Code: "REQUEST_STATUS_NOT_OK", Path: "result.alert.request_status"})
+		}
 		alerts = nil
 	}
 
@@ -458,6 +487,9 @@ func parseMallWeatherBatch(endpointKind string, raw []byte, metadata weatherdoma
 	})
 	if err != nil {
 		return nil, err
+	}
+	if realtimeFailed {
+		forecastBatch.Realtime = nil
 	}
 	var dailyBatch *weatherdomain.DailyModelBatch
 	if daily != nil {
@@ -485,12 +517,20 @@ func parseMallWeatherBatch(endpointKind string, raw []byte, metadata weatherdoma
 		return nil, err
 	}
 	warnings = deduplicateWarnings(append(warnings, moduleWarnings...))
+	if realtimeFailed {
+		counts[model.MallWeatherDataKindRealtime] = 0
+	}
 	status := weatherFetchStatusSuccess
 	if partial || warningsRequirePartial(warnings) {
 		status = weatherFetchStatusPartialSuccess
 	}
 	serverTime := weatherBundle.Metadata.ServerTimeUTC.UTC()
-	return newMallWeatherModelBatch(endpointKind, status, weatherParserVersionV26, forecastBatch, dailyBatch, alertBatch, nil, warnings, counts, finishedAt, &serverTime)
+	batch, err := newMallWeatherModelBatch(endpointKind, status, weatherParserVersionV26, forecastBatch, dailyBatch, alertBatch, nil, warnings, counts, finishedAt, &serverTime)
+	if err != nil {
+		return nil, err
+	}
+	batch.StaleLatest = staleLatest
+	return batch, nil
 }
 
 func newMallWeatherModelBatch(

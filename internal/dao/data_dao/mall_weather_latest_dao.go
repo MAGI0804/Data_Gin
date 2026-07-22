@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"sort"
 	"strconv"
+	"strings"
 	"time"
 
 	"gin-biz-web-api/connector/caiyun"
@@ -29,6 +30,11 @@ type MallWeatherLatestSources struct {
 	Hourly      []model.MallWeatherHourly
 	Daily       []model.MallWeatherDaily
 	LifeIndices []model.MallWeatherLifeIndex
+}
+
+type MallWeatherLatestStaleScope struct {
+	DataKinds      []string
+	LifeSourceAPIs []string
 }
 
 func (dao *MallWeatherDAO) RefreshLatest(ctx context.Context, sources MallWeatherLatestSources) (UpsertResult, error) {
@@ -103,17 +109,41 @@ func (dao *MallWeatherDAO) ReconcileLatestFreshness(ctx context.Context, now tim
 	return affected, nil
 }
 
-func (dao *MallWeatherDAO) MarkLatestStaleForEndpoint(ctx context.Context, mallID uint, endpointKind string) (int64, error) {
-	if dao == nil || dao.db == nil || ctx == nil || mallID == 0 {
+func (dao *MallWeatherDAO) MarkLatestStaleForEndpoint(ctx context.Context, mallID uint, endpointKind string, observedBefore time.Time) (int64, error) {
+	if dao == nil || dao.db == nil || ctx == nil || mallID == 0 || observedBefore.IsZero() {
 		return 0, fmt.Errorf("mall weather: invalid latest stale input")
 	}
-	predicate, args, err := latestEndpointPredicate(endpointKind)
+	var scope MallWeatherLatestStaleScope
+	switch endpointKind {
+	case caiyun.EndpointWeatherV26:
+		scope = MallWeatherLatestStaleScope{
+			DataKinds: []string{
+				model.MallWeatherDataKindRealtime,
+				model.MallWeatherDataKindMinutely,
+				model.MallWeatherDataKindHourly,
+				model.MallWeatherDataKindDaily,
+			},
+			LifeSourceAPIs: []string{weatherdomain.SourceAPIV26Daily},
+		}
+	case caiyun.EndpointLifeIndexV3:
+		scope = MallWeatherLatestStaleScope{LifeSourceAPIs: []string{weatherdomain.SourceAPIV3LifeIndex}}
+	default:
+		return 0, fmt.Errorf("mall weather: unsupported stale endpoint")
+	}
+	return dao.MarkLatestStale(ctx, mallID, scope, observedBefore)
+}
+
+func (dao *MallWeatherDAO) MarkLatestStale(ctx context.Context, mallID uint, scope MallWeatherLatestStaleScope, observedBefore time.Time) (int64, error) {
+	if dao == nil || dao.db == nil || ctx == nil || mallID == 0 || observedBefore.IsZero() {
+		return 0, fmt.Errorf("mall weather: invalid latest stale input")
+	}
+	predicate, args, err := latestStaleScopePredicate(scope)
 	if err != nil {
 		return 0, err
 	}
 	result := dao.db.WithContext(ctx).
 		Model(&model.MallWeatherLatest{}).
-		Where("mall_id = ? AND freshness_status <> ?", mallID, model.MallWeatherFreshnessStale).
+		Where("mall_id = ? AND freshness_status <> ? AND fetched_at_utc <= ?", mallID, model.MallWeatherFreshnessStale, observedBefore.UTC()).
 		Where(predicate, args...).
 		Update("freshness_status", model.MallWeatherFreshnessStale)
 	if result.Error != nil {
@@ -147,27 +177,49 @@ func buildLatestFreshnessPlans(now time.Time) ([]latestFreshnessPlan, error) {
 	return plans, nil
 }
 
-func latestEndpointPredicate(endpointKind string) (string, []interface{}, error) {
-	switch endpointKind {
-	case caiyun.EndpointWeatherV26:
-		return "(data_kind IN ? OR (data_kind = ? AND subtype LIKE ?))", []interface{}{
-			[]string{
-				model.MallWeatherDataKindRealtime,
-				model.MallWeatherDataKindMinutely,
-				model.MallWeatherDataKindHourly,
-				model.MallWeatherDataKindDaily,
-			},
-			model.MallWeatherDataKindLife,
-			weatherdomain.SourceAPIV26Daily + ":%",
-		}, nil
-	case caiyun.EndpointLifeIndexV3:
-		return "data_kind = ? AND subtype LIKE ?", []interface{}{
-			model.MallWeatherDataKindLife,
-			weatherdomain.SourceAPIV3LifeIndex + ":%",
-		}, nil
-	default:
-		return "", nil, fmt.Errorf("mall weather: unsupported stale endpoint")
+func latestStaleScopePredicate(scope MallWeatherLatestStaleScope) (string, []interface{}, error) {
+	allowedKinds := map[string]struct{}{
+		model.MallWeatherDataKindRealtime: {},
+		model.MallWeatherDataKindMinutely: {},
+		model.MallWeatherDataKindHourly:   {},
+		model.MallWeatherDataKindDaily:    {},
 	}
+	allowedLifeSources := map[string]struct{}{
+		weatherdomain.SourceAPIV26Daily:    {},
+		weatherdomain.SourceAPIV3LifeIndex: {},
+	}
+	kinds := uniqueAllowedLatestScopeValues(scope.DataKinds, allowedKinds)
+	lifeSources := uniqueAllowedLatestScopeValues(scope.LifeSourceAPIs, allowedLifeSources)
+	if kinds == nil || lifeSources == nil || len(kinds)+len(lifeSources) == 0 {
+		return "", nil, fmt.Errorf("mall weather: invalid latest stale scope")
+	}
+	conditions := make([]string, 0, 1+len(lifeSources))
+	args := make([]interface{}, 0, 1+2*len(lifeSources))
+	if len(kinds) > 0 {
+		conditions = append(conditions, "data_kind IN ?")
+		args = append(args, kinds)
+	}
+	for _, sourceAPI := range lifeSources {
+		conditions = append(conditions, "(data_kind = ? AND subtype LIKE ?)")
+		args = append(args, model.MallWeatherDataKindLife, sourceAPI+":%")
+	}
+	return "(" + strings.Join(conditions, " OR ") + ")", args, nil
+}
+
+func uniqueAllowedLatestScopeValues(values []string, allowed map[string]struct{}) []string {
+	unique := make(map[string]struct{}, len(values))
+	for _, value := range values {
+		if _, ok := allowed[value]; !ok {
+			return nil
+		}
+		unique[value] = struct{}{}
+	}
+	result := make([]string, 0, len(unique))
+	for value := range unique {
+		result = append(result, value)
+	}
+	sort.Strings(result)
+	return result
 }
 
 func appendResolvedLatest[T any](

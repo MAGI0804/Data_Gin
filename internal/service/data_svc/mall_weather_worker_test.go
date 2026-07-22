@@ -2,6 +2,7 @@ package data_svc
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"os"
 	"reflect"
@@ -104,9 +105,52 @@ func TestMallWeatherProcessorPersistsAvailableV26ModulesAsPartialSuccess(t *test
 		store.batch.Forecasts == nil || store.batch.Forecasts.Realtime == nil {
 		t.Fatalf("batch=%+v", store.batch)
 	}
+	if !reflect.DeepEqual(store.batch.StaleLatest.DataKinds, []string{
+		model.MallWeatherDataKindMinutely,
+		model.MallWeatherDataKindHourly,
+		model.MallWeatherDataKindDaily,
+	}) || !reflect.DeepEqual(store.batch.StaleLatest.LifeSourceAPIs, []string{weatherdomain.SourceAPIV26Daily}) {
+		t.Fatalf("stale latest=%+v", store.batch.StaleLatest)
+	}
 	if provider.weatherRequest.HourlySteps != 24 || provider.weatherRequest.DailySteps != 1 ||
 		provider.weatherRequest.Unit != "metric:v2" || !provider.weatherRequest.Alert {
 		t.Fatalf("request=%+v", provider.weatherRequest)
+	}
+}
+
+func TestParseMallWeatherBatchDoesNotPersistFailedRealtimeModule(t *testing.T) {
+	raw := readMallWeatherFixture(t, "../../../connector/caiyun/testdata/weather_v26_realtime.json")
+	var payload map[string]interface{}
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		t.Fatalf("decode fixture: %v", err)
+	}
+	result, ok := payload["result"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("fixture result=%T", payload["result"])
+	}
+	realtime, ok := result["realtime"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("fixture realtime=%T", result["realtime"])
+	}
+	realtime["status"] = "failed"
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("encode fixture: %v", err)
+	}
+	finishedAt := time.Date(2026, 7, 22, 3, 5, 0, 0, time.UTC)
+	batch, err := parseMallWeatherBatch(caiyun.EndpointWeatherV26, raw, weatherdomain.MappingMetadata{
+		MallID: 7, FetchRunID: 11, FetchedAtUTC: finishedAt, RawChecksum: "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa",
+	}, finishedAt)
+	if err != nil {
+		t.Fatalf("parseMallWeatherBatch() error=%v", err)
+	}
+	if batch.Forecasts == nil || batch.Forecasts.Realtime != nil || batch.Status != weatherFetchStatusPartialSuccess ||
+		len(batch.StaleLatest.DataKinds) != 4 || batch.StaleLatest.DataKinds[0] != model.MallWeatherDataKindRealtime {
+		t.Fatalf("batch=%+v", batch)
+	}
+	var counts map[string]int
+	if err := json.Unmarshal([]byte(batch.RowCountsJSON), &counts); err != nil || counts[model.MallWeatherDataKindRealtime] != 0 {
+		t.Fatalf("counts=%s error=%v", batch.RowCountsJSON, err)
 	}
 }
 

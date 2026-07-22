@@ -6,7 +6,6 @@ import (
 	"testing"
 	"time"
 
-	"gin-biz-web-api/connector/caiyun"
 	weatherdomain "gin-biz-web-api/internal/weather"
 	"gin-biz-web-api/model"
 
@@ -100,40 +99,47 @@ func TestBuildLatestFreshnessPlansUsesSharedThresholds(t *testing.T) {
 	}
 }
 
-func TestLatestEndpointPredicateScopesProviderModules(t *testing.T) {
+func TestLatestStaleScopePredicateScopesProviderModules(t *testing.T) {
 	tests := []struct {
 		name        string
-		endpoint    string
+		scope       MallWeatherLatestStaleScope
 		wantSQL     string
 		wantArgs    []interface{}
 		wantFailure bool
 	}{
 		{
-			name: "v26 weather and basic life indices", endpoint: caiyun.EndpointWeatherV26,
+			name: "selected weather and basic life indices",
+			scope: MallWeatherLatestStaleScope{
+				DataKinds:      []string{model.MallWeatherDataKindRealtime, model.MallWeatherDataKindMinutely},
+				LifeSourceAPIs: []string{weatherdomain.SourceAPIV26Daily},
+			},
 			wantSQL: "(data_kind IN ? OR (data_kind = ? AND subtype LIKE ?))",
 			wantArgs: []interface{}{
-				[]string{model.MallWeatherDataKindRealtime, model.MallWeatherDataKindMinutely, model.MallWeatherDataKindHourly, model.MallWeatherDataKindDaily},
+				[]string{model.MallWeatherDataKindMinutely, model.MallWeatherDataKindRealtime},
 				model.MallWeatherDataKindLife, weatherdomain.SourceAPIV26Daily + ":%",
 			},
 		},
 		{
-			name: "v3 rich life indices", endpoint: caiyun.EndpointLifeIndexV3,
-			wantSQL:  "data_kind = ? AND subtype LIKE ?",
+			name:     "v3 rich life indices",
+			scope:    MallWeatherLatestStaleScope{LifeSourceAPIs: []string{weatherdomain.SourceAPIV3LifeIndex}},
+			wantSQL:  "((data_kind = ? AND subtype LIKE ?))",
 			wantArgs: []interface{}{model.MallWeatherDataKindLife, weatherdomain.SourceAPIV3LifeIndex + ":%"},
 		},
-		{name: "unknown endpoint", endpoint: "v4", wantFailure: true},
+		{name: "empty scope", wantFailure: true},
+		{name: "unknown data kind", scope: MallWeatherLatestStaleScope{DataKinds: []string{"alerts"}}, wantFailure: true},
+		{name: "unknown life source", scope: MallWeatherLatestStaleScope{LifeSourceAPIs: []string{"v4"}}, wantFailure: true},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			gotSQL, gotArgs, err := latestEndpointPredicate(test.endpoint)
+			gotSQL, gotArgs, err := latestStaleScopePredicate(test.scope)
 			if test.wantFailure {
 				if err == nil {
-					t.Fatal("latestEndpointPredicate() accepted unsupported endpoint")
+					t.Fatal("latestStaleScopePredicate() accepted invalid scope")
 				}
 				return
 			}
 			if err != nil {
-				t.Fatalf("latestEndpointPredicate() error=%v", err)
+				t.Fatalf("latestStaleScopePredicate() error=%v", err)
 			}
 			if gotSQL != test.wantSQL || !reflect.DeepEqual(gotArgs, test.wantArgs) {
 				t.Fatalf("predicate=(%q, %#v) want=(%q, %#v)", gotSQL, gotArgs, test.wantSQL, test.wantArgs)
