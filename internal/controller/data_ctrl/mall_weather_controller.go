@@ -26,6 +26,7 @@ type MallWeatherQueryService interface {
 	Hourly(context.Context, uint, uint, requestbody.MallWeatherHourlyQueryRequest) (*data_svc.MallWeatherHourlyResult, error)
 	Daily(context.Context, uint, uint, requestbody.MallWeatherDailyQueryRequest) (*data_svc.MallWeatherDailyResult, error)
 	Alerts(context.Context, uint, uint, requestbody.MallWeatherAlertQueryRequest) (*data_svc.MallWeatherAlertResult, error)
+	LifeIndices(context.Context, uint, uint, requestbody.MallWeatherLifeIndexQueryRequest) (*data_svc.MallWeatherLifeIndexResult, error)
 }
 
 type MallWeatherController struct {
@@ -157,6 +158,25 @@ func (controller *MallWeatherController) Alerts(c *gin.Context) {
 	responses.New(c).ToResponseWithStatus(http.StatusOK, result)
 }
 
+func (controller *MallWeatherController) LifeIndices(c *gin.Context) {
+	mallID, err := parseMallUint(c.Param("id"), "mall id")
+	if err != nil {
+		writeMallWeatherError(c, err)
+		return
+	}
+	request, err := parseMallWeatherLifeIndexRequest(c)
+	if err != nil {
+		writeMallWeatherError(c, err)
+		return
+	}
+	result, err := controller.service.LifeIndices(c.Request.Context(), auth.CurrentUserID(c), mallID, request)
+	if err != nil {
+		writeMallWeatherError(c, err)
+		return
+	}
+	responses.New(c).ToResponseWithStatus(http.StatusOK, result)
+}
+
 func parseMallWeatherRealtimeRequest(c *gin.Context) (requestbody.MallWeatherRealtimeQueryRequest, error) {
 	shared, err := parseMallWeatherTimeSeriesRequest(c)
 	if err != nil {
@@ -211,6 +231,18 @@ func parseMallWeatherAlertRequest(c *gin.Context) (requestbody.MallWeatherAlertQ
 		return requestbody.MallWeatherAlertQueryRequest{}, err
 	}
 	return requestbody.MallWeatherAlertQueryRequest{
+		StartUTC: shared.StartUTC, EndUTC: shared.EndUTC, TimeZone: shared.TimeZone,
+		Latest: shared.Latest, AsOfUTC: shared.AsOfUTC, QualityStatus: shared.QualityStatus,
+		Cursor: shared.Cursor, PageSize: shared.PageSize,
+	}, nil
+}
+
+func parseMallWeatherLifeIndexRequest(c *gin.Context) (requestbody.MallWeatherLifeIndexQueryRequest, error) {
+	shared, err := parseMallWeatherTimeSeriesRequest(c)
+	if err != nil {
+		return requestbody.MallWeatherLifeIndexQueryRequest{}, err
+	}
+	return requestbody.MallWeatherLifeIndexQueryRequest{
 		StartUTC: shared.StartUTC, EndUTC: shared.EndUTC, TimeZone: shared.TimeZone,
 		Latest: shared.Latest, AsOfUTC: shared.AsOfUTC, QualityStatus: shared.QualityStatus,
 		Cursor: shared.Cursor, PageSize: shared.PageSize,
