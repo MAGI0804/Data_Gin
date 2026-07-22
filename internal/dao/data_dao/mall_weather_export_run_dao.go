@@ -268,7 +268,7 @@ func (dao *MallWeatherExportJobDAO) MarkRunSucceeded(
 		fileSizeBytes <= 0 || finishedAt.IsZero() || !expiresAt.After(finishedAt) {
 		return fmt.Errorf("mall weather export run: invalid success update")
 	}
-	return dao.finishOwnedRun(ctx, jobID, runToken, map[string]interface{}{
+	return dao.finishOwnedActiveRun(ctx, jobID, runToken, map[string]interface{}{
 		"status":             "succeeded",
 		"result_object_key":  resultObjectKey,
 		"result_checksum":    resultChecksum,
@@ -359,13 +359,34 @@ func (dao *MallWeatherExportJobDAO) ownedRunQuery(
 		Where("JSON_UNQUOTE(JSON_EXTRACT(last_cursor_json, '$.runToken')) = ?", runToken)
 }
 
+func (dao *MallWeatherExportJobDAO) ownedActiveRunQuery(
+	ctx context.Context,
+	jobID uint,
+	runToken string,
+) *gorm.DB {
+	return dao.ownedRunQuery(ctx, jobID, runToken).Where("cancel_requested = ?", false)
+}
+
 func (dao *MallWeatherExportJobDAO) finishOwnedRun(
 	ctx context.Context,
 	jobID uint,
 	runToken string,
 	updates map[string]interface{},
 ) error {
-	result := dao.ownedRunQuery(ctx, jobID, runToken).Updates(updates)
+	return finishMallWeatherExportRun(dao.ownedRunQuery(ctx, jobID, runToken), updates)
+}
+
+func (dao *MallWeatherExportJobDAO) finishOwnedActiveRun(
+	ctx context.Context,
+	jobID uint,
+	runToken string,
+	updates map[string]interface{},
+) error {
+	return finishMallWeatherExportRun(dao.ownedActiveRunQuery(ctx, jobID, runToken), updates)
+}
+
+func finishMallWeatherExportRun(query *gorm.DB, updates map[string]interface{}) error {
+	result := query.Updates(updates)
 	if result.Error != nil {
 		return fmt.Errorf("mall weather export run: finish: %w", result.Error)
 	}

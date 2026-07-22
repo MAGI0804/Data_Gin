@@ -100,6 +100,21 @@ func TestMallWeatherExportRunOwnershipQueryBindsToken(t *testing.T) {
 	}
 }
 
+func TestMallWeatherExportRunSuccessQueryRejectsCancellation(t *testing.T) {
+	token := uuid.NewString()
+	dao := NewMallWeatherExportJobDAO(dryRunWeatherDAOTestDB(t))
+	dao.db = dao.db.Session(&gorm.Session{SkipDefaultTransaction: true})
+	query := dao.ownedActiveRunQuery(t.Context(), 17, token).
+		Update("updated_at", time.Date(2026, 7, 22, 8, 0, 0, 0, time.UTC))
+	if query.Error != nil {
+		t.Fatalf("ownedActiveRunQuery() error=%v", query.Error)
+	}
+	statement := query.Statement.SQL.String()
+	if !strings.Contains(statement, "cancel_requested = ?") || strings.Contains(statement, token) {
+		t.Fatalf("active ownership statement is not cancellation-safe: %s", statement)
+	}
+}
+
 func TestMallWeatherExportRunTerminalInputValidation(t *testing.T) {
 	dao := &MallWeatherExportJobDAO{}
 	now := time.Now().UTC()
