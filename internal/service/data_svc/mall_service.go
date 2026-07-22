@@ -29,6 +29,7 @@ const (
 	PermissionMallRead            = "mall.read"
 	PermissionMallWrite           = "mall.write"
 	PermissionMallGeocodeConfirm  = "mall.geocode.confirm"
+	PermissionWeatherRead         = "weather.read"
 	PermissionWeatherRefresh      = "weather.refresh"
 	PermissionWeatherConfigManage = "weather.config.manage"
 

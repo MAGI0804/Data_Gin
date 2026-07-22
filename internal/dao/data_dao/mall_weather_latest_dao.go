@@ -2,6 +2,7 @@ package data_dao
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sort"
 	"strconv"
@@ -17,6 +18,8 @@ import (
 )
 
 const weatherLatestTimeLayout = "20060102T150405.000Z"
+
+var ErrMallWeatherLatestNotFound = errors.New("mall weather: latest pointer not found")
 
 type latestFreshnessPlan struct {
 	DataKind       string
@@ -70,6 +73,29 @@ func (dao *MallWeatherDAO) RefreshLatest(ctx context.Context, sources MallWeathe
 		return UpsertResult{}, err
 	}
 	return dao.UpsertLatest(ctx, latest)
+}
+
+func (dao *MallWeatherDAO) FindCurrentLatest(ctx context.Context, mallID uint, dataKind string) (*model.MallWeatherLatest, error) {
+	if dao == nil || dao.db == nil || ctx == nil || mallID == 0 {
+		return nil, fmt.Errorf("mall weather: invalid latest lookup")
+	}
+	if _, err := weatherdomain.FreshnessThresholdsForKind(dataKind); err != nil {
+		return nil, err
+	}
+	var row model.MallWeatherLatest
+	err := dao.db.WithContext(ctx).
+		Where("mall_id = ? AND data_kind = ?", mallID, dataKind).
+		Order("fetched_at_utc DESC").
+		Order("issued_at_utc DESC").
+		Order("id DESC").
+		First(&row).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, ErrMallWeatherLatestNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("mall weather: find current latest pointer: %w", err)
+	}
+	return &row, nil
 }
 
 func (dao *MallWeatherDAO) ReconcileLatestFreshness(ctx context.Context, now time.Time) (int64, error) {
