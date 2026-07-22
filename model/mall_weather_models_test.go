@@ -20,6 +20,7 @@ func TestMallWeatherModelSchemas(t *testing.T) {
 		{"mall", &Mall{}, "malls"},
 		{"geocode run", &MallGeocodeRun{}, "mall_geocode_runs"},
 		{"geocode candidate", &MallGeocodeCandidate{}, "mall_geocode_candidates"},
+		{"coordinate audit", &MallCoordinateAudit{}, "mall_coordinate_audits"},
 		{"raw snapshot", &ProviderRawSnapshot{}, "provider_raw_snapshots"},
 		{"fetch run", &MallWeatherFetchRun{}, "mall_weather_fetch_runs"},
 		{"fetch attempt", &MallWeatherFetchAttempt{}, "mall_weather_fetch_attempts"},

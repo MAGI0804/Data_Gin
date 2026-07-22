@@ -9,6 +9,7 @@ import (
 	"gin-biz-web-api/pkg/database"
 
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 var (
@@ -51,8 +52,20 @@ func (dao *MallDAO) Create(ctx context.Context, mall *model.Mall) error {
 }
 
 func (dao *MallDAO) FindByID(ctx context.Context, id uint) (*model.Mall, error) {
+	return dao.findByID(ctx, id, false)
+}
+
+func (dao *MallDAO) FindByIDForUpdate(ctx context.Context, id uint) (*model.Mall, error) {
+	return dao.findByID(ctx, id, true)
+}
+
+func (dao *MallDAO) findByID(ctx context.Context, id uint, forUpdate bool) (*model.Mall, error) {
 	var mall model.Mall
-	err := dao.db.WithContext(ctx).First(&mall, id).Error
+	query := dao.db.WithContext(ctx)
+	if forUpdate {
+		query = query.Clauses(clause.Locking{Strength: "UPDATE"})
+	}
+	err := query.First(&mall, id).Error
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return nil, ErrMallNotFound
 	}

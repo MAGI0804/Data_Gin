@@ -204,5 +204,8 @@ func registerMallRoutes(api *gin.RouterGroup, mallCtrl *data_ctrl.MallController
 		mallGroup.GET("/:id", mallCtrl.Get)
 		mallGroup.PATCH("/:id", mallCtrl.Update)
 		mallGroup.DELETE("/:id", mallCtrl.Delete)
+		mallGroup.POST("/:id/geocode", mallCtrl.TriggerGeocode)
+		mallGroup.GET("/:id/geocode-candidates", mallCtrl.ListGeocodeCandidates)
+		mallGroup.POST("/:id/geocode-confirm", mallCtrl.ConfirmGeocode)
 	}
 }

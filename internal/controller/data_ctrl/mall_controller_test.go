@@ -99,6 +99,7 @@ func TestMallControllerMapsServiceErrorsWithoutLeakingDetails(t *testing.T) {
 	}{
 		{name: "forbidden", err: data_svc.ErrMallForbidden, wantStatus: http.StatusForbidden},
 		{name: "not found", err: data_dao.ErrMallNotFound, wantStatus: http.StatusNotFound},
+		{name: "candidate not found", err: data_dao.ErrMallGeocodeCandidateNotFound, wantStatus: http.StatusNotFound},
 		{name: "version conflict", err: data_dao.ErrMallVersionConflict, wantStatus: http.StatusConflict},
 		{name: "invalid", err: data_svc.ErrMallInvalidInput, wantStatus: http.StatusUnprocessableEntity},
 		{name: "internal", err: errors.New("database password=secret unavailable"), wantStatus: http.StatusInternalServerError},
@@ -181,6 +182,54 @@ func TestMallControllerRejectsInvalidPathAndQueryValues(t *testing.T) {
 	}
 }
 
+func TestMallControllerGeocodeContractsUseJWTActor(t *testing.T) {
+	candidateID := uint(987)
+	service := &fakeMallService{
+		triggerGeocode: func(_ context.Context, actor, mallID uint, version uint64) (*data_svc.MallGeocodeTriggerResult, error) {
+			if actor != 17 || mallID != 9 || version != 4 {
+				t.Fatalf("trigger actor=%d mall=%d version=%d", actor, mallID, version)
+			}
+			return &data_svc.MallGeocodeTriggerResult{JobID: 12, MallID: mallID, MallVersion: 5}, nil
+		},
+		listGeocode: func(_ context.Context, actor, mallID uint) (*data_svc.MallGeocodeCandidatesResult, error) {
+			if actor != 17 || mallID != 9 {
+				t.Fatalf("list actor=%d mall=%d", actor, mallID)
+			}
+			return &data_svc.MallGeocodeCandidatesResult{MallID: mallID, RunID: 8}, nil
+		},
+		confirmGeocode: func(_ context.Context, actor, mallID uint, request requestbody.MallGeocodeConfirmRequest) (*data_svc.MallDTO, error) {
+			if actor != 17 || mallID != 9 || request.CandidateID == nil || *request.CandidateID != candidateID || request.ExpectedMallVersion != 5 || !request.WeatherEnabled {
+				t.Fatalf("confirm actor=%d mall=%d request=%+v", actor, mallID, request)
+			}
+			return &data_svc.MallDTO{ID: mallID, Version: 6}, nil
+		},
+	}
+
+	trigger := performMallRequest(t, service, http.MethodPost, "/api/v1/malls/9/geocode", `{"expectedMallVersion":4}`, nil)
+	if trigger.Code != http.StatusAccepted {
+		t.Fatalf("trigger status=%d body=%s", trigger.Code, trigger.Body.String())
+	}
+	list := performMallRequest(t, service, http.MethodGet, "/api/v1/malls/9/geocode-candidates", "", nil)
+	if list.Code != http.StatusOK {
+		t.Fatalf("list status=%d body=%s", list.Code, list.Body.String())
+	}
+	confirm := performMallRequest(t, service, http.MethodPost, "/api/v1/malls/9/geocode-confirm", `{"candidateId":987,"expectedMallVersion":5,"weatherEnabled":true}`, nil)
+	if confirm.Code != http.StatusOK {
+		t.Fatalf("confirm status=%d body=%s", confirm.Code, confirm.Body.String())
+	}
+}
+
+func TestMallControllerGeocodeConfirmRejectsClientAuditFields(t *testing.T) {
+	service := &fakeMallService{confirmGeocode: func(context.Context, uint, uint, requestbody.MallGeocodeConfirmRequest) (*data_svc.MallDTO, error) {
+		t.Fatal("service called for client-supplied audit field")
+		return nil, nil
+	}}
+	recorder := performMallRequest(t, service, http.MethodPost, "/api/v1/malls/9/geocode-confirm", `{"candidateId":987,"expectedMallVersion":5,"weatherEnabled":true,"confirmedBy":99}`, nil)
+	if recorder.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+}
+
 func performMallRequest(t *testing.T, service MallService, method, path, body string, headers map[string]string) *httptest.ResponseRecorder {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
@@ -197,6 +246,9 @@ func performMallRequest(t *testing.T, service MallService, method, path, body st
 	group.GET("/:id", controller.Get)
 	group.PATCH("/:id", controller.Update)
 	group.DELETE("/:id", controller.Delete)
+	group.POST("/:id/geocode", controller.TriggerGeocode)
+	group.GET("/:id/geocode-candidates", controller.ListGeocodeCandidates)
+	group.POST("/:id/geocode-confirm", controller.ConfirmGeocode)
 
 	request := httptest.NewRequest(method, path, strings.NewReader(body))
 	request.Header.Set("Content-Type", "application/json")
@@ -209,12 +261,15 @@ func performMallRequest(t *testing.T, service MallService, method, path, body st
 }
 
 type fakeMallService struct {
-	create      func(context.Context, uint, string, requestbody.MallCreateRequest) (*data_svc.MallCreateResult, bool, error)
-	importItems func(context.Context, uint, string, []requestbody.MallCreateRequest) (*data_svc.MallImportResult, error)
-	get         func(context.Context, uint, uint) (*data_svc.MallDTO, error)
-	list        func(context.Context, uint, requestbody.MallListRequest) (*data_svc.MallListResult, error)
-	update      func(context.Context, uint, uint, requestbody.MallPatchRequest) (*data_svc.MallDTO, error)
-	delete      func(context.Context, uint, uint, uint64) error
+	create         func(context.Context, uint, string, requestbody.MallCreateRequest) (*data_svc.MallCreateResult, bool, error)
+	importItems    func(context.Context, uint, string, []requestbody.MallCreateRequest) (*data_svc.MallImportResult, error)
+	get            func(context.Context, uint, uint) (*data_svc.MallDTO, error)
+	list           func(context.Context, uint, requestbody.MallListRequest) (*data_svc.MallListResult, error)
+	update         func(context.Context, uint, uint, requestbody.MallPatchRequest) (*data_svc.MallDTO, error)
+	delete         func(context.Context, uint, uint, uint64) error
+	triggerGeocode func(context.Context, uint, uint, uint64) (*data_svc.MallGeocodeTriggerResult, error)
+	listGeocode    func(context.Context, uint, uint) (*data_svc.MallGeocodeCandidatesResult, error)
+	confirmGeocode func(context.Context, uint, uint, requestbody.MallGeocodeConfirmRequest) (*data_svc.MallDTO, error)
 }
 
 func (service *fakeMallService) Import(ctx context.Context, actor uint, key string, items []requestbody.MallCreateRequest) (*data_svc.MallImportResult, error) {
@@ -257,4 +312,25 @@ func (service *fakeMallService) Delete(ctx context.Context, actor, mallID uint, 
 		panic("unexpected Delete call")
 	}
 	return service.delete(ctx, actor, mallID, version)
+}
+
+func (service *fakeMallService) TriggerGeocode(ctx context.Context, actor, mallID uint, version uint64) (*data_svc.MallGeocodeTriggerResult, error) {
+	if service.triggerGeocode == nil {
+		panic("unexpected TriggerGeocode call")
+	}
+	return service.triggerGeocode(ctx, actor, mallID, version)
+}
+
+func (service *fakeMallService) ListGeocodeCandidates(ctx context.Context, actor, mallID uint) (*data_svc.MallGeocodeCandidatesResult, error) {
+	if service.listGeocode == nil {
+		panic("unexpected ListGeocodeCandidates call")
+	}
+	return service.listGeocode(ctx, actor, mallID)
+}
+
+func (service *fakeMallService) ConfirmGeocode(ctx context.Context, actor, mallID uint, request requestbody.MallGeocodeConfirmRequest) (*data_svc.MallDTO, error) {
+	if service.confirmGeocode == nil {
+		panic("unexpected ConfirmGeocode call")
+	}
+	return service.confirmGeocode(ctx, actor, mallID, request)
 }

@@ -53,3 +53,28 @@ type MallGeocodeCandidate struct {
 }
 
 func (MallGeocodeCandidate) TableName() string { return "mall_geocode_candidates" }
+
+// MallCoordinateAudit is an append-only record of every operator-confirmed
+// coordinate change. Nullable before values preserve the first confirmation,
+// while run and candidate references retain the provenance of provider data.
+type MallCoordinateAudit struct {
+	BaseModel
+	MallID                 uint      `gorm:"column:mall_id;not null;index:idx_mall_coordinate_audit,priority:1" json:"mall_id"`
+	RunID                  *uint     `gorm:"column:run_id;index" json:"run_id"`
+	CandidateID            *uint     `gorm:"column:candidate_id;index" json:"candidate_id"`
+	Source                 string    `gorm:"column:source;size:32;not null" json:"source"`
+	BeforeLongitude        *float64  `gorm:"column:before_longitude;type:decimal(10,7)" json:"before_longitude"`
+	BeforeLatitude         *float64  `gorm:"column:before_latitude;type:decimal(10,7)" json:"before_latitude"`
+	BeforeCoordinateSystem string    `gorm:"column:before_coordinate_system;size:16" json:"before_coordinate_system"`
+	AfterLongitude         *float64  `gorm:"column:after_longitude;type:decimal(10,7)" json:"after_longitude"`
+	AfterLatitude          *float64  `gorm:"column:after_latitude;type:decimal(10,7)" json:"after_latitude"`
+	AfterCoordinateSystem  string    `gorm:"column:after_coordinate_system;size:16" json:"after_coordinate_system"`
+	Reason                 string    `gorm:"column:reason;size:500" json:"reason"`
+	ConfirmedBy            uint      `gorm:"column:confirmed_by;not null;index" json:"confirmed_by"`
+	MallVersionBefore      uint64    `gorm:"column:mall_version_before;not null" json:"mall_version_before"`
+	MallVersionAfter       uint64    `gorm:"column:mall_version_after;not null" json:"mall_version_after"`
+	ConfirmedAt            time.Time `gorm:"column:confirmed_at;type:datetime(3);not null;index:idx_mall_coordinate_audit,priority:2" json:"confirmed_at"`
+	CreatedAt              time.Time `gorm:"column:created_at;type:datetime(3);not null;autoCreateTime" json:"created_at"`
+}
+
+func (MallCoordinateAudit) TableName() string { return "mall_coordinate_audits" }

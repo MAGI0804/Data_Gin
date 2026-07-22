@@ -53,3 +53,21 @@ type MallListRequest struct {
 type MallImportRequest struct {
 	Items []MallCreateRequest `json:"items"`
 }
+
+type MallGeocodeTriggerRequest struct {
+	ExpectedMallVersion uint64 `json:"expectedMallVersion"`
+}
+
+type MallManualCoordinateRequest struct {
+	Longitude        float64 `json:"longitude"`
+	Latitude         float64 `json:"latitude"`
+	CoordinateSystem string  `json:"coordinateSystem"`
+	Reason           string  `json:"reason"`
+}
+
+type MallGeocodeConfirmRequest struct {
+	CandidateID         *uint                        `json:"candidateId,omitempty"`
+	ManualCoordinate    *MallManualCoordinateRequest `json:"manualCoordinate,omitempty"`
+	ExpectedMallVersion uint64                       `json:"expectedMallVersion"`
+	WeatherEnabled      bool                         `json:"weatherEnabled"`
+}

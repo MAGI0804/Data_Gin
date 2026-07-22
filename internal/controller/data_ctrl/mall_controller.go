@@ -30,6 +30,9 @@ type MallService interface {
 	List(context.Context, uint, requestbody.MallListRequest) (*data_svc.MallListResult, error)
 	Update(context.Context, uint, uint, requestbody.MallPatchRequest) (*data_svc.MallDTO, error)
 	Delete(context.Context, uint, uint, uint64) error
+	TriggerGeocode(context.Context, uint, uint, uint64) (*data_svc.MallGeocodeTriggerResult, error)
+	ListGeocodeCandidates(context.Context, uint, uint) (*data_svc.MallGeocodeCandidatesResult, error)
+	ConfirmGeocode(context.Context, uint, uint, requestbody.MallGeocodeConfirmRequest) (*data_svc.MallDTO, error)
 }
 
 type MallController struct {
@@ -153,6 +156,62 @@ func (controller *MallController) Delete(c *gin.Context) {
 	c.Status(http.StatusNoContent)
 }
 
+func (controller *MallController) TriggerGeocode(c *gin.Context) {
+	mallID, err := parseMallUint(c.Param("id"), "mall id")
+	if err != nil {
+		writeMallError(c, err)
+		return
+	}
+	var request requestbody.MallGeocodeTriggerRequest
+	if err := decodeMallJSON(c, &request); err != nil {
+		writeMallError(c, fmt.Errorf("%w: invalid JSON body", data_svc.ErrMallInvalidInput))
+		return
+	}
+	result, err := controller.service.TriggerGeocode(
+		c.Request.Context(), auth.CurrentUserID(c), mallID, request.ExpectedMallVersion,
+	)
+	if err != nil {
+		writeMallError(c, err)
+		return
+	}
+	responses.New(c).ToResponseWithStatus(http.StatusAccepted, result)
+}
+
+func (controller *MallController) ListGeocodeCandidates(c *gin.Context) {
+	mallID, err := parseMallUint(c.Param("id"), "mall id")
+	if err != nil {
+		writeMallError(c, err)
+		return
+	}
+	result, err := controller.service.ListGeocodeCandidates(c.Request.Context(), auth.CurrentUserID(c), mallID)
+	if err != nil {
+		writeMallError(c, err)
+		return
+	}
+	responses.New(c).ToResponseWithStatus(http.StatusOK, result)
+}
+
+func (controller *MallController) ConfirmGeocode(c *gin.Context) {
+	mallID, err := parseMallUint(c.Param("id"), "mall id")
+	if err != nil {
+		writeMallError(c, err)
+		return
+	}
+	var request requestbody.MallGeocodeConfirmRequest
+	if err := decodeMallJSON(c, &request); err != nil {
+		writeMallError(c, fmt.Errorf("%w: invalid JSON body", data_svc.ErrMallInvalidInput))
+		return
+	}
+	result, err := controller.service.ConfirmGeocode(
+		c.Request.Context(), auth.CurrentUserID(c), mallID, request,
+	)
+	if err != nil {
+		writeMallError(c, err)
+		return
+	}
+	responses.New(c).ToResponseWithStatus(http.StatusOK, result)
+}
+
 func decodeMallJSON(c *gin.Context, destination interface{}) error {
 	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, maxMallRequestBodyBytes)
 	decoder := json.NewDecoder(c.Request.Body)
@@ -224,6 +283,9 @@ func classifyMallError(err error) (*errcode.Error, string) {
 		return errcode.Forbidden, "无权执行此商场操作"
 	case errors.Is(err, data_dao.ErrMallNotFound):
 		return errcode.NotFound, "商场不存在"
+	case errors.Is(err, data_dao.ErrMallGeocodeRunNotFound),
+		errors.Is(err, data_dao.ErrMallGeocodeCandidateNotFound):
+		return errcode.NotFound, "地理编码候选不存在"
 	case errors.Is(err, data_svc.ErrMallConflict),
 		errors.Is(err, data_svc.ErrMallIdempotencyConflict),
 		errors.Is(err, data_svc.ErrMallIdempotencyPending),

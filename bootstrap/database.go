@@ -141,6 +141,7 @@ func mallWeatherMigrationModels() []interface{} {
 		&model.Mall{},
 		&model.MallGeocodeRun{},
 		&model.MallGeocodeCandidate{},
+		&model.MallCoordinateAudit{},
 		&model.ProviderRawSnapshot{},
 		&model.MallWeatherFetchRun{},
 		&model.MallWeatherFetchAttempt{},
