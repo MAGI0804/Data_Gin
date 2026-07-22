@@ -1,6 +1,13 @@
 package storage
 
-import "testing"
+import (
+	"strings"
+	"testing"
+	"time"
+
+	alioss "github.com/aliyun/alibabacloud-oss-go-sdk-v2/oss"
+	"github.com/aliyun/alibabacloud-oss-go-sdk-v2/oss/credentials"
+)
 
 func TestNormalizeOSSRegion(t *testing.T) {
 	tests := map[string]string{
@@ -81,5 +88,29 @@ func TestOSSClientUploadPlanMarksMultipart(t *testing.T) {
 	}
 	if plan.PartSizeBytes != 64*1024*1024 || plan.ParallelNum != 3 || !plan.EnableCheckpoint {
 		t.Fatalf("UploadPlan() = %+v, want configured multipart settings", plan)
+	}
+}
+
+func TestOSSClientPresignDownloadURL(t *testing.T) {
+	sdkClient := alioss.NewClient(alioss.LoadDefaultConfig().
+		WithCredentialsProvider(credentials.NewStaticCredentialsProvider("ak", "sk")).
+		WithRegion("cn-shanghai").
+		WithEndpoint("oss-cn-shanghai.aliyuncs.com"))
+	client := &OSSClient{cfg: OSSConfig{Bucket: "weather-private"}, client: sdkClient}
+	signedURL, err := client.PresignDownloadURL(
+		t.Context(),
+		"mall-weather-exports/job/result.xlsx",
+		"商场天气.xlsx",
+		5*time.Minute,
+	)
+	if err != nil {
+		t.Fatalf("PresignDownloadURL() error=%v", err)
+	}
+	if !strings.Contains(signedURL, "weather-private.oss-cn-shanghai.aliyuncs.com") ||
+		!strings.Contains(signedURL, "response-content-disposition") || !strings.Contains(signedURL, "x-oss-signature") {
+		t.Fatalf("signed URL=%q", signedURL)
+	}
+	if _, err := client.PresignDownloadURL(t.Context(), "key", "file.xlsx", 24*time.Hour); err == nil {
+		t.Fatal("PresignDownloadURL() accepted excessive expiry")
 	}
 }

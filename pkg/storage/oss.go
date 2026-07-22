@@ -239,6 +239,31 @@ func (c *OSSClient) DeleteObject(ctx context.Context, objectKey string) error {
 	return err
 }
 
+func (c *OSSClient) PresignDownloadURL(
+	ctx context.Context,
+	objectKey string,
+	downloadName string,
+	expires time.Duration,
+) (string, error) {
+	objectKey = cleanObjectKey(objectKey)
+	if c == nil || c.client == nil || ctx == nil || objectKey == "" || expires < time.Minute || expires > time.Hour {
+		return "", fmt.Errorf("OSS 下载签名参数无效")
+	}
+	result, err := c.client.Presign(ctx, &alioss.GetObjectRequest{
+		Bucket:                     alioss.Ptr(c.cfg.Bucket),
+		Key:                        alioss.Ptr(objectKey),
+		ResponseCacheControl:       alioss.Ptr("private, no-store"),
+		ResponseContentDisposition: alioss.Ptr(contentDisposition(downloadName)),
+	}, alioss.PresignExpires(expires))
+	if err != nil {
+		return "", fmt.Errorf("OSS 生成下载签名失败: %w", err)
+	}
+	if result == nil || strings.TrimSpace(result.URL) == "" {
+		return "", fmt.Errorf("OSS 下载签名结果无效")
+	}
+	return result.URL, nil
+}
+
 func (c *OSSClient) PublicURL(objectKey string) string {
 	objectKey = cleanObjectKey(objectKey)
 	if c.cfg.CDNBaseURL != "" {
