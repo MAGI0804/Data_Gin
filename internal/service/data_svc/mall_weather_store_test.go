@@ -63,3 +63,25 @@ func TestAddChecksumConflictWarningIsDeterministic(t *testing.T) {
 		t.Fatalf("row counts=%s", batch.RowCountsJSON)
 	}
 }
+
+func TestWeatherLatestSourcesIncludesSuccessfulModules(t *testing.T) {
+	realtime := model.MallWeatherRealtime{MallID: 7}
+	batch := &mallWeatherModelBatch{
+		Forecasts: &weatherdomain.ForecastModelBatch{
+			Realtime: &realtime,
+			Minutely: []model.MallWeatherMinutely{{MallID: 7}},
+			Hourly:   []model.MallWeatherHourly{{MallID: 7}},
+		},
+		Daily: &weatherdomain.DailyModelBatch{
+			Daily:       []model.MallWeatherDaily{{MallID: 7}},
+			LifeIndices: []model.MallWeatherLifeIndex{{MallID: 7, SourceAPI: "v26_daily"}},
+		},
+		LifeIndices: &weatherdomain.LifeIndexModelBatch{
+			LifeIndices: []model.MallWeatherLifeIndex{{MallID: 7, SourceAPI: "v3_lifeindex"}},
+		},
+	}
+	sources := weatherLatestSources(batch)
+	if len(sources.Realtime) != 1 || len(sources.Minutely) != 1 || len(sources.Hourly) != 1 || len(sources.Daily) != 1 || len(sources.LifeIndices) != 2 {
+		t.Fatalf("latest sources=%+v", sources)
+	}
+}

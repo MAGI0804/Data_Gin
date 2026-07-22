@@ -304,7 +304,32 @@ func persistWeatherModelRows(ctx context.Context, dao *data_dao.MallWeatherDAO, 
 		}
 		checksumConflicts += result.ChecksumConflicts
 	}
+	if _, err := dao.RefreshLatest(ctx, weatherLatestSources(batch)); err != nil {
+		return 0, err
+	}
 	return checksumConflicts, nil
+}
+
+func weatherLatestSources(batch *mallWeatherModelBatch) data_dao.MallWeatherLatestSources {
+	var sources data_dao.MallWeatherLatestSources
+	if batch == nil {
+		return sources
+	}
+	if batch.Forecasts != nil {
+		if batch.Forecasts.Realtime != nil {
+			sources.Realtime = []model.MallWeatherRealtime{*batch.Forecasts.Realtime}
+		}
+		sources.Minutely = batch.Forecasts.Minutely
+		sources.Hourly = batch.Forecasts.Hourly
+	}
+	if batch.Daily != nil {
+		sources.Daily = batch.Daily.Daily
+		sources.LifeIndices = append(sources.LifeIndices, batch.Daily.LifeIndices...)
+	}
+	if batch.LifeIndices != nil {
+		sources.LifeIndices = append(sources.LifeIndices, batch.LifeIndices.LifeIndices...)
+	}
+	return sources
 }
 
 func addChecksumConflictWarning(batch *mallWeatherModelBatch, conflicts int64) error {

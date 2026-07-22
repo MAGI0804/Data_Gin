@@ -365,7 +365,7 @@ func (dao *MallWeatherDAO) UpsertLifeIndices(ctx context.Context, rows []model.M
 }
 
 func (dao *MallWeatherDAO) UpsertLatest(ctx context.Context, rows []model.MallWeatherLatest) (UpsertResult, error) {
-	return upsertWeatherRows(ctx, dao.db, rows, []string{"mall_id", "data_kind", "business_key"}, defaultWeatherBatchSize)
+	return upsertLatestRows(ctx, dao.db, rows)
 }
 
 func (dao *MallWeatherDAO) FindAlertsByProviderIDs(ctx context.Context, provider string, alertIDs []string) ([]model.MallWeatherAlert, error) {

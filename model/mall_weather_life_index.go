@@ -2,6 +2,16 @@ package model
 
 import "time"
 
+const (
+	MallWeatherDataKindRealtime = "realtime"
+	MallWeatherDataKindMinutely = "minutely"
+	MallWeatherDataKindHourly   = "hourly"
+	MallWeatherDataKindDaily    = "daily"
+	MallWeatherDataKindLife     = "life_index"
+
+	MallWeatherFreshnessFresh = "fresh"
+)
+
 type MallWeatherLifeIndex struct {
 	BaseModel
 	MallID              uint      `gorm:"column:mall_id;not null;uniqueIndex:uk_life_version,priority:1;index" json:"mall_id"`
