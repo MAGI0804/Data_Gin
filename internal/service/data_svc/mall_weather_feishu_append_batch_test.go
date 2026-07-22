@@ -20,7 +20,10 @@ func TestMallWeatherFeishuAppendBatchExecutorCheckpointsSuccess(t *testing.T) {
 	events := make([]string, 0, 3)
 	sheets := &fakeMallWeatherFeishuAppender{
 		events: &events,
-		result: &feishu.SheetWriteResult{Revision: 17},
+		result: &feishu.SheetWriteResult{
+			Revision: 17, UpdatedRowStart: 20, UpdatedRowEnd: 21,
+			UpdatedRows: 2, UpdatedColumns: 2, UpdatedCells: 4,
+		},
 	}
 	logs := &fakeMallWeatherFeishuBatchLogStore{events: &events, createID: 41}
 	executor, err := newMallWeatherFeishuAppendBatchExecutor(sheets, logs, sequentialMallWeatherFeishuNow())
@@ -32,10 +35,11 @@ func TestMallWeatherFeishuAppendBatchExecutorCheckpointsSuccess(t *testing.T) {
 		t.Fatalf("Execute() error=%v", err)
 	}
 	if !slices.Equal(events, []string{"create", "append", "finish"}) || result.DeliveryLogID != 41 ||
-		result.BatchNo != 2 || result.RowStart != 12 || result.RowEnd != 13 || result.RecordCount != 2 ||
+		result.BatchNo != 2 || result.RowStart != 20 || result.RowEnd != 21 || result.RecordCount != 2 ||
 		result.CellCount != 4 || result.Revision != 17 || logs.created == nil || logs.created.Status != "running" ||
 		logs.created.RequestBody != "" || logs.created.ResponseBody != "" || logs.created.RequestChecksum != strings.Repeat("a", 64) ||
-		logs.finished.Status != "success" || !logs.finished.Success || logs.finished.HTTPStatus != http.StatusOK {
+		logs.finished.Status != "success" || !logs.finished.Success || logs.finished.HTTPStatus != http.StatusOK ||
+		logs.finished.RowStart != 20 || logs.finished.RowEnd != 21 {
 		t.Fatalf("events=%v result=%+v sheets=%+v logs=%+v", events, result, sheets, logs)
 	}
 	if sheets.write.Range.SheetID != "sheet-hourly-secret" || sheets.write.Range.StartRow != 12 ||
@@ -110,9 +114,19 @@ func TestMallWeatherFeishuAppendBatchExecutorFailsClosedAroundCheckpoint(t *test
 		{name: "checkpoint create fails", createErr: errors.New("database unavailable"), wantAppend: 0},
 		{
 			name: "success checkpoint finish fails", finishErr: errors.New("database unavailable"),
-			acknowledgement: &feishu.SheetWriteResult{Revision: 1}, wantAppend: 1, wantUnknown: true,
+			acknowledgement: &feishu.SheetWriteResult{
+				Revision: 1, UpdatedRowStart: 12, UpdatedRowEnd: 13,
+				UpdatedRows: 2, UpdatedColumns: 2, UpdatedCells: 4,
+			}, wantAppend: 1, wantUnknown: true,
 		},
 		{name: "acknowledgement missing", wantAppend: 1, wantUnknown: true},
+		{
+			name: "acknowledgement dimensions mismatch",
+			acknowledgement: &feishu.SheetWriteResult{
+				Revision: 1, UpdatedRowStart: 12, UpdatedRowEnd: 12,
+				UpdatedRows: 1, UpdatedColumns: 2, UpdatedCells: 2,
+			}, wantAppend: 1, wantUnknown: true,
+		},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

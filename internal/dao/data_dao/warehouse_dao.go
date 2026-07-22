@@ -346,6 +346,8 @@ func (dao *DeliveryLogDAO) FindRecent(ctx context.Context, limit int) ([]model.D
 
 type DeliveryLogBatchFinish struct {
 	Status          string
+	RowStart        int64
+	RowEnd          int64
 	HTTPStatus      int
 	FeishuCode      int
 	Success         bool
@@ -391,20 +393,25 @@ func (dao *DeliveryLogDAO) FinishWeatherBatch(
 		return errors.New("delivery log: invalid weather batch completion")
 	}
 	finishedAt := model.TimeNormal{Time: finish.FinishedAt.UTC()}
+	updates := map[string]interface{}{
+		"status":           finish.Status,
+		"http_status":      finish.HTTPStatus,
+		"feishu_code":      finish.FeishuCode,
+		"success":          finish.Success,
+		"response_summary": finish.ResponseSummary,
+		"error_message":    finish.SafeError,
+		"finished_at":      finishedAt,
+		"sent_at":          finishedAt,
+		"updated_at":       finish.FinishedAt.UTC().Unix(),
+	}
+	if finish.RowStart > 0 {
+		updates["row_start"] = finish.RowStart
+		updates["row_end"] = finish.RowEnd
+	}
 	result := dao.db.WithContext(ctx).
 		Model(&model.DeliveryLog{}).
 		Where("id = ? AND status = ?", id, "running").
-		Updates(map[string]interface{}{
-			"status":           finish.Status,
-			"http_status":      finish.HTTPStatus,
-			"feishu_code":      finish.FeishuCode,
-			"success":          finish.Success,
-			"response_summary": finish.ResponseSummary,
-			"error_message":    finish.SafeError,
-			"finished_at":      finishedAt,
-			"sent_at":          finishedAt,
-			"updated_at":       finish.FinishedAt.UTC().Unix(),
-		})
+		Updates(updates)
 	if result.Error != nil {
 		return result.Error
 	}
@@ -417,6 +424,7 @@ func (dao *DeliveryLogDAO) FinishWeatherBatch(
 func validDeliveryLogBatchFinish(finish DeliveryLogBatchFinish) bool {
 	return !finish.FinishedAt.IsZero() &&
 		(finish.Status == "success" || finish.Status == "failed" || finish.Status == "unknown") &&
+		((finish.RowStart == 0 && finish.RowEnd == 0) || (finish.RowStart > 0 && finish.RowEnd >= finish.RowStart)) &&
 		finish.HTTPStatus >= 0 && finish.FeishuCode >= 0 && len(finish.ResponseSummary) <= 512 &&
 		len(finish.SafeError) <= 2048 && (finish.Status == "success") == finish.Success
 }

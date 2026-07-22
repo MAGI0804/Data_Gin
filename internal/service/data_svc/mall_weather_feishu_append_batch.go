@@ -110,6 +110,14 @@ func (executor *mallWeatherFeishuAppendBatchExecutor) Execute(
 		Rows: request.Batch.Rows,
 	}
 	acknowledgement, appendErr := executor.sheets.AppendValues(ctx, request.Destination.SpreadsheetToken, write)
+	if appendErr == nil && !validMallWeatherFeishuAppendAcknowledgement(
+		acknowledgement,
+		recordCount,
+		len(request.Batch.Rows[0]),
+		cellCount,
+	) {
+		acknowledgement = nil
+	}
 	finish := mallWeatherFeishuAppendFinish(acknowledgement, appendErr, executor.now().UTC())
 	finishCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), mallWeatherFeishuCheckpointTimeout)
 	finishErr := executor.logs.FinishWeatherBatch(finishCtx, logID, finish)
@@ -127,7 +135,25 @@ func (executor *mallWeatherFeishuAppendBatchExecutor) Execute(
 		return result, ErrMallWeatherFeishuAppendStateUnknown
 	}
 	result.Revision = acknowledgement.Revision
+	result.RowStart = acknowledgement.UpdatedRowStart
+	result.RowEnd = acknowledgement.UpdatedRowEnd
 	return result, nil
+}
+
+func validMallWeatherFeishuAppendAcknowledgement(
+	acknowledgement *feishu.SheetWriteResult,
+	rows int,
+	columns int,
+	cells int,
+) bool {
+	if acknowledgement == nil || rows < 1 || columns < 1 || cells < 1 ||
+		acknowledgement.UpdatedRows != int64(rows) || acknowledgement.UpdatedColumns != int64(columns) ||
+		acknowledgement.UpdatedCells != int64(cells) || acknowledgement.UpdatedRowStart < 2 ||
+		acknowledgement.UpdatedRowStart > maxMallWeatherFeishuSheetRow {
+		return false
+	}
+	return acknowledgement.UpdatedRowEnd == acknowledgement.UpdatedRowStart+int64(rows)-1 &&
+		acknowledgement.UpdatedRowEnd <= maxMallWeatherFeishuSheetRow
 }
 
 func validateMallWeatherFeishuAppendBatchRequest(
@@ -179,6 +205,8 @@ func mallWeatherFeishuAppendFinish(
 	if appendErr == nil && acknowledgement != nil {
 		finish.Status = "success"
 		finish.Success = true
+		finish.RowStart = acknowledgement.UpdatedRowStart
+		finish.RowEnd = acknowledgement.UpdatedRowEnd
 		finish.HTTPStatus = 200
 		finish.ResponseSummary = "feishu append acknowledged"
 		return finish

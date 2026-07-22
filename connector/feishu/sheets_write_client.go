@@ -9,6 +9,7 @@ import (
 	"math"
 	"net/http"
 	"net/url"
+	"regexp"
 	"strconv"
 	"strings"
 	"unicode/utf8"
@@ -25,6 +26,8 @@ const (
 	maxSheetWriteCells   = int64(100_000)
 )
 
+var sheetUpdatedRangePattern = regexp.MustCompile(`^([A-Za-z0-9_-]{1,128})!([A-Z]{1,3})([1-9][0-9]*):([A-Z]{1,3})([1-9][0-9]*)$`)
+
 // SheetWriteRange is a fixed rectangular write. Its diagnostic and JSON
 // surfaces are redacted because Rows can contain customer data.
 type SheetWriteRange struct {
@@ -37,13 +40,24 @@ func (SheetWriteRange) GoString() string { return "feishu.SheetWriteRange{redact
 
 // SheetWriteResult contains only non-sensitive acknowledgement metadata.
 type SheetWriteResult struct {
-	Revision int64
+	Revision        int64
+	UpdatedRowStart int64
+	UpdatedRowEnd   int64
+	UpdatedRows     int64
+	UpdatedColumns  int64
+	UpdatedCells    int64
 }
 
+func (SheetWriteResult) String() string   { return "feishu.SheetWriteResult{redacted}" }
+func (SheetWriteResult) GoString() string { return "feishu.SheetWriteResult{redacted}" }
+
 type sheetWriteSpec struct {
-	a1Range string
-	values  [][]any
-	cells   int64
+	a1Range    string
+	values     [][]any
+	rangeValue SheetRange
+	rows       int64
+	columns    int64
+	cells      int64
 }
 
 type sheetValueRangeRequest struct {
@@ -64,7 +78,11 @@ type sheetWriteResponse struct {
 	Data *struct {
 		Revision int64 `json:"revision"`
 		Updates  *struct {
-			Revision int64 `json:"revision"`
+			Revision       int64  `json:"revision"`
+			UpdatedRange   string `json:"updatedRange"`
+			UpdatedRows    int64  `json:"updatedRows"`
+			UpdatedColumns int64  `json:"updatedColumns"`
+			UpdatedCells   int64  `json:"updatedCells"`
 		} `json:"updates"`
 		Responses []struct {
 			Revision int64 `json:"revision"`
@@ -93,7 +111,7 @@ func (client *SheetsClient) AppendValues(
 	if err != nil {
 		return nil, err
 	}
-	return client.postSheetWrite(ctx, spreadsheetToken, "values_append", body)
+	return client.postSheetWrite(ctx, spreadsheetToken, "values_append", body, &spec)
 }
 
 // BatchUpdateValues overwrites validated fixed ranges in one request. Callers
@@ -121,7 +139,7 @@ func (client *SheetsClient) BatchUpdateValues(
 	if err != nil {
 		return nil, err
 	}
-	return client.postSheetWrite(ctx, spreadsheetToken, "values_batch_update", body)
+	return client.postSheetWrite(ctx, spreadsheetToken, "values_batch_update", body, nil)
 }
 
 func validSheetsWriteClient(client *SheetsClient, ctx context.Context, spreadsheetToken string) bool {
@@ -154,9 +172,8 @@ func normalizeSheetWriteRange(writeRange SheetWriteRange) (sheetWriteSpec, error
 		}
 	}
 	return sheetWriteSpec{
-		a1Range: a1Range,
-		values:  values,
-		cells:   rows * columns,
+		a1Range: a1Range, values: values, rangeValue: writeRange.Range,
+		rows: rows, columns: columns, cells: rows * columns,
 	}, nil
 }
 
@@ -209,13 +226,14 @@ func (client *SheetsClient) postSheetWrite(
 	spreadsheetToken string,
 	operation string,
 	body []byte,
+	appendSpec *sheetWriteSpec,
 ) (*SheetWriteResult, error) {
 	token, err := client.tokens.Token(ctx)
 	if err != nil {
 		return nil, err
 	}
 	for attempt := 0; attempt < 2; attempt++ {
-		result, statusCode, err := client.postSheetWriteOnce(ctx, spreadsheetToken, operation, token, body)
+		result, statusCode, err := client.postSheetWriteOnce(ctx, spreadsheetToken, operation, token, body, appendSpec)
 		if statusCode == http.StatusUnauthorized && attempt == 0 {
 			token, err = client.tokens.Refresh(ctx)
 			if err != nil {
@@ -234,6 +252,7 @@ func (client *SheetsClient) postSheetWriteOnce(
 	operation string,
 	token string,
 	body []byte,
+	appendSpec *sheetWriteSpec,
 ) (*SheetWriteResult, int, error) {
 	if !validTenantToken(token) {
 		return nil, 0, errors.New("feishu sheets: token provider returned invalid token")
@@ -287,7 +306,13 @@ func (client *SheetsClient) postSheetWriteOnce(
 			Class: providerhttp.ErrorClassRequest, HTTPCode: response.StatusCode, Code: decoded.Code,
 		}
 	}
-	return &SheetWriteResult{Revision: sheetWriteRevision(decoded)}, response.StatusCode, nil
+	result, err := normalizeSheetWriteResult(decoded, appendSpec)
+	if err != nil {
+		return nil, response.StatusCode, &SheetsError{
+			Class: providerhttp.ErrorClassResponse, HTTPCode: response.StatusCode,
+		}
+	}
+	return result, response.StatusCode, nil
 }
 
 func safeSheetsWriteCause(err error) error {
@@ -340,4 +365,74 @@ func sheetWriteRevision(response sheetWriteResponse) int64 {
 		}
 	}
 	return revision
+}
+
+func normalizeSheetWriteResult(
+	response sheetWriteResponse,
+	appendSpec *sheetWriteSpec,
+) (*SheetWriteResult, error) {
+	result := &SheetWriteResult{Revision: sheetWriteRevision(response)}
+	if appendSpec == nil {
+		return result, nil
+	}
+	if response.Data == nil || response.Data.Updates == nil {
+		return nil, errors.New("append response acknowledgement is missing")
+	}
+	updates := response.Data.Updates
+	updatedRange, err := parseSheetUpdatedRange(updates.UpdatedRange)
+	if err != nil || updatedRange.SheetID != appendSpec.rangeValue.SheetID ||
+		updatedRange.StartColumn != appendSpec.rangeValue.StartColumn ||
+		updatedRange.EndColumn != appendSpec.rangeValue.EndColumn ||
+		updatedRange.EndRow-updatedRange.StartRow+1 != appendSpec.rows ||
+		updates.UpdatedRows != appendSpec.rows || updates.UpdatedColumns != appendSpec.columns ||
+		updates.UpdatedCells != appendSpec.cells {
+		return nil, errors.New("append response acknowledgement is inconsistent")
+	}
+	result.UpdatedRowStart = updatedRange.StartRow
+	result.UpdatedRowEnd = updatedRange.EndRow
+	result.UpdatedRows = updates.UpdatedRows
+	result.UpdatedColumns = updates.UpdatedColumns
+	result.UpdatedCells = updates.UpdatedCells
+	return result, nil
+}
+
+func parseSheetUpdatedRange(value string) (SheetRange, error) {
+	matches := sheetUpdatedRangePattern.FindStringSubmatch(value)
+	if len(matches) != 6 || !validFeishuSheetID(matches[1]) {
+		return SheetRange{}, errors.New("invalid updated range")
+	}
+	startColumn, valid := sheetColumnNumber(matches[2])
+	if !valid {
+		return SheetRange{}, errors.New("invalid updated range")
+	}
+	endColumn, valid := sheetColumnNumber(matches[4])
+	if !valid || endColumn < startColumn {
+		return SheetRange{}, errors.New("invalid updated range")
+	}
+	startRow, err := strconv.ParseInt(matches[3], 10, 64)
+	if err != nil {
+		return SheetRange{}, errors.New("invalid updated range")
+	}
+	endRow, err := strconv.ParseInt(matches[5], 10, 64)
+	if err != nil || startRow < 1 || endRow < startRow || endRow > maxSheetRowNumber {
+		return SheetRange{}, errors.New("invalid updated range")
+	}
+	return SheetRange{
+		SheetID: matches[1], StartRow: startRow, EndRow: endRow,
+		StartColumn: startColumn, EndColumn: endColumn,
+	}, nil
+}
+
+func sheetColumnNumber(value string) (int64, bool) {
+	var column int64
+	for _, character := range value {
+		if character < 'A' || character > 'Z' {
+			return 0, false
+		}
+		column = column*26 + int64(character-'A'+1)
+		if column > maxSheetWriteColumns {
+			return 0, false
+		}
+	}
+	return column, column > 0
 }

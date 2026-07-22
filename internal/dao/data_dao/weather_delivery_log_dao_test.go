@@ -29,6 +29,7 @@ func TestDeliveryLogDAORejectsInconsistentWeatherBatchCompletion(t *testing.T) {
 		{Status: "unknown", Success: true, FinishedAt: time.Now()},
 		{Status: "failed", HTTPStatus: -1, FinishedAt: time.Now()},
 		{Status: "failed", FeishuCode: -1, FinishedAt: time.Now()},
+		{Status: "failed", RowStart: 2, RowEnd: 0, FinishedAt: time.Now()},
 		{Status: "failed"},
 	}
 	for _, finish := range tests {

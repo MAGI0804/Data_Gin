@@ -42,7 +42,10 @@ func TestSheetsClientAppendsValidatedScalarBatch(t *testing.T) {
 			decoded.ValueRange.Values[0][2] != true || decoded.ValueRange.Values[0][3] != nil {
 			t.Fatalf("request body=%s error=%v", body, err)
 		}
-		_, _ = response.Write([]byte(`{"code":0,"data":{"updates":{"revision":11}}}`))
+		_, _ = response.Write([]byte(`{"code":0,"data":{"updates":{
+			"revision":11,"updatedRange":"sheet_hourly!B7:E7",
+			"updatedRows":1,"updatedColumns":4,"updatedCells":4
+		}}}`))
 	}))
 	defer server.Close()
 
@@ -59,7 +62,9 @@ func TestSheetsClientAppendsValidatedScalarBatch(t *testing.T) {
 			{Type: SheetCellBlank},
 		}},
 	})
-	if err != nil || result == nil || result.Revision != 11 || tokens.tokenCalls != 1 || tokens.refreshCalls != 0 {
+	if err != nil || result == nil || result.Revision != 11 || result.UpdatedRowStart != 7 ||
+		result.UpdatedRowEnd != 7 || result.UpdatedRows != 1 || result.UpdatedColumns != 4 ||
+		result.UpdatedCells != 4 || tokens.tokenCalls != 1 || tokens.refreshCalls != 0 {
 		t.Fatalf("AppendValues() result=%+v error=%v tokens=%+v", result, err, tokens)
 	}
 }
@@ -125,7 +130,9 @@ func TestSheetsClientWriteRefreshesOnlyAfterUnauthorized(t *testing.T) {
 		if request.Header.Get("Authorization") != "Bearer tenant-token-fresh-123" {
 			t.Fatalf("refreshed authorization=%q", request.Header.Get("Authorization"))
 		}
-		_, _ = response.Write([]byte(`{"code":0,"data":{"revision":3}}`))
+		_, _ = response.Write([]byte(`{"code":0,"data":{"revision":3,"updates":{
+			"updatedRange":"sheet_hourly!A9:A9","updatedRows":1,"updatedColumns":1,"updatedCells":1
+		}}}`))
 	}))
 	defer server.Close()
 
@@ -288,6 +295,9 @@ func TestSheetsClientWriteRejectsMalformedResponses(t *testing.T) {
 		{name: "trailing data", body: `{"code":0,"data":{}}{}`},
 		{name: "missing data", body: `{"code":0}`},
 		{name: "negative revision", body: `{"code":0,"data":{"revision":-1}}`},
+		{name: "missing append acknowledgement", body: `{"code":0,"data":{"revision":1}}`},
+		{name: "unsafe updated range", body: `{"code":0,"data":{"updates":{"updatedRange":"../sheet!A1:A1","updatedRows":1,"updatedColumns":1,"updatedCells":1}}}`},
+		{name: "wrong append dimensions", body: `{"code":0,"data":{"updates":{"updatedRange":"sheet_hourly!A1:A2","updatedRows":2,"updatedColumns":1,"updatedCells":2}}}`},
 		{name: "oversized", body: strings.Repeat("x", maxSheetsResponseBodyBytes+1)},
 	}
 	for _, test := range tests {
