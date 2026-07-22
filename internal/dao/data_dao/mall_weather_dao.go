@@ -19,8 +19,23 @@ const (
 	maxWeatherPageSize      = 500
 )
 
+type FetchAttemptDisposition uint8
+
+const (
+	FetchAttemptDispositionUnknown FetchAttemptDisposition = iota
+	FetchAttemptDispositionAcquired
+	FetchAttemptDispositionBusy
+	FetchAttemptDispositionTerminal
+)
+
 type UpsertResult struct {
 	AffectedRows int64
+}
+
+type FetchAttemptLease struct {
+	Disposition FetchAttemptDisposition
+	Run         model.MallWeatherFetchRun
+	Attempt     model.MallWeatherFetchAttempt
 }
 
 type HourlyQuery struct {
@@ -103,17 +118,179 @@ func (dao *MallWeatherDAO) CreateFetchAttempt(ctx context.Context, attempt *mode
 	return nil
 }
 
+func (dao *MallWeatherDAO) BeginFetchAttempt(ctx context.Context, runID uint, startedAt time.Time, staleAfter time.Duration) (*FetchAttemptLease, error) {
+	if dao == nil || dao.db == nil || ctx == nil || runID == 0 || startedAt.IsZero() || staleAfter <= 0 {
+		return nil, fmt.Errorf("mall weather: invalid fetch attempt lease input")
+	}
+	startedAt = startedAt.UTC()
+	lease := &FetchAttemptLease{}
+	err := dao.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&lease.Run, runID).Error; err != nil {
+			return fmt.Errorf("mall weather: lock fetch run: %w", err)
+		}
+
+		var latestAttempt *model.MallWeatherFetchAttempt
+		if lease.Run.AttemptCount > 0 {
+			var row model.MallWeatherFetchAttempt
+			err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+				Where("fetch_run_id = ? AND attempt_no = ?", lease.Run.ID, lease.Run.AttemptCount).
+				First(&row).Error
+			if err != nil && !errors.Is(err, gorm.ErrRecordNotFound) {
+				return fmt.Errorf("mall weather: lock latest fetch attempt: %w", err)
+			}
+			if err == nil {
+				latestAttempt = &row
+			}
+		}
+
+		disposition, recoverInterrupted, err := classifyFetchAttemptStart(&lease.Run, latestAttempt, startedAt, staleAfter)
+		if err != nil {
+			return err
+		}
+		lease.Disposition = disposition
+		if disposition != FetchAttemptDispositionAcquired {
+			return nil
+		}
+		if recoverInterrupted {
+			finishedAt := startedAt
+			durationMS := finishedAt.Sub(latestAttempt.StartedAt).Milliseconds()
+			if durationMS < 0 {
+				durationMS = 0
+			}
+			if err := NewMallWeatherDAO(tx).UpdateFetchAttempt(ctx, latestAttempt.ID, map[string]interface{}{
+				"status": "persist_failed", "finished_at": &finishedAt, "duration_ms": durationMS,
+				"error_class": "internal", "error_code": "WORKER_INTERRUPTED",
+				"error_message_safe": "weather worker attempt was interrupted",
+			}); err != nil {
+				return err
+			}
+		}
+
+		lease.Attempt = model.MallWeatherFetchAttempt{
+			FetchRunID: lease.Run.ID, AttemptNo: lease.Run.AttemptCount + 1,
+			StartedAt: startedAt, Status: "running",
+		}
+		if err := NewMallWeatherDAO(tx).CreateFetchAttempt(ctx, &lease.Attempt); err != nil {
+			return err
+		}
+		updates := map[string]interface{}{
+			"attempt_count": lease.Attempt.AttemptNo, "status": "running", "finished_at": nil,
+			"error_class": "", "error_code": "", "error_message_safe": "",
+		}
+		if lease.Run.StartedAt == nil {
+			updates["started_at"] = &startedAt
+			lease.Run.StartedAt = &startedAt
+		}
+		if err := NewMallWeatherDAO(tx).UpdateFetchRun(ctx, lease.Run.ID, updates); err != nil {
+			return err
+		}
+		lease.Run.AttemptCount = lease.Attempt.AttemptNo
+		lease.Run.Status = "running"
+		lease.Run.FinishedAt = nil
+		lease.Run.ErrorClass = ""
+		lease.Run.ErrorCode = ""
+		lease.Run.ErrorMessageSafe = ""
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return lease, nil
+}
+
+func classifyFetchAttemptStart(run *model.MallWeatherFetchRun, latestAttempt *model.MallWeatherFetchAttempt, now time.Time, staleAfter time.Duration) (FetchAttemptDisposition, bool, error) {
+	if run == nil || run.ID == 0 || now.IsZero() || staleAfter <= 0 || run.AttemptCount < 0 {
+		return FetchAttemptDispositionUnknown, false, fmt.Errorf("mall weather: invalid fetch run state")
+	}
+	if run.AttemptCount == 0 && latestAttempt != nil {
+		return FetchAttemptDispositionUnknown, false, fmt.Errorf("mall weather: unexpected fetch attempt for pending run")
+	}
+	if run.AttemptCount > 0 && (latestAttempt == nil || latestAttempt.FetchRunID != run.ID || latestAttempt.AttemptNo != run.AttemptCount) {
+		return FetchAttemptDispositionUnknown, false, fmt.Errorf("mall weather: inconsistent latest fetch attempt")
+	}
+	if run.Status != "pending" && latestAttempt == nil {
+		return FetchAttemptDispositionUnknown, false, fmt.Errorf("mall weather: fetch run status requires an attempt")
+	}
+	switch run.Status {
+	case "success", "partial_success":
+		if latestAttempt.Status != run.Status {
+			return FetchAttemptDispositionUnknown, false, fmt.Errorf("mall weather: inconsistent terminal fetch attempt")
+		}
+		return FetchAttemptDispositionTerminal, false, nil
+	case "pending":
+		if run.AttemptCount != 0 {
+			return FetchAttemptDispositionUnknown, false, fmt.Errorf("mall weather: pending fetch run has attempts")
+		}
+		return FetchAttemptDispositionAcquired, false, nil
+	case "failed":
+		if latestAttempt.Status == "running" || latestAttempt.Status == "success" || latestAttempt.Status == "partial_success" {
+			return FetchAttemptDispositionUnknown, false, fmt.Errorf("mall weather: inconsistent failed fetch attempt")
+		}
+		return FetchAttemptDispositionAcquired, false, nil
+	case "running":
+		if latestAttempt.Status != "running" || latestAttempt.StartedAt.IsZero() {
+			return FetchAttemptDispositionUnknown, false, fmt.Errorf("mall weather: inconsistent running fetch attempt")
+		}
+		if now.UTC().Before(latestAttempt.StartedAt.UTC().Add(staleAfter)) {
+			return FetchAttemptDispositionBusy, false, nil
+		}
+		return FetchAttemptDispositionAcquired, true, nil
+	default:
+		return FetchAttemptDispositionUnknown, false, fmt.Errorf("mall weather: unsupported fetch run status %q", run.Status)
+	}
+}
+
+func (dao *MallWeatherDAO) UpdateFetchAttempt(ctx context.Context, id uint, updates map[string]interface{}) error {
+	safeUpdates, err := sanitizeFetchAttemptUpdates(updates)
+	if err != nil {
+		return err
+	}
+	result := dao.db.WithContext(ctx).Model(&model.MallWeatherFetchAttempt{}).
+		Where("id = ?", id).
+		Updates(safeUpdates)
+	if result.Error != nil {
+		return fmt.Errorf("mall weather: update fetch attempt: %w", result.Error)
+	}
+	if id == 0 || result.RowsAffected != 1 {
+		return fmt.Errorf("mall weather: fetch attempt not found")
+	}
+	return nil
+}
+
 func (dao *MallWeatherDAO) UpdateFetchRun(ctx context.Context, id uint, updates map[string]interface{}) error {
 	safeUpdates, err := sanitizeFetchRunUpdates(updates)
 	if err != nil {
 		return err
 	}
-	if err := dao.db.WithContext(ctx).Model(&model.MallWeatherFetchRun{}).
+	result := dao.db.WithContext(ctx).Model(&model.MallWeatherFetchRun{}).
 		Where("id = ?", id).
-		Updates(safeUpdates).Error; err != nil {
-		return fmt.Errorf("mall weather: update fetch run: %w", err)
+		Updates(safeUpdates)
+	if result.Error != nil {
+		return fmt.Errorf("mall weather: update fetch run: %w", result.Error)
+	}
+	if id == 0 || result.RowsAffected != 1 {
+		return fmt.Errorf("mall weather: fetch run not found")
 	}
 	return nil
+}
+
+func sanitizeFetchAttemptUpdates(updates map[string]interface{}) (map[string]interface{}, error) {
+	allowed := map[string]struct{}{
+		"finished_at": {}, "duration_ms": {}, "http_status": {}, "provider_status": {},
+		"raw_snapshot_id": {}, "response_checksum": {}, "status": {}, "error_class": {},
+		"error_code": {}, "error_message_safe": {},
+	}
+	if len(updates) == 0 {
+		return nil, fmt.Errorf("mall weather: no fetch attempt fields to update")
+	}
+	result := make(map[string]interface{}, len(updates))
+	for field, value := range updates {
+		if _, ok := allowed[field]; !ok {
+			return nil, fmt.Errorf("mall weather: fetch attempt field %q is not allowed", field)
+		}
+		result[field] = value
+	}
+	return result, nil
 }
 
 func sanitizeFetchRunUpdates(updates map[string]interface{}) (map[string]interface{}, error) {

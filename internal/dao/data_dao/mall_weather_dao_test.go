@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"gin-biz-web-api/model"
 )
 
 func TestNormalizePageSizes(t *testing.T) {
@@ -62,6 +64,73 @@ func TestSanitizeFetchRunUpdates(t *testing.T) {
 	}
 	if _, err := sanitizeFetchRunUpdates(map[string]interface{}{"task_window": "changed"}); err == nil {
 		t.Fatal("sanitizeFetchRunUpdates() accepted immutable task window")
+	}
+}
+
+func TestSanitizeFetchAttemptUpdates(t *testing.T) {
+	if _, err := sanitizeFetchAttemptUpdates(map[string]interface{}{"status": "success"}); err != nil {
+		t.Fatalf("sanitizeFetchAttemptUpdates() rejected status: %v", err)
+	}
+	if _, err := sanitizeFetchAttemptUpdates(map[string]interface{}{"attempt_no": 99}); err == nil {
+		t.Fatal("sanitizeFetchAttemptUpdates() accepted immutable attempt number")
+	}
+}
+
+func TestClassifyFetchAttemptStart(t *testing.T) {
+	now := time.Date(2026, 7, 22, 3, 0, 0, 0, time.UTC)
+	const staleAfter = 10 * time.Minute
+	tests := []struct {
+		name        string
+		run         model.MallWeatherFetchRun
+		attempt     *model.MallWeatherFetchAttempt
+		want        FetchAttemptDisposition
+		wantRecover bool
+		wantError   bool
+	}{
+		{name: "pending is acquired", run: fetchRunState(0, "pending"), want: FetchAttemptDispositionAcquired},
+		{
+			name: "failed is acquired", run: fetchRunState(1, "failed"),
+			attempt: fetchAttemptState(1, "transport_failed", now.Add(-time.Minute)), want: FetchAttemptDispositionAcquired,
+		},
+		{
+			name: "success is terminal", run: fetchRunState(1, "success"),
+			attempt: fetchAttemptState(1, "success", now.Add(-time.Minute)), want: FetchAttemptDispositionTerminal,
+		},
+		{
+			name: "partial success is terminal", run: fetchRunState(1, "partial_success"),
+			attempt: fetchAttemptState(1, "partial_success", now.Add(-time.Minute)), want: FetchAttemptDispositionTerminal,
+		},
+		{
+			name: "fresh running attempt is busy", run: fetchRunState(2, "running"),
+			attempt: fetchAttemptState(2, "running", now.Add(-time.Minute)), want: FetchAttemptDispositionBusy,
+		},
+		{
+			name: "stale running attempt is recovered", run: fetchRunState(2, "running"),
+			attempt: fetchAttemptState(2, "running", now.Add(-staleAfter)), want: FetchAttemptDispositionAcquired, wantRecover: true,
+		},
+		{name: "running without matching attempt is rejected", run: fetchRunState(2, "running"), wantError: true},
+		{name: "unknown state is rejected", run: fetchRunState(1, "deleted"), wantError: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got, recoverInterrupted, err := classifyFetchAttemptStart(&test.run, test.attempt, now, staleAfter)
+			if (err != nil) != test.wantError {
+				t.Fatalf("classifyFetchAttemptStart() error=%v wantError=%v", err, test.wantError)
+			}
+			if err == nil && (got != test.want || recoverInterrupted != test.wantRecover) {
+				t.Fatalf("classifyFetchAttemptStart()=(%v,%v) want=(%v,%v)", got, recoverInterrupted, test.want, test.wantRecover)
+			}
+		})
+	}
+}
+
+func fetchRunState(attemptCount int, status string) model.MallWeatherFetchRun {
+	return model.MallWeatherFetchRun{BaseModel: model.BaseModel{ID: 7}, AttemptCount: attemptCount, Status: status}
+}
+
+func fetchAttemptState(attemptNo int, status string, startedAt time.Time) *model.MallWeatherFetchAttempt {
+	return &model.MallWeatherFetchAttempt{
+		BaseModel: model.BaseModel{ID: 11}, FetchRunID: 7, AttemptNo: attemptNo, StartedAt: startedAt, Status: status,
 	}
 }
 
