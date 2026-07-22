@@ -123,5 +123,9 @@ func validMallWeatherExportProcessorJob(t *testing.T) model.MallWeatherExportJob
 		TotalRows:           1,
 		ProfileSnapshotJSON: model.JSONText(snapshot),
 		FiltersJSON:         model.JSONText(filters),
+		WeatherTimestamps: model.WeatherTimestamps{
+			CreatedAt: time.Date(2026, 7, 22, 7, 0, 0, 0, time.UTC),
+			UpdatedAt: time.Date(2026, 7, 22, 7, 0, 0, 0, time.UTC),
+		},
 	}
 }

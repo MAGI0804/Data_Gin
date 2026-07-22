@@ -36,7 +36,7 @@ func prepareMallWeatherExportJob(
 ) (mallWeatherExportPreparedJob, error) {
 	if row.ID == 0 || row.ProfileID == 0 || row.ProfileVersion == 0 ||
 		len(row.JobUUID) != 36 || uuid.Validate(row.JobUUID) != nil || row.TotalRows < 0 ||
-		row.TotalRows > maxMallWeatherExportConfiguredRows || now.IsZero() {
+		row.TotalRows > maxMallWeatherExportConfiguredRows || row.CreatedAt.IsZero() || now.IsZero() {
 		return mallWeatherExportPreparedJob{}, fmt.Errorf("mall weather export processor: invalid job identity")
 	}
 	var snapshot MallWeatherExportProfileSnapshot
