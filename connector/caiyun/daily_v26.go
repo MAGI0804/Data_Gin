@@ -66,6 +66,9 @@ type DailyForecast struct {
 	NightSkycon        string
 	SunriseLocalTime   string
 	SunsetLocalTime    string
+	BasicLifeIndices   []LifeIndexItem
+	BasicLifeIndexJSON json.RawMessage
+	basicLifeIndexRaw  map[string]json.RawMessage
 }
 
 type DailyBundle struct {
@@ -101,14 +104,17 @@ type dailyPayload struct {
 }
 
 type dailyItem struct {
-	Date        json.RawMessage `json:"date"`
-	Maximum     json.RawMessage `json:"max"`
-	Minimum     json.RawMessage `json:"min"`
-	Average     json.RawMessage `json:"avg"`
-	Value       json.RawMessage `json:"value"`
-	Probability json.RawMessage `json:"probability"`
-	Sunrise     json.RawMessage `json:"sunrise"`
-	Sunset      json.RawMessage `json:"sunset"`
+	Date         json.RawMessage `json:"date"`
+	Maximum      json.RawMessage `json:"max"`
+	Minimum      json.RawMessage `json:"min"`
+	Average      json.RawMessage `json:"avg"`
+	Value        json.RawMessage `json:"value"`
+	Probability  json.RawMessage `json:"probability"`
+	Sunrise      json.RawMessage `json:"sunrise"`
+	Sunset       json.RawMessage `json:"sunset"`
+	Index        json.RawMessage `json:"index"`
+	Description  json.RawMessage `json:"desc"`
+	ProviderJSON json.RawMessage `json:"-"`
 }
 
 func ParseDailyV26(weather *WeatherBundle) (*DailyBundle, error) {
@@ -163,6 +169,7 @@ func ParseDailyV26(weather *WeatherBundle) (*DailyBundle, error) {
 	mergeDailyWind(payload.NightWind, "result.daily.wind_20h_32h", issuedAtUTC, zone, rows, &warnings,
 		func(row *DailyForecast) *DailyWind { return &row.NightWind })
 	mergeDailyAirQuality(payload.AirQuality, issuedAtUTC, zone, rows, &warnings)
+	mergeDailyBasicLifeIndices(payload.LifeIndex, issuedAtUTC, zone, rows, &warnings)
 	mergeDailySkycon(payload.Skycon, "result.daily.skycon", true, issuedAtUTC, zone, rows, &warnings,
 		func(row *DailyForecast, value string) { row.Skycon = value })
 	mergeDailySkycon(payload.DaySkycon, "result.daily.skycon_08h_20h", false, issuedAtUTC, zone, rows, &warnings,
@@ -185,6 +192,9 @@ func ParseDailyV26(weather *WeatherBundle) (*DailyBundle, error) {
 	irregularInterval := false
 	for index, date := range dates {
 		row := rows[date]
+		if err := finalizeDailyLifeIndices(row); err != nil {
+			return nil, weatherParseError()
+		}
 		if row.Temperature.Maximum == nil && row.Temperature.Minimum == nil && row.Temperature.Average == nil {
 			missingTemperature++
 		}
@@ -309,6 +319,7 @@ func mergeDailyItems(
 			*warnings = append(*warnings, ParseWarning{Code: "INVALID_ITEM", Path: itemPath})
 			continue
 		}
+		item.ProviderJSON = cloneRawMessage(rawItem)
 		date, ok := parseDailyDate(item.Date, itemPath+".date", issuedAtUTC, zone, warnings)
 		if !ok {
 			continue
