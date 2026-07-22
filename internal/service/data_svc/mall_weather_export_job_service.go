@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"gin-biz-web-api/internal/dao/data_dao"
 	"gin-biz-web-api/internal/requestbody"
@@ -241,7 +242,7 @@ func (service *MallWeatherExportJobService) Download(
 	if strings.ToLower(strings.TrimSpace(row.Status)) != "succeeded" {
 		return nil, ErrMallWeatherExportNotReady
 	}
-	if row.ExpiresAt == nil || !row.ExpiresAt.UTC().After(now) || !validMallWeatherExportDownloadObjectKey(row.ResultObjectKey) {
+	if row.ExpiresAt == nil || !row.ExpiresAt.UTC().After(now) || !validMallWeatherExportResultObjectKey(row.ResultObjectKey) {
 		return nil, ErrMallWeatherExportExpired
 	}
 	validFor := service.downloadTTL
@@ -266,9 +267,15 @@ func (service *MallWeatherExportJobService) Download(
 	return &MallWeatherExportDownloadResult{URL: url, ExpiresAt: now.Add(validFor)}, nil
 }
 
-func validMallWeatherExportDownloadObjectKey(value string) bool {
-	if value == "" || value != strings.TrimSpace(value) || strings.HasPrefix(value, "/") || strings.Contains(value, "\\") {
+func validMallWeatherExportResultObjectKey(value string) bool {
+	if value == "" || len(value) > 1024 || value != strings.TrimSpace(value) || strings.HasPrefix(value, "/") ||
+		strings.Contains(value, "\\") {
 		return false
+	}
+	for _, char := range value {
+		if unicode.IsControl(char) {
+			return false
+		}
 	}
 	for _, part := range strings.Split(value, "/") {
 		if part == "" || part == "." || part == ".." {
