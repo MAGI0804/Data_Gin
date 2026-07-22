@@ -127,6 +127,93 @@ func TestWeatherHourlyCursorRejectsUnknownFields(t *testing.T) {
 	}
 }
 
+func TestMallWeatherQueryServiceOverviewReturnsBoundedSummary(t *testing.T) {
+	now := time.Date(2026, 7, 22, 4, 0, 37, 0, time.UTC)
+	longitude, latitude := 121.455, 31.228
+	humidity, probability := 0.72, 0.35
+	publishedAt := now.Add(-time.Hour)
+	weather := &fakeMallWeatherQueryDAO{
+		realtime: &model.MallWeatherRealtime{
+			BaseModel: model.BaseModel{ID: 21}, MallID: 7, SnapshotAtUTC: now.Add(-5 * time.Minute), FetchedAtUTC: now.Add(-5 * time.Minute),
+			HumidityRatio: &humidity, WeatherQualityFields: model.WeatherQualityFields{QualityStatus: "valid", QualityFlagsJSON: model.JSONText("[]")},
+		},
+		minutely: []model.MallWeatherMinutely{{
+			BaseModel: model.BaseModel{ID: 31}, MallID: 7, ForecastMinuteUTC: now.Add(time.Minute), IssuedAtUTC: now.Add(-10 * time.Minute),
+			FetchedAtUTC: now.Add(-10 * time.Minute), MinuteOffset: 1, ProbabilityRatio: &probability,
+			WeatherQualityFields: model.WeatherQualityFields{QualityStatus: "warning", QualityFlagsJSON: model.JSONText(`[{"code":"MINUTE_GAP","path":"minutely"}]`)},
+		}},
+		rows: []model.MallWeatherHourly{{
+			BaseModel: model.BaseModel{ID: 41}, MallID: 7, ForecastTimeUTC: now.Add(time.Hour), IssuedAtUTC: now.Add(-time.Hour), FetchedAtUTC: now.Add(-time.Hour),
+			WeatherQualityFields: model.WeatherQualityFields{QualityStatus: "valid", QualityFlagsJSON: model.JSONText("[]")},
+		}},
+		alerts: []model.MallWeatherAlert{{
+			BaseModel: model.BaseModel{ID: 51}, AlertID: "alert-1", Status: "active", Title: "Heavy rain", PublishedAtUTC: &publishedAt,
+			QualityStatus: "valid", QualityFlagsJSON: model.JSONText("[]"),
+		}},
+		latestByKind: map[string]*model.MallWeatherLatest{
+			model.MallWeatherDataKindRealtime: {FetchedAtUTC: now.Add(-5 * time.Minute), FreshnessStatus: model.MallWeatherFreshnessFresh},
+			model.MallWeatherDataKindMinutely: {FetchedAtUTC: now.Add(-10 * time.Minute), FreshnessStatus: model.MallWeatherFreshnessFresh},
+			model.MallWeatherDataKindHourly:   {FetchedAtUTC: now.Add(-3 * time.Hour), FreshnessStatus: model.MallWeatherFreshnessStale},
+		},
+	}
+	mall := &model.Mall{
+		BaseModel: model.BaseModel{ID: 7}, WeatherLongitude: &longitude, WeatherLatitude: &latitude,
+		WeatherCoordinateSystem: "gcj02", GeocodeStatus: "confirmed", Timezone: "Asia/Shanghai",
+		SamplingMode: "center", CoverageRadiusM: 1000,
+	}
+	service, err := newMallWeatherQueryService(fakeMallWeatherQueryMallReader{mall: mall}, weather, fakeMallPermissionChecker{allowed: true}, func() time.Time { return now })
+	if err != nil {
+		t.Fatalf("newMallWeatherQueryService() error=%v", err)
+	}
+	result, err := service.Overview(context.Background(), 17, 7, "Asia/Shanghai")
+	if err != nil {
+		t.Fatalf("Overview() error=%v", err)
+	}
+	if result.Realtime == nil || result.Realtime.HumidityPct == nil || *result.Realtime.HumidityPct != 72 ||
+		result.Realtime.SnapshotAtLocal != "2026-07-22T11:55:37+08:00" || len(result.Minutely) != 1 ||
+		result.Minutely[0].ProbabilityPct == nil || *result.Minutely[0].ProbabilityPct != 35 ||
+		len(result.Minutely[0].QualityWarnings) != 1 || len(result.Hourly) != 1 || len(result.Alerts) != 1 ||
+		result.Alerts[0].PublishedAtLocal == nil || *result.Alerts[0].PublishedAtLocal != "2026-07-22T11:00:37+08:00" {
+		t.Fatalf("result=%+v", result)
+	}
+	if result.Meta.FreshnessStatus != "STALE" || result.Meta.DataAgeSeconds == nil || *result.Meta.DataAgeSeconds != 3*60*60 ||
+		weather.minutelyStartUTC != now.Truncate(time.Minute) || weather.minutelyEndUTC != now.Truncate(time.Minute).Add(2*time.Hour) || weather.minutelyLimit != maxWeatherOverviewMinutely ||
+		weather.query.StartUTC != now.Truncate(time.Hour) || weather.query.EndUTC != now.Truncate(time.Hour).Add(24*time.Hour) ||
+		!weather.query.Latest || weather.query.Limit != 24 || weather.alertLimit != maxWeatherOverviewAlerts {
+		t.Fatalf("meta=%+v query=%+v minutely=[%s,%s,%d] alertLimit=%d", result.Meta, weather.query, weather.minutelyStartUTC, weather.minutelyEndUTC, weather.minutelyLimit, weather.alertLimit)
+	}
+}
+
+func TestMallWeatherQueryServiceOverviewMarksMissingModuleUnavailable(t *testing.T) {
+	now := time.Date(2026, 7, 22, 4, 0, 0, 0, time.UTC)
+	longitude, latitude := 121.455, 31.228
+	weather := &fakeMallWeatherQueryDAO{latestByKind: map[string]*model.MallWeatherLatest{
+		model.MallWeatherDataKindRealtime: {FetchedAtUTC: now.Add(-5 * time.Minute), FreshnessStatus: model.MallWeatherFreshnessFresh},
+		model.MallWeatherDataKindHourly:   {FetchedAtUTC: now.Add(-time.Hour), FreshnessStatus: model.MallWeatherFreshnessFresh},
+	}}
+	service, err := newMallWeatherQueryService(fakeMallWeatherQueryMallReader{mall: &model.Mall{
+		BaseModel: model.BaseModel{ID: 7}, WeatherLongitude: &longitude, WeatherLatitude: &latitude,
+		GeocodeStatus: "confirmed", Timezone: "Asia/Shanghai", CoverageRadiusM: 1000,
+	}}, weather, fakeMallPermissionChecker{allowed: true}, func() time.Time { return now })
+	if err != nil {
+		t.Fatalf("newMallWeatherQueryService() error=%v", err)
+	}
+	result, err := service.Overview(context.Background(), 17, 7, "")
+	if err != nil {
+		t.Fatalf("Overview() error=%v", err)
+	}
+	if result.Meta.FreshnessStatus != "UNAVAILABLE" || result.Meta.DataAgeSeconds == nil || *result.Meta.DataAgeSeconds != 60*60 ||
+		result.Realtime != nil || result.Minutely == nil || result.Hourly == nil || result.Alerts == nil {
+		t.Fatalf("result=%+v", result)
+	}
+}
+
+func TestWeatherQualityWarningsRejectsMalformedJSON(t *testing.T) {
+	if _, err := weatherQualityWarnings(model.JSONText(`{"code":`)); err == nil {
+		t.Fatal("weatherQualityWarnings() accepted malformed JSON")
+	}
+}
+
 func validHourlyRequest(now time.Time) requestbody.MallWeatherHourlyQueryRequest {
 	return requestbody.MallWeatherHourlyQueryRequest{StartUTC: now, EndUTC: now.Add(time.Hour), Latest: true}
 }
@@ -141,10 +228,19 @@ func (reader fakeMallWeatherQueryMallReader) FindByID(context.Context, uint) (*m
 }
 
 type fakeMallWeatherQueryDAO struct {
-	rows   []model.MallWeatherHourly
-	latest *model.MallWeatherLatest
-	err    error
-	query  data_dao.HourlyQuery
+	rows             []model.MallWeatherHourly
+	latest           *model.MallWeatherLatest
+	latestByKind     map[string]*model.MallWeatherLatest
+	realtime         *model.MallWeatherRealtime
+	minutely         []model.MallWeatherMinutely
+	alerts           []model.MallWeatherAlert
+	err              error
+	overviewError    error
+	query            data_dao.HourlyQuery
+	minutelyStartUTC time.Time
+	minutelyEndUTC   time.Time
+	minutelyLimit    int
+	alertLimit       int
 }
 
 func (dao *fakeMallWeatherQueryDAO) QueryHourly(_ context.Context, query data_dao.HourlyQuery) ([]model.MallWeatherHourly, error) {
@@ -152,9 +248,35 @@ func (dao *fakeMallWeatherQueryDAO) QueryHourly(_ context.Context, query data_da
 	return append([]model.MallWeatherHourly(nil), dao.rows...), dao.err
 }
 
-func (dao *fakeMallWeatherQueryDAO) FindCurrentLatest(context.Context, uint, string) (*model.MallWeatherLatest, error) {
+func (dao *fakeMallWeatherQueryDAO) FindCurrentLatest(_ context.Context, _ uint, dataKind string) (*model.MallWeatherLatest, error) {
+	if dao.latestByKind != nil {
+		latest, exists := dao.latestByKind[dataKind]
+		if !exists {
+			return nil, data_dao.ErrMallWeatherLatestNotFound
+		}
+		return latest, dao.err
+	}
 	if dao.latest == nil && dao.err == nil {
 		return nil, data_dao.ErrMallWeatherLatestNotFound
 	}
 	return dao.latest, dao.err
+}
+
+func (dao *fakeMallWeatherQueryDAO) FindOverviewRealtime(context.Context, uint) (*model.MallWeatherRealtime, error) {
+	if dao.realtime == nil && dao.overviewError == nil {
+		return nil, data_dao.ErrMallWeatherLatestNotFound
+	}
+	return dao.realtime, dao.overviewError
+}
+
+func (dao *fakeMallWeatherQueryDAO) ListOverviewMinutely(_ context.Context, _ uint, startUTC, endUTC time.Time, limit int) ([]model.MallWeatherMinutely, error) {
+	dao.minutelyStartUTC = startUTC
+	dao.minutelyEndUTC = endUTC
+	dao.minutelyLimit = limit
+	return append([]model.MallWeatherMinutely(nil), dao.minutely...), dao.overviewError
+}
+
+func (dao *fakeMallWeatherQueryDAO) ListOverviewAlerts(_ context.Context, _ uint, limit int) ([]model.MallWeatherAlert, error) {
+	dao.alertLimit = limit
+	return append([]model.MallWeatherAlert(nil), dao.alerts...), dao.overviewError
 }

@@ -25,6 +25,8 @@ const (
 	maxWeatherCursorLength      = 512
 	minWeatherCursorUnixMS      = int64(946684800000)
 	maxWeatherCursorUnixMS      = int64(4102444800000)
+	maxWeatherOverviewMinutely  = 120
+	maxWeatherOverviewAlerts    = 20
 )
 
 var (
@@ -35,6 +37,9 @@ var (
 type mallWeatherQueryDAO interface {
 	QueryHourly(ctx context.Context, query data_dao.HourlyQuery) ([]model.MallWeatherHourly, error)
 	FindCurrentLatest(ctx context.Context, mallID uint, dataKind string) (*model.MallWeatherLatest, error)
+	FindOverviewRealtime(ctx context.Context, mallID uint) (*model.MallWeatherRealtime, error)
+	ListOverviewMinutely(ctx context.Context, mallID uint, startUTC, endUTC time.Time, limit int) ([]model.MallWeatherMinutely, error)
+	ListOverviewAlerts(ctx context.Context, mallID uint, limit int) ([]model.MallWeatherAlert, error)
 }
 
 type mallWeatherQueryMallReader interface {
@@ -107,6 +112,74 @@ type MallWeatherHourlyResult struct {
 	Items      []MallWeatherHourlyDTO `json:"items"`
 	Meta       MallWeatherQueryMeta   `json:"meta"`
 	Pagination MallWeatherPagination  `json:"pagination"`
+}
+
+type MallWeatherRealtimeDTO struct {
+	SnapshotAtUTC           time.Time               `json:"snapshotAtUtc"`
+	SnapshotAtLocal         string                  `json:"snapshotAtLocal"`
+	FetchedAtUTC            time.Time               `json:"fetchedAtUtc"`
+	FetchedAtLocal          string                  `json:"fetchedAtLocal"`
+	TemperatureC            *float64                `json:"temperatureC,omitempty"`
+	ApparentTemperatureC    *float64                `json:"apparentTemperatureC,omitempty"`
+	HumidityRatio           *float64                `json:"humidityRatio,omitempty"`
+	HumidityPct             *float64                `json:"humidityPct,omitempty"`
+	PressurePa              *float64                `json:"pressurePa,omitempty"`
+	WindSpeedKPH            *float64                `json:"windSpeedKph,omitempty"`
+	WindDirectionDeg        *float64                `json:"windDirectionDeg,omitempty"`
+	CloudrateRatio          *float64                `json:"cloudrateRatio,omitempty"`
+	VisibilityKM            *float64                `json:"visibilityKm,omitempty"`
+	Skycon                  string                  `json:"skycon,omitempty"`
+	LocalPrecipitationMMH   *float64                `json:"localPrecipitationMmH,omitempty"`
+	NearestPrecipDistanceKM *float64                `json:"nearestPrecipitationDistanceKm,omitempty"`
+	NearestPrecipitationMMH *float64                `json:"nearestPrecipitationMmH,omitempty"`
+	PM25UGM3                *float64                `json:"pm25UgM3,omitempty"`
+	PM10UGM3                *float64                `json:"pm10UgM3,omitempty"`
+	AQIChn                  *int                    `json:"aqiChn,omitempty"`
+	AQIUSA                  *int                    `json:"aqiUsa,omitempty"`
+	QualityStatus           string                  `json:"qualityStatus"`
+	QualityWarnings         []MallWeatherWarningDTO `json:"qualityWarnings"`
+}
+
+type MallWeatherMinutelyDTO struct {
+	ForecastMinuteUTC   time.Time               `json:"forecastMinuteUtc"`
+	ForecastMinuteLocal string                  `json:"forecastMinuteLocal"`
+	IssuedAtUTC         time.Time               `json:"issuedAtUtc"`
+	IssuedAtLocal       string                  `json:"issuedAtLocal"`
+	FetchedAtUTC        time.Time               `json:"fetchedAtUtc"`
+	FetchedAtLocal      string                  `json:"fetchedAtLocal"`
+	MinuteOffset        int                     `json:"minuteOffset"`
+	PrecipitationMMH    *float64                `json:"precipitationMmH,omitempty"`
+	ProbabilityRatio    *float64                `json:"probabilityRatio,omitempty"`
+	ProbabilityPct      *float64                `json:"probabilityPct,omitempty"`
+	Description         string                  `json:"description,omitempty"`
+	ForecastKeypoint    string                  `json:"forecastKeypoint,omitempty"`
+	QualityStatus       string                  `json:"qualityStatus"`
+	QualityWarnings     []MallWeatherWarningDTO `json:"qualityWarnings"`
+}
+
+type MallWeatherAlertDTO struct {
+	AlertID          string                  `json:"alertId"`
+	Status           string                  `json:"status"`
+	Code             string                  `json:"code,omitempty"`
+	AlertTypeCode    string                  `json:"alertTypeCode,omitempty"`
+	AlertLevelCode   string                  `json:"alertLevelCode,omitempty"`
+	AlertTypeName    string                  `json:"alertTypeName,omitempty"`
+	AlertLevelName   string                  `json:"alertLevelName,omitempty"`
+	Title            string                  `json:"title"`
+	Description      string                  `json:"description,omitempty"`
+	Source           string                  `json:"source,omitempty"`
+	PublishedAtUTC   *time.Time              `json:"publishedAtUtc,omitempty"`
+	PublishedAtLocal *string                 `json:"publishedAtLocal,omitempty"`
+	QualityStatus    string                  `json:"qualityStatus"`
+	QualityWarnings  []MallWeatherWarningDTO `json:"qualityWarnings"`
+}
+
+type MallWeatherOverviewResult struct {
+	Realtime *MallWeatherRealtimeDTO  `json:"realtime,omitempty"`
+	Minutely []MallWeatherMinutelyDTO `json:"minutely"`
+	Hourly   []MallWeatherHourlyDTO   `json:"hourly"`
+	Alerts   []MallWeatherAlertDTO    `json:"alerts"`
+	Meta     MallWeatherQueryMeta     `json:"meta"`
 }
 
 type weatherHourlyCursor struct {
@@ -216,6 +289,82 @@ func (service *MallWeatherQueryService) Hourly(
 	return result, nil
 }
 
+func (service *MallWeatherQueryService) Overview(ctx context.Context, actorUserID, mallID uint, timeZone string) (*MallWeatherOverviewResult, error) {
+	if service == nil || ctx == nil || mallID == 0 {
+		return nil, fmt.Errorf("%w: invalid request", ErrMallWeatherInvalidQuery)
+	}
+	if err := service.authorize(ctx, actorUserID); err != nil {
+		return nil, err
+	}
+	mall, err := service.malls.FindByID(ctx, mallID)
+	if err != nil {
+		return nil, err
+	}
+	location, err := weatherMallLocation(mall, timeZone)
+	if err != nil {
+		return nil, err
+	}
+	now := service.now().UTC()
+	minutelyStartUTC := now.Truncate(time.Minute)
+	hourlyStartUTC := now.Truncate(time.Hour)
+	realtime, err := service.weather.FindOverviewRealtime(ctx, mallID)
+	if err != nil && !errors.Is(err, data_dao.ErrMallWeatherLatestNotFound) {
+		return nil, fmt.Errorf("mall weather query: overview realtime: %w", err)
+	}
+	minutely, err := service.weather.ListOverviewMinutely(ctx, mallID, minutelyStartUTC, minutelyStartUTC.Add(2*time.Hour), maxWeatherOverviewMinutely)
+	if err != nil {
+		return nil, fmt.Errorf("mall weather query: overview minutely: %w", err)
+	}
+	hourly, err := service.weather.QueryHourly(ctx, data_dao.HourlyQuery{
+		MallID: mallID, StartUTC: hourlyStartUTC, EndUTC: hourlyStartUTC.Add(24 * time.Hour), Latest: true, Limit: 24,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("mall weather query: overview hourly: %w", err)
+	}
+	alerts, err := service.weather.ListOverviewAlerts(ctx, mallID, maxWeatherOverviewAlerts)
+	if err != nil {
+		return nil, fmt.Errorf("mall weather query: overview alerts: %w", err)
+	}
+	result := &MallWeatherOverviewResult{
+		Minutely: make([]MallWeatherMinutelyDTO, len(minutely)),
+		Hourly:   make([]MallWeatherHourlyDTO, len(hourly)),
+		Alerts:   make([]MallWeatherAlertDTO, len(alerts)),
+		Meta:     weatherQueryMeta(mall, location, model.MallWeatherFreshnessFresh, nil),
+	}
+	if realtime != nil {
+		dto, err := realtimeWeatherDTO(realtime, location)
+		if err != nil {
+			return nil, err
+		}
+		result.Realtime = &dto
+	}
+	for index := range minutely {
+		result.Minutely[index], err = minutelyWeatherDTO(&minutely[index], location)
+		if err != nil {
+			return nil, err
+		}
+	}
+	for index := range hourly {
+		result.Hourly[index], err = hourlyWeatherDTO(&hourly[index], location)
+		if err != nil {
+			return nil, err
+		}
+	}
+	for index := range alerts {
+		result.Alerts[index], err = alertWeatherDTO(&alerts[index], location)
+		if err != nil {
+			return nil, err
+		}
+	}
+	status, age, err := service.overviewFreshness(ctx, mallID, now)
+	if err != nil {
+		return nil, err
+	}
+	result.Meta.FreshnessStatus = strings.ToUpper(status)
+	result.Meta.DataAgeSeconds = age
+	return result, nil
+}
+
 func (service *MallWeatherQueryService) authorize(ctx context.Context, actorUserID uint) error {
 	if actorUserID == 0 {
 		return ErrMallForbidden
@@ -231,9 +380,9 @@ func (service *MallWeatherQueryService) authorize(ctx context.Context, actorUser
 }
 
 func normalizeHourlyWeatherRequest(request requestbody.MallWeatherHourlyQueryRequest, mall *model.Mall) (*time.Location, requestbody.MallWeatherHourlyQueryRequest, error) {
-	if mall == nil || mall.ID == 0 || mall.WeatherLongitude == nil || mall.WeatherLatitude == nil || mall.GeocodeStatus != "confirmed" ||
-		*mall.WeatherLongitude < -180 || *mall.WeatherLongitude > 180 || *mall.WeatherLatitude < -90 || *mall.WeatherLatitude > 90 {
-		return nil, request, ErrMallWeatherCoordinateUnconfirmed
+	location, err := weatherMallLocation(mall, request.TimeZone)
+	if err != nil {
+		return nil, request, err
 	}
 	if request.StartUTC.IsZero() || request.EndUTC.IsZero() || !request.StartUTC.Before(request.EndUTC) ||
 		request.EndUTC.Sub(request.StartUTC) > maxWeatherQueryRange {
@@ -255,7 +404,16 @@ func normalizeHourlyWeatherRequest(request requestbody.MallWeatherHourlyQueryReq
 	if request.PageSize < 1 || request.PageSize > maxWeatherQueryPageSize || len(request.Cursor) > maxWeatherCursorLength {
 		return nil, request, fmt.Errorf("%w: invalid pagination", ErrMallWeatherInvalidQuery)
 	}
-	zoneName := strings.TrimSpace(request.TimeZone)
+	request.TimeZone = location.String()
+	return location, request, nil
+}
+
+func weatherMallLocation(mall *model.Mall, timeZone string) (*time.Location, error) {
+	if mall == nil || mall.ID == 0 || mall.WeatherLongitude == nil || mall.WeatherLatitude == nil || mall.GeocodeStatus != "confirmed" ||
+		*mall.WeatherLongitude < -180 || *mall.WeatherLongitude > 180 || *mall.WeatherLatitude < -90 || *mall.WeatherLatitude > 90 {
+		return nil, ErrMallWeatherCoordinateUnconfirmed
+	}
+	zoneName := strings.TrimSpace(timeZone)
 	if zoneName == "" {
 		zoneName = strings.TrimSpace(mall.Timezone)
 	}
@@ -264,26 +422,18 @@ func normalizeHourlyWeatherRequest(request requestbody.MallWeatherHourlyQueryReq
 	}
 	location, err := time.LoadLocation(zoneName)
 	if err != nil {
-		return nil, request, fmt.Errorf("%w: invalid time zone", ErrMallWeatherInvalidQuery)
+		return nil, fmt.Errorf("%w: invalid time zone", ErrMallWeatherInvalidQuery)
 	}
-	request.TimeZone = zoneName
-	return location, request, nil
+	return location, nil
 }
 
 func hourlyWeatherDTO(row *model.MallWeatherHourly, location *time.Location) (MallWeatherHourlyDTO, error) {
 	if row == nil || row.ID == 0 || row.ForecastTimeUTC.IsZero() || row.IssuedAtUTC.IsZero() || row.FetchedAtUTC.IsZero() || location == nil {
 		return MallWeatherHourlyDTO{}, fmt.Errorf("mall weather query: invalid hourly row")
 	}
-	warnings := make([]MallWeatherWarningDTO, 0)
-	if row.QualityFlagsJSON != "" {
-		var parsed []caiyun.ParseWarning
-		if err := json.Unmarshal([]byte(row.QualityFlagsJSON), &parsed); err != nil {
-			return MallWeatherHourlyDTO{}, fmt.Errorf("mall weather query: decode quality warnings: %w", err)
-		}
-		warnings = make([]MallWeatherWarningDTO, len(parsed))
-		for index := range parsed {
-			warnings[index] = MallWeatherWarningDTO{Code: parsed[index].Code, Path: parsed[index].Path}
-		}
+	warnings, err := weatherQualityWarnings(row.QualityFlagsJSON)
+	if err != nil {
+		return MallWeatherHourlyDTO{}, err
 	}
 	return MallWeatherHourlyDTO{
 		ForecastTimeUTC: row.ForecastTimeUTC.UTC(), ForecastTimeLocal: formatWeatherLocalTime(row.ForecastTimeUTC, location),
@@ -298,6 +448,138 @@ func hourlyWeatherDTO(row *model.MallWeatherHourly, location *time.Location) (Ma
 		HourlyDescription: row.HourlyDescription, ForecastKeypoint: row.ForecastKeypoint,
 		QualityStatus: strings.ToUpper(row.QualityStatus), QualityWarnings: warnings,
 	}, nil
+}
+
+func realtimeWeatherDTO(row *model.MallWeatherRealtime, location *time.Location) (MallWeatherRealtimeDTO, error) {
+	if row == nil || row.ID == 0 || row.SnapshotAtUTC.IsZero() || row.FetchedAtUTC.IsZero() || location == nil {
+		return MallWeatherRealtimeDTO{}, fmt.Errorf("mall weather query: invalid realtime row")
+	}
+	warnings, err := weatherQualityWarnings(row.QualityFlagsJSON)
+	if err != nil {
+		return MallWeatherRealtimeDTO{}, err
+	}
+	return MallWeatherRealtimeDTO{
+		SnapshotAtUTC: row.SnapshotAtUTC.UTC(), SnapshotAtLocal: formatWeatherLocalTime(row.SnapshotAtUTC, location),
+		FetchedAtUTC: row.FetchedAtUTC.UTC(), FetchedAtLocal: formatWeatherLocalTime(row.FetchedAtUTC, location),
+		TemperatureC: row.TemperatureC, ApparentTemperatureC: row.ApparentTemperatureC,
+		HumidityRatio: row.HumidityRatio, HumidityPct: ratioPercent(row.HumidityRatio), PressurePa: row.PressurePa,
+		WindSpeedKPH: row.WindSpeedKPH, WindDirectionDeg: row.WindDirectionDeg, CloudrateRatio: row.CloudrateRatio,
+		VisibilityKM: row.VisibilityKM, Skycon: row.Skycon, LocalPrecipitationMMH: row.LocalPrecipMMH,
+		NearestPrecipDistanceKM: row.NearestPrecipDistanceKM, NearestPrecipitationMMH: row.NearestPrecipMMH,
+		PM25UGM3: row.PM25UGM3, PM10UGM3: row.PM10UGM3, AQIChn: row.AQIChn, AQIUSA: row.AQIUSA,
+		QualityStatus: strings.ToUpper(row.QualityStatus), QualityWarnings: warnings,
+	}, nil
+}
+
+func minutelyWeatherDTO(row *model.MallWeatherMinutely, location *time.Location) (MallWeatherMinutelyDTO, error) {
+	if row == nil || row.ID == 0 || row.ForecastMinuteUTC.IsZero() || row.IssuedAtUTC.IsZero() || row.FetchedAtUTC.IsZero() || location == nil {
+		return MallWeatherMinutelyDTO{}, fmt.Errorf("mall weather query: invalid minutely row")
+	}
+	warnings, err := weatherQualityWarnings(row.QualityFlagsJSON)
+	if err != nil {
+		return MallWeatherMinutelyDTO{}, err
+	}
+	return MallWeatherMinutelyDTO{
+		ForecastMinuteUTC: row.ForecastMinuteUTC.UTC(), ForecastMinuteLocal: formatWeatherLocalTime(row.ForecastMinuteUTC, location),
+		IssuedAtUTC: row.IssuedAtUTC.UTC(), IssuedAtLocal: formatWeatherLocalTime(row.IssuedAtUTC, location),
+		FetchedAtUTC: row.FetchedAtUTC.UTC(), FetchedAtLocal: formatWeatherLocalTime(row.FetchedAtUTC, location),
+		MinuteOffset: row.MinuteOffset, PrecipitationMMH: row.PrecipitationMMH,
+		ProbabilityRatio: row.ProbabilityRatio, ProbabilityPct: ratioPercent(row.ProbabilityRatio),
+		Description: row.Description, ForecastKeypoint: row.ForecastKeypoint,
+		QualityStatus: strings.ToUpper(row.QualityStatus), QualityWarnings: warnings,
+	}, nil
+}
+
+func alertWeatherDTO(row *model.MallWeatherAlert, location *time.Location) (MallWeatherAlertDTO, error) {
+	if row == nil || row.ID == 0 || strings.TrimSpace(row.AlertID) == "" || location == nil {
+		return MallWeatherAlertDTO{}, fmt.Errorf("mall weather query: invalid alert row")
+	}
+	warnings, err := weatherQualityWarnings(row.QualityFlagsJSON)
+	if err != nil {
+		return MallWeatherAlertDTO{}, err
+	}
+	dto := MallWeatherAlertDTO{
+		AlertID: row.AlertID, Status: strings.ToUpper(row.Status), Code: row.Code,
+		AlertTypeCode: row.AlertTypeCode, AlertLevelCode: row.AlertLevelCode,
+		AlertTypeName: row.AlertTypeName, AlertLevelName: row.AlertLevelName,
+		Title: row.Title, Description: row.Description, Source: row.Source,
+		QualityStatus: strings.ToUpper(row.QualityStatus), QualityWarnings: warnings,
+	}
+	if row.PublishedAtUTC != nil {
+		publishedAtUTC := row.PublishedAtUTC.UTC()
+		publishedAtLocal := formatWeatherLocalTime(publishedAtUTC, location)
+		dto.PublishedAtUTC = &publishedAtUTC
+		dto.PublishedAtLocal = &publishedAtLocal
+	}
+	return dto, nil
+}
+
+func weatherQualityWarnings(raw model.JSONText) ([]MallWeatherWarningDTO, error) {
+	parsed := make([]caiyun.ParseWarning, 0)
+	if strings.TrimSpace(string(raw)) != "" {
+		if err := json.Unmarshal([]byte(raw), &parsed); err != nil {
+			return nil, fmt.Errorf("mall weather query: decode quality warnings: %w", err)
+		}
+	}
+	warnings := make([]MallWeatherWarningDTO, len(parsed))
+	for index := range parsed {
+		warnings[index] = MallWeatherWarningDTO{Code: parsed[index].Code, Path: parsed[index].Path}
+	}
+	return warnings, nil
+}
+
+func (service *MallWeatherQueryService) overviewFreshness(ctx context.Context, mallID uint, now time.Time) (string, *int64, error) {
+	if service == nil || service.weather == nil || ctx == nil || mallID == 0 || now.IsZero() {
+		return "", nil, fmt.Errorf("mall weather query: invalid overview freshness request")
+	}
+	kinds := []string{
+		model.MallWeatherDataKindRealtime,
+		model.MallWeatherDataKindMinutely,
+		model.MallWeatherDataKindHourly,
+	}
+	worstStatus := model.MallWeatherFreshnessFresh
+	worstRank := weatherFreshnessRank(worstStatus)
+	var maxAge *int64
+	unavailable := false
+	for _, dataKind := range kinds {
+		latest, err := service.weather.FindCurrentLatest(ctx, mallID, dataKind)
+		if errors.Is(err, data_dao.ErrMallWeatherLatestNotFound) || (err == nil && latest == nil) {
+			unavailable = true
+			continue
+		}
+		if err != nil {
+			return "", nil, fmt.Errorf("mall weather query: find %s freshness: %w", dataKind, err)
+		}
+		status, age, err := currentWeatherFreshness(dataKind, latest, now)
+		if err != nil {
+			return "", nil, err
+		}
+		if maxAge == nil || age > *maxAge {
+			ageCopy := age
+			maxAge = &ageCopy
+		}
+		if rank := weatherFreshnessRank(status); rank > worstRank {
+			worstStatus = status
+			worstRank = rank
+		}
+	}
+	if unavailable {
+		return "unavailable", maxAge, nil
+	}
+	return worstStatus, maxAge, nil
+}
+
+func weatherFreshnessRank(status string) int {
+	switch status {
+	case model.MallWeatherFreshnessWarning:
+		return 1
+	case model.MallWeatherFreshnessCritical:
+		return 2
+	case model.MallWeatherFreshnessStale:
+		return 3
+	default:
+		return 0
+	}
 }
 
 func weatherQueryMeta(mall *model.Mall, location *time.Location, freshness string, age *int64) MallWeatherQueryMeta {
