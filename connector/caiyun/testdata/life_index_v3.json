@@ -1,0 +1,46 @@
+{
+  "data": [
+    {
+      "date": "2026-07-23",
+      "lifeindex": [
+        {
+          "type": 26,
+          "level": 3,
+          "desc": "紫外线较强",
+          "detail": "外出建议采取防晒措施"
+        },
+        {
+          "type": 99,
+          "desc": "未来新增指数",
+          "detail": "未知类型仍需保留"
+        }
+      ]
+    },
+    {
+      "date": "2026-07-22",
+      "lifeindex": [
+        {
+          "type": 1,
+          "level": 2,
+          "desc": "舒适",
+          "detail": "极少人需要开启空调"
+        },
+        {
+          "type": 26,
+          "level": 2,
+          "desc": "紫外线适中",
+          "detail": "可适当采取防晒措施"
+        },
+        {
+          "type": 26,
+          "level": 4,
+          "desc": "紫外线较强",
+          "detail": "重复类型应取响应中的最后一项"
+        }
+      ]
+    }
+  ],
+  "future_field": {
+    "must_not_break_parser": true
+  }
+}
