@@ -150,6 +150,19 @@ func ParseDailyV26(weather *WeatherBundle) (*DailyBundle, error) {
 		func(row *DailyForecast) *DailyMetric { return &row.Visibility })
 	mergeDailyMetric(payload.DSWRF, "result.daily.dswrf", false, 0, 2000, issuedAtUTC, zone, rows, &warnings,
 		func(row *DailyForecast) *DailyMetric { return &row.DSWRF })
+	mergeDailyPrecipitation(payload.Precipitation, "result.daily.precipitation", issuedAtUTC, zone, rows, &warnings,
+		func(row *DailyForecast) *DailyPrecipitation { return &row.Precipitation })
+	mergeDailyPrecipitation(payload.DayPrecipitation, "result.daily.precipitation_08h_20h", issuedAtUTC, zone, rows, &warnings,
+		func(row *DailyForecast) *DailyPrecipitation { return &row.DayPrecipitation })
+	mergeDailyPrecipitation(payload.NightPrecipitation, "result.daily.precipitation_20h_32h", issuedAtUTC, zone, rows, &warnings,
+		func(row *DailyForecast) *DailyPrecipitation { return &row.NightPrecipitation })
+	mergeDailyWind(payload.Wind, "result.daily.wind", issuedAtUTC, zone, rows, &warnings,
+		func(row *DailyForecast) *DailyWind { return &row.Wind })
+	mergeDailyWind(payload.DayWind, "result.daily.wind_08h_20h", issuedAtUTC, zone, rows, &warnings,
+		func(row *DailyForecast) *DailyWind { return &row.DayWind })
+	mergeDailyWind(payload.NightWind, "result.daily.wind_20h_32h", issuedAtUTC, zone, rows, &warnings,
+		func(row *DailyForecast) *DailyWind { return &row.NightWind })
+	mergeDailyAirQuality(payload.AirQuality, issuedAtUTC, zone, rows, &warnings)
 	mergeDailySkycon(payload.Skycon, "result.daily.skycon", true, issuedAtUTC, zone, rows, &warnings,
 		func(row *DailyForecast, value string) { row.Skycon = value })
 	mergeDailySkycon(payload.DaySkycon, "result.daily.skycon_08h_20h", false, issuedAtUTC, zone, rows, &warnings,
