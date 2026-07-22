@@ -27,6 +27,7 @@ func TestAPIDataRegistersMallCRUDRoutes(t *testing.T) {
 		http.MethodPatch + " /api/v1/malls/:id",
 		http.MethodDelete + " /api/v1/malls/:id",
 		http.MethodGet + " /api/v1/malls/:id/weather/overview",
+		http.MethodGet + " /api/v1/malls/:id/weather/realtime",
 		http.MethodGet + " /api/v1/malls/:id/weather/hourly",
 	} {
 		if _, ok := routes[expected]; !ok {
