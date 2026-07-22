@@ -8,7 +8,6 @@ import (
 	"time"
 
 	"gin-biz-web-api/internal/requestbody"
-	"gin-biz-web-api/job"
 	"gin-biz-web-api/model"
 )
 
@@ -18,7 +17,7 @@ func TestMallWeatherQueryServiceFetchRunsMapsSafeAuditContractAndCursor(t *testi
 	rows := []model.MallWeatherFetchRun{
 		{
 			BaseModel: model.BaseModel{ID: 11}, RunUUID: "5d5047eb-2673-4ea2-91df-09565b61d944", MallID: 7,
-			TaskKind: job.TypeMallWeatherFull, EndpointKind: "v26_weather", Provider: "caiyun", AttemptCount: 2,
+			TaskKind: "full", EndpointKind: "v26_weather", Provider: "caiyun", AttemptCount: 2,
 			Status: "partial_success", StartedAt: &startedAt, FinishedAt: &finishedAt, DurationMS: 30000,
 			RowCountsJSON:     model.JSONText(`{"hourly":360,"daily":15}`),
 			ParseWarningsJSON: model.JSONText(`[{"code":"MISSING_FIELD","path":"result.daily"}]`),
@@ -27,7 +26,7 @@ func TestMallWeatherQueryServiceFetchRunsMapsSafeAuditContractAndCursor(t *testi
 		},
 		{
 			BaseModel: model.BaseModel{ID: 10}, RunUUID: "ef618100-ad9d-4697-9003-192f2fdd050c", MallID: 7,
-			TaskKind: job.TypeMallWeatherLifeIndex, EndpointKind: "v3_life_index", Provider: "caiyun", Status: "success",
+			TaskKind: "lifeindex", EndpointKind: "v3_life_index", Provider: "caiyun", Status: "success",
 			WeatherTimestamps: model.WeatherTimestamps{CreatedAt: now.Add(-3 * time.Minute), UpdatedAt: now},
 		},
 	}
@@ -47,7 +46,7 @@ func TestMallWeatherQueryServiceFetchRunsMapsSafeAuditContractAndCursor(t *testi
 	}
 	if len(result.Items) != 1 || result.Items[0].TaskKind != "FULL" || result.Items[0].Status != "PARTIAL_SUCCESS" ||
 		result.Items[0].RowCounts["hourly"] != 360 || len(result.Items[0].ParseWarnings) != 1 || result.Items[0].StartedAtLocal == nil ||
-		result.Pagination.NextCursor == "" || weather.fetchRunQuery.TaskKind != job.TypeMallWeatherFull || weather.fetchRunQuery.Limit != 2 ||
+		result.Pagination.NextCursor == "" || weather.fetchRunQuery.TaskKind != "full" || weather.fetchRunQuery.Limit != 2 ||
 		result.Meta.TimeZone != "Asia/Shanghai" {
 		t.Fatalf("result=%+v query=%+v", result, weather.fetchRunQuery)
 	}

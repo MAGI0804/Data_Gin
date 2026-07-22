@@ -166,15 +166,15 @@ func normalizeFetchRunTaskKind(value string) (string, error) {
 	case "":
 		return "", nil
 	case "fast", job.TypeMallWeatherFast:
-		return job.TypeMallWeatherFast, nil
+		return "fast", nil
 	case "full", job.TypeMallWeatherFull:
-		return job.TypeMallWeatherFull, nil
+		return "full", nil
 	case "lifeindex", "life_index", job.TypeMallWeatherLifeIndex:
-		return job.TypeMallWeatherLifeIndex, nil
+		return "lifeindex", nil
 	case "repair", job.TypeMallWeatherRepair:
-		return job.TypeMallWeatherRepair, nil
+		return "repair", nil
 	case "manual", job.TypeMallWeatherManual:
-		return job.TypeMallWeatherManual, nil
+		return "manual", nil
 	default:
 		return "", fmt.Errorf("%w: invalid fetch run task kind", ErrMallWeatherInvalidQuery)
 	}
@@ -244,15 +244,15 @@ func setFetchRunOptionalTime(value *time.Time, location *time.Location, utc **ti
 
 func publicFetchRunTaskKind(value string) string {
 	switch value {
-	case job.TypeMallWeatherFast:
+	case "fast", job.TypeMallWeatherFast:
 		return "FAST"
-	case job.TypeMallWeatherFull:
+	case "full", job.TypeMallWeatherFull:
 		return "FULL"
-	case job.TypeMallWeatherLifeIndex:
+	case "lifeindex", job.TypeMallWeatherLifeIndex:
 		return "LIFEINDEX"
-	case job.TypeMallWeatherRepair:
+	case "repair", job.TypeMallWeatherRepair:
 		return "REPAIR"
-	case job.TypeMallWeatherManual:
+	case "manual", job.TypeMallWeatherManual:
 		return "MANUAL"
 	default:
 		return strings.ToUpper(value)
