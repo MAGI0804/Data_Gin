@@ -136,6 +136,37 @@ func TestMallWeatherControllerLifeIndicesParsesSharedContract(t *testing.T) {
 	}
 }
 
+func TestMallWeatherControllerFetchRunsParsesAuditFilters(t *testing.T) {
+	var gotActor, gotMall uint
+	var gotRequest requestbody.MallWeatherFetchRunQueryRequest
+	service := fakeMallWeatherControllerService{fetchRuns: func(_ context.Context, actor, mallID uint, request requestbody.MallWeatherFetchRunQueryRequest) (*data_svc.MallWeatherFetchRunResult, error) {
+		gotActor, gotMall, gotRequest = actor, mallID, request
+		return &data_svc.MallWeatherFetchRunResult{Items: []data_svc.MallWeatherFetchRunDTO{}, Pagination: data_svc.MallWeatherPagination{PageSize: 25}}, nil
+	}}
+	path := "/api/v1/malls/7/weather/fetch-runs?start=2026-07-01T08%3A00%3A00%2B08%3A00&end=2026-08-01T08%3A00%3A00%2B08%3A00" +
+		"&timezone=Asia%2FShanghai&task_kind=full&endpointKind=v26_weather&status=partial_success&page_size=25&cursor=abc"
+	recorder := performMallWeatherRequest(t, service, path)
+	if recorder.Code != http.StatusOK || gotActor != 17 || gotMall != 7 || gotRequest.TaskKind != "full" ||
+		gotRequest.EndpointKind != "v26_weather" || gotRequest.Status != "partial_success" || gotRequest.PageSize != 25 ||
+		gotRequest.TimeZone != "Asia/Shanghai" || gotRequest.Cursor != "abc" ||
+		!gotRequest.StartUTC.Equal(time.Date(2026, 7, 1, 0, 0, 0, 0, time.UTC)) {
+		t.Fatalf("status=%d actor=%d mall=%d request=%+v body=%s", recorder.Code, gotActor, gotMall, gotRequest, recorder.Body.String())
+	}
+}
+
+func TestMallWeatherControllerFetchRunsRejectsConflictingFilters(t *testing.T) {
+	calls := 0
+	service := fakeMallWeatherControllerService{fetchRuns: func(context.Context, uint, uint, requestbody.MallWeatherFetchRunQueryRequest) (*data_svc.MallWeatherFetchRunResult, error) {
+		calls++
+		return nil, nil
+	}}
+	path := "/api/v1/malls/7/weather/fetch-runs?start=2026-07-01T00:00:00Z&end=2026-08-01T00:00:00Z&taskKind=full&task_kind=fast"
+	recorder := performMallWeatherRequest(t, service, path)
+	if recorder.Code != http.StatusUnprocessableEntity || calls != 0 || strings.Contains(recorder.Body.String(), "conflicting") {
+		t.Fatalf("status=%d calls=%d body=%s", recorder.Code, calls, recorder.Body.String())
+	}
+}
+
 func TestMallWeatherControllerHourlyParsesContract(t *testing.T) {
 	var gotActor, gotMall uint
 	var gotRequest requestbody.MallWeatherHourlyQueryRequest
@@ -206,6 +237,7 @@ func performMallWeatherRequest(t *testing.T, service MallWeatherQueryService, pa
 	router.GET("/api/v1/malls/:id/weather/daily", controller.Daily)
 	router.GET("/api/v1/malls/:id/weather/alerts", controller.Alerts)
 	router.GET("/api/v1/malls/:id/weather/life-indices", controller.LifeIndices)
+	router.GET("/api/v1/malls/:id/weather/fetch-runs", controller.FetchRuns)
 	recorder := httptest.NewRecorder()
 	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, path, nil))
 	return recorder
@@ -219,6 +251,7 @@ type fakeMallWeatherControllerService struct {
 	daily       func(context.Context, uint, uint, requestbody.MallWeatherDailyQueryRequest) (*data_svc.MallWeatherDailyResult, error)
 	alerts      func(context.Context, uint, uint, requestbody.MallWeatherAlertQueryRequest) (*data_svc.MallWeatherAlertResult, error)
 	lifeIndices func(context.Context, uint, uint, requestbody.MallWeatherLifeIndexQueryRequest) (*data_svc.MallWeatherLifeIndexResult, error)
+	fetchRuns   func(context.Context, uint, uint, requestbody.MallWeatherFetchRunQueryRequest) (*data_svc.MallWeatherFetchRunResult, error)
 }
 
 func (service fakeMallWeatherControllerService) Overview(ctx context.Context, actor, mallID uint, timeZone string) (*data_svc.MallWeatherOverviewResult, error) {
@@ -268,4 +301,11 @@ func (service fakeMallWeatherControllerService) LifeIndices(ctx context.Context,
 		panic("unexpected LifeIndices call")
 	}
 	return service.lifeIndices(ctx, actor, mallID, request)
+}
+
+func (service fakeMallWeatherControllerService) FetchRuns(ctx context.Context, actor, mallID uint, request requestbody.MallWeatherFetchRunQueryRequest) (*data_svc.MallWeatherFetchRunResult, error) {
+	if service.fetchRuns == nil {
+		panic("unexpected FetchRuns call")
+	}
+	return service.fetchRuns(ctx, actor, mallID, request)
 }

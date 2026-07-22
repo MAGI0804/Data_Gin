@@ -27,6 +27,7 @@ type MallWeatherQueryService interface {
 	Daily(context.Context, uint, uint, requestbody.MallWeatherDailyQueryRequest) (*data_svc.MallWeatherDailyResult, error)
 	Alerts(context.Context, uint, uint, requestbody.MallWeatherAlertQueryRequest) (*data_svc.MallWeatherAlertResult, error)
 	LifeIndices(context.Context, uint, uint, requestbody.MallWeatherLifeIndexQueryRequest) (*data_svc.MallWeatherLifeIndexResult, error)
+	FetchRuns(context.Context, uint, uint, requestbody.MallWeatherFetchRunQueryRequest) (*data_svc.MallWeatherFetchRunResult, error)
 }
 
 type MallWeatherController struct {
@@ -177,6 +178,25 @@ func (controller *MallWeatherController) LifeIndices(c *gin.Context) {
 	responses.New(c).ToResponseWithStatus(http.StatusOK, result)
 }
 
+func (controller *MallWeatherController) FetchRuns(c *gin.Context) {
+	mallID, err := parseMallUint(c.Param("id"), "mall id")
+	if err != nil {
+		writeMallWeatherError(c, err)
+		return
+	}
+	request, err := parseMallWeatherFetchRunRequest(c)
+	if err != nil {
+		writeMallWeatherError(c, err)
+		return
+	}
+	result, err := controller.service.FetchRuns(c.Request.Context(), auth.CurrentUserID(c), mallID, request)
+	if err != nil {
+		writeMallWeatherError(c, err)
+		return
+	}
+	responses.New(c).ToResponseWithStatus(http.StatusOK, result)
+}
+
 func parseMallWeatherRealtimeRequest(c *gin.Context) (requestbody.MallWeatherRealtimeQueryRequest, error) {
 	shared, err := parseMallWeatherTimeSeriesRequest(c)
 	if err != nil {
@@ -247,6 +267,44 @@ func parseMallWeatherLifeIndexRequest(c *gin.Context) (requestbody.MallWeatherLi
 		Latest: shared.Latest, AsOfUTC: shared.AsOfUTC, QualityStatus: shared.QualityStatus,
 		Cursor: shared.Cursor, PageSize: shared.PageSize,
 	}, nil
+}
+
+func parseMallWeatherFetchRunRequest(c *gin.Context) (requestbody.MallWeatherFetchRunQueryRequest, error) {
+	var request requestbody.MallWeatherFetchRunQueryRequest
+	start, err := parseRequiredWeatherTime(c.Query("start"), "start")
+	if err != nil {
+		return request, err
+	}
+	end, err := parseRequiredWeatherTime(c.Query("end"), "end")
+	if err != nil {
+		return request, err
+	}
+	request.StartUTC, request.EndUTC = start.UTC(), end.UTC()
+	request.TimeZone, err = weatherAliasedQuery(c, "timeZone", "timezone")
+	if err != nil {
+		return request, err
+	}
+	request.TaskKind, err = weatherAliasedQuery(c, "taskKind", "task_kind")
+	if err != nil {
+		return request, err
+	}
+	request.EndpointKind, err = weatherAliasedQuery(c, "endpointKind", "endpoint_kind")
+	if err != nil {
+		return request, err
+	}
+	request.Status = strings.TrimSpace(c.Query("status"))
+	pageSizeValue, err := weatherAliasedQuery(c, "pageSize", "page_size")
+	if err != nil {
+		return request, err
+	}
+	if pageSizeValue != "" {
+		request.PageSize, err = strconv.Atoi(pageSizeValue)
+		if err != nil || request.PageSize <= 0 {
+			return request, fmt.Errorf("%w: invalid pageSize", data_svc.ErrMallWeatherInvalidQuery)
+		}
+	}
+	request.Cursor = strings.TrimSpace(c.Query("cursor"))
+	return request, nil
 }
 
 type parsedMallWeatherTimeSeriesRequest struct {
