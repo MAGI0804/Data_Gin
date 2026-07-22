@@ -64,6 +64,11 @@ type ExtractedOrder struct {
 	TotalAmt    float64 `json:"totalAmt"`
 }
 
+type youzanOrderClient struct {
+	httpClient *http.Client
+	ordersURL  string
+}
+
 func GetYouzanAccessToken() (string, error) {
 	url := config.GetString("cfg.youzan.token_url")
 	headers := map[string]string{
@@ -117,7 +122,16 @@ func GetYouzanAccessToken() (string, error) {
 }
 
 func GetYouzanOrders(accessToken string, startTime, endTime string) ([]map[string]interface{}, error) {
-	url := fmt.Sprintf("%s?access_token=%s", config.GetString("cfg.youzan.orders_url"), accessToken)
+	client := youzanOrderClient{
+		httpClient: &http.Client{Timeout: 30 * time.Second},
+		ordersURL:  config.GetString("cfg.youzan.orders_url"),
+	}
+
+	return client.getOrders(accessToken, startTime, endTime)
+}
+
+func (client youzanOrderClient) getOrders(accessToken string, startTime, endTime string) ([]map[string]interface{}, error) {
+	url := fmt.Sprintf("%s?access_token=%s", client.ordersURL, accessToken)
 	headers := map[string]string{
 		"Content-Type": "application/json",
 	}
@@ -131,8 +145,8 @@ func GetYouzanOrders(accessToken string, startTime, endTime string) ([]map[strin
 		params := map[string]interface{}{
 			"page_size":     pageSize,
 			"page_no":       pageNo,
-			"start_success": startTime,
-			"end_success":   endTime,
+			"start_created": startTime,
+			"end_created":   endTime,
 		}
 
 		jsonData, err := json.Marshal(params)
@@ -149,8 +163,7 @@ func GetYouzanOrders(accessToken string, startTime, endTime string) ([]map[strin
 			req.Header.Set(key, value)
 		}
 
-		client := &http.Client{Timeout: 30 * time.Second}
-		resp, err := client.Do(req)
+		resp, err := client.httpClient.Do(req)
 		if err != nil {
 			return nil, fmt.Errorf("发送请求失败: %w", err)
 		}
