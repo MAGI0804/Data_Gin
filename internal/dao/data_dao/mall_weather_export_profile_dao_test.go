@@ -18,6 +18,9 @@ func TestMallWeatherExportProfileDAORejectsInvalidStateBeforeDatabase(t *testing
 	if err == nil {
 		t.Fatal("List() accepted an unconfigured DAO")
 	}
+	if _, err := (&MallWeatherExportProfileDAO{}).FindByID(context.Background(), 1); err == nil {
+		t.Fatal("FindByID() accepted an unconfigured DAO")
+	}
 }
 
 func TestMallWeatherExportProfileDuplicateErrorsAreConflicts(t *testing.T) {

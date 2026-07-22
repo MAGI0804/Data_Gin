@@ -136,3 +136,9 @@ type MallWeatherExportProfileSaveRequest struct {
 	Filters          MallWeatherExportFilters   `json:"filters,omitempty"`
 	Datasets         []MallWeatherExportDataset `json:"datasets"`
 }
+
+type MallWeatherExportCreateRequest struct {
+	ProfileID              uint                      `json:"profileId"`
+	ExpectedProfileVersion *uint64                   `json:"expectedProfileVersion,omitempty"`
+	Filters                *MallWeatherExportFilters `json:"filters,omitempty"`
+}

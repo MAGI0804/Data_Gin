@@ -122,6 +122,24 @@ func (dao *MallWeatherExportProfileDAO) List(
 	return rows, nil
 }
 
+func (dao *MallWeatherExportProfileDAO) FindByID(
+	ctx context.Context,
+	profileID uint,
+) (*model.MallWeatherExportProfile, error) {
+	if dao == nil || dao.db == nil || ctx == nil || profileID == 0 {
+		return nil, fmt.Errorf("mall weather export profile: invalid lookup")
+	}
+	var row model.MallWeatherExportProfile
+	err := dao.db.WithContext(ctx).Where("id = ?", profileID).First(&row).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, ErrMallWeatherExportProfileNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("mall weather export profile: find by id: %w", err)
+	}
+	return &row, nil
+}
+
 func isMallWeatherExportProfileDuplicate(err error) bool {
 	var mysqlError *mysqlDriver.MySQLError
 	return errors.As(err, &mysqlError) && mysqlError.Number == 1062
