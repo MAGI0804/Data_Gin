@@ -2,11 +2,22 @@ package config
 
 import (
 	"gin-biz-web-api/pkg/config"
+
+	"github.com/spf13/cast"
 )
 
 func init() {
 
 	config.Add("cfg.queue_job", func() map[string]interface{} {
+		defaultQueues := map[string]int{
+			"critical":        6,
+			"default":         3,
+			"low":             1,
+			"gin-biz-web-api": 5,
+			"weather":         5,
+			"export":          2,
+			"delivery":        2,
+		}
 		return map[string]interface{}{
 			"redis": map[string]interface{}{
 				"host": config.Get("QueueJob.Redis.Host", "127.0.0.1"),
@@ -32,12 +43,7 @@ func init() {
 				// 然后加入队列时：
 				// project1 中 asynq.NewTask(taskType, taskPayload, asynq.Queue("project1"))
 				// project2 中 asynq.NewTask(taskType, taskPayload, asynq.Queue("project2"))
-				"queues": map[string]int{
-					"critical":        6,
-					"default":         3,
-					"low":             1,
-					"gin-biz-web-api": 5,
-				},
+				"queues": cast.ToStringMapInt(config.Get("QueueJob.ConfigOpt.Queues", defaultQueues)),
 			},
 		}
 	})

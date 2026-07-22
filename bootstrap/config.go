@@ -84,6 +84,10 @@ func validateMallWeatherConfig() error {
 	if releaseTimeout := pkgConfig.GetInt("cfg.mall_weather.lock_release_timeout_seconds"); releaseTimeout < 1 || releaseTimeout > 10 {
 		return fmt.Errorf("weather lock release timeout must be between 1 and 10 seconds")
 	}
+	queues, ok := pkgConfig.Get("cfg.queue_job.config_opt.queues").(map[string]int)
+	if !ok || queues["weather"] <= 0 {
+		return fmt.Errorf("weather queue must be configured with a positive weight")
+	}
 	return nil
 }
 

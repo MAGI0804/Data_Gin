@@ -39,6 +39,11 @@ func TestValidateMallWeatherConfig(t *testing.T) {
 			wantError: "lock ttl",
 		},
 		{
+			name:      "enabled requires weather queue consumer",
+			yaml:      "MallWeather:\n  Enabled: true\nCaiyun:\n  QPS: 2\nQueueJob:\n  ConfigOpt:\n    Queues:\n      default: 1\n",
+			wantError: "weather queue",
+		},
+		{
 			name:      "feishu cannot run independently",
 			yaml:      "MallWeather:\n  FeishuEnabled: true\n",
 			wantError: "requires mall weather",
