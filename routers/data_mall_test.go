@@ -17,6 +17,7 @@ func TestAPIDataRegistersMallCRUDRoutes(t *testing.T) {
 	registerMallWeatherRefreshRoutes(router.Group("/api"), &data_ctrl.MallWeatherRefreshController{})
 	registerMallWeatherExportProfileRoutes(router.Group("/api"), &data_ctrl.MallWeatherExportProfileController{})
 	registerMallWeatherExportJobRoutes(router.Group("/api"), &data_ctrl.MallWeatherExportJobController{})
+	registerMallWeatherFeishuPushRoutes(router.Group("/api"), &data_ctrl.MallWeatherFeishuPushController{})
 
 	routes := make(map[string]struct{})
 	for _, route := range router.Routes() {
@@ -43,6 +44,7 @@ func TestAPIDataRegistersMallCRUDRoutes(t *testing.T) {
 		http.MethodPost + " /api/v1/weather-exports",
 		http.MethodGet + " /api/v1/weather-exports/:job_id",
 		http.MethodGet + " /api/v1/weather-exports/:job_id/download",
+		http.MethodPost + " /api/v1/weather-sheet-pushes/dry-run",
 	} {
 		if _, ok := routes[expected]; !ok {
 			t.Errorf("route %q is not registered", expected)
