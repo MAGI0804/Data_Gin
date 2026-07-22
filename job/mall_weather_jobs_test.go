@@ -126,9 +126,15 @@ func TestMallWeatherFetchTaskTypesReturnsOnlyFetchHandlers(t *testing.T) {
 		t.Fatalf("fetch task types=%v", types)
 	}
 	for _, taskType := range types {
+		if !IsMallWeatherFetchTaskType(taskType) {
+			t.Fatalf("fetch task type %q was not recognized", taskType)
+		}
 		if taskType == TypeMallGeocode || taskType == TypeMallWeatherExport || taskType == TypeMallWeatherFeishu {
 			t.Fatalf("non-fetch task type %q was returned", taskType)
 		}
+	}
+	if IsMallWeatherFetchTaskType(TypeMallGeocode) || IsMallWeatherFetchTaskType(TypeMallWeatherExport) {
+		t.Fatal("non-fetch task type was recognized as a fetch task")
 	}
 	types[0] = "changed"
 	if MallWeatherFetchTaskTypes()[0] == "changed" {

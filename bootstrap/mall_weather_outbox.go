@@ -52,6 +52,7 @@ func startMallWeatherOutboxDispatcher() {
 			RetryBase:    time.Duration(config.GetInt("cfg.mall_weather.outbox_retry_base_seconds")) * time.Second,
 			RetryMax:     time.Duration(config.GetInt("cfg.mall_weather.outbox_retry_max_seconds")) * time.Second,
 			MaxRetry:     maxAttempts - 1,
+			TaskTimeout:  time.Duration(config.GetInt("cfg.mall_weather.task_timeout_seconds")) * time.Second,
 			OnCycleError: func(err error) {
 				logger.Error("Mall weather outbox dispatch cycle failed", zap.Error(err))
 			},

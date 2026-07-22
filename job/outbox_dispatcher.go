@@ -17,6 +17,7 @@ const (
 	defaultOutboxBatchSize    = 100
 	defaultOutboxRetryBase    = 5 * time.Second
 	defaultOutboxRetryMax     = 5 * time.Minute
+	defaultWeatherTaskTimeout = 5 * time.Minute
 
 	safeInvalidOutboxTaskError = "invalid outbox task"
 	safeQueuePublishError      = "queue publish failed"
@@ -38,6 +39,7 @@ type TaskPublishOptions struct {
 	TaskID   string
 	Queue    string
 	MaxRetry int
+	Timeout  time.Duration
 }
 
 type MallWeatherTaskPublisher interface {
@@ -56,13 +58,15 @@ func (publisher *AsynqMallWeatherTaskPublisher) Publish(ctx context.Context, tas
 	if publisher == nil || publisher.client == nil {
 		return fmt.Errorf("mall weather publisher: client is required")
 	}
-	_, err := publisher.client.EnqueueContext(
-		ctx,
-		task,
+	optionsList := []asynq.Option{
 		asynq.TaskID(options.TaskID),
 		asynq.Queue(options.Queue),
 		asynq.MaxRetry(options.MaxRetry),
-	)
+	}
+	if options.Timeout > 0 {
+		optionsList = append(optionsList, asynq.Timeout(options.Timeout))
+	}
+	_, err := publisher.client.EnqueueContext(ctx, task, optionsList...)
 	return err
 }
 
@@ -74,6 +78,7 @@ type OutboxDispatcherConfig struct {
 	RetryBase    time.Duration
 	RetryMax     time.Duration
 	MaxRetry     int
+	TaskTimeout  time.Duration
 	Now          func() time.Time
 	OnCycleError func(error)
 }
@@ -88,6 +93,7 @@ type OutboxDispatcher struct {
 	retryBase    time.Duration
 	retryMax     time.Duration
 	maxRetry     int
+	taskTimeout  time.Duration
 	now          func() time.Time
 	onCycleError func(error)
 }
@@ -123,6 +129,9 @@ func NewOutboxDispatcher(store OutboxStore, publisher MallWeatherTaskPublisher, 
 	if cfg.MaxRetry < 0 {
 		return nil, fmt.Errorf("outbox dispatcher: max retry must not be negative")
 	}
+	if cfg.TaskTimeout <= 0 {
+		cfg.TaskTimeout = defaultWeatherTaskTimeout
+	}
 	if cfg.Now == nil {
 		cfg.Now = time.Now
 	}
@@ -137,6 +146,7 @@ func NewOutboxDispatcher(store OutboxStore, publisher MallWeatherTaskPublisher, 
 		retryBase:    cfg.RetryBase,
 		retryMax:     cfg.RetryMax,
 		maxRetry:     cfg.MaxRetry,
+		taskTimeout:  cfg.TaskTimeout,
 		now:          cfg.Now,
 		onCycleError: cfg.OnCycleError,
 	}, nil
@@ -198,11 +208,15 @@ func (dispatcher *OutboxDispatcher) dispatchRow(ctx context.Context, row model.A
 		return dispatcher.failRow(ctx, row, safeInvalidOutboxTaskError, ErrInvalidOutboxTask)
 	}
 
-	err = dispatcher.publisher.Publish(ctx, task, TaskPublishOptions{
+	publishOptions := TaskPublishOptions{
 		TaskID:   row.TaskKey,
 		Queue:    row.QueueName,
 		MaxRetry: dispatcher.maxRetry,
-	})
+	}
+	if IsMallWeatherFetchTaskType(row.TaskType) {
+		publishOptions.Timeout = dispatcher.taskTimeout
+	}
+	err = dispatcher.publisher.Publish(ctx, task, publishOptions)
 	if err != nil && !errors.Is(err, asynq.ErrTaskIDConflict) {
 		if ctxErr := ctx.Err(); ctxErr != nil {
 			return ctxErr

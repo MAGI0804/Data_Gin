@@ -95,7 +95,8 @@ func TestOutboxDispatcherDispatchOncePublishesTask(t *testing.T) {
 	if call.taskType != TypeMallWeatherFull || call.payload != `{"mall_id":123,"task_window":"full:123:2026071710"}` {
 		t.Fatalf("published task = %q %s", call.taskType, call.payload)
 	}
-	if call.options.TaskID != "weather:full:123:2026071710" || call.options.Queue != MallWeatherQueueName || call.options.MaxRetry != 2 {
+	if call.options.TaskID != "weather:full:123:2026071710" || call.options.Queue != MallWeatherQueueName ||
+		call.options.MaxRetry != 2 || call.options.Timeout != 5*time.Minute {
 		t.Fatalf("publish options = %+v", call.options)
 	}
 	if len(store.published) != 1 || store.published[0].id != 1 || !store.published[0].publishedAt.Equal(now) {
@@ -226,6 +227,7 @@ func newTestOutboxDispatcher(t *testing.T, store OutboxStore, publisher MallWeat
 		RetryBase:    time.Second,
 		RetryMax:     10 * time.Second,
 		MaxRetry:     2,
+		TaskTimeout:  5 * time.Minute,
 		Now:          func() time.Time { return now },
 	})
 	if err != nil {

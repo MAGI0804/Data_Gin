@@ -69,6 +69,21 @@ func validateMallWeatherConfig() error {
 	if dailySteps := pkgConfig.GetInt("cfg.mall_weather.daily_steps"); dailySteps < 1 || dailySteps > 15 {
 		return fmt.Errorf("daily steps must be between 1 and 15")
 	}
+	fetchTimeout := pkgConfig.GetInt("cfg.mall_weather.fetch_timeout_seconds")
+	if fetchTimeout < 1 || fetchTimeout > 120 {
+		return fmt.Errorf("fetch timeout must be between 1 and 120 seconds")
+	}
+	lockTTL := pkgConfig.GetInt("cfg.mall_weather.lock_ttl_seconds")
+	taskTimeout := pkgConfig.GetInt("cfg.mall_weather.task_timeout_seconds")
+	if taskTimeout <= fetchTimeout || taskTimeout > 1800 {
+		return fmt.Errorf("weather task timeout must exceed fetch timeout and be at most 1800 seconds")
+	}
+	if lockTTL <= taskTimeout || lockTTL > 3600 {
+		return fmt.Errorf("weather lock ttl must exceed task timeout and be at most 3600 seconds")
+	}
+	if releaseTimeout := pkgConfig.GetInt("cfg.mall_weather.lock_release_timeout_seconds"); releaseTimeout < 1 || releaseTimeout > 10 {
+		return fmt.Errorf("weather lock release timeout must be between 1 and 10 seconds")
+	}
 	return nil
 }
 

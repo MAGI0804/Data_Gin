@@ -29,6 +29,16 @@ func TestValidateMallWeatherConfig(t *testing.T) {
 			yaml: "MallWeather:\n  Enabled: true\nCaiyun:\n  QPS: 2\n",
 		},
 		{
+			name:      "task timeout must exceed fetch timeout",
+			yaml:      "MallWeather:\n  Enabled: true\n  FetchTimeoutSeconds: 30\n  TaskTimeoutSeconds: 30\nCaiyun:\n  QPS: 2\n",
+			wantError: "task timeout",
+		},
+		{
+			name:      "lock ttl must exceed task timeout",
+			yaml:      "MallWeather:\n  Enabled: true\n  TaskTimeoutSeconds: 600\n  LockTTLSeconds: 600\nCaiyun:\n  QPS: 2\n",
+			wantError: "lock ttl",
+		},
+		{
 			name:      "feishu cannot run independently",
 			yaml:      "MallWeather:\n  FeishuEnabled: true\n",
 			wantError: "requires mall weather",

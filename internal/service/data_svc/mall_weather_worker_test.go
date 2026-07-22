@@ -40,6 +40,39 @@ func TestMallWeatherProcessorPersistsLifeIndexAfterRawSnapshot(t *testing.T) {
 	}
 }
 
+func TestMallWeatherProcessorUsesTaskLock(t *testing.T) {
+	provider := &fakeMallWeatherProvider{}
+	store := newFakeMallWeatherTaskStore(data_dao.FetchAttemptDispositionAcquired)
+	locker := &fakeWeatherTaskLocker{acquired: false}
+	processor := newTestMallWeatherProcessorWithLocker(t, provider, store, locker)
+	err := processor.Process(context.Background(), job.TypeMallWeatherFull, job.MallTaskPayload{
+		MallID: 7, TaskWindow: "full:7:2026072203",
+	})
+	var processError *MallWeatherProcessError
+	if !errors.As(err, &processError) || !processError.Retryable || processError.Code != "LOCK_BUSY" {
+		t.Fatalf("Process() error=%v", err)
+	}
+	if locker.key != "7:full:full:7:2026072203" || len(store.events) != 0 || provider.weatherCalls != 0 {
+		t.Fatalf("lock=%+v events=%v calls=%d", locker, store.events, provider.weatherCalls)
+	}
+}
+
+func TestMallWeatherProcessorReleasesTaskLockAfterFailure(t *testing.T) {
+	provider := &fakeMallWeatherProvider{weatherErr: &caiyun.ProviderError{
+		Class: providerhttp.ErrorClassTransport, Retryable: true,
+	}}
+	store := newFakeMallWeatherTaskStore(data_dao.FetchAttemptDispositionAcquired)
+	locker := &fakeWeatherTaskLocker{acquired: true}
+	processor := newTestMallWeatherProcessorWithLocker(t, provider, store, locker)
+	err := processor.Process(context.Background(), job.TypeMallWeatherFull, job.MallTaskPayload{
+		MallID: 7, TaskWindow: "full:7:2026072203",
+	})
+	var processError *MallWeatherProcessError
+	if !errors.As(err, &processError) || !processError.Retryable || !locker.released {
+		t.Fatalf("Process() error=%v locker=%+v", err, locker)
+	}
+}
+
 func TestMallWeatherProcessorPersistsAvailableV26ModulesAsPartialSuccess(t *testing.T) {
 	raw := readMallWeatherFixture(t, "../../../connector/caiyun/testdata/weather_v26_realtime.json")
 	provider := &fakeMallWeatherProvider{weatherResponse: &caiyun.ProviderResponse{
@@ -263,6 +296,10 @@ func (store *fakeMallWeatherTaskStore) Persist(_ context.Context, _ *mallWeather
 }
 
 func newTestMallWeatherProcessor(t *testing.T, provider mallWeatherProvider, store mallWeatherTaskStore) *MallWeatherProcessor {
+	return newTestMallWeatherProcessorWithLocker(t, provider, store, &fakeWeatherTaskLocker{acquired: true})
+}
+
+func newTestMallWeatherProcessorWithLocker(t *testing.T, provider mallWeatherProvider, store mallWeatherTaskStore, locker weatherdomain.TaskLocker) *MallWeatherProcessor {
 	t.Helper()
 	weatherSnapshots, err := weatherdomain.NewRawSnapshotBuilder(weatherdomain.RawSnapshotConfig{
 		SchemaVersion: weatherParserVersionV26,
@@ -277,10 +314,10 @@ func newTestMallWeatherProcessor(t *testing.T, provider mallWeatherProvider, sto
 		t.Fatalf("NewRawSnapshotBuilder(life) error=%v", err)
 	}
 	current := time.Date(2026, 7, 22, 3, 0, 0, 0, time.UTC)
-	processor, err := newMallWeatherProcessor(provider, store, weatherSnapshots, lifeSnapshots, MallWeatherProcessorConfig{
+	processor, err := newMallWeatherProcessor(provider, store, weatherSnapshots, lifeSnapshots, locker, MallWeatherProcessorConfig{
 		FastHourlySteps: 24, FastDailySteps: 1, FullHourlySteps: 360, FullDailySteps: 15,
 		LifeIndexDays: 15, Unit: "metric:v2", AlertEnabled: true,
-		AttemptStaleAfter: 2 * time.Minute, FailureFinalizeTimeout: time.Second,
+		AttemptStaleAfter: 2 * time.Minute, FailureFinalizeTimeout: time.Second, LockReleaseTimeout: time.Second,
 	}, func() time.Time {
 		result := current
 		current = current.Add(time.Second)
@@ -290,6 +327,30 @@ func newTestMallWeatherProcessor(t *testing.T, provider mallWeatherProvider, sto
 		t.Fatalf("newMallWeatherProcessor() error=%v", err)
 	}
 	return processor
+}
+
+type fakeWeatherTaskLocker struct {
+	key      string
+	acquired bool
+	err      error
+	released bool
+}
+
+func (locker *fakeWeatherTaskLocker) Acquire(_ context.Context, key string) (weatherdomain.TaskLock, bool, error) {
+	locker.key = key
+	if locker.err != nil || !locker.acquired {
+		return nil, false, locker.err
+	}
+	return &fakeWeatherTaskLock{locker: locker}, true, nil
+}
+
+type fakeWeatherTaskLock struct {
+	locker *fakeWeatherTaskLocker
+}
+
+func (lock *fakeWeatherTaskLock) Release(context.Context) error {
+	lock.locker.released = true
+	return nil
 }
 
 func readMallWeatherFixture(t *testing.T, path string) []byte {

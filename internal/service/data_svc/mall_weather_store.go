@@ -14,6 +14,7 @@ import (
 	"gin-biz-web-api/model"
 	"gin-biz-web-api/pkg/config"
 	"gin-biz-web-api/pkg/database"
+	projectredis "gin-biz-web-api/pkg/redis"
 	"gin-biz-web-api/pkg/storage"
 
 	"github.com/google/uuid"
@@ -66,13 +67,26 @@ func NewMallWeatherProcessor() (*MallWeatherProcessor, error) {
 	if staleAfter < 2*time.Minute {
 		staleAfter = 2 * time.Minute
 	}
-	return newMallWeatherProcessor(provider, &gormMallWeatherTaskStore{db: database.DB}, weatherSnapshots, lifeSnapshots, MallWeatherProcessorConfig{
+	redisInstance := projectredis.Instance()
+	if redisInstance == nil || redisInstance.Client == nil {
+		return nil, fmt.Errorf("mall weather: redis task lock is unavailable")
+	}
+	locker, err := weatherdomain.NewRedisTaskLocker(
+		redisInstance.Client,
+		projectredis.GenNamespace("lock:mall_weather:"),
+		time.Duration(config.GetInt("cfg.mall_weather.lock_ttl_seconds"))*time.Second,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return newMallWeatherProcessor(provider, &gormMallWeatherTaskStore{db: database.DB}, weatherSnapshots, lifeSnapshots, locker, MallWeatherProcessorConfig{
 		FastHourlySteps: 24, FastDailySteps: 1,
 		FullHourlySteps: config.GetInt("cfg.mall_weather.hourly_steps"),
 		FullDailySteps:  config.GetInt("cfg.mall_weather.daily_steps"),
 		LifeIndexDays:   config.GetInt("cfg.mall_weather.daily_steps"),
 		Unit:            config.GetString("cfg.mall_weather.unit"), AlertEnabled: config.GetBool("cfg.mall_weather.alert_enabled"),
 		AttemptStaleAfter: staleAfter, FailureFinalizeTimeout: 3 * time.Second,
+		LockReleaseTimeout: time.Duration(config.GetInt("cfg.mall_weather.lock_release_timeout_seconds")) * time.Second,
 	}, time.Now)
 }
 

@@ -83,6 +83,15 @@ func MallWeatherFetchTaskTypes() []string {
 	return append([]string(nil), mallWeatherFetchTaskTypes...)
 }
 
+func IsMallWeatherFetchTaskType(taskType string) bool {
+	switch taskType {
+	case TypeMallWeatherFast, TypeMallWeatherFull, TypeMallWeatherLifeIndex, TypeMallWeatherRepair, TypeMallWeatherManual:
+		return true
+	default:
+		return false
+	}
+}
+
 func ExpectedMallWeatherQueue(taskType string) (string, bool) {
 	switch taskType {
 	case TypeMallGeocode,

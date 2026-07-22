@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math"
 	"sort"
+	"strconv"
 	"time"
 
 	"gin-biz-web-api/connector/caiyun"
@@ -111,6 +112,7 @@ type MallWeatherProcessorConfig struct {
 	AlertEnabled           bool
 	AttemptStaleAfter      time.Duration
 	FailureFinalizeTimeout time.Duration
+	LockReleaseTimeout     time.Duration
 }
 
 type MallWeatherProcessor struct {
@@ -118,6 +120,7 @@ type MallWeatherProcessor struct {
 	store            mallWeatherTaskStore
 	weatherSnapshots *weatherdomain.RawSnapshotBuilder
 	lifeSnapshots    *weatherdomain.RawSnapshotBuilder
+	locker           weatherdomain.TaskLocker
 	config           MallWeatherProcessorConfig
 	now              func() time.Time
 }
@@ -127,23 +130,24 @@ func newMallWeatherProcessor(
 	store mallWeatherTaskStore,
 	weatherSnapshots *weatherdomain.RawSnapshotBuilder,
 	lifeSnapshots *weatherdomain.RawSnapshotBuilder,
+	locker weatherdomain.TaskLocker,
 	config MallWeatherProcessorConfig,
 	now func() time.Time,
 ) (*MallWeatherProcessor, error) {
-	if provider == nil || store == nil || weatherSnapshots == nil || lifeSnapshots == nil || now == nil ||
+	if provider == nil || store == nil || weatherSnapshots == nil || lifeSnapshots == nil || locker == nil || now == nil ||
 		config.FastHourlySteps < 1 || config.FastHourlySteps > 360 || config.FastDailySteps < 1 || config.FastDailySteps > 15 ||
 		config.FullHourlySteps < 1 || config.FullHourlySteps > 360 || config.FullDailySteps < 1 || config.FullDailySteps > 15 ||
 		config.LifeIndexDays < 1 || config.LifeIndexDays > 15 || config.Unit != "metric:v2" ||
-		config.AttemptStaleAfter <= 0 || config.FailureFinalizeTimeout <= 0 {
+		config.AttemptStaleAfter <= 0 || config.FailureFinalizeTimeout <= 0 || config.LockReleaseTimeout <= 0 {
 		return nil, fmt.Errorf("mall weather: invalid processor configuration")
 	}
 	return &MallWeatherProcessor{
 		provider: provider, store: store, weatherSnapshots: weatherSnapshots, lifeSnapshots: lifeSnapshots,
-		config: config, now: now,
+		locker: locker, config: config, now: now,
 	}, nil
 }
 
-func (processor *MallWeatherProcessor) Process(ctx context.Context, taskType string, payload job.MallTaskPayload) error {
+func (processor *MallWeatherProcessor) Process(ctx context.Context, taskType string, payload job.MallTaskPayload) (resultErr error) {
 	if processor == nil || ctx == nil {
 		return &MallWeatherProcessError{Code: "INVALID_PROCESSOR"}
 	}
@@ -151,6 +155,23 @@ func (processor *MallWeatherProcessor) Process(ctx context.Context, taskType str
 	if err != nil {
 		return &MallWeatherProcessError{Code: "INVALID_TASK", cause: err}
 	}
+	lock, acquired, err := processor.locker.Acquire(ctx, weatherTaskLockKey(start))
+	if err != nil {
+		return &MallWeatherProcessError{Retryable: true, Code: "LOCK_ACQUIRE_FAILED", cause: err}
+	}
+	if !acquired {
+		return &MallWeatherProcessError{Retryable: true, Code: "LOCK_BUSY"}
+	}
+	if lock == nil {
+		return &MallWeatherProcessError{Retryable: true, Code: "INVALID_TASK_LOCK"}
+	}
+	defer func() {
+		releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), processor.config.LockReleaseTimeout)
+		defer cancel()
+		if err := lock.Release(releaseCtx); err != nil && resultErr == nil {
+			resultErr = &MallWeatherProcessError{Retryable: true, Code: "LOCK_RELEASE_FAILED", cause: err}
+		}
+	}()
 	startedAt := processor.now().UTC()
 	execution, err := processor.store.Start(ctx, start, startedAt)
 	if err != nil {
@@ -227,6 +248,10 @@ func (processor *MallWeatherProcessor) Process(ctx context.Context, taskType str
 		}, err, true)
 	}
 	return nil
+}
+
+func weatherTaskLockKey(start mallWeatherTaskStart) string {
+	return strconv.FormatUint(uint64(start.Payload.MallID), 10) + ":" + start.TaskKind + ":" + start.Payload.TaskWindow
 }
 
 func (processor *MallWeatherProcessor) taskStart(taskType string, payload job.MallTaskPayload) (mallWeatherTaskStart, error) {
