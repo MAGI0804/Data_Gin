@@ -199,7 +199,10 @@ func (store *gormMallWeatherTaskStore) Fail(ctx context.Context, execution *mall
 		if err := dao.UpdateFetchAttempt(ctx, attempt.ID, attemptUpdates); err != nil {
 			return err
 		}
-		return dao.UpdateFetchRun(ctx, run.ID, runUpdates)
+		if err := dao.UpdateFetchRun(ctx, run.ID, runUpdates); err != nil {
+			return err
+		}
+		return data_dao.NewMallDAO(tx).AdvanceLastWeatherErrorAt(ctx, execution.Mall.ID, failure.FinishedAt)
 	})
 }
 
@@ -244,7 +247,10 @@ func (store *gormMallWeatherTaskStore) Persist(ctx context.Context, execution *m
 		if err := dao.UpdateFetchAttempt(ctx, attempt.ID, attemptUpdates); err != nil {
 			return err
 		}
-		return dao.UpdateFetchRun(ctx, run.ID, runUpdates)
+		if err := dao.UpdateFetchRun(ctx, run.ID, runUpdates); err != nil {
+			return err
+		}
+		return data_dao.NewMallDAO(tx).AdvanceLastWeatherSuccessAt(ctx, execution.Mall.ID, batch.FinishedAt)
 	})
 }
 

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"time"
 
 	"gin-biz-web-api/model"
 	"gin-biz-web-api/pkg/database"
@@ -154,6 +155,48 @@ func (dao *MallDAO) DeleteWithVersion(ctx context.Context, id uint, expectedVers
 		return ErrMallVersionConflict
 	}
 	return nil
+}
+
+func (dao *MallDAO) AdvanceLastWeatherSuccessAt(ctx context.Context, id uint, observedAt time.Time) error {
+	return dao.advanceWeatherObservedAt(ctx, id, observedAt, true)
+}
+
+func (dao *MallDAO) AdvanceLastWeatherErrorAt(ctx context.Context, id uint, observedAt time.Time) error {
+	return dao.advanceWeatherObservedAt(ctx, id, observedAt, false)
+}
+
+func (dao *MallDAO) advanceWeatherObservedAt(ctx context.Context, id uint, observedAt time.Time, success bool) error {
+	if dao == nil || dao.db == nil || ctx == nil || id == 0 || observedAt.IsZero() {
+		return fmt.Errorf("mall: invalid weather observation")
+	}
+	observedAt = observedAt.UTC()
+	column := "last_weather_error_at"
+	if success {
+		column = "last_weather_success_at"
+	}
+	expression, err := monotonicWeatherObservedAtExpr(column, observedAt)
+	if err != nil {
+		return err
+	}
+	result := dao.db.WithContext(ctx).Model(&model.Mall{}).
+		Where("id = ?", id).
+		Update(column, expression)
+	if result.Error != nil {
+		return fmt.Errorf("mall: advance weather observation: %w", result.Error)
+	}
+	return nil
+}
+
+func monotonicWeatherObservedAtExpr(column string, observedAt time.Time) (clause.Expr, error) {
+	if observedAt.IsZero() || (column != "last_weather_success_at" && column != "last_weather_error_at") {
+		return clause.Expr{}, fmt.Errorf("mall: invalid weather observation expression")
+	}
+	// Security: column is restricted to the two internal weather-health fields;
+	// observedAt remains a bound parameter.
+	return clause.Expr{
+		SQL:  "CASE WHEN `" + column + "` IS NULL OR `" + column + "` < ? THEN ? ELSE `" + column + "` END",
+		Vars: []interface{}{observedAt.UTC(), observedAt.UTC()},
+	}, nil
 }
 
 func normalizePageSize(limit int) int {
