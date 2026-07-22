@@ -15,6 +15,36 @@ func TestMallWeatherExportJobDAORejectsInvalidStateBeforeDatabase(t *testing.T) 
 	if err == nil {
 		t.Fatal("EstimateRows() accepted an unconfigured DAO")
 	}
+	if _, err := (&MallWeatherExportJobDAO{}).FindByUUIDAndActor(
+		context.Background(),
+		"00000000-0000-0000-0000-000000000001",
+		17,
+	); err == nil {
+		t.Fatal("FindByUUIDAndActor() accepted an unconfigured DAO")
+	}
+}
+
+func TestMallWeatherExportJobQueryColumnsExcludeSensitiveData(t *testing.T) {
+	selected := make(map[string]bool, len(mallWeatherExportJobQueryColumns))
+	for _, column := range mallWeatherExportJobQueryColumns {
+		selected[column] = true
+	}
+	for _, required := range []string{
+		"id", "job_uuid", "profile_id", "profile_version", "status", "total_rows", "processed_rows",
+		"current_sheet", "cancel_requested", "result_checksum", "file_size_bytes", "error_message_safe",
+		"started_at", "finished_at", "expires_at", "created_at", "updated_at",
+	} {
+		if !selected[required] {
+			t.Fatalf("query columns omitted required column %q", required)
+		}
+	}
+	for _, sensitive := range []string{
+		"profile_snapshot_json", "filters_json", "idempotency_key", "result_object_key", "last_cursor_json",
+	} {
+		if selected[sensitive] {
+			t.Fatalf("query columns include sensitive column %q", sensitive)
+		}
+	}
 }
 
 func TestMallWeatherExportEstimateUsesBoundFiltersAndLatestIdentity(t *testing.T) {
@@ -37,8 +67,9 @@ func TestMallWeatherExportEstimateUsesBoundFiltersAndLatestIdentity(t *testing.T
 		Where(timeColumn+" >= ?", filter.StartUTC).
 		Where(timeColumn+" < ?", filter.EndUTC).
 		Where(issuedColumn+" <= ?", dataset.AsOfUTC)
-	var count int64
-	if err := query.Select(countExpression).Scan(&count).Error; err != nil {
+	var count struct{ Value int64 }
+	query = query.Select(countExpression + " AS value").Find(&count)
+	if err := query.Error; err != nil {
 		t.Fatalf("build estimate query: %v", err)
 	}
 	statement := query.Statement.SQL.String()

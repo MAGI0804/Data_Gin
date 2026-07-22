@@ -2,13 +2,37 @@ package data_dao
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
+	"gin-biz-web-api/model"
 	"gin-biz-web-api/pkg/database"
 
 	"gorm.io/gorm"
 )
+
+var ErrMallWeatherExportJobNotFound = errors.New("mall weather export job: not found")
+
+var mallWeatherExportJobQueryColumns = []string{
+	"id",
+	"job_uuid",
+	"profile_id",
+	"profile_version",
+	"status",
+	"total_rows",
+	"processed_rows",
+	"current_sheet",
+	"cancel_requested",
+	"result_checksum",
+	"file_size_bytes",
+	"error_message_safe",
+	"started_at",
+	"finished_at",
+	"expires_at",
+	"created_at",
+	"updated_at",
+}
 
 type MallWeatherExportEstimateFilter struct {
 	MallIDs         []uint
@@ -67,6 +91,28 @@ func (dao *MallWeatherExportJobDAO) EstimateRows(
 		}
 	}
 	return total, nil
+}
+
+func (dao *MallWeatherExportJobDAO) FindByUUIDAndActor(
+	ctx context.Context,
+	jobUUID string,
+	actorUserID uint,
+) (*model.MallWeatherExportJob, error) {
+	if dao == nil || dao.db == nil || ctx == nil || len(jobUUID) != 36 || actorUserID == 0 {
+		return nil, fmt.Errorf("mall weather export job: invalid lookup")
+	}
+	var row model.MallWeatherExportJob
+	err := dao.db.WithContext(ctx).
+		Select(mallWeatherExportJobQueryColumns).
+		Where("job_uuid = ? AND created_by = ?", jobUUID, actorUserID).
+		First(&row).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, ErrMallWeatherExportJobNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("mall weather export job: find: %w", err)
+	}
+	return &row, nil
 }
 
 func (dao *MallWeatherExportJobDAO) estimateDatasetRows(

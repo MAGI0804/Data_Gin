@@ -3,6 +3,7 @@ package data_svc
 import (
 	"context"
 	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -49,6 +50,25 @@ type MallWeatherExportCreateResult struct {
 	CreatedAt      time.Time `json:"createdAt"`
 }
 
+type MallWeatherExportJobDTO struct {
+	JobID            string     `json:"jobId"`
+	ProfileID        uint       `json:"profileId"`
+	ProfileVersion   uint64     `json:"profileVersion"`
+	Status           string     `json:"status"`
+	TotalRows        int64      `json:"totalRows"`
+	ProcessedRows    int64      `json:"processedRows"`
+	CurrentSheet     string     `json:"currentSheet,omitempty"`
+	CancelRequested  bool       `json:"cancelRequested"`
+	ResultChecksum   string     `json:"resultChecksum,omitempty"`
+	FileSizeBytes    int64      `json:"fileSizeBytes"`
+	ErrorMessageSafe string     `json:"errorMessageSafe,omitempty"`
+	StartedAt        *time.Time `json:"startedAt,omitempty"`
+	FinishedAt       *time.Time `json:"finishedAt,omitempty"`
+	ExpiresAt        *time.Time `json:"expiresAt,omitempty"`
+	CreatedAt        time.Time  `json:"createdAt"`
+	UpdatedAt        time.Time  `json:"updatedAt"`
+}
+
 type MallWeatherExportProfileSnapshot struct {
 	ProfileID uint                           `json:"profileId"`
 	Code      string                         `json:"code"`
@@ -69,6 +89,10 @@ type mallWeatherExportProfileReader interface {
 
 type mallWeatherExportEstimator interface {
 	EstimateRows(context.Context, data_dao.MallWeatherExportEstimateRequest) (int64, error)
+}
+
+type mallWeatherExportJobReader interface {
+	FindByUUIDAndActor(context.Context, string, uint) (*model.MallWeatherExportJob, error)
 }
 
 type mallWeatherExportLimitReader interface {
@@ -104,6 +128,7 @@ type MallWeatherExportJobService struct {
 	profiles    mallWeatherExportProfileReader
 	permissions mallPermissionChecker
 	estimator   mallWeatherExportEstimator
+	jobs        mallWeatherExportJobReader
 	limits      mallWeatherExportLimitReader
 	store       mallWeatherExportJobStore
 	now         func() time.Time
@@ -114,6 +139,7 @@ func NewMallWeatherExportJobService() *MallWeatherExportJobService {
 		profiles:    data_dao.NewMallWeatherExportProfileDAO(database.DB),
 		permissions: data_dao.NewMallWeatherPermissionDAO(database.DB),
 		estimator:   data_dao.NewMallWeatherExportJobDAO(database.DB),
+		jobs:        data_dao.NewMallWeatherExportJobDAO(database.DB),
 		limits:      data_dao.NewRuntimeConfigDAO(),
 		store:       gormMallWeatherExportJobStore{db: database.DB},
 		now:         time.Now,
@@ -124,17 +150,85 @@ func newMallWeatherExportJobService(
 	profiles mallWeatherExportProfileReader,
 	permissions mallPermissionChecker,
 	estimator mallWeatherExportEstimator,
+	jobs mallWeatherExportJobReader,
 	limits mallWeatherExportLimitReader,
 	store mallWeatherExportJobStore,
 	now func() time.Time,
 ) (*MallWeatherExportJobService, error) {
-	if profiles == nil || permissions == nil || estimator == nil || limits == nil || store == nil || now == nil {
+	if profiles == nil || permissions == nil || estimator == nil || jobs == nil || limits == nil || store == nil || now == nil {
 		return nil, fmt.Errorf("mall weather export: invalid service configuration")
 	}
 	return &MallWeatherExportJobService{
-		profiles: profiles, permissions: permissions, estimator: estimator,
+		profiles: profiles, permissions: permissions, estimator: estimator, jobs: jobs,
 		limits: limits, store: store, now: now,
 	}, nil
+}
+
+func (service *MallWeatherExportJobService) Get(
+	ctx context.Context,
+	actorUserID uint,
+	jobUUID string,
+) (*MallWeatherExportJobDTO, error) {
+	jobUUID = strings.TrimSpace(jobUUID)
+	if service == nil || ctx == nil || actorUserID == 0 || len(jobUUID) != 36 || uuid.Validate(jobUUID) != nil {
+		return nil, fmt.Errorf("%w: invalid job id", ErrMallWeatherExportInvalid)
+	}
+	if err := service.authorize(ctx, actorUserID); err != nil {
+		return nil, err
+	}
+	row, err := service.jobs.FindByUUIDAndActor(ctx, jobUUID, actorUserID)
+	if err != nil {
+		return nil, err
+	}
+	dto, err := mallWeatherExportJobDTO(row)
+	if err != nil {
+		return nil, err
+	}
+	return &dto, nil
+}
+
+func mallWeatherExportJobDTO(row *model.MallWeatherExportJob) (MallWeatherExportJobDTO, error) {
+	if row == nil || row.ID == 0 || len(row.JobUUID) != 36 || uuid.Validate(row.JobUUID) != nil ||
+		row.ProfileID == 0 || row.ProfileVersion == 0 || row.TotalRows < 0 || row.ProcessedRows < 0 ||
+		row.FileSizeBytes < 0 || row.CreatedAt.IsZero() || row.UpdatedAt.IsZero() {
+		return MallWeatherExportJobDTO{}, fmt.Errorf("mall weather export: invalid stored job")
+	}
+	status := strings.ToLower(strings.TrimSpace(row.Status))
+	if !mallWeatherExportJobStatuses[status] {
+		return MallWeatherExportJobDTO{}, fmt.Errorf("mall weather export: invalid stored status")
+	}
+	if row.ResultChecksum != "" {
+		checksum, err := hex.DecodeString(row.ResultChecksum)
+		if err != nil || len(checksum) != sha256.Size {
+			return MallWeatherExportJobDTO{}, fmt.Errorf("mall weather export: invalid stored checksum")
+		}
+	}
+	return MallWeatherExportJobDTO{
+		JobID: row.JobUUID, ProfileID: row.ProfileID, ProfileVersion: row.ProfileVersion,
+		Status: strings.ToUpper(status), TotalRows: row.TotalRows, ProcessedRows: row.ProcessedRows,
+		CurrentSheet: row.CurrentSheet, CancelRequested: row.CancelRequested,
+		ResultChecksum: row.ResultChecksum, FileSizeBytes: row.FileSizeBytes,
+		ErrorMessageSafe: row.ErrorMessageSafe,
+		StartedAt:        utcTimePointer(row.StartedAt), FinishedAt: utcTimePointer(row.FinishedAt),
+		ExpiresAt: utcTimePointer(row.ExpiresAt), CreatedAt: row.CreatedAt.UTC(), UpdatedAt: row.UpdatedAt.UTC(),
+	}, nil
+}
+
+func utcTimePointer(value *time.Time) *time.Time {
+	if value == nil {
+		return nil
+	}
+	utc := value.UTC()
+	return &utc
+}
+
+var mallWeatherExportJobStatuses = map[string]bool{
+	"pending":   true,
+	"running":   true,
+	"succeeded": true,
+	"failed":    true,
+	"cancelled": true,
+	"expired":   true,
 }
 
 func (service *MallWeatherExportJobService) Create(

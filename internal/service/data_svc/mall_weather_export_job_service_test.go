@@ -91,6 +91,7 @@ func TestMallWeatherExportJobServiceRejectsEstimateOverRuntimeLimit(t *testing.T
 		fakeMallWeatherExportProfileReader{row: &profile},
 		fakeMallPermissionChecker{allowed: true},
 		estimator,
+		&fakeMallWeatherExportJobReader{},
 		fakeMallWeatherExportLimitReader{
 			value:  `{"maxEstimatedRows":100,"maxRangeDays":30,"estimateTimeoutSeconds":2}`,
 			exists: true,
@@ -117,6 +118,7 @@ func TestMallWeatherExportJobServiceAuthorizationFailsClosed(t *testing.T) {
 		fakeMallWeatherExportProfileReader{},
 		fakeMallPermissionChecker{allowed: false},
 		&fakeMallWeatherExportEstimator{},
+		&fakeMallWeatherExportJobReader{},
 		fakeMallWeatherExportLimitReader{},
 		&fakeMallWeatherExportJobStore{},
 		time.Now,
@@ -132,6 +134,41 @@ func TestMallWeatherExportJobServiceAuthorizationFailsClosed(t *testing.T) {
 	)
 	if !errors.Is(err, ErrMallForbidden) {
 		t.Fatalf("Create() error=%v, want ErrMallForbidden", err)
+	}
+}
+
+func TestMallWeatherExportJobServiceGetsActorScopedSafeDTO(t *testing.T) {
+	now := time.Date(2026, 7, 22, 8, 0, 0, 0, time.UTC)
+	jobUUID := uuid.NewString()
+	jobs := fakeMallWeatherExportJobReader{row: &model.MallWeatherExportJob{
+		BaseModel: model.BaseModel{ID: 22}, JobUUID: jobUUID, ProfileID: 9, ProfileVersion: 3,
+		Status: "running", TotalRows: 123, ProcessedRows: 45, CurrentSheet: "hourly",
+		ResultObjectKey: "weather-exports/secret.xlsx", CreatedBy: 17,
+		WeatherTimestamps: model.WeatherTimestamps{CreatedAt: now, UpdatedAt: now},
+	}}
+	service, err := newMallWeatherExportJobService(
+		fakeMallWeatherExportProfileReader{},
+		fakeMallPermissionChecker{allowed: true},
+		&fakeMallWeatherExportEstimator{},
+		&jobs,
+		fakeMallWeatherExportLimitReader{},
+		&fakeMallWeatherExportJobStore{},
+		time.Now,
+	)
+	if err != nil {
+		t.Fatalf("newMallWeatherExportJobService() error=%v", err)
+	}
+	result, err := service.Get(context.Background(), 17, jobUUID)
+	if err != nil {
+		t.Fatalf("Get() error=%v", err)
+	}
+	encoded, err := json.Marshal(result)
+	if err != nil {
+		t.Fatalf("json.Marshal() error=%v", err)
+	}
+	if result.Status != "RUNNING" || result.ProcessedRows != 45 || jobs.actorUserID != 17 ||
+		strings.Contains(string(encoded), "weather-exports/secret.xlsx") {
+		t.Fatalf("result=%+v encoded=%s actor=%d", result, encoded, jobs.actorUserID)
 	}
 }
 
@@ -176,6 +213,7 @@ func newTestMallWeatherExportJobService(
 		fakeMallWeatherExportProfileReader{row: &profile},
 		fakeMallPermissionChecker{allowed: true},
 		estimator,
+		&fakeMallWeatherExportJobReader{},
 		fakeMallWeatherExportLimitReader{},
 		store,
 		func() time.Time { return now },
@@ -216,6 +254,25 @@ type fakeMallWeatherExportEstimator struct {
 	rows    int64
 	err     error
 	calls   int
+}
+
+type fakeMallWeatherExportJobReader struct {
+	row         *model.MallWeatherExportJob
+	err         error
+	actorUserID uint
+}
+
+func (reader *fakeMallWeatherExportJobReader) FindByUUIDAndActor(
+	_ context.Context,
+	_ string,
+	actorUserID uint,
+) (*model.MallWeatherExportJob, error) {
+	reader.actorUserID = actorUserID
+	if reader.err != nil {
+		return nil, reader.err
+	}
+	copy := *reader.row
+	return &copy, nil
 }
 
 func (estimator *fakeMallWeatherExportEstimator) EstimateRows(
