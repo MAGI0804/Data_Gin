@@ -55,16 +55,22 @@ func TestVerifyMallWeatherFeishuAppendCheckpointFailsClosed(t *testing.T) {
 		name     string
 		reader   *fakeMallWeatherFeishuRangeReader
 		checksum string
+		rowStart int64
 	}{
 		{name: "invalid checksum", reader: &fakeMallWeatherFeishuRangeReader{}, checksum: "invalid"},
 		{name: "missing response", reader: &fakeMallWeatherFeishuRangeReader{responses: []*feishu.SheetValues{nil}}, checksum: strings.Repeat("a", 64)},
 		{name: "read failure", reader: &fakeMallWeatherFeishuRangeReader{err: errors.New("read unavailable")}, checksum: strings.Repeat("a", 64)},
+		{name: "header row is not append data", reader: &fakeMallWeatherFeishuRangeReader{}, checksum: strings.Repeat("a", 64), rowStart: 1},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
+			rowStart := test.rowStart
+			if rowStart == 0 {
+				rowStart = 2
+			}
 			if _, err := verifyMallWeatherFeishuAppendCheckpoint(
-				t.Context(), test.reader, "spreadsheet_abc", "sheet_hourly", 2, 2, 1, test.checksum,
+				t.Context(), test.reader, "spreadsheet_abc", "sheet_hourly", rowStart, rowStart, 1, test.checksum,
 			); err == nil {
 				t.Fatal("verifyMallWeatherFeishuAppendCheckpoint() error=nil")
 			}
