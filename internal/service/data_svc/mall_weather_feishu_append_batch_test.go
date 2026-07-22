@@ -167,16 +167,32 @@ func TestMallWeatherFeishuAppendBatchExecutorPersistsCanceledOutcome(t *testing.
 
 func TestMallWeatherFeishuAppendBatchExecutorRejectsInvalidRequestBeforeSideEffects(t *testing.T) {
 	t.Parallel()
-	sheets := &fakeMallWeatherFeishuAppender{}
-	logs := &fakeMallWeatherFeishuBatchLogStore{createID: 41}
-	executor, err := newMallWeatherFeishuAppendBatchExecutor(sheets, logs, sequentialMallWeatherFeishuNow())
-	if err != nil {
-		t.Fatalf("newMallWeatherFeishuAppendBatchExecutor() error=%v", err)
+	tests := []struct {
+		name   string
+		mutate func(*mallWeatherFeishuAppendBatchRequest)
+	}{
+		{name: "ragged row", mutate: func(request *mallWeatherFeishuAppendBatchRequest) {
+			request.Batch.Rows[1] = request.Batch.Rows[1][:1]
+		}},
+		{name: "blank first column", mutate: func(request *mallWeatherFeishuAppendBatchRequest) {
+			request.Batch.Rows[0][0] = feishu.SheetCell{Type: feishu.SheetCellBlank}
+		}},
 	}
-	request := validMallWeatherFeishuAppendBatchRequest()
-	request.Batch.Rows[1] = request.Batch.Rows[1][:1]
-	if _, err := executor.Execute(t.Context(), request); err == nil || logs.createCalls != 0 || sheets.calls != 0 {
-		t.Fatalf("Execute() error=%v sheets=%+v logs=%+v", err, sheets, logs)
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			t.Parallel()
+			sheets := &fakeMallWeatherFeishuAppender{}
+			logs := &fakeMallWeatherFeishuBatchLogStore{createID: 41}
+			executor, err := newMallWeatherFeishuAppendBatchExecutor(sheets, logs, sequentialMallWeatherFeishuNow())
+			if err != nil {
+				t.Fatalf("newMallWeatherFeishuAppendBatchExecutor() error=%v", err)
+			}
+			request := validMallWeatherFeishuAppendBatchRequest()
+			test.mutate(&request)
+			if _, err := executor.Execute(t.Context(), request); err == nil || logs.createCalls != 0 || sheets.calls != 0 {
+				t.Fatalf("Execute() error=%v sheets=%+v logs=%+v", err, sheets, logs)
+			}
+		})
 	}
 }
 

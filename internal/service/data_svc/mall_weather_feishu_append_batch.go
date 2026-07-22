@@ -186,7 +186,7 @@ func validateMallWeatherFeishuAppendBatchRequest(
 		return 0, 0, 0, errors.New("invalid batch dimensions")
 	}
 	for _, row := range request.Batch.Rows {
-		if len(row) != columns {
+		if len(row) != columns || mallWeatherFeishuFirstCellIsBlank(row) {
 			return 0, 0, 0, errors.New("invalid batch dimensions")
 		}
 	}
