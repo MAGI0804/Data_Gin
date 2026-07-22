@@ -14,7 +14,9 @@ func TestMallWeatherTaskConstructorsUseNonSensitivePayloads(t *testing.T) {
 		queue    string
 		create   func() (*asynq.Task, error)
 	}{
-		{"geocode", TypeMallGeocode, MallWeatherQueueName, func() (*asynq.Task, error) { return NewMallGeocodeTask(MallTaskPayload{MallID: 11}) }},
+		{"geocode", TypeMallGeocode, MallWeatherQueueName, func() (*asynq.Task, error) {
+			return NewMallGeocodeTask(MallGeocodeTaskPayload{MallID: 11, MallVersion: 3, AddressHash: strings.Repeat("a", 64)})
+		}},
 		{"fast", TypeMallWeatherFast, MallWeatherQueueName, func() (*asynq.Task, error) { return NewMallWeatherFastTask(MallTaskPayload{MallID: 11}) }},
 		{"full", TypeMallWeatherFull, MallWeatherQueueName, func() (*asynq.Task, error) { return NewMallWeatherFullTask(MallTaskPayload{MallID: 11}) }},
 		{"life index", TypeMallWeatherLifeIndex, MallWeatherQueueName, func() (*asynq.Task, error) { return NewMallWeatherLifeIndexTask(MallTaskPayload{MallID: 11}) }},
@@ -63,6 +65,8 @@ func TestNewMallWeatherTaskRejectsInvalidPayload(t *testing.T) {
 		{"credential field", TypeMallWeatherFast, `{"mall_id":1,"app_secret":"do-not-queue"}`},
 		{"URL field", TypeMallWeatherFast, `{"mall_id":1,"provider_url":"https://example.invalid"}`},
 		{"multiple values", TypeMallWeatherFast, `{"mall_id":1}{"mall_id":2}`},
+		{"geocode missing version", TypeMallGeocode, `{"mall_id":1,"address_hash":"aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"}`},
+		{"geocode invalid hash", TypeMallGeocode, `{"mall_id":1,"mall_version":2,"address_hash":"not-a-sha256"}`},
 	}
 
 	for _, tt := range tests {

@@ -2,6 +2,7 @@ package data_svc
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -9,6 +10,7 @@ import (
 	"time"
 
 	"gin-biz-web-api/internal/requestbody"
+	"gin-biz-web-api/job"
 	"gin-biz-web-api/model"
 
 	mysqlDriver "github.com/go-sql-driver/mysql"
@@ -117,6 +119,13 @@ func TestBuildMallPatchInvalidatesCoordinatesAndQueuesNewVersion(t *testing.T) {
 	}
 	if !strings.Contains(outbox.TaskKey, "mall:geocode:7:v5:") || strings.Contains(string(outbox.PayloadJSON), "新地址") {
 		t.Fatalf("outbox = %+v", outbox)
+	}
+	var payload job.MallGeocodeTaskPayload
+	if err := json.Unmarshal([]byte(outbox.PayloadJSON), &payload); err != nil {
+		t.Fatalf("decode geocode payload: %v", err)
+	}
+	if payload.MallID != 7 || payload.MallVersion != 5 || payload.AddressHash != mallAddressHash(&candidate) {
+		t.Fatalf("geocode identity = %+v", payload)
 	}
 }
 

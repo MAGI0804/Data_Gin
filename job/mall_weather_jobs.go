@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
+	"regexp"
 
 	"github.com/hibiken/asynq"
 )
@@ -41,6 +42,14 @@ type MallTaskPayload struct {
 	MallID uint `json:"mall_id"`
 }
 
+type MallGeocodeTaskPayload struct {
+	MallID      uint   `json:"mall_id"`
+	MallVersion uint64 `json:"mall_version"`
+	AddressHash string `json:"address_hash"`
+}
+
+var sha256HexPattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
+
 // MallWeatherExportTaskPayload identifies a persisted export job.
 type MallWeatherExportTaskPayload struct {
 	ExportJobID uint `json:"export_job_id"`
@@ -74,7 +83,7 @@ func ExpectedMallWeatherQueue(taskType string) (string, bool) {
 	}
 }
 
-func NewMallGeocodeTask(payload MallTaskPayload) (*asynq.Task, error) {
+func NewMallGeocodeTask(payload MallGeocodeTaskPayload) (*asynq.Task, error) {
 	return newTypedMallWeatherTask(TypeMallGeocode, payload)
 }
 
@@ -124,8 +133,15 @@ func NewMallWeatherTask(taskType string, payload []byte) (*asynq.Task, error) {
 	}
 
 	switch taskType {
-	case TypeMallGeocode,
-		TypeMallWeatherFast,
+	case TypeMallGeocode:
+		var decoded MallGeocodeTaskPayload
+		if err := decodeStrictTaskPayload(payload, &decoded); err != nil {
+			return nil, err
+		}
+		if decoded.MallID == 0 || decoded.MallVersion == 0 || !sha256HexPattern.MatchString(decoded.AddressHash) {
+			return nil, fmt.Errorf("mall weather task: invalid geocode identity")
+		}
+	case TypeMallWeatherFast,
 		TypeMallWeatherFull,
 		TypeMallWeatherLifeIndex,
 		TypeMallWeatherRepair,

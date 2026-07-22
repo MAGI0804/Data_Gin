@@ -610,11 +610,15 @@ func buildMallPatch(current *model.Mall, request requestbody.MallPatchRequest, a
 }
 
 func newMallGeocodeOutbox(mall *model.Mall, now time.Time) (*model.AsyncJobOutbox, error) {
-	payload, err := json.Marshal(job.MallTaskPayload{MallID: mall.ID})
+	addressHash := mallAddressHash(mall)
+	payload, err := json.Marshal(job.MallGeocodeTaskPayload{
+		MallID:      mall.ID,
+		MallVersion: mall.Version,
+		AddressHash: addressHash,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("mall service: encode geocode payload: %w", err)
 	}
-	addressHash := mallAddressHash(mall)
 	return &model.AsyncJobOutbox{
 		TaskKey:     fmt.Sprintf("mall:geocode:%d:v%d:%s", mall.ID, mall.Version, addressHash),
 		TaskType:    job.TypeMallGeocode,
