@@ -80,7 +80,7 @@ func (runner *mallWeatherFeishuOverwriteDatasetRunner) Run(
 	if err != nil {
 		return result, err
 	}
-	initialAppendRow, err := findMallWeatherFeishuAppendRow(
+	previousLastRow, err := findMallWeatherFeishuLastDataRow(
 		ctx,
 		runner.sheets,
 		request.Destination.SpreadsheetToken,
@@ -90,7 +90,8 @@ func (runner *mallWeatherFeishuOverwriteDatasetRunner) Run(
 	if err != nil {
 		return result, fmt.Errorf("mall weather feishu overwrite dataset: locate previous data tail: %w", err)
 	}
-	result.PreviousLastRow = initialAppendRow - 1
+	result.PreviousLastRow = previousLastRow
+	initialAppendRow := previousLastRow + 1
 	rowStart := int64(2)
 	var afterID uint
 	for batchNo := 1; ; batchNo++ {
