@@ -31,6 +31,7 @@ const (
 	PermissionMallGeocodeConfirm  = "mall.geocode.confirm"
 	PermissionWeatherRead         = "weather.read"
 	PermissionWeatherRefresh      = "weather.refresh"
+	PermissionWeatherExport       = "weather.export"
 	PermissionWeatherConfigManage = "weather.config.manage"
 
 	mallCreateOperationScope = "mall.create"
