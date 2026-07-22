@@ -89,6 +89,21 @@ func TestMallWeatherControllerMinutelyParsesSharedContract(t *testing.T) {
 	}
 }
 
+func TestMallWeatherControllerDailyParsesSharedContract(t *testing.T) {
+	var gotRequest requestbody.MallWeatherDailyQueryRequest
+	service := fakeMallWeatherControllerService{daily: func(_ context.Context, _, _ uint, request requestbody.MallWeatherDailyQueryRequest) (*data_svc.MallWeatherDailyResult, error) {
+		gotRequest = request
+		return &data_svc.MallWeatherDailyResult{Items: []data_svc.MallWeatherDailyDTO{}, Pagination: data_svc.MallWeatherPagination{PageSize: 15}}, nil
+	}}
+	path := "/api/v1/malls/7/weather/daily?start=2026-07-22T00:00:00Z&end=2026-08-06T00:00:00Z" +
+		"&timezone=Asia%2FShanghai&latest=true&as_of=2026-07-22T01:00:00Z&quality_status=valid&page_size=15"
+	recorder := performMallWeatherRequest(t, service, path)
+	if recorder.Code != http.StatusOK || !gotRequest.Latest || gotRequest.PageSize != 15 ||
+		gotRequest.TimeZone != "Asia/Shanghai" || gotRequest.QualityStatus != "valid" || gotRequest.AsOfUTC == nil {
+		t.Fatalf("status=%d request=%+v body=%s", recorder.Code, gotRequest, recorder.Body.String())
+	}
+}
+
 func TestMallWeatherControllerHourlyParsesContract(t *testing.T) {
 	var gotActor, gotMall uint
 	var gotRequest requestbody.MallWeatherHourlyQueryRequest
@@ -156,6 +171,7 @@ func performMallWeatherRequest(t *testing.T, service MallWeatherQueryService, pa
 	router.GET("/api/v1/malls/:id/weather/realtime", controller.Realtime)
 	router.GET("/api/v1/malls/:id/weather/minutely", controller.Minutely)
 	router.GET("/api/v1/malls/:id/weather/hourly", controller.Hourly)
+	router.GET("/api/v1/malls/:id/weather/daily", controller.Daily)
 	recorder := httptest.NewRecorder()
 	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, path, nil))
 	return recorder
@@ -166,6 +182,7 @@ type fakeMallWeatherControllerService struct {
 	realtime func(context.Context, uint, uint, requestbody.MallWeatherRealtimeQueryRequest) (*data_svc.MallWeatherRealtimeResult, error)
 	minutely func(context.Context, uint, uint, requestbody.MallWeatherMinutelyQueryRequest) (*data_svc.MallWeatherMinutelyResult, error)
 	hourly   func(context.Context, uint, uint, requestbody.MallWeatherHourlyQueryRequest) (*data_svc.MallWeatherHourlyResult, error)
+	daily    func(context.Context, uint, uint, requestbody.MallWeatherDailyQueryRequest) (*data_svc.MallWeatherDailyResult, error)
 }
 
 func (service fakeMallWeatherControllerService) Overview(ctx context.Context, actor, mallID uint, timeZone string) (*data_svc.MallWeatherOverviewResult, error) {
@@ -194,4 +211,11 @@ func (service fakeMallWeatherControllerService) Hourly(ctx context.Context, acto
 		panic("unexpected Hourly call")
 	}
 	return service.hourly(ctx, actor, mallID, request)
+}
+
+func (service fakeMallWeatherControllerService) Daily(ctx context.Context, actor, mallID uint, request requestbody.MallWeatherDailyQueryRequest) (*data_svc.MallWeatherDailyResult, error) {
+	if service.daily == nil {
+		panic("unexpected Daily call")
+	}
+	return service.daily(ctx, actor, mallID, request)
 }
