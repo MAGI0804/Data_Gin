@@ -160,6 +160,24 @@ func TestMallWeatherProcessorFinalizesCanceledAttempt(t *testing.T) {
 	}
 }
 
+func TestMallWeatherProcessorDiscardsSupersededAttemptResults(t *testing.T) {
+	raw := readMallWeatherFixture(t, "../../../connector/caiyun/testdata/life_index_v3.json")
+	provider := &fakeMallWeatherProvider{lifeResponse: &caiyun.ProviderResponse{
+		EndpointKind: caiyun.EndpointLifeIndexV3, HTTPStatus: 200, ProviderStatus: "ok", RawBody: raw,
+	}}
+	store := newFakeMallWeatherTaskStore(data_dao.FetchAttemptDispositionAcquired)
+	store.recordErr = ErrMallWeatherAttemptSuperseded
+	processor := newTestMallWeatherProcessor(t, provider, store)
+	if err := processor.Process(context.Background(), job.TypeMallWeatherLifeIndex, job.MallTaskPayload{
+		MallID: 7, TaskWindow: "life:7:2026072203",
+	}); err != nil {
+		t.Fatalf("Process() error=%v", err)
+	}
+	if !reflect.DeepEqual(store.events, []string{"start", "response"}) {
+		t.Fatalf("events=%v", store.events)
+	}
+}
+
 type fakeMallWeatherProvider struct {
 	weatherResponse *caiyun.ProviderResponse
 	weatherErr      error

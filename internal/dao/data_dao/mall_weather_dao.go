@@ -345,6 +345,25 @@ func (dao *MallWeatherDAO) UpsertLatest(ctx context.Context, rows []model.MallWe
 	return upsertWeatherRows(ctx, dao.db, rows, []string{"mall_id", "data_kind", "business_key"}, defaultWeatherBatchSize)
 }
 
+func (dao *MallWeatherDAO) FindAlertsByProviderIDs(ctx context.Context, provider string, alertIDs []string) ([]model.MallWeatherAlert, error) {
+	provider = strings.TrimSpace(provider)
+	if provider == "" || len(alertIDs) == 0 || len(alertIDs) > 500 {
+		return nil, fmt.Errorf("mall weather: invalid alert identity query")
+	}
+	for _, alertID := range alertIDs {
+		if strings.TrimSpace(alertID) == "" {
+			return nil, fmt.Errorf("mall weather: invalid alert identity query")
+		}
+	}
+	var rows []model.MallWeatherAlert
+	if err := dao.db.WithContext(ctx).
+		Where("provider = ? AND alert_id IN ?", provider, alertIDs).
+		Find(&rows).Error; err != nil {
+		return nil, fmt.Errorf("mall weather: find alerts by provider ids: %w", err)
+	}
+	return rows, nil
+}
+
 func upsertWeatherRows[T any](ctx context.Context, db *gorm.DB, rows []T, conflictColumns []string, batchSize int) (UpsertResult, error) {
 	if len(rows) == 0 {
 		return UpsertResult{}, nil

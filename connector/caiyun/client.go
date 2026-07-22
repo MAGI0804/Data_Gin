@@ -42,6 +42,11 @@ type ProviderError struct {
 	cause      error
 }
 
+type ClientConfig struct {
+	Timeout          time.Duration
+	MaxResponseBytes int64
+}
+
 func (err *ProviderError) Error() string {
 	if err == nil {
 		return "caiyun provider error"
@@ -71,14 +76,28 @@ type Client struct {
 }
 
 func NewClient(builder *RequestBuilder, httpClient HTTPDoer) (*Client, error) {
+	return NewClientWithConfig(builder, httpClient, ClientConfig{})
+}
+
+func NewClientWithConfig(builder *RequestBuilder, httpClient HTTPDoer, config ClientConfig) (*Client, error) {
 	if builder == nil || builder.signer == nil {
 		return nil, fmt.Errorf("caiyun client: request builder is required")
+	}
+	if config.Timeout == 0 {
+		config.Timeout = defaultRequestTimeout
+	}
+	if config.MaxResponseBytes == 0 {
+		config.MaxResponseBytes = defaultMaxResponseBytes
+	}
+	if config.Timeout < time.Second || config.Timeout > 5*time.Minute ||
+		config.MaxResponseBytes < 1 || config.MaxResponseBytes > defaultMaxResponseBytes {
+		return nil, fmt.Errorf("caiyun client: invalid client limits")
 	}
 	if httpClient == nil {
 		var err error
 		httpClient, err = providerhttp.NewClient(providerhttp.ClientConfig{
-			Timeout:               defaultRequestTimeout,
-			ResponseHeaderTimeout: defaultRequestTimeout,
+			Timeout:               config.Timeout,
+			ResponseHeaderTimeout: config.Timeout,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("caiyun client: create HTTP client")
@@ -86,7 +105,7 @@ func NewClient(builder *RequestBuilder, httpClient HTTPDoer) (*Client, error) {
 	}
 	return &Client{
 		builder: builder, httpClient: httpClient,
-		timeout: defaultRequestTimeout, maxResponseBytes: defaultMaxResponseBytes,
+		timeout: config.Timeout, maxResponseBytes: config.MaxResponseBytes,
 	}, nil
 }
 

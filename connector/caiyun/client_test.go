@@ -10,6 +10,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"gin-biz-web-api/pkg/providerhttp"
 )
@@ -191,6 +192,27 @@ func TestClientRejectsInvalidInputAndRedactsFormatting(t *testing.T) {
 	encoded, err := json.Marshal(client)
 	if err != nil || strings.Contains(string(encoded), testAppKey) || strings.Contains(string(encoded), testAppSecret) {
 		t.Fatalf("serialized client=%s error=%v", encoded, err)
+	}
+}
+
+func TestNewClientWithConfigAppliesBoundedLimits(t *testing.T) {
+	builder := fixedRequestBuilder(t)
+	client, err := NewClientWithConfig(builder, caiyunHandlerDoer{handler: http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})}, ClientConfig{
+		Timeout: 3 * time.Second, MaxResponseBytes: 1024,
+	})
+	if err != nil {
+		t.Fatalf("NewClientWithConfig() error=%v", err)
+	}
+	if client.timeout != 3*time.Second || client.maxResponseBytes != 1024 {
+		t.Fatalf("client limits timeout=%v max=%d", client.timeout, client.maxResponseBytes)
+	}
+	for _, config := range []ClientConfig{
+		{Timeout: time.Millisecond, MaxResponseBytes: 1024},
+		{Timeout: time.Second, MaxResponseBytes: defaultMaxResponseBytes + 1},
+	} {
+		if _, err := NewClientWithConfig(builder, caiyunHandlerDoer{handler: http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})}, config); err == nil {
+			t.Fatalf("NewClientWithConfig(%+v) error=nil", config)
+		}
 	}
 }
 

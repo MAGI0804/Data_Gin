@@ -1,0 +1,46 @@
+package data_svc
+
+import (
+	"context"
+	"testing"
+	"time"
+
+	"gin-biz-web-api/connector/caiyun"
+	weatherdomain "gin-biz-web-api/internal/weather"
+	"gin-biz-web-api/model"
+
+	"gorm.io/gorm"
+)
+
+func TestValidateWeatherStoreResponseChecksExecutionIdentity(t *testing.T) {
+	mallID := uint(7)
+	store := &gormMallWeatherTaskStore{db: &gorm.DB{}}
+	execution := &mallWeatherExecution{
+		Mall: model.Mall{BaseModel: model.BaseModel{ID: mallID}},
+		Run: model.MallWeatherFetchRun{
+			BaseModel: model.BaseModel{ID: 17}, EndpointKind: caiyun.EndpointWeatherV26,
+		},
+		Attempt: model.MallWeatherFetchAttempt{BaseModel: model.BaseModel{ID: 23}},
+	}
+	response := &caiyun.ProviderResponse{EndpointKind: caiyun.EndpointWeatherV26}
+	snapshot := &model.ProviderRawSnapshot{
+		Provider: weatherdomain.ProviderCaiyun, EndpointKind: caiyun.EndpointWeatherV26,
+		MallID: &mallID, ResponseChecksum: "checksum",
+	}
+	if err := validateWeatherStoreResponse(store, context.Background(), execution, response, snapshot); err != nil {
+		t.Fatalf("validateWeatherStoreResponse() error=%v", err)
+	}
+	snapshot.EndpointKind = caiyun.EndpointLifeIndexV3
+	if err := validateWeatherStoreResponse(store, context.Background(), execution, response, snapshot); err == nil {
+		t.Fatal("validateWeatherStoreResponse() accepted mismatched endpoint")
+	}
+}
+
+func TestNonNegativeMilliseconds(t *testing.T) {
+	if got := nonNegativeMilliseconds(-time.Second); got != 0 {
+		t.Fatalf("nonNegativeMilliseconds(-1s)=%d", got)
+	}
+	if got := nonNegativeMilliseconds(1500 * time.Millisecond); got != 1500 {
+		t.Fatalf("nonNegativeMilliseconds(1.5s)=%d", got)
+	}
+}

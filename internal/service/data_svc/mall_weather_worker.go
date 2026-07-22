@@ -23,6 +23,8 @@ const (
 	weatherParserVersionLifeV3       = "caiyun-v3-lifeindex-v1"
 )
 
+var ErrMallWeatherAttemptSuperseded = errors.New("mall weather: fetch attempt superseded")
+
 var partialWeatherWarningCodes = map[string]struct{}{
 	"CORE_FIELD_COVERAGE_LOW": {}, "EMPTY_DAY": {}, "FORECAST_DATE_OUT_OF_RANGE": {},
 	"FORECAST_TIME_OUT_OF_RANGE": {}, "INVALID_ALERT_ID": {}, "INVALID_DATE": {},
@@ -76,11 +78,13 @@ type mallWeatherExecution struct {
 }
 
 type mallWeatherFailure struct {
-	AttemptStatus    string
-	ErrorClass       string
-	ErrorCode        string
-	ErrorMessageSafe string
-	FinishedAt       time.Time
+	AttemptStatus     string
+	ErrorClass        string
+	ErrorCode         string
+	ErrorMessageSafe  string
+	FinishedAt        time.Time
+	ParserVersion     string
+	ParseWarningsJSON model.JSONText
 }
 
 type mallWeatherModelBatch struct {
@@ -184,6 +188,9 @@ func (processor *MallWeatherProcessor) Process(ctx context.Context, taskType str
 		}
 		execution.Run.ResponseChecksum = snapshot.ResponseChecksum
 		if err := processor.store.RecordResponse(ctx, execution, response, snapshot); err != nil {
+			if errors.Is(err, ErrMallWeatherAttemptSuperseded) {
+				return nil
+			}
 			return processor.finishFailure(ctx, execution, mallWeatherFailure{
 				AttemptStatus: "persist_failed", ErrorClass: "database", ErrorCode: "SNAPSHOT_RECORD_FAILED",
 				ErrorMessageSafe: "weather response snapshot could not be recorded", FinishedAt: finishedAt,
@@ -207,9 +214,13 @@ func (processor *MallWeatherProcessor) Process(ctx context.Context, taskType str
 		return processor.finishFailure(ctx, execution, mallWeatherFailure{
 			AttemptStatus: "parse_failed", ErrorClass: "invalid_response", ErrorCode: "PARSE_FAILED",
 			ErrorMessageSafe: "weather provider response could not be parsed", FinishedAt: finishedAt,
+			ParserVersion: parserVersionForEndpoint(start.Payload.EndpointKind), ParseWarningsJSON: model.JSONText("[]"),
 		}, err, false)
 	}
 	if err := processor.store.Persist(ctx, execution, batch); err != nil {
+		if errors.Is(err, ErrMallWeatherAttemptSuperseded) {
+			return nil
+		}
 		return processor.finishFailure(ctx, execution, mallWeatherFailure{
 			AttemptStatus: "persist_failed", ErrorClass: "database", ErrorCode: "PERSIST_FAILED",
 			ErrorMessageSafe: "weather business data could not be stored", FinishedAt: finishedAt,
@@ -292,12 +303,22 @@ func (processor *MallWeatherProcessor) finishFailure(ctx context.Context, execut
 	failureCtx, cancel := context.WithTimeout(failureParent, processor.config.FailureFinalizeTimeout)
 	defer cancel()
 	if err := processor.store.Fail(failureCtx, execution, failure); err != nil {
+		if errors.Is(err, ErrMallWeatherAttemptSuperseded) {
+			return nil
+		}
 		return &MallWeatherProcessError{Retryable: true, Code: "FAILURE_AUDIT_FAILED", cause: err}
 	}
 	if errors.Is(cause, context.Canceled) || errors.Is(cause, context.DeadlineExceeded) {
 		return cause
 	}
 	return &MallWeatherProcessError{Retryable: retryable, Code: failure.ErrorCode, cause: cause}
+}
+
+func parserVersionForEndpoint(endpointKind string) string {
+	if endpointKind == caiyun.EndpointLifeIndexV3 {
+		return weatherParserVersionLifeV3
+	}
+	return weatherParserVersionV26
 }
 
 func validateWeatherExecution(execution *mallWeatherExecution, start mallWeatherTaskStart) error {
