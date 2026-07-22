@@ -12,7 +12,6 @@ import (
 
 	"gin-biz-web-api/internal/dao/data_dao"
 	"gin-biz-web-api/internal/requestbody"
-	weatherdomain "gin-biz-web-api/internal/weather"
 	"gin-biz-web-api/model"
 )
 
@@ -105,31 +104,22 @@ func (service *MallWeatherQueryService) Realtime(
 }
 
 func normalizeRealtimeWeatherRequest(request requestbody.MallWeatherRealtimeQueryRequest, mall *model.Mall) (*time.Location, requestbody.MallWeatherRealtimeQueryRequest, error) {
-	location, err := weatherMallLocation(mall, request.TimeZone)
+	location, normalized, err := normalizeWeatherTimeSeriesRequest(weatherTimeSeriesRequest{
+		StartUTC: request.StartUTC, EndUTC: request.EndUTC, TimeZone: request.TimeZone,
+		Latest: request.Latest, AsOfUTC: request.AsOfUTC, QualityStatus: request.QualityStatus,
+		Cursor: request.Cursor, PageSize: request.PageSize,
+	}, mall)
 	if err != nil {
 		return nil, request, err
 	}
-	if request.StartUTC.IsZero() || request.EndUTC.IsZero() || !request.StartUTC.Before(request.EndUTC) ||
-		request.EndUTC.Sub(request.StartUTC) > maxWeatherQueryRange {
-		return nil, request, fmt.Errorf("%w: invalid time range", ErrMallWeatherInvalidQuery)
-	}
-	request.StartUTC = request.StartUTC.UTC()
-	request.EndUTC = request.EndUTC.UTC()
-	if request.AsOfUTC != nil {
-		asOf := request.AsOfUTC.UTC()
-		request.AsOfUTC = &asOf
-	}
-	request.QualityStatus = strings.ToLower(strings.TrimSpace(request.QualityStatus))
-	if request.QualityStatus != "" && request.QualityStatus != weatherdomain.QualityStatusValid && request.QualityStatus != weatherdomain.QualityStatusWarning {
-		return nil, request, fmt.Errorf("%w: invalid quality status", ErrMallWeatherInvalidQuery)
-	}
-	if request.PageSize == 0 {
-		request.PageSize = defaultWeatherQueryPageSize
-	}
-	if request.PageSize < 1 || request.PageSize > maxWeatherQueryPageSize || len(request.Cursor) > maxWeatherCursorLength {
-		return nil, request, fmt.Errorf("%w: invalid pagination", ErrMallWeatherInvalidQuery)
-	}
-	request.TimeZone = location.String()
+	request.StartUTC = normalized.StartUTC
+	request.EndUTC = normalized.EndUTC
+	request.TimeZone = normalized.TimeZone
+	request.Latest = normalized.Latest
+	request.AsOfUTC = normalized.AsOfUTC
+	request.QualityStatus = normalized.QualityStatus
+	request.Cursor = normalized.Cursor
+	request.PageSize = normalized.PageSize
 	return location, request, nil
 }
 

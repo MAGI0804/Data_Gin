@@ -206,6 +206,17 @@ type weatherHourlyCursor struct {
 	ID                 uint  `json:"id"`
 }
 
+type weatherTimeSeriesRequest struct {
+	StartUTC      time.Time
+	EndUTC        time.Time
+	TimeZone      string
+	Latest        bool
+	AsOfUTC       *time.Time
+	QualityStatus string
+	Cursor        string
+	PageSize      int
+}
+
 func NewMallWeatherQueryService() *MallWeatherQueryService {
 	return &MallWeatherQueryService{
 		malls: data_dao.NewMallDAO(database.DB), weather: data_dao.NewMallWeatherDAO(database.DB),
@@ -397,6 +408,26 @@ func (service *MallWeatherQueryService) authorize(ctx context.Context, actorUser
 }
 
 func normalizeHourlyWeatherRequest(request requestbody.MallWeatherHourlyQueryRequest, mall *model.Mall) (*time.Location, requestbody.MallWeatherHourlyQueryRequest, error) {
+	location, normalized, err := normalizeWeatherTimeSeriesRequest(weatherTimeSeriesRequest{
+		StartUTC: request.StartUTC, EndUTC: request.EndUTC, TimeZone: request.TimeZone,
+		Latest: request.Latest, AsOfUTC: request.AsOfUTC, QualityStatus: request.QualityStatus,
+		Cursor: request.Cursor, PageSize: request.PageSize,
+	}, mall)
+	if err != nil {
+		return nil, request, err
+	}
+	request.StartUTC = normalized.StartUTC
+	request.EndUTC = normalized.EndUTC
+	request.TimeZone = normalized.TimeZone
+	request.Latest = normalized.Latest
+	request.AsOfUTC = normalized.AsOfUTC
+	request.QualityStatus = normalized.QualityStatus
+	request.Cursor = normalized.Cursor
+	request.PageSize = normalized.PageSize
+	return location, request, nil
+}
+
+func normalizeWeatherTimeSeriesRequest(request weatherTimeSeriesRequest, mall *model.Mall) (*time.Location, weatherTimeSeriesRequest, error) {
 	location, err := weatherMallLocation(mall, request.TimeZone)
 	if err != nil {
 		return nil, request, err
