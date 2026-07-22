@@ -13,6 +13,7 @@ func TestAPIDataRegistersMallCRUDRoutes(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	registerMallRoutes(router.Group("/api"), &data_ctrl.MallController{})
+	registerMallWeatherRoutes(router.Group("/api"), &data_ctrl.MallWeatherController{})
 
 	routes := make(map[string]struct{})
 	for _, route := range router.Routes() {
@@ -25,6 +26,7 @@ func TestAPIDataRegistersMallCRUDRoutes(t *testing.T) {
 		http.MethodGet + " /api/v1/malls/:id",
 		http.MethodPatch + " /api/v1/malls/:id",
 		http.MethodDelete + " /api/v1/malls/:id",
+		http.MethodGet + " /api/v1/malls/:id/weather/hourly",
 	} {
 		if _, ok := routes[expected]; !ok {
 			t.Errorf("route %q is not registered", expected)

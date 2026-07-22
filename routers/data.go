@@ -9,6 +9,7 @@ import (
 
 func apiData(api *gin.RouterGroup) {
 	registerMallRoutes(api, data_ctrl.NewMallController())
+	registerMallWeatherRoutes(api, data_ctrl.NewMallWeatherController())
 
 	sourceGroup := api.Group("/v1/sources")
 	sourceGroup.Use(middleware.AuthJWT())
@@ -191,6 +192,14 @@ func apiData(api *gin.RouterGroup) {
 		dataGroup.POST("/raw/list", dataCtrl.QueryController.GetRawDataList)
 		dataGroup.GET("/processed", dataCtrl.QueryController.GetProcessedData)
 		dataGroup.GET("/statistics", dataCtrl.QueryController.GetStatistics)
+	}
+}
+
+func registerMallWeatherRoutes(api *gin.RouterGroup, weatherCtrl *data_ctrl.MallWeatherController) {
+	weatherGroup := api.Group("/v1/malls")
+	weatherGroup.Use(middleware.AuthJWT())
+	{
+		weatherGroup.GET("/:id/weather/hourly", weatherCtrl.Hourly)
 	}
 }
 
