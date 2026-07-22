@@ -60,8 +60,8 @@ func validateMallWeatherConfig() error {
 	if pkgConfig.GetString("cfg.mall_weather.unit") != "metric:v2" {
 		return fmt.Errorf("unit must be metric:v2")
 	}
-	if qps := pkgConfig.GetFloat64("cfg.caiyun.qps"); qps <= 0 {
-		return fmt.Errorf("caiyun qps must be greater than zero")
+	if qps := pkgConfig.GetFloat64("cfg.caiyun.qps"); qps <= 0 || qps > 1000 {
+		return fmt.Errorf("caiyun qps must be greater than zero and at most 1000")
 	}
 	if hourlySteps := pkgConfig.GetInt("cfg.mall_weather.hourly_steps"); hourlySteps < 1 || hourlySteps > 360 {
 		return fmt.Errorf("hourly steps must be between 1 and 360")

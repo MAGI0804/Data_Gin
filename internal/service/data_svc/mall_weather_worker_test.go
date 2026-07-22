@@ -73,6 +73,21 @@ func TestMallWeatherProcessorReleasesTaskLockAfterFailure(t *testing.T) {
 	}
 }
 
+func TestMallWeatherProcessorDoesNotBypassRateLimiterFailure(t *testing.T) {
+	provider := &fakeMallWeatherProvider{}
+	store := newFakeMallWeatherTaskStore(data_dao.FetchAttemptDispositionAcquired)
+	limiter := &fakeWeatherRateLimiter{err: errors.New("redis unavailable")}
+	processor := newTestMallWeatherProcessorWithGuard(t, provider, store, &fakeWeatherTaskLocker{acquired: true}, limiter)
+	err := processor.Process(context.Background(), job.TypeMallWeatherFull, job.MallTaskPayload{
+		MallID: 7, TaskWindow: "full:7:2026072203",
+	})
+	var processError *MallWeatherProcessError
+	if !errors.As(err, &processError) || !processError.Retryable || processError.Code != "RATE_LIMIT_FAILED" ||
+		provider.weatherCalls != 0 || store.failure.ErrorClass != "rate_limit" {
+		t.Fatalf("Process() error=%v calls=%d failure=%+v", err, provider.weatherCalls, store.failure)
+	}
+}
+
 func TestMallWeatherProcessorPersistsAvailableV26ModulesAsPartialSuccess(t *testing.T) {
 	raw := readMallWeatherFixture(t, "../../../connector/caiyun/testdata/weather_v26_realtime.json")
 	provider := &fakeMallWeatherProvider{weatherResponse: &caiyun.ProviderResponse{
@@ -300,6 +315,10 @@ func newTestMallWeatherProcessor(t *testing.T, provider mallWeatherProvider, sto
 }
 
 func newTestMallWeatherProcessorWithLocker(t *testing.T, provider mallWeatherProvider, store mallWeatherTaskStore, locker weatherdomain.TaskLocker) *MallWeatherProcessor {
+	return newTestMallWeatherProcessorWithGuard(t, provider, store, locker, &fakeWeatherRateLimiter{})
+}
+
+func newTestMallWeatherProcessorWithGuard(t *testing.T, provider mallWeatherProvider, store mallWeatherTaskStore, locker weatherdomain.TaskLocker, limiter weatherdomain.ProviderRateLimiter) *MallWeatherProcessor {
 	t.Helper()
 	weatherSnapshots, err := weatherdomain.NewRawSnapshotBuilder(weatherdomain.RawSnapshotConfig{
 		SchemaVersion: weatherParserVersionV26,
@@ -314,7 +333,7 @@ func newTestMallWeatherProcessorWithLocker(t *testing.T, provider mallWeatherPro
 		t.Fatalf("NewRawSnapshotBuilder(life) error=%v", err)
 	}
 	current := time.Date(2026, 7, 22, 3, 0, 0, 0, time.UTC)
-	processor, err := newMallWeatherProcessor(provider, store, weatherSnapshots, lifeSnapshots, locker, MallWeatherProcessorConfig{
+	processor, err := newMallWeatherProcessor(provider, store, weatherSnapshots, lifeSnapshots, locker, limiter, MallWeatherProcessorConfig{
 		FastHourlySteps: 24, FastDailySteps: 1, FullHourlySteps: 360, FullDailySteps: 15,
 		LifeIndexDays: 15, Unit: "metric:v2", AlertEnabled: true,
 		AttemptStaleAfter: 2 * time.Minute, FailureFinalizeTimeout: time.Second, LockReleaseTimeout: time.Second,
@@ -327,6 +346,16 @@ func newTestMallWeatherProcessorWithLocker(t *testing.T, provider mallWeatherPro
 		t.Fatalf("newMallWeatherProcessor() error=%v", err)
 	}
 	return processor
+}
+
+type fakeWeatherRateLimiter struct {
+	calls int
+	err   error
+}
+
+func (limiter *fakeWeatherRateLimiter) Wait(context.Context) error {
+	limiter.calls++
+	return limiter.err
 }
 
 type fakeWeatherTaskLocker struct {

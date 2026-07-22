@@ -121,6 +121,7 @@ type MallWeatherProcessor struct {
 	weatherSnapshots *weatherdomain.RawSnapshotBuilder
 	lifeSnapshots    *weatherdomain.RawSnapshotBuilder
 	locker           weatherdomain.TaskLocker
+	limiter          weatherdomain.ProviderRateLimiter
 	config           MallWeatherProcessorConfig
 	now              func() time.Time
 }
@@ -131,10 +132,11 @@ func newMallWeatherProcessor(
 	weatherSnapshots *weatherdomain.RawSnapshotBuilder,
 	lifeSnapshots *weatherdomain.RawSnapshotBuilder,
 	locker weatherdomain.TaskLocker,
+	limiter weatherdomain.ProviderRateLimiter,
 	config MallWeatherProcessorConfig,
 	now func() time.Time,
 ) (*MallWeatherProcessor, error) {
-	if provider == nil || store == nil || weatherSnapshots == nil || lifeSnapshots == nil || locker == nil || now == nil ||
+	if provider == nil || store == nil || weatherSnapshots == nil || lifeSnapshots == nil || locker == nil || limiter == nil || now == nil ||
 		config.FastHourlySteps < 1 || config.FastHourlySteps > 360 || config.FastDailySteps < 1 || config.FastDailySteps > 15 ||
 		config.FullHourlySteps < 1 || config.FullHourlySteps > 360 || config.FullDailySteps < 1 || config.FullDailySteps > 15 ||
 		config.LifeIndexDays < 1 || config.LifeIndexDays > 15 || config.Unit != "metric:v2" ||
@@ -143,7 +145,7 @@ func newMallWeatherProcessor(
 	}
 	return &MallWeatherProcessor{
 		provider: provider, store: store, weatherSnapshots: weatherSnapshots, lifeSnapshots: lifeSnapshots,
-		locker: locker, config: config, now: now,
+		locker: locker, limiter: limiter, config: config, now: now,
 	}, nil
 }
 
@@ -189,6 +191,12 @@ func (processor *MallWeatherProcessor) Process(ctx context.Context, taskType str
 			AttemptStatus: "provider_failed", ErrorClass: "invalid_request", ErrorCode: "INVALID_MALL_WEATHER_POINT",
 			ErrorMessageSafe: "mall weather request point is not eligible", FinishedAt: processor.now().UTC(),
 		}, err, false)
+	}
+	if err := processor.limiter.Wait(ctx); err != nil {
+		return processor.finishFailure(ctx, execution, mallWeatherFailure{
+			AttemptStatus: "transport_failed", ErrorClass: "rate_limit", ErrorCode: "RATE_LIMIT_FAILED",
+			ErrorMessageSafe: "weather provider rate limit could not be acquired", FinishedAt: processor.now().UTC(),
+		}, err, true)
 	}
 
 	response, providerErr := processor.fetch(ctx, start, &execution.Mall)

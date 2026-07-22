@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"time"
 
 	"gin-biz-web-api/connector/caiyun"
@@ -79,7 +80,21 @@ func NewMallWeatherProcessor() (*MallWeatherProcessor, error) {
 	if err != nil {
 		return nil, err
 	}
-	return newMallWeatherProcessor(provider, &gormMallWeatherTaskStore{db: database.DB}, weatherSnapshots, lifeSnapshots, locker, MallWeatherProcessorConfig{
+	qps := config.GetFloat64("cfg.caiyun.qps")
+	burst := int(math.Ceil(qps))
+	if burst < 1 {
+		burst = 1
+	}
+	limiter, err := weatherdomain.NewRedisTokenBucketLimiter(
+		redisInstance.Client,
+		projectredis.GenNamespace("rate:mall_weather:caiyun"),
+		qps,
+		burst,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return newMallWeatherProcessor(provider, &gormMallWeatherTaskStore{db: database.DB}, weatherSnapshots, lifeSnapshots, locker, limiter, MallWeatherProcessorConfig{
 		FastHourlySteps: 24, FastDailySteps: 1,
 		FullHourlySteps: config.GetInt("cfg.mall_weather.hourly_steps"),
 		FullDailySteps:  config.GetInt("cfg.mall_weather.daily_steps"),
