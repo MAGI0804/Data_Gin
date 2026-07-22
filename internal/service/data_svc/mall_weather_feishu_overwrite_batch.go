@@ -37,6 +37,18 @@ type mallWeatherFeishuOverwriteBatchRequest struct {
 	Batch       mallWeatherFeishuRenderedBatch
 }
 
+type mallWeatherFeishuOverwriteClearBatchRequest struct {
+	RunID       uint
+	TraceID     string
+	Destination *MallWeatherFeishuResolvedDestination
+	DatasetKind string
+	BatchNo     int
+	Attempt     int
+	RowStart    int64
+	RowEnd      int64
+	Columns     int
+}
+
 type mallWeatherFeishuOverwriteBatchResult struct {
 	DeliveryLogID uint
 	BatchNo       int
@@ -68,11 +80,50 @@ func (executor *mallWeatherFeishuOverwriteBatchExecutor) Execute(
 	ctx context.Context,
 	request mallWeatherFeishuOverwriteBatchRequest,
 ) (mallWeatherFeishuOverwriteBatchResult, error) {
-	var result mallWeatherFeishuOverwriteBatchResult
 	rowEnd, recordCount, cellCount, err := validateMallWeatherFeishuOverwriteBatchRequest(ctx, request)
 	if executor == nil || executor.sheets == nil || executor.logs == nil || executor.now == nil || err != nil {
-		return result, errors.New("mall weather feishu overwrite: invalid batch request")
+		return mallWeatherFeishuOverwriteBatchResult{}, errors.New("mall weather feishu overwrite: invalid batch request")
 	}
+	return executor.executeFixedRange(ctx, request, rowEnd, recordCount, cellCount)
+}
+
+func (executor *mallWeatherFeishuOverwriteBatchExecutor) Clear(
+	ctx context.Context,
+	request mallWeatherFeishuOverwriteClearBatchRequest,
+) (mallWeatherFeishuOverwriteBatchResult, error) {
+	rows, cells, err := validateMallWeatherFeishuOverwriteClearBatchRequest(ctx, request)
+	if executor == nil || executor.sheets == nil || executor.logs == nil || executor.now == nil || err != nil {
+		return mallWeatherFeishuOverwriteBatchResult{}, errors.New("mall weather feishu overwrite: invalid clear batch request")
+	}
+	blankRows := make([][]feishu.SheetCell, rows)
+	for rowIndex := range blankRows {
+		blankRows[rowIndex] = make([]feishu.SheetCell, request.Columns)
+		for columnIndex := range blankRows[rowIndex] {
+			blankRows[rowIndex][columnIndex].Type = feishu.SheetCellBlank
+		}
+	}
+	checksum, err := checksumMallWeatherFeishuRows(blankRows, rows, request.Columns)
+	if err != nil {
+		return mallWeatherFeishuOverwriteBatchResult{}, err
+	}
+	return executor.executeFixedRange(ctx, mallWeatherFeishuOverwriteBatchRequest{
+		RunID: request.RunID, TraceID: request.TraceID, Destination: request.Destination,
+		DatasetKind: request.DatasetKind, BatchNo: request.BatchNo, Attempt: request.Attempt,
+		RowStart: request.RowStart,
+		Batch: mallWeatherFeishuRenderedBatch{
+			Rows: blankRows, Checksum: checksum, FirstCursor: 1, LastCursor: 1,
+		},
+	}, request.RowEnd, rows, cells)
+}
+
+func (executor *mallWeatherFeishuOverwriteBatchExecutor) executeFixedRange(
+	ctx context.Context,
+	request mallWeatherFeishuOverwriteBatchRequest,
+	rowEnd int64,
+	recordCount int,
+	cellCount int,
+) (mallWeatherFeishuOverwriteBatchResult, error) {
+	var result mallWeatherFeishuOverwriteBatchResult
 	startedAt := executor.now().UTC()
 	if startedAt.IsZero() {
 		return result, errors.New("mall weather feishu overwrite: invalid start time")
@@ -184,6 +235,30 @@ func validateMallWeatherFeishuOverwriteBatchRequest(
 		return 0, 0, 0, errors.New("invalid batch row range")
 	}
 	return rowEnd, len(request.Batch.Rows), len(request.Batch.Rows) * columns, nil
+}
+
+func validateMallWeatherFeishuOverwriteClearBatchRequest(
+	ctx context.Context,
+	request mallWeatherFeishuOverwriteClearBatchRequest,
+) (int, int, error) {
+	_, datasetAllowed := mallWeatherFeishuDatasetKinds[request.DatasetKind]
+	if ctx == nil || request.RunID == 0 || uuid.Validate(request.TraceID) != nil || request.Destination == nil ||
+		request.Destination.DestinationID == 0 || request.Destination.Code == "" ||
+		request.Destination.Config.WriteMode != "overwrite_range" || request.Destination.SpreadsheetToken == "" ||
+		!datasetAllowed || request.Destination.SheetIDs[request.DatasetKind] == "" ||
+		request.Destination.Config.SheetIDEnvMapping[request.DatasetKind] == "" || request.BatchNo < 1 ||
+		request.Attempt < 1 || request.RowStart < 2 || request.RowEnd < request.RowStart ||
+		request.RowEnd > maxMallWeatherFeishuSheetRow || request.Columns < 1 ||
+		request.Columns > maxMallWeatherFeishuColumns {
+		return 0, 0, errors.New("invalid clear batch")
+	}
+	rowCount := request.RowEnd - request.RowStart + 1
+	if rowCount > int64(maxMallWeatherFeishuBatchRows) || rowCount > int64(math.MaxInt) ||
+		rowCount > int64(math.MaxInt/request.Columns) {
+		return 0, 0, errors.New("invalid clear batch dimensions")
+	}
+	rows := int(rowCount)
+	return rows, rows * request.Columns, nil
 }
 
 func mallWeatherFeishuOverwriteOutcomeUnknown(err error) bool {

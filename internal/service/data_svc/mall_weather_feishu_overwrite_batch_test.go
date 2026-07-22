@@ -44,6 +44,42 @@ func TestMallWeatherFeishuOverwriteBatchExecutorVerifiesSuccess(t *testing.T) {
 	}
 }
 
+func TestMallWeatherFeishuOverwriteBatchExecutorClearsVerifiedRange(t *testing.T) {
+	t.Parallel()
+	request := validMallWeatherFeishuOverwriteBatchRequest(t)
+	clearRequest := mallWeatherFeishuOverwriteClearBatchRequest{
+		RunID: request.RunID, TraceID: request.TraceID, Destination: request.Destination,
+		DatasetKind: request.DatasetKind, BatchNo: 3, Attempt: 1,
+		RowStart: 14, RowEnd: 16, Columns: 2,
+	}
+	sheets := &fakeMallWeatherFeishuOverwriteSheets{
+		writeResult: &feishu.SheetWriteResult{Revision: 18},
+		readResult:  &feishu.SheetValues{},
+	}
+	logs := &fakeMallWeatherFeishuBatchLogStore{createID: 42}
+	executor, err := newMallWeatherFeishuOverwriteBatchExecutor(sheets, logs, sequentialMallWeatherFeishuNow())
+	if err != nil {
+		t.Fatalf("newMallWeatherFeishuOverwriteBatchExecutor() error=%v", err)
+	}
+	result, err := executor.Clear(t.Context(), clearRequest)
+	if err != nil || result.DeliveryLogID != 42 || result.BatchNo != 3 || result.RowStart != 14 ||
+		result.RowEnd != 16 || result.RecordCount != 3 || result.CellCount != 6 || result.Revision != 18 ||
+		logs.created == nil || logs.created.RequestChecksum == "" || logs.finished.Status != "success" {
+		t.Fatalf("Clear() result=%+v error=%v sheets=%+v logs=%+v", result, err, sheets, logs)
+	}
+	if len(sheets.writes) != 1 || len(sheets.writes[0]) != 1 || len(sheets.writes[0][0].Rows) != 3 ||
+		sheets.writes[0][0].Range.StartRow != 14 || sheets.writes[0][0].Range.EndRow != 16 {
+		t.Fatalf("writes=%+v", sheets.writes)
+	}
+	for _, row := range sheets.writes[0][0].Rows {
+		for _, cell := range row {
+			if cell.Type != feishu.SheetCellBlank || cell.Text != "" || cell.Number != "" || cell.Boolean {
+				t.Fatalf("clear cell=%+v", cell)
+			}
+		}
+	}
+}
+
 func TestMallWeatherFeishuOverwriteBatchExecutorReconcilesUncertainWrite(t *testing.T) {
 	t.Parallel()
 	request := validMallWeatherFeishuOverwriteBatchRequest(t)
@@ -190,6 +226,13 @@ func TestMallWeatherFeishuOverwriteBatchExecutorRejectsInvalidRequestBeforeSideE
 	}
 	if _, err := executor.Execute(t.Context(), request); err == nil || logs.createCalls != 0 || len(sheets.writes) != 0 {
 		t.Fatalf("Execute() error=%v sheets=%+v logs=%+v", err, sheets, logs)
+	}
+	if _, err := executor.Clear(t.Context(), mallWeatherFeishuOverwriteClearBatchRequest{
+		RunID: request.RunID, TraceID: request.TraceID, Destination: request.Destination,
+		DatasetKind: request.DatasetKind, BatchNo: 3, Attempt: 1,
+		RowStart: 14, RowEnd: 13, Columns: 2,
+	}); err == nil || logs.createCalls != 0 || len(sheets.writes) != 0 {
+		t.Fatalf("Clear() error=%v sheets=%+v logs=%+v", err, sheets, logs)
 	}
 }
 
