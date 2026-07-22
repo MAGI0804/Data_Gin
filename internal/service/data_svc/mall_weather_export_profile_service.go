@@ -365,7 +365,7 @@ func normalizeMallWeatherExportDataset(
 	dataset.Kind = strings.ToLower(strings.TrimSpace(dataset.Kind))
 	dataset.SheetName = strings.TrimSpace(dataset.SheetName)
 	dataset.SplitBy = strings.ToLower(strings.TrimSpace(dataset.SplitBy))
-	allowedFields, exists := mallWeatherExportFields[dataset.Kind]
+	allowedFields, exists := data_dao.MallWeatherExportDatasetFields(dataset.Kind)
 	if !exists || !validMallWeatherSheetName(dataset.SheetName) {
 		return dataset, fmt.Errorf("%w: invalid dataset identity", ErrMallWeatherExportProfileInvalid)
 	}
@@ -626,14 +626,6 @@ func mallWeatherExportProfileDTO(row *model.MallWeatherExportProfile) (MallWeath
 	}, nil
 }
 
-func exportFieldSet(values ...string) map[string]struct{} {
-	result := make(map[string]struct{}, len(values))
-	for _, value := range values {
-		result[value] = struct{}{}
-	}
-	return result
-}
-
 var mallWeatherExportColumnFormats = map[string]bool{
 	"general":  true,
 	"text":     true,
@@ -653,42 +645,4 @@ var mallWeatherExportConditionalOperators = map[string]bool{
 	"greater_than_or_equal": true,
 	"between":               true,
 	"not_between":           true,
-}
-
-var mallWeatherExportFields = map[string]map[string]struct{}{
-	"malls": exportFieldSet(
-		"mall_code", "name_cn", "name_en", "province", "city", "district", "address", "longitude", "latitude",
-		"coordinate_system", "coverage_radius_m", "status",
-	),
-	"realtime": exportFieldSet(
-		"mall_code", "snapshot_at", "temperature_c", "apparent_temperature_c", "humidity_pct", "pressure_pa",
-		"wind_speed_kph", "precipitation_mm_h", "aqi_chn", "aqi_usa", "pm25_ug_m3", "pm10_ug_m3", "skycon",
-		"quality_status", "issued_at", "fetched_at",
-	),
-	"minutely": exportFieldSet(
-		"mall_code", "forecast_minute", "minute_offset", "precipitation_mm_h", "probability_pct", "description",
-		"quality_status", "issued_at", "fetched_at",
-	),
-	"hourly": exportFieldSet(
-		"mall_code", "forecast_time", "temperature_c", "apparent_temperature_c", "humidity_pct", "pressure_pa",
-		"wind_speed_kph", "wind_direction_deg", "precipitation_mm_h", "precipitation_probability_pct", "aqi_chn",
-		"aqi_usa", "pm25_ug_m3", "skycon", "quality_status", "issued_at", "fetched_at",
-	),
-	"daily": exportFieldSet(
-		"mall_code", "forecast_date", "temperature_max_c", "temperature_min_c", "humidity_avg_pct",
-		"precipitation_probability_pct", "aqi_avg_chn", "pm25_avg_ug_m3", "skycon", "sunrise", "sunset",
-		"quality_status", "issued_at", "fetched_at",
-	),
-	"alerts": exportFieldSet(
-		"mall_code", "alert_id", "status", "title", "description", "source", "published_at", "ended_at", "province",
-		"city", "county", "quality_status",
-	),
-	"life_indices": exportFieldSet(
-		"mall_code", "forecast_date", "source_api", "index_type", "index_code", "index_name", "level", "short_desc",
-		"detail", "is_unknown_type", "quality_status", "issued_at", "fetched_at",
-	),
-	"fetch_runs": exportFieldSet(
-		"mall_code", "run_uuid", "task_kind", "endpoint_kind", "status", "attempt_count", "duration_ms", "http_status",
-		"provider_status", "row_counts", "error_class", "error_code", "started_at", "finished_at",
-	),
 }
