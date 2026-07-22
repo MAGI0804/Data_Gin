@@ -92,7 +92,7 @@ func TestOutboxDispatcherDispatchOncePublishesTask(t *testing.T) {
 		t.Fatalf("publish calls = %d, want 1", len(publisher.calls))
 	}
 	call := publisher.calls[0]
-	if call.taskType != TypeMallWeatherFull || call.payload != `{"mall_id":123}` {
+	if call.taskType != TypeMallWeatherFull || call.payload != `{"mall_id":123,"task_window":"full:123:2026071710"}` {
 		t.Fatalf("published task = %q %s", call.taskType, call.payload)
 	}
 	if call.options.TaskID != "weather:full:123:2026071710" || call.options.Queue != MallWeatherQueueName || call.options.MaxRetry != 2 {
@@ -154,7 +154,7 @@ func TestOutboxDispatcherStoresSafeFailureAndBackoff(t *testing.T) {
 func TestOutboxDispatcherRejectsUnsafePayloadBeforePublish(t *testing.T) {
 	now := time.Date(2026, 7, 17, 10, 0, 0, 0, time.UTC)
 	row := weatherOutboxRow(4, 0)
-	row.PayloadJSON = `{"mall_id":123,"app_secret":"do-not-queue"}`
+	row.PayloadJSON = `{"mall_id":123,"task_window":"full:123:2026071710","app_secret":"do-not-queue"}`
 	store := &fakeOutboxStore{rows: []model.AsyncJobOutbox{row}}
 	publisher := &fakeMallWeatherPublisher{}
 	dispatcher := newTestOutboxDispatcher(t, store, publisher, now)
@@ -239,7 +239,7 @@ func weatherOutboxRow(id uint, attempts int) model.AsyncJobOutbox {
 		BaseModel:   model.BaseModel{ID: id},
 		TaskKey:     "weather:full:123:2026071710",
 		TaskType:    TypeMallWeatherFull,
-		PayloadJSON: model.JSONText(`{"mall_id":123}`),
+		PayloadJSON: model.JSONText(`{"mall_id":123,"task_window":"full:123:2026071710"}`),
 		QueueName:   MallWeatherQueueName,
 		Attempts:    attempts,
 	}

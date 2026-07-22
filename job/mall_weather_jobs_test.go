@@ -17,11 +17,13 @@ func TestMallWeatherTaskConstructorsUseNonSensitivePayloads(t *testing.T) {
 		{"geocode", TypeMallGeocode, MallWeatherQueueName, func() (*asynq.Task, error) {
 			return NewMallGeocodeTask(MallGeocodeTaskPayload{MallID: 11, MallVersion: 3, AddressHash: strings.Repeat("a", 64)})
 		}},
-		{"fast", TypeMallWeatherFast, MallWeatherQueueName, func() (*asynq.Task, error) { return NewMallWeatherFastTask(MallTaskPayload{MallID: 11}) }},
-		{"full", TypeMallWeatherFull, MallWeatherQueueName, func() (*asynq.Task, error) { return NewMallWeatherFullTask(MallTaskPayload{MallID: 11}) }},
-		{"life index", TypeMallWeatherLifeIndex, MallWeatherQueueName, func() (*asynq.Task, error) { return NewMallWeatherLifeIndexTask(MallTaskPayload{MallID: 11}) }},
-		{"repair", TypeMallWeatherRepair, MallWeatherQueueName, func() (*asynq.Task, error) { return NewMallWeatherRepairTask(MallTaskPayload{MallID: 11}) }},
-		{"manual", TypeMallWeatherManual, MallWeatherQueueName, func() (*asynq.Task, error) { return NewMallWeatherManualTask(MallTaskPayload{MallID: 11}) }},
+		{"fast", TypeMallWeatherFast, MallWeatherQueueName, func() (*asynq.Task, error) { return NewMallWeatherFastTask(weatherTaskPayload("fast:11:202607221030")) }},
+		{"full", TypeMallWeatherFull, MallWeatherQueueName, func() (*asynq.Task, error) { return NewMallWeatherFullTask(weatherTaskPayload("full:11:2026072210")) }},
+		{"life index", TypeMallWeatherLifeIndex, MallWeatherQueueName, func() (*asynq.Task, error) {
+			return NewMallWeatherLifeIndexTask(weatherTaskPayload("life:11:2026072210"))
+		}},
+		{"repair", TypeMallWeatherRepair, MallWeatherQueueName, func() (*asynq.Task, error) { return NewMallWeatherRepairTask(weatherTaskPayload("repair:42:1")) }},
+		{"manual", TypeMallWeatherManual, MallWeatherQueueName, func() (*asynq.Task, error) { return NewMallWeatherManualTask(weatherTaskPayload("manual:4f8d2a")) }},
 		{"export", TypeMallWeatherExport, MallExportQueueName, func() (*asynq.Task, error) {
 			return NewMallWeatherExportTask(MallWeatherExportTaskPayload{ExportJobID: 22})
 		}},
@@ -62,6 +64,11 @@ func TestNewMallWeatherTaskRejectsInvalidPayload(t *testing.T) {
 	}{
 		{"unknown type", "mall:weather:unknown", `{"mall_id":1}`},
 		{"missing id", TypeMallWeatherFast, `{"mall_id":0}`},
+		{"missing window", TypeMallWeatherFast, `{"mall_id":1}`},
+		{"mismatched window", TypeMallWeatherFast, `{"mall_id":1,"task_window":"full:1:2026072210"}`},
+		{"mismatched mall", TypeMallWeatherFast, `{"mall_id":1,"task_window":"fast:2:202607221030"}`},
+		{"empty window identity", TypeMallWeatherManual, `{"mall_id":1,"task_window":"manual:"}`},
+		{"unsafe window", TypeMallWeatherFast, `{"mall_id":1,"task_window":"fast:../secret"}`},
 		{"credential field", TypeMallWeatherFast, `{"mall_id":1,"app_secret":"do-not-queue"}`},
 		{"URL field", TypeMallWeatherFast, `{"mall_id":1,"provider_url":"https://example.invalid"}`},
 		{"multiple values", TypeMallWeatherFast, `{"mall_id":1}{"mall_id":2}`},
@@ -76,6 +83,22 @@ func TestNewMallWeatherTaskRejectsInvalidPayload(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestDecodeMallWeatherTaskPayloadReturnsStableIdentity(t *testing.T) {
+	want := weatherTaskPayload("fast:11:202607221030")
+	data := []byte(`{"mall_id":11,"task_window":"fast:11:202607221030"}`)
+	got, err := DecodeMallWeatherTaskPayload(TypeMallWeatherFast, data)
+	if err != nil {
+		t.Fatalf("DecodeMallWeatherTaskPayload() error = %v", err)
+	}
+	if got != want {
+		t.Fatalf("DecodeMallWeatherTaskPayload() = %+v, want %+v", got, want)
+	}
+}
+
+func weatherTaskPayload(taskWindow string) MallTaskPayload {
+	return MallTaskPayload{MallID: 11, TaskWindow: taskWindow}
 }
 
 func TestMallWeatherTaskTypesReturnsCopy(t *testing.T) {

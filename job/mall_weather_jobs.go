@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"io"
 	"regexp"
+	"strconv"
+	"strings"
 
 	"github.com/hibiken/asynq"
 )
@@ -36,10 +38,12 @@ var mallWeatherTaskTypes = []string{
 	TypeMallWeatherFeishu,
 }
 
-// MallTaskPayload deliberately carries only the database identifier needed by
-// geocode and weather workers. Provider credentials are resolved by the worker.
+// MallTaskPayload deliberately carries only the database identifier and
+// non-sensitive idempotency window needed by weather workers. Provider
+// credentials are resolved by the worker.
 type MallTaskPayload struct {
-	MallID uint `json:"mall_id"`
+	MallID     uint   `json:"mall_id"`
+	TaskWindow string `json:"task_window"`
 }
 
 type MallGeocodeTaskPayload struct {
@@ -49,6 +53,7 @@ type MallGeocodeTaskPayload struct {
 }
 
 var sha256HexPattern = regexp.MustCompile(`^[0-9a-f]{64}$`)
+var mallWeatherTaskWindowPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9:_-]{0,63}$`)
 
 // MallWeatherExportTaskPayload identifies a persisted export job.
 type MallWeatherExportTaskPayload struct {
@@ -142,12 +147,8 @@ func NewMallWeatherTask(taskType string, payload []byte) (*asynq.Task, error) {
 		TypeMallWeatherLifeIndex,
 		TypeMallWeatherRepair,
 		TypeMallWeatherManual:
-		var decoded MallTaskPayload
-		if err := decodeStrictTaskPayload(payload, &decoded); err != nil {
+		if _, err := DecodeMallWeatherTaskPayload(taskType, payload); err != nil {
 			return nil, err
-		}
-		if decoded.MallID == 0 {
-			return nil, fmt.Errorf("mall weather task: mall_id is required")
 		}
 	case TypeMallWeatherExport:
 		var decoded MallWeatherExportTaskPayload
@@ -168,6 +169,50 @@ func NewMallWeatherTask(taskType string, payload []byte) (*asynq.Task, error) {
 	}
 
 	return asynq.NewTask(taskType, append([]byte(nil), payload...), asynq.Queue(queue)), nil
+}
+
+func DecodeMallWeatherTaskPayload(taskType string, payload []byte) (MallTaskPayload, error) {
+	prefix, ok := mallWeatherTaskWindowPrefix(taskType)
+	if !ok {
+		return MallTaskPayload{}, fmt.Errorf("mall weather task: unsupported weather task type")
+	}
+	var decoded MallTaskPayload
+	if err := decodeStrictTaskPayload(payload, &decoded); err != nil {
+		return MallTaskPayload{}, err
+	}
+	if decoded.MallID == 0 || !mallWeatherTaskWindowPattern.MatchString(decoded.TaskWindow) ||
+		!strings.HasPrefix(decoded.TaskWindow, prefix) || len(decoded.TaskWindow) <= len(prefix) ||
+		!weatherWindowMatchesMall(taskType, decoded) {
+		return MallTaskPayload{}, fmt.Errorf("mall weather task: invalid weather task identity")
+	}
+	return decoded, nil
+}
+
+func weatherWindowMatchesMall(taskType string, payload MallTaskPayload) bool {
+	switch taskType {
+	case TypeMallWeatherFast, TypeMallWeatherFull, TypeMallWeatherLifeIndex:
+		prefix, _ := mallWeatherTaskWindowPrefix(taskType)
+		return strings.HasPrefix(payload.TaskWindow, prefix+strconv.FormatUint(uint64(payload.MallID), 10)+":")
+	default:
+		return true
+	}
+}
+
+func mallWeatherTaskWindowPrefix(taskType string) (string, bool) {
+	switch taskType {
+	case TypeMallWeatherFast:
+		return "fast:", true
+	case TypeMallWeatherFull:
+		return "full:", true
+	case TypeMallWeatherLifeIndex:
+		return "life:", true
+	case TypeMallWeatherRepair:
+		return "repair:", true
+	case TypeMallWeatherManual:
+		return "manual:", true
+	default:
+		return "", false
+	}
 }
 
 func DecodeMallGeocodeTaskPayload(payload []byte) (MallGeocodeTaskPayload, error) {

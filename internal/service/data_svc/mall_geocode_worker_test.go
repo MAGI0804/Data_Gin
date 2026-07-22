@@ -170,8 +170,9 @@ func TestNewInitialWeatherOutboxesBuildsIndependentMinimalTasks(t *testing.T) {
 		if row.QueueName != job.MallWeatherQueueName || !strings.Contains(row.TaskKey, "7") || !strings.Contains(row.TaskKey, "v4") || !row.AvailableAt.Equal(now.UTC()) {
 			t.Fatalf("row = %+v", row)
 		}
-		if string(row.PayloadJSON) != `{"mall_id":7}` {
-			t.Fatalf("payload = %s", row.PayloadJSON)
+		payload, err := job.DecodeMallWeatherTaskPayload(row.TaskType, []byte(row.PayloadJSON))
+		if err != nil || payload.MallID != 7 || !strings.Contains(payload.TaskWindow, "v4") {
+			t.Fatalf("payload = %s error=%v", row.PayloadJSON, err)
 		}
 	}
 }
