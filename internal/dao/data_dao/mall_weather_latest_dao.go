@@ -7,6 +7,8 @@ import (
 	"strconv"
 	"time"
 
+	"gin-biz-web-api/connector/caiyun"
+	weatherdomain "gin-biz-web-api/internal/weather"
 	"gin-biz-web-api/model"
 
 	"gorm.io/gorm"
@@ -14,6 +16,12 @@ import (
 )
 
 const weatherLatestTimeLayout = "20060102T150405.000Z"
+
+type latestFreshnessPlan struct {
+	DataKind       string
+	WarningBefore  time.Time
+	CriticalBefore time.Time
+}
 
 type MallWeatherLatestSources struct {
 	Realtime    []model.MallWeatherRealtime
@@ -56,6 +64,110 @@ func (dao *MallWeatherDAO) RefreshLatest(ctx context.Context, sources MallWeathe
 		return UpsertResult{}, err
 	}
 	return dao.UpsertLatest(ctx, latest)
+}
+
+func (dao *MallWeatherDAO) ReconcileLatestFreshness(ctx context.Context, now time.Time) (int64, error) {
+	if dao == nil || dao.db == nil || ctx == nil || now.IsZero() {
+		return 0, fmt.Errorf("mall weather: latest freshness store is not configured")
+	}
+	plans, err := buildLatestFreshnessPlans(now)
+	if err != nil {
+		return 0, err
+	}
+	var affected int64
+	for _, plan := range plans {
+		result := dao.db.WithContext(ctx).
+			Model(&model.MallWeatherLatest{}).
+			Where("data_kind = ? AND freshness_status <> ?", plan.DataKind, model.MallWeatherFreshnessStale).
+			Where(`
+				(fetched_at_utc <= ? AND freshness_status <> ?) OR
+				(fetched_at_utc > ? AND fetched_at_utc <= ? AND freshness_status <> ?) OR
+				(fetched_at_utc > ? AND freshness_status <> ?)`,
+				plan.CriticalBefore, model.MallWeatherFreshnessCritical,
+				plan.CriticalBefore, plan.WarningBefore, model.MallWeatherFreshnessWarning,
+				plan.WarningBefore, model.MallWeatherFreshnessFresh,
+			).
+			Update("freshness_status", gorm.Expr(`CASE
+				WHEN fetched_at_utc <= ? THEN ?
+				WHEN fetched_at_utc <= ? THEN ?
+				ELSE ? END`,
+				plan.CriticalBefore, model.MallWeatherFreshnessCritical,
+				plan.WarningBefore, model.MallWeatherFreshnessWarning,
+				model.MallWeatherFreshnessFresh,
+			))
+		if result.Error != nil {
+			return affected, fmt.Errorf("mall weather: reconcile %s latest freshness: %w", plan.DataKind, result.Error)
+		}
+		affected += result.RowsAffected
+	}
+	return affected, nil
+}
+
+func (dao *MallWeatherDAO) MarkLatestStaleForEndpoint(ctx context.Context, mallID uint, endpointKind string) (int64, error) {
+	if dao == nil || dao.db == nil || ctx == nil || mallID == 0 {
+		return 0, fmt.Errorf("mall weather: invalid latest stale input")
+	}
+	predicate, args, err := latestEndpointPredicate(endpointKind)
+	if err != nil {
+		return 0, err
+	}
+	result := dao.db.WithContext(ctx).
+		Model(&model.MallWeatherLatest{}).
+		Where("mall_id = ? AND freshness_status <> ?", mallID, model.MallWeatherFreshnessStale).
+		Where(predicate, args...).
+		Update("freshness_status", model.MallWeatherFreshnessStale)
+	if result.Error != nil {
+		return 0, fmt.Errorf("mall weather: mark latest stale: %w", result.Error)
+	}
+	return result.RowsAffected, nil
+}
+
+func buildLatestFreshnessPlans(now time.Time) ([]latestFreshnessPlan, error) {
+	if now.IsZero() {
+		return nil, fmt.Errorf("mall weather: invalid freshness reconciliation time")
+	}
+	now = now.UTC()
+	kinds := []string{
+		model.MallWeatherDataKindRealtime,
+		model.MallWeatherDataKindMinutely,
+		model.MallWeatherDataKindHourly,
+		model.MallWeatherDataKindDaily,
+		model.MallWeatherDataKindLife,
+	}
+	plans := make([]latestFreshnessPlan, 0, len(kinds))
+	for _, kind := range kinds {
+		thresholds, err := weatherdomain.FreshnessThresholdsForKind(kind)
+		if err != nil {
+			return nil, err
+		}
+		plans = append(plans, latestFreshnessPlan{
+			DataKind: kind, WarningBefore: now.Add(-thresholds.Warning), CriticalBefore: now.Add(-thresholds.Critical),
+		})
+	}
+	return plans, nil
+}
+
+func latestEndpointPredicate(endpointKind string) (string, []interface{}, error) {
+	switch endpointKind {
+	case caiyun.EndpointWeatherV26:
+		return "(data_kind IN ? OR (data_kind = ? AND subtype LIKE ?))", []interface{}{
+			[]string{
+				model.MallWeatherDataKindRealtime,
+				model.MallWeatherDataKindMinutely,
+				model.MallWeatherDataKindHourly,
+				model.MallWeatherDataKindDaily,
+			},
+			model.MallWeatherDataKindLife,
+			weatherdomain.SourceAPIV26Daily + ":%",
+		}, nil
+	case caiyun.EndpointLifeIndexV3:
+		return "data_kind = ? AND subtype LIKE ?", []interface{}{
+			model.MallWeatherDataKindLife,
+			weatherdomain.SourceAPIV3LifeIndex + ":%",
+		}, nil
+	default:
+		return "", nil, fmt.Errorf("mall weather: unsupported stale endpoint")
+	}
 }
 
 func appendResolvedLatest[T any](

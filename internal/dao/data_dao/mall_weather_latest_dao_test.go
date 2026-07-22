@@ -1,10 +1,13 @@
 package data_dao
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 	"time"
 
+	"gin-biz-web-api/connector/caiyun"
+	weatherdomain "gin-biz-web-api/internal/weather"
 	"gin-biz-web-api/model"
 
 	"gorm.io/gorm/clause"
@@ -71,5 +74,70 @@ func TestLatestMonotonicUpdateSetKeepsVersionComparisonStable(t *testing.T) {
 	fetched, ok := byName["fetched_at_utc"].Value.(clause.Expr)
 	if !ok || !strings.Contains(fetched.SQL, "GREATEST(`fetched_at_utc`, VALUES(`fetched_at_utc`))") {
 		t.Fatalf("fetched-at assignment=%+v", byName["fetched_at_utc"])
+	}
+}
+
+func TestBuildLatestFreshnessPlansUsesSharedThresholds(t *testing.T) {
+	now := time.Date(2026, 7, 22, 12, 0, 0, 0, time.FixedZone("CST", 8*60*60))
+	plans, err := buildLatestFreshnessPlans(now)
+	if err != nil {
+		t.Fatalf("buildLatestFreshnessPlans() error=%v", err)
+	}
+	if len(plans) != 5 {
+		t.Fatalf("plans=%+v", plans)
+	}
+	byKind := make(map[string]latestFreshnessPlan, len(plans))
+	for _, plan := range plans {
+		byKind[plan.DataKind] = plan
+	}
+	hourly := byKind[model.MallWeatherDataKindHourly]
+	if !hourly.WarningBefore.Equal(now.UTC().Add(-2*time.Hour)) || !hourly.CriticalBefore.Equal(now.UTC().Add(-4*time.Hour)) {
+		t.Fatalf("hourly plan=%+v", hourly)
+	}
+	life := byKind[model.MallWeatherDataKindLife]
+	if !life.WarningBefore.Equal(now.UTC().Add(-3*time.Hour)) || !life.CriticalBefore.Equal(now.UTC().Add(-8*time.Hour)) {
+		t.Fatalf("life plan=%+v", life)
+	}
+}
+
+func TestLatestEndpointPredicateScopesProviderModules(t *testing.T) {
+	tests := []struct {
+		name        string
+		endpoint    string
+		wantSQL     string
+		wantArgs    []interface{}
+		wantFailure bool
+	}{
+		{
+			name: "v26 weather and basic life indices", endpoint: caiyun.EndpointWeatherV26,
+			wantSQL: "(data_kind IN ? OR (data_kind = ? AND subtype LIKE ?))",
+			wantArgs: []interface{}{
+				[]string{model.MallWeatherDataKindRealtime, model.MallWeatherDataKindMinutely, model.MallWeatherDataKindHourly, model.MallWeatherDataKindDaily},
+				model.MallWeatherDataKindLife, weatherdomain.SourceAPIV26Daily + ":%",
+			},
+		},
+		{
+			name: "v3 rich life indices", endpoint: caiyun.EndpointLifeIndexV3,
+			wantSQL:  "data_kind = ? AND subtype LIKE ?",
+			wantArgs: []interface{}{model.MallWeatherDataKindLife, weatherdomain.SourceAPIV3LifeIndex + ":%"},
+		},
+		{name: "unknown endpoint", endpoint: "v4", wantFailure: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			gotSQL, gotArgs, err := latestEndpointPredicate(test.endpoint)
+			if test.wantFailure {
+				if err == nil {
+					t.Fatal("latestEndpointPredicate() accepted unsupported endpoint")
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("latestEndpointPredicate() error=%v", err)
+			}
+			if gotSQL != test.wantSQL || !reflect.DeepEqual(gotArgs, test.wantArgs) {
+				t.Fatalf("predicate=(%q, %#v) want=(%q, %#v)", gotSQL, gotArgs, test.wantSQL, test.wantArgs)
+			}
+		})
 	}
 }
