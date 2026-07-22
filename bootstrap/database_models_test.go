@@ -7,8 +7,8 @@ import (
 
 func TestMallWeatherMigrationModelsAreUnique(t *testing.T) {
 	models := mallWeatherMigrationModels()
-	if len(models) != 21 {
-		t.Fatalf("mallWeatherMigrationModels() count = %d, want 21", len(models))
+	if len(models) != 22 {
+		t.Fatalf("mallWeatherMigrationModels() count = %d, want 22", len(models))
 	}
 
 	seen := make(map[reflect.Type]struct{}, len(models))

@@ -43,6 +43,24 @@ type MallWeatherExportJob struct {
 
 func (MallWeatherExportJob) TableName() string { return "mall_weather_export_jobs" }
 
+// MallWeatherFeishuRun stores the immutable, non-secret inputs and the
+// internal worker lease for a weather Sheet push. The public lifecycle and
+// counters remain on the associated PipelineRun.
+type MallWeatherFeishuRun struct {
+	BaseModel
+	PipelineRunID           uint     `gorm:"column:pipeline_run_id;not null;uniqueIndex:uk_weather_feishu_run" json:"pipeline_run_id"`
+	ProfileID               uint     `gorm:"column:profile_id;not null;index" json:"profile_id"`
+	ProfileVersion          uint64   `gorm:"column:profile_version;not null" json:"profile_version"`
+	ProfileSnapshotJSON     JSONText `gorm:"column:profile_snapshot_json;type:json;not null" json:"-"`
+	FiltersJSON             JSONText `gorm:"column:filters_json;type:json;not null" json:"-"`
+	DestinationSnapshotJSON JSONText `gorm:"column:destination_snapshot_json;type:json;not null" json:"-"`
+	RunToken                string   `gorm:"column:run_token;type:char(36);not null;default:''" json:"-"`
+	CreatedBy               uint     `gorm:"column:created_by;not null" json:"created_by"`
+	WeatherTimestamps
+}
+
+func (MallWeatherFeishuRun) TableName() string { return "mall_weather_feishu_runs" }
+
 type MallWeatherSheetRow struct {
 	BaseModel
 	DestinationID uint      `gorm:"column:destination_id;not null;uniqueIndex:uk_weather_sheet_row,priority:1;index" json:"destination_id"`
