@@ -9,9 +9,13 @@ const (
 	defaultMallWeatherCapacityMinutelyRows = 120
 	defaultMallWeatherCapacityHourlyBatch  = 200
 	defaultMallWeatherCapacityAlertBatch   = 200
-	maxMallWeatherCapacityMallCount        = 100000
-	maxMallWeatherCapacityProviderQPS      = 10000
-	maxMallWeatherCapacityAlertsPerMall    = 256
+	// docs/mall_weather_development.md §10.5:
+	// full daily v2.6 calls ≈ N × (144 + 24), v3 life index calls ≈ N × 24.
+	defaultMallWeatherCapacityWeatherV26CallsPerMallPerDay  = 168
+	defaultMallWeatherCapacityLifeIndexV3CallsPerMallPerDay = 24
+	maxMallWeatherCapacityMallCount                         = 100000
+	maxMallWeatherCapacityProviderQPS                       = 10000
+	maxMallWeatherCapacityAlertsPerMall                     = 256
 )
 
 var ErrMallWeatherInvalidCapacityPlan = errors.New("mall weather capacity plan: invalid input")
@@ -34,16 +38,18 @@ type MallWeatherCapacityDatasetPlan struct {
 }
 
 type MallWeatherCapacityPlan struct {
-	MallCount                    int                              `json:"mallCount"`
-	ProviderQPS                  float64                          `json:"providerQps"`
-	ProviderRequests             int64                            `json:"providerRequests"`
-	ProviderDrainSeconds         float64                          `json:"providerDrainSeconds"`
-	MinimumQPSForHourlyFullSweep float64                          `json:"minimumQpsForHourlyFullSweep"`
-	TotalDatabaseRows            int64                            `json:"totalDatabaseRows"`
-	TotalDatabaseBatches         int64                            `json:"totalDatabaseBatches"`
-	FeishuBatchRows              int                              `json:"feishuBatchRows"`
-	TotalFeishuBatches           int64                            `json:"totalFeishuBatches"`
-	Datasets                     []MallWeatherCapacityDatasetPlan `json:"datasets"`
+	MallCount                         int                              `json:"mallCount"`
+	ProviderQPS                       float64                          `json:"providerQps"`
+	WeatherV26ProviderRequestsPerDay  int64                            `json:"weatherV26ProviderRequestsPerDay"`
+	LifeIndexV3ProviderRequestsPerDay int64                            `json:"lifeIndexV3ProviderRequestsPerDay"`
+	ProviderRequests                  int64                            `json:"providerRequests"`
+	ProviderDrainSeconds              float64                          `json:"providerDrainSeconds"`
+	MinimumQPSForOneHourDrain         float64                          `json:"minimumQpsForOneHourDrain"`
+	TotalDatabaseRows                 int64                            `json:"totalDatabaseRows"`
+	TotalDatabaseBatches              int64                            `json:"totalDatabaseBatches"`
+	FeishuBatchRows                   int                              `json:"feishuBatchRows"`
+	TotalFeishuBatches                int64                            `json:"totalFeishuBatches"`
+	Datasets                          []MallWeatherCapacityDatasetPlan `json:"datasets"`
 }
 
 func BuildMallWeatherCapacityPlan(input MallWeatherCapacityPlanInput) (MallWeatherCapacityPlan, error) {
@@ -52,7 +58,9 @@ func BuildMallWeatherCapacityPlan(input MallWeatherCapacityPlanInput) (MallWeath
 		return MallWeatherCapacityPlan{}, err
 	}
 	malls := int64(normalized.MallCount)
-	providerRequests := malls * 2
+	weatherRequests := malls * defaultMallWeatherCapacityWeatherV26CallsPerMallPerDay
+	lifeIndexRequests := malls * defaultMallWeatherCapacityLifeIndexV3CallsPerMallPerDay
+	providerRequests := weatherRequests + lifeIndexRequests
 	datasets := []MallWeatherCapacityDatasetPlan{
 		mallWeatherCapacityDataset("realtime", malls, malls, normalized.FeishuBatchRows),
 		mallWeatherCapacityDataset("minutely", malls*defaultMallWeatherCapacityMinutelyRows, malls, normalized.FeishuBatchRows),
@@ -62,13 +70,15 @@ func BuildMallWeatherCapacityPlan(input MallWeatherCapacityPlanInput) (MallWeath
 		mallWeatherCapacityDataset("life_indices", malls*int64(normalized.LifeIndexDays), malls, normalized.FeishuBatchRows),
 	}
 	plan := MallWeatherCapacityPlan{
-		MallCount:                    normalized.MallCount,
-		ProviderQPS:                  normalized.ProviderQPS,
-		ProviderRequests:             providerRequests,
-		ProviderDrainSeconds:         float64(providerRequests) / normalized.ProviderQPS,
-		MinimumQPSForHourlyFullSweep: float64(providerRequests) / 3600,
-		FeishuBatchRows:              normalized.FeishuBatchRows,
-		Datasets:                     datasets,
+		MallCount:                         normalized.MallCount,
+		ProviderQPS:                       normalized.ProviderQPS,
+		WeatherV26ProviderRequestsPerDay:  weatherRequests,
+		LifeIndexV3ProviderRequestsPerDay: lifeIndexRequests,
+		ProviderRequests:                  providerRequests,
+		ProviderDrainSeconds:              float64(providerRequests) / normalized.ProviderQPS,
+		MinimumQPSForOneHourDrain:         float64(providerRequests) / 3600,
+		FeishuBatchRows:                   normalized.FeishuBatchRows,
+		Datasets:                          datasets,
 	}
 	for _, dataset := range datasets {
 		plan.TotalDatabaseRows += dataset.Rows

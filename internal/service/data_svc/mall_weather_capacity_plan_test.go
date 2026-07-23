@@ -2,6 +2,7 @@ package data_svc
 
 import (
 	"errors"
+	"math"
 	"reflect"
 	"testing"
 )
@@ -15,7 +16,9 @@ func TestBuildMallWeatherCapacityPlanEstimatesProviderAndStoragePressure(t *test
 	if err != nil {
 		t.Fatalf("BuildMallWeatherCapacityPlan() error=%v", err)
 	}
-	if plan.ProviderRequests != 10 || plan.ProviderDrainSeconds != 4 || plan.MinimumQPSForHourlyFullSweep != float64(10)/3600 {
+	if plan.WeatherV26ProviderRequestsPerDay != 840 || plan.LifeIndexV3ProviderRequestsPerDay != 120 ||
+		plan.ProviderRequests != 960 || plan.ProviderDrainSeconds != 384 ||
+		plan.MinimumQPSForOneHourDrain != float64(960)/3600 {
 		t.Fatalf("provider plan=%+v", plan)
 	}
 	if plan.TotalDatabaseRows != 2570 || plan.TotalDatabaseBatches != 35 || plan.FeishuBatchRows != defaultMallWeatherFeishuBatchRows ||
@@ -58,6 +61,8 @@ func TestBuildMallWeatherCapacityPlanRejectsInvalidInputs(t *testing.T) {
 	}{
 		{name: "missing mall count", mutate: func(input *MallWeatherCapacityPlanInput) { input.MallCount = 0 }},
 		{name: "missing qps", mutate: func(input *MallWeatherCapacityPlanInput) { input.ProviderQPS = 0 }},
+		{name: "nan qps", mutate: func(input *MallWeatherCapacityPlanInput) { input.ProviderQPS = math.NaN() }},
+		{name: "infinite qps", mutate: func(input *MallWeatherCapacityPlanInput) { input.ProviderQPS = math.Inf(1) }},
 		{name: "too many hourly steps", mutate: func(input *MallWeatherCapacityPlanInput) { input.HourlySteps = 361 }},
 		{name: "too many daily steps", mutate: func(input *MallWeatherCapacityPlanInput) { input.DailySteps = 16 }},
 		{name: "too many life days", mutate: func(input *MallWeatherCapacityPlanInput) { input.LifeIndexDays = 16 }},
