@@ -17,6 +17,7 @@ type fakeOutboxStore struct {
 	mu              sync.Mutex
 	rows            []model.AsyncJobOutbox
 	claimErr        error
+	publishErr      error
 	claimCalls      int
 	published       []publishedOutboxRow
 	failed          []failedOutboxRow
@@ -48,6 +49,9 @@ func (store *fakeOutboxStore) ClaimBatch(_ context.Context, _ string, _ time.Tim
 func (store *fakeOutboxStore) MarkPublished(_ context.Context, id uint, publishedAt time.Time) error {
 	store.mu.Lock()
 	defer store.mu.Unlock()
+	if store.publishErr != nil {
+		return store.publishErr
+	}
 	store.published = append(store.published, publishedOutboxRow{id: id, publishedAt: publishedAt})
 	return nil
 }
@@ -121,6 +125,56 @@ func TestOutboxDispatcherTreatsTaskIDConflictAsPublished(t *testing.T) {
 	}
 	if len(store.failed) != 0 {
 		t.Fatalf("failed rows = %+v", store.failed)
+	}
+}
+
+func TestOutboxDispatcherReportsPublishedRowsAfterStateUpdate(t *testing.T) {
+	now := time.Date(2026, 7, 17, 10, 0, 0, 0, time.UTC)
+	row := weatherOutboxRow(5, 0)
+	row.AvailableAt = now.Add(-3 * time.Second)
+	store := &fakeOutboxStore{rows: []model.AsyncJobOutbox{row}}
+	publisher := &fakeMallWeatherPublisher{}
+	dispatcher := newTestOutboxDispatcher(t, store, publisher, now)
+
+	var observedRows []model.AsyncJobOutbox
+	var observedTimes []time.Time
+	dispatcher.onPublished = func(row model.AsyncJobOutbox, publishedAt time.Time) {
+		observedRows = append(observedRows, row)
+		observedTimes = append(observedTimes, publishedAt)
+	}
+
+	if err := dispatcher.DispatchOnce(context.Background()); err != nil {
+		t.Fatalf("DispatchOnce() error = %v", err)
+	}
+	if len(store.published) != 1 {
+		t.Fatalf("published rows = %+v", store.published)
+	}
+	if len(observedRows) != 1 || observedRows[0].ID != 5 || !observedRows[0].AvailableAt.Equal(row.AvailableAt) ||
+		len(observedTimes) != 1 || !observedTimes[0].Equal(now) {
+		t.Fatalf("observed rows=%+v times=%+v", observedRows, observedTimes)
+	}
+}
+
+func TestOutboxDispatcherSkipsPublishedHookWhenStateUpdateFails(t *testing.T) {
+	now := time.Date(2026, 7, 17, 10, 0, 0, 0, time.UTC)
+	store := &fakeOutboxStore{
+		rows:       []model.AsyncJobOutbox{weatherOutboxRow(6, 0)},
+		publishErr: errors.New("database unavailable"),
+	}
+	publisher := &fakeMallWeatherPublisher{}
+	dispatcher := newTestOutboxDispatcher(t, store, publisher, now)
+
+	observed := 0
+	dispatcher.onPublished = func(model.AsyncJobOutbox, time.Time) {
+		observed++
+	}
+
+	err := dispatcher.DispatchOnce(context.Background())
+	if !errors.Is(err, ErrOutboxState) {
+		t.Fatalf("DispatchOnce() error = %v, want ErrOutboxState", err)
+	}
+	if observed != 0 {
+		t.Fatalf("published hook called %d times, want 0", observed)
 	}
 }
 

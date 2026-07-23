@@ -80,6 +80,7 @@ type OutboxDispatcherConfig struct {
 	MaxRetry     int
 	TaskTimeout  time.Duration
 	Now          func() time.Time
+	OnPublished  func(model.AsyncJobOutbox, time.Time)
 	OnCycleError func(error)
 }
 
@@ -95,6 +96,7 @@ type OutboxDispatcher struct {
 	maxRetry     int
 	taskTimeout  time.Duration
 	now          func() time.Time
+	onPublished  func(model.AsyncJobOutbox, time.Time)
 	onCycleError func(error)
 }
 
@@ -148,6 +150,7 @@ func NewOutboxDispatcher(store OutboxStore, publisher MallWeatherTaskPublisher, 
 		maxRetry:     cfg.MaxRetry,
 		taskTimeout:  cfg.TaskTimeout,
 		now:          cfg.Now,
+		onPublished:  cfg.OnPublished,
 		onCycleError: cfg.OnCycleError,
 	}, nil
 }
@@ -224,8 +227,12 @@ func (dispatcher *OutboxDispatcher) dispatchRow(ctx context.Context, row model.A
 		return dispatcher.failRow(ctx, row, safeQueuePublishError, ErrOutboxPublish)
 	}
 
-	if err := dispatcher.store.MarkPublished(ctx, row.ID, dispatcher.now().UTC()); err != nil {
+	publishedAt := dispatcher.now().UTC()
+	if err := dispatcher.store.MarkPublished(ctx, row.ID, publishedAt); err != nil {
 		return fmt.Errorf("%w: mark row %d published", ErrOutboxState, row.ID)
+	}
+	if dispatcher.onPublished != nil {
+		dispatcher.onPublished(row, publishedAt)
 	}
 	return nil
 }

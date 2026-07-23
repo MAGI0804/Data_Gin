@@ -8,6 +8,7 @@ import (
 
 	"gin-biz-web-api/global"
 	"gin-biz-web-api/internal/dao/data_dao"
+	"gin-biz-web-api/internal/service/data_svc"
 	"gin-biz-web-api/job"
 	"gin-biz-web-api/pkg/config"
 	"gin-biz-web-api/pkg/console"
@@ -53,6 +54,7 @@ func startMallWeatherOutboxDispatcher() {
 			RetryMax:     time.Duration(config.GetInt("cfg.mall_weather.outbox_retry_max_seconds")) * time.Second,
 			MaxRetry:     maxAttempts - 1,
 			TaskTimeout:  time.Duration(config.GetInt("cfg.mall_weather.task_timeout_seconds")) * time.Second,
+			OnPublished:  data_svc.RecordMallWeatherOutboxQueueLag,
 			OnCycleError: func(err error) {
 				logger.Error("Mall weather outbox dispatch cycle failed", zap.Error(err))
 			},

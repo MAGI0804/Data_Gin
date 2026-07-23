@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"gin-biz-web-api/connector/caiyun"
+	"gin-biz-web-api/job"
 	"gin-biz-web-api/model"
 )
 
@@ -202,6 +203,62 @@ func TestMallWeatherFetchGaugeRecorders(t *testing.T) {
 			Name:   MallWeatherMetricFetchDurationSeconds,
 			Labels: map[string]string{"kind": "full"},
 			Value:  1.5,
+		},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("GaugeSnapshot()=%+v want %+v", got, want)
+	}
+}
+
+func TestRecordMallWeatherQueueLag(t *testing.T) {
+	t.Parallel()
+
+	recorder := newInMemoryMallWeatherMetricRecorder()
+	availableAt := time.Date(2026, 7, 22, 3, 0, 0, 0, time.UTC)
+	publishedAt := availableAt.Add(2500 * time.Millisecond)
+
+	recordMallWeatherQueueLag(recorder, job.TypeMallWeatherFull, availableAt, publishedAt)
+	recordMallWeatherQueueLag(recorder, job.TypeMallWeatherLifeIndex, availableAt, availableAt.Add(3*time.Second))
+	recordMallWeatherQueueLag(recorder, "unknown", availableAt, publishedAt)
+	recordMallWeatherQueueLag(recorder, job.TypeMallWeatherRepair, publishedAt, availableAt)
+	recordMallWeatherQueueLag(recorder, job.TypeMallWeatherManual, time.Time{}, publishedAt)
+
+	got := recorder.GaugeSnapshot()
+	want := []MallWeatherMetricGaugeSample{
+		{
+			Name:   MallWeatherMetricQueueLagSeconds,
+			Labels: map[string]string{"kind": "full"},
+			Value:  2.5,
+		},
+		{
+			Name:   MallWeatherMetricQueueLagSeconds,
+			Labels: map[string]string{"kind": "lifeindex"},
+			Value:  3,
+		},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("GaugeSnapshot()=%+v want %+v", got, want)
+	}
+}
+
+func TestRecordMallWeatherOutboxQueueLag(t *testing.T) {
+	recorder := newInMemoryMallWeatherMetricRecorder()
+	previous := mallWeatherRuntimeMetrics
+	mallWeatherRuntimeMetrics = recorder
+	t.Cleanup(func() { mallWeatherRuntimeMetrics = previous })
+
+	availableAt := time.Date(2026, 7, 22, 3, 0, 0, 0, time.UTC)
+	RecordMallWeatherOutboxQueueLag(model.AsyncJobOutbox{
+		TaskType:    job.TypeMallWeatherFeishu,
+		AvailableAt: availableAt,
+	}, availableAt.Add(4*time.Second))
+
+	got := recorder.GaugeSnapshot()
+	want := []MallWeatherMetricGaugeSample{
+		{
+			Name:   MallWeatherMetricQueueLagSeconds,
+			Labels: map[string]string{"kind": "feishu"},
+			Value:  4,
 		},
 	}
 	if !reflect.DeepEqual(got, want) {

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"gin-biz-web-api/connector/caiyun"
+	"gin-biz-web-api/job"
 	"gin-biz-web-api/model"
 )
 
@@ -356,6 +357,58 @@ func recordMallWeatherDataAge(
 		map[string]string{"kind": taskKind},
 		observedAt.Sub(*providerServerTime).Seconds(),
 	)
+}
+
+// RecordMallWeatherOutboxQueueLag records the time a ready outbox row waited
+// before it was durably marked as published to Asynq.
+func RecordMallWeatherOutboxQueueLag(row model.AsyncJobOutbox, publishedAt time.Time) {
+	recordMallWeatherQueueLag(mallWeatherRuntimeMetrics, row.TaskType, row.AvailableAt, publishedAt)
+}
+
+func recordMallWeatherQueueLag(
+	recorder mallWeatherMetricRecorder,
+	taskType string,
+	availableAt time.Time,
+	publishedAt time.Time,
+) {
+	gauge, ok := recorder.(mallWeatherMetricGaugeRecorder)
+	if !ok || taskType == "" || availableAt.IsZero() || publishedAt.IsZero() || publishedAt.Before(availableAt) {
+		return
+	}
+	taskKind := mallWeatherQueueLagTaskKind(taskType)
+	if taskKind == "" {
+		return
+	}
+	gauge.SetGauge(
+		MallWeatherMetricQueueLagSeconds,
+		map[string]string{"kind": taskKind},
+		publishedAt.Sub(availableAt).Seconds(),
+	)
+}
+
+func mallWeatherQueueLagTaskKind(taskType string) string {
+	switch taskType {
+	case job.TypeMallGeocode:
+		return "geocode"
+	case job.TypeMallWeatherFast:
+		return "fast"
+	case job.TypeMallWeatherFull:
+		return "full"
+	case job.TypeMallWeatherLifeIndex:
+		return "lifeindex"
+	case job.TypeMallWeatherRepair:
+		return "repair"
+	case job.TypeMallWeatherManual:
+		return "manual"
+	case job.TypeMallWeatherExport:
+		return "export"
+	case job.TypeMallWeatherExportCleanup:
+		return "export_cleanup"
+	case job.TypeMallWeatherFeishu:
+		return "feishu"
+	default:
+		return ""
+	}
 }
 
 func recordMallWeatherParseWarnings(
