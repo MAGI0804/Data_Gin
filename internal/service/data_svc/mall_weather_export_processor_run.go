@@ -65,6 +65,7 @@ type MallWeatherExportProcessor struct {
 	buildObjectKey    func(...string) string
 	now               func() time.Time
 	newRunToken       func() string
+	metrics           mallWeatherMetricRecorder
 	workRoot          string
 	staleAfter        time.Duration
 	heartbeatInterval time.Duration
@@ -81,6 +82,7 @@ func NewMallWeatherExportProcessor() *MallWeatherExportProcessor {
 		buildObjectKey:    storage.BuildObjectKey,
 		now:               time.Now,
 		newRunToken:       uuid.NewString,
+		metrics:           mallWeatherRuntimeMetrics,
 		workRoot:          excelTempRootDir(),
 		staleAfter:        defaultMallWeatherExportRunStaleAfter,
 		heartbeatInterval: defaultMallWeatherExportHeartbeatInterval,
@@ -254,6 +256,7 @@ func (processor *MallWeatherExportProcessor) processOwnedRun(
 		finishedAt.Add(processor.retention),
 	)
 	if err == nil {
+		recordMallWeatherExportRows(processor.metrics, renderResult)
 		return nil
 	}
 	deleteErr := processor.deleteObject(ctx, objectStore, objectKey)
@@ -294,7 +297,8 @@ func (processor *MallWeatherExportProcessor) updateProgress(
 func (processor *MallWeatherExportProcessor) validate(ctx context.Context, jobID uint) error {
 	if processor == nil || processor.runs == nil || processor.renderer == nil || processor.newObjectStore == nil ||
 		processor.buildObjectKey == nil ||
-		processor.now == nil || processor.newRunToken == nil || ctx == nil || jobID == 0 || processor.workRoot == "" ||
+		processor.now == nil || processor.newRunToken == nil || processor.metrics == nil ||
+		ctx == nil || jobID == 0 || processor.workRoot == "" ||
 		processor.staleAfter <= 0 || processor.heartbeatInterval <= 0 || processor.retention <= 0 {
 		return fmt.Errorf("mall weather export processor: invalid configuration")
 	}

@@ -59,6 +59,73 @@ func TestMallWeatherExportProcessorCompletesOwnedRun(t *testing.T) {
 	}
 }
 
+func TestMallWeatherExportProcessorRecordsSuccessfulExportRows(t *testing.T) {
+	runToken := uuid.NewString()
+	store := newFakeMallWeatherExportRunStore(t)
+	renderer := mallWeatherExportRendererFunc(func(
+		_ context.Context,
+		request MallWeatherExportRenderRequest,
+		_ func(MallWeatherExportRenderProgress) error,
+	) (MallWeatherExportRenderResult, error) {
+		if err := os.WriteFile(request.OutputPath, []byte("xlsx artifact"), 0o600); err != nil {
+			return MallWeatherExportRenderResult{}, err
+		}
+		return MallWeatherExportRenderResult{ProcessedRows: 3, SheetCount: 1}, nil
+	})
+	metrics := &fakeMallWeatherMetricRecorder{}
+	processor := newTestMallWeatherExportProcessorWithMetrics(
+		t,
+		store,
+		renderer,
+		&fakeMallWeatherExportObjectStore{},
+		runToken,
+		metrics,
+	)
+
+	if err := processor.Process(t.Context(), 17, true); err != nil {
+		t.Fatalf("Process() error=%v", err)
+	}
+	assertFakeMallWeatherMetricCounters(t, metrics.counters, []fakeMallWeatherMetricCounter{{
+		name: MallWeatherMetricExportRowsTotal, value: 3,
+	}})
+}
+
+func TestMallWeatherExportProcessorDoesNotRecordRowsForUnfinishedExport(t *testing.T) {
+	store := newFakeMallWeatherExportRunStore(t)
+	metrics := &fakeMallWeatherMetricRecorder{}
+	processor := newTestMallWeatherExportProcessorWithMetrics(
+		t,
+		store,
+		mallWeatherExportRendererFunc(writeFakeMallWeatherExportArtifact),
+		&fakeMallWeatherExportObjectStore{uploadErr: errors.New("temporary OSS failure")},
+		uuid.NewString(),
+		metrics,
+	)
+
+	if err := processor.Process(t.Context(), 17, true); err == nil {
+		t.Fatal("Process() returned nil error")
+	}
+	if len(metrics.counters) != 0 {
+		t.Fatalf("metrics=%+v, want none", metrics.counters)
+	}
+}
+
+func TestMallWeatherExportProcessorRejectsMissingMetricsRecorder(t *testing.T) {
+	store := newFakeMallWeatherExportRunStore(t)
+	processor := newTestMallWeatherExportProcessorWithMetrics(
+		t,
+		store,
+		mallWeatherExportRendererFunc(writeFakeMallWeatherExportArtifact),
+		&fakeMallWeatherExportObjectStore{},
+		uuid.NewString(),
+		nil,
+	)
+
+	if err := processor.Process(t.Context(), 17, true); err == nil {
+		t.Fatal("Process() accepted missing metrics recorder")
+	}
+}
+
 func TestMallWeatherExportProcessorHonorsProgressCancellation(t *testing.T) {
 	store := newFakeMallWeatherExportRunStore(t)
 	store.progressControl = data_dao.MallWeatherExportRunControlCancelRequested
@@ -372,6 +439,25 @@ func newTestMallWeatherExportProcessor(
 	runToken string,
 ) *MallWeatherExportProcessor {
 	t.Helper()
+	return newTestMallWeatherExportProcessorWithMetrics(
+		t,
+		runs,
+		renderer,
+		objectStore,
+		runToken,
+		noopMallWeatherMetricRecorder{},
+	)
+}
+
+func newTestMallWeatherExportProcessorWithMetrics(
+	t *testing.T,
+	runs mallWeatherExportRunStore,
+	renderer mallWeatherExportWorkbookRenderer,
+	objectStore mallWeatherExportObjectStore,
+	runToken string,
+	metrics mallWeatherMetricRecorder,
+) *MallWeatherExportProcessor {
+	t.Helper()
 	return &MallWeatherExportProcessor{
 		runs:              runs,
 		renderer:          renderer,
@@ -379,6 +465,7 @@ func newTestMallWeatherExportProcessor(
 		buildObjectKey:    func(parts ...string) string { return path.Join(parts...) },
 		now:               func() time.Time { return time.Date(2026, 7, 22, 8, 0, 0, 0, time.UTC) },
 		newRunToken:       func() string { return runToken },
+		metrics:           metrics,
 		workRoot:          t.TempDir(),
 		staleAfter:        time.Minute,
 		heartbeatInterval: time.Hour,

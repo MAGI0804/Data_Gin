@@ -214,3 +214,13 @@ func recordMallWeatherFeishuRows(
 		)
 	}
 }
+
+func recordMallWeatherExportRows(
+	recorder mallWeatherMetricRecorder,
+	result MallWeatherExportRenderResult,
+) {
+	if recorder == nil || result.ProcessedRows <= 0 {
+		return
+	}
+	recorder.AddCounter(MallWeatherMetricExportRowsTotal, nil, result.ProcessedRows)
+}
