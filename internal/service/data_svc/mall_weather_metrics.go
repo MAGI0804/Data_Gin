@@ -69,13 +69,25 @@ type MallWeatherMetricCounterSample struct {
 	Value  int64             `json:"value"`
 }
 
+type MallWeatherMetricGaugeSample struct {
+	Name   string            `json:"name"`
+	Labels map[string]string `json:"labels,omitempty"`
+	Value  float64           `json:"value"`
+}
+
 type MallWeatherMetricsResult struct {
 	Definitions []MallWeatherMetricDefinition    `json:"definitions"`
 	Counters    []MallWeatherMetricCounterSample `json:"counters"`
+	Gauges      []MallWeatherMetricGaugeSample   `json:"gauges"`
 }
 
 type mallWeatherMetricSnapshotter interface {
 	CounterSnapshot() []MallWeatherMetricCounterSample
+	GaugeSnapshot() []MallWeatherMetricGaugeSample
+}
+
+type mallWeatherMetricGaugeRecorder interface {
+	SetGauge(name string, labels map[string]string, value float64)
 }
 
 type MallWeatherMetricsService struct {
@@ -106,17 +118,20 @@ func (service *MallWeatherMetricsService) Snapshot(
 	return &MallWeatherMetricsResult{
 		Definitions: MallWeatherMetricDefinitions(),
 		Counters:    service.metrics.CounterSnapshot(),
+		Gauges:      service.metrics.GaugeSnapshot(),
 	}, nil
 }
 
 type inMemoryMallWeatherMetricRecorder struct {
 	mu       sync.RWMutex
 	counters map[string]MallWeatherMetricCounterSample
+	gauges   map[string]MallWeatherMetricGaugeSample
 }
 
 func newInMemoryMallWeatherMetricRecorder() *inMemoryMallWeatherMetricRecorder {
 	return &inMemoryMallWeatherMetricRecorder{
 		counters: make(map[string]MallWeatherMetricCounterSample),
+		gauges:   make(map[string]MallWeatherMetricGaugeSample),
 	}
 }
 
@@ -149,6 +164,29 @@ func (recorder *inMemoryMallWeatherMetricRecorder) AddCounter(
 	recorder.counters[key] = sample
 }
 
+func (recorder *inMemoryMallWeatherMetricRecorder) SetGauge(
+	name string,
+	labels map[string]string,
+	value float64,
+) {
+	if recorder == nil || name == "" || math.IsNaN(value) || math.IsInf(value, 0) {
+		return
+	}
+	key := mallWeatherMetricSeriesKey(name, labels)
+	sample := MallWeatherMetricGaugeSample{
+		Name:   name,
+		Labels: copyMallWeatherMetricLabels(labels),
+		Value:  value,
+	}
+
+	recorder.mu.Lock()
+	defer recorder.mu.Unlock()
+	if recorder.gauges == nil {
+		recorder.gauges = make(map[string]MallWeatherMetricGaugeSample)
+	}
+	recorder.gauges[key] = sample
+}
+
 func (recorder *inMemoryMallWeatherMetricRecorder) CounterSnapshot() []MallWeatherMetricCounterSample {
 	if recorder == nil {
 		return nil
@@ -158,6 +196,26 @@ func (recorder *inMemoryMallWeatherMetricRecorder) CounterSnapshot() []MallWeath
 
 	samples := make([]MallWeatherMetricCounterSample, 0, len(recorder.counters))
 	for _, sample := range recorder.counters {
+		sample.Labels = copyMallWeatherMetricLabels(sample.Labels)
+		samples = append(samples, sample)
+	}
+	sort.Slice(samples, func(left, right int) bool {
+		leftKey := mallWeatherMetricSeriesKey(samples[left].Name, samples[left].Labels)
+		rightKey := mallWeatherMetricSeriesKey(samples[right].Name, samples[right].Labels)
+		return leftKey < rightKey
+	})
+	return samples
+}
+
+func (recorder *inMemoryMallWeatherMetricRecorder) GaugeSnapshot() []MallWeatherMetricGaugeSample {
+	if recorder == nil {
+		return nil
+	}
+	recorder.mu.RLock()
+	defer recorder.mu.RUnlock()
+
+	samples := make([]MallWeatherMetricGaugeSample, 0, len(recorder.gauges))
+	for _, sample := range recorder.gauges {
 		sample.Labels = copyMallWeatherMetricLabels(sample.Labels)
 		samples = append(samples, sample)
 	}

@@ -135,11 +135,49 @@ func TestInMemoryMallWeatherMetricRecorderSaturatesOnOverflow(t *testing.T) {
 	}
 }
 
+func TestInMemoryMallWeatherMetricRecorderStoresGauges(t *testing.T) {
+	t.Parallel()
+
+	recorder := newInMemoryMallWeatherMetricRecorder()
+	labels := map[string]string{"kind": "full"}
+	recorder.SetGauge(MallWeatherMetricFetchDurationSeconds, labels, 1.25)
+	labels["kind"] = "mutated"
+	recorder.SetGauge(MallWeatherMetricFetchDurationSeconds, map[string]string{"kind": "full"}, 2.5)
+	recorder.SetGauge(MallWeatherMetricDataAgeSeconds, nil, 10)
+	recorder.SetGauge("", nil, 99)
+	recorder.SetGauge(MallWeatherMetricDataAgeSeconds, map[string]string{"kind": "bad"}, math.NaN())
+	recorder.SetGauge(MallWeatherMetricDataAgeSeconds, map[string]string{"kind": "bad"}, math.Inf(1))
+
+	got := recorder.GaugeSnapshot()
+	want := []MallWeatherMetricGaugeSample{
+		{
+			Name:   MallWeatherMetricDataAgeSeconds,
+			Value:  10,
+			Labels: nil,
+		},
+		{
+			Name:   MallWeatherMetricFetchDurationSeconds,
+			Labels: map[string]string{"kind": "full"},
+			Value:  2.5,
+		},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("GaugeSnapshot()=%+v want %+v", got, want)
+	}
+
+	got[1].Labels["kind"] = "mutated"
+	fresh := recorder.GaugeSnapshot()
+	if fresh[1].Labels["kind"] != "full" {
+		t.Fatalf("GaugeSnapshot() exposed mutable labels: %+v", fresh[1])
+	}
+}
+
 func TestMallWeatherMetricsServiceSnapshotReturnsContractAndCounters(t *testing.T) {
 	t.Parallel()
 
 	recorder := newInMemoryMallWeatherMetricRecorder()
 	recorder.AddCounter(MallWeatherMetricFeishuRowsTotal, map[string]string{"status": "success"}, 5)
+	recorder.SetGauge(MallWeatherMetricDataAgeSeconds, map[string]string{"kind": "full"}, 12)
 	service, err := newMallWeatherMetricsServiceWithRecorder(recorder)
 	if err != nil {
 		t.Fatalf("newMallWeatherMetricsServiceWithRecorder() error=%v", err)
@@ -149,20 +187,26 @@ func TestMallWeatherMetricsServiceSnapshotReturnsContractAndCounters(t *testing.
 	if err != nil {
 		t.Fatalf("Snapshot() error=%v", err)
 	}
-	if len(result.Definitions) == 0 || len(result.Counters) != 1 ||
+	if len(result.Definitions) == 0 || len(result.Counters) != 1 || len(result.Gauges) != 1 ||
 		result.Counters[0].Name != MallWeatherMetricFeishuRowsTotal ||
 		result.Counters[0].Labels["status"] != "success" ||
-		result.Counters[0].Value != 5 {
+		result.Counters[0].Value != 5 ||
+		result.Gauges[0].Name != MallWeatherMetricDataAgeSeconds ||
+		result.Gauges[0].Labels["kind"] != "full" ||
+		result.Gauges[0].Value != 12 {
 		t.Fatalf("Snapshot()=%+v", result)
 	}
 
 	result.Definitions[0].Name = "mutated"
 	result.Counters[0].Labels["status"] = "mutated"
+	result.Gauges[0].Labels["kind"] = "mutated"
 	fresh, err := service.Snapshot(context.Background(), 17)
 	if err != nil {
 		t.Fatalf("Snapshot() second error=%v", err)
 	}
-	if fresh.Definitions[0].Name == "mutated" || fresh.Counters[0].Labels["status"] != "success" {
+	if fresh.Definitions[0].Name == "mutated" ||
+		fresh.Counters[0].Labels["status"] != "success" ||
+		fresh.Gauges[0].Labels["kind"] != "full" {
 		t.Fatalf("Snapshot() exposed mutable state: %+v", fresh)
 	}
 }

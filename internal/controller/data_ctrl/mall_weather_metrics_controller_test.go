@@ -31,6 +31,11 @@ func TestMallWeatherMetricsControllerReturnsSnapshot(t *testing.T) {
 					Labels: map[string]string{"status": "success"},
 					Value:  9,
 				}},
+				Gauges: []data_svc.MallWeatherMetricGaugeSample{{
+					Name:   data_svc.MallWeatherMetricDataAgeSeconds,
+					Labels: map[string]string{"kind": "full"},
+					Value:  12.5,
+				}},
 			}, nil
 		},
 	}
@@ -40,7 +45,9 @@ func TestMallWeatherMetricsControllerReturnsSnapshot(t *testing.T) {
 	if recorder.Code != http.StatusOK ||
 		!strings.Contains(body, `"definitions":[`) ||
 		!strings.Contains(body, `"counters":[`) ||
-		!strings.Contains(body, `"value":9`) {
+		!strings.Contains(body, `"gauges":[`) ||
+		!strings.Contains(body, `"value":9`) ||
+		!strings.Contains(body, `"value":12.5`) {
 		t.Fatalf("status=%d body=%s", recorder.Code, body)
 	}
 }
