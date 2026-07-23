@@ -30,6 +30,10 @@ type mallWeatherFeishuDestinationReader interface {
 	FindByID(context.Context, uint) (*model.DestinationDefinition, error)
 }
 
+type mallWeatherFeishuRunReader interface {
+	FindByPipelineRunID(context.Context, uint) (*data_dao.MallWeatherFeishuRunRecord, error)
+}
+
 type mallWeatherFeishuSheetsReader interface {
 	Inspect(context.Context, string, []string) (*feishu.SpreadsheetMetadata, error)
 	ReadRange(context.Context, string, feishu.SheetRange) (*feishu.SheetValues, error)
@@ -44,6 +48,7 @@ type mallWeatherFeishuPushDependencies struct {
 	estimator    mallWeatherExportEstimator
 	limits       mallWeatherExportLimitReader
 	store        mallWeatherFeishuPushStore
+	runs         mallWeatherFeishuRunReader
 	resources    mallWeatherFeishuResourceResolver
 	newSheets    mallWeatherFeishuSheetsFactory
 	now          func() time.Time
@@ -56,6 +61,7 @@ type MallWeatherFeishuPushService struct {
 	estimator    mallWeatherExportEstimator
 	limits       mallWeatherExportLimitReader
 	store        mallWeatherFeishuPushStore
+	runs         mallWeatherFeishuRunReader
 	resources    mallWeatherFeishuResourceResolver
 	newSheets    mallWeatherFeishuSheetsFactory
 	now          func() time.Time
@@ -78,6 +84,7 @@ func NewMallWeatherFeishuPushService() *MallWeatherFeishuPushService {
 		estimator:    data_dao.NewMallWeatherExportJobDAO(database.DB),
 		limits:       data_dao.NewRuntimeConfigDAO(),
 		store:        gormMallWeatherFeishuPushStore{db: database.DB},
+		runs:         data_dao.NewMallWeatherFeishuRunDAO(database.DB),
 		resources:    global.Credentials,
 		newSheets:    newSheets,
 		now:          time.Now,
@@ -92,7 +99,8 @@ func newMallWeatherFeishuPushService(
 	dependencies mallWeatherFeishuPushDependencies,
 ) (*MallWeatherFeishuPushService, error) {
 	if dependencies.destinations == nil || dependencies.profiles == nil || dependencies.permissions == nil ||
-		dependencies.estimator == nil || dependencies.limits == nil || dependencies.store == nil || dependencies.resources == nil ||
+		dependencies.estimator == nil || dependencies.limits == nil || dependencies.store == nil || dependencies.runs == nil ||
+		dependencies.resources == nil ||
 		dependencies.newSheets == nil || dependencies.now == nil {
 		return nil, errors.New("mall weather feishu push: invalid service configuration")
 	}
@@ -103,6 +111,7 @@ func newMallWeatherFeishuPushService(
 		estimator:    dependencies.estimator,
 		limits:       dependencies.limits,
 		store:        dependencies.store,
+		runs:         dependencies.runs,
 		resources:    dependencies.resources,
 		newSheets:    dependencies.newSheets,
 		now:          dependencies.now,

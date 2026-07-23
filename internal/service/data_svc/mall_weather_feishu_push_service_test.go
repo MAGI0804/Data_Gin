@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"gin-biz-web-api/connector/feishu"
+	"gin-biz-web-api/internal/dao/data_dao"
 	"gin-biz-web-api/internal/requestbody"
 	"gin-biz-web-api/job"
 	"gin-biz-web-api/model"
@@ -76,6 +77,7 @@ func TestMallWeatherFeishuPushServiceDryRunOrchestratesReadOnlyPlan(t *testing.T
 		estimator:    estimator,
 		limits:       fakeMallWeatherExportLimitReader{},
 		store:        &fakeMallWeatherFeishuPushStore{},
+		runs:         fakeMallWeatherFeishuRunReader{},
 		resources: fakeMallWeatherFeishuResourceResolver{values: map[string]string{
 			credential.EnvFeishuWeatherSpreadsheetToken: "spreadsheet_abc",
 			credential.EnvFeishuWeatherHourlySheetID:    "sheet_hourly",
@@ -117,6 +119,7 @@ func TestMallWeatherFeishuPushServiceDryRunFailsClosedBeforeExternalReads(t *tes
 		estimator:    estimator,
 		limits:       fakeMallWeatherExportLimitReader{},
 		store:        &fakeMallWeatherFeishuPushStore{},
+		runs:         fakeMallWeatherFeishuRunReader{},
 		resources: fakeMallWeatherFeishuResourceResolver{values: map[string]string{
 			credential.EnvFeishuWeatherSpreadsheetToken: "spreadsheet_abc",
 			credential.EnvFeishuWeatherHourlySheetID:    "sheet_hourly",
@@ -155,6 +158,7 @@ func TestMallWeatherFeishuPushServiceCreatePersistsOnlySafeSnapshots(t *testing.
 		estimator:    &fakeMallWeatherExportEstimator{rows: 10},
 		limits:       fakeMallWeatherExportLimitReader{},
 		store:        store,
+		runs:         fakeMallWeatherFeishuRunReader{},
 		resources: fakeMallWeatherFeishuResourceResolver{values: map[string]string{
 			credential.EnvFeishuWeatherSpreadsheetToken: "spreadsheet_private_value",
 			credential.EnvFeishuWeatherHourlySheetID:    "sheet_private_value",
@@ -201,6 +205,48 @@ func TestMallWeatherFeishuPushServiceCreatePersistsOnlySafeSnapshots(t *testing.
 	}
 }
 
+func TestMallWeatherFeishuPushServiceGetReturnsOwnedSafeRun(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 7, 23, 8, 0, 0, 0, time.UTC)
+	record := &data_dao.MallWeatherFeishuRunRecord{
+		Pipeline: model.PipelineRun{
+			BaseModel: model.BaseModel{ID: 41}, TraceID: uuid.NewString(), RunType: "delivery",
+			TriggerType: "api", DestinationID: 17, Status: "running",
+		},
+		Detail: model.MallWeatherFeishuRun{
+			BaseModel: model.BaseModel{ID: 42}, PipelineRunID: 41, ProfileID: 9, ProfileVersion: 3,
+			ProfileSnapshotJSON:     model.JSONText(`{"private":"profile"}`),
+			FiltersJSON:             model.JSONText(`{"private":"filters"}`),
+			DestinationSnapshotJSON: model.JSONText(`{"private":"destination"}`),
+			RunToken:                "private-run-token", CreatedBy: 19,
+			WeatherTimestamps: model.WeatherTimestamps{CreatedAt: now, UpdatedAt: now},
+		},
+	}
+	service := &MallWeatherFeishuPushService{
+		permissions: fakeMallPermissionChecker{allowed: true},
+		runs:        fakeMallWeatherFeishuRunReader{record: record},
+		now:         func() time.Time { return now },
+	}
+	result, err := service.Get(context.Background(), 19, 41)
+	if err != nil || result == nil || result.Status != "PENDING" || result.RunID != 41 ||
+		result.ProfileID != 9 || result.DestinationID != 17 || result.StartedAt != nil {
+		t.Fatalf("Get() result=%+v error=%v", result, err)
+	}
+	encoded, err := json.Marshal(result)
+	if err != nil {
+		t.Fatalf("json.Marshal() error=%v", err)
+	}
+	for _, forbidden := range []string{"private", "run-token", "profileSnapshot", "filters"} {
+		if strings.Contains(string(encoded), forbidden) {
+			t.Fatalf("query response leaked %q: %s", forbidden, encoded)
+		}
+	}
+	if _, err := service.Get(context.Background(), 20, 41); !errors.Is(err, data_dao.ErrMallWeatherFeishuRunNotFound) {
+		t.Fatalf("Get() ownership error=%v", err)
+	}
+}
+
 type fakeMallWeatherFeishuDestinationReader struct {
 	row *model.DestinationDefinition
 	err error
@@ -212,6 +258,21 @@ type fakeMallWeatherFeishuPushStore struct {
 	replayed bool
 	err      error
 	calls    int
+}
+
+type fakeMallWeatherFeishuRunReader struct {
+	record *data_dao.MallWeatherFeishuRunRecord
+	err    error
+}
+
+func (reader fakeMallWeatherFeishuRunReader) FindByPipelineRunID(
+	context.Context,
+	uint,
+) (*data_dao.MallWeatherFeishuRunRecord, error) {
+	if reader.err != nil {
+		return nil, reader.err
+	}
+	return reader.record, nil
 }
 
 func (store *fakeMallWeatherFeishuPushStore) Create(
