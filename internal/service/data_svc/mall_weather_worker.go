@@ -213,6 +213,7 @@ func (processor *MallWeatherProcessor) Process(ctx context.Context, taskType str
 		providerErr = &caiyun.ProviderError{Class: "invalid_response"}
 	}
 	recordMallWeatherProviderRequest(processor.metrics, start.Payload.EndpointKind, providerErr == nil)
+	recordMallWeatherProviderRateLimited(processor.metrics, providerErr)
 	if response != nil && len(response.RawBody) > 0 {
 		snapshot, snapshotErr := processor.snapshotBuilder(start.Payload.EndpointKind).Build(ctx, weatherdomain.RawSnapshotInput{
 			Provider: weatherdomain.ProviderCaiyun, EndpointKind: start.Payload.EndpointKind,

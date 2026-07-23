@@ -3,6 +3,7 @@ package data_svc
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"math"
 	"sort"
 	"strings"
@@ -12,6 +13,7 @@ import (
 	"gin-biz-web-api/connector/caiyun"
 	"gin-biz-web-api/job"
 	"gin-biz-web-api/model"
+	"gin-biz-web-api/pkg/providerhttp"
 )
 
 // MallWeatherMetricDefinition describes a registry-agnostic metric contract.
@@ -322,6 +324,20 @@ func recordMallWeatherProviderRequest(
 		map[string]string{"endpoint": endpoint, "status": status},
 		1,
 	)
+}
+
+func recordMallWeatherProviderRateLimited(
+	recorder mallWeatherMetricRecorder,
+	err error,
+) {
+	if recorder == nil || err == nil {
+		return
+	}
+	var providerError *caiyun.ProviderError
+	if !errors.As(err, &providerError) || providerError.Class != providerhttp.ErrorClassRateLimited {
+		return
+	}
+	recorder.AddCounter(MallWeatherMetricProviderRateLimitedTotal, nil, 1)
 }
 
 func recordMallWeatherFetchDuration(

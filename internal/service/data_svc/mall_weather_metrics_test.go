@@ -14,6 +14,7 @@ import (
 	"gin-biz-web-api/connector/caiyun"
 	"gin-biz-web-api/job"
 	"gin-biz-web-api/model"
+	"gin-biz-web-api/pkg/providerhttp"
 )
 
 func TestMallWeatherMetricDefinitionsMatchDocumentedContract(t *testing.T) {
@@ -207,6 +208,26 @@ func TestMallWeatherFetchGaugeRecorders(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("GaugeSnapshot()=%+v want %+v", got, want)
+	}
+}
+
+func TestRecordMallWeatherProviderRateLimited(t *testing.T) {
+	t.Parallel()
+
+	recorder := newInMemoryMallWeatherMetricRecorder()
+
+	recordMallWeatherProviderRateLimited(recorder, &caiyun.ProviderError{Class: providerhttp.ErrorClassRateLimited})
+	recordMallWeatherProviderRateLimited(recorder, &caiyun.ProviderError{Class: providerhttp.ErrorClassProvider})
+	recordMallWeatherProviderRateLimited(recorder, errors.New("redis limiter failed"))
+	recordMallWeatherProviderRateLimited(recorder, nil)
+
+	got := recorder.CounterSnapshot()
+	want := []MallWeatherMetricCounterSample{{
+		Name:  MallWeatherMetricProviderRateLimitedTotal,
+		Value: 1,
+	}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("CounterSnapshot()=%+v want %+v", got, want)
 	}
 }
 
