@@ -174,7 +174,7 @@ func TestMallWeatherFeishuDestinationResolvesResourcesWithoutSnapshotLeak(t *tes
 		resolved.SpreadsheetToken != spreadsheetToken || resolved.SheetIDs["hourly"] != hourlySheetID {
 		t.Fatalf("resolved destination metadata is incorrect")
 	}
-	snapshot, err := mallWeatherFeishuDestinationSnapshot(resolved.Config)
+	snapshot, err := mallWeatherFeishuDestinationSnapshot(resolved)
 	if err != nil {
 		t.Fatalf("mallWeatherFeishuDestinationSnapshot() error=%v", err)
 	}
@@ -184,7 +184,9 @@ func TestMallWeatherFeishuDestinationResolvesResourcesWithoutSnapshotLeak(t *tes
 		}
 	}
 	if !strings.Contains(string(snapshot), credential.EnvFeishuWeatherSpreadsheetToken) ||
-		!strings.Contains(string(snapshot), credential.EnvFeishuWeatherHourlySheetID) {
+		!strings.Contains(string(snapshot), credential.EnvFeishuWeatherHourlySheetID) ||
+		!strings.Contains(string(snapshot), `"destinationId":17`) ||
+		!strings.Contains(string(snapshot), `"code":"weather_feishu"`) {
 		t.Fatalf("snapshot=%s", snapshot)
 	}
 	serialized, err := json.Marshal(resolved)

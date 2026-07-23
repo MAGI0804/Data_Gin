@@ -76,7 +76,7 @@ func encodeMallWeatherFeishuPushSnapshots(
 	if err != nil {
 		return "", "", "", fmt.Errorf("mall weather feishu push: encode filters: %w", err)
 	}
-	destinationSnapshot, err := mallWeatherFeishuDestinationSnapshot(prepared.destination.Config)
+	destinationSnapshot, err := mallWeatherFeishuDestinationSnapshot(prepared.destination)
 	if err != nil {
 		return "", "", "", fmt.Errorf("mall weather feishu push: encode destination snapshot: %w", err)
 	}

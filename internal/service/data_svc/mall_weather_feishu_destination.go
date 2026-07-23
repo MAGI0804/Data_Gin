@@ -61,6 +61,25 @@ type MallWeatherFeishuResolvedDestination struct {
 	SheetIDs         map[string]string `json:"-"`
 }
 
+type mallWeatherFeishuDestinationSnapshotData struct {
+	DestinationID       uint                              `json:"destinationId"`
+	Code                string                            `json:"code"`
+	SpreadsheetTokenEnv string                            `json:"spreadsheetTokenEnv"`
+	Sheets              []mallWeatherFeishuSheetReference `json:"sheets"`
+	WriteMode           string                            `json:"writeMode"`
+	BatchRows           int                               `json:"batchRows"`
+	ProfileCode         string                            `json:"profileCode"`
+	UniqueKeyFields     map[string][]string               `json:"uniqueKeyFields,omitempty"`
+	TimeoutSeconds      int                               `json:"timeoutSeconds"`
+	CreateIfMissing     bool                              `json:"createIfMissing"`
+	AllowHeaderRewrite  bool                              `json:"allowHeaderRewrite"`
+}
+
+type mallWeatherFeishuSheetReference struct {
+	Dataset string `json:"dataset"`
+	Env     string `json:"env"`
+}
+
 func (MallWeatherFeishuResolvedDestination) String() string {
 	return "data_svc.MallWeatherFeishuResolvedDestination{redacted}"
 }
@@ -219,39 +238,35 @@ func normalizeMallWeatherFeishuUniqueKeys(
 	return result, nil
 }
 
-func mallWeatherFeishuDestinationSnapshot(config MallWeatherFeishuDestinationConfig) ([]byte, error) {
-	datasets := make([]string, 0, len(config.SheetIDEnvMapping))
-	for dataset := range config.SheetIDEnvMapping {
+func mallWeatherFeishuDestinationSnapshot(
+	destination *MallWeatherFeishuResolvedDestination,
+) ([]byte, error) {
+	if destination == nil || destination.DestinationID == 0 || strings.TrimSpace(destination.Code) == "" {
+		return nil, errors.New("mall weather feishu destination: invalid snapshot identity")
+	}
+	datasets := make([]string, 0, len(destination.Config.SheetIDEnvMapping))
+	for dataset := range destination.Config.SheetIDEnvMapping {
 		datasets = append(datasets, dataset)
 	}
 	sort.Strings(datasets)
-	type sheetReference struct {
-		Dataset string `json:"dataset"`
-		Env     string `json:"env"`
-	}
-	references := make([]sheetReference, 0, len(datasets))
+	references := make([]mallWeatherFeishuSheetReference, 0, len(datasets))
 	for _, dataset := range datasets {
-		references = append(references, sheetReference{Dataset: dataset, Env: config.SheetIDEnvMapping[dataset]})
+		references = append(references, mallWeatherFeishuSheetReference{
+			Dataset: dataset,
+			Env:     destination.Config.SheetIDEnvMapping[dataset],
+		})
 	}
-	return json.Marshal(struct {
-		SpreadsheetTokenEnv string              `json:"spreadsheetTokenEnv"`
-		Sheets              []sheetReference    `json:"sheets"`
-		WriteMode           string              `json:"writeMode"`
-		BatchRows           int                 `json:"batchRows"`
-		ProfileCode         string              `json:"profileCode"`
-		UniqueKeyFields     map[string][]string `json:"uniqueKeyFields,omitempty"`
-		TimeoutSeconds      int                 `json:"timeoutSeconds"`
-		CreateIfMissing     bool                `json:"createIfMissing"`
-		AllowHeaderRewrite  bool                `json:"allowHeaderRewrite"`
-	}{
-		SpreadsheetTokenEnv: config.SpreadsheetTokenEnv,
+	return json.Marshal(mallWeatherFeishuDestinationSnapshotData{
+		DestinationID:       destination.DestinationID,
+		Code:                strings.TrimSpace(destination.Code),
+		SpreadsheetTokenEnv: destination.Config.SpreadsheetTokenEnv,
 		Sheets:              references,
-		WriteMode:           config.WriteMode,
-		BatchRows:           config.BatchRows,
-		ProfileCode:         config.ProfileCode,
-		UniqueKeyFields:     config.UniqueKeyFields,
-		TimeoutSeconds:      config.TimeoutSeconds,
-		CreateIfMissing:     config.CreateIfMissing,
-		AllowHeaderRewrite:  config.AllowHeaderRewrite,
+		WriteMode:           destination.Config.WriteMode,
+		BatchRows:           destination.Config.BatchRows,
+		ProfileCode:         destination.Config.ProfileCode,
+		UniqueKeyFields:     destination.Config.UniqueKeyFields,
+		TimeoutSeconds:      destination.Config.TimeoutSeconds,
+		CreateIfMissing:     destination.Config.CreateIfMissing,
+		AllowHeaderRewrite:  destination.Config.AllowHeaderRewrite,
 	})
 }
