@@ -3,7 +3,6 @@ package data_dao
 import (
 	"context"
 	"database/sql"
-	"errors"
 	"reflect"
 	"strings"
 	"testing"
@@ -89,9 +88,6 @@ func TestFindRawSnapshotByIDRejectsInvalidBoundary(t *testing.T) {
 	}
 	if _, err := NewMallWeatherDAO(dryRunWeatherDAOTestDB(t)).FindRawSnapshotByID(context.Background(), 0); err == nil {
 		t.Fatal("FindRawSnapshotByID() accepted zero snapshot ID")
-	}
-	if !errors.Is(ErrProviderRawSnapshotNotFound, ErrProviderRawSnapshotNotFound) {
-		t.Fatal("ErrProviderRawSnapshotNotFound is not a stable sentinel")
 	}
 }
 
