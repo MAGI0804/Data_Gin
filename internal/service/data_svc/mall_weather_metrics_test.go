@@ -30,6 +30,7 @@ func TestMallWeatherMetricDefinitionsMatchDocumentedContract(t *testing.T) {
 		{Name: "mall_weather_provider_circuit_open"},
 		{Name: "mall_weather_data_age_seconds", Labels: []string{"kind"}},
 		{Name: "mall_weather_parse_warnings_total", Labels: []string{"field"}},
+		{Name: "mall_weather_parse_warning_reasons_total", Labels: []string{"field", "reason"}},
 		{Name: "mall_weather_queue_lag_seconds", Labels: []string{"kind"}},
 		{Name: "mall_weather_dead_letters_total", Labels: []string{"kind", "reason"}},
 		{Name: "mall_weather_export_rows_total"},
@@ -430,6 +431,33 @@ func TestMallWeatherParseWarningFieldIsLowCardinality(t *testing.T) {
 	}
 }
 
+func TestMallWeatherParseWarningReasonIsLowCardinality(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		code string
+		want string
+	}{
+		{name: "core field", code: "CORE_FIELD_COVERAGE_LOW", want: "critical_field_missing"},
+		{name: "missing field", code: "MISSING_FIELD", want: "critical_field_missing"},
+		{name: "unknown provider shape", code: "UNKNOWN_LIFE_INDEX_GROUP", want: "unknown_provider_field"},
+		{name: "invalid field", code: "INVALID_VALUE", want: "invalid_provider_field"},
+		{name: "module status", code: "MODULE_STATUS_NOT_OK", want: "provider_status_not_ok"},
+		{name: "api status", code: "API_STATUS_NOT_ACTIVE", want: "provider_status_not_ok"},
+		{name: "missing optional value", code: "MISSING_LEVEL", want: "missing_provider_field"},
+		{name: "empty", code: " ", want: "unknown"},
+		{name: "other", code: "IRREGULAR_TIME_INTERVAL", want: "other"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := mallWeatherParseWarningReason(test.code); got != test.want {
+				t.Fatalf("mallWeatherParseWarningReason(%q)=%q want %q", test.code, got, test.want)
+			}
+		})
+	}
+}
+
 func TestRecordMallWeatherParseWarnings(t *testing.T) {
 	t.Parallel()
 
@@ -448,6 +476,26 @@ func TestRecordMallWeatherParseWarnings(t *testing.T) {
 
 	got := recorder.CounterSnapshot()
 	want := []MallWeatherMetricCounterSample{
+		{
+			Name:   MallWeatherMetricParseWarningReasonsTotal,
+			Labels: map[string]string{"field": "api_status", "reason": "provider_status_not_ok"},
+			Value:  1,
+		},
+		{
+			Name:   MallWeatherMetricParseWarningReasonsTotal,
+			Labels: map[string]string{"field": "hourly", "reason": "critical_field_missing"},
+			Value:  1,
+		},
+		{
+			Name:   MallWeatherMetricParseWarningReasonsTotal,
+			Labels: map[string]string{"field": "hourly", "reason": "invalid_provider_field"},
+			Value:  1,
+		},
+		{
+			Name:   MallWeatherMetricParseWarningReasonsTotal,
+			Labels: map[string]string{"field": "lifeindex", "reason": "other"},
+			Value:  1,
+		},
 		{
 			Name:   MallWeatherMetricParseWarningsTotal,
 			Labels: map[string]string{"field": "api_status"},
@@ -479,6 +527,8 @@ func TestEvaluateMallWeatherOperationalAlerts(t *testing.T) {
 		{Name: MallWeatherMetricProviderRateLimitedTotal, Value: 6},
 		{Name: MallWeatherMetricProviderAuthFailuresTotal, Labels: map[string]string{"endpoint": caiyun.EndpointWeatherV26}, Value: 1},
 		{Name: MallWeatherMetricParseWarningsTotal, Labels: map[string]string{"field": "hourly"}, Value: 2},
+		{Name: MallWeatherMetricParseWarningReasonsTotal, Labels: map[string]string{"field": "hourly", "reason": "critical_field_missing"}, Value: 1},
+		{Name: MallWeatherMetricParseWarningReasonsTotal, Labels: map[string]string{"field": "lifeindex", "reason": "unknown_provider_field"}, Value: 1},
 		{Name: MallWeatherMetricDeadLettersTotal, Labels: map[string]string{"kind": "feishu", "reason": MallWeatherDeadLetterReasonPermanent}, Value: 1},
 		{Name: MallWeatherMetricExportRunsTotal, Labels: map[string]string{"status": "cancelled"}, Value: 1},
 		{Name: MallWeatherMetricExportRunsTotal, Labels: map[string]string{"status": "failed"}, Value: 2},
@@ -578,6 +628,24 @@ func TestEvaluateMallWeatherOperationalAlerts(t *testing.T) {
 			Metric:    MallWeatherMetricProviderRateLimitedTotal,
 			Value:     0.2,
 			Threshold: mallWeatherProviderRateLimitCriticalRatio,
+		},
+		{
+			Code:      "MALL_WEATHER_PROVIDER_SCHEMA_CRITICAL_FIELD_MISSING",
+			Severity:  mallWeatherAlertSeverityCritical,
+			Status:    mallWeatherAlertStatusFiring,
+			Metric:    MallWeatherMetricParseWarningReasonsTotal,
+			Labels:    map[string]string{"field": "hourly", "reason": "critical_field_missing"},
+			Value:     1,
+			Threshold: 1,
+		},
+		{
+			Code:      "MALL_WEATHER_PROVIDER_SCHEMA_UNKNOWN_FIELD",
+			Severity:  mallWeatherAlertSeverityWarning,
+			Status:    mallWeatherAlertStatusFiring,
+			Metric:    MallWeatherMetricParseWarningReasonsTotal,
+			Labels:    map[string]string{"field": "lifeindex", "reason": "unknown_provider_field"},
+			Value:     1,
+			Threshold: 1,
 		},
 		{
 			Code:      "MALL_WEATHER_QUEUE_LAG_CRITICAL",

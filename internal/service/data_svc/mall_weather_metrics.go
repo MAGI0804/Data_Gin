@@ -34,6 +34,7 @@ const (
 	MallWeatherMetricProviderCircuitOpen       = "mall_weather_provider_circuit_open"
 	MallWeatherMetricDataAgeSeconds            = "mall_weather_data_age_seconds"
 	MallWeatherMetricParseWarningsTotal        = "mall_weather_parse_warnings_total"
+	MallWeatherMetricParseWarningReasonsTotal  = "mall_weather_parse_warning_reasons_total"
 	MallWeatherMetricQueueLagSeconds           = "mall_weather_queue_lag_seconds"
 	MallWeatherMetricDeadLettersTotal          = "mall_weather_dead_letters_total"
 	MallWeatherMetricExportRowsTotal           = "mall_weather_export_rows_total"
@@ -68,6 +69,7 @@ var mallWeatherMetricDefinitions = []MallWeatherMetricDefinition{
 	{Name: MallWeatherMetricProviderCircuitOpen},
 	{Name: MallWeatherMetricDataAgeSeconds, Labels: []string{"kind"}},
 	{Name: MallWeatherMetricParseWarningsTotal, Labels: []string{"field"}},
+	{Name: MallWeatherMetricParseWarningReasonsTotal, Labels: []string{"field", "reason"}},
 	{Name: MallWeatherMetricQueueLagSeconds, Labels: []string{"kind"}},
 	{Name: MallWeatherMetricDeadLettersTotal, Labels: []string{"kind", "reason"}},
 	{Name: MallWeatherMetricExportRowsTotal},
@@ -218,6 +220,29 @@ func evaluateMallWeatherCounterAlerts(counters []MallWeatherMetricCounterSample)
 					float64(counter.Value),
 					1,
 				))
+			}
+		case MallWeatherMetricParseWarningReasonsTotal:
+			if counter.Value > 0 {
+				switch counter.Labels["reason"] {
+				case "critical_field_missing":
+					alerts = append(alerts, mallWeatherOperationalAlert(
+						"MALL_WEATHER_PROVIDER_SCHEMA_CRITICAL_FIELD_MISSING",
+						mallWeatherAlertSeverityCritical,
+						counter.Name,
+						counter.Labels,
+						float64(counter.Value),
+						1,
+					))
+				case "unknown_provider_field":
+					alerts = append(alerts, mallWeatherOperationalAlert(
+						"MALL_WEATHER_PROVIDER_SCHEMA_UNKNOWN_FIELD",
+						mallWeatherAlertSeverityWarning,
+						counter.Name,
+						counter.Labels,
+						float64(counter.Value),
+						1,
+					))
+				}
 			}
 		case MallWeatherMetricDeadLettersTotal:
 			if counter.Value > 0 {
@@ -790,6 +815,31 @@ func recordMallWeatherParseWarnings(
 			map[string]string{"field": field},
 			1,
 		)
+		recorder.AddCounter(
+			MallWeatherMetricParseWarningReasonsTotal,
+			map[string]string{"field": field, "reason": mallWeatherParseWarningReason(warning.Code)},
+			1,
+		)
+	}
+}
+
+func mallWeatherParseWarningReason(code string) string {
+	code = strings.ToUpper(strings.TrimSpace(code))
+	switch {
+	case code == "CORE_FIELD_COVERAGE_LOW" || code == "MISSING_FIELD":
+		return "critical_field_missing"
+	case strings.HasPrefix(code, "UNKNOWN_"):
+		return "unknown_provider_field"
+	case strings.HasPrefix(code, "INVALID_"):
+		return "invalid_provider_field"
+	case strings.Contains(code, "STATUS_NOT"):
+		return "provider_status_not_ok"
+	case strings.HasPrefix(code, "MISSING_"):
+		return "missing_provider_field"
+	case code == "":
+		return "unknown"
+	default:
+		return "other"
 	}
 }
 
