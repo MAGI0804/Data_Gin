@@ -121,25 +121,29 @@ func validMallWeatherFeishuExecutionRecordForMode(
 	if err != nil {
 		t.Fatalf("json.Marshal(filters) error=%v", err)
 	}
-	destinationConfigJSON, err := json.Marshal(MallWeatherFeishuDestinationConfig{
+	destinationConfig := MallWeatherFeishuDestinationConfig{
 		SpreadsheetTokenEnv: credential.EnvFeishuWeatherSpreadsheetToken,
 		SheetIDEnvMapping:   map[string]string{"hourly": credential.EnvFeishuWeatherHourlySheetID},
 		WriteMode:           writeMode,
 		BatchRows:           200,
 		ProfileCode:         profileRequest.Code,
 		TimeoutSeconds:      20,
-	})
+	}
+	if writeMode == "upsert" {
+		destinationConfig.UniqueKeyFields = map[string][]string{"hourly": {"mall_code", "forecast_time", "issued_at"}}
+	}
+	destinationConfigJSON, err := json.Marshal(destinationConfig)
 	if err != nil {
 		t.Fatalf("json.Marshal(destination config) error=%v", err)
 	}
-	destinationConfig, err := parseMallWeatherFeishuDestinationConfig(string(destinationConfigJSON))
+	parsedDestinationConfig, err := parseMallWeatherFeishuDestinationConfig(string(destinationConfigJSON))
 	if err != nil {
 		t.Fatalf("parseMallWeatherFeishuDestinationConfig() error=%v", err)
 	}
 	destinationSnapshot, err := mallWeatherFeishuDestinationSnapshot(&MallWeatherFeishuResolvedDestination{
 		DestinationID: 17,
 		Code:          "weather_feishu",
-		Config:        destinationConfig,
+		Config:        parsedDestinationConfig,
 	})
 	if err != nil {
 		t.Fatalf("mallWeatherFeishuDestinationSnapshot() error=%v", err)

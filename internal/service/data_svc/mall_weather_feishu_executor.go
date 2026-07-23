@@ -27,6 +27,10 @@ type mallWeatherFeishuOverwriteDatasetExecutor interface {
 	Run(context.Context, mallWeatherFeishuOverwriteDatasetRequest) (mallWeatherFeishuOverwriteDatasetResult, error)
 }
 
+type mallWeatherFeishuUpsertDatasetExecutor interface {
+	Run(context.Context, mallWeatherFeishuUpsertDatasetRequest) (mallWeatherFeishuUpsertDatasetResult, error)
+}
+
 type mallWeatherFeishuOverwriteCleanupExecutor interface {
 	Run(context.Context, mallWeatherFeishuOverwriteCleanupRequest) (mallWeatherFeishuOverwriteCleanupResult, error)
 }
@@ -37,6 +41,7 @@ type mallWeatherFeishuExecutor struct {
 	locker             weatherdomain.TaskLocker
 	appendDatasets     mallWeatherFeishuAppendDatasetExecutor
 	overwriteDatasets  mallWeatherFeishuOverwriteDatasetExecutor
+	upsertDatasets     mallWeatherFeishuUpsertDatasetExecutor
 	overwriteCleanup   mallWeatherFeishuOverwriteCleanupExecutor
 	lockReleaseTimeout time.Duration
 }
@@ -47,16 +52,17 @@ func newMallWeatherFeishuExecutor(
 	locker weatherdomain.TaskLocker,
 	appendDatasets mallWeatherFeishuAppendDatasetExecutor,
 	overwriteDatasets mallWeatherFeishuOverwriteDatasetExecutor,
+	upsertDatasets mallWeatherFeishuUpsertDatasetExecutor,
 	overwriteCleanup mallWeatherFeishuOverwriteCleanupExecutor,
 	lockReleaseTimeout time.Duration,
 ) (*mallWeatherFeishuExecutor, error) {
 	if resources == nil || sheets == nil || locker == nil || appendDatasets == nil ||
-		overwriteDatasets == nil || overwriteCleanup == nil || lockReleaseTimeout <= 0 {
+		overwriteDatasets == nil || upsertDatasets == nil || overwriteCleanup == nil || lockReleaseTimeout <= 0 {
 		return nil, errors.New("mall weather feishu executor: invalid configuration")
 	}
 	return &mallWeatherFeishuExecutor{
 		resources: resources, sheets: sheets, locker: locker, appendDatasets: appendDatasets,
-		overwriteDatasets: overwriteDatasets, overwriteCleanup: overwriteCleanup,
+		overwriteDatasets: overwriteDatasets, upsertDatasets: upsertDatasets, overwriteCleanup: overwriteCleanup,
 		lockReleaseTimeout: lockReleaseTimeout,
 	}, nil
 }
@@ -67,7 +73,8 @@ func (executor *mallWeatherFeishuExecutor) Execute(
 	progress func(successCount, failedCount int) error,
 ) (result MallWeatherFeishuExecutionResult, resultErr error) {
 	if executor == nil || executor.resources == nil || executor.sheets == nil || executor.locker == nil ||
-		executor.appendDatasets == nil || executor.overwriteDatasets == nil || executor.overwriteCleanup == nil ||
+		executor.appendDatasets == nil || executor.overwriteDatasets == nil || executor.upsertDatasets == nil ||
+		executor.overwriteCleanup == nil ||
 		executor.lockReleaseTimeout <= 0 || ctx == nil || progress == nil {
 		return result, permanentMallWeatherFeishuExecutionError(
 			"飞书推送执行器配置无效",
@@ -164,11 +171,16 @@ func (executor *mallWeatherFeishuExecutor) Execute(
 			}
 			successCount = datasetResult.RecordCount
 		case "upsert":
-			result.FailedCount++
-			return result, permanentMallWeatherFeishuExecutionError(
-				"飞书 upsert 尚未启用",
-				errors.New("mall weather feishu executor: upsert runner is unavailable"),
-			)
+			datasetResult, runErr := executor.upsertDatasets.Run(ctx, mallWeatherFeishuUpsertDatasetRequest{
+				RunID: record.Pipeline.ID, TraceID: record.Pipeline.TraceID,
+				Destination: prepared.Destination, Profile: prepared.Profile, Dataset: dataset,
+				Filter: prepared.Filter, SnapshotAt: prepared.SnapshotAt, GridRows: sheet.GridProperties.RowCount,
+			})
+			if runErr != nil {
+				result.FailedCount++
+				return result, classifyMallWeatherFeishuExecutorError("飞书 upsert 数据集失败", runErr)
+			}
+			successCount = datasetResult.RecordCount
 		default:
 			result.FailedCount++
 			return result, permanentMallWeatherFeishuExecutionError(

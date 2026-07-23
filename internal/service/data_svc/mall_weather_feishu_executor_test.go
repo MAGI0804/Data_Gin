@@ -20,7 +20,8 @@ func TestMallWeatherFeishuExecutorLocksAndAppendsAllData(t *testing.T) {
 		DatasetKind: "hourly", RecordCount: 5,
 	}}
 	executor := newTestMallWeatherFeishuExecutor(t, resources, sheets, locker, appendRunner,
-		&fakeMallWeatherFeishuOverwriteDatasetExecutor{}, &fakeMallWeatherFeishuOverwriteCleanupExecutor{})
+		&fakeMallWeatherFeishuOverwriteDatasetExecutor{}, &fakeMallWeatherFeishuUpsertDatasetExecutor{},
+		&fakeMallWeatherFeishuOverwriteCleanupExecutor{})
 	var progressSuccess int
 
 	result, err := executor.Execute(t.Context(), record, func(successCount, failedCount int) error {
@@ -44,6 +45,46 @@ func TestMallWeatherFeishuExecutorLocksAndAppendsAllData(t *testing.T) {
 	}
 }
 
+func TestMallWeatherFeishuExecutorRunsUpsertDatasets(t *testing.T) {
+	record, resources := validMallWeatherFeishuExecutionRecordForMode(t, "upsert")
+	locker := &fakeMallWeatherFeishuExecutionLocker{acquired: true}
+	sheets := newFakeMallWeatherFeishuExecutionSheets()
+	upsertRunner := &fakeMallWeatherFeishuUpsertDatasetExecutor{result: mallWeatherFeishuUpsertDatasetResult{
+		DatasetKind: "hourly", RecordCount: 7, SkippedCount: 2, UpdatedCount: 3, AppendedCount: 2,
+	}}
+	executor := newTestMallWeatherFeishuExecutor(
+		t,
+		resources,
+		sheets,
+		locker,
+		&fakeMallWeatherFeishuAppendDatasetExecutor{},
+		&fakeMallWeatherFeishuOverwriteDatasetExecutor{},
+		upsertRunner,
+		&fakeMallWeatherFeishuOverwriteCleanupExecutor{},
+	)
+	var progressSuccess int
+
+	result, err := executor.Execute(t.Context(), record, func(successCount, failedCount int) error {
+		progressSuccess = successCount
+		if failedCount != 0 {
+			t.Fatalf("failedCount=%d", failedCount)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatalf("Execute() error=%v", err)
+	}
+	if result.SuccessCount != 7 || result.FailedCount != 0 || progressSuccess != 7 ||
+		upsertRunner.calls != 1 || sheets.inspectCalls != 1 || sheets.headerWriteCalls != 1 ||
+		locker.lock.releaseCalls != 1 {
+		t.Fatalf("result=%+v progress=%d upsert=%+v sheets=%+v locker=%+v", result, progressSuccess, upsertRunner, sheets, locker)
+	}
+	if upsertRunner.request.GridRows != 1_000 || upsertRunner.request.RunID != 41 ||
+		upsertRunner.request.Destination.Config.WriteMode != "upsert" {
+		t.Fatalf("unexpected upsert request=%+v", upsertRunner.request)
+	}
+}
+
 func TestMallWeatherFeishuExecutorKeepsOverwriteCleanupInSameLock(t *testing.T) {
 	record, resources := validMallWeatherFeishuExecutionRecordForMode(t, "overwrite_range")
 	locker := &fakeMallWeatherFeishuExecutionLocker{acquired: true}
@@ -58,6 +99,7 @@ func TestMallWeatherFeishuExecutorKeepsOverwriteCleanupInSameLock(t *testing.T) 
 		locker,
 		&fakeMallWeatherFeishuAppendDatasetExecutor{},
 		overwriteRunner,
+		&fakeMallWeatherFeishuUpsertDatasetExecutor{},
 		cleanupRunner,
 	)
 
@@ -92,6 +134,7 @@ func TestMallWeatherFeishuExecutorNeverBypassesDestinationLock(t *testing.T) {
 				&fakeMallWeatherFeishuExecutionLocker{acquired: test.acquired, err: test.lockErr},
 				&fakeMallWeatherFeishuAppendDatasetExecutor{},
 				&fakeMallWeatherFeishuOverwriteDatasetExecutor{},
+				&fakeMallWeatherFeishuUpsertDatasetExecutor{},
 				&fakeMallWeatherFeishuOverwriteCleanupExecutor{},
 			)
 			_, err := executor.Execute(t.Context(), record, func(int, int) error { return nil })
@@ -117,6 +160,7 @@ func TestMallWeatherFeishuExecutorRejectsInvalidSnapshotBeforeLock(t *testing.T)
 		locker,
 		&fakeMallWeatherFeishuAppendDatasetExecutor{},
 		&fakeMallWeatherFeishuOverwriteDatasetExecutor{},
+		&fakeMallWeatherFeishuUpsertDatasetExecutor{},
 		&fakeMallWeatherFeishuOverwriteCleanupExecutor{},
 	)
 
@@ -140,6 +184,7 @@ func TestMallWeatherFeishuExecutorRetriesSuccessfulWorkWhenLockReleaseFails(t *t
 		locker,
 		&fakeMallWeatherFeishuAppendDatasetExecutor{result: mallWeatherFeishuAppendDatasetResult{RecordCount: 2}},
 		&fakeMallWeatherFeishuOverwriteDatasetExecutor{},
+		&fakeMallWeatherFeishuUpsertDatasetExecutor{},
 		&fakeMallWeatherFeishuOverwriteCleanupExecutor{},
 	)
 
@@ -157,6 +202,7 @@ func newTestMallWeatherFeishuExecutor(
 	locker weatherdomain.TaskLocker,
 	appendRunner mallWeatherFeishuAppendDatasetExecutor,
 	overwriteRunner mallWeatherFeishuOverwriteDatasetExecutor,
+	upsertRunner mallWeatherFeishuUpsertDatasetExecutor,
 	cleanupRunner mallWeatherFeishuOverwriteCleanupExecutor,
 ) *mallWeatherFeishuExecutor {
 	t.Helper()
@@ -166,6 +212,7 @@ func newTestMallWeatherFeishuExecutor(
 		locker,
 		appendRunner,
 		overwriteRunner,
+		upsertRunner,
 		cleanupRunner,
 		time.Second,
 	)
@@ -289,6 +336,22 @@ func (runner *fakeMallWeatherFeishuOverwriteDatasetExecutor) Run(
 	_ context.Context,
 	request mallWeatherFeishuOverwriteDatasetRequest,
 ) (mallWeatherFeishuOverwriteDatasetResult, error) {
+	runner.calls++
+	runner.request = request
+	return runner.result, runner.err
+}
+
+type fakeMallWeatherFeishuUpsertDatasetExecutor struct {
+	result  mallWeatherFeishuUpsertDatasetResult
+	err     error
+	request mallWeatherFeishuUpsertDatasetRequest
+	calls   int
+}
+
+func (runner *fakeMallWeatherFeishuUpsertDatasetExecutor) Run(
+	_ context.Context,
+	request mallWeatherFeishuUpsertDatasetRequest,
+) (mallWeatherFeishuUpsertDatasetResult, error) {
 	runner.calls++
 	runner.request = request
 	return runner.result, runner.err
