@@ -343,7 +343,7 @@ func (service *MallWeatherFeishuPushService) inspectAndPlan(
 	})
 }
 
-func newRuntimeMallWeatherFeishuSheets() (mallWeatherFeishuSheetsReader, error) {
+func newRuntimeMallWeatherFeishuSheets() (mallWeatherFeishuRuntimeSheets, error) {
 	redisInstance := projectredis.Instance()
 	if redisInstance == nil || redisInstance.Client == nil {
 		return nil, errors.New("mall weather feishu push: redis is unavailable")

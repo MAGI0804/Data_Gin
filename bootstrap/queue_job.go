@@ -74,6 +74,12 @@ func setupQueueJob() {
 
 		exportCleaner := data_svc.NewMallWeatherExportCleaner()
 		mux.HandleFunc(job.TypeMallWeatherExportCleanup, newMallWeatherExportCleanupHandler(exportCleaner))
+
+		feishuProcessor, err := data_svc.NewMallWeatherFeishuProcessor()
+		if err != nil {
+			console.Exit("Mall Weather Feishu Worker Init Failed %v", err)
+		}
+		mux.HandleFunc(job.TypeMallWeatherFeishu, newMallWeatherFeishuHandler(feishuProcessor))
 	}
 
 	go func(mux *asynq.ServeMux, server *asynq.Server) {
@@ -107,6 +113,10 @@ type mallWeatherSchedulePlanner interface {
 
 type mallWeatherExportProcessor interface {
 	Process(ctx context.Context, jobID uint, retryAllowed bool) error
+}
+
+type mallWeatherFeishuProcessor interface {
+	Process(ctx context.Context, pipelineRunID uint, retryAllowed bool) error
 }
 
 type mallWeatherExportCleaner interface {
@@ -205,6 +215,28 @@ func newMallWeatherExportHandler(processor mallWeatherExportProcessor) asynq.Han
 		}
 		if err := processor.Process(ctx, payload.ExportJobID, mallWeatherExportRetryAllowed(ctx)); err != nil {
 			if errors.Is(err, data_svc.ErrMallWeatherExportProcessNonRetryable) {
+				return fmt.Errorf("%w: %v", asynq.SkipRetry, err)
+			}
+			return err
+		}
+		return nil
+	}
+}
+
+func newMallWeatherFeishuHandler(processor mallWeatherFeishuProcessor) asynq.HandlerFunc {
+	return func(ctx context.Context, task *asynq.Task) error {
+		if processor == nil {
+			return fmt.Errorf("mall weather feishu handler: processor is not configured")
+		}
+		if task == nil || task.Type() != job.TypeMallWeatherFeishu {
+			return fmt.Errorf("%w: invalid mall weather feishu task", asynq.SkipRetry)
+		}
+		payload, err := job.DecodeMallWeatherFeishuTaskPayload(task.Payload())
+		if err != nil {
+			return fmt.Errorf("%w: %v", asynq.SkipRetry, err)
+		}
+		if err := processor.Process(ctx, payload.PipelineRunID, mallWeatherExportRetryAllowed(ctx)); err != nil {
+			if errors.Is(err, data_svc.ErrMallWeatherFeishuProcessNonRetryable) {
 				return fmt.Errorf("%w: %v", asynq.SkipRetry, err)
 			}
 			return err
