@@ -44,6 +44,8 @@ func TestAPIDataRegistersMallCRUDRoutes(t *testing.T) {
 		http.MethodPost + " /api/v1/weather-exports",
 		http.MethodGet + " /api/v1/weather-exports/:job_id",
 		http.MethodGet + " /api/v1/weather-exports/:job_id/download",
+		http.MethodPost + " /api/v1/weather-sheet-pushes",
+		http.MethodGet + " /api/v1/weather-sheet-pushes/:run_id",
 		http.MethodPost + " /api/v1/weather-sheet-pushes/dry-run",
 	} {
 		if _, ok := routes[expected]; !ok {

@@ -247,6 +247,8 @@ func registerMallWeatherFeishuPushRoutes(
 ) {
 	pushGroup := api.Group("/v1/weather-sheet-pushes")
 	pushGroup.Use(middleware.AuthJWT())
+	pushGroup.POST("", pushCtrl.Create)
+	pushGroup.GET("/:run_id", pushCtrl.Get)
 	pushGroup.POST("/dry-run", pushCtrl.DryRun)
 }
 
