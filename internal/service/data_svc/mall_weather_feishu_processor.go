@@ -65,6 +65,7 @@ type MallWeatherFeishuProcessor struct {
 	executor          mallWeatherFeishuRunExecutor
 	now               func() time.Time
 	newRunToken       func() string
+	metrics           mallWeatherMetricRecorder
 	staleAfter        time.Duration
 	heartbeatInterval time.Duration
 	stateTimeout      time.Duration
@@ -75,16 +76,18 @@ func newMallWeatherFeishuProcessor(
 	executor mallWeatherFeishuRunExecutor,
 	now func() time.Time,
 	newRunToken func() string,
+	metrics mallWeatherMetricRecorder,
 	staleAfter time.Duration,
 	heartbeatInterval time.Duration,
 	stateTimeout time.Duration,
 ) (*MallWeatherFeishuProcessor, error) {
 	if runs == nil || executor == nil || now == nil || newRunToken == nil ||
+		metrics == nil ||
 		staleAfter <= 0 || heartbeatInterval <= 0 || heartbeatInterval >= staleAfter || stateTimeout <= 0 {
 		return nil, errors.New("mall weather feishu processor: invalid configuration")
 	}
 	return &MallWeatherFeishuProcessor{
-		runs: runs, executor: executor, now: now, newRunToken: newRunToken,
+		runs: runs, executor: executor, now: now, newRunToken: newRunToken, metrics: metrics,
 		staleAfter: staleAfter, heartbeatInterval: heartbeatInterval, stateTimeout: stateTimeout,
 	}, nil
 }
@@ -95,7 +98,7 @@ func (processor *MallWeatherFeishuProcessor) Process(
 	retryAllowed bool,
 ) error {
 	if processor == nil || processor.runs == nil || processor.executor == nil || processor.now == nil ||
-		processor.newRunToken == nil || ctx == nil || pipelineRunID == 0 || processor.staleAfter <= 0 ||
+		processor.newRunToken == nil || processor.metrics == nil || ctx == nil || pipelineRunID == 0 || processor.staleAfter <= 0 ||
 		processor.heartbeatInterval <= 0 || processor.heartbeatInterval >= processor.staleAfter ||
 		processor.stateTimeout <= 0 {
 		return fmt.Errorf("%w: invalid processor", ErrMallWeatherFeishuProcessNonRetryable)
@@ -184,6 +187,7 @@ func (processor *MallWeatherFeishuProcessor) Process(
 			"飞书推送状态保存失败",
 		)
 	}
+	recordMallWeatherFeishuRows(processor.metrics, result)
 	return nil
 }
 
@@ -220,6 +224,7 @@ func (processor *MallWeatherFeishuProcessor) finishError(
 	if err != nil {
 		return errors.Join(cause, err)
 	}
+	recordMallWeatherFeishuRows(processor.metrics, result)
 	return errors.Join(ErrMallWeatherFeishuProcessNonRetryable, cause)
 }
 

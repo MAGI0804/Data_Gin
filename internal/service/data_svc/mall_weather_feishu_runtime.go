@@ -115,6 +115,7 @@ func NewMallWeatherFeishuProcessor() (*MallWeatherFeishuProcessor, error) {
 		executor,
 		now,
 		uuid.NewString,
+		noopMallWeatherMetricRecorder{},
 		defaultMallWeatherFeishuRunStaleAfter,
 		defaultMallWeatherFeishuHeartbeatInterval,
 		defaultMallWeatherFeishuStateUpdateTimeout,

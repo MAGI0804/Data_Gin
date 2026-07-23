@@ -31,6 +31,86 @@ func TestMallWeatherFeishuProcessorCompletesOwnedRun(t *testing.T) {
 	}
 }
 
+func TestMallWeatherFeishuProcessorRecordsTerminalSuccessfulFeishuRows(t *testing.T) {
+	tests := []struct {
+		name    string
+		result  MallWeatherFeishuExecutionResult
+		err     error
+		want    []fakeMallWeatherMetricCounter
+		wantErr bool
+	}{
+		{
+			name:   "success rows",
+			result: MallWeatherFeishuExecutionResult{SuccessCount: 3},
+			want: []fakeMallWeatherMetricCounter{{
+				name: MallWeatherMetricFeishuRowsTotal, labels: map[string]string{"status": mallWeatherMetricStatusSuccess}, value: 3,
+			}},
+		},
+		{
+			name: "partial rows only records confirmed success count",
+			result: MallWeatherFeishuExecutionResult{
+				SuccessCount: 8,
+				FailedCount:  1,
+			},
+			err: &MallWeatherFeishuExecutionError{
+				Retryable: false, SafeMessage: "部分飞书数据集推送失败", cause: errors.New("header conflict"),
+			},
+			want: []fakeMallWeatherMetricCounter{{
+				name: MallWeatherMetricFeishuRowsTotal, labels: map[string]string{"status": mallWeatherMetricStatusSuccess}, value: 8,
+			}},
+			wantErr: true,
+		},
+		{
+			name: "failed execution without confirmed rows",
+			result: MallWeatherFeishuExecutionResult{
+				FailedCount: 2,
+			},
+			err: &MallWeatherFeishuExecutionError{
+				Retryable: false, SafeMessage: "飞书推送失败", cause: errors.New("permission denied"),
+			},
+			want:    nil,
+			wantErr: true,
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			store := newFakeMallWeatherFeishuRunStore(data_dao.MallWeatherFeishuRunDispositionAcquired)
+			metrics := &fakeMallWeatherMetricRecorder{}
+			processor := newTestMallWeatherFeishuProcessorWithMetrics(
+				t,
+				store,
+				&fakeMallWeatherFeishuRunExecutor{result: test.result, err: test.err},
+				metrics,
+			)
+
+			err := processor.Process(t.Context(), 41, true)
+			if (err != nil) != test.wantErr {
+				t.Fatalf("Process() error=%v wantErr=%t", err, test.wantErr)
+			}
+			assertFakeMallWeatherMetricCounters(t, metrics.counters, test.want)
+		})
+	}
+}
+
+func TestMallWeatherFeishuProcessorDoesNotRecordMetricsForRetryRelease(t *testing.T) {
+	store := newFakeMallWeatherFeishuRunStore(data_dao.MallWeatherFeishuRunDispositionAcquired)
+	metrics := &fakeMallWeatherMetricRecorder{}
+	processor := newTestMallWeatherFeishuProcessorWithMetrics(
+		t,
+		store,
+		&fakeMallWeatherFeishuRunExecutor{
+			result: MallWeatherFeishuExecutionResult{SuccessCount: 3, FailedCount: 1},
+			err:    errors.New("sheets unavailable"),
+		},
+		metrics,
+	)
+
+	err := processor.Process(t.Context(), 41, true)
+	if err == nil || store.releaseCalls != 1 || len(metrics.counters) != 0 {
+		t.Fatalf("Process() error=%v release=%d metrics=%+v", err, store.releaseCalls, metrics.counters)
+	}
+}
+
 func TestMallWeatherFeishuProcessorSkipsBusyOrTerminalRun(t *testing.T) {
 	for _, disposition := range []data_dao.MallWeatherFeishuRunDisposition{
 		data_dao.MallWeatherFeishuRunDispositionBusy,
@@ -170,11 +250,24 @@ func TestMallWeatherFeishuProcessorRejectsInvalidConfiguration(t *testing.T) {
 		&fakeMallWeatherFeishuRunExecutor{},
 		time.Now,
 		uuid.NewString,
+		noopMallWeatherMetricRecorder{},
 		time.Minute,
 		time.Minute,
 		time.Second,
 	); err == nil {
 		t.Fatal("newMallWeatherFeishuProcessor() accepted heartbeat equal to stale duration")
+	}
+	if _, err := newMallWeatherFeishuProcessor(
+		newFakeMallWeatherFeishuRunStore(data_dao.MallWeatherFeishuRunDispositionAcquired),
+		&fakeMallWeatherFeishuRunExecutor{},
+		time.Now,
+		uuid.NewString,
+		nil,
+		2*time.Minute,
+		time.Minute,
+		time.Second,
+	); err == nil {
+		t.Fatal("newMallWeatherFeishuProcessor() accepted nil metrics recorder")
 	}
 }
 
@@ -184,11 +277,22 @@ func newTestMallWeatherFeishuProcessor(
 	executor mallWeatherFeishuRunExecutor,
 ) *MallWeatherFeishuProcessor {
 	t.Helper()
+	return newTestMallWeatherFeishuProcessorWithMetrics(t, store, executor, noopMallWeatherMetricRecorder{})
+}
+
+func newTestMallWeatherFeishuProcessorWithMetrics(
+	t *testing.T,
+	store mallWeatherFeishuRunStore,
+	executor mallWeatherFeishuRunExecutor,
+	metrics mallWeatherMetricRecorder,
+) *MallWeatherFeishuProcessor {
+	t.Helper()
 	processor, err := newMallWeatherFeishuProcessor(
 		store,
 		executor,
 		func() time.Time { return time.Date(2026, 7, 23, 10, 0, 0, 0, time.UTC) },
 		uuid.NewString,
+		metrics,
 		2*time.Hour,
 		time.Hour,
 		time.Second,
@@ -197,6 +301,52 @@ func newTestMallWeatherFeishuProcessor(
 		t.Fatalf("newMallWeatherFeishuProcessor() error=%v", err)
 	}
 	return processor
+}
+
+type fakeMallWeatherMetricCounter struct {
+	name   string
+	labels map[string]string
+	value  int64
+}
+
+type fakeMallWeatherMetricRecorder struct {
+	counters []fakeMallWeatherMetricCounter
+}
+
+func (recorder *fakeMallWeatherMetricRecorder) AddCounter(
+	name string,
+	labels map[string]string,
+	value int64,
+) {
+	recorder.counters = append(recorder.counters, fakeMallWeatherMetricCounter{
+		name:   name,
+		labels: labels,
+		value:  value,
+	})
+}
+
+func assertFakeMallWeatherMetricCounters(
+	t *testing.T,
+	got []fakeMallWeatherMetricCounter,
+	want []fakeMallWeatherMetricCounter,
+) {
+	t.Helper()
+	if len(got) != len(want) {
+		t.Fatalf("metric counters=%+v want %+v", got, want)
+	}
+	for index := range got {
+		if got[index].name != want[index].name || got[index].value != want[index].value {
+			t.Fatalf("metric counters=%+v want %+v", got, want)
+		}
+		for key, value := range want[index].labels {
+			if got[index].labels[key] != value {
+				t.Fatalf("metric counters=%+v want %+v", got, want)
+			}
+		}
+		if len(got[index].labels) != len(want[index].labels) {
+			t.Fatalf("metric counters=%+v want %+v", got, want)
+		}
+	}
 }
 
 type fakeMallWeatherFeishuRunStore struct {
