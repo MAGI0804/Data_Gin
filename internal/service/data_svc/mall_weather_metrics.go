@@ -37,11 +37,13 @@ const (
 	MallWeatherMetricQueueLagSeconds           = "mall_weather_queue_lag_seconds"
 	MallWeatherMetricDeadLettersTotal          = "mall_weather_dead_letters_total"
 	MallWeatherMetricExportRowsTotal           = "mall_weather_export_rows_total"
+	MallWeatherMetricExportRunsTotal           = "mall_weather_export_runs_total"
 	MallWeatherMetricFeishuRunsTotal           = "mall_weather_feishu_runs_total"
 	MallWeatherMetricFeishuRowsTotal           = "mall_weather_feishu_rows_total"
 	MallWeatherDeadLetterReasonInvalidPayload  = "invalid_payload"
 	MallWeatherDeadLetterReasonPermanent       = "permanent_failure"
 	mallWeatherMetricStatusSuccess             = "success"
+	mallWeatherMetricStatusSucceeded           = "succeeded"
 	mallWeatherMetricStatusFailed              = "failed"
 	mallWeatherMetricStatusPartialSuccess      = "partial_success"
 	mallWeatherAlertStatusFiring               = "FIRING"
@@ -69,6 +71,7 @@ var mallWeatherMetricDefinitions = []MallWeatherMetricDefinition{
 	{Name: MallWeatherMetricQueueLagSeconds, Labels: []string{"kind"}},
 	{Name: MallWeatherMetricDeadLettersTotal, Labels: []string{"kind", "reason"}},
 	{Name: MallWeatherMetricExportRowsTotal},
+	{Name: MallWeatherMetricExportRunsTotal, Labels: []string{"status"}},
 	{Name: MallWeatherMetricFeishuRunsTotal, Labels: []string{"status"}},
 	{Name: MallWeatherMetricFeishuRowsTotal, Labels: []string{"status"}},
 }
@@ -221,6 +224,27 @@ func evaluateMallWeatherCounterAlerts(counters []MallWeatherMetricCounterSample)
 				alerts = append(alerts, mallWeatherOperationalAlert(
 					"MALL_WEATHER_DEAD_LETTERS_PRESENT",
 					mallWeatherAlertSeverityCritical,
+					counter.Name,
+					counter.Labels,
+					float64(counter.Value),
+					1,
+				))
+			}
+		case MallWeatherMetricExportRunsTotal:
+			switch counter.Labels["status"] {
+			case mallWeatherMetricStatusFailed:
+				alerts = append(alerts, mallWeatherOperationalAlert(
+					"MALL_WEATHER_EXPORT_RUNS_FAILED",
+					mallWeatherAlertSeverityCritical,
+					counter.Name,
+					counter.Labels,
+					float64(counter.Value),
+					1,
+				))
+			case "cancelled":
+				alerts = append(alerts, mallWeatherOperationalAlert(
+					"MALL_WEATHER_EXPORT_RUNS_CANCELLED",
+					mallWeatherAlertSeverityWarning,
 					counter.Name,
 					counter.Labels,
 					float64(counter.Value),
@@ -519,6 +543,25 @@ func recordMallWeatherExportRows(
 		return
 	}
 	recorder.AddCounter(MallWeatherMetricExportRowsTotal, nil, result.ProcessedRows)
+}
+
+func recordMallWeatherExportRun(
+	recorder mallWeatherMetricRecorder,
+	status string,
+) {
+	if recorder == nil {
+		return
+	}
+	switch status {
+	case mallWeatherMetricStatusSucceeded, mallWeatherMetricStatusFailed, "cancelled":
+	default:
+		status = "unknown"
+	}
+	recorder.AddCounter(
+		MallWeatherMetricExportRunsTotal,
+		map[string]string{"status": status},
+		1,
+	)
 }
 
 func recordMallWeatherFetch(

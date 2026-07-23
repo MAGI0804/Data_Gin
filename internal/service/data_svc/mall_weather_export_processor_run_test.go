@@ -87,6 +87,8 @@ func TestMallWeatherExportProcessorRecordsSuccessfulExportRows(t *testing.T) {
 	}
 	assertFakeMallWeatherMetricCounters(t, metrics.counters, []fakeMallWeatherMetricCounter{{
 		name: MallWeatherMetricExportRowsTotal, value: 3,
+	}, {
+		name: MallWeatherMetricExportRunsTotal, labels: map[string]string{"status": mallWeatherMetricStatusSucceeded}, value: 1,
 	}})
 }
 
@@ -108,6 +110,59 @@ func TestMallWeatherExportProcessorDoesNotRecordRowsForUnfinishedExport(t *testi
 	if len(metrics.counters) != 0 {
 		t.Fatalf("metrics=%+v, want none", metrics.counters)
 	}
+}
+
+func TestMallWeatherExportProcessorRecordsTerminalRunMetrics(t *testing.T) {
+	t.Run("failed final attempt", func(t *testing.T) {
+		store := newFakeMallWeatherExportRunStore(t)
+		metrics := &fakeMallWeatherMetricRecorder{}
+		processor := newTestMallWeatherExportProcessorWithMetrics(
+			t,
+			store,
+			mallWeatherExportRendererFunc(writeFakeMallWeatherExportArtifact),
+			&fakeMallWeatherExportObjectStore{uploadErr: errors.New("permanent OSS failure")},
+			uuid.NewString(),
+			metrics,
+		)
+
+		err := processor.Process(t.Context(), 17, false)
+		if !errors.Is(err, ErrMallWeatherExportProcessNonRetryable) {
+			t.Fatalf("Process() error=%v", err)
+		}
+		assertFakeMallWeatherMetricCounters(t, metrics.counters, []fakeMallWeatherMetricCounter{{
+			name: MallWeatherMetricExportRunsTotal, labels: map[string]string{"status": mallWeatherMetricStatusFailed}, value: 1,
+		}})
+	})
+
+	t.Run("cancelled", func(t *testing.T) {
+		store := newFakeMallWeatherExportRunStore(t)
+		store.progressControl = data_dao.MallWeatherExportRunControlCancelRequested
+		metrics := &fakeMallWeatherMetricRecorder{}
+		renderer := mallWeatherExportRendererFunc(func(
+			_ context.Context,
+			_ MallWeatherExportRenderRequest,
+			onProgress func(MallWeatherExportRenderProgress) error,
+		) (MallWeatherExportRenderResult, error) {
+			return MallWeatherExportRenderResult{}, onProgress(MallWeatherExportRenderProgress{
+				ProcessedRows: 1, CurrentSheet: "商场", Cursor: []byte(`{"afterId":1}`),
+			})
+		})
+		processor := newTestMallWeatherExportProcessorWithMetrics(
+			t,
+			store,
+			renderer,
+			&fakeMallWeatherExportObjectStore{},
+			uuid.NewString(),
+			metrics,
+		)
+
+		if err := processor.Process(t.Context(), 17, true); err != nil {
+			t.Fatalf("Process() error=%v", err)
+		}
+		assertFakeMallWeatherMetricCounters(t, metrics.counters, []fakeMallWeatherMetricCounter{{
+			name: MallWeatherMetricExportRunsTotal, labels: map[string]string{"status": "cancelled"}, value: 1,
+		}})
+	})
 }
 
 func TestMallWeatherExportProcessorRejectsMissingMetricsRecorder(t *testing.T) {

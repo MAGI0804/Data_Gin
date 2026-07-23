@@ -257,6 +257,7 @@ func (processor *MallWeatherExportProcessor) processOwnedRun(
 	)
 	if err == nil {
 		recordMallWeatherExportRows(processor.metrics, renderResult)
+		recordMallWeatherExportRun(processor.metrics, mallWeatherMetricStatusSucceeded)
 		return nil
 	}
 	deleteErr := processor.deleteObject(ctx, objectStore, objectKey)
@@ -328,6 +329,9 @@ func (processor *MallWeatherExportProcessor) finishError(
 		if errors.Is(err, data_dao.ErrMallWeatherExportRunLeaseLost) {
 			return nil
 		}
+		if err == nil {
+			recordMallWeatherExportRun(processor.metrics, "cancelled")
+		}
 		return err
 	}
 	if !permanent && retryAllowed {
@@ -344,6 +348,7 @@ func (processor *MallWeatherExportProcessor) finishError(
 	if err != nil {
 		return errors.Join(cause, err)
 	}
+	recordMallWeatherExportRun(processor.metrics, mallWeatherMetricStatusFailed)
 	return errors.Join(ErrMallWeatherExportProcessNonRetryable, cause)
 }
 
