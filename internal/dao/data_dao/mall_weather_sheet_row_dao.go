@@ -210,6 +210,29 @@ func (dao *MallWeatherSheetRowDAO) ResetMappings(
 	return nil
 }
 
+func (dao *MallWeatherSheetRowDAO) MarkUninitialized(
+	ctx context.Context,
+	destinationID uint,
+	datasetKind string,
+) error {
+	if dao == nil || dao.db == nil || ctx == nil || destinationID == 0 ||
+		!validMallWeatherSheetDataset(datasetKind) {
+		return errors.New("mall weather sheet row: invalid initialization marker reset")
+	}
+	result := dao.db.WithContext(ctx).
+		Where(
+			"destination_id = ? AND dataset_kind = ? AND business_key = ?",
+			destinationID,
+			datasetKind,
+			mallWeatherSheetMappingStateKey,
+		).
+		Delete(&model.MallWeatherSheetRow{})
+	if result.Error != nil {
+		return fmt.Errorf("mall weather sheet row: mark uninitialized: %w", result.Error)
+	}
+	return nil
+}
+
 func (dao *MallWeatherSheetRowDAO) MarkInitialized(
 	ctx context.Context,
 	destinationID uint,

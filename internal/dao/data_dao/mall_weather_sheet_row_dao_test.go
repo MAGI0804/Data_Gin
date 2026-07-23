@@ -39,6 +39,9 @@ func TestMallWeatherSheetRowDAOValidatesInputsBeforeDatabase(t *testing.T) {
 	if err := dao.ResetMappings(context.Background(), 1, "hourly"); err == nil {
 		t.Fatal("ResetMappings() accepted unavailable database")
 	}
+	if err := dao.MarkUninitialized(context.Background(), 1, "hourly"); err == nil {
+		t.Fatal("MarkUninitialized() accepted unavailable database")
+	}
 	if err := dao.MarkInitialized(
 		context.Background(), 1, "hourly", credential.EnvFeishuWeatherHourlySheetID, checksum, now,
 	); err == nil {
@@ -63,6 +66,9 @@ func TestMallWeatherSheetRowDAOAcceptsBoundedMappings(t *testing.T) {
 		t.Context(), 17, "hourly", credential.EnvFeishuWeatherHourlySheetID, checksum, now,
 	); err != nil {
 		t.Fatalf("MarkInitialized() error=%v", err)
+	}
+	if err := dao.MarkUninitialized(t.Context(), 17, "hourly"); err != nil {
+		t.Fatalf("MarkUninitialized() error=%v", err)
 	}
 	if err := dao.ResetMappings(t.Context(), 17, "hourly"); err != nil {
 		t.Fatalf("ResetMappings() error=%v", err)
