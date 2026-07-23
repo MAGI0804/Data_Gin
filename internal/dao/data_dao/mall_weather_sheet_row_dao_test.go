@@ -30,6 +30,12 @@ func TestMallWeatherSheetRowDAOValidatesInputsBeforeDatabase(t *testing.T) {
 	); err == nil {
 		t.Fatal("UpsertMappings() accepted unavailable database")
 	}
+	if err := dao.CreateScannedMappings(
+		context.Background(), 1, "hourly", credential.EnvFeishuWeatherHourlySheetID,
+		[]MallWeatherSheetRowMapping{{BusinessKey: "sha256:key", RowNumber: 2, Checksum: checksum}}, now,
+	); err == nil {
+		t.Fatal("CreateScannedMappings() accepted unavailable database")
+	}
 	if err := dao.ResetMappings(context.Background(), 1, "hourly"); err == nil {
 		t.Fatal("ResetMappings() accepted unavailable database")
 	}
