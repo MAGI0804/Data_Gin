@@ -162,10 +162,12 @@ func parseMallWeatherFeishuDestinationConfig(raw string) (MallWeatherFeishuDesti
 		config.WriteMode == "overwrite_range"
 	isBatchSizeValid := config.BatchRows >= 1 && config.BatchRows <= maxMallWeatherFeishuBatchRows
 	isTimeoutValid := config.TimeoutSeconds >= 1 && config.TimeoutSeconds <= maxMallWeatherFeishuTimeout
+	isCreateIfMissingSupported := !config.CreateIfMissing
 	isMappingSizeValid := len(config.SheetIDEnvMapping) >= 1 &&
 		len(config.SheetIDEnvMapping) <= len(mallWeatherFeishuDatasetKinds)
 	if !isSpreadsheetReferenceValid || !mallWeatherExportProfileCodePattern.MatchString(config.ProfileCode) ||
-		!isWriteModeValid || !isBatchSizeValid || !isTimeoutValid || !isMappingSizeValid {
+		!isWriteModeValid || !isBatchSizeValid || !isTimeoutValid || !isCreateIfMissingSupported ||
+		!isMappingSizeValid {
 		return config, errors.New("mall weather feishu destination: invalid config values")
 	}
 	normalizedMapping := make(map[string]string, len(config.SheetIDEnvMapping))

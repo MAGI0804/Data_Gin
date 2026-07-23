@@ -125,6 +125,12 @@ func TestMallWeatherFeishuDestinationRejectsInvalidConfig(t *testing.T) {
 				config["timeout_seconds"] = maxMallWeatherFeishuTimeout + 1
 			},
 		},
+		{
+			name: "create missing sheets unsupported",
+			mutate: func(config map[string]any) {
+				config["createIfMissing"] = true
+			},
+		},
 	}
 
 	for _, test := range tests {
