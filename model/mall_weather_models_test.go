@@ -77,6 +77,7 @@ func TestMallWeatherBusinessIndexes(t *testing.T) {
 		{"latest", &MallWeatherLatest{}, "uk_weather_latest", []string{"mall_id", "data_kind", "business_key"}},
 		{"feishu pipeline run", &MallWeatherFeishuRun{}, "uk_weather_feishu_run", []string{"pipeline_run_id"}},
 		{"sheet row", &MallWeatherSheetRow{}, "uk_weather_sheet_row", []string{"destination_id", "dataset_kind", "business_key"}},
+		{"sheet row number", &MallWeatherSheetRow{}, "uk_weather_sheet_row_number", []string{"destination_id", "dataset_kind", "row_number"}},
 		{"user permission", &MallWeatherUserPermission{}, "uk_mall_weather_permission", []string{"user_id", "permission"}},
 		{"API idempotency", &APIIdempotencyRecord{}, "uk_api_idempotency", []string{"operation_scope", "actor_user_id", "key_hash"}},
 	}

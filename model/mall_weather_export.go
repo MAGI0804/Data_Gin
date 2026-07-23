@@ -63,11 +63,11 @@ func (MallWeatherFeishuRun) TableName() string { return "mall_weather_feishu_run
 
 type MallWeatherSheetRow struct {
 	BaseModel
-	DestinationID uint      `gorm:"column:destination_id;not null;uniqueIndex:uk_weather_sheet_row,priority:1;index" json:"destination_id"`
-	DatasetKind   string    `gorm:"column:dataset_kind;size:32;not null;uniqueIndex:uk_weather_sheet_row,priority:2" json:"dataset_kind"`
+	DestinationID uint      `gorm:"column:destination_id;not null;uniqueIndex:uk_weather_sheet_row,priority:1;uniqueIndex:uk_weather_sheet_row_number,priority:1;index" json:"destination_id"`
+	DatasetKind   string    `gorm:"column:dataset_kind;size:32;not null;uniqueIndex:uk_weather_sheet_row,priority:2;uniqueIndex:uk_weather_sheet_row_number,priority:2" json:"dataset_kind"`
 	BusinessKey   string    `gorm:"column:business_key;size:512;not null;uniqueIndex:uk_weather_sheet_row,priority:3" json:"business_key"`
 	SheetIDEnv    string    `gorm:"column:sheet_id_env;size:128;not null" json:"sheet_id_env"`
-	RowNumber     int64     `gorm:"column:row_number;not null" json:"row_number"`
+	RowNumber     int64     `gorm:"column:row_number;not null;uniqueIndex:uk_weather_sheet_row_number,priority:3" json:"row_number"`
 	Checksum      string    `gorm:"column:checksum;type:char(64);not null" json:"checksum"`
 	LastSyncedAt  time.Time `gorm:"column:last_synced_at;type:datetime(3);not null;index" json:"last_synced_at"`
 	WeatherTimestamps
