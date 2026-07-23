@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"gin-biz-web-api/connector/caiyun"
+	weatherdomain "gin-biz-web-api/internal/weather"
 	"gin-biz-web-api/job"
 	"gin-biz-web-api/model"
 	"gin-biz-web-api/pkg/providerhttp"
@@ -37,6 +38,17 @@ const (
 	MallWeatherMetricFeishuRowsTotal          = "mall_weather_feishu_rows_total"
 	mallWeatherMetricStatusSuccess            = "success"
 	mallWeatherMetricStatusFailed             = "failed"
+	mallWeatherAlertStatusFiring              = "FIRING"
+	mallWeatherAlertSeverityWarning           = "WARNING"
+	mallWeatherAlertSeverityCritical          = "CRITICAL"
+	mallWeatherFetchAlertMinSamples           = int64(20)
+	mallWeatherProviderAlertMinSamples        = int64(20)
+	mallWeatherFetchSuccessWarningRatio       = 0.95
+	mallWeatherFetchSuccessCriticalRatio      = 0.80
+	mallWeatherProviderRateLimitWarningRatio  = 0.05
+	mallWeatherProviderRateLimitCriticalRatio = 0.20
+	mallWeatherQueueLagWarningSeconds         = 60
+	mallWeatherQueueLagCriticalSeconds        = 300
 )
 
 var mallWeatherMetricDefinitions = []MallWeatherMetricDefinition{
@@ -87,6 +99,17 @@ type MallWeatherMetricsResult struct {
 	Definitions []MallWeatherMetricDefinition    `json:"definitions"`
 	Counters    []MallWeatherMetricCounterSample `json:"counters"`
 	Gauges      []MallWeatherMetricGaugeSample   `json:"gauges"`
+	Alerts      []MallWeatherOperationalAlert    `json:"alerts"`
+}
+
+type MallWeatherOperationalAlert struct {
+	Code      string            `json:"code"`
+	Severity  string            `json:"severity"`
+	Status    string            `json:"status"`
+	Metric    string            `json:"metric"`
+	Labels    map[string]string `json:"labels,omitempty"`
+	Value     float64           `json:"value"`
+	Threshold float64           `json:"threshold"`
 }
 
 type mallWeatherMetricSnapshotter interface {
@@ -123,11 +146,146 @@ func (service *MallWeatherMetricsService) Snapshot(
 	if actorID == 0 {
 		return nil, ErrMallForbidden
 	}
+	counters := service.metrics.CounterSnapshot()
+	gauges := service.metrics.GaugeSnapshot()
 	return &MallWeatherMetricsResult{
 		Definitions: MallWeatherMetricDefinitions(),
-		Counters:    service.metrics.CounterSnapshot(),
-		Gauges:      service.metrics.GaugeSnapshot(),
+		Counters:    counters,
+		Gauges:      gauges,
+		Alerts:      EvaluateMallWeatherOperationalAlerts(counters, gauges),
 	}, nil
+}
+
+func EvaluateMallWeatherOperationalAlerts(
+	counters []MallWeatherMetricCounterSample,
+	gauges []MallWeatherMetricGaugeSample,
+) []MallWeatherOperationalAlert {
+	alerts := make([]MallWeatherOperationalAlert, 0)
+	alerts = append(alerts, evaluateMallWeatherCounterAlerts(counters)...)
+	alerts = append(alerts, evaluateMallWeatherGaugeAlerts(gauges)...)
+	sort.Slice(alerts, func(left, right int) bool {
+		leftKey := mallWeatherMetricSeriesKey(alerts[left].Code, alerts[left].Labels)
+		rightKey := mallWeatherMetricSeriesKey(alerts[right].Code, alerts[right].Labels)
+		return leftKey < rightKey
+	})
+	return alerts
+}
+
+func evaluateMallWeatherCounterAlerts(counters []MallWeatherMetricCounterSample) []MallWeatherOperationalAlert {
+	var fetchTotal, fetchFailed, providerTotal, providerRateLimited int64
+	alerts := make([]MallWeatherOperationalAlert, 0)
+	for _, counter := range counters {
+		switch counter.Name {
+		case MallWeatherMetricFetchTotal:
+			fetchTotal += counter.Value
+			if counter.Labels["status"] == mallWeatherMetricStatusFailed {
+				fetchFailed += counter.Value
+			}
+		case MallWeatherMetricProviderRequestsTotal:
+			providerTotal += counter.Value
+		case MallWeatherMetricProviderRateLimitedTotal:
+			providerRateLimited += counter.Value
+		case MallWeatherMetricParseWarningsTotal:
+			if counter.Value > 0 {
+				alerts = append(alerts, mallWeatherOperationalAlert(
+					"MALL_WEATHER_PARSE_WARNINGS_PRESENT",
+					mallWeatherAlertSeverityWarning,
+					counter.Name,
+					counter.Labels,
+					float64(counter.Value),
+					1,
+				))
+			}
+		}
+	}
+	if fetchTotal >= mallWeatherFetchAlertMinSamples {
+		successRatio := float64(fetchTotal-fetchFailed) / float64(fetchTotal)
+		switch {
+		case successRatio < mallWeatherFetchSuccessCriticalRatio:
+			alerts = append(alerts, mallWeatherOperationalAlert("MALL_WEATHER_FETCH_SUCCESS_RATE_CRITICAL", mallWeatherAlertSeverityCritical, MallWeatherMetricFetchTotal, nil, successRatio, mallWeatherFetchSuccessCriticalRatio))
+		case successRatio < mallWeatherFetchSuccessWarningRatio:
+			alerts = append(alerts, mallWeatherOperationalAlert("MALL_WEATHER_FETCH_SUCCESS_RATE_LOW", mallWeatherAlertSeverityWarning, MallWeatherMetricFetchTotal, nil, successRatio, mallWeatherFetchSuccessWarningRatio))
+		}
+	}
+	if providerTotal >= mallWeatherProviderAlertMinSamples {
+		rateLimitRatio := float64(providerRateLimited) / float64(providerTotal)
+		switch {
+		case rateLimitRatio >= mallWeatherProviderRateLimitCriticalRatio:
+			alerts = append(alerts, mallWeatherOperationalAlert("MALL_WEATHER_PROVIDER_RATE_LIMITED_CRITICAL", mallWeatherAlertSeverityCritical, MallWeatherMetricProviderRateLimitedTotal, nil, rateLimitRatio, mallWeatherProviderRateLimitCriticalRatio))
+		case rateLimitRatio >= mallWeatherProviderRateLimitWarningRatio:
+			alerts = append(alerts, mallWeatherOperationalAlert("MALL_WEATHER_PROVIDER_RATE_LIMITED_HIGH", mallWeatherAlertSeverityWarning, MallWeatherMetricProviderRateLimitedTotal, nil, rateLimitRatio, mallWeatherProviderRateLimitWarningRatio))
+		}
+	}
+	return alerts
+}
+
+func evaluateMallWeatherGaugeAlerts(gauges []MallWeatherMetricGaugeSample) []MallWeatherOperationalAlert {
+	alerts := make([]MallWeatherOperationalAlert, 0)
+	for _, gauge := range gauges {
+		switch gauge.Name {
+		case MallWeatherMetricProviderCircuitOpen:
+			if gauge.Value >= 1 {
+				alerts = append(alerts, mallWeatherOperationalAlert("MALL_WEATHER_PROVIDER_CIRCUIT_OPEN", mallWeatherAlertSeverityCritical, gauge.Name, nil, gauge.Value, 1))
+			}
+		case MallWeatherMetricDataAgeSeconds:
+			warning, critical, ok := mallWeatherDataAgeAlertThresholds(gauge.Labels["kind"])
+			if !ok {
+				continue
+			}
+			switch {
+			case gauge.Value >= critical:
+				alerts = append(alerts, mallWeatherOperationalAlert("MALL_WEATHER_DATA_AGE_CRITICAL", mallWeatherAlertSeverityCritical, gauge.Name, gauge.Labels, gauge.Value, critical))
+			case gauge.Value >= warning:
+				alerts = append(alerts, mallWeatherOperationalAlert("MALL_WEATHER_DATA_AGE_HIGH", mallWeatherAlertSeverityWarning, gauge.Name, gauge.Labels, gauge.Value, warning))
+			}
+		case MallWeatherMetricQueueLagSeconds:
+			switch {
+			case gauge.Value >= mallWeatherQueueLagCriticalSeconds:
+				alerts = append(alerts, mallWeatherOperationalAlert("MALL_WEATHER_QUEUE_LAG_CRITICAL", mallWeatherAlertSeverityCritical, gauge.Name, gauge.Labels, gauge.Value, mallWeatherQueueLagCriticalSeconds))
+			case gauge.Value >= mallWeatherQueueLagWarningSeconds:
+				alerts = append(alerts, mallWeatherOperationalAlert("MALL_WEATHER_QUEUE_LAG_HIGH", mallWeatherAlertSeverityWarning, gauge.Name, gauge.Labels, gauge.Value, mallWeatherQueueLagWarningSeconds))
+			}
+		}
+	}
+	return alerts
+}
+
+func mallWeatherOperationalAlert(
+	code string,
+	severity string,
+	metric string,
+	labels map[string]string,
+	value float64,
+	threshold float64,
+) MallWeatherOperationalAlert {
+	return MallWeatherOperationalAlert{
+		Code:      code,
+		Severity:  severity,
+		Status:    mallWeatherAlertStatusFiring,
+		Metric:    metric,
+		Labels:    copyMallWeatherMetricLabels(labels),
+		Value:     value,
+		Threshold: threshold,
+	}
+}
+
+func mallWeatherDataAgeAlertThresholds(taskKind string) (float64, float64, bool) {
+	dataKind := ""
+	switch taskKind {
+	case "fast":
+		dataKind = model.MallWeatherDataKindRealtime
+	case "full", "repair", "manual":
+		dataKind = model.MallWeatherDataKindHourly
+	case "lifeindex":
+		dataKind = model.MallWeatherDataKindLife
+	default:
+		return 0, 0, false
+	}
+	thresholds, err := weatherdomain.FreshnessThresholdsForKind(dataKind)
+	if err != nil {
+		return 0, 0, false
+	}
+	return thresholds.Warning.Seconds(), thresholds.Critical.Seconds(), true
 }
 
 type inMemoryMallWeatherMetricRecorder struct {

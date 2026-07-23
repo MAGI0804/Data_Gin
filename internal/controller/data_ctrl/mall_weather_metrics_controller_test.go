@@ -36,6 +36,15 @@ func TestMallWeatherMetricsControllerReturnsSnapshot(t *testing.T) {
 					Labels: map[string]string{"kind": "full"},
 					Value:  12.5,
 				}},
+				Alerts: []data_svc.MallWeatherOperationalAlert{{
+					Code:      "MALL_WEATHER_QUEUE_LAG_HIGH",
+					Severity:  "WARNING",
+					Status:    "FIRING",
+					Metric:    data_svc.MallWeatherMetricQueueLagSeconds,
+					Labels:    map[string]string{"kind": "full"},
+					Value:     75,
+					Threshold: 60,
+				}},
 			}, nil
 		},
 	}
@@ -46,6 +55,8 @@ func TestMallWeatherMetricsControllerReturnsSnapshot(t *testing.T) {
 		!strings.Contains(body, `"definitions":[`) ||
 		!strings.Contains(body, `"counters":[`) ||
 		!strings.Contains(body, `"gauges":[`) ||
+		!strings.Contains(body, `"alerts":[`) ||
+		!strings.Contains(body, `"code":"MALL_WEATHER_QUEUE_LAG_HIGH"`) ||
 		!strings.Contains(body, `"value":9`) ||
 		!strings.Contains(body, `"value":12.5`) {
 		t.Fatalf("status=%d body=%s", recorder.Code, body)

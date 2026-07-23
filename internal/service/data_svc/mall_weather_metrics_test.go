@@ -367,11 +367,113 @@ func TestRecordMallWeatherParseWarnings(t *testing.T) {
 	}
 }
 
+func TestEvaluateMallWeatherOperationalAlerts(t *testing.T) {
+	t.Parallel()
+
+	counters := []MallWeatherMetricCounterSample{
+		{Name: MallWeatherMetricFetchTotal, Labels: map[string]string{"kind": "full", "status": mallWeatherMetricStatusSuccess}, Value: 18},
+		{Name: MallWeatherMetricFetchTotal, Labels: map[string]string{"kind": "full", "status": mallWeatherMetricStatusFailed}, Value: 2},
+		{Name: MallWeatherMetricProviderRequestsTotal, Labels: map[string]string{"endpoint": "v26_weather", "status": mallWeatherMetricStatusSuccess}, Value: 30},
+		{Name: MallWeatherMetricProviderRateLimitedTotal, Value: 6},
+		{Name: MallWeatherMetricParseWarningsTotal, Labels: map[string]string{"field": "hourly"}, Value: 2},
+	}
+	gauges := []MallWeatherMetricGaugeSample{
+		{Name: MallWeatherMetricProviderCircuitOpen, Value: 1},
+		{Name: MallWeatherMetricDataAgeSeconds, Labels: map[string]string{"kind": "fast"}, Value: (31 * time.Minute).Seconds()},
+		{Name: MallWeatherMetricQueueLagSeconds, Labels: map[string]string{"kind": "full"}, Value: 301},
+	}
+
+	got := EvaluateMallWeatherOperationalAlerts(counters, gauges)
+	want := []MallWeatherOperationalAlert{
+		{
+			Code:      "MALL_WEATHER_DATA_AGE_CRITICAL",
+			Severity:  mallWeatherAlertSeverityCritical,
+			Status:    mallWeatherAlertStatusFiring,
+			Metric:    MallWeatherMetricDataAgeSeconds,
+			Labels:    map[string]string{"kind": "fast"},
+			Value:     (31 * time.Minute).Seconds(),
+			Threshold: (30 * time.Minute).Seconds(),
+		},
+		{
+			Code:      "MALL_WEATHER_FETCH_SUCCESS_RATE_LOW",
+			Severity:  mallWeatherAlertSeverityWarning,
+			Status:    mallWeatherAlertStatusFiring,
+			Metric:    MallWeatherMetricFetchTotal,
+			Value:     0.9,
+			Threshold: mallWeatherFetchSuccessWarningRatio,
+		},
+		{
+			Code:      "MALL_WEATHER_PARSE_WARNINGS_PRESENT",
+			Severity:  mallWeatherAlertSeverityWarning,
+			Status:    mallWeatherAlertStatusFiring,
+			Metric:    MallWeatherMetricParseWarningsTotal,
+			Labels:    map[string]string{"field": "hourly"},
+			Value:     2,
+			Threshold: 1,
+		},
+		{
+			Code:      "MALL_WEATHER_PROVIDER_CIRCUIT_OPEN",
+			Severity:  mallWeatherAlertSeverityCritical,
+			Status:    mallWeatherAlertStatusFiring,
+			Metric:    MallWeatherMetricProviderCircuitOpen,
+			Value:     1,
+			Threshold: 1,
+		},
+		{
+			Code:      "MALL_WEATHER_PROVIDER_RATE_LIMITED_CRITICAL",
+			Severity:  mallWeatherAlertSeverityCritical,
+			Status:    mallWeatherAlertStatusFiring,
+			Metric:    MallWeatherMetricProviderRateLimitedTotal,
+			Value:     0.2,
+			Threshold: mallWeatherProviderRateLimitCriticalRatio,
+		},
+		{
+			Code:      "MALL_WEATHER_QUEUE_LAG_CRITICAL",
+			Severity:  mallWeatherAlertSeverityCritical,
+			Status:    mallWeatherAlertStatusFiring,
+			Metric:    MallWeatherMetricQueueLagSeconds,
+			Labels:    map[string]string{"kind": "full"},
+			Value:     301,
+			Threshold: mallWeatherQueueLagCriticalSeconds,
+		},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("EvaluateMallWeatherOperationalAlerts()=%+v want %+v", got, want)
+	}
+
+	got[0].Labels["kind"] = "mutated"
+	fresh := EvaluateMallWeatherOperationalAlerts(counters, gauges)
+	if fresh[0].Labels["kind"] != "fast" {
+		t.Fatalf("EvaluateMallWeatherOperationalAlerts() exposed mutable labels: %+v", fresh[0])
+	}
+}
+
+func TestEvaluateMallWeatherOperationalAlertsIgnoresSmallSamples(t *testing.T) {
+	t.Parallel()
+
+	alerts := EvaluateMallWeatherOperationalAlerts(
+		[]MallWeatherMetricCounterSample{
+			{Name: MallWeatherMetricFetchTotal, Labels: map[string]string{"status": mallWeatherMetricStatusFailed}, Value: 1},
+			{Name: MallWeatherMetricProviderRequestsTotal, Labels: map[string]string{"status": mallWeatherMetricStatusFailed}, Value: 1},
+			{Name: MallWeatherMetricProviderRateLimitedTotal, Value: 1},
+		},
+		[]MallWeatherMetricGaugeSample{
+			{Name: MallWeatherMetricProviderCircuitOpen, Value: 0},
+			{Name: MallWeatherMetricDataAgeSeconds, Labels: map[string]string{"kind": "unknown"}, Value: math.MaxFloat64},
+			{Name: MallWeatherMetricQueueLagSeconds, Labels: map[string]string{"kind": "full"}, Value: mallWeatherQueueLagWarningSeconds - 1},
+		},
+	)
+	if len(alerts) != 0 {
+		t.Fatalf("EvaluateMallWeatherOperationalAlerts()=%+v want none", alerts)
+	}
+}
+
 func TestMallWeatherMetricsServiceSnapshotReturnsContractAndCounters(t *testing.T) {
 	t.Parallel()
 
 	recorder := newInMemoryMallWeatherMetricRecorder()
 	recorder.AddCounter(MallWeatherMetricFeishuRowsTotal, map[string]string{"status": "success"}, 5)
+	recorder.AddCounter(MallWeatherMetricParseWarningsTotal, map[string]string{"field": "hourly"}, 1)
 	recorder.SetGauge(MallWeatherMetricDataAgeSeconds, map[string]string{"kind": "full"}, 12)
 	service, err := newMallWeatherMetricsServiceWithRecorder(recorder)
 	if err != nil {
@@ -382,26 +484,30 @@ func TestMallWeatherMetricsServiceSnapshotReturnsContractAndCounters(t *testing.
 	if err != nil {
 		t.Fatalf("Snapshot() error=%v", err)
 	}
-	if len(result.Definitions) == 0 || len(result.Counters) != 1 || len(result.Gauges) != 1 ||
+	if len(result.Definitions) == 0 || len(result.Counters) != 2 || len(result.Gauges) != 1 ||
+		len(result.Alerts) != 1 ||
 		result.Counters[0].Name != MallWeatherMetricFeishuRowsTotal ||
 		result.Counters[0].Labels["status"] != "success" ||
 		result.Counters[0].Value != 5 ||
 		result.Gauges[0].Name != MallWeatherMetricDataAgeSeconds ||
 		result.Gauges[0].Labels["kind"] != "full" ||
-		result.Gauges[0].Value != 12 {
+		result.Gauges[0].Value != 12 ||
+		result.Alerts[0].Code != "MALL_WEATHER_PARSE_WARNINGS_PRESENT" {
 		t.Fatalf("Snapshot()=%+v", result)
 	}
 
 	result.Definitions[0].Name = "mutated"
 	result.Counters[0].Labels["status"] = "mutated"
 	result.Gauges[0].Labels["kind"] = "mutated"
+	result.Alerts[0].Labels["field"] = "mutated"
 	fresh, err := service.Snapshot(context.Background(), 17)
 	if err != nil {
 		t.Fatalf("Snapshot() second error=%v", err)
 	}
 	if fresh.Definitions[0].Name == "mutated" ||
 		fresh.Counters[0].Labels["status"] != "success" ||
-		fresh.Gauges[0].Labels["kind"] != "full" {
+		fresh.Gauges[0].Labels["kind"] != "full" ||
+		fresh.Alerts[0].Labels["field"] != "hourly" {
 		t.Fatalf("Snapshot() exposed mutable state: %+v", fresh)
 	}
 }
