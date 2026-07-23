@@ -94,6 +94,10 @@ func TestMallWeatherProcessorRecordsSuccessfulFetchGaugeMetrics(t *testing.T) {
 			Labels: map[string]string{"kind": "fast"},
 			Value:  1,
 		},
+		{
+			Name:  MallWeatherMetricProviderCircuitOpen,
+			Value: 0,
+		},
 	}
 	if got := metrics.GaugeSnapshot(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("GaugeSnapshot()=%+v want %+v", got, want)
@@ -313,6 +317,73 @@ func TestMallWeatherProcessorDoesNotRecordProviderMetricBeforeProviderCall(t *te
 	}})
 }
 
+func TestMallWeatherProcessorSkipsProviderWhenCircuitIsOpen(t *testing.T) {
+	provider := &fakeMallWeatherProvider{}
+	store := newFakeMallWeatherTaskStore(data_dao.FetchAttemptDispositionAcquired)
+	metrics := newInMemoryMallWeatherMetricRecorder()
+	breaker := &fakeWeatherCircuitBreaker{allowed: false}
+	processor := newTestMallWeatherProcessorWithGuardMetricsAndBreaker(
+		t,
+		provider,
+		store,
+		&fakeWeatherTaskLocker{acquired: true},
+		&fakeWeatherRateLimiter{},
+		metrics,
+		breaker,
+	)
+
+	err := processor.Process(context.Background(), job.TypeMallWeatherFull, job.MallTaskPayload{
+		MallID: 7, TaskWindow: "full:7:2026072203",
+	})
+	var processError *MallWeatherProcessError
+	if !errors.As(err, &processError) || !processError.Retryable || processError.Code != "CIRCUIT_OPEN" ||
+		provider.weatherCalls != 0 || breaker.allowCalls != 1 || breaker.failureCalls != 0 {
+		t.Fatalf("Process() error=%v providerCalls=%d breaker=%+v", err, provider.weatherCalls, breaker)
+	}
+	if !mallWeatherMetricGaugeExists(metrics.GaugeSnapshot(), MallWeatherMetricProviderCircuitOpen, nil, 1) {
+		t.Fatalf("GaugeSnapshot()=%+v missing circuit open gauge", metrics.GaugeSnapshot())
+	}
+	if !mallWeatherMetricCounterExists(
+		metrics.CounterSnapshot(),
+		MallWeatherMetricFetchTotal,
+		map[string]string{"kind": "full", "status": mallWeatherMetricStatusFailed},
+		1,
+	) {
+		t.Fatalf("CounterSnapshot()=%+v missing failed fetch counter", metrics.CounterSnapshot())
+	}
+}
+
+func TestMallWeatherProcessorReportsProviderCircuitSuccess(t *testing.T) {
+	raw := readMallWeatherFixture(t, "../../../connector/caiyun/testdata/weather_v26_realtime.json")
+	provider := &fakeMallWeatherProvider{weatherResponse: &caiyun.ProviderResponse{
+		EndpointKind: caiyun.EndpointWeatherV26, HTTPStatus: 200, ProviderStatus: "ok", RawBody: raw,
+	}}
+	store := newFakeMallWeatherTaskStore(data_dao.FetchAttemptDispositionAcquired)
+	metrics := newInMemoryMallWeatherMetricRecorder()
+	breaker := &fakeWeatherCircuitBreaker{allowed: true}
+	processor := newTestMallWeatherProcessorWithGuardMetricsAndBreaker(
+		t,
+		provider,
+		store,
+		&fakeWeatherTaskLocker{acquired: true},
+		&fakeWeatherRateLimiter{},
+		metrics,
+		breaker,
+	)
+
+	if err := processor.Process(context.Background(), job.TypeMallWeatherFast, job.MallTaskPayload{
+		MallID: 7, TaskWindow: "fast:7:202607220310",
+	}); err != nil {
+		t.Fatalf("Process() error=%v", err)
+	}
+	if breaker.allowCalls != 1 || breaker.successCalls != 1 || breaker.failureCalls != 0 {
+		t.Fatalf("breaker=%+v", breaker)
+	}
+	if !mallWeatherMetricGaugeExists(metrics.GaugeSnapshot(), MallWeatherMetricProviderCircuitOpen, nil, 0) {
+		t.Fatalf("GaugeSnapshot()=%+v missing circuit closed gauge", metrics.GaugeSnapshot())
+	}
+}
+
 func TestMallWeatherProcessorPersistsAvailableV26ModulesAsPartialSuccess(t *testing.T) {
 	raw := readMallWeatherFixture(t, "../../../connector/caiyun/testdata/weather_v26_realtime.json")
 	provider := &fakeMallWeatherProvider{weatherResponse: &caiyun.ProviderResponse{
@@ -430,7 +501,16 @@ func TestMallWeatherProcessorClassifiesTransportAndParseFailures(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			store := newFakeMallWeatherTaskStore(data_dao.FetchAttemptDispositionAcquired)
-			processor := newTestMallWeatherProcessor(t, test.provider, store)
+			breaker := &fakeWeatherCircuitBreaker{allowed: true}
+			processor := newTestMallWeatherProcessorWithGuardMetricsAndBreaker(
+				t,
+				test.provider,
+				store,
+				&fakeWeatherTaskLocker{acquired: true},
+				&fakeWeatherRateLimiter{},
+				noopMallWeatherMetricRecorder{},
+				breaker,
+			)
 			err := processor.Process(context.Background(), job.TypeMallWeatherFull, job.MallTaskPayload{
 				MallID: 7, TaskWindow: "full:7:2026072203",
 			})
@@ -440,6 +520,9 @@ func TestMallWeatherProcessorClassifiesTransportAndParseFailures(t *testing.T) {
 			}
 			if !reflect.DeepEqual(store.events, test.wantEvents) || store.failure.AttemptStatus != test.wantStatus {
 				t.Fatalf("events=%v failure=%+v", store.events, store.failure)
+			}
+			if breaker.failureCalls != 1 {
+				t.Fatalf("breaker=%+v, want one failure report", breaker)
 			}
 		})
 	}
@@ -617,6 +700,26 @@ func newTestMallWeatherProcessorWithGuardAndMetrics(
 	limiter weatherdomain.ProviderRateLimiter,
 	metrics mallWeatherMetricRecorder,
 ) *MallWeatherProcessor {
+	return newTestMallWeatherProcessorWithGuardMetricsAndBreaker(
+		t,
+		provider,
+		store,
+		locker,
+		limiter,
+		metrics,
+		&fakeWeatherCircuitBreaker{allowed: true},
+	)
+}
+
+func newTestMallWeatherProcessorWithGuardMetricsAndBreaker(
+	t *testing.T,
+	provider mallWeatherProvider,
+	store mallWeatherTaskStore,
+	locker weatherdomain.TaskLocker,
+	limiter weatherdomain.ProviderRateLimiter,
+	metrics mallWeatherMetricRecorder,
+	breaker weatherdomain.ProviderCircuitBreaker,
+) *MallWeatherProcessor {
 	t.Helper()
 	weatherSnapshots, err := weatherdomain.NewRawSnapshotBuilder(weatherdomain.RawSnapshotConfig{
 		SchemaVersion: weatherParserVersionV26,
@@ -631,7 +734,7 @@ func newTestMallWeatherProcessorWithGuardAndMetrics(
 		t.Fatalf("NewRawSnapshotBuilder(life) error=%v", err)
 	}
 	current := time.Date(2026, 7, 22, 3, 0, 0, 0, time.UTC)
-	processor, err := newMallWeatherProcessor(provider, store, weatherSnapshots, lifeSnapshots, locker, limiter, MallWeatherProcessorConfig{
+	processor, err := newMallWeatherProcessor(provider, store, weatherSnapshots, lifeSnapshots, locker, limiter, breaker, MallWeatherProcessorConfig{
 		FastHourlySteps: 24, FastDailySteps: 1, FullHourlySteps: 360, FullDailySteps: 15,
 		LifeIndexDays: 15, Unit: "metric:v2", AlertEnabled: true,
 		AttemptStaleAfter: 2 * time.Minute, FailureFinalizeTimeout: time.Second, LockReleaseTimeout: time.Second,
@@ -654,6 +757,34 @@ type fakeWeatherRateLimiter struct {
 func (limiter *fakeWeatherRateLimiter) Wait(context.Context) error {
 	limiter.calls++
 	return limiter.err
+}
+
+type fakeWeatherCircuitBreaker struct {
+	allowed      bool
+	allowErr     error
+	successErr   error
+	failureErr   error
+	allowCalls   int
+	successCalls int
+	failureCalls int
+}
+
+func (breaker *fakeWeatherCircuitBreaker) Allow(context.Context) (bool, error) {
+	breaker.allowCalls++
+	if breaker.allowErr != nil {
+		return false, breaker.allowErr
+	}
+	return breaker.allowed, nil
+}
+
+func (breaker *fakeWeatherCircuitBreaker) ReportSuccess(context.Context) error {
+	breaker.successCalls++
+	return breaker.successErr
+}
+
+func (breaker *fakeWeatherCircuitBreaker) ReportFailure(context.Context) error {
+	breaker.failureCalls++
+	return breaker.failureErr
 }
 
 type fakeWeatherTaskLocker struct {
@@ -694,6 +825,30 @@ func mallWeatherMetricCounterExists(
 	name string,
 	labels map[string]string,
 	value int64,
+) bool {
+	for _, sample := range samples {
+		if sample.Name != name || sample.Value != value || len(sample.Labels) != len(labels) {
+			continue
+		}
+		matches := true
+		for key, labelValue := range labels {
+			if sample.Labels[key] != labelValue {
+				matches = false
+				break
+			}
+		}
+		if matches {
+			return true
+		}
+	}
+	return false
+}
+
+func mallWeatherMetricGaugeExists(
+	samples []MallWeatherMetricGaugeSample,
+	name string,
+	labels map[string]string,
+	value float64,
 ) bool {
 	for _, sample := range samples {
 		if sample.Name != name || sample.Value != value || len(sample.Labels) != len(labels) {

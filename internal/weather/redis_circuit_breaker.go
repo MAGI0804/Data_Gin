@@ -113,7 +113,7 @@ func newRedisCircuitBreaker(client redisCircuitBreakerClient, cfg RedisCircuitBr
 		return nil, fmt.Errorf("weather circuit breaker: invalid configuration")
 	}
 	if cfg.StateTTL == 0 {
-		cfg.StateTTL = 2 * cfg.OpenTimeout
+		cfg.StateTTL = 2*cfg.OpenTimeout + cfg.ProbeTTL
 	}
 	if cfg.StateTTL < cfg.OpenTimeout+cfg.ProbeTTL {
 		return nil, fmt.Errorf("weather circuit breaker: state ttl is too short")

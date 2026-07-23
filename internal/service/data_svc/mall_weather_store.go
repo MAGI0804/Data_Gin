@@ -94,7 +94,16 @@ func NewMallWeatherProcessor() (*MallWeatherProcessor, error) {
 	if err != nil {
 		return nil, err
 	}
-	return newMallWeatherProcessor(provider, &gormMallWeatherTaskStore{db: database.DB}, weatherSnapshots, lifeSnapshots, locker, limiter, MallWeatherProcessorConfig{
+	breaker, err := weatherdomain.NewRedisCircuitBreaker(redisInstance.Client, weatherdomain.RedisCircuitBreakerConfig{
+		Key:              projectredis.GenNamespace("circuit:mall_weather:caiyun"),
+		FailureThreshold: config.GetInt("cfg.mall_weather.circuit_failure_threshold"),
+		OpenTimeout:      time.Duration(config.GetInt("cfg.mall_weather.circuit_open_seconds")) * time.Second,
+		ProbeTTL:         time.Duration(config.GetInt("cfg.mall_weather.circuit_probe_ttl_seconds")) * time.Second,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return newMallWeatherProcessor(provider, &gormMallWeatherTaskStore{db: database.DB}, weatherSnapshots, lifeSnapshots, locker, limiter, breaker, MallWeatherProcessorConfig{
 		FastHourlySteps: 24, FastDailySteps: 1,
 		FullHourlySteps: config.GetInt("cfg.mall_weather.hourly_steps"),
 		FullDailySteps:  config.GetInt("cfg.mall_weather.daily_steps"),

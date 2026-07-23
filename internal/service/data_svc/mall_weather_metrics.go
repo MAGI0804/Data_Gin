@@ -340,6 +340,21 @@ func recordMallWeatherProviderRateLimited(
 	recorder.AddCounter(MallWeatherMetricProviderRateLimitedTotal, nil, 1)
 }
 
+func recordMallWeatherProviderCircuitOpen(
+	recorder mallWeatherMetricRecorder,
+	open bool,
+) {
+	gauge, ok := recorder.(mallWeatherMetricGaugeRecorder)
+	if !ok {
+		return
+	}
+	value := 0.0
+	if open {
+		value = 1
+	}
+	gauge.SetGauge(MallWeatherMetricProviderCircuitOpen, nil, value)
+}
+
 func recordMallWeatherFetchDuration(
 	recorder mallWeatherMetricRecorder,
 	taskKind string,

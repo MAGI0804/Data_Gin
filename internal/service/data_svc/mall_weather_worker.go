@@ -15,6 +15,9 @@ import (
 	weatherdomain "gin-biz-web-api/internal/weather"
 	"gin-biz-web-api/job"
 	"gin-biz-web-api/model"
+	"gin-biz-web-api/pkg/logger"
+
+	"go.uber.org/zap"
 )
 
 const (
@@ -123,6 +126,7 @@ type MallWeatherProcessor struct {
 	lifeSnapshots    *weatherdomain.RawSnapshotBuilder
 	locker           weatherdomain.TaskLocker
 	limiter          weatherdomain.ProviderRateLimiter
+	breaker          weatherdomain.ProviderCircuitBreaker
 	config           MallWeatherProcessorConfig
 	now              func() time.Time
 	metrics          mallWeatherMetricRecorder
@@ -135,12 +139,13 @@ func newMallWeatherProcessor(
 	lifeSnapshots *weatherdomain.RawSnapshotBuilder,
 	locker weatherdomain.TaskLocker,
 	limiter weatherdomain.ProviderRateLimiter,
+	breaker weatherdomain.ProviderCircuitBreaker,
 	config MallWeatherProcessorConfig,
 	now func() time.Time,
 	metrics mallWeatherMetricRecorder,
 ) (*MallWeatherProcessor, error) {
-	if provider == nil || store == nil || weatherSnapshots == nil || lifeSnapshots == nil || locker == nil || limiter == nil || now == nil ||
-		metrics == nil ||
+	if provider == nil || store == nil || weatherSnapshots == nil || lifeSnapshots == nil || locker == nil ||
+		limiter == nil || breaker == nil || now == nil || metrics == nil ||
 		config.FastHourlySteps < 1 || config.FastHourlySteps > 360 || config.FastDailySteps < 1 || config.FastDailySteps > 15 ||
 		config.FullHourlySteps < 1 || config.FullHourlySteps > 360 || config.FullDailySteps < 1 || config.FullDailySteps > 15 ||
 		config.LifeIndexDays < 1 || config.LifeIndexDays > 15 || config.Unit != "metric:v2" ||
@@ -149,7 +154,7 @@ func newMallWeatherProcessor(
 	}
 	return &MallWeatherProcessor{
 		provider: provider, store: store, weatherSnapshots: weatherSnapshots, lifeSnapshots: lifeSnapshots,
-		locker: locker, limiter: limiter, config: config, now: now,
+		locker: locker, limiter: limiter, breaker: breaker, config: config, now: now,
 		metrics: metrics,
 	}, nil
 }
@@ -197,6 +202,20 @@ func (processor *MallWeatherProcessor) Process(ctx context.Context, taskType str
 			ErrorMessageSafe: "mall weather request point is not eligible", FinishedAt: processor.now().UTC(),
 		}, err, false)
 	}
+	allowed, err := processor.breaker.Allow(ctx)
+	if err != nil {
+		return processor.finishFailure(ctx, execution, mallWeatherFailure{
+			AttemptStatus: "transport_failed", ErrorClass: "circuit", ErrorCode: "CIRCUIT_CHECK_FAILED",
+			ErrorMessageSafe: "weather provider circuit state could not be checked", FinishedAt: processor.now().UTC(),
+		}, err, true)
+	}
+	if !allowed {
+		recordMallWeatherProviderCircuitOpen(processor.metrics, true)
+		return processor.finishFailure(ctx, execution, mallWeatherFailure{
+			AttemptStatus: "provider_skipped", ErrorClass: "circuit_open", ErrorCode: "CIRCUIT_OPEN",
+			ErrorMessageSafe: "weather provider circuit is open", FinishedAt: processor.now().UTC(),
+		}, fmt.Errorf("weather provider circuit is open"), true)
+	}
 	if err := processor.limiter.Wait(ctx); err != nil {
 		return processor.finishFailure(ctx, execution, mallWeatherFailure{
 			AttemptStatus: "transport_failed", ErrorClass: "rate_limit", ErrorCode: "RATE_LIMIT_FAILED",
@@ -237,6 +256,7 @@ func (processor *MallWeatherProcessor) Process(ctx context.Context, taskType str
 		}
 	}
 	if providerErr != nil {
+		processor.reportProviderCircuitFailure(ctx, providerErr)
 		failure, retryable := classifyWeatherProviderFailure(providerErr, response, finishedAt)
 		return processor.finishFailure(ctx, execution, failure, providerErr, retryable)
 	}
@@ -247,12 +267,14 @@ func (processor *MallWeatherProcessor) Process(ctx context.Context, taskType str
 	}
 	batch, err := parseMallWeatherBatch(start.Payload.EndpointKind, response.RawBody, metadata, finishedAt)
 	if err != nil {
+		processor.reportProviderCircuitFailure(ctx, err)
 		return processor.finishFailure(ctx, execution, mallWeatherFailure{
 			AttemptStatus: "parse_failed", ErrorClass: "invalid_response", ErrorCode: "PARSE_FAILED",
 			ErrorMessageSafe: "weather provider response could not be parsed", FinishedAt: finishedAt,
 			ParserVersion: parserVersionForEndpoint(start.Payload.EndpointKind), ParseWarningsJSON: model.JSONText("[]"),
 		}, err, false)
 	}
+	processor.reportProviderCircuitSuccess(ctx)
 	if err := processor.store.Persist(ctx, execution, batch); err != nil {
 		if errors.Is(err, ErrMallWeatherAttemptSuperseded) {
 			return nil
@@ -267,6 +289,20 @@ func (processor *MallWeatherProcessor) Process(ctx context.Context, taskType str
 	recordMallWeatherParseWarnings(processor.metrics, batch.ParseWarningsJSON)
 	recordMallWeatherFetch(processor.metrics, start.TaskKind, batch.Status)
 	return nil
+}
+
+func (processor *MallWeatherProcessor) reportProviderCircuitSuccess(ctx context.Context) {
+	if err := processor.breaker.ReportSuccess(ctx); err != nil {
+		logger.Warn("Mall weather provider circuit success report failed", zap.Error(err))
+		return
+	}
+	recordMallWeatherProviderCircuitOpen(processor.metrics, false)
+}
+
+func (processor *MallWeatherProcessor) reportProviderCircuitFailure(ctx context.Context, cause error) {
+	if err := processor.breaker.ReportFailure(ctx); err != nil {
+		logger.Warn("Mall weather provider circuit failure report failed", zap.Error(err), zap.NamedError("cause", cause))
+	}
 }
 
 func weatherTaskLockKey(start mallWeatherTaskStart) string {

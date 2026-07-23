@@ -231,6 +231,24 @@ func TestRecordMallWeatherProviderRateLimited(t *testing.T) {
 	}
 }
 
+func TestRecordMallWeatherProviderCircuitOpen(t *testing.T) {
+	t.Parallel()
+
+	recorder := newInMemoryMallWeatherMetricRecorder()
+
+	recordMallWeatherProviderCircuitOpen(recorder, true)
+	recordMallWeatherProviderCircuitOpen(recorder, false)
+
+	got := recorder.GaugeSnapshot()
+	want := []MallWeatherMetricGaugeSample{{
+		Name:  MallWeatherMetricProviderCircuitOpen,
+		Value: 0,
+	}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("GaugeSnapshot()=%+v want %+v", got, want)
+	}
+}
+
 func TestRecordMallWeatherQueueLag(t *testing.T) {
 	t.Parallel()
 

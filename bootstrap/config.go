@@ -84,6 +84,15 @@ func validateMallWeatherConfig() error {
 	if releaseTimeout := pkgConfig.GetInt("cfg.mall_weather.lock_release_timeout_seconds"); releaseTimeout < 1 || releaseTimeout > 10 {
 		return fmt.Errorf("weather lock release timeout must be between 1 and 10 seconds")
 	}
+	if threshold := pkgConfig.GetInt("cfg.mall_weather.circuit_failure_threshold"); threshold < 1 || threshold > 100 {
+		return fmt.Errorf("weather circuit failure threshold must be between 1 and 100")
+	}
+	if openSeconds := pkgConfig.GetInt("cfg.mall_weather.circuit_open_seconds"); openSeconds < 1 || openSeconds > 3600 {
+		return fmt.Errorf("weather circuit open seconds must be between 1 and 3600")
+	}
+	if probeSeconds := pkgConfig.GetInt("cfg.mall_weather.circuit_probe_ttl_seconds"); probeSeconds < 1 || probeSeconds > 120 {
+		return fmt.Errorf("weather circuit probe ttl seconds must be between 1 and 120")
+	}
 	if repairRounds := pkgConfig.GetInt("cfg.mall_weather.repair_max_rounds"); repairRounds < 1 || repairRounds > 10 {
 		return fmt.Errorf("weather repair max rounds must be between 1 and 10")
 	}
