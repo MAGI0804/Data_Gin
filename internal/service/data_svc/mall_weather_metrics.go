@@ -1,6 +1,7 @@
 package data_svc
 
 import (
+	"context"
 	"math"
 	"sort"
 	"strings"
@@ -61,20 +62,60 @@ type noopMallWeatherMetricRecorder struct{}
 
 func (noopMallWeatherMetricRecorder) AddCounter(string, map[string]string, int64) {}
 
-type mallWeatherMetricCounterSample struct {
-	Name   string
-	Labels map[string]string
-	Value  int64
+type MallWeatherMetricCounterSample struct {
+	Name   string            `json:"name"`
+	Labels map[string]string `json:"labels,omitempty"`
+	Value  int64             `json:"value"`
+}
+
+type MallWeatherMetricsResult struct {
+	Definitions []MallWeatherMetricDefinition    `json:"definitions"`
+	Counters    []MallWeatherMetricCounterSample `json:"counters"`
+}
+
+type mallWeatherMetricSnapshotter interface {
+	CounterSnapshot() []MallWeatherMetricCounterSample
+}
+
+type MallWeatherMetricsService struct {
+	metrics mallWeatherMetricSnapshotter
+}
+
+func NewMallWeatherMetricsService() *MallWeatherMetricsService {
+	return &MallWeatherMetricsService{metrics: mallWeatherRuntimeMetrics}
+}
+
+func newMallWeatherMetricsServiceWithRecorder(metrics mallWeatherMetricSnapshotter) (*MallWeatherMetricsService, error) {
+	if metrics == nil {
+		return nil, ErrMallWeatherInvalidQuery
+	}
+	return &MallWeatherMetricsService{metrics: metrics}, nil
+}
+
+func (service *MallWeatherMetricsService) Snapshot(
+	ctx context.Context,
+	actorID uint,
+) (*MallWeatherMetricsResult, error) {
+	if service == nil || service.metrics == nil || ctx == nil {
+		return nil, ErrMallWeatherInvalidQuery
+	}
+	if actorID == 0 {
+		return nil, ErrMallForbidden
+	}
+	return &MallWeatherMetricsResult{
+		Definitions: MallWeatherMetricDefinitions(),
+		Counters:    service.metrics.CounterSnapshot(),
+	}, nil
 }
 
 type inMemoryMallWeatherMetricRecorder struct {
 	mu       sync.RWMutex
-	counters map[string]mallWeatherMetricCounterSample
+	counters map[string]MallWeatherMetricCounterSample
 }
 
 func newInMemoryMallWeatherMetricRecorder() *inMemoryMallWeatherMetricRecorder {
 	return &inMemoryMallWeatherMetricRecorder{
-		counters: make(map[string]mallWeatherMetricCounterSample),
+		counters: make(map[string]MallWeatherMetricCounterSample),
 	}
 }
 
@@ -92,7 +133,7 @@ func (recorder *inMemoryMallWeatherMetricRecorder) AddCounter(
 	recorder.mu.Lock()
 	defer recorder.mu.Unlock()
 	if recorder.counters == nil {
-		recorder.counters = make(map[string]mallWeatherMetricCounterSample)
+		recorder.counters = make(map[string]MallWeatherMetricCounterSample)
 	}
 	sample := recorder.counters[key]
 	if sample.Name == "" {
@@ -107,14 +148,14 @@ func (recorder *inMemoryMallWeatherMetricRecorder) AddCounter(
 	recorder.counters[key] = sample
 }
 
-func (recorder *inMemoryMallWeatherMetricRecorder) CounterSnapshot() []mallWeatherMetricCounterSample {
+func (recorder *inMemoryMallWeatherMetricRecorder) CounterSnapshot() []MallWeatherMetricCounterSample {
 	if recorder == nil {
 		return nil
 	}
 	recorder.mu.RLock()
 	defer recorder.mu.RUnlock()
 
-	samples := make([]mallWeatherMetricCounterSample, 0, len(recorder.counters))
+	samples := make([]MallWeatherMetricCounterSample, 0, len(recorder.counters))
 	for _, sample := range recorder.counters {
 		sample.Labels = copyMallWeatherMetricLabels(sample.Labels)
 		samples = append(samples, sample)

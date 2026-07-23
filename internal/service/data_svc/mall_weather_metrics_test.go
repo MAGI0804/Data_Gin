@@ -1,6 +1,8 @@
 package data_svc
 
 import (
+	"context"
+	"errors"
 	"math"
 	"reflect"
 	"regexp"
@@ -75,7 +77,7 @@ func TestInMemoryMallWeatherMetricRecorderAggregatesCounters(t *testing.T) {
 	recorder.AddCounter(MallWeatherMetricFeishuRowsTotal, nil, 0)
 
 	got := recorder.CounterSnapshot()
-	want := []mallWeatherMetricCounterSample{
+	want := []MallWeatherMetricCounterSample{
 		{
 			Name:   MallWeatherMetricFeishuRowsTotal,
 			Labels: map[string]string{"kind": "feishu", "status": "success"},
@@ -130,5 +132,55 @@ func TestInMemoryMallWeatherMetricRecorderSaturatesOnOverflow(t *testing.T) {
 	got := recorder.CounterSnapshot()
 	if len(got) != 1 || got[0].Value != math.MaxInt64 {
 		t.Fatalf("CounterSnapshot()=%+v, want saturated MaxInt64", got)
+	}
+}
+
+func TestMallWeatherMetricsServiceSnapshotReturnsContractAndCounters(t *testing.T) {
+	t.Parallel()
+
+	recorder := newInMemoryMallWeatherMetricRecorder()
+	recorder.AddCounter(MallWeatherMetricFeishuRowsTotal, map[string]string{"status": "success"}, 5)
+	service, err := newMallWeatherMetricsServiceWithRecorder(recorder)
+	if err != nil {
+		t.Fatalf("newMallWeatherMetricsServiceWithRecorder() error=%v", err)
+	}
+
+	result, err := service.Snapshot(context.Background(), 17)
+	if err != nil {
+		t.Fatalf("Snapshot() error=%v", err)
+	}
+	if len(result.Definitions) == 0 || len(result.Counters) != 1 ||
+		result.Counters[0].Name != MallWeatherMetricFeishuRowsTotal ||
+		result.Counters[0].Labels["status"] != "success" ||
+		result.Counters[0].Value != 5 {
+		t.Fatalf("Snapshot()=%+v", result)
+	}
+
+	result.Definitions[0].Name = "mutated"
+	result.Counters[0].Labels["status"] = "mutated"
+	fresh, err := service.Snapshot(context.Background(), 17)
+	if err != nil {
+		t.Fatalf("Snapshot() second error=%v", err)
+	}
+	if fresh.Definitions[0].Name == "mutated" || fresh.Counters[0].Labels["status"] != "success" {
+		t.Fatalf("Snapshot() exposed mutable state: %+v", fresh)
+	}
+}
+
+func TestMallWeatherMetricsServiceSnapshotRejectsInvalidBoundary(t *testing.T) {
+	t.Parallel()
+
+	service, err := newMallWeatherMetricsServiceWithRecorder(newInMemoryMallWeatherMetricRecorder())
+	if err != nil {
+		t.Fatalf("newMallWeatherMetricsServiceWithRecorder() error=%v", err)
+	}
+	if _, err := service.Snapshot(context.Background(), 0); !errors.Is(err, ErrMallForbidden) {
+		t.Fatalf("Snapshot() error=%v, want ErrMallForbidden", err)
+	}
+	if _, err := service.Snapshot(nil, 17); !errors.Is(err, ErrMallWeatherInvalidQuery) {
+		t.Fatalf("Snapshot() error=%v, want ErrMallWeatherInvalidQuery", err)
+	}
+	if _, err := newMallWeatherMetricsServiceWithRecorder(nil); !errors.Is(err, ErrMallWeatherInvalidQuery) {
+		t.Fatalf("newMallWeatherMetricsServiceWithRecorder(nil) error=%v, want ErrMallWeatherInvalidQuery", err)
 	}
 }
