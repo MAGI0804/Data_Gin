@@ -45,6 +45,14 @@ func TestMallWeatherMetricsControllerReturnsSnapshot(t *testing.T) {
 					Value:     75,
 					Threshold: 60,
 				}},
+				Summary: data_svc.MallWeatherAlertSummary{
+					Total:   1,
+					Warning: 1,
+					ByStatus: []data_svc.MallWeatherAlertStatusSum{{
+						Status: "FIRING",
+						Count:  1,
+					}},
+				},
 			}, nil
 		},
 	}
@@ -56,6 +64,8 @@ func TestMallWeatherMetricsControllerReturnsSnapshot(t *testing.T) {
 		!strings.Contains(body, `"counters":[`) ||
 		!strings.Contains(body, `"gauges":[`) ||
 		!strings.Contains(body, `"alerts":[`) ||
+		!strings.Contains(body, `"summary":`) ||
+		!strings.Contains(body, `"warning":1`) ||
 		!strings.Contains(body, `"code":"MALL_WEATHER_QUEUE_LAG_HIGH"`) ||
 		!strings.Contains(body, `"value":9`) ||
 		!strings.Contains(body, `"value":12.5`) {

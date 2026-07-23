@@ -668,6 +668,33 @@ func TestEvaluateMallWeatherOperationalAlerts(t *testing.T) {
 	}
 }
 
+func TestSummarizeMallWeatherOperationalAlerts(t *testing.T) {
+	t.Parallel()
+
+	got := summarizeMallWeatherOperationalAlerts([]MallWeatherOperationalAlert{
+		{Severity: mallWeatherAlertSeverityCritical, Status: mallWeatherAlertStatusFiring},
+		{Severity: mallWeatherAlertSeverityWarning, Status: mallWeatherAlertStatusFiring},
+		{Severity: mallWeatherAlertSeverityWarning, Status: "RESOLVED"},
+		{Severity: "INFO"},
+	})
+	want := MallWeatherAlertSummary{
+		Total:    4,
+		Critical: 1,
+		Warning:  2,
+		ByStatus: []MallWeatherAlertStatusSum{
+			{Status: mallWeatherAlertStatusFiring, Count: 2},
+			{Status: "RESOLVED", Count: 1},
+			{Status: "UNKNOWN", Count: 1},
+		},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("summarizeMallWeatherOperationalAlerts()=%+v want %+v", got, want)
+	}
+	if empty := summarizeMallWeatherOperationalAlerts(nil); empty.Total != 0 || len(empty.ByStatus) != 0 {
+		t.Fatalf("summarizeMallWeatherOperationalAlerts(nil)=%+v want empty", empty)
+	}
+}
+
 func TestEvaluateMallWeatherOperationalAlertsIgnoresSmallSamples(t *testing.T) {
 	t.Parallel()
 
@@ -706,6 +733,10 @@ func TestMallWeatherMetricsServiceSnapshotReturnsContractAndCounters(t *testing.
 	}
 	if len(result.Definitions) == 0 || len(result.Counters) != 2 || len(result.Gauges) != 1 ||
 		len(result.Alerts) != 1 ||
+		result.Summary.Total != 1 ||
+		result.Summary.Warning != 1 ||
+		len(result.Summary.ByStatus) != 1 ||
+		result.Summary.ByStatus[0].Status != mallWeatherAlertStatusFiring ||
 		result.Counters[0].Name != MallWeatherMetricFeishuRowsTotal ||
 		result.Counters[0].Labels["status"] != "success" ||
 		result.Counters[0].Value != 5 ||
@@ -720,6 +751,7 @@ func TestMallWeatherMetricsServiceSnapshotReturnsContractAndCounters(t *testing.
 	result.Counters[0].Labels["status"] = "mutated"
 	result.Gauges[0].Labels["kind"] = "mutated"
 	result.Alerts[0].Labels["field"] = "mutated"
+	result.Summary.ByStatus[0].Status = "mutated"
 	fresh, err := service.Snapshot(context.Background(), 17)
 	if err != nil {
 		t.Fatalf("Snapshot() second error=%v", err)
@@ -727,7 +759,8 @@ func TestMallWeatherMetricsServiceSnapshotReturnsContractAndCounters(t *testing.
 	if fresh.Definitions[0].Name == "mutated" ||
 		fresh.Counters[0].Labels["status"] != "success" ||
 		fresh.Gauges[0].Labels["kind"] != "full" ||
-		fresh.Alerts[0].Labels["field"] != "hourly" {
+		fresh.Alerts[0].Labels["field"] != "hourly" ||
+		fresh.Summary.ByStatus[0].Status != mallWeatherAlertStatusFiring {
 		t.Fatalf("Snapshot() exposed mutable state: %+v", fresh)
 	}
 }

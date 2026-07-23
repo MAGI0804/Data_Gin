@@ -114,6 +114,19 @@ type MallWeatherMetricsResult struct {
 	Counters    []MallWeatherMetricCounterSample `json:"counters"`
 	Gauges      []MallWeatherMetricGaugeSample   `json:"gauges"`
 	Alerts      []MallWeatherOperationalAlert    `json:"alerts"`
+	Summary     MallWeatherAlertSummary          `json:"summary"`
+}
+
+type MallWeatherAlertSummary struct {
+	Total    int                         `json:"total"`
+	Critical int                         `json:"critical"`
+	Warning  int                         `json:"warning"`
+	ByStatus []MallWeatherAlertStatusSum `json:"byStatus"`
+}
+
+type MallWeatherAlertStatusSum struct {
+	Status string `json:"status"`
+	Count  int    `json:"count"`
 }
 
 type MallWeatherOperationalAlert struct {
@@ -162,11 +175,13 @@ func (service *MallWeatherMetricsService) Snapshot(
 	}
 	counters := service.metrics.CounterSnapshot()
 	gauges := service.metrics.GaugeSnapshot()
+	alerts := EvaluateMallWeatherOperationalAlerts(counters, gauges)
 	return &MallWeatherMetricsResult{
 		Definitions: MallWeatherMetricDefinitions(),
 		Counters:    counters,
 		Gauges:      gauges,
-		Alerts:      EvaluateMallWeatherOperationalAlerts(counters, gauges),
+		Alerts:      alerts,
+		Summary:     summarizeMallWeatherOperationalAlerts(alerts),
 	}, nil
 }
 
@@ -183,6 +198,40 @@ func EvaluateMallWeatherOperationalAlerts(
 		return leftKey < rightKey
 	})
 	return alerts
+}
+
+func summarizeMallWeatherOperationalAlerts(alerts []MallWeatherOperationalAlert) MallWeatherAlertSummary {
+	summary := MallWeatherAlertSummary{Total: len(alerts)}
+	statusCounts := make(map[string]int)
+	for _, alert := range alerts {
+		switch alert.Severity {
+		case mallWeatherAlertSeverityCritical:
+			summary.Critical++
+		case mallWeatherAlertSeverityWarning:
+			summary.Warning++
+		}
+		status := strings.TrimSpace(alert.Status)
+		if status == "" {
+			status = "UNKNOWN"
+		}
+		statusCounts[status]++
+	}
+	if len(statusCounts) == 0 {
+		return summary
+	}
+	statuses := make([]string, 0, len(statusCounts))
+	for status := range statusCounts {
+		statuses = append(statuses, status)
+	}
+	sort.Strings(statuses)
+	summary.ByStatus = make([]MallWeatherAlertStatusSum, 0, len(statuses))
+	for _, status := range statuses {
+		summary.ByStatus = append(summary.ByStatus, MallWeatherAlertStatusSum{
+			Status: status,
+			Count:  statusCounts[status],
+		})
+	}
+	return summary
 }
 
 func evaluateMallWeatherCounterAlerts(counters []MallWeatherMetricCounterSample) []MallWeatherOperationalAlert {
