@@ -26,32 +26,33 @@ type MallWeatherMetricDefinition struct {
 }
 
 const (
-	MallWeatherMetricFetchTotal               = "mall_weather_fetch_total"
-	MallWeatherMetricFetchDurationSeconds     = "mall_weather_fetch_duration_seconds"
-	MallWeatherMetricProviderRequestsTotal    = "mall_weather_provider_requests_total"
-	MallWeatherMetricProviderRateLimitedTotal = "mall_weather_provider_rate_limited_total"
-	MallWeatherMetricProviderCircuitOpen      = "mall_weather_provider_circuit_open"
-	MallWeatherMetricDataAgeSeconds           = "mall_weather_data_age_seconds"
-	MallWeatherMetricParseWarningsTotal       = "mall_weather_parse_warnings_total"
-	MallWeatherMetricQueueLagSeconds          = "mall_weather_queue_lag_seconds"
-	MallWeatherMetricDeadLettersTotal         = "mall_weather_dead_letters_total"
-	MallWeatherMetricExportRowsTotal          = "mall_weather_export_rows_total"
-	MallWeatherMetricFeishuRowsTotal          = "mall_weather_feishu_rows_total"
-	MallWeatherDeadLetterReasonInvalidPayload = "invalid_payload"
-	MallWeatherDeadLetterReasonPermanent      = "permanent_failure"
-	mallWeatherMetricStatusSuccess            = "success"
-	mallWeatherMetricStatusFailed             = "failed"
-	mallWeatherAlertStatusFiring              = "FIRING"
-	mallWeatherAlertSeverityWarning           = "WARNING"
-	mallWeatherAlertSeverityCritical          = "CRITICAL"
-	mallWeatherFetchAlertMinSamples           = int64(20)
-	mallWeatherProviderAlertMinSamples        = int64(20)
-	mallWeatherFetchSuccessWarningRatio       = 0.95
-	mallWeatherFetchSuccessCriticalRatio      = 0.80
-	mallWeatherProviderRateLimitWarningRatio  = 0.05
-	mallWeatherProviderRateLimitCriticalRatio = 0.20
-	mallWeatherQueueLagWarningSeconds         = 60
-	mallWeatherQueueLagCriticalSeconds        = 300
+	MallWeatherMetricFetchTotal                = "mall_weather_fetch_total"
+	MallWeatherMetricFetchDurationSeconds      = "mall_weather_fetch_duration_seconds"
+	MallWeatherMetricProviderRequestsTotal     = "mall_weather_provider_requests_total"
+	MallWeatherMetricProviderRateLimitedTotal  = "mall_weather_provider_rate_limited_total"
+	MallWeatherMetricProviderAuthFailuresTotal = "mall_weather_provider_auth_failures_total"
+	MallWeatherMetricProviderCircuitOpen       = "mall_weather_provider_circuit_open"
+	MallWeatherMetricDataAgeSeconds            = "mall_weather_data_age_seconds"
+	MallWeatherMetricParseWarningsTotal        = "mall_weather_parse_warnings_total"
+	MallWeatherMetricQueueLagSeconds           = "mall_weather_queue_lag_seconds"
+	MallWeatherMetricDeadLettersTotal          = "mall_weather_dead_letters_total"
+	MallWeatherMetricExportRowsTotal           = "mall_weather_export_rows_total"
+	MallWeatherMetricFeishuRowsTotal           = "mall_weather_feishu_rows_total"
+	MallWeatherDeadLetterReasonInvalidPayload  = "invalid_payload"
+	MallWeatherDeadLetterReasonPermanent       = "permanent_failure"
+	mallWeatherMetricStatusSuccess             = "success"
+	mallWeatherMetricStatusFailed              = "failed"
+	mallWeatherAlertStatusFiring               = "FIRING"
+	mallWeatherAlertSeverityWarning            = "WARNING"
+	mallWeatherAlertSeverityCritical           = "CRITICAL"
+	mallWeatherFetchAlertMinSamples            = int64(20)
+	mallWeatherProviderAlertMinSamples         = int64(20)
+	mallWeatherFetchSuccessWarningRatio        = 0.95
+	mallWeatherFetchSuccessCriticalRatio       = 0.80
+	mallWeatherProviderRateLimitWarningRatio   = 0.05
+	mallWeatherProviderRateLimitCriticalRatio  = 0.20
+	mallWeatherQueueLagWarningSeconds          = 60
+	mallWeatherQueueLagCriticalSeconds         = 300
 )
 
 var mallWeatherMetricDefinitions = []MallWeatherMetricDefinition{
@@ -59,6 +60,7 @@ var mallWeatherMetricDefinitions = []MallWeatherMetricDefinition{
 	{Name: MallWeatherMetricFetchDurationSeconds, Labels: []string{"kind"}},
 	{Name: MallWeatherMetricProviderRequestsTotal, Labels: []string{"endpoint", "status"}},
 	{Name: MallWeatherMetricProviderRateLimitedTotal},
+	{Name: MallWeatherMetricProviderAuthFailuresTotal, Labels: []string{"endpoint"}},
 	{Name: MallWeatherMetricProviderCircuitOpen},
 	{Name: MallWeatherMetricDataAgeSeconds, Labels: []string{"kind"}},
 	{Name: MallWeatherMetricParseWarningsTotal, Labels: []string{"field"}},
@@ -189,6 +191,17 @@ func evaluateMallWeatherCounterAlerts(counters []MallWeatherMetricCounterSample)
 			providerTotal += counter.Value
 		case MallWeatherMetricProviderRateLimitedTotal:
 			providerRateLimited += counter.Value
+		case MallWeatherMetricProviderAuthFailuresTotal:
+			if counter.Value > 0 {
+				alerts = append(alerts, mallWeatherOperationalAlert(
+					"MALL_WEATHER_PROVIDER_AUTH_FAILURES_PRESENT",
+					mallWeatherAlertSeverityCritical,
+					counter.Name,
+					counter.Labels,
+					float64(counter.Value),
+					1,
+				))
+			}
 		case MallWeatherMetricParseWarningsTotal:
 			if counter.Value > 0 {
 				alerts = append(alerts, mallWeatherOperationalAlert(
@@ -511,6 +524,25 @@ func recordMallWeatherProviderRateLimited(
 		return
 	}
 	recorder.AddCounter(MallWeatherMetricProviderRateLimitedTotal, nil, 1)
+}
+
+func recordMallWeatherProviderAuthFailure(
+	recorder mallWeatherMetricRecorder,
+	endpoint string,
+	err error,
+) {
+	if recorder == nil || endpoint == "" || err == nil {
+		return
+	}
+	var providerError *caiyun.ProviderError
+	if !errors.As(err, &providerError) || providerError.Class != providerhttp.ErrorClassAuth {
+		return
+	}
+	recorder.AddCounter(
+		MallWeatherMetricProviderAuthFailuresTotal,
+		map[string]string{"endpoint": endpoint},
+		1,
+	)
 }
 
 func recordMallWeatherProviderCircuitOpen(

@@ -206,6 +206,48 @@ func TestMallWeatherProcessorRecordsProviderRateLimitedMetric(t *testing.T) {
 	})
 }
 
+func TestMallWeatherProcessorRecordsProviderAuthFailureMetric(t *testing.T) {
+	provider := &fakeMallWeatherProvider{weatherErr: &caiyun.ProviderError{
+		Class: providerhttp.ErrorClassAuth,
+	}}
+	store := newFakeMallWeatherTaskStore(data_dao.FetchAttemptDispositionAcquired)
+	metrics := &fakeMallWeatherMetricRecorder{}
+	processor := newTestMallWeatherProcessorWithMetrics(t, provider, store, metrics)
+
+	err := processor.Process(context.Background(), job.TypeMallWeatherFull, job.MallTaskPayload{
+		MallID: 7, TaskWindow: "full:7:2026072203",
+	})
+	var processError *MallWeatherProcessError
+	if !errors.As(err, &processError) || processError.Retryable {
+		t.Fatalf("Process() error=%v", err)
+	}
+	assertFakeMallWeatherMetricCounters(t, metrics.counters, []fakeMallWeatherMetricCounter{
+		{
+			name: MallWeatherMetricProviderRequestsTotal,
+			labels: map[string]string{
+				"endpoint": caiyun.EndpointWeatherV26,
+				"status":   mallWeatherMetricStatusFailed,
+			},
+			value: 1,
+		},
+		{
+			name: MallWeatherMetricProviderAuthFailuresTotal,
+			labels: map[string]string{
+				"endpoint": caiyun.EndpointWeatherV26,
+			},
+			value: 1,
+		},
+		{
+			name: MallWeatherMetricFetchTotal,
+			labels: map[string]string{
+				"kind":   "full",
+				"status": mallWeatherMetricStatusFailed,
+			},
+			value: 1,
+		},
+	})
+}
+
 func TestMallWeatherProcessorRecordsEmptyProviderResponseAsFailedMetric(t *testing.T) {
 	provider := &fakeMallWeatherProvider{}
 	store := newFakeMallWeatherTaskStore(data_dao.FetchAttemptDispositionAcquired)

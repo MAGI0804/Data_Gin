@@ -26,6 +26,7 @@ func TestMallWeatherMetricDefinitionsMatchDocumentedContract(t *testing.T) {
 		{Name: "mall_weather_fetch_duration_seconds", Labels: []string{"kind"}},
 		{Name: "mall_weather_provider_requests_total", Labels: []string{"endpoint", "status"}},
 		{Name: "mall_weather_provider_rate_limited_total"},
+		{Name: "mall_weather_provider_auth_failures_total", Labels: []string{"endpoint"}},
 		{Name: "mall_weather_provider_circuit_open"},
 		{Name: "mall_weather_data_age_seconds", Labels: []string{"kind"}},
 		{Name: "mall_weather_parse_warnings_total", Labels: []string{"field"}},
@@ -232,6 +233,28 @@ func TestRecordMallWeatherProviderRateLimited(t *testing.T) {
 	}
 }
 
+func TestRecordMallWeatherProviderAuthFailure(t *testing.T) {
+	t.Parallel()
+
+	recorder := newInMemoryMallWeatherMetricRecorder()
+
+	recordMallWeatherProviderAuthFailure(recorder, caiyun.EndpointWeatherV26, &caiyun.ProviderError{Class: providerhttp.ErrorClassAuth})
+	recordMallWeatherProviderAuthFailure(recorder, caiyun.EndpointWeatherV26, &caiyun.ProviderError{Class: providerhttp.ErrorClassRateLimited})
+	recordMallWeatherProviderAuthFailure(recorder, "", &caiyun.ProviderError{Class: providerhttp.ErrorClassAuth})
+	recordMallWeatherProviderAuthFailure(recorder, caiyun.EndpointWeatherV26, errors.New("signature=secret"))
+	recordMallWeatherProviderAuthFailure(recorder, caiyun.EndpointWeatherV26, nil)
+
+	got := recorder.CounterSnapshot()
+	want := []MallWeatherMetricCounterSample{{
+		Name:   MallWeatherMetricProviderAuthFailuresTotal,
+		Labels: map[string]string{"endpoint": caiyun.EndpointWeatherV26},
+		Value:  1,
+	}}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("CounterSnapshot()=%+v want %+v", got, want)
+	}
+}
+
 func TestRecordMallWeatherProviderCircuitOpen(t *testing.T) {
 	t.Parallel()
 
@@ -408,6 +431,7 @@ func TestEvaluateMallWeatherOperationalAlerts(t *testing.T) {
 		{Name: MallWeatherMetricFetchTotal, Labels: map[string]string{"kind": "full", "status": mallWeatherMetricStatusFailed}, Value: 2},
 		{Name: MallWeatherMetricProviderRequestsTotal, Labels: map[string]string{"endpoint": "v26_weather", "status": mallWeatherMetricStatusSuccess}, Value: 30},
 		{Name: MallWeatherMetricProviderRateLimitedTotal, Value: 6},
+		{Name: MallWeatherMetricProviderAuthFailuresTotal, Labels: map[string]string{"endpoint": caiyun.EndpointWeatherV26}, Value: 1},
 		{Name: MallWeatherMetricParseWarningsTotal, Labels: map[string]string{"field": "hourly"}, Value: 2},
 		{Name: MallWeatherMetricDeadLettersTotal, Labels: map[string]string{"kind": "feishu", "reason": MallWeatherDeadLetterReasonPermanent}, Value: 1},
 	}
@@ -452,6 +476,15 @@ func TestEvaluateMallWeatherOperationalAlerts(t *testing.T) {
 			Metric:    MallWeatherMetricParseWarningsTotal,
 			Labels:    map[string]string{"field": "hourly"},
 			Value:     2,
+			Threshold: 1,
+		},
+		{
+			Code:      "MALL_WEATHER_PROVIDER_AUTH_FAILURES_PRESENT",
+			Severity:  mallWeatherAlertSeverityCritical,
+			Status:    mallWeatherAlertStatusFiring,
+			Metric:    MallWeatherMetricProviderAuthFailuresTotal,
+			Labels:    map[string]string{"endpoint": caiyun.EndpointWeatherV26},
+			Value:     1,
 			Threshold: 1,
 		},
 		{
