@@ -2,6 +2,7 @@ package data_svc
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"math"
 	"reflect"
@@ -9,6 +10,9 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"gin-biz-web-api/connector/caiyun"
+	"gin-biz-web-api/model"
 )
 
 func TestMallWeatherMetricDefinitionsMatchDocumentedContract(t *testing.T) {
@@ -202,6 +206,68 @@ func TestMallWeatherFetchGaugeRecorders(t *testing.T) {
 	}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("GaugeSnapshot()=%+v want %+v", got, want)
+	}
+}
+
+func TestMallWeatherParseWarningFieldIsLowCardinality(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		path string
+		want string
+	}{
+		{name: "result module", path: "result.hourly.temperature[0].value", want: "hourly"},
+		{name: "top level", path: "api_status", want: "api_status"},
+		{name: "life index array", path: "data[12].lifeindex[3].type", want: "lifeindex"},
+		{name: "empty", path: " ", want: "unknown"},
+		{name: "sanitized", path: "result.bad-field.value", want: "bad_field"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := mallWeatherParseWarningField(test.path); got != test.want {
+				t.Fatalf("mallWeatherParseWarningField(%q)=%q want %q", test.path, got, test.want)
+			}
+		})
+	}
+}
+
+func TestRecordMallWeatherParseWarnings(t *testing.T) {
+	t.Parallel()
+
+	warningsJSON, err := json.Marshal([]caiyun.ParseWarning{
+		{Code: "CORE_FIELD_COVERAGE_LOW", Path: "result.hourly.temperature"},
+		{Code: "INVALID_ITEM", Path: "result.hourly.skycon[0]"},
+		{Code: "API_STATUS_NOT_ACTIVE", Path: "api_status"},
+		{Code: "EMPTY_DAY", Path: "data[0].lifeindex"},
+	})
+	if err != nil {
+		t.Fatalf("json.Marshal() error=%v", err)
+	}
+	recorder := newInMemoryMallWeatherMetricRecorder()
+	recordMallWeatherParseWarnings(recorder, model.JSONText(warningsJSON))
+	recordMallWeatherParseWarnings(recorder, model.JSONText(`{"not":"a warning list"}`))
+
+	got := recorder.CounterSnapshot()
+	want := []MallWeatherMetricCounterSample{
+		{
+			Name:   MallWeatherMetricParseWarningsTotal,
+			Labels: map[string]string{"field": "api_status"},
+			Value:  1,
+		},
+		{
+			Name:   MallWeatherMetricParseWarningsTotal,
+			Labels: map[string]string{"field": "hourly"},
+			Value:  2,
+		},
+		{
+			Name:   MallWeatherMetricParseWarningsTotal,
+			Labels: map[string]string{"field": "lifeindex"},
+			Value:  1,
+		},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("CounterSnapshot()=%+v want %+v", got, want)
 	}
 }
 

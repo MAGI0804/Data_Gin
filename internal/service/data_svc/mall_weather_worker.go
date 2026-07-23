@@ -263,6 +263,7 @@ func (processor *MallWeatherProcessor) Process(ctx context.Context, taskType str
 	}
 	recordMallWeatherFetchDuration(processor.metrics, start.TaskKind, startedAt, finishedAt)
 	recordMallWeatherDataAge(processor.metrics, start.TaskKind, batch.ProviderServerTime, finishedAt)
+	recordMallWeatherParseWarnings(processor.metrics, batch.ParseWarningsJSON)
 	recordMallWeatherFetch(processor.metrics, start.TaskKind, batch.Status)
 	return nil
 }

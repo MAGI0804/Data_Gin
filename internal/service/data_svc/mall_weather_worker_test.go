@@ -47,7 +47,7 @@ func TestMallWeatherProcessorRecordsSuccessfulFetchMetrics(t *testing.T) {
 		EndpointKind: caiyun.EndpointLifeIndexV3, HTTPStatus: 200, ProviderStatus: "ok", RawBody: raw,
 	}}
 	store := newFakeMallWeatherTaskStore(data_dao.FetchAttemptDispositionAcquired)
-	metrics := &fakeMallWeatherMetricRecorder{}
+	metrics := newInMemoryMallWeatherMetricRecorder()
 	processor := newTestMallWeatherProcessorWithMetrics(t, provider, store, metrics)
 
 	if err := processor.Process(context.Background(), job.TypeMallWeatherLifeIndex, job.MallTaskPayload{
@@ -55,24 +55,16 @@ func TestMallWeatherProcessorRecordsSuccessfulFetchMetrics(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("Process() error=%v", err)
 	}
-	assertFakeMallWeatherMetricCounters(t, metrics.counters, []fakeMallWeatherMetricCounter{
-		{
-			name: MallWeatherMetricProviderRequestsTotal,
-			labels: map[string]string{
-				"endpoint": caiyun.EndpointLifeIndexV3,
-				"status":   mallWeatherMetricStatusSuccess,
-			},
-			value: 1,
-		},
-		{
-			name: MallWeatherMetricFetchTotal,
-			labels: map[string]string{
-				"kind":   "lifeindex",
-				"status": weatherFetchStatusSuccess,
-			},
-			value: 1,
-		},
-	})
+	counters := metrics.CounterSnapshot()
+	if !mallWeatherMetricCounterExists(counters, MallWeatherMetricProviderRequestsTotal, map[string]string{
+		"endpoint": caiyun.EndpointLifeIndexV3,
+		"status":   mallWeatherMetricStatusSuccess,
+	}, 1) || !mallWeatherMetricCounterExists(counters, MallWeatherMetricFetchTotal, map[string]string{
+		"kind":   "lifeindex",
+		"status": weatherFetchStatusSuccess,
+	}, 1) {
+		t.Fatalf("CounterSnapshot()=%+v missing success fetch counters", counters)
+	}
 }
 
 func TestMallWeatherProcessorRecordsSuccessfulFetchGaugeMetrics(t *testing.T) {
@@ -105,6 +97,34 @@ func TestMallWeatherProcessorRecordsSuccessfulFetchGaugeMetrics(t *testing.T) {
 	}
 	if got := metrics.GaugeSnapshot(); !reflect.DeepEqual(got, want) {
 		t.Fatalf("GaugeSnapshot()=%+v want %+v", got, want)
+	}
+}
+
+func TestMallWeatherProcessorRecordsParseWarningMetricsAfterPersist(t *testing.T) {
+	raw := readMallWeatherFixture(t, "../../../connector/caiyun/testdata/weather_v26_realtime.json")
+	var payload map[string]interface{}
+	if err := json.Unmarshal(raw, &payload); err != nil {
+		t.Fatalf("decode fixture: %v", err)
+	}
+	payload["api_status"] = "inactive"
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("encode fixture: %v", err)
+	}
+	provider := &fakeMallWeatherProvider{weatherResponse: &caiyun.ProviderResponse{
+		EndpointKind: caiyun.EndpointWeatherV26, HTTPStatus: 200, ProviderStatus: "ok", RawBody: raw,
+	}}
+	store := newFakeMallWeatherTaskStore(data_dao.FetchAttemptDispositionAcquired)
+	metrics := newInMemoryMallWeatherMetricRecorder()
+	processor := newTestMallWeatherProcessorWithMetrics(t, provider, store, metrics)
+
+	if err := processor.Process(context.Background(), job.TypeMallWeatherFast, job.MallTaskPayload{
+		MallID: 7, TaskWindow: "fast:7:202607220310",
+	}); err != nil {
+		t.Fatalf("Process() error=%v", err)
+	}
+	if !mallWeatherMetricCounterExists(metrics.CounterSnapshot(), MallWeatherMetricParseWarningsTotal, map[string]string{"field": "api_status"}, 1) {
+		t.Fatalf("CounterSnapshot()=%+v missing api_status parse warning", metrics.CounterSnapshot())
 	}
 }
 
@@ -628,4 +648,28 @@ func readMallWeatherFixture(t *testing.T, path string) []byte {
 		t.Fatalf("os.ReadFile(%q) error=%v", path, err)
 	}
 	return raw
+}
+
+func mallWeatherMetricCounterExists(
+	samples []MallWeatherMetricCounterSample,
+	name string,
+	labels map[string]string,
+	value int64,
+) bool {
+	for _, sample := range samples {
+		if sample.Name != name || sample.Value != value || len(sample.Labels) != len(labels) {
+			continue
+		}
+		matches := true
+		for key, labelValue := range labels {
+			if sample.Labels[key] != labelValue {
+				matches = false
+				break
+			}
+		}
+		if matches {
+			return true
+		}
+	}
+	return false
 }

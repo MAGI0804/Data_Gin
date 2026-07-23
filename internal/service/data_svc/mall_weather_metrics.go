@@ -2,11 +2,15 @@ package data_svc
 
 import (
 	"context"
+	"encoding/json"
 	"math"
 	"sort"
 	"strings"
 	"sync"
 	"time"
+
+	"gin-biz-web-api/connector/caiyun"
+	"gin-biz-web-api/model"
 )
 
 // MallWeatherMetricDefinition describes a registry-agnostic metric contract.
@@ -352,4 +356,62 @@ func recordMallWeatherDataAge(
 		map[string]string{"kind": taskKind},
 		observedAt.Sub(*providerServerTime).Seconds(),
 	)
+}
+
+func recordMallWeatherParseWarnings(
+	recorder mallWeatherMetricRecorder,
+	warningsJSON model.JSONText,
+) {
+	if recorder == nil || len(warningsJSON) == 0 {
+		return
+	}
+	var warnings []caiyun.ParseWarning
+	if err := json.Unmarshal([]byte(warningsJSON), &warnings); err != nil {
+		return
+	}
+	for _, warning := range warnings {
+		field := mallWeatherParseWarningField(warning.Path)
+		recorder.AddCounter(
+			MallWeatherMetricParseWarningsTotal,
+			map[string]string{"field": field},
+			1,
+		)
+	}
+}
+
+func mallWeatherParseWarningField(path string) string {
+	path = strings.TrimSpace(path)
+	if path == "" {
+		return "unknown"
+	}
+	path = strings.TrimPrefix(path, "result.")
+	if strings.HasPrefix(path, "data[") || path == "data" {
+		return "lifeindex"
+	}
+	fieldEnd := len(path)
+	for index, char := range path {
+		if char == '.' || char == '[' {
+			fieldEnd = index
+			break
+		}
+	}
+	field := strings.ToLower(strings.TrimSpace(path[:fieldEnd]))
+	var builder strings.Builder
+	for _, char := range field {
+		switch {
+		case char >= 'a' && char <= 'z':
+			builder.WriteRune(char)
+		case char >= '0' && char <= '9':
+			builder.WriteRune(char)
+		case char == '_':
+			builder.WriteRune(char)
+		case builder.Len() > 0:
+			builder.WriteByte('_')
+		}
+	}
+	field = strings.Trim(builder.String(), "_")
+	if field == "" {
+		return "unknown"
+	}
+	return field
 }
