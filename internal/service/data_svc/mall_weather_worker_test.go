@@ -130,6 +130,12 @@ func TestMallWeatherProcessorRecordsParseWarningMetricsAfterPersist(t *testing.T
 	if !mallWeatherMetricCounterExists(metrics.CounterSnapshot(), MallWeatherMetricParseWarningsTotal, map[string]string{"field": "api_status"}, 1) {
 		t.Fatalf("CounterSnapshot()=%+v missing api_status parse warning", metrics.CounterSnapshot())
 	}
+	if !mallWeatherMetricCounterExists(metrics.CounterSnapshot(), MallWeatherMetricParseWarningReasonsTotal, map[string]string{
+		"field":  "api_status",
+		"reason": "provider_status_not_ok",
+	}, 1) {
+		t.Fatalf("CounterSnapshot()=%+v missing api_status parse warning reason", metrics.CounterSnapshot())
+	}
 }
 
 func TestMallWeatherProcessorRecordsFailedFetchMetrics(t *testing.T) {
