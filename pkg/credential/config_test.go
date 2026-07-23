@@ -38,6 +38,16 @@ func TestLoad(t *testing.T) {
 			},
 			wantError: EnvAliyunOSSAccessKeyID,
 		},
+		{
+			name:         "infrastructure accepts shared redis credentials",
+			requirements: Requirements{RequireInfrastructure: true},
+			environment: map[string]string{
+				EnvJWTKey:        "jwt-value",
+				EnvDBUsername:    "db-user",
+				EnvDBPassword:    "db-password",
+				EnvRedisPassword: "redis-password",
+			},
+		},
 	}
 
 	for _, tt := range tests {
@@ -68,6 +78,50 @@ func TestLoad(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestRedisCredentialsFallBackToSharedRedis(t *testing.T) {
+	for _, name := range allNames() {
+		t.Setenv(name, "")
+	}
+	t.Setenv(EnvRedisUsername, "redis-user")
+	t.Setenv(EnvRedisPassword, "redis-password")
+	cfg, err := Load(Requirements{})
+	if err != nil {
+		t.Fatalf("Load() error = %v", err)
+	}
+
+	if cfg.CacheUsername() != "redis-user" ||
+		cfg.CachePassword() != "redis-password" ||
+		cfg.QueueJobRedisUsername() != "redis-user" ||
+		cfg.QueueJobRedisPassword() != "redis-password" {
+		t.Fatalf("fallback credentials cache=(%q,%q) queue=(%q,%q)",
+			cfg.CacheUsername(),
+			cfg.CachePassword(),
+			cfg.QueueJobRedisUsername(),
+			cfg.QueueJobRedisPassword(),
+		)
+	}
+
+	t.Setenv(EnvCacheUsername, "cache-user")
+	t.Setenv(EnvCachePassword, "cache-password")
+	t.Setenv(EnvQueueJobRedisUsername, "queue-user")
+	t.Setenv(EnvQueueJobRedisPassword, "queue-password")
+	cfg, err = Load(Requirements{})
+	if err != nil {
+		t.Fatalf("Load() with overrides error = %v", err)
+	}
+	if cfg.CacheUsername() != "cache-user" ||
+		cfg.CachePassword() != "cache-password" ||
+		cfg.QueueJobRedisUsername() != "queue-user" ||
+		cfg.QueueJobRedisPassword() != "queue-password" {
+		t.Fatalf("override credentials cache=(%q,%q) queue=(%q,%q)",
+			cfg.CacheUsername(),
+			cfg.CachePassword(),
+			cfg.QueueJobRedisUsername(),
+			cfg.QueueJobRedisPassword(),
+		)
 	}
 }
 

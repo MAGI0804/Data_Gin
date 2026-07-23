@@ -106,12 +106,7 @@ func requiredNames(requirements Requirements) map[string]bool {
 			EnvJWTKey,
 			EnvDBUsername,
 			EnvDBPassword,
-			EnvRedisUsername,
 			EnvRedisPassword,
-			EnvCacheUsername,
-			EnvCachePassword,
-			EnvQueueJobRedisUsername,
-			EnvQueueJobRedisPassword,
 		} {
 			required[name] = true
 		}
@@ -201,13 +196,13 @@ func (c Config) DBUsername() string        { return c.value(EnvDBUsername) }
 func (c Config) DBPassword() string        { return c.value(EnvDBPassword) }
 func (c Config) RedisUsername() string     { return c.value(EnvRedisUsername) }
 func (c Config) RedisPassword() string     { return c.value(EnvRedisPassword) }
-func (c Config) CacheUsername() string     { return c.value(EnvCacheUsername) }
-func (c Config) CachePassword() string     { return c.value(EnvCachePassword) }
+func (c Config) CacheUsername() string     { return c.valueOrFallback(EnvCacheUsername, EnvRedisUsername) }
+func (c Config) CachePassword() string     { return c.valueOrFallback(EnvCachePassword, EnvRedisPassword) }
 func (c Config) QueueJobRedisUsername() string {
-	return c.value(EnvQueueJobRedisUsername)
+	return c.valueOrFallback(EnvQueueJobRedisUsername, EnvRedisUsername)
 }
 func (c Config) QueueJobRedisPassword() string {
-	return c.value(EnvQueueJobRedisPassword)
+	return c.valueOrFallback(EnvQueueJobRedisPassword, EnvRedisPassword)
 }
 func (c Config) AliyunOSSAccessKeyID() string { return c.value(EnvAliyunOSSAccessKeyID) }
 func (c Config) AliyunOSSAccessKeySecret() string {
@@ -215,6 +210,13 @@ func (c Config) AliyunOSSAccessKeySecret() string {
 }
 func (c Config) AliyunOSSSecurityToken() string {
 	return c.value(EnvAliyunOSSSecurityToken)
+}
+
+func (c Config) valueOrFallback(name string, fallback string) string {
+	if value := c.value(name); strings.TrimSpace(value) != "" {
+		return value
+	}
+	return c.value(fallback)
 }
 
 // EnvironmentValue resolves only known resource-location variables. It is for
