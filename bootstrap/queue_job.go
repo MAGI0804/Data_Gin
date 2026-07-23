@@ -195,11 +195,13 @@ func newMallWeatherHandler(processor mallWeatherProcessor) asynq.HandlerFunc {
 		}
 		payload, err := job.DecodeMallWeatherTaskPayload(task.Type(), task.Payload())
 		if err != nil {
+			data_svc.RecordMallWeatherDeadLetterTask(task.Type(), data_svc.MallWeatherDeadLetterReasonInvalidPayload)
 			return fmt.Errorf("%w: %v", asynq.SkipRetry, err)
 		}
 		if err := processor.Process(ctx, task.Type(), payload); err != nil {
 			var processError *data_svc.MallWeatherProcessError
 			if errors.As(err, &processError) && processError != nil && !processError.Retryable {
+				data_svc.RecordMallWeatherDeadLetterTask(task.Type(), data_svc.MallWeatherDeadLetterReasonPermanent)
 				return fmt.Errorf("%w: %v", asynq.SkipRetry, err)
 			}
 			return err
@@ -214,10 +216,12 @@ func newMallWeatherScheduleHandler(planner mallWeatherSchedulePlanner) asynq.Han
 			return fmt.Errorf("mall weather schedule handler: planner is not configured")
 		}
 		if task == nil || task.Type() != job.TypeMallWeatherSchedule {
+			recordMallWeatherInvalidTaskDeadLetter(task)
 			return fmt.Errorf("%w: invalid mall weather schedule task", asynq.SkipRetry)
 		}
 		payload, err := job.DecodeMallWeatherSchedulePayload(task.Payload())
 		if err != nil {
+			data_svc.RecordMallWeatherDeadLetterTask(task.Type(), data_svc.MallWeatherDeadLetterReasonInvalidPayload)
 			return fmt.Errorf("%w: %v", asynq.SkipRetry, err)
 		}
 		return planner.Plan(ctx, payload)
@@ -230,14 +234,17 @@ func newMallWeatherExportHandler(processor mallWeatherExportProcessor) asynq.Han
 			return fmt.Errorf("mall weather export handler: processor is not configured")
 		}
 		if task == nil || task.Type() != job.TypeMallWeatherExport {
+			recordMallWeatherInvalidTaskDeadLetter(task)
 			return fmt.Errorf("%w: invalid mall weather export task", asynq.SkipRetry)
 		}
 		payload, err := job.DecodeMallWeatherExportTaskPayload(task.Payload())
 		if err != nil {
+			data_svc.RecordMallWeatherDeadLetterTask(task.Type(), data_svc.MallWeatherDeadLetterReasonInvalidPayload)
 			return fmt.Errorf("%w: %v", asynq.SkipRetry, err)
 		}
 		if err := processor.Process(ctx, payload.ExportJobID, mallWeatherExportRetryAllowed(ctx)); err != nil {
 			if errors.Is(err, data_svc.ErrMallWeatherExportProcessNonRetryable) {
+				data_svc.RecordMallWeatherDeadLetterTask(task.Type(), data_svc.MallWeatherDeadLetterReasonPermanent)
 				return fmt.Errorf("%w: %v", asynq.SkipRetry, err)
 			}
 			return err
@@ -252,20 +259,30 @@ func newMallWeatherFeishuHandler(processor mallWeatherFeishuProcessor) asynq.Han
 			return fmt.Errorf("mall weather feishu handler: processor is not configured")
 		}
 		if task == nil || task.Type() != job.TypeMallWeatherFeishu {
+			recordMallWeatherInvalidTaskDeadLetter(task)
 			return fmt.Errorf("%w: invalid mall weather feishu task", asynq.SkipRetry)
 		}
 		payload, err := job.DecodeMallWeatherFeishuTaskPayload(task.Payload())
 		if err != nil {
+			data_svc.RecordMallWeatherDeadLetterTask(task.Type(), data_svc.MallWeatherDeadLetterReasonInvalidPayload)
 			return fmt.Errorf("%w: %v", asynq.SkipRetry, err)
 		}
 		if err := processor.Process(ctx, payload.PipelineRunID, mallWeatherExportRetryAllowed(ctx)); err != nil {
 			if errors.Is(err, data_svc.ErrMallWeatherFeishuProcessNonRetryable) {
+				data_svc.RecordMallWeatherDeadLetterTask(task.Type(), data_svc.MallWeatherDeadLetterReasonPermanent)
 				return fmt.Errorf("%w: %v", asynq.SkipRetry, err)
 			}
 			return err
 		}
 		return nil
 	}
+}
+
+func recordMallWeatherInvalidTaskDeadLetter(task *asynq.Task) {
+	if task == nil {
+		return
+	}
+	data_svc.RecordMallWeatherDeadLetterTask(task.Type(), data_svc.MallWeatherDeadLetterReasonInvalidPayload)
 }
 
 func mallWeatherExportRetryAllowed(ctx context.Context) bool {

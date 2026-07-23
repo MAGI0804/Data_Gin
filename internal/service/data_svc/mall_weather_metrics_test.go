@@ -30,6 +30,7 @@ func TestMallWeatherMetricDefinitionsMatchDocumentedContract(t *testing.T) {
 		{Name: "mall_weather_data_age_seconds", Labels: []string{"kind"}},
 		{Name: "mall_weather_parse_warnings_total", Labels: []string{"field"}},
 		{Name: "mall_weather_queue_lag_seconds", Labels: []string{"kind"}},
+		{Name: "mall_weather_dead_letters_total", Labels: []string{"kind", "reason"}},
 		{Name: "mall_weather_export_rows_total"},
 		{Name: "mall_weather_feishu_rows_total", Labels: []string{"status"}},
 	}
@@ -305,6 +306,38 @@ func TestRecordMallWeatherOutboxQueueLag(t *testing.T) {
 	}
 }
 
+func TestRecordMallWeatherDeadLetterTask(t *testing.T) {
+	t.Parallel()
+
+	recorder := newInMemoryMallWeatherMetricRecorder()
+	recordMallWeatherDeadLetterTask(recorder, job.TypeMallWeatherFeishu, MallWeatherDeadLetterReasonInvalidPayload)
+	recordMallWeatherDeadLetterTask(recorder, job.TypeMallWeatherSchedule, MallWeatherDeadLetterReasonPermanent)
+	recordMallWeatherDeadLetterTask(recorder, "unknown", "secret=do-not-leak")
+	recordMallWeatherDeadLetterTask(nil, job.TypeMallWeatherFull, MallWeatherDeadLetterReasonPermanent)
+
+	got := recorder.CounterSnapshot()
+	want := []MallWeatherMetricCounterSample{
+		{
+			Name:   MallWeatherMetricDeadLettersTotal,
+			Labels: map[string]string{"kind": "feishu", "reason": "invalid_payload"},
+			Value:  1,
+		},
+		{
+			Name:   MallWeatherMetricDeadLettersTotal,
+			Labels: map[string]string{"kind": "schedule", "reason": "permanent_failure"},
+			Value:  1,
+		},
+		{
+			Name:   MallWeatherMetricDeadLettersTotal,
+			Labels: map[string]string{"kind": "unknown", "reason": "unknown"},
+			Value:  1,
+		},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("CounterSnapshot()=%+v want %+v", got, want)
+	}
+}
+
 func TestMallWeatherParseWarningFieldIsLowCardinality(t *testing.T) {
 	t.Parallel()
 
@@ -376,6 +409,7 @@ func TestEvaluateMallWeatherOperationalAlerts(t *testing.T) {
 		{Name: MallWeatherMetricProviderRequestsTotal, Labels: map[string]string{"endpoint": "v26_weather", "status": mallWeatherMetricStatusSuccess}, Value: 30},
 		{Name: MallWeatherMetricProviderRateLimitedTotal, Value: 6},
 		{Name: MallWeatherMetricParseWarningsTotal, Labels: map[string]string{"field": "hourly"}, Value: 2},
+		{Name: MallWeatherMetricDeadLettersTotal, Labels: map[string]string{"kind": "feishu", "reason": MallWeatherDeadLetterReasonPermanent}, Value: 1},
 	}
 	gauges := []MallWeatherMetricGaugeSample{
 		{Name: MallWeatherMetricProviderCircuitOpen, Value: 1},
@@ -393,6 +427,15 @@ func TestEvaluateMallWeatherOperationalAlerts(t *testing.T) {
 			Labels:    map[string]string{"kind": "fast"},
 			Value:     (31 * time.Minute).Seconds(),
 			Threshold: (30 * time.Minute).Seconds(),
+		},
+		{
+			Code:      "MALL_WEATHER_DEAD_LETTERS_PRESENT",
+			Severity:  mallWeatherAlertSeverityCritical,
+			Status:    mallWeatherAlertStatusFiring,
+			Metric:    MallWeatherMetricDeadLettersTotal,
+			Labels:    map[string]string{"kind": "feishu", "reason": MallWeatherDeadLetterReasonPermanent},
+			Value:     1,
+			Threshold: 1,
 		},
 		{
 			Code:      "MALL_WEATHER_FETCH_SUCCESS_RATE_LOW",

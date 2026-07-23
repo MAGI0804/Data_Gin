@@ -34,8 +34,11 @@ const (
 	MallWeatherMetricDataAgeSeconds           = "mall_weather_data_age_seconds"
 	MallWeatherMetricParseWarningsTotal       = "mall_weather_parse_warnings_total"
 	MallWeatherMetricQueueLagSeconds          = "mall_weather_queue_lag_seconds"
+	MallWeatherMetricDeadLettersTotal         = "mall_weather_dead_letters_total"
 	MallWeatherMetricExportRowsTotal          = "mall_weather_export_rows_total"
 	MallWeatherMetricFeishuRowsTotal          = "mall_weather_feishu_rows_total"
+	MallWeatherDeadLetterReasonInvalidPayload = "invalid_payload"
+	MallWeatherDeadLetterReasonPermanent      = "permanent_failure"
 	mallWeatherMetricStatusSuccess            = "success"
 	mallWeatherMetricStatusFailed             = "failed"
 	mallWeatherAlertStatusFiring              = "FIRING"
@@ -60,6 +63,7 @@ var mallWeatherMetricDefinitions = []MallWeatherMetricDefinition{
 	{Name: MallWeatherMetricDataAgeSeconds, Labels: []string{"kind"}},
 	{Name: MallWeatherMetricParseWarningsTotal, Labels: []string{"field"}},
 	{Name: MallWeatherMetricQueueLagSeconds, Labels: []string{"kind"}},
+	{Name: MallWeatherMetricDeadLettersTotal, Labels: []string{"kind", "reason"}},
 	{Name: MallWeatherMetricExportRowsTotal},
 	{Name: MallWeatherMetricFeishuRowsTotal, Labels: []string{"status"}},
 }
@@ -190,6 +194,17 @@ func evaluateMallWeatherCounterAlerts(counters []MallWeatherMetricCounterSample)
 				alerts = append(alerts, mallWeatherOperationalAlert(
 					"MALL_WEATHER_PARSE_WARNINGS_PRESENT",
 					mallWeatherAlertSeverityWarning,
+					counter.Name,
+					counter.Labels,
+					float64(counter.Value),
+					1,
+				))
+			}
+		case MallWeatherMetricDeadLettersTotal:
+			if counter.Value > 0 {
+				alerts = append(alerts, mallWeatherOperationalAlert(
+					"MALL_WEATHER_DEAD_LETTERS_PRESENT",
+					mallWeatherAlertSeverityCritical,
 					counter.Name,
 					counter.Labels,
 					float64(counter.Value),
@@ -576,6 +591,10 @@ func recordMallWeatherQueueLag(
 }
 
 func mallWeatherQueueLagTaskKind(taskType string) string {
+	return mallWeatherTaskMetricKind(taskType)
+}
+
+func mallWeatherTaskMetricKind(taskType string) string {
 	switch taskType {
 	case job.TypeMallGeocode:
 		return "geocode"
@@ -595,8 +614,43 @@ func mallWeatherQueueLagTaskKind(taskType string) string {
 		return "export_cleanup"
 	case job.TypeMallWeatherFeishu:
 		return "feishu"
+	case job.TypeMallWeatherSchedule:
+		return "schedule"
 	default:
 		return ""
+	}
+}
+
+func RecordMallWeatherDeadLetterTask(taskType string, reason string) {
+	recordMallWeatherDeadLetterTask(mallWeatherRuntimeMetrics, taskType, reason)
+}
+
+func recordMallWeatherDeadLetterTask(
+	recorder mallWeatherMetricRecorder,
+	taskType string,
+	reason string,
+) {
+	if recorder == nil {
+		return
+	}
+	kind := mallWeatherTaskMetricKind(taskType)
+	if kind == "" {
+		kind = "unknown"
+	}
+	reason = mallWeatherDeadLetterReason(reason)
+	recorder.AddCounter(
+		MallWeatherMetricDeadLettersTotal,
+		map[string]string{"kind": kind, "reason": reason},
+		1,
+	)
+}
+
+func mallWeatherDeadLetterReason(reason string) string {
+	switch reason {
+	case MallWeatherDeadLetterReasonInvalidPayload, MallWeatherDeadLetterReasonPermanent:
+		return reason
+	default:
+		return "unknown"
 	}
 }
 
