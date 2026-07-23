@@ -37,11 +37,13 @@ const (
 	MallWeatherMetricQueueLagSeconds           = "mall_weather_queue_lag_seconds"
 	MallWeatherMetricDeadLettersTotal          = "mall_weather_dead_letters_total"
 	MallWeatherMetricExportRowsTotal           = "mall_weather_export_rows_total"
+	MallWeatherMetricFeishuRunsTotal           = "mall_weather_feishu_runs_total"
 	MallWeatherMetricFeishuRowsTotal           = "mall_weather_feishu_rows_total"
 	MallWeatherDeadLetterReasonInvalidPayload  = "invalid_payload"
 	MallWeatherDeadLetterReasonPermanent       = "permanent_failure"
 	mallWeatherMetricStatusSuccess             = "success"
 	mallWeatherMetricStatusFailed              = "failed"
+	mallWeatherMetricStatusPartialSuccess      = "partial_success"
 	mallWeatherAlertStatusFiring               = "FIRING"
 	mallWeatherAlertSeverityWarning            = "WARNING"
 	mallWeatherAlertSeverityCritical           = "CRITICAL"
@@ -67,6 +69,7 @@ var mallWeatherMetricDefinitions = []MallWeatherMetricDefinition{
 	{Name: MallWeatherMetricQueueLagSeconds, Labels: []string{"kind"}},
 	{Name: MallWeatherMetricDeadLettersTotal, Labels: []string{"kind", "reason"}},
 	{Name: MallWeatherMetricExportRowsTotal},
+	{Name: MallWeatherMetricFeishuRunsTotal, Labels: []string{"status"}},
 	{Name: MallWeatherMetricFeishuRowsTotal, Labels: []string{"status"}},
 }
 
@@ -218,6 +221,27 @@ func evaluateMallWeatherCounterAlerts(counters []MallWeatherMetricCounterSample)
 				alerts = append(alerts, mallWeatherOperationalAlert(
 					"MALL_WEATHER_DEAD_LETTERS_PRESENT",
 					mallWeatherAlertSeverityCritical,
+					counter.Name,
+					counter.Labels,
+					float64(counter.Value),
+					1,
+				))
+			}
+		case MallWeatherMetricFeishuRunsTotal:
+			switch counter.Labels["status"] {
+			case mallWeatherMetricStatusFailed:
+				alerts = append(alerts, mallWeatherOperationalAlert(
+					"MALL_WEATHER_FEISHU_RUNS_FAILED",
+					mallWeatherAlertSeverityCritical,
+					counter.Name,
+					counter.Labels,
+					float64(counter.Value),
+					1,
+				))
+			case mallWeatherMetricStatusPartialSuccess:
+				alerts = append(alerts, mallWeatherOperationalAlert(
+					"MALL_WEATHER_FEISHU_RUNS_PARTIAL_SUCCESS",
+					mallWeatherAlertSeverityWarning,
 					counter.Name,
 					counter.Labels,
 					float64(counter.Value),
@@ -466,6 +490,25 @@ func recordMallWeatherFeishuRows(
 			int64(result.SuccessCount),
 		)
 	}
+}
+
+func recordMallWeatherFeishuRun(
+	recorder mallWeatherMetricRecorder,
+	status string,
+) {
+	if recorder == nil {
+		return
+	}
+	switch status {
+	case mallWeatherMetricStatusSuccess, mallWeatherMetricStatusFailed, mallWeatherMetricStatusPartialSuccess:
+	default:
+		status = "unknown"
+	}
+	recorder.AddCounter(
+		MallWeatherMetricFeishuRunsTotal,
+		map[string]string{"status": status},
+		1,
+	)
 }
 
 func recordMallWeatherExportRows(

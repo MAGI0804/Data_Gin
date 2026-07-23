@@ -33,6 +33,7 @@ func TestMallWeatherMetricDefinitionsMatchDocumentedContract(t *testing.T) {
 		{Name: "mall_weather_queue_lag_seconds", Labels: []string{"kind"}},
 		{Name: "mall_weather_dead_letters_total", Labels: []string{"kind", "reason"}},
 		{Name: "mall_weather_export_rows_total"},
+		{Name: "mall_weather_feishu_runs_total", Labels: []string{"status"}},
 		{Name: "mall_weather_feishu_rows_total", Labels: []string{"status"}},
 	}
 	if !reflect.DeepEqual(definitions, want) {
@@ -361,6 +362,28 @@ func TestRecordMallWeatherDeadLetterTask(t *testing.T) {
 	}
 }
 
+func TestRecordMallWeatherFeishuRun(t *testing.T) {
+	t.Parallel()
+
+	recorder := newInMemoryMallWeatherMetricRecorder()
+	recordMallWeatherFeishuRun(recorder, mallWeatherMetricStatusSuccess)
+	recordMallWeatherFeishuRun(recorder, mallWeatherMetricStatusPartialSuccess)
+	recordMallWeatherFeishuRun(recorder, mallWeatherMetricStatusFailed)
+	recordMallWeatherFeishuRun(recorder, "secret=do-not-leak")
+	recordMallWeatherFeishuRun(nil, mallWeatherMetricStatusFailed)
+
+	got := recorder.CounterSnapshot()
+	want := []MallWeatherMetricCounterSample{
+		{Name: MallWeatherMetricFeishuRunsTotal, Labels: map[string]string{"status": "failed"}, Value: 1},
+		{Name: MallWeatherMetricFeishuRunsTotal, Labels: map[string]string{"status": mallWeatherMetricStatusPartialSuccess}, Value: 1},
+		{Name: MallWeatherMetricFeishuRunsTotal, Labels: map[string]string{"status": "success"}, Value: 1},
+		{Name: MallWeatherMetricFeishuRunsTotal, Labels: map[string]string{"status": "unknown"}, Value: 1},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("CounterSnapshot()=%+v want %+v", got, want)
+	}
+}
+
 func TestMallWeatherParseWarningFieldIsLowCardinality(t *testing.T) {
 	t.Parallel()
 
@@ -434,6 +457,7 @@ func TestEvaluateMallWeatherOperationalAlerts(t *testing.T) {
 		{Name: MallWeatherMetricProviderAuthFailuresTotal, Labels: map[string]string{"endpoint": caiyun.EndpointWeatherV26}, Value: 1},
 		{Name: MallWeatherMetricParseWarningsTotal, Labels: map[string]string{"field": "hourly"}, Value: 2},
 		{Name: MallWeatherMetricDeadLettersTotal, Labels: map[string]string{"kind": "feishu", "reason": MallWeatherDeadLetterReasonPermanent}, Value: 1},
+		{Name: MallWeatherMetricFeishuRunsTotal, Labels: map[string]string{"status": mallWeatherMetricStatusPartialSuccess}, Value: 2},
 	}
 	gauges := []MallWeatherMetricGaugeSample{
 		{Name: MallWeatherMetricProviderCircuitOpen, Value: 1},
@@ -459,6 +483,15 @@ func TestEvaluateMallWeatherOperationalAlerts(t *testing.T) {
 			Metric:    MallWeatherMetricDeadLettersTotal,
 			Labels:    map[string]string{"kind": "feishu", "reason": MallWeatherDeadLetterReasonPermanent},
 			Value:     1,
+			Threshold: 1,
+		},
+		{
+			Code:      "MALL_WEATHER_FEISHU_RUNS_PARTIAL_SUCCESS",
+			Severity:  mallWeatherAlertSeverityWarning,
+			Status:    mallWeatherAlertStatusFiring,
+			Metric:    MallWeatherMetricFeishuRunsTotal,
+			Labels:    map[string]string{"status": mallWeatherMetricStatusPartialSuccess},
+			Value:     2,
 			Threshold: 1,
 		},
 		{

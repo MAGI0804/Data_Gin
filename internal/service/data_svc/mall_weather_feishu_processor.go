@@ -188,6 +188,7 @@ func (processor *MallWeatherFeishuProcessor) Process(
 		)
 	}
 	recordMallWeatherFeishuRows(processor.metrics, result)
+	recordMallWeatherFeishuRun(processor.metrics, finish.Status)
 	return nil
 }
 
@@ -225,6 +226,7 @@ func (processor *MallWeatherFeishuProcessor) finishError(
 		return errors.Join(cause, err)
 	}
 	recordMallWeatherFeishuRows(processor.metrics, result)
+	recordMallWeatherFeishuRun(processor.metrics, finish.Status)
 	return errors.Join(ErrMallWeatherFeishuProcessNonRetryable, cause)
 }
 

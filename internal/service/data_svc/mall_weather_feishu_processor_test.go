@@ -31,7 +31,7 @@ func TestMallWeatherFeishuProcessorCompletesOwnedRun(t *testing.T) {
 	}
 }
 
-func TestMallWeatherFeishuProcessorRecordsTerminalSuccessfulFeishuRows(t *testing.T) {
+func TestMallWeatherFeishuProcessorRecordsTerminalFeishuMetrics(t *testing.T) {
 	tests := []struct {
 		name    string
 		result  MallWeatherFeishuExecutionResult
@@ -42,9 +42,10 @@ func TestMallWeatherFeishuProcessorRecordsTerminalSuccessfulFeishuRows(t *testin
 		{
 			name:   "success rows",
 			result: MallWeatherFeishuExecutionResult{SuccessCount: 3},
-			want: []fakeMallWeatherMetricCounter{{
-				name: MallWeatherMetricFeishuRowsTotal, labels: map[string]string{"status": mallWeatherMetricStatusSuccess}, value: 3,
-			}},
+			want: []fakeMallWeatherMetricCounter{
+				{name: MallWeatherMetricFeishuRowsTotal, labels: map[string]string{"status": mallWeatherMetricStatusSuccess}, value: 3},
+				{name: MallWeatherMetricFeishuRunsTotal, labels: map[string]string{"status": mallWeatherMetricStatusSuccess}, value: 1},
+			},
 		},
 		{
 			name: "partial rows only records confirmed success count",
@@ -55,9 +56,10 @@ func TestMallWeatherFeishuProcessorRecordsTerminalSuccessfulFeishuRows(t *testin
 			err: &MallWeatherFeishuExecutionError{
 				Retryable: false, SafeMessage: "部分飞书数据集推送失败", cause: errors.New("header conflict"),
 			},
-			want: []fakeMallWeatherMetricCounter{{
-				name: MallWeatherMetricFeishuRowsTotal, labels: map[string]string{"status": mallWeatherMetricStatusSuccess}, value: 8,
-			}},
+			want: []fakeMallWeatherMetricCounter{
+				{name: MallWeatherMetricFeishuRowsTotal, labels: map[string]string{"status": mallWeatherMetricStatusSuccess}, value: 8},
+				{name: MallWeatherMetricFeishuRunsTotal, labels: map[string]string{"status": mallWeatherMetricStatusPartialSuccess}, value: 1},
+			},
 			wantErr: true,
 		},
 		{
@@ -68,7 +70,9 @@ func TestMallWeatherFeishuProcessorRecordsTerminalSuccessfulFeishuRows(t *testin
 			err: &MallWeatherFeishuExecutionError{
 				Retryable: false, SafeMessage: "飞书推送失败", cause: errors.New("permission denied"),
 			},
-			want:    nil,
+			want: []fakeMallWeatherMetricCounter{{
+				name: MallWeatherMetricFeishuRunsTotal, labels: map[string]string{"status": mallWeatherMetricStatusFailed}, value: 1,
+			}},
 			wantErr: true,
 		},
 	}
