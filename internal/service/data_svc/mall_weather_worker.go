@@ -261,6 +261,8 @@ func (processor *MallWeatherProcessor) Process(ctx context.Context, taskType str
 			ErrorMessageSafe: "weather business data could not be stored", FinishedAt: finishedAt,
 		}, err, true)
 	}
+	recordMallWeatherFetchDuration(processor.metrics, start.TaskKind, startedAt, finishedAt)
+	recordMallWeatherDataAge(processor.metrics, start.TaskKind, batch.ProviderServerTime, finishedAt)
 	recordMallWeatherFetch(processor.metrics, start.TaskKind, batch.Status)
 	return nil
 }

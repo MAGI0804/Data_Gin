@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 )
 
 // MallWeatherMetricDefinition describes a registry-agnostic metric contract.
@@ -315,5 +316,40 @@ func recordMallWeatherProviderRequest(
 		MallWeatherMetricProviderRequestsTotal,
 		map[string]string{"endpoint": endpoint, "status": status},
 		1,
+	)
+}
+
+func recordMallWeatherFetchDuration(
+	recorder mallWeatherMetricRecorder,
+	taskKind string,
+	startedAt time.Time,
+	finishedAt time.Time,
+) {
+	gauge, ok := recorder.(mallWeatherMetricGaugeRecorder)
+	if !ok || taskKind == "" || startedAt.IsZero() || finishedAt.IsZero() || finishedAt.Before(startedAt) {
+		return
+	}
+	gauge.SetGauge(
+		MallWeatherMetricFetchDurationSeconds,
+		map[string]string{"kind": taskKind},
+		finishedAt.Sub(startedAt).Seconds(),
+	)
+}
+
+func recordMallWeatherDataAge(
+	recorder mallWeatherMetricRecorder,
+	taskKind string,
+	providerServerTime *time.Time,
+	observedAt time.Time,
+) {
+	gauge, ok := recorder.(mallWeatherMetricGaugeRecorder)
+	if !ok || taskKind == "" || providerServerTime == nil || providerServerTime.IsZero() ||
+		observedAt.IsZero() || observedAt.Before(*providerServerTime) {
+		return
+	}
+	gauge.SetGauge(
+		MallWeatherMetricDataAgeSeconds,
+		map[string]string{"kind": taskKind},
+		observedAt.Sub(*providerServerTime).Seconds(),
 	)
 }

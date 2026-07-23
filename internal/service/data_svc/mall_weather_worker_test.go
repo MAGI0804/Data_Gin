@@ -75,6 +75,39 @@ func TestMallWeatherProcessorRecordsSuccessfulFetchMetrics(t *testing.T) {
 	})
 }
 
+func TestMallWeatherProcessorRecordsSuccessfulFetchGaugeMetrics(t *testing.T) {
+	raw := readMallWeatherFixture(t, "../../../connector/caiyun/testdata/weather_v26_realtime.json")
+	provider := &fakeMallWeatherProvider{weatherResponse: &caiyun.ProviderResponse{
+		EndpointKind: caiyun.EndpointWeatherV26, HTTPStatus: 200, ProviderStatus: "ok", RawBody: raw,
+	}}
+	store := newFakeMallWeatherTaskStore(data_dao.FetchAttemptDispositionAcquired)
+	metrics := newInMemoryMallWeatherMetricRecorder()
+	processor := newTestMallWeatherProcessorWithMetrics(t, provider, store, metrics)
+
+	if err := processor.Process(context.Background(), job.TypeMallWeatherFast, job.MallTaskPayload{
+		MallID: 7, TaskWindow: "fast:7:202607220310",
+	}); err != nil {
+		t.Fatalf("Process() error=%v", err)
+	}
+	finishedAt := time.Date(2026, 7, 22, 3, 0, 1, 0, time.UTC)
+	serverTime := time.Unix(1784688000, 0).UTC()
+	want := []MallWeatherMetricGaugeSample{
+		{
+			Name:   MallWeatherMetricDataAgeSeconds,
+			Labels: map[string]string{"kind": "fast"},
+			Value:  finishedAt.Sub(serverTime).Seconds(),
+		},
+		{
+			Name:   MallWeatherMetricFetchDurationSeconds,
+			Labels: map[string]string{"kind": "fast"},
+			Value:  1,
+		},
+	}
+	if got := metrics.GaugeSnapshot(); !reflect.DeepEqual(got, want) {
+		t.Fatalf("GaugeSnapshot()=%+v want %+v", got, want)
+	}
+}
+
 func TestMallWeatherProcessorRecordsFailedFetchMetrics(t *testing.T) {
 	provider := &fakeMallWeatherProvider{weatherErr: &caiyun.ProviderError{
 		Class: providerhttp.ErrorClassTransport, Retryable: true,

@@ -8,6 +8,7 @@ import (
 	"regexp"
 	"sync"
 	"testing"
+	"time"
 )
 
 func TestMallWeatherMetricDefinitionsMatchDocumentedContract(t *testing.T) {
@@ -169,6 +170,38 @@ func TestInMemoryMallWeatherMetricRecorderStoresGauges(t *testing.T) {
 	fresh := recorder.GaugeSnapshot()
 	if fresh[1].Labels["kind"] != "full" {
 		t.Fatalf("GaugeSnapshot() exposed mutable labels: %+v", fresh[1])
+	}
+}
+
+func TestMallWeatherFetchGaugeRecorders(t *testing.T) {
+	t.Parallel()
+
+	recorder := newInMemoryMallWeatherMetricRecorder()
+	startedAt := time.Date(2026, 7, 22, 3, 0, 0, 0, time.UTC)
+	finishedAt := startedAt.Add(1500 * time.Millisecond)
+	serverTime := startedAt.Add(-10 * time.Second)
+
+	recordMallWeatherFetchDuration(recorder, "full", startedAt, finishedAt)
+	recordMallWeatherDataAge(recorder, "full", &serverTime, finishedAt)
+	recordMallWeatherFetchDuration(recorder, "bad", finishedAt, startedAt)
+	futureServerTime := finishedAt.Add(time.Second)
+	recordMallWeatherDataAge(recorder, "bad", &futureServerTime, finishedAt)
+
+	got := recorder.GaugeSnapshot()
+	want := []MallWeatherMetricGaugeSample{
+		{
+			Name:   MallWeatherMetricDataAgeSeconds,
+			Labels: map[string]string{"kind": "full"},
+			Value:  11.5,
+		},
+		{
+			Name:   MallWeatherMetricFetchDurationSeconds,
+			Labels: map[string]string{"kind": "full"},
+			Value:  1.5,
+		},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("GaugeSnapshot()=%+v want %+v", got, want)
 	}
 }
 
