@@ -46,3 +46,29 @@ func TestGzipAcceptsEmptyPayload(t *testing.T) {
 		t.Fatalf("Gzip(nil) length=%d error=%v", len(compressed), err)
 	}
 }
+
+func TestGunzipDecodesWithoutMutatingInput(t *testing.T) {
+	original := []byte(`{"status":"ok","result":{"value":"天气"}}`)
+	compressed, err := Gzip(original)
+	if err != nil {
+		t.Fatalf("Gzip() error=%v", err)
+	}
+	input := append([]byte(nil), compressed...)
+
+	decoded, err := Gunzip(input)
+	if err != nil {
+		t.Fatalf("Gunzip() error=%v", err)
+	}
+	if !bytes.Equal(decoded, original) {
+		t.Fatalf("Gunzip()=%q want %q", decoded, original)
+	}
+	if !bytes.Equal(input, compressed) {
+		t.Fatal("Gunzip() mutated input")
+	}
+}
+
+func TestGunzipRejectsInvalidPayload(t *testing.T) {
+	if _, err := Gunzip([]byte("not-gzip")); err == nil {
+		t.Fatal("Gunzip() accepted invalid gzip payload")
+	}
+}
