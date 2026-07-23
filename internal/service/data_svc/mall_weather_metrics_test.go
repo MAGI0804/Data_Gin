@@ -1,8 +1,10 @@
 package data_svc
 
 import (
+	"math"
 	"reflect"
 	"regexp"
+	"sync"
 	"testing"
 )
 
@@ -57,5 +59,76 @@ func TestMallWeatherMetricDefinitionsReturnsDefensiveCopy(t *testing.T) {
 	second := MallWeatherMetricDefinitions()
 	if second[0].Name == "mutated" || second[0].Labels[0] == "mutated" {
 		t.Fatalf("MallWeatherMetricDefinitions() returned mutable global state: %+v", second[0])
+	}
+}
+
+func TestInMemoryMallWeatherMetricRecorderAggregatesCounters(t *testing.T) {
+	t.Parallel()
+
+	recorder := newInMemoryMallWeatherMetricRecorder()
+	labels := map[string]string{"status": "success", "kind": "feishu"}
+	recorder.AddCounter(MallWeatherMetricFeishuRowsTotal, labels, 3)
+	labels["status"] = "mutated"
+	recorder.AddCounter(MallWeatherMetricFeishuRowsTotal, map[string]string{"kind": "feishu", "status": "success"}, 4)
+	recorder.AddCounter(MallWeatherMetricFeishuRowsTotal, map[string]string{"status": "failed"}, 2)
+	recorder.AddCounter("", nil, 10)
+	recorder.AddCounter(MallWeatherMetricFeishuRowsTotal, nil, 0)
+
+	got := recorder.CounterSnapshot()
+	want := []mallWeatherMetricCounterSample{
+		{
+			Name:   MallWeatherMetricFeishuRowsTotal,
+			Labels: map[string]string{"kind": "feishu", "status": "success"},
+			Value:  7,
+		},
+		{
+			Name:   MallWeatherMetricFeishuRowsTotal,
+			Labels: map[string]string{"status": "failed"},
+			Value:  2,
+		},
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("CounterSnapshot()=%+v want %+v", got, want)
+	}
+
+	got[0].Labels["status"] = "mutated"
+	fresh := recorder.CounterSnapshot()
+	if fresh[0].Labels["status"] != "success" {
+		t.Fatalf("CounterSnapshot() exposed mutable labels: %+v", fresh[0])
+	}
+}
+
+func TestInMemoryMallWeatherMetricRecorderIsRaceSafe(t *testing.T) {
+	t.Parallel()
+
+	recorder := newInMemoryMallWeatherMetricRecorder()
+	var wait sync.WaitGroup
+	for worker := 0; worker < 8; worker++ {
+		wait.Add(1)
+		go func() {
+			defer wait.Done()
+			for index := 0; index < 100; index++ {
+				recorder.AddCounter(MallWeatherMetricFeishuRowsTotal, map[string]string{"status": "success"}, 1)
+			}
+		}()
+	}
+	wait.Wait()
+
+	got := recorder.CounterSnapshot()
+	if len(got) != 1 || got[0].Value != 800 {
+		t.Fatalf("CounterSnapshot()=%+v, want one success counter with value 800", got)
+	}
+}
+
+func TestInMemoryMallWeatherMetricRecorderSaturatesOnOverflow(t *testing.T) {
+	t.Parallel()
+
+	recorder := newInMemoryMallWeatherMetricRecorder()
+	recorder.AddCounter(MallWeatherMetricFeishuRowsTotal, nil, math.MaxInt64)
+	recorder.AddCounter(MallWeatherMetricFeishuRowsTotal, nil, 1)
+
+	got := recorder.CounterSnapshot()
+	if len(got) != 1 || got[0].Value != math.MaxInt64 {
+		t.Fatalf("CounterSnapshot()=%+v, want saturated MaxInt64", got)
 	}
 }

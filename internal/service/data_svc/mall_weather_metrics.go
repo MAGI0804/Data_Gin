@@ -1,5 +1,12 @@
 package data_svc
 
+import (
+	"math"
+	"sort"
+	"strings"
+	"sync"
+)
+
 // MallWeatherMetricDefinition describes a registry-agnostic metric contract.
 // A Prometheus, OpenTelemetry, or logging-backed exporter should use these
 // definitions as the canonical mall weather metric names and label sets.
@@ -53,6 +60,103 @@ type mallWeatherMetricRecorder interface {
 type noopMallWeatherMetricRecorder struct{}
 
 func (noopMallWeatherMetricRecorder) AddCounter(string, map[string]string, int64) {}
+
+type mallWeatherMetricCounterSample struct {
+	Name   string
+	Labels map[string]string
+	Value  int64
+}
+
+type inMemoryMallWeatherMetricRecorder struct {
+	mu       sync.RWMutex
+	counters map[string]mallWeatherMetricCounterSample
+}
+
+func newInMemoryMallWeatherMetricRecorder() *inMemoryMallWeatherMetricRecorder {
+	return &inMemoryMallWeatherMetricRecorder{
+		counters: make(map[string]mallWeatherMetricCounterSample),
+	}
+}
+
+func (recorder *inMemoryMallWeatherMetricRecorder) AddCounter(
+	name string,
+	labels map[string]string,
+	value int64,
+) {
+	if recorder == nil || name == "" || value <= 0 {
+		return
+	}
+	key := mallWeatherMetricSeriesKey(name, labels)
+	labelCopy := copyMallWeatherMetricLabels(labels)
+
+	recorder.mu.Lock()
+	defer recorder.mu.Unlock()
+	if recorder.counters == nil {
+		recorder.counters = make(map[string]mallWeatherMetricCounterSample)
+	}
+	sample := recorder.counters[key]
+	if sample.Name == "" {
+		sample.Name = name
+		sample.Labels = labelCopy
+	}
+	if math.MaxInt64-sample.Value < value {
+		sample.Value = math.MaxInt64
+	} else {
+		sample.Value += value
+	}
+	recorder.counters[key] = sample
+}
+
+func (recorder *inMemoryMallWeatherMetricRecorder) CounterSnapshot() []mallWeatherMetricCounterSample {
+	if recorder == nil {
+		return nil
+	}
+	recorder.mu.RLock()
+	defer recorder.mu.RUnlock()
+
+	samples := make([]mallWeatherMetricCounterSample, 0, len(recorder.counters))
+	for _, sample := range recorder.counters {
+		sample.Labels = copyMallWeatherMetricLabels(sample.Labels)
+		samples = append(samples, sample)
+	}
+	sort.Slice(samples, func(left, right int) bool {
+		leftKey := mallWeatherMetricSeriesKey(samples[left].Name, samples[left].Labels)
+		rightKey := mallWeatherMetricSeriesKey(samples[right].Name, samples[right].Labels)
+		return leftKey < rightKey
+	})
+	return samples
+}
+
+func mallWeatherMetricSeriesKey(name string, labels map[string]string) string {
+	if len(labels) == 0 {
+		return name
+	}
+	keys := make([]string, 0, len(labels))
+	for key := range labels {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	var builder strings.Builder
+	builder.WriteString(name)
+	for _, key := range keys {
+		builder.WriteByte(0)
+		builder.WriteString(key)
+		builder.WriteByte('=')
+		builder.WriteString(labels[key])
+	}
+	return builder.String()
+}
+
+func copyMallWeatherMetricLabels(labels map[string]string) map[string]string {
+	if len(labels) == 0 {
+		return nil
+	}
+	copied := make(map[string]string, len(labels))
+	for key, value := range labels {
+		copied[key] = value
+	}
+	return copied
+}
 
 func recordMallWeatherFeishuRows(
 	recorder mallWeatherMetricRecorder,

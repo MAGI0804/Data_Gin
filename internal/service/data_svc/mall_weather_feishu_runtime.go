@@ -21,6 +21,8 @@ type mallWeatherFeishuRuntimeSheets interface {
 	AppendValues(context.Context, string, feishu.SheetWriteRange) (*feishu.SheetWriteResult, error)
 }
 
+var mallWeatherRuntimeMetrics = newInMemoryMallWeatherMetricRecorder()
+
 func NewMallWeatherFeishuProcessor() (*MallWeatherFeishuProcessor, error) {
 	sheets, err := newRuntimeMallWeatherFeishuSheets()
 	if err != nil {
@@ -115,7 +117,7 @@ func NewMallWeatherFeishuProcessor() (*MallWeatherFeishuProcessor, error) {
 		executor,
 		now,
 		uuid.NewString,
-		noopMallWeatherMetricRecorder{},
+		mallWeatherRuntimeMetrics,
 		defaultMallWeatherFeishuRunStaleAfter,
 		defaultMallWeatherFeishuHeartbeatInterval,
 		defaultMallWeatherFeishuStateUpdateTimeout,
