@@ -14,6 +14,7 @@ import (
 	"gin-biz-web-api/internal/requestbody"
 	"gin-biz-web-api/job"
 	"gin-biz-web-api/model"
+	"gin-biz-web-api/pkg/config"
 	"gin-biz-web-api/pkg/database"
 	projectredis "gin-biz-web-api/pkg/redis"
 
@@ -24,6 +25,7 @@ import (
 var (
 	ErrMallWeatherFeishuInvalid             = errors.New("mall weather feishu push: invalid input")
 	ErrMallWeatherFeishuDestinationNotFound = errors.New("mall weather feishu push: destination not found")
+	ErrMallWeatherFeishuDisabled            = errors.New("mall weather feishu push: disabled")
 )
 
 type mallWeatherFeishuDestinationReader interface {
@@ -42,29 +44,31 @@ type mallWeatherFeishuSheetsReader interface {
 type mallWeatherFeishuSheetsFactory func() (mallWeatherFeishuSheetsReader, error)
 
 type mallWeatherFeishuPushDependencies struct {
-	destinations mallWeatherFeishuDestinationReader
-	profiles     mallWeatherExportProfileReader
-	permissions  mallPermissionChecker
-	estimator    mallWeatherExportEstimator
-	limits       mallWeatherExportLimitReader
-	store        mallWeatherFeishuPushStore
-	runs         mallWeatherFeishuRunReader
-	resources    mallWeatherFeishuResourceResolver
-	newSheets    mallWeatherFeishuSheetsFactory
-	now          func() time.Time
+	destinations  mallWeatherFeishuDestinationReader
+	profiles      mallWeatherExportProfileReader
+	permissions   mallPermissionChecker
+	estimator     mallWeatherExportEstimator
+	limits        mallWeatherExportLimitReader
+	store         mallWeatherFeishuPushStore
+	runs          mallWeatherFeishuRunReader
+	resources     mallWeatherFeishuResourceResolver
+	newSheets     mallWeatherFeishuSheetsFactory
+	feishuEnabled func() bool
+	now           func() time.Time
 }
 
 type MallWeatherFeishuPushService struct {
-	destinations mallWeatherFeishuDestinationReader
-	profiles     mallWeatherExportProfileReader
-	permissions  mallPermissionChecker
-	estimator    mallWeatherExportEstimator
-	limits       mallWeatherExportLimitReader
-	store        mallWeatherFeishuPushStore
-	runs         mallWeatherFeishuRunReader
-	resources    mallWeatherFeishuResourceResolver
-	newSheets    mallWeatherFeishuSheetsFactory
-	now          func() time.Time
+	destinations  mallWeatherFeishuDestinationReader
+	profiles      mallWeatherExportProfileReader
+	permissions   mallPermissionChecker
+	estimator     mallWeatherExportEstimator
+	limits        mallWeatherExportLimitReader
+	store         mallWeatherFeishuPushStore
+	runs          mallWeatherFeishuRunReader
+	resources     mallWeatherFeishuResourceResolver
+	newSheets     mallWeatherFeishuSheetsFactory
+	feishuEnabled func() bool
+	now           func() time.Time
 }
 
 func NewMallWeatherFeishuPushService() *MallWeatherFeishuPushService {
@@ -87,7 +91,10 @@ func NewMallWeatherFeishuPushService() *MallWeatherFeishuPushService {
 		runs:         data_dao.NewMallWeatherFeishuRunDAO(database.DB),
 		resources:    global.Credentials,
 		newSheets:    newSheets,
-		now:          time.Now,
+		feishuEnabled: func() bool {
+			return config.GetBool("cfg.mall_weather.feishu_enabled")
+		},
+		now: time.Now,
 	})
 	if err != nil {
 		panic(err)
@@ -101,20 +108,21 @@ func newMallWeatherFeishuPushService(
 	if dependencies.destinations == nil || dependencies.profiles == nil || dependencies.permissions == nil ||
 		dependencies.estimator == nil || dependencies.limits == nil || dependencies.store == nil || dependencies.runs == nil ||
 		dependencies.resources == nil ||
-		dependencies.newSheets == nil || dependencies.now == nil {
+		dependencies.newSheets == nil || dependencies.feishuEnabled == nil || dependencies.now == nil {
 		return nil, errors.New("mall weather feishu push: invalid service configuration")
 	}
 	return &MallWeatherFeishuPushService{
-		destinations: dependencies.destinations,
-		profiles:     dependencies.profiles,
-		permissions:  dependencies.permissions,
-		estimator:    dependencies.estimator,
-		limits:       dependencies.limits,
-		store:        dependencies.store,
-		runs:         dependencies.runs,
-		resources:    dependencies.resources,
-		newSheets:    dependencies.newSheets,
-		now:          dependencies.now,
+		destinations:  dependencies.destinations,
+		profiles:      dependencies.profiles,
+		permissions:   dependencies.permissions,
+		estimator:     dependencies.estimator,
+		limits:        dependencies.limits,
+		store:         dependencies.store,
+		runs:          dependencies.runs,
+		resources:     dependencies.resources,
+		newSheets:     dependencies.newSheets,
+		feishuEnabled: dependencies.feishuEnabled,
+		now:           dependencies.now,
 	}, nil
 }
 
@@ -197,6 +205,9 @@ func (service *MallWeatherFeishuPushService) prepare(
 	if service == nil || ctx == nil || actorUserID == 0 || request.DestinationID == 0 || request.ProfileID == 0 ||
 		(request.ExpectedProfileVersion != nil && *request.ExpectedProfileVersion == 0) {
 		return nil, ErrMallWeatherFeishuInvalid
+	}
+	if !service.feishuEnabled() {
+		return nil, ErrMallWeatherFeishuDisabled
 	}
 	allowed, err := service.permissions.HasPermission(
 		ctx, actorUserID, PermissionWeatherFeishuPush, service.now().UTC(),

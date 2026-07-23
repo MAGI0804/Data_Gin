@@ -3,6 +3,7 @@ package bootstrap
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"gin-biz-web-api/internal/service/data_svc"
@@ -10,6 +11,34 @@ import (
 
 	"github.com/hibiken/asynq"
 )
+
+func TestRegisterMallWeatherFeishuWorkerHonorsFeatureGate(t *testing.T) {
+	t.Parallel()
+
+	calls := 0
+	if err := registerMallWeatherFeishuWorker(asynq.NewServeMux(), false, func() (mallWeatherFeishuProcessor, error) {
+		calls++
+		return &fakeMallWeatherFeishuProcessor{}, nil
+	}); err != nil || calls != 0 {
+		t.Fatalf("disabled registration error=%v calls=%d", err, calls)
+	}
+
+	if err := registerMallWeatherFeishuWorker(asynq.NewServeMux(), true, func() (mallWeatherFeishuProcessor, error) {
+		calls++
+		return &fakeMallWeatherFeishuProcessor{}, nil
+	}); err != nil || calls != 1 {
+		t.Fatalf("enabled registration error=%v calls=%d", err, calls)
+	}
+}
+
+func TestRegisterMallWeatherFeishuWorkerRejectsInvalidConfiguration(t *testing.T) {
+	t.Parallel()
+
+	err := registerMallWeatherFeishuWorker(nil, true, nil)
+	if err == nil || !strings.Contains(err.Error(), "invalid registration configuration") {
+		t.Fatalf("registerMallWeatherFeishuWorker() error=%v", err)
+	}
+}
 
 func TestMallWeatherFeishuHandlerProcessesStrictPayload(t *testing.T) {
 	t.Parallel()

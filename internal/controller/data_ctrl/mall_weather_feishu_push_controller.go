@@ -107,6 +107,8 @@ func classifyMallWeatherFeishuPushError(err error) (*errcode.Error, string) {
 	switch {
 	case errors.Is(err, data_svc.ErrMallForbidden):
 		return errcode.Forbidden, "无权推送天气数据到飞书"
+	case errors.Is(err, data_svc.ErrMallWeatherFeishuDisabled):
+		return errcode.Forbidden, "飞书天气推送功能未开启"
 	case errors.Is(err, data_svc.ErrMallWeatherFeishuDestinationNotFound):
 		return errcode.NotFound, "飞书推送目标不存在"
 	case errors.Is(err, data_dao.ErrMallWeatherFeishuRunNotFound):

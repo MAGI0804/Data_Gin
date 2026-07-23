@@ -96,6 +96,22 @@ func TestMallWeatherFeishuPushControllerGetsRunAndRejectsInvalidID(t *testing.T)
 	}
 }
 
+func TestMallWeatherFeishuPushControllerReportsDisabledFeature(t *testing.T) {
+	calls := 0
+	service := fakeMallWeatherFeishuPushControllerService{dryRun: func(
+		context.Context,
+		uint,
+		requestbody.MallWeatherFeishuPushRequest,
+	) (*data_svc.MallWeatherFeishuDryRunResult, error) {
+		calls++
+		return nil, data_svc.ErrMallWeatherFeishuDisabled
+	}}
+	recorder := performMallWeatherFeishuPushRequest(t, service, `{"destinationId":8,"profileId":9}`)
+	if recorder.Code != http.StatusForbidden || calls != 1 || strings.Contains(recorder.Body.String(), "disabled") {
+		t.Fatalf("status=%d calls=%d body=%s", recorder.Code, calls, recorder.Body.String())
+	}
+}
+
 func TestMallWeatherFeishuPushControllerRejectsUnknownFieldsAndLeaksNoErrors(t *testing.T) {
 	calls := 0
 	service := fakeMallWeatherFeishuPushControllerService{dryRun: func(

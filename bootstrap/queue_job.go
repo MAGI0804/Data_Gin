@@ -75,11 +75,15 @@ func setupQueueJob() {
 		exportCleaner := data_svc.NewMallWeatherExportCleaner()
 		mux.HandleFunc(job.TypeMallWeatherExportCleanup, newMallWeatherExportCleanupHandler(exportCleaner))
 
-		feishuProcessor, err := data_svc.NewMallWeatherFeishuProcessor()
-		if err != nil {
+		if err := registerMallWeatherFeishuWorker(
+			mux,
+			config.GetBool("cfg.mall_weather.feishu_enabled"),
+			func() (mallWeatherFeishuProcessor, error) {
+				return data_svc.NewMallWeatherFeishuProcessor()
+			},
+		); err != nil {
 			console.Exit("Mall Weather Feishu Worker Init Failed %v", err)
 		}
-		mux.HandleFunc(job.TypeMallWeatherFeishu, newMallWeatherFeishuHandler(feishuProcessor))
 	}
 
 	go func(mux *asynq.ServeMux, server *asynq.Server) {
@@ -121,6 +125,25 @@ type mallWeatherFeishuProcessor interface {
 
 type mallWeatherExportCleaner interface {
 	Cleanup(context.Context) (data_svc.MallWeatherExportCleanupResult, error)
+}
+
+func registerMallWeatherFeishuWorker(
+	mux *asynq.ServeMux,
+	enabled bool,
+	processorFactory func() (mallWeatherFeishuProcessor, error),
+) error {
+	if !enabled {
+		return nil
+	}
+	if mux == nil || processorFactory == nil {
+		return fmt.Errorf("mall weather feishu worker: invalid registration configuration")
+	}
+	feishuProcessor, err := processorFactory()
+	if err != nil {
+		return err
+	}
+	mux.HandleFunc(job.TypeMallWeatherFeishu, newMallWeatherFeishuHandler(feishuProcessor))
+	return nil
 }
 
 func newMallWeatherExportCleanupHandler(cleaner mallWeatherExportCleaner) asynq.HandlerFunc {

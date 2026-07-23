@@ -83,7 +83,10 @@ func TestMallWeatherFeishuPushServiceDryRunOrchestratesReadOnlyPlan(t *testing.T
 			credential.EnvFeishuWeatherHourlySheetID:    "sheet_hourly",
 		}},
 		newSheets: func() (mallWeatherFeishuSheetsReader, error) { return sheets, nil },
-		now:       func() time.Time { return now },
+		feishuEnabled: func() bool {
+			return true
+		},
+		now: func() time.Time { return now },
 	})
 	if err != nil {
 		t.Fatalf("newMallWeatherFeishuPushService() error=%v", err)
@@ -125,7 +128,10 @@ func TestMallWeatherFeishuPushServiceDryRunFailsClosedBeforeExternalReads(t *tes
 			credential.EnvFeishuWeatherHourlySheetID:    "sheet_hourly",
 		}},
 		newSheets: func() (mallWeatherFeishuSheetsReader, error) { return sheets, nil },
-		now:       func() time.Time { return now },
+		feishuEnabled: func() bool {
+			return true
+		},
+		now: func() time.Time { return now },
 	})
 	if err != nil {
 		t.Fatalf("newMallWeatherFeishuPushService() error=%v", err)
@@ -167,6 +173,9 @@ func TestMallWeatherFeishuPushServiceCreatePersistsOnlySafeSnapshots(t *testing.
 			sheetsCalls++
 			return nil, errors.New("must not be called")
 		},
+		feishuEnabled: func() bool {
+			return true
+		},
 		now: func() time.Time { return now },
 	})
 	if err != nil {
@@ -202,6 +211,47 @@ func TestMallWeatherFeishuPushServiceCreatePersistsOnlySafeSnapshots(t *testing.
 		!strings.Contains(string(command.DestinationSnapshotJSON), credential.EnvFeishuWeatherSpreadsheetToken) ||
 		!strings.Contains(string(command.DestinationSnapshotJSON), credential.EnvFeishuWeatherHourlySheetID) {
 		t.Fatalf("stored snapshots are incomplete: %s", allSnapshots)
+	}
+}
+
+func TestMallWeatherFeishuPushServiceDisabledFailsClosedBeforeExternalReads(t *testing.T) {
+	t.Parallel()
+
+	sheetsCalls := 0
+	store := &fakeMallWeatherFeishuPushStore{}
+	service, err := newMallWeatherFeishuPushService(mallWeatherFeishuPushDependencies{
+		destinations: fakeMallWeatherFeishuDestinationReader{},
+		profiles:     fakeMallWeatherExportProfileReader{},
+		permissions:  fakeMallPermissionChecker{allowed: true},
+		estimator:    &fakeMallWeatherExportEstimator{rows: 10},
+		limits:       fakeMallWeatherExportLimitReader{},
+		store:        store,
+		runs:         fakeMallWeatherFeishuRunReader{},
+		resources:    fakeMallWeatherFeishuResourceResolver{},
+		newSheets: func() (mallWeatherFeishuSheetsReader, error) {
+			sheetsCalls++
+			return &fakeMallWeatherFeishuSheetsReader{}, nil
+		},
+		feishuEnabled: func() bool {
+			return false
+		},
+		now: func() time.Time {
+			return time.Date(2026, 7, 23, 8, 0, 0, 0, time.UTC)
+		},
+	})
+	if err != nil {
+		t.Fatalf("newMallWeatherFeishuPushService() error=%v", err)
+	}
+
+	request := requestbody.MallWeatherFeishuPushRequest{DestinationID: 17, ProfileID: 9}
+	if _, err := service.DryRun(context.Background(), 19, request); !errors.Is(err, ErrMallWeatherFeishuDisabled) {
+		t.Fatalf("DryRun() error=%v, want disabled", err)
+	}
+	if _, _, err := service.Create(context.Background(), 19, "feishu-create-request-1", request); !errors.Is(err, ErrMallWeatherFeishuDisabled) {
+		t.Fatalf("Create() error=%v, want disabled", err)
+	}
+	if sheetsCalls != 0 || store.calls != 0 {
+		t.Fatalf("disabled service performed external work: sheetsCalls=%d store=%+v", sheetsCalls, store)
 	}
 }
 
