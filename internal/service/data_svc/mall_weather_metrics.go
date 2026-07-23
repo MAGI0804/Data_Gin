@@ -28,6 +28,7 @@ const (
 	MallWeatherMetricExportRowsTotal          = "mall_weather_export_rows_total"
 	MallWeatherMetricFeishuRowsTotal          = "mall_weather_feishu_rows_total"
 	mallWeatherMetricStatusSuccess            = "success"
+	mallWeatherMetricStatusFailed             = "failed"
 )
 
 var mallWeatherMetricDefinitions = []MallWeatherMetricDefinition{
@@ -223,4 +224,38 @@ func recordMallWeatherExportRows(
 		return
 	}
 	recorder.AddCounter(MallWeatherMetricExportRowsTotal, nil, result.ProcessedRows)
+}
+
+func recordMallWeatherFetch(
+	recorder mallWeatherMetricRecorder,
+	taskKind string,
+	status string,
+) {
+	if recorder == nil || taskKind == "" || status == "" {
+		return
+	}
+	recorder.AddCounter(
+		MallWeatherMetricFetchTotal,
+		map[string]string{"kind": taskKind, "status": status},
+		1,
+	)
+}
+
+func recordMallWeatherProviderRequest(
+	recorder mallWeatherMetricRecorder,
+	endpoint string,
+	success bool,
+) {
+	if recorder == nil || endpoint == "" {
+		return
+	}
+	status := mallWeatherMetricStatusFailed
+	if success {
+		status = mallWeatherMetricStatusSuccess
+	}
+	recorder.AddCounter(
+		MallWeatherMetricProviderRequestsTotal,
+		map[string]string{"endpoint": endpoint, "status": status},
+		1,
+	)
 }

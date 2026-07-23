@@ -41,6 +41,108 @@ func TestMallWeatherProcessorPersistsLifeIndexAfterRawSnapshot(t *testing.T) {
 	}
 }
 
+func TestMallWeatherProcessorRecordsSuccessfulFetchMetrics(t *testing.T) {
+	raw := readMallWeatherFixture(t, "../../../connector/caiyun/testdata/life_index_v3.json")
+	provider := &fakeMallWeatherProvider{lifeResponse: &caiyun.ProviderResponse{
+		EndpointKind: caiyun.EndpointLifeIndexV3, HTTPStatus: 200, ProviderStatus: "ok", RawBody: raw,
+	}}
+	store := newFakeMallWeatherTaskStore(data_dao.FetchAttemptDispositionAcquired)
+	metrics := &fakeMallWeatherMetricRecorder{}
+	processor := newTestMallWeatherProcessorWithMetrics(t, provider, store, metrics)
+
+	if err := processor.Process(context.Background(), job.TypeMallWeatherLifeIndex, job.MallTaskPayload{
+		MallID: 7, TaskWindow: "life:7:2026072203",
+	}); err != nil {
+		t.Fatalf("Process() error=%v", err)
+	}
+	assertFakeMallWeatherMetricCounters(t, metrics.counters, []fakeMallWeatherMetricCounter{
+		{
+			name: MallWeatherMetricProviderRequestsTotal,
+			labels: map[string]string{
+				"endpoint": caiyun.EndpointLifeIndexV3,
+				"status":   mallWeatherMetricStatusSuccess,
+			},
+			value: 1,
+		},
+		{
+			name: MallWeatherMetricFetchTotal,
+			labels: map[string]string{
+				"kind":   "lifeindex",
+				"status": weatherFetchStatusSuccess,
+			},
+			value: 1,
+		},
+	})
+}
+
+func TestMallWeatherProcessorRecordsFailedFetchMetrics(t *testing.T) {
+	provider := &fakeMallWeatherProvider{weatherErr: &caiyun.ProviderError{
+		Class: providerhttp.ErrorClassTransport, Retryable: true,
+	}}
+	store := newFakeMallWeatherTaskStore(data_dao.FetchAttemptDispositionAcquired)
+	metrics := &fakeMallWeatherMetricRecorder{}
+	processor := newTestMallWeatherProcessorWithMetrics(t, provider, store, metrics)
+
+	err := processor.Process(context.Background(), job.TypeMallWeatherFull, job.MallTaskPayload{
+		MallID: 7, TaskWindow: "full:7:2026072203",
+	})
+	var processError *MallWeatherProcessError
+	if !errors.As(err, &processError) || !processError.Retryable {
+		t.Fatalf("Process() error=%v", err)
+	}
+	assertFakeMallWeatherMetricCounters(t, metrics.counters, []fakeMallWeatherMetricCounter{
+		{
+			name: MallWeatherMetricProviderRequestsTotal,
+			labels: map[string]string{
+				"endpoint": caiyun.EndpointWeatherV26,
+				"status":   mallWeatherMetricStatusFailed,
+			},
+			value: 1,
+		},
+		{
+			name: MallWeatherMetricFetchTotal,
+			labels: map[string]string{
+				"kind":   "full",
+				"status": mallWeatherMetricStatusFailed,
+			},
+			value: 1,
+		},
+	})
+}
+
+func TestMallWeatherProcessorRecordsEmptyProviderResponseAsFailedMetric(t *testing.T) {
+	provider := &fakeMallWeatherProvider{}
+	store := newFakeMallWeatherTaskStore(data_dao.FetchAttemptDispositionAcquired)
+	metrics := &fakeMallWeatherMetricRecorder{}
+	processor := newTestMallWeatherProcessorWithMetrics(t, provider, store, metrics)
+
+	err := processor.Process(context.Background(), job.TypeMallWeatherFull, job.MallTaskPayload{
+		MallID: 7, TaskWindow: "full:7:2026072203",
+	})
+	var processError *MallWeatherProcessError
+	if !errors.As(err, &processError) || processError.Retryable {
+		t.Fatalf("Process() error=%v", err)
+	}
+	assertFakeMallWeatherMetricCounters(t, metrics.counters, []fakeMallWeatherMetricCounter{
+		{
+			name: MallWeatherMetricProviderRequestsTotal,
+			labels: map[string]string{
+				"endpoint": caiyun.EndpointWeatherV26,
+				"status":   mallWeatherMetricStatusFailed,
+			},
+			value: 1,
+		},
+		{
+			name: MallWeatherMetricFetchTotal,
+			labels: map[string]string{
+				"kind":   "full",
+				"status": mallWeatherMetricStatusFailed,
+			},
+			value: 1,
+		},
+	})
+}
+
 func TestMallWeatherProcessorUsesTaskLock(t *testing.T) {
 	provider := &fakeMallWeatherProvider{}
 	store := newFakeMallWeatherTaskStore(data_dao.FetchAttemptDispositionAcquired)
@@ -87,6 +189,36 @@ func TestMallWeatherProcessorDoesNotBypassRateLimiterFailure(t *testing.T) {
 		provider.weatherCalls != 0 || store.failure.ErrorClass != "rate_limit" {
 		t.Fatalf("Process() error=%v calls=%d failure=%+v", err, provider.weatherCalls, store.failure)
 	}
+}
+
+func TestMallWeatherProcessorDoesNotRecordProviderMetricBeforeProviderCall(t *testing.T) {
+	provider := &fakeMallWeatherProvider{}
+	store := newFakeMallWeatherTaskStore(data_dao.FetchAttemptDispositionAcquired)
+	metrics := &fakeMallWeatherMetricRecorder{}
+	processor := newTestMallWeatherProcessorWithGuardAndMetrics(
+		t,
+		provider,
+		store,
+		&fakeWeatherTaskLocker{acquired: true},
+		&fakeWeatherRateLimiter{err: errors.New("redis unavailable")},
+		metrics,
+	)
+
+	err := processor.Process(context.Background(), job.TypeMallWeatherFull, job.MallTaskPayload{
+		MallID: 7, TaskWindow: "full:7:2026072203",
+	})
+	var processError *MallWeatherProcessError
+	if !errors.As(err, &processError) || !processError.Retryable {
+		t.Fatalf("Process() error=%v", err)
+	}
+	assertFakeMallWeatherMetricCounters(t, metrics.counters, []fakeMallWeatherMetricCounter{{
+		name: MallWeatherMetricFetchTotal,
+		labels: map[string]string{
+			"kind":   "full",
+			"status": mallWeatherMetricStatusFailed,
+		},
+		value: 1,
+	}})
 }
 
 func TestMallWeatherProcessorPersistsAvailableV26ModulesAsPartialSuccess(t *testing.T) {
@@ -358,11 +490,41 @@ func newTestMallWeatherProcessor(t *testing.T, provider mallWeatherProvider, sto
 	return newTestMallWeatherProcessorWithLocker(t, provider, store, &fakeWeatherTaskLocker{acquired: true})
 }
 
+func newTestMallWeatherProcessorWithMetrics(
+	t *testing.T,
+	provider mallWeatherProvider,
+	store mallWeatherTaskStore,
+	metrics mallWeatherMetricRecorder,
+) *MallWeatherProcessor {
+	return newTestMallWeatherProcessorWithLockerAndMetrics(t, provider, store, &fakeWeatherTaskLocker{acquired: true}, metrics)
+}
+
 func newTestMallWeatherProcessorWithLocker(t *testing.T, provider mallWeatherProvider, store mallWeatherTaskStore, locker weatherdomain.TaskLocker) *MallWeatherProcessor {
-	return newTestMallWeatherProcessorWithGuard(t, provider, store, locker, &fakeWeatherRateLimiter{})
+	return newTestMallWeatherProcessorWithLockerAndMetrics(t, provider, store, locker, noopMallWeatherMetricRecorder{})
+}
+
+func newTestMallWeatherProcessorWithLockerAndMetrics(
+	t *testing.T,
+	provider mallWeatherProvider,
+	store mallWeatherTaskStore,
+	locker weatherdomain.TaskLocker,
+	metrics mallWeatherMetricRecorder,
+) *MallWeatherProcessor {
+	return newTestMallWeatherProcessorWithGuardAndMetrics(t, provider, store, locker, &fakeWeatherRateLimiter{}, metrics)
 }
 
 func newTestMallWeatherProcessorWithGuard(t *testing.T, provider mallWeatherProvider, store mallWeatherTaskStore, locker weatherdomain.TaskLocker, limiter weatherdomain.ProviderRateLimiter) *MallWeatherProcessor {
+	return newTestMallWeatherProcessorWithGuardAndMetrics(t, provider, store, locker, limiter, noopMallWeatherMetricRecorder{})
+}
+
+func newTestMallWeatherProcessorWithGuardAndMetrics(
+	t *testing.T,
+	provider mallWeatherProvider,
+	store mallWeatherTaskStore,
+	locker weatherdomain.TaskLocker,
+	limiter weatherdomain.ProviderRateLimiter,
+	metrics mallWeatherMetricRecorder,
+) *MallWeatherProcessor {
 	t.Helper()
 	weatherSnapshots, err := weatherdomain.NewRawSnapshotBuilder(weatherdomain.RawSnapshotConfig{
 		SchemaVersion: weatherParserVersionV26,
@@ -385,7 +547,7 @@ func newTestMallWeatherProcessorWithGuard(t *testing.T, provider mallWeatherProv
 		result := current
 		current = current.Add(time.Second)
 		return result
-	})
+	}, metrics)
 	if err != nil {
 		t.Fatalf("newMallWeatherProcessor() error=%v", err)
 	}

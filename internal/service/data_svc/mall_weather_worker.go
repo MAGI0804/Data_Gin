@@ -125,6 +125,7 @@ type MallWeatherProcessor struct {
 	limiter          weatherdomain.ProviderRateLimiter
 	config           MallWeatherProcessorConfig
 	now              func() time.Time
+	metrics          mallWeatherMetricRecorder
 }
 
 func newMallWeatherProcessor(
@@ -136,8 +137,10 @@ func newMallWeatherProcessor(
 	limiter weatherdomain.ProviderRateLimiter,
 	config MallWeatherProcessorConfig,
 	now func() time.Time,
+	metrics mallWeatherMetricRecorder,
 ) (*MallWeatherProcessor, error) {
 	if provider == nil || store == nil || weatherSnapshots == nil || lifeSnapshots == nil || locker == nil || limiter == nil || now == nil ||
+		metrics == nil ||
 		config.FastHourlySteps < 1 || config.FastHourlySteps > 360 || config.FastDailySteps < 1 || config.FastDailySteps > 15 ||
 		config.FullHourlySteps < 1 || config.FullHourlySteps > 360 || config.FullDailySteps < 1 || config.FullDailySteps > 15 ||
 		config.LifeIndexDays < 1 || config.LifeIndexDays > 15 || config.Unit != "metric:v2" ||
@@ -147,6 +150,7 @@ func newMallWeatherProcessor(
 	return &MallWeatherProcessor{
 		provider: provider, store: store, weatherSnapshots: weatherSnapshots, lifeSnapshots: lifeSnapshots,
 		locker: locker, limiter: limiter, config: config, now: now,
+		metrics: metrics,
 	}, nil
 }
 
@@ -205,6 +209,10 @@ func (processor *MallWeatherProcessor) Process(ctx context.Context, taskType str
 	if response != nil && response.EndpointKind != start.Payload.EndpointKind {
 		providerErr = &caiyun.ProviderError{Class: "invalid_response"}
 	}
+	if providerErr == nil && (response == nil || len(response.RawBody) == 0) {
+		providerErr = &caiyun.ProviderError{Class: "invalid_response"}
+	}
+	recordMallWeatherProviderRequest(processor.metrics, start.Payload.EndpointKind, providerErr == nil)
 	if response != nil && len(response.RawBody) > 0 {
 		snapshot, snapshotErr := processor.snapshotBuilder(start.Payload.EndpointKind).Build(ctx, weatherdomain.RawSnapshotInput{
 			Provider: weatherdomain.ProviderCaiyun, EndpointKind: start.Payload.EndpointKind,
@@ -226,9 +234,6 @@ func (processor *MallWeatherProcessor) Process(ctx context.Context, taskType str
 				ErrorMessageSafe: "weather response snapshot could not be recorded", FinishedAt: finishedAt,
 			}, err, true)
 		}
-	}
-	if providerErr == nil && (response == nil || len(response.RawBody) == 0) {
-		providerErr = &caiyun.ProviderError{Class: "invalid_response"}
 	}
 	if providerErr != nil {
 		failure, retryable := classifyWeatherProviderFailure(providerErr, response, finishedAt)
@@ -256,6 +261,7 @@ func (processor *MallWeatherProcessor) Process(ctx context.Context, taskType str
 			ErrorMessageSafe: "weather business data could not be stored", FinishedAt: finishedAt,
 		}, err, true)
 	}
+	recordMallWeatherFetch(processor.metrics, start.TaskKind, batch.Status)
 	return nil
 }
 
@@ -342,6 +348,7 @@ func (processor *MallWeatherProcessor) finishFailure(ctx context.Context, execut
 		}
 		return &MallWeatherProcessError{Retryable: true, Code: "FAILURE_AUDIT_FAILED", cause: err}
 	}
+	recordMallWeatherFetch(processor.metrics, execution.Run.TaskKind, mallWeatherMetricStatusFailed)
 	if errors.Is(cause, context.Canceled) || errors.Is(cause, context.DeadlineExceeded) {
 		return cause
 	}

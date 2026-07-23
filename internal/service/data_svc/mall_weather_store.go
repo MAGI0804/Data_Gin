@@ -102,7 +102,7 @@ func NewMallWeatherProcessor() (*MallWeatherProcessor, error) {
 		Unit:            config.GetString("cfg.mall_weather.unit"), AlertEnabled: config.GetBool("cfg.mall_weather.alert_enabled"),
 		AttemptStaleAfter: staleAfter, FailureFinalizeTimeout: 3 * time.Second,
 		LockReleaseTimeout: time.Duration(config.GetInt("cfg.mall_weather.lock_release_timeout_seconds")) * time.Second,
-	}, time.Now)
+	}, time.Now, mallWeatherRuntimeMetrics)
 }
 
 func newWeatherSnapshotObjectStore() (weatherdomain.SnapshotObjectStore, error) {
