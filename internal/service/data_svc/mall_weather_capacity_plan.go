@@ -1,8 +1,13 @@
 package data_svc
 
 import (
+	"context"
 	"errors"
 	"math"
+	"time"
+
+	"gin-biz-web-api/internal/dao/data_dao"
+	"gin-biz-web-api/pkg/database"
 )
 
 const (
@@ -19,6 +24,28 @@ const (
 )
 
 var ErrMallWeatherInvalidCapacityPlan = errors.New("mall weather capacity plan: invalid input")
+
+type MallWeatherCapacityPlanService struct {
+	permissions mallPermissionChecker
+	now         func() time.Time
+}
+
+func NewMallWeatherCapacityPlanService() *MallWeatherCapacityPlanService {
+	return &MallWeatherCapacityPlanService{
+		permissions: data_dao.NewMallWeatherPermissionDAO(database.DB),
+		now:         time.Now,
+	}
+}
+
+func newMallWeatherCapacityPlanService(
+	permissions mallPermissionChecker,
+	now func() time.Time,
+) (*MallWeatherCapacityPlanService, error) {
+	if permissions == nil || now == nil {
+		return nil, ErrMallWeatherInvalidCapacityPlan
+	}
+	return &MallWeatherCapacityPlanService{permissions: permissions, now: now}, nil
+}
 
 type MallWeatherCapacityPlanInput struct {
 	MallCount       int
@@ -50,6 +77,36 @@ type MallWeatherCapacityPlan struct {
 	FeishuBatchRows                   int                              `json:"feishuBatchRows"`
 	TotalFeishuBatches                int64                            `json:"totalFeishuBatches"`
 	Datasets                          []MallWeatherCapacityDatasetPlan `json:"datasets"`
+}
+
+func (service *MallWeatherCapacityPlanService) Plan(
+	ctx context.Context,
+	actorUserID uint,
+	input MallWeatherCapacityPlanInput,
+) (*MallWeatherCapacityPlan, error) {
+	if service == nil || service.permissions == nil || service.now == nil || ctx == nil {
+		return nil, ErrMallWeatherInvalidCapacityPlan
+	}
+	if actorUserID == 0 {
+		return nil, ErrMallForbidden
+	}
+	allowed, err := service.permissions.HasPermission(
+		ctx,
+		actorUserID,
+		PermissionWeatherConfigManage,
+		service.now().UTC(),
+	)
+	if err != nil {
+		return nil, err
+	}
+	if !allowed {
+		return nil, ErrMallForbidden
+	}
+	plan, err := BuildMallWeatherCapacityPlan(input)
+	if err != nil {
+		return nil, err
+	}
+	return &plan, nil
 }
 
 func BuildMallWeatherCapacityPlan(input MallWeatherCapacityPlanInput) (MallWeatherCapacityPlan, error) {

@@ -1,10 +1,12 @@
 package data_svc
 
 import (
+	"context"
 	"errors"
 	"math"
 	"reflect"
 	"testing"
+	"time"
 )
 
 func TestBuildMallWeatherCapacityPlanEstimatesProviderAndStoragePressure(t *testing.T) {
@@ -79,5 +81,48 @@ func TestBuildMallWeatherCapacityPlanRejectsInvalidInputs(t *testing.T) {
 				t.Fatalf("BuildMallWeatherCapacityPlan() error=%v want %v", err, ErrMallWeatherInvalidCapacityPlan)
 			}
 		})
+	}
+}
+
+func TestMallWeatherCapacityPlanServiceRequiresConfigPermission(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 7, 23, 9, 0, 0, 0, time.UTC)
+	permissions := &recordingMallPermissionChecker{allowed: map[string]bool{
+		PermissionWeatherConfigManage: true,
+	}}
+	service, err := newMallWeatherCapacityPlanService(permissions, func() time.Time { return now })
+	if err != nil {
+		t.Fatalf("newMallWeatherCapacityPlanService() error=%v", err)
+	}
+	plan, err := service.Plan(context.Background(), 17, MallWeatherCapacityPlanInput{
+		MallCount: 1, ProviderQPS: 1, HourlySteps: 24, DailySteps: 1, LifeIndexDays: 1,
+	})
+	if err != nil {
+		t.Fatalf("Plan() error=%v", err)
+	}
+	if plan.ProviderRequests == 0 || !reflect.DeepEqual(permissions.requested, []string{PermissionWeatherConfigManage}) {
+		t.Fatalf("plan=%+v permissions=%v", plan, permissions.requested)
+	}
+}
+
+func TestMallWeatherCapacityPlanServiceRejectsUnauthorizedActor(t *testing.T) {
+	t.Parallel()
+
+	service, err := newMallWeatherCapacityPlanService(
+		&recordingMallPermissionChecker{allowed: map[string]bool{}},
+		time.Now,
+	)
+	if err != nil {
+		t.Fatalf("newMallWeatherCapacityPlanService() error=%v", err)
+	}
+	_, err = service.Plan(context.Background(), 17, MallWeatherCapacityPlanInput{
+		MallCount: 1, ProviderQPS: 1, HourlySteps: 24, DailySteps: 1, LifeIndexDays: 1,
+	})
+	if !errors.Is(err, ErrMallForbidden) {
+		t.Fatalf("Plan() error=%v, want ErrMallForbidden", err)
+	}
+	if _, err = service.Plan(context.Background(), 0, MallWeatherCapacityPlanInput{}); !errors.Is(err, ErrMallForbidden) {
+		t.Fatalf("Plan() anonymous error=%v, want ErrMallForbidden", err)
 	}
 }
