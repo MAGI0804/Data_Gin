@@ -44,6 +44,8 @@ type FetchAttemptLease struct {
 	Attempt     model.MallWeatherFetchAttempt
 }
 
+var ErrProviderRawSnapshotNotFound = errors.New("provider raw snapshot: not found")
+
 type HourlyQuery struct {
 	MallID            uint
 	StartUTC          time.Time
@@ -81,6 +83,28 @@ func (dao *MallWeatherDAO) CreateRawSnapshot(ctx context.Context, snapshot *mode
 		return fmt.Errorf("mall weather: create raw snapshot: %w", err)
 	}
 	return nil
+}
+
+func (dao *MallWeatherDAO) FindRawSnapshotByID(ctx context.Context, snapshotID uint) (*model.ProviderRawSnapshot, error) {
+	if dao == nil || dao.db == nil || ctx == nil || snapshotID == 0 {
+		return nil, fmt.Errorf("mall weather: invalid raw snapshot lookup")
+	}
+	var row model.ProviderRawSnapshot
+	if err := dao.rawSnapshotByIDQuery(ctx, snapshotID, &row).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrProviderRawSnapshotNotFound
+		}
+		return nil, fmt.Errorf("mall weather: find raw snapshot: %w", err)
+	}
+	return &row, nil
+}
+
+func (dao *MallWeatherDAO) rawSnapshotByIDQuery(
+	ctx context.Context,
+	snapshotID uint,
+	row *model.ProviderRawSnapshot,
+) *gorm.DB {
+	return dao.db.WithContext(ctx).Where("id = ?", snapshotID).First(row)
 }
 
 func (dao *MallWeatherDAO) GetOrCreateFetchRun(ctx context.Context, run *model.MallWeatherFetchRun) (*model.MallWeatherFetchRun, bool, error) {

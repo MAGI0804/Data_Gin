@@ -3,6 +3,7 @@ package data_dao
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"reflect"
 	"strings"
 	"testing"
@@ -79,6 +80,35 @@ func TestSanitizeFetchAttemptUpdates(t *testing.T) {
 	}
 	if _, err := sanitizeFetchAttemptUpdates(map[string]interface{}{"attempt_no": 99}); err == nil {
 		t.Fatal("sanitizeFetchAttemptUpdates() accepted immutable attempt number")
+	}
+}
+
+func TestFindRawSnapshotByIDRejectsInvalidBoundary(t *testing.T) {
+	if _, err := (&MallWeatherDAO{}).FindRawSnapshotByID(context.Background(), 1); err == nil {
+		t.Fatal("FindRawSnapshotByID() accepted unconfigured DAO")
+	}
+	if _, err := NewMallWeatherDAO(dryRunWeatherDAOTestDB(t)).FindRawSnapshotByID(context.Background(), 0); err == nil {
+		t.Fatal("FindRawSnapshotByID() accepted zero snapshot ID")
+	}
+	if !errors.Is(ErrProviderRawSnapshotNotFound, ErrProviderRawSnapshotNotFound) {
+		t.Fatal("ErrProviderRawSnapshotNotFound is not a stable sentinel")
+	}
+}
+
+func TestRawSnapshotByIDQueryUsesBoundID(t *testing.T) {
+	dao := NewMallWeatherDAO(dryRunWeatherDAOTestDB(t))
+	var row model.ProviderRawSnapshot
+	query := dao.rawSnapshotByIDQuery(context.Background(), 123, &row)
+	if query.Error != nil {
+		t.Fatalf("rawSnapshotByIDQuery() error=%v", query.Error)
+	}
+	statement := query.Statement.SQL.String()
+	if !strings.Contains(statement, "provider_raw_snapshots") ||
+		!strings.Contains(statement, "id = ?") ||
+		strings.Contains(statement, "123") ||
+		len(query.Statement.Vars) == 0 ||
+		query.Statement.Vars[0] != uint(123) {
+		t.Fatalf("statement=%s vars=%v", statement, query.Statement.Vars)
 	}
 }
 
