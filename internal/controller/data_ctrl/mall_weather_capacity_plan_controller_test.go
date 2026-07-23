@@ -55,6 +55,24 @@ func TestMallWeatherCapacityPlanControllerReturnsPlan(t *testing.T) {
 	}
 }
 
+func TestMallWeatherCapacityPlanControllerDefaultsFullProfileParameters(t *testing.T) {
+	service := fakeMallWeatherCapacityPlanService{
+		plan: func(_ context.Context, _ uint, input data_svc.MallWeatherCapacityPlanInput) (*data_svc.MallWeatherCapacityPlan, error) {
+			if input.MallCount != 1000 || input.ProviderQPS != 20 ||
+				input.HourlySteps != 360 || input.DailySteps != 15 || input.LifeIndexDays != 15 ||
+				input.AlertsPerMall != 0 || input.FeishuBatchRows != 0 {
+				t.Fatalf("input=%+v", input)
+			}
+			return &data_svc.MallWeatherCapacityPlan{MallCount: input.MallCount, ProviderQPS: input.ProviderQPS}, nil
+		},
+	}
+
+	recorder := performMallWeatherCapacityPlanRequest(t, service, 17, "?mall_count=1000&provider_qps=20")
+	if recorder.Code != http.StatusOK {
+		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+}
+
 func TestMallWeatherCapacityPlanControllerRejectsInvalidQuery(t *testing.T) {
 	calls := 0
 	service := fakeMallWeatherCapacityPlanService{
@@ -67,6 +85,11 @@ func TestMallWeatherCapacityPlanControllerRejectsInvalidQuery(t *testing.T) {
 	recorder := performMallWeatherCapacityPlanRequest(t, service, 17, "?mallCount=bad&providerQps=2.5&hourlySteps=360&dailySteps=15&lifeIndexDays=15")
 	if recorder.Code != http.StatusUnprocessableEntity || calls != 0 {
 		t.Fatalf("status=%d calls=%d body=%s", recorder.Code, calls, recorder.Body.String())
+	}
+
+	recorder = performMallWeatherCapacityPlanRequest(t, service, 17, "?mallCount=5&mall_count=6&providerQps=2.5")
+	if recorder.Code != http.StatusUnprocessableEntity || calls != 0 {
+		t.Fatalf("conflict status=%d calls=%d body=%s", recorder.Code, calls, recorder.Body.String())
 	}
 }
 
