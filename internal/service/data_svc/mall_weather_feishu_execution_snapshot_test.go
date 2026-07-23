@@ -92,6 +92,13 @@ func TestPrepareMallWeatherFeishuExecutionFailsClosedWhenResourceIsMissing(t *te
 func validMallWeatherFeishuExecutionRecord(
 	t *testing.T,
 ) (data_dao.MallWeatherFeishuRunRecord, fakeMallWeatherFeishuResourceResolver) {
+	return validMallWeatherFeishuExecutionRecordForMode(t, "append")
+}
+
+func validMallWeatherFeishuExecutionRecordForMode(
+	t *testing.T,
+	writeMode string,
+) (data_dao.MallWeatherFeishuRunRecord, fakeMallWeatherFeishuResourceResolver) {
 	t.Helper()
 	profileRequest := requestbody.MallWeatherExportProfileSaveRequest{
 		Code: "mall_weather_full", Name: "Mall weather", TimeZone: "UTC", UnitSystem: "metric",
@@ -117,7 +124,7 @@ func validMallWeatherFeishuExecutionRecord(
 	destinationConfigJSON, err := json.Marshal(MallWeatherFeishuDestinationConfig{
 		SpreadsheetTokenEnv: credential.EnvFeishuWeatherSpreadsheetToken,
 		SheetIDEnvMapping:   map[string]string{"hourly": credential.EnvFeishuWeatherHourlySheetID},
-		WriteMode:           "append",
+		WriteMode:           writeMode,
 		BatchRows:           200,
 		ProfileCode:         profileRequest.Code,
 		TimeoutSeconds:      20,
