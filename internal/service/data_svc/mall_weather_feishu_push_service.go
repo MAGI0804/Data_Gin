@@ -43,6 +43,7 @@ type mallWeatherFeishuPushDependencies struct {
 	permissions  mallPermissionChecker
 	estimator    mallWeatherExportEstimator
 	limits       mallWeatherExportLimitReader
+	store        mallWeatherFeishuPushStore
 	resources    mallWeatherFeishuResourceResolver
 	newSheets    mallWeatherFeishuSheetsFactory
 	now          func() time.Time
@@ -54,6 +55,7 @@ type MallWeatherFeishuPushService struct {
 	permissions  mallPermissionChecker
 	estimator    mallWeatherExportEstimator
 	limits       mallWeatherExportLimitReader
+	store        mallWeatherFeishuPushStore
 	resources    mallWeatherFeishuResourceResolver
 	newSheets    mallWeatherFeishuSheetsFactory
 	now          func() time.Time
@@ -75,6 +77,7 @@ func NewMallWeatherFeishuPushService() *MallWeatherFeishuPushService {
 		permissions:  data_dao.NewMallWeatherPermissionDAO(database.DB),
 		estimator:    data_dao.NewMallWeatherExportJobDAO(database.DB),
 		limits:       data_dao.NewRuntimeConfigDAO(),
+		store:        gormMallWeatherFeishuPushStore{db: database.DB},
 		resources:    global.Credentials,
 		newSheets:    newSheets,
 		now:          time.Now,
@@ -89,7 +92,7 @@ func newMallWeatherFeishuPushService(
 	dependencies mallWeatherFeishuPushDependencies,
 ) (*MallWeatherFeishuPushService, error) {
 	if dependencies.destinations == nil || dependencies.profiles == nil || dependencies.permissions == nil ||
-		dependencies.estimator == nil || dependencies.limits == nil || dependencies.resources == nil ||
+		dependencies.estimator == nil || dependencies.limits == nil || dependencies.store == nil || dependencies.resources == nil ||
 		dependencies.newSheets == nil || dependencies.now == nil {
 		return nil, errors.New("mall weather feishu push: invalid service configuration")
 	}
@@ -99,6 +102,7 @@ func newMallWeatherFeishuPushService(
 		permissions:  dependencies.permissions,
 		estimator:    dependencies.estimator,
 		limits:       dependencies.limits,
+		store:        dependencies.store,
 		resources:    dependencies.resources,
 		newSheets:    dependencies.newSheets,
 		now:          dependencies.now,
@@ -110,15 +114,83 @@ func (service *MallWeatherFeishuPushService) DryRun(
 	actorUserID uint,
 	request requestbody.MallWeatherFeishuPushRequest,
 ) (*MallWeatherFeishuDryRunResult, error) {
+	prepared, err := service.prepare(ctx, actorUserID, request)
+	if err != nil {
+		return nil, err
+	}
+	sheets, err := service.newSheets()
+	if err != nil || sheets == nil {
+		return nil, errors.New("mall weather feishu push: sheets client is unavailable")
+	}
+	return service.inspectAndPlan(ctx, prepared.destination, prepared.profileDTO, prepared.estimatedRows, sheets)
+}
+
+type mallWeatherFeishuPreparedPush struct {
+	destinationRow *model.DestinationDefinition
+	destination    *MallWeatherFeishuResolvedDestination
+	profileRow     *model.MallWeatherExportProfile
+	profileDTO     MallWeatherExportProfileDTO
+	filters        requestbody.MallWeatherExportFilters
+	estimatedRows  map[string]int64
+}
+
+func (service *MallWeatherFeishuPushService) Create(
+	ctx context.Context,
+	actorUserID uint,
+	idempotencyKey string,
+	request requestbody.MallWeatherFeishuPushRequest,
+) (*MallWeatherFeishuPushCreateResult, bool, error) {
+	if !validIdempotencyKey(idempotencyKey) {
+		return nil, false, fmt.Errorf("%w: idempotency key is required", ErrMallWeatherFeishuInvalid)
+	}
+	prepared, err := service.prepare(ctx, actorUserID, request)
+	if err != nil {
+		return nil, false, err
+	}
+	if err := validateMallWeatherFeishuPreparedPush(prepared); err != nil {
+		return nil, false, err
+	}
+	profileSnapshot, filtersJSON, destinationSnapshot, err := encodeMallWeatherFeishuPushSnapshots(prepared)
+	if err != nil {
+		return nil, false, err
+	}
+	requestHash, err := hashJSON(mallWeatherFeishuPushRequestForHash(
+		request.DestinationID,
+		request.ProfileID,
+		request.ExpectedProfileVersion,
+		prepared.filters,
+	))
+	if err != nil {
+		return nil, false, fmt.Errorf("mall weather feishu push: hash request: %w", err)
+	}
+	var totalEstimatedRows int64
+	for _, rows := range prepared.estimatedRows {
+		totalEstimatedRows += rows
+	}
+	command := mallWeatherFeishuPushCreateCommand{
+		ActorUserID: actorUserID, DestinationID: prepared.destinationRow.ID,
+		DestinationCode: prepared.destinationRow.Code, DestinationConfigJSON: prepared.destinationRow.ConfigJSON,
+		ProfileID: prepared.profileRow.ID, ProfileVersion: prepared.profileRow.Version,
+		ProfileCode: prepared.profileRow.Code, ProfileName: prepared.profileRow.Name,
+		ProfileJSON: prepared.profileRow.ProfileJSON, ProfileSnapshotJSON: profileSnapshot,
+		FiltersJSON: filtersJSON, DestinationSnapshotJSON: destinationSnapshot,
+		KeyHash: sha256Hex([]byte(idempotencyKey)), RequestHash: requestHash,
+		TraceID: uuid.NewString(), EstimatedRows: totalEstimatedRows, RequestedAt: service.now().UTC(),
+	}
+	return service.store.Create(ctx, command)
+}
+
+func (service *MallWeatherFeishuPushService) prepare(
+	ctx context.Context,
+	actorUserID uint,
+	request requestbody.MallWeatherFeishuPushRequest,
+) (*mallWeatherFeishuPreparedPush, error) {
 	if service == nil || ctx == nil || actorUserID == 0 || request.DestinationID == 0 || request.ProfileID == 0 ||
 		(request.ExpectedProfileVersion != nil && *request.ExpectedProfileVersion == 0) {
 		return nil, ErrMallWeatherFeishuInvalid
 	}
 	allowed, err := service.permissions.HasPermission(
-		ctx,
-		actorUserID,
-		PermissionWeatherFeishuPush,
-		service.now().UTC(),
+		ctx, actorUserID, PermissionWeatherFeishuPush, service.now().UTC(),
 	)
 	if err != nil {
 		return nil, fmt.Errorf("mall weather feishu push: authorize: %w", err)
@@ -167,11 +239,10 @@ func (service *MallWeatherFeishuPushService) DryRun(
 	if err != nil {
 		return nil, err
 	}
-	sheets, err := service.newSheets()
-	if err != nil || sheets == nil {
-		return nil, errors.New("mall weather feishu push: sheets client is unavailable")
-	}
-	return service.inspectAndPlan(ctx, resolved, profileDTO, estimatedRows, sheets)
+	return &mallWeatherFeishuPreparedPush{
+		destinationRow: destination, destination: resolved, profileRow: profile,
+		profileDTO: profileDTO, filters: filters, estimatedRows: estimatedRows,
+	}, nil
 }
 
 func (service *MallWeatherFeishuPushService) estimateDryRunRows(

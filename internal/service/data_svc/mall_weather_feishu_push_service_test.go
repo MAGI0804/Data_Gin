@@ -75,6 +75,7 @@ func TestMallWeatherFeishuPushServiceDryRunOrchestratesReadOnlyPlan(t *testing.T
 		permissions:  fakeMallPermissionChecker{allowed: true},
 		estimator:    estimator,
 		limits:       fakeMallWeatherExportLimitReader{},
+		store:        &fakeMallWeatherFeishuPushStore{},
 		resources: fakeMallWeatherFeishuResourceResolver{values: map[string]string{
 			credential.EnvFeishuWeatherSpreadsheetToken: "spreadsheet_abc",
 			credential.EnvFeishuWeatherHourlySheetID:    "sheet_hourly",
@@ -115,6 +116,7 @@ func TestMallWeatherFeishuPushServiceDryRunFailsClosedBeforeExternalReads(t *tes
 		permissions:  fakeMallPermissionChecker{allowed: true},
 		estimator:    estimator,
 		limits:       fakeMallWeatherExportLimitReader{},
+		store:        &fakeMallWeatherFeishuPushStore{},
 		resources: fakeMallWeatherFeishuResourceResolver{values: map[string]string{
 			credential.EnvFeishuWeatherSpreadsheetToken: "spreadsheet_abc",
 			credential.EnvFeishuWeatherHourlySheetID:    "sheet_hourly",
@@ -135,9 +137,90 @@ func TestMallWeatherFeishuPushServiceDryRunFailsClosedBeforeExternalReads(t *tes
 	}
 }
 
+func TestMallWeatherFeishuPushServiceCreatePersistsOnlySafeSnapshots(t *testing.T) {
+	t.Parallel()
+
+	now := time.Date(2026, 7, 23, 8, 0, 0, 0, time.UTC)
+	profile := mallWeatherFeishuTestProfile(t, now)
+	destination := mallWeatherFeishuTestDestination(t)
+	store := &fakeMallWeatherFeishuPushStore{result: &MallWeatherFeishuPushCreateResult{
+		RunID: 41, TraceID: uuid.NewString(), Status: "PENDING", DestinationID: destination.ID,
+		ProfileID: profile.ID, ProfileVersion: profile.Version, EstimatedRows: 10, CreatedBy: 19, CreatedAt: now,
+	}}
+	sheetsCalls := 0
+	service, err := newMallWeatherFeishuPushService(mallWeatherFeishuPushDependencies{
+		destinations: fakeMallWeatherFeishuDestinationReader{row: destination},
+		profiles:     fakeMallWeatherExportProfileReader{row: profile},
+		permissions:  fakeMallPermissionChecker{allowed: true},
+		estimator:    &fakeMallWeatherExportEstimator{rows: 10},
+		limits:       fakeMallWeatherExportLimitReader{},
+		store:        store,
+		resources: fakeMallWeatherFeishuResourceResolver{values: map[string]string{
+			credential.EnvFeishuWeatherSpreadsheetToken: "spreadsheet_private_value",
+			credential.EnvFeishuWeatherHourlySheetID:    "sheet_private_value",
+		}},
+		newSheets: func() (mallWeatherFeishuSheetsReader, error) {
+			sheetsCalls++
+			return nil, errors.New("must not be called")
+		},
+		now: func() time.Time { return now },
+	})
+	if err != nil {
+		t.Fatalf("newMallWeatherFeishuPushService() error=%v", err)
+	}
+	expectedVersion := profile.Version
+	result, replayed, err := service.Create(
+		context.Background(),
+		19,
+		"feishu-create-request-1",
+		requestbody.MallWeatherFeishuPushRequest{
+			DestinationID: destination.ID, ProfileID: profile.ID, ExpectedProfileVersion: &expectedVersion,
+			Filters: &requestbody.MallWeatherExportFilters{Cities: []string{" Shanghai "}},
+		},
+	)
+	if err != nil || replayed || result != store.result || store.calls != 1 || sheetsCalls != 0 {
+		t.Fatalf("Create() result=%+v replayed=%t error=%v store=%+v sheetsCalls=%d", result, replayed, err, store, sheetsCalls)
+	}
+	command := store.command
+	if command.ActorUserID != 19 || command.DestinationID != destination.ID || command.ProfileID != profile.ID ||
+		command.ProfileVersion != profile.Version || command.EstimatedRows != 10 || command.RequestedAt != now ||
+		len(command.KeyHash) != 64 || strings.Contains(command.KeyHash, "feishu-create-request-1") ||
+		len(command.RequestHash) != 64 || uuid.Validate(command.TraceID) != nil {
+		t.Fatalf("command identity=%+v", command)
+	}
+	allSnapshots := string(command.ProfileSnapshotJSON) + string(command.FiltersJSON) + string(command.DestinationSnapshotJSON)
+	for _, secret := range []string{"spreadsheet_private_value", "sheet_private_value"} {
+		if strings.Contains(allSnapshots, secret) {
+			t.Fatalf("stored snapshots leak resolved resource %q: %s", secret, allSnapshots)
+		}
+	}
+	if !strings.Contains(string(command.FiltersJSON), `"shanghai"`) ||
+		!strings.Contains(string(command.DestinationSnapshotJSON), credential.EnvFeishuWeatherSpreadsheetToken) ||
+		!strings.Contains(string(command.DestinationSnapshotJSON), credential.EnvFeishuWeatherHourlySheetID) {
+		t.Fatalf("stored snapshots are incomplete: %s", allSnapshots)
+	}
+}
+
 type fakeMallWeatherFeishuDestinationReader struct {
 	row *model.DestinationDefinition
 	err error
+}
+
+type fakeMallWeatherFeishuPushStore struct {
+	command  mallWeatherFeishuPushCreateCommand
+	result   *MallWeatherFeishuPushCreateResult
+	replayed bool
+	err      error
+	calls    int
+}
+
+func (store *fakeMallWeatherFeishuPushStore) Create(
+	_ context.Context,
+	command mallWeatherFeishuPushCreateCommand,
+) (*MallWeatherFeishuPushCreateResult, bool, error) {
+	store.calls++
+	store.command = command
+	return store.result, store.replayed, store.err
 }
 
 func (reader fakeMallWeatherFeishuDestinationReader) FindByID(
