@@ -65,6 +65,15 @@ func TestClassifyMallWeatherFeishuRunStart(t *testing.T) {
 			err: true,
 		},
 		{
+			name: "released retry acquired",
+			mutate: func(record *MallWeatherFeishuRunRecord) {
+				startedAt := model.TimeNormal{Time: now.Add(-time.Minute)}
+				record.Pipeline.StartedAt = &startedAt
+				record.Detail.RunToken = mallWeatherFeishuReleasedRunToken
+			},
+			want: MallWeatherFeishuRunDispositionAcquired,
+		},
+		{
 			name: "running without token rejected",
 			mutate: func(record *MallWeatherFeishuRunRecord) {
 				startedAt := model.TimeNormal{Time: now.Add(-time.Minute)}
@@ -197,6 +206,9 @@ func TestMallWeatherFeishuRunRejectsInvalidDAOInputs(t *testing.T) {
 		Status: "success", FinishedAt: time.Now(),
 	}); err == nil {
 		t.Fatal("FinishRun() accepted unconfigured DAO")
+	}
+	if err := dao.ReleaseRunForRetry(t.Context(), 1, uuid.NewString(), time.Now()); err == nil {
+		t.Fatal("ReleaseRunForRetry() accepted unconfigured DAO")
 	}
 	if !errors.Is(ErrMallWeatherFeishuRunLeaseLost, ErrMallWeatherFeishuRunLeaseLost) {
 		t.Fatal("lease lost sentinel is not comparable")

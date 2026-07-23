@@ -23,6 +23,7 @@ const (
 	maxMallWeatherFeishuFiltersBytes             = 64 * 1024
 	maxMallWeatherFeishuDestinationSnapshotBytes = 64 * 1024
 	maxMallWeatherFeishuRunSafeErrorBytes        = 2 * 1024
+	mallWeatherFeishuReleasedRunToken            = "retry"
 )
 
 var (
@@ -177,9 +178,6 @@ func (dao *MallWeatherFeishuRunDAO) BeginRun(
 		if pipelineResult.Error != nil {
 			return fmt.Errorf("mall weather feishu run: claim pipeline: %w", pipelineResult.Error)
 		}
-		if pipelineResult.RowsAffected != 1 {
-			return fmt.Errorf("mall weather feishu run: claim pipeline count changed")
-		}
 		lease.RunToken = runToken
 		lease.Record.Detail.UpdatedAt = startedAt
 		lease.Record.Pipeline.UpdatedAt = int(startedAt.Unix())
@@ -279,6 +277,53 @@ func (dao *MallWeatherFeishuRunDAO) FinishRun(
 			Where("id = ? AND run_token = ?", record.Detail.ID, runToken).
 			Update("updated_at", finish.FinishedAt).Error; err != nil {
 			return fmt.Errorf("mall weather feishu run: finish detail: %w", err)
+		}
+		return nil
+	})
+}
+
+func (dao *MallWeatherFeishuRunDAO) ReleaseRunForRetry(
+	ctx context.Context,
+	pipelineRunID uint,
+	runToken string,
+	releasedAt time.Time,
+) error {
+	if dao == nil || dao.db == nil || ctx == nil || pipelineRunID == 0 ||
+		!validMallWeatherFeishuRunToken(runToken) || releasedAt.IsZero() {
+		return fmt.Errorf("mall weather feishu run: invalid retry release")
+	}
+	releasedAt = releasedAt.UTC().Truncate(time.Millisecond)
+	return dao.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		record := &MallWeatherFeishuRunRecord{}
+		if err := loadMallWeatherFeishuRunRecord(tx, pipelineRunID, true, record); err != nil {
+			return err
+		}
+		if err := validateStoredMallWeatherFeishuRun(record); err != nil {
+			return err
+		}
+		if record.Pipeline.Status != "running" || record.Pipeline.StartedAt == nil ||
+			record.Pipeline.FinishedAt != nil || record.Detail.RunToken != runToken {
+			return ErrMallWeatherFeishuRunLeaseLost
+		}
+		if releasedAt.Before(record.Detail.UpdatedAt) {
+			return fmt.Errorf("mall weather feishu run: retry release time moved backwards")
+		}
+		pipelineResult := ownedMallWeatherFeishuPipelineQuery(tx, pipelineRunID, runToken).
+			Update("updated_at", releasedAt.Unix())
+		if pipelineResult.Error != nil {
+			return fmt.Errorf("mall weather feishu run: release pipeline: %w", pipelineResult.Error)
+		}
+		detailResult := tx.Model(&model.MallWeatherFeishuRun{}).
+			Where("id = ? AND run_token = ?", record.Detail.ID, runToken).
+			Updates(map[string]interface{}{
+				"run_token":  mallWeatherFeishuReleasedRunToken,
+				"updated_at": releasedAt,
+			})
+		if detailResult.Error != nil {
+			return fmt.Errorf("mall weather feishu run: release detail: %w", detailResult.Error)
+		}
+		if detailResult.RowsAffected != 1 {
+			return ErrMallWeatherFeishuRunLeaseLost
 		}
 		return nil
 	})
@@ -396,6 +441,9 @@ func classifyMallWeatherFeishuRunStart(
 			}
 			return MallWeatherFeishuRunDispositionAcquired, nil
 		}
+		if detail.RunToken == mallWeatherFeishuReleasedRunToken {
+			return MallWeatherFeishuRunDispositionAcquired, nil
+		}
 		if run.StartedAt.IsZero() || !validMallWeatherFeishuRunToken(detail.RunToken) {
 			return MallWeatherFeishuRunDispositionUnknown, fmt.Errorf("mall weather feishu run: running row has an invalid lease")
 		}
@@ -452,7 +500,8 @@ func validateStoredMallWeatherFeishuRun(record *MallWeatherFeishuRunRecord) erro
 	case "running":
 		if run.FinishedAt != nil ||
 			(run.StartedAt == nil && detail.RunToken != "") ||
-			(run.StartedAt != nil && (run.StartedAt.IsZero() || !validMallWeatherFeishuRunToken(detail.RunToken))) {
+			(run.StartedAt != nil && (run.StartedAt.IsZero() ||
+				(detail.RunToken != mallWeatherFeishuReleasedRunToken && !validMallWeatherFeishuRunToken(detail.RunToken)))) {
 			return fmt.Errorf("mall weather feishu run: invalid running state")
 		}
 	case "success", "failed", "partial_success":
