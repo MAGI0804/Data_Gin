@@ -34,6 +34,9 @@ func TestLegacyTaskDefinitionsExposeConfiguredFetchAndDeliveryJobs(t *testing.T)
 	if byCode["youzan_distribution_order_fetch"].CronExpr == "" {
 		t.Fatal("youzan distribution fetch must expose its daily cron expression")
 	}
+	if got := byCode["youzan_distribution_order_fetch"].DefaultPayload["time_filter"]; got != "created" {
+		t.Fatalf("youzan distribution default time_filter = %v, want created", got)
+	}
 	if byCode["bojun_order_fetch"].TaskType != TypeBojunOrderFetch {
 		t.Fatalf("bojun_order_fetch task type = %s, want %s", byCode["bojun_order_fetch"].TaskType, TypeBojunOrderFetch)
 	}
@@ -100,8 +103,9 @@ func TestNewLegacyTaskBuildsBojunOrderFetchTask(t *testing.T) {
 
 func TestNewLegacyTaskBuildsYouzanDistributionFetchTask(t *testing.T) {
 	task, err := NewLegacyTask("youzan_distribution_order_fetch", map[string]interface{}{
-		"start_time": "2026-07-05 00:00:00",
-		"end_time":   "2026-07-05 23:59:59",
+		"time_filter": "success",
+		"start_time":  "2026-07-05 00:00:00",
+		"end_time":    "2026-07-05 23:59:59",
 	})
 	if err != nil {
 		t.Fatalf("NewLegacyTask returned error: %v", err)

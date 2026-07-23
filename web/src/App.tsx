@@ -480,7 +480,16 @@ type YouzanDistributionBackfillSample = {
   fans_nickname: string
 }
 
+type YouzanDistributionTimeFilter = 'created' | 'success'
+
+type YouzanDistributionBackfillPayload = {
+  time_filter: YouzanDistributionTimeFilter
+  start_time: string
+  end_time: string
+}
+
 type YouzanDistributionBackfillResult = {
+  time_filter: YouzanDistributionTimeFilter
   start_time: string
   end_time: string
   page_size: number
@@ -900,7 +909,7 @@ function App() {
     return null
   }
 
-  async function previewYouzanDistributionBackfill(payload: { start_time: string; end_time: string }) {
+  async function previewYouzanDistributionBackfill(payload: YouzanDistributionBackfillPayload) {
     const response = await client('/v1/youzan-distribution-order-backfill/preview', {
       method: 'POST',
       body: payload,
@@ -908,7 +917,7 @@ function App() {
     return response.ok ? readObject<YouzanDistributionBackfillResult>(response, 'result') : null
   }
 
-  async function confirmYouzanDistributionBackfill(payload: { start_time: string; end_time: string }) {
+  async function confirmYouzanDistributionBackfill(payload: YouzanDistributionBackfillPayload) {
     const response = await client('/v1/youzan-distribution-order-backfill/confirm', {
       method: 'POST',
       body: payload,
@@ -1364,11 +1373,12 @@ function BojunBackfillPage({ loading, onPreview, onConfirm }: {
 function YouzanDistributionPage({ task, loading, onPreview, onConfirm }: {
   task?: LegacyTask
   loading: boolean
-  onPreview: (payload: { start_time: string; end_time: string }) => Promise<YouzanDistributionBackfillResult | null>
-  onConfirm: (payload: { start_time: string; end_time: string }) => Promise<YouzanDistributionBackfillResult | null>
+  onPreview: (payload: YouzanDistributionBackfillPayload) => Promise<YouzanDistributionBackfillResult | null>
+  onConfirm: (payload: YouzanDistributionBackfillPayload) => Promise<YouzanDistributionBackfillResult | null>
 }) {
   const [showBackfill, setShowBackfill] = useState(false)
-  const [payload, setPayload] = useState<{ start_time: string; end_time: string } | null>(null)
+  const [timeFilter, setTimeFilter] = useState<YouzanDistributionTimeFilter>('created')
+  const [payload, setPayload] = useState<YouzanDistributionBackfillPayload | null>(null)
   const [preview, setPreview] = useState<YouzanDistributionBackfillResult | null>(null)
   const [confirmed, setConfirmed] = useState<YouzanDistributionBackfillResult | null>(null)
 
@@ -1376,6 +1386,7 @@ function YouzanDistributionPage({ task, loading, onPreview, onConfirm }: {
     event.preventDefault()
     const form = new FormData(event.currentTarget)
     const nextPayload = {
+      time_filter: timeFilter,
       start_time: backendDateTime(formValue(form, 'start_time')),
       end_time: backendDateTime(formValue(form, 'end_time')),
     }
@@ -1388,6 +1399,14 @@ function YouzanDistributionPage({ task, loading, onPreview, onConfirm }: {
   async function confirm() {
     if (!payload || !preview || !window.confirm(`确认写入 ${preview.writable_count} 条有赞分销订单？`)) return
     setConfirmed(await onConfirm(payload))
+  }
+
+  function changeTimeFilter(value: string) {
+    if (value !== 'created' && value !== 'success') return
+    setTimeFilter(value)
+    setPayload(null)
+    setPreview(null)
+    setConfirmed(null)
   }
 
   function openBackfill() {
@@ -1418,7 +1437,7 @@ function YouzanDistributionPage({ task, loading, onPreview, onConfirm }: {
       </Panel>
 
       {confirmed && (
-        <Panel title="最近写入结果" icon={<CheckCircle2 />} meta={`${confirmed.start_time} ~ ${confirmed.end_time}`}>
+        <Panel title="最近写入结果" icon={<CheckCircle2 />} meta={`${youzanDistributionTimeFilterLabel(confirmed.time_filter)} / ${confirmed.start_time} ~ ${confirmed.end_time}`}>
           <YouzanDistributionBackfillResultView title="写入结果" result={confirmed} />
         </Panel>
       )}
@@ -1426,12 +1445,19 @@ function YouzanDistributionPage({ task, loading, onPreview, onConfirm }: {
       {showBackfill && (
         <Modal title="补拉有赞分销订单" onClose={() => { if (!loading) setShowBackfill(false) }}>
           <form className="youzan-backfill-form" onSubmit={submit}>
-            <Field label="开始时间" name="start_time" type="datetime-local" defaultValue={previousDayDateTimeLocal(false)} required />
-            <Field label="结束时间" name="end_time" type="datetime-local" defaultValue={previousDayDateTimeLocal(true)} required />
+            <label>
+              时间筛选方式
+              <select name="time_filter" value={timeFilter} onChange={(event) => changeTimeFilter(event.currentTarget.value)}>
+                <option value="created">下单时间</option>
+                <option value="success">订单完成时间</option>
+              </select>
+            </label>
+            <Field label={timeFilter === 'created' ? '下单开始时间' : '完成开始时间'} name="start_time" type="datetime-local" defaultValue={previousDayDateTimeLocal(false)} required />
+            <Field label={timeFilter === 'created' ? '下单结束时间' : '完成结束时间'} name="end_time" type="datetime-local" defaultValue={previousDayDateTimeLocal(true)} required />
             <button className="primary" type="submit" disabled={loading}>{loading ? '预览中' : '预览补拉'}</button>
             <button type="button" disabled={loading || !preview || preview.writable_count === 0} onClick={confirm}>确认写入</button>
           </form>
-          <p className="backfill-note">预览会真实拉取、解密并判重，但不写数据库；确认后重新拉取相同时间范围并写入，已有 tid 不覆盖。</p>
+          <p className="backfill-note">当前按{youzanDistributionTimeFilterLabel(timeFilter)}筛选。预览会真实拉取、解密并判重，但不写数据库；确认后重新拉取相同筛选方式和时间范围并写入，已有 tid 不覆盖。</p>
           {preview && <YouzanDistributionBackfillResultView title="预览结果" result={preview} />}
           {confirmed && <YouzanDistributionBackfillResultView title="写入结果" result={confirmed} />}
         </Modal>
@@ -1445,7 +1471,7 @@ function YouzanDistributionBackfillResultView({ title, result }: { title: string
     <section className="backfill-result">
       <div className="backfill-result-title">
         <strong>{title}</strong>
-        <span>{result.start_time} ~ {result.end_time} / 拉取 {result.fetch_pages} 页</span>
+        <span>{youzanDistributionTimeFilterLabel(result.time_filter)} / {result.start_time} ~ {result.end_time} / 拉取 {result.fetch_pages} 页</span>
       </div>
       <div className="overview-grid compact">
         <Metric label="有赞返回" value={result.total_count} />
@@ -3883,6 +3909,10 @@ function youzanDistributionBackfillStatusLabel(value: string) {
     failed: '失败',
   }
   return labels[value] ?? (value || '-')
+}
+
+function youzanDistributionTimeFilterLabel(value: YouzanDistributionTimeFilter) {
+  return value === 'success' ? '订单完成时间' : '下单时间'
 }
 
 function previousDayDateTimeLocal(endOfDay: boolean) {

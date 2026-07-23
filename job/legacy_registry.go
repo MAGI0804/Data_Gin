@@ -4,6 +4,7 @@ import (
 	"fmt"
 
 	"gin-biz-web-api/pkg/config"
+	"gin-biz-web-api/pkg/youzan"
 
 	"github.com/hibiken/asynq"
 )
@@ -102,11 +103,12 @@ func LegacyTaskDefinitions() []LegacyTaskDefinition {
 			InputTable:  "youzan.trades.sold.get/4.0.4",
 			OutputTable: "youzan_distribution_orders",
 			Handler:     "internal/service/data_svc/youzan_distribution_order_service.go",
-			Description: "每天拉取前一整天的有赞分销订单，所有非空 fans_nickname 解密成功后才写入独立分销订单表；支持按起止时间补拉。",
+			Description: "每天按下单时间拉取前一整天的有赞分销订单，所有非空 fans_nickname 解密成功后才写入独立分销订单表；手动补拉可选择下单时间或订单完成时间。",
 			Editable:    true,
 			DefaultPayload: map[string]interface{}{
-				"start_time": "",
-				"end_time":   "",
+				"time_filter": string(youzan.OrderTimeFilterCreated),
+				"start_time":  "",
+				"end_time":    "",
 			},
 		},
 		{
@@ -337,8 +339,9 @@ func NewLegacyTask(code string, payload map[string]interface{}) (*asynq.Task, er
 		})
 	case "youzan_distribution_order_fetch":
 		return NewYouzanDistributionOrderSyncTask(YouzanDistributionOrderSyncPayload{
-			StartTime: stringValue(payload, "start_time"),
-			EndTime:   stringValue(payload, "end_time"),
+			TimeFilter: youzan.OrderTimeFilter(stringValue(payload, "time_filter")),
+			StartTime:  stringValue(payload, "start_time"),
+			EndTime:    stringValue(payload, "end_time"),
 		})
 	case "bojun_order_fetch":
 		return NewBojunOrderFetchTask(BojunOrderFetchPayload{

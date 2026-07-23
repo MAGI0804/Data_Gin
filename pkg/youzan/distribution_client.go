@@ -13,6 +13,13 @@ import (
 
 const maxDecryptBatchSize = 10000
 
+type OrderTimeFilter string
+
+const (
+	OrderTimeFilterCreated OrderTimeFilter = "created"
+	OrderTimeFilterSuccess OrderTimeFilter = "success"
+)
+
 type DistributionClient struct {
 	orderURL   string
 	decryptURL string
@@ -26,12 +33,27 @@ func NewDistributionClient(orderURL, decryptURL string, httpClient *http.Client)
 	return &DistributionClient{orderURL: orderURL, decryptURL: decryptURL, httpClient: httpClient}
 }
 
-func (c *DistributionClient) FetchOrderPage(ctx context.Context, accessToken, startTime, endTime string, pageNo, pageSize int) ([]map[string]any, bool, error) {
+func ParseOrderTimeFilter(value string) (OrderTimeFilter, error) {
+	switch OrderTimeFilter(strings.TrimSpace(value)) {
+	case "", OrderTimeFilterCreated:
+		return OrderTimeFilterCreated, nil
+	case OrderTimeFilterSuccess:
+		return OrderTimeFilterSuccess, nil
+	default:
+		return "", fmt.Errorf("unsupported youzan order time filter %q", value)
+	}
+}
+
+func (c *DistributionClient) FetchOrderPage(ctx context.Context, accessToken string, timeFilter OrderTimeFilter, startTime, endTime string, pageNo, pageSize int) ([]map[string]any, bool, error) {
+	startField, endField, err := orderTimeFields(timeFilter)
+	if err != nil {
+		return nil, false, err
+	}
 	payload := map[string]any{
-		"page_size":     pageSize,
-		"page_no":       pageNo,
-		"start_success": startTime,
-		"end_success":   endTime,
+		"page_size": pageSize,
+		"page_no":   pageNo,
+		startField:  startTime,
+		endField:    endTime,
 	}
 
 	var response struct {
@@ -68,6 +90,17 @@ func (c *DistributionClient) FetchOrderPage(ctx context.Context, accessToken, st
 		hasNext = *data.Paginator.HasNext
 	}
 	return orders, hasNext, nil
+}
+
+func orderTimeFields(timeFilter OrderTimeFilter) (string, string, error) {
+	normalized, err := ParseOrderTimeFilter(string(timeFilter))
+	if err != nil {
+		return "", "", err
+	}
+	if normalized == OrderTimeFilterSuccess {
+		return "start_success", "end_success", nil
+	}
+	return "start_created", "end_created", nil
 }
 
 func (c *DistributionClient) DecryptBatch(ctx context.Context, accessToken string, sources []string) ([]string, error) {

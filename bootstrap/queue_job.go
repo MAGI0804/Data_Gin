@@ -343,15 +343,21 @@ func handleYouzanDistributionOrderSync(ctx context.Context, task *asynq.Task) er
 	}
 
 	startTime, endTime := job.ResolveYouzanDistributionOrderRange(payload, time.Now())
+	timeFilter, err := job.ResolveYouzanDistributionOrderTimeFilter(payload)
+	if err != nil {
+		return err
+	}
 	logger.Info(
 		"开始拉取有赞分销订单",
+		zap.String("time_filter", string(timeFilter)),
 		zap.String("start_time", startTime),
 		zap.String("end_time", endTime),
 	)
-	result, err := data_svc.NewYouzanDistributionOrderService().SyncRange(ctx, startTime, endTime)
+	result, err := data_svc.NewYouzanDistributionOrderService().SyncRange(ctx, timeFilter, startTime, endTime)
 	if err != nil {
 		logger.Error(
 			"有赞分销订单拉取失败",
+			zap.String("time_filter", string(timeFilter)),
 			zap.String("start_time", startTime),
 			zap.String("end_time", endTime),
 			zap.Error(err),
@@ -360,6 +366,7 @@ func handleYouzanDistributionOrderSync(ctx context.Context, task *asynq.Task) er
 	}
 	logger.Info(
 		"有赞分销订单拉取完成",
+		zap.String("time_filter", string(timeFilter)),
 		zap.String("start_time", startTime),
 		zap.String("end_time", endTime),
 		zap.Int("fetch_pages", result.FetchPages),

@@ -7,6 +7,7 @@ import (
 
 	"gin-biz-web-api/model"
 	"gin-biz-web-api/pkg/logger"
+	"gin-biz-web-api/pkg/youzan"
 
 	"go.uber.org/zap"
 )
@@ -14,9 +15,11 @@ import (
 type fakeYouzanDistributionClient struct {
 	pages        [][]map[string]any
 	decryptSizes []int
+	timeFilters  []youzan.OrderTimeFilter
 }
 
-func (f *fakeYouzanDistributionClient) FetchOrderPage(_ context.Context, _ string, _, _ string, pageNo, _ int) ([]map[string]any, bool, error) {
+func (f *fakeYouzanDistributionClient) FetchOrderPage(_ context.Context, _ string, timeFilter youzan.OrderTimeFilter, _, _ string, pageNo, _ int) ([]map[string]any, bool, error) {
+	f.timeFilters = append(f.timeFilters, timeFilter)
 	if pageNo > len(f.pages) {
 		return nil, false, nil
 	}
@@ -62,7 +65,7 @@ func TestYouzanDistributionOrderServiceSyncsEveryPageAndDecryptsNickname(t *test
 	writer := &fakeYouzanDistributionWriter{}
 	service := newYouzanDistributionOrderService(client, writer, func() (string, error) { return "token", nil })
 
-	result, err := service.SyncRange(context.Background(), "2026-07-05 00:00:00", "2026-07-05 23:59:59")
+	result, err := service.SyncRange(context.Background(), youzan.OrderTimeFilterCreated, "2026-07-05 00:00:00", "2026-07-05 23:59:59")
 	if err != nil {
 		t.Fatalf("SyncRange() error = %v", err)
 	}
@@ -78,6 +81,9 @@ func TestYouzanDistributionOrderServiceSyncsEveryPageAndDecryptsNickname(t *test
 	if got := writer.batches[0][0].FansNicknameEncrypted; got != "encrypted-1" {
 		t.Fatalf("FansNicknameEncrypted = %q", got)
 	}
+	if fmt.Sprint(client.timeFilters) != "[created created]" || result.TimeFilter != youzan.OrderTimeFilterCreated {
+		t.Fatalf("time filters = %v, result time filter = %q", client.timeFilters, result.TimeFilter)
+	}
 }
 
 func TestYouzanDistributionOrderServicePreviewDecryptsAndDoesNotWrite(t *testing.T) {
@@ -89,7 +95,7 @@ func TestYouzanDistributionOrderServicePreviewDecryptsAndDoesNotWrite(t *testing
 	writer := &fakeYouzanDistributionWriter{existing: map[string]bool{"D200": true}}
 	service := newYouzanDistributionOrderService(client, writer, func() (string, error) { return "token", nil })
 
-	result, err := service.PreviewRange(context.Background(), "2026-07-05 00:00:00", "2026-07-05 23:59:59")
+	result, err := service.PreviewRange(context.Background(), youzan.OrderTimeFilterSuccess, "2026-07-05 00:00:00", "2026-07-05 23:59:59")
 	if err != nil {
 		t.Fatalf("PreviewRange() error = %v", err)
 	}
@@ -105,6 +111,9 @@ func TestYouzanDistributionOrderServicePreviewDecryptsAndDoesNotWrite(t *testing
 	if result.Samples[1].Status != "exists" {
 		t.Fatalf("existing order sample status = %q", result.Samples[1].Status)
 	}
+	if fmt.Sprint(client.timeFilters) != "[success]" || result.TimeFilter != youzan.OrderTimeFilterSuccess {
+		t.Fatalf("time filters = %v, result time filter = %q", client.timeFilters, result.TimeFilter)
+	}
 }
 
 func TestYouzanDistributionOrderServiceSplitsDecryptRequestsAtTenThousand(t *testing.T) {
@@ -116,7 +125,7 @@ func TestYouzanDistributionOrderServiceSplitsDecryptRequestsAtTenThousand(t *tes
 	client := &fakeYouzanDistributionClient{pages: [][]map[string]any{orders}}
 	service := newYouzanDistributionOrderService(client, &fakeYouzanDistributionWriter{}, func() (string, error) { return "token", nil })
 
-	if _, err := service.SyncRange(context.Background(), "2026-07-05 00:00:00", "2026-07-05 23:59:59"); err != nil {
+	if _, err := service.SyncRange(context.Background(), youzan.OrderTimeFilterCreated, "2026-07-05 00:00:00", "2026-07-05 23:59:59"); err != nil {
 		t.Fatalf("SyncRange() error = %v", err)
 	}
 	if fmt.Sprint(client.decryptSizes) != "[10000 1]" {

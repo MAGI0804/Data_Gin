@@ -25,7 +25,7 @@ const (
 )
 
 type youzanDistributionClient interface {
-	FetchOrderPage(ctx context.Context, accessToken, startTime, endTime string, pageNo, pageSize int) ([]map[string]any, bool, error)
+	FetchOrderPage(ctx context.Context, accessToken string, timeFilter youzan.OrderTimeFilter, startTime, endTime string, pageNo, pageSize int) ([]map[string]any, bool, error)
 	DecryptBatch(ctx context.Context, accessToken string, sources []string) ([]string, error)
 }
 
@@ -41,6 +41,7 @@ type YouzanDistributionOrderService struct {
 }
 
 type YouzanDistributionSyncResult struct {
+	TimeFilter    youzan.OrderTimeFilter          `json:"time_filter"`
 	StartTime     string                          `json:"start_time"`
 	EndTime       string                          `json:"end_time"`
 	PageSize      int                             `json:"page_size"`
@@ -81,18 +82,22 @@ func newYouzanDistributionOrderService(client youzanDistributionClient, writer y
 	return &YouzanDistributionOrderService{client: client, writer: writer, getAccessToken: getAccessToken}
 }
 
-func (s *YouzanDistributionOrderService) PreviewRange(ctx context.Context, startTime, endTime string) (*YouzanDistributionSyncResult, error) {
-	return s.runRange(ctx, startTime, endTime, false)
+func (s *YouzanDistributionOrderService) PreviewRange(ctx context.Context, timeFilter youzan.OrderTimeFilter, startTime, endTime string) (*YouzanDistributionSyncResult, error) {
+	return s.runRange(ctx, timeFilter, startTime, endTime, false)
 }
 
 // SyncRange fetches and persists one page at a time, keeping memory bounded for large backfills.
-func (s *YouzanDistributionOrderService) SyncRange(ctx context.Context, startTime, endTime string) (*YouzanDistributionSyncResult, error) {
-	return s.runRange(ctx, startTime, endTime, true)
+func (s *YouzanDistributionOrderService) SyncRange(ctx context.Context, timeFilter youzan.OrderTimeFilter, startTime, endTime string) (*YouzanDistributionSyncResult, error) {
+	return s.runRange(ctx, timeFilter, startTime, endTime, true)
 }
 
-func (s *YouzanDistributionOrderService) runRange(ctx context.Context, startTime, endTime string, confirmWrite bool) (*YouzanDistributionSyncResult, error) {
+func (s *YouzanDistributionOrderService) runRange(ctx context.Context, timeFilter youzan.OrderTimeFilter, startTime, endTime string, confirmWrite bool) (*YouzanDistributionSyncResult, error) {
+	timeFilter, filterErr := youzan.ParseOrderTimeFilter(string(timeFilter))
 	startTime, endTime, err := normalizeYouzanDistributionRange(startTime, endTime)
-	result := &YouzanDistributionSyncResult{StartTime: startTime, EndTime: endTime, PageSize: youzanDistributionPageSize}
+	result := &YouzanDistributionSyncResult{TimeFilter: timeFilter, StartTime: startTime, EndTime: endTime, PageSize: youzanDistributionPageSize}
+	if filterErr != nil {
+		return result, filterErr
+	}
 	if err != nil {
 		return result, err
 	}
@@ -106,7 +111,7 @@ func (s *YouzanDistributionOrderService) runRange(ctx context.Context, startTime
 	}
 
 	for pageNo := 1; ; pageNo++ {
-		orders, hasNext, err := s.client.FetchOrderPage(ctx, accessToken, startTime, endTime, pageNo, youzanDistributionPageSize)
+		orders, hasNext, err := s.client.FetchOrderPage(ctx, accessToken, timeFilter, startTime, endTime, pageNo, youzanDistributionPageSize)
 		if err != nil {
 			return result, fmt.Errorf("fetch youzan distribution orders page %d: %w", pageNo, err)
 		}

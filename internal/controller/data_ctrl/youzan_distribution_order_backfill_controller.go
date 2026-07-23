@@ -5,6 +5,7 @@ import (
 
 	"gin-biz-web-api/internal/msg"
 	"gin-biz-web-api/internal/service/data_svc"
+	"gin-biz-web-api/pkg/youzan"
 )
 
 type YouzanDistributionOrderBackfillController struct {
@@ -12,8 +13,9 @@ type YouzanDistributionOrderBackfillController struct {
 }
 
 type youzanDistributionOrderBackfillRequest struct {
-	StartTime string `json:"start_time"`
-	EndTime   string `json:"end_time"`
+	TimeFilter string `json:"time_filter" binding:"omitempty,oneof=created success"`
+	StartTime  string `json:"start_time"`
+	EndTime    string `json:"end_time"`
 }
 
 func NewYouzanDistributionOrderBackfillController() *YouzanDistributionOrderBackfillController {
@@ -27,7 +29,13 @@ func (ctrl *YouzanDistributionOrderBackfillController) Preview(c *gin.Context) {
 		return
 	}
 
-	result, err := ctrl.service.PreviewRange(c.Request.Context(), req.StartTime, req.EndTime)
+	timeFilter, err := youzan.ParseOrderTimeFilter(req.TimeFilter)
+	if err != nil {
+		c.JSON(400, msg.ErrResponse("无效的有赞分销时间筛选方式", err))
+		return
+	}
+
+	result, err := ctrl.service.PreviewRange(c.Request.Context(), timeFilter, req.StartTime, req.EndTime)
 	if err != nil {
 		c.JSON(500, msg.ErrResponse("有赞分销补拉预览失败", err))
 		return
@@ -43,7 +51,13 @@ func (ctrl *YouzanDistributionOrderBackfillController) Confirm(c *gin.Context) {
 		return
 	}
 
-	result, err := ctrl.service.SyncRange(c.Request.Context(), req.StartTime, req.EndTime)
+	timeFilter, err := youzan.ParseOrderTimeFilter(req.TimeFilter)
+	if err != nil {
+		c.JSON(400, msg.ErrResponse("无效的有赞分销时间筛选方式", err))
+		return
+	}
+
+	result, err := ctrl.service.SyncRange(c.Request.Context(), timeFilter, req.StartTime, req.EndTime)
 	if err != nil {
 		c.JSON(500, msg.ErrResponse("有赞分销补拉写入失败", err))
 		return

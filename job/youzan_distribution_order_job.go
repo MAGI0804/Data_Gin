@@ -6,17 +6,25 @@ import (
 	"strings"
 	"time"
 
+	"gin-biz-web-api/pkg/youzan"
+
 	"github.com/hibiken/asynq"
 )
 
 const TypeYouzanDistributionOrderSync = "youzan:distribution:orders:sync"
 
 type YouzanDistributionOrderSyncPayload struct {
-	StartTime string `json:"start_time"`
-	EndTime   string `json:"end_time"`
+	TimeFilter youzan.OrderTimeFilter `json:"time_filter,omitempty"`
+	StartTime  string                 `json:"start_time"`
+	EndTime    string                 `json:"end_time"`
 }
 
 func NewYouzanDistributionOrderSyncTask(payload YouzanDistributionOrderSyncPayload) (*asynq.Task, error) {
+	timeFilter, err := youzan.ParseOrderTimeFilter(string(payload.TimeFilter))
+	if err != nil {
+		return nil, err
+	}
+	payload.TimeFilter = timeFilter
 	payload.StartTime = strings.TrimSpace(payload.StartTime)
 	payload.EndTime = strings.TrimSpace(payload.EndTime)
 	if (payload.StartTime == "") != (payload.EndTime == "") {
@@ -38,6 +46,10 @@ func NewYouzanDistributionOrderSyncTask(payload YouzanDistributionOrderSyncPaylo
 		asynq.Queue(DefaultQueueName),
 		asynq.MaxRetry(3),
 	), nil
+}
+
+func ResolveYouzanDistributionOrderTimeFilter(payload YouzanDistributionOrderSyncPayload) (youzan.OrderTimeFilter, error) {
+	return youzan.ParseOrderTimeFilter(string(payload.TimeFilter))
 }
 
 func ResolveYouzanDistributionOrderRange(payload YouzanDistributionOrderSyncPayload, now time.Time) (string, string) {
