@@ -210,7 +210,7 @@ func runExcelOrderItemMatchStep(
 			case !validExcelSpecCode(specCode):
 				result.Status, result.Reason = "unmatched", "规格编码为空"
 			case !priceOK:
-				result.Status, result.Reason = "unmatched", "价格不是有效数字"
+				result.Status, result.Reason = "unmatched", "销售金额不是有效数字"
 			case !qtyOK:
 				result.Status, result.Reason = "unmatched", "销售数量不是有效数字"
 			default:
@@ -223,7 +223,10 @@ func runExcelOrderItemMatchStep(
 				result.Status = "unmatched"
 				if value != "" {
 					result.MatchedValue = value
-					result.Status, result.Reason = "matched", "已按订单商品明细匹配"
+					result.Status = "matched"
+					if result.Reason == "" {
+						result.Reason = "已按订单商品明细匹配"
+					}
 				}
 			}
 		}
@@ -244,9 +247,14 @@ func (state *excelOrderItemMatchState) match(detail excelOrderItemDetail, orderN
 	}
 	matchedButUsed := false
 	matchedButReserved := false
+	hasSpecMatch := false
 	seenOccurrences := make(map[excelOrderItemIdentity]int)
 	for _, item := range detail.items {
-		if !item.valid || !excelSpecCodesMatch(specCode, item.productName) || priceCents != item.priceCents || math.Abs(qty-item.qty) >= excelOrderItemQtyTolerance {
+		if !item.valid || !excelSpecCodesMatch(specCode, item.productName) {
+			continue
+		}
+		hasSpecMatch = true
+		if priceCents != item.priceCents || math.Abs(qty-item.qty) >= excelOrderItemQtyTolerance {
 			continue
 		}
 		identity := item.identity()
@@ -273,7 +281,45 @@ func (state *excelOrderItemMatchState) match(detail excelOrderItemDetail, orderN
 	if matchedButReserved {
 		return "", "符合条件的SKU已为更长规格编码行保留", nil
 	}
-	return "", "订单购物明细中无规格编码、价格和数量同时相符的SKU", nil
+	if hasSpecMatch {
+		return "", "订单购物明细中无规格编码、金额和数量同时相符的SKU", nil
+	}
+	return state.matchByAmountAndQty(detail.items, used, orderNo, priceCents, qty)
+}
+
+func (state *excelOrderItemMatchState) matchByAmountAndQty(items []excelOrderItem, used excelOrderItemUseCounts, orderNo string, priceCents int64, qty float64) (string, string, error) {
+	matchedButUsed := false
+	matchedButReserved := false
+	seenOccurrences := make(map[excelOrderItemIdentity]int)
+	for _, item := range items {
+		if !item.valid || priceCents != item.priceCents || !excelOrderItemQtyEqual(qty, item.qty) {
+			continue
+		}
+		identity := item.identity()
+		occurrence := seenOccurrences[identity]
+		seenOccurrences[identity] = occurrence + 1
+		if occurrence < used[identity] {
+			matchedButUsed = true
+			continue
+		}
+		if !state.canConsumeItem(items, used, orderNo, "", item) {
+			matchedButReserved = true
+			continue
+		}
+		if state.usedCount >= maxExcelOrderUsedItems {
+			return "", "", fmt.Errorf("订单商品明细使用数量超过上限 %d，请拆分Excel文件", maxExcelOrderUsedItems)
+		}
+		used[identity]++
+		state.usedCount++
+		return item.no, "规格编码未匹配，已按金额和数量匹配", nil
+	}
+	if matchedButUsed {
+		return "", "符合金额和数量的SKU已被当前订单其他Excel行使用", nil
+	}
+	if matchedButReserved {
+		return "", "符合金额和数量的SKU已为其他规格编码行保留", nil
+	}
+	return "", "订单购物明细中无金额和数量同时相符的SKU", nil
 }
 
 func (item excelOrderItem) identity() excelOrderItemIdentity {
@@ -287,7 +333,11 @@ func (item excelOrderItem) identity() excelOrderItemIdentity {
 
 func (state *excelOrderItemMatchState) canConsumeItem(items []excelOrderItem, used excelOrderItemUseCounts, orderNo, excelCode string, target excelOrderItem) bool {
 	excelCode = normalizeExcelSpecCode(excelCode)
-	for prefixLength := len(excelCode); prefixLength <= len(target.productName); prefixLength++ {
+	maxPrefixLength := state.reservations.maxPendingCodeLength(orderNo, len(excelCode), len(target.productName), target.priceCents, target.qty)
+	if maxPrefixLength <= len(excelCode) {
+		return true
+	}
+	for prefixLength := len(excelCode); prefixLength <= maxPrefixLength; prefixLength++ {
 		prefix := target.productName[:prefixLength]
 		remaining := state.reservations.remainingForPrefix(
 			items,
@@ -307,6 +357,26 @@ func (state *excelOrderItemMatchState) canConsumeItem(items []excelOrderItem, us
 		}
 	}
 	return true
+}
+
+func (reservations excelOrderItemReservations) maxPendingCodeLength(orderNo string, currentCodeLength, databaseCodeLength int, priceCents int64, qty float64) int {
+	maxLength := currentCodeLength
+	for _, byOrder := range reservations {
+		for reservedCode, items := range byOrder[orderNo] {
+			if len(reservedCode) <= currentCodeLength || len(reservedCode) > databaseCodeLength {
+				continue
+			}
+			for _, item := range items {
+				if item.count > 0 && item.priceCents == priceCents && excelOrderItemQtyEqual(item.qty, qty) {
+					if len(reservedCode) > maxLength {
+						maxLength = len(reservedCode)
+					}
+					break
+				}
+			}
+		}
+	}
+	return maxLength
 }
 
 func availableExcelOrderItemsForPrefix(items []excelOrderItem, used excelOrderItemUseCounts, prefix string, priceCents int64, qty float64) int {
@@ -363,21 +433,26 @@ func (reservations excelOrderItemReservations) remainingForPrefix(
 	priceCents int64,
 	qty float64,
 ) int {
-	count := 0
+	pendingByCode := make(map[string]int)
 	for _, byOrder := range reservations {
 		for reservedCode, items := range byOrder[orderNo] {
 			if len(reservedCode) <= currentCodeLength || len(reservedCode) > databaseCodeLength || !strings.HasPrefix(reservedCode, prefix) {
 				continue
 			}
-			if availableExcelOrderItemsForPrefix(databaseItems, used, reservedCode, priceCents, qty) == 0 {
-				continue
-			}
 			for _, item := range items {
 				if item.count > 0 && item.priceCents == priceCents && excelOrderItemQtyEqual(item.qty, qty) {
-					count += item.count
+					pendingByCode[reservedCode] += item.count
 				}
 			}
 		}
+	}
+	count := 0
+	for reservedCode, pending := range pendingByCode {
+		available := availableExcelOrderItemsForPrefix(databaseItems, used, reservedCode, priceCents, qty)
+		if available < pending {
+			pending = available
+		}
+		count += pending
 	}
 	return count
 }
@@ -411,7 +486,7 @@ func parseExcelOrderItems(raw string) ([]excelOrderItem, error) {
 			productName: productName,
 			qty:         qty,
 			priceCents:  priceCents,
-			valid:       no != "" && len(productName) == 9 && qtyOK && priceOK,
+			valid:       no != "" && productName != "" && qtyOK && priceOK,
 		})
 	}
 	return items, nil

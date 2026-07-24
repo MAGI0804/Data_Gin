@@ -2483,13 +2483,13 @@ function ExcelMatchView({
                     <Field label={step.matchMode === 'order_item_sku' ? 'SKU 输出列' : '追加输出列'} name={`step_output_${index}`} value={step.outputColumnName} onChange={(value) => updateExportStep(index, 'outputColumnName', value)} required />
                     {step.matchMode === 'order_item_sku' && <>
                       <Field label="规格编码 Excel 列" name={`step_spec_${index}`} value={step.specExcelColumn} onChange={(value) => updateExportStep(index, 'specExcelColumn', value)} required />
-                      <Field label="销售价格 Excel 列" name={`step_price_${index}`} value={step.priceExcelColumn} onChange={(value) => updateExportStep(index, 'priceExcelColumn', value)} required />
+                      <Field label="销售金额 Excel 列（对应 totAmtActual）" name={`step_price_${index}`} value={step.priceExcelColumn} onChange={(value) => updateExportStep(index, 'priceExcelColumn', value)} required />
                       <Field label="销售数量 Excel 列" name={`step_qty_${index}`} value={step.qtyExcelColumn} onChange={(value) => updateExportStep(index, 'qtyExcelColumn', value)} required />
                     </>}
                   </div>
                   {step.matchMode === 'order_item_sku' && (
                     <p className="excel-mode-note">
-                      按数据库购物明细字段（例如 items_json）中的 mProductName、totAmtActual、qty 匹配并输出完整 no。Excel 规格编码按自身长度与数据库规格编码开头比较；15 位或 16 位编码直接跳过。价格和数量必须相同，每条购物明细最多使用一次；重复明细可分别输出相同 no。
+                      按数据库购物明细字段（例如 items_json）匹配并输出完整 no：优先用 Excel 规格编码匹配 mProductName 前缀，并同时校验 totAmtActual（销售金额）和 qty，mProductName 长度不限；若规格编码在订单明细中没有候选，则按销售金额和数量兜底匹配。Excel 规格编码为 15 位或 16 位时直接跳过。每条购物明细按其在 JSON 中的出现次数使用一次；相同明细重复出现时，可按次数重复输出同一 no。
                     </p>
                   )}
                   <div className="excel-step-filter-editor">

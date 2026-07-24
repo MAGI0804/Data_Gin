@@ -3,6 +3,7 @@ package data_svc
 import (
 	"context"
 	"errors"
+	"fmt"
 	"gin-biz-web-api/model"
 	"gin-biz-web-api/pkg/storage"
 	"os"
@@ -565,6 +566,180 @@ func TestExcelOrderItemMatchUsesTotalAmountInsteadOfUnitPrice(t *testing.T) {
 	got, reason, err := state.match(detail, "ORDER-1", "C09H1073A", 31920, 2)
 	if err != nil || got != "SKU-TOTAL" || reason != "" {
 		t.Fatalf("total-amount match = %q, %q, %v, want SKU-TOTAL", got, reason, err)
+	}
+}
+
+func TestExcelOrderItemMatchAcceptsEightCharacterSpecAndZeroAmount(t *testing.T) {
+	items, err := parseExcelOrderItems(`[
+		{"no":"QTCM0339A093000","qty":1,"totAmtActual":0,"mProductName":"QTCM0339"},
+		{"no":"QTCM0365","qty":12,"totAmtActual":0,"mProductName":"QTCM0365"},
+		{"no":"QTCM0358","qty":2,"totAmtActual":0,"mProductName":"QTCM0358"}
+	]`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := newExcelOrderItemMatchState(nil)
+	got, reason, err := state.match(excelOrderItemDetail{items: items}, "ORDER-1", "QTCM0339", 0, 1)
+	if err != nil || got != "QTCM0339A093000" || reason != "" {
+		t.Fatalf("zero-amount match = %q, %q, %v, want QTCM0339A093000", got, reason, err)
+	}
+}
+
+func TestExcelOrderItemMatchAcceptsArbitraryNonEmptyDatabaseSpecLengths(t *testing.T) {
+	tests := []struct {
+		name string
+		code string
+	}{
+		{name: "three characters", code: "ABC"},
+		{name: "twenty characters", code: "ABCDEFGHIJKLMNOPQRST"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			items, err := parseExcelOrderItems(fmt.Sprintf(`[
+				{"no":"SKU-%s","qty":1,"totAmtActual":0,"mProductName":"%s"}
+			]`, tt.name, tt.code))
+			if err != nil {
+				t.Fatal(err)
+			}
+			state := newExcelOrderItemMatchState(nil)
+			got, reason, err := state.match(excelOrderItemDetail{items: items}, "ORDER-1", tt.code, 0, 1)
+			if err != nil || got == "" || reason != "" {
+				t.Fatalf("arbitrary-length match = %q, %q, %v, want matched", got, reason, err)
+			}
+		})
+	}
+}
+
+func TestExcelOrderItemMatchRejectsEmptyDatabaseSpec(t *testing.T) {
+	items, err := parseExcelOrderItems(`[
+		{"no":"SKU-EMPTY","qty":1,"totAmtActual":0,"mProductName":""}
+	]`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := newExcelOrderItemMatchState(nil)
+	got, reason, err := state.match(excelOrderItemDetail{items: items}, "ORDER-1", "UNRELATED", 0, 1)
+	if err != nil || got != "" || reason != "订单购物明细中无金额和数量同时相符的SKU" {
+		t.Fatalf("empty database spec match = %q, %q, %v, want invalid item", got, reason, err)
+	}
+}
+
+func TestExcelOrderItemMatchFallsBackToAmountAndQtyForUnrelatedSpec(t *testing.T) {
+	items, err := parseExcelOrderItems(`[
+		{"no":"SKU-A","qty":1,"totAmtActual":10,"mProductName":"PRODUCT1A"},
+		{"no":"SKU-B","qty":2,"totAmtActual":20,"mProductName":"PRODUCT2A"}
+	]`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := newExcelOrderItemMatchState(nil)
+	got, reason, err := state.match(excelOrderItemDetail{items: items}, "ORDER-1", "UNRELATED", 2000, 2)
+	if err != nil || got != "SKU-B" || reason != "规格编码未匹配，已按金额和数量匹配" {
+		t.Fatalf("fallback match = %q, %q, %v, want SKU-B by amount and qty", got, reason, err)
+	}
+}
+
+func TestExcelOrderItemMatchDoesNotFallbackWhenSpecExists(t *testing.T) {
+	items, err := parseExcelOrderItems(`[
+		{"no":"SKU-A","qty":1,"totAmtActual":10,"mProductName":"PRODUCT1A"},
+		{"no":"SKU-B","qty":1,"totAmtActual":20,"mProductName":"PRODUCT2A"}
+	]`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := newExcelOrderItemMatchState(nil)
+	got, reason, err := state.match(excelOrderItemDetail{items: items}, "ORDER-1", "PRODUCT1", 2000, 1)
+	if err != nil || got != "" || reason != "订单购物明细中无规格编码、金额和数量同时相符的SKU" {
+		t.Fatalf("existing-spec mismatch = %q, %q, %v, want no amount-only fallback", got, reason, err)
+	}
+}
+
+func TestExcelOrderItemMatchDoesNotFallbackAfterCodeCandidateIsUsed(t *testing.T) {
+	items, err := parseExcelOrderItems(`[
+		{"no":"SKU-A","qty":1,"totAmtActual":20,"mProductName":"PRODUCT1A"},
+		{"no":"SKU-B","qty":1,"totAmtActual":20,"mProductName":"PRODUCT2A"}
+	]`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := newExcelOrderItemMatchState(nil)
+	detail := excelOrderItemDetail{items: items}
+	got, reason, err := state.match(detail, "ORDER-1", "PRODUCT1", 2000, 1)
+	if err != nil || got != "SKU-A" || reason != "" {
+		t.Fatalf("first code match = %q, %q, %v, want SKU-A", got, reason, err)
+	}
+	got, reason, err = state.match(detail, "ORDER-1", "PRODUCT1", 2000, 1)
+	if err != nil || got != "" || reason != "符合条件的SKU已被当前订单其他Excel行使用" {
+		t.Fatalf("used code match = %q, %q, %v, want no fallback to SKU-B", got, reason, err)
+	}
+}
+
+func TestExcelOrderItemMatchFallbackConsumesDuplicateOccurrences(t *testing.T) {
+	items, err := parseExcelOrderItems(`[
+		{"no":"SKU-SAME","qty":1,"totAmtActual":0,"mProductName":"PRODUCT1A"},
+		{"no":"SKU-SAME","qty":1,"totAmtActual":0,"mProductName":"PRODUCT1A"}
+	]`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := newExcelOrderItemMatchState(nil)
+	detail := excelOrderItemDetail{items: items}
+	for attempt := 1; attempt <= 2; attempt++ {
+		got, reason, err := state.match(detail, "ORDER-1", "UNRELATED", 0, 1)
+		if err != nil || got != "SKU-SAME" || reason != "规格编码未匹配，已按金额和数量匹配" {
+			t.Fatalf("fallback attempt %d = %q, %q, %v, want SKU-SAME", attempt, got, reason, err)
+		}
+	}
+	got, reason, err := state.match(detail, "ORDER-1", "UNRELATED", 0, 1)
+	if err != nil || got != "" || reason != "符合金额和数量的SKU已被当前订单其他Excel行使用" {
+		t.Fatalf("third fallback = %q, %q, %v, want duplicate occurrences exhausted", got, reason, err)
+	}
+}
+
+func TestExcelOrderItemMatchFallbackPreservesCodeMatchReservations(t *testing.T) {
+	items, err := parseExcelOrderItems(`[
+		{"no":"SKU-A","qty":1,"totAmtActual":20,"mProductName":"C09H1073A"},
+		{"no":"SKU-B","qty":1,"totAmtActual":20,"mProductName":"C09H1073B"},
+		{"no":"SKU-C","qty":1,"totAmtActual":20,"mProductName":"OTHER001A"}
+	]`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reservations := excelOrderItemReservations{0: {}}
+	reservations.add(0, "ORDER-1", "C09H1073A", 2000, 1)
+	reservations.add(0, "ORDER-1", "C09H10", 2000, 1)
+	state := newExcelOrderItemMatchState(reservations)
+	got, reason, err := state.match(excelOrderItemDetail{items: items}, "ORDER-1", "UNRELATED", 2000, 1)
+	if err != nil || got != "SKU-C" || reason != "规格编码未匹配，已按金额和数量匹配" {
+		t.Fatalf("reserved fallback match = %q, %q, %v, want unreserved SKU-C", got, reason, err)
+	}
+	reservations.consume(0, "ORDER-1", "C09H1073A", 2000, 1)
+	got, reason, err = state.match(excelOrderItemDetail{items: items}, "ORDER-1", "C09H1073A", 2000, 1)
+	if err != nil || got != "SKU-A" || reason != "" {
+		t.Fatalf("exact reserved match = %q, %q, %v, want SKU-A", got, reason, err)
+	}
+	reservations.consume(0, "ORDER-1", "C09H10", 2000, 1)
+	got, reason, err = state.match(excelOrderItemDetail{items: items}, "ORDER-1", "C09H10", 2000, 1)
+	if err != nil || got != "SKU-B" || reason != "" {
+		t.Fatalf("prefix reserved match = %q, %q, %v, want SKU-B", got, reason, err)
+	}
+}
+
+func TestExcelOrderItemMatchFallbackCapsSameCodeReservationsAcrossSteps(t *testing.T) {
+	items, err := parseExcelOrderItems(`[
+		{"no":"SKU-A","qty":1,"totAmtActual":20,"mProductName":"C09H1073A"},
+		{"no":"SKU-B","qty":1,"totAmtActual":20,"mProductName":"OTHER001A"}
+	]`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reservations := excelOrderItemReservations{0: {}, 1: {}}
+	reservations.add(0, "ORDER-1", "C09H1073A", 2000, 1)
+	reservations.add(1, "ORDER-1", "C09H1073A", 2000, 1)
+	state := newExcelOrderItemMatchState(reservations)
+	got, reason, err := state.match(excelOrderItemDetail{items: items}, "ORDER-1", "UNRELATED", 2000, 1)
+	if err != nil || got != "SKU-B" || reason != "规格编码未匹配，已按金额和数量匹配" {
+		t.Fatalf("cross-step capped fallback = %q, %q, %v, want unrelated SKU-B", got, reason, err)
 	}
 }
 
