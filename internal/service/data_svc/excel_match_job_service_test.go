@@ -591,11 +591,12 @@ func TestExcelOrderItemMatchReservesOnlyRequiredCandidateCapacity(t *testing.T) 
 	}
 }
 
-func TestExcelOrderItemMatchDoesNotCountDuplicateNoAsCapacity(t *testing.T) {
-	items, err := parseExcelOrderItems(`[
+func TestExcelOrderItemMatchConsumesDuplicateNoOccurrencesOnceEach(t *testing.T) {
+	raw := `[
 		{"no":"SKU-A","qty":1,"totAmtActual":319.2,"mProductName":"C09H1073A"},
 		{"no":"SKU-A","qty":1,"totAmtActual":319.2,"mProductName":"C09H1073A"}
-	]`)
+	]`
+	items, err := parseExcelOrderItems(raw)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -604,13 +605,53 @@ func TestExcelOrderItemMatchDoesNotCountDuplicateNoAsCapacity(t *testing.T) {
 	state := newExcelOrderItemMatchState(reservations)
 	detail := excelOrderItemDetail{items: items}
 	fuzzySKU, reason, err := state.match(detail, "ORDER-1", "C09H1073", 31920, 1)
-	if err != nil || fuzzySKU != "" || reason != "符合条件的SKU已为更长规格编码行保留" {
-		t.Fatalf("fuzzy match = %q, %q, %v, want duplicate no reserved once", fuzzySKU, reason, err)
+	if err != nil || fuzzySKU != "SKU-A" || reason != "" {
+		t.Fatalf("fuzzy match = %q, %q, %v, want first SKU-A occurrence", fuzzySKU, reason, err)
 	}
+	items, err = parseExcelOrderItems(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	detail = excelOrderItemDetail{items: items}
 	reservations.consume(0, "ORDER-1", "C09H1073A", 31920, 1)
 	exactSKU, reason, err := state.match(detail, "ORDER-1", "C09H1073A", 31920, 1)
 	if err != nil || exactSKU != "SKU-A" || reason != "" {
-		t.Fatalf("exact match = %q, %q, %v, want SKU-A", exactSKU, reason, err)
+		t.Fatalf("exact match = %q, %q, %v, want second SKU-A occurrence", exactSKU, reason, err)
+	}
+	thirdSKU, reason, err := state.match(detail, "ORDER-1", "C09H1073A", 31920, 1)
+	if err != nil || thirdSKU != "" || reason != "符合条件的SKU已被当前订单其他Excel行使用" {
+		t.Fatalf("third match = %q, %q, %v, want both SKU-A occurrences exhausted", thirdSKU, reason, err)
+	}
+}
+
+func TestExcelOrderItemMatchKeepsConsumptionWhenDatabaseItemsReorder(t *testing.T) {
+	firstBatch, err := parseExcelOrderItems(`[
+		{"no":"SKU-SHARED","qty":1,"totAmtActual":319.2,"mProductName":"C09H1073A"},
+		{"no":"SKU-SHARED","qty":1,"totAmtActual":319.2,"mProductName":"C09H1073B"}
+	]`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := newExcelOrderItemMatchState(nil)
+	matched, reason, err := state.match(excelOrderItemDetail{items: firstBatch}, "ORDER-1", "C09H1073A", 31920, 1)
+	if err != nil || matched != "SKU-SHARED" || reason != "" {
+		t.Fatalf("first batch match = %q, %q, %v, want shared SKU for product A", matched, reason, err)
+	}
+
+	secondBatch, err := parseExcelOrderItems(`[
+		{"no":"SKU-SHARED","qty":1,"totAmtActual":319.2,"mProductName":"C09H1073B"},
+		{"no":"SKU-SHARED","qty":1,"totAmtActual":319.2,"mProductName":"C09H1073A"}
+	]`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	matched, reason, err = state.match(excelOrderItemDetail{items: secondBatch}, "ORDER-1", "C09H1073A", 31920, 1)
+	if err != nil || matched != "" || reason != "符合条件的SKU已被当前订单其他Excel行使用" {
+		t.Fatalf("reordered used match = %q, %q, %v, want product A identity exhausted", matched, reason, err)
+	}
+	matched, reason, err = state.match(excelOrderItemDetail{items: secondBatch}, "ORDER-1", "C09H1073B", 31920, 1)
+	if err != nil || matched != "SKU-SHARED" || reason != "" {
+		t.Fatalf("reordered unused match = %q, %q, %v, want shared SKU for product B", matched, reason, err)
 	}
 }
 

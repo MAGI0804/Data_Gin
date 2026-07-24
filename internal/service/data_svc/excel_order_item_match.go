@@ -17,7 +17,7 @@ const (
 	excelOrderItemQtyTolerance     = 1e-9
 	maxExcelOrderItemsJSONBytes    = 16 * 1024 * 1024
 	maxExcelOrderReservationGroups = 250000
-	maxExcelOrderUsedSKUs          = 1000000
+	maxExcelOrderUsedItems         = 1000000
 )
 
 type excelOrderItemJSON struct {
@@ -48,16 +48,25 @@ type excelOrderItemReservation struct {
 
 type excelOrderItemReservations map[int]map[string]map[string][]excelOrderItemReservation
 
+type excelOrderItemIdentity struct {
+	no          string
+	productName string
+	qty         float64
+	priceCents  int64
+}
+
+type excelOrderItemUseCounts map[excelOrderItemIdentity]int
+
 type excelOrderItemMatchState struct {
 	reservations excelOrderItemReservations
-	used         map[string]map[string]struct{}
+	used         map[string]excelOrderItemUseCounts
 	usedCount    int
 }
 
 func newExcelOrderItemMatchState(reservations excelOrderItemReservations) *excelOrderItemMatchState {
 	return &excelOrderItemMatchState{
 		reservations: reservations,
-		used:         make(map[string]map[string]struct{}),
+		used:         make(map[string]excelOrderItemUseCounts),
 	}
 }
 
@@ -230,16 +239,20 @@ func (state *excelOrderItemMatchState) match(detail excelOrderItemDetail, orderN
 	}
 	used := state.used[orderNo]
 	if used == nil {
-		used = make(map[string]struct{})
+		used = make(excelOrderItemUseCounts)
 		state.used[orderNo] = used
 	}
 	matchedButUsed := false
 	matchedButReserved := false
+	seenOccurrences := make(map[excelOrderItemIdentity]int)
 	for _, item := range detail.items {
 		if !item.valid || !excelSpecCodesMatch(specCode, item.productName) || priceCents != item.priceCents || math.Abs(qty-item.qty) >= excelOrderItemQtyTolerance {
 			continue
 		}
-		if _, exists := used[item.no]; exists {
+		identity := item.identity()
+		occurrence := seenOccurrences[identity]
+		seenOccurrences[identity] = occurrence + 1
+		if occurrence < used[identity] {
 			matchedButUsed = true
 			continue
 		}
@@ -247,10 +260,10 @@ func (state *excelOrderItemMatchState) match(detail excelOrderItemDetail, orderN
 			matchedButReserved = true
 			continue
 		}
-		if state.usedCount >= maxExcelOrderUsedSKUs {
-			return "", "", fmt.Errorf("订单商品SKU去重数量超过上限 %d，请拆分Excel文件", maxExcelOrderUsedSKUs)
+		if state.usedCount >= maxExcelOrderUsedItems {
+			return "", "", fmt.Errorf("订单商品明细使用数量超过上限 %d，请拆分Excel文件", maxExcelOrderUsedItems)
 		}
-		used[item.no] = struct{}{}
+		used[identity]++
 		state.usedCount++
 		return item.no, "", nil
 	}
@@ -263,7 +276,16 @@ func (state *excelOrderItemMatchState) match(detail excelOrderItemDetail, orderN
 	return "", "订单购物明细中无规格编码、价格和数量同时相符的SKU", nil
 }
 
-func (state *excelOrderItemMatchState) canConsumeItem(items []excelOrderItem, used map[string]struct{}, orderNo, excelCode string, target excelOrderItem) bool {
+func (item excelOrderItem) identity() excelOrderItemIdentity {
+	return excelOrderItemIdentity{
+		no:          item.no,
+		productName: item.productName,
+		qty:         item.qty,
+		priceCents:  item.priceCents,
+	}
+}
+
+func (state *excelOrderItemMatchState) canConsumeItem(items []excelOrderItem, used excelOrderItemUseCounts, orderNo, excelCode string, target excelOrderItem) bool {
 	excelCode = normalizeExcelSpecCode(excelCode)
 	for prefixLength := len(excelCode); prefixLength <= len(target.productName); prefixLength++ {
 		prefix := target.productName[:prefixLength]
@@ -287,18 +309,18 @@ func (state *excelOrderItemMatchState) canConsumeItem(items []excelOrderItem, us
 	return true
 }
 
-func availableExcelOrderItemsForPrefix(items []excelOrderItem, used map[string]struct{}, prefix string, priceCents int64, qty float64) int {
+func availableExcelOrderItemsForPrefix(items []excelOrderItem, used excelOrderItemUseCounts, prefix string, priceCents int64, qty float64) int {
 	count := 0
-	seen := make(map[string]struct{})
+	seenOccurrences := make(map[excelOrderItemIdentity]int)
 	for _, item := range items {
 		if !item.valid || !strings.HasPrefix(item.productName, prefix) || item.priceCents != priceCents || !excelOrderItemQtyEqual(item.qty, qty) {
 			continue
 		}
-		if _, exists := used[item.no]; !exists {
-			if _, duplicate := seen[item.no]; !duplicate {
-				seen[item.no] = struct{}{}
-				count++
-			}
+		identity := item.identity()
+		occurrence := seenOccurrences[identity]
+		seenOccurrences[identity] = occurrence + 1
+		if occurrence >= used[identity] {
+			count++
 		}
 	}
 	return count
@@ -335,7 +357,7 @@ func (reservations excelOrderItemReservations) consume(stepIndex int, orderNo, s
 
 func (reservations excelOrderItemReservations) remainingForPrefix(
 	databaseItems []excelOrderItem,
-	used map[string]struct{},
+	used excelOrderItemUseCounts,
 	orderNo, prefix string,
 	currentCodeLength, databaseCodeLength int,
 	priceCents int64,
