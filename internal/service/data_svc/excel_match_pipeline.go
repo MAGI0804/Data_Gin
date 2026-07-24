@@ -24,6 +24,14 @@ type excelMatchPipelineLayout struct {
 	columnFormats    []string
 }
 
+type excelMatchPipelineState struct {
+	orderItems *excelOrderItemMatchState
+}
+
+func newExcelMatchPipelineState(reservations excelOrderItemReservations) *excelMatchPipelineState {
+	return &excelMatchPipelineState{orderItems: newExcelOrderItemMatchState(reservations)}
+}
+
 func processExcelMatchFile(ctx context.Context, inputPath, outputPath string, config ExcelMatchConfig, lookup ExcelMatchLookup) (ExcelMatchJobStats, error) {
 	return processExcelMatchFileWithProgress(ctx, inputPath, outputPath, config, lookup, nil)
 }
@@ -31,8 +39,10 @@ func processExcelMatchFile(ctx context.Context, inputPath, outputPath string, co
 func prepareExcelMatchPipeline(headers []string, config ExcelMatchConfig) (excelMatchPipelineLayout, error) {
 	layout := excelMatchPipelineLayout{columnIndexes: make(map[string]int, len(headers)+len(config.Steps))}
 	layout.headers = append(layout.headers, headers...)
+	originalColumns := make(map[string]struct{}, len(headers))
 	for index, header := range headers {
 		layout.columnIndexes[header] = index
+		originalColumns[header] = struct{}{}
 	}
 	for index, step := range config.Steps {
 		for _, filter := range step.Filters {
@@ -43,6 +53,18 @@ func prepareExcelMatchPipeline(headers []string, config ExcelMatchConfig) (excel
 		inputIndex, ok := layout.columnIndexes[step.MatchExcelColumn]
 		if !ok {
 			return layout, fmt.Errorf("第 %d 个匹配步骤缺少输入列: %s", index+1, step.MatchExcelColumn)
+		}
+		if step.MatchMode == excelMatchModeOrderItemSKU {
+			for _, column := range []string{step.MatchExcelColumn, step.SpecExcelColumn, step.PriceExcelColumn, step.QtyExcelColumn} {
+				if _, ok := originalColumns[column]; !ok {
+					return layout, fmt.Errorf("第 %d 个订单商品SKU匹配步骤缺少Excel列: %s", index+1, column)
+				}
+			}
+			for _, filter := range step.Filters {
+				if _, ok := originalColumns[filter.Column]; !ok {
+					return layout, fmt.Errorf("第 %d 个订单商品SKU匹配步骤筛选只能使用原始Excel列: %s", index+1, filter.Column)
+				}
+			}
 		}
 		if _, exists := layout.columnIndexes[step.OutputColumnName]; exists {
 			return layout, fmt.Errorf("第 %d 个匹配步骤输出列已存在: %s", index+1, step.OutputColumnName)
@@ -61,7 +83,7 @@ func prepareExcelMatchPipeline(headers []string, config ExcelMatchConfig) (excel
 	return layout, nil
 }
 
-func runExcelMatchSteps(ctx context.Context, config ExcelMatchConfig, lookup ExcelMatchLookup, layout excelMatchPipelineLayout, rows []*excelMatchPipelineRow) error {
+func runExcelMatchSteps(ctx context.Context, config ExcelMatchConfig, lookup ExcelMatchLookup, layout excelMatchPipelineLayout, state *excelMatchPipelineState, rows []*excelMatchPipelineRow) error {
 	for stepIndex, step := range config.Steps {
 		keys := make([]string, 0, len(rows))
 		seen := make(map[string]struct{}, len(rows))
@@ -80,6 +102,12 @@ func runExcelMatchSteps(ctx context.Context, config ExcelMatchConfig, lookup Exc
 					keys = append(keys, key)
 				}
 			}
+		}
+		if step.MatchMode == excelMatchModeOrderItemSKU {
+			if err := runExcelOrderItemMatchStep(ctx, stepIndex, step, lookup, layout, state.orderItems, rows, eligibleRows, keys); err != nil {
+				return err
+			}
+			continue
 		}
 		matches := map[string]string{}
 		if len(keys) > 0 {
@@ -155,6 +183,10 @@ func processExcelMatchPreview(ctx context.Context, input *excelize.File, config 
 	if !sheetExists(input.GetSheetList(), config.SheetName) {
 		return nil, fmt.Errorf("Excel 不存在 sheet: %s", config.SheetName)
 	}
+	reservations, err := collectExcelOrderItemReservations(ctx, input, config, 0)
+	if err != nil {
+		return nil, err
+	}
 	rows, err := input.Rows(config.SheetName)
 	if err != nil {
 		return nil, err
@@ -162,6 +194,7 @@ func processExcelMatchPreview(ctx context.Context, input *excelize.File, config 
 	defer func() { _ = rows.Close() }()
 
 	result := &ExcelMatchPreviewResult{Config: config, ScanLimit: scanLimit, SampleLimit: sampleLimit}
+	state := newExcelMatchPipelineState(reservations)
 	var layout excelMatchPipelineLayout
 	var buffered []*excelMatchPipelineRow
 	headerRead := false
@@ -169,7 +202,7 @@ func processExcelMatchPreview(ctx context.Context, input *excelize.File, config 
 		if len(buffered) == 0 {
 			return nil
 		}
-		if err := runExcelMatchSteps(ctx, config, lookup, layout, buffered); err != nil {
+		if err := runExcelMatchSteps(ctx, config, lookup, layout, state, buffered); err != nil {
 			return err
 		}
 		updateExcelMatchFinalStats(&result.Stats, buffered)
@@ -247,6 +280,10 @@ func processExcelMatchFileWithProgress(ctx context.Context, inputPath, outputPat
 	if !sheetExists(input.GetSheetList(), config.SheetName) {
 		return ExcelMatchJobStats{}, fmt.Errorf("Excel 不存在 sheet: %s", config.SheetName)
 	}
+	reservations, err := collectExcelOrderItemReservations(ctx, input, config, 0)
+	if err != nil {
+		return ExcelMatchJobStats{}, err
+	}
 	rows, err := input.Rows(config.SheetName)
 	if err != nil {
 		return ExcelMatchJobStats{}, err
@@ -260,6 +297,7 @@ func processExcelMatchFileWithProgress(ctx context.Context, inputPath, outputPat
 	}
 
 	stats := ExcelMatchJobStats{}
+	state := newExcelMatchPipelineState(reservations)
 	var layout excelMatchPipelineLayout
 	var buffered []*excelMatchPipelineRow
 	rowInSheet, sheetIndex := 1, 1
@@ -297,7 +335,7 @@ func processExcelMatchFileWithProgress(ctx context.Context, inputPath, outputPat
 		if len(buffered) == 0 {
 			return nil
 		}
-		if err := runExcelMatchSteps(ctx, config, lookup, layout, buffered); err != nil {
+		if err := runExcelMatchSteps(ctx, config, lookup, layout, state, buffered); err != nil {
 			return err
 		}
 		for _, bufferedRow := range buffered {

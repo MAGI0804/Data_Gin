@@ -101,6 +101,48 @@ func TestNormalizeExcelMatchConfigAcceptsOrderedCustomSteps(t *testing.T) {
 	}
 }
 
+func TestNormalizeExcelMatchConfigAcceptsOrderItemSKUStep(t *testing.T) {
+	cfg, err := normalizeExcelMatchConfig(ExcelMatchConfig{
+		Operation: excelOperationExportMatch,
+		Steps: []ExcelMatchStep{{
+			Name:             "补全SKU",
+			MatchMode:        excelMatchModeOrderItemSKU,
+			TableName:        bojunRetailOrdersTable,
+			MatchExcelColumn: "订单号",
+			SpecExcelColumn:  "规格编码",
+			PriceExcelColumn: "销售单价",
+			QtyExcelColumn:   "销售数量",
+			DBMatchField:     "docno",
+			DBValueField:     "items_json",
+			OutputColumnName: "完整SKU",
+		}},
+	})
+	if err != nil {
+		t.Fatalf("normalizeExcelMatchConfig returned error: %v", err)
+	}
+	if got := cfg.Steps[0]; got.MatchMode != excelMatchModeOrderItemSKU || got.SpecExcelColumn != "规格编码" || got.PriceExcelColumn != "销售单价" || got.QtyExcelColumn != "销售数量" {
+		t.Fatalf("normalized order item step = %#v", got)
+	}
+}
+
+func TestNormalizeExcelMatchConfigRejectsIncompleteOrderItemSKUStep(t *testing.T) {
+	_, err := normalizeExcelMatchConfig(ExcelMatchConfig{
+		Operation: excelOperationExportMatch,
+		Steps: []ExcelMatchStep{{
+			MatchMode:        excelMatchModeOrderItemSKU,
+			TableName:        bojunRetailOrdersTable,
+			MatchExcelColumn: "订单号",
+			SpecExcelColumn:  "规格编码",
+			DBMatchField:     "docno",
+			DBValueField:     "items_json",
+			OutputColumnName: "完整SKU",
+		}},
+	})
+	if err == nil {
+		t.Fatal("normalizeExcelMatchConfig returned nil error, want missing price and quantity columns error")
+	}
+}
+
 func TestNormalizeExcelMatchConfigRejectsDuplicateStepOutput(t *testing.T) {
 	_, err := normalizeExcelMatchConfig(ExcelMatchConfig{
 		Operation: "export_match",
@@ -356,6 +398,217 @@ func TestProcessExcelMatchFileUsesPreviousStepOutputAsNextStepInput(t *testing.T
 	want := [][]string{{"订单号", "门店名称", "区域"}, {"B001", "杭州恒隆", "华东"}}
 	if !reflect.DeepEqual(rows, want) {
 		t.Fatalf("result rows = %#v, want %#v", rows, want)
+	}
+}
+
+func TestProcessExcelMatchFileMatchesOrderItemsWithoutReusingSKUAcrossBatches(t *testing.T) {
+	dir := t.TempDir()
+	inputPath := filepath.Join(dir, "source.xlsx")
+	outputPath := filepath.Join(dir, "result.xlsx")
+
+	f := excelize.NewFile()
+	if err := f.SetSheetRow("Sheet1", "A1", &[]interface{}{"订单号", "规格编码", "销售单价", "销售数量"}); err != nil {
+		t.Fatal(err)
+	}
+	for index := 0; index < 501; index++ {
+		cell, err := excelize.CoordinatesToCellName(1, index+2)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := f.SetSheetRow("Sheet1", cell, &[]interface{}{"ORDER-1", "C09H1073", "319.20", "1"}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := f.SaveAs(inputPath); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := normalizeExcelMatchConfig(ExcelMatchConfig{
+		Operation: excelOperationExportMatch,
+		BatchSize: 500,
+		Steps: []ExcelMatchStep{{
+			Name:             "补全SKU",
+			MatchMode:        excelMatchModeOrderItemSKU,
+			TableName:        bojunRetailOrdersTable,
+			MatchExcelColumn: "订单号",
+			SpecExcelColumn:  "规格编码",
+			PriceExcelColumn: "销售单价",
+			QtyExcelColumn:   "销售数量",
+			DBMatchField:     "docno",
+			DBValueField:     "items_json",
+			OutputColumnName: "完整SKU",
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	lookup := &fakeExcelMatchLookup{value: map[string]string{
+		"ORDER-1": `[{"no":"C09H1073AR752130","qty":1,"priceactual":319.2,"mProductName":"C09H1073A"}]`,
+	}}
+	stats, err := processExcelMatchFile(context.Background(), inputPath, outputPath, cfg, lookup)
+	if err != nil {
+		t.Fatalf("processExcelMatchFile returned error: %v", err)
+	}
+	if !reflect.DeepEqual(lookup.keys, []string{"ORDER-1", "ORDER-1"}) {
+		t.Fatalf("lookup keys = %#v, want bounded detail lookup per batch", lookup.keys)
+	}
+	if stats.MatchedRows != 1 || stats.UnmatchedRows != 500 {
+		t.Fatalf("stats = %+v, want one matched row and 500 unmatched rows", stats)
+	}
+
+	out, err := excelize.OpenFile(outputPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = out.Close() }()
+	if got, err := out.GetCellValue("Result_1", "E2"); err != nil || got != "C09H1073AR752130" {
+		t.Fatalf("first matched SKU = %q, err=%v", got, err)
+	}
+	if got, err := out.GetCellValue("Result_1", "E502"); err != nil || got != "" {
+		t.Fatalf("reused SKU in second batch = %q, err=%v", got, err)
+	}
+}
+
+func TestProcessExcelMatchFileReservesExactSpecAcrossBatches(t *testing.T) {
+	dir := t.TempDir()
+	inputPath := filepath.Join(dir, "source.xlsx")
+	outputPath := filepath.Join(dir, "result.xlsx")
+
+	f := excelize.NewFile()
+	if err := f.SetSheetRow("Sheet1", "A1", &[]interface{}{"订单号", "规格编码", "销售单价", "销售数量"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.SetSheetRow("Sheet1", "A2", &[]interface{}{"ORDER-1", "C09H1073", "319.20", "1"}); err != nil {
+		t.Fatal(err)
+	}
+	for index := 1; index < 500; index++ {
+		cell, err := excelize.CoordinatesToCellName(1, index+2)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := f.SetSheetRow("Sheet1", cell, &[]interface{}{"", "", "", ""}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := f.SetSheetRow("Sheet1", "A502", &[]interface{}{"ORDER-1", "C09H1073A", "319.20", "1"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.SaveAs(inputPath); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := normalizeExcelMatchConfig(ExcelMatchConfig{
+		Operation: excelOperationExportMatch,
+		BatchSize: 500,
+		Steps: []ExcelMatchStep{{
+			Name: "补全SKU", MatchMode: excelMatchModeOrderItemSKU, TableName: bojunRetailOrdersTable,
+			MatchExcelColumn: "订单号", SpecExcelColumn: "规格编码", PriceExcelColumn: "销售单价", QtyExcelColumn: "销售数量",
+			DBMatchField: "docno", DBValueField: "items_json", OutputColumnName: "完整SKU",
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	lookup := &fakeExcelMatchLookup{value: map[string]string{
+		"ORDER-1": `[
+			{"no":"SKU-A","qty":1,"priceactual":319.2,"mProductName":"C09H1073A"},
+			{"no":"SKU-B","qty":1,"priceactual":319.2,"mProductName":"C09H1073B"}
+		]`,
+	}}
+	stats, err := processExcelMatchFile(context.Background(), inputPath, outputPath, cfg, lookup)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if stats.MatchedRows != 2 {
+		t.Fatalf("stats = %+v, want both fuzzy and exact rows matched", stats)
+	}
+	out, err := excelize.OpenFile(outputPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = out.Close() }()
+	if got, _ := out.GetCellValue("Result_1", "E2"); got != "SKU-B" {
+		t.Fatalf("8-digit row SKU = %q, want unreserved SKU-B", got)
+	}
+	if got, _ := out.GetCellValue("Result_1", "E502"); got != "SKU-A" {
+		t.Fatalf("9-digit row SKU = %q, want reserved exact SKU-A", got)
+	}
+}
+
+func TestExcelOrderItemMatchSelectsExactNineDigitSpec(t *testing.T) {
+	items, err := parseExcelOrderItems(`[
+		{"no":"SKU-A","qty":1,"priceactual":319.2,"mProductName":"C09H1073A"},
+		{"no":"SKU-B","qty":1,"priceactual":"319.20","mProductName":"C09H1073B"}
+	]`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := newExcelOrderItemMatchState(nil)
+	got, reason, err := state.match(excelOrderItemDetail{items: items}, "ORDER-1", "c09h1073b", 31920, 1)
+	if err != nil || got != "SKU-B" || reason != "" {
+		t.Fatalf("match() = %q, %q, %v, want exact SKU-B", got, reason, err)
+	}
+}
+
+func TestExcelOrderItemMatchReservesOnlyRequiredCandidateCapacity(t *testing.T) {
+	items, err := parseExcelOrderItems(`[
+		{"no":"SKU-A-1","qty":1,"priceactual":319.2,"mProductName":"C09H1073A"},
+		{"no":"SKU-A-2","qty":1,"priceactual":319.2,"mProductName":"C09H1073A"}
+	]`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reservations := excelOrderItemReservations{0: {}}
+	reservations.add(0, "ORDER-1", "C09H1073A", 31920, 1)
+	state := newExcelOrderItemMatchState(reservations)
+	detail := excelOrderItemDetail{items: items}
+	fuzzySKU, reason, err := state.match(detail, "ORDER-1", "C09H1073", 31920, 1)
+	if err != nil || fuzzySKU != "SKU-A-1" || reason != "" {
+		t.Fatalf("fuzzy match = %q, %q, %v, want one unreserved candidate", fuzzySKU, reason, err)
+	}
+	reservations.consume(0, "ORDER-1", "C09H1073A", 31920, 1)
+	exactSKU, reason, err := state.match(detail, "ORDER-1", "C09H1073A", 31920, 1)
+	if err != nil || exactSKU != "SKU-A-2" || reason != "" {
+		t.Fatalf("exact match = %q, %q, %v, want remaining reserved candidate", exactSKU, reason, err)
+	}
+}
+
+func TestExcelOrderItemMatchDoesNotCountDuplicateNoAsCapacity(t *testing.T) {
+	items, err := parseExcelOrderItems(`[
+		{"no":"SKU-A","qty":1,"priceactual":319.2,"mProductName":"C09H1073A"},
+		{"no":"SKU-A","qty":1,"priceactual":319.2,"mProductName":"C09H1073A"}
+	]`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reservations := excelOrderItemReservations{0: {}}
+	reservations.add(0, "ORDER-1", "C09H1073A", 31920, 1)
+	state := newExcelOrderItemMatchState(reservations)
+	detail := excelOrderItemDetail{items: items}
+	fuzzySKU, reason, err := state.match(detail, "ORDER-1", "C09H1073", 31920, 1)
+	if err != nil || fuzzySKU != "" || reason != "符合条件的SKU已为9位精确规格编码行保留" {
+		t.Fatalf("fuzzy match = %q, %q, %v, want duplicate no reserved once", fuzzySKU, reason, err)
+	}
+	reservations.consume(0, "ORDER-1", "C09H1073A", 31920, 1)
+	exactSKU, reason, err := state.match(detail, "ORDER-1", "C09H1073A", 31920, 1)
+	if err != nil || exactSKU != "SKU-A" || reason != "" {
+		t.Fatalf("exact match = %q, %q, %v, want SKU-A", exactSKU, reason, err)
+	}
+}
+
+func TestParseExcelOrderItemsSkipsInvalidItemAndRejectsTrailingJSON(t *testing.T) {
+	items, err := parseExcelOrderItems(`[
+		{"no":{"bad":true},"qty":1,"priceactual":319.2,"mProductName":"C09H1073A"},
+		{"no":"SKU-B","qty":1,"priceactual":319.2,"mProductName":"C09H1073B"}
+	]`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 || items[0].no != "SKU-B" {
+		t.Fatalf("items = %#v, want only valid SKU-B", items)
+	}
+	if _, err := parseExcelOrderItems(`[] {}`); err == nil {
+		t.Fatal("parseExcelOrderItems accepted trailing JSON")
 	}
 }
 
@@ -674,6 +927,53 @@ func TestProcessExcelMatchPreviewReturnsSamplesWithoutWritingOutput(t *testing.T
 	}
 	if _, err := excelize.OpenFile(outputPath); err == nil {
 		t.Fatal("preview unexpectedly wrote result.xlsx")
+	}
+}
+
+func TestProcessExcelMatchPreviewReservesExactSpecsBeyondScanLimit(t *testing.T) {
+	f := excelize.NewFile()
+	if err := f.SetSheetRow("Sheet1", "A1", &[]interface{}{"订单号", "规格编码", "销售单价", "销售数量"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.SetSheetRow("Sheet1", "A2", &[]interface{}{"ORDER-1", "C09H1073", "319.20", "1"}); err != nil {
+		t.Fatal(err)
+	}
+	for row := 3; row <= 101; row++ {
+		cell, err := excelize.CoordinatesToCellName(1, row)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := f.SetSheetRow("Sheet1", cell, &[]interface{}{"", "", "", ""}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := f.SetSheetRow("Sheet1", "A102", &[]interface{}{"ORDER-1", "C09H1073A", "319.20", "1"}); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := normalizeExcelMatchConfig(ExcelMatchConfig{
+		Operation: excelOperationExportMatch,
+		BatchSize: 500,
+		Steps: []ExcelMatchStep{{
+			Name: "补全SKU", MatchMode: excelMatchModeOrderItemSKU, TableName: bojunRetailOrdersTable,
+			MatchExcelColumn: "订单号", SpecExcelColumn: "规格编码", PriceExcelColumn: "销售单价", QtyExcelColumn: "销售数量",
+			DBMatchField: "docno", DBValueField: "items_json", OutputColumnName: "完整SKU",
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	lookup := &fakeExcelMatchLookup{value: map[string]string{
+		"ORDER-1": `[
+			{"no":"SKU-A","qty":1,"priceactual":319.2,"mProductName":"C09H1073A"},
+			{"no":"SKU-B","qty":1,"priceactual":319.2,"mProductName":"C09H1073B"}
+		]`,
+	}}
+	preview, err := processExcelMatchPreview(context.Background(), f, cfg, lookup, 100, 1)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(preview.Samples) != 1 || preview.Samples[0].MatchedValue != "SKU-B" {
+		t.Fatalf("preview samples = %#v, want fuzzy row to preserve SKU-A beyond scan limit", preview.Samples)
 	}
 }
 

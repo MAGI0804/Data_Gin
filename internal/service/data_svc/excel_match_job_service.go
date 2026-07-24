@@ -30,6 +30,8 @@ const (
 	excelOperationExportMatch  = "export_match"
 	excelOperationImportUpdate = "import_update"
 	excelOperationClearMatched = "clear_matched_docno"
+	excelMatchModeField        = "field"
+	excelMatchModeOrderItemSKU = "order_item_sku"
 
 	excelMatchStatusPending = "pending"
 	excelMatchStatusSuccess = "success"
@@ -146,8 +148,12 @@ type ExcelExportColumnFormat struct {
 type ExcelMatchStep struct {
 	Name             string             `json:"name"`
 	Filters          []ExcelMatchFilter `json:"filters,omitempty"`
+	MatchMode        string             `json:"matchMode,omitempty"`
 	TableName        string             `json:"tableName"`
 	MatchExcelColumn string             `json:"matchExcelColumn"`
+	SpecExcelColumn  string             `json:"specExcelColumn,omitempty"`
+	PriceExcelColumn string             `json:"priceExcelColumn,omitempty"`
+	QtyExcelColumn   string             `json:"qtyExcelColumn,omitempty"`
 	DBMatchField     string             `json:"dbMatchField"`
 	DBValueField     string             `json:"dbValueField"`
 	OutputColumnName string             `json:"outputColumnName"`
@@ -929,16 +935,29 @@ func normalizeExcelExportConfig(config ExcelMatchConfig) (ExcelMatchConfig, erro
 	for i := range config.Steps {
 		step := &config.Steps[i]
 		step.Name = strings.TrimSpace(step.Name)
+		step.MatchMode = strings.ToLower(strings.TrimSpace(step.MatchMode))
 		step.TableName = strings.TrimSpace(step.TableName)
 		step.MatchExcelColumn = strings.TrimSpace(step.MatchExcelColumn)
+		step.SpecExcelColumn = strings.TrimSpace(step.SpecExcelColumn)
+		step.PriceExcelColumn = strings.TrimSpace(step.PriceExcelColumn)
+		step.QtyExcelColumn = strings.TrimSpace(step.QtyExcelColumn)
 		step.DBMatchField = strings.TrimSpace(step.DBMatchField)
 		step.DBValueField = strings.TrimSpace(step.DBValueField)
 		step.OutputColumnName = strings.TrimSpace(step.OutputColumnName)
 		if step.Name == "" {
 			step.Name = fmt.Sprintf("步骤 %d", i+1)
 		}
+		if step.MatchMode == "" {
+			step.MatchMode = excelMatchModeField
+		}
+		if step.MatchMode != excelMatchModeField && step.MatchMode != excelMatchModeOrderItemSKU {
+			return config, fmt.Errorf("第 %d 个匹配步骤模式不支持: %s", i+1, step.MatchMode)
+		}
 		if step.TableName == "" || step.MatchExcelColumn == "" || step.DBMatchField == "" || step.DBValueField == "" || step.OutputColumnName == "" {
 			return config, fmt.Errorf("第 %d 个匹配步骤配置不完整", i+1)
+		}
+		if step.MatchMode == excelMatchModeOrderItemSKU && (step.SpecExcelColumn == "" || step.PriceExcelColumn == "" || step.QtyExcelColumn == "") {
+			return config, fmt.Errorf("第 %d 个订单商品SKU匹配步骤必须配置规格编码、价格和销售数量列", i+1)
 		}
 		step.Filters, err = normalizeExcelMatchFilters(step.Filters, fmt.Sprintf("第 %d 个匹配步骤", i+1))
 		if err != nil {
