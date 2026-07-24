@@ -21,10 +21,10 @@ const (
 )
 
 type excelOrderItemJSON struct {
-	No          string          `json:"no"`
-	Qty         json.RawMessage `json:"qty"`
-	PriceActual json.RawMessage `json:"priceactual"`
-	ProductName string          `json:"mProductName"`
+	No           string          `json:"no"`
+	Qty          json.RawMessage `json:"qty"`
+	TotAmtActual json.RawMessage `json:"totAmtActual"`
+	ProductName  string          `json:"mProductName"`
 }
 
 type excelOrderItem struct {
@@ -267,7 +267,16 @@ func (state *excelOrderItemMatchState) canConsumeItem(items []excelOrderItem, us
 	excelCode = normalizeExcelSpecCode(excelCode)
 	for prefixLength := len(excelCode); prefixLength <= len(target.productName); prefixLength++ {
 		prefix := target.productName[:prefixLength]
-		remaining := state.reservations.remainingForPrefix(orderNo, prefix, len(excelCode), len(target.productName), target.priceCents, target.qty)
+		remaining := state.reservations.remainingForPrefix(
+			items,
+			used,
+			orderNo,
+			prefix,
+			len(excelCode),
+			len(target.productName),
+			target.priceCents,
+			target.qty,
+		)
 		if remaining == 0 {
 			continue
 		}
@@ -324,11 +333,21 @@ func (reservations excelOrderItemReservations) consume(stepIndex int, orderNo, s
 	}
 }
 
-func (reservations excelOrderItemReservations) remainingForPrefix(orderNo, prefix string, currentCodeLength, databaseCodeLength int, priceCents int64, qty float64) int {
+func (reservations excelOrderItemReservations) remainingForPrefix(
+	databaseItems []excelOrderItem,
+	used map[string]struct{},
+	orderNo, prefix string,
+	currentCodeLength, databaseCodeLength int,
+	priceCents int64,
+	qty float64,
+) int {
 	count := 0
 	for _, byOrder := range reservations {
 		for reservedCode, items := range byOrder[orderNo] {
 			if len(reservedCode) <= currentCodeLength || len(reservedCode) > databaseCodeLength || !strings.HasPrefix(reservedCode, prefix) {
+				continue
+			}
+			if availableExcelOrderItemsForPrefix(databaseItems, used, reservedCode, priceCents, qty) == 0 {
 				continue
 			}
 			for _, item := range items {
@@ -362,7 +381,7 @@ func parseExcelOrderItems(raw string) ([]excelOrderItem, error) {
 			continue
 		}
 		qty, qtyOK := parseJSONMatchNumber(item.Qty)
-		priceCents, priceOK := parseJSONMatchPrice(item.PriceActual)
+		priceCents, priceOK := parseJSONMatchPrice(item.TotAmtActual)
 		no := strings.TrimSpace(item.No)
 		productName := normalizeExcelSpecCode(item.ProductName)
 		items = append(items, excelOrderItem{

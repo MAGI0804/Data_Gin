@@ -443,7 +443,7 @@ func TestProcessExcelMatchFileMatchesOrderItemsWithoutReusingSKUAcrossBatches(t 
 		t.Fatal(err)
 	}
 	lookup := &fakeExcelMatchLookup{value: map[string]string{
-		"ORDER-1": `[{"no":"C09H1073AR752130","qty":1,"priceactual":319.2,"mProductName":"C09H1073A"}]`,
+		"ORDER-1": `[{"no":"C09H1073AR752130","qty":1,"totAmtActual":319.2,"mProductName":"C09H1073A"}]`,
 	}}
 	stats, err := processExcelMatchFile(context.Background(), inputPath, outputPath, cfg, lookup)
 	if err != nil {
@@ -511,8 +511,8 @@ func TestProcessExcelMatchFileReservesLongerSpecPrefixAcrossBatches(t *testing.T
 	}
 	lookup := &fakeExcelMatchLookup{value: map[string]string{
 		"ORDER-1": `[
-			{"no":"SKU-A","qty":1,"priceactual":319.2,"mProductName":"C09H1073A"},
-			{"no":"SKU-B","qty":1,"priceactual":319.2,"mProductName":"C09H1073B"}
+			{"no":"SKU-A","qty":1,"totAmtActual":319.2,"mProductName":"C09H1073A"},
+			{"no":"SKU-B","qty":1,"totAmtActual":319.2,"mProductName":"C09H1073B"}
 		]`,
 	}}
 	stats, err := processExcelMatchFile(context.Background(), inputPath, outputPath, cfg, lookup)
@@ -537,8 +537,8 @@ func TestProcessExcelMatchFileReservesLongerSpecPrefixAcrossBatches(t *testing.T
 
 func TestExcelOrderItemMatchSelectsExactNineDigitSpec(t *testing.T) {
 	items, err := parseExcelOrderItems(`[
-		{"no":"SKU-A","qty":1,"priceactual":319.2,"mProductName":"C09H1073A"},
-		{"no":"SKU-B","qty":1,"priceactual":"319.20","mProductName":"C09H1073B"}
+		{"no":"SKU-A","qty":1,"totAmtActual":319.2,"mProductName":"C09H1073A"},
+		{"no":"SKU-B","qty":1,"totAmtActual":"319.20","mProductName":"C09H1073B"}
 	]`)
 	if err != nil {
 		t.Fatal(err)
@@ -550,10 +550,28 @@ func TestExcelOrderItemMatchSelectsExactNineDigitSpec(t *testing.T) {
 	}
 }
 
+func TestExcelOrderItemMatchUsesTotalAmountInsteadOfUnitPrice(t *testing.T) {
+	items, err := parseExcelOrderItems(`[
+		{"no":"SKU-TOTAL","qty":2,"priceactual":159.6,"totAmtActual":319.2,"mProductName":"C09H1073A"}
+	]`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := newExcelOrderItemMatchState(nil)
+	detail := excelOrderItemDetail{items: items}
+	if got, _, err := state.match(detail, "ORDER-1", "C09H1073A", 15960, 2); err != nil || got != "" {
+		t.Fatalf("unit-price match = %q, %v, want unmatched", got, err)
+	}
+	got, reason, err := state.match(detail, "ORDER-1", "C09H1073A", 31920, 2)
+	if err != nil || got != "SKU-TOTAL" || reason != "" {
+		t.Fatalf("total-amount match = %q, %q, %v, want SKU-TOTAL", got, reason, err)
+	}
+}
+
 func TestExcelOrderItemMatchReservesOnlyRequiredCandidateCapacity(t *testing.T) {
 	items, err := parseExcelOrderItems(`[
-		{"no":"SKU-A-1","qty":1,"priceactual":319.2,"mProductName":"C09H1073A"},
-		{"no":"SKU-A-2","qty":1,"priceactual":319.2,"mProductName":"C09H1073A"}
+		{"no":"SKU-A-1","qty":1,"totAmtActual":319.2,"mProductName":"C09H1073A"},
+		{"no":"SKU-A-2","qty":1,"totAmtActual":319.2,"mProductName":"C09H1073A"}
 	]`)
 	if err != nil {
 		t.Fatal(err)
@@ -575,8 +593,8 @@ func TestExcelOrderItemMatchReservesOnlyRequiredCandidateCapacity(t *testing.T) 
 
 func TestExcelOrderItemMatchDoesNotCountDuplicateNoAsCapacity(t *testing.T) {
 	items, err := parseExcelOrderItems(`[
-		{"no":"SKU-A","qty":1,"priceactual":319.2,"mProductName":"C09H1073A"},
-		{"no":"SKU-A","qty":1,"priceactual":319.2,"mProductName":"C09H1073A"}
+		{"no":"SKU-A","qty":1,"totAmtActual":319.2,"mProductName":"C09H1073A"},
+		{"no":"SKU-A","qty":1,"totAmtActual":319.2,"mProductName":"C09H1073A"}
 	]`)
 	if err != nil {
 		t.Fatal(err)
@@ -598,8 +616,8 @@ func TestExcelOrderItemMatchDoesNotCountDuplicateNoAsCapacity(t *testing.T) {
 
 func TestExcelOrderItemMatchPreservesSharedLongerPrefixCapacity(t *testing.T) {
 	items, err := parseExcelOrderItems(`[
-		{"no":"SKU-A","qty":1,"priceactual":319.2,"mProductName":"C09H1073A"},
-		{"no":"SKU-B","qty":1,"priceactual":319.2,"mProductName":"C09H1073B"}
+		{"no":"SKU-A","qty":1,"totAmtActual":319.2,"mProductName":"C09H1073A"},
+		{"no":"SKU-B","qty":1,"totAmtActual":319.2,"mProductName":"C09H1073B"}
 	]`)
 	if err != nil {
 		t.Fatal(err)
@@ -612,6 +630,50 @@ func TestExcelOrderItemMatchPreservesSharedLongerPrefixCapacity(t *testing.T) {
 	sku, reason, err := state.match(detail, "ORDER-1", "C09H10", 31920, 1)
 	if err != nil || sku != "" || reason != "符合条件的SKU已为更长规格编码行保留" {
 		t.Fatalf("short-prefix match = %q, %q, %v, want all capacity reserved for longer prefixes", sku, reason, err)
+	}
+}
+
+func TestExcelOrderItemMatchIgnoresLongerReservationWithoutDatabaseCandidate(t *testing.T) {
+	items, err := parseExcelOrderItems(`[
+		{"no":"SKU-A","qty":1,"totAmtActual":319.2,"mProductName":"C09H1073A"},
+		{"no":"SKU-B","qty":1,"totAmtActual":319.2,"mProductName":"C09H1073B"}
+	]`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reservations := excelOrderItemReservations{0: {}}
+	reservations.add(0, "ORDER-1", "C09H10", 31920, 1)
+	reservations.add(0, "ORDER-1", "C09H1099", 31920, 1)
+	reservations.consume(0, "ORDER-1", "C09H10", 31920, 1)
+	state := newExcelOrderItemMatchState(reservations)
+	sku, reason, err := state.match(excelOrderItemDetail{items: items}, "ORDER-1", "C09H10", 31920, 1)
+	if err != nil || sku != "SKU-A" || reason != "" {
+		t.Fatalf("short-prefix match = %q, %q, %v, want SKU-A despite ghost reservation", sku, reason, err)
+	}
+}
+
+func TestExcelOrderItemMatchUsesDifferentNosAcrossMultipleCandidates(t *testing.T) {
+	items, err := parseExcelOrderItems(`[
+		{"no":"SKU-1","qty":1,"totAmtActual":319.2,"mProductName":"C09H1073A"},
+		{"no":"SKU-2","qty":1,"totAmtActual":319.2,"mProductName":"C09H1073B"},
+		{"no":"SKU-3","qty":1,"totAmtActual":319.2,"mProductName":"C09H1073C"},
+		{"no":"SKU-4","qty":1,"totAmtActual":319.2,"mProductName":"C09H1073D"}
+	]`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	state := newExcelOrderItemMatchState(nil)
+	detail := excelOrderItemDetail{items: items}
+	first, firstReason, err := state.match(detail, "ORDER-1", "C09H10", 31920, 1)
+	if err != nil || first == "" || firstReason != "" {
+		t.Fatalf("first match = %q, %q, %v, want a SKU", first, firstReason, err)
+	}
+	second, secondReason, err := state.match(detail, "ORDER-1", "C09H10", 31920, 1)
+	if err != nil || second == "" || secondReason != "" {
+		t.Fatalf("second match = %q, %q, %v, want a SKU", second, secondReason, err)
+	}
+	if first == second {
+		t.Fatalf("two Excel rows reused no %q", first)
 	}
 }
 
@@ -673,7 +735,7 @@ func TestProcessExcelMatchFileSkipsFifteenAndSixteenCharacterCodesBeforeLookup(t
 		t.Fatal(err)
 	}
 	lookup := &fakeExcelMatchLookup{value: map[string]string{
-		"ORDER-MATCH": `[{"no":"SKU-MATCH","qty":1,"priceactual":319.2,"mProductName":"C09H1073A"}]`,
+		"ORDER-MATCH": `[{"no":"SKU-MATCH","qty":1,"totAmtActual":319.2,"mProductName":"C09H1073A"}]`,
 	}}
 	stats, err := processExcelMatchFile(context.Background(), inputPath, outputPath, cfg, lookup)
 	if err != nil {
@@ -703,8 +765,8 @@ func TestProcessExcelMatchFileSkipsFifteenAndSixteenCharacterCodesBeforeLookup(t
 
 func TestParseExcelOrderItemsSkipsInvalidItemAndRejectsTrailingJSON(t *testing.T) {
 	items, err := parseExcelOrderItems(`[
-		{"no":{"bad":true},"qty":1,"priceactual":319.2,"mProductName":"C09H1073A"},
-		{"no":"SKU-B","qty":1,"priceactual":319.2,"mProductName":"C09H1073B"}
+		{"no":{"bad":true},"qty":1,"totAmtActual":319.2,"mProductName":"C09H1073A"},
+		{"no":"SKU-B","qty":1,"totAmtActual":319.2,"mProductName":"C09H1073B"}
 	]`)
 	if err != nil {
 		t.Fatal(err)
@@ -1069,8 +1131,8 @@ func TestProcessExcelMatchPreviewReservesExactSpecsBeyondScanLimit(t *testing.T)
 	}
 	lookup := &fakeExcelMatchLookup{value: map[string]string{
 		"ORDER-1": `[
-			{"no":"SKU-A","qty":1,"priceactual":319.2,"mProductName":"C09H1073A"},
-			{"no":"SKU-B","qty":1,"priceactual":319.2,"mProductName":"C09H1073B"}
+			{"no":"SKU-A","qty":1,"totAmtActual":319.2,"mProductName":"C09H1073A"},
+			{"no":"SKU-B","qty":1,"totAmtActual":319.2,"mProductName":"C09H1073B"}
 		]`,
 	}}
 	preview, err := processExcelMatchPreview(context.Background(), f, cfg, lookup, 100, 1)

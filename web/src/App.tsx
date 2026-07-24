@@ -2489,7 +2489,7 @@ function ExcelMatchView({
                   </div>
                   {step.matchMode === 'order_item_sku' && (
                     <p className="excel-mode-note">
-                      按数据库购物明细字段（例如 items_json）中的 mProductName、priceactual、qty 匹配并输出完整 no。Excel 规格编码按自身长度与数据库规格编码开头比较；15 位或 16 位编码直接跳过。价格和数量必须相同，同一订单内每个 no 最多使用一次。
+                      按数据库购物明细字段（例如 items_json）中的 mProductName、totAmtActual、qty 匹配并输出完整 no。Excel 规格编码按自身长度与数据库规格编码开头比较；15 位或 16 位编码直接跳过。价格和数量必须相同，同一订单内每个 no 最多使用一次。
                     </p>
                   )}
                   <div className="excel-step-filter-editor">
