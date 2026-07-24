@@ -4,14 +4,20 @@ export type ExcelMatchFilterConfig = {
   value: string
 }
 
+export type ExcelMatchMode = 'field' | 'order_item_sku'
+
 export type ExcelMatchStepConfig = {
   name: string
   filters: ExcelMatchFilterConfig[]
+  matchMode: ExcelMatchMode
   tableName: string
   matchExcelColumn: string
   dbMatchField: string
   dbValueField: string
   outputColumnName: string
+  specExcelColumn: string
+  priceExcelColumn: string
+  qtyExcelColumn: string
 }
 
 export type ExcelMatchModelField = {
@@ -47,6 +53,10 @@ type ExcelMatchSchemeSource = {
   tableName?: string
   outputColumnName?: string
   steps?: Array<Partial<ExcelMatchStepConfig>>
+}
+
+function normalizeMatchMode(value: unknown): ExcelMatchMode {
+  return value === 'order_item_sku' ? 'order_item_sku' : 'field'
 }
 
 type ExcelExportConfigInput = {
@@ -118,25 +128,33 @@ export function selectExcelMatchStepModel(step: ExcelMatchStepConfig, tableName:
   }
 }
 
-export function migrateExcelMatchSteps(config: ExcelMatchSchemeSource, fallbackStep: ExcelMatchStepConfig) {
-  const configuredSteps = Array.isArray(config.steps) && config.steps.length > 0
+export function migrateExcelMatchSteps(config: ExcelMatchSchemeSource, fallbackStep: ExcelMatchStepConfig): ExcelMatchStepConfig[] {
+  const configuredSteps: ExcelMatchStepConfig[] = Array.isArray(config.steps) && config.steps.length > 0
     ? config.steps.map((step, index): ExcelMatchStepConfig => ({
         name: step.name ?? `步骤 ${index + 1}`,
         filters: cloneFilters(step.filters),
+        matchMode: normalizeMatchMode(step.matchMode),
         tableName: step.tableName ?? '',
         matchExcelColumn: step.matchExcelColumn ?? '',
         dbMatchField: step.dbMatchField ?? '',
         dbValueField: step.dbValueField ?? '',
         outputColumnName: step.outputColumnName ?? '',
+        specExcelColumn: step.specExcelColumn ?? '',
+        priceExcelColumn: step.priceExcelColumn ?? '',
+        qtyExcelColumn: step.qtyExcelColumn ?? '',
       }))
     : [{
         name: '兼容旧方案',
         filters: [],
+        matchMode: 'field',
         tableName: config.tableName || fallbackStep.tableName,
         matchExcelColumn: config.matchExcelColumn || fallbackStep.matchExcelColumn,
         dbMatchField: config.dbMatchField || fallbackStep.dbMatchField,
         dbValueField: config.dbValueField || fallbackStep.dbValueField,
         outputColumnName: config.outputColumnName || fallbackStep.outputColumnName,
+        specExcelColumn: '',
+        priceExcelColumn: '',
+        qtyExcelColumn: '',
       }]
   const legacyFilters = cloneFilters(config.filters)
   if (legacyFilters.length > 0) {
@@ -151,6 +169,7 @@ export function buildExcelExportConfig(input: ExcelExportConfigInput) {
     sheetName: input.sheetName.trim() || 'Sheet1',
     steps: input.steps.map((step) => ({
       name: step.name.trim(),
+      matchMode: normalizeMatchMode(step.matchMode),
       filters: step.filters
         .map((filter) => {
           const op = filter.op.trim().toLowerCase() || 'eq'
@@ -166,6 +185,9 @@ export function buildExcelExportConfig(input: ExcelExportConfigInput) {
       dbMatchField: step.dbMatchField.trim(),
       dbValueField: step.dbValueField.trim(),
       outputColumnName: step.outputColumnName.trim(),
+      specExcelColumn: step.specExcelColumn.trim(),
+      priceExcelColumn: step.priceExcelColumn.trim(),
+      qtyExcelColumn: step.qtyExcelColumn.trim(),
     })),
     exportColumnFormats: input.exportColumnFormats,
     batchSize: input.batchSize,

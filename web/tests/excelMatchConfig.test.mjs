@@ -12,11 +12,15 @@ import {
 const fallbackStep = {
   name: '匹配伯俊门店',
   filters: [],
+  matchMode: 'field',
   tableName: 'bojun_retail_orders',
   matchExcelColumn: '原始线上订单号',
   dbMatchField: 'matched_docno',
   dbValueField: 'c_store_name',
   outputColumnName: '线下店名称',
+  specExcelColumn: '',
+  priceExcelColumn: '',
+  qtyExcelColumn: '',
 }
 
 test('migrateExcelMatchSteps moves legacy top-level filters to the first step only', () => {
@@ -49,6 +53,40 @@ test('migrateExcelMatchSteps preserves independent filters on every step', () =>
   ])
 })
 
+test('migrateExcelMatchSteps defaults legacy schemes and steps to field mode', () => {
+  const legacyTopLevel = migrateExcelMatchSteps({
+    tableName: 'bojun_retail_orders',
+    matchExcelColumn: '订单号',
+    dbMatchField: 'docno',
+    dbValueField: 'items_json',
+    outputColumnName: 'SKU',
+  }, fallbackStep)
+  const legacyStep = migrateExcelMatchSteps({
+    steps: [{ ...fallbackStep, matchMode: undefined }],
+  }, fallbackStep)
+
+  assert.equal(legacyTopLevel[0].matchMode, 'field')
+  assert.equal(legacyStep[0].matchMode, 'field')
+  assert.equal(legacyStep[0].specExcelColumn, '')
+})
+
+test('migrateExcelMatchSteps preserves order item SKU columns', () => {
+  const [step] = migrateExcelMatchSteps({
+    steps: [{
+      ...fallbackStep,
+      matchMode: 'order_item_sku',
+      specExcelColumn: '规格编码',
+      priceExcelColumn: '销售价格',
+      qtyExcelColumn: '销售数量',
+    }],
+  }, fallbackStep)
+
+  assert.equal(step.matchMode, 'order_item_sku')
+  assert.equal(step.specExcelColumn, '规格编码')
+  assert.equal(step.priceExcelColumn, '销售价格')
+  assert.equal(step.qtyExcelColumn, '销售数量')
+})
+
 test('buildExcelExportConfig emits step filters without a top-level filter', () => {
   const config = buildExcelExportConfig({
     sheetName: ' Sheet1 ',
@@ -71,6 +109,41 @@ test('buildExcelExportConfig emits step filters without a top-level filter', () 
     { column: '备注', op: 'empty', value: '' },
   ])
   assert.equal(config.steps[0].name, '第一步')
+  assert.equal(config.steps[0].matchMode, 'field')
+  assert.equal(config.steps[0].specExcelColumn, '')
+})
+
+test('buildExcelExportConfig emits trimmed order item SKU matching fields', () => {
+  const config = buildExcelExportConfig({
+    sheetName: 'Sheet1',
+    steps: [{
+      ...fallbackStep,
+      matchMode: 'order_item_sku',
+      matchExcelColumn: ' 订单号 ',
+      dbMatchField: ' docno ',
+      dbValueField: ' items_json ',
+      outputColumnName: ' SKU ',
+      specExcelColumn: ' 规格编码 ',
+      priceExcelColumn: ' 销售价格 ',
+      qtyExcelColumn: ' 销售数量 ',
+    }],
+    exportColumnFormats: [],
+    batchSize: 1000,
+  })
+
+  assert.deepEqual(config.steps[0], {
+    name: '匹配伯俊门店',
+    matchMode: 'order_item_sku',
+    filters: [],
+    tableName: 'bojun_retail_orders',
+    matchExcelColumn: '订单号',
+    dbMatchField: 'docno',
+    dbValueField: 'items_json',
+    outputColumnName: 'SKU',
+    specExcelColumn: '规格编码',
+    priceExcelColumn: '销售价格',
+    qtyExcelColumn: '销售数量',
+  })
 })
 
 const modelCatalog = [{

@@ -306,11 +306,15 @@ const defaultExcelExportScheme: ExcelExportSchemeConfig = {
   steps: [{
     name: '匹配伯俊门店',
     filters: [{ column: '店铺', op: 'eq', value: '幼岚-有赞' }],
+    matchMode: 'field',
     tableName: 'bojun_retail_orders',
     matchExcelColumn: '原始线上订单号',
     dbMatchField: 'matched_docno',
     dbValueField: 'c_store_name',
     outputColumnName: '线下店名称',
+    specExcelColumn: '',
+    priceExcelColumn: '',
+    qtyExcelColumn: '',
   }],
   exportColumnFormats: '',
   batchSize: '1000',
@@ -1737,11 +1741,15 @@ function ExcelMatchView({
       return [...current, {
         name: `步骤 ${current.length + 1}`,
         filters: [],
+        matchMode: 'field',
         tableName: '',
         matchExcelColumn: current[current.length - 1]?.outputColumnName ?? '',
         dbMatchField: '',
         dbValueField: '',
         outputColumnName: '',
+        specExcelColumn: '',
+        priceExcelColumn: '',
+        qtyExcelColumn: '',
       }]
     })
   }
@@ -2438,15 +2446,26 @@ function ExcelMatchView({
                   </div>
                   <div className="excel-step-fields">
                     <Field label="步骤名称" name={`step_name_${index}`} value={step.name} onChange={(value) => updateExportStep(index, 'name', value)} required />
+                    <label>
+                      匹配模式
+                      <select
+                        name={`step_mode_${index}`}
+                        value={step.matchMode}
+                        onChange={(event) => updateExportStep(index, 'matchMode', event.currentTarget.value)}
+                      >
+                        <option value="field">普通字段匹配</option>
+                        <option value="order_item_sku">订单商品 SKU 匹配</option>
+                      </select>
+                    </label>
                     <ExcelModelSelector
                       name={`step_table_${index}`}
                       models={excelModels}
                       value={step.tableName}
                       onChange={(value) => selectExportStepModel(index, value)}
                     />
-                    <Field label="Excel 输入列" name={`step_excel_${index}`} value={step.matchExcelColumn} onChange={(value) => updateExportStep(index, 'matchExcelColumn', value)} required />
+                    <Field label={step.matchMode === 'order_item_sku' ? '订单号 Excel 列' : 'Excel 输入列'} name={`step_excel_${index}`} value={step.matchExcelColumn} onChange={(value) => updateExportStep(index, 'matchExcelColumn', value)} required />
                     <ExcelModelFieldSelector
-                      label="匹配模型字段"
+                      label={step.matchMode === 'order_item_sku' ? '数据库订单号字段' : '匹配模型字段'}
                       name={`step_match_${index}`}
                       models={excelModels}
                       tableName={step.tableName}
@@ -2454,20 +2473,32 @@ function ExcelMatchView({
                       onChange={(value) => updateExportStep(index, 'dbMatchField', value)}
                     />
                     <ExcelModelFieldSelector
-                      label="取值模型字段"
+                      label={step.matchMode === 'order_item_sku' ? '数据库购物明细字段' : '取值模型字段'}
                       name={`step_value_${index}`}
                       models={excelModels}
                       tableName={step.tableName}
                       value={step.dbValueField}
                       onChange={(value) => updateExportStep(index, 'dbValueField', value)}
                     />
-                    <Field label="追加输出列" name={`step_output_${index}`} value={step.outputColumnName} onChange={(value) => updateExportStep(index, 'outputColumnName', value)} required />
+                    <Field label={step.matchMode === 'order_item_sku' ? 'SKU 输出列' : '追加输出列'} name={`step_output_${index}`} value={step.outputColumnName} onChange={(value) => updateExportStep(index, 'outputColumnName', value)} required />
+                    {step.matchMode === 'order_item_sku' && <>
+                      <Field label="规格编码 Excel 列" name={`step_spec_${index}`} value={step.specExcelColumn} onChange={(value) => updateExportStep(index, 'specExcelColumn', value)} required />
+                      <Field label="销售价格 Excel 列" name={`step_price_${index}`} value={step.priceExcelColumn} onChange={(value) => updateExportStep(index, 'priceExcelColumn', value)} required />
+                      <Field label="销售数量 Excel 列" name={`step_qty_${index}`} value={step.qtyExcelColumn} onChange={(value) => updateExportStep(index, 'qtyExcelColumn', value)} required />
+                    </>}
                   </div>
+                  {step.matchMode === 'order_item_sku' && (
+                    <p className="excel-mode-note">
+                      按数据库购物明细字段（例如 items_json）中的 mProductName、priceactual、qty 匹配并输出完整 no。Excel 规格编码为 9 位时精确匹配，8 位时按数据库 9 位规格编码的前 8 位匹配；价格和数量必须相同，同一订单内每个 no 最多使用一次。
+                    </p>
+                  )}
                   <div className="excel-step-filter-editor">
                     <div className="excel-step-filter-heading">
                       <div>
                         <strong>本步骤筛选</strong>
-                        <span>只决定本步骤处理哪些行；多条条件需要同时满足。可引用原始列或前序步骤追加列。</span>
+                        <span>{step.matchMode === 'order_item_sku'
+                          ? '只决定本步骤处理哪些行；多条条件需要同时满足。订单商品 SKU 模式仅可引用原始 Excel 列。'
+                          : '只决定本步骤处理哪些行；多条条件需要同时满足。可引用原始列或前序步骤追加列。'}</span>
                       </div>
                       <button type="button" onClick={() => addExportStepFilter(index)}>添加条件</button>
                     </div>
