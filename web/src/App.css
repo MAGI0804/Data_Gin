@@ -734,6 +734,11 @@ button:focus-visible {
   flex-wrap: wrap;
 }
 
+.excel-job-focus-target:focus-visible {
+  outline: 2px solid #111111;
+  outline-offset: 4px;
+}
+
 .excel-step-editor {
   grid-column: 1 / -1;
   display: grid;
@@ -964,11 +969,42 @@ button:focus-visible {
 .modal-panel {
   width: min(1040px, 100%);
   max-height: min(820px, calc(100vh - 48px));
-  overflow-y: auto;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  overflow: hidden;
   border: 1px solid #111111;
   border-radius: 0;
   background: #ffffff;
   padding: 16px;
+}
+
+.modal-body {
+  min-width: 0;
+  min-height: 0;
+  overflow-y: auto;
+  overscroll-behavior: contain;
+}
+
+.modal-footer {
+  margin-top: 12px;
+  border-top: 1px solid #d0d0d0;
+  background: #ffffff;
+  padding-top: 12px;
+  padding-bottom: max(0px, env(safe-area-inset-bottom));
+}
+
+.modal-footer .excel-form-actions {
+  grid-column: auto;
+}
+
+.excel-modal-footer-content {
+  display: grid;
+  gap: 8px;
+}
+
+.modal-footer-status {
+  margin: 0;
+  overflow-wrap: anywhere;
 }
 
 .modal-title {
@@ -1177,7 +1213,12 @@ summary {
 
   .modal-panel {
     max-height: calc(100vh - 24px);
+    max-height: calc(100dvh - 24px);
     padding: 12px;
+  }
+
+  .modal-footer .excel-form-actions > button {
+    flex: 1 1 140px;
   }
 
   .ops-workspace {

@@ -1,4 +1,4 @@
-import { FormEvent, ReactNode, useCallback, useEffect, useMemo, useState } from 'react'
+import { FormEvent, ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Activity,
   ArrowDownToLine,
@@ -1002,7 +1002,7 @@ function App() {
         {activeNav === 'destinations' && <DestinationsQueryPage destinations={destinations} />}
         {activeNav === 'tasks' && <DeliveryTasksQueryPage tasks={deliveryTasks} destinations={destinations} />}
         {activeNav === 'push_policy' && <PushPolicyPage coreMethod={coreMethods.find((item) => item.key === 'mall_push')} config={orderPushSkipConfig} targets={orderPushTargets} onSave={saveOrderPushSkipConfig} onToggle={toggleTarget} />}
-        {(activeNav === 'excel_jobs' || activeNav === 'excel_schemes' || activeNav === 'excel_write') && <ExcelMatchView section={activeNav === 'excel_jobs' ? 'jobs' : activeNav === 'excel_schemes' ? 'schemes' : 'write'} token={token} loading={loading} setLoading={setLoading} setResult={setResult} />}
+        {(activeNav === 'excel_jobs' || activeNav === 'excel_schemes' || activeNav === 'excel_write') && <ExcelMatchView section={activeNav === 'excel_jobs' ? 'jobs' : activeNav === 'excel_schemes' ? 'schemes' : 'write'} token={token} loading={loading} setLoading={setLoading} setResult={setResult} onNavigateToJobs={() => navigate('excel_jobs')} />}
       </section>
 
       <ResultPanel result={result} onClose={() => setResult(null)} />
@@ -1618,13 +1618,17 @@ function ExcelMatchView({
   loading,
   setLoading,
   setResult,
+  onNavigateToJobs,
 }: {
   section: 'jobs' | 'schemes' | 'write'
   token: string
   loading: boolean
   setLoading: (value: boolean) => void
   setResult: (value: ApiResult | null) => void
+  onNavigateToJobs: () => void
 }) {
+  const pendingJobFocusIDRef = useRef<number | null>(null)
+  const jobExecutionRef = useRef<HTMLDivElement>(null)
   const [jobID, setJobID] = useState('')
   const [job, setJob] = useState<ExcelMatchJob | null>(null)
   const [jobHistory, setJobHistory] = useState<ExcelMatchJob[]>([])
@@ -1654,6 +1658,7 @@ function ExcelMatchView({
   const [jobQuery, setJobQuery] = useState('')
   const [jobStatus, setJobStatus] = useState('all')
   const [jobOperation, setJobOperation] = useState('all')
+  const focusedJobID = job?.id
   const filteredJobHistory = useMemo(() => jobHistory.filter((item) => includesQuery([item.id, item.source_file_name, item.error_message], jobQuery)
     && (jobStatus === 'all' || item.status === jobStatus)
     && (jobOperation === 'all' || excelJobOperation(item) === jobOperation)), [jobHistory, jobOperation, jobQuery, jobStatus])
@@ -1669,6 +1674,7 @@ function ExcelMatchView({
       }
     }
     setJobLogs(readList<ExcelMatchJobLog>(result, 'logs'))
+    return nextJob
   }, [])
 
   function clearUploadRef(slot: ExcelUploadSlot) {
@@ -1874,6 +1880,21 @@ function ExcelMatchView({
     setUploadRefs({})
     setUploadProgress('')
   }, [section])
+
+  useEffect(() => {
+    if (section !== 'jobs' || !focusedJobID || pendingJobFocusIDRef.current !== focusedJobID) return
+
+    const animationFrame = window.requestAnimationFrame(() => {
+      const target = jobExecutionRef.current
+      if (!target || pendingJobFocusIDRef.current !== focusedJobID) return
+      pendingJobFocusIDRef.current = null
+      const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
+      target.scrollIntoView({ block: 'start', behavior: reduceMotion ? 'auto' : 'smooth' })
+      target.focus({ preventScroll: true })
+    })
+
+    return () => window.cancelAnimationFrame(animationFrame)
+  }, [focusedJobID, section])
 
   const refreshJobByID = useCallback(async (id: number, options: { silent?: boolean; track?: boolean } = {}) => {
     if (!options.silent) setLoading(true)
@@ -2096,11 +2117,10 @@ function ExcelMatchView({
       })
       const data = await response.json().catch(() => ({}))
       const nextResult = { ok: response.ok && isSuccessPayload(data), status: response.status, data }
-      setResult(nextResult)
       if (nextResult.ok) {
-        applyJobResult(nextResult)
-        await loadJobHistory()
-        closeExcelDialog()
+        showCreatedJob(nextResult)
+      } else {
+        setResult(nextResult)
       }
     } catch (error) {
       setResult({ ok: false, status: 0, data: error instanceof Error ? error.message : String(error) })
@@ -2164,11 +2184,10 @@ function ExcelMatchView({
       })
       const data = await response.json().catch(() => ({}))
       const nextResult = { ok: response.ok && isSuccessPayload(data), status: response.status, data }
-      setResult(nextResult)
       if (nextResult.ok) {
-        applyJobResult(nextResult)
-        await loadJobHistory()
-        closeExcelDialog()
+        showCreatedJob(nextResult)
+      } else {
+        setResult(nextResult)
       }
     } catch (error) {
       setResult({ ok: false, status: 0, data: error instanceof Error ? error.message : String(error) })
@@ -2212,17 +2231,25 @@ function ExcelMatchView({
       })
       const data = await response.json().catch(() => ({}))
       const nextResult = { ok: response.ok && isSuccessPayload(data), status: response.status, data }
-      setResult(nextResult)
       if (nextResult.ok) {
-        applyJobResult(nextResult)
-        await loadJobHistory()
-        closeExcelDialog()
+        showCreatedJob(nextResult)
+      } else {
+        setResult(nextResult)
       }
     } catch (error) {
       setResult({ ok: false, status: 0, data: error instanceof Error ? error.message : String(error) })
     } finally {
       setLoading(false)
     }
+  }
+
+  function showCreatedJob(result: ApiResult) {
+    const createdJob = applyJobResult(result)
+    if (createdJob) pendingJobFocusIDRef.current = createdJob.id
+    setAutoRefreshText('')
+    setResult(null)
+    closeExcelDialog()
+    onNavigateToJobs()
   }
 
   async function refreshJob() {
@@ -2288,39 +2315,47 @@ function ExcelMatchView({
         </Panel>
 
         {job && (
-          <Panel title={`Excel 任务 #${job.id}`} icon={<FileJson />} meta={job.source_file_name || 'job detail'}>
-            {autoRefreshText && <p className="excel-mode-note">{autoRefreshText}</p>}
-            <div className="excel-job-detail">
-              <Metric label="源文件" value={job.source_file_name || '-'} />
-              <Metric label="任务类型" value={excelJobOperationLabel(excelJobOperation(job))} />
-              <Metric label="筛选/命中" value={job.filtered_rows || '-'} />
-              <Metric label="匹配/更新" value={job.matched_rows || '-'} />
-              <Metric label="未匹配" value={job.unmatched_rows || '-'} />
-              <Metric label="结果过期" value={formatDate(job.expires_at)} />
-              <Metric label="开始时间" value={formatDate(job.started_at)} />
-              <Metric label="结束时间" value={formatDate(job.finished_at)} />
-            </div>
-            <div className="excel-detail-actions">
-              <button type="button" onClick={() => void refreshJobByID(job.id)} disabled={loading}>
-                <RefreshCcw aria-hidden="true" />
-                刷新状态
-              </button>
-              <button
-                type="button"
-                onClick={() => void downloadJob(job.id)}
-                disabled={loading || downloadingJobID === job.id || !canDownloadExcelJob(job)}
-              >
-                <Download aria-hidden="true" />
-                {downloadingJobID === job.id ? '下载中' : '下载结果'}
-              </button>
-              {!canDownloadExcelJob(job) && <span>{job.download_message || '只有匹配导出成功任务会生成可下载结果文件。'}</span>}
-            </div>
-            {job.error_message && <div className="login-error">{job.error_message}</div>}
-            <section className="content-grid two">
-              <ReadonlyJSON value={job.config_json || '{}'} />
-              <ExcelJobLogList logs={jobLogs} />
-            </section>
-          </Panel>
+          <div
+            ref={jobExecutionRef}
+            className="excel-job-focus-target"
+            tabIndex={-1}
+            role="region"
+            aria-label={`Excel 任务 ${job.id} 执行详情`}
+          >
+            <Panel title={`Excel 任务 #${job.id}`} icon={<FileJson />} meta={job.source_file_name || 'job detail'}>
+              {autoRefreshText && <p className="excel-mode-note">{autoRefreshText}</p>}
+              <div className="excel-job-detail">
+                <Metric label="源文件" value={job.source_file_name || '-'} />
+                <Metric label="任务类型" value={excelJobOperationLabel(excelJobOperation(job))} />
+                <Metric label="筛选/命中" value={job.filtered_rows || '-'} />
+                <Metric label="匹配/更新" value={job.matched_rows || '-'} />
+                <Metric label="未匹配" value={job.unmatched_rows || '-'} />
+                <Metric label="结果过期" value={formatDate(job.expires_at)} />
+                <Metric label="开始时间" value={formatDate(job.started_at)} />
+                <Metric label="结束时间" value={formatDate(job.finished_at)} />
+              </div>
+              <div className="excel-detail-actions">
+                <button type="button" onClick={() => void refreshJobByID(job.id)} disabled={loading}>
+                  <RefreshCcw aria-hidden="true" />
+                  刷新状态
+                </button>
+                <button
+                  type="button"
+                  onClick={() => void downloadJob(job.id)}
+                  disabled={loading || downloadingJobID === job.id || !canDownloadExcelJob(job)}
+                >
+                  <Download aria-hidden="true" />
+                  {downloadingJobID === job.id ? '下载中' : '下载结果'}
+                </button>
+                {!canDownloadExcelJob(job) && <span>{job.download_message || '只有匹配导出成功任务会生成可下载结果文件。'}</span>}
+              </div>
+              {job.error_message && <div className="login-error">{job.error_message}</div>}
+              <section className="content-grid two">
+                <ReadonlyJSON value={job.config_json || '{}'} />
+                <ExcelJobLogList logs={jobLogs} />
+              </section>
+            </Panel>
+          </div>
         )}
       </>}
 
@@ -2372,8 +2407,34 @@ function ExcelMatchView({
       </>}
 
       {excelDialog === 'export' && (
-        <Modal title="匹配导出参数" onClose={closeExcelDialog}>
-          <form className="excel-upload-form" onSubmit={createExportJob} key={exportFormKey}>
+        <Modal
+          title="匹配导出参数"
+          onClose={closeExcelDialog}
+          footer={(
+            <div className="excel-modal-footer-content">
+              {uploadProgress && <p className="excel-mode-note modal-footer-status" role="status" aria-live="polite">{uploadProgress}</p>}
+              <div className="excel-form-actions">
+                <button
+                  type="button"
+                  form="excel-export-job-form"
+                  onClick={(event) => {
+                    const form = event.currentTarget.form
+                    if (form?.reportValidity()) void previewExportJob(form)
+                  }}
+                  disabled={loading}
+                >
+                  <FileJson aria-hidden="true" />
+                  预览匹配
+                </button>
+                <button className="primary" type="submit" form="excel-export-job-form" disabled={loading}>
+                  <Upload aria-hidden="true" />
+                  创建导出任务
+                </button>
+              </div>
+            </div>
+          )}
+        >
+          <form id="excel-export-job-form" className="excel-upload-form" onSubmit={createExportJob} key={exportFormKey}>
             <label>
               已保存方案
               <select value={selectedExportSchemeID} onChange={(event) => applyExportScheme(event.currentTarget.value)}>
@@ -2552,24 +2613,6 @@ function ExcelMatchView({
               <small>支持格式：text、number、integer、bool、date。列名可填原 Excel 表头或追加列名。</small>
             </label>
             <Field label="批量查询大小" name="batchSize" defaultValue={exportDefaults.batchSize} />
-            {uploadProgress && <p className="excel-mode-note">{uploadProgress}</p>}
-            <div className="excel-form-actions">
-              <button
-                type="button"
-                onClick={(event) => {
-                  const form = event.currentTarget.form
-                  if (form?.reportValidity()) void previewExportJob(form)
-                }}
-                disabled={loading}
-              >
-                <FileJson aria-hidden="true" />
-                预览匹配
-              </button>
-              <button className="primary" type="submit" disabled={loading}>
-                <Upload aria-hidden="true" />
-                创建导出任务
-              </button>
-            </div>
             {previewResult && <ExcelMatchPreviewPanel preview={previewResult} />}
           </form>
         </Modal>
@@ -2823,7 +2866,7 @@ function ExcelJobHistoryTable({
   )
 }
 
-function Modal({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
+function Modal({ title, onClose, children, footer }: { title: string; onClose: () => void; children: ReactNode; footer?: ReactNode }) {
   useEffect(() => {
     const previousOverflow = document.body.style.overflow
     const handleKeyDown = (event: KeyboardEvent) => {
@@ -2844,7 +2887,8 @@ function Modal({ title, onClose, children }: { title: string; onClose: () => voi
           <h3>{title}</h3>
           <button type="button" onClick={onClose}>关闭</button>
         </div>
-        {children}
+        <div className="modal-body">{children}</div>
+        {footer && <div className="modal-footer">{footer}</div>}
       </section>
     </div>
   )
