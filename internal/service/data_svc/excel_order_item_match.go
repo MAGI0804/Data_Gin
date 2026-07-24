@@ -114,13 +114,13 @@ func collectExcelOrderItemReservations(ctx context.Context, input excelRowsSourc
 			specCode := normalizeExcelSpecCode(excelMatchRowValue(row, columnIndexes[step.SpecExcelColumn]))
 			priceCents, priceOK := parseExcelMatchPrice(excelMatchRowValue(row, columnIndexes[step.PriceExcelColumn]))
 			qty, qtyOK := parseExcelMatchNumber(excelMatchRowValue(row, columnIndexes[step.QtyExcelColumn]))
-			if orderNo == "" || len(specCode) != 9 || !priceOK || !qtyOK {
+			if orderNo == "" || specCode == "" || skipExcelOrderItemSpecCode(specCode) || !priceOK || !qtyOK {
 				continue
 			}
 			if reservations.add(stepIndex, orderNo, specCode, priceCents, qty) {
 				reservationGroups++
 				if reservationGroups > maxExcelOrderReservationGroups {
-					return nil, fmt.Errorf("9位精确规格匹配组合超过上限 %d，请拆分Excel文件", maxExcelOrderReservationGroups)
+					return nil, fmt.Errorf("规格前缀匹配组合超过上限 %d，请拆分Excel文件", maxExcelOrderReservationGroups)
 				}
 			}
 		}
@@ -194,18 +194,18 @@ func runExcelOrderItemMatchStep(
 			priceCents, priceOK := parseExcelMatchPrice(excelMatchRowValue(row.values, priceIndex))
 			qty, qtyOK := parseExcelMatchNumber(excelMatchRowValue(row.values, qtyIndex))
 			switch {
+			case skipExcelOrderItemSpecCode(specCode):
+				result.Status, result.Reason = "skipped", "规格编码长度为15或16，无需处理"
 			case orderNo == "":
 				result.Status, result.Reason = "unmatched", "订单号为空"
 			case !validExcelSpecCode(specCode):
-				result.Status, result.Reason = "unmatched", "规格编码必须为8位或9位"
+				result.Status, result.Reason = "unmatched", "规格编码为空"
 			case !priceOK:
 				result.Status, result.Reason = "unmatched", "价格不是有效数字"
 			case !qtyOK:
 				result.Status, result.Reason = "unmatched", "销售数量不是有效数字"
 			default:
-				if len(normalizeExcelSpecCode(specCode)) == 9 {
-					state.reservations.consume(stepIndex, orderNo, specCode, priceCents, qty)
-				}
+				state.reservations.consume(stepIndex, orderNo, specCode, priceCents, qty)
 				var err error
 				value, result.Reason, err = state.match(details[orderNo], orderNo, specCode, priceCents, qty)
 				if err != nil {
@@ -243,7 +243,7 @@ func (state *excelOrderItemMatchState) match(detail excelOrderItemDetail, orderN
 			matchedButUsed = true
 			continue
 		}
-		if len(normalizeExcelSpecCode(specCode)) == 8 && state.availableUnused(detail.items, used, item) <= state.reservations.remaining(orderNo, item.productName, item.priceCents, item.qty) {
+		if !state.canConsumeItem(detail.items, used, orderNo, specCode, item) {
 			matchedButReserved = true
 			continue
 		}
@@ -258,16 +258,31 @@ func (state *excelOrderItemMatchState) match(detail excelOrderItemDetail, orderN
 		return "", "符合条件的SKU已被当前订单其他Excel行使用", nil
 	}
 	if matchedButReserved {
-		return "", "符合条件的SKU已为9位精确规格编码行保留", nil
+		return "", "符合条件的SKU已为更长规格编码行保留", nil
 	}
 	return "", "订单购物明细中无规格编码、价格和数量同时相符的SKU", nil
 }
 
-func (state *excelOrderItemMatchState) availableUnused(items []excelOrderItem, used map[string]struct{}, target excelOrderItem) int {
+func (state *excelOrderItemMatchState) canConsumeItem(items []excelOrderItem, used map[string]struct{}, orderNo, excelCode string, target excelOrderItem) bool {
+	excelCode = normalizeExcelSpecCode(excelCode)
+	for prefixLength := len(excelCode); prefixLength <= len(target.productName); prefixLength++ {
+		prefix := target.productName[:prefixLength]
+		remaining := state.reservations.remainingForPrefix(orderNo, prefix, len(excelCode), len(target.productName), target.priceCents, target.qty)
+		if remaining == 0 {
+			continue
+		}
+		if availableExcelOrderItemsForPrefix(items, used, prefix, target.priceCents, target.qty) <= remaining {
+			return false
+		}
+	}
+	return true
+}
+
+func availableExcelOrderItemsForPrefix(items []excelOrderItem, used map[string]struct{}, prefix string, priceCents int64, qty float64) int {
 	count := 0
 	seen := make(map[string]struct{})
 	for _, item := range items {
-		if !item.valid || item.productName != target.productName || item.priceCents != target.priceCents || !excelOrderItemQtyEqual(item.qty, target.qty) {
+		if !item.valid || !strings.HasPrefix(item.productName, prefix) || item.priceCents != priceCents || !excelOrderItemQtyEqual(item.qty, qty) {
 			continue
 		}
 		if _, exists := used[item.no]; !exists {
@@ -309,12 +324,17 @@ func (reservations excelOrderItemReservations) consume(stepIndex int, orderNo, s
 	}
 }
 
-func (reservations excelOrderItemReservations) remaining(orderNo, specCode string, priceCents int64, qty float64) int {
+func (reservations excelOrderItemReservations) remainingForPrefix(orderNo, prefix string, currentCodeLength, databaseCodeLength int, priceCents int64, qty float64) int {
 	count := 0
 	for _, byOrder := range reservations {
-		for _, item := range byOrder[orderNo][specCode] {
-			if item.count > 0 && item.priceCents == priceCents && excelOrderItemQtyEqual(item.qty, qty) {
-				count += item.count
+		for reservedCode, items := range byOrder[orderNo] {
+			if len(reservedCode) <= currentCodeLength || len(reservedCode) > databaseCodeLength || !strings.HasPrefix(reservedCode, prefix) {
+				continue
+			}
+			for _, item := range items {
+				if item.count > 0 && item.priceCents == priceCents && excelOrderItemQtyEqual(item.qty, qty) {
+					count += item.count
+				}
 			}
 		}
 	}
@@ -422,17 +442,18 @@ func excelMatchRowValue(row []string, index int) string {
 }
 
 func validExcelSpecCode(value string) bool {
+	return normalizeExcelSpecCode(value) != ""
+}
+
+func skipExcelOrderItemSpecCode(value string) bool {
 	length := len(normalizeExcelSpecCode(value))
-	return length == 8 || length == 9
+	return length == 15 || length == 16
 }
 
 func excelSpecCodesMatch(excelCode, databaseCode string) bool {
 	excelCode = normalizeExcelSpecCode(excelCode)
 	databaseCode = normalizeExcelSpecCode(databaseCode)
-	if len(excelCode) == 8 && len(databaseCode) == 9 {
-		return strings.HasPrefix(databaseCode, excelCode)
-	}
-	return len(excelCode) == 9 && excelCode == databaseCode
+	return excelCode != "" && len(excelCode) <= len(databaseCode) && strings.HasPrefix(databaseCode, excelCode)
 }
 
 func normalizeExcelSpecCode(value string) string {

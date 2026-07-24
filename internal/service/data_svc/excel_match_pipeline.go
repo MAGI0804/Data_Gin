@@ -94,7 +94,24 @@ func runExcelMatchSteps(ctx context.Context, config ExcelMatchConfig, lookup Exc
 			if !eligibleRows[rowIndex] || inputIndex >= len(row.values) {
 				continue
 			}
-			row.participated = true
+			if step.MatchMode == excelMatchModeOrderItemSKU {
+				specCode := excelMatchRowValue(row.values, layout.columnIndexes[step.SpecExcelColumn])
+				if skipExcelOrderItemSpecCode(specCode) {
+					continue
+				}
+				row.participated = true
+				if normalizeExcelSpecCode(specCode) == "" {
+					continue
+				}
+				if _, ok := parseExcelMatchPrice(excelMatchRowValue(row.values, layout.columnIndexes[step.PriceExcelColumn])); !ok {
+					continue
+				}
+				if _, ok := parseExcelMatchNumber(excelMatchRowValue(row.values, layout.columnIndexes[step.QtyExcelColumn])); !ok {
+					continue
+				}
+			} else {
+				row.participated = true
+			}
 			key := strings.TrimSpace(row.values[inputIndex])
 			if key != "" {
 				if _, ok := seen[key]; !ok {

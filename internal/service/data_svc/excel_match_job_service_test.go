@@ -469,7 +469,7 @@ func TestProcessExcelMatchFileMatchesOrderItemsWithoutReusingSKUAcrossBatches(t 
 	}
 }
 
-func TestProcessExcelMatchFileReservesExactSpecAcrossBatches(t *testing.T) {
+func TestProcessExcelMatchFileReservesLongerSpecPrefixAcrossBatches(t *testing.T) {
 	dir := t.TempDir()
 	inputPath := filepath.Join(dir, "source.xlsx")
 	outputPath := filepath.Join(dir, "result.xlsx")
@@ -478,7 +478,7 @@ func TestProcessExcelMatchFileReservesExactSpecAcrossBatches(t *testing.T) {
 	if err := f.SetSheetRow("Sheet1", "A1", &[]interface{}{"订单号", "规格编码", "销售单价", "销售数量"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := f.SetSheetRow("Sheet1", "A2", &[]interface{}{"ORDER-1", "C09H1073", "319.20", "1"}); err != nil {
+	if err := f.SetSheetRow("Sheet1", "A2", &[]interface{}{"ORDER-1", "C09H10", "319.20", "1"}); err != nil {
 		t.Fatal(err)
 	}
 	for index := 1; index < 500; index++ {
@@ -528,10 +528,10 @@ func TestProcessExcelMatchFileReservesExactSpecAcrossBatches(t *testing.T) {
 	}
 	defer func() { _ = out.Close() }()
 	if got, _ := out.GetCellValue("Result_1", "E2"); got != "SKU-B" {
-		t.Fatalf("8-digit row SKU = %q, want unreserved SKU-B", got)
+		t.Fatalf("short-prefix row SKU = %q, want unreserved SKU-B", got)
 	}
 	if got, _ := out.GetCellValue("Result_1", "E502"); got != "SKU-A" {
-		t.Fatalf("9-digit row SKU = %q, want reserved exact SKU-A", got)
+		t.Fatalf("long-prefix row SKU = %q, want reserved SKU-A", got)
 	}
 }
 
@@ -586,13 +586,118 @@ func TestExcelOrderItemMatchDoesNotCountDuplicateNoAsCapacity(t *testing.T) {
 	state := newExcelOrderItemMatchState(reservations)
 	detail := excelOrderItemDetail{items: items}
 	fuzzySKU, reason, err := state.match(detail, "ORDER-1", "C09H1073", 31920, 1)
-	if err != nil || fuzzySKU != "" || reason != "符合条件的SKU已为9位精确规格编码行保留" {
+	if err != nil || fuzzySKU != "" || reason != "符合条件的SKU已为更长规格编码行保留" {
 		t.Fatalf("fuzzy match = %q, %q, %v, want duplicate no reserved once", fuzzySKU, reason, err)
 	}
 	reservations.consume(0, "ORDER-1", "C09H1073A", 31920, 1)
 	exactSKU, reason, err := state.match(detail, "ORDER-1", "C09H1073A", 31920, 1)
 	if err != nil || exactSKU != "SKU-A" || reason != "" {
 		t.Fatalf("exact match = %q, %q, %v, want SKU-A", exactSKU, reason, err)
+	}
+}
+
+func TestExcelOrderItemMatchPreservesSharedLongerPrefixCapacity(t *testing.T) {
+	items, err := parseExcelOrderItems(`[
+		{"no":"SKU-A","qty":1,"priceactual":319.2,"mProductName":"C09H1073A"},
+		{"no":"SKU-B","qty":1,"priceactual":319.2,"mProductName":"C09H1073B"}
+	]`)
+	if err != nil {
+		t.Fatal(err)
+	}
+	reservations := excelOrderItemReservations{0: {}}
+	reservations.add(0, "ORDER-1", "C09H1073", 31920, 1)
+	reservations.add(0, "ORDER-1", "C09H1073A", 31920, 1)
+	state := newExcelOrderItemMatchState(reservations)
+	detail := excelOrderItemDetail{items: items}
+	sku, reason, err := state.match(detail, "ORDER-1", "C09H10", 31920, 1)
+	if err != nil || sku != "" || reason != "符合条件的SKU已为更长规格编码行保留" {
+		t.Fatalf("short-prefix match = %q, %q, %v, want all capacity reserved for longer prefixes", sku, reason, err)
+	}
+}
+
+func TestExcelSpecCodesMatchUsesExcelCodeAsPrefix(t *testing.T) {
+	tests := []struct {
+		name         string
+		excelCode    string
+		databaseCode string
+		want         bool
+	}{
+		{name: "short prefix", excelCode: "C09H", databaseCode: "C09H1073A", want: true},
+		{name: "mixed case prefix", excelCode: "c09h107", databaseCode: "C09H1073A", want: true},
+		{name: "full code", excelCode: "C09H1073A", databaseCode: "C09H1073A", want: true},
+		{name: "different prefix", excelCode: "C09H108", databaseCode: "C09H1073A", want: false},
+		{name: "longer than database", excelCode: "C09H1073AX", databaseCode: "C09H1073A", want: false},
+		{name: "empty", excelCode: "", databaseCode: "C09H1073A", want: false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := excelSpecCodesMatch(tt.excelCode, tt.databaseCode); got != tt.want {
+				t.Fatalf("excelSpecCodesMatch(%q, %q) = %v, want %v", tt.excelCode, tt.databaseCode, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestProcessExcelMatchFileSkipsFifteenAndSixteenCharacterCodesBeforeLookup(t *testing.T) {
+	dir := t.TempDir()
+	inputPath := filepath.Join(dir, "source.xlsx")
+	outputPath := filepath.Join(dir, "result.xlsx")
+	f := excelize.NewFile()
+	rows := [][]interface{}{
+		{"订单号", "规格编码", "销售单价", "销售数量"},
+		{"ORDER-15", "ABCDEFGHIJKLMNO", "319.20", "1"},
+		{"ORDER-16", "ABCDEFGHIJKLMNOP", "319.20", "1"},
+		{"ORDER-MATCH", "C09H10", "319.20", "1"},
+	}
+	for index, row := range rows {
+		cell, err := excelize.CoordinatesToCellName(1, index+1)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := f.SetSheetRow("Sheet1", cell, &row); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := f.SaveAs(inputPath); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := normalizeExcelMatchConfig(ExcelMatchConfig{
+		Operation: excelOperationExportMatch,
+		Steps: []ExcelMatchStep{{
+			Name: "补全SKU", MatchMode: excelMatchModeOrderItemSKU, TableName: bojunRetailOrdersTable,
+			MatchExcelColumn: "订单号", SpecExcelColumn: "规格编码", PriceExcelColumn: "销售单价", QtyExcelColumn: "销售数量",
+			DBMatchField: "docno", DBValueField: "items_json", OutputColumnName: "完整SKU",
+		}},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	lookup := &fakeExcelMatchLookup{value: map[string]string{
+		"ORDER-MATCH": `[{"no":"SKU-MATCH","qty":1,"priceactual":319.2,"mProductName":"C09H1073A"}]`,
+	}}
+	stats, err := processExcelMatchFile(context.Background(), inputPath, outputPath, cfg, lookup)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(lookup.keys, []string{"ORDER-MATCH"}) {
+		t.Fatalf("lookup keys = %#v, want only processable order", lookup.keys)
+	}
+	if stats.FilteredRows != 1 || stats.MatchedRows != 1 || stats.UnmatchedRows != 0 {
+		t.Fatalf("stats = %+v, want skipped 15/16-character rows excluded", stats)
+	}
+	out, err := excelize.OpenFile(outputPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = out.Close() }()
+	if got, _ := out.GetCellValue("Result_1", "E2"); got != "" {
+		t.Fatalf("15-character row output = %q, want blank", got)
+	}
+	if got, _ := out.GetCellValue("Result_1", "E3"); got != "" {
+		t.Fatalf("16-character row output = %q, want blank", got)
+	}
+	if got, _ := out.GetCellValue("Result_1", "E4"); got != "SKU-MATCH" {
+		t.Fatalf("processable row output = %q, want SKU-MATCH", got)
 	}
 }
 
