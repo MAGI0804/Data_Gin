@@ -119,6 +119,9 @@ export type MallWeatherPendingRefresh = {
 export type MallWeatherRefreshResult = {
   jobId: number
   mallId: number
+  force: boolean
+  reason: string
+  requestedBy: number
   kinds: Array<{
     kind: MallWeatherRefreshKind
     status: 'QUEUED' | 'SKIPPED_FRESH'
@@ -284,7 +287,9 @@ export function parseMallWeatherOverview(payload: unknown): MallWeatherOverview 
 
 export function parseMallWeatherRefreshResult(payload: unknown): MallWeatherRefreshResult | null {
   const data = envelopeData(payload)
-  if (!data || !Number.isSafeInteger(data.jobId) || Number(data.jobId) <= 0 || !Number.isSafeInteger(data.mallId) || Number(data.mallId) <= 0 || !Array.isArray(data.kinds) || data.kinds.length === 0) return null
+  if (!data || !Number.isSafeInteger(data.jobId) || Number(data.jobId) <= 0 || !Number.isSafeInteger(data.mallId) || Number(data.mallId) <= 0 ||
+    typeof data.force !== 'boolean' || typeof data.reason !== 'string' || !Number.isSafeInteger(data.requestedBy) || Number(data.requestedBy) <= 0 ||
+    !Array.isArray(data.kinds) || data.kinds.length === 0) return null
   const kinds: MallWeatherRefreshResult['kinds'] = []
   const seenKinds = new Set<MallWeatherRefreshKind>()
   for (const item of data.kinds) {
@@ -297,11 +302,12 @@ export function parseMallWeatherRefreshResult(payload: unknown): MallWeatherRefr
     if (item.status === 'SKIPPED_FRESH' && outboxJobId !== undefined) return null
     kinds.push({ kind: item.kind, status: item.status, ...(outboxJobId === undefined ? {} : { outboxJobId }) })
   }
-  return { jobId: Number(data.jobId), mallId: Number(data.mallId), kinds }
+  return { jobId: Number(data.jobId), mallId: Number(data.mallId), force: data.force, reason: data.reason, requestedBy: Number(data.requestedBy), kinds }
 }
 
 export function mallWeatherRefreshDisposition(
   response: { ok: boolean; status: number; data: unknown },
+  actorID: string,
   mallID: number,
   request: MallWeatherRefreshRequest,
 ): MallWeatherRefreshDisposition {
@@ -312,7 +318,8 @@ export function mallWeatherRefreshDisposition(
   }
   if (response.status !== 202) return { kind: 'uncertain' }
   const result = parseMallWeatherRefreshResult(response.data)
-  if (!result || result.mallId !== mallID || result.kinds.length !== request.kinds.length) return { kind: 'uncertain' }
+  if (!result || result.mallId !== mallID || String(result.requestedBy) !== actorID || result.force !== request.force ||
+    result.reason !== request.reason || result.kinds.length !== request.kinds.length) return { kind: 'uncertain' }
   const returnedKinds = new Set(result.kinds.map((item) => item.kind))
   if (request.kinds.some((kind) => !returnedKinds.has(kind))) return { kind: 'uncertain' }
   return { kind: 'accepted', result }

@@ -124,6 +124,9 @@ test('parses queued and fresh-skipped refresh results without over-reporting que
   const result = parseMallWeatherRefreshResult({ code: 0, data: {
     jobId: 31,
     mallId: 7,
+    force: false,
+    reason: '管理端补采',
+    requestedBy: 42,
     kinds: [
       { kind: 'V26_FULL', status: 'QUEUED', outboxJobId: 41 },
       { kind: 'V3_LIFE_INDEX', status: 'SKIPPED_FRESH' },
@@ -134,13 +137,19 @@ test('parses queued and fresh-skipped refresh results without over-reporting que
   const skipped = parseMallWeatherRefreshResult({ code: 0, data: {
     jobId: 32,
     mallId: 7,
+    force: false,
+    reason: '管理端补采',
+    requestedBy: 42,
     kinds: [{ kind: 'V26_FULL', status: 'SKIPPED_FRESH' }],
   } })
   assert.equal(mallWeatherRefreshResultMessage(skipped), '1 项数据仍新鲜，本次未重复入队。')
-  assert.equal(parseMallWeatherRefreshResult({ code: 0, data: { jobId: 33, mallId: 7, kinds: [{ kind: 'V26_FULL', status: 'QUEUED' }] } }), null)
+  assert.equal(parseMallWeatherRefreshResult({ code: 0, data: { jobId: 33, mallId: 7, force: false, reason: '管理端补采', requestedBy: 42, kinds: [{ kind: 'V26_FULL', status: 'QUEUED' }] } }), null)
   assert.equal(parseMallWeatherRefreshResult({ code: 0, data: {
     jobId: 34,
     mallId: 7,
+    force: false,
+    reason: '管理端补采',
+    requestedBy: 42,
     kinds: [
       { kind: 'V26_FULL', status: 'QUEUED', outboxJobId: 41 },
       { kind: 'V26_FULL', status: 'SKIPPED_FRESH' },
@@ -149,6 +158,9 @@ test('parses queued and fresh-skipped refresh results without over-reporting que
   assert.equal(parseMallWeatherRefreshResult({ code: 0, data: {
     jobId: 35,
     mallId: 7,
+    force: false,
+    reason: '管理端补采',
+    requestedBy: 42,
     kinds: [{ kind: 'V3_LIFE_INDEX', status: 'SKIPPED_FRESH', outboxJobId: 42 }],
   } }), null)
 })
@@ -158,25 +170,33 @@ test('keeps the original idempotent request for every uncertain refresh outcome'
   const acceptedData = { code: 0, data: {
     jobId: 31,
     mallId: 7,
+    force: false,
+    reason: '管理端补采',
+    requestedBy: 42,
     kinds: [
       { kind: 'V26_FULL', status: 'QUEUED', outboxJobId: 41 },
       { kind: 'V3_LIFE_INDEX', status: 'SKIPPED_FRESH' },
     ],
   } }
 
-  assert.equal(mallWeatherRefreshDisposition({ ok: true, status: 202, data: acceptedData }, 7, request).kind, 'accepted')
-  assert.equal(mallWeatherRefreshDisposition({ ok: false, status: 202, data: {} }, 7, request).kind, 'uncertain')
-  assert.equal(mallWeatherRefreshDisposition({ ok: false, status: 0, data: {} }, 7, request).kind, 'uncertain')
-  assert.equal(mallWeatherRefreshDisposition({ ok: false, status: 408, data: {} }, 7, request).kind, 'uncertain')
-  assert.equal(mallWeatherRefreshDisposition({ ok: false, status: 409, data: {} }, 7, request).kind, 'uncertain')
-  assert.equal(mallWeatherRefreshDisposition({ ok: false, status: 503, data: {} }, 7, request).kind, 'uncertain')
-  assert.equal(mallWeatherRefreshDisposition({ ok: false, status: 403, data: {} }, 7, request).kind, 'rejected')
-  assert.equal(mallWeatherRefreshDisposition({ ok: true, status: 200, data: acceptedData }, 7, request).kind, 'uncertain')
+  assert.equal(mallWeatherRefreshDisposition({ ok: true, status: 202, data: acceptedData }, '42', 7, request).kind, 'accepted')
+  assert.equal(mallWeatherRefreshDisposition({ ok: false, status: 202, data: {} }, '42', 7, request).kind, 'uncertain')
+  assert.equal(mallWeatherRefreshDisposition({ ok: false, status: 0, data: {} }, '42', 7, request).kind, 'uncertain')
+  assert.equal(mallWeatherRefreshDisposition({ ok: false, status: 408, data: {} }, '42', 7, request).kind, 'uncertain')
+  assert.equal(mallWeatherRefreshDisposition({ ok: false, status: 409, data: {} }, '42', 7, request).kind, 'uncertain')
+  assert.equal(mallWeatherRefreshDisposition({ ok: false, status: 503, data: {} }, '42', 7, request).kind, 'uncertain')
+  assert.equal(mallWeatherRefreshDisposition({ ok: false, status: 403, data: {} }, '42', 7, request).kind, 'rejected')
+  assert.equal(mallWeatherRefreshDisposition({ ok: true, status: 200, data: acceptedData }, '42', 7, request).kind, 'uncertain')
+  assert.equal(mallWeatherRefreshDisposition({ ok: true, status: 202, data: { ...acceptedData, data: { ...acceptedData.data, requestedBy: 43 } } }, '42', 7, request).kind, 'uncertain')
+  assert.equal(mallWeatherRefreshDisposition({ ok: true, status: 202, data: { ...acceptedData, data: { ...acceptedData.data, reason: '其他原因' } } }, '42', 7, request).kind, 'uncertain')
   assert.equal(mallWeatherRefreshDisposition({ ok: true, status: 202, data: { code: 0, data: {
     jobId: 31,
     mallId: 7,
+    force: false,
+    reason: '管理端补采',
+    requestedBy: 42,
     kinds: [{ kind: 'V26_FULL', status: 'QUEUED', outboxJobId: 41 }],
-  } } }, 7, request).kind, 'uncertain')
+  } } }, '42', 7, request).kind, 'uncertain')
 })
 
 test('formats weather statuses, conditions, metrics, and chart points', () => {

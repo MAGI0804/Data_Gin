@@ -232,7 +232,7 @@ function ManualRefreshPanel({ actorID, mall, client }: { actorID: string; mall: 
       silentLoading: true,
     })
     setSubmitting(false)
-    const disposition = mallWeatherRefreshDisposition(response, mall.id, request.body)
+    const disposition = mallWeatherRefreshDisposition(response, actorID, mall.id, request.body)
     if (disposition.kind === 'rejected') {
       clearMallWeatherPendingRefresh(actorID, mall.id, window.sessionStorage)
       setPending(null)
