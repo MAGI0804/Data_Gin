@@ -32,6 +32,49 @@ func (dao *MallWeatherPermissionDAO) WithDB(db *gorm.DB) *MallWeatherPermissionD
 	return &MallWeatherPermissionDAO{db: db}
 }
 
+// GrantPermanentPermissions idempotently grants a permanent permission set.
+// Existing expired grants are restored by clearing expires_at.
+func (dao *MallWeatherPermissionDAO) GrantPermanentPermissions(
+	ctx context.Context,
+	userID uint,
+	grantedBy uint,
+	permissions []string,
+) error {
+	if dao == nil || dao.db == nil || ctx == nil || userID == 0 || grantedBy == 0 || len(permissions) == 0 {
+		return fmt.Errorf("mall weather permission: invalid permanent grant")
+	}
+
+	seen := make(map[string]struct{}, len(permissions))
+	grants := make([]model.MallWeatherUserPermission, 0, len(permissions))
+	for _, permission := range permissions {
+		permission = strings.TrimSpace(permission)
+		if permission == "" || len(permission) > 64 {
+			return fmt.Errorf("mall weather permission: invalid permanent grant")
+		}
+		if _, exists := seen[permission]; exists {
+			return fmt.Errorf("mall weather permission: duplicate permanent grant")
+		}
+		seen[permission] = struct{}{}
+		grants = append(grants, model.MallWeatherUserPermission{
+			UserID:     userID,
+			Permission: permission,
+			GrantedBy:  grantedBy,
+			ExpiresAt:  nil,
+		})
+	}
+
+	result := dao.db.WithContext(ctx).Clauses(clause.OnConflict{
+		Columns: []clause.Column{{Name: "user_id"}, {Name: "permission"}},
+		DoUpdates: clause.AssignmentColumns([]string{
+			"granted_by", "expires_at", "updated_at",
+		}),
+	}).Create(&grants)
+	if result.Error != nil {
+		return fmt.Errorf("mall weather permission: grant permanent permissions: %w", result.Error)
+	}
+	return nil
+}
+
 func (dao *MallWeatherPermissionDAO) HasPermission(ctx context.Context, userID uint, permission string, now time.Time) (bool, error) {
 	permission = strings.TrimSpace(permission)
 	if userID == 0 || permission == "" || len(permission) > 64 {

@@ -26,14 +26,14 @@ import (
 )
 
 const (
-	PermissionMallRead            = "mall.read"
-	PermissionMallWrite           = "mall.write"
-	PermissionMallGeocodeConfirm  = "mall.geocode.confirm"
-	PermissionWeatherRead         = "weather.read"
-	PermissionWeatherRefresh      = "weather.refresh"
-	PermissionWeatherExport       = "weather.export"
-	PermissionWeatherFeishuPush   = "weather.feishu.push"
-	PermissionWeatherConfigManage = "weather.config.manage"
+	PermissionMallRead            = model.PermissionMallRead
+	PermissionMallWrite           = model.PermissionMallWrite
+	PermissionMallGeocodeConfirm  = model.PermissionMallGeocodeConfirm
+	PermissionWeatherRead         = model.PermissionWeatherRead
+	PermissionWeatherRefresh      = model.PermissionWeatherRefresh
+	PermissionWeatherExport       = model.PermissionWeatherExport
+	PermissionWeatherFeishuPush   = model.PermissionWeatherFeishuPush
+	PermissionWeatherConfigManage = model.PermissionWeatherConfigManage
 
 	mallCreateOperationScope = "mall.create"
 	maxIdempotencyKeyLength  = 255

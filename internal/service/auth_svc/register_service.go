@@ -3,6 +3,7 @@ package auth_svc
 import (
 	"github.com/gin-gonic/gin"
 
+	"gin-biz-web-api/constant"
 	"gin-biz-web-api/internal/requests/auth_request"
 	"gin-biz-web-api/model"
 	"gin-biz-web-api/pkg/database"
@@ -18,6 +19,9 @@ func NewRegisterService() *RegisterService {
 
 // CreateUserToken 创建用户并返回 token
 func (svc *RegisterService) CreateUserToken(c *gin.Context, request auth_request.SignupUsingEmailRequest) string {
+	if constant.IsConsoleAdminAccount(request.Account) {
+		return ""
+	}
 
 	user := model.User{
 		BaseModel:             &model.BaseModel{},

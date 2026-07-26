@@ -23,6 +23,8 @@ type User struct {
 	Introduction string `gorm:"column:introduction;" json:"introduction"`
 	// 头像地址    varchar(255) is_nullable: NO
 	Avatar string `gorm:"column:avatar;" json:"avatar"`
+	// 控制台管理员身份只能由内部控制台登录流程设置，公开注册不可写入。
+	ConsoleManaged bool `gorm:"column:console_managed;not null;default:false" json:"-"`
 
 	*CommonTimestampsField
 }

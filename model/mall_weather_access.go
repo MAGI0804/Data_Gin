@@ -2,6 +2,39 @@ package model
 
 import "time"
 
+const (
+	PermissionMallRead            = "mall.read"
+	PermissionMallWrite           = "mall.write"
+	PermissionMallGeocodeConfirm  = "mall.geocode.confirm"
+	PermissionWeatherRead         = "weather.read"
+	PermissionWeatherRefresh      = "weather.refresh"
+	PermissionWeatherExport       = "weather.export"
+	PermissionWeatherFeishuPush   = "weather.feishu.push"
+	PermissionWeatherConfigManage = "weather.config.manage"
+	PermissionWeatherRawRead      = "weather.raw.read"
+)
+
+var mallWeatherAdminPermissions = [...]string{
+	PermissionMallRead,
+	PermissionMallWrite,
+	PermissionMallGeocodeConfirm,
+	PermissionWeatherRead,
+	PermissionWeatherRefresh,
+	PermissionWeatherExport,
+	PermissionWeatherFeishuPush,
+	PermissionWeatherConfigManage,
+	PermissionWeatherRawRead,
+}
+
+// MallWeatherAdminPermissions returns the complete permanent permission set
+// assigned to the console admin. The returned slice is safe for callers to
+// modify.
+func MallWeatherAdminPermissions() []string {
+	permissions := make([]string, len(mallWeatherAdminPermissions))
+	copy(permissions, mallWeatherAdminPermissions[:])
+	return permissions
+}
+
 // MallWeatherUserPermission is an explicit, fail-closed grant. The module does
 // not infer administrative access from usernames or user IDs.
 type MallWeatherUserPermission struct {

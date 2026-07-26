@@ -4,6 +4,7 @@ import (
 	"github.com/gin-gonic/gin"
 	"github.com/thedevsaddam/govalidator"
 
+	"gin-biz-web-api/constant"
 	"gin-biz-web-api/pkg/validator"
 )
 
@@ -56,9 +57,21 @@ func SignupUsingEmail(data interface{}, c *gin.Context) map[string][]string {
 	errs := validator.ValidateStruct(data, rules, messages)
 
 	req := data.(*SignupUsingEmailRequest)
+	errs = rejectReservedAccount(req.Account, errs)
 	errs = validator.ValidationPasswordConfirm(req.Password, req.PasswordConfirm, errs) // 验证两次密码是否一致
 	errs = validator.ValidationVerifyCode(req.Email, req.VerifyCode, errs)              // 验证邮件验证码是否正确
 
+	return errs
+}
+
+func rejectReservedAccount(account string, errs map[string][]string) map[string][]string {
+	if !constant.IsConsoleAdminAccount(account) {
+		return errs
+	}
+	if errs == nil {
+		errs = make(map[string][]string)
+	}
+	errs["account"] = append(errs["account"], "该账号为系统保留账号")
 	return errs
 }
 

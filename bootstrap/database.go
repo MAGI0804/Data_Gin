@@ -1,6 +1,7 @@
 package bootstrap
 
 import (
+	"context"
 	"fmt"
 	"time"
 
@@ -8,6 +9,7 @@ import (
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 
+	"gin-biz-web-api/internal/service/auth_svc"
 	"gin-biz-web-api/model"
 	"gin-biz-web-api/pkg/config"
 	"gin-biz-web-api/pkg/console"
@@ -133,6 +135,20 @@ func autoMigrateTables() {
 	}
 
 	console.Success("数据表自动迁移完成")
+
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	synchronized, err := auth_svc.SyncExistingConsoleAdminPermissions(ctx, db)
+	if err != nil {
+		logger.Error("同步 admin 天气权限失败", zap.Error(err))
+		console.Exit("同步 admin 天气权限失败: %v", err)
+		return
+	}
+	if synchronized {
+		console.Success("admin 天气权限同步完成")
+	} else {
+		console.Info("admin 尚未完成控制台身份初始化，首次控制台登录时将同步天气权限")
+	}
 }
 
 func mallWeatherMigrationModels() []interface{} {
