@@ -9,6 +9,16 @@ export type MallWeatherMall = {
   status: string
 }
 
+export type MallWeatherMallList = {
+  items: MallWeatherMall[]
+  nextAfterId: number
+}
+
+export type MallWeatherWarning = {
+  code: string
+  path: string
+}
+
 export type MallWeatherMeta = {
   provider: string
   apiVersion: string
@@ -16,6 +26,7 @@ export type MallWeatherMeta = {
   longitude: number
   latitude: number
   coordinateSystem: string
+  samplingMode: string
   coverageRadiusM: number
   spatialResolution: string
   timeZone: string
@@ -26,12 +37,12 @@ export type MallWeatherMeta = {
 
 export type MallWeatherRealtime = {
   snapshotAtLocal: string
+  providerServerTimeLocal: string
   fetchedAtLocal: string
   temperatureC?: number
   apparentTemperatureC?: number
   humidityPct?: number
   windSpeedKph?: number
-  precipitationMmH?: number
   localPrecipitationMmH?: number
   visibilityKm?: number
   skycon?: string
@@ -44,6 +55,7 @@ export type MallWeatherRealtime = {
   aqiChn?: number
   aqiDescriptionChn?: string
   qualityStatus: string
+  qualityWarnings: MallWeatherWarning[]
 }
 
 export type MallWeatherMinutely = {
@@ -54,6 +66,7 @@ export type MallWeatherMinutely = {
   description?: string
   forecastKeypoint?: string
   qualityStatus: string
+  qualityWarnings: MallWeatherWarning[]
 }
 
 export type MallWeatherHourly = {
@@ -66,6 +79,7 @@ export type MallWeatherHourly = {
   pm25UgM3?: number
   aqiChn?: number
   qualityStatus: string
+  qualityWarnings: MallWeatherWarning[]
 }
 
 export type MallWeatherAlert = {
@@ -78,6 +92,7 @@ export type MallWeatherAlert = {
   publishedAtLocal?: string
   source?: string
   qualityStatus: string
+  qualityWarnings: MallWeatherWarning[]
 }
 
 export type MallWeatherOverview = {
@@ -108,6 +123,14 @@ function numberValue(record: JsonRecord, key: string) {
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined
 }
 
+function warningValues(value: unknown): MallWeatherWarning[] {
+  if (!Array.isArray(value)) return []
+  return value.flatMap((warning) => {
+    if (!isRecord(warning) || typeof warning.code !== 'string' || typeof warning.path !== 'string') return []
+    return [{ code: warning.code, path: warning.path }]
+  })
+}
+
 function mallWeatherMeta(record: JsonRecord): MallWeatherMeta {
   return {
     provider: textValue(record, 'provider'),
@@ -116,6 +139,7 @@ function mallWeatherMeta(record: JsonRecord): MallWeatherMeta {
     longitude: numberValue(record, 'longitude') ?? 0,
     latitude: numberValue(record, 'latitude') ?? 0,
     coordinateSystem: textValue(record, 'coordinateSystem'),
+    samplingMode: textValue(record, 'samplingMode'),
     coverageRadiusM: numberValue(record, 'coverageRadiusM') ?? 0,
     spatialResolution: textValue(record, 'spatialResolution'),
     timeZone: textValue(record, 'timeZone'),
@@ -128,12 +152,12 @@ function mallWeatherMeta(record: JsonRecord): MallWeatherMeta {
 function mallWeatherRealtime(record: JsonRecord): MallWeatherRealtime {
   return {
     snapshotAtLocal: textValue(record, 'snapshotAtLocal'),
+    providerServerTimeLocal: textValue(record, 'providerServerTimeLocal'),
     fetchedAtLocal: textValue(record, 'fetchedAtLocal'),
     temperatureC: numberValue(record, 'temperatureC'),
     apparentTemperatureC: numberValue(record, 'apparentTemperatureC'),
     humidityPct: numberValue(record, 'humidityPct'),
     windSpeedKph: numberValue(record, 'windSpeedKph'),
-    precipitationMmH: numberValue(record, 'precipitationMmH'),
     localPrecipitationMmH: numberValue(record, 'localPrecipitationMmH'),
     visibilityKm: numberValue(record, 'visibilityKm'),
     skycon: textValue(record, 'skycon'),
@@ -146,6 +170,7 @@ function mallWeatherRealtime(record: JsonRecord): MallWeatherRealtime {
     aqiChn: numberValue(record, 'aqiChn'),
     aqiDescriptionChn: textValue(record, 'aqiDescriptionChn'),
     qualityStatus: textValue(record, 'qualityStatus'),
+    qualityWarnings: warningValues(record.qualityWarnings),
   }
 }
 
@@ -158,6 +183,7 @@ function mallWeatherMinutely(record: JsonRecord): MallWeatherMinutely {
     description: textValue(record, 'description'),
     forecastKeypoint: textValue(record, 'forecastKeypoint'),
     qualityStatus: textValue(record, 'qualityStatus'),
+    qualityWarnings: warningValues(record.qualityWarnings),
   }
 }
 
@@ -172,6 +198,7 @@ function mallWeatherHourly(record: JsonRecord): MallWeatherHourly {
     pm25UgM3: numberValue(record, 'pm25UgM3'),
     aqiChn: numberValue(record, 'aqiChn'),
     qualityStatus: textValue(record, 'qualityStatus'),
+    qualityWarnings: warningValues(record.qualityWarnings),
   }
 }
 
@@ -186,14 +213,15 @@ function mallWeatherAlert(record: JsonRecord): MallWeatherAlert {
     publishedAtLocal: textValue(record, 'publishedAtLocal'),
     source: textValue(record, 'source'),
     qualityStatus: textValue(record, 'qualityStatus'),
+    qualityWarnings: warningValues(record.qualityWarnings),
   }
 }
 
-export function parseMallWeatherMalls(payload: unknown): MallWeatherMall[] {
+export function parseMallWeatherMallList(payload: unknown): MallWeatherMallList | null {
   const data = envelopeData(payload)
-  if (!data || !Array.isArray(data.items)) return []
+  if (!data || !Array.isArray(data.items)) return null
 
-  return data.items.flatMap((item) => {
+  const items = data.items.flatMap((item) => {
     if (!isRecord(item) || !Number.isSafeInteger(item.id) || Number(item.id) <= 0 || typeof item.nameCn !== 'string') return []
     return [{
       id: Number(item.id),
@@ -206,6 +234,9 @@ export function parseMallWeatherMalls(payload: unknown): MallWeatherMall[] {
       status: typeof item.status === 'string' ? item.status : '',
     }]
   })
+  const nextAfterId = data.nextAfterId === undefined ? 0 : numberValue(data, 'nextAfterId')
+  if (nextAfterId === undefined || !Number.isSafeInteger(nextAfterId) || nextAfterId < 0) return null
+  return { items, nextAfterId }
 }
 
 export function parseMallWeatherOverview(payload: unknown): MallWeatherOverview | null {
@@ -232,6 +263,7 @@ export function mallWeatherFreshnessLabel(status: string) {
     FRESH: '数据新鲜',
     WARNING: '即将过期',
     STALE: '数据已过期',
+    CRITICAL: '数据严重过期',
     UNAVAILABLE: '暂无数据',
   }
   return labels[status.toUpperCase()] ?? (status || '未知状态')
@@ -262,18 +294,26 @@ export function mallWeatherMetric(value: number | undefined, unit: string, fract
   return `${value.toFixed(fractionDigits)}${unit}`
 }
 
-export function mallWeatherChartPoints(values: Array<number | undefined>, width: number, height: number) {
+export function mallWeatherChartSegments(values: Array<number | undefined>, width: number, height: number) {
   const finiteValues = values.filter((value): value is number => typeof value === 'number' && Number.isFinite(value))
-  if (finiteValues.length === 0 || width <= 0 || height <= 0) return ''
+  if (finiteValues.length === 0 || width <= 0 || height <= 0) return []
   const minimum = Math.min(...finiteValues)
   const maximum = Math.max(...finiteValues)
   const range = maximum - minimum || 1
   const denominator = Math.max(values.length - 1, 1)
 
-  return values.map((value, index) => {
-    if (typeof value !== 'number' || !Number.isFinite(value)) return null
+  const segments: string[] = []
+  let current: string[] = []
+  values.forEach((value, index) => {
+    if (typeof value !== 'number' || !Number.isFinite(value)) {
+      if (current.length > 0) segments.push(current.join(' '))
+      current = []
+      return
+    }
     const x = index / denominator * width
     const y = height - (value - minimum) / range * height
-    return `${x.toFixed(1)},${y.toFixed(1)}`
-  }).filter(Boolean).join(' ')
+    current.push(`${x.toFixed(1)},${y.toFixed(1)}`)
+  })
+  if (current.length > 0) segments.push(current.join(' '))
+  return segments
 }
