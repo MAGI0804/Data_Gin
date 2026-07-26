@@ -11,15 +11,13 @@ import {
   parseMallWeatherOverview,
 } from '../.test-dist/mallWeather.js'
 
-test('parses valid malls, ignores malformed rows, and preserves the list cursor', () => {
+test('parses valid malls and preserves the list cursor', () => {
   const result = parseMallWeatherMallList({
     code: 0,
     data: {
       nextAfterId: 7,
       items: [
         { id: 7, mallCode: 'SH-001', nameCn: '示例商场', city: '上海', weatherEnabled: true, status: 'active' },
-        { id: 0, nameCn: '无效商场' },
-        { id: 8 },
       ],
     },
   })
@@ -37,6 +35,7 @@ test('parses valid malls, ignores malformed rows, and preserves the list cursor'
       status: 'active',
     }],
   })
+  assert.equal(parseMallWeatherMallList({ code: 0, data: { items: [{ id: 0, nameCn: '无效商场' }] } }), null)
   assert.equal(parseMallWeatherMallList({ code: 0, data: { items: [], nextAfterId: 'bad' } }), null)
 })
 

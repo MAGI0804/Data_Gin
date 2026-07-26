@@ -5,6 +5,7 @@ import {
   ArrowUpFromLine,
   BookOpen,
   CheckCircle2,
+  CloudSun,
   Database,
   Download,
   FileJson,
@@ -20,7 +21,9 @@ import {
   X,
 } from 'lucide-react'
 import './App.css'
+import { effectiveApiStatus } from './apiResponse'
 import { clearStoredToken, loadStoredToken, saveStoredToken, storedTokenExpiresAt } from './authStorage'
+import { MallWeatherPage } from './MallWeatherPage'
 import {
   buildExcelExportConfig,
   cloneExcelMatchSteps,
@@ -50,7 +53,7 @@ type ApiClientOptions = {
 }
 
 type ApiClient = (path: string, options?: ApiClientOptions) => Promise<ApiResult>
-type NavKey = 'overview' | 'runs' | 'delivery_logs' | 'step_runs' | 'sources' | 'receive' | 'pull_records' | 'backfill' | 'youzan_distribution' | 'rules' | 'processed' | 'methods' | 'destinations' | 'tasks' | 'push_policy' | 'excel_jobs' | 'excel_schemes' | 'excel_write'
+type NavKey = 'overview' | 'runs' | 'delivery_logs' | 'step_runs' | 'mall_weather' | 'sources' | 'receive' | 'pull_records' | 'backfill' | 'youzan_distribution' | 'rules' | 'processed' | 'methods' | 'destinations' | 'tasks' | 'push_policy' | 'excel_jobs' | 'excel_schemes' | 'excel_write'
 type NavItem = { key: NavKey; label: string; description: string; icon: ReactNode }
 type NavGroup = { label: string; items: NavItem[] }
 type MethodKind = 'configured' | 'builtin'
@@ -557,6 +560,7 @@ const navGroups: NavGroup[] = [
   {
     label: '数据接入',
     items: [
+      { key: 'mall_weather', label: '商场天气', description: '实况、趋势与预警', icon: <CloudSun aria-hidden="true" /> },
       { key: 'sources', label: '数据源', description: '接入配置与启用状态', icon: <Database aria-hidden="true" /> },
       { key: 'receive', label: '接口接收', description: '外部推送入库记录', icon: <Inbox aria-hidden="true" /> },
       { key: 'pull_records', label: '拉取记录', description: '主动拉取原始数据', icon: <ArrowDownToLine aria-hidden="true" /> },
@@ -715,8 +719,9 @@ function App() {
           body: method === 'GET' || options.body === undefined ? undefined : JSON.stringify(options.body),
         })
         const data = await response.json().catch(() => ({}))
-        const nextResult = { ok: response.ok && isSuccessPayload(data), status: response.status, data }
-        if (response.status === 401) {
+        const effectiveStatus = effectiveApiStatus(response.status, data)
+        const nextResult = { ok: response.ok && isSuccessPayload(data), status: effectiveStatus, data }
+        if (effectiveStatus === 401) {
           clearStoredToken(window.localStorage)
           setToken('')
           setAuthenticated(false)
@@ -991,6 +996,7 @@ function App() {
         {activeNav === 'runs' && <RunsQueryPage runs={runs} onLoadSteps={loadStepRuns} />}
         {activeNav === 'delivery_logs' && <DeliveryLogsQueryPage logs={deliveryLogs} onRetryLog={retryDeliveryLog} />}
         {activeNav === 'step_runs' && <StepRunsQueryPage runs={runs} stepRuns={stepRuns} onLoadSteps={loadStepRuns} />}
+        {activeNav === 'mall_weather' && <MallWeatherPage client={client} />}
         {activeNav === 'sources' && <SourcesQueryPage sources={sources} />}
         {activeNav === 'methods' && <MethodsView methods={methods} coreMethods={coreMethods} onToggle={toggleTarget} />}
         {activeNav === 'receive' && <RawRecordsQueryPage title="接口接收记录" records={receivedData} />}
@@ -1057,6 +1063,7 @@ function ModuleHeader({ activeNav, loading }: { activeNav: NavKey; loading: bool
     runs: { title: '流水线运行', subtitle: '按状态、运行类型和 Trace ID 查询执行记录。' },
     delivery_logs: { title: '推送日志', subtitle: '按成功状态、门店和业务键查询外部交付结果。' },
     step_runs: { title: '步骤运行', subtitle: '选择一次流水线运行并查看每个步骤的输入输出。' },
+    mall_weather: { title: '商场天气', subtitle: '查看商场中心点实况、未来降水、小时趋势和气象预警。' },
     sources: { title: '数据源', subtitle: '查询数据接入配置、类型和启用状态。' },
     receive: { title: '接口接收', subtitle: '查询外部系统主动推送进来的原始数据。' },
     pull_records: { title: '拉取记录', subtitle: '查询系统主动从外部接口拉取的数据。' },

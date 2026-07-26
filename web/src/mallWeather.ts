@@ -221,9 +221,10 @@ export function parseMallWeatherMallList(payload: unknown): MallWeatherMallList 
   const data = envelopeData(payload)
   if (!data || !Array.isArray(data.items)) return null
 
-  const items = data.items.flatMap((item) => {
-    if (!isRecord(item) || !Number.isSafeInteger(item.id) || Number(item.id) <= 0 || typeof item.nameCn !== 'string') return []
-    return [{
+  const items: MallWeatherMall[] = []
+  for (const item of data.items) {
+    if (!isRecord(item) || !Number.isSafeInteger(item.id) || Number(item.id) <= 0 || typeof item.nameCn !== 'string') return null
+    items.push({
       id: Number(item.id),
       mallCode: typeof item.mallCode === 'string' ? item.mallCode : '',
       nameCn: item.nameCn,
@@ -232,8 +233,8 @@ export function parseMallWeatherMallList(payload: unknown): MallWeatherMallList 
       geocodeStatus: typeof item.geocodeStatus === 'string' ? item.geocodeStatus : '',
       weatherEnabled: item.weatherEnabled === true,
       status: typeof item.status === 'string' ? item.status : '',
-    }]
-  })
+    })
+  }
   const nextAfterId = data.nextAfterId === undefined ? 0 : numberValue(data, 'nextAfterId')
   if (nextAfterId === undefined || !Number.isSafeInteger(nextAfterId) || nextAfterId < 0) return null
   return { items, nextAfterId }
