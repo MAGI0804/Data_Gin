@@ -916,7 +916,7 @@ func TestExcelSpecCodesMatchUsesExcelCodeAsPrefix(t *testing.T) {
 	}
 }
 
-func TestProcessExcelMatchFileSkipsFifteenAndSixteenCharacterCodesBeforeLookup(t *testing.T) {
+func TestProcessExcelMatchFileCopiesFifteenAndSixteenCharacterCodesWithoutLookup(t *testing.T) {
 	dir := t.TempDir()
 	inputPath := filepath.Join(dir, "source.xlsx")
 	outputPath := filepath.Join(dir, "result.xlsx")
@@ -924,7 +924,7 @@ func TestProcessExcelMatchFileSkipsFifteenAndSixteenCharacterCodesBeforeLookup(t
 	rows := [][]interface{}{
 		{"订单号", "规格编码", "销售单价", "销售数量"},
 		{"ORDER-15", "ABCDEFGHIJKLMNO", "319.20", "1"},
-		{"ORDER-16", "ABCDEFGHIJKLMNOP", "319.20", "1"},
+		{"", "ABCDEFGHIJKLMNOP", "金额无效", "数量无效"},
 		{"ORDER-MATCH", "C09H10", "319.20", "1"},
 	}
 	for index, row := range rows {
@@ -960,19 +960,19 @@ func TestProcessExcelMatchFileSkipsFifteenAndSixteenCharacterCodesBeforeLookup(t
 	if !reflect.DeepEqual(lookup.keys, []string{"ORDER-MATCH"}) {
 		t.Fatalf("lookup keys = %#v, want only processable order", lookup.keys)
 	}
-	if stats.FilteredRows != 1 || stats.MatchedRows != 1 || stats.UnmatchedRows != 0 {
-		t.Fatalf("stats = %+v, want skipped 15/16-character rows excluded", stats)
+	if stats.FilteredRows != 3 || stats.MatchedRows != 3 || stats.UnmatchedRows != 0 {
+		t.Fatalf("stats = %+v, want 15/16-character rows copied as matches", stats)
 	}
 	out, err := excelize.OpenFile(outputPath)
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer func() { _ = out.Close() }()
-	if got, _ := out.GetCellValue("Result_1", "E2"); got != "" {
-		t.Fatalf("15-character row output = %q, want blank", got)
+	if got, _ := out.GetCellValue("Result_1", "E2"); got != "ABCDEFGHIJKLMNO" {
+		t.Fatalf("15-character row output = %q, want original code", got)
 	}
-	if got, _ := out.GetCellValue("Result_1", "E3"); got != "" {
-		t.Fatalf("16-character row output = %q, want blank", got)
+	if got, _ := out.GetCellValue("Result_1", "E3"); got != "ABCDEFGHIJKLMNOP" {
+		t.Fatalf("16-character row output = %q, want original code", got)
 	}
 	if got, _ := out.GetCellValue("Result_1", "E4"); got != "SKU-MATCH" {
 		t.Fatalf("processable row output = %q, want SKU-MATCH", got)

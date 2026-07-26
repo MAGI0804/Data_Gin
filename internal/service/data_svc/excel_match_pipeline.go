@@ -97,6 +97,7 @@ func runExcelMatchSteps(ctx context.Context, config ExcelMatchConfig, lookup Exc
 			if step.MatchMode == excelMatchModeOrderItemSKU {
 				specCode := excelMatchRowValue(row.values, layout.columnIndexes[step.SpecExcelColumn])
 				if skipExcelOrderItemSpecCode(specCode) {
+					row.participated = true
 					continue
 				}
 				row.participated = true

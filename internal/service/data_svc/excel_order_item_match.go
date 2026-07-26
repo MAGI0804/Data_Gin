@@ -204,7 +204,9 @@ func runExcelOrderItemMatchStep(
 			qty, qtyOK := parseExcelMatchNumber(excelMatchRowValue(row.values, qtyIndex))
 			switch {
 			case skipExcelOrderItemSpecCode(specCode):
-				result.Status, result.Reason = "skipped", "规格编码长度为15或16，无需处理"
+				value = specCode
+				result.MatchedValue = value
+				result.Status, result.Reason = "matched", "规格编码已是完整SKU，已直接写入"
 			case orderNo == "":
 				result.Status, result.Reason = "unmatched", "订单号为空"
 			case !validExcelSpecCode(specCode):
