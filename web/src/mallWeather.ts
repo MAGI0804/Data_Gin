@@ -103,7 +103,36 @@ export type MallWeatherOverview = {
   meta: MallWeatherMeta
 }
 
+export type MallWeatherRefreshKind = 'V26_FULL' | 'V3_LIFE_INDEX'
+
+export type MallWeatherRefreshRequest = {
+  kinds: MallWeatherRefreshKind[]
+  force: false
+  reason: string
+}
+
+export type MallWeatherPendingRefresh = {
+  key: string
+  body: MallWeatherRefreshRequest
+}
+
+export type MallWeatherRefreshResult = {
+  jobId: number
+  mallId: number
+  kinds: Array<{
+    kind: MallWeatherRefreshKind
+    status: 'QUEUED' | 'SKIPPED_FRESH'
+    outboxJobId?: number
+  }>
+}
+
+export type MallWeatherRefreshDisposition =
+  | { kind: 'accepted'; result: MallWeatherRefreshResult }
+  | { kind: 'uncertain' }
+  | { kind: 'rejected' }
+
 type JsonRecord = Record<string, unknown>
+type RefreshStorage = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>
 
 function isRecord(value: unknown): value is JsonRecord {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
@@ -253,10 +282,115 @@ export function parseMallWeatherOverview(payload: unknown): MallWeatherOverview 
   }
 }
 
+export function parseMallWeatherRefreshResult(payload: unknown): MallWeatherRefreshResult | null {
+  const data = envelopeData(payload)
+  if (!data || !Number.isSafeInteger(data.jobId) || Number(data.jobId) <= 0 || !Number.isSafeInteger(data.mallId) || Number(data.mallId) <= 0 || !Array.isArray(data.kinds) || data.kinds.length === 0) return null
+  const kinds: MallWeatherRefreshResult['kinds'] = []
+  const seenKinds = new Set<MallWeatherRefreshKind>()
+  for (const item of data.kinds) {
+    if (!isRecord(item) || (item.kind !== 'V26_FULL' && item.kind !== 'V3_LIFE_INDEX') ||
+      (item.status !== 'QUEUED' && item.status !== 'SKIPPED_FRESH')) return null
+    if (seenKinds.has(item.kind)) return null
+    seenKinds.add(item.kind)
+    const outboxJobId = numberValue(item, 'outboxJobId')
+    if (item.status === 'QUEUED' && (outboxJobId === undefined || !Number.isSafeInteger(outboxJobId) || outboxJobId <= 0)) return null
+    if (item.status === 'SKIPPED_FRESH' && outboxJobId !== undefined) return null
+    kinds.push({ kind: item.kind, status: item.status, ...(outboxJobId === undefined ? {} : { outboxJobId }) })
+  }
+  return { jobId: Number(data.jobId), mallId: Number(data.mallId), kinds }
+}
+
+export function mallWeatherRefreshDisposition(
+  response: { ok: boolean; status: number; data: unknown },
+  mallID: number,
+  request: MallWeatherRefreshRequest,
+): MallWeatherRefreshDisposition {
+  if (!response.ok) {
+    const uncertain = response.status === 0 || response.status === 408 || response.status === 409 || response.status >= 500 ||
+      (response.status >= 200 && response.status < 300)
+    return { kind: uncertain ? 'uncertain' : 'rejected' }
+  }
+  if (response.status !== 202) return { kind: 'uncertain' }
+  const result = parseMallWeatherRefreshResult(response.data)
+  if (!result || result.mallId !== mallID || result.kinds.length !== request.kinds.length) return { kind: 'uncertain' }
+  const returnedKinds = new Set(result.kinds.map((item) => item.kind))
+  if (request.kinds.some((kind) => !returnedKinds.has(kind))) return { kind: 'uncertain' }
+  return { kind: 'accepted', result }
+}
+
+export function mallWeatherRefreshResultMessage(result: MallWeatherRefreshResult) {
+  const queued = result.kinds.filter((item) => item.status === 'QUEUED').length
+  const skipped = result.kinds.filter((item) => item.status === 'SKIPPED_FRESH').length
+  if (queued > 0 && skipped > 0) return `${queued} 个采集任务已入队，${skipped} 项数据仍新鲜并已跳过。`
+  if (queued > 0) return `${queued} 个采集任务已进入异步队列；稍后重新加载天气即可查看结果。`
+  return `${skipped} 项数据仍新鲜，本次未重复入队。`
+}
+
 export function mallWeatherOverviewPath(mallID: number, timeZone = 'Asia/Shanghai') {
   if (!Number.isSafeInteger(mallID) || mallID <= 0) throw new Error('invalid mall id')
   const query = new URLSearchParams({ timeZone })
   return `/v1/malls/${mallID}/weather/overview?${query.toString()}`
+}
+
+export function mallWeatherRefreshPath(mallID: number) {
+  if (!Number.isSafeInteger(mallID) || mallID <= 0) throw new Error('invalid mall id')
+  return `/v1/malls/${mallID}/weather-refresh`
+}
+
+export function mallWeatherRefreshRequest(kinds: MallWeatherRefreshKind[], reason: string): MallWeatherRefreshRequest {
+  const normalizedReason = reason.trim()
+  const normalizedKinds = Array.from(new Set(kinds)).sort() as MallWeatherRefreshKind[]
+  if (normalizedKinds.length === 0 || normalizedKinds.some((kind) => kind !== 'V26_FULL' && kind !== 'V3_LIFE_INDEX')) {
+    throw new Error('invalid refresh kinds')
+  }
+  if (!normalizedReason || Array.from(normalizedReason).length > 500 || /[\0\r\n]/.test(normalizedReason)) {
+    throw new Error('invalid refresh reason')
+  }
+  return { kinds: normalizedKinds, force: false, reason: normalizedReason }
+}
+
+export function mallWeatherRefreshKey(seed?: string) {
+  const value = seed || globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`
+  const key = `weather-refresh:${value}`
+  if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{7,254}$/.test(key)) throw new Error('invalid refresh key')
+  return key
+}
+
+export function loadMallWeatherPendingRefresh(actorID: string, mallID: number, storage: RefreshStorage): MallWeatherPendingRefresh | null {
+  const storageKey = mallWeatherPendingRefreshStorageKey(actorID, mallID)
+  const raw = storage.getItem(storageKey)
+  if (!raw) return null
+  try {
+    const snapshot: unknown = JSON.parse(raw)
+    if (!isRecord(snapshot) || typeof snapshot.key !== 'string' || !isRecord(snapshot.body) || snapshot.body.force !== false ||
+      !Array.isArray(snapshot.body.kinds) || !snapshot.body.kinds.every((kind) => kind === 'V26_FULL' || kind === 'V3_LIFE_INDEX') ||
+      typeof snapshot.body.reason !== 'string' || !validMallWeatherRefreshKey(snapshot.key)) return null
+    const body = mallWeatherRefreshRequest(snapshot.body.kinds as MallWeatherRefreshKind[], snapshot.body.reason)
+    return { key: snapshot.key, body }
+  } catch {
+    return null
+  }
+}
+
+export function saveMallWeatherPendingRefresh(actorID: string, mallID: number, pending: MallWeatherPendingRefresh, storage: RefreshStorage) {
+  if (!validMallWeatherRefreshKey(pending.key)) throw new Error('invalid refresh key')
+  const body = mallWeatherRefreshRequest(pending.body.kinds, pending.body.reason)
+  storage.setItem(mallWeatherPendingRefreshStorageKey(actorID, mallID), JSON.stringify({ key: pending.key, body }))
+}
+
+export function clearMallWeatherPendingRefresh(actorID: string, mallID: number, storage: RefreshStorage) {
+  storage.removeItem(mallWeatherPendingRefreshStorageKey(actorID, mallID))
+}
+
+function mallWeatherPendingRefreshStorageKey(actorID: string, mallID: number) {
+  const numericActorID = Number(actorID)
+  if (!/^[1-9]\d*$/.test(actorID) || !Number.isSafeInteger(numericActorID)) throw new Error('invalid actor id')
+  if (!Number.isSafeInteger(mallID) || mallID <= 0) throw new Error('invalid mall id')
+  return `mall-weather-pending-refresh:${actorID}:${mallID}`
+}
+
+function validMallWeatherRefreshKey(key: string) {
+  return /^[A-Za-z0-9][A-Za-z0-9._:-]{7,254}$/.test(key)
 }
 
 export function mallWeatherFreshnessLabel(status: string) {

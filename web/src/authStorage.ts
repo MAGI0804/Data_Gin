@@ -5,17 +5,28 @@ export const defaultTokenLifetimeMs = 24 * 60 * 60 * 1000
 
 type TokenStorage = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>
 
-export function tokenExpiresAt(token: string): number | null {
+function decodedTokenParts(token: string): string[] | null {
   try {
     const normalized = token.replace(/-/g, '+').replace(/_/g, '/')
     const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, '=')
     const parts = globalThis.atob(padded).split(':')
-    const rawExpiry = parts.length >= 5 ? parts[2] : parts.length >= 3 ? parts[1] : ''
-    const expirySeconds = Number(rawExpiry)
-    return Number.isSafeInteger(expirySeconds) && expirySeconds > 0 ? expirySeconds * 1000 : null
+    return parts.length === 5 || parts.length === 3 ? parts : null
   } catch {
     return null
   }
+}
+
+export function tokenActorID(token: string): string | null {
+  const actorID = decodedTokenParts(token)?.[0] ?? ''
+  const numericActorID = Number(actorID)
+  return /^[1-9]\d*$/.test(actorID) && Number.isSafeInteger(numericActorID) ? actorID : null
+}
+
+export function tokenExpiresAt(token: string): number | null {
+  const parts = decodedTokenParts(token)
+  const rawExpiry = parts?.length === 5 ? parts[2] : parts?.[1] ?? ''
+  const expirySeconds = Number(rawExpiry)
+  return Number.isSafeInteger(expirySeconds) && expirySeconds > 0 ? expirySeconds * 1000 : null
 }
 
 export function storedTokenExpiresAt(storage: TokenStorage): number | null {

@@ -7,6 +7,7 @@ import {
   loadStoredToken,
   saveStoredToken,
   storedTokenExpiresAt,
+  tokenActorID,
   tokenExpiresAt,
 } from '../.test-dist/authStorage.js'
 
@@ -33,6 +34,14 @@ function encodeToken(value) {
 test('reads expiry from full and compact backend token formats', () => {
   assert.equal(tokenExpiresAt(encodeToken('42:r:2000000000:1900000000:abcdef12')), 2_000_000_000_000)
   assert.equal(tokenExpiresAt(encodeToken('42:2000000000:abcdef12')), 2_000_000_000_000)
+})
+
+test('reads a stable actor id only from supported backend token formats', () => {
+  assert.equal(tokenActorID(encodeToken('42:r:2000000000:1900000000:abcdef12')), '42')
+  assert.equal(tokenActorID(encodeToken('7:2000000000:abcdef12')), '7')
+  assert.equal(tokenActorID(encodeToken('0:2000000000:abcdef12')), null)
+  assert.equal(tokenActorID(encodeToken('42:r:2000000000:abcdef12')), null)
+  assert.equal(tokenActorID('not-a-valid-token'), null)
 })
 
 test('stores a malformed token for the default one-day lifetime', () => {

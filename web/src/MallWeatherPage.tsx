@@ -1,16 +1,26 @@
-import { type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { type FormEvent, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AlertTriangle, CloudRain, MapPin, RefreshCcw, Thermometer, Wind } from 'lucide-react'
 import './MallWeatherPage.css'
 import {
   mallWeatherChartSegments,
+  clearMallWeatherPendingRefresh,
+  loadMallWeatherPendingRefresh,
   mallWeatherFreshnessLabel,
   mallWeatherMetric,
   mallWeatherOverviewPath,
+  mallWeatherRefreshKey,
+  mallWeatherRefreshDisposition,
+  mallWeatherRefreshPath,
+  mallWeatherRefreshRequest,
+  mallWeatherRefreshResultMessage,
+  saveMallWeatherPendingRefresh,
   mallWeatherSkyconLabel,
   parseMallWeatherMallList,
   parseMallWeatherOverview,
   type MallWeatherMall,
   type MallWeatherOverview,
+  type MallWeatherPendingRefresh,
+  type MallWeatherRefreshRequest,
 } from './mallWeather'
 
 type MallWeatherApiResult = {
@@ -21,12 +31,12 @@ type MallWeatherApiResult = {
 
 type MallWeatherApiClient = (
   path: string,
-  options?: { method?: 'GET'; showResult?: boolean; silentLoading?: boolean },
+  options?: { method?: 'GET' | 'POST'; body?: unknown; headers?: Record<string, string>; showResult?: boolean; silentLoading?: boolean },
 ) => Promise<MallWeatherApiResult>
 
 type LoadState = 'idle' | 'loading' | 'success' | 'error'
 
-export function MallWeatherPage({ client }: { client: MallWeatherApiClient }) {
+export function MallWeatherPage({ actorID, client }: { actorID: string | null; client: MallWeatherApiClient }) {
   const [malls, setMalls] = useState<MallWeatherMall[]>([])
   const [nextAfterID, setNextAfterID] = useState(0)
   const [mallState, setMallState] = useState<LoadState>('idle')
@@ -173,6 +183,9 @@ export function MallWeatherPage({ client }: { client: MallWeatherApiClient }) {
 
         <section className="mall-weather-content">
           {!selectedMall && mallState !== 'loading' && <EmptyState title="请选择商场" detail="选择左侧商场后查看天气概览。" />}
+          {selectedMall && (actorID
+            ? <ManualRefreshPanel actorID={actorID} mall={selectedMall} client={client} key={`${actorID}:${selectedMall.id}`} />
+            : <RequestError message="无法识别当前登录账号，请退出后重新登录再提交天气刷新。" onRetry={() => window.location.reload()} />)}
           {selectedMall && overviewState === 'loading' && !selectedOverview && <LoadingState label={`正在加载${selectedMall.nameCn}天气`} />}
           {selectedMall && overviewState === 'error' && <RequestError message={overviewError} onRetry={() => void loadOverview(selectedMall.id)} />}
           {selectedMall && selectedOverview && <WeatherOverview mall={selectedMall} overview={selectedOverview} refreshing={overviewState === 'loading'} onRefresh={() => void loadOverview(selectedMall.id)} />}
@@ -180,6 +193,94 @@ export function MallWeatherPage({ client }: { client: MallWeatherApiClient }) {
       </div>
     </div>
   )
+}
+
+function ManualRefreshPanel({ actorID, mall, client }: { actorID: string; mall: MallWeatherMall; client: MallWeatherApiClient }) {
+  const [pending, setPending] = useState<MallWeatherPendingRefresh | null>(() => loadMallWeatherPendingRefresh(actorID, mall.id, window.sessionStorage))
+  const [profile, setProfile] = useState<'weather' | 'life' | 'all'>(() => refreshProfile(pending?.body.kinds))
+  const [reason, setReason] = useState(() => pending?.body.reason || '管理端手工刷新')
+  const [submitting, setSubmitting] = useState(false)
+  const [message, setMessage] = useState('')
+  const [error, setError] = useState('')
+  const reasonHelpID = `mall-weather-refresh-reason-help-${actorID}-${mall.id}`
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    let request = pending
+    if (!request) {
+      const kinds = profile === 'weather' ? ['V26_FULL'] as const : profile === 'life' ? ['V3_LIFE_INDEX'] as const : ['V26_FULL', 'V3_LIFE_INDEX'] as const
+      let body: MallWeatherRefreshRequest
+      try {
+        body = mallWeatherRefreshRequest([...kinds], reason)
+      } catch {
+        setError('请填写单行刷新原因，最多 500 个字符')
+        setMessage('')
+        return
+      }
+      request = { key: mallWeatherRefreshKey(), body }
+      saveMallWeatherPendingRefresh(actorID, mall.id, request, window.sessionStorage)
+      setPending(request)
+    }
+    setSubmitting(true)
+    setError('')
+    setMessage('')
+    const response = await client(mallWeatherRefreshPath(mall.id), {
+      method: 'POST',
+      body: request.body,
+      headers: { 'Idempotency-Key': request.key },
+      showResult: false,
+      silentLoading: true,
+    })
+    setSubmitting(false)
+    const disposition = mallWeatherRefreshDisposition(response, mall.id, request.body)
+    if (disposition.kind === 'rejected') {
+      clearMallWeatherPendingRefresh(actorID, mall.id, window.sessionStorage)
+      setPending(null)
+      setError(weatherRequestError(response.status, '天气刷新任务提交失败', '当前账号缺少 weather.refresh 权限'))
+      return
+    }
+    if (disposition.kind === 'uncertain') {
+      setError('刷新响应暂不确定；已保留原请求，请使用“重试原请求”确认。')
+      return
+    }
+    clearMallWeatherPendingRefresh(actorID, mall.id, window.sessionStorage)
+    setPending(null)
+    setMessage(mallWeatherRefreshResultMessage(disposition.result))
+  }
+
+  function changeProfile(value: string) {
+    if (value !== 'weather' && value !== 'life' && value !== 'all') return
+    setProfile(value)
+  }
+
+  function changeReason(value: string) {
+    setReason(value)
+  }
+
+  return (
+    <section className="workbench-panel mall-weather-refresh-panel">
+      <div className="mall-weather-section-title"><div><strong>手工刷新</strong><span>提交异步采集任务，不阻塞等待供应商</span></div><RefreshCcw aria-hidden="true" /></div>
+      <form className="mall-weather-refresh-form" onSubmit={submit} aria-busy={submitting}>
+        <label><span>采集范围</span><select value={profile} onChange={(event) => changeProfile(event.currentTarget.value)} disabled={submitting || Boolean(pending)}>
+          <option value="all">全量天气 + 生活指数</option>
+          <option value="weather">全量天气</option>
+          <option value="life">生活指数</option>
+        </select></label>
+        <label><span>刷新原因</span><input value={reason} onChange={(event) => changeReason(event.currentTarget.value)} disabled={submitting || Boolean(pending)} aria-describedby={reasonHelpID} />
+          <small id={reasonHelpID}>必填单行文本，最多 500 个字符</small>
+        </label>
+        <button className="primary" type="submit" disabled={submitting}>{submitting ? '提交中' : pending ? '重试原请求' : '提交刷新'}</button>
+      </form>
+      {message && <p className="mall-weather-action-message" role="status">{message}</p>}
+      {error && <p className="mall-weather-action-message error" role="alert">{error}</p>}
+    </section>
+  )
+}
+
+function refreshProfile(kinds: MallWeatherRefreshRequest['kinds'] | undefined): 'weather' | 'life' | 'all' {
+  if (kinds?.length === 1 && kinds[0] === 'V26_FULL') return 'weather'
+  if (kinds?.length === 1 && kinds[0] === 'V3_LIFE_INDEX') return 'life'
+  return 'all'
 }
 
 function WeatherOverview({ mall, overview, refreshing, onRefresh }: { mall: MallWeatherMall; overview: MallWeatherOverview; refreshing: boolean; onRefresh: () => void }) {

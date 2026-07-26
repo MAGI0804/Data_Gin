@@ -22,7 +22,7 @@ import {
 } from 'lucide-react'
 import './App.css'
 import { effectiveApiStatus } from './apiResponse'
-import { clearStoredToken, loadStoredToken, saveStoredToken, storedTokenExpiresAt } from './authStorage'
+import { clearStoredToken, loadStoredToken, saveStoredToken, storedTokenExpiresAt, tokenActorID } from './authStorage'
 import { MallWeatherPage } from './MallWeatherPage'
 import {
   buildExcelExportConfig,
@@ -48,6 +48,7 @@ type ApiResult = {
 type ApiClientOptions = {
   method?: 'GET' | 'POST' | 'PUT'
   body?: unknown
+  headers?: Record<string, string>
   showResult?: boolean
   silentLoading?: boolean
 }
@@ -684,6 +685,7 @@ const builtinMethods: MethodDisplay[] = [
 
 function App() {
   const [token, setToken] = useState(() => loadStoredToken(window.localStorage))
+  const actorID = useMemo(() => tokenActorID(token), [token])
   const [authenticated, setAuthenticated] = useState(() => Boolean(token))
   const [activeNav, setActiveNav] = useState<NavKey>(navFromHash)
   const [navQuery, setNavQuery] = useState('')
@@ -714,6 +716,7 @@ function App() {
           method,
           headers: {
             'Content-Type': 'application/json',
+            ...options.headers,
             ...(token ? { token } : {}),
           },
           body: method === 'GET' || options.body === undefined ? undefined : JSON.stringify(options.body),
@@ -996,7 +999,7 @@ function App() {
         {activeNav === 'runs' && <RunsQueryPage runs={runs} onLoadSteps={loadStepRuns} />}
         {activeNav === 'delivery_logs' && <DeliveryLogsQueryPage logs={deliveryLogs} onRetryLog={retryDeliveryLog} />}
         {activeNav === 'step_runs' && <StepRunsQueryPage runs={runs} stepRuns={stepRuns} onLoadSteps={loadStepRuns} />}
-        {activeNav === 'mall_weather' && <MallWeatherPage client={client} />}
+        {activeNav === 'mall_weather' && <MallWeatherPage actorID={actorID} client={client} />}
         {activeNav === 'sources' && <SourcesQueryPage sources={sources} />}
         {activeNav === 'methods' && <MethodsView methods={methods} coreMethods={coreMethods} onToggle={toggleTarget} />}
         {activeNav === 'receive' && <RawRecordsQueryPage title="接口接收记录" records={receivedData} />}

@@ -29,6 +29,30 @@
   gap: 14px;
 }
 
+.mall-weather-refresh-form {
+  display: grid;
+  grid-template-columns: minmax(180px, 0.8fr) minmax(240px, 1.6fr) auto;
+  align-items: end;
+  gap: 12px;
+}
+
+.mall-weather-action-message {
+  margin: 10px 0 0;
+  border-left: 3px solid #111111;
+  background: #f0f0f0;
+  font-size: 12px;
+  padding: 8px 10px;
+}
+
+.mall-weather-action-message.error {
+  border: 1px solid #111111;
+}
+
+.mall-weather-refresh-form label small {
+  color: var(--muted);
+  font-size: 11px;
+}
+
 .mall-weather-malls,
 .mall-weather-content,
 .mall-weather-mall-list,
@@ -300,6 +324,7 @@
 
 @media (max-width: 840px) {
   .mall-weather-toolbar,
+  .mall-weather-refresh-form,
   .mall-weather-layout,
   .mall-weather-overview-grid,
   .mall-weather-meta,
