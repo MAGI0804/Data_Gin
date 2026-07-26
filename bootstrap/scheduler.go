@@ -45,6 +45,8 @@ func setupScheduler() {
 
 	registerDatabaseDeliveryTasks(scheduler)
 
+	registerExcelMatchScheduledTasks(scheduler)
+
 	registerMallWeatherScheduledTasks(scheduler)
 
 	go func(scheduler *asynq.Scheduler) {
@@ -57,6 +59,17 @@ func setupScheduler() {
 	global.QueueJobScheduler = scheduler
 
 	console.Success("Scheduler started successfully")
+}
+
+func registerExcelMatchScheduledTasks(scheduler *asynq.Scheduler) {
+	cleanupTask, err := job.NewExcelMatchCleanupTask()
+	if err != nil {
+		console.Warning("Failed to create Excel match cleanup task: %v", err)
+		return
+	}
+	if _, err := scheduler.Register(job.ExcelMatchCleanupCron, cleanupTask); err != nil {
+		console.Warning("Failed to register Excel match cleanup: %v", err)
+	}
 }
 
 func registerMallWeatherScheduledTasks(scheduler *asynq.Scheduler) {

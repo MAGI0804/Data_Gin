@@ -47,6 +47,11 @@ func setupQueueJob() {
 	mux.Use(jobLoggingMiddleware)
 
 	addQueueJob(mux)
+	if cleanupTask, err := job.NewExcelMatchCleanupTask(); err != nil {
+		console.Warning("Failed to create initial Excel match cleanup task: %v", err)
+	} else if _, err := client.Enqueue(cleanupTask); err != nil && !errors.Is(err, asynq.ErrDuplicateTask) {
+		console.Warning("Failed to enqueue initial Excel match cleanup task: %v", err)
+	}
 	if config.GetBool("cfg.mall_weather.enabled") {
 		geocodeProcessor, err := data_svc.NewMallGeocodeProcessor()
 		if err != nil {
@@ -93,12 +98,6 @@ func setupQueueJob() {
 		}
 	}(mux, server)
 
-	go func() {
-		if err := data_svc.NewExcelMatchJobService().CleanupExpiredJobs(context.Background()); err != nil {
-			logger.Error("Excel Match Job Cleanup Failed", zap.Error(err))
-		}
-	}()
-
 	startMallWeatherOutboxDispatcher()
 
 }
@@ -125,6 +124,25 @@ type mallWeatherFeishuProcessor interface {
 
 type mallWeatherExportCleaner interface {
 	Cleanup(context.Context) (data_svc.MallWeatherExportCleanupResult, error)
+}
+
+type excelMatchCleanupRunner interface {
+	CleanupExpiredJobs(context.Context) error
+}
+
+func newExcelMatchCleanupHandler(cleaner excelMatchCleanupRunner) asynq.HandlerFunc {
+	return func(ctx context.Context, task *asynq.Task) error {
+		if cleaner == nil {
+			return fmt.Errorf("excel match cleanup handler: cleaner is not configured")
+		}
+		if task == nil {
+			return fmt.Errorf("%w: excel match cleanup task is nil", asynq.SkipRetry)
+		}
+		if err := job.DecodeExcelMatchCleanupTaskPayload(task.Payload()); err != nil {
+			return fmt.Errorf("%w: %v", asynq.SkipRetry, err)
+		}
+		return cleaner.CleanupExpiredJobs(ctx)
+	}
 }
 
 func registerMallWeatherFeishuWorker(
@@ -303,6 +321,7 @@ func addQueueJob(mux *asynq.ServeMux) {
 	mux.HandleFunc(job.TypeXianOrderSync, job.HandleXianOrderSyncTask)
 	mux.HandleFunc(job.TypeDeliveryTaskRun, handleDeliveryTaskRun)
 	mux.HandleFunc(job.TypeExcelMatchExport, handleExcelMatchExport)
+	mux.HandleFunc(job.TypeExcelMatchCleanup, newExcelMatchCleanupHandler(data_svc.NewExcelMatchJobService()))
 	mux.HandleFunc(job.TypeBojunOrderFetch, handleBojunOrderFetch)
 	mux.HandleFunc(job.TypeYouzanDistributionOrderSync, handleYouzanDistributionOrderSync)
 }

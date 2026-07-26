@@ -66,6 +66,7 @@ const (
 	excelMatchOSSUploadBytesPerMinute = 32 * 1024 * 1024
 	excelMatchOSSProgressBytes        = 32 * 1024 * 1024
 	excelMatchOSSProgressInterval     = 15 * time.Second
+	excelMatchRunningStaleAfter       = 35 * time.Minute
 )
 
 var excelizeTempMu sync.Mutex
@@ -387,7 +388,7 @@ func (s *ExcelMatchJobService) GetJob(ctx context.Context, id uint) (*model.Exce
 	if err != nil {
 		return nil, err
 	}
-	s.refreshExpiredJob(ctx, matchJob)
+	refreshExpiredJob(matchJob)
 	s.refreshDownloadState(ctx, matchJob)
 	return matchJob, nil
 }
@@ -402,7 +403,7 @@ func (s *ExcelMatchJobService) ListJobs(ctx context.Context, limit int) ([]model
 		return nil, err
 	}
 	for i := range jobs {
-		s.refreshExpiredJob(ctx, &jobs[i])
+		refreshExpiredJob(&jobs[i])
 		s.refreshDownloadState(ctx, &jobs[i])
 	}
 	return jobs, nil
@@ -722,8 +723,12 @@ func (s *ExcelMatchJobService) ProcessJob(ctx context.Context, id uint) error {
 		}
 	}
 
-	if err := s.jobDAO.MarkRunning(ctx, id); err != nil {
+	claimed, err := s.jobDAO.MarkRunning(ctx, id, time.Now().Add(-excelMatchRunningStaleAfter))
+	if err != nil {
 		return err
+	}
+	if !claimed {
+		return fmt.Errorf("%w: Excel任务已过期、已完成或正在由其他Worker处理", asynq.SkipRetry)
 	}
 	s.logJob(ctx, id, "info", "任务开始处理", map[string]interface{}{
 		"operation": config.Operation,
@@ -763,7 +768,26 @@ func (s *ExcelMatchJobService) ProcessJob(ctx context.Context, id uint) error {
 	if config.Operation == excelOperationExportMatch && storage.OSSStorageEnabled() {
 		fileSize := fileSizeOrZero(matchJob.ResultFilePath)
 		uploadTimeout := excelMatchOSSUploadTimeout(fileSize)
-		objectKey := excelMatchResultObjectKey(id, time.Now())
+		objectKey := strings.TrimSpace(matchJob.ResultObjectKey)
+		if objectKey == "" {
+			objectKey = excelMatchResultObjectKey(id, time.Now())
+		}
+		if !validExcelMatchResultObjectKey(objectKey, id, storage.BuildObjectKey("excel-match-results")) {
+			err := errors.New("OSS结果文件Key非法")
+			_ = s.jobDAO.MarkFailed(ctx, id, err.Error(), expiresAt)
+			s.logJob(ctx, id, "error", "OSS结果文件Key校验失败", map[string]interface{}{"object_key": objectKey})
+			return err
+		}
+		if err := s.jobDAO.UpdateResultStorage(ctx, id, objectKey, ""); err != nil {
+			_ = s.jobDAO.MarkFailed(ctx, id, err.Error(), expiresAt)
+			s.logJob(ctx, id, "error", "上传前保存OSS结果文件Key失败", map[string]interface{}{
+				"object_key": objectKey,
+				"error":      err.Error(),
+			})
+			return err
+		}
+		matchJob.ResultObjectKey = objectKey
+		matchJob.ResultURL = ""
 		s.logJob(ctx, id, "info", "Excel匹配完成，开始上传结果文件到OSS", map[string]interface{}{
 			"object_key":      objectKey,
 			"file_size":       fileSize,
@@ -797,18 +821,13 @@ func (s *ExcelMatchJobService) ProcessJob(ctx context.Context, id uint) error {
 }
 
 func (s *ExcelMatchJobService) CleanupExpiredJobs(ctx context.Context) error {
-	jobs, err := s.jobDAO.FindExpired(ctx, time.Now(), 100)
-	if err != nil {
-		return err
+	if s == nil || s.jobDAO == nil || ctx == nil {
+		return errors.New("excel match cleanup: invalid service")
 	}
-	for _, matchJob := range jobs {
-		s.cleanupResultObject(ctx, matchJob)
-		if matchJob.WorkDir != "" && isPathInside(excelMatchJobDir(matchJob.ID), matchJob.WorkDir) {
-			_ = os.RemoveAll(matchJob.WorkDir)
-		}
-		_ = s.jobDAO.MarkExpired(ctx, matchJob.ID)
-	}
-	return s.CleanupExpiredUploads(ctx)
+	cleaner := newExcelMatchJobCleaner(s.jobDAO, s.logJob)
+	_, cleanupErr := cleaner.Cleanup(ctx)
+	uploadErr := s.CleanupExpiredUploads(ctx)
+	return errors.Join(cleanupErr, uploadErr)
 }
 
 func (s *ExcelMatchJobService) CleanupExpiredUploads(ctx context.Context) error {
@@ -1406,20 +1425,6 @@ func excelMatchResultObjectKey(jobID uint, now time.Time) string {
 	)
 }
 
-func (s *ExcelMatchJobService) cleanupResultObject(ctx context.Context, matchJob model.ExcelMatchJob) {
-	if strings.TrimSpace(matchJob.ResultObjectKey) == "" || !storage.OSSStorageEnabled() {
-		return
-	}
-	client, err := storage.NewOSSClientFromConfig()
-	if err != nil {
-		s.logJob(ctx, matchJob.ID, "warn", "初始化OSS清理客户端失败", map[string]interface{}{"error": err.Error()})
-		return
-	}
-	if err := client.DeleteObject(ctx, matchJob.ResultObjectKey); err != nil {
-		s.logJob(ctx, matchJob.ID, "warn", "删除OSS结果文件失败", map[string]interface{}{"error": err.Error()})
-	}
-}
-
 func statsDetail(stats ExcelMatchJobStats) map[string]interface{} {
 	return map[string]interface{}{
 		"total_rows":     stats.TotalRows,
@@ -1749,12 +1754,11 @@ func isExcelMatchJobExpired(matchJob *model.ExcelMatchJob) bool {
 	return matchJob.ExpiresAt != nil && time.Now().After(matchJob.ExpiresAt.Time)
 }
 
-func (s *ExcelMatchJobService) refreshExpiredJob(ctx context.Context, matchJob *model.ExcelMatchJob) {
-	if !isExcelMatchJobExpired(matchJob) || matchJob.Status == excelMatchStatusExpired {
+func refreshExpiredJob(matchJob *model.ExcelMatchJob) {
+	if !isExcelMatchJobExpired(matchJob) || matchJob.Status == excelMatchStatusExpired ||
+		(matchJob.Status != excelMatchStatusSuccess && matchJob.Status != "failed") {
 		return
 	}
-	_ = os.RemoveAll(matchJob.WorkDir)
-	_ = s.jobDAO.MarkExpired(ctx, matchJob.ID)
 	matchJob.Status = excelMatchStatusExpired
 }
 

@@ -19,6 +19,8 @@ type ExcelMatchJobDAO struct {
 	db *gorm.DB
 }
 
+var ErrExcelMatchCleanupLeaseLost = errors.New("excel match cleanup: lease lost")
+
 var allowedBojunExcelFields = map[string]struct{}{
 	"billdate":             {},
 	"c_store_code":         {},
@@ -129,7 +131,7 @@ func (dao *ExcelMatchJobDAO) DeleteScheme(ctx context.Context, id uint) error {
 func (dao *ExcelMatchJobDAO) UpdatePaths(ctx context.Context, id uint, workDir, sourcePath, resultPath string) error {
 	return dao.db.WithContext(ctx).
 		Model(&model.ExcelMatchJob{}).
-		Where("id = ?", id).
+		Where("id = ? AND result_object_key = ?", id, "").
 		Updates(map[string]interface{}{
 			"work_dir":         workDir,
 			"source_file_path": sourcePath,
@@ -149,16 +151,36 @@ func (dao *ExcelMatchJobDAO) UpdateResultStorage(ctx context.Context, id uint, o
 		}).Error
 }
 
-func (dao *ExcelMatchJobDAO) MarkRunning(ctx context.Context, id uint) error {
+func (dao *ExcelMatchJobDAO) MarkRunning(ctx context.Context, id uint, staleBefore time.Time) (bool, error) {
 	now := time.Now()
-	return dao.db.WithContext(ctx).
-		Model(&model.ExcelMatchJob{}).
-		Where("id = ?", id).
+	result := dao.markRunningClaimQuery(ctx, id, now, staleBefore).
 		Updates(map[string]interface{}{
 			"status":     "running",
 			"started_at": model.TimeNormal{Time: now},
 			"updated_at": now.Unix(),
-		}).Error
+		})
+	return result.RowsAffected == 1, result.Error
+}
+
+func (dao *ExcelMatchJobDAO) markRunningClaimQuery(
+	ctx context.Context,
+	id uint,
+	now time.Time,
+	staleBefore time.Time,
+) *gorm.DB {
+	// A stale running attempt may recover after its original expiry. The cleaner
+	// deliberately excludes running rows, so recovery is what moves it back to
+	// a terminal state with a fresh retention window.
+	return dao.db.WithContext(ctx).
+		Model(&model.ExcelMatchJob{}).
+		Where("id = ?", id).
+		Where(
+			`(status IN ? AND (expires_at IS NULL OR expires_at > ?)) OR
+				(status = ? AND updated_at <= ?)`,
+			[]string{"pending", "failed"},
+			now,
+			"running", staleBefore.Unix(),
+		)
 }
 
 func (dao *ExcelMatchJobDAO) UpdateProgress(ctx context.Context, id uint, stats ExcelMatchJobStats) error {
@@ -210,25 +232,140 @@ func (dao *ExcelMatchJobDAO) MarkFailed(ctx context.Context, id uint, errMessage
 func (dao *ExcelMatchJobDAO) MarkExpired(ctx context.Context, id uint) error {
 	return dao.db.WithContext(ctx).
 		Model(&model.ExcelMatchJob{}).
-		Where("id = ?", id).
+		Where("id = ? AND result_object_key = ?", id, "").
 		Updates(map[string]interface{}{
-			"status":     "expired",
-			"updated_at": time.Now().Unix(),
+			"status":            "expired",
+			"result_object_key": "",
+			"result_url":        "",
+			"work_dir":          "",
+			"source_file_path":  "",
+			"result_file_path":  "",
+			"updated_at":        time.Now().Unix(),
 		}).Error
 }
 
-func (dao *ExcelMatchJobDAO) FindExpired(ctx context.Context, now time.Time, limit int) ([]model.ExcelMatchJob, error) {
+func (dao *ExcelMatchJobDAO) ListExpiredCleanupCandidates(
+	ctx context.Context,
+	now time.Time,
+	staleBefore time.Time,
+	afterID uint,
+	limit int,
+) ([]model.ExcelMatchJob, error) {
 	if limit <= 0 || limit > 500 {
 		limit = 100
 	}
-
 	var jobs []model.ExcelMatchJob
-	err := dao.db.WithContext(ctx).
-		Where("expires_at IS NOT NULL AND expires_at <= ? AND status IN ?", now, []string{"success", "failed"}).
+	err := dao.expiredCleanupCandidateQuery(ctx, now, staleBefore).
+		Where("id > ?", afterID).
 		Order("id ASC").
 		Limit(limit).
 		Find(&jobs).Error
 	return jobs, err
+}
+
+func (dao *ExcelMatchJobDAO) ClaimExpiredCleanup(
+	ctx context.Context,
+	candidate model.ExcelMatchJob,
+	claimAt time.Time,
+	staleBefore time.Time,
+) (bool, error) {
+	result := dao.expiredCleanupCandidateQuery(ctx, claimAt, staleBefore).
+		Where(
+			"id = ? AND status = ? AND result_object_key = ? AND updated_at = ?",
+			candidate.ID,
+			candidate.Status,
+			candidate.ResultObjectKey,
+			candidate.UpdatedAt,
+		).
+		Updates(map[string]interface{}{
+			"status":     "expired",
+			"updated_at": claimAt.Unix(),
+		})
+	if result.Error != nil {
+		return false, result.Error
+	}
+	return result.RowsAffected == 1, nil
+}
+
+func (dao *ExcelMatchJobDAO) FinishExpiredCleanup(
+	ctx context.Context,
+	id uint,
+	expectedObjectKey string,
+	claimUnix int64,
+) error {
+	result := dao.expiredCleanupLeaseQuery(ctx, id, expectedObjectKey, claimUnix).
+		Updates(map[string]interface{}{
+			"status":            "expired",
+			"result_object_key": "",
+			"result_url":        "",
+			"work_dir":          "",
+			"source_file_path":  "",
+			"result_file_path":  "",
+			"updated_at":        time.Now().Unix(),
+		})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected != 1 {
+		return ErrExcelMatchCleanupLeaseLost
+	}
+	return nil
+}
+
+func (dao *ExcelMatchJobDAO) ReleaseExpiredCleanup(
+	ctx context.Context,
+	candidate model.ExcelMatchJob,
+	claimUnix int64,
+) error {
+	result := dao.expiredCleanupLeaseQuery(ctx, candidate.ID, candidate.ResultObjectKey, claimUnix).
+		Updates(map[string]interface{}{
+			"status":     candidate.Status,
+			"updated_at": candidate.UpdatedAt,
+		})
+	if result.Error != nil {
+		return result.Error
+	}
+	if result.RowsAffected != 1 {
+		return ErrExcelMatchCleanupLeaseLost
+	}
+	return nil
+}
+
+func (dao *ExcelMatchJobDAO) expiredCleanupCandidateQuery(
+	ctx context.Context,
+	now time.Time,
+	staleBefore time.Time,
+) *gorm.DB {
+	return dao.db.WithContext(ctx).
+		Model(&model.ExcelMatchJob{}).
+		Where("expires_at IS NOT NULL AND expires_at <= ?", now).
+		Where(
+			`status IN ? OR
+				(status = ? AND updated_at <= ? AND (
+					result_object_key <> ? OR result_url <> ? OR work_dir <> ? OR
+					source_file_path <> ? OR result_file_path <> ?
+				))`,
+			[]string{"success", "failed", "pending"},
+			"expired", staleBefore.Unix(),
+			"", "", "", "", "",
+		)
+}
+
+func (dao *ExcelMatchJobDAO) expiredCleanupLeaseQuery(
+	ctx context.Context,
+	id uint,
+	expectedObjectKey string,
+	claimUnix int64,
+) *gorm.DB {
+	return dao.db.WithContext(ctx).
+		Model(&model.ExcelMatchJob{}).
+		Where(
+			"id = ? AND status = ? AND result_object_key = ? AND updated_at = ?",
+			id,
+			"expired",
+			expectedObjectKey,
+			claimUnix,
+		)
 }
 
 type ExcelMatchJobStats struct {
