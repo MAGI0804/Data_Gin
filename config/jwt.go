@@ -9,6 +9,9 @@ func init() {
 	config.Add("cfg.jwt", func() map[string]interface{} {
 		return map[string]interface{}{
 
+			// jwt 加密 key
+			"key": config.Get("JWT.Key"),
+
 			// 过期时间，单位是分钟，默认一天
 			"expire_time": config.Get("JWT.ExpireTime", 1440),
 

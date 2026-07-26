@@ -25,27 +25,13 @@ const (
 	EnvFeishuWeatherAlertSheetID     = "FEISHU_WEATHER_ALERT_SHEET_ID"
 	EnvFeishuWeatherLifeIndexSheetID = "FEISHU_WEATHER_LIFE_INDEX_SHEET_ID"
 	EnvFeishuWeatherFolderToken      = "FEISHU_WEATHER_FOLDER_TOKEN"
-	EnvAliyunOSSAccessKeyID          = "ALIYUN_OSS_ACCESS_KEY_ID"
-	EnvAliyunOSSAccessKeySecret      = "ALIYUN_OSS_ACCESS_KEY_SECRET"
-	EnvAliyunOSSSecurityToken        = "ALIYUN_OSS_SECURITY_TOKEN"
-	EnvJWTKey                        = "JWT_KEY"
-	EnvDBUsername                    = "DB_USERNAME"
-	EnvDBPassword                    = "DB_PASSWORD"
-	EnvRedisUsername                 = "REDIS_USERNAME"
-	EnvRedisPassword                 = "REDIS_PASSWORD"
-	EnvCacheUsername                 = "CACHE_USERNAME"
-	EnvCachePassword                 = "CACHE_PASSWORD"
-	EnvQueueJobRedisUsername         = "QUEUE_JOB_REDIS_USERNAME"
-	EnvQueueJobRedisPassword         = "QUEUE_JOB_REDIS_PASSWORD"
 )
 
 // Requirements controls which optional integration credentials are mandatory.
 type Requirements struct {
-	Production            bool
-	RequireInfrastructure bool
-	RequireMallWeather    bool
-	RequireFeishu         bool
-	RequireOSS            bool
+	Production         bool
+	RequireMallWeather bool
+	RequireFeishu      bool
 }
 
 // Config intentionally keeps every value private so encoding/json, YAML and
@@ -101,16 +87,6 @@ func Load(requirements Requirements) (Config, error) {
 
 func requiredNames(requirements Requirements) map[string]bool {
 	required := make(map[string]bool)
-	if requirements.RequireInfrastructure {
-		for _, name := range []string{
-			EnvJWTKey,
-			EnvDBUsername,
-			EnvDBPassword,
-			EnvRedisPassword,
-		} {
-			required[name] = true
-		}
-	}
 	if requirements.RequireMallWeather {
 		for _, name := range []string{EnvAmapWebServiceKey, EnvCaiyunAppKey, EnvCaiyunAppSecret} {
 			required[name] = true
@@ -131,10 +107,6 @@ func requiredNames(requirements Requirements) map[string]bool {
 			required[name] = true
 		}
 	}
-	if requirements.RequireOSS {
-		required[EnvAliyunOSSAccessKeyID] = true
-		required[EnvAliyunOSSAccessKeySecret] = true
-	}
 	return required
 }
 
@@ -153,18 +125,6 @@ func allNames() []string {
 		EnvFeishuWeatherAlertSheetID,
 		EnvFeishuWeatherLifeIndexSheetID,
 		EnvFeishuWeatherFolderToken,
-		EnvAliyunOSSAccessKeyID,
-		EnvAliyunOSSAccessKeySecret,
-		EnvAliyunOSSSecurityToken,
-		EnvJWTKey,
-		EnvDBUsername,
-		EnvDBPassword,
-		EnvRedisUsername,
-		EnvRedisPassword,
-		EnvCacheUsername,
-		EnvCachePassword,
-		EnvQueueJobRedisUsername,
-		EnvQueueJobRedisPassword,
 	}
 }
 
@@ -191,33 +151,6 @@ func (c Config) CaiyunAppKey() string      { return c.value(EnvCaiyunAppKey) }
 func (c Config) CaiyunAppSecret() string   { return c.value(EnvCaiyunAppSecret) }
 func (c Config) FeishuAppID() string       { return c.value(EnvFeishuAppID) }
 func (c Config) FeishuAppSecret() string   { return c.value(EnvFeishuAppSecret) }
-func (c Config) JWTKey() string            { return c.value(EnvJWTKey) }
-func (c Config) DBUsername() string        { return c.value(EnvDBUsername) }
-func (c Config) DBPassword() string        { return c.value(EnvDBPassword) }
-func (c Config) RedisUsername() string     { return c.value(EnvRedisUsername) }
-func (c Config) RedisPassword() string     { return c.value(EnvRedisPassword) }
-func (c Config) CacheUsername() string     { return c.valueOrFallback(EnvCacheUsername, EnvRedisUsername) }
-func (c Config) CachePassword() string     { return c.valueOrFallback(EnvCachePassword, EnvRedisPassword) }
-func (c Config) QueueJobRedisUsername() string {
-	return c.valueOrFallback(EnvQueueJobRedisUsername, EnvRedisUsername)
-}
-func (c Config) QueueJobRedisPassword() string {
-	return c.valueOrFallback(EnvQueueJobRedisPassword, EnvRedisPassword)
-}
-func (c Config) AliyunOSSAccessKeyID() string { return c.value(EnvAliyunOSSAccessKeyID) }
-func (c Config) AliyunOSSAccessKeySecret() string {
-	return c.value(EnvAliyunOSSAccessKeySecret)
-}
-func (c Config) AliyunOSSSecurityToken() string {
-	return c.value(EnvAliyunOSSSecurityToken)
-}
-
-func (c Config) valueOrFallback(name string, fallback string) string {
-	if value := c.value(name); strings.TrimSpace(value) != "" {
-		return value
-	}
-	return c.value(fallback)
-}
 
 // EnvironmentValue resolves only known resource-location variables. It is for
 // Feishu destination references and cannot read arbitrary process variables.

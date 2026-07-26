@@ -25,8 +25,8 @@ func setupQueueJob() {
 
 	redisHost := config.GetString("cfg.queue_job.redis.host")
 	redisPort := config.GetString("cfg.queue_job.redis.port")
-	redisUsername := global.Credentials.QueueJobRedisUsername()
-	redisPassword := global.Credentials.QueueJobRedisPassword()
+	redisUsername := config.GetString("cfg.queue_job.redis.username")
+	redisPassword := config.GetString("cfg.queue_job.redis.password")
 	redisDB := config.GetInt("cfg.queue_job.redis.db")
 	redisAddr := redisHost + ":" + redisPort
 

@@ -33,11 +33,9 @@ func setupConfig() {
 	}
 
 	credentials, err := credential.Load(credential.Requirements{
-		Production:            pkgConfig.GetString("cfg.app.env") == "prod",
-		RequireInfrastructure: true,
-		RequireMallWeather:    pkgConfig.GetBool("cfg.mall_weather.enabled"),
-		RequireFeishu:         pkgConfig.GetBool("cfg.mall_weather.feishu_enabled"),
-		RequireOSS:            pkgConfig.GetBool("cfg.storage.oss.enabled"),
+		Production:         pkgConfig.GetString("cfg.app.env") == "prod",
+		RequireMallWeather: pkgConfig.GetBool("cfg.mall_weather.enabled"),
+		RequireFeishu:      pkgConfig.GetBool("cfg.mall_weather.feishu_enabled"),
 	})
 	if err != nil {
 		console.Exit("invalid credential configuration: %v", err)

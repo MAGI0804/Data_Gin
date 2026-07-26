@@ -17,6 +17,8 @@ func init() {
 					"host":     config.Get("DB.Host", "127.0.0.1"),
 					"port":     config.Get("DB.Port", 3306),
 					"database": config.Get("DB.Database", "gin-biz-web-api"),
+					"username": config.Get("DB.Username"),
+					"password": config.Get("DB.Password"),
 					"charset":  config.Get("DB.Charset", "utf8mb4"),
 
 					// 连接池配置
@@ -31,6 +33,8 @@ func init() {
 				// 	"host":     config.Get("DB1.Host", "127.0.0.1"),
 				// 	"port":     config.Get("DB1.Port", 3306),
 				// 	"database": config.Get("DB1.Database", "gin-biz-web-api"),
+				// 	"username": config.Get("DB1.Username"),
+				// 	"password": config.Get("DB1.Password"),
 				// 	"charset":  config.Get("DB1.Charset", "utf8mb4"),
 				//
 				// 	// 连接池配置

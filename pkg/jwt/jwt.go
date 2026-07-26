@@ -15,7 +15,6 @@ import (
 	"github.com/gin-gonic/gin"
 	jwtPkg "github.com/golang-jwt/jwt"
 
-	"gin-biz-web-api/global"
 	"gin-biz-web-api/pkg/app"
 	"gin-biz-web-api/pkg/config"
 	"gin-biz-web-api/pkg/logger"
@@ -62,7 +61,7 @@ func (c *JWTCustomClaims) Valid() error {
 
 func NewJWT() *JWT {
 	return &JWT{
-		Key:        []byte(global.Credentials.JWTKey()),                                      // 密钥
+		Key:        []byte(config.GetString("cfg.jwt.key")),                                  // 密钥
 		MaxRefresh: time.Duration(config.GetInt64("cfg.jwt.max_refresh_time")) * time.Minute, // 允许刷新时间
 		ExpireTime: config.GetInt64("cfg.jwt.expire_time"),                                   // 过期时间（分钟）
 	}
