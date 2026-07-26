@@ -51,6 +51,7 @@ type ApiClientOptions = {
   headers?: Record<string, string>
   showResult?: boolean
   silentLoading?: boolean
+  signal?: AbortSignal
 }
 
 type ApiClient = (path: string, options?: ApiClientOptions) => Promise<ApiResult>
@@ -714,6 +715,7 @@ function App() {
       try {
         const response = await fetch(apiURL(path), {
           method,
+          signal: options.signal,
           headers: {
             'Content-Type': 'application/json',
             ...options.headers,

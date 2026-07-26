@@ -1,6 +1,7 @@
 import { type FormEvent, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AlertTriangle, CloudRain, MapPin, RefreshCcw, Thermometer, Wind } from 'lucide-react'
 import './MallWeatherPage.css'
+import { MallWeatherForecastPanel } from './MallWeatherForecastPanel'
 import {
   mallWeatherChartSegments,
   clearMallWeatherPendingRefresh,
@@ -31,7 +32,7 @@ type MallWeatherApiResult = {
 
 type MallWeatherApiClient = (
   path: string,
-  options?: { method?: 'GET' | 'POST'; body?: unknown; headers?: Record<string, string>; showResult?: boolean; silentLoading?: boolean },
+  options?: { method?: 'GET' | 'POST'; body?: unknown; headers?: Record<string, string>; showResult?: boolean; silentLoading?: boolean; signal?: AbortSignal },
 ) => Promise<MallWeatherApiResult>
 
 type LoadState = 'idle' | 'loading' | 'success' | 'error'
@@ -189,6 +190,12 @@ export function MallWeatherPage({ actorID, client }: { actorID: string | null; c
           {selectedMall && overviewState === 'loading' && !selectedOverview && <LoadingState label={`正在加载${selectedMall.nameCn}天气`} />}
           {selectedMall && overviewState === 'error' && <RequestError message={overviewError} onRetry={() => void loadOverview(selectedMall.id)} />}
           {selectedMall && selectedOverview && <WeatherOverview mall={selectedMall} overview={selectedOverview} refreshing={overviewState === 'loading'} onRefresh={() => void loadOverview(selectedMall.id)} />}
+          {selectedMall && <MallWeatherForecastPanel
+            mallID={selectedMall.id}
+            timeZone={selectedOverview?.meta.timeZone || 'Asia/Shanghai'}
+            client={client}
+            key={`forecast-${selectedMall.id}:${selectedOverview?.meta.timeZone || 'Asia/Shanghai'}`}
+          />}
         </section>
       </div>
     </div>

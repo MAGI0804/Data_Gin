@@ -70,7 +70,12 @@ export type MallWeatherMinutely = {
 }
 
 export type MallWeatherHourly = {
+  forecastTimeUtc: string
   forecastTimeLocal: string
+  issuedAtUtc: string
+  issuedAtLocal: string
+  fetchedAtUtc: string
+  fetchedAtLocal: string
   temperatureC?: number
   precipitationMmH?: number
   precipitationProbabilityPct?: number
@@ -102,6 +107,69 @@ export type MallWeatherOverview = {
   alerts: MallWeatherAlert[]
   meta: MallWeatherMeta
 }
+
+export type MallWeatherDaily = {
+  forecastDateLocal: string
+  issuedAtUtc: string
+  issuedAtLocal: string
+  fetchedAtUtc: string
+  fetchedAtLocal: string
+  temperatureMaxC?: number
+  temperatureMinC?: number
+  temperatureAvgC?: number
+  precipitationProbabilityPct?: number
+  windMaxSpeedKph?: number
+  daySkycon: string
+  nightSkycon: string
+  sunriseLocalTime: string
+  sunsetLocalTime: string
+  qualityStatus: string
+  qualityWarnings: MallWeatherWarning[]
+}
+
+export type MallWeatherLifeIndex = {
+  sourceApi: string
+  forecastDateLocal: string
+  indexType: number
+  indexCode: string
+  indexName: string
+  level?: number
+  shortDescription: string
+  detail: string
+  isUnknownType: boolean
+  issuedAtUtc: string
+  issuedAtLocal: string
+  fetchedAtUtc: string
+  fetchedAtLocal: string
+  qualityStatus: string
+  qualityWarnings: MallWeatherWarning[]
+}
+
+export type MallWeatherPageResult<T> = {
+  items: T[]
+  meta: MallWeatherMeta
+  pagination: { pageSize: number; nextCursor: string }
+}
+
+export type MallWeatherSeries = 'hourly' | 'daily' | 'life-indices'
+
+export type MallWeatherQueryWindow = {
+  start: Date
+  end: Date
+}
+
+export type MallWeatherForecastWindows = {
+  hourly: MallWeatherQueryWindow
+  daily: MallWeatherQueryWindow
+}
+
+export type MallWeatherPageParser<T> = (payload: unknown) => MallWeatherPageResult<T> | null
+
+export type MallWeatherPageRequester = (path: string) => Promise<{
+  ok: boolean
+  status: number
+  data: unknown
+}>
 
 export type MallWeatherRefreshKind = 'V26_FULL' | 'V3_LIFE_INDEX'
 
@@ -181,6 +249,40 @@ function mallWeatherMeta(record: JsonRecord): MallWeatherMeta {
   }
 }
 
+function strictMallWeatherMeta(value: unknown): MallWeatherMeta | null {
+  if (!isRecord(value)) return null
+  const requiredText = ['provider', 'apiVersion', 'representativePoint', 'coordinateSystem', 'samplingMode', 'spatialResolution', 'timeZone', 'unit', 'freshnessStatus']
+  if (requiredText.some((key) => typeof value[key] !== 'string' || !String(value[key]).trim())) return null
+  const longitude = numberValue(value, 'longitude')
+  const latitude = numberValue(value, 'latitude')
+  const coverageRadiusM = numberValue(value, 'coverageRadiusM')
+  const dataAgeSeconds = numberValue(value, 'dataAgeSeconds')
+  if (longitude === undefined || longitude < -180 || longitude > 180 || latitude === undefined || latitude < -90 || latitude > 90 ||
+    coverageRadiusM === undefined || !Number.isSafeInteger(coverageRadiusM) || coverageRadiusM < 0 ||
+    (value.dataAgeSeconds !== undefined && (dataAgeSeconds === undefined || !Number.isSafeInteger(dataAgeSeconds) || dataAgeSeconds < 0))) return null
+  return mallWeatherMeta(value)
+}
+
+function strictWarningValues(value: unknown): MallWeatherWarning[] | null {
+  if (!Array.isArray(value)) return null
+  const warnings: MallWeatherWarning[] = []
+  for (const warning of value) {
+    if (!isRecord(warning) || typeof warning.code !== 'string' || !warning.code.trim() || typeof warning.path !== 'string') return null
+    warnings.push({ code: warning.code, path: warning.path })
+  }
+  return warnings
+}
+
+function isRFC3339(value: unknown): value is string {
+  return typeof value === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(value) && Number.isFinite(Date.parse(value))
+}
+
+function isISODate(value: unknown): value is string {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}$/.test(value)) return false
+  const parsed = new Date(`${value}T00:00:00.000Z`)
+  return Number.isFinite(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value
+}
+
 function mallWeatherRealtime(record: JsonRecord): MallWeatherRealtime {
   return {
     snapshotAtLocal: textValue(record, 'snapshotAtLocal'),
@@ -219,9 +321,14 @@ function mallWeatherMinutely(record: JsonRecord): MallWeatherMinutely {
   }
 }
 
-function mallWeatherHourly(record: JsonRecord): MallWeatherHourly {
+function mallWeatherHourly(record: JsonRecord, qualityWarnings = warningValues(record.qualityWarnings)): MallWeatherHourly {
   return {
+    forecastTimeUtc: textValue(record, 'forecastTimeUtc'),
     forecastTimeLocal: textValue(record, 'forecastTimeLocal'),
+    issuedAtUtc: textValue(record, 'issuedAtUtc'),
+    issuedAtLocal: textValue(record, 'issuedAtLocal'),
+    fetchedAtUtc: textValue(record, 'fetchedAtUtc'),
+    fetchedAtLocal: textValue(record, 'fetchedAtLocal'),
     temperatureC: numberValue(record, 'temperatureC'),
     precipitationMmH: numberValue(record, 'precipitationMmH'),
     precipitationProbabilityPct: numberValue(record, 'precipitationProbabilityPct'),
@@ -230,7 +337,7 @@ function mallWeatherHourly(record: JsonRecord): MallWeatherHourly {
     pm25UgM3: numberValue(record, 'pm25UgM3'),
     aqiChn: numberValue(record, 'aqiChn'),
     qualityStatus: textValue(record, 'qualityStatus'),
-    qualityWarnings: warningValues(record.qualityWarnings),
+    qualityWarnings,
   }
 }
 
@@ -279,10 +386,109 @@ export function parseMallWeatherOverview(payload: unknown): MallWeatherOverview 
   return {
     realtime: isRecord(data.realtime) ? mallWeatherRealtime(data.realtime) : null,
     minutely: data.minutely.filter(isRecord).map(mallWeatherMinutely),
-    hourly: data.hourly.filter(isRecord).map(mallWeatherHourly),
+    hourly: data.hourly.filter(isRecord).map((item) => mallWeatherHourly(item)),
     alerts: data.alerts.filter(isRecord).map(mallWeatherAlert),
     meta: mallWeatherMeta(data.meta),
   }
+}
+
+function mallWeatherPagination(value: unknown): MallWeatherPageResult<never>['pagination'] | null {
+  if (!isRecord(value) || !Number.isSafeInteger(value.pageSize) || Number(value.pageSize) < 1 || Number(value.pageSize) > 200 ||
+    (value.nextCursor !== undefined && typeof value.nextCursor !== 'string')) return null
+  return { pageSize: Number(value.pageSize), nextCursor: typeof value.nextCursor === 'string' ? value.nextCursor : '' }
+}
+
+function mallWeatherPageData(payload: unknown): { data: JsonRecord; pagination: MallWeatherPageResult<never>['pagination'] } | null {
+  const data = envelopeData(payload)
+  if (!data || !Array.isArray(data.items) || !isRecord(data.meta)) return null
+  const pagination = mallWeatherPagination(data.pagination)
+  return pagination ? { data, pagination } : null
+}
+
+export function parseMallWeatherHourlyPage(payload: unknown): MallWeatherPageResult<MallWeatherHourly> | null {
+  const page = mallWeatherPageData(payload)
+  if (!page) return null
+  const meta = strictMallWeatherMeta(page.data.meta)
+  if (!meta) return null
+  const items: MallWeatherHourly[] = []
+  for (const item of page.data.items as unknown[]) {
+    if (!isRecord(item) || !isRFC3339(item.forecastTimeUtc) || !isRFC3339(item.forecastTimeLocal) || !isRFC3339(item.issuedAtUtc) ||
+      !isRFC3339(item.issuedAtLocal) || !isRFC3339(item.fetchedAtUtc) || !isRFC3339(item.fetchedAtLocal) ||
+      typeof item.qualityStatus !== 'string' || !item.qualityStatus.trim()) return null
+    const warnings = strictWarningValues(item.qualityWarnings)
+    if (!warnings) return null
+    items.push(mallWeatherHourly(item, warnings))
+  }
+  return { items, meta, pagination: page.pagination }
+}
+
+export function parseMallWeatherDailyPage(payload: unknown): MallWeatherPageResult<MallWeatherDaily> | null {
+  const page = mallWeatherPageData(payload)
+  if (!page) return null
+  const meta = strictMallWeatherMeta(page.data.meta)
+  if (!meta) return null
+  const items: MallWeatherDaily[] = []
+  for (const item of page.data.items as unknown[]) {
+    if (!isRecord(item) || !isISODate(item.forecastDateLocal) || !isRFC3339(item.issuedAtUtc) || !isRFC3339(item.issuedAtLocal) ||
+      !isRFC3339(item.fetchedAtUtc) || !isRFC3339(item.fetchedAtLocal) || typeof item.qualityStatus !== 'string' || !item.qualityStatus.trim()) return null
+    const warnings = strictWarningValues(item.qualityWarnings)
+    if (!warnings) return null
+    items.push({
+      forecastDateLocal: item.forecastDateLocal,
+      issuedAtUtc: item.issuedAtUtc,
+      issuedAtLocal: item.issuedAtLocal,
+      fetchedAtUtc: item.fetchedAtUtc,
+      fetchedAtLocal: item.fetchedAtLocal,
+      temperatureMaxC: numberValue(item, 'temperatureMaxC'),
+      temperatureMinC: numberValue(item, 'temperatureMinC'),
+      temperatureAvgC: numberValue(item, 'temperatureAvgC'),
+      precipitationProbabilityPct: numberValue(item, 'precipitationProbabilityPct'),
+      windMaxSpeedKph: numberValue(item, 'windMaxSpeedKph'),
+      daySkycon: textValue(item, 'daySkycon'),
+      nightSkycon: textValue(item, 'nightSkycon'),
+      sunriseLocalTime: textValue(item, 'sunriseLocalTime'),
+      sunsetLocalTime: textValue(item, 'sunsetLocalTime'),
+      qualityStatus: item.qualityStatus,
+      qualityWarnings: warnings,
+    })
+  }
+  return { items, meta, pagination: page.pagination }
+}
+
+export function parseMallWeatherLifeIndexPage(payload: unknown): MallWeatherPageResult<MallWeatherLifeIndex> | null {
+  const page = mallWeatherPageData(payload)
+  if (!page) return null
+  const meta = strictMallWeatherMeta(page.data.meta)
+  if (!meta) return null
+  const items: MallWeatherLifeIndex[] = []
+  for (const item of page.data.items as unknown[]) {
+    if (!isRecord(item) || typeof item.sourceApi !== 'string' || !item.sourceApi.trim() || !isISODate(item.forecastDateLocal) ||
+      !Number.isSafeInteger(item.indexType) || Number(item.indexType) < 0 || typeof item.indexCode !== 'string' || !item.indexCode.trim() ||
+      !isRFC3339(item.issuedAtUtc) || !isRFC3339(item.issuedAtLocal) || !isRFC3339(item.fetchedAtUtc) || !isRFC3339(item.fetchedAtLocal) ||
+      typeof item.qualityStatus !== 'string' || !item.qualityStatus.trim() || typeof item.isUnknownType !== 'boolean') return null
+    const level = numberValue(item, 'level')
+    if (level !== undefined && !Number.isSafeInteger(level)) return null
+    const warnings = strictWarningValues(item.qualityWarnings)
+    if (!warnings) return null
+    items.push({
+      sourceApi: item.sourceApi,
+      forecastDateLocal: item.forecastDateLocal,
+      indexType: Number(item.indexType),
+      indexCode: item.indexCode,
+      indexName: textValue(item, 'indexName'),
+      level,
+      shortDescription: textValue(item, 'shortDescription'),
+      detail: textValue(item, 'detail'),
+      isUnknownType: item.isUnknownType,
+      issuedAtUtc: item.issuedAtUtc,
+      issuedAtLocal: item.issuedAtLocal,
+      fetchedAtUtc: item.fetchedAtUtc,
+      fetchedAtLocal: item.fetchedAtLocal,
+      qualityStatus: item.qualityStatus,
+      qualityWarnings: warnings,
+    })
+  }
+  return { items, meta, pagination: page.pagination }
 }
 
 export function parseMallWeatherRefreshResult(payload: unknown): MallWeatherRefreshResult | null {
@@ -333,10 +539,137 @@ export function mallWeatherRefreshResultMessage(result: MallWeatherRefreshResult
   return `${skipped} 项数据仍新鲜，本次未重复入队。`
 }
 
-export function mallWeatherOverviewPath(mallID: number, timeZone = 'Asia/Shanghai') {
+export function mallWeatherOverviewPath(mallID: number, timeZone = '') {
   if (!Number.isSafeInteger(mallID) || mallID <= 0) throw new Error('invalid mall id')
-  const query = new URLSearchParams({ timeZone })
-  return `/v1/malls/${mallID}/weather/overview?${query.toString()}`
+  const query = new URLSearchParams()
+  if (timeZone.trim()) query.set('timeZone', timeZone)
+  const suffix = query.toString()
+  return `/v1/malls/${mallID}/weather/overview${suffix ? `?${suffix}` : ''}`
+}
+
+export function mallWeatherSeriesPath(mallID: number, series: MallWeatherSeries, start: Date, end: Date, cursor = '', timeZone = 'Asia/Shanghai', asOf = new Date()) {
+  if (!Number.isSafeInteger(mallID) || mallID <= 0) throw new Error('invalid mall id')
+  if (!['hourly', 'daily', 'life-indices'].includes(series)) throw new Error('invalid weather series')
+  if (!Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime()) || start >= end || end.getTime() - start.getTime() > 31 * 24 * 60 * 60 * 1000) {
+    throw new Error('invalid weather range')
+  }
+  if (!Number.isFinite(asOf.getTime())) throw new Error('invalid weather snapshot time')
+  if (!timeZone.trim()) throw new Error('invalid weather time zone')
+  const query = new URLSearchParams({
+    start: start.toISOString(),
+    end: end.toISOString(),
+    timeZone,
+    latest: 'true',
+    asOf: asOf.toISOString(),
+    pageSize: '200',
+  })
+  if (cursor) query.set('cursor', cursor)
+  return `/v1/malls/${mallID}/weather/${series}?${query.toString()}`
+}
+
+export function mallWeatherForecastQueryWindows(now = new Date(), timeZone = 'Asia/Shanghai'): MallWeatherForecastWindows {
+  if (!Number.isFinite(now.getTime())) throw new Error('invalid weather query time')
+  const hourMilliseconds = 60 * 60 * 1000
+  const hourlyStart = new Date(Math.floor(now.getTime() / hourMilliseconds) * hourMilliseconds)
+  const localDate = datePartsInTimeZone(now, timeZone)
+  const dailyStart = localMidnight(localDate.year, localDate.month, localDate.day, timeZone)
+  const normalizedEndDate = new Date(Date.UTC(localDate.year, localDate.month - 1, localDate.day + 15))
+  const dailyEnd = localMidnight(normalizedEndDate.getUTCFullYear(), normalizedEndDate.getUTCMonth() + 1, normalizedEndDate.getUTCDate(), timeZone)
+  return {
+    hourly: { start: hourlyStart, end: new Date(hourlyStart.getTime() + 360 * hourMilliseconds) },
+    daily: { start: dailyStart, end: dailyEnd },
+  }
+}
+
+export async function loadAllMallWeatherPages<T>(
+  request: MallWeatherPageRequester,
+  mallID: number,
+  series: MallWeatherSeries,
+  window: MallWeatherQueryWindow,
+  timeZone: string,
+  asOf: Date,
+  parser: MallWeatherPageParser<T>,
+): Promise<{ items: T[]; meta: MallWeatherMeta | null }> {
+  const items: T[] = []
+  let cursor = ''
+  let meta: MallWeatherMeta | null = null
+  const seenCursors = new Set<string>()
+  const seenLogicalKeys = new Set<string>()
+  for (let pageNumber = 0; pageNumber < 10; pageNumber++) {
+    const response = await request(mallWeatherSeriesPath(mallID, series, window.start, window.end, cursor, timeZone, asOf))
+    if (!response.ok) throw new Error(mallWeatherQueryError(response.status))
+    const page = parser(response.data)
+    if (!page) throw new Error('响应格式不正确，请联系管理员')
+    for (const item of page.items) {
+      const logicalKey = mallWeatherLogicalKey(series, item)
+      if (!logicalKey || seenLogicalKeys.has(logicalKey)) throw new Error('分页数据重复或缺少业务键，请联系管理员')
+      seenLogicalKeys.add(logicalKey)
+    }
+    items.push(...page.items)
+    meta = page.meta
+    const nextCursor = page.pagination.nextCursor
+    if (!nextCursor) return { items, meta }
+    if (seenCursors.has(nextCursor)) throw new Error('分页游标重复，请联系管理员')
+    seenCursors.add(nextCursor)
+    cursor = nextCursor
+  }
+  throw new Error('分页数量超过安全上限，请联系管理员')
+}
+
+function mallWeatherLogicalKey(series: MallWeatherSeries, value: unknown) {
+  if (!isRecord(value)) return ''
+  if (series === 'hourly') return typeof value.forecastTimeUtc === 'string' ? value.forecastTimeUtc : ''
+  if (series === 'daily') return typeof value.forecastDateLocal === 'string' ? value.forecastDateLocal : ''
+  return typeof value.forecastDateLocal === 'string' && typeof value.sourceApi === 'string' && Number.isSafeInteger(value.indexType)
+    ? `${value.forecastDateLocal}\u0000${value.sourceApi}\u0000${value.indexType}`
+    : ''
+}
+
+function mallWeatherQueryError(status: number) {
+  if (status === 0) return '无法连接服务，请检查网络后重试'
+  if (status === 403) return '当前账号缺少 weather.read 权限'
+  if (status === 404) return '商场或天气数据不存在'
+  if (status === 422) return '查询窗口、时区或商场坐标无效'
+  return `完整天气查询失败（HTTP ${status}）`
+}
+
+function datePartsInTimeZone(value: Date, timeZone: string) {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).formatToParts(value)
+  const part = (type: Intl.DateTimeFormatPartTypes) => Number(parts.find((item) => item.type === type)?.value)
+  const year = part('year')
+  const month = part('month')
+  const day = part('day')
+  if (!Number.isSafeInteger(year) || !Number.isSafeInteger(month) || !Number.isSafeInteger(day)) throw new Error('invalid weather time zone')
+  return { year, month, day }
+}
+
+function localMidnight(year: number, month: number, day: number, timeZone: string) {
+  const targetTimestamp = Date.UTC(year, month - 1, day)
+  let candidateTimestamp = targetTimestamp
+  const formatter = new Intl.DateTimeFormat('en-CA', {
+    timeZone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hourCycle: 'h23',
+  })
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const parts = formatter.formatToParts(new Date(candidateTimestamp))
+    const part = (type: Intl.DateTimeFormatPartTypes) => Number(parts.find((item) => item.type === type)?.value)
+    const representedTimestamp = Date.UTC(part('year'), part('month') - 1, part('day'), part('hour'), part('minute'), part('second'))
+    const nextTimestamp = targetTimestamp - (representedTimestamp - candidateTimestamp)
+    if (nextTimestamp === candidateTimestamp) return new Date(candidateTimestamp)
+    candidateTimestamp = nextTimestamp
+  }
+  return new Date(candidateTimestamp)
 }
 
 export function mallWeatherRefreshPath(mallID: number) {
