@@ -24,6 +24,7 @@ import {
 } from 'lucide-react'
 import './App.css'
 import { effectiveApiStatus } from './apiResponse'
+import { apiURL as buildApiURL } from './apiURL'
 import { clearStoredToken, loadStoredToken, saveStoredToken, storedTokenExpiresAt, tokenActorID } from './authStorage'
 import { MallWeatherPage } from './MallWeatherPage'
 import {
@@ -39,7 +40,7 @@ import {
   type ExcelMatchStepConfig,
 } from './excelMatchConfig'
 
-const defaultApiBaseURL = import.meta.env.VITE_API_BASE_URL ?? 'https://shop-test.youlankids.com'
+const defaultApiBaseURL = import.meta.env.VITE_API_BASE_URL ?? ''
 
 type ApiResult = {
   ok: boolean
@@ -3167,9 +3168,7 @@ function normalizeOrderPushSkipConfig(config: OrderPushSkipConfig | null): Order
 }
 
 function apiURL(path: string) {
-  const normalizedPath = path.startsWith('/api') ? path : `/api${path.startsWith('/') ? path : `/${path}`}`
-  const base = defaultApiBaseURL.replace(/\/$/, '')
-  return `${base}${normalizedPath}`
+  return buildApiURL(path, defaultApiBaseURL)
 }
 
 function matchDeliveryStore(log: DeliveryLog) {

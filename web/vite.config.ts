@@ -3,10 +3,11 @@ import react from '@vitejs/plugin-react'
 
 // https://vite.dev/config/
 export default defineConfig(({ mode }) => {
-  const env = loadEnv(mode, '.', '')
+  const env = loadEnv(mode, '..', 'VITE_')
   const apiTarget = env.VITE_API_PROXY_TARGET || 'https://shop-test.youlankids.com'
 
   return {
+    envDir: '..',
     plugins: [react()],
     server: {
       host: '127.0.0.1',
