@@ -30,6 +30,7 @@ type MallWeatherExportRenderRequest struct {
 	ProfileCode   string
 	Config        MallWeatherExportProfileConfig
 	Filter        data_dao.MallWeatherExportEstimateFilter
+	GeneratedAt   time.Time
 	SnapshotAt    time.Time
 	EstimatedRows int64
 	OutputPath    string
@@ -101,6 +102,9 @@ func (renderer *MallWeatherExportRenderer) Render(
 		request.SnapshotAt.IsZero() || request.EstimatedRows < 0 || len(request.Config.Datasets) == 0 || invalidConfig {
 		return result, fmt.Errorf("mall weather export renderer: invalid request")
 	}
+	if reservedFixedMallWeatherExportProfileCode(request.ProfileCode) && request.GeneratedAt.IsZero() {
+		return result, fmt.Errorf("mall weather export renderer: invalid fixed export generation time")
+	}
 	location, err := time.LoadLocation(request.Config.TimeZone)
 	if err != nil {
 		return result, fmt.Errorf("mall weather export renderer: load time zone: %w", err)
@@ -130,9 +134,16 @@ func (renderer *MallWeatherExportRenderer) Render(
 		return result, err
 	}
 	result.UsedStream = request.EstimatedRows >= mallWeatherExportStreamThreshold
+	firstSheet := true
+	if reservedFixedMallWeatherExportProfileCode(request.ProfileCode) {
+		if err := writeMallWeatherExportScopeSheet(file, namer, request, styles); err != nil {
+			return result, err
+		}
+		firstSheet = false
+		result.SheetCount++
+	}
 	currentStates := make(map[string]*mallWeatherExportSheetState)
 	allStates := make([]*mallWeatherExportSheetState, 0)
-	firstSheet := true
 	for datasetIndex, dataset := range request.Config.Datasets {
 		datasetFilter, err := mallWeatherExportDatasetFilter(
 			request.ProfileCode,

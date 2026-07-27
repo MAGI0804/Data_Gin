@@ -196,6 +196,7 @@ func (processor *MallWeatherExportProcessor) processOwnedRun(
 			ProfileCode:   prepared.ProfileCode,
 			Config:        prepared.Config,
 			Filter:        prepared.Filter,
+			GeneratedAt:   prepared.GeneratedAt,
 			SnapshotAt:    job.CreatedAt.UTC(),
 			EstimatedRows: job.TotalRows,
 			OutputPath:    outputPath,

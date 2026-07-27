@@ -128,8 +128,20 @@ func TestMallWeatherExportRendererUsesRegularWriterForSmallJobs(t *testing.T) {
 		},
 		SnapshotAt: time.Now().UTC(), EstimatedRows: 1, OutputPath: output,
 	}, nil)
-	if err != nil || result.UsedStream || result.ProcessedRows != 1 {
+	if err != nil || result.UsedStream || result.ProcessedRows != 1 || result.SheetCount != 1 {
 		t.Fatalf("result=%+v error=%v", result, err)
+	}
+	workbook, err := excelize.OpenFile(output)
+	if err != nil {
+		t.Fatalf("OpenFile() error=%v", err)
+	}
+	t.Cleanup(func() {
+		if err := workbook.Close(); err != nil {
+			t.Errorf("Close() error=%v", err)
+		}
+	})
+	if sheets := workbook.GetSheetList(); len(sheets) != 1 || sheets[0] != "商场" {
+		t.Fatalf("sheets=%v", sheets)
 	}
 }
 
@@ -154,7 +166,7 @@ func TestMallWeatherExportRendererUsesFixedCurrentForecastWindows(t *testing.T) 
 				{Kind: "life_indices", SheetName: "生活指数", Latest: &latest},
 			},
 		},
-		SnapshotAt: snapshot, EstimatedRows: 0, OutputPath: output,
+		GeneratedAt: snapshot.Add(time.Minute), SnapshotAt: snapshot, EstimatedRows: 0, OutputPath: output,
 	}, nil)
 	if err != nil {
 		t.Fatalf("Render() error=%v", err)
@@ -210,8 +222,9 @@ func TestMallWeatherExportRendererPreservesExplicitRange(t *testing.T) {
 			StartUTC: &wantStart, EndUTC: &wantEnd,
 			StartDate: "2026-07-01", EndDate: "2026-07-03",
 		},
-		SnapshotAt: time.Date(2026, 7, 27, 12, 34, 56, 0, time.UTC),
-		OutputPath: output,
+		GeneratedAt: time.Date(2026, 7, 27, 12, 35, 56, 0, time.UTC),
+		SnapshotAt:  time.Date(2026, 7, 27, 12, 34, 56, 0, time.UTC),
+		OutputPath:  output,
 	}, nil)
 	if err != nil {
 		t.Fatalf("Render() error=%v", err)

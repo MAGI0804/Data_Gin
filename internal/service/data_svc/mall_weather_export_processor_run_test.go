@@ -29,6 +29,7 @@ func TestMallWeatherExportProcessorCompletesOwnedRun(t *testing.T) {
 	) (MallWeatherExportRenderResult, error) {
 		renderedDir = filepath.Dir(request.OutputPath)
 		if request.ProfileCode != "mall_weather" ||
+			!request.GeneratedAt.Equal(time.Date(2026, 7, 22, 8, 0, 0, 0, time.UTC)) ||
 			!request.SnapshotAt.Equal(time.Date(2026, 7, 22, 7, 0, 0, 0, time.UTC)) {
 			t.Fatalf("render request=%+v", request)
 		}

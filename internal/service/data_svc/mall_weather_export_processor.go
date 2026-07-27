@@ -29,6 +29,7 @@ type mallWeatherExportPreparedJob struct {
 	Config      MallWeatherExportProfileConfig
 	Filter      data_dao.MallWeatherExportEstimateFilter
 	FileName    string
+	GeneratedAt time.Time
 }
 
 func prepareMallWeatherExportJob(
@@ -108,6 +109,7 @@ func prepareMallWeatherExportJob(
 		Config:      normalizedConfig,
 		Filter:      estimateRequest.Filter,
 		FileName:    fileName,
+		GeneratedAt: now.UTC(),
 	}, nil
 }
 

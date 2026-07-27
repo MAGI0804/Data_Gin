@@ -21,7 +21,8 @@ func TestPrepareMallWeatherExportJobStrictlyValidatesSnapshot(t *testing.T) {
 	if err != nil {
 		t.Fatalf("prepareMallWeatherExportJob() error=%v", err)
 	}
-	if prepared.FileName != "商场天气_20260722_160000.xlsx" || prepared.Config.TimeZone != "Asia/Shanghai" {
+	if prepared.FileName != "商场天气_20260722_160000.xlsx" || prepared.Config.TimeZone != "Asia/Shanghai" ||
+		!prepared.GeneratedAt.Equal(now) {
 		t.Fatalf("prepared=%+v", prepared)
 	}
 	if len(prepared.Filter.MallIDs) != 1 || prepared.Filter.MallIDs[0] != 7 {
