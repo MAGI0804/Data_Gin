@@ -5,7 +5,6 @@ import {
   loadMallWeatherExportSession,
   mallWeatherDefaultExportProfileRequest,
   mallWeatherExportCreateRequest,
-  mallWeatherExportDownloadReadiness,
   mallWeatherExportDownloadPath,
   mallWeatherExportJobPath,
   mallWeatherExportJobTerminal,
@@ -394,51 +393,20 @@ export function MallWeatherExportPanel({ actorID, mallID, mallName, client, onDo
     setDownloading(true)
     setActionError('')
     try {
-      const jobResponse = await client(mallWeatherExportJobPath(job.jobId), {
-        method: 'GET', showResult: false, silentLoading: true, signal: controller.signal,
-      })
-      if (controller.signal.aborted) return
-      if (!jobResponse.ok) throw new Error(exportRequestError(
-        jobResponse.status,
-        '下载前同步任务状态失败',
-        '当前账号缺少 weather.export 权限',
-        jobResponse.data,
-      ))
-      const refreshedJob = parseMallWeatherExportJob(jobResponse.data)
-      if (!refreshedJob || refreshedJob.jobId !== job.jobId) {
-        throw new Error('导出任务响应格式不正确，请联系管理员')
-      }
-      const readiness = mallWeatherExportDownloadReadiness(refreshedJob)
-      if (readiness === 'expired') {
-        const expiredJob = { ...refreshedJob, status: 'EXPIRED' as const }
-        setJob(expiredJob)
-        clearMallWeatherExportSession(actorID, mallID, window.sessionStorage)
-        throw new Error('天气导出文件已过期，请重新生成')
-      }
-      setJob(refreshedJob)
-      if (readiness === 'not-ready') {
-        if (mallWeatherExportJobTerminal(refreshedJob.status)) {
-          clearMallWeatherExportSession(actorID, mallID, window.sessionStorage)
-        } else {
-          saveMallWeatherExportSession(actorID, mallID, { pending: null, jobId: refreshedJob.jobId }, window.sessionStorage)
-        }
-        throw new Error(`任务状态已更新为“${exportStatusLabel(refreshedJob.status)}”，文件暂不可下载`)
-      }
-      saveMallWeatherExportSession(actorID, mallID, { pending: null, jobId: refreshedJob.jobId }, window.sessionStorage)
-
-      const response = await client(mallWeatherExportDownloadPath(refreshedJob.jobId), {
+      const response = await client(mallWeatherExportDownloadPath(job.jobId), {
         method: 'GET', showResult: false, silentLoading: true, signal: controller.signal,
       })
       if (controller.signal.aborted) return
       if (!response.ok && response.status === 409) {
         const safeMessage = parseMallWeatherExportSafeErrorMessage(response.data)
         if (safeMessage === '天气导出文件已过期') {
-          setJob({ ...refreshedJob, status: 'EXPIRED' })
+          setJob({ ...job, status: 'EXPIRED' })
           clearMallWeatherExportSession(actorID, mallID, window.sessionStorage)
           throw new Error('天气导出文件已过期，请重新生成')
         }
         if (safeMessage === '天气导出文件尚未生成') {
-          setJob({ ...refreshedJob, status: 'RUNNING' })
+          setJob({ ...job, status: 'RUNNING' })
+          saveMallWeatherExportSession(actorID, mallID, { pending: null, jobId: job.jobId }, window.sessionStorage)
           setPollRevision((current) => current + 1)
           throw new Error('天气导出文件尚未生成，已恢复任务查询，请稍后重试')
         }
@@ -451,12 +419,14 @@ export function MallWeatherExportPanel({ actorID, mallID, mallName, client, onDo
       ))
       const download = parseMallWeatherExportDownload(response.data)
       if (!download) throw new Error('下载链接响应格式不正确，请联系管理员')
+      saveMallWeatherExportSession(actorID, mallID, { pending: null, jobId: job.jobId }, window.sessionStorage)
       if (onDownloadURL) onDownloadURL(download.url)
       else window.location.assign(download.url)
     } catch (error) {
       if (!controller.signal.aborted) setActionError(error instanceof Error ? error.message : '下载链接生成失败')
     } finally {
-      if (!controller.signal.aborted) setDownloading(false)
+      if (actionController.current === controller) actionController.current = null
+      setDownloading(false)
     }
   }
 
@@ -501,7 +471,7 @@ export function MallWeatherExportPanel({ actorID, mallID, mallName, client, onDo
           <strong>完整天气 Excel</strong>
           <span>固定导出当前商场近 24 小时历史及未来 16 天范围内的完整天气数据，无需选择或维护方案。</span>
           <button className="primary" type="button" onClick={() => void createJob()}
-            disabled={!selectedProfile || creatingJob || Boolean(job && !mallWeatherExportJobTerminal(job.status))}>
+            disabled={!selectedProfile || creatingJob || downloading || Boolean(job && !mallWeatherExportJobTerminal(job.status))}>
             {creatingJob ? '提交中' : pendingCreate.current ? '重试原请求' : '生成 Excel'}
           </button>
         </div>
