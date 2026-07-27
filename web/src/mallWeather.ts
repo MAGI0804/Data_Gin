@@ -50,6 +50,15 @@ export type MallWeatherCreateResult = {
   version: number
 }
 
+export type MallWeatherPatchRequest = {
+  expectedMallVersion: number
+  nameCn?: string
+  province?: string
+  city?: string
+  district?: string
+  address?: string
+}
+
 export type MallWeatherPendingCreate = {
   key: string
   body: MallWeatherCreateRequest
@@ -794,6 +803,31 @@ export function mallWeatherCreateKey(seed?: string) {
   return mallWeatherOperationKey('mall-create', seed)
 }
 
+export function mallWeatherMallPatchRequest(
+  mall: MallWeatherMall,
+  input: Omit<MallWeatherCreateInput, 'mallCode'>,
+): MallWeatherPatchRequest | null {
+  if (!positiveSafeInteger(mall.id) || !positiveSafeInteger(mall.version)) throw new Error('invalid mall patch request')
+  const normalized = mallWeatherCreateRequest({ mallCode: mall.mallCode, ...input })
+  const request: MallWeatherPatchRequest = { expectedMallVersion: mall.version }
+  if (normalized.nameCn !== mall.nameCn.trim()) request.nameCn = normalized.nameCn
+  if (normalized.province !== mall.province.trim()) request.province = normalized.province
+  if (normalized.city !== mall.city.trim()) request.city = normalized.city
+  const district = normalized.district ?? ''
+  if (district !== mall.district.trim()) request.district = district
+  if (normalized.address !== mall.address.trim()) request.address = normalized.address
+  return Object.keys(request).length > 1 ? request : null
+}
+
+export function mallWeatherMallPath(mallID: number) {
+  return `/v1/malls/${positiveMallID(mallID)}`
+}
+
+export function mallWeatherMallDeletePath(mallID: number, expectedMallVersion: number) {
+  if (!positiveSafeInteger(expectedMallVersion)) throw new Error('invalid mall delete version')
+  return `${mallWeatherMallPath(mallID)}?${new URLSearchParams({ expectedMallVersion: String(expectedMallVersion) }).toString()}`
+}
+
 export function mallWeatherMallReady(mall: MallWeatherMall) {
   return mall.status.toLowerCase() === 'active' && mall.geocodeStatus.toLowerCase() === 'confirmed' && mall.weatherEnabled &&
     mall.longitude !== undefined && mall.latitude !== undefined && mall.coordinateSystem.trim().toUpperCase() === 'GCJ02'
@@ -889,6 +923,20 @@ export function mallWeatherCoordinateAdjustmentRequest(
   return {
     manualCoordinate: mallWeatherCoordinateInput(longitudeInput, latitudeInput, reasonInput),
     expectedMallVersion: mall.version,
+    weatherEnabled: true,
+  }
+}
+
+export function mallWeatherManualCoordinateConfirmationRequest(
+  expectedMallVersion: number,
+  longitudeInput: string,
+  latitudeInput: string,
+  reasonInput: string,
+): MallWeatherGeocodeConfirmRequest {
+  if (!positiveSafeInteger(expectedMallVersion)) throw new Error('invalid mall coordinate version')
+  return {
+    manualCoordinate: mallWeatherCoordinateInput(longitudeInput, latitudeInput, reasonInput),
+    expectedMallVersion,
     weatherEnabled: true,
   }
 }

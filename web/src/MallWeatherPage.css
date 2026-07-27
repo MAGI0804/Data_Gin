@@ -110,6 +110,42 @@
   border-top: 4px solid #0f766e;
 }
 
+.mall-weather-editor-panel {
+  display: grid;
+  gap: 12px;
+  border-top: 4px solid #1f2937;
+}
+
+.mall-weather-page button.danger {
+  border-color: #b91c1c;
+  background: #ffffff;
+  color: #991b1b;
+}
+
+.mall-weather-page button.danger:hover,
+.mall-weather-page button.danger:focus-visible {
+  background: #fef2f2;
+}
+
+.mall-weather-page button.danger:disabled {
+  border-color: #cbd5e1;
+  background: #f8fafc;
+  color: #94a3b8;
+}
+
+.mall-weather-delete-confirm {
+  display: grid;
+  gap: 10px;
+  border: 1px solid #b91c1c;
+  background: #fef2f2;
+  padding: 12px;
+  color: #7f1d1d;
+}
+
+.mall-weather-delete-confirm label {
+  width: min(100%, 520px);
+}
+
 .mall-weather-steps {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));

@@ -3,6 +3,7 @@ import { AlertTriangle, CloudRain, MapPin, RefreshCcw, Thermometer, Wind } from 
 import './MallWeatherPage.css'
 import { MallWeatherExportPanel } from './MallWeatherExportPanel'
 import { MallWeatherForecastPanel } from './MallWeatherForecastPanel'
+import { MallDetailsFields, MallWeatherMallEditor } from './MallWeatherMallEditor'
 import {
   mallWeatherChartSegments,
   mallWeatherCreateKey,
@@ -65,7 +66,7 @@ type MallWeatherApiResult = {
 
 type MallWeatherApiClient = (
   path: string,
-  options?: { method?: 'GET' | 'POST'; body?: unknown; headers?: Record<string, string>; showResult?: boolean; silentLoading?: boolean; signal?: AbortSignal },
+  options?: { method?: 'GET' | 'POST' | 'PATCH' | 'DELETE'; body?: unknown; headers?: Record<string, string>; showResult?: boolean; silentLoading?: boolean; signal?: AbortSignal },
 ) => Promise<MallWeatherApiResult>
 
 type LoadState = 'idle' | 'loading' | 'success' | 'error'
@@ -217,6 +218,14 @@ export function MallWeatherPage({ actorID, client }: { actorID: string | null; c
     setSelectedMallID(mall.id)
   }, [])
 
+  const handleMallDeleted = useCallback((mallID: number) => {
+    const remaining = malls.filter((mall) => mall.id !== mallID)
+    const nextID = remaining[0]?.id ?? 0
+    setMalls(remaining)
+    selectedMallIDRef.current = nextID
+    setSelectedMallID(nextID)
+  }, [malls])
+
   return (
     <div className="view-stack mall-weather-page">
       <section className="mall-weather-toolbar" aria-label="商场天气筛选">
@@ -274,6 +283,13 @@ export function MallWeatherPage({ actorID, client }: { actorID: string | null; c
             ? <MallCreatePanel actorID={actorID} client={client} onCreated={handleMallCreated} onCancel={() => setShowCreate(false)} />
             : <RequestError message="无法识别当前登录账号，请退出后重新登录再新增商场。" onRetry={() => window.location.reload()} />)}
           {!showCreate && !selectedMall && mallState !== 'loading' && <EmptyState title="请选择或新增商场" detail="选择左侧商场查看接入进度，或新增一个商场。" />}
+          {!showCreate && selectedMall && !selectedMallReady && actorID && <MallWeatherMallEditor
+            key={`editor-onboarding-${selectedMall.id}`}
+            mall={selectedMall}
+            client={client}
+            onMallUpdated={handleMallUpdated}
+            onMallDeleted={handleMallDeleted}
+          />}
           {!showCreate && selectedMall && !selectedMallReady && <MallOnboardingPanel
             key={`onboarding-${selectedMall.id}`}
             mall={selectedMall}
@@ -305,6 +321,7 @@ export function MallWeatherPage({ actorID, client }: { actorID: string | null; c
           {!showCreate && selectedMallReady && selectedMall && (actorID
             ? <section className="view-stack mall-weather-management" id="mall-weather-management" tabIndex={-1}>
               <div className="mall-weather-section-title"><div><strong>商场天气管理</strong><span>坐标调整、全量刷新与已有推送绑定</span></div></div>
+              <MallWeatherMallEditor mall={selectedMall} client={client} onMallUpdated={handleMallUpdated} onMallDeleted={handleMallDeleted} key={`editor-active-${selectedMall.id}`} />
               <MallCoordinateAdjustmentPanel mall={selectedMall} client={client} onMallUpdated={handleMallUpdated} key={`coordinate-${selectedMall.id}:${selectedMall.version}`} />
               <ManualRefreshPanel actorID={actorID} mall={selectedMall} client={client} key={`refresh-${actorID}:${selectedMall.id}`} />
               <MallWeatherSheetPushPanel actorID={actorID} mall={selectedMall} client={client} key={`push-${actorID}:${selectedMall.id}`} />
@@ -429,12 +446,7 @@ function MallCreatePanel({ actorID, client, onCreated, onCancel }: {
     <section className="workbench-panel mall-weather-onboarding-panel" id="mall-weather-create-panel">
       <div className="mall-weather-section-title"><div><strong>新增商场</strong><span>创建后继续确认坐标并启用天气</span></div><span>天气口径：full · 1000 m</span></div>
       <form className="mall-weather-create-form" onSubmit={submit} aria-busy={submitting}>
-        <label><span>商场编码 *</span><input name="mallCode" value={form.mallCode} onChange={(event) => change('mallCode', event.currentTarget.value)} placeholder="例如 SH-PD-001" maxLength={64} disabled={submitting} /></label>
-        <label><span>商场名称 *</span><input name="nameCn" value={form.nameCn} onChange={(event) => change('nameCn', event.currentTarget.value)} placeholder="中文名称" maxLength={255} disabled={submitting} /></label>
-        <label><span>省份 *</span><input name="province" value={form.province} onChange={(event) => change('province', event.currentTarget.value)} placeholder="上海市" maxLength={128} disabled={submitting} /></label>
-        <label><span>城市 *</span><input name="city" value={form.city} onChange={(event) => change('city', event.currentTarget.value)} placeholder="上海市" maxLength={128} disabled={submitting} /></label>
-        <label><span>区县</span><input name="district" value={form.district} onChange={(event) => change('district', event.currentTarget.value)} placeholder="浦东新区" maxLength={128} disabled={submitting} /></label>
-        <label className="mall-weather-form-wide"><span>详细地址 *</span><input name="address" value={form.address} onChange={(event) => change('address', event.currentTarget.value)} placeholder="道路、门牌号及建筑名称" maxLength={1000} disabled={submitting} /></label>
+        <MallDetailsFields form={form} onChange={change} disabled={submitting} />
         <div className="mall-weather-form-actions mall-weather-form-wide">
           <button className="primary" type="submit" disabled={submitting}>{submitting ? '提交中' : pending ? '重试原请求' : '创建并继续'}</button>
           <button type="button" onClick={onCancel} disabled={submitting}>取消</button>

@@ -49,7 +49,7 @@ type ApiResult = {
 }
 
 type ApiClientOptions = {
-  method?: 'GET' | 'POST' | 'PUT'
+  method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
   body?: unknown
   headers?: Record<string, string>
   showResult?: boolean

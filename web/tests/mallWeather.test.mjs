@@ -23,6 +23,9 @@ import {
   mallWeatherGeocodeRunTerminal,
   mallWeatherGeocodeTriggerPath,
   mallWeatherMallReady,
+  mallWeatherMallDeletePath,
+  mallWeatherMallPatchRequest,
+  mallWeatherManualCoordinateConfirmationRequest,
   mallWeatherSheetPushKey,
   mallWeatherSheetPushRequest,
   mallWeatherSheetPushRequestMatchesOption,
@@ -160,6 +163,28 @@ test('builds a normalized mall onboarding request and stable operation paths', (
   assert.equal(mallWeatherGeocodeConfirmPath(7), '/v1/malls/7/geocode-confirm')
   assert.throws(() => mallWeatherCreateRequest({ mallCode: '!', nameCn: '', province: '', city: '', district: '', address: '' }), /invalid mall create request/)
   assert.throws(() => mallWeatherGeocodeConfirmPath(0), /invalid mall id/)
+})
+
+test('builds versioned mall edits, deletes, and manual GCJ-02 confirmation', () => {
+  const mall = {
+    id: 7, version: 3, mallCode: 'SH-001', nameCn: '示例商场', province: '上海市', city: '上海市', district: '黄浦区',
+    address: '示例路 1 号', coordinateSystem: '', geocodeStatus: 'FAILED', weatherEnabled: false,
+    detailProfile: 'full', coverageRadiusM: 1000, status: 'draft',
+  }
+  assert.deepEqual(mallWeatherMallPatchRequest(mall, {
+    nameCn: ' 示例商场 ', province: '上海市', city: '上海市', district: '浦东新区', address: ' 世纪大道 1 号 ',
+  }), { expectedMallVersion: 3, district: '浦东新区', address: '世纪大道 1 号' })
+  assert.equal(mallWeatherMallPatchRequest(mall, {
+    nameCn: '示例商场', province: '上海市', city: '上海市', district: '黄浦区', address: '示例路 1 号',
+  }), null)
+  assert.equal(mallWeatherMallDeletePath(7, 3), '/v1/malls/7?expectedMallVersion=3')
+  assert.deepEqual(mallWeatherManualCoordinateConfirmationRequest(4, '121.5', '31.2', ' 人工确认商场入口 '), {
+    manualCoordinate: { longitude: 121.5, latitude: 31.2, coordinateSystem: 'GCJ02', reason: '人工确认商场入口' },
+    expectedMallVersion: 4,
+    weatherEnabled: true,
+  })
+  assert.throws(() => mallWeatherMallDeletePath(7, 0), /invalid mall delete version/)
+  assert.throws(() => mallWeatherManualCoordinateConfirmationRequest(0, '121.5', '31.2', 'bad'), /invalid mall coordinate version/)
 })
 
 test('parses mall creation and geocode candidate contracts', () => {
