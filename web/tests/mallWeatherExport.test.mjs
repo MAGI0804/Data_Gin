@@ -6,6 +6,7 @@ import {
   loadMallWeatherExportSession,
   mallWeatherDefaultExportProfileRequest,
   mallWeatherExportCreateRequest,
+  mallWeatherExportDownloadReadiness,
   mallWeatherExportDownloadPath,
   mallWeatherExportJobPath,
   mallWeatherExportJobTerminal,
@@ -16,9 +17,11 @@ import {
   parseMallWeatherExportCreateResult,
   parseMallWeatherExportDownload,
   parseMallWeatherExportJob,
+  parseMallWeatherExportSafeErrorMessage,
   parseMallWeatherExportProfile,
   parseMallWeatherExportProfilePage,
   saveMallWeatherExportSession,
+  selectMallWeatherCompleteExportProfile,
   selectMallWeatherExportProfile,
 } from '../.test-dist/mallWeatherExport.js'
 
@@ -75,6 +78,17 @@ test('prefers a profile containing both minutely and hourly datasets', () => {
   const forecast = parseMallWeatherExportProfile(envelope(profile()))
   assert.equal(selectMallWeatherExportProfile([realtimeOnly, forecast].filter(Boolean))?.id, 9)
   assert.equal(selectMallWeatherExportProfile([]), null)
+})
+
+test('selects only the fixed complete weather export template', () => {
+  const datasets = mallWeatherDefaultExportProfileRequest().datasets.map(({ kind, sheetName, latest }) => ({
+    kind, sheetName, ...(latest ? { latest } : {}),
+  }))
+  const incomplete = parseMallWeatherExportProfile(envelope(profile()))
+  const complete = parseMallWeatherExportProfile(envelope(profile({ datasets, version: 4 })))
+  const dynamic = parseMallWeatherExportProfile(envelope(profile({ id: 10, code: 'custom_weather', datasets, version: 9 })))
+  assert.equal(selectMallWeatherCompleteExportProfile([incomplete, dynamic, complete].filter(Boolean))?.version, 4)
+  assert.equal(selectMallWeatherCompleteExportProfile([incomplete, dynamic].filter(Boolean)), null)
 })
 
 test('builds the complete default export profile with latest forecast semantics', () => {
@@ -171,6 +185,15 @@ test('strictly parses export creation and job progress without leaking unsafe sh
   assert.equal(parseMallWeatherExportJob(envelope({ ...job, status: 'UNKNOWN' })), null)
 })
 
+test('requires a succeeded job with at least one minute of download lifetime', () => {
+  const now = new Date('2026-07-27T10:00:00Z')
+  assert.equal(mallWeatherExportDownloadReadiness({ status: 'RUNNING' }, now), 'not-ready')
+  assert.equal(mallWeatherExportDownloadReadiness({ status: 'EXPIRED' }, now), 'expired')
+  assert.equal(mallWeatherExportDownloadReadiness({ status: 'SUCCEEDED' }, now), 'expired')
+  assert.equal(mallWeatherExportDownloadReadiness({ status: 'SUCCEEDED', expiresAt: '2026-07-27T10:00:59Z' }, now), 'expired')
+  assert.equal(mallWeatherExportDownloadReadiness({ status: 'SUCCEEDED', expiresAt: '2026-07-27T10:01:00Z' }, now), 'ready')
+})
+
 test('accepts only short HTTPS download URLs and builds stable resource paths', () => {
   const download = parseMallWeatherExportDownload(envelope({
     url: 'https://bucket.oss-cn-shanghai.aliyuncs.com/result.xlsx?signature=short-lived',
@@ -184,4 +207,11 @@ test('accepts only short HTTPS download URLs and builds stable resource paths', 
   assert.equal(mallWeatherExportProfilesPath('next cursor'), '/v1/weather-export-profiles?enabled=true&pageSize=100&cursor=next+cursor')
   assert.equal(mallWeatherExportProfilesPath('', false), '/v1/weather-export-profiles?enabled=false&pageSize=100')
   assert.throws(() => mallWeatherExportJobPath('bad'), /invalid mall weather export job id/)
+})
+
+test('reads only bounded safe API error messages', () => {
+  assert.equal(parseMallWeatherExportSafeErrorMessage({ code: 40901, msg: '天气导出文件已过期', data: null }), '天气导出文件已过期')
+  assert.equal(parseMallWeatherExportSafeErrorMessage({ code: 0, msg: 'success', data: {} }), null)
+  assert.equal(parseMallWeatherExportSafeErrorMessage({ code: 40901, msg: '', data: null }), null)
+  assert.equal(parseMallWeatherExportSafeErrorMessage({ code: 40901, msg: 'x'.repeat(201), data: null }), null)
 })

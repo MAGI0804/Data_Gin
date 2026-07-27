@@ -5,6 +5,7 @@ import {
   loadMallWeatherExportSession,
   mallWeatherDefaultExportProfileRequest,
   mallWeatherExportCreateRequest,
+  mallWeatherExportDownloadReadiness,
   mallWeatherExportDownloadPath,
   mallWeatherExportJobPath,
   mallWeatherExportJobTerminal,
@@ -19,8 +20,9 @@ import {
   parseMallWeatherExportJob,
   parseMallWeatherExportProfile,
   parseMallWeatherExportProfilePage,
+  parseMallWeatherExportSafeErrorMessage,
   saveMallWeatherExportSession,
-  selectMallWeatherExportProfile,
+  selectMallWeatherCompleteExportProfile,
   type MallWeatherExportJob,
   type MallWeatherExportPendingCreate,
   type MallWeatherExportProfile,
@@ -63,7 +65,6 @@ export function MallWeatherExportPanel({ actorID, mallID, mallName, client, onDo
   )
   const [profiles, setProfiles] = useState<MallWeatherExportProfile[]>([])
   const [profileState, setProfileState] = useState<LoadState>('loading')
-  const [selectedProfileID, setSelectedProfileID] = useState(0)
   const [profileError, setProfileError] = useState('')
   const [creatingProfile, setCreatingProfile] = useState(false)
   const [creatingJob, setCreatingJob] = useState(false)
@@ -79,8 +80,8 @@ export function MallWeatherExportPanel({ actorID, mallID, mallName, client, onDo
   const pendingCreate = useRef<MallWeatherExportPendingCreate | null>(restoredSession?.pending ?? null)
 
   const selectedProfile = useMemo(
-    () => profiles.find((profile) => profile.id === selectedProfileID) ?? null,
-    [profiles, selectedProfileID],
+    () => selectMallWeatherCompleteExportProfile(profiles),
+    [profiles],
   )
   const polledJobID = job?.jobId ?? ''
   const polledJobStatus = job?.status
@@ -119,12 +120,6 @@ export function MallWeatherExportPanel({ actorID, mallID, mallName, client, onDo
         }
         if (!page.pagination.nextCursor) {
           setProfiles(collected)
-          setSelectedProfileID((current) => {
-            if (collected.some((profile) => profile.id === current)) return current
-            const restoredProfileID = pendingCreate.current?.body.profileId ?? 0
-            if (collected.some((profile) => profile.id === restoredProfileID)) return restoredProfileID
-            return selectMallWeatherExportProfile(collected)?.id ?? 0
-          })
           setProfileState('success')
           return collected
         }
@@ -176,7 +171,6 @@ export function MallWeatherExportPanel({ actorID, mallID, mallName, client, onDo
     actionController.current = null
     replacePendingCreate(restoredSession?.pending ?? null)
     setProfiles([])
-    setSelectedProfileID(0)
     setJob(restoredSession?.jobId ? pendingJob(restoredSession.jobId) : null)
     setActionError('')
     setPollError('')
@@ -296,7 +290,6 @@ export function MallWeatherExportPanel({ actorID, mallID, mallName, client, onDo
       const profile = parseMallWeatherExportProfile(response.data)
       if (!profile || !profile.enabled) throw new Error('默认导出方案响应格式不正确，请联系管理员')
       setProfiles((current) => [profile, ...current.filter((item) => item.id !== profile.id)])
-      setSelectedProfileID(profile.id)
       setProfileState('success')
     } catch (error) {
       if (!controller.signal.aborted) setActionError(error instanceof Error ? error.message : '默认导出方案创建失败')
@@ -345,12 +338,11 @@ export function MallWeatherExportPanel({ actorID, mallID, mallName, client, onDo
           const exactProfile = refreshed?.find((profile) =>
             profile.id === pending.body.profileId && profile.version === pending.body.expectedProfileVersion)
           if (exactProfile) {
-            setSelectedProfileID(exactProfile.id)
-            throw new Error('导出请求正在处理或发生冲突，原方案版本仍可用；请重试原请求确认结果。')
+            throw new Error('导出请求正在处理或发生冲突；请重试原请求确认结果。')
           }
           throw new Error(refreshed
-            ? '原导出方案已删除、停用或升版。原请求仍保留；请放弃原请求后使用最新方案。'
-            : '导出请求发生冲突，且暂时无法确认方案版本；请稍后刷新方案。')
+            ? '固定完整模板已更新。原请求仍保留；请放弃原请求后重新生成。'
+            : '导出请求发生冲突，且暂时无法确认固定模板状态；请稍后重试。')
         }
         const uncertain = response.status === 0 || response.status === 408 || response.status >= 500
         if (uncertain) {
@@ -402,14 +394,60 @@ export function MallWeatherExportPanel({ actorID, mallID, mallName, client, onDo
     setDownloading(true)
     setActionError('')
     try {
-      const response = await client(mallWeatherExportDownloadPath(job.jobId), {
+      const jobResponse = await client(mallWeatherExportJobPath(job.jobId), {
         method: 'GET', showResult: false, silentLoading: true, signal: controller.signal,
       })
       if (controller.signal.aborted) return
+      if (!jobResponse.ok) throw new Error(exportRequestError(
+        jobResponse.status,
+        '下载前同步任务状态失败',
+        '当前账号缺少 weather.export 权限',
+        jobResponse.data,
+      ))
+      const refreshedJob = parseMallWeatherExportJob(jobResponse.data)
+      if (!refreshedJob || refreshedJob.jobId !== job.jobId) {
+        throw new Error('导出任务响应格式不正确，请联系管理员')
+      }
+      const readiness = mallWeatherExportDownloadReadiness(refreshedJob)
+      if (readiness === 'expired') {
+        const expiredJob = { ...refreshedJob, status: 'EXPIRED' as const }
+        setJob(expiredJob)
+        clearMallWeatherExportSession(actorID, mallID, window.sessionStorage)
+        throw new Error('天气导出文件已过期，请重新生成')
+      }
+      setJob(refreshedJob)
+      if (readiness === 'not-ready') {
+        if (mallWeatherExportJobTerminal(refreshedJob.status)) {
+          clearMallWeatherExportSession(actorID, mallID, window.sessionStorage)
+        } else {
+          saveMallWeatherExportSession(actorID, mallID, { pending: null, jobId: refreshedJob.jobId }, window.sessionStorage)
+        }
+        throw new Error(`任务状态已更新为“${exportStatusLabel(refreshedJob.status)}”，文件暂不可下载`)
+      }
+      saveMallWeatherExportSession(actorID, mallID, { pending: null, jobId: refreshedJob.jobId }, window.sessionStorage)
+
+      const response = await client(mallWeatherExportDownloadPath(refreshedJob.jobId), {
+        method: 'GET', showResult: false, silentLoading: true, signal: controller.signal,
+      })
+      if (controller.signal.aborted) return
+      if (!response.ok && response.status === 409) {
+        const safeMessage = parseMallWeatherExportSafeErrorMessage(response.data)
+        if (safeMessage === '天气导出文件已过期') {
+          setJob({ ...refreshedJob, status: 'EXPIRED' })
+          clearMallWeatherExportSession(actorID, mallID, window.sessionStorage)
+          throw new Error('天气导出文件已过期，请重新生成')
+        }
+        if (safeMessage === '天气导出文件尚未生成') {
+          setJob({ ...refreshedJob, status: 'RUNNING' })
+          setPollRevision((current) => current + 1)
+          throw new Error('天气导出文件尚未生成，已恢复任务查询，请稍后重试')
+        }
+      }
       if (!response.ok) throw new Error(exportRequestError(
         response.status,
         '下载链接生成失败',
         '当前账号缺少 weather.export 权限',
+        response.data,
       ))
       const download = parseMallWeatherExportDownload(response.data)
       if (!download) throw new Error('下载链接响应格式不正确，请联系管理员')
@@ -423,8 +461,6 @@ export function MallWeatherExportPanel({ actorID, mallID, mallName, client, onDo
   }
 
   const progress = job ? mallWeatherExportProgress(job) : 0
-  const hasForecastDatasets = selectedProfile ? profileHasForecastDatasets(selectedProfile) : false
-  const hasCompleteExportProfile = profiles.some(profileHasCompleteWeatherData)
 
   function abandonPendingCreate() {
     replacePendingCreate(null)
@@ -443,54 +479,30 @@ export function MallWeatherExportPanel({ actorID, mallID, mallName, client, onDo
         <FileSpreadsheet aria-hidden="true" />
       </div>
 
-      {profileState === 'loading' && <p role="status">正在加载可用导出方案…</p>}
+      {profileState === 'loading' && <p role="status">正在准备完整天气导出模板…</p>}
       {profileState === 'error' && (
         <div className="mall-weather-action-message error" role="alert">
           {profileError}
           <button type="button" onClick={retryProfiles}>重试加载</button>
         </div>
       )}
-      {profileState === 'success' && profiles.length === 0 && (
+      {profileState === 'success' && !selectedProfile && (
         <div className="empty-state" role="status">
-          <strong>没有可用天气导出方案</strong>
-          <span>可创建包含商场、实况、约 1 km 分辨率分钟降水、小时及逐日预报、预警和生活指数的默认方案。</span>
+          <strong>完整天气导出模板尚未启用</strong>
+          <span>固定模板包含商场、实况、约 1 km 分钟降水、逐小时与逐日预报、预警和生活指数。</span>
           <button className="primary" type="button" onClick={() => void createDefaultProfile()}
             disabled={creatingProfile || Boolean(pendingCreate.current)}>
-            {creatingProfile ? '创建中' : '创建默认方案'}
+            {creatingProfile ? '启用中' : '启用完整模板'}
           </button>
         </div>
       )}
-      {profiles.length > 0 && (
-        <div className="mall-weather-refresh-form">
-          <label>
-            <span>导出方案</span>
-            <select value={selectedProfileID} onChange={(event) => {
-              setSelectedProfileID(Number(event.currentTarget.value))
-              setJob(null)
-              clearMallWeatherExportSession(actorID, mallID, window.sessionStorage)
-              setActionError('')
-              setPollError('')
-            }} disabled={Boolean(pendingCreate.current) || creatingJob ||
-              Boolean(job && !mallWeatherExportJobTerminal(job.status))}>
-              {profiles.map((profile) => (
-                <option key={profile.id} value={profile.id}>{profile.name}（v{profile.version}）</option>
-              ))}
-            </select>
-            <small>{hasForecastDatasets ? '包含约 1 km 分辨率分钟降水和逐小时预报' : '该方案未同时包含分钟降水和逐小时预报'}</small>
-          </label>
+      {selectedProfile && (
+        <div className="mall-weather-request-state">
+          <strong>完整天气 Excel</strong>
+          <span>固定导出当前商场近 24 小时历史及未来 16 天范围内的完整天气数据，无需选择或维护方案。</span>
           <button className="primary" type="button" onClick={() => void createJob()}
             disabled={!selectedProfile || creatingJob || Boolean(job && !mallWeatherExportJobTerminal(job.status))}>
             {creatingJob ? '提交中' : pendingCreate.current ? '重试原请求' : '生成 Excel'}
-          </button>
-        </div>
-      )}
-      {profileState === 'success' && profiles.length > 0 && !hasCompleteExportProfile && (
-        <div className="mall-weather-request-state">
-          <strong>当前方案不含完整天气数据</strong>
-          <span>可创建或恢复包含分钟降水、逐小时、逐日、预警和生活指数的完整默认方案。</span>
-          <button type="button" onClick={() => void createDefaultProfile()}
-            disabled={creatingProfile || Boolean(pendingCreate.current)}>
-            {creatingProfile ? '恢复中' : '创建或恢复完整方案'}
           </button>
         </div>
       )}
@@ -543,17 +555,6 @@ function exportStatusLabel(status: MallWeatherExportJob['status']) {
   return labels[status]
 }
 
-function profileHasForecastDatasets(profile: MallWeatherExportProfile) {
-  const kinds = new Set(profile.datasets.map((dataset) => dataset.kind))
-  return kinds.has('minutely') && kinds.has('hourly')
-}
-
-function profileHasCompleteWeatherData(profile: MallWeatherExportProfile) {
-  const kinds = new Set(profile.datasets.map((dataset) => dataset.kind))
-  return ['malls', 'realtime', 'minutely', 'hourly', 'daily', 'alerts', 'life_indices']
-    .every((kind) => kinds.has(kind as MallWeatherExportProfile['datasets'][number]['kind']))
-}
-
 function pendingJob(jobId: string): MallWeatherExportJob {
   return {
     jobId,
@@ -569,8 +570,10 @@ function pendingJob(jobId: string): MallWeatherExportJob {
   }
 }
 
-function exportRequestError(status: number, fallback: string, forbiddenMessage: string) {
+function exportRequestError(status: number, fallback: string, forbiddenMessage: string, payload?: unknown) {
   if (status === 0) return '无法连接服务，请检查网络后重试'
+  const safeMessage = parseMallWeatherExportSafeErrorMessage(payload)
+  if (safeMessage) return safeMessage
   if (status === 403) return forbiddenMessage
   if (status === 404) return '导出方案或任务不存在，请刷新后重试'
   if (status === 409) return '导出方案或任务状态已变化，请刷新后重试'

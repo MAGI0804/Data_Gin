@@ -282,6 +282,13 @@ export function MallWeatherPage({ actorID, client }: { actorID: string | null; c
             onReloadMall={loadMall}
           />}
           {!showCreate && selectedMallReady && selectedMall && <MallWeatherDataNavigation showActorActions={Boolean(actorID)} />}
+          {!showCreate && selectedMallReady && selectedMall && (
+            <div id="mall-weather-overview" tabIndex={-1}>
+              {overviewState === 'loading' && !selectedOverview && <LoadingState label={`正在加载${selectedMall.nameCn}天气`} />}
+              {overviewState === 'error' && <RequestError message={overviewError} onRetry={() => void loadOverview(selectedMall.id)} />}
+              {selectedOverview && <WeatherOverview mall={selectedMall} overview={selectedOverview} refreshing={overviewState === 'loading'} onRefresh={() => void loadOverview(selectedMall.id)} />}
+            </div>
+          )}
           {!showCreate && selectedMallReady && selectedMall && <MallWeatherForecastPanel
             mallID={selectedMall.id}
             timeZone={selectedOverview?.meta.timeZone || 'Asia/Shanghai'}
@@ -295,13 +302,6 @@ export function MallWeatherPage({ actorID, client }: { actorID: string | null; c
             client={client}
             key={`excel-export-${actorID}:${selectedMall.id}`}
           />}
-          {!showCreate && selectedMallReady && selectedMall && (
-            <div id="mall-weather-overview" tabIndex={-1}>
-              {overviewState === 'loading' && !selectedOverview && <LoadingState label={`正在加载${selectedMall.nameCn}天气`} />}
-              {overviewState === 'error' && <RequestError message={overviewError} onRetry={() => void loadOverview(selectedMall.id)} />}
-              {selectedOverview && <WeatherOverview mall={selectedMall} overview={selectedOverview} refreshing={overviewState === 'loading'} onRefresh={() => void loadOverview(selectedMall.id)} />}
-            </div>
-          )}
           {!showCreate && selectedMallReady && selectedMall && (actorID
             ? <section className="view-stack mall-weather-management" id="mall-weather-management" tabIndex={-1}>
               <div className="mall-weather-section-title"><div><strong>商场天气管理</strong><span>坐标调整、全量刷新与已有推送绑定</span></div></div>
@@ -327,10 +327,10 @@ function MallWeatherDataNavigation({ showActorActions }: { showActorActions: boo
   return (
     <nav className="mall-weather-data-nav" aria-label="天气数据快速入口">
       <strong>天气数据</strong>
+      <button type="button" onClick={() => navigateTo('mall-weather-overview')}>实况与趋势</button>
       <button type="button" onClick={() => navigateTo('mall-weather-minutely')}>约 1 km 分钟降水</button>
       <button type="button" onClick={() => navigateTo('mall-weather-hourly')}>逐小时预报</button>
       {showActorActions && <button type="button" onClick={() => navigateTo('mall-weather-export')}>导出 Excel</button>}
-      <button type="button" onClick={() => navigateTo('mall-weather-overview')}>实况与趋势</button>
       {showActorActions && <button type="button" onClick={() => navigateTo('mall-weather-management')}>管理操作</button>}
     </nav>
   )

@@ -85,6 +85,8 @@ export type MallWeatherExportDownload = {
   expiresAt: string
 }
 
+export type MallWeatherExportDownloadReadiness = 'ready' | 'not-ready' | 'expired'
+
 export type MallWeatherExportProfileSaveRequest = {
   code: string
   name: string
@@ -117,6 +119,9 @@ const exportDatasetKinds = new Set<MallWeatherExportDatasetKind>([
 const exportJobStatuses = new Set<MallWeatherExportJobStatus>([
   'PENDING', 'RUNNING', 'SUCCEEDED', 'FAILED', 'CANCELLED', 'EXPIRED',
 ])
+const completeExportDatasetKinds: MallWeatherExportDatasetKind[] = [
+  'malls', 'realtime', 'minutely', 'hourly', 'daily', 'alerts', 'life_indices',
+]
 
 function isRecord(value: unknown): value is JsonRecord {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
@@ -222,6 +227,17 @@ export function selectMallWeatherExportProfile(profiles: MallWeatherExportProfil
     const rightForecast = Number(rightKinds.has('minutely') && rightKinds.has('hourly'))
     return rightForecast - leftForecast || rightKinds.size - leftKinds.size || left.code.localeCompare(right.code) || left.id - right.id
   })[0] ?? null
+}
+
+export function selectMallWeatherCompleteExportProfile(profiles: MallWeatherExportProfile[]): MallWeatherExportProfile | null {
+  return profiles
+    .filter((profile) => profile.enabled && profile.code === 'mall_weather_full' && profileHasCompleteWeatherData(profile))
+    .sort((left, right) => right.version - left.version || left.id - right.id)[0] ?? null
+}
+
+function profileHasCompleteWeatherData(profile: MallWeatherExportProfile) {
+  const kinds = new Set(profile.datasets.map((dataset) => dataset.kind))
+  return completeExportDatasetKinds.every((kind) => kinds.has(kind))
 }
 
 export function mallWeatherDefaultExportProfileRequest(expectedVersion?: number): MallWeatherExportProfileSaveRequest {
@@ -417,6 +433,17 @@ export function mallWeatherExportJobTerminal(status: MallWeatherExportJobStatus)
   return status === 'SUCCEEDED' || status === 'FAILED' || status === 'CANCELLED' || status === 'EXPIRED'
 }
 
+export function mallWeatherExportDownloadReadiness(
+  job: Pick<MallWeatherExportJob, 'status' | 'expiresAt'>,
+  now = new Date(),
+): MallWeatherExportDownloadReadiness {
+  if (job.status === 'EXPIRED') return 'expired'
+  if (job.status !== 'SUCCEEDED') return 'not-ready'
+  const expiresAt = job.expiresAt ? Date.parse(job.expiresAt) : Number.NaN
+  if (!Number.isFinite(now.getTime()) || !Number.isFinite(expiresAt) || expiresAt - now.getTime() < 60_000) return 'expired'
+  return 'ready'
+}
+
 export function mallWeatherExportProgress(job: Pick<MallWeatherExportJob, 'processedRows' | 'totalRows'>) {
   if (job.totalRows <= 0) return job.processedRows > 0 ? 100 : 0
   return Math.min(100, Math.max(0, Math.round(job.processedRows * 100 / job.totalRows)))
@@ -432,6 +459,12 @@ export function parseMallWeatherExportDownload(payload: unknown): MallWeatherExp
     return null
   }
   return { url: data.url, expiresAt: data.expiresAt }
+}
+
+export function parseMallWeatherExportSafeErrorMessage(payload: unknown): string | null {
+  if (!isRecord(payload) || typeof payload.code !== 'number' || payload.code === 0 ||
+    !nonEmptyString(payload.msg, 200)) return null
+  return payload.msg
 }
 
 export function mallWeatherExportJobPath(jobID: string) {
