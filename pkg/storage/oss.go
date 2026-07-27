@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"mime"
 	"net/http"
 	"net/url"
@@ -45,6 +46,7 @@ type OSSClient struct {
 	client         *alioss.Client
 	downloadClient *alioss.Client
 	headObject     func(context.Context, *alioss.HeadObjectRequest) (*alioss.HeadObjectResult, error)
+	getObject      func(context.Context, *alioss.GetObjectRequest) (*alioss.GetObjectResult, error)
 }
 
 type UploadResult struct {
@@ -53,6 +55,11 @@ type UploadResult struct {
 }
 
 type ObjectMetadata struct {
+	Size int64
+}
+
+type DownloadObject struct {
+	Body io.ReadCloser
 	Size int64
 }
 
@@ -128,6 +135,9 @@ func NewOSSClientFromConfig() (*OSSClient, error) {
 	}
 	client.headObject = func(ctx context.Context, request *alioss.HeadObjectRequest) (*alioss.HeadObjectResult, error) {
 		return client.client.HeadObject(ctx, request)
+	}
+	client.getObject = func(ctx context.Context, request *alioss.GetObjectRequest) (*alioss.GetObjectResult, error) {
+		return client.client.GetObject(ctx, request)
 	}
 	return client, nil
 }
@@ -334,6 +344,43 @@ func (c *OSSClient) StatDownloadObject(ctx context.Context, objectKey string) (O
 		return ObjectMetadata{}, fmt.Errorf("OSS 下载对象元数据无效")
 	}
 	return ObjectMetadata{Size: result.ContentLength}, nil
+}
+
+func (c *OSSClient) OpenDownloadObject(ctx context.Context, objectKey string) (DownloadObject, error) {
+	objectKey = cleanObjectKey(objectKey)
+	if c == nil || ctx == nil || objectKey == "" {
+		return DownloadObject{}, fmt.Errorf("OSS 下载对象读取参数无效")
+	}
+	getObject := c.getObject
+	if getObject == nil && c.client != nil {
+		getObject = func(ctx context.Context, request *alioss.GetObjectRequest) (*alioss.GetObjectResult, error) {
+			return c.client.GetObject(ctx, request)
+		}
+	}
+	if getObject == nil {
+		return DownloadObject{}, fmt.Errorf("OSS 下载对象读取客户端无效")
+	}
+	result, err := getObject(ctx, &alioss.GetObjectRequest{
+		Bucket: alioss.Ptr(c.cfg.Bucket),
+		Key:    alioss.Ptr(objectKey),
+	})
+	if err != nil {
+		var serviceError *alioss.ServiceError
+		if errors.As(err, &serviceError) && ossObjectMissing(serviceError) {
+			return DownloadObject{}, fmt.Errorf("%w: %w", ErrOSSObjectNotFound, err)
+		}
+		return DownloadObject{}, fmt.Errorf("OSS 读取下载对象失败: %w", err)
+	}
+	if result == nil || result.Body == nil || result.ContentLength < 0 {
+		if result != nil && result.Body != nil {
+			_ = result.Body.Close()
+		}
+		return DownloadObject{}, fmt.Errorf("OSS 下载对象响应无效")
+	}
+	return DownloadObject{
+		Body: result.Body,
+		Size: result.ContentLength,
+	}, nil
 }
 
 func ossObjectMissing(serviceError *alioss.ServiceError) bool {

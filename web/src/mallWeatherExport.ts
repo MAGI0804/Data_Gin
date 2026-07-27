@@ -75,41 +75,15 @@ export type MallWeatherExportJob = {
   expiresAt?: string
 }
 
-export type MallWeatherExportDownload = {
-  url: string
-  expiresAt: string
-}
-
 export type MallWeatherExportDownloadReadiness = 'ready' | 'not-ready' | 'expired'
 
-export const mallWeatherExportDownloadRequestTimeoutMilliseconds = 15_000
+export const mallWeatherExportDownloadRequestTimeoutMilliseconds = 60_000
 
 export class MallWeatherExportDownloadTimeoutError extends Error {
   constructor() {
     super('mall weather export download request timed out')
     this.name = 'MallWeatherExportDownloadTimeoutError'
   }
-}
-
-export class MallWeatherExportPopupBlockedError extends Error {
-  constructor() {
-    super('mall weather export download window was blocked')
-    this.name = 'MallWeatherExportPopupBlockedError'
-  }
-}
-
-export class MallWeatherExportDownloadTargetError extends Error {
-  constructor() {
-    super('mall weather export download target is unavailable')
-    this.name = 'MallWeatherExportDownloadTargetError'
-  }
-}
-
-export type MallWeatherExportDownloadTarget = {
-  closed: boolean
-  opener: unknown
-  close: () => void
-  location: { replace: (url: string) => void }
 }
 
 type JsonRecord = Record<string, unknown>
@@ -369,46 +343,6 @@ export function mallWeatherExportProgress(job: Pick<MallWeatherExportJob, 'proce
   return Math.min(100, Math.max(0, Math.round(job.processedRows * 100 / job.totalRows)))
 }
 
-export function parseMallWeatherExportDownload(payload: unknown): MallWeatherExportDownload | null {
-  const data = envelopeData(payload)
-  if (!data || typeof data.url !== 'string' || !safeMallWeatherExportDownloadURL(data.url) ||
-    !isRFC3339(data.expiresAt)) return null
-  return { url: data.url, expiresAt: data.expiresAt }
-}
-
-export function prepareMallWeatherExportDownloadTarget(
-  openTarget: () => MallWeatherExportDownloadTarget | null,
-): MallWeatherExportDownloadTarget {
-  const target = openTarget()
-  if (!target) throw new MallWeatherExportPopupBlockedError()
-  try {
-    target.opener = null
-  } catch {
-    closeMallWeatherExportDownloadTarget(target)
-    throw new MallWeatherExportDownloadTargetError()
-  }
-  return target
-}
-
-export function navigateMallWeatherExportDownloadTarget(
-  target: MallWeatherExportDownloadTarget,
-  url: string,
-) {
-  if (target.closed || !safeMallWeatherExportDownloadURL(url)) {
-    throw new MallWeatherExportDownloadTargetError()
-  }
-  target.location.replace(url)
-}
-
-export function closeMallWeatherExportDownloadTarget(target: MallWeatherExportDownloadTarget | null) {
-  if (!target) return
-  try {
-    if (!target.closed) target.close()
-  } catch {
-    // The browser owns this window. Cleanup is best-effort so UI state can always recover.
-  }
-}
-
 export async function waitForMallWeatherExportDownload<T>(
   request: Promise<T>,
   controller: AbortController,
@@ -446,13 +380,6 @@ export function mallWeatherExportDownloadPath(jobID: string) {
   return `${mallWeatherExportJobPath(jobID)}/download`
 }
 
-function safeMallWeatherExportDownloadURL(value: string) {
-  if (!value || value.length > 8_192) return false
-  try {
-    const parsed = new URL(value)
-    return parsed.protocol === 'https:' && Boolean(parsed.hostname) && !parsed.username && !parsed.password &&
-      !parsed.hostname.toLowerCase().endsWith('-internal.aliyuncs.com')
-  } catch {
-    return false
-  }
+export function mallWeatherExportContentPath(jobID: string) {
+  return `${mallWeatherExportJobPath(jobID)}/content`
 }

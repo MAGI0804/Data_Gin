@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"mime"
 	"net/http"
 
 	"gin-biz-web-api/internal/dao/data_dao"
@@ -25,6 +26,7 @@ type MallWeatherExportJobServiceAPI interface {
 	) (*data_svc.MallWeatherExportCreateResult, bool, error)
 	Get(context.Context, uint, string) (*data_svc.MallWeatherExportJobDTO, error)
 	Download(context.Context, uint, string) (*data_svc.MallWeatherExportDownloadResult, error)
+	OpenDownloadContent(context.Context, uint, string) (*data_svc.MallWeatherExportContentResult, error)
 }
 
 type MallWeatherExportJobController struct {
@@ -95,6 +97,36 @@ func (controller *MallWeatherExportJobController) Download(c *gin.Context) {
 		return
 	}
 	responses.New(c).ToResponseWithStatus(http.StatusOK, result)
+}
+
+func (controller *MallWeatherExportJobController) DownloadContent(c *gin.Context) {
+	disableMallWeatherExportCaching(c)
+	result, err := controller.service.OpenDownloadContent(
+		c.Request.Context(),
+		auth.CurrentUserID(c),
+		c.Param("job_id"),
+	)
+	if err != nil {
+		writeMallWeatherExportJobError(c, err)
+		return
+	}
+	if result == nil || result.Body == nil || result.Size < 1 || result.FileName == "" || result.ContentType == "" {
+		writeMallWeatherExportJobError(c, errors.New("mall weather export: invalid content result"))
+		return
+	}
+	defer result.Body.Close()
+	contentDisposition := mime.FormatMediaType("attachment", map[string]string{"filename": result.FileName})
+	c.DataFromReader(
+		http.StatusOK,
+		result.Size,
+		result.ContentType,
+		result.Body,
+		map[string]string{
+			"Content-Disposition":    contentDisposition,
+			"X-Content-Type-Options": "nosniff",
+			"Referrer-Policy":        "no-referrer",
+		},
+	)
 }
 
 func disableMallWeatherExportCaching(c *gin.Context) {

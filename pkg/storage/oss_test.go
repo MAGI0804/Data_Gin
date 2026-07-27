@@ -499,6 +499,46 @@ func TestOSSClientStatsInternallyAndPresignsForBrowser(t *testing.T) {
 	}
 }
 
+func TestOSSClientOpensDownloadObjectThroughConfiguredStorageClient(t *testing.T) {
+	var requestedBucket string
+	var requestedKey string
+	client := &OSSClient{
+		cfg: OSSConfig{Bucket: "weather-private"},
+		getObject: func(_ context.Context, request *alioss.GetObjectRequest) (*alioss.GetObjectResult, error) {
+			requestedBucket = alioss.ToString(request.Bucket)
+			requestedKey = alioss.ToString(request.Key)
+			return &alioss.GetObjectResult{
+				Body:          io.NopCloser(strings.NewReader("PK\x03\x04xlsx")),
+				ContentLength: 8,
+			}, nil
+		},
+	}
+
+	object, err := client.OpenDownloadObject(t.Context(), "mall-weather-exports/job/result.xlsx")
+	if err != nil {
+		t.Fatalf("OpenDownloadObject() error=%v", err)
+	}
+	defer object.Body.Close()
+	body, err := io.ReadAll(object.Body)
+	if err != nil || string(body) != "PK\x03\x04xlsx" || object.Size != 8 ||
+		requestedBucket != "weather-private" || requestedKey != "mall-weather-exports/job/result.xlsx" {
+		t.Fatalf("object=%+v body=%q error=%v bucket=%q key=%q", object, body, err, requestedBucket, requestedKey)
+	}
+}
+
+func TestOSSClientMapsMissingDownloadObject(t *testing.T) {
+	client := &OSSClient{
+		cfg: OSSConfig{Bucket: "weather-private"},
+		getObject: func(context.Context, *alioss.GetObjectRequest) (*alioss.GetObjectResult, error) {
+			return nil, &alioss.ServiceError{StatusCode: http.StatusNotFound, Code: "NoSuchKey"}
+		},
+	}
+	_, err := client.OpenDownloadObject(t.Context(), "mall-weather-exports/job/result.xlsx")
+	if !errors.Is(err, ErrOSSObjectNotFound) {
+		t.Fatalf("OpenDownloadObject() error=%v, want ErrOSSObjectNotFound", err)
+	}
+}
+
 type roundTripFunc func(*http.Request) (*http.Response, error)
 
 func (roundTrip roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {

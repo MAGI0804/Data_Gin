@@ -1,6 +1,7 @@
 package data_svc
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
@@ -82,6 +83,13 @@ type MallWeatherExportDownloadResult struct {
 	ExpiresAt time.Time `json:"expiresAt"`
 }
 
+type MallWeatherExportContentResult struct {
+	Body        io.ReadCloser
+	Size        int64
+	FileName    string
+	ContentType string
+}
+
 type MallWeatherExportProfileSnapshot struct {
 	ProfileID uint                           `json:"profileId"`
 	Code      string                         `json:"code"`
@@ -120,6 +128,7 @@ type mallWeatherExportLimitReader interface {
 type mallWeatherExportDownloadSigner interface {
 	StatDownloadObject(context.Context, string) (storage.ObjectMetadata, error)
 	PresignDownloadURL(context.Context, string, string, time.Duration) (string, error)
+	OpenDownloadObject(context.Context, string) (storage.DownloadObject, error)
 }
 
 type mallWeatherExportDownloadSignerFactory func() (mallWeatherExportDownloadSigner, error)
@@ -234,41 +243,13 @@ func (service *MallWeatherExportJobService) Download(
 	actorUserID uint,
 	jobUUID string,
 ) (*MallWeatherExportDownloadResult, error) {
-	jobUUID = strings.TrimSpace(jobUUID)
-	if service == nil || service.newSigner == nil || service.downloadTTL < time.Minute ||
-		service.downloadTTL > time.Hour || ctx == nil || actorUserID == 0 ||
-		service.statTimeout <= 0 || service.statTimeout > 30*time.Second ||
-		len(jobUUID) != 36 || uuid.Validate(jobUUID) != nil {
+	if service == nil || service.newSigner == nil ||
+		service.statTimeout <= 0 || service.statTimeout > 30*time.Second {
 		return nil, fmt.Errorf("%w: invalid download request", ErrMallWeatherExportInvalid)
 	}
-	if err := service.authorize(ctx, actorUserID); err != nil {
-		return nil, err
-	}
-	row, err := service.jobs.FindDownloadByUUIDAndActor(ctx, jobUUID, actorUserID)
+	row, now, validFor, err := service.readyDownloadJob(ctx, actorUserID, jobUUID)
 	if err != nil {
 		return nil, err
-	}
-	if row == nil {
-		return nil, fmt.Errorf("mall weather export: nil stored job")
-	}
-	now := service.now().UTC()
-	status := strings.ToLower(strings.TrimSpace(row.Status))
-	if status == "expired" {
-		return nil, ErrMallWeatherExportExpired
-	}
-	if status != "succeeded" {
-		return nil, ErrMallWeatherExportNotReady
-	}
-	if row.ExpiresAt == nil || !row.ExpiresAt.UTC().After(now) ||
-		!validMallWeatherExportResultObjectKey(row.ResultObjectKey) || row.FileSizeBytes <= 0 {
-		return nil, ErrMallWeatherExportExpired
-	}
-	validFor := service.downloadTTL
-	if remaining := row.ExpiresAt.UTC().Sub(now); remaining < validFor {
-		validFor = remaining
-	}
-	if validFor < time.Minute {
-		return nil, ErrMallWeatherExportExpired
 	}
 	signer, err := service.newSigner()
 	if err != nil {
@@ -300,6 +281,119 @@ func (service *MallWeatherExportJobService) Download(
 		return nil, fmt.Errorf("%w: sign download: %w", ErrMallWeatherExportStorageUnavailable, err)
 	}
 	return &MallWeatherExportDownloadResult{URL: url, ExpiresAt: now.Add(validFor)}, nil
+}
+
+func (service *MallWeatherExportJobService) OpenDownloadContent(
+	ctx context.Context,
+	actorUserID uint,
+	jobUUID string,
+) (*MallWeatherExportContentResult, error) {
+	if service == nil || service.newSigner == nil {
+		return nil, fmt.Errorf("%w: invalid download content request", ErrMallWeatherExportInvalid)
+	}
+	row, _, _, err := service.readyDownloadJob(ctx, actorUserID, jobUUID)
+	if err != nil {
+		return nil, err
+	}
+	reader, err := service.newSigner()
+	if err != nil {
+		return nil, fmt.Errorf("%w: create content reader: %w", ErrMallWeatherExportStorageUnavailable, err)
+	}
+	if reader == nil {
+		return nil, fmt.Errorf("mall weather export: nil content reader")
+	}
+	object, err := reader.OpenDownloadObject(ctx, row.ResultObjectKey)
+	if err != nil {
+		if errors.Is(err, storage.ErrOSSObjectNotFound) {
+			return nil, fmt.Errorf("%w: %w", ErrMallWeatherExportArtifactMissing, err)
+		}
+		return nil, fmt.Errorf("%w: open download content: %w", ErrMallWeatherExportStorageUnavailable, err)
+	}
+	if object.Body == nil {
+		return nil, fmt.Errorf("%w: download content body is missing", ErrMallWeatherExportArtifactMissing)
+	}
+	if object.Size != row.FileSizeBytes || object.Size < 4 {
+		_ = object.Body.Close()
+		return nil, fmt.Errorf(
+			"%w: stored size %d differs from download size %d",
+			ErrMallWeatherExportArtifactMissing,
+			row.FileSizeBytes,
+			object.Size,
+		)
+	}
+	header := make([]byte, 4)
+	if _, err := io.ReadFull(object.Body, header); err != nil {
+		_ = object.Body.Close()
+		return nil, fmt.Errorf("%w: read XLSX header: %v", ErrMallWeatherExportArtifactMissing, err)
+	}
+	if string(header) != "PK\x03\x04" {
+		_ = object.Body.Close()
+		return nil, fmt.Errorf("%w: invalid XLSX header", ErrMallWeatherExportArtifactMissing)
+	}
+	fileName := "mall_weather_export_" + strings.TrimSpace(jobUUID) + ".xlsx"
+	return &MallWeatherExportContentResult{
+		Body: &mallWeatherExportReadCloser{
+			Reader: io.MultiReader(bytes.NewReader(header), object.Body),
+			closer: object.Body,
+		},
+		Size:        object.Size,
+		FileName:    fileName,
+		ContentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+	}, nil
+}
+
+func (service *MallWeatherExportJobService) readyDownloadJob(
+	ctx context.Context,
+	actorUserID uint,
+	jobUUID string,
+) (*data_dao.MallWeatherExportDownloadJob, time.Time, time.Duration, error) {
+	jobUUID = strings.TrimSpace(jobUUID)
+	if service == nil || service.downloadTTL < time.Minute || service.downloadTTL > time.Hour ||
+		ctx == nil || actorUserID == 0 || len(jobUUID) != 36 || uuid.Validate(jobUUID) != nil {
+		return nil, time.Time{}, 0, fmt.Errorf("%w: invalid download request", ErrMallWeatherExportInvalid)
+	}
+	if err := service.authorize(ctx, actorUserID); err != nil {
+		return nil, time.Time{}, 0, err
+	}
+	row, err := service.jobs.FindDownloadByUUIDAndActor(ctx, jobUUID, actorUserID)
+	if err != nil {
+		return nil, time.Time{}, 0, err
+	}
+	if row == nil {
+		return nil, time.Time{}, 0, fmt.Errorf("mall weather export: nil stored job")
+	}
+	now := service.now().UTC()
+	status := strings.ToLower(strings.TrimSpace(row.Status))
+	if status == "expired" {
+		return nil, time.Time{}, 0, ErrMallWeatherExportExpired
+	}
+	if status != "succeeded" {
+		return nil, time.Time{}, 0, ErrMallWeatherExportNotReady
+	}
+	if row.ExpiresAt == nil || !row.ExpiresAt.UTC().After(now) ||
+		!validMallWeatherExportResultObjectKey(row.ResultObjectKey) || row.FileSizeBytes <= 0 {
+		return nil, time.Time{}, 0, ErrMallWeatherExportExpired
+	}
+	validFor := service.downloadTTL
+	if remaining := row.ExpiresAt.UTC().Sub(now); remaining < validFor {
+		validFor = remaining
+	}
+	if validFor < time.Minute {
+		return nil, time.Time{}, 0, ErrMallWeatherExportExpired
+	}
+	return row, now, validFor, nil
+}
+
+type mallWeatherExportReadCloser struct {
+	io.Reader
+	closer io.Closer
+}
+
+func (reader *mallWeatherExportReadCloser) Close() error {
+	if reader == nil || reader.closer == nil {
+		return nil
+	}
+	return reader.closer.Close()
 }
 
 func validMallWeatherExportResultObjectKey(value string) bool {

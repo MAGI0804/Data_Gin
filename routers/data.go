@@ -242,6 +242,7 @@ func registerMallWeatherExportJobRoutes(
 	exportGroup.POST("", exportCtrl.Create)
 	exportGroup.GET("/:job_id", exportCtrl.Get)
 	exportGroup.GET("/:job_id/download", exportCtrl.Download)
+	exportGroup.GET("/:job_id/content", exportCtrl.DownloadContent)
 }
 
 func registerMallWeatherFeishuPushRoutes(

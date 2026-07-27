@@ -74,13 +74,27 @@ type MallWeatherApiClient = (
   options?: { method?: 'GET' | 'POST' | 'PATCH' | 'DELETE'; body?: unknown; headers?: Record<string, string>; showResult?: boolean; silentLoading?: boolean; signal?: AbortSignal },
 ) => Promise<MallWeatherApiResult>
 
+type MallWeatherFileClient = (
+  path: string,
+  fileName: string,
+  signal: AbortSignal,
+) => Promise<MallWeatherApiResult>
+
 type LoadState = 'idle' | 'loading' | 'success' | 'error'
 type OverviewLoadState = LoadState | 'waiting'
 type WeatherOverviewReloadResult = 'ready' | 'waiting' | 'failed' | 'aborted'
 type OverviewWaitingReason = Exclude<MallWeatherOverviewReadiness, 'ready'> | ''
 type OverviewStableState = { mallID: number; state: 'success' | 'waiting'; reason: OverviewWaitingReason }
 
-export function MallWeatherPage({ actorID, client }: { actorID: string | null; client: MallWeatherApiClient }) {
+export function MallWeatherPage({
+  actorID,
+  client,
+  downloadFile,
+}: {
+  actorID: string | null
+  client: MallWeatherApiClient
+  downloadFile: MallWeatherFileClient
+}) {
   const [malls, setMalls] = useState<MallWeatherMall[]>([])
   const [nextAfterID, setNextAfterID] = useState(0)
   const [mallState, setMallState] = useState<LoadState>('idle')
@@ -484,6 +498,7 @@ export function MallWeatherPage({ actorID, client }: { actorID: string | null; c
             mallID={selectedMall.id}
             mallName={selectedMall.nameCn}
             client={client}
+            downloadFile={downloadFile}
             key={`excel-export-${actorID}:${selectedMall.id}`}
           />}
           {!showCreate && selectedMallReady && selectedMall && (actorID

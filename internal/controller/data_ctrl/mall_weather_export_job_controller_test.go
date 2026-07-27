@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -116,6 +117,35 @@ func TestMallWeatherExportJobControllerDisablesCachingForDownloadErrors(t *testi
 	}
 }
 
+func TestMallWeatherExportJobControllerStreamsAuthenticatedDownloadContent(t *testing.T) {
+	service := fakeMallWeatherExportJobControllerService{
+		content: func(_ context.Context, actor uint, jobUUID string) (*data_svc.MallWeatherExportContentResult, error) {
+			if actor != 17 || jobUUID != mallWeatherExportJobTestUUID {
+				t.Fatalf("actor=%d job=%s", actor, jobUUID)
+			}
+			return &data_svc.MallWeatherExportContentResult{
+				Body: io.NopCloser(strings.NewReader("PK\x03\x04xlsx")), Size: 8,
+				FileName:    "mall_weather_export_" + jobUUID + ".xlsx",
+				ContentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+			}, nil
+		},
+	}
+	recorder := performMallWeatherExportJobRequest(
+		t,
+		service,
+		http.MethodGet,
+		"/api/v1/weather-exports/"+mallWeatherExportJobTestUUID+"/content",
+		"",
+		"",
+	)
+	if recorder.Code != http.StatusOK || recorder.Body.String() != "PK\x03\x04xlsx" ||
+		recorder.Header().Get("Cache-Control") != "no-store" ||
+		recorder.Header().Get("X-Content-Type-Options") != "nosniff" ||
+		!strings.Contains(recorder.Header().Get("Content-Disposition"), ".xlsx") {
+		t.Fatalf("status=%d headers=%v body=%q", recorder.Code, recorder.Header(), recorder.Body.String())
+	}
+}
+
 func TestMallWeatherExportJobControllerRejectsUnknownJSONField(t *testing.T) {
 	calls := 0
 	service := fakeMallWeatherExportJobControllerService{
@@ -205,6 +235,7 @@ func performMallWeatherExportJobRequest(
 	router.POST("/api/v1/weather-exports", controller.Create)
 	router.GET("/api/v1/weather-exports/:job_id", controller.Get)
 	router.GET("/api/v1/weather-exports/:job_id/download", controller.Download)
+	router.GET("/api/v1/weather-exports/:job_id/content", controller.DownloadContent)
 	request := httptest.NewRequest(method, path, strings.NewReader(body))
 	request.Header.Set("Content-Type", "application/json")
 	if idempotencyKey != "" {
@@ -224,6 +255,7 @@ type fakeMallWeatherExportJobControllerService struct {
 	) (*data_svc.MallWeatherExportCreateResult, bool, error)
 	get      func(context.Context, uint, string) (*data_svc.MallWeatherExportJobDTO, error)
 	download func(context.Context, uint, string) (*data_svc.MallWeatherExportDownloadResult, error)
+	content  func(context.Context, uint, string) (*data_svc.MallWeatherExportContentResult, error)
 }
 
 func (service fakeMallWeatherExportJobControllerService) Create(
@@ -258,4 +290,15 @@ func (service fakeMallWeatherExportJobControllerService) Download(
 		return nil, errors.New("download not configured")
 	}
 	return service.download(ctx, actor, jobUUID)
+}
+
+func (service fakeMallWeatherExportJobControllerService) OpenDownloadContent(
+	ctx context.Context,
+	actor uint,
+	jobUUID string,
+) (*data_svc.MallWeatherExportContentResult, error) {
+	if service.content == nil {
+		return nil, errors.New("download content not configured")
+	}
+	return service.content(ctx, actor, jobUUID)
 }

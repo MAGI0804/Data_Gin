@@ -2,7 +2,6 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import {
-  closeMallWeatherExportDownloadTarget,
   clearMallWeatherExportSession,
   loadMallWeatherExportSession,
   mallWeatherExportCreateDisposition,
@@ -10,18 +9,16 @@ import {
   mallWeatherExportCreateResultMatchesRequest,
   mallWeatherExportDownloadReadiness,
   mallWeatherExportDownloadRequestTimeoutMilliseconds,
+  mallWeatherExportContentPath,
   mallWeatherExportDownloadPath,
   mallWeatherExportJobPath,
   mallWeatherExportJobTerminal,
   mallWeatherExportKey,
   mallWeatherExportProgress,
   mallWeatherExportRequestMatches,
-  navigateMallWeatherExportDownloadTarget,
   parseMallWeatherExportCreateResult,
-  parseMallWeatherExportDownload,
   parseMallWeatherExportJob,
   parseMallWeatherExportSafeErrorMessage,
-  prepareMallWeatherExportDownloadTarget,
   saveMallWeatherExportSession,
   waitForMallWeatherExportDownload,
 } from '../.test-dist/mallWeatherExport.js'
@@ -185,25 +182,15 @@ test('requires a succeeded job with at least one minute of download lifetime', (
   assert.equal(mallWeatherExportDownloadReadiness({ status: 'SUCCEEDED', expiresAt: '2026-07-27T10:01:00Z' }, now), 'ready')
 })
 
-test('accepts only short HTTPS download URLs and builds stable resource paths', () => {
-  const download = parseMallWeatherExportDownload(envelope({
-    url: 'https://bucket.oss-cn-shanghai.aliyuncs.com/result.xlsx?signature=short-lived',
-    expiresAt: '2026-07-27T10:05:00Z',
-  }))
-  assert.match(download?.url ?? '', /^https:/)
-  assert.equal(parseMallWeatherExportDownload(envelope({ url: 'http://example.com/result.xlsx', expiresAt: '2026-07-27T10:05:00Z' })), null)
-  assert.equal(parseMallWeatherExportDownload(envelope({ url: 'https://user:secret@example.com/result.xlsx', expiresAt: '2026-07-27T10:05:00Z' })), null)
-  assert.equal(parseMallWeatherExportDownload(envelope({
-    url: 'https://bucket.oss-cn-shanghai-internal.aliyuncs.com/result.xlsx?signature=private-network',
-    expiresAt: '2026-07-27T10:05:00Z',
-  })), null)
+test('builds stable authenticated download resource paths', () => {
   assert.equal(mallWeatherExportJobPath(jobID), `/v1/weather-exports/${jobID}`)
   assert.equal(mallWeatherExportDownloadPath(jobID), `/v1/weather-exports/${jobID}/download`)
+  assert.equal(mallWeatherExportContentPath(jobID), `/v1/weather-exports/${jobID}/content`)
   assert.throws(() => mallWeatherExportJobPath('bad'), /invalid mall weather export job id/)
 })
 
-test('bounds download link requests and aborts clients that do not settle', async () => {
-  assert.equal(mallWeatherExportDownloadRequestTimeoutMilliseconds, 15_000)
+test('bounds authenticated file downloads and aborts clients that do not settle', async () => {
+  assert.equal(mallWeatherExportDownloadRequestTimeoutMilliseconds, 60_000)
 
   const completedController = new AbortController()
   assert.equal(await waitForMallWeatherExportDownload(
@@ -217,45 +204,6 @@ test('bounds download link requests and aborts clients that do not settle', asyn
     { name: 'MallWeatherExportDownloadTimeoutError' },
   )
   assert.equal(stalledController.signal.aborted, true)
-})
-
-test('prepares a safe isolated target for the signed download URL', () => {
-  let replaced = ''
-  let closeCount = 0
-  const target = {
-    closed: false,
-    opener: { unsafe: true },
-    close() {
-      closeCount++
-      this.closed = true
-    },
-    location: { replace(url) { replaced = url } },
-  }
-
-  assert.throws(
-    () => prepareMallWeatherExportDownloadTarget(() => null),
-    { name: 'MallWeatherExportPopupBlockedError' },
-  )
-  assert.equal(prepareMallWeatherExportDownloadTarget(() => target), target)
-  assert.equal(target.opener, null)
-
-  navigateMallWeatherExportDownloadTarget(target, 'https://bucket.oss-cn-shanghai.aliyuncs.com/result.xlsx?signature=short-lived')
-  assert.match(replaced, /^https:/)
-  assert.throws(
-    () => navigateMallWeatherExportDownloadTarget(target, 'https://bucket.oss-cn-shanghai-internal.aliyuncs.com/result.xlsx'),
-    { name: 'MallWeatherExportDownloadTargetError' },
-  )
-
-  closeMallWeatherExportDownloadTarget(target)
-  closeMallWeatherExportDownloadTarget(target)
-  assert.equal(closeCount, 1)
-
-  assert.doesNotThrow(() => closeMallWeatherExportDownloadTarget({
-    closed: false,
-    opener: null,
-    close() { throw new Error('browser extension denied close') },
-    location: { replace() {} },
-  }))
 })
 
 test('reads only bounded safe API error messages', () => {

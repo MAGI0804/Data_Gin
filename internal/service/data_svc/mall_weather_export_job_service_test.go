@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"strings"
 	"testing"
 	"time"
@@ -279,6 +280,81 @@ func TestMallWeatherExportJobServiceSignsActorScopedDownload(t *testing.T) {
 	encoded, err := json.Marshal(result)
 	if err != nil || strings.Contains(string(encoded), "mall-weather-exports") {
 		t.Fatalf("encoded=%s error=%v", encoded, err)
+	}
+}
+
+func TestMallWeatherExportJobServiceOpensActorScopedDownloadContent(t *testing.T) {
+	now := time.Date(2026, 7, 22, 8, 0, 0, 0, time.UTC)
+	jobUUID := uuid.NewString()
+	expiresAt := now.Add(10 * time.Minute)
+	jobs := &fakeMallWeatherExportJobReader{download: &data_dao.MallWeatherExportDownloadJob{
+		Status: "succeeded", ResultObjectKey: "mall-weather-exports/job/result.xlsx",
+		FileSizeBytes: 8, ExpiresAt: &expiresAt,
+	}}
+	service, err := newMallWeatherExportJobService(
+		&fakeMallWeatherExportProfileReader{},
+		fakeMallPermissionChecker{allowed: true},
+		&fakeMallWeatherExportEstimator{},
+		jobs,
+		fakeMallWeatherExportLimitReader{},
+		&fakeMallWeatherExportJobStore{},
+		func() time.Time { return now },
+	)
+	if err != nil {
+		t.Fatalf("newMallWeatherExportJobService() error=%v", err)
+	}
+	signer := &fakeMallWeatherExportDownloadSigner{downloadBody: "PK\x03\x04xlsx", objectSize: 8}
+	service.newSigner = func() (mallWeatherExportDownloadSigner, error) { return signer, nil }
+
+	result, err := service.OpenDownloadContent(t.Context(), 17, jobUUID)
+	if err != nil {
+		t.Fatalf("OpenDownloadContent() error=%v", err)
+	}
+	defer result.Body.Close()
+	body, err := io.ReadAll(result.Body)
+	if err != nil || string(body) != signer.downloadBody || result.Size != 8 ||
+		result.FileName != "mall_weather_export_"+jobUUID+".xlsx" ||
+		signer.openObjectKey != jobs.download.ResultObjectKey || jobs.actorUserID != 17 {
+		t.Fatalf("result=%+v body=%q signer=%+v actor=%d error=%v", result, body, signer, jobs.actorUserID, err)
+	}
+}
+
+func TestMallWeatherExportJobServiceRejectsInvalidDownloadContent(t *testing.T) {
+	now := time.Date(2026, 7, 22, 8, 0, 0, 0, time.UTC)
+	expiresAt := now.Add(10 * time.Minute)
+	tests := []struct {
+		name       string
+		body       string
+		objectSize int64
+		openErr    error
+		want       error
+	}{
+		{name: "object missing", openErr: storage.ErrOSSObjectNotFound, want: ErrMallWeatherExportArtifactMissing},
+		{name: "storage unavailable", openErr: errors.New("access denied"), want: ErrMallWeatherExportStorageUnavailable},
+		{name: "size mismatch", body: "PK\x03\x04bad", objectSize: 7, want: ErrMallWeatherExportArtifactMissing},
+		{name: "invalid XLSX header", body: "NOPEdata", objectSize: 8, want: ErrMallWeatherExportArtifactMissing},
+		{name: "truncated content", body: "PK", objectSize: 8, want: ErrMallWeatherExportArtifactMissing},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			signer := &fakeMallWeatherExportDownloadSigner{
+				downloadBody: tt.body, objectSize: tt.objectSize, openErr: tt.openErr,
+			}
+			service := &MallWeatherExportJobService{
+				permissions: fakeMallPermissionChecker{allowed: true},
+				jobs: &fakeMallWeatherExportJobReader{download: &data_dao.MallWeatherExportDownloadJob{
+					Status: "succeeded", ResultObjectKey: "mall-weather-exports/job/result.xlsx",
+					FileSizeBytes: 8, ExpiresAt: &expiresAt,
+				}},
+				newSigner:   func() (mallWeatherExportDownloadSigner, error) { return signer, nil },
+				downloadTTL: 5 * time.Minute,
+				now:         func() time.Time { return now },
+			}
+			result, err := service.OpenDownloadContent(t.Context(), 17, uuid.NewString())
+			if result != nil || !errors.Is(err, tt.want) {
+				t.Fatalf("OpenDownloadContent() result=%+v error=%v, want %v", result, err, tt.want)
+			}
+		})
 	}
 }
 
@@ -576,9 +652,12 @@ type fakeMallWeatherExportDownloadSigner struct {
 	objectSize         int64
 	statErr            error
 	presignErr         error
+	openErr            error
 	waitForStatContext bool
 	statObjectKey      string
 	objectKey          string
+	openObjectKey      string
+	downloadBody       string
 	downloadName       string
 	expires            time.Duration
 }
@@ -605,6 +684,20 @@ func (signer *fakeMallWeatherExportDownloadSigner) PresignDownloadURL(
 	signer.downloadName = downloadName
 	signer.expires = expires
 	return signer.url, signer.presignErr
+}
+
+func (signer *fakeMallWeatherExportDownloadSigner) OpenDownloadObject(
+	_ context.Context,
+	objectKey string,
+) (storage.DownloadObject, error) {
+	signer.openObjectKey = objectKey
+	if signer.openErr != nil {
+		return storage.DownloadObject{}, signer.openErr
+	}
+	return storage.DownloadObject{
+		Body: io.NopCloser(strings.NewReader(signer.downloadBody)),
+		Size: signer.objectSize,
+	}, nil
 }
 
 func (store *fakeMallWeatherExportJobStore) Create(

@@ -58,6 +58,7 @@ type ApiClientOptions = {
 }
 
 type ApiClient = (path: string, options?: ApiClientOptions) => Promise<ApiResult>
+type FileDownloadClient = (path: string, fileName: string, signal: AbortSignal) => Promise<ApiResult>
 type NavKey = 'overview' | 'runs' | 'delivery_logs' | 'step_runs' | 'mall_weather' | 'sources' | 'receive' | 'pull_records' | 'backfill' | 'youzan_distribution' | 'rules' | 'processed' | 'methods' | 'destinations' | 'tasks' | 'push_policy' | 'excel_jobs' | 'excel_schemes' | 'excel_write'
 type NavItem = { key: NavKey; label: string; description: string; icon: ReactNode }
 type NavGroup = { label: string; items: NavItem[] }
@@ -763,6 +764,62 @@ function App() {
     [token],
   )
 
+  const downloadFile = useCallback<FileDownloadClient>(
+    async (path, fileName, signal) => {
+      const validFileName = /^mall_weather_export_[0-9a-f-]{36}\.xlsx$/i.test(fileName)
+      if (!validFileName) return { ok: false, status: 422, data: 'invalid download file name' }
+      try {
+        const response = await fetch(apiURL(path), {
+          method: 'GET',
+          signal,
+          headers: {
+            ...(token ? { token } : {}),
+          },
+        })
+        const contentType = response.headers.get('Content-Type')?.split(';', 1)[0].trim().toLowerCase() ?? ''
+        if (!response.ok || contentType !== 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet') {
+          const data = await response.json().catch(() => ({}))
+          const effectiveStatus = effectiveApiStatus(response.status, data)
+          if (effectiveStatus === 401) {
+            clearStoredToken(window.localStorage)
+            setToken('')
+            setAuthenticated(false)
+          }
+          return { ok: false, status: effectiveStatus, data }
+        }
+        const declaredSizeValue = response.headers.get('Content-Length')
+        const declaredSize = declaredSizeValue === null ? null : Number(declaredSizeValue)
+        if (declaredSize !== null && (!Number.isSafeInteger(declaredSize) || declaredSize < 4)) {
+          return { ok: false, status: 502, data: 'invalid XLSX download size' }
+        }
+        const blob = await response.blob()
+        const header = new Uint8Array(await blob.slice(0, 4).arrayBuffer())
+        if (declaredSize !== null && blob.size !== declaredSize) {
+          return { ok: false, status: 502, data: 'incomplete XLSX download content' }
+        }
+        if (blob.size < 4 || header[0] !== 0x50 || header[1] !== 0x4b || header[2] !== 0x03 || header[3] !== 0x04) {
+          return { ok: false, status: 502, data: 'invalid XLSX download content' }
+        }
+        const objectURL = URL.createObjectURL(blob)
+        const anchor = document.createElement('a')
+        try {
+          anchor.href = objectURL
+          anchor.download = fileName
+          anchor.rel = 'noopener'
+          document.body.append(anchor)
+          anchor.click()
+        } finally {
+          anchor.remove()
+          window.setTimeout(() => URL.revokeObjectURL(objectURL), 60_000)
+        }
+        return { ok: true, status: response.status, data: { fileName, size: blob.size } }
+      } catch (error) {
+        return { ok: false, status: 0, data: error instanceof Error ? error.message : String(error) }
+      }
+    },
+    [token],
+  )
+
   const loadConfiguredMethods = useCallback(async (pipelines: PipelineDefinition[]) => {
     const details = await Promise.all(
       pipelines.map((pipeline) => client(`/v1/pipelines/${pipeline.id}`, { method: 'GET', showResult: false, silentLoading: true })),
@@ -1053,7 +1110,7 @@ function App() {
         {activeNav === 'runs' && <RunsQueryPage runs={runs} onLoadSteps={loadStepRuns} />}
         {activeNav === 'delivery_logs' && <DeliveryLogsQueryPage logs={deliveryLogs} onRetryLog={retryDeliveryLog} />}
         {activeNav === 'step_runs' && <StepRunsQueryPage runs={runs} stepRuns={stepRuns} onLoadSteps={loadStepRuns} />}
-        {activeNav === 'mall_weather' && <MallWeatherPage actorID={actorID} client={client} />}
+        {activeNav === 'mall_weather' && <MallWeatherPage actorID={actorID} client={client} downloadFile={downloadFile} />}
         {activeNav === 'sources' && <SourcesQueryPage sources={sources} />}
         {activeNav === 'methods' && <MethodsView methods={methods} coreMethods={coreMethods} onToggle={toggleTarget} />}
         {activeNav === 'receive' && <RawRecordsQueryPage title="接口接收记录" records={receivedData} />}
