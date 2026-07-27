@@ -1,11 +1,19 @@
 package config
 
-import "gin-biz-web-api/pkg/config"
+import (
+	"os"
+	"strconv"
+	"strings"
+
+	"gin-biz-web-api/pkg/config"
+)
+
+const EnvMallWeatherEnabled = "MALL_WEATHER_ENABLED"
 
 func init() {
 	config.Add("cfg.mall_weather", func() map[string]interface{} {
 		return map[string]interface{}{
-			"enabled":                         config.Get("MallWeather.Enabled", false),
+			"enabled":                         mallWeatherEnabled(),
 			"feishu_enabled":                  config.Get("MallWeather.FeishuEnabled", false),
 			"provider":                        config.Get("MallWeather.Provider", "caiyun"),
 			"coverage_radius_m":               config.Get("MallWeather.CoverageRadiusM", 1000),
@@ -38,4 +46,17 @@ func init() {
 			"forecast_version_retention_days": config.Get("MallWeather.ForecastVersionRetentionDays", 30),
 		}
 	})
+}
+
+func mallWeatherEnabled() bool {
+	fallback := config.GetBool("MallWeather.Enabled", false)
+	raw, exists := os.LookupEnv(EnvMallWeatherEnabled)
+	if !exists || strings.TrimSpace(raw) == "" {
+		return fallback
+	}
+	enabled, err := strconv.ParseBool(strings.TrimSpace(raw))
+	if err != nil {
+		return false
+	}
+	return enabled
 }

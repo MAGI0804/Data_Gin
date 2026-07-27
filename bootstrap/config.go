@@ -2,9 +2,11 @@ package bootstrap
 
 import (
 	"fmt"
+	"os"
+	"strconv"
 	"strings"
 
-	_ "gin-biz-web-api/config"
+	appConfig "gin-biz-web-api/config"
 	"gin-biz-web-api/global"
 	pkgConfig "gin-biz-web-api/pkg/config"
 	"gin-biz-web-api/pkg/console"
@@ -46,6 +48,11 @@ func setupConfig() {
 }
 
 func validateMallWeatherConfig() error {
+	if raw, exists := os.LookupEnv(appConfig.EnvMallWeatherEnabled); exists && strings.TrimSpace(raw) != "" {
+		if _, err := strconv.ParseBool(strings.TrimSpace(raw)); err != nil {
+			return fmt.Errorf("%s must be a boolean", appConfig.EnvMallWeatherEnabled)
+		}
+	}
 	if !pkgConfig.GetBool("cfg.mall_weather.enabled") {
 		if pkgConfig.GetBool("cfg.mall_weather.feishu_enabled") {
 			return fmt.Errorf("feishu integration requires mall weather to be enabled")

@@ -6,14 +6,18 @@ import (
 	"strings"
 	"testing"
 
+	appConfig "gin-biz-web-api/config"
 	pkgConfig "gin-biz-web-api/pkg/config"
 )
 
 func TestValidateMallWeatherConfig(t *testing.T) {
 	tests := []struct {
-		name      string
-		yaml      string
-		wantError string
+		name         string
+		yaml         string
+		enabledEnv   string
+		checkEnabled bool
+		wantEnabled  bool
+		wantError    string
 	}{
 		{
 			name: "disabled by default",
@@ -27,6 +31,21 @@ func TestValidateMallWeatherConfig(t *testing.T) {
 		{
 			name: "enabled configuration is valid",
 			yaml: "MallWeather:\n  Enabled: true\nCaiyun:\n  QPS: 2\n",
+		},
+		{
+			name:       "environment enables workers",
+			yaml:       "MallWeather:\n  Enabled: false\nCaiyun:\n  QPS: 2\n",
+			enabledEnv: "true", checkEnabled: true, wantEnabled: true,
+		},
+		{
+			name:       "environment disables workers",
+			yaml:       "MallWeather:\n  Enabled: true\n",
+			enabledEnv: "false", checkEnabled: true, wantEnabled: false,
+		},
+		{
+			name:       "invalid environment flag fails closed",
+			yaml:       "App:\n  Env: local\n",
+			enabledEnv: "sometimes", wantError: "MALL_WEATHER_ENABLED",
 		},
 		{
 			name:      "task timeout must exceed fetch timeout",
@@ -62,12 +81,16 @@ func TestValidateMallWeatherConfig(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
+			t.Setenv(appConfig.EnvMallWeatherEnabled, tt.enabledEnv)
 			configDir := t.TempDir()
 			configFile := filepath.Join(configDir, "config.yaml")
 			if err := os.WriteFile(configFile, []byte(tt.yaml), 0o600); err != nil {
 				t.Fatalf("write test config: %v", err)
 			}
 			pkgConfig.NewConfig("", configDir+string(os.PathSeparator))
+			if tt.checkEnabled && pkgConfig.GetBool("cfg.mall_weather.enabled") != tt.wantEnabled {
+				t.Fatalf("cfg.mall_weather.enabled = %t, want %t", pkgConfig.GetBool("cfg.mall_weather.enabled"), tt.wantEnabled)
+			}
 
 			err := validateMallWeatherConfig()
 			if tt.wantError == "" {

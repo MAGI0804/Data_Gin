@@ -47,7 +47,7 @@ QueueJob:
     DB: 0
 
 MallWeather:
-  Enabled: false
+  Enabled: ${MALL_WEATHER_ENABLED:-false}
   FeishuEnabled: false
   Provider: caiyun
   CoverageRadiusM: 1000
