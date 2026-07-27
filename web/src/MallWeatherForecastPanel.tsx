@@ -109,7 +109,7 @@ export function MallWeatherForecastPanel({ mallID, timeZone, client }: { mallID:
         </div>
         <button type="button" onClick={load} disabled={loading}><RefreshCcw aria-hidden="true" />{loading ? '加载中' : '重新查询'}</button>
       </div>
-      <ForecastDataset id="mall-weather-minutely" title={`中心点未来 ${mallWeatherMinutelyForecastMinutes} 分钟降水（约 1 km 分辨率）`} state={minutely} empty={`未来 ${mallWeatherMinutelyForecastMinutes} 分钟窗口没有分钟级降水预报`}>
+      <ForecastDataset id="mall-weather-minutely" title={`中心点未来 ${mallWeatherMinutelyForecastMinutes} 分钟降水（约 1 km 分辨率）`} state={minutely} empty={`未来 ${mallWeatherMinutelyForecastMinutes} 分钟窗口没有分钟级降水预报`} defaultOpen>
         <table className="data-table"><caption className="mall-weather-table-caption">商场中心点未来 {mallWeatherMinutelyForecastMinutes} 分钟约 1 km 分辨率降水明细</caption><thead><tr><th scope="col">时间</th><th scope="col">分钟偏移</th><th scope="col">降水强度</th><th scope="col">概率</th><th scope="col">描述 / 关键点</th><th scope="col">数据源</th><th scope="col">质量</th></tr></thead><tbody>
           {minutely.items.map((item, index) => <tr key={`${item.forecastMinuteUtc}-${index}`}><td>{item.forecastMinuteLocal}</td><td>+{item.minuteOffset} 分钟</td><td>{mallWeatherMetric(item.precipitationMmH, ' mm/h')}</td><td>{mallWeatherMetric(item.probabilityPct, '%', 0)}</td><td>{[item.description, item.forecastKeypoint].filter(Boolean).join(' / ') || '—'}</td><td>{item.datasource || '—'}</td><td>{qualityLabel(item.qualityStatus, item.qualityWarnings.length)}</td></tr>)}
         </tbody></table>
@@ -129,6 +129,7 @@ export function MallWeatherForecastPanel({ mallID, timeZone, client }: { mallID:
         title={`未来逐小时预报（目标 ${mallWeatherHourlyForecastHours} 小时）`}
         state={hourly}
         empty={`未来 ${mallWeatherHourlyForecastHours} 小时窗口没有小时预报`}
+        defaultOpen
         notice={!hourly.loading && !hourly.error && hourly.items.length > 0 && hourly.items.length < mallWeatherHourlyForecastHours
           ? `当前服务端可用 ${hourly.items.length} / ${mallWeatherHourlyForecastHours} 条连续逐小时数据，已展示全部可用内容。`
           : ''}
@@ -151,16 +152,17 @@ export function MallWeatherForecastPanel({ mallID, timeZone, client }: { mallID:
   )
 }
 
-function ForecastDataset<T>({ id, title, state, empty, notice = '', children }: {
+function ForecastDataset<T>({ id, title, state, empty, notice = '', defaultOpen = false, children }: {
   id?: string
   title: string
   state: QueryState<T>
   empty: string
   notice?: string
+  defaultOpen?: boolean
   children: ReactNode
 }) {
   return (
-    <details id={id} className="mall-weather-forecast-dataset" tabIndex={-1} open>
+    <details id={id} className="mall-weather-forecast-dataset" tabIndex={-1} open={defaultOpen}>
       <summary>{title}（{state.items.length} 条）{state.meta ? ` · ${mallWeatherFreshnessLabel(state.meta.freshnessStatus)}` : ''}</summary>
       {state.loading && state.items.length === 0 && <p role="status">正在加载全部分页…</p>}
       {state.error && <p className="mall-weather-action-message error" role="alert">{state.error}</p>}
