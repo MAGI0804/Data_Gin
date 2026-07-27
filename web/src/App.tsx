@@ -970,13 +970,9 @@ function App() {
 
   return (
     <main className="ops-shell">
-      <aside className="ops-sidebar" aria-label="数据仓库导航">
+      <aside className="ops-sidebar" aria-label="主导航">
         <div className="brand">
-          <img className="brand-logo" src="/logo.jpg" alt="数据仓库" />
-          <div>
-            <h1>数据仓库</h1>
-            <span>DATA OPERATIONS</span>
-          </div>
+          <img className="brand-logo" src="/logo.jpg" alt="系统 Logo" />
         </div>
         <label className="nav-search">
           <span>查找页面</span>
@@ -1082,11 +1078,8 @@ function LoginScreen({ onLogin }: { onLogin: (token: string) => void }) {
     <main className="login-shell">
       <section className="login-panel">
         <div className="login-title">
-          <img className="brand-logo large" src="/logo.jpg" alt="数据仓库" />
-          <div>
-            <h1>数据仓库</h1>
-            <p>登录后查看运行情况和现有方法</p>
-          </div>
+          <img className="brand-logo large" src="/logo.jpg" alt="系统 Logo" />
+          <h1 className="sr-only">登录</h1>
         </div>
         <form className="login-form" onSubmit={submit}>
           <Field label="用户名" name="username" />
@@ -1124,7 +1117,6 @@ function ModuleHeader({ activeNav, loading }: { activeNav: NavKey; loading: bool
   return (
     <header className="workspace-header">
       <div>
-        <p className="eyebrow">warehouse overview</p>
         <h2>{titles[activeNav].title}</h2>
         <span>{titles[activeNav].subtitle}</span>
       </div>
