@@ -59,10 +59,10 @@ func TestParseHourlyV26MergesUnionSortsAndUsesLastDuplicate(t *testing.T) {
 	}
 }
 
-func TestParseHourlyV26Preserves72HourTemperatureContract(t *testing.T) {
+func TestParseHourlyV26Preserves360HourTemperatureContract(t *testing.T) {
 	issuedAt := time.Date(2026, 7, 22, 2, 30, 0, 0, time.UTC)
-	temperatures := make([]interface{}, 72)
-	skycons := make([]interface{}, 72)
+	temperatures := make([]interface{}, 360)
+	skycons := make([]interface{}, 360)
 	for index := range temperatures {
 		forecastTime := issuedAt.Truncate(time.Hour).Add(time.Duration(index+1) * time.Hour).Format(time.RFC3339)
 		temperatures[index] = map[string]interface{}{"datetime": forecastTime, "value": 20.0 + float64(index)/10}
@@ -75,8 +75,8 @@ func TestParseHourlyV26Preserves72HourTemperatureContract(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ParseHourlyV26() error=%v", err)
 	}
-	if len(bundle.Forecasts) != 72 {
-		t.Fatalf("forecast count=%d want=72", len(bundle.Forecasts))
+	if len(bundle.Forecasts) != 360 {
+		t.Fatalf("forecast count=%d want=360", len(bundle.Forecasts))
 	}
 	for index := range bundle.Forecasts {
 		if bundle.Forecasts[index].TemperatureC == nil {

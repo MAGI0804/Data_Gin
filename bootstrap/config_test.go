@@ -27,11 +27,21 @@ func TestValidateMallWeatherConfig(t *testing.T) {
 	}{
 		{
 			name: "disabled by default",
-			yaml: "App:\n  Env: local\n", checkSteps: true, wantHourly: 72, wantDaily: 7,
+			yaml: "App:\n  Env: local\n", checkSteps: true, wantHourly: 360, wantDaily: 15,
 		},
 		{
-			name: "legacy forecast windows are capped",
-			yaml: "MallWeather:\n  HourlySteps: 360\n  DailySteps: 15\n", checkSteps: true, wantHourly: 72, wantDaily: 7,
+			name: "full forecast windows are preserved",
+			yaml: "MallWeather:\n  HourlySteps: 360\n  DailySteps: 15\n", checkSteps: true, wantHourly: 360, wantDaily: 15,
+		},
+		{
+			name:      "hourly forecast window above provider maximum is rejected",
+			yaml:      "MallWeather:\n  Enabled: true\n  HourlySteps: 361\n  DailySteps: 15\nCaiyun:\n  QPS: 2\n",
+			wantError: "hourly steps",
+		},
+		{
+			name:      "daily forecast window above provider maximum is rejected",
+			yaml:      "MallWeather:\n  Enabled: true\n  HourlySteps: 360\n  DailySteps: 16\nCaiyun:\n  QPS: 2\n",
+			wantError: "daily steps",
 		},
 		{
 			name:      "enabled requires explicit qps",

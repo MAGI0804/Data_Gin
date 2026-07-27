@@ -70,6 +70,37 @@ func TestParseDailyV26AcceptsOfficialTimezoneDate(t *testing.T) {
 	}
 }
 
+func TestParseDailyV26Preserves15DayForecastAndLifeIndexContract(t *testing.T) {
+	issuedAt := time.Date(2026, 7, 22, 2, 30, 0, 0, time.UTC)
+	temperatures := make([]interface{}, 15)
+	skycons := make([]interface{}, 15)
+	comfort := make([]interface{}, 15)
+	for index := range temperatures {
+		forecastDate := issuedAt.In(time.FixedZone("CST", 8*60*60)).AddDate(0, 0, index).Format("2006-01-02")
+		temperatures[index] = dailyMetricItem(forecastDate, 34, 26, 30)
+		skycons[index] = map[string]interface{}{"date": forecastDate, "value": "CLEAR_DAY"}
+		comfort[index] = map[string]interface{}{"date": forecastDate, "index": "4", "desc": "舒适"}
+	}
+
+	bundle, err := ParseDailyV26(dailyWeatherWithPayload(t, issuedAt, map[string]interface{}{
+		"status":      "ok",
+		"temperature": temperatures,
+		"skycon":      skycons,
+		"life_index":  map[string]interface{}{"comfort": comfort},
+	}))
+	if err != nil {
+		t.Fatalf("ParseDailyV26() error=%v", err)
+	}
+	if len(bundle.Forecasts) != 15 {
+		t.Fatalf("forecast count=%d want=15", len(bundle.Forecasts))
+	}
+	for index := range bundle.Forecasts {
+		if len(bundle.Forecasts[index].BasicLifeIndices) != 1 {
+			t.Fatalf("forecast[%d] life indices=%+v", index, bundle.Forecasts[index].BasicLifeIndices)
+		}
+	}
+}
+
 func TestParseDailyV26ContainsBadDatesAndMetricValues(t *testing.T) {
 	issuedAt := time.Date(2026, 7, 22, 2, 3, 47, 0, time.UTC)
 	weather := dailyWeatherWithPayload(t, issuedAt, map[string]interface{}{

@@ -15,7 +15,7 @@ func TestRequestBuilderConstructsSignedV26Request(t *testing.T) {
 	builder := fixedRequestBuilder(t)
 	request, err := builder.NewWeatherRequest(context.Background(), WeatherRequest{
 		Longitude: 121.4551234, Latitude: 31.2285678,
-		HourlySteps: 72, DailySteps: 7, Alert: true, Unit: "metric:v2",
+		HourlySteps: 360, DailySteps: 15, Alert: true, Unit: "metric:v2",
 	})
 	if err != nil {
 		path := builder.weatherBaseURL.JoinPath("v2.6", builder.signer.appKey, "121.4551234,31.2285678", "weather").EscapedPath()
@@ -27,30 +27,35 @@ func TestRequestBuilderConstructsSignedV26Request(t *testing.T) {
 	if request.URL.EscapedPath() != "/v2.6/test_app_key_2026/121.4551234,31.2285678/weather" {
 		t.Fatalf("path=%q", request.URL.EscapedPath())
 	}
-	if request.URL.RawQuery != "alert=true&dailysteps=7&hourlysteps=72&unit=metric%3Av2" {
+	if request.URL.RawQuery != "alert=true&dailysteps=15&hourlysteps=360&unit=metric%3Av2" {
 		t.Fatalf("query=%q", request.URL.RawQuery)
 	}
 	if request.Header.Get("x-cy-app-key") != "" {
 		t.Fatalf("v2.6 app key header=%q", request.Header.Get("x-cy-app-key"))
 	}
-	assertFixedSigningHeaders(t, request, "zhGS5fGnVuPiwbFLoLlJsOzPWT3yfB4YlM56-_ogSnw=")
+	assertFixedSigningHeaders(t, request, "jW2s-OXHx_tLmeu4uMRnfWqUeHvw1mbDWOjYFK9Yvbk=")
 }
 
 func TestRequestBuilderRejectsInvalidBoundaries(t *testing.T) {
 	builder := fixedRequestBuilder(t)
-	weatherRequests := []WeatherRequest{
-		{Longitude: math.NaN(), Latitude: 31, HourlySteps: 1, DailySteps: 1, Unit: "metric:v2"},
-		{Longitude: 181, Latitude: 31, HourlySteps: 1, DailySteps: 1, Unit: "metric:v2"},
-		{Longitude: 121, Latitude: 91, HourlySteps: 1, DailySteps: 1, Unit: "metric:v2"},
-		{Longitude: 121, Latitude: 31, HourlySteps: 0, DailySteps: 1, Unit: "metric:v2"},
-		{Longitude: 121, Latitude: 31, HourlySteps: 73, DailySteps: 1, Unit: "metric:v2"},
-		{Longitude: 121, Latitude: 31, HourlySteps: 1, DailySteps: 8, Unit: "metric:v2"},
-		{Longitude: 121, Latitude: 31, HourlySteps: 1, DailySteps: 1, Unit: "metric:v2&token=bad"},
+	tests := []struct {
+		name  string
+		input WeatherRequest
+	}{
+		{name: "nan longitude", input: WeatherRequest{Longitude: math.NaN(), Latitude: 31, HourlySteps: 1, DailySteps: 1, Unit: "metric:v2"}},
+		{name: "longitude above range", input: WeatherRequest{Longitude: 181, Latitude: 31, HourlySteps: 1, DailySteps: 1, Unit: "metric:v2"}},
+		{name: "latitude above range", input: WeatherRequest{Longitude: 121, Latitude: 91, HourlySteps: 1, DailySteps: 1, Unit: "metric:v2"}},
+		{name: "zero hourly steps", input: WeatherRequest{Longitude: 121, Latitude: 31, HourlySteps: 0, DailySteps: 1, Unit: "metric:v2"}},
+		{name: "hourly steps above provider maximum", input: WeatherRequest{Longitude: 121, Latitude: 31, HourlySteps: 361, DailySteps: 1, Unit: "metric:v2"}},
+		{name: "daily steps above provider maximum", input: WeatherRequest{Longitude: 121, Latitude: 31, HourlySteps: 1, DailySteps: 16, Unit: "metric:v2"}},
+		{name: "unsafe unit", input: WeatherRequest{Longitude: 121, Latitude: 31, HourlySteps: 1, DailySteps: 1, Unit: "metric:v2&token=bad"}},
 	}
-	for index, input := range weatherRequests {
-		if _, err := builder.NewWeatherRequest(context.Background(), input); err == nil {
-			t.Fatalf("weather request %d error=nil", index)
-		}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if _, err := builder.NewWeatherRequest(context.Background(), test.input); err == nil {
+				t.Fatal("NewWeatherRequest() error=nil")
+			}
+		})
 	}
 }
 

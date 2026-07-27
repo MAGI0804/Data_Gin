@@ -15,8 +15,8 @@ import (
 )
 
 const (
-	maximumHourlySteps = 72
-	maximumDailySteps  = 7
+	maximumHourlySteps = 360
+	maximumDailySteps  = 15
 	coordinateScale    = 7
 )
 

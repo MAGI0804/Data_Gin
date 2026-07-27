@@ -56,10 +56,12 @@ func TestMallWeatherProcessorPersistsEveryComprehensiveWeatherModule(t *testing.
 		t.Fatalf("Process() error=%v", err)
 	}
 	batch := store.batch
-	if provider.weatherCalls != 1 || batch == nil || batch.EndpointKind != caiyun.EndpointWeatherV26 ||
+	request := provider.weatherRequest
+	if provider.weatherCalls != 1 || request.HourlySteps != 360 || request.DailySteps != 15 ||
+		!request.Alert || request.Unit != "metric:v2" || batch == nil || batch.EndpointKind != caiyun.EndpointWeatherV26 ||
 		batch.Status != weatherFetchStatusSuccess || batch.Forecasts == nil || batch.Forecasts.Realtime == nil ||
-		len(batch.Forecasts.Minutely) != 120 || len(batch.Forecasts.Hourly) != 72 || batch.Daily == nil ||
-		len(batch.Daily.Daily) != 7 || len(batch.Daily.LifeIndices) != 7 || batch.Alerts == nil ||
+		len(batch.Forecasts.Minutely) != 120 || len(batch.Forecasts.Hourly) != 360 || batch.Daily == nil ||
+		len(batch.Daily.Daily) != 15 || len(batch.Daily.LifeIndices) != 15 || batch.Alerts == nil ||
 		len(batch.StaleLatest.DataKinds) != 0 || len(batch.StaleLatest.LifeSourceAPIs) != 0 {
 		t.Fatalf("provider calls=%d batch=%+v", provider.weatherCalls, batch)
 	}
@@ -899,10 +901,10 @@ func fullComprehensiveWeatherResponse(t *testing.T) []byte {
 		"precipitation_2h": precipitation2H, "precipitation": precipitation,
 		"probability": []float64{0, 0, 0, 0},
 	}
-	hourlyTemperature := make([]interface{}, 0, 72)
-	hourlySkycon := make([]interface{}, 0, 72)
+	hourlyTemperature := make([]interface{}, 0, 360)
+	hourlySkycon := make([]interface{}, 0, 360)
 	hourlyStart := time.Date(2026, 7, 22, 11, 0, 0, 0, time.FixedZone("CST", 8*60*60))
-	for hour := 0; hour < 72; hour++ {
+	for hour := 0; hour < 360; hour++ {
 		forecastTime := hourlyStart.Add(time.Duration(hour) * time.Hour).Format("2006-01-02T15:04Z07:00")
 		hourlyTemperature = append(hourlyTemperature, map[string]interface{}{"datetime": forecastTime, "value": 33.2})
 		hourlySkycon = append(hourlySkycon, map[string]interface{}{"datetime": forecastTime, "value": "PARTLY_CLOUDY_DAY"})
@@ -912,10 +914,10 @@ func fullComprehensiveWeatherResponse(t *testing.T) []byte {
 		"temperature": hourlyTemperature,
 		"skycon":      hourlySkycon,
 	}
-	dailyTemperature := make([]interface{}, 0, 7)
-	dailySkycon := make([]interface{}, 0, 7)
-	dailyComfort := make([]interface{}, 0, 7)
-	for day := 0; day < 7; day++ {
+	dailyTemperature := make([]interface{}, 0, 15)
+	dailySkycon := make([]interface{}, 0, 15)
+	dailyComfort := make([]interface{}, 0, 15)
+	for day := 0; day < 15; day++ {
 		forecastDate := hourlyStart.AddDate(0, 0, day).Format("2006-01-02T00:00Z07:00")
 		dailyTemperature = append(dailyTemperature, map[string]interface{}{
 			"date": forecastDate, "max": 35.0, "min": 27.0, "avg": 31.0,
