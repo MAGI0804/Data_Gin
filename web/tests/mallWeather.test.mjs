@@ -154,12 +154,14 @@ test('parses mall creation and geocode candidate contracts', () => {
   const candidates = parseMallWeatherGeocodeCandidates({ code: 0, data: {
     mallId: 9, mallVersion: 2, runId: 4, runStatus: 'SUCCEEDED', items: [{
       id: 11, candidateNo: 1, formattedAddress: '上海市浦东新区世纪大道 1 号', province: '上海市', city: '上海市', district: '浦东新区',
-      longitude: 121.5, latitude: 31.2, coordinateSystem: 'GCJ02', level: '门牌号', confidenceScore: 0.96, selected: false,
+      longitude: 121.5, latitude: 31.2, coordinateSystem: 'GCJ02', level: '门牌号', confidenceScore: 96, selected: false,
     }],
   } })
   assert.equal(candidates?.items[0].formattedAddress, '上海市浦东新区世纪大道 1 号')
+  assert.equal(candidates?.items[0].confidenceScore, 96)
   assert.equal(candidates?.mallVersion, 2)
   assert.equal(parseMallWeatherGeocodeCandidates({ code: 0, data: { mallId: 9, mallVersion: 2, items: [{ id: 1, candidateNo: 1, formattedAddress: 'bad', longitude: 200, latitude: 31, coordinateSystem: 'GCJ02', confidenceScore: 1 }] } }), null)
+  assert.equal(parseMallWeatherGeocodeCandidates({ code: 0, data: { mallId: 9, mallVersion: 2, items: [{ id: 1, candidateNo: 1, formattedAddress: 'bad', longitude: 121, latitude: 31, coordinateSystem: 'WGS84', confidenceScore: 80 }] } }), null)
   for (const status of ['NO_CANDIDATES', 'AUTO_CONFIRMED', 'REVIEW_REQUIRED', 'FAILED', 'STALE']) assert.equal(mallWeatherGeocodeRunTerminal(status), true)
   assert.equal(mallWeatherGeocodeRunTerminal('RUNNING'), false)
 })

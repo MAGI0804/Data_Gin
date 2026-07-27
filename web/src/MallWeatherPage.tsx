@@ -532,7 +532,7 @@ function MallOnboardingPanel({ mall, client, onMallUpdated, onReloadMall }: {
       </div>
       {candidates && candidates.items.length > 0 && <div className="mall-weather-candidates">
         {candidates.items.map((candidate) => <article key={candidate.id}>
-          <div><strong>候选 {candidate.candidateNo}</strong><span>置信度 {(candidate.confidenceScore * 100).toFixed(0)}% · {candidate.level || '层级未知'}</span></div>
+          <div><strong>候选 {candidate.candidateNo}</strong><span>置信度 {candidate.confidenceScore.toFixed(0)}% · {candidate.level || '层级未知'}</span></div>
           <p>{candidate.formattedAddress}</p>
           <small>{candidate.longitude.toFixed(6)}, {candidate.latitude.toFixed(6)} {candidate.coordinateSystem}</small>
           <button className="primary" type="button" onClick={() => void confirmCoordinate(candidate.id)} disabled={submitting || candidateState === 'loading'}>选用并启用天气</button>

@@ -569,7 +569,8 @@ export function parseMallWeatherGeocodeCandidates(payload: unknown): MallWeather
     if (!isRecord(item) || !positiveSafeInteger(item.id) || !Number.isSafeInteger(item.candidateNo) || Number(item.candidateNo) < 1 ||
       typeof item.formattedAddress !== 'string' || !validCoordinateValue(item.longitude, -180, 180) ||
       !validCoordinateValue(item.latitude, -90, 90) || typeof item.coordinateSystem !== 'string' ||
-      typeof item.confidenceScore !== 'number' || !Number.isFinite(item.confidenceScore) || item.confidenceScore < 0 || item.confidenceScore > 1) return null
+      item.coordinateSystem.trim().toUpperCase() !== 'GCJ02' || typeof item.confidenceScore !== 'number' ||
+      !Number.isFinite(item.confidenceScore) || item.confidenceScore < 0 || item.confidenceScore > 100) return null
     items.push({
       id: Number(item.id),
       candidateNo: Number(item.candidateNo),
@@ -579,7 +580,7 @@ export function parseMallWeatherGeocodeCandidates(payload: unknown): MallWeather
       district: textValue(item, 'district'),
       longitude: Number(item.longitude),
       latitude: Number(item.latitude),
-      coordinateSystem: item.coordinateSystem,
+      coordinateSystem: 'GCJ02',
       level: textValue(item, 'level'),
       confidenceScore: item.confidenceScore,
       selected: item.selected === true,
