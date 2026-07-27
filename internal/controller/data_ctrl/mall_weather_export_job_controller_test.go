@@ -66,8 +66,9 @@ func TestMallWeatherExportJobControllerGetsActorScopedJob(t *testing.T) {
 		"",
 		"",
 	)
-	if recorder.Code != http.StatusOK || !strings.Contains(recorder.Body.String(), `"status":"RUNNING"`) {
-		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
+	if recorder.Code != http.StatusOK || recorder.Header().Get("Cache-Control") != "no-store" ||
+		!strings.Contains(recorder.Body.String(), `"status":"RUNNING"`) {
+		t.Fatalf("status=%d headers=%v body=%s", recorder.Code, recorder.Header(), recorder.Body.String())
 	}
 }
 
@@ -88,9 +89,29 @@ func TestMallWeatherExportJobControllerReturnsSignedDownload(t *testing.T) {
 		"",
 		"",
 	)
-	if recorder.Code != http.StatusOK || strings.Contains(recorder.Body.String(), "object_key") ||
+	if recorder.Code != http.StatusOK || recorder.Header().Get("Cache-Control") != "no-store" ||
+		strings.Contains(recorder.Body.String(), "object_key") ||
 		!strings.Contains(recorder.Body.String(), "https://signed.example/result") {
-		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
+		t.Fatalf("status=%d headers=%v body=%s", recorder.Code, recorder.Header(), recorder.Body.String())
+	}
+}
+
+func TestMallWeatherExportJobControllerDisablesCachingForDownloadErrors(t *testing.T) {
+	service := fakeMallWeatherExportJobControllerService{
+		download: func(context.Context, uint, string) (*data_svc.MallWeatherExportDownloadResult, error) {
+			return nil, data_svc.ErrMallWeatherExportNotReady
+		},
+	}
+	recorder := performMallWeatherExportJobRequest(
+		t,
+		service,
+		http.MethodGet,
+		"/api/v1/weather-exports/"+mallWeatherExportJobTestUUID+"/download",
+		"",
+		"",
+	)
+	if recorder.Code != http.StatusConflict || recorder.Header().Get("Cache-Control") != "no-store" {
+		t.Fatalf("status=%d headers=%v body=%s", recorder.Code, recorder.Header(), recorder.Body.String())
 	}
 }
 

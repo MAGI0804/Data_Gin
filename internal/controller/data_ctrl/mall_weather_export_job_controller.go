@@ -70,6 +70,7 @@ func (controller *MallWeatherExportJobController) Create(c *gin.Context) {
 }
 
 func (controller *MallWeatherExportJobController) Get(c *gin.Context) {
+	disableMallWeatherExportCaching(c)
 	result, err := controller.service.Get(
 		c.Request.Context(),
 		auth.CurrentUserID(c),
@@ -83,6 +84,7 @@ func (controller *MallWeatherExportJobController) Get(c *gin.Context) {
 }
 
 func (controller *MallWeatherExportJobController) Download(c *gin.Context) {
+	disableMallWeatherExportCaching(c)
 	result, err := controller.service.Download(
 		c.Request.Context(),
 		auth.CurrentUserID(c),
@@ -93,6 +95,10 @@ func (controller *MallWeatherExportJobController) Download(c *gin.Context) {
 		return
 	}
 	responses.New(c).ToResponseWithStatus(http.StatusOK, result)
+}
+
+func disableMallWeatherExportCaching(c *gin.Context) {
+	c.Header("Cache-Control", "no-store")
 }
 
 func writeMallWeatherExportJobError(c *gin.Context, err error) {
