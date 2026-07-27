@@ -172,7 +172,12 @@ export type MallWeatherRealtime = {
   apparentTemperatureC?: number
   humidityPct?: number
   windSpeedKph?: number
+  localPrecipitationStatus?: string
   localPrecipitationMmH?: number
+  localPrecipitationSource?: string
+  nearestPrecipitationStatus?: string
+  nearestPrecipitationDistanceKm?: number
+  nearestPrecipitationMmH?: number
   visibilityKm?: number
   skycon?: string
   pm25UgM3?: number
@@ -188,10 +193,16 @@ export type MallWeatherRealtime = {
 }
 
 export type MallWeatherMinutely = {
+  forecastMinuteUtc: string
   forecastMinuteLocal: string
+  issuedAtUtc: string
+  issuedAtLocal: string
+  fetchedAtUtc: string
+  fetchedAtLocal: string
   minuteOffset: number
   precipitationMmH?: number
   probabilityPct?: number
+  datasource?: string
   description?: string
   forecastKeypoint?: string
   qualityStatus: string
@@ -206,12 +217,22 @@ export type MallWeatherHourly = {
   fetchedAtUtc: string
   fetchedAtLocal: string
   temperatureC?: number
+  apparentTemperatureC?: number
+  pressurePa?: number
+  humidityPct?: number
   precipitationMmH?: number
   precipitationProbabilityPct?: number
   windSpeedKph?: number
+  windDirectionDeg?: number
+  cloudrateRatio?: number
+  dswrfWM2?: number
+  visibilityKm?: number
   skycon?: string
   pm25UgM3?: number
   aqiChn?: number
+  aqiUsa?: number
+  hourlyDescription?: string
+  forecastKeypoint?: string
   qualityStatus: string
   qualityWarnings: MallWeatherWarning[]
 }
@@ -280,7 +301,7 @@ export type MallWeatherPageResult<T> = {
   pagination: { pageSize: number; nextCursor: string }
 }
 
-export type MallWeatherSeries = 'hourly' | 'daily' | 'life-indices'
+export type MallWeatherSeries = 'minutely' | 'hourly' | 'daily' | 'life-indices'
 
 export type MallWeatherQueryWindow = {
   start: Date
@@ -288,6 +309,7 @@ export type MallWeatherQueryWindow = {
 }
 
 export type MallWeatherForecastWindows = {
+  minutely: MallWeatherQueryWindow
   hourly: MallWeatherQueryWindow
   daily: MallWeatherQueryWindow
 }
@@ -458,6 +480,14 @@ function strictWarningValues(value: unknown): MallWeatherWarning[] | null {
   return warnings
 }
 
+function hasOnlyOptionalFiniteNumbers(record: JsonRecord, keys: string[]) {
+  return keys.every((key) => record[key] === undefined || typeof record[key] === 'number' && Number.isFinite(record[key]))
+}
+
+function hasOnlyOptionalStrings(record: JsonRecord, keys: string[]) {
+  return keys.every((key) => record[key] === undefined || typeof record[key] === 'string')
+}
+
 function isRFC3339(value: unknown): value is string {
   return typeof value === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(value) && Number.isFinite(Date.parse(value))
 }
@@ -477,7 +507,12 @@ function mallWeatherRealtime(record: JsonRecord): MallWeatherRealtime {
     apparentTemperatureC: numberValue(record, 'apparentTemperatureC'),
     humidityPct: numberValue(record, 'humidityPct'),
     windSpeedKph: numberValue(record, 'windSpeedKph'),
+    localPrecipitationStatus: textValue(record, 'localPrecipitationStatus'),
     localPrecipitationMmH: numberValue(record, 'localPrecipitationMmH'),
+    localPrecipitationSource: textValue(record, 'localPrecipitationSource'),
+    nearestPrecipitationStatus: textValue(record, 'nearestPrecipitationStatus'),
+    nearestPrecipitationDistanceKm: numberValue(record, 'nearestPrecipitationDistanceKm'),
+    nearestPrecipitationMmH: numberValue(record, 'nearestPrecipitationMmH'),
     visibilityKm: numberValue(record, 'visibilityKm'),
     skycon: textValue(record, 'skycon'),
     pm25UgM3: numberValue(record, 'pm25UgM3'),
@@ -493,16 +528,22 @@ function mallWeatherRealtime(record: JsonRecord): MallWeatherRealtime {
   }
 }
 
-function mallWeatherMinutely(record: JsonRecord): MallWeatherMinutely {
+function mallWeatherMinutely(record: JsonRecord, qualityWarnings = warningValues(record.qualityWarnings)): MallWeatherMinutely {
   return {
+    forecastMinuteUtc: textValue(record, 'forecastMinuteUtc'),
     forecastMinuteLocal: textValue(record, 'forecastMinuteLocal'),
+    issuedAtUtc: textValue(record, 'issuedAtUtc'),
+    issuedAtLocal: textValue(record, 'issuedAtLocal'),
+    fetchedAtUtc: textValue(record, 'fetchedAtUtc'),
+    fetchedAtLocal: textValue(record, 'fetchedAtLocal'),
     minuteOffset: numberValue(record, 'minuteOffset') ?? 0,
     precipitationMmH: numberValue(record, 'precipitationMmH'),
     probabilityPct: numberValue(record, 'probabilityPct'),
+    datasource: textValue(record, 'datasource'),
     description: textValue(record, 'description'),
     forecastKeypoint: textValue(record, 'forecastKeypoint'),
     qualityStatus: textValue(record, 'qualityStatus'),
-    qualityWarnings: warningValues(record.qualityWarnings),
+    qualityWarnings,
   }
 }
 
@@ -515,12 +556,22 @@ function mallWeatherHourly(record: JsonRecord, qualityWarnings = warningValues(r
     fetchedAtUtc: textValue(record, 'fetchedAtUtc'),
     fetchedAtLocal: textValue(record, 'fetchedAtLocal'),
     temperatureC: numberValue(record, 'temperatureC'),
+    apparentTemperatureC: numberValue(record, 'apparentTemperatureC'),
+    pressurePa: numberValue(record, 'pressurePa'),
+    humidityPct: numberValue(record, 'humidityPct'),
     precipitationMmH: numberValue(record, 'precipitationMmH'),
     precipitationProbabilityPct: numberValue(record, 'precipitationProbabilityPct'),
     windSpeedKph: numberValue(record, 'windSpeedKph'),
+    windDirectionDeg: numberValue(record, 'windDirectionDeg'),
+    cloudrateRatio: numberValue(record, 'cloudrateRatio'),
+    dswrfWM2: numberValue(record, 'dswrfWM2'),
+    visibilityKm: numberValue(record, 'visibilityKm'),
     skycon: textValue(record, 'skycon'),
     pm25UgM3: numberValue(record, 'pm25UgM3'),
     aqiChn: numberValue(record, 'aqiChn'),
+    aqiUsa: numberValue(record, 'aqiUsa'),
+    hourlyDescription: textValue(record, 'hourlyDescription'),
+    forecastKeypoint: textValue(record, 'forecastKeypoint'),
     qualityStatus: textValue(record, 'qualityStatus'),
     qualityWarnings,
   }
@@ -888,7 +939,7 @@ export function parseMallWeatherOverview(payload: unknown): MallWeatherOverview 
 
   return {
     realtime: isRecord(data.realtime) ? mallWeatherRealtime(data.realtime) : null,
-    minutely: data.minutely.filter(isRecord).map(mallWeatherMinutely),
+    minutely: data.minutely.filter(isRecord).map((item) => mallWeatherMinutely(item)),
     hourly: data.hourly.filter(isRecord).map((item) => mallWeatherHourly(item)),
     alerts: data.alerts.filter(isRecord).map(mallWeatherAlert),
     meta: mallWeatherMeta(data.meta),
@@ -917,10 +968,34 @@ export function parseMallWeatherHourlyPage(payload: unknown): MallWeatherPageRes
   for (const item of page.data.items as unknown[]) {
     if (!isRecord(item) || !isRFC3339(item.forecastTimeUtc) || !isRFC3339(item.forecastTimeLocal) || !isRFC3339(item.issuedAtUtc) ||
       !isRFC3339(item.issuedAtLocal) || !isRFC3339(item.fetchedAtUtc) || !isRFC3339(item.fetchedAtLocal) ||
-      typeof item.qualityStatus !== 'string' || !item.qualityStatus.trim()) return null
+      typeof item.qualityStatus !== 'string' || !item.qualityStatus.trim() || !hasOnlyOptionalFiniteNumbers(item, [
+        'temperatureC', 'apparentTemperatureC', 'pressurePa', 'humidityPct', 'precipitationMmH',
+        'precipitationProbabilityPct', 'windSpeedKph', 'windDirectionDeg', 'cloudrateRatio', 'dswrfWM2',
+        'visibilityKm', 'pm25UgM3', 'aqiChn', 'aqiUsa',
+      ]) || !hasOnlyOptionalStrings(item, ['skycon', 'hourlyDescription', 'forecastKeypoint'])) return null
     const warnings = strictWarningValues(item.qualityWarnings)
     if (!warnings) return null
     items.push(mallWeatherHourly(item, warnings))
+  }
+  return { items, meta, pagination: page.pagination }
+}
+
+export function parseMallWeatherMinutelyPage(payload: unknown): MallWeatherPageResult<MallWeatherMinutely> | null {
+  const page = mallWeatherPageData(payload)
+  if (!page) return null
+  const meta = strictMallWeatherMeta(page.data.meta)
+  if (!meta) return null
+  const items: MallWeatherMinutely[] = []
+  for (const item of page.data.items as unknown[]) {
+    if (!isRecord(item) || !isRFC3339(item.forecastMinuteUtc) || !isRFC3339(item.forecastMinuteLocal) ||
+      !isRFC3339(item.issuedAtUtc) || !isRFC3339(item.issuedAtLocal) || !isRFC3339(item.fetchedAtUtc) ||
+      !isRFC3339(item.fetchedAtLocal) || !Number.isSafeInteger(item.minuteOffset) || Number(item.minuteOffset) < 0 ||
+      typeof item.qualityStatus !== 'string' || !item.qualityStatus.trim() ||
+      !hasOnlyOptionalFiniteNumbers(item, ['precipitationMmH', 'probabilityPct']) ||
+      !hasOnlyOptionalStrings(item, ['datasource', 'description', 'forecastKeypoint'])) return null
+    const warnings = strictWarningValues(item.qualityWarnings)
+    if (!warnings) return null
+    items.push(mallWeatherMinutely(item, warnings))
   }
   return { items, meta, pagination: page.pagination }
 }
@@ -1052,7 +1127,7 @@ export function mallWeatherOverviewPath(mallID: number, timeZone = '') {
 
 export function mallWeatherSeriesPath(mallID: number, series: MallWeatherSeries, start: Date, end: Date, cursor = '', timeZone = 'Asia/Shanghai', asOf = new Date()) {
   if (!Number.isSafeInteger(mallID) || mallID <= 0) throw new Error('invalid mall id')
-  if (!['hourly', 'daily', 'life-indices'].includes(series)) throw new Error('invalid weather series')
+  if (!['minutely', 'hourly', 'daily', 'life-indices'].includes(series)) throw new Error('invalid weather series')
   if (!Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime()) || start >= end || end.getTime() - start.getTime() > 31 * 24 * 60 * 60 * 1000) {
     throw new Error('invalid weather range')
   }
@@ -1072,13 +1147,16 @@ export function mallWeatherSeriesPath(mallID: number, series: MallWeatherSeries,
 
 export function mallWeatherForecastQueryWindows(now = new Date(), timeZone = 'Asia/Shanghai'): MallWeatherForecastWindows {
   if (!Number.isFinite(now.getTime())) throw new Error('invalid weather query time')
+  const minuteMilliseconds = 60 * 1000
   const hourMilliseconds = 60 * 60 * 1000
+  const minutelyStart = new Date(Math.floor(now.getTime() / minuteMilliseconds) * minuteMilliseconds)
   const hourlyStart = new Date(Math.floor(now.getTime() / hourMilliseconds) * hourMilliseconds)
   const localDate = datePartsInTimeZone(now, timeZone)
   const dailyStart = localMidnight(localDate.year, localDate.month, localDate.day, timeZone)
   const normalizedEndDate = new Date(Date.UTC(localDate.year, localDate.month - 1, localDate.day + 15))
   const dailyEnd = localMidnight(normalizedEndDate.getUTCFullYear(), normalizedEndDate.getUTCMonth() + 1, normalizedEndDate.getUTCDate(), timeZone)
   return {
+    minutely: { start: minutelyStart, end: new Date(minutelyStart.getTime() + 120 * minuteMilliseconds) },
     hourly: { start: hourlyStart, end: new Date(hourlyStart.getTime() + 360 * hourMilliseconds) },
     daily: { start: dailyStart, end: dailyEnd },
   }
@@ -1121,6 +1199,7 @@ export async function loadAllMallWeatherPages<T>(
 
 function mallWeatherLogicalKey(series: MallWeatherSeries, value: unknown) {
   if (!isRecord(value)) return ''
+  if (series === 'minutely') return typeof value.forecastMinuteUtc === 'string' ? value.forecastMinuteUtc : ''
   if (series === 'hourly') return typeof value.forecastTimeUtc === 'string' ? value.forecastTimeUtc : ''
   if (series === 'daily') return typeof value.forecastDateLocal === 'string' ? value.forecastDateLocal : ''
   return typeof value.forecastDateLocal === 'string' && typeof value.sourceApi === 'string' && Number.isSafeInteger(value.indexType)

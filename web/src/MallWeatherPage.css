@@ -209,6 +209,42 @@
   gap: 14px;
 }
 
+.mall-weather-data-nav {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  border: 1px solid #111111;
+  background: #ffffff;
+  padding: 10px 12px;
+}
+
+.mall-weather-data-nav strong {
+  margin-right: 4px;
+}
+
+.mall-weather-data-nav a {
+  border: 1px solid #cbd5e1;
+  color: #111111;
+  padding: 6px 9px;
+  text-decoration: none;
+}
+
+.mall-weather-data-nav a:hover,
+.mall-weather-data-nav a:focus-visible {
+  border-color: #111111;
+}
+
+.mall-weather-forecast-dataset,
+#mall-weather-overview,
+#mall-weather-management {
+  scroll-margin-top: 16px;
+}
+
+.mall-weather-management {
+  gap: 12px;
+}
+
 .mall-weather-refresh-form {
   display: grid;
   grid-template-columns: minmax(180px, 0.8fr) minmax(240px, 1.6fr) auto;

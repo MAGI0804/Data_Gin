@@ -9,11 +9,13 @@ import {
   parseMallWeatherDailyPage,
   parseMallWeatherHourlyPage,
   parseMallWeatherLifeIndexPage,
+  parseMallWeatherMinutelyPage,
   type MallWeatherDaily,
   type MallWeatherForecastWindows,
   type MallWeatherHourly,
   type MallWeatherLifeIndex,
   type MallWeatherMeta,
+  type MallWeatherMinutely,
 } from './mallWeather'
 
 type QueryClient = (
@@ -31,6 +33,7 @@ type QueryState<T> = {
 const emptyState = <T,>(): QueryState<T> => ({ loading: false, error: '', items: [], meta: null })
 
 export function MallWeatherForecastPanel({ mallID, timeZone, client }: { mallID: number; timeZone: string; client: QueryClient }) {
+  const [minutely, setMinutely] = useState<QueryState<MallWeatherMinutely>>(emptyState)
   const [hourly, setHourly] = useState<QueryState<MallWeatherHourly>>(emptyState)
   const [daily, setDaily] = useState<QueryState<MallWeatherDaily>>(emptyState)
   const [life, setLife] = useState<QueryState<MallWeatherLifeIndex>>(emptyState)
@@ -46,6 +49,7 @@ export function MallWeatherForecastPanel({ mallID, timeZone, client }: { mallID:
   const load = useCallback(() => {
     abortActiveRequests()
     const sequence = ++requestSequence.current
+    setMinutely((state) => ({ ...state, loading: true, error: '' }))
     setHourly((state) => ({ ...state, loading: true, error: '' }))
     setDaily((state) => ({ ...state, loading: true, error: '' }))
     setLife((state) => ({ ...state, loading: true, error: '' }))
@@ -54,6 +58,7 @@ export function MallWeatherForecastPanel({ mallID, timeZone, client }: { mallID:
       windows = mallWeatherForecastQueryWindows(new Date(), timeZone)
     } catch {
       const message = '商场时区无效，无法构造完整预报窗口'
+      setMinutely((state) => ({ ...state, loading: false, error: message }))
       setHourly((state) => ({ ...state, loading: false, error: message }))
       setDaily((state) => ({ ...state, loading: false, error: message }))
       setLife((state) => ({ ...state, loading: false, error: message }))
@@ -73,6 +78,7 @@ export function MallWeatherForecastPanel({ mallID, timeZone, client }: { mallID:
     }
     const isCurrent = () => !disposed.current && sequence === requestSequence.current
     void Promise.all([
+      settleDataset(loadAllMallWeatherPages(request, mallID, 'minutely', windows.minutely, timeZone, asOf, parseMallWeatherMinutelyPage), isCurrent, setMinutely),
       settleDataset(loadAllMallWeatherPages(request, mallID, 'hourly', windows.hourly, timeZone, asOf, parseMallWeatherHourlyPage), isCurrent, setHourly),
       settleDataset(loadAllMallWeatherPages(request, mallID, 'daily', windows.daily, timeZone, asOf, parseMallWeatherDailyPage), isCurrent, setDaily),
       settleDataset(loadAllMallWeatherPages(request, mallID, 'life-indices', windows.daily, timeZone, asOf, parseMallWeatherLifeIndexPage), isCurrent, setLife),
@@ -88,16 +94,21 @@ export function MallWeatherForecastPanel({ mallID, timeZone, client }: { mallID:
     }
   }, [abortActiveRequests, load])
 
-  const loading = hourly.loading || daily.loading || life.loading
+  const loading = minutely.loading || hourly.loading || daily.loading || life.loading
   return (
     <section className="workbench-panel mall-weather-forecast-panel" aria-busy={loading}>
       <div className="mall-weather-section-title">
-        <div><strong>完整预报与生活指数</strong><span>未来 360 小时 · 15 天 · 自动读取全部游标页</span></div>
+        <div><strong>完整预报与生活指数</strong><span>中心点未来 120 分钟 · 360 小时 · 15 天 · 自动读取全部游标页</span></div>
         <button type="button" onClick={load} disabled={loading}><RefreshCcw aria-hidden="true" />{loading ? '加载中' : '重新查询'}</button>
       </div>
-      <ForecastDataset title="360 小时逐小时预报" state={hourly} empty="未来 360 小时窗口没有小时预报">
-        <table className="data-table"><caption className="mall-weather-table-caption">未来 360 小时逐小时天气明细</caption><thead><tr><th scope="col">时间</th><th scope="col">天气</th><th scope="col">温度</th><th scope="col">降水</th><th scope="col">风速</th><th scope="col">AQI</th><th scope="col">质量</th></tr></thead><tbody>
-          {hourly.items.map((item, index) => <tr key={`${item.forecastTimeLocal}-${index}`}><td>{item.forecastTimeLocal}</td><td>{mallWeatherSkyconLabel(item.skycon)}</td><td>{mallWeatherMetric(item.temperatureC, '°C')}</td><td>{mallWeatherMetric(item.precipitationMmH, ' mm/h')}</td><td>{mallWeatherMetric(item.windSpeedKph, ' km/h')}</td><td>{mallWeatherMetric(item.aqiChn, '', 0)}</td><td>{qualityLabel(item.qualityStatus, item.qualityWarnings.length)}</td></tr>)}
+      <ForecastDataset id="mall-weather-minutely" title="中心点未来 120 分钟降水（约 1 km 分辨率）" state={minutely} empty="未来 120 分钟窗口没有分钟级降水预报">
+        <table className="data-table"><caption className="mall-weather-table-caption">商场中心点未来 120 分钟约 1 km 分辨率降水明细</caption><thead><tr><th scope="col">时间</th><th scope="col">分钟偏移</th><th scope="col">降水强度</th><th scope="col">概率</th><th scope="col">描述 / 关键点</th><th scope="col">数据源</th><th scope="col">质量</th></tr></thead><tbody>
+          {minutely.items.map((item, index) => <tr key={`${item.forecastMinuteUtc}-${index}`}><td>{item.forecastMinuteLocal}</td><td>+{item.minuteOffset} 分钟</td><td>{mallWeatherMetric(item.precipitationMmH, ' mm/h')}</td><td>{mallWeatherMetric(item.probabilityPct, '%', 0)}</td><td>{[item.description, item.forecastKeypoint].filter(Boolean).join(' / ') || '—'}</td><td>{item.datasource || '—'}</td><td>{qualityLabel(item.qualityStatus, item.qualityWarnings.length)}</td></tr>)}
+        </tbody></table>
+      </ForecastDataset>
+      <ForecastDataset id="mall-weather-hourly" title="360 小时逐小时预报" state={hourly} empty="未来 360 小时窗口没有小时预报">
+        <table className="data-table"><caption className="mall-weather-table-caption">未来 360 小时逐小时天气明细</caption><thead><tr><th scope="col">时间</th><th scope="col">天气</th><th scope="col">温度 / 体感</th><th scope="col">湿度</th><th scope="col">气压</th><th scope="col">降水 / 概率</th><th scope="col">风速 / 风向</th><th scope="col">能见度</th><th scope="col">PM2.5 / AQI</th><th scope="col">描述</th><th scope="col">质量</th></tr></thead><tbody>
+          {hourly.items.map((item, index) => <tr key={`${item.forecastTimeLocal}-${index}`}><td>{item.forecastTimeLocal}</td><td>{mallWeatherSkyconLabel(item.skycon)}</td><td>{mallWeatherMetric(item.temperatureC, '°C')} / {mallWeatherMetric(item.apparentTemperatureC, '°C')}</td><td>{mallWeatherMetric(item.humidityPct, '%', 0)}</td><td>{mallWeatherMetric(item.pressurePa, ' Pa', 0)}</td><td>{mallWeatherMetric(item.precipitationMmH, ' mm/h')} / {mallWeatherMetric(item.precipitationProbabilityPct, '%', 0)}</td><td>{mallWeatherMetric(item.windSpeedKph, ' km/h')} / {mallWeatherMetric(item.windDirectionDeg, '°', 0)}</td><td>{mallWeatherMetric(item.visibilityKm, ' km')}</td><td>{mallWeatherMetric(item.pm25UgM3, ' μg/m³')} / {mallWeatherMetric(item.aqiChn, '', 0)}</td><td>{item.hourlyDescription || item.forecastKeypoint || '—'}</td><td>{qualityLabel(item.qualityStatus, item.qualityWarnings.length)}</td></tr>)}
         </tbody></table>
       </ForecastDataset>
       <ForecastDataset title="15 日逐日预报" state={daily} empty="当前 15 天窗口没有逐日预报">
@@ -114,9 +125,9 @@ export function MallWeatherForecastPanel({ mallID, timeZone, client }: { mallID:
   )
 }
 
-function ForecastDataset<T>({ title, state, empty, children }: { title: string; state: QueryState<T>; empty: string; children: ReactNode }) {
+function ForecastDataset<T>({ id, title, state, empty, children }: { id?: string; title: string; state: QueryState<T>; empty: string; children: ReactNode }) {
   return (
-    <details className="mall-weather-forecast-dataset" open>
+    <details id={id} className="mall-weather-forecast-dataset" open>
       <summary>{title}（{state.items.length} 条）{state.meta ? ` · ${mallWeatherFreshnessLabel(state.meta.freshnessStatus)}` : ''}</summary>
       {state.loading && state.items.length === 0 && <p role="status">正在加载全部分页…</p>}
       {state.error && <p className="mall-weather-action-message error" role="alert">{state.error}</p>}

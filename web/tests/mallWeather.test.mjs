@@ -47,6 +47,7 @@ import {
   parseMallWeatherDailyPage,
   parseMallWeatherHourlyPage,
   parseMallWeatherLifeIndexPage,
+  parseMallWeatherMinutelyPage,
   parseMallWeatherOverview,
   parseMallWeatherRefreshResult,
 } from '../.test-dist/mallWeather.js'
@@ -92,6 +93,20 @@ const hourlyItem = (hour, temperatureC = hour) => ({
   forecastTimeLocal: `2026-07-22T${String((hour + 8) % 24).padStart(2, '0')}:00:00+08:00`,
   ...completeWeatherTimes,
   temperatureC,
+  qualityStatus: 'VALID',
+  qualityWarnings: [],
+})
+
+const minutelyItem = (minute, precipitationMmH = 0.2) => ({
+  forecastMinuteUtc: `2026-07-22T00:${String(minute).padStart(2, '0')}:00Z`,
+  forecastMinuteLocal: `2026-07-22T08:${String(minute).padStart(2, '0')}:00+08:00`,
+  ...completeWeatherTimes,
+  minuteOffset: minute,
+  precipitationMmH,
+  probabilityPct: 65,
+  datasource: 'radar',
+  description: '附近有小雨',
+  forecastKeypoint: '十分钟后雨势减弱',
   qualityStatus: 'VALID',
   qualityWarnings: [],
 })
@@ -273,6 +288,24 @@ test('keeps overview datasets and normalizes a missing realtime snapshot', () =>
   assert.equal(overview?.hourly[0].temperatureC, 31)
 })
 
+test('preserves local and nearest precipitation details from realtime data', () => {
+  const overview = parseMallWeatherOverview({ code: 0, data: {
+    meta: { provider: 'caiyun', freshnessStatus: 'FRESH' },
+    realtime: {
+      localPrecipitationStatus: 'ok', localPrecipitationMmH: 0.4, localPrecipitationSource: 'radar',
+      nearestPrecipitationStatus: 'ok', nearestPrecipitationDistanceKm: 0.8, nearestPrecipitationMmH: 1.2,
+      qualityStatus: 'VALID', qualityWarnings: [],
+    },
+    minutely: [], hourly: [], alerts: [],
+  } })
+
+  assert.equal(overview?.realtime?.localPrecipitationStatus, 'ok')
+  assert.equal(overview?.realtime?.localPrecipitationSource, 'radar')
+  assert.equal(overview?.realtime?.nearestPrecipitationStatus, 'ok')
+  assert.equal(overview?.realtime?.nearestPrecipitationDistanceKm, 0.8)
+  assert.equal(overview?.realtime?.nearestPrecipitationMmH, 1.2)
+})
+
 test('builds encoded weather overview paths and rejects invalid mall ids', () => {
   assert.equal(mallWeatherOverviewPath(7), '/v1/malls/7/weather/overview')
   assert.equal(mallWeatherOverviewPath(7, 'Asia/Shanghai'), '/v1/malls/7/weather/overview?timeZone=Asia%2FShanghai')
@@ -292,17 +325,36 @@ test('builds bounded complete-series paths and parses paged forecast contracts',
   assert.equal(url.searchParams.get('timeZone'), 'Asia/Shanghai')
   assert.equal(url.searchParams.get('asOf'), asOf.toISOString())
   assert.equal(url.searchParams.get('cursor'), 'next-page')
+  const minutelyURL = new URL(mallWeatherSeriesPath(7, 'minutely', start, new Date('2026-07-22T02:00:00.000Z'), '', 'Asia/Shanghai', asOf), 'https://example.test')
+  assert.equal(minutelyURL.pathname, '/v1/malls/7/weather/minutely')
   assert.throws(() => mallWeatherSeriesPath(7, 'daily', start, new Date('2026-09-01T00:00:00Z')), /invalid weather range/)
 
-  const hourly = parseMallWeatherHourlyPage(pageEnvelope([hourlyItem(1, 30)], 'hourly-next'))
+  const hourly = parseMallWeatherHourlyPage(pageEnvelope([{ ...hourlyItem(1, 30), apparentTemperatureC: 33, humidityPct: 74,
+    pressurePa: 100800, precipitationProbabilityPct: 60, windDirectionDeg: 180, visibilityKm: 12,
+    pm25UgM3: 18, hourlyDescription: '午后有阵雨' }], 'hourly-next'))
   assert.equal(hourly?.items[0].temperatureC, 30)
+  assert.equal(hourly?.items[0].apparentTemperatureC, 33)
+  assert.equal(hourly?.items[0].humidityPct, 74)
+  assert.equal(hourly?.items[0].pressurePa, 100800)
+  assert.equal(hourly?.items[0].windDirectionDeg, 180)
+  assert.equal(hourly?.items[0].visibilityKm, 12)
+  assert.equal(hourly?.items[0].hourlyDescription, '午后有阵雨')
   assert.equal(hourly?.pagination.nextCursor, 'hourly-next')
+  const minutely = parseMallWeatherMinutelyPage(pageEnvelope([minutelyItem(1)], 'minutely-next'))
+  assert.equal(minutely?.items[0].forecastMinuteLocal, '2026-07-22T08:01:00+08:00')
+  assert.equal(minutely?.items[0].probabilityPct, 65)
+  assert.equal(minutely?.items[0].forecastKeypoint, '十分钟后雨势减弱')
+  assert.equal(minutely?.pagination.nextCursor, 'minutely-next')
   const daily = parseMallWeatherDailyPage(pageEnvelope([{ forecastDateLocal: '2026-07-22', ...completeWeatherTimes, temperatureMinC: 24, temperatureMaxC: 32, daySkycon: 'CLEAR_DAY', qualityStatus: 'VALID', qualityWarnings: [] }]))
   assert.equal(daily?.items[0].temperatureMaxC, 32)
   const life = parseMallWeatherLifeIndexPage(pageEnvelope([{ sourceApi: 'v3_lifeindex', forecastDateLocal: '2026-07-22', indexType: 1, indexCode: 'comfort', isUnknownType: false, ...completeWeatherTimes, qualityStatus: 'VALID', qualityWarnings: [] }]))
   assert.equal(life?.items[0].indexCode, 'comfort')
   assert.equal(parseMallWeatherHourlyPage(pageEnvelope([{ ...hourlyItem(2), forecastTimeLocal: 'bad' }])), null)
+  assert.equal(parseMallWeatherHourlyPage(pageEnvelope([{ ...hourlyItem(2), humidityPct: '74' }])), null)
   assert.equal(parseMallWeatherHourlyPage(pageEnvelope([{ ...hourlyItem(2), qualityWarnings: [{ code: 7, path: '' }] }])), null)
+  assert.equal(parseMallWeatherMinutelyPage(pageEnvelope([{ ...minutelyItem(2), minuteOffset: 1.5 }])), null)
+  assert.equal(parseMallWeatherMinutelyPage(pageEnvelope([{ ...minutelyItem(2), precipitationMmH: '0.2' }])), null)
+  assert.equal(parseMallWeatherMinutelyPage(pageEnvelope([{ ...minutelyItem(2), forecastMinuteLocal: 'bad' }])), null)
   assert.equal(parseMallWeatherDailyPage(pageEnvelope([{ forecastDateLocal: '2026-02-30', ...completeWeatherTimes, qualityStatus: 'VALID', qualityWarnings: [] }])), null)
   assert.equal(parseMallWeatherLifeIndexPage(pageEnvelope([{ sourceApi: 'v3_lifeindex', forecastDateLocal: '2026-07-22', indexType: 1.5, indexCode: 'bad', isUnknownType: false, ...completeWeatherTimes, qualityStatus: 'VALID', qualityWarnings: [] }])), null)
   assert.equal(parseMallWeatherLifeIndexPage(pageEnvelope([], '', { ...completeWeatherMeta, timeZone: '' })), null)
@@ -310,6 +362,8 @@ test('builds bounded complete-series paths and parses paged forecast contracts',
 
 test('builds an exact 360-hour window and 15 target-time-zone calendar days', () => {
   const shanghai = mallWeatherForecastQueryWindows(new Date('2026-07-22T02:34:56.000Z'), 'Asia/Shanghai')
+  assert.equal(shanghai.minutely.start.toISOString(), '2026-07-22T02:34:00.000Z')
+  assert.equal(shanghai.minutely.end.toISOString(), '2026-07-22T04:34:00.000Z')
   assert.equal(shanghai.hourly.start.toISOString(), '2026-07-22T02:00:00.000Z')
   assert.equal(shanghai.hourly.end.toISOString(), '2026-08-06T02:00:00.000Z')
   assert.equal(shanghai.daily.start.toISOString(), '2026-07-21T16:00:00.000Z')
@@ -366,6 +420,32 @@ test('loads every opaque cursor page without changing the original query window'
     return { ok: true, status: 200, data: envelope(excessiveCalls, `cursor-${excessiveCalls}`) }
   }, 7, 'hourly', window, 'Asia/Shanghai', asOf, parseMallWeatherHourlyPage), /分页数量超过安全上限/)
   assert.equal(excessiveCalls, 10)
+})
+
+test('loads every minutely page with one fixed 120-minute window and snapshot time', async () => {
+  const window = {
+    start: new Date('2026-07-22T02:34:00.000Z'),
+    end: new Date('2026-07-22T04:34:00.000Z'),
+  }
+  const asOf = new Date('2026-07-22T02:34:56.000Z')
+  const paths = []
+  const responses = [pageEnvelope([minutelyItem(1)], 'minute-cursor'), pageEnvelope([minutelyItem(2)])]
+  const result = await loadAllMallWeatherPages(async (path) => {
+    paths.push(path)
+    return { ok: true, status: 200, data: responses.shift() }
+  }, 7, 'minutely', window, 'Asia/Shanghai', asOf, parseMallWeatherMinutelyPage)
+
+  assert.deepEqual(result.items.map((item) => item.minuteOffset), [1, 2])
+  assert.equal(paths.length, 2)
+  const first = new URL(paths[0], 'https://example.test')
+  const second = new URL(paths[1], 'https://example.test')
+  for (const parameter of ['start', 'end', 'timeZone', 'latest', 'asOf', 'pageSize']) {
+    assert.equal(second.searchParams.get(parameter), first.searchParams.get(parameter))
+  }
+  assert.equal(first.searchParams.get('start'), window.start.toISOString())
+  assert.equal(first.searchParams.get('end'), window.end.toISOString())
+  assert.equal(first.searchParams.get('asOf'), asOf.toISOString())
+  assert.equal(second.searchParams.get('cursor'), 'minute-cursor')
 })
 
 test('builds validated manual refresh requests and idempotency keys', () => {

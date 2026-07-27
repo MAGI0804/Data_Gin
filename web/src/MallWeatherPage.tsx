@@ -280,25 +280,39 @@ export function MallWeatherPage({ actorID, client }: { actorID: string | null; c
             onMallUpdated={handleMallUpdated}
             onReloadMall={loadMall}
           />}
-          {!showCreate && selectedMallReady && selectedMall && (actorID
-            ? <>
-              <MallCoordinateAdjustmentPanel mall={selectedMall} client={client} onMallUpdated={handleMallUpdated} key={`coordinate-${selectedMall.id}:${selectedMall.version}`} />
-              <ManualRefreshPanel actorID={actorID} mall={selectedMall} client={client} key={`refresh-${actorID}:${selectedMall.id}`} />
-              <MallWeatherSheetPushPanel actorID={actorID} mall={selectedMall} client={client} key={`push-${actorID}:${selectedMall.id}`} />
-            </>
-            : <RequestError message="无法识别当前登录账号，请退出后重新登录再提交天气刷新。" onRetry={() => window.location.reload()} />)}
-          {!showCreate && selectedMallReady && selectedMall && overviewState === 'loading' && !selectedOverview && <LoadingState label={`正在加载${selectedMall.nameCn}天气`} />}
-          {!showCreate && selectedMallReady && selectedMall && overviewState === 'error' && <RequestError message={overviewError} onRetry={() => void loadOverview(selectedMall.id)} />}
-          {!showCreate && selectedMallReady && selectedMall && selectedOverview && <WeatherOverview mall={selectedMall} overview={selectedOverview} refreshing={overviewState === 'loading'} onRefresh={() => void loadOverview(selectedMall.id)} />}
+          {!showCreate && selectedMallReady && selectedMall && <MallWeatherDataNavigation />}
           {!showCreate && selectedMallReady && selectedMall && <MallWeatherForecastPanel
             mallID={selectedMall.id}
             timeZone={selectedOverview?.meta.timeZone || 'Asia/Shanghai'}
             client={client}
             key={`forecast-${selectedMall.id}:${selectedOverview?.meta.timeZone || 'Asia/Shanghai'}`}
           />}
+          {!showCreate && selectedMallReady && selectedMall && overviewState === 'loading' && !selectedOverview && <LoadingState label={`正在加载${selectedMall.nameCn}天气`} />}
+          {!showCreate && selectedMallReady && selectedMall && overviewState === 'error' && <RequestError message={overviewError} onRetry={() => void loadOverview(selectedMall.id)} />}
+          {!showCreate && selectedMallReady && selectedMall && selectedOverview && <WeatherOverview mall={selectedMall} overview={selectedOverview} refreshing={overviewState === 'loading'} onRefresh={() => void loadOverview(selectedMall.id)} />}
+          {!showCreate && selectedMallReady && selectedMall && (actorID
+            ? <section className="view-stack mall-weather-management" id="mall-weather-management">
+              <div className="mall-weather-section-title"><div><strong>商场天气管理</strong><span>坐标调整、全量刷新与已有推送绑定</span></div></div>
+              <MallCoordinateAdjustmentPanel mall={selectedMall} client={client} onMallUpdated={handleMallUpdated} key={`coordinate-${selectedMall.id}:${selectedMall.version}`} />
+              <ManualRefreshPanel actorID={actorID} mall={selectedMall} client={client} key={`refresh-${actorID}:${selectedMall.id}`} />
+              <MallWeatherSheetPushPanel actorID={actorID} mall={selectedMall} client={client} key={`push-${actorID}:${selectedMall.id}`} />
+            </section>
+            : <RequestError message="无法识别当前登录账号，请退出后重新登录再提交天气刷新。" onRetry={() => window.location.reload()} />)}
         </section>
       </div>
     </div>
+  )
+}
+
+function MallWeatherDataNavigation() {
+  return (
+    <nav className="mall-weather-data-nav" aria-label="天气数据快速入口">
+      <strong>天气数据</strong>
+      <a href="#mall-weather-hourly">逐小时预报</a>
+      <a href="#mall-weather-minutely">约 1 km 分钟降水</a>
+      <a href="#mall-weather-overview">实况与趋势</a>
+      <a href="#mall-weather-management">管理操作</a>
+    </nav>
   )
 }
 
@@ -907,7 +921,7 @@ function WeatherOverview({ mall, overview, refreshing, onRefresh }: { mall: Mall
   const coverageRadius = meta.coverageRadiusM > 0 ? `业务半径 ${meta.coverageRadiusM} m` : '业务半径口径缺失'
 
   return (
-    <div className="view-stack">
+    <div className="view-stack" id="mall-weather-overview">
       <section className="workbench-panel mall-weather-summary">
         <div className="mall-weather-summary-heading">
           <div>
@@ -938,6 +952,10 @@ function WeatherOverview({ mall, overview, refreshing, onRefresh }: { mall: Mall
                 <MetaItem label="风速" value={mallWeatherMetric(realtime.windSpeedKph, ' km/h')} />
                 <MetaItem label="能见度" value={mallWeatherMetric(realtime.visibilityKm, ' km')} />
                 <MetaItem label="本地降水" value={mallWeatherMetric(realtime.localPrecipitationMmH, ' mm/h')} />
+                <MetaItem label="本地降水状态" value={[realtime.localPrecipitationStatus, realtime.localPrecipitationSource].filter(Boolean).join(' · ') || '暂无'} />
+                <MetaItem label="最近降水" value={realtime.nearestPrecipitationDistanceKm === undefined && realtime.nearestPrecipitationMmH === undefined
+                  ? realtime.nearestPrecipitationStatus || '暂无'
+                  : `${mallWeatherMetric(realtime.nearestPrecipitationDistanceKm, ' km')} · ${mallWeatherMetric(realtime.nearestPrecipitationMmH, ' mm/h')}`} />
                 <MetaItem label="质量" value={`${realtime.qualityStatus || '未知'}${realtime.qualityWarnings.length ? ` · ${realtime.qualityWarnings.length} 项告警` : ''}`} />
               </div>
               <p className="mall-weather-caption">供应商时间 {realtime.providerServerTimeLocal || '—'} · 采集时间 {realtime.fetchedAtLocal || '—'}</p>
