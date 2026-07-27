@@ -4,9 +4,11 @@ import test from 'node:test'
 import {
   clearMallWeatherPendingRefresh,
   clearMallWeatherPendingCreate,
+  clearMallWeatherPendingSheetPush,
   loadAllMallWeatherPages,
   loadMallWeatherPendingCreate,
   loadMallWeatherPendingRefresh,
+  loadMallWeatherPendingSheetPush,
   mallWeatherChartSegments,
   mallWeatherCreateKey,
   mallWeatherCreateRequest,
@@ -19,6 +21,10 @@ import {
   mallWeatherGeocodeRunTerminal,
   mallWeatherGeocodeTriggerPath,
   mallWeatherMallReady,
+  mallWeatherSheetPushKey,
+  mallWeatherSheetPushRequest,
+  mallWeatherSheetPushRequestMatchesOption,
+  mallWeatherSheetPushResultMatchesRequest,
   mergeMallWeatherMalls,
   mallWeatherRefreshKey,
   mallWeatherRefreshDisposition,
@@ -28,10 +34,14 @@ import {
   mallWeatherSeriesPath,
   saveMallWeatherPendingRefresh,
   saveMallWeatherPendingCreate,
+  saveMallWeatherPendingSheetPush,
   mallWeatherSkyconLabel,
   parseMallWeatherMallList,
   parseMallWeatherCreateResult,
   parseMallWeatherGeocodeCandidates,
+  parseMallWeatherSheetPushDryRun,
+  parseMallWeatherSheetPushOptions,
+  parseMallWeatherSheetPushResult,
   parseMallWeatherDailyPage,
   parseMallWeatherHourlyPage,
   parseMallWeatherLifeIndexPage,
@@ -180,6 +190,48 @@ test('persists uncertain mall creation requests per actor', () => {
   clearMallWeatherPendingCreate('42', storage)
   assert.equal(loadMallWeatherPendingCreate('42', storage), null)
   assert.throws(() => saveMallWeatherPendingCreate('invalid', pending, storage), /invalid actor id/)
+})
+
+test('builds, parses, and persists a mall-scoped existing-target push', () => {
+  const options = parseMallWeatherSheetPushOptions({ code: 0, data: { items: [{
+    destinationId: 8, name: '天气数据表', code: 'weather_sheet', profileId: 9, profileCode: 'mall_weather_full', profileVersion: 3,
+  }] } })
+  assert.equal(options?.length, 1)
+  const body = mallWeatherSheetPushRequest(options[0], 7)
+  assert.deepEqual(body, { destinationId: 8, profileId: 9, expectedProfileVersion: 3, filters: { mallIds: [7] } })
+  const dryRun = parseMallWeatherSheetPushDryRun({ code: 0, data: {
+    destinationId: 8, destinationCode: 'weather_sheet', profileId: 9, profileCode: 'mall_weather_full', profileVersion: 3,
+    writeMode: 'APPEND', totalEstimatedRows: 42, totalEstimatedCells: 420, canExecute: false, warnings: ['PROFILE_WARNING'],
+    spreadsheetTokenEnv: 'SECRET_TOKEN_ENV',
+    datasets: [{
+      datasetKind: 'hourly', estimatedRows: 42, estimatedCells: 420, canExecute: false,
+      warnings: ['HEADER_MISMATCH_REWRITE_DISABLED'], sheetId: 'secret-sheet-id',
+    }],
+  } })
+  assert.equal(dryRun?.totalEstimatedRows, 42)
+  assert.deepEqual(dryRun?.datasets, [{
+    datasetKind: 'hourly', estimatedRows: 42, estimatedCells: 420, canExecute: false, warnings: ['HEADER_MISMATCH_REWRITE_DISABLED'],
+  }])
+  assert.equal(JSON.stringify(dryRun).includes('SECRET_TOKEN_ENV'), false)
+  assert.equal(JSON.stringify(dryRun).includes('secret-sheet-id'), false)
+  const result = parseMallWeatherSheetPushResult({ code: 0, data: {
+    runId: 31, traceId: 'trace-31', status: 'PENDING', destinationId: 8, profileId: 9, profileVersion: 3, estimatedRows: 42,
+  } })
+  assert.equal(result?.runId, 31)
+  assert.equal(mallWeatherSheetPushRequestMatchesOption(body, options[0], 7), true)
+  assert.equal(mallWeatherSheetPushRequestMatchesOption(body, { ...options[0], profileVersion: 4 }, 7), false)
+  assert.equal(mallWeatherSheetPushRequestMatchesOption(body, options[0], 8), false)
+  assert.equal(mallWeatherSheetPushResultMatchesRequest(result, body), true)
+  assert.equal(mallWeatherSheetPushResultMatchesRequest({ ...result, destinationId: 10 }, body), false)
+
+  const storage = new MemoryStorage()
+  const pending = { key: mallWeatherSheetPushKey('12345678-abcd'), body }
+  saveMallWeatherPendingSheetPush('42', 7, pending, storage)
+  assert.deepEqual(loadMallWeatherPendingSheetPush('42', 7, storage), pending)
+  assert.equal(loadMallWeatherPendingSheetPush('42', 8, storage), null)
+  clearMallWeatherPendingSheetPush('42', 7, storage)
+  assert.equal(loadMallWeatherPendingSheetPush('42', 7, storage), null)
+  assert.equal(parseMallWeatherSheetPushOptions({ code: 0, data: { items: [{ destinationId: 8, name: 'bad' }] } }), null)
 })
 
 test('rejects unsuccessful or structurally incomplete overview payloads', () => {

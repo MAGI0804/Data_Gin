@@ -78,6 +78,59 @@ export type MallWeatherGeocodeCandidates = {
   items: MallWeatherGeocodeCandidate[]
 }
 
+export type MallWeatherSheetPushOption = {
+  destinationId: number
+  name: string
+  code: string
+  profileId: number
+  profileCode: string
+  profileVersion: number
+}
+
+export type MallWeatherSheetPushRequest = {
+  destinationId: number
+  profileId: number
+  expectedProfileVersion: number
+  filters: { mallIds: number[] }
+}
+
+export type MallWeatherSheetPushDryRun = {
+  destinationId: number
+  destinationCode: string
+  profileId: number
+  profileCode: string
+  profileVersion: number
+  writeMode: string
+  totalEstimatedRows: number
+  totalEstimatedCells: number
+  canExecute: boolean
+  warnings: string[]
+  datasets: MallWeatherSheetPushDatasetDryRun[]
+}
+
+export type MallWeatherSheetPushDatasetDryRun = {
+  datasetKind: string
+  estimatedRows: number
+  estimatedCells: number
+  canExecute: boolean
+  warnings: string[]
+}
+
+export type MallWeatherSheetPushResult = {
+  runId: number
+  traceId: string
+  status: string
+  destinationId: number
+  profileId: number
+  profileVersion: number
+  estimatedRows: number
+}
+
+export type MallWeatherPendingSheetPush = {
+  key: string
+  body: MallWeatherSheetPushRequest
+}
+
 export type MallWeatherWarning = {
   code: string
   path: string
@@ -637,6 +690,142 @@ export function mallWeatherGeocodeRunTerminal(status: string) {
   return ['SUCCEEDED', 'FAILED', 'STALE', 'NO_CANDIDATES', 'AUTO_CONFIRMED', 'REVIEW_REQUIRED'].includes(status.toUpperCase())
 }
 
+export function parseMallWeatherSheetPushOptions(payload: unknown): MallWeatherSheetPushOption[] | null {
+  const data = envelopeData(payload)
+  if (!data || !Array.isArray(data.items)) return null
+  const items: MallWeatherSheetPushOption[] = []
+  for (const item of data.items) {
+    if (!isRecord(item) || !positiveSafeInteger(item.destinationId) || !positiveSafeInteger(item.profileId) ||
+      !positiveSafeInteger(item.profileVersion) || typeof item.name !== 'string' || !item.name.trim() ||
+      typeof item.code !== 'string' || !item.code.trim() || typeof item.profileCode !== 'string' || !item.profileCode.trim()) return null
+    items.push({
+      destinationId: item.destinationId,
+      name: item.name,
+      code: item.code,
+      profileId: item.profileId,
+      profileCode: item.profileCode,
+      profileVersion: item.profileVersion,
+    })
+  }
+  return items
+}
+
+export function mallWeatherSheetPushRequest(option: MallWeatherSheetPushOption, mallID: number): MallWeatherSheetPushRequest {
+  if (!positiveSafeInteger(option.destinationId) || !positiveSafeInteger(option.profileId) || !positiveSafeInteger(option.profileVersion)) {
+    throw new Error('invalid weather sheet push option')
+  }
+  return {
+    destinationId: option.destinationId,
+    profileId: option.profileId,
+    expectedProfileVersion: option.profileVersion,
+    filters: { mallIds: [positiveMallID(mallID)] },
+  }
+}
+
+export function mallWeatherSheetPushRequestMatchesOption(request: MallWeatherSheetPushRequest, option: MallWeatherSheetPushOption, mallID: number) {
+  return request.destinationId === option.destinationId && request.profileId === option.profileId &&
+    request.expectedProfileVersion === option.profileVersion && request.filters.mallIds.length === 1 &&
+    request.filters.mallIds[0] === mallID
+}
+
+export function mallWeatherSheetPushResultMatchesRequest(result: MallWeatherSheetPushResult, request: MallWeatherSheetPushRequest) {
+  return result.destinationId === request.destinationId && result.profileId === request.profileId &&
+    result.profileVersion === request.expectedProfileVersion
+}
+
+export function parseMallWeatherSheetPushDryRun(payload: unknown): MallWeatherSheetPushDryRun | null {
+  const data = envelopeData(payload)
+  if (!data || !positiveSafeInteger(data.destinationId) || !positiveSafeInteger(data.profileId) || !positiveSafeInteger(data.profileVersion) ||
+    typeof data.destinationCode !== 'string' || typeof data.profileCode !== 'string' || typeof data.writeMode !== 'string' ||
+    !Number.isSafeInteger(data.totalEstimatedRows) || Number(data.totalEstimatedRows) < 0 ||
+    !Number.isSafeInteger(data.totalEstimatedCells) || Number(data.totalEstimatedCells) < 0 || typeof data.canExecute !== 'boolean' ||
+    !Array.isArray(data.warnings) || !data.warnings.every((warning) => typeof warning === 'string') || !Array.isArray(data.datasets)) return null
+  const datasets: MallWeatherSheetPushDatasetDryRun[] = []
+  for (const dataset of data.datasets) {
+    if (!isRecord(dataset) || typeof dataset.datasetKind !== 'string' || !dataset.datasetKind.trim() ||
+      !Number.isSafeInteger(dataset.estimatedRows) || Number(dataset.estimatedRows) < 0 ||
+      !Number.isSafeInteger(dataset.estimatedCells) || Number(dataset.estimatedCells) < 0 || typeof dataset.canExecute !== 'boolean' ||
+      !Array.isArray(dataset.warnings) || !dataset.warnings.every((warning) => typeof warning === 'string')) return null
+    datasets.push({
+      datasetKind: dataset.datasetKind,
+      estimatedRows: Number(dataset.estimatedRows),
+      estimatedCells: Number(dataset.estimatedCells),
+      canExecute: dataset.canExecute,
+      warnings: dataset.warnings.map((warning) => String(warning)),
+    })
+  }
+  return {
+    destinationId: data.destinationId,
+    destinationCode: data.destinationCode,
+    profileId: data.profileId,
+    profileCode: data.profileCode,
+    profileVersion: data.profileVersion,
+    writeMode: data.writeMode,
+    totalEstimatedRows: Number(data.totalEstimatedRows),
+    totalEstimatedCells: Number(data.totalEstimatedCells),
+    canExecute: data.canExecute,
+    warnings: data.warnings.map((warning) => String(warning)),
+    datasets,
+  }
+}
+
+export function parseMallWeatherSheetPushResult(payload: unknown): MallWeatherSheetPushResult | null {
+  const data = envelopeData(payload)
+  if (!data || !positiveSafeInteger(data.runId) || !positiveSafeInteger(data.destinationId) || !positiveSafeInteger(data.profileId) ||
+    !positiveSafeInteger(data.profileVersion) || typeof data.traceId !== 'string' || !data.traceId.trim() || typeof data.status !== 'string' ||
+    !Number.isSafeInteger(data.estimatedRows) || Number(data.estimatedRows) < 0) return null
+  return {
+    runId: data.runId,
+    traceId: data.traceId,
+    status: data.status,
+    destinationId: data.destinationId,
+    profileId: data.profileId,
+    profileVersion: data.profileVersion,
+    estimatedRows: Number(data.estimatedRows),
+  }
+}
+
+export function mallWeatherSheetPushKey(seed?: string) {
+  return mallWeatherOperationKey('weather-sheet-push', seed)
+}
+
+export function loadMallWeatherPendingSheetPush(actorID: string, mallID: number, storage: OnboardingStorage): MallWeatherPendingSheetPush | null {
+  const storageKey = mallWeatherPendingSheetPushStorageKey(actorID, mallID)
+  const raw = storage.getItem(storageKey)
+  if (!raw) return null
+  try {
+    const snapshot: unknown = JSON.parse(raw)
+    if (!isRecord(snapshot) || typeof snapshot.key !== 'string' || !validMallWeatherSheetPushKey(snapshot.key) || !isRecord(snapshot.body) ||
+      !positiveSafeInteger(snapshot.body.destinationId) || !positiveSafeInteger(snapshot.body.profileId) ||
+      !positiveSafeInteger(snapshot.body.expectedProfileVersion) || !isRecord(snapshot.body.filters) ||
+      !Array.isArray(snapshot.body.filters.mallIds) || snapshot.body.filters.mallIds.length !== 1 || snapshot.body.filters.mallIds[0] !== mallID) return null
+    return {
+      key: snapshot.key,
+      body: {
+        destinationId: snapshot.body.destinationId,
+        profileId: snapshot.body.profileId,
+        expectedProfileVersion: snapshot.body.expectedProfileVersion,
+        filters: { mallIds: [mallID] },
+      },
+    }
+  } catch {
+    return null
+  }
+}
+
+export function saveMallWeatherPendingSheetPush(actorID: string, mallID: number, pending: MallWeatherPendingSheetPush, storage: OnboardingStorage) {
+  if (!validMallWeatherSheetPushKey(pending.key) || !positiveSafeInteger(pending.body.destinationId) ||
+    !positiveSafeInteger(pending.body.profileId) || !positiveSafeInteger(pending.body.expectedProfileVersion) ||
+    pending.body.filters.mallIds.length !== 1 || pending.body.filters.mallIds[0] !== mallID) {
+    throw new Error('invalid weather sheet push')
+  }
+  storage.setItem(mallWeatherPendingSheetPushStorageKey(actorID, mallID), JSON.stringify(pending))
+}
+
+export function clearMallWeatherPendingSheetPush(actorID: string, mallID: number, storage: OnboardingStorage) {
+  storage.removeItem(mallWeatherPendingSheetPushStorageKey(actorID, mallID))
+}
+
 export function parseMallWeatherOverview(payload: unknown): MallWeatherOverview | null {
   const data = envelopeData(payload)
   if (!data || !isRecord(data.meta) || !Array.isArray(data.minutely) || !Array.isArray(data.hourly) || !Array.isArray(data.alerts)) return null
@@ -992,6 +1181,17 @@ function mallWeatherPendingCreateStorageKey(actorID: string) {
 
 function validMallWeatherCreateKey(key: string) {
   return key.startsWith('mall-create:') && /^[A-Za-z0-9][A-Za-z0-9._:-]{7,254}$/.test(key)
+}
+
+function mallWeatherPendingSheetPushStorageKey(actorID: string, mallID: number) {
+  const numericActorID = Number(actorID)
+  if (!/^[1-9]\d*$/.test(actorID) || !Number.isSafeInteger(numericActorID)) throw new Error('invalid actor id')
+  if (!Number.isSafeInteger(mallID) || mallID <= 0) throw new Error('invalid mall id')
+  return `mall-weather-pending-sheet-push:${actorID}:${mallID}`
+}
+
+function validMallWeatherSheetPushKey(key: string) {
+  return key.startsWith('weather-sheet-push:') && /^[A-Za-z0-9][A-Za-z0-9._:-]{7,254}$/.test(key)
 }
 
 function validMallWeatherRefreshKey(key: string) {

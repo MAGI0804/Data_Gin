@@ -30,6 +30,71 @@
   gap: 12px;
 }
 
+.mall-weather-push-panel {
+  border-top: 4px solid #1f2937;
+}
+
+.mall-weather-push-controls {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) auto auto;
+  align-items: end;
+  gap: 10px;
+}
+
+.mall-weather-push-summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1px;
+  margin-top: 12px;
+  border: 1px solid #cbd5e1;
+  background: #cbd5e1;
+}
+
+.mall-weather-push-warnings {
+  margin: 10px 0 0;
+  border-left: 3px solid #b91c1c;
+  background: #fef2f2;
+  padding: 8px 10px 8px 28px;
+  color: #7f1d1d;
+  font-size: 12px;
+}
+
+.mall-weather-push-datasets {
+  display: grid;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.mall-weather-push-datasets > section {
+  display: grid;
+  grid-template-columns: minmax(100px, auto) 1fr;
+  gap: 4px 12px;
+  border: 1px solid #cbd5e1;
+  padding: 9px 10px;
+}
+
+.mall-weather-push-datasets > section > span {
+  color: #475569;
+  font-size: 12px;
+}
+
+.mall-weather-push-datasets .mall-weather-push-warnings {
+  grid-column: 1 / -1;
+}
+
+.mall-weather-pending-push {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 10px;
+  border: 1px solid #b91c1c;
+  background: #fef2f2;
+  padding: 9px 10px;
+  color: #7f1d1d;
+  font-size: 12px;
+}
+
 .mall-weather-form-wide {
   grid-column: 1 / -1;
 }
@@ -490,6 +555,7 @@
   .mall-weather-refresh-form,
   .mall-weather-create-form,
   .mall-weather-manual-coordinate,
+  .mall-weather-push-controls,
   .mall-weather-layout,
   .mall-weather-overview-grid,
   .mall-weather-meta,
@@ -499,11 +565,28 @@
     grid-template-columns: 1fr;
   }
 
+  .mall-weather-push-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .mall-weather-push-datasets > section {
+    grid-template-columns: 1fr;
+  }
+
+  .mall-weather-push-datasets .mall-weather-push-warnings {
+    grid-column: auto;
+  }
+
   .mall-weather-form-wide {
     grid-column: auto;
   }
 
   .mall-weather-geocode-actions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .mall-weather-pending-push {
     align-items: stretch;
     flex-direction: column;
   }
