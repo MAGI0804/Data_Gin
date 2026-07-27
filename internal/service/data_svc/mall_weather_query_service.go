@@ -285,7 +285,8 @@ func (service *MallWeatherQueryService) Hourly(
 	query := data_dao.HourlyQuery{
 		MallID: mallID, StartUTC: normalized.StartUTC, EndUTC: normalized.EndUTC,
 		AsOfUTC: normalized.AsOfUTC, Latest: normalized.Latest, QualityStatus: normalized.QualityStatus,
-		Limit: normalized.PageSize + 1,
+		PreferNonNullTemperature: normalized.Latest && normalized.AsOfUTC == nil,
+		Limit:                    normalized.PageSize + 1,
 	}
 	if cursor != nil {
 		forecastTime := time.UnixMilli(cursor.ForecastTimeUnixMS).UTC()

@@ -57,7 +57,7 @@ func TestMallWeatherQueryServiceHourlyMapsMetadataAndCursor(t *testing.T) {
 		t.Fatalf("result=%+v", result)
 	}
 	decoded, err := decodeWeatherHourlyCursor(result.Pagination.NextCursor)
-	if err != nil || decoded.ID != 11 || weather.query.Limit != 2 {
+	if err != nil || decoded.ID != 11 || weather.query.Limit != 2 || !weather.query.PreferNonNullTemperature {
 		t.Fatalf("cursor=%+v query=%+v error=%v", decoded, weather.query, err)
 	}
 }
@@ -80,6 +80,47 @@ func TestMallWeatherQueryServiceHourlyPreservesExplicitStale(t *testing.T) {
 	})
 	if err != nil || result.Meta.FreshnessStatus != "STALE" {
 		t.Fatalf("result=%+v error=%v", result, err)
+	}
+}
+
+func TestMallWeatherQueryServiceHourlyOnlyPrefersTemperatureForCurrentLatest(t *testing.T) {
+	now := time.Date(2026, 7, 22, 4, 0, 0, 0, time.UTC)
+	longitude, latitude := 121.455, 31.228
+	mall := &model.Mall{
+		BaseModel: model.BaseModel{ID: 7}, WeatherLongitude: &longitude, WeatherLatitude: &latitude,
+		GeocodeStatus: "confirmed", Timezone: "Asia/Shanghai", CoverageRadiusM: 1000,
+	}
+	asOf := now.Add(-time.Hour)
+	tests := []struct {
+		name       string
+		latest     bool
+		asOf       *time.Time
+		wantPrefer bool
+	}{
+		{name: "current latest", latest: true, wantPrefer: true},
+		{name: "as of snapshot", latest: true, asOf: &asOf},
+		{name: "version history"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			weather := &fakeMallWeatherQueryDAO{}
+			service, err := newMallWeatherQueryService(
+				fakeMallWeatherQueryMallReader{mall: mall}, weather,
+				fakeMallPermissionChecker{allowed: true}, func() time.Time { return now },
+			)
+			if err != nil {
+				t.Fatalf("newMallWeatherQueryService() error=%v", err)
+			}
+			_, err = service.Hourly(context.Background(), 17, 7, requestbody.MallWeatherHourlyQueryRequest{
+				StartUTC: now, EndUTC: now.Add(time.Hour), Latest: test.latest, AsOfUTC: test.asOf,
+			})
+			if err != nil {
+				t.Fatalf("Hourly() error=%v", err)
+			}
+			if weather.query.PreferNonNullTemperature != test.wantPrefer {
+				t.Fatalf("PreferNonNullTemperature=%t want=%t query=%+v", weather.query.PreferNonNullTemperature, test.wantPrefer, weather.query)
+			}
+		})
 	}
 }
 
