@@ -31,8 +31,8 @@ func TestMallWeatherCapacityPlanCommandOutputsJSON(t *testing.T) {
 	if err := json.Unmarshal(stdout.Bytes(), &plan); err != nil {
 		t.Fatalf("capacity plan output is not JSON: %v body=%s", err, stdout.String())
 	}
-	if plan.ProviderRequests != 192000 || plan.WeatherV26ProviderRequestsPerDay != 168000 ||
-		plan.LifeIndexV3ProviderRequestsPerDay != 24000 || plan.ProviderDrainSeconds != 9600 ||
+	if plan.ProviderRequests != 168000 || plan.WeatherV26ProviderRequestsPerDay != 168000 ||
+		plan.LifeIndexV3ProviderRequestsPerDay != 0 || plan.ProviderDrainSeconds != 8400 ||
 		plan.TotalDatabaseRows != 514000 || len(plan.Datasets) != 6 {
 		t.Fatalf("plan=%+v", plan)
 	}

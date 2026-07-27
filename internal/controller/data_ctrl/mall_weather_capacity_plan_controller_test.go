@@ -30,10 +30,10 @@ func TestMallWeatherCapacityPlanControllerReturnsPlan(t *testing.T) {
 				MallCount:                         input.MallCount,
 				ProviderQPS:                       input.ProviderQPS,
 				WeatherV26ProviderRequestsPerDay:  840,
-				LifeIndexV3ProviderRequestsPerDay: 120,
-				ProviderRequests:                  960,
-				ProviderDrainSeconds:              384,
-				MinimumQPSForOneHourDrain:         float64(960) / 3600,
+				LifeIndexV3ProviderRequestsPerDay: 0,
+				ProviderRequests:                  840,
+				ProviderDrainSeconds:              336,
+				MinimumQPSForOneHourDrain:         float64(840) / 3600,
 				TotalDatabaseRows:                 2570,
 				TotalDatabaseBatches:              35,
 				FeishuBatchRows:                   input.FeishuBatchRows,
@@ -48,7 +48,7 @@ func TestMallWeatherCapacityPlanControllerReturnsPlan(t *testing.T) {
 	recorder := performMallWeatherCapacityPlanRequest(t, service, 17, "?mallCount=5&providerQps=2.5&hourlySteps=360&dailySteps=15&lifeIndexDays=15&alertsPerMall=3&feishuBatchRows=200")
 	body := recorder.Body.String()
 	if recorder.Code != http.StatusOK ||
-		!strings.Contains(body, `"providerRequests":960`) ||
+		!strings.Contains(body, `"providerRequests":840`) ||
 		!strings.Contains(body, `"totalDatabaseRows":2570`) ||
 		!strings.Contains(body, `"kind":"hourly"`) {
 		t.Fatalf("status=%d body=%s", recorder.Code, body)

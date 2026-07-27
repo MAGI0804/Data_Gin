@@ -18,9 +18,9 @@ func TestBuildMallWeatherCapacityPlanEstimatesProviderAndStoragePressure(t *test
 	if err != nil {
 		t.Fatalf("BuildMallWeatherCapacityPlan() error=%v", err)
 	}
-	if plan.WeatherV26ProviderRequestsPerDay != 840 || plan.LifeIndexV3ProviderRequestsPerDay != 120 ||
-		plan.ProviderRequests != 960 || plan.ProviderDrainSeconds != 384 ||
-		plan.MinimumQPSForOneHourDrain != float64(960)/3600 {
+	if plan.WeatherV26ProviderRequestsPerDay != 840 || plan.LifeIndexV3ProviderRequestsPerDay != 0 ||
+		plan.ProviderRequests != 840 || plan.ProviderDrainSeconds != 336 ||
+		plan.MinimumQPSForOneHourDrain != float64(840)/3600 {
 		t.Fatalf("provider plan=%+v", plan)
 	}
 	if plan.TotalDatabaseRows != 2570 || plan.TotalDatabaseBatches != 35 || plan.FeishuBatchRows != defaultMallWeatherFeishuBatchRows ||

@@ -48,7 +48,7 @@ func newMallWeatherCapacityPlanCmd() *cobra.Command {
 	flags.Float64Var(&input.ProviderQPS, "provider-qps", 0, "彩云控制台确认的实际可用 QPS")
 	flags.IntVar(&input.HourlySteps, "hourly-steps", input.HourlySteps, "每次 full 采集的小时预报步数，最多 360")
 	flags.IntVar(&input.DailySteps, "daily-steps", input.DailySteps, "每次 full 采集的日预报步数，最多 15")
-	flags.IntVar(&input.LifeIndexDays, "life-index-days", input.LifeIndexDays, "每次 v3 生活指数采集天数，最多 15")
+	flags.IntVar(&input.LifeIndexDays, "life-index-days", input.LifeIndexDays, "综合 daily 响应中预计包含生活指数的天数，最多 15")
 	flags.IntVar(&input.AlertsPerMall, "alerts-per-mall", 0, "压测估算使用的每商场预警条数")
 	flags.IntVar(&input.FeishuBatchRows, "feishu-batch-rows", 0, "飞书批次行数，默认使用 Destination 默认值")
 	_ = command.MarkFlagRequired("mall-count")

@@ -11,16 +11,13 @@ import (
 )
 
 const (
-	defaultMallWeatherCapacityMinutelyRows = 120
-	defaultMallWeatherCapacityHourlyBatch  = 200
-	defaultMallWeatherCapacityAlertBatch   = 200
-	// docs/mall_weather_development.md §10.5:
-	// full daily v2.6 calls ≈ N × (144 + 24), v3 life index calls ≈ N × 24.
-	defaultMallWeatherCapacityWeatherV26CallsPerMallPerDay  = 168
-	defaultMallWeatherCapacityLifeIndexV3CallsPerMallPerDay = 24
-	maxMallWeatherCapacityMallCount                         = 100000
-	maxMallWeatherCapacityProviderQPS                       = 10000
-	maxMallWeatherCapacityAlertsPerMall                     = 256
+	defaultMallWeatherCapacityMinutelyRows                 = 120
+	defaultMallWeatherCapacityHourlyBatch                  = 200
+	defaultMallWeatherCapacityAlertBatch                   = 200
+	defaultMallWeatherCapacityWeatherV26CallsPerMallPerDay = 168
+	maxMallWeatherCapacityMallCount                        = 100000
+	maxMallWeatherCapacityProviderQPS                      = 10000
+	maxMallWeatherCapacityAlertsPerMall                    = 256
 )
 
 var ErrMallWeatherInvalidCapacityPlan = errors.New("mall weather capacity plan: invalid input")
@@ -116,8 +113,7 @@ func BuildMallWeatherCapacityPlan(input MallWeatherCapacityPlanInput) (MallWeath
 	}
 	malls := int64(normalized.MallCount)
 	weatherRequests := malls * defaultMallWeatherCapacityWeatherV26CallsPerMallPerDay
-	lifeIndexRequests := malls * defaultMallWeatherCapacityLifeIndexV3CallsPerMallPerDay
-	providerRequests := weatherRequests + lifeIndexRequests
+	providerRequests := weatherRequests
 	datasets := []MallWeatherCapacityDatasetPlan{
 		mallWeatherCapacityDataset("realtime", malls, malls, normalized.FeishuBatchRows),
 		mallWeatherCapacityDataset("minutely", malls*defaultMallWeatherCapacityMinutelyRows, malls, normalized.FeishuBatchRows),
@@ -130,7 +126,7 @@ func BuildMallWeatherCapacityPlan(input MallWeatherCapacityPlanInput) (MallWeath
 		MallCount:                         normalized.MallCount,
 		ProviderQPS:                       normalized.ProviderQPS,
 		WeatherV26ProviderRequestsPerDay:  weatherRequests,
-		LifeIndexV3ProviderRequestsPerDay: lifeIndexRequests,
+		LifeIndexV3ProviderRequestsPerDay: 0,
 		ProviderRequests:                  providerRequests,
 		ProviderDrainSeconds:              float64(providerRequests) / normalized.ProviderQPS,
 		MinimumQPSForOneHourDrain:         float64(providerRequests) / 3600,
