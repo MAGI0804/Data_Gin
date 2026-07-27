@@ -18,6 +18,8 @@ import {
   mallWeatherExportKey,
   mallWeatherExportProgress,
   mallWeatherExportPollRetryDelayMilliseconds,
+  mallWeatherExportPollFailureAction,
+  mallWeatherExportPollingActive,
   mallWeatherExportPollStatusRetryable,
   mallWeatherExportRequestTimeoutMilliseconds,
   mallWeatherExportRequestMatches,
@@ -294,6 +296,19 @@ test('bounds export API requests and classifies finite transient polling retries
   for (const status of [200, 400, 401, 403, 404, 409, 422, 600]) {
     assert.equal(mallWeatherExportPollStatusRetryable(status), false)
   }
+  for (const status of [0, 408, 429, 500, 503, 599]) {
+    assert.equal(mallWeatherExportPollFailureAction(status), 'retry')
+  }
+  for (const status of [404, 422]) {
+    assert.equal(mallWeatherExportPollFailureAction(status), 'forget')
+  }
+  for (const status of [200, 400, 401, 403, 409, 600]) {
+    assert.equal(mallWeatherExportPollFailureAction(status), 'pause')
+  }
+  assert.equal(mallWeatherExportPollingActive('PENDING', false), true)
+  assert.equal(mallWeatherExportPollingActive('RUNNING', true), false)
+  assert.equal(mallWeatherExportPollingActive('SUCCEEDED', false), false)
+  assert.equal(mallWeatherExportPollingActive(undefined, false), false)
   assert.deepEqual(
     [1, 2, 3, 4, 5, 6].map(mallWeatherExportPollRetryDelayMilliseconds),
     [2_000, 4_000, 8_000, 16_000, 30_000, 30_000],

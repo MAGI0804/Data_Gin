@@ -11,9 +11,10 @@ import {
   mallWeatherExportKey,
   mallWeatherExportMaximumPollAttempts,
   mallWeatherExportMaximumTransientPollRetries,
+  mallWeatherExportPollFailureAction,
   mallWeatherExportPollIntervalMilliseconds,
+  mallWeatherExportPollingActive,
   mallWeatherExportPollRetryDelayMilliseconds,
-  mallWeatherExportPollStatusRetryable,
   mallWeatherExportProgress,
   mallWeatherExportRequestMatches,
   MallWeatherExportDownloadTimeoutError,
@@ -157,13 +158,16 @@ export function MallWeatherExportPanel({ actorID, mallID, mallName, client, down
           requestController,
         )
         if (controller.signal.aborted) return
-        if (!response.ok && response.status === 404) {
+        const failureAction = response.ok ? null : mallWeatherExportPollFailureAction(response.status)
+        if (failureAction === 'forget') {
           clearSession()
           setJob(null)
-          setPollError('原导出任务已不存在，已清理本地记录；可以重新生成 Excel。')
+          setPollError(response.status === 422
+            ? '原导出任务记录已失效，已清理本地记录；可以重新生成 Excel。'
+            : '原导出任务已不存在，已清理本地记录；可以重新生成 Excel。')
           return
         }
-        if (!response.ok && mallWeatherExportPollStatusRetryable(response.status)) {
+        if (failureAction === 'retry') {
           retryTransientFailure(exportRequestError(
             response.status,
             '导出进度查询暂时失败',
@@ -348,6 +352,7 @@ export function MallWeatherExportPanel({ actorID, mallID, mallName, client, down
   }
 
   const progress = job ? mallWeatherExportProgress(job) : 0
+  const pollingPaused = Boolean(pollError && job && !mallWeatherExportJobTerminal(job.status))
 
   function abandonPendingCreate() {
     replacePendingCreate(null)
@@ -359,7 +364,7 @@ export function MallWeatherExportPanel({ actorID, mallID, mallName, client, down
 
   return (
     <section className="workbench-panel mall-weather-export-panel" id="mall-weather-export" tabIndex={-1}
-      aria-busy={creatingJob || downloading || Boolean(job && !mallWeatherExportJobTerminal(job.status))}>
+      aria-busy={creatingJob || downloading || mallWeatherExportPollingActive(job?.status, pollingPaused)}>
       <div className="mall-weather-section-title">
         <div><strong>导出 Excel</strong><span>{mallName} · 当前商场天气数据</span></div>
         <FileSpreadsheet aria-hidden="true" />
@@ -398,10 +403,13 @@ export function MallWeatherExportPanel({ actorID, mallID, mallName, client, down
         <div className="mall-weather-action-message error" role="alert">
           {pollError}
           {job && !mallWeatherExportJobTerminal(job.status) && (
-            <button type="button" onClick={() => {
-              setPollError('')
-              setPollRevision((current) => current + 1)
-            }}><RefreshCcw aria-hidden="true" />继续查询</button>
+            <div className="mall-weather-export-recovery-actions">
+              <button type="button" onClick={() => {
+                setPollError('')
+                setPollRevision((current) => current + 1)
+              }}><RefreshCcw aria-hidden="true" />继续查询</button>
+              <button type="button" onClick={abandonPendingCreate}>清除本地任务记录</button>
+            </div>
           )}
         </div>
       )}

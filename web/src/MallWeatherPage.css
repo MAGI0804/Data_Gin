@@ -327,6 +327,14 @@
   color: var(--muted);
 }
 
+.mall-weather-export-recovery-actions {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 8px;
+}
+
 .mall-weather-refresh-form {
   display: grid;
   grid-template-columns: minmax(180px, 0.8fr) minmax(240px, 1.6fr) auto;

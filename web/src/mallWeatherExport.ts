@@ -79,6 +79,7 @@ export type MallWeatherExportJob = {
 }
 
 export type MallWeatherExportDownloadReadiness = 'ready' | 'not-ready' | 'expired'
+export type MallWeatherExportPollFailureAction = 'retry' | 'forget' | 'pause'
 
 export const mallWeatherExportDownloadRequestTimeoutMilliseconds = 900_000
 
@@ -393,6 +394,19 @@ export function mallWeatherExportProgress(job: Pick<MallWeatherExportJob, 'proce
 
 export function mallWeatherExportPollStatusRetryable(status: number) {
   return status === 0 || status === 408 || status === 429 || (status >= 500 && status <= 599)
+}
+
+export function mallWeatherExportPollFailureAction(status: number): MallWeatherExportPollFailureAction {
+  if (mallWeatherExportPollStatusRetryable(status)) return 'retry'
+  if (status === 404 || status === 422) return 'forget'
+  return 'pause'
+}
+
+export function mallWeatherExportPollingActive(
+  status: MallWeatherExportJobStatus | undefined,
+  pollingPaused: boolean,
+) {
+  return Boolean(status && !mallWeatherExportJobTerminal(status) && !pollingPaused)
 }
 
 export function mallWeatherExportPollRetryDelayMilliseconds(transientFailureCount: number) {
