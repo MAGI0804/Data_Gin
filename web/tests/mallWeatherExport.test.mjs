@@ -8,6 +8,7 @@ import {
   mallWeatherExportCreateRequest,
   mallWeatherExportCreateResultMatchesRequest,
   mallWeatherExportDownloadReadiness,
+  mallWeatherExportDownloadFrameLifetimeMilliseconds,
   mallWeatherExportMaximumPollRetryDelayMilliseconds,
   mallWeatherExportMaximumTransientPollRetries,
   mallWeatherExportContentPath,
@@ -24,6 +25,7 @@ import {
   mallWeatherExportRequestMatches,
   parseMallWeatherExportCreateResult,
   parseMallWeatherExportDownloadGrant,
+  submitMallWeatherExportBrowserDownload,
   parseMallWeatherExportJob,
   parseMallWeatherExportSafeErrorMessage,
   resolveMallWeatherExportStorage,
@@ -261,24 +263,64 @@ test('builds stable authenticated download resource paths', () => {
   assert.throws(() => mallWeatherExportJobPath('bad'), /invalid mall weather export job id/)
 })
 
-test('accepts only short-lived HTTPS download grants', async () => {
-  const now = new Date('2026-07-27T10:00:00Z')
+test('accepts HTTPS download grants without trusting the browser clock', async () => {
   const valid = envelope({
     url: 'https://weather-files.example.com/export.xlsx?signature=abc123',
     expiresAt: '2026-07-27T10:05:00Z',
   })
-  assert.deepEqual(parseMallWeatherExportDownloadGrant(valid, now), valid.data)
+  assert.deepEqual(parseMallWeatherExportDownloadGrant(valid), valid.data)
   for (const invalid of [
     { ...valid.data, url: 'http://weather-files.example.com/export.xlsx' },
     { ...valid.data, url: 'javascript:alert(1)' },
     { ...valid.data, url: 'https://user:secret@weather-files.example.com/export.xlsx' },
     { ...valid.data, url: 'https://weather-files.example.com/export.xlsx#fragment' },
-    { ...valid.data, expiresAt: '2026-07-27T10:00:29Z' },
-    { ...valid.data, expiresAt: '2026-07-27T11:00:01Z' },
+    { ...valid.data, url: 'https://weather-private.oss-cn-shanghai-internal.aliyuncs.com/export.xlsx' },
+    { ...valid.data, expiresAt: 'not-a-time' },
   ]) {
-    assert.equal(parseMallWeatherExportDownloadGrant(envelope(invalid), now), null)
+    assert.equal(parseMallWeatherExportDownloadGrant(envelope(invalid)), null)
   }
-  assert.equal(parseMallWeatherExportDownloadGrant({ code: 0, data: valid.data }, new Date('invalid')), null)
+  assert.deepEqual(parseMallWeatherExportDownloadGrant(envelope({
+    ...valid.data,
+    expiresAt: '2020-01-01T00:00:00Z',
+  })), { ...valid.data, expiresAt: '2020-01-01T00:00:00Z' })
+
+  const frames = []
+  let cleanup = null
+  const documentRef = {
+    body: { append: (frame) => frames.push(frame) },
+    createElement: (tagName) => {
+      assert.equal(tagName, 'iframe')
+      return {
+        hidden: false,
+        title: '',
+        referrerPolicy: '',
+        src: '',
+        attributes: {},
+        removed: false,
+        setAttribute(name, value) { this.attributes[name] = value },
+        remove() { this.removed = true },
+      }
+    },
+  }
+  submitMallWeatherExportBrowserDownload(
+    documentRef,
+    valid.data,
+    `mall_weather_export_${jobID}.xlsx`,
+    (callback, delayMilliseconds) => {
+      cleanup = callback
+      assert.equal(delayMilliseconds, mallWeatherExportDownloadFrameLifetimeMilliseconds)
+    },
+  )
+  assert.equal(frames.length, 1)
+  assert.equal(frames[0].hidden, true)
+  assert.equal(frames[0].title, `下载 mall_weather_export_${jobID}.xlsx`)
+  assert.equal(frames[0].referrerPolicy, 'no-referrer')
+  assert.equal(frames[0].attributes['aria-hidden'], 'true')
+  assert.equal(frames[0].attributes.sandbox, 'allow-downloads')
+  assert.equal(frames[0].src, valid.data.url)
+  assert.equal(frames[0].removed, false)
+  cleanup()
+  assert.equal(frames[0].removed, true)
 
   const cancelledController = new AbortController()
   const cancelledRequest = waitForMallWeatherExportRequest(

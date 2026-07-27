@@ -339,7 +339,7 @@ export function MallWeatherExportPanel({ actorID, mallID, mallName, client, down
         response.data,
       ))
       persistSession({ pending: null, jobId: job.jobId })
-      setDownloadMessage('下载请求已提交给浏览器，请在下载列表中查看保存进度。')
+      setDownloadMessage('下载请求已交给浏览器；若未开始，请检查浏览器下载列表或 OSS 公网访问配置。')
     } catch (error) {
       if (error instanceof MallWeatherExportRequestTimeoutError) {
         setActionError('获取 Excel 下载地址超时，请检查网络后重试')

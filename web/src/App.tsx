@@ -27,7 +27,7 @@ import { effectiveApiStatus } from './apiResponse'
 import { apiURL as buildApiURL } from './apiURL'
 import { clearStoredToken, loadStoredToken, saveStoredToken, storedTokenExpiresAt, tokenActorID } from './authStorage'
 import { MallWeatherPage } from './MallWeatherPage'
-import { parseMallWeatherExportDownloadGrant } from './mallWeatherExport'
+import { parseMallWeatherExportDownloadGrant, submitMallWeatherExportBrowserDownload } from './mallWeatherExport'
 import {
   buildExcelExportConfig,
   cloneExcelMatchSteps,
@@ -776,17 +776,12 @@ function App() {
         if (!response.ok) return response
         const grant = parseMallWeatherExportDownloadGrant(response.data)
         if (!grant) return { ok: false, status: 502, data: 'invalid XLSX download grant' }
-        const anchor = document.createElement('a')
-        try {
-          anchor.href = grant.url
-          anchor.download = fileName
-          anchor.rel = 'noopener noreferrer'
-          anchor.referrerPolicy = 'no-referrer'
-          document.body.append(anchor)
-          anchor.click()
-        } finally {
-          anchor.remove()
-        }
+        submitMallWeatherExportBrowserDownload(
+          document,
+          grant,
+          fileName,
+          (callback, delayMilliseconds) => window.setTimeout(callback, delayMilliseconds),
+        )
         return { ok: true, status: response.status, data: { fileName, expiresAt: grant.expiresAt } }
       } catch (error) {
         return { ok: false, status: 0, data: error instanceof Error ? error.message : String(error) }

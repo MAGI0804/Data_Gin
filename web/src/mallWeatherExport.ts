@@ -86,6 +86,8 @@ export type MallWeatherExportDownloadGrant = {
   expiresAt: string
 }
 
+export const mallWeatherExportDownloadFrameLifetimeMilliseconds = 5 * 60 * 1000
+
 export class MallWeatherExportRequestTimeoutError extends Error {
   constructor() {
     super('mall weather export request timed out')
@@ -369,21 +371,43 @@ export function parseMallWeatherExportJob(payload: unknown): MallWeatherExportJo
 
 export function parseMallWeatherExportDownloadGrant(
   payload: unknown,
-  now = new Date(),
 ): MallWeatherExportDownloadGrant | null {
   const data = envelopeData(payload)
-  if (!data || !nonEmptyString(data.url, 8_192) || !isRFC3339(data.expiresAt) || !Number.isFinite(now.getTime())) return null
-  const expiresAtMilliseconds = Date.parse(data.expiresAt)
-  const lifetimeMilliseconds = expiresAtMilliseconds - now.getTime()
-  if (lifetimeMilliseconds < 30_000 || lifetimeMilliseconds > 60 * 60 * 1000) return null
+  if (!data || !nonEmptyString(data.url, 8_192) || !isRFC3339(data.expiresAt)) return null
   let parsedURL: URL
   try {
     parsedURL = new URL(data.url)
   } catch {
     return null
   }
-  if (parsedURL.protocol !== 'https:' || parsedURL.username || parsedURL.password || parsedURL.hash || !parsedURL.hostname) return null
+  if (parsedURL.protocol !== 'https:' || parsedURL.username || parsedURL.password || parsedURL.hash || !parsedURL.hostname ||
+    parsedURL.hostname.toLowerCase().endsWith('-internal.aliyuncs.com')) return null
   return { url: data.url, expiresAt: data.expiresAt }
+}
+
+export function submitMallWeatherExportBrowserDownload(
+  documentRef: Document,
+  grant: MallWeatherExportDownloadGrant,
+  fileName: string,
+  scheduleCleanup: (callback: () => void, delayMilliseconds: number) => unknown,
+) {
+  if (!documentRef?.body || !grant || !nonEmptyString(fileName, 255) || typeof scheduleCleanup !== 'function') {
+    throw new Error('invalid mall weather export browser download')
+  }
+  const frame = documentRef.createElement('iframe')
+  frame.hidden = true
+  frame.title = `下载 ${fileName}`
+  frame.referrerPolicy = 'no-referrer'
+  frame.setAttribute('aria-hidden', 'true')
+  frame.setAttribute('sandbox', 'allow-downloads')
+  documentRef.body.append(frame)
+  try {
+    frame.src = grant.url
+    scheduleCleanup(() => frame.remove(), mallWeatherExportDownloadFrameLifetimeMilliseconds)
+  } catch (error) {
+    frame.remove()
+    throw error
+  }
 }
 
 export function mallWeatherExportJobTerminal(status: MallWeatherExportJobStatus) {
