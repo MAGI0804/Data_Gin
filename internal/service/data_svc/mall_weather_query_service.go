@@ -366,7 +366,8 @@ func (service *MallWeatherQueryService) Overview(ctx context.Context, actorUserI
 		return nil, fmt.Errorf("mall weather query: overview minutely: %w", err)
 	}
 	hourly, err := service.weather.QueryHourly(ctx, data_dao.HourlyQuery{
-		MallID: mallID, StartUTC: hourlyStartUTC, EndUTC: hourlyStartUTC.Add(24 * time.Hour), Latest: true, Limit: 24,
+		MallID: mallID, StartUTC: hourlyStartUTC, EndUTC: hourlyStartUTC.Add(25 * time.Hour),
+		Latest: true, PreferNonNullTemperature: true, Limit: 24,
 	})
 	if err != nil {
 		return nil, fmt.Errorf("mall weather query: overview hourly: %w", err)

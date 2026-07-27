@@ -32,7 +32,7 @@ func TestClientFetchWeatherUsesSignedRequestAndRedactsRawBody(t *testing.T) {
 	client := testClient(t, handler)
 	response, err := client.FetchWeather(context.Background(), WeatherRequest{
 		Longitude: 121.4551234, Latitude: 31.2285678,
-		HourlySteps: 360, DailySteps: 15, Alert: true, Unit: "metric:v2",
+		HourlySteps: 72, DailySteps: 7, Alert: true, Unit: "metric:v2",
 	})
 	if err != nil {
 		t.Fatalf("FetchWeather() error=%v", err)
@@ -249,7 +249,7 @@ func requestSignatureForTest(t *testing.T) string {
 	t.Helper()
 	request, err := fixedRequestBuilder(t).NewWeatherRequest(context.Background(), WeatherRequest{
 		Longitude: 121.4551234, Latitude: 31.2285678,
-		HourlySteps: 360, DailySteps: 15, Alert: true, Unit: "metric:v2",
+		HourlySteps: 72, DailySteps: 7, Alert: true, Unit: "metric:v2",
 	})
 	if err != nil {
 		t.Fatalf("NewWeatherRequest() error=%v", err)

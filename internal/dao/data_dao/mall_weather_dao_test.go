@@ -187,6 +187,18 @@ func TestBuildHourlyQuery(t *testing.T) {
 			wantArgCount: 4,
 		},
 		{
+			name: "overview latest prefers a version with temperature",
+			query: HourlyQuery{
+				MallID: 1, StartUTC: start, EndUTC: end, Latest: true,
+				PreferNonNullTemperature: true, Limit: 24,
+			},
+			contains: []string{
+				"ROW_NUMBER() OVER",
+				"ORDER BY (w.temperature_c IS NULL) ASC, w.issued_at_utc DESC, w.id DESC",
+			},
+			wantArgCount: 4,
+		},
+		{
 			name:         "as of and cursor stay parameterized",
 			query:        HourlyQuery{MallID: 1, StartUTC: start, EndUTC: end, AsOfUTC: &asOf, QualityStatus: "valid", AfterForecastTime: &cursor, AfterID: 99, Limit: 900},
 			contains:     []string{"w.issued_at_utc <= ?", "w.quality_status = ?", "ranked.forecast_time_utc > ?", "ROW_NUMBER() OVER"},

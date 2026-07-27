@@ -47,16 +47,17 @@ type FetchAttemptLease struct {
 var ErrProviderRawSnapshotNotFound = errors.New("provider raw snapshot: not found")
 
 type HourlyQuery struct {
-	MallID            uint
-	StartUTC          time.Time
-	EndUTC            time.Time
-	AsOfUTC           *time.Time
-	Latest            bool
-	QualityStatus     string
-	AfterForecastTime *time.Time
-	AfterIssuedAtUTC  *time.Time
-	AfterID           uint
-	Limit             int
+	MallID                   uint
+	StartUTC                 time.Time
+	EndUTC                   time.Time
+	AsOfUTC                  *time.Time
+	Latest                   bool
+	PreferNonNullTemperature bool
+	QualityStatus            string
+	AfterForecastTime        *time.Time
+	AfterIssuedAtUTC         *time.Time
+	AfterID                  uint
+	Limit                    int
 }
 
 type MallWeatherDAO struct {
@@ -634,6 +635,10 @@ func buildHourlyQuery(query HourlyQuery) (string, []interface{}, error) {
 	args = append(args, limit)
 
 	if query.Latest || query.AsOfUTC != nil {
+		versionOrder := "w.issued_at_utc DESC, w.id DESC"
+		if query.PreferNonNullTemperature {
+			versionOrder = "(w.temperature_c IS NULL) ASC, " + versionOrder
+		}
 		outerWhere := []string{"ranked.version_rank = 1"}
 		if query.AfterForecastTime != nil {
 			outerWhere = append(outerWhere, "(ranked.forecast_time_utc > ? OR (ranked.forecast_time_utc = ? AND ranked.id > ?))")
@@ -641,10 +646,10 @@ func buildHourlyQuery(query HourlyQuery) (string, []interface{}, error) {
 			args = append(args[:len(args)-1], cursor, cursor, query.AfterID, limit)
 		}
 		return `SELECT ranked.* FROM (
-SELECT w.*, ROW_NUMBER() OVER (
-  PARTITION BY w.forecast_time_utc
-  ORDER BY w.issued_at_utc DESC, w.id DESC
-) AS version_rank
+	SELECT w.*, ROW_NUMBER() OVER (
+	  PARTITION BY w.forecast_time_utc
+	  ORDER BY ` + versionOrder + `
+	) AS version_rank
 FROM mall_weather_hourly AS w
 WHERE ` + strings.Join(where, " AND ") + `
 ) AS ranked

@@ -180,8 +180,8 @@ func TestMallWeatherQueryServiceOverviewReturnsBoundedSummary(t *testing.T) {
 	}
 	if result.Meta.FreshnessStatus != "STALE" || result.Meta.DataAgeSeconds == nil || *result.Meta.DataAgeSeconds != 3*60*60 ||
 		weather.minutelyStartUTC != now.Truncate(time.Minute) || weather.minutelyEndUTC != now.Truncate(time.Minute).Add(2*time.Hour) || weather.minutelyLimit != maxWeatherOverviewMinutely ||
-		weather.query.StartUTC != now.Truncate(time.Hour) || weather.query.EndUTC != now.Truncate(time.Hour).Add(24*time.Hour) ||
-		!weather.query.Latest || weather.query.Limit != 24 || weather.alertLimit != maxWeatherOverviewAlerts {
+		weather.query.StartUTC != now.Truncate(time.Hour) || weather.query.EndUTC != now.Truncate(time.Hour).Add(25*time.Hour) ||
+		!weather.query.Latest || !weather.query.PreferNonNullTemperature || weather.query.Limit != 24 || weather.alertLimit != maxWeatherOverviewAlerts {
 		t.Fatalf("meta=%+v query=%+v minutely=[%s,%s,%d] alertLimit=%d", result.Meta, weather.query, weather.minutelyStartUTC, weather.minutelyEndUTC, weather.minutelyLimit, weather.alertLimit)
 	}
 }

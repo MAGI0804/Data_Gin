@@ -15,7 +15,7 @@ func TestRequestBuilderConstructsSignedV26Request(t *testing.T) {
 	builder := fixedRequestBuilder(t)
 	request, err := builder.NewWeatherRequest(context.Background(), WeatherRequest{
 		Longitude: 121.4551234, Latitude: 31.2285678,
-		HourlySteps: 360, DailySteps: 15, Alert: true, Unit: "metric:v2",
+		HourlySteps: 72, DailySteps: 7, Alert: true, Unit: "metric:v2",
 	})
 	if err != nil {
 		path := builder.weatherBaseURL.JoinPath("v2.6", builder.signer.appKey, "121.4551234,31.2285678", "weather").EscapedPath()
@@ -27,13 +27,13 @@ func TestRequestBuilderConstructsSignedV26Request(t *testing.T) {
 	if request.URL.EscapedPath() != "/v2.6/test_app_key_2026/121.4551234,31.2285678/weather" {
 		t.Fatalf("path=%q", request.URL.EscapedPath())
 	}
-	if request.URL.RawQuery != "alert=true&dailysteps=15&hourlysteps=360&unit=metric%3Av2" {
+	if request.URL.RawQuery != "alert=true&dailysteps=7&hourlysteps=72&unit=metric%3Av2" {
 		t.Fatalf("query=%q", request.URL.RawQuery)
 	}
 	if request.Header.Get("x-cy-app-key") != "" {
 		t.Fatalf("v2.6 app key header=%q", request.Header.Get("x-cy-app-key"))
 	}
-	assertFixedSigningHeaders(t, request, "jW2s-OXHx_tLmeu4uMRnfWqUeHvw1mbDWOjYFK9Yvbk=")
+	assertFixedSigningHeaders(t, request, "zhGS5fGnVuPiwbFLoLlJsOzPWT3yfB4YlM56-_ogSnw=")
 }
 
 func TestRequestBuilderRejectsInvalidBoundaries(t *testing.T) {
@@ -43,8 +43,8 @@ func TestRequestBuilderRejectsInvalidBoundaries(t *testing.T) {
 		{Longitude: 181, Latitude: 31, HourlySteps: 1, DailySteps: 1, Unit: "metric:v2"},
 		{Longitude: 121, Latitude: 91, HourlySteps: 1, DailySteps: 1, Unit: "metric:v2"},
 		{Longitude: 121, Latitude: 31, HourlySteps: 0, DailySteps: 1, Unit: "metric:v2"},
-		{Longitude: 121, Latitude: 31, HourlySteps: 361, DailySteps: 1, Unit: "metric:v2"},
-		{Longitude: 121, Latitude: 31, HourlySteps: 1, DailySteps: 16, Unit: "metric:v2"},
+		{Longitude: 121, Latitude: 31, HourlySteps: 73, DailySteps: 1, Unit: "metric:v2"},
+		{Longitude: 121, Latitude: 31, HourlySteps: 1, DailySteps: 8, Unit: "metric:v2"},
 		{Longitude: 121, Latitude: 31, HourlySteps: 1, DailySteps: 1, Unit: "metric:v2&token=bad"},
 	}
 	for index, input := range weatherRequests {
