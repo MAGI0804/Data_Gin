@@ -142,6 +142,58 @@ func TestMallWeatherExportRunTerminalInputValidation(t *testing.T) {
 	}
 }
 
+func TestConfirmMallWeatherExportStoredResult(t *testing.T) {
+	objectKey := "mall-weather-exports/job/run/result.xlsx"
+	checksum := strings.Repeat("a", 64)
+	tests := []struct {
+		name      string
+		row       mallWeatherExportStoredResult
+		want      bool
+		wantError bool
+	}{
+		{
+			name: "committed exact artifact",
+			row: mallWeatherExportStoredResult{
+				Status: "succeeded", ResultObjectKey: objectKey,
+				ResultChecksum: checksum, FileSizeBytes: 1024,
+			},
+			want: true,
+		},
+		{
+			name: "different committed artifact is unreferenced",
+			row: mallWeatherExportStoredResult{
+				Status: "succeeded", ResultObjectKey: "mall-weather-exports/other/result.xlsx",
+				ResultChecksum: checksum, FileSizeBytes: 1024,
+			},
+		},
+		{
+			name: "same key with different metadata is unsafe",
+			row: mallWeatherExportStoredResult{
+				Status: "succeeded", ResultObjectKey: objectKey,
+				ResultChecksum: strings.Repeat("b", 64), FileSizeBytes: 1024,
+			},
+			wantError: true,
+		},
+		{
+			name: "running job does not reference artifact",
+			row:  mallWeatherExportStoredResult{Status: "running"},
+		},
+		{
+			name:      "unfinished reference is unsafe",
+			row:       mallWeatherExportStoredResult{Status: "running", ResultObjectKey: objectKey},
+			wantError: true,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := confirmMallWeatherExportStoredResult(tt.row, objectKey, checksum, 1024)
+			if got != tt.want || (err != nil) != tt.wantError {
+				t.Fatalf("confirmMallWeatherExportStoredResult() got=%v error=%v", got, err)
+			}
+		})
+	}
+}
+
 func exportRunState(status string, updatedAt time.Time) model.MallWeatherExportJob {
 	return model.MallWeatherExportJob{
 		BaseModel:         model.BaseModel{ID: 17},

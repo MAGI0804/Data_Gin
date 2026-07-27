@@ -59,6 +59,154 @@ func TestMallWeatherExportProcessorCompletesOwnedRun(t *testing.T) {
 	}
 }
 
+func TestMallWeatherExportProcessorKeepsObjectWhenSuccessCommitIsAmbiguous(t *testing.T) {
+	runToken := uuid.NewString()
+	store := newFakeMallWeatherExportRunStore(t)
+	store.succeedErr = errors.New("database response lost after commit")
+	store.commitSuccessOnError = true
+	objectStore := &fakeMallWeatherExportObjectStore{}
+	metrics := &fakeMallWeatherMetricRecorder{}
+	processor := newTestMallWeatherExportProcessorWithMetrics(
+		t,
+		store,
+		mallWeatherExportRendererFunc(writeFakeMallWeatherExportArtifact),
+		objectStore,
+		runToken,
+		metrics,
+	)
+
+	if err := processor.Process(t.Context(), 17, true); err != nil {
+		t.Fatalf("Process() error=%v", err)
+	}
+	state := store.snapshot()
+	if state.successConfirmations != 1 || objectStore.deletedKey != "" ||
+		state.released != 0 || state.failed != 0 {
+		t.Fatalf("store state=%+v object store=%+v", state, objectStore)
+	}
+	assertFakeMallWeatherMetricCounters(t, metrics.counters, []fakeMallWeatherMetricCounter{{
+		name: MallWeatherMetricExportRowsTotal, value: 1,
+	}, {
+		name: MallWeatherMetricExportRunsTotal, labels: map[string]string{"status": mallWeatherMetricStatusSucceeded}, value: 1,
+	}})
+}
+
+func TestMallWeatherExportProcessorPreservesObjectAfterAmbiguousDatabaseFailure(t *testing.T) {
+	runToken := uuid.NewString()
+	store := newFakeMallWeatherExportRunStore(t)
+	store.succeedErr = errors.New("database update result unknown")
+	objectStore := &fakeMallWeatherExportObjectStore{}
+	processor := newTestMallWeatherExportProcessor(
+		t,
+		store,
+		mallWeatherExportRendererFunc(writeFakeMallWeatherExportArtifact),
+		objectStore,
+		runToken,
+	)
+
+	err := processor.Process(t.Context(), 17, true)
+	if err == nil {
+		t.Fatal("Process() returned nil error")
+	}
+	state := store.snapshot()
+	if state.successConfirmations != 1 || objectStore.deletedKey != "" || state.released != 1 {
+		t.Fatalf("store state=%+v object store=%+v", state, objectStore)
+	}
+}
+
+func TestMallWeatherExportProcessorDeletesObjectAfterConfirmedLeaseLoss(t *testing.T) {
+	runToken := uuid.NewString()
+	store := newFakeMallWeatherExportRunStore(t)
+	store.succeedErr = data_dao.ErrMallWeatherExportRunLeaseLost
+	store.heartbeatControl = data_dao.MallWeatherExportRunControlLeaseLost
+	objectStore := &fakeMallWeatherExportObjectStore{}
+	processor := newTestMallWeatherExportProcessor(
+		t,
+		store,
+		mallWeatherExportRendererFunc(writeFakeMallWeatherExportArtifact),
+		objectStore,
+		runToken,
+	)
+
+	if err := processor.Process(t.Context(), 17, true); err != nil {
+		t.Fatalf("Process() error=%v", err)
+	}
+	state := store.snapshot()
+	if state.successConfirmations != 1 || objectStore.deletedKey == "" ||
+		objectStore.deletedKey != objectStore.uploadedKey || state.released != 0 || state.failed != 0 {
+		t.Fatalf("store state=%+v object store=%+v", state, objectStore)
+	}
+}
+
+func TestMallWeatherExportProcessorCancelsAfterConfirmedLeaseLoss(t *testing.T) {
+	runToken := uuid.NewString()
+	store := newFakeMallWeatherExportRunStore(t)
+	store.succeedErr = data_dao.ErrMallWeatherExportRunLeaseLost
+	store.heartbeatControl = data_dao.MallWeatherExportRunControlCancelRequested
+	objectStore := &fakeMallWeatherExportObjectStore{}
+	processor := newTestMallWeatherExportProcessor(
+		t,
+		store,
+		mallWeatherExportRendererFunc(writeFakeMallWeatherExportArtifact),
+		objectStore,
+		runToken,
+	)
+
+	if err := processor.Process(t.Context(), 17, true); err != nil {
+		t.Fatalf("Process() error=%v", err)
+	}
+	state := store.snapshot()
+	if state.successConfirmations != 1 || objectStore.deletedKey == "" || state.cancelled != 1 {
+		t.Fatalf("store state=%+v object store=%+v", state, objectStore)
+	}
+}
+
+func TestMallWeatherExportProcessorPreservesObjectOnFinalSuccessUpdateFailure(t *testing.T) {
+	runToken := uuid.NewString()
+	store := newFakeMallWeatherExportRunStore(t)
+	store.succeedErr = errors.New("database update result unknown")
+	objectStore := &fakeMallWeatherExportObjectStore{}
+	processor := newTestMallWeatherExportProcessor(
+		t,
+		store,
+		mallWeatherExportRendererFunc(writeFakeMallWeatherExportArtifact),
+		objectStore,
+		runToken,
+	)
+
+	err := processor.Process(t.Context(), 17, false)
+	if !errors.Is(err, ErrMallWeatherExportProcessNonRetryable) {
+		t.Fatalf("Process() error=%v", err)
+	}
+	state := store.snapshot()
+	if state.successConfirmations != 1 || objectStore.deletedKey != "" || state.failed != 1 {
+		t.Fatalf("store state=%+v object store=%+v", state, objectStore)
+	}
+}
+
+func TestMallWeatherExportProcessorPreservesObjectWhenSuccessCannotBeConfirmed(t *testing.T) {
+	runToken := uuid.NewString()
+	store := newFakeMallWeatherExportRunStore(t)
+	store.succeedErr = errors.New("database update result unknown")
+	store.confirmSuccessErr = errors.New("database confirmation unavailable")
+	objectStore := &fakeMallWeatherExportObjectStore{}
+	processor := newTestMallWeatherExportProcessor(
+		t,
+		store,
+		mallWeatherExportRendererFunc(writeFakeMallWeatherExportArtifact),
+		objectStore,
+		runToken,
+	)
+
+	err := processor.Process(t.Context(), 17, true)
+	if err == nil || !strings.Contains(err.Error(), "confirmation unavailable") {
+		t.Fatalf("Process() error=%v", err)
+	}
+	state := store.snapshot()
+	if state.successConfirmations != 1 || objectStore.deletedKey != "" || state.released != 1 {
+		t.Fatalf("store state=%+v object store=%+v", state, objectStore)
+	}
+}
+
 func TestMallWeatherExportProcessorRecordsSuccessfulExportRows(t *testing.T) {
 	runToken := uuid.NewString()
 	store := newFakeMallWeatherExportRunStore(t)
@@ -313,16 +461,21 @@ func (renderer mallWeatherExportRendererFunc) Render(
 }
 
 type fakeMallWeatherExportRunStore struct {
-	mu                sync.Mutex
-	lease             data_dao.MallWeatherExportRunLease
-	progressControl   data_dao.MallWeatherExportRunControl
-	heartbeatControl  data_dao.MallWeatherExportRunControl
-	progressUpdates   int
-	released          int
-	failed            int
-	cancelled         int
-	succeededKey      string
-	succeededChecksum string
+	mu                   sync.Mutex
+	lease                data_dao.MallWeatherExportRunLease
+	progressControl      data_dao.MallWeatherExportRunControl
+	heartbeatControl     data_dao.MallWeatherExportRunControl
+	progressUpdates      int
+	released             int
+	failed               int
+	cancelled            int
+	succeededKey         string
+	succeededChecksum    string
+	succeededFileSize    int64
+	succeedErr           error
+	commitSuccessOnError bool
+	confirmSuccessErr    error
+	successConfirmations int
 }
 
 func newFakeMallWeatherExportRunStore(t *testing.T) *fakeMallWeatherExportRunStore {
@@ -391,15 +544,35 @@ func (store *fakeMallWeatherExportRunStore) MarkRunSucceeded(
 	_ string,
 	objectKey string,
 	checksum string,
-	_ int64,
+	fileSize int64,
 	_ time.Time,
 	_ time.Time,
 ) error {
 	store.mu.Lock()
 	defer store.mu.Unlock()
-	store.succeededKey = objectKey
-	store.succeededChecksum = checksum
-	return nil
+	if store.succeedErr == nil || store.commitSuccessOnError {
+		store.succeededKey = objectKey
+		store.succeededChecksum = checksum
+		store.succeededFileSize = fileSize
+	}
+	return store.succeedErr
+}
+
+func (store *fakeMallWeatherExportRunStore) ConfirmRunSucceeded(
+	_ context.Context,
+	_ uint,
+	objectKey string,
+	checksum string,
+	fileSize int64,
+) (bool, error) {
+	store.mu.Lock()
+	defer store.mu.Unlock()
+	store.successConfirmations++
+	if store.confirmSuccessErr != nil {
+		return false, store.confirmSuccessErr
+	}
+	return store.succeededKey == objectKey && store.succeededChecksum == checksum &&
+		store.succeededFileSize == fileSize, nil
 }
 
 func (store *fakeMallWeatherExportRunStore) MarkRunFailed(
@@ -442,24 +615,26 @@ func (store *fakeMallWeatherExportRunStore) ReleaseRunForRetry(
 }
 
 type fakeMallWeatherExportRunStoreState struct {
-	progressUpdates   int
-	released          int
-	failed            int
-	cancelled         int
-	succeededKey      string
-	succeededChecksum string
+	progressUpdates      int
+	released             int
+	failed               int
+	cancelled            int
+	succeededKey         string
+	succeededChecksum    string
+	successConfirmations int
 }
 
 func (store *fakeMallWeatherExportRunStore) snapshot() fakeMallWeatherExportRunStoreState {
 	store.mu.Lock()
 	defer store.mu.Unlock()
 	return fakeMallWeatherExportRunStoreState{
-		progressUpdates:   store.progressUpdates,
-		released:          store.released,
-		failed:            store.failed,
-		cancelled:         store.cancelled,
-		succeededKey:      store.succeededKey,
-		succeededChecksum: store.succeededChecksum,
+		progressUpdates:      store.progressUpdates,
+		released:             store.released,
+		failed:               store.failed,
+		cancelled:            store.cancelled,
+		succeededKey:         store.succeededKey,
+		succeededChecksum:    store.succeededChecksum,
+		successConfirmations: store.successConfirmations,
 	}
 }
 

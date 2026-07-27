@@ -38,6 +38,7 @@ type mallWeatherExportRunStore interface {
 	HeartbeatRun(context.Context, uint, string, time.Time) (data_dao.MallWeatherExportRunControl, error)
 	InspectRun(context.Context, uint, string) (data_dao.MallWeatherExportRunControl, error)
 	MarkRunSucceeded(context.Context, uint, string, string, string, int64, time.Time, time.Time) error
+	ConfirmRunSucceeded(context.Context, uint, string, string, int64) (bool, error)
 	MarkRunFailed(context.Context, uint, string, string, time.Time, time.Time) error
 	MarkRunCancelled(context.Context, uint, string, time.Time, time.Time) error
 	ReleaseRunForRetry(context.Context, uint, string, time.Time) error
@@ -260,15 +261,32 @@ func (processor *MallWeatherExportProcessor) processOwnedRun(
 		recordMallWeatherExportRun(processor.metrics, mallWeatherMetricStatusSucceeded)
 		return nil
 	}
-	deleteErr := processor.deleteObject(ctx, objectStore, objectKey)
+	confirmed, confirmErr := processor.confirmRunSucceeded(ctx, job.ID, objectKey, checksum, fileSize)
+	if confirmed {
+		recordMallWeatherExportRows(processor.metrics, renderResult)
+		recordMallWeatherExportRun(processor.metrics, mallWeatherMetricStatusSucceeded)
+		return nil
+	}
 	if errors.Is(err, data_dao.ErrMallWeatherExportRunLeaseLost) {
+		var deleteErr error
+		if confirmErr == nil {
+			deleteErr = processor.deleteObject(ctx, objectStore, objectKey)
+		}
 		control, inspectErr := processor.inspectRun(ctx, job.ID, runToken)
 		if inspectErr == nil && control == data_dao.MallWeatherExportRunControlCancelRequested {
 			return processor.finishError(ctx, job.ID, runToken, errMallWeatherExportProcessCancelled, false, false, "导出任务已取消")
 		}
-		return errors.Join(deleteErr, inspectErr)
+		return errors.Join(confirmErr, deleteErr, inspectErr)
 	}
-	return processor.finishError(ctx, job.ID, runToken, errors.Join(err, deleteErr), false, retryAllowed, "导出任务完成状态更新失败")
+	return processor.finishError(
+		ctx,
+		job.ID,
+		runToken,
+		errors.Join(err, confirmErr),
+		false,
+		retryAllowed,
+		"导出任务完成状态更新失败",
+	)
 }
 
 func (processor *MallWeatherExportProcessor) updateProgress(
@@ -376,6 +394,22 @@ func (processor *MallWeatherExportProcessor) inspectRun(
 	stateCtx, cancel := mallWeatherExportStateContext(ctx)
 	defer cancel()
 	return processor.runs.InspectRun(stateCtx, jobID, runToken)
+}
+
+func (processor *MallWeatherExportProcessor) confirmRunSucceeded(
+	ctx context.Context,
+	jobID uint,
+	objectKey string,
+	checksum string,
+	fileSize int64,
+) (bool, error) {
+	stateCtx, cancel := mallWeatherExportStateContext(ctx)
+	defer cancel()
+	confirmed, err := processor.runs.ConfirmRunSucceeded(stateCtx, jobID, objectKey, checksum, fileSize)
+	if err != nil {
+		return false, fmt.Errorf("mall weather export processor: confirm completed run: %w", err)
+	}
+	return confirmed, nil
 }
 
 func mallWeatherExportStateContext(ctx context.Context) (context.Context, context.CancelFunc) {

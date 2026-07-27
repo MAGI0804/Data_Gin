@@ -280,6 +280,69 @@ func (dao *MallWeatherExportJobDAO) MarkRunSucceeded(
 	})
 }
 
+// ConfirmRunSucceeded resolves the ambiguous outcome of MarkRunSucceeded.
+// A database connection can fail after the server has committed the update, so
+// callers must verify the stored artifact before deciding whether it is safe to
+// delete the uploaded object.
+func (dao *MallWeatherExportJobDAO) ConfirmRunSucceeded(
+	ctx context.Context,
+	jobID uint,
+	resultObjectKey string,
+	resultChecksum string,
+	fileSizeBytes int64,
+) (bool, error) {
+	if dao == nil || dao.db == nil || ctx == nil || jobID == 0 ||
+		!validMallWeatherExportObjectKey(resultObjectKey) ||
+		!mallWeatherExportChecksumPattern.MatchString(resultChecksum) || fileSizeBytes <= 0 {
+		return false, fmt.Errorf("mall weather export run: invalid success confirmation")
+	}
+	var row mallWeatherExportStoredResult
+	err := dao.db.WithContext(ctx).Model(&model.MallWeatherExportJob{}).
+		Select("status", "result_object_key", "result_checksum", "file_size_bytes").
+		Where("id = ?", jobID).
+		First(&row).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return false, nil
+	}
+	if err != nil {
+		return false, fmt.Errorf("mall weather export run: confirm success: %w", err)
+	}
+	return confirmMallWeatherExportStoredResult(
+		row,
+		resultObjectKey,
+		resultChecksum,
+		fileSizeBytes,
+	)
+}
+
+type mallWeatherExportStoredResult struct {
+	Status          string `gorm:"column:status"`
+	ResultObjectKey string `gorm:"column:result_object_key"`
+	ResultChecksum  string `gorm:"column:result_checksum"`
+	FileSizeBytes   int64  `gorm:"column:file_size_bytes"`
+}
+
+func confirmMallWeatherExportStoredResult(
+	row mallWeatherExportStoredResult,
+	resultObjectKey string,
+	resultChecksum string,
+	fileSizeBytes int64,
+) (bool, error) {
+	if strings.EqualFold(strings.TrimSpace(row.Status), "succeeded") {
+		if row.ResultObjectKey != resultObjectKey {
+			return false, nil
+		}
+		if row.ResultChecksum != resultChecksum || row.FileSizeBytes != fileSizeBytes {
+			return false, fmt.Errorf("mall weather export run: stored artifact metadata mismatch")
+		}
+		return true, nil
+	}
+	if row.ResultObjectKey == resultObjectKey {
+		return false, fmt.Errorf("mall weather export run: unfinished job references uploaded artifact")
+	}
+	return false, nil
+}
+
 func (dao *MallWeatherExportJobDAO) MarkRunFailed(
 	ctx context.Context,
 	jobID uint,
