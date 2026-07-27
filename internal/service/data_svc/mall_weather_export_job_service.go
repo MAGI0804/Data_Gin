@@ -97,6 +97,10 @@ type mallWeatherExportProfileReader interface {
 	FindByID(context.Context, uint) (*model.MallWeatherExportProfile, error)
 }
 
+type mallWeatherFixedExportProfileResolver interface {
+	EnsureSystemProfile(context.Context, *model.MallWeatherExportProfile) (*model.MallWeatherExportProfile, error)
+}
+
 type mallWeatherExportEstimator interface {
 	EstimateRows(context.Context, data_dao.MallWeatherExportEstimateRequest) (int64, error)
 }
@@ -336,19 +340,37 @@ func (service *MallWeatherExportJobService) Create(
 	idempotencyKey string,
 	request requestbody.MallWeatherExportCreateRequest,
 ) (*MallWeatherExportCreateResult, bool, error) {
-	if service == nil || ctx == nil || actorUserID == 0 || request.ProfileID == 0 {
+	if service == nil || ctx == nil || actorUserID == 0 {
 		return nil, false, fmt.Errorf("%w: invalid create request", ErrMallWeatherExportInvalid)
 	}
 	if !validIdempotencyKey(idempotencyKey) {
 		return nil, false, fmt.Errorf("%w: idempotency key is required", ErrMallWeatherExportInvalid)
 	}
-	if request.ExpectedProfileVersion != nil && *request.ExpectedProfileVersion == 0 {
+	fixedProfile := request.ProfileID == 0
+	if fixedProfile && (request.ExpectedProfileVersion != nil || request.Filters == nil) {
+		return nil, false, fmt.Errorf("%w: invalid fixed profile request", ErrMallWeatherExportInvalid)
+	}
+	if !fixedProfile && request.ExpectedProfileVersion != nil && *request.ExpectedProfileVersion == 0 {
 		return nil, false, fmt.Errorf("%w: invalid profile version", ErrMallWeatherExportInvalid)
 	}
 	if err := service.authorize(ctx, actorUserID); err != nil {
 		return nil, false, err
 	}
-	profile, err := service.profiles.FindByID(ctx, request.ProfileID)
+	var normalizedFixedFilters *requestbody.MallWeatherExportFilters
+	if fixedProfile {
+		filters, err := normalizeMallWeatherExportFilters(*request.Filters)
+		if err != nil || len(filters.MallIDs) != 1 {
+			return nil, false, fmt.Errorf("%w: fixed profile requires one mall", ErrMallWeatherExportInvalid)
+		}
+		normalizedFixedFilters = &filters
+	}
+	var profile *model.MallWeatherExportProfile
+	var err error
+	if fixedProfile {
+		profile, err = service.resolveFixedProfile(ctx)
+	} else {
+		profile, err = service.profiles.FindByID(ctx, request.ProfileID)
+	}
 	if err != nil {
 		return nil, false, err
 	}
@@ -363,7 +385,9 @@ func (service *MallWeatherExportJobService) Create(
 		return nil, false, err
 	}
 	effectiveFilters := profileDTO.Filters
-	if request.Filters != nil {
+	if normalizedFixedFilters != nil {
+		effectiveFilters = *normalizedFixedFilters
+	} else if request.Filters != nil {
 		effectiveFilters, err = normalizeMallWeatherExportFilters(*request.Filters)
 		if err != nil {
 			return nil, false, fmt.Errorf("%w: invalid filters", ErrMallWeatherExportInvalid)
@@ -405,6 +429,28 @@ func (service *MallWeatherExportJobService) Create(
 		effectiveFilters,
 		estimatedRows,
 	)
+}
+
+func (service *MallWeatherExportJobService) resolveFixedProfile(
+	ctx context.Context,
+) (*model.MallWeatherExportProfile, error) {
+	resolver, ok := service.profiles.(mallWeatherFixedExportProfileResolver)
+	if !ok {
+		return nil, fmt.Errorf("mall weather export: fixed profile resolver is unavailable")
+	}
+	desired, err := fixedMallWeatherExportProfile()
+	if err != nil {
+		return nil, err
+	}
+	profile, err := resolver.EnsureSystemProfile(ctx, desired)
+	if err != nil {
+		return nil, fmt.Errorf("mall weather export: ensure fixed profile: %w", err)
+	}
+	if profile == nil || profile.ID == 0 || profile.Version == 0 || profile.Code != fixedMallWeatherExportProfileCode ||
+		!profile.Enabled || !sameFixedMallWeatherExportProfileJSON(profile.ProfileJSON, desired.ProfileJSON) {
+		return nil, fmt.Errorf("mall weather export: invalid fixed profile")
+	}
+	return profile, nil
 }
 
 func (service *MallWeatherExportJobService) authorize(ctx context.Context, actorUserID uint) error {

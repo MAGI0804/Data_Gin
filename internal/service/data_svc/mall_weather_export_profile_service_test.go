@@ -108,6 +108,28 @@ func TestMallWeatherExportProfileServiceAuthorizationFailsClosed(t *testing.T) {
 	}
 }
 
+func TestMallWeatherExportProfileServiceRejectsReservedFixedCode(t *testing.T) {
+	store := &fakeMallWeatherExportProfileStore{}
+	service, err := newMallWeatherExportProfileService(
+		store,
+		fakeMallPermissionChecker{allowed: true},
+		time.Now,
+	)
+	if err != nil {
+		t.Fatalf("newMallWeatherExportProfileService() error=%v", err)
+	}
+	for _, code := range []string{fixedMallWeatherExportProfileCodePrefix, fixedMallWeatherExportProfileCode, fixedMallWeatherExportProfileCodePrefix + "_v2"} {
+		request := validMallWeatherExportProfileRequest()
+		request.Code = code
+		if _, _, err := service.Save(context.Background(), 17, request); !errors.Is(err, ErrMallWeatherExportProfileInvalid) {
+			t.Fatalf("Save() code=%q error=%v, want reserved code rejection", code, err)
+		}
+	}
+	if store.saved != nil {
+		t.Fatalf("Save() wrote reserved profile: %+v", store.saved)
+	}
+}
+
 func TestMallWeatherExportProfileServiceListsWithStableCursor(t *testing.T) {
 	store := &fakeMallWeatherExportProfileStore{rows: []model.MallWeatherExportProfile{
 		storedMallWeatherExportProfile(t, "alpha_profile", 1),

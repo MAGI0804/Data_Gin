@@ -126,6 +126,9 @@ func (service *MallWeatherExportProfileService) Save(
 	if err != nil {
 		return nil, false, err
 	}
+	if reservedFixedMallWeatherExportProfileCode(normalized.Code) {
+		return nil, false, fmt.Errorf("%w: reserved profile code", ErrMallWeatherExportProfileInvalid)
+	}
 	profileJSON, err := json.Marshal(config)
 	if err != nil {
 		return nil, false, fmt.Errorf("mall weather export profile: encode config: %w", err)

@@ -59,6 +59,77 @@ func TestMallWeatherExportJobServiceCreatesBoundedSnapshotJob(t *testing.T) {
 	}
 }
 
+func TestMallWeatherExportJobServiceCreatesWithFixedCompleteProfile(t *testing.T) {
+	profile, err := fixedMallWeatherExportProfile()
+	if err != nil {
+		t.Fatalf("fixedMallWeatherExportProfile() error=%v", err)
+	}
+	profile.BaseModel = model.BaseModel{ID: 29}
+	profile.Version = 4
+	profile.WeatherTimestamps = model.WeatherTimestamps{CreatedAt: time.Now(), UpdatedAt: time.Now()}
+	now := time.Date(2026, 7, 27, 12, 0, 0, 0, time.UTC)
+	estimator := &fakeMallWeatherExportEstimator{rows: 321}
+	store := &fakeMallWeatherExportJobStore{result: &MallWeatherExportCreateResult{
+		JobID: uuid.NewString(), Status: "PENDING", ProfileID: 29, ProfileVersion: 4,
+		EstimatedRows: 321, CreatedBy: 17, CreatedAt: now,
+	}}
+	profiles := &fakeMallWeatherExportProfileReader{systemRow: profile}
+	service, err := newMallWeatherExportJobService(
+		profiles,
+		fakeMallPermissionChecker{allowed: true},
+		estimator,
+		&fakeMallWeatherExportJobReader{},
+		fakeMallWeatherExportLimitReader{},
+		store,
+		func() time.Time { return now },
+	)
+	if err != nil {
+		t.Fatalf("newMallWeatherExportJobService() error=%v", err)
+	}
+	result, replayed, err := service.Create(
+		context.Background(),
+		17,
+		"fixed-export-key-1234",
+		requestbody.MallWeatherExportCreateRequest{
+			Filters: &requestbody.MallWeatherExportFilters{MallIDs: []uint{7}},
+		},
+	)
+	if err != nil || replayed || result.ProfileID != 29 || result.ProfileVersion != 4 {
+		t.Fatalf("Create() result=%+v replayed=%v error=%v", result, replayed, err)
+	}
+	if profiles.ensureCalls != 1 || store.command.ProfileID != 29 ||
+		len(estimator.request.Datasets) != 7 || len(estimator.request.Filter.MallIDs) != 1 {
+		t.Fatalf("profiles=%+v command=%+v estimate=%+v", profiles, store.command, estimator.request)
+	}
+	var snapshot MallWeatherExportProfileSnapshot
+	if err := json.Unmarshal([]byte(store.command.ProfileSnapshotJSON), &snapshot); err != nil {
+		t.Fatalf("decode fixed profile snapshot: %v", err)
+	}
+	if snapshot.Code != fixedMallWeatherExportProfileCode || len(snapshot.Config.Datasets) != 7 {
+		t.Fatalf("snapshot=%+v", snapshot)
+	}
+}
+
+func TestMallWeatherExportJobServiceRejectsInvalidFixedProfileSelectors(t *testing.T) {
+	version := uint64(1)
+	requests := []requestbody.MallWeatherExportCreateRequest{
+		{},
+		{ExpectedProfileVersion: &version, Filters: &requestbody.MallWeatherExportFilters{MallIDs: []uint{7}}},
+		{Filters: &requestbody.MallWeatherExportFilters{MallIDs: []uint{7, 8}}},
+	}
+	for _, request := range requests {
+		service := &MallWeatherExportJobService{
+			profiles: &fakeMallWeatherExportProfileReader{}, permissions: fakeMallPermissionChecker{allowed: true},
+			estimator: &fakeMallWeatherExportEstimator{}, limits: fakeMallWeatherExportLimitReader{},
+			store: &fakeMallWeatherExportJobStore{}, now: time.Now,
+		}
+		_, _, err := service.Create(context.Background(), 17, "fixed-export-key-1234", request)
+		if !errors.Is(err, ErrMallWeatherExportInvalid) {
+			t.Fatalf("Create() request=%+v error=%v", request, err)
+		}
+	}
+}
+
 func TestMallWeatherExportJobServiceRejectsUnboundedHistory(t *testing.T) {
 	profile := storedMallWeatherExportProfile(t, "history_profile", 9)
 	config := MallWeatherExportProfileConfig{
@@ -88,7 +159,7 @@ func TestMallWeatherExportJobServiceRejectsEstimateOverRuntimeLimit(t *testing.T
 	estimator := &fakeMallWeatherExportEstimator{rows: 101}
 	store := &fakeMallWeatherExportJobStore{}
 	service, err := newMallWeatherExportJobService(
-		fakeMallWeatherExportProfileReader{row: &profile},
+		&fakeMallWeatherExportProfileReader{row: &profile},
 		fakeMallPermissionChecker{allowed: true},
 		estimator,
 		&fakeMallWeatherExportJobReader{},
@@ -115,7 +186,7 @@ func TestMallWeatherExportJobServiceRejectsEstimateOverRuntimeLimit(t *testing.T
 
 func TestMallWeatherExportJobServiceAuthorizationFailsClosed(t *testing.T) {
 	service, err := newMallWeatherExportJobService(
-		fakeMallWeatherExportProfileReader{},
+		&fakeMallWeatherExportProfileReader{},
 		fakeMallPermissionChecker{allowed: false},
 		&fakeMallWeatherExportEstimator{},
 		&fakeMallWeatherExportJobReader{},
@@ -147,7 +218,7 @@ func TestMallWeatherExportJobServiceGetsActorScopedSafeDTO(t *testing.T) {
 		WeatherTimestamps: model.WeatherTimestamps{CreatedAt: now, UpdatedAt: now},
 	}}
 	service, err := newMallWeatherExportJobService(
-		fakeMallWeatherExportProfileReader{},
+		&fakeMallWeatherExportProfileReader{},
 		fakeMallPermissionChecker{allowed: true},
 		&fakeMallWeatherExportEstimator{},
 		&jobs,
@@ -180,7 +251,7 @@ func TestMallWeatherExportJobServiceSignsActorScopedDownload(t *testing.T) {
 		Status: "succeeded", ResultObjectKey: "mall-weather-exports/job/result.xlsx", ExpiresAt: &expiresAt,
 	}}
 	service, err := newMallWeatherExportJobService(
-		fakeMallWeatherExportProfileReader{},
+		&fakeMallWeatherExportProfileReader{},
 		fakeMallPermissionChecker{allowed: true},
 		&fakeMallWeatherExportEstimator{},
 		jobs,
@@ -278,7 +349,7 @@ func newTestMallWeatherExportJobService(
 ) *MallWeatherExportJobService {
 	t.Helper()
 	service, err := newMallWeatherExportJobService(
-		fakeMallWeatherExportProfileReader{row: &profile},
+		&fakeMallWeatherExportProfileReader{row: &profile},
 		fakeMallPermissionChecker{allowed: true},
 		estimator,
 		&fakeMallWeatherExportJobReader{},
@@ -302,8 +373,10 @@ func mustMallWeatherExportJSON(t *testing.T, value interface{}) model.JSONText {
 }
 
 type fakeMallWeatherExportProfileReader struct {
-	row *model.MallWeatherExportProfile
-	err error
+	row         *model.MallWeatherExportProfile
+	systemRow   *model.MallWeatherExportProfile
+	err         error
+	ensureCalls int
 }
 
 func (reader fakeMallWeatherExportProfileReader) FindByID(
@@ -314,6 +387,18 @@ func (reader fakeMallWeatherExportProfileReader) FindByID(
 		return nil, reader.err
 	}
 	copy := *reader.row
+	return &copy, nil
+}
+
+func (reader *fakeMallWeatherExportProfileReader) EnsureSystemProfile(
+	_ context.Context,
+	_ *model.MallWeatherExportProfile,
+) (*model.MallWeatherExportProfile, error) {
+	reader.ensureCalls++
+	if reader.err != nil {
+		return nil, reader.err
+	}
+	copy := *reader.systemRow
 	return &copy, nil
 }
 

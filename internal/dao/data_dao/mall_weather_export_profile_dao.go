@@ -2,8 +2,10 @@ package data_dao
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"reflect"
 	"strings"
 
 	"gin-biz-web-api/model"
@@ -138,6 +140,68 @@ func (dao *MallWeatherExportProfileDAO) FindByID(
 		return nil, fmt.Errorf("mall weather export profile: find by id: %w", err)
 	}
 	return &row, nil
+}
+
+func (dao *MallWeatherExportProfileDAO) EnsureSystemProfile(
+	ctx context.Context,
+	desired *model.MallWeatherExportProfile,
+) (*model.MallWeatherExportProfile, error) {
+	if dao == nil || dao.db == nil || ctx == nil || desired == nil || strings.TrimSpace(desired.Code) == "" ||
+		strings.TrimSpace(desired.Name) == "" || !json.Valid([]byte(desired.ProfileJSON)) || !desired.Enabled {
+		return nil, fmt.Errorf("mall weather export profile: invalid system profile")
+	}
+	candidate := *desired
+	candidate.BaseModel = model.BaseModel{}
+	candidate.Version = 1
+	candidate.CreatedBy = 0
+	candidate.UpdatedBy = 0
+	candidate.WeatherTimestamps = model.WeatherTimestamps{}
+	var resolved model.MallWeatherExportProfile
+	err := dao.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Clauses(clause.OnConflict{DoNothing: true}).Create(&candidate).Error; err != nil {
+			return fmt.Errorf("mall weather export profile: create system profile: %w", err)
+		}
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).
+			Where("code = ?", desired.Code).First(&resolved).Error; err != nil {
+			return fmt.Errorf("mall weather export profile: lock system profile: %w", err)
+		}
+		if resolved.Name == desired.Name && sameMallWeatherExportProfileJSON(resolved.ProfileJSON, desired.ProfileJSON) &&
+			resolved.Enabled {
+			return nil
+		}
+		if resolved.Version == ^uint64(0) {
+			return fmt.Errorf("mall weather export profile: system profile version exhausted")
+		}
+		result := tx.Model(&model.MallWeatherExportProfile{}).
+			Where("id = ? AND version = ?", resolved.ID, resolved.Version).
+			Updates(map[string]interface{}{
+				"name": desired.Name, "profile_json": desired.ProfileJSON, "enabled": true,
+				"updated_by": 0, "version": resolved.Version + 1,
+			})
+		if result.Error != nil {
+			return fmt.Errorf("mall weather export profile: update system profile: %w", result.Error)
+		}
+		if result.RowsAffected != 1 {
+			return ErrMallWeatherExportProfileConflict
+		}
+		if err := tx.First(&resolved, resolved.ID).Error; err != nil {
+			return fmt.Errorf("mall weather export profile: reload system profile: %w", err)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &resolved, nil
+}
+
+func sameMallWeatherExportProfileJSON(left, right model.JSONText) bool {
+	var leftValue interface{}
+	var rightValue interface{}
+	if json.Unmarshal([]byte(left), &leftValue) != nil || json.Unmarshal([]byte(right), &rightValue) != nil {
+		return false
+	}
+	return reflect.DeepEqual(leftValue, rightValue)
 }
 
 func isMallWeatherExportProfileDuplicate(err error) bool {
