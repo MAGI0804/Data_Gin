@@ -1,6 +1,7 @@
 import { Download, FileSpreadsheet, RefreshCcw } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
+  closeMallWeatherExportDownloadTarget,
   clearMallWeatherExportSession,
   loadMallWeatherExportSession,
   mallWeatherDefaultExportProfileRequest,
@@ -14,17 +15,22 @@ import {
   mallWeatherExportProfilesPath,
   mallWeatherExportProgress,
   mallWeatherExportRequestMatches,
+  MallWeatherExportDownloadTargetError,
   MallWeatherExportDownloadTimeoutError,
+  MallWeatherExportPopupBlockedError,
+  navigateMallWeatherExportDownloadTarget,
   parseMallWeatherExportCreateResult,
   parseMallWeatherExportDownload,
   parseMallWeatherExportJob,
   parseMallWeatherExportProfile,
   parseMallWeatherExportProfilePage,
   parseMallWeatherExportSafeErrorMessage,
+  prepareMallWeatherExportDownloadTarget,
   saveMallWeatherExportSession,
   selectMallWeatherCompleteExportProfile,
   waitForMallWeatherExportDownload,
   type MallWeatherExportJob,
+  type MallWeatherExportDownloadTarget,
   type MallWeatherExportPendingCreate,
   type MallWeatherExportProfile,
 } from './mallWeatherExport'
@@ -389,6 +395,17 @@ export function MallWeatherExportPanel({ actorID, mallID, mallName, client, onDo
 
   async function downloadResult() {
     if (!job || job.status !== 'SUCCEEDED') return
+    let downloadTarget: MallWeatherExportDownloadTarget | null = null
+    if (!onDownloadURL) {
+      try {
+        downloadTarget = prepareMallWeatherExportDownloadTarget(() => window.open('', '_blank'))
+      } catch (error) {
+        setActionError(error instanceof MallWeatherExportPopupBlockedError
+          ? '浏览器阻止了下载窗口，请允许本站打开弹窗后重试'
+          : '无法打开下载窗口，请检查浏览器设置后重试')
+        return
+      }
+    }
     actionController.current?.abort()
     const controller = new AbortController()
     actionController.current = controller
@@ -426,14 +443,18 @@ export function MallWeatherExportPanel({ actorID, mallID, mallName, client, onDo
       if (!download) throw new Error('下载链接响应格式不正确，请联系管理员')
       saveMallWeatherExportSession(actorID, mallID, { pending: null, jobId: job.jobId }, window.sessionStorage)
       if (onDownloadURL) onDownloadURL(download.url)
-      else triggerMallWeatherExportDownload(download.url)
+      else if (downloadTarget) navigateMallWeatherExportDownloadTarget(downloadTarget, download.url)
+      downloadTarget = null
     } catch (error) {
       if (error instanceof MallWeatherExportDownloadTimeoutError) {
         setActionError('下载链接生成超时，请检查网络后重试')
+      } else if (error instanceof MallWeatherExportDownloadTargetError) {
+        setActionError('下载窗口已关闭或不可用，请重试')
       } else if (!controller.signal.aborted) {
         setActionError(error instanceof Error ? error.message : '下载链接生成失败')
       }
     } finally {
+      closeMallWeatherExportDownloadTarget(downloadTarget)
       if (actionController.current === controller) actionController.current = null
       setDownloading(false)
     }
@@ -520,15 +541,6 @@ export function MallWeatherExportPanel({ actorID, mallID, mallName, client, onDo
       {actionError && <p className="mall-weather-action-message error" role="alert">{actionError}</p>}
     </section>
   )
-}
-
-function triggerMallWeatherExportDownload(url: string) {
-  const iframe = document.createElement('iframe')
-  iframe.title = '天气 Excel 下载'
-  iframe.hidden = true
-  iframe.src = url
-  document.body.appendChild(iframe)
-  window.setTimeout(() => iframe.remove(), 5 * 60 * 1000)
 }
 
 function exportStatusLabel(status: MallWeatherExportJob['status']) {

@@ -96,6 +96,27 @@ export class MallWeatherExportDownloadTimeoutError extends Error {
   }
 }
 
+export class MallWeatherExportPopupBlockedError extends Error {
+  constructor() {
+    super('mall weather export download window was blocked')
+    this.name = 'MallWeatherExportPopupBlockedError'
+  }
+}
+
+export class MallWeatherExportDownloadTargetError extends Error {
+  constructor() {
+    super('mall weather export download target is unavailable')
+    this.name = 'MallWeatherExportDownloadTargetError'
+  }
+}
+
+export type MallWeatherExportDownloadTarget = {
+  closed: boolean
+  opener: unknown
+  close: () => void
+  location: { replace: (url: string) => void }
+}
+
 export type MallWeatherExportProfileSaveRequest = {
   code: string
   name: string
@@ -460,15 +481,42 @@ export function mallWeatherExportProgress(job: Pick<MallWeatherExportJob, 'proce
 
 export function parseMallWeatherExportDownload(payload: unknown): MallWeatherExportDownload | null {
   const data = envelopeData(payload)
-  if (!data || typeof data.url !== 'string' || data.url.length > 8_192 || !isRFC3339(data.expiresAt)) return null
-  try {
-    const url = new URL(data.url)
-    if (url.protocol !== 'https:' || !url.hostname || url.username || url.password ||
-      url.hostname.toLowerCase().endsWith('-internal.aliyuncs.com')) return null
-  } catch {
-    return null
-  }
+  if (!data || typeof data.url !== 'string' || !safeMallWeatherExportDownloadURL(data.url) ||
+    !isRFC3339(data.expiresAt)) return null
   return { url: data.url, expiresAt: data.expiresAt }
+}
+
+export function prepareMallWeatherExportDownloadTarget(
+  openTarget: () => MallWeatherExportDownloadTarget | null,
+): MallWeatherExportDownloadTarget {
+  const target = openTarget()
+  if (!target) throw new MallWeatherExportPopupBlockedError()
+  try {
+    target.opener = null
+  } catch {
+    closeMallWeatherExportDownloadTarget(target)
+    throw new MallWeatherExportDownloadTargetError()
+  }
+  return target
+}
+
+export function navigateMallWeatherExportDownloadTarget(
+  target: MallWeatherExportDownloadTarget,
+  url: string,
+) {
+  if (target.closed || !safeMallWeatherExportDownloadURL(url)) {
+    throw new MallWeatherExportDownloadTargetError()
+  }
+  target.location.replace(url)
+}
+
+export function closeMallWeatherExportDownloadTarget(target: MallWeatherExportDownloadTarget | null) {
+  if (!target) return
+  try {
+    if (!target.closed) target.close()
+  } catch {
+    // The browser owns this window. Cleanup is best-effort so UI state can always recover.
+  }
 }
 
 export async function waitForMallWeatherExportDownload<T>(
@@ -506,4 +554,15 @@ export function mallWeatherExportJobPath(jobID: string) {
 
 export function mallWeatherExportDownloadPath(jobID: string) {
   return `${mallWeatherExportJobPath(jobID)}/download`
+}
+
+function safeMallWeatherExportDownloadURL(value: string) {
+  if (!value || value.length > 8_192) return false
+  try {
+    const parsed = new URL(value)
+    return parsed.protocol === 'https:' && Boolean(parsed.hostname) && !parsed.username && !parsed.password &&
+      !parsed.hostname.toLowerCase().endsWith('-internal.aliyuncs.com')
+  } catch {
+    return false
+  }
 }

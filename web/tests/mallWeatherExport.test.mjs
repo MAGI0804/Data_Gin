@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import {
+  closeMallWeatherExportDownloadTarget,
   clearMallWeatherExportSession,
   loadMallWeatherExportSession,
   mallWeatherDefaultExportProfileRequest,
@@ -15,10 +16,12 @@ import {
   mallWeatherExportProfilesPath,
   mallWeatherExportProgress,
   mallWeatherExportRequestMatches,
+  navigateMallWeatherExportDownloadTarget,
   parseMallWeatherExportCreateResult,
   parseMallWeatherExportDownload,
   parseMallWeatherExportJob,
   parseMallWeatherExportSafeErrorMessage,
+  prepareMallWeatherExportDownloadTarget,
   parseMallWeatherExportProfile,
   parseMallWeatherExportProfilePage,
   saveMallWeatherExportSession,
@@ -230,6 +233,45 @@ test('bounds download link requests and aborts clients that do not settle', asyn
     { name: 'MallWeatherExportDownloadTimeoutError' },
   )
   assert.equal(stalledController.signal.aborted, true)
+})
+
+test('prepares a safe isolated target for the signed download URL', () => {
+  let replaced = ''
+  let closeCount = 0
+  const target = {
+    closed: false,
+    opener: { unsafe: true },
+    close() {
+      closeCount++
+      this.closed = true
+    },
+    location: { replace(url) { replaced = url } },
+  }
+
+  assert.throws(
+    () => prepareMallWeatherExportDownloadTarget(() => null),
+    { name: 'MallWeatherExportPopupBlockedError' },
+  )
+  assert.equal(prepareMallWeatherExportDownloadTarget(() => target), target)
+  assert.equal(target.opener, null)
+
+  navigateMallWeatherExportDownloadTarget(target, 'https://bucket.oss-cn-shanghai.aliyuncs.com/result.xlsx?signature=short-lived')
+  assert.match(replaced, /^https:/)
+  assert.throws(
+    () => navigateMallWeatherExportDownloadTarget(target, 'https://bucket.oss-cn-shanghai-internal.aliyuncs.com/result.xlsx'),
+    { name: 'MallWeatherExportDownloadTargetError' },
+  )
+
+  closeMallWeatherExportDownloadTarget(target)
+  closeMallWeatherExportDownloadTarget(target)
+  assert.equal(closeCount, 1)
+
+  assert.doesNotThrow(() => closeMallWeatherExportDownloadTarget({
+    closed: false,
+    opener: null,
+    close() { throw new Error('browser extension denied close') },
+    location: { replace() {} },
+  }))
 })
 
 test('reads only bounded safe API error messages', () => {
