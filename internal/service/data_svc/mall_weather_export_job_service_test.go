@@ -176,10 +176,8 @@ func TestMallWeatherExportJobServiceSignsActorScopedDownload(t *testing.T) {
 	now := time.Date(2026, 7, 22, 8, 0, 0, 0, time.UTC)
 	jobUUID := uuid.NewString()
 	expiresAt := now.Add(10 * time.Minute)
-	jobs := &fakeMallWeatherExportJobReader{row: &model.MallWeatherExportJob{
-		BaseModel: model.BaseModel{ID: 22}, JobUUID: jobUUID, ProfileID: 9, ProfileVersion: 3,
+	jobs := &fakeMallWeatherExportJobReader{download: &data_dao.MallWeatherExportDownloadJob{
 		Status: "succeeded", ResultObjectKey: "mall-weather-exports/job/result.xlsx", ExpiresAt: &expiresAt,
-		WeatherTimestamps: model.WeatherTimestamps{CreatedAt: now.Add(-time.Hour), UpdatedAt: now},
 	}}
 	service, err := newMallWeatherExportJobService(
 		fakeMallWeatherExportProfileReader{},
@@ -200,7 +198,7 @@ func TestMallWeatherExportJobServiceSignsActorScopedDownload(t *testing.T) {
 		t.Fatalf("Download() error=%v", err)
 	}
 	if result.URL != signer.url || !result.ExpiresAt.Equal(now.Add(5*time.Minute)) ||
-		jobs.actorUserID != 17 || signer.objectKey != jobs.row.ResultObjectKey || signer.expires != 5*time.Minute {
+		jobs.actorUserID != 17 || signer.objectKey != jobs.download.ResultObjectKey || signer.expires != 5*time.Minute {
 		t.Fatalf("result=%+v signer=%+v actor=%d", result, signer, jobs.actorUserID)
 	}
 	encoded, err := json.Marshal(result)
@@ -224,8 +222,7 @@ func TestMallWeatherExportJobServiceRejectsUnavailableDownload(t *testing.T) {
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			jobs := &fakeMallWeatherExportJobReader{row: &model.MallWeatherExportJob{
-				BaseModel: model.BaseModel{ID: 22}, JobUUID: jobUUID, ProfileID: 9, ProfileVersion: 3,
+			jobs := &fakeMallWeatherExportJobReader{download: &data_dao.MallWeatherExportDownloadJob{
 				Status: tt.status, ResultObjectKey: "mall-weather-exports/job/result.xlsx", ExpiresAt: &tt.expiry,
 			}}
 			service := &MallWeatherExportJobService{
@@ -329,6 +326,7 @@ type fakeMallWeatherExportEstimator struct {
 
 type fakeMallWeatherExportJobReader struct {
 	row         *model.MallWeatherExportJob
+	download    *data_dao.MallWeatherExportDownloadJob
 	err         error
 	actorUserID uint
 }
@@ -343,6 +341,19 @@ func (reader *fakeMallWeatherExportJobReader) FindByUUIDAndActor(
 		return nil, reader.err
 	}
 	copy := *reader.row
+	return &copy, nil
+}
+
+func (reader *fakeMallWeatherExportJobReader) FindDownloadByUUIDAndActor(
+	_ context.Context,
+	_ string,
+	actorUserID uint,
+) (*data_dao.MallWeatherExportDownloadJob, error) {
+	reader.actorUserID = actorUserID
+	if reader.err != nil {
+		return nil, reader.err
+	}
+	copy := *reader.download
 	return &copy, nil
 }
 

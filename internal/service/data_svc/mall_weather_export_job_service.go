@@ -103,6 +103,7 @@ type mallWeatherExportEstimator interface {
 
 type mallWeatherExportJobReader interface {
 	FindByUUIDAndActor(context.Context, string, uint) (*model.MallWeatherExportJob, error)
+	FindDownloadByUUIDAndActor(context.Context, string, uint) (*data_dao.MallWeatherExportDownloadJob, error)
 }
 
 type mallWeatherExportLimitReader interface {
@@ -231,7 +232,7 @@ func (service *MallWeatherExportJobService) Download(
 	if err := service.authorize(ctx, actorUserID); err != nil {
 		return nil, err
 	}
-	row, err := service.jobs.FindByUUIDAndActor(ctx, jobUUID, actorUserID)
+	row, err := service.jobs.FindDownloadByUUIDAndActor(ctx, jobUUID, actorUserID)
 	if err != nil {
 		return nil, err
 	}

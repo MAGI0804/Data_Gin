@@ -22,6 +22,13 @@ func TestMallWeatherExportJobDAORejectsInvalidStateBeforeDatabase(t *testing.T) 
 	); err == nil {
 		t.Fatal("FindByUUIDAndActor() accepted an unconfigured DAO")
 	}
+	if _, err := (&MallWeatherExportJobDAO{}).FindDownloadByUUIDAndActor(
+		context.Background(),
+		"00000000-0000-0000-0000-000000000001",
+		17,
+	); err == nil {
+		t.Fatal("FindDownloadByUUIDAndActor() accepted an unconfigured DAO")
+	}
 }
 
 func TestMallWeatherExportJobQueryColumnsExcludeSensitiveData(t *testing.T) {
@@ -44,6 +51,30 @@ func TestMallWeatherExportJobQueryColumnsExcludeSensitiveData(t *testing.T) {
 		if selected[sensitive] {
 			t.Fatalf("query columns include sensitive column %q", sensitive)
 		}
+	}
+}
+
+func TestMallWeatherExportDownloadQuerySelectsPrivateObjectForActor(t *testing.T) {
+	dao := NewMallWeatherExportJobDAO(dryRunWeatherDAOTestDB(t))
+	jobUUID := "00000000-0000-4000-8000-000000000017"
+	query := dao.downloadByUUIDAndActorQuery(t.Context(), jobUUID, 17).
+		Take(&MallWeatherExportDownloadJob{})
+	if query.Error != nil {
+		t.Fatalf("build download lookup: %v", query.Error)
+	}
+	statement := query.Statement.SQL.String()
+	for _, fragment := range []string{
+		"`status`", "`result_object_key`", "`expires_at`", "job_uuid = ?", "created_by = ?",
+	} {
+		if !strings.Contains(statement, fragment) {
+			t.Fatalf("download lookup does not contain %q: %s", fragment, statement)
+		}
+	}
+	if strings.Contains(statement, jobUUID) || strings.Contains(statement, "17") {
+		t.Fatalf("download lookup interpolated actor-scoped values: %s", statement)
+	}
+	if len(query.Statement.Vars) != 2 || query.Statement.Vars[0] != jobUUID || query.Statement.Vars[1] != uint(17) {
+		t.Fatalf("download lookup vars=%#v", query.Statement.Vars)
 	}
 }
 

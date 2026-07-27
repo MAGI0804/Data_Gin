@@ -34,6 +34,18 @@ var mallWeatherExportJobQueryColumns = []string{
 	"updated_at",
 }
 
+var mallWeatherExportDownloadJobQueryColumns = []string{
+	"status",
+	"result_object_key",
+	"expires_at",
+}
+
+type MallWeatherExportDownloadJob struct {
+	Status          string     `gorm:"column:status"`
+	ResultObjectKey string     `gorm:"column:result_object_key"`
+	ExpiresAt       *time.Time `gorm:"column:expires_at"`
+}
+
 type MallWeatherExportEstimateFilter struct {
 	MallIDs         []uint
 	Cities          []string
@@ -113,6 +125,36 @@ func (dao *MallWeatherExportJobDAO) FindByUUIDAndActor(
 		return nil, fmt.Errorf("mall weather export job: find: %w", err)
 	}
 	return &row, nil
+}
+
+func (dao *MallWeatherExportJobDAO) FindDownloadByUUIDAndActor(
+	ctx context.Context,
+	jobUUID string,
+	actorUserID uint,
+) (*MallWeatherExportDownloadJob, error) {
+	if dao == nil || dao.db == nil || ctx == nil || len(jobUUID) != 36 || actorUserID == 0 {
+		return nil, fmt.Errorf("mall weather export job: invalid download lookup")
+	}
+	var row MallWeatherExportDownloadJob
+	err := dao.downloadByUUIDAndActorQuery(ctx, jobUUID, actorUserID).Take(&row).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, ErrMallWeatherExportJobNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("mall weather export job: find download: %w", err)
+	}
+	return &row, nil
+}
+
+func (dao *MallWeatherExportJobDAO) downloadByUUIDAndActorQuery(
+	ctx context.Context,
+	jobUUID string,
+	actorUserID uint,
+) *gorm.DB {
+	return dao.db.WithContext(ctx).
+		Model(&model.MallWeatherExportJob{}).
+		Select(mallWeatherExportDownloadJobQueryColumns).
+		Where("job_uuid = ? AND created_by = ?", jobUUID, actorUserID)
 }
 
 func (dao *MallWeatherExportJobDAO) estimateDatasetRows(
