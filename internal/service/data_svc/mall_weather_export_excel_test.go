@@ -86,6 +86,18 @@ func TestMallWeatherExportExcelPercentAndDateFormatting(t *testing.T) {
 	}
 }
 
+func TestMallWeatherExportComprehensiveDecimalFieldsRemainNumeric(t *testing.T) {
+	for _, field := range []string{
+		"visibility_km", "nearest_precip_distance_km", "dswrf_w_m2", "cloudrate_avg_ratio",
+		"day_precipitation_avg_mm_h", "night_wind_avg_direction_deg", "aqi_avg_usa",
+	} {
+		value, numeric, err := mallWeatherExportNumericValue(field, "general", "metric", "12.5")
+		if err != nil || !numeric || value != 12.5 {
+			t.Errorf("field=%q value=%v numeric=%v error=%v", field, value, numeric, err)
+		}
+	}
+}
+
 func TestMallWeatherExportStreamRowPreservesPlainText(t *testing.T) {
 	file := excelize.NewFile()
 	t.Cleanup(func() { _ = file.Close() })
