@@ -280,6 +280,52 @@ func TestChecksumAwareUpdateSetPreservesIdentityAndOrdersChecksumLast(t *testing
 	}
 }
 
+func TestDeactivateMissingAlertRelationsIsScopedAndParameterized(t *testing.T) {
+	dao := NewMallWeatherDAO(dryRunWeatherDAOTestDB(t))
+	missingBefore := time.Date(2026, 7, 28, 1, 30, 0, 0, time.UTC)
+	query := dao.deactivateMissingAlertRelationsQuery(
+		context.Background(),
+		7,
+		"caiyun",
+		[]uint{11, 13},
+		missingBefore,
+	)
+	if query.Error != nil {
+		t.Fatalf("deactivateMissingAlertRelationsQuery() error=%v", query.Error)
+	}
+	statement := query.Statement.SQL.String()
+	for _, fragment := range []string{
+		"UPDATE `mall_weather_alert_relations`",
+		"mall_id = ?",
+		"is_active = ?",
+		"last_seen_at <= ?",
+		"alert_pk IN (SELECT `id` FROM `mall_weather_alerts` WHERE provider = ?)",
+		"alert_pk NOT IN (?,?)",
+	} {
+		if !strings.Contains(statement, fragment) {
+			t.Fatalf("query does not contain %q: %s", fragment, statement)
+		}
+	}
+	if strings.Contains(statement, "caiyun") || strings.Contains(statement, "2026-") ||
+		len(query.Statement.Vars) != 8 {
+		t.Fatalf("statement=%s vars=%v", statement, query.Statement.Vars)
+	}
+}
+
+func TestDeactivateMissingAlertRelationsAcceptsAnEmptyCurrentSet(t *testing.T) {
+	dao := NewMallWeatherDAO(dryRunWeatherDAOTestDB(t))
+	query := dao.deactivateMissingAlertRelationsQuery(
+		context.Background(),
+		7,
+		"caiyun",
+		nil,
+		time.Date(2026, 7, 28, 1, 30, 0, 0, time.UTC),
+	)
+	if query.Error != nil || strings.Contains(query.Statement.SQL.String(), "NOT IN") {
+		t.Fatalf("statement=%s vars=%v error=%v", query.Statement.SQL.String(), query.Statement.Vars, query.Error)
+	}
+}
+
 func TestChecksumConflictPredicateIsParameterized(t *testing.T) {
 	issuedAt := time.Date(2026, 7, 22, 3, 0, 0, 0, time.UTC)
 	rows := []model.MallWeatherHourly{
@@ -360,7 +406,11 @@ func dryRunWeatherDAOTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 	db, err := gorm.Open(mysql.New(mysql.Config{
 		Conn: &sql.DB{}, SkipInitializeWithVersion: true,
-	}), &gorm.Config{DryRun: true, DisableAutomaticPing: true})
+	}), &gorm.Config{
+		DryRun:                 true,
+		DisableAutomaticPing:   true,
+		SkipDefaultTransaction: true,
+	})
 	if err != nil {
 		t.Fatalf("gorm.Open() error=%v", err)
 	}

@@ -25,6 +25,7 @@ func init() {
 			"daily_steps":                     config.GetInt("MallWeather.DailySteps", 15),
 			"unit":                            config.Get("MallWeather.Unit", "metric:v2"),
 			"alert_enabled":                   config.Get("MallWeather.AlertEnabled", true),
+			"alert_missing_grace_seconds":     config.Get("MallWeather.AlertMissingGraceSeconds", 1800),
 			"fetch_timeout_seconds":           config.Get("MallWeather.FetchTimeoutSeconds", 10),
 			"max_attempts":                    config.Get("MallWeather.MaxAttempts", 3),
 			"worker_concurrency":              config.Get("MallWeather.WorkerConcurrency", 20),

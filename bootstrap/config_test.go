@@ -44,6 +44,16 @@ func TestValidateMallWeatherConfig(t *testing.T) {
 			wantError: "daily steps",
 		},
 		{
+			name:      "alert missing grace below minimum",
+			yaml:      "MallWeather:\n  Enabled: true\n  AlertMissingGraceSeconds: 59\nCaiyun:\n  QPS: 2\n",
+			wantError: "alert missing grace",
+		},
+		{
+			name:      "alert missing grace above maximum",
+			yaml:      "MallWeather:\n  Enabled: true\n  AlertMissingGraceSeconds: 86401\nCaiyun:\n  QPS: 2\n",
+			wantError: "alert missing grace",
+		},
+		{
 			name:      "enabled requires explicit qps",
 			yaml:      "MallWeather:\n  Enabled: true\n",
 			wantError: "qps",

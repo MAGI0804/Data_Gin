@@ -179,6 +179,10 @@ func (dao *MallWeatherExportDataDAO) buildPageQuery(
 	if request.Kind == "life_indices" {
 		query = query.Where("w.source_api = ?", "v26_daily")
 	}
+	if request.Kind == "alerts" && request.Latest {
+		query = query.Where("relation.is_active = ?", true).
+			Where("w.ended_at IS NULL")
+	}
 	query = applyMallWeatherExportMallFilters(query, request.Filter)
 	if spec.qualityExpression != "" && len(request.Filter.QualityStatuses) > 0 {
 		query = query.Where(spec.qualityExpression+" IN ?", request.Filter.QualityStatuses)

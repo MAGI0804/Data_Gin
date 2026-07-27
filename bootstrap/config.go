@@ -81,6 +81,9 @@ func validateMallWeatherConfig() error {
 	if dailySteps := pkgConfig.GetInt("cfg.mall_weather.daily_steps"); dailySteps < 1 || dailySteps > 15 {
 		return fmt.Errorf("daily steps must be between 1 and 15")
 	}
+	if graceSeconds := pkgConfig.GetInt("cfg.mall_weather.alert_missing_grace_seconds"); graceSeconds < 60 || graceSeconds > 86400 {
+		return fmt.Errorf("alert missing grace must be between 60 and 86400 seconds")
+	}
 	fetchTimeout := pkgConfig.GetInt("cfg.mall_weather.fetch_timeout_seconds")
 	if fetchTimeout < 1 || fetchTimeout > 120 {
 		return fmt.Errorf("fetch timeout must be between 1 and 120 seconds")

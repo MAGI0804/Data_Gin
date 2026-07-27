@@ -135,6 +135,38 @@ func TestMallWeatherExportEstimateLifeIndicesOnlyUsesComprehensiveSource(t *test
 	}
 }
 
+func TestMallWeatherExportEstimateAlertsLatestOnlyCountsActiveUnendedRelations(t *testing.T) {
+	dao := NewMallWeatherExportJobDAO(dryRunWeatherDAOTestDB(t))
+	for _, test := range []struct {
+		name   string
+		latest bool
+	}{
+		{name: "latest", latest: true},
+		{name: "history", latest: false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			query, countExpression, _, _, _, err := dao.exportEstimateQuery(
+				t.Context(),
+				MallWeatherExportEstimateDataset{Kind: "alerts", Latest: test.latest},
+			)
+			if err != nil {
+				t.Fatalf("exportEstimateQuery() error=%v", err)
+			}
+			var count struct{ Value int64 }
+			query = query.Select(countExpression + " AS value").Find(&count)
+			if query.Error != nil {
+				t.Fatalf("build alert estimate query: %v", query.Error)
+			}
+			statement := query.Statement.SQL.String()
+			hasActiveFilter := strings.Contains(statement, "relation.is_active = ?")
+			hasEndedFilter := strings.Contains(statement, "w.ended_at IS NULL")
+			if hasActiveFilter != test.latest || hasEndedFilter != test.latest {
+				t.Fatalf("latest=%t statement=%s vars=%v", test.latest, statement, query.Statement.Vars)
+			}
+		})
+	}
+}
+
 func timePointer(value time.Time) *time.Time {
 	return &value
 }

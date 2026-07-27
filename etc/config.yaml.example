@@ -59,6 +59,7 @@ MallWeather:
   DailySteps: 15
   Unit: metric:v2
   AlertEnabled: true
+  AlertMissingGraceSeconds: ${MALL_WEATHER_ALERT_MISSING_GRACE_SECONDS:-1800}
   FetchTimeoutSeconds: 10
   MaxAttempts: 3
   WorkerConcurrency: 20

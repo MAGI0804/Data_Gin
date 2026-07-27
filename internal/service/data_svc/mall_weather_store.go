@@ -24,10 +24,18 @@ import (
 )
 
 type gormMallWeatherTaskStore struct {
-	db *gorm.DB
+	db                *gorm.DB
+	alertMissingGrace time.Duration
+}
+
+type mallWeatherAlertRelationStore interface {
+	FindAlertsByProviderIDs(context.Context, string, []string) ([]model.MallWeatherAlert, error)
+	UpsertAlertRelations(context.Context, []model.MallWeatherAlertRelation) (data_dao.UpsertResult, error)
+	DeactivateMissingAlertRelations(context.Context, uint, string, []uint, time.Time) (int64, error)
 }
 
 var _ mallWeatherTaskStore = (*gormMallWeatherTaskStore)(nil)
+var _ mallWeatherAlertRelationStore = (*data_dao.MallWeatherDAO)(nil)
 
 func NewMallWeatherProcessor() (*MallWeatherProcessor, error) {
 	if database.DB == nil {
@@ -102,7 +110,10 @@ func NewMallWeatherProcessor() (*MallWeatherProcessor, error) {
 	if err != nil {
 		return nil, err
 	}
-	return newMallWeatherProcessor(provider, &gormMallWeatherTaskStore{db: database.DB}, weatherSnapshots, lifeSnapshots, locker, limiter, breaker, MallWeatherProcessorConfig{
+	alertMissingGrace := time.Duration(config.GetInt("cfg.mall_weather.alert_missing_grace_seconds")) * time.Second
+	return newMallWeatherProcessor(provider, &gormMallWeatherTaskStore{
+		db: database.DB, alertMissingGrace: alertMissingGrace,
+	}, weatherSnapshots, lifeSnapshots, locker, limiter, breaker, MallWeatherProcessorConfig{
 		FastHourlySteps: 24, FastDailySteps: 1,
 		FullHourlySteps: config.GetInt("cfg.mall_weather.hourly_steps"),
 		FullDailySteps:  config.GetInt("cfg.mall_weather.daily_steps"),
@@ -249,7 +260,8 @@ func (store *gormMallWeatherTaskStore) Fail(ctx context.Context, execution *mall
 func (store *gormMallWeatherTaskStore) Persist(ctx context.Context, execution *mallWeatherExecution, batch *mallWeatherModelBatch) error {
 	if store == nil || store.db == nil || ctx == nil || execution == nil || batch == nil ||
 		(batch.Status != weatherFetchStatusSuccess && batch.Status != weatherFetchStatusPartialSuccess) ||
-		batch.EndpointKind != execution.Run.EndpointKind || batch.FinishedAt.IsZero() {
+		batch.EndpointKind != execution.Run.EndpointKind || batch.FinishedAt.IsZero() ||
+		store.alertMissingGrace < time.Minute || store.alertMissingGrace > 24*time.Hour {
 		return fmt.Errorf("mall weather: invalid persistence batch")
 	}
 	return store.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
@@ -258,7 +270,14 @@ func (store *gormMallWeatherTaskStore) Persist(ctx context.Context, execution *m
 			return err
 		}
 		dao := data_dao.NewMallWeatherDAO(tx)
-		checksumConflicts, err := persistWeatherModelRows(ctx, dao, execution.Mall.ID, attempt.StartedAt, batch)
+		checksumConflicts, err := persistWeatherModelRows(
+			ctx,
+			dao,
+			execution.Mall.ID,
+			attempt.StartedAt,
+			batch,
+			store.alertMissingGrace,
+		)
 		if err != nil {
 			return err
 		}
@@ -294,7 +313,14 @@ func (store *gormMallWeatherTaskStore) Persist(ctx context.Context, execution *m
 	})
 }
 
-func persistWeatherModelRows(ctx context.Context, dao *data_dao.MallWeatherDAO, mallID uint, staleObservedBefore time.Time, batch *mallWeatherModelBatch) (int64, error) {
+func persistWeatherModelRows(
+	ctx context.Context,
+	dao *data_dao.MallWeatherDAO,
+	mallID uint,
+	staleObservedBefore time.Time,
+	batch *mallWeatherModelBatch,
+	alertMissingGrace time.Duration,
+) (int64, error) {
 	var checksumConflicts int64
 	if batch.Forecasts != nil {
 		if batch.Forecasts.Realtime != nil {
@@ -333,7 +359,14 @@ func persistWeatherModelRows(ctx context.Context, dao *data_dao.MallWeatherDAO, 
 			return 0, err
 		}
 		checksumConflicts += result.ChecksumConflicts
-		if err := persistWeatherAlertRelations(ctx, dao, mallID, batch.Alerts.Alerts, batch.FinishedAt); err != nil {
+		if err := persistWeatherAlertRelations(
+			ctx,
+			dao,
+			mallID,
+			batch.Alerts.Alerts,
+			batch.FinishedAt,
+			alertMissingGrace,
+		); err != nil {
 			return 0, err
 		}
 	}
@@ -409,9 +442,28 @@ func addChecksumConflictWarning(batch *mallWeatherModelBatch, conflicts int64) e
 	return nil
 }
 
-func persistWeatherAlertRelations(ctx context.Context, dao *data_dao.MallWeatherDAO, mallID uint, alerts []model.MallWeatherAlert, seenAt time.Time) error {
+func persistWeatherAlertRelations(
+	ctx context.Context,
+	dao mallWeatherAlertRelationStore,
+	mallID uint,
+	alerts []model.MallWeatherAlert,
+	seenAt time.Time,
+	missingGrace time.Duration,
+) error {
+	if ctx == nil || dao == nil || mallID == 0 || seenAt.IsZero() ||
+		missingGrace < time.Minute || missingGrace > 24*time.Hour {
+		return fmt.Errorf("mall weather: invalid alert relation reconciliation")
+	}
+	missingBefore := seenAt.Add(-missingGrace)
 	if len(alerts) == 0 {
-		return nil
+		_, err := dao.DeactivateMissingAlertRelations(
+			ctx,
+			mallID,
+			weatherdomain.ProviderCaiyun,
+			nil,
+			missingBefore,
+		)
+		return err
 	}
 	alertIDs := make([]string, len(alerts))
 	for index := range alerts {
@@ -425,13 +477,24 @@ func persistWeatherAlertRelations(ctx context.Context, dao *data_dao.MallWeather
 		return fmt.Errorf("mall weather: alert upsert identity mismatch")
 	}
 	relations := make([]model.MallWeatherAlertRelation, len(stored))
+	seenAlertPKs := make([]uint, len(stored))
 	for index := range stored {
+		seenAlertPKs[index] = stored[index].ID
 		relations[index] = model.MallWeatherAlertRelation{
 			MallID: mallID, AlertPK: stored[index].ID, RelationReason: "provider_location",
 			FirstSeenAt: seenAt, LastSeenAt: seenAt, IsActive: true,
 		}
 	}
-	_, err = dao.UpsertAlertRelations(ctx, relations)
+	if _, err = dao.UpsertAlertRelations(ctx, relations); err != nil {
+		return err
+	}
+	_, err = dao.DeactivateMissingAlertRelations(
+		ctx,
+		mallID,
+		weatherdomain.ProviderCaiyun,
+		seenAlertPKs,
+		missingBefore,
+	)
 	return err
 }
 

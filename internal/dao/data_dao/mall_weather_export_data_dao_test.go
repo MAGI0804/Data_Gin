@@ -142,6 +142,41 @@ func TestMallWeatherExportLifeIndicesOnlyUseComprehensiveWeatherSource(t *testin
 	}
 }
 
+func TestMallWeatherExportAlertDataLatestOnlyUsesActiveUnendedRelations(t *testing.T) {
+	dao := NewMallWeatherExportDataDAO(dryRunWeatherDAOTestDB(t))
+	snapshot := time.Date(2026, 7, 28, 8, 0, 0, 0, time.UTC)
+	for _, test := range []struct {
+		name   string
+		latest bool
+	}{
+		{name: "latest", latest: true},
+		{name: "history", latest: false},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			query, _, err := dao.buildPageQuery(t.Context(), MallWeatherExportDataPageRequest{
+				Kind: "alerts", Latest: test.latest, Limit: 100, SnapshotAt: snapshot,
+			})
+			if err != nil {
+				t.Fatalf("buildPageQuery() error=%v", err)
+			}
+			var rows []struct{}
+			query = query.Find(&rows)
+			if query.Error != nil {
+				t.Fatalf("build alert query SQL error=%v", query.Error)
+			}
+			statement := query.Statement.SQL.String()
+			hasActiveFilter := strings.Contains(statement, "relation.is_active = ?")
+			hasEndedFilter := strings.Contains(statement, "w.ended_at IS NULL")
+			if hasActiveFilter != test.latest || hasEndedFilter != test.latest {
+				t.Fatalf("latest=%t statement=%s vars=%v", test.latest, statement, query.Statement.Vars)
+			}
+			if test.latest && !slices.Contains(query.Statement.Vars, interface{}(true)) {
+				t.Fatalf("latest alert query does not bind active state: vars=%v", query.Statement.Vars)
+			}
+		})
+	}
+}
+
 func TestMallWeatherExportDataQueryRejectsDynamicSQLInput(t *testing.T) {
 	dao := NewMallWeatherExportDataDAO(dryRunWeatherDAOTestDB(t))
 	request := MallWeatherExportDataPageRequest{

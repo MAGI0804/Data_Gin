@@ -231,6 +231,10 @@ func (dao *MallWeatherExportJobDAO) exportEstimateQuery(
 		query := dao.db.WithContext(ctx).Table("mall_weather_alert_relations AS relation").
 			Joins("JOIN mall_weather_alerts AS w ON w.id = relation.alert_pk").
 			Joins("JOIN malls AS m ON m.id = relation.mall_id AND m.deleted_at IS NULL")
+		if dataset.Latest {
+			query = query.Where("relation.is_active = ?", true).
+				Where("w.ended_at IS NULL")
+		}
 		return query, "COUNT(DISTINCT relation.mall_id, w.id)",
 			"COALESCE(w.published_at_utc, w.first_seen_at)", "w.quality_status", "", nil
 	case "life_indices":

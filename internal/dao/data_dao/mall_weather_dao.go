@@ -385,6 +385,57 @@ func (dao *MallWeatherDAO) UpsertAlertRelations(ctx context.Context, rows []mode
 	return UpsertResult{AffectedRows: result.RowsAffected}, nil
 }
 
+func (dao *MallWeatherDAO) DeactivateMissingAlertRelations(
+	ctx context.Context,
+	mallID uint,
+	provider string,
+	seenAlertPKs []uint,
+	missingBefore time.Time,
+) (int64, error) {
+	provider = strings.TrimSpace(provider)
+	if dao == nil || dao.db == nil || ctx == nil || mallID == 0 || provider == "" ||
+		missingBefore.IsZero() || len(seenAlertPKs) > 500 {
+		return 0, fmt.Errorf("mall weather: invalid missing alert relation reconciliation")
+	}
+	for _, alertPK := range seenAlertPKs {
+		if alertPK == 0 {
+			return 0, fmt.Errorf("mall weather: invalid missing alert relation reconciliation")
+		}
+	}
+	result := dao.deactivateMissingAlertRelationsQuery(
+		ctx,
+		mallID,
+		provider,
+		seenAlertPKs,
+		missingBefore.UTC(),
+	)
+	if result.Error != nil {
+		return 0, fmt.Errorf("mall weather: deactivate missing alert relations: %w", result.Error)
+	}
+	return result.RowsAffected, nil
+}
+
+func (dao *MallWeatherDAO) deactivateMissingAlertRelationsQuery(
+	ctx context.Context,
+	mallID uint,
+	provider string,
+	seenAlertPKs []uint,
+	missingBefore time.Time,
+) *gorm.DB {
+	providerAlerts := dao.db.WithContext(ctx).
+		Model(&model.MallWeatherAlert{}).
+		Select("id").
+		Where("provider = ?", provider)
+	query := dao.db.WithContext(ctx).
+		Model(&model.MallWeatherAlertRelation{}).
+		Where("mall_id = ? AND is_active = ? AND last_seen_at <= ?", mallID, true, missingBefore).
+		Where("alert_pk IN (?)", providerAlerts)
+	if len(seenAlertPKs) > 0 {
+		query = query.Where("alert_pk NOT IN ?", seenAlertPKs)
+	}
+	return query.Update("is_active", false)
+}
+
 func (dao *MallWeatherDAO) UpsertLifeIndices(ctx context.Context, rows []model.MallWeatherLifeIndex) (UpsertResult, error) {
 	return upsertChecksumAwareWeatherRows(ctx, dao.db, rows, []string{"mall_id", "provider", "source_api", "forecast_date_local", "index_type", "issued_at_utc"}, nil, 200)
 }
