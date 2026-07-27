@@ -15,27 +15,26 @@ import (
 func TestMallWeatherExportContentRequestMatcher(t *testing.T) {
 	const validPath = "/api/v1/weather-exports/00000000-0000-4000-8000-000000000017/content"
 	tests := []struct {
-		name string
-		path string
-		want bool
+		name   string
+		method string
+		path   string
+		want   bool
 	}{
-		{name: "content", path: validPath, want: true},
-		{name: "job", path: "/api/v1/weather-exports/00000000-0000-4000-8000-000000000017", want: false},
-		{name: "invalid UUID", path: "/api/v1/weather-exports/not-a-uuid/content", want: false},
-		{name: "noncanonical UUID", path: "/api/v1/weather-exports/00000000000040008000000000000017/content", want: false},
-		{name: "extra segment", path: validPath + "/extra", want: false},
+		{name: "GET content", method: http.MethodGet, path: validPath, want: true},
+		{name: "POST content", method: http.MethodPost, path: validPath, want: true},
+		{name: "unsupported method", method: http.MethodPut, path: validPath, want: false},
+		{name: "job", method: http.MethodGet, path: "/api/v1/weather-exports/00000000-0000-4000-8000-000000000017", want: false},
+		{name: "invalid UUID", method: http.MethodGet, path: "/api/v1/weather-exports/not-a-uuid/content", want: false},
+		{name: "noncanonical UUID", method: http.MethodGet, path: "/api/v1/weather-exports/00000000000040008000000000000017/content", want: false},
+		{name: "extra segment", method: http.MethodGet, path: validPath + "/extra", want: false},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
-			request := httptest.NewRequest(http.MethodGet, test.path, nil)
+			request := httptest.NewRequest(test.method, test.path, nil)
 			if got := isMallWeatherExportContentRequest(request); got != test.want {
 				t.Fatalf("isMallWeatherExportContentRequest()=%t, want %t", got, test.want)
 			}
 		})
-	}
-	request := httptest.NewRequest(http.MethodPost, validPath, nil)
-	if isMallWeatherExportContentRequest(request) {
-		t.Fatal("POST download content request matched")
 	}
 }
 
@@ -52,7 +51,7 @@ func TestMallWeatherExportContentUsesDedicatedWriteDeadline(t *testing.T) {
 	recorder := &writeDeadlineRecorder{ResponseRecorder: httptest.NewRecorder()}
 	before := time.Now().Add(timeout)
 
-	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, path, nil))
+	handler.ServeHTTP(recorder, httptest.NewRequest(http.MethodPost, path, nil))
 
 	after := time.Now().Add(timeout)
 	if nextCalls != 1 || recorder.Code != http.StatusNoContent ||

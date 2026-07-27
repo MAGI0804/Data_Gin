@@ -81,12 +81,7 @@ export type MallWeatherExportJob = {
 export type MallWeatherExportDownloadReadiness = 'ready' | 'not-ready' | 'expired'
 export type MallWeatherExportPollFailureAction = 'retry' | 'forget' | 'pause'
 
-export type MallWeatherExportDownloadGrant = {
-  url: string
-  expiresAt: string
-}
-
-export const mallWeatherExportDownloadFrameLifetimeMilliseconds = 5 * 60 * 1000
+export const mallWeatherExportDownloadFrameLifetimeMilliseconds = 20 * 60 * 1000
 
 export class MallWeatherExportRequestTimeoutError extends Error {
   constructor() {
@@ -103,6 +98,7 @@ const exportKeyPattern = /^[A-Za-z0-9][A-Za-z0-9._:-]{7,254}$/
 const exportJobStatuses = new Set<MallWeatherExportJobStatus>([
   'PENDING', 'RUNNING', 'SUCCEEDED', 'FAILED', 'CANCELLED', 'EXPIRED',
 ])
+let exportDownloadFrameSequence = 0
 
 function isRecord(value: unknown): value is JsonRecord {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
@@ -369,42 +365,61 @@ export function parseMallWeatherExportJob(payload: unknown): MallWeatherExportJo
   }
 }
 
-export function parseMallWeatherExportDownloadGrant(
-  payload: unknown,
-): MallWeatherExportDownloadGrant | null {
-  const data = envelopeData(payload)
-  if (!data || !nonEmptyString(data.url, 8_192) || !isRFC3339(data.expiresAt)) return null
-  let parsedURL: URL
-  try {
-    parsedURL = new URL(data.url)
-  } catch {
-    return null
-  }
-  if (parsedURL.protocol !== 'https:' || parsedURL.username || parsedURL.password || parsedURL.hash || !parsedURL.hostname ||
-    parsedURL.hostname.toLowerCase().endsWith('-internal.aliyuncs.com')) return null
-  return { url: data.url, expiresAt: data.expiresAt }
-}
-
-export function submitMallWeatherExportBrowserDownload(
+export function submitMallWeatherExportContentDownload(
   documentRef: Document,
-  grant: MallWeatherExportDownloadGrant,
+  action: string,
+  token: string,
   fileName: string,
   scheduleCleanup: (callback: () => void, delayMilliseconds: number) => unknown,
 ) {
-  if (!documentRef?.body || !grant || !nonEmptyString(fileName, 255) || typeof scheduleCleanup !== 'function') {
+  if (!documentRef?.body || !nonEmptyString(action, 8_192) || !nonEmptyString(token, 16_384) ||
+    !nonEmptyString(fileName, 255) || typeof scheduleCleanup !== 'function') {
     throw new Error('invalid mall weather export browser download')
   }
+  let parsedAction: URL
+  try {
+    parsedAction = new URL(action, 'https://mall-weather-download.invalid')
+  } catch {
+    throw new Error('invalid mall weather export browser download')
+  }
+  const contentPath = parsedAction.pathname.match(
+    /^\/api\/v1\/weather-exports\/([0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12})\/content$/i,
+  )
+  if (!contentPath || !['http:', 'https:'].includes(parsedAction.protocol) || parsedAction.username ||
+    parsedAction.password || parsedAction.search || parsedAction.hash) {
+    throw new Error('invalid mall weather export browser download')
+  }
+
+  exportDownloadFrameSequence++
+  const frameName = `mall-weather-export-download-${contentPath[1]}-${exportDownloadFrameSequence}`
   const frame = documentRef.createElement('iframe')
   frame.hidden = true
   frame.title = `下载 ${fileName}`
+  frame.name = frameName
   frame.referrerPolicy = 'no-referrer'
   frame.setAttribute('aria-hidden', 'true')
   frame.setAttribute('sandbox', 'allow-downloads')
-  documentRef.body.append(frame)
+  const form = documentRef.createElement('form')
+  form.hidden = true
+  form.method = 'POST'
+  form.action = action
+  form.target = frameName
+  form.enctype = 'application/x-www-form-urlencoded'
+  form.acceptCharset = 'UTF-8'
+  const tokenInput = documentRef.createElement('input')
+  tokenInput.type = 'hidden'
+  tokenInput.name = 'token'
+  tokenInput.value = token
+  form.append(tokenInput)
+
   try {
-    frame.src = grant.url
+    documentRef.body.append(frame)
+    documentRef.body.append(form)
+    form.submit()
+    form.remove()
     scheduleCleanup(() => frame.remove(), mallWeatherExportDownloadFrameLifetimeMilliseconds)
   } catch (error) {
+    form.remove()
     frame.remove()
     throw error
   }

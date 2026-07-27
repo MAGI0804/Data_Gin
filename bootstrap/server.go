@@ -166,7 +166,8 @@ func withMallWeatherExportDownloadWriteDeadline(next http.Handler, timeout time.
 }
 
 func isMallWeatherExportContentRequest(request *http.Request) bool {
-	if request == nil || request.Method != http.MethodGet || request.URL == nil {
+	if request == nil || request.URL == nil ||
+		request.Method != http.MethodGet && request.Method != http.MethodPost {
 		return false
 	}
 	parts := strings.Split(strings.Trim(request.URL.Path, "/"), "/")

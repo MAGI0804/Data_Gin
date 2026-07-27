@@ -5,7 +5,7 @@ import {
   mallWeatherExportCreateDisposition,
   loadMallWeatherExportSession,
   mallWeatherExportCreateRequest,
-  mallWeatherExportDownloadPath,
+  mallWeatherExportContentPath,
   mallWeatherExportJobPath,
   mallWeatherExportJobTerminal,
   mallWeatherExportKey,
@@ -311,7 +311,7 @@ export function MallWeatherExportPanel({ actorID, mallID, mallName, client, down
     try {
       const response = await waitForMallWeatherExportRequest(
         downloadFile(
-          mallWeatherExportDownloadPath(job.jobId),
+          mallWeatherExportContentPath(job.jobId),
           `mall_weather_export_${job.jobId}.xlsx`,
           controller.signal,
         ),
@@ -339,10 +339,10 @@ export function MallWeatherExportPanel({ actorID, mallID, mallName, client, down
         response.data,
       ))
       persistSession({ pending: null, jobId: job.jobId })
-      setDownloadMessage('下载请求已交给浏览器；若未开始，请检查浏览器下载列表或 OSS 公网访问配置。')
+      setDownloadMessage('下载请求已交给浏览器，请在浏览器下载列表中查看文件。')
     } catch (error) {
       if (error instanceof MallWeatherExportRequestTimeoutError) {
-        setActionError('获取 Excel 下载地址超时，请检查网络后重试')
+        setActionError('提交 Excel 下载请求超时，请检查网络后重试')
       } else if (!controller.signal.aborted) {
         setActionError(error instanceof Error ? error.message : 'Excel 文件下载失败')
       }

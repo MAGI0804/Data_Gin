@@ -27,7 +27,7 @@ import { effectiveApiStatus } from './apiResponse'
 import { apiURL as buildApiURL } from './apiURL'
 import { clearStoredToken, loadStoredToken, saveStoredToken, storedTokenExpiresAt, tokenActorID } from './authStorage'
 import { MallWeatherPage } from './MallWeatherPage'
-import { parseMallWeatherExportDownloadGrant, submitMallWeatherExportBrowserDownload } from './mallWeatherExport'
+import { submitMallWeatherExportContentDownload } from './mallWeatherExport'
 import {
   buildExcelExportConfig,
   cloneExcelMatchSteps,
@@ -769,25 +769,21 @@ function App() {
     async (path, fileName, signal) => {
       const validFileName = /^mall_weather_export_[0-9a-f-]{36}\.xlsx$/i.test(fileName)
       if (!validFileName) return { ok: false, status: 422, data: 'invalid download file name' }
+      if (signal.aborted) return { ok: false, status: 0, data: 'download request aborted' }
       try {
-        const response = await client(path, {
-          method: 'GET', signal, showResult: false, silentLoading: true,
-        })
-        if (!response.ok) return response
-        const grant = parseMallWeatherExportDownloadGrant(response.data)
-        if (!grant) return { ok: false, status: 502, data: 'invalid XLSX download grant' }
-        submitMallWeatherExportBrowserDownload(
+        submitMallWeatherExportContentDownload(
           document,
-          grant,
+          apiURL(path),
+          token,
           fileName,
           (callback, delayMilliseconds) => window.setTimeout(callback, delayMilliseconds),
         )
-        return { ok: true, status: response.status, data: { fileName, expiresAt: grant.expiresAt } }
+        return { ok: true, status: 200, data: { fileName } }
       } catch (error) {
         return { ok: false, status: 0, data: error instanceof Error ? error.message : String(error) }
       }
     },
-    [client],
+    [token],
   )
 
   const loadConfiguredMethods = useCallback(async (pipelines: PipelineDefinition[]) => {

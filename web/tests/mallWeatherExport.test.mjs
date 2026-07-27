@@ -24,8 +24,7 @@ import {
   mallWeatherExportRequestTimeoutMilliseconds,
   mallWeatherExportRequestMatches,
   parseMallWeatherExportCreateResult,
-  parseMallWeatherExportDownloadGrant,
-  submitMallWeatherExportBrowserDownload,
+  submitMallWeatherExportContentDownload,
   parseMallWeatherExportJob,
   parseMallWeatherExportSafeErrorMessage,
   resolveMallWeatherExportStorage,
@@ -263,64 +262,81 @@ test('builds stable authenticated download resource paths', () => {
   assert.throws(() => mallWeatherExportJobPath('bad'), /invalid mall weather export job id/)
 })
 
-test('accepts HTTPS download grants without trusting the browser clock', async () => {
-  const valid = envelope({
-    url: 'https://weather-files.example.com/export.xlsx?signature=abc123',
-    expiresAt: '2026-07-27T10:05:00Z',
-  })
-  assert.deepEqual(parseMallWeatherExportDownloadGrant(valid), valid.data)
-  for (const invalid of [
-    { ...valid.data, url: 'http://weather-files.example.com/export.xlsx' },
-    { ...valid.data, url: 'javascript:alert(1)' },
-    { ...valid.data, url: 'https://user:secret@weather-files.example.com/export.xlsx' },
-    { ...valid.data, url: 'https://weather-files.example.com/export.xlsx#fragment' },
-    { ...valid.data, url: 'https://weather-private.oss-cn-shanghai-internal.aliyuncs.com/export.xlsx' },
-    { ...valid.data, expiresAt: 'not-a-time' },
-  ]) {
-    assert.equal(parseMallWeatherExportDownloadGrant(envelope(invalid)), null)
-  }
-  assert.deepEqual(parseMallWeatherExportDownloadGrant(envelope({
-    ...valid.data,
-    expiresAt: '2020-01-01T00:00:00Z',
-  })), { ...valid.data, expiresAt: '2020-01-01T00:00:00Z' })
-
-  const frames = []
+test('submits authenticated content download without putting the token in the URL', async () => {
+  assert.equal(mallWeatherExportDownloadFrameLifetimeMilliseconds, 20 * 60 * 1000)
+  const appended = []
+  const created = []
   let cleanup = null
+  const element = (tagName) => ({
+    tagName,
+    hidden: false,
+    title: '',
+    name: '',
+    referrerPolicy: '',
+    method: '',
+    action: '',
+    target: '',
+    enctype: '',
+    acceptCharset: '',
+    type: '',
+    value: '',
+    attributes: {},
+    children: [],
+    removed: false,
+    submitted: false,
+    setAttribute(name, value) { this.attributes[name] = value },
+    append(child) { this.children.push(child) },
+    submit() { this.submitted = true },
+    remove() { this.removed = true },
+  })
   const documentRef = {
-    body: { append: (frame) => frames.push(frame) },
+    body: { append: (node) => appended.push(node) },
     createElement: (tagName) => {
-      assert.equal(tagName, 'iframe')
-      return {
-        hidden: false,
-        title: '',
-        referrerPolicy: '',
-        src: '',
-        attributes: {},
-        removed: false,
-        setAttribute(name, value) { this.attributes[name] = value },
-        remove() { this.removed = true },
-      }
+      const node = element(tagName)
+      created.push(node)
+      return node
     },
   }
-  submitMallWeatherExportBrowserDownload(
+  const action = `https://api.example.com/api${mallWeatherExportContentPath(jobID)}`
+  submitMallWeatherExportContentDownload(
     documentRef,
-    valid.data,
+    action,
+    'header.payload.signature',
     `mall_weather_export_${jobID}.xlsx`,
     (callback, delayMilliseconds) => {
       cleanup = callback
       assert.equal(delayMilliseconds, mallWeatherExportDownloadFrameLifetimeMilliseconds)
     },
   )
-  assert.equal(frames.length, 1)
-  assert.equal(frames[0].hidden, true)
-  assert.equal(frames[0].title, `下载 mall_weather_export_${jobID}.xlsx`)
-  assert.equal(frames[0].referrerPolicy, 'no-referrer')
-  assert.equal(frames[0].attributes['aria-hidden'], 'true')
-  assert.equal(frames[0].attributes.sandbox, 'allow-downloads')
-  assert.equal(frames[0].src, valid.data.url)
-  assert.equal(frames[0].removed, false)
+  assert.deepEqual(created.map((node) => node.tagName), ['iframe', 'form', 'input'])
+  const [frame, form, tokenInput] = created
+  assert.equal(appended.length, 2)
+  assert.equal(frame.hidden, true)
+  assert.equal(frame.title, `下载 mall_weather_export_${jobID}.xlsx`)
+  assert.equal(frame.referrerPolicy, 'no-referrer')
+  assert.equal(frame.attributes['aria-hidden'], 'true')
+  assert.equal(frame.attributes.sandbox, 'allow-downloads')
+  assert.equal(form.method, 'POST')
+  assert.equal(form.action, action)
+  assert.equal(form.action.includes('header.payload.signature'), false)
+  assert.equal(form.target, frame.name)
+  assert.equal(form.enctype, 'application/x-www-form-urlencoded')
+  assert.equal(form.submitted, true)
+  assert.equal(form.removed, true)
+  assert.equal(form.children[0], tokenInput)
+  assert.equal(tokenInput.name, 'token')
+  assert.equal(tokenInput.value, 'header.payload.signature')
+  assert.equal(frame.removed, false)
   cleanup()
-  assert.equal(frames[0].removed, true)
+  assert.equal(frame.removed, true)
+
+  assert.throws(() => submitMallWeatherExportContentDownload(
+    documentRef,
+    `${action}?token=query-secret`,
+    'form-token',
+    `mall_weather_export_${jobID}.xlsx`,
+    () => {},
+  ), /invalid mall weather export browser download/)
 
   const cancelledController = new AbortController()
   const cancelledRequest = waitForMallWeatherExportRequest(

@@ -147,6 +147,34 @@ func TestMallWeatherExportJobControllerStreamsAuthenticatedDownloadContent(t *te
 	}
 }
 
+func TestMallWeatherExportJobControllerStreamsPostFormDownloadContent(t *testing.T) {
+	service := fakeMallWeatherExportJobControllerService{
+		content: func(_ context.Context, actor uint, jobUUID string) (*data_svc.MallWeatherExportContentResult, error) {
+			if actor != 17 || jobUUID != mallWeatherExportJobTestUUID {
+				t.Fatalf("actor=%d job=%s", actor, jobUUID)
+			}
+			return &data_svc.MallWeatherExportContentResult{
+				Body: io.NopCloser(strings.NewReader("PK\x03\x04xlsx")), Size: 8,
+				FileName:    "mall_weather_export_" + jobUUID + ".xlsx",
+				ContentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+			}, nil
+		},
+	}
+	recorder := performMallWeatherExportJobRequest(
+		t,
+		service,
+		http.MethodPost,
+		"/api/v1/weather-exports/"+mallWeatherExportJobTestUUID+"/content",
+		"token=form-token",
+		"",
+	)
+	if recorder.Code != http.StatusOK || recorder.Body.String() != "PK\x03\x04xlsx" ||
+		recorder.Header().Get("Content-Length") != "8" ||
+		!strings.Contains(recorder.Header().Get("Content-Disposition"), ".xlsx") {
+		t.Fatalf("status=%d headers=%v body=%q", recorder.Code, recorder.Header(), recorder.Body.String())
+	}
+}
+
 func TestMallWeatherExportJobControllerClosesInvalidDownloadContent(t *testing.T) {
 	body := &trackingReadCloser{Reader: strings.NewReader("PK\x03\x04xlsx")}
 	service := fakeMallWeatherExportJobControllerService{
@@ -284,8 +312,13 @@ func performMallWeatherExportJobRequest(
 	router.GET("/api/v1/weather-exports/:job_id", controller.Get)
 	router.GET("/api/v1/weather-exports/:job_id/download", controller.Download)
 	router.GET("/api/v1/weather-exports/:job_id/content", controller.DownloadContent)
+	router.POST("/api/v1/weather-exports/:job_id/content", controller.DownloadContent)
 	request := httptest.NewRequest(method, path, strings.NewReader(body))
-	request.Header.Set("Content-Type", "application/json")
+	if method == http.MethodPost && strings.HasSuffix(path, "/content") {
+		request.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	} else {
+		request.Header.Set("Content-Type", "application/json")
+	}
 	if idempotencyKey != "" {
 		request.Header.Set("Idempotency-Key", idempotencyKey)
 	}
