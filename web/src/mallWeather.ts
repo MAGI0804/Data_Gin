@@ -433,6 +433,7 @@ export type MallWeatherRefreshResult = {
   force: boolean
   reason: string
   requestedBy: number
+  requestedAt: string
   kinds: Array<{
     kind: MallWeatherRefreshKind
     status: 'QUEUED' | 'SKIPPED_FRESH'
@@ -445,6 +446,36 @@ export type MallWeatherRefreshDisposition =
   | { kind: 'uncertain' }
   | { kind: 'rejected' }
 
+export type MallWeatherFetchRunTaskKind = 'MANUAL' | 'FULL'
+
+export type MallWeatherFetchRun = {
+  runUuid: string
+  provider: string
+  endpointKind: string
+  taskKind: string
+  requestedHourlySteps: number
+  requestedDailySteps: number
+  attemptCount: number
+  status: string
+  durationMs: number
+  rowCounts: Record<string, number>
+  parseWarnings: MallWeatherWarning[]
+  errorCode: string
+  errorMessageSafe: string
+  createdAtUtc: string
+  createdAtLocal: string
+  updatedAtUtc: string
+  updatedAtLocal: string
+  finishedAtUtc?: string
+  finishedAtLocal?: string
+}
+
+export type MallWeatherFetchRunsResult = {
+  items: MallWeatherFetchRun[]
+  meta: { timeZone: string }
+  pagination: { pageSize: number; nextCursor: string }
+}
+
 type JsonRecord = Record<string, unknown>
 type RefreshStorage = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>
 type OnboardingStorage = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>
@@ -455,6 +486,10 @@ function isRecord(value: unknown): value is JsonRecord {
 
 function positiveSafeInteger(value: unknown): value is number {
   return typeof value === 'number' && Number.isSafeInteger(value) && value > 0
+}
+
+function nonNegativeSafeInteger(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0
 }
 
 function validCoordinateValue(value: unknown, minimum: number, maximum: number): value is number {
@@ -582,6 +617,10 @@ function hasOnlyOptionalStrings(record: JsonRecord, keys: string[]) {
 
 function isRFC3339(value: unknown): value is string {
   return typeof value === 'string' && /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(value) && Number.isFinite(Date.parse(value))
+}
+
+function optionalRFC3339(value: unknown): value is string | undefined {
+  return value === undefined || isRFC3339(value)
 }
 
 function isISODate(value: unknown): value is string {
@@ -1301,7 +1340,7 @@ export function parseMallWeatherRefreshResult(payload: unknown): MallWeatherRefr
   const data = envelopeData(payload)
   if (!data || !Number.isSafeInteger(data.jobId) || Number(data.jobId) <= 0 || !Number.isSafeInteger(data.mallId) || Number(data.mallId) <= 0 ||
     typeof data.force !== 'boolean' || typeof data.reason !== 'string' || !Number.isSafeInteger(data.requestedBy) || Number(data.requestedBy) <= 0 ||
-    !Array.isArray(data.kinds) || data.kinds.length !== 1) return null
+    !isRFC3339(data.requestedAt) || !Array.isArray(data.kinds) || data.kinds.length !== 1) return null
   const kinds: MallWeatherRefreshResult['kinds'] = []
   const seenKinds = new Set<MallWeatherRefreshKind>()
   for (const item of data.kinds) {
@@ -1314,7 +1353,68 @@ export function parseMallWeatherRefreshResult(payload: unknown): MallWeatherRefr
     if (item.status === 'SKIPPED_FRESH' && outboxJobId !== undefined) return null
     kinds.push({ kind: item.kind, status: item.status, ...(outboxJobId === undefined ? {} : { outboxJobId }) })
   }
-  return { jobId: Number(data.jobId), mallId: Number(data.mallId), force: data.force, reason: data.reason, requestedBy: Number(data.requestedBy), kinds }
+  return {
+    jobId: Number(data.jobId),
+    mallId: Number(data.mallId),
+    force: data.force,
+    reason: data.reason,
+    requestedBy: Number(data.requestedBy),
+    requestedAt: data.requestedAt,
+    kinds,
+  }
+}
+
+export function parseMallWeatherFetchRuns(payload: unknown): MallWeatherFetchRunsResult | null {
+  const data = envelopeData(payload)
+  if (!data || !Array.isArray(data.items) || !isRecord(data.meta) || typeof data.meta.timeZone !== 'string' || !data.meta.timeZone.trim()) return null
+  const pagination = mallWeatherPagination(data.pagination)
+  if (!pagination) return null
+  const items: MallWeatherFetchRun[] = []
+  for (const item of data.items) {
+    if (!isRecord(item) || typeof item.runUuid !== 'string' || !item.runUuid.trim() || typeof item.provider !== 'string' ||
+      typeof item.endpointKind !== 'string' || !item.endpointKind.trim() || typeof item.taskKind !== 'string' || !item.taskKind.trim() ||
+      typeof item.status !== 'string' || !item.status.trim() || !nonNegativeSafeInteger(item.requestedHourlySteps) ||
+      !nonNegativeSafeInteger(item.requestedDailySteps) || !nonNegativeSafeInteger(item.attemptCount) ||
+      !nonNegativeSafeInteger(item.durationMs) || !isRecord(item.rowCounts) || !Array.isArray(item.parseWarnings) ||
+      !isRFC3339(item.createdAtUtc) || !isRFC3339(item.createdAtLocal) || !isRFC3339(item.updatedAtUtc) || !isRFC3339(item.updatedAtLocal) ||
+      !optionalRFC3339(item.finishedAtUtc) || !optionalRFC3339(item.finishedAtLocal) ||
+      !hasOnlyOptionalStrings(item, ['errorCode', 'errorMessageSafe'])) return null
+    const rowCounts: Record<string, number> = {}
+    const entries = Object.entries(item.rowCounts)
+    if (entries.length > 64) return null
+    for (const [key, value] of entries) {
+      if (!key.trim() || key.length > 128 || !nonNegativeSafeInteger(value)) return null
+      rowCounts[key] = value
+    }
+    const parseWarnings = strictWarningValues(item.parseWarnings)
+    if (!parseWarnings) return null
+    items.push({
+      runUuid: item.runUuid,
+      provider: item.provider,
+      endpointKind: item.endpointKind,
+      taskKind: item.taskKind.toUpperCase(),
+      requestedHourlySteps: item.requestedHourlySteps,
+      requestedDailySteps: item.requestedDailySteps,
+      attemptCount: item.attemptCount,
+      status: item.status.toUpperCase(),
+      durationMs: item.durationMs,
+      rowCounts,
+      parseWarnings,
+      errorCode: textValue(item, 'errorCode'),
+      errorMessageSafe: textValue(item, 'errorMessageSafe'),
+      createdAtUtc: item.createdAtUtc,
+      createdAtLocal: item.createdAtLocal,
+      updatedAtUtc: item.updatedAtUtc,
+      updatedAtLocal: item.updatedAtLocal,
+      ...(typeof item.finishedAtUtc === 'string' ? { finishedAtUtc: item.finishedAtUtc } : {}),
+      ...(typeof item.finishedAtLocal === 'string' ? { finishedAtLocal: item.finishedAtLocal } : {}),
+    })
+  }
+  return { items, meta: { timeZone: data.meta.timeZone }, pagination }
+}
+
+export function mallWeatherFetchRunTerminal(status: string) {
+  return ['SUCCESS', 'PARTIAL_SUCCESS', 'FAILED', 'CANCELLED'].includes(status.trim().toUpperCase())
 }
 
 export function mallWeatherRefreshDisposition(
@@ -1485,6 +1585,28 @@ function localMidnight(year: number, month: number, day: number, timeZone: strin
 export function mallWeatherRefreshPath(mallID: number) {
   if (!Number.isSafeInteger(mallID) || mallID <= 0) throw new Error('invalid mall id')
   return `/v1/malls/${mallID}/weather-refresh`
+}
+
+export function mallWeatherFetchRunsPath(
+  mallID: number,
+  start: Date,
+  end: Date,
+  taskKind: MallWeatherFetchRunTaskKind,
+) {
+  positiveMallID(mallID)
+  const duration = end.getTime() - start.getTime()
+  if (!Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime()) || duration <= 0 || duration > 24 * 60 * 60 * 1000) {
+    throw new Error('invalid weather fetch run range')
+  }
+  if (taskKind !== 'MANUAL' && taskKind !== 'FULL') throw new Error('invalid weather fetch run task kind')
+  const query = new URLSearchParams({
+    start: start.toISOString(),
+    end: end.toISOString(),
+    taskKind,
+    endpointKind: 'v26_weather',
+    pageSize: '10',
+  })
+  return `/v1/malls/${mallID}/weather/fetch-runs?${query.toString()}`
 }
 
 export function mallWeatherRefreshRequest(kinds: MallWeatherRefreshKind[], reason: string): MallWeatherRefreshRequest {

@@ -33,6 +33,8 @@ import {
   mergeMallWeatherMalls,
   mallWeatherRefreshKey,
   mallWeatherRefreshDisposition,
+  mallWeatherFetchRunsPath,
+  mallWeatherFetchRunTerminal,
   mallWeatherRefreshPath,
   mallWeatherRefreshRequest,
   mallWeatherRefreshResultMessage,
@@ -52,6 +54,7 @@ import {
   parseMallWeatherLifeIndexPage,
   parseMallWeatherMinutelyPage,
   parseMallWeatherOverview,
+  parseMallWeatherFetchRuns,
   parseMallWeatherRefreshResult,
 } from '../.test-dist/mallWeather.js'
 
@@ -543,6 +546,7 @@ test('parses queued and fresh-skipped refresh results without over-reporting que
     force: false,
     reason: '管理端补采',
     requestedBy: 42,
+    requestedAt: '2026-07-27T08:00:00Z',
     kinds: [{ kind: 'V26_FULL', status: 'QUEUED', outboxJobId: 41 }],
   } })
   assert.equal(mallWeatherRefreshResultMessage(result), '1 个采集任务已进入异步队列；稍后重新加载天气即可查看结果。')
@@ -553,6 +557,7 @@ test('parses queued and fresh-skipped refresh results without over-reporting que
     force: false,
     reason: '管理端补采',
     requestedBy: 42,
+    requestedAt: '2026-07-27T08:00:00Z',
     kinds: [{ kind: 'V26_FULL', status: 'SKIPPED_FRESH' }],
   } })
   assert.equal(mallWeatherRefreshResultMessage(skipped), '1 项数据仍新鲜，本次未重复入队。')
@@ -563,6 +568,7 @@ test('parses queued and fresh-skipped refresh results without over-reporting que
     force: false,
     reason: '管理端补采',
     requestedBy: 42,
+    requestedAt: '2026-07-27T08:00:00Z',
     kinds: [
       { kind: 'V26_FULL', status: 'QUEUED', outboxJobId: 41 },
       { kind: 'V26_FULL', status: 'SKIPPED_FRESH' },
@@ -574,6 +580,7 @@ test('parses queued and fresh-skipped refresh results without over-reporting que
     force: false,
     reason: '管理端补采',
     requestedBy: 42,
+    requestedAt: '2026-07-27T08:00:00Z',
     kinds: [{ kind: 'V3_LIFE_INDEX', status: 'SKIPPED_FRESH', outboxJobId: 42 }],
   } }), null)
 })
@@ -586,6 +593,7 @@ test('keeps the original idempotent request for every uncertain refresh outcome'
     force: false,
     reason: '管理端补采',
     requestedBy: 42,
+    requestedAt: '2026-07-27T08:00:00Z',
     kinds: [{ kind: 'V26_FULL', status: 'QUEUED', outboxJobId: 41 }],
   } }
 
@@ -605,8 +613,58 @@ test('keeps the original idempotent request for every uncertain refresh outcome'
     force: false,
     reason: '管理端补采',
     requestedBy: 42,
+    requestedAt: '2026-07-27T08:00:00Z',
     kinds: [{ kind: 'V3_LIFE_INDEX', status: 'SKIPPED_FRESH' }],
   } } }, '42', 7, request).kind, 'uncertain')
+})
+
+test('builds and parses bounded fetch-run audit queries for weather polling', () => {
+  const start = new Date('2026-07-27T08:00:00Z')
+  const end = new Date('2026-07-27T08:10:00Z')
+  const path = new URL(mallWeatherFetchRunsPath(7, start, end, 'MANUAL'), 'https://example.test')
+  assert.equal(path.pathname, '/v1/malls/7/weather/fetch-runs')
+  assert.equal(path.searchParams.get('start'), start.toISOString())
+  assert.equal(path.searchParams.get('end'), end.toISOString())
+  assert.equal(path.searchParams.get('taskKind'), 'MANUAL')
+  assert.equal(path.searchParams.get('endpointKind'), 'v26_weather')
+  assert.equal(path.searchParams.get('pageSize'), '10')
+
+  const parsed = parseMallWeatherFetchRuns({ code: 0, data: {
+    items: [{
+      runUuid: 'run-20260727-1',
+      provider: 'CAIYUN',
+      endpointKind: 'v26_weather',
+      taskKind: 'MANUAL',
+      requestedHourlySteps: 72,
+      requestedDailySteps: 7,
+      attemptCount: 1,
+      status: 'SUCCESS',
+      durationMs: 1200,
+      rowCounts: { hourly: 72, daily: 7 },
+      parseWarnings: [],
+      createdAtUtc: '2026-07-27T08:00:02Z',
+      createdAtLocal: '2026-07-27T16:00:02+08:00',
+      updatedAtUtc: '2026-07-27T08:00:03Z',
+      updatedAtLocal: '2026-07-27T16:00:03+08:00',
+      finishedAtUtc: '2026-07-27T08:00:03Z',
+      finishedAtLocal: '2026-07-27T16:00:03+08:00',
+    }],
+    meta: { timeZone: 'Asia/Shanghai' },
+    pagination: { pageSize: 10 },
+  } })
+  assert.equal(parsed.items[0].rowCounts.hourly, 72)
+  assert.equal(parsed.items[0].status, 'SUCCESS')
+  assert.equal(mallWeatherFetchRunTerminal('SUCCESS'), true)
+  assert.equal(mallWeatherFetchRunTerminal('PARTIAL_SUCCESS'), true)
+  assert.equal(mallWeatherFetchRunTerminal('FAILED'), true)
+  assert.equal(mallWeatherFetchRunTerminal('RUNNING'), false)
+
+  assert.throws(() => mallWeatherFetchRunsPath(7, end, start, 'MANUAL'), /invalid weather fetch run range/)
+  assert.equal(parseMallWeatherFetchRuns({ code: 0, data: {
+    items: [{ ...parsed.items[0], rowCounts: { hourly: -1 } }],
+    meta: { timeZone: 'Asia/Shanghai' },
+    pagination: { pageSize: 10 },
+  } }), null)
 })
 
 test('formats weather statuses, conditions, metrics, and chart points', () => {
