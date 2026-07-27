@@ -94,11 +94,13 @@ type weatherEnvelope struct {
 }
 
 type weatherResult struct {
-	Realtime json.RawMessage `json:"realtime"`
-	Minutely json.RawMessage `json:"minutely"`
-	Hourly   json.RawMessage `json:"hourly"`
-	Daily    json.RawMessage `json:"daily"`
-	Alert    json.RawMessage `json:"alert"`
+	Realtime         json.RawMessage `json:"realtime"`
+	Minutely         json.RawMessage `json:"minutely"`
+	Hourly           json.RawMessage `json:"hourly"`
+	Daily            json.RawMessage `json:"daily"`
+	Alert            json.RawMessage `json:"alert"`
+	Primary          json.RawMessage `json:"primary"`
+	ForecastKeypoint json.RawMessage `json:"forecast_keypoint"`
 }
 
 type realtimePayload struct {
@@ -126,13 +128,13 @@ func ParseWeatherV26(raw []byte) (*WeatherBundle, error) {
 		return nil, weatherParseError()
 	}
 
-	metadata, warnings, err := parseWeatherMetadata(envelope)
-	if err != nil {
-		return nil, err
-	}
 	var result weatherResult
 	if err := json.Unmarshal(envelope.Result, &result); err != nil || !isJSONObject(result.Realtime) {
 		return nil, weatherParseError()
+	}
+	metadata, warnings, err := parseWeatherMetadata(envelope, result)
+	if err != nil {
+		return nil, err
 	}
 	realtime, realtimeWarnings, err := parseRealtimeWeather(result.Realtime)
 	if err != nil {
@@ -147,7 +149,7 @@ func ParseWeatherV26(raw []byte) (*WeatherBundle, error) {
 	}, nil
 }
 
-func parseWeatherMetadata(envelope weatherEnvelope) (WeatherMetadata, []ParseWarning, error) {
+func parseWeatherMetadata(envelope weatherEnvelope, result weatherResult) (WeatherMetadata, []ParseWarning, error) {
 	warnings := make([]ParseWarning, 0)
 	apiVersion := decodeWeatherString(envelope.APIVersion, "api_version", maximumMetadataTextRunes, true, &warnings)
 	apiStatus := decodeWeatherString(envelope.APIStatus, "api_status", maximumMetadataTextRunes, true, &warnings)
@@ -180,16 +182,24 @@ func parseWeatherMetadata(envelope weatherEnvelope) (WeatherMetadata, []ParseWar
 		warnings = append(warnings, ParseWarning{Code: "TZSHIFT_MISMATCH", Path: "tzshift"})
 	}
 
+	primaryRaw := result.Primary
+	if len(primaryRaw) == 0 {
+		primaryRaw = envelope.Primary
+	}
 	var primary *int
-	if len(envelope.Primary) != 0 && string(envelope.Primary) != "null" {
+	if len(primaryRaw) != 0 && string(primaryRaw) != "null" {
 		var value int
-		if err := json.Unmarshal(envelope.Primary, &value); err != nil {
-			warnings = append(warnings, ParseWarning{Code: "INVALID_FIELD", Path: "primary"})
+		if err := json.Unmarshal(primaryRaw, &value); err != nil {
+			warnings = append(warnings, ParseWarning{Code: "INVALID_FIELD", Path: "result.primary"})
 		} else {
 			primary = &value
 		}
 	}
-	keypoint := decodeWeatherString(envelope.ForecastKeypoint, "forecast_keypoint", maximumKeypointRunes, false, &warnings)
+	keypointRaw := result.ForecastKeypoint
+	if len(keypointRaw) == 0 {
+		keypointRaw = envelope.ForecastKeypoint
+	}
+	keypoint := decodeWeatherString(keypointRaw, "result.forecast_keypoint", maximumKeypointRunes, false, &warnings)
 	return WeatherMetadata{
 		Status: envelope.Status, APIVersion: apiVersion, APIStatus: apiStatus,
 		Language: language, Unit: unit, TZShiftSeconds: tzShift, Timezone: timezoneName,

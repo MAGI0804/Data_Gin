@@ -8,9 +8,9 @@
   "timezone": "Asia/Shanghai",
   "server_time": 1784688000,
   "location": [31.2285678, 121.4551234],
-  "primary": 0,
-  "forecast_keypoint": "未来两小时无降水",
   "result": {
+    "primary": 0,
+    "forecast_keypoint": "未来两小时无降水",
     "realtime": {
       "status": "ok",
       "temperature": 33.2,

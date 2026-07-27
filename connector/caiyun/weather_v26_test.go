@@ -76,8 +76,8 @@ func TestParseWeatherV26WarnsOnTimezoneOffsetAndTruncatesText(t *testing.T) {
 	longSkycon := strings.Repeat("天", 65)
 	raw := []byte(`{
 		"status":"ok","api_version":"v2.6","api_status":"active","lang":"zh_CN","unit":"metric:v2",
-		"tzshift":0,"timezone":"Asia/Shanghai","server_time":1784688000,"location":[31,121],"forecast_keypoint":" keypoint ",
-		"result":{"realtime":{"status":"ok","temperature":1,"apparent_temperature":1,"humidity":0.5,"pressure":100000,
+		"tzshift":0,"timezone":"Asia/Shanghai","server_time":1784688000,"location":[31,121],
+		"result":{"forecast_keypoint":" keypoint ","realtime":{"status":"ok","temperature":1,"apparent_temperature":1,"humidity":0.5,"pressure":100000,
 		"wind":{"speed":1,"direction":1},"cloudrate":0.5,"visibility":1,"dswrf":1,"skycon":"` + longSkycon + `"}}
 	}`)
 	bundle, err := ParseWeatherV26(raw)
