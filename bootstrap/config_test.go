@@ -30,6 +30,10 @@ func TestValidateMallWeatherConfig(t *testing.T) {
 			yaml: "App:\n  Env: local\n", checkSteps: true, wantHourly: 72, wantDaily: 7,
 		},
 		{
+			name: "legacy forecast windows are capped",
+			yaml: "MallWeather:\n  HourlySteps: 360\n  DailySteps: 15\n", checkSteps: true, wantHourly: 72, wantDaily: 7,
+		},
+		{
 			name:      "enabled requires explicit qps",
 			yaml:      "MallWeather:\n  Enabled: true\n",
 			wantError: "qps",
