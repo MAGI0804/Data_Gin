@@ -56,6 +56,7 @@ import {
   parseMallWeatherOverview,
   parseMallWeatherFetchRuns,
   parseMallWeatherRefreshResult,
+  pollMallWeatherFetchRun,
 } from '../.test-dist/mallWeather.js'
 
 class MemoryStorage {
@@ -665,6 +666,92 @@ test('builds and parses bounded fetch-run audit queries for weather polling', ()
     meta: { timeZone: 'Asia/Shanghai' },
     pagination: { pageSize: 10 },
   } }), null)
+})
+
+test('polls serially until the matching manual weather run becomes terminal', async () => {
+  const requestedAt = '2026-07-27T08:00:00Z'
+  const responses = [
+    { items: [] },
+    { items: [{ status: 'RUNNING', createdAtUtc: '2026-07-27T08:00:01Z' }] },
+    { items: [{ status: 'SUCCESS', createdAtUtc: '2026-07-27T08:00:01Z', rowCounts: { hourly: 72 } }] },
+  ]
+  let active = 0
+  let maximumActive = 0
+  let waits = 0
+  const request = async (path) => {
+    active++
+    maximumActive = Math.max(maximumActive, active)
+    assert.equal(new URL(path, 'https://example.test').searchParams.get('taskKind'), 'MANUAL')
+    const current = responses.shift()
+    active--
+    return { ok: true, status: 200, data: { code: 0, data: {
+      items: current.items.map((item, index) => ({
+        runUuid: `run-${responses.length}-${index}`,
+        provider: 'CAIYUN',
+        endpointKind: 'v26_weather',
+        taskKind: 'MANUAL',
+        requestedHourlySteps: 72,
+        requestedDailySteps: 7,
+        attemptCount: 1,
+        durationMs: 100,
+        rowCounts: {},
+        parseWarnings: [],
+        createdAtLocal: '2026-07-27T16:00:01+08:00',
+        updatedAtUtc: '2026-07-27T08:00:02Z',
+        updatedAtLocal: '2026-07-27T16:00:02+08:00',
+        ...item,
+      })),
+      meta: { timeZone: 'Asia/Shanghai' },
+      pagination: { pageSize: 10 },
+    } } }
+  }
+  const result = await pollMallWeatherFetchRun(request, 7, requestedAt, 'MANUAL', {
+    maxAttempts: 5,
+    now: () => new Date('2026-07-27T08:02:00Z'),
+    wait: async () => { waits++ },
+  })
+  assert.equal(result.kind, 'terminal')
+  assert.equal(result.run.status, 'SUCCESS')
+  assert.equal(result.run.rowCounts.hourly, 72)
+  assert.equal(waits, 2)
+  assert.equal(maximumActive, 1)
+})
+
+test('ignores old terminal runs and stops polling on timeout or cancellation', async () => {
+  const oldRunResponse = { ok: true, status: 200, data: { code: 0, data: {
+    items: [{
+      runUuid: 'old-run',
+      provider: 'CAIYUN',
+      endpointKind: 'v26_weather',
+      taskKind: 'MANUAL',
+      requestedHourlySteps: 72,
+      requestedDailySteps: 7,
+      attemptCount: 1,
+      status: 'SUCCESS',
+      durationMs: 100,
+      rowCounts: { hourly: 72 },
+      parseWarnings: [],
+      createdAtUtc: '2026-07-27T07:59:59Z',
+      createdAtLocal: '2026-07-27T15:59:59+08:00',
+      updatedAtUtc: '2026-07-27T08:00:00Z',
+      updatedAtLocal: '2026-07-27T16:00:00+08:00',
+    }],
+    meta: { timeZone: 'Asia/Shanghai' },
+    pagination: { pageSize: 10 },
+  } } }
+  const timedOut = await pollMallWeatherFetchRun(async () => oldRunResponse, 7, '2026-07-27T08:00:00Z', 'MANUAL', {
+    maxAttempts: 2,
+    now: () => new Date('2026-07-27T08:02:00Z'),
+    wait: async () => {},
+  })
+  assert.deepEqual(timedOut, { kind: 'timed_out' })
+
+  const controller = new AbortController()
+  controller.abort()
+  const cancelled = await pollMallWeatherFetchRun(async () => oldRunResponse, 7, '2026-07-27T08:00:00Z', 'MANUAL', {
+    signal: controller.signal,
+  })
+  assert.deepEqual(cancelled, { kind: 'cancelled' })
 })
 
 test('formats weather statuses, conditions, metrics, and chart points', () => {

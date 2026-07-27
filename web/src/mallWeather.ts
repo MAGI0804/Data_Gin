@@ -476,6 +476,25 @@ export type MallWeatherFetchRunsResult = {
   pagination: { pageSize: number; nextCursor: string }
 }
 
+export type MallWeatherFetchRunPollResult =
+  | { kind: 'terminal'; run: MallWeatherFetchRun }
+  | { kind: 'timed_out' }
+  | { kind: 'cancelled' }
+  | { kind: 'query_error'; status: number }
+
+type MallWeatherFetchRunRequester = (
+  path: string,
+  options: { method: 'GET'; showResult: false; silentLoading: true; signal?: AbortSignal },
+) => Promise<{ ok: boolean; status: number; data: unknown }>
+
+type MallWeatherFetchRunPollOptions = {
+  maxAttempts?: number
+  intervalMs?: number
+  signal?: AbortSignal
+  now?: () => Date
+  wait?: (intervalMs: number, signal?: AbortSignal) => Promise<void>
+}
+
 type JsonRecord = Record<string, unknown>
 type RefreshStorage = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>
 type OnboardingStorage = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>
@@ -1415,6 +1434,62 @@ export function parseMallWeatherFetchRuns(payload: unknown): MallWeatherFetchRun
 
 export function mallWeatherFetchRunTerminal(status: string) {
   return ['SUCCESS', 'PARTIAL_SUCCESS', 'FAILED', 'CANCELLED'].includes(status.trim().toUpperCase())
+}
+
+export async function pollMallWeatherFetchRun(
+  request: MallWeatherFetchRunRequester,
+  mallID: number,
+  requestedAt: string,
+  taskKind: MallWeatherFetchRunTaskKind,
+  options: MallWeatherFetchRunPollOptions = {},
+): Promise<MallWeatherFetchRunPollResult> {
+  const requestedAtMS = Date.parse(requestedAt)
+  const maxAttempts = options.maxAttempts ?? 30
+  const intervalMs = options.intervalMs ?? 2_000
+  const now = options.now ?? (() => new Date())
+  const wait = options.wait ?? waitForMallWeatherPoll
+  if (!Number.isFinite(requestedAtMS) || !Number.isSafeInteger(maxAttempts) || maxAttempts < 1 || maxAttempts > 120 ||
+    !Number.isFinite(intervalMs) || intervalMs < 0 || intervalMs > 60_000) {
+    throw new Error('invalid weather fetch run poll')
+  }
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    if (options.signal?.aborted) return { kind: 'cancelled' }
+    const currentTime = now()
+    const endMS = Math.max(currentTime.getTime() + 5 * 60 * 1000, requestedAtMS + 60 * 1000)
+    const startMS = Math.max(requestedAtMS, endMS - 24 * 60 * 60 * 1000)
+    const response = await request(mallWeatherFetchRunsPath(mallID, new Date(startMS), new Date(endMS), taskKind), {
+      method: 'GET',
+      showResult: false,
+      silentLoading: true,
+      signal: options.signal,
+    })
+    if (options.signal?.aborted) return { kind: 'cancelled' }
+    if (!response.ok) return { kind: 'query_error', status: response.status }
+    const parsed = parseMallWeatherFetchRuns(response.data)
+    if (!parsed) return { kind: 'query_error', status: response.status }
+    const run = parsed.items
+      .filter((item) => item.taskKind === taskKind && Date.parse(item.createdAtUtc) >= requestedAtMS)
+      .sort((left, right) => Date.parse(right.createdAtUtc) - Date.parse(left.createdAtUtc))[0]
+    if (run && mallWeatherFetchRunTerminal(run.status)) return { kind: 'terminal', run }
+    if (attempt + 1 < maxAttempts) await wait(intervalMs, options.signal)
+  }
+  return options.signal?.aborted ? { kind: 'cancelled' } : { kind: 'timed_out' }
+}
+
+function waitForMallWeatherPoll(intervalMs: number, signal?: AbortSignal) {
+  return new Promise<void>((resolve) => {
+    if (signal?.aborted || intervalMs === 0) {
+      resolve()
+      return
+    }
+    const finish = () => {
+      globalThis.clearTimeout(timer)
+      signal?.removeEventListener('abort', finish)
+      resolve()
+    }
+    const timer = globalThis.setTimeout(finish, intervalMs)
+    signal?.addEventListener('abort', finish, { once: true })
+  })
 }
 
 export function mallWeatherRefreshDisposition(
