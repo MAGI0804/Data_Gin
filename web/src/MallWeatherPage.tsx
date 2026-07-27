@@ -970,6 +970,10 @@ function WeatherOverview({ mall, overview, refreshing, onRefresh }: { mall: Mall
                 <MetaItem label="体感" value={mallWeatherMetric(realtime.apparentTemperatureC, '°C')} />
                 <MetaItem label="湿度" value={mallWeatherMetric(realtime.humidityPct, '%', 0)} />
                 <MetaItem label="风速" value={mallWeatherMetric(realtime.windSpeedKph, ' km/h')} />
+                <MetaItem label="风向" value={mallWeatherMetric(realtime.windDirectionDeg, '°', 0)} />
+                <MetaItem label="气压" value={mallWeatherMetric(realtime.pressurePa, ' Pa', 0)} />
+                <MetaItem label="云量" value={weatherRatioPercent(realtime.cloudrateRatio)} />
+                <MetaItem label="短波辐射" value={mallWeatherMetric(realtime.dswrfWM2, ' W/m²')} />
                 <MetaItem label="能见度" value={mallWeatherMetric(realtime.visibilityKm, ' km')} />
                 <MetaItem label="本地降水" value={mallWeatherMetric(realtime.localPrecipitationMmH, ' mm/h')} />
                 <MetaItem label="本地降水状态" value={[realtime.localPrecipitationStatus, realtime.localPrecipitationSource].filter(Boolean).join(' · ') || '暂无'} />
@@ -977,6 +981,8 @@ function WeatherOverview({ mall, overview, refreshing, onRefresh }: { mall: Mall
                   ? realtime.nearestPrecipitationStatus || '暂无'
                   : `${mallWeatherMetric(realtime.nearestPrecipitationDistanceKm, ' km')} · ${mallWeatherMetric(realtime.nearestPrecipitationMmH, ' mm/h')}`} />
                 <MetaItem label="质量" value={`${realtime.qualityStatus || '未知'}${realtime.qualityWarnings.length ? ` · ${realtime.qualityWarnings.length} 项告警` : ''}`} />
+                <MetaItem label="舒适度" value={[realtime.comfortIndex, realtime.comfortDescription].filter((value) => value !== undefined && value !== '').join(' · ') || '暂无'} />
+                <MetaItem label="紫外线" value={[realtime.ultravioletIndex, realtime.ultravioletDescription].filter((value) => value !== undefined && value !== '').join(' · ') || '暂无'} />
               </div>
               <p className="mall-weather-caption">供应商时间 {realtime.providerServerTimeLocal || '—'} · 采集时间 {realtime.fetchedAtLocal || '—'}</p>
             </>
@@ -993,6 +999,7 @@ function WeatherOverview({ mall, overview, refreshing, onRefresh }: { mall: Mall
             <MetaItem label="NO₂" value={mallWeatherMetric(realtime?.no2UgM3, ' μg/m³')} />
             <MetaItem label="SO₂" value={mallWeatherMetric(realtime?.so2UgM3, ' μg/m³')} />
             <MetaItem label="CO" value={mallWeatherMetric(realtime?.coMgM3, ' mg/m³')} />
+            <MetaItem label="美国 AQI" value={`${mallWeatherMetric(realtime?.aqiUsa, '', 0)}${realtime?.aqiDescriptionUsa ? ` · ${realtime.aqiDescriptionUsa}` : ''}`} />
           </div>
         </article>
       </section>
@@ -1023,6 +1030,8 @@ function WeatherOverview({ mall, overview, refreshing, onRefresh }: { mall: Mall
                 <div><strong>{alert.title}</strong><span>{[alert.alertTypeName, alert.alertLevelName].filter(Boolean).join(' · ') || alert.status}</span></div>
                 {alert.description && <p>{alert.description}</p>}
                 <small>{alert.source || '预警发布机构'} · {alert.publishedAtLocal || '发布时间未知'}</small>
+                <small>{[alert.code, alert.location, alert.adcode].filter(Boolean).join(' · ') || '区域信息未提供'}</small>
+                <small>首次发现 {alert.firstSeenAtLocal || '—'} · 最近发现 {alert.lastSeenAtLocal || '—'}</small>
               </article>
             ))}
           </div>
@@ -1030,6 +1039,10 @@ function WeatherOverview({ mall, overview, refreshing, onRefresh }: { mall: Mall
       </section>
     </div>
   )
+}
+
+function weatherRatioPercent(value: number | undefined) {
+  return mallWeatherMetric(value === undefined ? undefined : value * 100, '%', 0)
 }
 
 function WeatherChart({ title, detail, unit, icon, series }: { title: string; detail: string; unit: string; icon: ReactNode; series: Array<{ time: string; value?: number }> }) {

@@ -292,8 +292,11 @@ test('preserves local and nearest precipitation details from realtime data', () 
   const overview = parseMallWeatherOverview({ code: 0, data: {
     meta: { provider: 'caiyun', freshnessStatus: 'FRESH' },
     realtime: {
+      pressurePa: 100123, windDirectionDeg: 165, cloudrateRatio: 0.7, dswrfWM2: 544,
       localPrecipitationStatus: 'ok', localPrecipitationMmH: 0.4, localPrecipitationSource: 'radar',
       nearestPrecipitationStatus: 'ok', nearestPrecipitationDistanceKm: 0.8, nearestPrecipitationMmH: 1.2,
+      aqiUsa: 48, aqiDescriptionUsa: '良', comfortIndex: 5, comfortDescription: '闷热',
+      ultravioletIndex: 4, ultravioletDescription: '强',
       qualityStatus: 'VALID', qualityWarnings: [],
     },
     minutely: [], hourly: [], alerts: [],
@@ -304,6 +307,10 @@ test('preserves local and nearest precipitation details from realtime data', () 
   assert.equal(overview?.realtime?.nearestPrecipitationStatus, 'ok')
   assert.equal(overview?.realtime?.nearestPrecipitationDistanceKm, 0.8)
   assert.equal(overview?.realtime?.nearestPrecipitationMmH, 1.2)
+  assert.equal(overview?.realtime?.pressurePa, 100123)
+  assert.equal(overview?.realtime?.aqiUsa, 48)
+  assert.equal(overview?.realtime?.comfortDescription, '闷热')
+  assert.equal(overview?.realtime?.ultravioletDescription, '强')
 })
 
 test('builds encoded weather overview paths and rejects invalid mall ids', () => {
@@ -345,8 +352,21 @@ test('builds bounded complete-series paths and parses paged forecast contracts',
   assert.equal(minutely?.items[0].probabilityPct, 65)
   assert.equal(minutely?.items[0].forecastKeypoint, '十分钟后雨势减弱')
   assert.equal(minutely?.pagination.nextCursor, 'minutely-next')
-  const daily = parseMallWeatherDailyPage(pageEnvelope([{ forecastDateLocal: '2026-07-22', ...completeWeatherTimes, temperatureMinC: 24, temperatureMaxC: 32, daySkycon: 'CLEAR_DAY', qualityStatus: 'VALID', qualityWarnings: [] }]))
+  const daily = parseMallWeatherDailyPage(pageEnvelope([{
+    forecastDateLocal: '2026-07-22', ...completeWeatherTimes,
+    temperatureMinC: 24, temperatureMaxC: 32, temperatureAvgC: 28,
+    dayTemperatureMaxC: 32, nightTemperatureMinC: 24,
+    precipitationMaxMmH: 1.2, dayPrecipitationProbabilityPct: 60, nightPrecipitationProbabilityPct: 20,
+    windMaxSpeedKph: 18, windMaxDirectionDeg: 180, humidityAvgPct: 72, cloudrateAvgRatio: 0.65,
+    pressureAvgPa: 100800, visibilityMinKm: 8, dswrfMaxWM2: 600, pm25AvgUgM3: 18,
+    aqiMaxChn: 72, aqiAvgUsa: 51, skycon: 'PARTLY_CLOUDY_DAY', daySkycon: 'CLEAR_DAY', nightSkycon: 'CLOUDY',
+    sunriseLocalTime: '05:08', sunsetLocalTime: '18:52', qualityStatus: 'VALID', qualityWarnings: [],
+  }]))
   assert.equal(daily?.items[0].temperatureMaxC, 32)
+  assert.equal(daily?.items[0].nightTemperatureMinC, 24)
+  assert.equal(daily?.items[0].dayPrecipitationProbabilityPct, 60)
+  assert.equal(daily?.items[0].cloudrateAvgRatio, 0.65)
+  assert.equal(daily?.items[0].aqiAvgUsa, 51)
   const life = parseMallWeatherLifeIndexPage(pageEnvelope([{ sourceApi: 'v3_lifeindex', forecastDateLocal: '2026-07-22', indexType: 1, indexCode: 'comfort', isUnknownType: false, ...completeWeatherTimes, qualityStatus: 'VALID', qualityWarnings: [] }]))
   assert.equal(life?.items[0].indexCode, 'comfort')
   assert.equal(parseMallWeatherHourlyPage(pageEnvelope([{ ...hourlyItem(2), forecastTimeLocal: 'bad' }])), null)

@@ -171,7 +171,11 @@ export type MallWeatherRealtime = {
   temperatureC?: number
   apparentTemperatureC?: number
   humidityPct?: number
+  pressurePa?: number
   windSpeedKph?: number
+  windDirectionDeg?: number
+  cloudrateRatio?: number
+  dswrfWM2?: number
   localPrecipitationStatus?: string
   localPrecipitationMmH?: number
   localPrecipitationSource?: string
@@ -187,7 +191,13 @@ export type MallWeatherRealtime = {
   no2UgM3?: number
   coMgM3?: number
   aqiChn?: number
+  aqiUsa?: number
   aqiDescriptionChn?: string
+  aqiDescriptionUsa?: string
+  comfortIndex?: number
+  comfortDescription?: string
+  ultravioletIndex?: number
+  ultravioletDescription?: string
   qualityStatus: string
   qualityWarnings: MallWeatherWarning[]
 }
@@ -242,10 +252,24 @@ export type MallWeatherAlert = {
   status: string
   title: string
   description?: string
+  code?: string
+  alertTypeCode?: string
+  alertLevelCode?: string
   alertTypeName?: string
   alertLevelName?: string
   publishedAtLocal?: string
   source?: string
+  province?: string
+  city?: string
+  county?: string
+  location?: string
+  regionId?: string
+  adcode?: string
+  latitude?: number
+  longitude?: number
+  firstSeenAtLocal?: string
+  lastSeenAtLocal?: string
+  endedAtLocal?: string
   qualityStatus: string
   qualityWarnings: MallWeatherWarning[]
 }
@@ -267,8 +291,67 @@ export type MallWeatherDaily = {
   temperatureMaxC?: number
   temperatureMinC?: number
   temperatureAvgC?: number
+  dayTemperatureMaxC?: number
+  dayTemperatureMinC?: number
+  dayTemperatureAvgC?: number
+  nightTemperatureMaxC?: number
+  nightTemperatureMinC?: number
+  nightTemperatureAvgC?: number
+  precipitationMaxMmH?: number
+  precipitationMinMmH?: number
+  precipitationAvgMmH?: number
   precipitationProbabilityPct?: number
+  dayPrecipitationMaxMmH?: number
+  dayPrecipitationMinMmH?: number
+  dayPrecipitationAvgMmH?: number
+  dayPrecipitationProbabilityPct?: number
+  nightPrecipitationMaxMmH?: number
+  nightPrecipitationMinMmH?: number
+  nightPrecipitationAvgMmH?: number
+  nightPrecipitationProbabilityPct?: number
   windMaxSpeedKph?: number
+  windMaxDirectionDeg?: number
+  windMinSpeedKph?: number
+  windMinDirectionDeg?: number
+  windAvgSpeedKph?: number
+  windAvgDirectionDeg?: number
+  dayWindMaxSpeedKph?: number
+  dayWindMaxDirectionDeg?: number
+  dayWindMinSpeedKph?: number
+  dayWindMinDirectionDeg?: number
+  dayWindAvgSpeedKph?: number
+  dayWindAvgDirectionDeg?: number
+  nightWindMaxSpeedKph?: number
+  nightWindMaxDirectionDeg?: number
+  nightWindMinSpeedKph?: number
+  nightWindMinDirectionDeg?: number
+  nightWindAvgSpeedKph?: number
+  nightWindAvgDirectionDeg?: number
+  humidityMaxPct?: number
+  humidityMinPct?: number
+  humidityAvgPct?: number
+  cloudrateMaxRatio?: number
+  cloudrateMinRatio?: number
+  cloudrateAvgRatio?: number
+  pressureMaxPa?: number
+  pressureMinPa?: number
+  pressureAvgPa?: number
+  visibilityMaxKm?: number
+  visibilityMinKm?: number
+  visibilityAvgKm?: number
+  dswrfMaxWM2?: number
+  dswrfMinWM2?: number
+  dswrfAvgWM2?: number
+  pm25MaxUgM3?: number
+  pm25MinUgM3?: number
+  pm25AvgUgM3?: number
+  aqiMaxChn?: number
+  aqiMinChn?: number
+  aqiAvgChn?: number
+  aqiMaxUsa?: number
+  aqiMinUsa?: number
+  aqiAvgUsa?: number
+  skycon: string
   daySkycon: string
   nightSkycon: string
   sunriseLocalTime: string
@@ -506,7 +589,11 @@ function mallWeatherRealtime(record: JsonRecord): MallWeatherRealtime {
     temperatureC: numberValue(record, 'temperatureC'),
     apparentTemperatureC: numberValue(record, 'apparentTemperatureC'),
     humidityPct: numberValue(record, 'humidityPct'),
+    pressurePa: numberValue(record, 'pressurePa'),
     windSpeedKph: numberValue(record, 'windSpeedKph'),
+    windDirectionDeg: numberValue(record, 'windDirectionDeg'),
+    cloudrateRatio: numberValue(record, 'cloudrateRatio'),
+    dswrfWM2: numberValue(record, 'dswrfWM2'),
     localPrecipitationStatus: textValue(record, 'localPrecipitationStatus'),
     localPrecipitationMmH: numberValue(record, 'localPrecipitationMmH'),
     localPrecipitationSource: textValue(record, 'localPrecipitationSource'),
@@ -522,7 +609,13 @@ function mallWeatherRealtime(record: JsonRecord): MallWeatherRealtime {
     no2UgM3: numberValue(record, 'no2UgM3'),
     coMgM3: numberValue(record, 'coMgM3'),
     aqiChn: numberValue(record, 'aqiChn'),
+    aqiUsa: numberValue(record, 'aqiUsa'),
     aqiDescriptionChn: textValue(record, 'aqiDescriptionChn'),
+    aqiDescriptionUsa: textValue(record, 'aqiDescriptionUsa'),
+    comfortIndex: numberValue(record, 'comfortIndex'),
+    comfortDescription: textValue(record, 'comfortDescription'),
+    ultravioletIndex: numberValue(record, 'ultravioletIndex'),
+    ultravioletDescription: textValue(record, 'ultravioletDescription'),
     qualityStatus: textValue(record, 'qualityStatus'),
     qualityWarnings: warningValues(record.qualityWarnings),
   }
@@ -583,10 +676,24 @@ function mallWeatherAlert(record: JsonRecord): MallWeatherAlert {
     status: textValue(record, 'status'),
     title: textValue(record, 'title'),
     description: textValue(record, 'description'),
+    code: textValue(record, 'code'),
+    alertTypeCode: textValue(record, 'alertTypeCode'),
+    alertLevelCode: textValue(record, 'alertLevelCode'),
     alertTypeName: textValue(record, 'alertTypeName'),
     alertLevelName: textValue(record, 'alertLevelName'),
     publishedAtLocal: textValue(record, 'publishedAtLocal'),
     source: textValue(record, 'source'),
+    province: textValue(record, 'province'),
+    city: textValue(record, 'city'),
+    county: textValue(record, 'county'),
+    location: textValue(record, 'location'),
+    regionId: textValue(record, 'regionId'),
+    adcode: textValue(record, 'adcode'),
+    latitude: numberValue(record, 'latitude'),
+    longitude: numberValue(record, 'longitude'),
+    firstSeenAtLocal: textValue(record, 'firstSeenAtLocal'),
+    lastSeenAtLocal: textValue(record, 'lastSeenAtLocal'),
+    endedAtLocal: textValue(record, 'endedAtLocal'),
     qualityStatus: textValue(record, 'qualityStatus'),
     qualityWarnings: warningValues(record.qualityWarnings),
   }
@@ -1008,7 +1115,21 @@ export function parseMallWeatherDailyPage(payload: unknown): MallWeatherPageResu
   const items: MallWeatherDaily[] = []
   for (const item of page.data.items as unknown[]) {
     if (!isRecord(item) || !isISODate(item.forecastDateLocal) || !isRFC3339(item.issuedAtUtc) || !isRFC3339(item.issuedAtLocal) ||
-      !isRFC3339(item.fetchedAtUtc) || !isRFC3339(item.fetchedAtLocal) || typeof item.qualityStatus !== 'string' || !item.qualityStatus.trim()) return null
+      !isRFC3339(item.fetchedAtUtc) || !isRFC3339(item.fetchedAtLocal) || typeof item.qualityStatus !== 'string' || !item.qualityStatus.trim() ||
+      !hasOnlyOptionalFiniteNumbers(item, [
+        'temperatureMaxC', 'temperatureMinC', 'temperatureAvgC', 'dayTemperatureMaxC', 'dayTemperatureMinC', 'dayTemperatureAvgC',
+        'nightTemperatureMaxC', 'nightTemperatureMinC', 'nightTemperatureAvgC', 'precipitationMaxMmH', 'precipitationMinMmH',
+        'precipitationAvgMmH', 'precipitationProbabilityPct', 'dayPrecipitationMaxMmH', 'dayPrecipitationMinMmH',
+        'dayPrecipitationAvgMmH', 'dayPrecipitationProbabilityPct', 'nightPrecipitationMaxMmH', 'nightPrecipitationMinMmH',
+        'nightPrecipitationAvgMmH', 'nightPrecipitationProbabilityPct', 'windMaxSpeedKph', 'windMaxDirectionDeg',
+        'windMinSpeedKph', 'windMinDirectionDeg', 'windAvgSpeedKph', 'windAvgDirectionDeg', 'dayWindMaxSpeedKph',
+        'dayWindMaxDirectionDeg', 'dayWindMinSpeedKph', 'dayWindMinDirectionDeg', 'dayWindAvgSpeedKph', 'dayWindAvgDirectionDeg',
+        'nightWindMaxSpeedKph', 'nightWindMaxDirectionDeg', 'nightWindMinSpeedKph', 'nightWindMinDirectionDeg',
+        'nightWindAvgSpeedKph', 'nightWindAvgDirectionDeg', 'humidityMaxPct', 'humidityMinPct', 'humidityAvgPct',
+        'cloudrateMaxRatio', 'cloudrateMinRatio', 'cloudrateAvgRatio', 'pressureMaxPa', 'pressureMinPa', 'pressureAvgPa',
+        'visibilityMaxKm', 'visibilityMinKm', 'visibilityAvgKm', 'dswrfMaxWM2', 'dswrfMinWM2', 'dswrfAvgWM2',
+        'pm25MaxUgM3', 'pm25MinUgM3', 'pm25AvgUgM3', 'aqiMaxChn', 'aqiMinChn', 'aqiAvgChn', 'aqiMaxUsa', 'aqiMinUsa', 'aqiAvgUsa',
+      ]) || !hasOnlyOptionalStrings(item, ['skycon', 'daySkycon', 'nightSkycon', 'sunriseLocalTime', 'sunsetLocalTime'])) return null
     const warnings = strictWarningValues(item.qualityWarnings)
     if (!warnings) return null
     items.push({
@@ -1020,8 +1141,67 @@ export function parseMallWeatherDailyPage(payload: unknown): MallWeatherPageResu
       temperatureMaxC: numberValue(item, 'temperatureMaxC'),
       temperatureMinC: numberValue(item, 'temperatureMinC'),
       temperatureAvgC: numberValue(item, 'temperatureAvgC'),
+      dayTemperatureMaxC: numberValue(item, 'dayTemperatureMaxC'),
+      dayTemperatureMinC: numberValue(item, 'dayTemperatureMinC'),
+      dayTemperatureAvgC: numberValue(item, 'dayTemperatureAvgC'),
+      nightTemperatureMaxC: numberValue(item, 'nightTemperatureMaxC'),
+      nightTemperatureMinC: numberValue(item, 'nightTemperatureMinC'),
+      nightTemperatureAvgC: numberValue(item, 'nightTemperatureAvgC'),
+      precipitationMaxMmH: numberValue(item, 'precipitationMaxMmH'),
+      precipitationMinMmH: numberValue(item, 'precipitationMinMmH'),
+      precipitationAvgMmH: numberValue(item, 'precipitationAvgMmH'),
       precipitationProbabilityPct: numberValue(item, 'precipitationProbabilityPct'),
+      dayPrecipitationMaxMmH: numberValue(item, 'dayPrecipitationMaxMmH'),
+      dayPrecipitationMinMmH: numberValue(item, 'dayPrecipitationMinMmH'),
+      dayPrecipitationAvgMmH: numberValue(item, 'dayPrecipitationAvgMmH'),
+      dayPrecipitationProbabilityPct: numberValue(item, 'dayPrecipitationProbabilityPct'),
+      nightPrecipitationMaxMmH: numberValue(item, 'nightPrecipitationMaxMmH'),
+      nightPrecipitationMinMmH: numberValue(item, 'nightPrecipitationMinMmH'),
+      nightPrecipitationAvgMmH: numberValue(item, 'nightPrecipitationAvgMmH'),
+      nightPrecipitationProbabilityPct: numberValue(item, 'nightPrecipitationProbabilityPct'),
       windMaxSpeedKph: numberValue(item, 'windMaxSpeedKph'),
+      windMaxDirectionDeg: numberValue(item, 'windMaxDirectionDeg'),
+      windMinSpeedKph: numberValue(item, 'windMinSpeedKph'),
+      windMinDirectionDeg: numberValue(item, 'windMinDirectionDeg'),
+      windAvgSpeedKph: numberValue(item, 'windAvgSpeedKph'),
+      windAvgDirectionDeg: numberValue(item, 'windAvgDirectionDeg'),
+      dayWindMaxSpeedKph: numberValue(item, 'dayWindMaxSpeedKph'),
+      dayWindMaxDirectionDeg: numberValue(item, 'dayWindMaxDirectionDeg'),
+      dayWindMinSpeedKph: numberValue(item, 'dayWindMinSpeedKph'),
+      dayWindMinDirectionDeg: numberValue(item, 'dayWindMinDirectionDeg'),
+      dayWindAvgSpeedKph: numberValue(item, 'dayWindAvgSpeedKph'),
+      dayWindAvgDirectionDeg: numberValue(item, 'dayWindAvgDirectionDeg'),
+      nightWindMaxSpeedKph: numberValue(item, 'nightWindMaxSpeedKph'),
+      nightWindMaxDirectionDeg: numberValue(item, 'nightWindMaxDirectionDeg'),
+      nightWindMinSpeedKph: numberValue(item, 'nightWindMinSpeedKph'),
+      nightWindMinDirectionDeg: numberValue(item, 'nightWindMinDirectionDeg'),
+      nightWindAvgSpeedKph: numberValue(item, 'nightWindAvgSpeedKph'),
+      nightWindAvgDirectionDeg: numberValue(item, 'nightWindAvgDirectionDeg'),
+      humidityMaxPct: numberValue(item, 'humidityMaxPct'),
+      humidityMinPct: numberValue(item, 'humidityMinPct'),
+      humidityAvgPct: numberValue(item, 'humidityAvgPct'),
+      cloudrateMaxRatio: numberValue(item, 'cloudrateMaxRatio'),
+      cloudrateMinRatio: numberValue(item, 'cloudrateMinRatio'),
+      cloudrateAvgRatio: numberValue(item, 'cloudrateAvgRatio'),
+      pressureMaxPa: numberValue(item, 'pressureMaxPa'),
+      pressureMinPa: numberValue(item, 'pressureMinPa'),
+      pressureAvgPa: numberValue(item, 'pressureAvgPa'),
+      visibilityMaxKm: numberValue(item, 'visibilityMaxKm'),
+      visibilityMinKm: numberValue(item, 'visibilityMinKm'),
+      visibilityAvgKm: numberValue(item, 'visibilityAvgKm'),
+      dswrfMaxWM2: numberValue(item, 'dswrfMaxWM2'),
+      dswrfMinWM2: numberValue(item, 'dswrfMinWM2'),
+      dswrfAvgWM2: numberValue(item, 'dswrfAvgWM2'),
+      pm25MaxUgM3: numberValue(item, 'pm25MaxUgM3'),
+      pm25MinUgM3: numberValue(item, 'pm25MinUgM3'),
+      pm25AvgUgM3: numberValue(item, 'pm25AvgUgM3'),
+      aqiMaxChn: numberValue(item, 'aqiMaxChn'),
+      aqiMinChn: numberValue(item, 'aqiMinChn'),
+      aqiAvgChn: numberValue(item, 'aqiAvgChn'),
+      aqiMaxUsa: numberValue(item, 'aqiMaxUsa'),
+      aqiMinUsa: numberValue(item, 'aqiMinUsa'),
+      aqiAvgUsa: numberValue(item, 'aqiAvgUsa'),
+      skycon: textValue(item, 'skycon'),
       daySkycon: textValue(item, 'daySkycon'),
       nightSkycon: textValue(item, 'nightSkycon'),
       sunriseLocalTime: textValue(item, 'sunriseLocalTime'),
