@@ -1161,6 +1161,30 @@ export function parseMallWeatherOverview(payload: unknown): MallWeatherOverview 
   }
 }
 
+export function mallWeatherOverviewHasHourlyTemperature(
+  overview: Pick<MallWeatherOverview, 'hourly'>,
+) {
+  return overview.hourly.some((item) =>
+    typeof item.temperatureC === 'number' && Number.isFinite(item.temperatureC))
+}
+
+export type MallWeatherOverviewReadiness = 'ready' | 'waiting-empty' | 'waiting-hourly-temperature'
+
+export function mallWeatherOverviewHasBusinessData(overview: MallWeatherOverview) {
+  return overview.realtime !== null || overview.minutely.length > 0 || overview.hourly.length > 0 ||
+    overview.alerts.length > 0
+}
+
+export function mallWeatherOverviewReadiness(
+  overview: MallWeatherOverview,
+): MallWeatherOverviewReadiness {
+  if (mallWeatherOverviewHasHourlyTemperature(overview)) return 'ready'
+  if (overview.meta.freshnessStatus.trim().toUpperCase() === 'UNAVAILABLE' &&
+    overview.realtime === null && overview.minutely.length === 0 && overview.hourly.length === 0 &&
+    overview.alerts.length === 0) return 'waiting-empty'
+  return 'waiting-hourly-temperature'
+}
+
 function mallWeatherPagination(value: unknown): MallWeatherPageResult<never>['pagination'] | null {
   if (!isRecord(value) || !Number.isSafeInteger(value.pageSize) || Number(value.pageSize) < 1 || Number(value.pageSize) > 200 ||
     (value.nextCursor !== undefined && typeof value.nextCursor !== 'string')) return null

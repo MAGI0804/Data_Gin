@@ -23,6 +23,9 @@ import {
   mallWeatherGeocodeRunTerminal,
   mallWeatherGeocodeTriggerPath,
   mallWeatherMallReady,
+  mallWeatherOverviewHasBusinessData,
+  mallWeatherOverviewHasHourlyTemperature,
+  mallWeatherOverviewReadiness,
   mallWeatherSheetPushKey,
   mallWeatherSheetPushRequest,
   mallWeatherSheetPushRequestMatchesOption,
@@ -53,6 +56,7 @@ import {
   type MallWeatherGeocodeCandidates,
   type MallWeatherMall,
   type MallWeatherOverview,
+  type MallWeatherOverviewReadiness,
   type MallWeatherPendingRefresh,
   type MallWeatherRefreshRequest,
   type MallWeatherFetchRun,
@@ -72,6 +76,10 @@ type MallWeatherApiClient = (
 ) => Promise<MallWeatherApiResult>
 
 type LoadState = 'idle' | 'loading' | 'success' | 'error'
+type OverviewLoadState = LoadState | 'waiting'
+type WeatherOverviewReloadResult = 'ready' | 'waiting' | 'failed' | 'aborted'
+type OverviewWaitingReason = Exclude<MallWeatherOverviewReadiness, 'ready'> | ''
+type OverviewStableState = { mallID: number; state: 'success' | 'waiting'; reason: OverviewWaitingReason }
 
 export function MallWeatherPage({ actorID, client }: { actorID: string | null; client: MallWeatherApiClient }) {
   const [malls, setMalls] = useState<MallWeatherMall[]>([])
@@ -81,10 +89,10 @@ export function MallWeatherPage({ actorID, client }: { actorID: string | null; c
   const [selectedMallID, setSelectedMallID] = useState(0)
   const [overview, setOverview] = useState<MallWeatherOverview | null>(null)
   const [overviewMallID, setOverviewMallID] = useState(0)
-  const [overviewState, setOverviewState] = useState<LoadState>('idle')
+  const [overviewState, setOverviewState] = useState<OverviewLoadState>('idle')
   const [overviewError, setOverviewError] = useState('')
-  const [overviewErrorStatus, setOverviewErrorStatus] = useState(0)
   const [overviewRetryCount, setOverviewRetryCount] = useState(0)
+  const [overviewWaitingReason, setOverviewWaitingReason] = useState<OverviewWaitingReason>('')
   const [weatherReloadVersion, setWeatherReloadVersion] = useState(0)
   const [query, setQuery] = useState('')
   const [city, setCity] = useState('')
@@ -92,7 +100,29 @@ export function MallWeatherPage({ actorID, client }: { actorID: string | null; c
   const mallRequestSequence = useRef(0)
   const overviewRequestSequence = useRef(0)
   const overviewController = useRef<AbortController | null>(null)
+  const overviewSnapshotRef = useRef<MallWeatherOverview | null>(null)
+  const overviewSnapshotMallIDRef = useRef(0)
+  const overviewRetryMallIDRef = useRef(0)
+  const overviewLastStableRef = useRef<OverviewStableState | null>(null)
   const selectedMallIDRef = useRef(0)
+
+  const updateOverviewState = useCallback((state: OverviewLoadState) => {
+    setOverviewState(state)
+  }, [])
+
+  const updateOverviewWaitingReason = useCallback((reason: OverviewWaitingReason) => {
+    setOverviewWaitingReason(reason)
+  }, [])
+
+  const updateOverviewStableState = useCallback((
+    mallID: number,
+    state: OverviewStableState['state'],
+    reason: OverviewWaitingReason,
+  ) => {
+    overviewLastStableRef.current = { mallID, state, reason }
+    setOverviewState(state)
+    setOverviewWaitingReason(reason)
+  }, [])
 
   useEffect(() => {
     selectedMallIDRef.current = selectedMallID
@@ -155,61 +185,121 @@ export function MallWeatherPage({ actorID, client }: { actorID: string | null; c
     return parsed
   }, [client])
 
-  const loadOverview = useCallback(async (mallID: number, externalSignal?: AbortSignal) => {
-    if (!mallID || externalSignal?.aborted) return false
+  const loadOverview = useCallback(async (
+    mallID: number,
+    externalSignal?: AbortSignal,
+  ): Promise<WeatherOverviewReloadResult> => {
+    if (!mallID || externalSignal?.aborted || selectedMallIDRef.current !== mallID) return 'aborted'
+    if (overviewRetryMallIDRef.current !== mallID) {
+      overviewRetryMallIDRef.current = mallID
+      setOverviewRetryCount(0)
+    }
+    const previousStable = overviewLastStableRef.current?.mallID === mallID
+      ? overviewLastStableRef.current
+      : null
     overviewController.current?.abort()
     const controller = new AbortController()
     overviewController.current = controller
     const abortFromExternal = () => controller.abort()
     externalSignal?.addEventListener('abort', abortFromExternal, { once: true })
     const sequence = ++overviewRequestSequence.current
+    const restoreAfterAbort = () => {
+      if (sequence !== overviewRequestSequence.current || selectedMallIDRef.current !== mallID) return
+      if (previousStable) {
+        updateOverviewStableState(mallID, previousStable.state, previousStable.reason)
+        return
+      }
+      const previous = overviewSnapshotMallIDRef.current === mallID ? overviewSnapshotRef.current : null
+      if (!previous) {
+        updateOverviewStableState(mallID, 'waiting', 'waiting-empty')
+        return
+      }
+      const previousReadiness = mallWeatherOverviewReadiness(previous)
+      updateOverviewStableState(
+        mallID,
+        previousReadiness === 'ready' ? 'success' : 'waiting',
+        previousReadiness === 'ready' ? '' : previousReadiness,
+      )
+    }
     try {
-      setOverviewState('loading')
+      updateOverviewState('loading')
       setOverviewError('')
-      setOverviewErrorStatus(0)
       let response: MallWeatherApiResult
       try {
         response = await client(mallWeatherOverviewPath(mallID), {
           method: 'GET', showResult: false, silentLoading: true, signal: controller.signal,
         })
       } catch {
-        if (controller.signal.aborted || sequence !== overviewRequestSequence.current) return false
-        setOverview(null)
-        setOverviewMallID(0)
-        setOverviewState('error')
-        setOverviewErrorStatus(0)
+        if (controller.signal.aborted || sequence !== overviewRequestSequence.current) {
+          restoreAfterAbort()
+          return 'aborted'
+        }
+        updateOverviewState('error')
+        updateOverviewWaitingReason('')
         setOverviewError('天气概览加载异常，请检查网络后重试')
-        return false
+        return 'failed'
       }
-      if (controller.signal.aborted || sequence !== overviewRequestSequence.current) return false
+      if (controller.signal.aborted || sequence !== overviewRequestSequence.current) {
+        restoreAfterAbort()
+        return 'aborted'
+      }
       if (!response.ok) {
-        setOverview(null)
-        setOverviewMallID(0)
-        setOverviewState('error')
-        setOverviewErrorStatus(response.status)
+        if (response.status === 404) {
+          const previous = overviewSnapshotMallIDRef.current === mallID ? overviewSnapshotRef.current : null
+          if (!previous || !mallWeatherOverviewHasBusinessData(previous)) {
+            overviewSnapshotRef.current = null
+            overviewSnapshotMallIDRef.current = 0
+            setOverview(null)
+            setOverviewMallID(0)
+          }
+          updateOverviewStableState(mallID, 'waiting', previous && mallWeatherOverviewHasBusinessData(previous)
+            ? 'waiting-hourly-temperature'
+            : 'waiting-empty')
+          return 'waiting'
+        }
+        updateOverviewState('error')
+        updateOverviewWaitingReason('')
         setOverviewError(weatherRequestError(response.status, '天气概览加载失败', '当前账号缺少 weather.read 权限'))
-        return false
+        return 'failed'
       }
       const parsed = parseMallWeatherOverview(response.data)
       if (!parsed) {
-        setOverview(null)
-        setOverviewMallID(0)
-        setOverviewState('error')
-        setOverviewErrorStatus(response.status)
+        updateOverviewState('error')
+        updateOverviewWaitingReason('')
         setOverviewError('天气概览响应格式不正确，请联系管理员')
-        return false
+        return 'failed'
       }
+      const readiness = mallWeatherOverviewReadiness(parsed)
+      if (readiness !== 'ready') {
+        const previous = overviewSnapshotMallIDRef.current === mallID ? overviewSnapshotRef.current : null
+        const preservePrevious = Boolean(previous && (
+          mallWeatherOverviewReadiness(previous) === 'ready' ||
+          (readiness === 'waiting-empty' && mallWeatherOverviewHasBusinessData(previous))
+        ))
+        if (!preservePrevious) {
+          overviewSnapshotRef.current = parsed
+          overviewSnapshotMallIDRef.current = mallID
+          setOverview(parsed)
+          setOverviewMallID(mallID)
+        }
+        updateOverviewStableState(mallID, 'waiting', preservePrevious && previous && mallWeatherOverviewHasBusinessData(previous)
+          ? 'waiting-hourly-temperature'
+          : readiness)
+        return 'waiting'
+      }
+      overviewSnapshotRef.current = parsed
+      overviewSnapshotMallIDRef.current = mallID
       setOverview(parsed)
       setOverviewMallID(mallID)
-      setOverviewState('success')
+      updateOverviewStableState(mallID, 'success', '')
       setOverviewRetryCount(0)
       setWeatherReloadVersion((current) => current + 1)
-      return true
+      return 'ready'
     } finally {
       externalSignal?.removeEventListener('abort', abortFromExternal)
       if (overviewController.current === controller) overviewController.current = null
     }
-  }, [client])
+  }, [client, updateOverviewStableState, updateOverviewState, updateOverviewWaitingReason])
 
   useEffect(() => {
     void loadMalls()
@@ -223,13 +313,17 @@ export function MallWeatherPage({ actorID, client }: { actorID: string | null; c
     }
     overviewRequestSequence.current++
     overviewController.current?.abort()
+    overviewSnapshotRef.current = null
+    overviewSnapshotMallIDRef.current = 0
+    overviewRetryMallIDRef.current = 0
+    overviewLastStableRef.current = null
     setOverview(null)
     setOverviewMallID(0)
-    setOverviewState('idle')
+    updateOverviewState('idle')
+    updateOverviewWaitingReason('')
     setOverviewError('')
-    setOverviewErrorStatus(0)
     setOverviewRetryCount(0)
-  }, [loadOverview, malls, selectedMallID])
+  }, [loadOverview, malls, selectedMallID, updateOverviewState, updateOverviewWaitingReason])
 
   useEffect(() => () => {
     overviewController.current?.abort()
@@ -238,13 +332,13 @@ export function MallWeatherPage({ actorID, client }: { actorID: string | null; c
 
   useEffect(() => {
     const mall = malls.find((item) => item.id === selectedMallID)
-    if (!mall || !mallWeatherMallReady(mall) || overviewState !== 'error' || overviewErrorStatus !== 404 || overviewRetryCount >= 30) return
+    if (!mall || !mallWeatherMallReady(mall) || overviewState !== 'waiting' || overviewRetryCount >= 30) return
     const timer = window.setTimeout(() => {
       setOverviewRetryCount((current) => current + 1)
       void loadOverview(mall.id)
     }, 2_000)
     return () => window.clearTimeout(timer)
-  }, [loadOverview, malls, overviewErrorStatus, overviewRetryCount, overviewState, selectedMallID])
+  }, [loadOverview, malls, overviewRetryCount, overviewState, selectedMallID])
 
   const cities = useMemo(() => Array.from(new Set(malls.map((mall) => mall.city).filter(Boolean))).sort(), [malls])
   useEffect(() => {
@@ -257,6 +351,9 @@ export function MallWeatherPage({ actorID, client }: { actorID: string | null; c
   const selectedMall = malls.find((mall) => mall.id === selectedMallID)
   const selectedOverview = selectedMallID === overviewMallID ? overview : null
   const selectedMallReady = Boolean(selectedMall && mallWeatherMallReady(selectedMall))
+  const selectedOverviewHourlyReady = Boolean(
+    selectedOverview && mallWeatherOverviewHasHourlyTemperature(selectedOverview),
+  )
 
   const handleMallCreated = useCallback((mall: MallWeatherMall) => {
     setMalls((current) => mergeMallWeatherMalls(current, [mall]))
@@ -358,23 +455,30 @@ export function MallWeatherPage({ actorID, client }: { actorID: string | null; c
           {!showCreate && selectedMallReady && selectedMall && (
             <div id="mall-weather-overview" tabIndex={-1}>
               {overviewState === 'loading' && !selectedOverview && <LoadingState label={`正在加载${selectedMall.nameCn}天气`} />}
-              {overviewState === 'error' && overviewErrorStatus === 404 && overviewRetryCount < 30 &&
-                <LoadingState label={`首次天气采集中，正在等待实况与未来 72 小时数据（${overviewRetryCount + 1}/30）`} />}
-              {overviewState === 'error' && (overviewErrorStatus !== 404 || overviewRetryCount >= 30) &&
+              {selectedOverview && <WeatherOverview mall={selectedMall} overview={selectedOverview} refreshing={overviewState === 'loading'} onRefresh={() => void loadOverview(selectedMall.id)} />}
+              {overviewState === 'error' &&
                 <RequestError
-                  message={overviewErrorStatus === 404
-                    ? '首次采集长时间未生成数据，请确认 MALL_WEATHER_ENABLED=true 且 weather 队列消费进程正在运行。'
-                    : overviewError}
+                  message={overviewError}
                   onRetry={() => { setOverviewRetryCount(0); void loadOverview(selectedMall.id) }}
                 />}
-              {selectedOverview && <WeatherOverview mall={selectedMall} overview={selectedOverview} refreshing={overviewState === 'loading'} onRefresh={() => void loadOverview(selectedMall.id)} />}
+              {overviewState === 'waiting' && overviewRetryCount < 30 &&
+                <LoadingState label={overviewWaitingReason === 'waiting-empty'
+                  ? `首次天气采集中，正在等待实况与未来逐小时数据（${overviewRetryCount + 1}/30）`
+                  : `实况已加载，未来逐小时温度正在同步（${overviewRetryCount + 1}/30）`} />}
+              {overviewState === 'waiting' && overviewRetryCount >= 30 &&
+                <RequestError
+                  message={overviewWaitingReason === 'waiting-empty'
+                    ? '首次采集长时间未生成数据，请确认 MALL_WEATHER_ENABLED=true 且 weather 队列消费进程正在运行。'
+                    : '实况已加载，但未来逐小时温度长时间不可用。请确认天气业务事务已提交，并检查最近采集记录。'}
+                  onRetry={() => { setOverviewRetryCount(0); void loadOverview(selectedMall.id) }}
+                />}
             </div>
           )}
-          {!showCreate && selectedMallReady && selectedMall && selectedOverview && <MallWeatherForecastPanel
+          {!showCreate && selectedMallReady && selectedMall && selectedOverviewHourlyReady && <MallWeatherForecastPanel
             mallID={selectedMall.id}
             timeZone={selectedOverview?.meta.timeZone || 'Asia/Shanghai'}
             client={client}
-            key={`forecast-${selectedMall.id}:${selectedOverview.meta.timeZone || 'Asia/Shanghai'}:${weatherReloadVersion}`}
+            key={`forecast-${selectedMall.id}:${selectedOverview?.meta.timeZone || 'Asia/Shanghai'}:${weatherReloadVersion}`}
           />}
           {!showCreate && selectedMallReady && selectedMall && actorID && <MallWeatherExportPanel
             actorID={actorID}
@@ -934,7 +1038,7 @@ function ManualRefreshPanel({ actorID, mall, client, onWeatherUpdated }: {
   actorID: string
   mall: MallWeatherMall
   client: MallWeatherApiClient
-  onWeatherUpdated: (signal: AbortSignal) => Promise<boolean>
+  onWeatherUpdated: (signal: AbortSignal) => Promise<WeatherOverviewReloadResult>
 }) {
   const [pending, setPending] = useState<MallWeatherPendingRefresh | null>(() => loadMallWeatherPendingRefresh(actorID, mall.id, window.sessionStorage))
   const [reason, setReason] = useState(() => pending?.body.reason || '管理端手工刷新')
@@ -997,10 +1101,15 @@ function ManualRefreshPanel({ actorID, mall, client, onWeatherUpdated }: {
       if (!queued) {
         const reloaded = await onWeatherUpdated(controller.signal)
         if (controller.signal.aborted) return
-        if (!reloaded) {
+        if (reloaded === 'failed') {
           setError('数据仍然新鲜，但页面重新加载失败，请点击“重新加载”重试。')
           return
         }
+        if (reloaded === 'waiting') {
+          setMessage('数据仍然新鲜，页面正在等待未来逐小时温度同步。')
+          return
+        }
+        if (reloaded === 'aborted') return
         setMessage(mallWeatherRefreshResultMessage(disposition.result))
         return
       }
@@ -1032,19 +1141,24 @@ function ManualRefreshPanel({ actorID, mall, client, onWeatherUpdated }: {
         setMessage('')
         return
       }
-      const reloaded = await onWeatherUpdated(controller.signal)
-      if (controller.signal.aborted) return
-      if (!reloaded) {
-        setError('采集已完成，但天气数据重新加载失败，请点击页面上的“重新加载”重试。')
-        setMessage('')
-        return
-      }
       const hourlyRows = pollResult.run.rowCounts.hourly ?? 0
       if (hourlyRows < 1) {
         setError('采集任务已完成，但没有写入未来逐小时数据。请查看任务的解析告警和服务端日志。')
         setMessage('')
         return
       }
+      const reloaded = await onWeatherUpdated(controller.signal)
+      if (controller.signal.aborted) return
+      if (reloaded === 'failed') {
+        setError('采集已完成，但天气数据重新加载失败，请点击页面上的“重新加载”重试。')
+        setMessage('')
+        return
+      }
+      if (reloaded === 'waiting') {
+        setMessage(`采集已完成并写入 ${hourlyRows} 条逐小时数据，页面正在等待温度读模型同步。`)
+        return
+      }
+      if (reloaded === 'aborted') return
       setMessage(`天气已更新并重新加载，共写入 ${hourlyRows} 条未来逐小时数据。`)
     } catch {
       if (controller.signal.aborted) return

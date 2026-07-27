@@ -15,6 +15,9 @@ import {
   mallWeatherForecastQueryWindows,
   mallWeatherFreshnessLabel,
   mallWeatherMetric,
+  mallWeatherOverviewHasBusinessData,
+  mallWeatherOverviewHasHourlyTemperature,
+  mallWeatherOverviewReadiness,
   mallWeatherOverviewPath,
   mallWeatherGeocodeCandidatesPath,
   mallWeatherGeocodeConfirmPath,
@@ -317,6 +320,32 @@ test('keeps overview datasets and normalizes a missing realtime snapshot', () =>
   assert.equal(overview?.realtime, null)
   assert.equal(overview?.minutely[0].precipitationMmH, 0.2)
   assert.equal(overview?.hourly[0].temperatureC, 31)
+})
+
+test('treats an overview as hourly-ready only when it contains a finite temperature', () => {
+  assert.equal(mallWeatherOverviewHasHourlyTemperature({ hourly: [] }), false)
+  assert.equal(mallWeatherOverviewHasHourlyTemperature({ hourly: [{ temperatureC: undefined }] }), false)
+  assert.equal(mallWeatherOverviewHasHourlyTemperature({ hourly: [{ temperatureC: 0 }] }), true)
+})
+
+test('distinguishes an empty initial overview from partial data waiting for hourly temperature', () => {
+  const empty = parseMallWeatherOverview({ code: 0, data: {
+    meta: { provider: 'caiyun', freshnessStatus: 'UNAVAILABLE' },
+    realtime: null, minutely: [], hourly: [], alerts: [],
+  } })
+  const partial = parseMallWeatherOverview({ code: 0, data: {
+    meta: { provider: 'caiyun', freshnessStatus: 'FRESH' },
+    realtime: { temperatureC: 31 }, minutely: [], hourly: [{ forecastTimeLocal: '2026-07-27 10:00:00' }], alerts: [],
+  } })
+  const ready = parseMallWeatherOverview({ code: 0, data: {
+    meta: { provider: 'caiyun', freshnessStatus: 'FRESH' },
+    realtime: null, minutely: [], hourly: [{ forecastTimeLocal: '2026-07-27 10:00:00', temperatureC: 0 }], alerts: [],
+  } })
+  assert.equal(mallWeatherOverviewReadiness(empty), 'waiting-empty')
+  assert.equal(mallWeatherOverviewReadiness(partial), 'waiting-hourly-temperature')
+  assert.equal(mallWeatherOverviewReadiness(ready), 'ready')
+  assert.equal(mallWeatherOverviewHasBusinessData(empty), false)
+  assert.equal(mallWeatherOverviewHasBusinessData(partial), true)
 })
 
 test('preserves local and nearest precipitation details from realtime data', () => {
