@@ -1190,6 +1190,7 @@ summary {
   .content-grid.two,
   .method-groups,
   .excel-action-grid,
+  .excel-action-grid.compact-actions,
   .push-skip-form,
   .push-skip-row,
   .query-bar {
@@ -1260,7 +1261,8 @@ summary {
     flex-direction: column;
   }
 
-  .overview-grid {
+  .overview-grid,
+  .overview-grid.compact {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
@@ -1333,6 +1335,7 @@ summary {
 
 @media (max-width: 480px) {
   .overview-grid,
+  .overview-grid.compact,
   .excel-step-fields,
   .excel-step-filter-row {
     grid-template-columns: 1fr;
