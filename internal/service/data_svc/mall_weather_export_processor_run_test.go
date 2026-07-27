@@ -54,6 +54,9 @@ func TestMallWeatherExportProcessorCompletesOwnedRun(t *testing.T) {
 	if objectStore.uploadedKey != state.succeededKey || objectStore.downloadName == "" {
 		t.Fatalf("object store=%+v", objectStore)
 	}
+	if objectStore.statCalls != 1 || objectStore.statKey != objectStore.uploadedKey {
+		t.Fatalf("object verification=%+v", objectStore)
+	}
 	if _, err := os.Stat(renderedDir); !errors.Is(err, os.ErrNotExist) {
 		t.Fatalf("work directory was not removed: %v", err)
 	}
@@ -381,6 +384,96 @@ func TestMallWeatherExportProcessorClassifiesUploadFailure(t *testing.T) {
 	}
 }
 
+func TestMallWeatherExportProcessorRejectsUnverifiedUpload(t *testing.T) {
+	wrongSize := int64(1)
+	tests := []struct {
+		name          string
+		configure     func(*fakeMallWeatherExportObjectStore)
+		wantError     string
+		wantStatCalls int
+	}{
+		{
+			name: "object missing",
+			configure: func(store *fakeMallWeatherExportObjectStore) {
+				store.statErr = storage.ErrOSSObjectNotFound
+			},
+			wantError:     "object not found",
+			wantStatCalls: 1,
+		},
+		{
+			name: "size mismatch",
+			configure: func(store *fakeMallWeatherExportObjectStore) {
+				store.statSizeOverride = &wrongSize
+			},
+			wantError:     "uploaded object size mismatch",
+			wantStatCalls: 1,
+		},
+		{
+			name: "metadata lookup failure",
+			configure: func(store *fakeMallWeatherExportObjectStore) {
+				store.statErr = errors.New("temporary HEAD failure")
+			},
+			wantError:     "temporary HEAD failure",
+			wantStatCalls: 1,
+		},
+		{
+			name: "object key mismatch",
+			configure: func(store *fakeMallWeatherExportObjectStore) {
+				store.uploadResultKey = "unexpected/result.xlsx"
+			},
+			wantError: "uploaded object key mismatch",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store := newFakeMallWeatherExportRunStore(t)
+			objectStore := &fakeMallWeatherExportObjectStore{}
+			tt.configure(objectStore)
+			processor := newTestMallWeatherExportProcessor(
+				t,
+				store,
+				mallWeatherExportRendererFunc(writeFakeMallWeatherExportArtifact),
+				objectStore,
+				uuid.NewString(),
+			)
+
+			err := processor.Process(t.Context(), 17, true)
+			if err == nil || !strings.Contains(err.Error(), tt.wantError) ||
+				errors.Is(err, ErrMallWeatherExportProcessNonRetryable) {
+				t.Fatalf("Process() error=%v", err)
+			}
+			state := store.snapshot()
+			if state.released != 1 || state.failed != 0 || state.succeededKey != "" ||
+				objectStore.deletedKey != objectStore.uploadedKey || objectStore.statCalls != tt.wantStatCalls {
+				t.Fatalf("store state=%+v object store=%+v", state, objectStore)
+			}
+		})
+	}
+}
+
+func TestMallWeatherExportProcessorBoundsUploadVerification(t *testing.T) {
+	store := newFakeMallWeatherExportRunStore(t)
+	objectStore := &fakeMallWeatherExportObjectStore{waitForStatContext: true}
+	processor := newTestMallWeatherExportProcessor(
+		t,
+		store,
+		mallWeatherExportRendererFunc(writeFakeMallWeatherExportArtifact),
+		objectStore,
+		uuid.NewString(),
+	)
+	processor.objectVerifyTimeout = 5 * time.Millisecond
+
+	err := processor.Process(t.Context(), 17, true)
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("Process() error=%v", err)
+	}
+	state := store.snapshot()
+	if state.released != 1 || state.failed != 0 || state.succeededKey != "" ||
+		objectStore.deletedKey != objectStore.uploadedKey || objectStore.statCalls != 1 {
+		t.Fatalf("store state=%+v object store=%+v", state, objectStore)
+	}
+}
+
 func TestMallWeatherExportProcessorHeartbeatCancelsBlockedRenderer(t *testing.T) {
 	store := newFakeMallWeatherExportRunStore(t)
 	store.heartbeatControl = data_dao.MallWeatherExportRunControlCancelRequested
@@ -639,21 +732,55 @@ func (store *fakeMallWeatherExportRunStore) snapshot() fakeMallWeatherExportRunS
 }
 
 type fakeMallWeatherExportObjectStore struct {
-	uploadedKey  string
-	downloadName string
-	uploadErr    error
-	deletedKey   string
+	uploadedKey        string
+	downloadName       string
+	uploadErr          error
+	uploadResultKey    string
+	uploadedSize       int64
+	statKey            string
+	statCalls          int
+	statErr            error
+	statSizeOverride   *int64
+	waitForStatContext bool
+	deletedKey         string
 }
 
 func (store *fakeMallWeatherExportObjectStore) UploadFile(
 	_ context.Context,
 	objectKey string,
-	_ string,
+	localPath string,
 	downloadName string,
 ) (storage.UploadResult, error) {
 	store.uploadedKey = objectKey
 	store.downloadName = downloadName
-	return storage.UploadResult{ObjectKey: objectKey}, store.uploadErr
+	if info, err := os.Stat(localPath); err == nil {
+		store.uploadedSize = info.Size()
+	}
+	resultKey := objectKey
+	if store.uploadResultKey != "" {
+		resultKey = store.uploadResultKey
+	}
+	return storage.UploadResult{ObjectKey: resultKey}, store.uploadErr
+}
+
+func (store *fakeMallWeatherExportObjectStore) StatDownloadObject(
+	ctx context.Context,
+	objectKey string,
+) (storage.ObjectMetadata, error) {
+	store.statCalls++
+	store.statKey = objectKey
+	if store.waitForStatContext {
+		<-ctx.Done()
+		return storage.ObjectMetadata{}, ctx.Err()
+	}
+	if store.statErr != nil {
+		return storage.ObjectMetadata{}, store.statErr
+	}
+	size := store.uploadedSize
+	if store.statSizeOverride != nil {
+		size = *store.statSizeOverride
+	}
+	return storage.ObjectMetadata{Size: size}, nil
 }
 
 func (store *fakeMallWeatherExportObjectStore) DeleteObject(_ context.Context, objectKey string) error {
@@ -689,17 +816,18 @@ func newTestMallWeatherExportProcessorWithMetrics(
 ) *MallWeatherExportProcessor {
 	t.Helper()
 	return &MallWeatherExportProcessor{
-		runs:              runs,
-		renderer:          renderer,
-		newObjectStore:    func() (mallWeatherExportObjectStore, error) { return objectStore, nil },
-		buildObjectKey:    func(parts ...string) string { return path.Join(parts...) },
-		now:               func() time.Time { return time.Date(2026, 7, 22, 8, 0, 0, 0, time.UTC) },
-		newRunToken:       func() string { return runToken },
-		metrics:           metrics,
-		workRoot:          t.TempDir(),
-		staleAfter:        time.Minute,
-		heartbeatInterval: time.Hour,
-		retention:         7 * 24 * time.Hour,
+		runs:                runs,
+		renderer:            renderer,
+		newObjectStore:      func() (mallWeatherExportObjectStore, error) { return objectStore, nil },
+		buildObjectKey:      func(parts ...string) string { return path.Join(parts...) },
+		now:                 func() time.Time { return time.Date(2026, 7, 22, 8, 0, 0, 0, time.UTC) },
+		newRunToken:         func() string { return runToken },
+		metrics:             metrics,
+		workRoot:            t.TempDir(),
+		staleAfter:          time.Minute,
+		heartbeatInterval:   time.Hour,
+		retention:           7 * 24 * time.Hour,
+		objectVerifyTimeout: time.Second,
 	}
 }
 

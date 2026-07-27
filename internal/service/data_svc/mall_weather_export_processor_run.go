@@ -16,10 +16,11 @@ import (
 )
 
 const (
-	defaultMallWeatherExportRunStaleAfter      = 10 * time.Minute
-	defaultMallWeatherExportHeartbeatInterval  = 30 * time.Second
-	defaultMallWeatherExportRetention          = 7 * 24 * time.Hour
-	defaultMallWeatherExportStateUpdateTimeout = 10 * time.Second
+	defaultMallWeatherExportRunStaleAfter       = 10 * time.Minute
+	defaultMallWeatherExportHeartbeatInterval   = 30 * time.Second
+	defaultMallWeatherExportRetention           = 7 * 24 * time.Hour
+	defaultMallWeatherExportStateUpdateTimeout  = 10 * time.Second
+	defaultMallWeatherExportObjectVerifyTimeout = 10 * time.Second
 )
 
 var (
@@ -54,23 +55,25 @@ type mallWeatherExportWorkbookRenderer interface {
 
 type mallWeatherExportObjectStore interface {
 	UploadFile(context.Context, string, string, string) (storage.UploadResult, error)
+	StatDownloadObject(context.Context, string) (storage.ObjectMetadata, error)
 	DeleteObject(context.Context, string) error
 }
 
 type mallWeatherExportObjectStoreFactory func() (mallWeatherExportObjectStore, error)
 
 type MallWeatherExportProcessor struct {
-	runs              mallWeatherExportRunStore
-	renderer          mallWeatherExportWorkbookRenderer
-	newObjectStore    mallWeatherExportObjectStoreFactory
-	buildObjectKey    func(...string) string
-	now               func() time.Time
-	newRunToken       func() string
-	metrics           mallWeatherMetricRecorder
-	workRoot          string
-	staleAfter        time.Duration
-	heartbeatInterval time.Duration
-	retention         time.Duration
+	runs                mallWeatherExportRunStore
+	renderer            mallWeatherExportWorkbookRenderer
+	newObjectStore      mallWeatherExportObjectStoreFactory
+	buildObjectKey      func(...string) string
+	now                 func() time.Time
+	newRunToken         func() string
+	metrics             mallWeatherMetricRecorder
+	workRoot            string
+	staleAfter          time.Duration
+	heartbeatInterval   time.Duration
+	retention           time.Duration
+	objectVerifyTimeout time.Duration
 }
 
 func NewMallWeatherExportProcessor() *MallWeatherExportProcessor {
@@ -80,14 +83,15 @@ func NewMallWeatherExportProcessor() *MallWeatherExportProcessor {
 		newObjectStore: func() (mallWeatherExportObjectStore, error) {
 			return storage.NewOSSClientFromConfig()
 		},
-		buildObjectKey:    storage.BuildObjectKey,
-		now:               time.Now,
-		newRunToken:       uuid.NewString,
-		metrics:           mallWeatherRuntimeMetrics,
-		workRoot:          excelTempRootDir(),
-		staleAfter:        defaultMallWeatherExportRunStaleAfter,
-		heartbeatInterval: defaultMallWeatherExportHeartbeatInterval,
-		retention:         defaultMallWeatherExportRetention,
+		buildObjectKey:      storage.BuildObjectKey,
+		now:                 time.Now,
+		newRunToken:         uuid.NewString,
+		metrics:             mallWeatherRuntimeMetrics,
+		workRoot:            excelTempRootDir(),
+		staleAfter:          defaultMallWeatherExportRunStaleAfter,
+		heartbeatInterval:   defaultMallWeatherExportHeartbeatInterval,
+		retention:           defaultMallWeatherExportRetention,
+		objectVerifyTimeout: defaultMallWeatherExportObjectVerifyTimeout,
 	}
 }
 
@@ -227,13 +231,22 @@ func (processor *MallWeatherExportProcessor) processOwnedRun(
 	if objectStore == nil && err == nil {
 		err = fmt.Errorf("mall weather export processor: nil object store")
 	}
+	uploadAttempted := false
 	if err == nil {
-		_, err = objectStore.UploadFile(runCtx, objectKey, outputPath, prepared.FileName)
+		uploadAttempted = true
+		var uploadResult storage.UploadResult
+		uploadResult, err = objectStore.UploadFile(runCtx, objectKey, outputPath, prepared.FileName)
+		if err == nil && uploadResult.ObjectKey != objectKey {
+			err = fmt.Errorf("mall weather export processor: uploaded object key mismatch")
+		}
+		if err == nil {
+			err = processor.verifyUploadedObject(runCtx, objectStore, objectKey, fileSize)
+		}
 	}
 	monitorErr := monitor.Stop()
 	if err != nil || monitorErr != nil {
-		if err == nil {
-			err = processor.deleteObject(ctx, objectStore, objectKey)
+		if uploadAttempted {
+			err = errors.Join(err, processor.deleteObject(ctx, objectStore, objectKey))
 		}
 		return processor.finishError(
 			ctx,
@@ -318,8 +331,34 @@ func (processor *MallWeatherExportProcessor) validate(ctx context.Context, jobID
 		processor.buildObjectKey == nil ||
 		processor.now == nil || processor.newRunToken == nil || processor.metrics == nil ||
 		ctx == nil || jobID == 0 || processor.workRoot == "" ||
-		processor.staleAfter <= 0 || processor.heartbeatInterval <= 0 || processor.retention <= 0 {
+		processor.staleAfter <= 0 || processor.heartbeatInterval <= 0 || processor.retention <= 0 ||
+		processor.objectVerifyTimeout <= 0 {
 		return fmt.Errorf("mall weather export processor: invalid configuration")
+	}
+	return nil
+}
+
+func (processor *MallWeatherExportProcessor) verifyUploadedObject(
+	ctx context.Context,
+	objectStore mallWeatherExportObjectStore,
+	objectKey string,
+	fileSize int64,
+) error {
+	if ctx == nil || objectStore == nil || objectKey == "" || fileSize <= 0 || processor.objectVerifyTimeout <= 0 {
+		return fmt.Errorf("mall weather export processor: invalid uploaded object verification")
+	}
+	verifyCtx, cancel := context.WithTimeout(ctx, processor.objectVerifyTimeout)
+	defer cancel()
+	metadata, err := objectStore.StatDownloadObject(verifyCtx, objectKey)
+	if err != nil {
+		return fmt.Errorf("mall weather export processor: verify uploaded object: %w", err)
+	}
+	if metadata.Size != fileSize {
+		return fmt.Errorf(
+			"mall weather export processor: uploaded object size mismatch: got %d, want %d",
+			metadata.Size,
+			fileSize,
+		)
 	}
 	return nil
 }
