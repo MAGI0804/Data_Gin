@@ -817,6 +817,20 @@ test('retries temporary fetch-run failures but stops on deterministic authorizat
   })
   assert.deepEqual(forbidden, { kind: 'query_error', status: 403 })
   assert.equal(forbiddenCalls, 1)
+
+  for (const status of [0, 503]) {
+    let unavailableCalls = 0
+    const unavailable = await pollMallWeatherFetchRun(async () => {
+      unavailableCalls++
+      return { ok: false, status, data: {} }
+    }, 7, '2026-07-27T08:00:00Z', 'MANUAL', manualCorrelationID, {
+      maxAttempts: 2,
+      now: () => new Date('2026-07-27T08:02:00Z'),
+      wait: async () => {},
+    })
+    assert.deepEqual(unavailable, { kind: 'query_error', status })
+    assert.equal(unavailableCalls, 2)
+  }
 })
 
 test('formats weather statuses, conditions, metrics, and chart points', () => {

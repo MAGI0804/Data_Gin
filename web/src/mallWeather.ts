@@ -1475,7 +1475,8 @@ export async function pollMallWeatherFetchRun(
       const retryable = response.status === 0 || response.status === 408 || response.status === 425 ||
         response.status === 429 || response.status >= 500
       if (!retryable) return { kind: 'query_error', status: response.status }
-      if (attempt + 1 < maxAttempts) await wait(intervalMs, options.signal)
+      if (attempt + 1 >= maxAttempts) return { kind: 'query_error', status: response.status }
+      await wait(intervalMs, options.signal)
       continue
     }
     const parsed = parseMallWeatherFetchRuns(response.data)
