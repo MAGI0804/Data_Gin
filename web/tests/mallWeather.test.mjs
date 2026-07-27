@@ -381,18 +381,18 @@ test('builds bounded complete-series paths and parses paged forecast contracts',
   assert.equal(parseMallWeatherLifeIndexPage(pageEnvelope([], '', { ...completeWeatherMeta, timeZone: '' })), null)
 })
 
-test('builds an exact 360-hour window and 15 target-time-zone calendar days', () => {
+test('builds an exact 72-hour window and 7 target-time-zone calendar days', () => {
   const shanghai = mallWeatherForecastQueryWindows(new Date('2026-07-22T02:34:56.000Z'), 'Asia/Shanghai')
   assert.equal(shanghai.minutely.start.toISOString(), '2026-07-22T02:34:00.000Z')
   assert.equal(shanghai.minutely.end.toISOString(), '2026-07-22T04:34:00.000Z')
   assert.equal(shanghai.hourly.start.toISOString(), '2026-07-22T02:00:00.000Z')
-  assert.equal(shanghai.hourly.end.toISOString(), '2026-08-06T02:00:00.000Z')
+  assert.equal(shanghai.hourly.end.toISOString(), '2026-07-25T02:00:00.000Z')
   assert.equal(shanghai.daily.start.toISOString(), '2026-07-21T16:00:00.000Z')
-  assert.equal(shanghai.daily.end.toISOString(), '2026-08-05T16:00:00.000Z')
+  assert.equal(shanghai.daily.end.toISOString(), '2026-07-28T16:00:00.000Z')
 
   const newYorkAcrossDST = mallWeatherForecastQueryWindows(new Date('2026-03-07T17:00:00.000Z'), 'America/New_York')
   assert.equal(newYorkAcrossDST.daily.start.toISOString(), '2026-03-07T05:00:00.000Z')
-  assert.equal(newYorkAcrossDST.daily.end.toISOString(), '2026-03-22T04:00:00.000Z')
+  assert.equal(newYorkAcrossDST.daily.end.toISOString(), '2026-03-14T04:00:00.000Z')
   assert.throws(() => mallWeatherForecastQueryWindows(new Date('invalid')), /invalid weather query time/)
   assert.throws(() => mallWeatherForecastQueryWindows(new Date(), 'Not/A_Time_Zone'), /time zone/i)
 })

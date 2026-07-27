@@ -1333,11 +1333,11 @@ export function mallWeatherForecastQueryWindows(now = new Date(), timeZone = 'As
   const hourlyStart = new Date(Math.floor(now.getTime() / hourMilliseconds) * hourMilliseconds)
   const localDate = datePartsInTimeZone(now, timeZone)
   const dailyStart = localMidnight(localDate.year, localDate.month, localDate.day, timeZone)
-  const normalizedEndDate = new Date(Date.UTC(localDate.year, localDate.month - 1, localDate.day + 15))
+  const normalizedEndDate = new Date(Date.UTC(localDate.year, localDate.month - 1, localDate.day + 7))
   const dailyEnd = localMidnight(normalizedEndDate.getUTCFullYear(), normalizedEndDate.getUTCMonth() + 1, normalizedEndDate.getUTCDate(), timeZone)
   return {
     minutely: { start: minutelyStart, end: new Date(minutelyStart.getTime() + 120 * minuteMilliseconds) },
-    hourly: { start: hourlyStart, end: new Date(hourlyStart.getTime() + 360 * hourMilliseconds) },
+    hourly: { start: hourlyStart, end: new Date(hourlyStart.getTime() + 72 * hourMilliseconds) },
     daily: { start: dailyStart, end: dailyEnd },
   }
 }
