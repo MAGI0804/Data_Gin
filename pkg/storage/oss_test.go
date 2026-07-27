@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"net/url"
 	"strings"
 	"testing"
 	"time"
@@ -99,6 +100,22 @@ func TestBrowserDownloadEndpointNeverUsesInternalOSSHost(t *testing.T) {
 				UseCName: true,
 			},
 		},
+		{
+			name: "aliyun public endpoint is not a cname",
+			cfg: OSSConfig{
+				Region:   "cn-shanghai",
+				Endpoint: "https://oss-cn-shanghai.aliyuncs.com",
+				UseCName: true,
+			},
+		},
+		{
+			name: "bucket qualified aliyun endpoint is canonicalized",
+			cfg: OSSConfig{
+				Region:   "cn-shanghai",
+				Endpoint: "https://weather-private.oss-cn-shanghai.aliyuncs.com",
+				UseCName: true,
+			},
+		},
 	}
 
 	for _, tt := range tests {
@@ -129,33 +146,46 @@ func TestBrowserDownloadAddressingPreservesCustomCName(t *testing.T) {
 	}
 }
 
-func TestBrowserDownloadAddressingSignsWithBucketAfterInternalConversion(t *testing.T) {
-	cfg := OSSConfig{
-		Region:   "cn-shanghai",
-		Endpoint: "https://oss-cn-shanghai-internal.aliyuncs.com",
-		Bucket:   "weather-private",
-		UseCName: true,
+func TestBrowserDownloadAddressingSignsAliyunEndpointsWithBucket(t *testing.T) {
+	endpoints := []string{
+		"https://oss-cn-shanghai-internal.aliyuncs.com",
+		"https://oss-cn-shanghai.aliyuncs.com",
+		"https://weather-private.oss-cn-shanghai.aliyuncs.com",
 	}
-	endpoint, useCName := browserDownloadAddressing(cfg)
-	sdkClient := alioss.NewClient(alioss.LoadDefaultConfig().
-		WithCredentialsProvider(credentials.NewStaticCredentialsProvider("ak", "sk")).
-		WithRegion(cfg.Region).
-		WithEndpoint(endpoint).
-		WithUseCName(useCName).
-		WithUseInternalEndpoint(false))
-	client := &OSSClient{cfg: cfg, downloadClient: sdkClient}
+	for _, endpointValue := range endpoints {
+		t.Run(endpointValue, func(t *testing.T) {
+			cfg := OSSConfig{
+				Region:   "cn-shanghai",
+				Endpoint: endpointValue,
+				Bucket:   "weather-private",
+				UseCName: true,
+			}
+			endpoint, useCName := browserDownloadAddressing(cfg)
+			sdkClient := alioss.NewClient(alioss.LoadDefaultConfig().
+				WithCredentialsProvider(credentials.NewStaticCredentialsProvider("ak", "sk")).
+				WithRegion(cfg.Region).
+				WithEndpoint(endpoint).
+				WithUseCName(useCName).
+				WithUseInternalEndpoint(false))
+			client := &OSSClient{cfg: cfg, downloadClient: sdkClient}
 
-	signedURL, err := client.PresignDownloadURL(
-		t.Context(),
-		"mall-weather-exports/job/result.xlsx",
-		"mall-weather.xlsx",
-		5*time.Minute,
-	)
-	if err != nil {
-		t.Fatalf("PresignDownloadURL() error=%v", err)
-	}
-	if !strings.Contains(signedURL, "https://weather-private.oss-cn-shanghai.aliyuncs.com/") {
-		t.Fatalf("signed URL lost bucket addressing after internal conversion: %q", signedURL)
+			signedURL, err := client.PresignDownloadURL(
+				t.Context(),
+				"mall-weather-exports/job/result.xlsx",
+				"mall-weather.xlsx",
+				5*time.Minute,
+			)
+			if err != nil {
+				t.Fatalf("PresignDownloadURL() error=%v", err)
+			}
+			parsedURL, err := url.Parse(signedURL)
+			if err != nil {
+				t.Fatalf("parse signed URL: %v", err)
+			}
+			if parsedURL.Scheme != "https" || parsedURL.Hostname() != "weather-private.oss-cn-shanghai.aliyuncs.com" {
+				t.Fatalf("signed URL lost bucket addressing for endpoint %q: %q", endpointValue, signedURL)
+			}
+		})
 	}
 }
 

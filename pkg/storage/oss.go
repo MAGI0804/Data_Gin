@@ -329,7 +329,7 @@ func clientEndpoint(cfg OSSConfig) string {
 
 func browserDownloadAddressing(cfg OSSConfig) (string, bool) {
 	endpoint := strings.TrimSpace(cfg.Endpoint)
-	if strings.HasSuffix(strings.ToLower(endpointHostname(endpoint)), "-internal.aliyuncs.com") {
+	if isAliyunOSSEndpoint(endpoint) {
 		region := normalizeOSSRegion(cfg.Region)
 		if region == "" {
 			region = normalizeOSSRegion(endpoint)
@@ -350,6 +350,14 @@ func browserDownloadAddressing(cfg OSSConfig) (string, bool) {
 		return "https://oss-" + region + ".aliyuncs.com", false
 	}
 	return httpsEndpoint(endpoint), false
+}
+
+func isAliyunOSSEndpoint(endpoint string) bool {
+	host := strings.ToLower(endpointHostname(endpoint))
+	if !strings.HasSuffix(host, ".aliyuncs.com") {
+		return false
+	}
+	return strings.HasPrefix(host, "oss-") || strings.Contains(host, ".oss-")
 }
 
 func endpointHostname(endpoint string) string {
