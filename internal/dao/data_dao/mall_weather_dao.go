@@ -580,7 +580,7 @@ func checksumRowPredicate[T any](ctx context.Context, db *gorm.DB, rows []T, con
 		for fieldIndex, field := range fields {
 			fieldValue, _ := field.ValueOf(ctx, value)
 			conditions = append(conditions, "`"+conflictColumns[fieldIndex]+"` = ?")
-			args = append(args, fieldValue)
+			args = append(args, normalizeWeatherIdentityFieldValue(field, fieldValue))
 		}
 		if includeChecksumDifference {
 			checksum, _ := checksumField.ValueOf(ctx, value)
@@ -590,6 +590,21 @@ func checksumRowPredicate[T any](ctx context.Context, db *gorm.DB, rows []T, con
 		groups = append(groups, "("+strings.Join(conditions, " AND ")+")")
 	}
 	return "(" + strings.Join(groups, " OR ") + ")", args, nil
+}
+
+func normalizeWeatherIdentityFieldValue(field *schema.Field, value interface{}) interface{} {
+	if field == nil || !strings.EqualFold(strings.TrimSpace(field.TagSettings["TYPE"]), "date") {
+		return value
+	}
+	switch typed := value.(type) {
+	case time.Time:
+		return typed.Format("2006-01-02")
+	case *time.Time:
+		if typed != nil {
+			return typed.Format("2006-01-02")
+		}
+	}
+	return value
 }
 
 func (dao *MallWeatherDAO) QueryHourly(ctx context.Context, query HourlyQuery) ([]model.MallWeatherHourly, error) {

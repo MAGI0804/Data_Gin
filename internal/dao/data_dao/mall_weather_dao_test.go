@@ -310,6 +310,41 @@ func TestChecksumConflictPredicateIsParameterized(t *testing.T) {
 	}
 }
 
+func TestChecksumIdentityPredicateBindsDateColumnsAsCalendarDates(t *testing.T) {
+	forecastDate := time.Date(2026, 7, 27, 0, 0, 0, 0, time.FixedZone("CST", 8*60*60))
+	issuedAt := time.Date(2026, 7, 27, 10, 4, 0, 0, time.UTC)
+	rows := []model.MallWeatherDaily{{
+		MallID: 3, Provider: "caiyun", ForecastDateLocal: forecastDate, IssuedAtUTC: issuedAt,
+	}}
+	_, args, err := checksumIdentityPredicate(context.Background(), dryRunWeatherDAOTestDB(t), rows,
+		[]string{"mall_id", "provider", "forecast_date_local", "issued_at_utc"})
+	if err != nil {
+		t.Fatalf("checksumIdentityPredicate() error=%v", err)
+	}
+	if len(args) != 4 {
+		t.Fatalf("identity args=%v", args)
+	}
+	if date, ok := args[2].(string); !ok || date != "2026-07-27" {
+		t.Fatalf("forecast_date_local arg=%#v, want calendar date string", args[2])
+	}
+	if value, ok := args[3].(time.Time); !ok || !value.Equal(issuedAt) {
+		t.Fatalf("issued_at_utc arg=%#v, want time.Time", args[3])
+	}
+
+	lifeRows := []model.MallWeatherLifeIndex{{
+		MallID: 3, Provider: "caiyun", SourceAPI: "v26_daily", ForecastDateLocal: forecastDate,
+		IndexType: 6, IssuedAtUTC: issuedAt,
+	}}
+	_, lifeArgs, err := checksumIdentityPredicate(context.Background(), dryRunWeatherDAOTestDB(t), lifeRows,
+		[]string{"mall_id", "provider", "source_api", "forecast_date_local", "index_type", "issued_at_utc"})
+	if err != nil {
+		t.Fatalf("life checksumIdentityPredicate() error=%v", err)
+	}
+	if len(lifeArgs) != 6 || lifeArgs[3] != "2026-07-27" {
+		t.Fatalf("life identity args=%v", lifeArgs)
+	}
+}
+
 func TestChecksumAwareUpdateSetSupportsEmbeddedWeatherQualityFields(t *testing.T) {
 	updates, err := checksumAwareUpdateSet(dryRunWeatherDAOTestDB(t), &model.MallWeatherHourly{},
 		[]string{"mall_id", "provider", "forecast_time_utc", "issued_at_utc"}, nil)
