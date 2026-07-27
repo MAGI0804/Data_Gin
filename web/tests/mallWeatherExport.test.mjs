@@ -9,12 +9,17 @@ import {
   mallWeatherExportCreateResultMatchesRequest,
   mallWeatherExportDownloadReadiness,
   mallWeatherExportDownloadRequestTimeoutMilliseconds,
+  mallWeatherExportMaximumPollRetryDelayMilliseconds,
+  mallWeatherExportMaximumTransientPollRetries,
   mallWeatherExportContentPath,
   mallWeatherExportDownloadPath,
   mallWeatherExportJobPath,
   mallWeatherExportJobTerminal,
   mallWeatherExportKey,
   mallWeatherExportProgress,
+  mallWeatherExportPollRetryDelayMilliseconds,
+  mallWeatherExportPollStatusRetryable,
+  mallWeatherExportRequestTimeoutMilliseconds,
   mallWeatherExportRequestMatches,
   parseMallWeatherExportCreateResult,
   parseMallWeatherExportJob,
@@ -22,6 +27,7 @@ import {
   resolveMallWeatherExportStorage,
   saveMallWeatherExportSession,
   waitForMallWeatherExportDownload,
+  waitForMallWeatherExportRequest,
 } from '../.test-dist/mallWeatherExport.js'
 
 const jobID = '123e4567-e89b-42d3-a456-426614174000'
@@ -260,6 +266,43 @@ test('bounds authenticated file downloads and aborts clients that do not settle'
   await assert.rejects(
     waitForMallWeatherExportDownload(new Promise(() => {}), stalledController, 5),
     { name: 'MallWeatherExportDownloadTimeoutError' },
+  )
+  assert.equal(stalledController.signal.aborted, true)
+
+  const cancelledController = new AbortController()
+  const cancelledRequest = waitForMallWeatherExportRequest(
+    new Promise(() => {}), cancelledController, 100,
+  )
+  cancelledController.abort()
+  await assert.rejects(cancelledRequest, { name: 'AbortError' })
+})
+
+test('bounds export API requests and classifies finite transient polling retries', async () => {
+  assert.equal(mallWeatherExportRequestTimeoutMilliseconds, 30_000)
+  assert.equal(mallWeatherExportMaximumTransientPollRetries, 5)
+  assert.equal(mallWeatherExportMaximumPollRetryDelayMilliseconds, 30_000)
+  for (const status of [0, 408, 429, 500, 502, 503, 599]) {
+    assert.equal(mallWeatherExportPollStatusRetryable(status), true)
+  }
+  for (const status of [200, 400, 401, 403, 404, 409, 422, 600]) {
+    assert.equal(mallWeatherExportPollStatusRetryable(status), false)
+  }
+  assert.deepEqual(
+    [1, 2, 3, 4, 5, 6].map(mallWeatherExportPollRetryDelayMilliseconds),
+    [2_000, 4_000, 8_000, 16_000, 30_000, 30_000],
+  )
+  assert.throws(() => mallWeatherExportPollRetryDelayMilliseconds(0), /invalid mall weather export transient failure count/)
+
+  const completedController = new AbortController()
+  assert.equal(await waitForMallWeatherExportRequest(
+    Promise.resolve('ready'), completedController, 100,
+  ), 'ready')
+  assert.equal(completedController.signal.aborted, false)
+
+  const stalledController = new AbortController()
+  await assert.rejects(
+    waitForMallWeatherExportRequest(new Promise(() => {}), stalledController, 5),
+    { name: 'MallWeatherExportRequestTimeoutError' },
   )
   assert.equal(stalledController.signal.aborted, true)
 })

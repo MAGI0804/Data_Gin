@@ -1,5 +1,8 @@
 export const mallWeatherExportPollIntervalMilliseconds = 2_000
 export const mallWeatherExportMaximumPollAttempts = 150
+export const mallWeatherExportRequestTimeoutMilliseconds = 30_000
+export const mallWeatherExportMaximumTransientPollRetries = 5
+export const mallWeatherExportMaximumPollRetryDelayMilliseconds = 30_000
 
 export type MallWeatherExportFixedFilters =
   | {
@@ -78,6 +81,13 @@ export type MallWeatherExportJob = {
 export type MallWeatherExportDownloadReadiness = 'ready' | 'not-ready' | 'expired'
 
 export const mallWeatherExportDownloadRequestTimeoutMilliseconds = 900_000
+
+export class MallWeatherExportRequestTimeoutError extends Error {
+  constructor() {
+    super('mall weather export request timed out')
+    this.name = 'MallWeatherExportRequestTimeoutError'
+  }
+}
 
 export class MallWeatherExportDownloadTimeoutError extends Error {
   constructor() {
@@ -380,25 +390,74 @@ export function mallWeatherExportProgress(job: Pick<MallWeatherExportJob, 'proce
   return Math.min(100, Math.max(0, Math.round(job.processedRows * 100 / job.totalRows)))
 }
 
+export function mallWeatherExportPollStatusRetryable(status: number) {
+  return status === 0 || status === 408 || status === 429 || (status >= 500 && status <= 599)
+}
+
+export function mallWeatherExportPollRetryDelayMilliseconds(transientFailureCount: number) {
+  if (!Number.isSafeInteger(transientFailureCount) || transientFailureCount < 1) {
+    throw new Error('invalid mall weather export transient failure count')
+  }
+  return Math.min(
+    mallWeatherExportMaximumPollRetryDelayMilliseconds,
+    mallWeatherExportPollIntervalMilliseconds * (2 ** (transientFailureCount - 1)),
+  )
+}
+
+export async function waitForMallWeatherExportRequest<T>(
+  request: Promise<T>,
+  controller: AbortController,
+  timeoutMilliseconds = mallWeatherExportRequestTimeoutMilliseconds,
+): Promise<T> {
+  return waitForMallWeatherExportAbortableRequest(
+    request,
+    controller,
+    timeoutMilliseconds,
+    () => new MallWeatherExportRequestTimeoutError(),
+  )
+}
+
 export async function waitForMallWeatherExportDownload<T>(
   request: Promise<T>,
   controller: AbortController,
   timeoutMilliseconds = mallWeatherExportDownloadRequestTimeoutMilliseconds,
 ): Promise<T> {
+  return waitForMallWeatherExportAbortableRequest(
+    request,
+    controller,
+    timeoutMilliseconds,
+    () => new MallWeatherExportDownloadTimeoutError(),
+  )
+}
+
+async function waitForMallWeatherExportAbortableRequest<T>(
+  request: Promise<T>,
+  controller: AbortController,
+  timeoutMilliseconds: number,
+  timeoutError: () => Error,
+): Promise<T> {
   if (!Number.isSafeInteger(timeoutMilliseconds) || timeoutMilliseconds < 1 || controller.signal.aborted) {
-    throw new Error('invalid mall weather export download timeout')
+    throw new Error('invalid mall weather export request timeout')
   }
   let timer = 0
+  let timedOut = false
+  let cancelRequest: (() => void) | null = null
   try {
     return await new Promise<T>((resolve, reject) => {
+      cancelRequest = () => {
+        if (!timedOut) reject(new DOMException('mall weather export request aborted', 'AbortError'))
+      }
+      controller.signal.addEventListener('abort', cancelRequest, { once: true })
       timer = globalThis.setTimeout(() => {
+        timedOut = true
         controller.abort()
-        reject(new MallWeatherExportDownloadTimeoutError())
+        reject(timeoutError())
       }, timeoutMilliseconds)
       request.then(resolve, reject)
     })
   } finally {
     globalThis.clearTimeout(timer)
+    if (cancelRequest) controller.signal.removeEventListener('abort', cancelRequest)
   }
 }
 

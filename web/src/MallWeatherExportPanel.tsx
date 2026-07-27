@@ -10,15 +10,20 @@ import {
   mallWeatherExportJobTerminal,
   mallWeatherExportKey,
   mallWeatherExportMaximumPollAttempts,
+  mallWeatherExportMaximumTransientPollRetries,
   mallWeatherExportPollIntervalMilliseconds,
+  mallWeatherExportPollRetryDelayMilliseconds,
+  mallWeatherExportPollStatusRetryable,
   mallWeatherExportProgress,
   mallWeatherExportRequestMatches,
   MallWeatherExportDownloadTimeoutError,
+  MallWeatherExportRequestTimeoutError,
   parseMallWeatherExportJob,
   parseMallWeatherExportSafeErrorMessage,
   resolveMallWeatherExportStorage,
   saveMallWeatherExportSession,
   waitForMallWeatherExportDownload,
+  waitForMallWeatherExportRequest,
   type MallWeatherExportJob,
   type MallWeatherExportPendingCreate,
   type MallWeatherExportSession,
@@ -109,7 +114,11 @@ export function MallWeatherExportPanel({ actorID, mallID, mallName, client, down
     setPollRevision(0)
     setCreatingJob(false)
     setDownloading(false)
-    return () => actionController.current?.abort()
+    return () => {
+      const controller = actionController.current
+      actionController.current = null
+      controller?.abort()
+    }
   }, [mallID, restoredSession])
 
   useEffect(() => {
@@ -118,21 +127,48 @@ export function MallWeatherExportPanel({ actorID, mallID, mallName, client, down
     const controller = new AbortController()
     let timer = 0
     let attempt = 0
+    let transientFailureCount = 0
+    const schedulePoll = (delayMilliseconds: number) => {
+      timer = window.setTimeout(() => void poll(), delayMilliseconds)
+    }
+    const retryTransientFailure = (message: string) => {
+      transientFailureCount++
+      if (transientFailureCount > mallWeatherExportMaximumTransientPollRetries) {
+        setPollError(`${message}；已停止自动刷新，可点击“继续查询”。`)
+        return
+      }
+      schedulePoll(mallWeatherExportPollRetryDelayMilliseconds(transientFailureCount))
+    }
     const poll = async () => {
       attempt++
       if (attempt > mallWeatherExportMaximumPollAttempts) {
         setPollError('导出任务仍在处理，已停止自动刷新；可点击“继续查询”。')
         return
       }
+      const requestController = new AbortController()
+      const cancelRequest = () => requestController.abort()
+      if (controller.signal.aborted) requestController.abort()
+      else controller.signal.addEventListener('abort', cancelRequest, { once: true })
       try {
-        const response = await client(mallWeatherExportJobPath(jobID), {
-          method: 'GET', showResult: false, silentLoading: true, signal: controller.signal,
-        })
+        const response = await waitForMallWeatherExportRequest(
+          client(mallWeatherExportJobPath(jobID), {
+            method: 'GET', showResult: false, silentLoading: true, signal: requestController.signal,
+          }),
+          requestController,
+        )
         if (controller.signal.aborted) return
         if (!response.ok && response.status === 404) {
           clearSession()
           setJob(null)
           setPollError('原导出任务已不存在，已清理本地记录；可以重新生成 Excel。')
+          return
+        }
+        if (!response.ok && mallWeatherExportPollStatusRetryable(response.status)) {
+          retryTransientFailure(exportRequestError(
+            response.status,
+            '导出进度查询暂时失败',
+            '当前账号缺少 weather.export 权限',
+          ))
           return
         }
         if (!response.ok) throw new Error(exportRequestError(
@@ -142,6 +178,7 @@ export function MallWeatherExportPanel({ actorID, mallID, mallName, client, down
         ))
         const nextJob = parseMallWeatherExportJob(response.data)
         if (!nextJob || nextJob.jobId !== jobID) throw new Error('导出任务响应格式不正确，请联系管理员')
+        transientFailureCount = 0
         setJob(nextJob)
         setPollError('')
         if (nextJob.status === 'FAILED' || nextJob.status === 'CANCELLED' || nextJob.status === 'EXPIRED') {
@@ -153,14 +190,20 @@ export function MallWeatherExportPanel({ actorID, mallID, mallName, client, down
           })
         }
         if (!mallWeatherExportJobTerminal(nextJob.status)) {
-          timer = window.setTimeout(() => void poll(), mallWeatherExportPollIntervalMilliseconds)
+          schedulePoll(mallWeatherExportPollIntervalMilliseconds)
         }
       } catch (error) {
         if (controller.signal.aborted) return
+        if (error instanceof MallWeatherExportRequestTimeoutError) {
+          retryTransientFailure('导出进度查询超时')
+          return
+        }
         setPollError(error instanceof Error ? error.message : '导出进度查询失败')
+      } finally {
+        controller.signal.removeEventListener('abort', cancelRequest)
       }
     }
-    timer = window.setTimeout(() => void poll(), mallWeatherExportPollIntervalMilliseconds)
+    schedulePoll(mallWeatherExportPollIntervalMilliseconds)
     return () => {
       window.clearTimeout(timer)
       controller.abort()
@@ -168,6 +211,7 @@ export function MallWeatherExportPanel({ actorID, mallID, mallName, client, down
   }, [clearSession, client, persistSession, polledJobID, polledJobStatus, pollRevision])
 
   async function createJob() {
+    if (actionController.current || creatingJob || downloading) return
     let pending = pendingCreate.current
     if (pending && !mallWeatherExportRequestMatches(pending.body, mallID)) {
       setActionError('保留的原请求不属于当前商场；请先放弃原请求后重新生成。')
@@ -187,17 +231,19 @@ export function MallWeatherExportPanel({ actorID, mallID, mallName, client, down
       setJob(null)
       persistSession({ pending, jobId: '' })
     }
-    actionController.current?.abort()
     const controller = new AbortController()
     actionController.current = controller
     setCreatingJob(true)
     setActionError('')
     setPollError('')
     try {
-      const response = await client('/v1/weather-exports', {
-        method: 'POST', body: pending.body, headers: { 'Idempotency-Key': pending.key },
-        showResult: false, silentLoading: true, signal: controller.signal,
-      })
+      const response = await waitForMallWeatherExportRequest(
+        client('/v1/weather-exports', {
+          method: 'POST', body: pending.body, headers: { 'Idempotency-Key': pending.key },
+          showResult: false, silentLoading: true, signal: controller.signal,
+        }),
+        controller,
+      )
       if (controller.signal.aborted) return
       const disposition = mallWeatherExportCreateDisposition(response, pending.body)
       if (disposition.kind !== 'accepted') {
@@ -237,16 +283,21 @@ export function MallWeatherExportPanel({ actorID, mallID, mallName, client, down
         jobId: acceptedJob.jobId,
       })
     } catch (error) {
-      if (!controller.signal.aborted) setActionError(error instanceof Error ? error.message : '天气导出任务创建失败')
+      if (error instanceof MallWeatherExportRequestTimeoutError) {
+        setActionError('导出请求超时，结果暂不确定；已保留原请求，请点击“重试原请求”。')
+      } else if (!controller.signal.aborted) {
+        setActionError(error instanceof Error ? error.message : '天气导出任务创建失败')
+      }
     } finally {
-      if (actionController.current === controller) actionController.current = null
-      if (!controller.signal.aborted) setCreatingJob(false)
+      if (actionController.current === controller) {
+        actionController.current = null
+        setCreatingJob(false)
+      }
     }
   }
 
   async function downloadResult() {
-    if (!job || job.status !== 'SUCCEEDED') return
-    actionController.current?.abort()
+    if (!job || job.status !== 'SUCCEEDED' || actionController.current || downloading) return
     const controller = new AbortController()
     actionController.current = controller
     setDownloading(true)
@@ -289,8 +340,10 @@ export function MallWeatherExportPanel({ actorID, mallID, mallName, client, down
         setActionError(error instanceof Error ? error.message : 'Excel 文件下载失败')
       }
     } finally {
-      if (actionController.current === controller) actionController.current = null
-      setDownloading(false)
+      if (actionController.current === controller) {
+        actionController.current = null
+        setDownloading(false)
+      }
     }
   }
 
