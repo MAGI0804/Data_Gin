@@ -86,6 +86,24 @@ func TestMallWeatherExportEstimateUsesBoundFiltersAndLatestIdentity(t *testing.T
 	}
 }
 
+func TestMallWeatherExportEstimateLifeIndicesOnlyUsesComprehensiveSource(t *testing.T) {
+	dao := NewMallWeatherExportJobDAO(dryRunWeatherDAOTestDB(t))
+	query, countExpression, _, _, _, err := dao.exportEstimateQuery(
+		t.Context(), MallWeatherExportEstimateDataset{Kind: "life_indices", Latest: true},
+	)
+	if err != nil {
+		t.Fatalf("exportEstimateQuery() error=%v", err)
+	}
+	var count struct{ Value int64 }
+	query = query.Select(countExpression + " AS value").Find(&count)
+	if query.Error != nil {
+		t.Fatalf("build estimate query: %v", query.Error)
+	}
+	if statement := query.Statement.SQL.String(); !strings.Contains(statement, "w.source_api = ?") {
+		t.Fatalf("life-index estimate does not restrict comprehensive source: %s", statement)
+	}
+}
+
 func timePointer(value time.Time) *time.Time {
 	return &value
 }

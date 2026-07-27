@@ -73,14 +73,34 @@ func TestMallWeatherExportForecastDefaultsIncludeDisplayedDetail(t *testing.T) {
 		expected []string
 	}{
 		{
+			name:     "actual mall sampling point",
+			kind:     "malls",
+			expected: []string{"weather_longitude", "weather_latitude", "weather_coordinate_system", "weather_provider", "sampling_mode"},
+		},
+		{
+			name:     "realtime comprehensive detail",
+			kind:     "realtime",
+			expected: []string{"wind_direction_deg", "cloudrate_ratio", "visibility_km", "dswrf_w_m2", "nearest_precip_distance_km", "nearest_precipitation_mm_h", "o3_ug_m3", "so2_ug_m3", "no2_ug_m3", "co_mg_m3", "comfort_index", "ultraviolet_index"},
+		},
+		{
 			name:     "minutely detail",
 			kind:     "minutely",
-			expected: []string{"description", "forecast_keypoint", "datasource"},
+			expected: []string{"probability_window", "description", "forecast_keypoint", "datasource"},
 		},
 		{
 			name:     "hourly detail",
 			kind:     "hourly",
-			expected: []string{"visibility_km", "hourly_description", "forecast_keypoint"},
+			expected: []string{"cloudrate_ratio", "dswrf_w_m2", "visibility_km", "hourly_description", "forecast_keypoint"},
+		},
+		{
+			name:     "daily comprehensive detail",
+			kind:     "daily",
+			expected: []string{"temperature_avg_c", "day_temperature_avg_c", "night_temperature_avg_c", "day_precipitation_probability_pct", "night_precipitation_probability_pct", "wind_avg_direction_deg", "humidity_max_pct", "cloudrate_avg_ratio", "pressure_avg_pa", "visibility_min_km", "dswrf_max_w_m2", "pm25_avg_ug_m3", "aqi_avg_usa", "day_skycon", "night_skycon"},
+		},
+		{
+			name:     "alert comprehensive detail",
+			kind:     "alerts",
+			expected: []string{"code", "alert_type_code", "alert_level_code", "location", "region_id", "adcode", "alert_latitude", "alert_longitude", "first_seen_at", "last_seen_at"},
 		},
 	}
 
@@ -100,6 +120,25 @@ func TestMallWeatherExportForecastDefaultsIncludeDisplayedDetail(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestMallWeatherExportLifeIndicesOnlyUseComprehensiveWeatherSource(t *testing.T) {
+	dao := NewMallWeatherExportDataDAO(dryRunWeatherDAOTestDB(t))
+	snapshot := time.Date(2026, 7, 22, 8, 0, 0, 0, time.UTC)
+	query, _, err := dao.buildPageQuery(t.Context(), MallWeatherExportDataPageRequest{
+		Kind: "life_indices", Limit: 100, SnapshotAt: snapshot,
+	})
+	if err != nil {
+		t.Fatalf("buildPageQuery() error=%v", err)
+	}
+	var rows []struct{}
+	query = query.Find(&rows)
+	if query.Error != nil {
+		t.Fatalf("build life-index query SQL error=%v", query.Error)
+	}
+	if statement := query.Statement.SQL.String(); !strings.Contains(statement, "w.source_api = ?") {
+		t.Fatalf("life-index query does not restrict comprehensive source: %s", statement)
 	}
 }
 

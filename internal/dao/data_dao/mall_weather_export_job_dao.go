@@ -194,7 +194,7 @@ func (dao *MallWeatherExportJobDAO) exportEstimateQuery(
 		if dataset.Latest {
 			count = "COUNT(DISTINCT w.mall_id, w.forecast_date_local, w.source_api, w.index_type)"
 		}
-		return mallWeatherExportWeatherTable(dao.db, ctx, "mall_weather_life_indices"),
+		return mallWeatherExportWeatherTable(dao.db, ctx, "mall_weather_life_indices").Where("w.source_api = ?", "v26_daily"),
 			count, "w.forecast_date_local", "w.quality_status", "w.issued_at_utc", nil
 	case "fetch_runs":
 		return mallWeatherExportWeatherTable(dao.db, ctx, "mall_weather_fetch_runs"),
