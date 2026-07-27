@@ -2,6 +2,7 @@ package bootstrap
 
 import (
 	"fmt"
+	"math"
 	"os"
 	"strconv"
 	"strings"
@@ -53,6 +54,12 @@ func validateMallWeatherConfig() error {
 			return fmt.Errorf("%s must be a boolean", appConfig.EnvMallWeatherEnabled)
 		}
 	}
+	if raw, exists := os.LookupEnv(appConfig.EnvCaiyunQPS); exists && strings.TrimSpace(raw) != "" {
+		qps, err := strconv.ParseFloat(strings.TrimSpace(raw), 64)
+		if err != nil || math.IsNaN(qps) || math.IsInf(qps, 0) {
+			return fmt.Errorf("%s must be a finite number", appConfig.EnvCaiyunQPS)
+		}
+	}
 	if !pkgConfig.GetBool("cfg.mall_weather.enabled") {
 		if pkgConfig.GetBool("cfg.mall_weather.feishu_enabled") {
 			return fmt.Errorf("feishu integration requires mall weather to be enabled")
@@ -65,7 +72,7 @@ func validateMallWeatherConfig() error {
 	if pkgConfig.GetString("cfg.mall_weather.unit") != "metric:v2" {
 		return fmt.Errorf("unit must be metric:v2")
 	}
-	if qps := pkgConfig.GetFloat64("cfg.caiyun.qps"); qps <= 0 || qps > 1000 {
+	if qps := pkgConfig.GetFloat64("cfg.caiyun.qps"); qps <= 0 || qps > 1000 || math.IsNaN(qps) || math.IsInf(qps, 0) {
 		return fmt.Errorf("caiyun qps must be greater than zero and at most 1000")
 	}
 	if hourlySteps := pkgConfig.GetInt("cfg.mall_weather.hourly_steps"); hourlySteps < 1 || hourlySteps > 360 {

@@ -15,8 +15,11 @@ func TestValidateMallWeatherConfig(t *testing.T) {
 		name         string
 		yaml         string
 		enabledEnv   string
+		qpsEnv       string
 		checkEnabled bool
 		wantEnabled  bool
+		checkQPS     bool
+		wantQPS      float64
 		wantError    string
 	}{
 		{
@@ -36,6 +39,21 @@ func TestValidateMallWeatherConfig(t *testing.T) {
 			name:       "environment enables workers",
 			yaml:       "MallWeather:\n  Enabled: false\nCaiyun:\n  QPS: 2\n",
 			enabledEnv: "true", checkEnabled: true, wantEnabled: true,
+		},
+		{
+			name:   "environment configures caiyun qps",
+			yaml:   "MallWeather:\n  Enabled: true\nCaiyun:\n  QPS: 0\n",
+			qpsEnv: "2.5", checkQPS: true, wantQPS: 2.5,
+		},
+		{
+			name:   "invalid caiyun qps environment fails closed",
+			yaml:   "MallWeather:\n  Enabled: true\nCaiyun:\n  QPS: 2\n",
+			qpsEnv: "fast", wantError: "CAIYUN_QPS must be a finite number",
+		},
+		{
+			name:   "non-finite caiyun qps environment fails closed",
+			yaml:   "MallWeather:\n  Enabled: true\nCaiyun:\n  QPS: 2\n",
+			qpsEnv: "NaN", wantError: "CAIYUN_QPS must be a finite number",
 		},
 		{
 			name:       "environment disables workers",
@@ -82,6 +100,7 @@ func TestValidateMallWeatherConfig(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			t.Setenv(appConfig.EnvMallWeatherEnabled, tt.enabledEnv)
+			t.Setenv(appConfig.EnvCaiyunQPS, tt.qpsEnv)
 			configDir := t.TempDir()
 			configFile := filepath.Join(configDir, "config.yaml")
 			if err := os.WriteFile(configFile, []byte(tt.yaml), 0o600); err != nil {
@@ -90,6 +109,9 @@ func TestValidateMallWeatherConfig(t *testing.T) {
 			pkgConfig.NewConfig("", configDir+string(os.PathSeparator))
 			if tt.checkEnabled && pkgConfig.GetBool("cfg.mall_weather.enabled") != tt.wantEnabled {
 				t.Fatalf("cfg.mall_weather.enabled = %t, want %t", pkgConfig.GetBool("cfg.mall_weather.enabled"), tt.wantEnabled)
+			}
+			if tt.checkQPS && pkgConfig.GetFloat64("cfg.caiyun.qps") != tt.wantQPS {
+				t.Fatalf("cfg.caiyun.qps = %v, want %v", pkgConfig.GetFloat64("cfg.caiyun.qps"), tt.wantQPS)
 			}
 
 			err := validateMallWeatherConfig()

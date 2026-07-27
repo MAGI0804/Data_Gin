@@ -74,7 +74,7 @@ MallWeather:
 Caiyun:
   BaseURL: https://api.caiyunapp.com
   LifeIndexBaseURL: https://singer.caiyunhub.com
-  QPS: 0
+  QPS: ${CAIYUN_QPS:-0}
 
 Amap:
   BaseURL: https://restapi.amap.com
