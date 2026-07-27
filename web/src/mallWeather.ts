@@ -1650,7 +1650,7 @@ export async function loadAllMallWeatherPages<T>(
     meta = page.meta
     const nextCursor = page.pagination.nextCursor
     if (!nextCursor) {
-      if (series === 'hourly') validateCompleteMallWeatherHourlySeries(items, fixedWindow)
+      if (series === 'hourly') validateAvailableMallWeatherHourlySeries(items, fixedWindow)
       return { items, meta }
     }
     if (seenCursors.has(nextCursor)) throw new Error('分页游标重复，请联系管理员')
@@ -1660,7 +1660,7 @@ export async function loadAllMallWeatherPages<T>(
   throw new Error('分页数量超过安全上限，请联系管理员')
 }
 
-function validateCompleteMallWeatherHourlySeries(items: unknown[], window: MallWeatherQueryWindow) {
+function validateAvailableMallWeatherHourlySeries(items: unknown[], window: MallWeatherQueryWindow) {
   const hourMilliseconds = 60 * 60 * 1000
   const startMilliseconds = window.start.getTime()
   const durationMilliseconds = window.end.getTime() - startMilliseconds
@@ -1668,8 +1668,8 @@ function validateCompleteMallWeatherHourlySeries(items: unknown[], window: MallW
   if (!Number.isSafeInteger(expectedCount) || expectedCount !== mallWeatherHourlyForecastHours) {
     throw new Error('逐小时预报查询窗口无效，请联系管理员')
   }
-  if (items.length !== expectedCount) {
-    throw new Error(`逐小时预报数量不完整：期望 ${expectedCount} 条，实际 ${items.length} 条`)
+  if (items.length > expectedCount) {
+    throw new Error(`逐小时预报数量超过窗口：最多 ${expectedCount} 条，实际 ${items.length} 条`)
   }
   for (let index = 0; index < items.length; index++) {
     const item = items[index]

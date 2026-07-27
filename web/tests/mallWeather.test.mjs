@@ -563,7 +563,7 @@ test('snapshots mutable hourly window and as-of dates before loading cursor page
   assert.equal(paths[1].searchParams.get('asOf'), paths[0].searchParams.get('asOf'))
 })
 
-test('rejects incomplete, discontinuous, unordered, and out-of-window hourly series', async () => {
+test('accepts available configured horizons while rejecting discontinuous, unordered, and oversized hourly series', async () => {
   const window = {
     start: new Date('2026-07-22T03:00:00.000Z'),
     end: new Date('2026-08-06T03:00:00.000Z'),
@@ -582,7 +582,10 @@ test('rejects incomplete, discontinuous, unordered, and out-of-window hourly ser
     data: pageEnvelope(complete.slice(0, 359)),
   }), 7, 'hourly', { start: window.start, end: new Date(window.end.getTime() - 60 * 60 * 1000) }, 'Asia/Shanghai', asOf, parseMallWeatherHourlyPage), /逐小时预报查询窗口无效/)
 
-  await assert.rejects(load(complete.slice(0, 359)), /逐小时预报数量不完整/)
+  for (const availableCount of [1, 24, 72, 359, 360]) {
+    const result = await load(complete.slice(0, availableCount))
+    assert.equal(result.items.length, availableCount)
+  }
 
   const missingMiddle = complete.filter((_, index) => index !== 120)
   missingMiddle.push(hourlyItem(363))
@@ -592,7 +595,7 @@ test('rejects incomplete, discontinuous, unordered, and out-of-window hourly ser
   ;[unordered[180], unordered[181]] = [unordered[181], unordered[180]]
   await assert.rejects(load(unordered), /逐小时预报时间不连续/)
 
-  await assert.rejects(load([...complete, hourlyItem(363)]), /逐小时预报数量不完整/)
+  await assert.rejects(load([...complete, hourlyItem(363)]), /逐小时预报数量超过窗口/)
 
   const inconsistentLocalTime = complete.map((item, index) => index === 0
     ? { ...item, forecastTimeLocal: '2026-07-22T12:00:00+08:00' }

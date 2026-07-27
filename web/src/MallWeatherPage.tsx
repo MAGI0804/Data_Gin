@@ -544,7 +544,7 @@ function MallWeatherDataNavigation({ showActorActions }: { showActorActions: boo
       <strong>天气数据</strong>
       <button type="button" onClick={() => navigateTo('mall-weather-overview')}>当前实况</button>
       <button type="button" onClick={() => navigateTo('mall-weather-minutely')}>约 1 km 分钟降水</button>
-      <button type="button" onClick={() => navigateTo('mall-weather-hourly')}>360 小时逐小时预报</button>
+      <button type="button" onClick={() => navigateTo('mall-weather-hourly')}>未来逐小时预报</button>
       <button type="button" onClick={() => navigateTo('mall-weather-daily')}>15 天逐日预报</button>
       <button type="button" onClick={() => navigateTo('mall-weather-life-indices')}>15 天生活指数</button>
       {showActorActions && <button type="button" onClick={() => navigateTo('mall-weather-export')}>导出 Excel</button>}
