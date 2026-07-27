@@ -89,6 +89,11 @@ func autoMigrateTables() {
 	}
 
 	prepareMethodPipelineIndexes(db)
+	if err := prepareMallWeatherVersionIndexes(db); err != nil {
+		logger.Error("修复商场天气版本索引失败", zap.Error(err))
+		console.Warning("修复商场天气版本索引失败: %v", err)
+		return
+	}
 
 	// 迁移数据存储相关表
 	models := []interface{}{
@@ -131,6 +136,11 @@ func autoMigrateTables() {
 	if err != nil {
 		logger.Error("数据表自动迁移失败", zap.Error(err))
 		console.Warning("数据表自动迁移失败: %v", err)
+		return
+	}
+	if err := verifyMallWeatherVersionIndexes(db); err != nil {
+		logger.Error("校验商场天气版本索引失败", zap.Error(err))
+		console.Warning("校验商场天气版本索引失败: %v", err)
 		return
 	}
 
