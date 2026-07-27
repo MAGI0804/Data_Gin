@@ -127,12 +127,16 @@ export function MallWeatherForecastPanel({ mallID, timeZone, client }: { mallID:
 
 function ForecastDataset<T>({ id, title, state, empty, children }: { id?: string; title: string; state: QueryState<T>; empty: string; children: ReactNode }) {
   return (
-    <details id={id} className="mall-weather-forecast-dataset" open>
+    <details id={id} className="mall-weather-forecast-dataset" tabIndex={-1} open>
       <summary>{title}（{state.items.length} 条）{state.meta ? ` · ${mallWeatherFreshnessLabel(state.meta.freshnessStatus)}` : ''}</summary>
       {state.loading && state.items.length === 0 && <p role="status">正在加载全部分页…</p>}
       {state.error && <p className="mall-weather-action-message error" role="alert">{state.error}</p>}
       {!state.loading && !state.error && state.items.length === 0 && <p role="status">{empty}</p>}
-      {state.items.length > 0 && <div className="data-table-wrap">{children}</div>}
+      {state.items.length > 0 && (
+        <div className="data-table-wrap" role="region" aria-label={`${title}数据表，可横向滚动`} tabIndex={0}>
+          {children}
+        </div>
+      )}
     </details>
   )
 }

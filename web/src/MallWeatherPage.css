@@ -223,26 +223,72 @@
   margin-right: 4px;
 }
 
-.mall-weather-data-nav a {
+.mall-weather-data-nav button {
   border: 1px solid #cbd5e1;
+  border-radius: 0;
+  background: #ffffff;
   color: #111111;
   padding: 6px 9px;
-  text-decoration: none;
 }
 
-.mall-weather-data-nav a:hover,
-.mall-weather-data-nav a:focus-visible {
+.mall-weather-data-nav button:hover,
+.mall-weather-data-nav button:focus-visible {
   border-color: #111111;
 }
 
 .mall-weather-forecast-dataset,
 #mall-weather-overview,
+#mall-weather-export,
 #mall-weather-management {
   scroll-margin-top: 16px;
 }
 
 .mall-weather-management {
   gap: 12px;
+}
+
+.mall-weather-export-panel {
+  display: grid;
+  gap: 12px;
+}
+
+.mall-weather-export-panel .empty-state {
+  display: grid;
+  justify-items: start;
+  gap: 8px;
+}
+
+.mall-weather-export-progress {
+  display: grid;
+  gap: 8px;
+  border: 1px solid #cbd5e1;
+  background: #f8fafc;
+  padding: 12px;
+}
+
+.mall-weather-export-progress > div {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+  min-width: 0;
+}
+
+.mall-weather-export-progress progress {
+  width: 100%;
+}
+
+.mall-weather-export-progress span,
+.mall-weather-export-progress small,
+.mall-weather-export-panel .mall-weather-action-message,
+.mall-weather-export-panel .mall-weather-section-title > div {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.mall-weather-export-progress small,
+.mall-weather-export-panel label small {
+  color: var(--muted);
 }
 
 .mall-weather-refresh-form {
@@ -294,6 +340,19 @@
 .mall-weather-forecast-dataset .data-table-wrap {
   max-height: min(64vh, 640px);
   border: 1px solid var(--line);
+}
+
+.mall-weather-forecast-dataset .data-table-wrap:focus-visible {
+  outline: 2px solid #111111;
+  outline-offset: 2px;
+}
+
+.mall-weather-forecast-dataset:focus-visible,
+#mall-weather-overview:focus-visible,
+#mall-weather-export:focus-visible,
+#mall-weather-management:focus-visible {
+  outline: 2px solid #111111;
+  outline-offset: 3px;
 }
 
 .mall-weather-forecast-dataset .data-table th {
@@ -633,6 +692,8 @@
   }
 
   .mall-weather-summary-heading,
+  .mall-weather-export-progress > div,
+  .mall-weather-export-panel .mall-weather-section-title,
   .mall-weather-alerts article > div {
     align-items: stretch;
     flex-direction: column;
