@@ -1095,24 +1095,6 @@ function WeatherOverview({ mall, overview, refreshing, onRefresh }: { mall: Mall
 
   return (
     <div className="view-stack">
-      <section className="workbench-panel mall-weather-summary">
-        <div className="mall-weather-summary-heading">
-          <div>
-            <span className="eyebrow">{mall.mallCode} · {mall.city}</span>
-            <h3>{mall.nameCn}</h3>
-            <p><MapPin aria-hidden="true" />代表点：{representativePoint} · {coverageRadius}</p>
-          </div>
-          <button type="button" onClick={onRefresh} disabled={refreshing}><RefreshCcw aria-hidden="true" />{refreshing ? '加载中' : '重新加载'}</button>
-        </div>
-        <div className="mall-weather-meta" aria-label="天气数据口径">
-          <MetaItem label="供应商" value={`${meta.provider || '彩云天气'} ${meta.apiVersion}`.trim()} />
-          <MetaItem label="新鲜度" value={mallWeatherFreshnessLabel(meta.freshnessStatus)} />
-          <MetaItem label="坐标" value={meta.longitude === 0 && meta.latitude === 0 ? '坐标未提供' : `${meta.longitude.toFixed(4)}, ${meta.latitude.toFixed(4)} ${meta.coordinateSystem}`} />
-          <MetaItem label="时区 / 单位" value={`${meta.timeZone || 'Asia/Shanghai'} · ${meta.unit || 'metric:v2'}`} />
-        </div>
-        <p className="mall-weather-resolution">实况与未来两小时降水为商场中心点 1 km 级数据；常规小时预报为商场中心点所在 9～13 km 预报网格。预警按行政区域发布。</p>
-      </section>
-
       <section className="mall-weather-overview-grid">
         <article className="workbench-panel mall-weather-realtime">
           <div className="mall-weather-section-title"><div><strong>当前实况</strong><span>{realtime?.snapshotAtLocal || '暂无快照时间'}</span></div><Thermometer aria-hidden="true" /></div>
@@ -1155,6 +1137,24 @@ function WeatherOverview({ mall, overview, refreshing, onRefresh }: { mall: Mall
             <MetaItem label="美国 AQI" value={`${mallWeatherMetric(realtime?.aqiUsa, '', 0)}${realtime?.aqiDescriptionUsa ? ` · ${realtime.aqiDescriptionUsa}` : ''}`} />
           </div>
         </article>
+      </section>
+
+      <section className="workbench-panel mall-weather-summary">
+        <div className="mall-weather-summary-heading">
+          <div>
+            <span className="eyebrow">{mall.mallCode} · {mall.city}</span>
+            <h3>{mall.nameCn}</h3>
+            <p><MapPin aria-hidden="true" />代表点：{representativePoint} · {coverageRadius}</p>
+          </div>
+          <button type="button" onClick={onRefresh} disabled={refreshing}><RefreshCcw aria-hidden="true" />{refreshing ? '加载中' : '重新加载'}</button>
+        </div>
+        <div className="mall-weather-meta" aria-label="天气数据口径">
+          <MetaItem label="供应商" value={`${meta.provider || '彩云天气'} ${meta.apiVersion}`.trim()} />
+          <MetaItem label="新鲜度" value={mallWeatherFreshnessLabel(meta.freshnessStatus)} />
+          <MetaItem label="坐标" value={meta.longitude === 0 && meta.latitude === 0 ? '坐标未提供' : `${meta.longitude.toFixed(4)}, ${meta.latitude.toFixed(4)} ${meta.coordinateSystem}`} />
+          <MetaItem label="时区 / 单位" value={`${meta.timeZone || 'Asia/Shanghai'} · ${meta.unit || 'metric:v2'}`} />
+        </div>
+        <p className="mall-weather-resolution">实况与未来两小时降水为商场中心点 1 km 级数据；常规小时预报为商场中心点所在 9～13 km 预报网格。预警按行政区域发布。</p>
       </section>
 
       <section className="content-grid two">
