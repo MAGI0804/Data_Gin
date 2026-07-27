@@ -38,7 +38,12 @@ func registerGlobalMiddleWare(router *gin.Engine) {
 		middleware.AccessLog(), // 请求日志中间件
 		middleware.Cors(),      // 跨域中间件
 		middleware.Recovery(),  // 记录 Panic 和 call stack
-		middleware.ContextTimeout(time.Duration(config.GetUint("cfg.app.context_timeout"))*time.Second), // 上下文超时时间
+		middleware.ContextTimeout(
+			time.Duration(config.GetUint("cfg.app.context_timeout"))*time.Second,
+			func(c *gin.Context) bool {
+				return isMallWeatherExportContentRequest(c.Request)
+			},
+		), // 上下文超时时间
 	)
 }
 

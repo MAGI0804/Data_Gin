@@ -4,8 +4,10 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"mime"
 	"net/http"
+	"strconv"
 
 	"gin-biz-web-api/internal/dao/data_dao"
 	"gin-biz-web-api/internal/requestbody"
@@ -110,23 +112,33 @@ func (controller *MallWeatherExportJobController) DownloadContent(c *gin.Context
 		writeMallWeatherExportJobError(c, err)
 		return
 	}
-	if result == nil || result.Body == nil || result.Size < 1 || result.FileName == "" || result.ContentType == "" {
+	if result == nil || result.Body == nil {
 		writeMallWeatherExportJobError(c, errors.New("mall weather export: invalid content result"))
 		return
 	}
 	defer result.Body.Close()
+	if result.Size < 1 || result.FileName == "" || result.ContentType == "" {
+		writeMallWeatherExportJobError(c, errors.New("mall weather export: invalid content metadata"))
+		return
+	}
 	contentDisposition := mime.FormatMediaType("attachment", map[string]string{"filename": result.FileName})
-	c.DataFromReader(
-		http.StatusOK,
-		result.Size,
-		result.ContentType,
-		result.Body,
-		map[string]string{
-			"Content-Disposition":    contentDisposition,
-			"X-Content-Type-Options": "nosniff",
-			"Referrer-Policy":        "no-referrer",
-		},
-	)
+	c.Header("Content-Disposition", contentDisposition)
+	c.Header("Content-Length", strconv.FormatInt(result.Size, 10))
+	c.Header("Content-Type", result.ContentType)
+	c.Header("Referrer-Policy", "no-referrer")
+	c.Header("X-Accel-Buffering", "no")
+	c.Header("X-Content-Type-Options", "nosniff")
+	c.Status(http.StatusOK)
+	written, copyErr := io.CopyN(c.Writer, result.Body, result.Size)
+	if copyErr != nil {
+		_ = c.Error(fmt.Errorf(
+			"mall weather export: content stream ended after %d bytes: %w",
+			written,
+			copyErr,
+		)).
+			SetType(gin.ErrorTypePrivate)
+		c.Abort()
+	}
 }
 
 func disableMallWeatherExportCaching(c *gin.Context) {

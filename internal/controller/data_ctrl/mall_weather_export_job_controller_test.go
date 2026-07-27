@@ -140,9 +140,57 @@ func TestMallWeatherExportJobControllerStreamsAuthenticatedDownloadContent(t *te
 	)
 	if recorder.Code != http.StatusOK || recorder.Body.String() != "PK\x03\x04xlsx" ||
 		recorder.Header().Get("Cache-Control") != "no-store" ||
+		recorder.Header().Get("X-Accel-Buffering") != "no" ||
 		recorder.Header().Get("X-Content-Type-Options") != "nosniff" ||
 		!strings.Contains(recorder.Header().Get("Content-Disposition"), ".xlsx") {
 		t.Fatalf("status=%d headers=%v body=%q", recorder.Code, recorder.Header(), recorder.Body.String())
+	}
+}
+
+func TestMallWeatherExportJobControllerClosesInvalidDownloadContent(t *testing.T) {
+	body := &trackingReadCloser{Reader: strings.NewReader("PK\x03\x04xlsx")}
+	service := fakeMallWeatherExportJobControllerService{
+		content: func(context.Context, uint, string) (*data_svc.MallWeatherExportContentResult, error) {
+			return &data_svc.MallWeatherExportContentResult{
+				Body: body, Size: 8, FileName: "", ContentType: "",
+			}, nil
+		},
+	}
+	recorder := performMallWeatherExportJobRequest(
+		t,
+		service,
+		http.MethodGet,
+		"/api/v1/weather-exports/"+mallWeatherExportJobTestUUID+"/content",
+		"",
+		"",
+	)
+	if recorder.Code != http.StatusInternalServerError || body.closeCalls != 1 {
+		t.Fatalf("status=%d closeCalls=%d body=%s", recorder.Code, body.closeCalls, recorder.Body.String())
+	}
+}
+
+func TestMallWeatherExportJobControllerDoesNotAppendJSONAfterStreamFailure(t *testing.T) {
+	body := &trackingReadCloser{Reader: strings.NewReader("PK\x03\x04xlsx")}
+	service := fakeMallWeatherExportJobControllerService{
+		content: func(context.Context, uint, string) (*data_svc.MallWeatherExportContentResult, error) {
+			return &data_svc.MallWeatherExportContentResult{
+				Body: body, Size: 16,
+				FileName:    "mall_weather_export_" + mallWeatherExportJobTestUUID + ".xlsx",
+				ContentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+			}, nil
+		},
+	}
+	recorder := performMallWeatherExportJobRequest(
+		t,
+		service,
+		http.MethodGet,
+		"/api/v1/weather-exports/"+mallWeatherExportJobTestUUID+"/content",
+		"",
+		"",
+	)
+	if recorder.Code != http.StatusOK || recorder.Body.String() != "PK\x03\x04xlsx" ||
+		strings.Contains(recorder.Body.String(), `"code"`) || body.closeCalls != 1 {
+		t.Fatalf("status=%d closeCalls=%d body=%q", recorder.Code, body.closeCalls, recorder.Body.String())
 	}
 }
 
@@ -256,6 +304,16 @@ type fakeMallWeatherExportJobControllerService struct {
 	get      func(context.Context, uint, string) (*data_svc.MallWeatherExportJobDTO, error)
 	download func(context.Context, uint, string) (*data_svc.MallWeatherExportDownloadResult, error)
 	content  func(context.Context, uint, string) (*data_svc.MallWeatherExportContentResult, error)
+}
+
+type trackingReadCloser struct {
+	io.Reader
+	closeCalls int
+}
+
+func (body *trackingReadCloser) Close() error {
+	body.closeCalls++
+	return nil
 }
 
 func (service fakeMallWeatherExportJobControllerService) Create(

@@ -2,7 +2,8 @@ package middleware
 
 import (
 	"bytes"
-	"io/ioutil"
+	"io"
+	"mime"
 	"net/url"
 	"strings"
 	"time"
@@ -16,18 +17,55 @@ import (
 	"gin-biz-web-api/pkg/logger"
 )
 
+const maxAccessLogResponseBodyBytes = 64 << 10
+
 type AccessLogWriter struct {
 	gin.ResponseWriter
-	body *bytes.Buffer
+	body      *bytes.Buffer
+	truncated bool
 }
 
-// Write 在此方法中实现了双写，因此可以直接通过 `AccessLogWriter.body` 获取到方法返回的响应主体
-func (w AccessLogWriter) Write(p []byte) (int, error) {
-	if n, err := w.body.Write(p); err != nil {
-		return n, err
-	}
-
+// Write records a bounded textual response preview and always streams the original bytes.
+func (w *AccessLogWriter) Write(p []byte) (int, error) {
+	w.capture(p)
 	return w.ResponseWriter.Write(p)
+}
+
+func (w *AccessLogWriter) WriteString(value string) (int, error) {
+	w.capture([]byte(value))
+	return w.ResponseWriter.WriteString(value)
+}
+
+func (w *AccessLogWriter) capture(p []byte) {
+	if w == nil || w.body == nil || len(p) == 0 ||
+		!accessLogTextualContentType(w.Header().Get("Content-Type")) {
+		return
+	}
+	remaining := maxAccessLogResponseBodyBytes - w.body.Len()
+	if remaining <= 0 {
+		w.truncated = true
+		return
+	}
+	if len(p) > remaining {
+		_, _ = w.body.Write(p[:remaining])
+		w.truncated = true
+		return
+	}
+	_, _ = w.body.Write(p)
+}
+
+func accessLogTextualContentType(value string) bool {
+	mediaType, _, err := mime.ParseMediaType(strings.TrimSpace(value))
+	if err != nil {
+		return false
+	}
+	mediaType = strings.ToLower(mediaType)
+	return strings.HasPrefix(mediaType, "text/") ||
+		mediaType == "application/json" ||
+		strings.HasSuffix(mediaType, "+json") ||
+		mediaType == "application/xml" ||
+		strings.HasSuffix(mediaType, "+xml") ||
+		mediaType == "application/x-www-form-urlencoded"
 }
 
 // AccessLog 记录请求日志
@@ -52,9 +90,9 @@ func AccessLog() gin.HandlerFunc {
 		var requestBody []byte
 		if c.Request.Body != nil {
 			// c.Request.Body 是一个 buffer 对象，只能读取一次
-			requestBody, _ = ioutil.ReadAll(c.Request.Body)
+			requestBody, _ = io.ReadAll(c.Request.Body)
 			// 读取后，重新赋值 c.Request.Body ，以供后续的其他操作
-			c.Request.Body = ioutil.NopCloser(bytes.NewBuffer(requestBody))
+			c.Request.Body = io.NopCloser(bytes.NewBuffer(requestBody))
 		}
 
 		// 设置开始时间
@@ -79,7 +117,9 @@ func AccessLog() gin.HandlerFunc {
 			zap.String("user_agent", c.Request.UserAgent()), // 用户请求头
 			zap.Any("headers", c.Request.Header),            // 请求头
 			zap.String("errors", c.Errors.ByType(gin.ErrorTypePrivate).String()),
-			zap.Int("response_status", responseStatus),                  // 当前的响应结果状态码
+			zap.Int("response_status", responseStatus), // 当前的响应结果状态码
+			zap.Int("response_size", responseBodyWriter.Size()),
+			zap.Bool("response_body_truncated", responseBodyWriter.truncated),
 			zap.String("code_execute_time", strx.StrMicroseconds(cost)), // 程序执行时间
 			// zap.String("response_body", responseBodyWriter.body.String()), // 当前的请求结果响应体
 		}

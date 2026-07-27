@@ -190,7 +190,7 @@ test('builds stable authenticated download resource paths', () => {
 })
 
 test('bounds authenticated file downloads and aborts clients that do not settle', async () => {
-  assert.equal(mallWeatherExportDownloadRequestTimeoutMilliseconds, 60_000)
+  assert.equal(mallWeatherExportDownloadRequestTimeoutMilliseconds, 900_000)
 
   const completedController = new AbortController()
   assert.equal(await waitForMallWeatherExportDownload(

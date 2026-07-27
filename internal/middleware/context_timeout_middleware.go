@@ -7,9 +7,17 @@ import (
 	"github.com/gin-gonic/gin"
 )
 
+type ContextTimeoutSkipper func(*gin.Context) bool
+
 // ContextTimeout 上下文超时时间
-func ContextTimeout(t time.Duration) func(c *gin.Context) {
+func ContextTimeout(t time.Duration, skippers ...ContextTimeoutSkipper) func(c *gin.Context) {
 	return func(c *gin.Context) {
+		for _, skip := range skippers {
+			if skip != nil && skip(c) {
+				c.Next()
+				return
+			}
+		}
 		// 调用 context.WithTimeout() 方法设置当前 context 的超时时间
 		ctx, cancel := context.WithTimeout(c.Request.Context(), t)
 		defer cancel()

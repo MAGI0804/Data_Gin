@@ -77,7 +77,7 @@ export type MallWeatherExportJob = {
 
 export type MallWeatherExportDownloadReadiness = 'ready' | 'not-ready' | 'expired'
 
-export const mallWeatherExportDownloadRequestTimeoutMilliseconds = 60_000
+export const mallWeatherExportDownloadRequestTimeoutMilliseconds = 900_000
 
 export class MallWeatherExportDownloadTimeoutError extends Error {
   constructor() {

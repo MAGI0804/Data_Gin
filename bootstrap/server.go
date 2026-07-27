@@ -2,19 +2,24 @@ package bootstrap
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"net/http"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 
 	"gin-biz-web-api/pkg/config"
 	"gin-biz-web-api/pkg/console"
 	"gin-biz-web-api/pkg/logger"
 )
+
+const mallWeatherExportDownloadWriteTimeout = 16 * time.Minute
 
 // RunServer 启动服务
 func RunServer() {
@@ -134,9 +139,42 @@ func initServer(router *gin.Engine) *http.Server {
 
 	return &http.Server{
 		Addr:           addr, // 服务启动的地址和端口
-		Handler:        router,
+		Handler:        withMallWeatherExportDownloadWriteDeadline(router, mallWeatherExportDownloadWriteTimeout),
 		ReadTimeout:    time.Second * time.Duration(config.GetInt64("cfg.app.read_timeout")),  // 允许读取的最大时间
 		WriteTimeout:   time.Second * time.Duration(config.GetInt64("cfg.app.write_timeout")), // 允许写入的最大时间
 		MaxHeaderBytes: 1 << 20,                                                               // 请求头的最大字节数
 	}
+}
+
+func withMallWeatherExportDownloadWriteDeadline(next http.Handler, timeout time.Duration) http.Handler {
+	if next == nil || timeout <= 0 {
+		panic("server: invalid mall weather export download handler")
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
+		if isMallWeatherExportContentRequest(request) {
+			err := http.NewResponseController(w).SetWriteDeadline(time.Now().Add(timeout))
+			if err != nil {
+				if !errors.Is(err, http.ErrNotSupported) {
+					logger.ErrorString("Server", "mallWeatherExportDownloadWriteDeadline", err.Error())
+				}
+				http.Error(w, "weather export download is unavailable", http.StatusServiceUnavailable)
+				return
+			}
+		}
+		next.ServeHTTP(w, request)
+	})
+}
+
+func isMallWeatherExportContentRequest(request *http.Request) bool {
+	if request == nil || request.Method != http.MethodGet || request.URL == nil {
+		return false
+	}
+	parts := strings.Split(strings.Trim(request.URL.Path, "/"), "/")
+	return len(parts) == 5 &&
+		parts[0] == "api" &&
+		parts[1] == "v1" &&
+		parts[2] == "weather-exports" &&
+		len(parts[3]) == 36 &&
+		uuid.Validate(parts[3]) == nil &&
+		parts[4] == "content"
 }
