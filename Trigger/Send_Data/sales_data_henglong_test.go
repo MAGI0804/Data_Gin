@@ -1,8 +1,9 @@
 package send
 
 import (
+	"os"
+	"path/filepath"
 	"strings"
-	"sync"
 	"testing"
 	"time"
 
@@ -10,16 +11,18 @@ import (
 	pkgConfig "gin-biz-web-api/pkg/config"
 )
 
-var salesDataTestConfigOnce sync.Once
-
-func setupSalesDataTestConfig() {
-	salesDataTestConfigOnce.Do(func() {
-		pkgConfig.NewConfig("", "../../etc/")
-	})
+func setupSalesDataTestConfig(t *testing.T) {
+	t.Helper()
+	configDir := t.TempDir()
+	configBody := []byte("HengLong:\n  TillID: \"01\"\n")
+	if err := os.WriteFile(filepath.Join(configDir, "config.yaml"), configBody, 0o600); err != nil {
+		t.Fatalf("write test config: %v", err)
+	}
+	pkgConfig.NewConfig("", configDir+string(os.PathSeparator))
 }
 
 func TestBuildSoapXMLUsesProvidedIssueTimeAndMallItemCode(t *testing.T) {
-	setupSalesDataTestConfig()
+	setupSalesDataTestConfig(t)
 	issuedAt := time.Date(2026, 7, 3, 15, 45, 11, 0, time.FixedZone("CST", 8*60*60))
 
 	xml := buildSoapXML(118.15, "ABCN002A001P12607031545110012", &issuedAt, "416201", "E6600000099", "SA")
