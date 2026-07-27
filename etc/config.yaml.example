@@ -55,8 +55,8 @@ MallWeather:
   DefaultDetailProfile: full
   FastCron: "*/10 * * * *"
   FullCron: "7 * * * *"
-  HourlySteps: 360
-  DailySteps: 15
+  HourlySteps: 72
+  DailySteps: 7
   Unit: metric:v2
   AlertEnabled: true
   FetchTimeoutSeconds: 10

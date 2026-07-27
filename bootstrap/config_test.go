@@ -20,11 +20,14 @@ func TestValidateMallWeatherConfig(t *testing.T) {
 		wantEnabled  bool
 		checkQPS     bool
 		wantQPS      float64
+		checkSteps   bool
+		wantHourly   int
+		wantDaily    int
 		wantError    string
 	}{
 		{
 			name: "disabled by default",
-			yaml: "App:\n  Env: local\n",
+			yaml: "App:\n  Env: local\n", checkSteps: true, wantHourly: 72, wantDaily: 7,
 		},
 		{
 			name:      "enabled requires explicit qps",
@@ -112,6 +115,12 @@ func TestValidateMallWeatherConfig(t *testing.T) {
 			}
 			if tt.checkQPS && pkgConfig.GetFloat64("cfg.caiyun.qps") != tt.wantQPS {
 				t.Fatalf("cfg.caiyun.qps = %v, want %v", pkgConfig.GetFloat64("cfg.caiyun.qps"), tt.wantQPS)
+			}
+			if tt.checkSteps && (pkgConfig.GetInt("cfg.mall_weather.hourly_steps") != tt.wantHourly ||
+				pkgConfig.GetInt("cfg.mall_weather.daily_steps") != tt.wantDaily) {
+				t.Fatalf("weather steps = %d/%d, want %d/%d",
+					pkgConfig.GetInt("cfg.mall_weather.hourly_steps"), pkgConfig.GetInt("cfg.mall_weather.daily_steps"),
+					tt.wantHourly, tt.wantDaily)
 			}
 
 			err := validateMallWeatherConfig()
