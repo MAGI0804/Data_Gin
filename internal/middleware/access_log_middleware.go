@@ -2,8 +2,10 @@ package middleware
 
 import (
 	"bytes"
+	"encoding/json"
 	"io"
 	"mime"
+	"net/http"
 	"net/url"
 	"strings"
 	"time"
@@ -18,6 +20,8 @@ import (
 )
 
 const maxAccessLogResponseBodyBytes = 64 << 10
+
+const accessLogRedactedValue = "[REDACTED]"
 
 type AccessLogWriter struct {
 	gin.ResponseWriter
@@ -104,18 +108,20 @@ func AccessLog() gin.HandlerFunc {
 		// http 响应状态码
 		responseStatus := responseBodyWriter.Status()
 
+		requestURL, requestURI, requestQuery := sanitizedAccessLogURL(c.Request)
+
 		// 开始记录日志
 		logFields := []zap.Field{
-			zap.String("request_method", c.Request.Method),                   // 当前请求的方法
-			zap.String("request_url", c.Request.Host+c.Request.URL.String()), // 完整的请求地址（host + path + query）eg：`0.0.0.0:3000/api/user?aa=11&bb=22`
-			zap.String("request_path", c.Request.URL.Path),                   // 只有请求地址，不带参数 eg：`/api/user`
-			zap.String("request_uri", c.Request.RequestURI),                  // 带参数的地址 eg： `/api/user?aa=11&bb=22`
-			zap.String("request_query", c.Request.URL.RawQuery),              // 只有参数 eg：`aa=11&bb=22`
+			zap.String("request_method", c.Request.Method), // 当前请求的方法
+			zap.String("request_url", requestURL),          // 完整的请求地址（host + path + query）eg：`0.0.0.0:3000/api/user?aa=11&bb=22`
+			zap.String("request_path", c.Request.URL.Path), // 只有请求地址，不带参数 eg：`/api/user`
+			zap.String("request_uri", requestURI),          // 带参数的地址 eg： `/api/user?aa=11&bb=22`
+			zap.String("request_query", requestQuery),      // 只有参数 eg：`aa=11&bb=22`
 			// zap.String("request_body", string(requestBody)),                   // 请求的内容
 			zap.String("client_ip", c.ClientIP()), // 客户端的 ip 地址
 			zap.String("remote_addr", c.Request.RemoteAddr),
-			zap.String("user_agent", c.Request.UserAgent()), // 用户请求头
-			zap.Any("headers", c.Request.Header),            // 请求头
+			zap.String("user_agent", c.Request.UserAgent()),                 // 用户请求头
+			zap.Any("headers", sanitizedAccessLogHeaders(c.Request.Header)), // 请求头
 			zap.String("errors", c.Errors.ByType(gin.ErrorTypePrivate).String()),
 			zap.Int("response_status", responseStatus), // 当前的响应结果状态码
 			zap.Int("response_size", responseBodyWriter.Size()),
@@ -124,21 +130,137 @@ func AccessLog() gin.HandlerFunc {
 			// zap.String("response_body", responseBodyWriter.body.String()), // 当前的请求结果响应体
 		}
 
-		// 记录请求体内容 eg：`"x=33&y=zz"`
-		var logRequestBody string
-		if "multipart/form-data" == c.ContentType() {
-			// 上传文件时，不会记录上传文件资源数据
-			logRequestBody = c.Request.PostForm.Encode()
-		} else {
-			logRequestBody, _ = url.QueryUnescape(string(requestBody)) // 中文会被加码，因此为了方便查看中文参数，对请求体进行解码
-		}
+		// 记录已经脱敏的结构化请求体；无法可靠解析的正文不写入日志。
+		logRequestBody := sanitizedAccessLogRequestBody(c.ContentType(), requestBody, c.Request.PostForm)
 		logFields = append(logFields, zap.String("request_body", logRequestBody))
 
-		// 响应的内容
-		logFields = append(logFields, zap.String("response_body", responseBodyWriter.body.String()))
+		// 响应的内容同样按结构化字段脱敏，避免登录等接口把凭证写入访问日志。
+		logResponseBody := sanitizedAccessLogBody(
+			responseBodyWriter.Header().Get("Content-Type"),
+			responseBodyWriter.body.Bytes(),
+			nil,
+		)
+		logFields = append(logFields, zap.String("response_body", logResponseBody))
 
 		// 记录访问日志
 		logger.Info("HTTP Access Log [ "+cast.ToString(responseStatus)+" ]", logFields...)
 
+	}
+}
+
+func sanitizedAccessLogHeaders(headers http.Header) http.Header {
+	sanitized := headers.Clone()
+	for name := range sanitized {
+		if sensitiveAccessLogKey(name) {
+			sanitized[name] = []string{accessLogRedactedValue}
+		}
+	}
+	return sanitized
+}
+
+func sanitizedAccessLogURL(request *http.Request) (string, string, string) {
+	if request == nil || request.URL == nil {
+		return "", "", ""
+	}
+	sanitizedURL := *request.URL
+	sanitizedURL.RawQuery = sanitizedAccessLogValues(request.URL.Query()).Encode()
+	return request.Host + sanitizedURL.String(), sanitizedURL.RequestURI(), sanitizedURL.RawQuery
+}
+
+func sanitizedAccessLogRequestBody(contentType string, body []byte, postForm url.Values) string {
+	return sanitizedAccessLogBody(contentType, body, postForm)
+}
+
+func sanitizedAccessLogBody(contentType string, body []byte, form url.Values) string {
+	mediaType, _, err := mime.ParseMediaType(strings.TrimSpace(contentType))
+	if err != nil && len(bytes.TrimSpace(body)) > 0 {
+		return "[unparseable request body omitted]"
+	}
+
+	switch strings.ToLower(mediaType) {
+	case "multipart/form-data":
+		return sanitizedAccessLogValues(form).Encode()
+	case "application/x-www-form-urlencoded":
+		values, err := url.ParseQuery(string(body))
+		if err != nil {
+			return "[unparseable form body omitted]"
+		}
+		return sanitizedAccessLogValues(values).Encode()
+	case "application/json":
+		if len(bytes.TrimSpace(body)) == 0 {
+			return ""
+		}
+		var value any
+		if err := json.Unmarshal(body, &value); err != nil {
+			return "[unparseable JSON body omitted]"
+		}
+		sanitized, err := json.Marshal(sanitizedAccessLogJSON(value))
+		if err != nil {
+			return "[unserializable JSON body omitted]"
+		}
+		return string(sanitized)
+	default:
+		if len(bytes.TrimSpace(body)) == 0 {
+			return ""
+		}
+		return "[unstructured request body omitted]"
+	}
+}
+
+func sanitizedAccessLogValues(values url.Values) url.Values {
+	sanitized := make(url.Values, len(values))
+	for name, items := range values {
+		if sensitiveAccessLogKey(name) {
+			sanitized[name] = []string{accessLogRedactedValue}
+			continue
+		}
+		sanitized[name] = append([]string(nil), items...)
+	}
+	return sanitized
+}
+
+func sanitizedAccessLogJSON(value any) any {
+	switch typed := value.(type) {
+	case map[string]any:
+		for name, item := range typed {
+			if sensitiveAccessLogKey(name) {
+				typed[name] = accessLogRedactedValue
+				continue
+			}
+			typed[name] = sanitizedAccessLogJSON(item)
+		}
+		return typed
+	case []any:
+		for index, item := range typed {
+			typed[index] = sanitizedAccessLogJSON(item)
+		}
+		return typed
+	default:
+		return value
+	}
+}
+
+func sensitiveAccessLogKey(name string) bool {
+	normalized := strings.Map(func(character rune) rune {
+		if character >= 'A' && character <= 'Z' {
+			return character + ('a' - 'A')
+		}
+		if character >= 'a' && character <= 'z' || character >= '0' && character <= '9' {
+			return character
+		}
+		return -1
+	}, name)
+	if strings.Contains(normalized, "token") || strings.Contains(normalized, "password") ||
+		strings.Contains(normalized, "passwd") || strings.Contains(normalized, "secret") ||
+		strings.Contains(normalized, "signature") {
+		return true
+	}
+	switch normalized {
+	case "authorization", "proxyauthorization", "cookie", "setcookie", "jwtkey",
+		"amapwebservicekey", "caiyunappkey", "aliyunossaccesskeyid", "ossaccesskeyid",
+		"alibabacloudaccesskeyid":
+		return true
+	default:
+		return false
 	}
 }
