@@ -63,7 +63,7 @@ func TestMallWeatherTaskConstructorsUseNonSensitivePayloads(t *testing.T) {
 }
 
 func TestMallWeatherScheduleDefinitionsCoverProfiles(t *testing.T) {
-	definitions, err := MallWeatherScheduleDefinitions("*/10 * * * *", "7 * * * *", "17 * * * *")
+	definitions, err := MallWeatherScheduleDefinitions("*/10 * * * *", "7 * * * *")
 	if err != nil {
 		t.Fatalf("MallWeatherScheduleDefinitions() error=%v", err)
 	}

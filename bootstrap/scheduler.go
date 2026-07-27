@@ -85,7 +85,6 @@ func registerMallWeatherScheduledTasks(scheduler *asynq.Scheduler) {
 	definitions, err := job.MallWeatherScheduleDefinitions(
 		config.GetString("cfg.mall_weather.fast_cron"),
 		config.GetString("cfg.mall_weather.full_cron"),
-		config.GetString("cfg.mall_weather.life_index_cron"),
 	)
 	if err != nil {
 		console.Warning("Failed to build mall weather schedules: %v", err)

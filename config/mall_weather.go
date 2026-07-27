@@ -21,7 +21,6 @@ func init() {
 			"default_detail_profile":          config.Get("MallWeather.DefaultDetailProfile", "full"),
 			"fast_cron":                       config.Get("MallWeather.FastCron", "*/10 * * * *"),
 			"full_cron":                       config.Get("MallWeather.FullCron", "7 * * * *"),
-			"life_index_cron":                 config.Get("MallWeather.LifeIndexCron", "17 * * * *"),
 			"hourly_steps":                    config.Get("MallWeather.HourlySteps", 360),
 			"daily_steps":                     config.Get("MallWeather.DailySteps", 15),
 			"unit":                            config.Get("MallWeather.Unit", "metric:v2"),

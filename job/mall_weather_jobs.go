@@ -187,7 +187,7 @@ func NewMallWeatherScheduleTask(payload MallWeatherSchedulePayload) (*asynq.Task
 	), nil
 }
 
-func MallWeatherScheduleDefinitions(fastCron, fullCron, _ string) ([]MallWeatherScheduleDefinition, error) {
+func MallWeatherScheduleDefinitions(fastCron, fullCron string) ([]MallWeatherScheduleDefinition, error) {
 	if strings.TrimSpace(fastCron) == "" || strings.TrimSpace(fullCron) == "" {
 		return nil, fmt.Errorf("mall weather task: schedule cron is required")
 	}
