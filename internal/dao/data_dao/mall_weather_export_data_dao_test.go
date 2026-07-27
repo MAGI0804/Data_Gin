@@ -1,6 +1,7 @@
 package data_dao
 
 import (
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -62,6 +63,43 @@ func TestMallWeatherExportDataCatalogIsCanonicalAndDefensive(t *testing.T) {
 		if _, exists := freshFields[freshDefaults[0]]; !exists || freshDefaults[0] == "mutated" {
 			t.Fatalf("kind=%q catalog leaked mutable state", kind)
 		}
+	}
+}
+
+func TestMallWeatherExportForecastDefaultsIncludeDisplayedDetail(t *testing.T) {
+	tests := []struct {
+		name     string
+		kind     string
+		expected []string
+	}{
+		{
+			name:     "minutely detail",
+			kind:     "minutely",
+			expected: []string{"description", "forecast_keypoint", "datasource"},
+		},
+		{
+			name:     "hourly detail",
+			kind:     "hourly",
+			expected: []string{"visibility_km", "hourly_description", "forecast_keypoint"},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			fields, fieldsOK := MallWeatherExportDatasetFields(test.kind)
+			defaults, defaultsOK := MallWeatherExportDefaultFields(test.kind)
+			if !fieldsOK || !defaultsOK {
+				t.Fatalf("kind=%q is missing from export catalog", test.kind)
+			}
+			for _, expected := range test.expected {
+				if _, exists := fields[expected]; !exists {
+					t.Errorf("kind=%q field %q is missing from export catalog", test.kind, expected)
+				}
+				if !slices.Contains(defaults, expected) {
+					t.Errorf("kind=%q field %q is missing from export defaults", test.kind, expected)
+				}
+			}
+		})
 	}
 }
 

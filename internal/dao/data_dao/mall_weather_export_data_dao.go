@@ -349,10 +349,10 @@ var mallWeatherExportDatasetCatalog = map[string]mallWeatherExportDatasetSpec{
 		map[string]string{
 			"mall_code": "m.mall_code", "forecast_minute": "w.forecast_minute_utc", "minute_offset": "w.minute_offset",
 			"precipitation_mm_h": "w.precipitation_mm_h", "probability_pct": "w.probability_ratio * 100",
-			"description": "w.description", "quality_status": "w.quality_status", "issued_at": "w.issued_at_utc",
-			"fetched_at": "w.fetched_at_utc",
+			"description": "w.description", "forecast_keypoint": "w.forecast_keypoint", "datasource": "w.datasource",
+			"quality_status": "w.quality_status", "issued_at": "w.issued_at_utc", "fetched_at": "w.fetched_at_utc",
 		},
-		[]string{"mall_code", "forecast_minute", "minute_offset", "precipitation_mm_h", "probability_pct", "description", "quality_status", "issued_at", "fetched_at"},
+		[]string{"mall_code", "forecast_minute", "minute_offset", "precipitation_mm_h", "probability_pct", "description", "forecast_keypoint", "datasource", "quality_status", "issued_at", "fetched_at"},
 		"NOT EXISTS (SELECT 1 FROM mall_weather_minutely AS newer WHERE newer.mall_id = w.mall_id AND newer.provider = w.provider AND newer.forecast_minute_utc = w.forecast_minute_utc AND newer.issued_at_utc <= ? AND newer.issued_at_utc > w.issued_at_utc AND newer.created_at <= ?)",
 	),
 	"hourly": exportDatasetSpec(
@@ -364,9 +364,11 @@ var mallWeatherExportDatasetCatalog = map[string]mallWeatherExportDatasetSpec{
 			"pressure_pa": "w.pressure_pa", "wind_speed_kph": "w.wind_speed_kph", "wind_direction_deg": "w.wind_direction_deg",
 			"precipitation_mm_h": "w.precipitation_mm_h", "precipitation_probability_pct": "w.precip_probability_pct",
 			"aqi_chn": "w.aqi_chn", "aqi_usa": "w.aqi_usa", "pm25_ug_m3": "w.pm25_ug_m3", "skycon": "w.skycon",
-			"quality_status": "w.quality_status", "issued_at": "w.issued_at_utc", "fetched_at": "w.fetched_at_utc",
+			"visibility_km": "w.visibility_km", "hourly_description": "w.hourly_description",
+			"forecast_keypoint": "w.forecast_keypoint", "quality_status": "w.quality_status",
+			"issued_at": "w.issued_at_utc", "fetched_at": "w.fetched_at_utc",
 		},
-		[]string{"mall_code", "forecast_time", "temperature_c", "apparent_temperature_c", "humidity_pct", "pressure_pa", "wind_speed_kph", "wind_direction_deg", "precipitation_mm_h", "precipitation_probability_pct", "aqi_chn", "aqi_usa", "pm25_ug_m3", "skycon", "quality_status", "issued_at", "fetched_at"},
+		[]string{"mall_code", "forecast_time", "temperature_c", "apparent_temperature_c", "humidity_pct", "pressure_pa", "wind_speed_kph", "wind_direction_deg", "precipitation_mm_h", "precipitation_probability_pct", "visibility_km", "aqi_chn", "aqi_usa", "pm25_ug_m3", "skycon", "hourly_description", "forecast_keypoint", "quality_status", "issued_at", "fetched_at"},
 		"NOT EXISTS (SELECT 1 FROM mall_weather_hourly AS newer WHERE newer.mall_id = w.mall_id AND newer.provider = w.provider AND newer.forecast_time_utc = w.forecast_time_utc AND newer.issued_at_utc <= ? AND newer.issued_at_utc > w.issued_at_utc AND newer.created_at <= ?)",
 	),
 	"daily": exportDatasetSpec(
