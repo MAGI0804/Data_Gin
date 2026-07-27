@@ -175,15 +175,14 @@ func TestMallWeatherExportJobControllerStreamsPostFormDownloadContent(t *testing
 	}
 }
 
-func TestMallWeatherExportJobControllerChecksDownloadContentBeforeStreaming(t *testing.T) {
-	body := &trackingReadCloser{Reader: strings.NewReader("PK\x03\x04xlsx")}
+func TestMallWeatherExportJobControllerChecksDownloadContentWithoutOpeningStream(t *testing.T) {
 	service := fakeMallWeatherExportJobControllerService{
-		content: func(_ context.Context, actor uint, jobUUID string) (*data_svc.MallWeatherExportContentResult, error) {
+		contentStatus: func(_ context.Context, actor uint, jobUUID string) (*data_svc.MallWeatherExportContentStatusResult, error) {
 			if actor != 17 || jobUUID != mallWeatherExportJobTestUUID {
 				t.Fatalf("actor=%d job=%s", actor, jobUUID)
 			}
-			return &data_svc.MallWeatherExportContentResult{
-				Body: body, Size: 8,
+			return &data_svc.MallWeatherExportContentStatusResult{
+				Size:        8,
 				FileName:    "mall_weather_export_" + jobUUID + ".xlsx",
 				ContentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
 			}, nil
@@ -200,9 +199,6 @@ func TestMallWeatherExportJobControllerChecksDownloadContentBeforeStreaming(t *t
 	if recorder.Code != http.StatusOK || !strings.Contains(recorder.Body.String(), `"fileSizeBytes":8`) ||
 		!strings.Contains(recorder.Body.String(), `"fileName":"mall_weather_export_`) {
 		t.Fatalf("status=%d body=%q", recorder.Code, recorder.Body.String())
-	}
-	if body.closeCalls != 1 {
-		t.Fatalf("content readiness check closeCalls=%d", body.closeCalls)
 	}
 }
 
@@ -366,9 +362,10 @@ type fakeMallWeatherExportJobControllerService struct {
 		string,
 		requestbody.MallWeatherExportCreateRequest,
 	) (*data_svc.MallWeatherExportCreateResult, bool, error)
-	get      func(context.Context, uint, string) (*data_svc.MallWeatherExportJobDTO, error)
-	download func(context.Context, uint, string) (*data_svc.MallWeatherExportDownloadResult, error)
-	content  func(context.Context, uint, string) (*data_svc.MallWeatherExportContentResult, error)
+	get           func(context.Context, uint, string) (*data_svc.MallWeatherExportJobDTO, error)
+	download      func(context.Context, uint, string) (*data_svc.MallWeatherExportDownloadResult, error)
+	content       func(context.Context, uint, string) (*data_svc.MallWeatherExportContentResult, error)
+	contentStatus func(context.Context, uint, string) (*data_svc.MallWeatherExportContentStatusResult, error)
 }
 
 type trackingReadCloser struct {
@@ -424,4 +421,15 @@ func (service fakeMallWeatherExportJobControllerService) OpenDownloadContent(
 		return nil, errors.New("download content not configured")
 	}
 	return service.content(ctx, actor, jobUUID)
+}
+
+func (service fakeMallWeatherExportJobControllerService) CheckDownloadContent(
+	ctx context.Context,
+	actor uint,
+	jobUUID string,
+) (*data_svc.MallWeatherExportContentStatusResult, error) {
+	if service.contentStatus == nil {
+		return nil, errors.New("download content status not configured")
+	}
+	return service.contentStatus(ctx, actor, jobUUID)
 }

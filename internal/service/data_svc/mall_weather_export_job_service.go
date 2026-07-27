@@ -90,6 +90,12 @@ type MallWeatherExportContentResult struct {
 	ContentType string
 }
 
+type MallWeatherExportContentStatusResult struct {
+	Size        int64
+	FileName    string
+	ContentType string
+}
+
 type MallWeatherExportProfileSnapshot struct {
 	ProfileID uint                           `json:"profileId"`
 	Code      string                         `json:"code"`
@@ -251,6 +257,45 @@ func (service *MallWeatherExportJobService) Download(
 	if err != nil {
 		return nil, err
 	}
+	signer, err := service.verifiedDownloadSigner(ctx, row)
+	if err != nil {
+		return nil, err
+	}
+	fileName := "mall_weather_export_" + jobUUID + ".xlsx"
+	url, err := signer.PresignDownloadURL(ctx, row.ResultObjectKey, fileName, validFor)
+	if err != nil {
+		return nil, fmt.Errorf("%w: sign download: %w", ErrMallWeatherExportStorageUnavailable, err)
+	}
+	return &MallWeatherExportDownloadResult{URL: url, ExpiresAt: now.Add(validFor)}, nil
+}
+
+func (service *MallWeatherExportJobService) CheckDownloadContent(
+	ctx context.Context,
+	actorUserID uint,
+	jobUUID string,
+) (*MallWeatherExportContentStatusResult, error) {
+	if service == nil || service.newSigner == nil ||
+		service.statTimeout <= 0 || service.statTimeout > 30*time.Second {
+		return nil, fmt.Errorf("%w: invalid download content status request", ErrMallWeatherExportInvalid)
+	}
+	row, _, _, err := service.readyDownloadJob(ctx, actorUserID, jobUUID)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := service.verifiedDownloadSigner(ctx, row); err != nil {
+		return nil, err
+	}
+	return &MallWeatherExportContentStatusResult{
+		Size:        row.FileSizeBytes,
+		FileName:    "mall_weather_export_" + strings.TrimSpace(jobUUID) + ".xlsx",
+		ContentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+	}, nil
+}
+
+func (service *MallWeatherExportJobService) verifiedDownloadSigner(
+	ctx context.Context,
+	row *data_dao.MallWeatherExportDownloadJob,
+) (mallWeatherExportDownloadSigner, error) {
 	signer, err := service.newSigner()
 	if err != nil {
 		return nil, fmt.Errorf("%w: create signer: %w", ErrMallWeatherExportStorageUnavailable, err)
@@ -259,13 +304,20 @@ func (service *MallWeatherExportJobService) Download(
 		return nil, fmt.Errorf("mall weather export: nil download signer")
 	}
 	statCtx, cancelStat := context.WithTimeout(ctx, service.statTimeout)
+	defer cancelStat()
 	metadata, err := signer.StatDownloadObject(statCtx, row.ResultObjectKey)
-	cancelStat()
 	if err != nil {
 		if errors.Is(err, storage.ErrOSSObjectNotFound) {
 			return nil, fmt.Errorf("%w: %w", ErrMallWeatherExportArtifactMissing, err)
 		}
 		return nil, fmt.Errorf("%w: %w", ErrMallWeatherExportStorageUnavailable, err)
+	}
+	if metadata.Size < 4 {
+		return nil, fmt.Errorf(
+			"%w: object size %d is too small",
+			ErrMallWeatherExportArtifactMissing,
+			metadata.Size,
+		)
 	}
 	if metadata.Size != row.FileSizeBytes {
 		return nil, fmt.Errorf(
@@ -275,12 +327,7 @@ func (service *MallWeatherExportJobService) Download(
 			metadata.Size,
 		)
 	}
-	fileName := "mall_weather_export_" + jobUUID + ".xlsx"
-	url, err := signer.PresignDownloadURL(ctx, row.ResultObjectKey, fileName, validFor)
-	if err != nil {
-		return nil, fmt.Errorf("%w: sign download: %w", ErrMallWeatherExportStorageUnavailable, err)
-	}
-	return &MallWeatherExportDownloadResult{URL: url, ExpiresAt: now.Add(validFor)}, nil
+	return signer, nil
 }
 
 func (service *MallWeatherExportJobService) OpenDownloadContent(

@@ -28,6 +28,7 @@ type MallWeatherExportJobServiceAPI interface {
 	) (*data_svc.MallWeatherExportCreateResult, bool, error)
 	Get(context.Context, uint, string) (*data_svc.MallWeatherExportJobDTO, error)
 	Download(context.Context, uint, string) (*data_svc.MallWeatherExportDownloadResult, error)
+	CheckDownloadContent(context.Context, uint, string) (*data_svc.MallWeatherExportContentStatusResult, error)
 	OpenDownloadContent(context.Context, uint, string) (*data_svc.MallWeatherExportContentResult, error)
 }
 
@@ -143,7 +144,7 @@ func (controller *MallWeatherExportJobController) DownloadContent(c *gin.Context
 
 func (controller *MallWeatherExportJobController) DownloadContentStatus(c *gin.Context) {
 	disableMallWeatherExportCaching(c)
-	result, err := controller.service.OpenDownloadContent(
+	result, err := controller.service.CheckDownloadContent(
 		c.Request.Context(),
 		auth.CurrentUserID(c),
 		c.Param("job_id"),
@@ -152,11 +153,10 @@ func (controller *MallWeatherExportJobController) DownloadContentStatus(c *gin.C
 		writeMallWeatherExportJobError(c, err)
 		return
 	}
-	if result == nil || result.Body == nil {
+	if result == nil {
 		writeMallWeatherExportJobError(c, errors.New("mall weather export: invalid content result"))
 		return
 	}
-	defer result.Body.Close()
 	if result.Size < 4 || result.FileName == "" || result.ContentType == "" {
 		writeMallWeatherExportJobError(c, errors.New("mall weather export: invalid content metadata"))
 		return

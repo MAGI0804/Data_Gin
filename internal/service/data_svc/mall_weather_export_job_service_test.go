@@ -377,6 +377,63 @@ func TestMallWeatherExportJobServiceSignsActorScopedDownload(t *testing.T) {
 	}
 }
 
+func TestMallWeatherExportJobServiceChecksActorScopedDownloadWithoutOpeningContent(t *testing.T) {
+	now := time.Date(2026, 7, 22, 8, 0, 0, 0, time.UTC)
+	jobUUID := uuid.NewString()
+	expiresAt := now.Add(10 * time.Minute)
+	jobs := &fakeMallWeatherExportJobReader{download: &data_dao.MallWeatherExportDownloadJob{
+		Status: "succeeded", ResultObjectKey: "mall-weather-exports/job/result.xlsx",
+		FileSizeBytes: 4096, ExpiresAt: &expiresAt,
+	}}
+	service, err := newMallWeatherExportJobService(
+		&fakeMallWeatherExportProfileReader{},
+		fakeMallPermissionChecker{allowed: true},
+		&fakeMallWeatherExportEstimator{},
+		jobs,
+		fakeMallWeatherExportLimitReader{},
+		&fakeMallWeatherExportJobStore{},
+		func() time.Time { return now },
+	)
+	if err != nil {
+		t.Fatalf("newMallWeatherExportJobService() error=%v", err)
+	}
+	signer := &fakeMallWeatherExportDownloadSigner{objectSize: 4096}
+	service.newSigner = func() (mallWeatherExportDownloadSigner, error) { return signer, nil }
+	service.statTimeout = time.Second
+
+	result, err := service.CheckDownloadContent(t.Context(), 17, jobUUID)
+	if err != nil {
+		t.Fatalf("CheckDownloadContent() error=%v", err)
+	}
+	if result.Size != 4096 || result.FileName != "mall_weather_export_"+jobUUID+".xlsx" ||
+		result.ContentType != "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" ||
+		signer.statObjectKey != jobs.download.ResultObjectKey || signer.openObjectKey != "" || jobs.actorUserID != 17 {
+		t.Fatalf("result=%+v signer=%+v actor=%d", result, signer, jobs.actorUserID)
+	}
+}
+
+func TestMallWeatherExportJobServiceBoundsDownloadContentStatusCheck(t *testing.T) {
+	now := time.Date(2026, 7, 22, 8, 0, 0, 0, time.UTC)
+	expiresAt := now.Add(time.Hour)
+	signer := &fakeMallWeatherExportDownloadSigner{waitForStatContext: true}
+	service := &MallWeatherExportJobService{
+		permissions: fakeMallPermissionChecker{allowed: true},
+		jobs: &fakeMallWeatherExportJobReader{download: &data_dao.MallWeatherExportDownloadJob{
+			Status: "succeeded", ResultObjectKey: "mall-weather-exports/job/result.xlsx",
+			FileSizeBytes: 4096, ExpiresAt: &expiresAt,
+		}},
+		newSigner:   func() (mallWeatherExportDownloadSigner, error) { return signer, nil },
+		downloadTTL: 5 * time.Minute,
+		statTimeout: 5 * time.Millisecond,
+		now:         func() time.Time { return now },
+	}
+
+	result, err := service.CheckDownloadContent(t.Context(), 17, uuid.NewString())
+	if result != nil || !errors.Is(err, context.DeadlineExceeded) || signer.openObjectKey != "" {
+		t.Fatalf("CheckDownloadContent() result=%+v error=%v signer=%+v", result, err, signer)
+	}
+}
+
 func TestMallWeatherExportJobServiceOpensActorScopedDownloadContent(t *testing.T) {
 	now := time.Date(2026, 7, 22, 8, 0, 0, 0, time.UTC)
 	jobUUID := uuid.NewString()
