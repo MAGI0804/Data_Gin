@@ -5,6 +5,7 @@ import { MallWeatherChart } from './MallWeatherChart'
 import { MallWeatherExportPanel } from './MallWeatherExportPanel'
 import { MallWeatherForecastPanel } from './MallWeatherForecastPanel'
 import { MallDetailsFields, MallWeatherMallEditor } from './MallWeatherMallEditor'
+import { mallWeatherDataNavigationItems, navigateMallWeatherSection } from './mallWeatherNavigation'
 import {
   mallWeatherCreateKey,
   mallWeatherCreateRequest,
@@ -439,6 +440,8 @@ export function MallWeatherPage({
         </button>
       </section>
 
+      {!showCreate && selectedMallReady && selectedMall && <MallWeatherDataNavigation showActorActions={Boolean(actorID)} />}
+
       <div className="mall-weather-layout">
         <aside className="workbench-panel mall-weather-malls" aria-label="商场接入列表">
           <div className="mall-weather-section-title">
@@ -495,7 +498,6 @@ export function MallWeatherPage({
               refreshing={overviewState === 'loading'}
               onRefresh={() => void loadOverview(selectedMall.id)}
             />}
-          {!showCreate && selectedMallReady && selectedMall && <MallWeatherDataNavigation showActorActions={Boolean(actorID)} />}
           {!showCreate && selectedMallReady && selectedMall && <MallWeatherForecastPanel
             mallID={selectedMall.id}
             timeZone={selectedMall.timeZone}
@@ -533,22 +535,21 @@ export function MallWeatherPage({
 
 function MallWeatherDataNavigation({ showActorActions }: { showActorActions: boolean }) {
   function navigateTo(targetID: string) {
-    const target = document.getElementById(targetID)
-    if (!target) return
-    target.scrollIntoView({ behavior: 'smooth', block: 'start' })
-    target.focus({ preventScroll: true })
+    const reduceMotion = typeof window.matchMedia === 'function' &&
+      window.matchMedia('(prefers-reduced-motion: reduce)').matches
+    navigateMallWeatherSection(document, targetID, reduceMotion)
   }
 
   return (
     <nav className="mall-weather-data-nav" aria-label="天气数据快速入口">
       <strong>天气数据</strong>
-      <button type="button" onClick={() => navigateTo('mall-weather-overview')}>当前实况</button>
-      <button type="button" onClick={() => navigateTo('mall-weather-minutely')}>约 1 km 分钟降水</button>
-      <button type="button" onClick={() => navigateTo('mall-weather-hourly')}>未来逐小时预报</button>
-      <button type="button" onClick={() => navigateTo('mall-weather-daily')}>15 天逐日预报</button>
-      <button type="button" onClick={() => navigateTo('mall-weather-life-indices')}>15 天生活指数</button>
-      {showActorActions && <button type="button" onClick={() => navigateTo('mall-weather-export')}>导出 Excel</button>}
-      {showActorActions && <button type="button" onClick={() => navigateTo('mall-weather-management')}>管理操作</button>}
+      {mallWeatherDataNavigationItems
+        .filter((item) => showActorActions || !item.requiresActor)
+        .map((item) => (
+          <button type="button" aria-controls={item.targetID} onClick={() => navigateTo(item.targetID)} key={item.targetID}>
+            {item.label}
+          </button>
+        ))}
     </nav>
   )
 }
