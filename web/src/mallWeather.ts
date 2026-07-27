@@ -1598,7 +1598,7 @@ export function mallWeatherForecastQueryWindows(now = new Date(), timeZone = 'As
   const minuteMilliseconds = 60 * 1000
   const hourMilliseconds = 60 * 60 * 1000
   const minutelyStart = new Date(Math.floor(now.getTime() / minuteMilliseconds) * minuteMilliseconds)
-  const hourlyStart = new Date(Math.floor(now.getTime() / hourMilliseconds) * hourMilliseconds)
+  const hourlyStart = new Date((Math.floor(now.getTime() / hourMilliseconds) + 1) * hourMilliseconds)
   const localDate = datePartsInTimeZone(now, timeZone)
   const dailyStart = localMidnight(localDate.year, localDate.month, localDate.day, timeZone)
   const normalizedEndDate = new Date(Date.UTC(
@@ -1630,12 +1630,14 @@ export async function loadAllMallWeatherPages<T>(
   parser: MallWeatherPageParser<T>,
 ): Promise<{ items: T[]; meta: MallWeatherMeta | null }> {
   const items: T[] = []
+  const fixedWindow = { start: new Date(window.start.getTime()), end: new Date(window.end.getTime()) }
+  const fixedAsOf = asOf === undefined ? undefined : new Date(asOf.getTime())
   let cursor = ''
   let meta: MallWeatherMeta | null = null
   const seenCursors = new Set<string>()
   const seenLogicalKeys = new Set<string>()
   for (let pageNumber = 0; pageNumber < 10; pageNumber++) {
-    const response = await request(mallWeatherSeriesPath(mallID, series, window.start, window.end, cursor, timeZone, asOf))
+    const response = await request(mallWeatherSeriesPath(mallID, series, fixedWindow.start, fixedWindow.end, cursor, timeZone, fixedAsOf))
     if (!response.ok) throw new Error(mallWeatherQueryError(response.status))
     const page = parser(response.data)
     if (!page) throw new Error('响应格式不正确，请联系管理员')
@@ -1647,12 +1649,41 @@ export async function loadAllMallWeatherPages<T>(
     items.push(...page.items)
     meta = page.meta
     const nextCursor = page.pagination.nextCursor
-    if (!nextCursor) return { items, meta }
+    if (!nextCursor) {
+      if (series === 'hourly') validateCompleteMallWeatherHourlySeries(items, fixedWindow)
+      return { items, meta }
+    }
     if (seenCursors.has(nextCursor)) throw new Error('分页游标重复，请联系管理员')
     seenCursors.add(nextCursor)
     cursor = nextCursor
   }
   throw new Error('分页数量超过安全上限，请联系管理员')
+}
+
+function validateCompleteMallWeatherHourlySeries(items: unknown[], window: MallWeatherQueryWindow) {
+  const hourMilliseconds = 60 * 60 * 1000
+  const startMilliseconds = window.start.getTime()
+  const durationMilliseconds = window.end.getTime() - startMilliseconds
+  const expectedCount = durationMilliseconds / hourMilliseconds
+  if (!Number.isSafeInteger(expectedCount) || expectedCount !== mallWeatherHourlyForecastHours) {
+    throw new Error('逐小时预报查询窗口无效，请联系管理员')
+  }
+  if (items.length !== expectedCount) {
+    throw new Error(`逐小时预报数量不完整：期望 ${expectedCount} 条，实际 ${items.length} 条`)
+  }
+  for (let index = 0; index < items.length; index++) {
+    const item = items[index]
+    if (!isRecord(item)) throw new Error('逐小时预报响应格式不正确，请联系管理员')
+    const utcMilliseconds = Date.parse(String(item.forecastTimeUtc))
+    const localMilliseconds = Date.parse(String(item.forecastTimeLocal))
+    const expectedMilliseconds = startMilliseconds + index * hourMilliseconds
+    if (utcMilliseconds !== expectedMilliseconds) {
+      throw new Error(`逐小时预报时间不连续：第 ${index + 1} 条不在预期小时`)
+    }
+    if (localMilliseconds !== utcMilliseconds) {
+      throw new Error(`逐小时预报本地时间与 UTC 时间不一致：第 ${index + 1} 条`)
+    }
+  }
 }
 
 export function loadMallWeatherForecastDatasets(

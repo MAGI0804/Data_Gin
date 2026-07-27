@@ -462,9 +462,11 @@ test('builds exact 120-minute, 360-hour, and 15-local-day forecast windows', () 
   assert.equal(mallWeatherDailyForecastDays, 15)
   assert.equal(shanghai.minutely.start.toISOString(), '2026-07-22T02:34:00.000Z')
   assert.equal(shanghai.minutely.end.toISOString(), '2026-07-22T04:34:00.000Z')
-  assert.equal(shanghai.hourly.start.toISOString(), '2026-07-22T02:00:00.000Z')
-  assert.equal(shanghai.hourly.end.toISOString(), '2026-08-06T02:00:00.000Z')
+  assert.equal(shanghai.hourly.start.toISOString(), '2026-07-22T03:00:00.000Z')
+  assert.equal(shanghai.hourly.end.toISOString(), '2026-08-06T03:00:00.000Z')
   assert.equal(shanghai.hourly.end.getTime() - shanghai.hourly.start.getTime(), 360 * 60 * 60 * 1000)
+  const exactlyOnHour = mallWeatherForecastQueryWindows(new Date('2026-07-22T02:00:00.000Z'), 'Asia/Shanghai')
+  assert.equal(exactlyOnHour.hourly.start.toISOString(), '2026-07-22T03:00:00.000Z')
   assert.equal(shanghai.daily.start.toISOString(), '2026-07-21T16:00:00.000Z')
   assert.equal(shanghai.daily.end.toISOString(), '2026-08-05T16:00:00.000Z')
 
@@ -481,13 +483,13 @@ test('builds exact 120-minute, 360-hour, and 15-local-day forecast windows', () 
 
 test('loads every opaque cursor page without changing the original query window', async () => {
   const window = {
-    start: new Date('2026-07-22T02:00:00.000Z'),
-    end: new Date('2026-08-06T02:00:00.000Z'),
+    start: new Date('2026-07-22T03:00:00.000Z'),
+    end: new Date('2026-08-06T03:00:00.000Z'),
   }
   const asOf = new Date('2026-07-22T00:02:00.000Z')
   const envelope = (hour, nextCursor = '') => pageEnvelope([hourlyItem(hour)], nextCursor)
   const paths = []
-  const forecasts = Array.from({ length: 360 }, (_, index) => hourlyItem(index))
+  const forecasts = Array.from({ length: 360 }, (_, index) => hourlyItem(index + 3, index))
   const responses = [
     pageEnvelope(forecasts.slice(0, 200), 'opaque+/=cursor'),
     pageEnvelope(forecasts.slice(200)),
@@ -529,6 +531,129 @@ test('loads every opaque cursor page without changing the original query window'
     return { ok: true, status: 200, data: envelope(excessiveCalls, `cursor-${excessiveCalls}`) }
   }, 7, 'hourly', window, 'Asia/Shanghai', asOf, parseMallWeatherHourlyPage), /分页数量超过安全上限/)
   assert.equal(excessiveCalls, 10)
+})
+
+test('snapshots mutable hourly window and as-of dates before loading cursor pages', async () => {
+  const window = {
+    start: new Date('2026-07-22T03:00:00.000Z'),
+    end: new Date('2026-08-06T03:00:00.000Z'),
+  }
+  const asOf = new Date('2026-07-22T00:02:00.000Z')
+  const forecasts = Array.from({ length: 360 }, (_, index) => hourlyItem(index + 3, index))
+  const responses = [
+    pageEnvelope(forecasts.slice(0, 200), 'fixed-input-next'),
+    pageEnvelope(forecasts.slice(200)),
+  ]
+  const paths = []
+
+  const result = await loadAllMallWeatherPages(async (path) => {
+    paths.push(new URL(path, 'https://example.test'))
+    if (paths.length === 1) {
+      window.start.setUTCDate(window.start.getUTCDate() + 1)
+      window.end.setUTCDate(window.end.getUTCDate() + 1)
+      asOf.setUTCDate(asOf.getUTCDate() + 1)
+    }
+    return { ok: true, status: 200, data: responses.shift() }
+  }, 7, 'hourly', window, 'Asia/Shanghai', asOf, parseMallWeatherHourlyPage)
+
+  assert.equal(result.items.length, 360)
+  assert.equal(paths[0].searchParams.get('start'), '2026-07-22T03:00:00.000Z')
+  assert.equal(paths[1].searchParams.get('start'), paths[0].searchParams.get('start'))
+  assert.equal(paths[1].searchParams.get('end'), paths[0].searchParams.get('end'))
+  assert.equal(paths[1].searchParams.get('asOf'), paths[0].searchParams.get('asOf'))
+})
+
+test('rejects incomplete, discontinuous, unordered, and out-of-window hourly series', async () => {
+  const window = {
+    start: new Date('2026-07-22T03:00:00.000Z'),
+    end: new Date('2026-08-06T03:00:00.000Z'),
+  }
+  const asOf = new Date('2026-07-22T00:02:00.000Z')
+  const complete = Array.from({ length: 360 }, (_, index) => hourlyItem(index + 3, index))
+  const load = (items) => loadAllMallWeatherPages(async () => ({
+    ok: true,
+    status: 200,
+    data: pageEnvelope(items),
+  }), 7, 'hourly', window, 'Asia/Shanghai', asOf, parseMallWeatherHourlyPage)
+
+  await assert.rejects(loadAllMallWeatherPages(async () => ({
+    ok: true,
+    status: 200,
+    data: pageEnvelope(complete.slice(0, 359)),
+  }), 7, 'hourly', { start: window.start, end: new Date(window.end.getTime() - 60 * 60 * 1000) }, 'Asia/Shanghai', asOf, parseMallWeatherHourlyPage), /逐小时预报查询窗口无效/)
+
+  await assert.rejects(load(complete.slice(0, 359)), /逐小时预报数量不完整/)
+
+  const missingMiddle = complete.filter((_, index) => index !== 120)
+  missingMiddle.push(hourlyItem(363))
+  await assert.rejects(load(missingMiddle), /逐小时预报时间不连续/)
+
+  const unordered = [...complete]
+  ;[unordered[180], unordered[181]] = [unordered[181], unordered[180]]
+  await assert.rejects(load(unordered), /逐小时预报时间不连续/)
+
+  await assert.rejects(load([...complete, hourlyItem(363)]), /逐小时预报数量不完整/)
+
+  const inconsistentLocalTime = complete.map((item, index) => index === 0
+    ? { ...item, forecastTimeLocal: '2026-07-22T12:00:00+08:00' }
+    : item)
+  await assert.rejects(load(inconsistentLocalTime), /本地时间与 UTC 时间不一致/)
+})
+
+test('validates hourly continuity in UTC while accepting a DST local clock transition', async () => {
+  const hourMilliseconds = 60 * 60 * 1000
+  const dstTransition = Date.parse('2026-03-08T07:00:00.000Z')
+  const window = mallWeatherForecastQueryWindows(new Date('2026-03-07T17:34:56.000Z'), 'America/New_York').hourly
+  const forecasts = Array.from({ length: 360 }, (_, index) => {
+    const utcMilliseconds = window.start.getTime() + index * hourMilliseconds
+    const offsetHours = utcMilliseconds < dstTransition ? -5 : -4
+    const localClock = new Date(utcMilliseconds + offsetHours * hourMilliseconds).toISOString().slice(0, 19)
+    return {
+      ...hourlyItem(index, index),
+      forecastTimeUtc: new Date(utcMilliseconds).toISOString(),
+      forecastTimeLocal: `${localClock}${offsetHours === -5 ? '-05:00' : '-04:00'}`,
+    }
+  })
+  const responses = [
+    pageEnvelope(forecasts.slice(0, 200), 'dst-next', { ...completeWeatherMeta, timeZone: 'America/New_York' }),
+    pageEnvelope(forecasts.slice(200), '', { ...completeWeatherMeta, timeZone: 'America/New_York' }),
+  ]
+
+  const result = await loadAllMallWeatherPages(async () => ({
+    ok: true,
+    status: 200,
+    data: responses.shift(),
+  }), 7, 'hourly', window, 'America/New_York', new Date('2026-03-07T17:34:56.000Z'), parseMallWeatherHourlyPage)
+
+  assert.equal(result.items.length, 360)
+  assert.match(result.items[12].forecastTimeLocal, /01:00:00-05:00$/)
+  assert.match(result.items[13].forecastTimeLocal, /03:00:00-04:00$/)
+
+  const fallTransition = Date.parse('2026-11-01T06:00:00.000Z')
+  const fallWindow = mallWeatherForecastQueryWindows(new Date('2026-10-31T23:34:56.000Z'), 'America/New_York').hourly
+  const fallForecasts = Array.from({ length: 360 }, (_, index) => {
+    const utcMilliseconds = fallWindow.start.getTime() + index * hourMilliseconds
+    const offsetHours = utcMilliseconds < fallTransition ? -4 : -5
+    const localClock = new Date(utcMilliseconds + offsetHours * hourMilliseconds).toISOString().slice(0, 19)
+    return {
+      ...hourlyItem(index, index),
+      forecastTimeUtc: new Date(utcMilliseconds).toISOString(),
+      forecastTimeLocal: `${localClock}${offsetHours === -4 ? '-04:00' : '-05:00'}`,
+    }
+  })
+  const fallResponses = [
+    pageEnvelope(fallForecasts.slice(0, 200), 'fall-dst-next', { ...completeWeatherMeta, timeZone: 'America/New_York' }),
+    pageEnvelope(fallForecasts.slice(200), '', { ...completeWeatherMeta, timeZone: 'America/New_York' }),
+  ]
+  const fallResult = await loadAllMallWeatherPages(async () => ({
+    ok: true,
+    status: 200,
+    data: fallResponses.shift(),
+  }), 7, 'hourly', fallWindow, 'America/New_York', new Date('2026-10-31T23:34:56.000Z'), parseMallWeatherHourlyPage)
+
+  assert.equal(fallResult.items.length, 360)
+  assert.match(fallResult.items[5].forecastTimeLocal, /01:00:00-04:00$/)
+  assert.match(fallResult.items[6].forecastTimeLocal, /01:00:00-05:00$/)
 })
 
 test('loads every minutely page with one fixed 120-minute window and snapshot time', async () => {
