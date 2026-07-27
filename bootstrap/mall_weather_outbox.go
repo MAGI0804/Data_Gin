@@ -26,7 +26,7 @@ var mallWeatherOutboxLifecycle struct {
 }
 
 func startMallWeatherOutboxDispatcher() {
-	if !config.GetBool("cfg.mall_weather.enabled") {
+	if !global.MallWeatherEnabledAtStartup {
 		return
 	}
 	if database.DB == nil {

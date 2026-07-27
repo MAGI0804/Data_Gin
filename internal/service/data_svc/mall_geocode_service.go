@@ -161,7 +161,6 @@ func (service *MallService) ConfirmGeocode(ctx context.Context, actorUserID, mal
 	if err := validateMallGeocodeConfirmationRequest(request); err != nil {
 		return nil, err
 	}
-
 	var updated *model.Mall
 	err := service.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		mallDAO := data_dao.NewMallDAO(tx)
@@ -172,10 +171,12 @@ func (service *MallService) ConfirmGeocode(ctx context.Context, actorUserID, mal
 		if mall.Version != request.ExpectedMallVersion {
 			return data_dao.ErrMallVersionConflict
 		}
-
 		geocodeDAO := data_dao.NewMallGeocodeDAO(tx)
 		confirmation, err := resolveMallGeocodeConfirmation(ctx, geocodeDAO, mall, request)
 		if err != nil {
+			return err
+		}
+		if err := service.requireWeatherFeature(request.WeatherEnabled); err != nil {
 			return err
 		}
 		now := service.now().UTC()

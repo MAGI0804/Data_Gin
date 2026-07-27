@@ -140,6 +140,115 @@ func TestBuildMallPatchCannotEnableWeatherBeforeConfirmation(t *testing.T) {
 	}
 }
 
+func TestMallServiceWeatherFeatureGateOnlyRejectsQueuedMallOperations(t *testing.T) {
+	disabled := &MallService{weatherFeatureEnabled: func() bool { return false }}
+	current := &model.Mall{GeocodeStatus: "confirmed"}
+	nameEN := "Example Mall"
+	grossFloorArea := 45000.0
+	parkingSpaces := 120
+	tags := []string{"亲子", "地铁直达"}
+	businessHours := map[string][]requestbody.MallBusinessHour{"monday": {{Open: "10:00", Close: "22:00"}}}
+	detailProfile := "standard"
+	weatherDisabled := false
+	metadataValues := []struct {
+		name   string
+		mutate func(*requestbody.MallPatchRequest)
+	}{
+		{name: "english name", mutate: func(request *requestbody.MallPatchRequest) { request.NameEN = &nameEN }},
+		{name: "gross floor area", mutate: func(request *requestbody.MallPatchRequest) { request.GrossFloorAreaSQM = &grossFloorArea }},
+		{name: "parking spaces", mutate: func(request *requestbody.MallPatchRequest) { request.ParkingSpaces = &parkingSpaces }},
+		{name: "tags", mutate: func(request *requestbody.MallPatchRequest) { request.Tags = &tags }},
+		{name: "business hours", mutate: func(request *requestbody.MallPatchRequest) { request.BusinessHours = &businessHours }},
+		{name: "weather profile", mutate: func(request *requestbody.MallPatchRequest) {
+			request.Weather = &requestbody.MallWeatherSettingsRequest{DetailProfile: &detailProfile}
+		}},
+		{name: "disable weather", mutate: func(request *requestbody.MallPatchRequest) {
+			request.Weather = &requestbody.MallWeatherSettingsRequest{Enabled: &weatherDisabled}
+		}},
+	}
+	for _, test := range metadataValues {
+		t.Run(test.name, func(t *testing.T) {
+			request := requestbody.MallPatchRequest{ExpectedMallVersion: 1}
+			test.mutate(&request)
+			updates, requiresGeocode, err := disabled.prepareMallPatch(current, request, 9)
+			if err != nil || requiresGeocode || len(updates) < 2 {
+				t.Fatalf("metadata patch = (%#v, requiresGeocode=%v, err=%v)", updates, requiresGeocode, err)
+			}
+		})
+	}
+
+	geocodeValues := []struct {
+		name   string
+		mutate func(*requestbody.MallPatchRequest)
+	}{
+		{name: "name", mutate: func(request *requestbody.MallPatchRequest) { request.NameCN = mallTestStringPointer("新商场") }},
+		{name: "province", mutate: func(request *requestbody.MallPatchRequest) { request.Province = mallTestStringPointer("浙江省") }},
+		{name: "city", mutate: func(request *requestbody.MallPatchRequest) { request.City = mallTestStringPointer("杭州市") }},
+		{name: "district", mutate: func(request *requestbody.MallPatchRequest) { request.District = mallTestStringPointer("西湖区") }},
+		{name: "address", mutate: func(request *requestbody.MallPatchRequest) { request.Address = mallTestStringPointer("新地址") }},
+		{name: "address with metadata", mutate: func(request *requestbody.MallPatchRequest) {
+			request.Address = mallTestStringPointer("新地址")
+			request.ParkingSpaces = &parkingSpaces
+		}},
+	}
+	for _, test := range geocodeValues {
+		t.Run(test.name, func(t *testing.T) {
+			request := requestbody.MallPatchRequest{ExpectedMallVersion: 1}
+			test.mutate(&request)
+			if _, _, err := disabled.prepareMallPatch(current, request, 9); !errors.Is(err, ErrMallWeatherDisabled) {
+				t.Fatalf("prepareMallPatch() error = %v, want ErrMallWeatherDisabled", err)
+			}
+		})
+	}
+
+	weatherEnabled := true
+	if _, _, err := disabled.prepareMallPatch(current, requestbody.MallPatchRequest{
+		ExpectedMallVersion: 1,
+		Weather:             &requestbody.MallWeatherSettingsRequest{Enabled: &weatherEnabled},
+	}, 9); !errors.Is(err, ErrMallWeatherDisabled) {
+		t.Fatalf("enable weather patch error = %v, want ErrMallWeatherDisabled", err)
+	}
+
+	if err := disabled.requireWeatherFeature(false); err != nil {
+		t.Fatalf("coordinate-only confirmation gate error = %v", err)
+	}
+	if err := disabled.requireWeatherFeature(true); !errors.Is(err, ErrMallWeatherDisabled) {
+		t.Fatalf("weather-enabled confirmation gate error = %v, want ErrMallWeatherDisabled", err)
+	}
+
+	invalidAddress := ""
+	if _, _, err := disabled.prepareMallPatch(current, requestbody.MallPatchRequest{
+		ExpectedMallVersion: 1,
+		Address:             &invalidAddress,
+	}, 9); !errors.Is(err, ErrMallInvalidInput) {
+		t.Fatalf("invalid address error = %v, want ErrMallInvalidInput", err)
+	}
+}
+
+func mallTestStringPointer(value string) *string {
+	return &value
+}
+
+func TestMallServiceWeatherFeatureGateFailsClosedAndAllowsEnabledWorkers(t *testing.T) {
+	tests := []struct {
+		name    string
+		service *MallService
+		wantErr bool
+	}{
+		{name: "missing reader", service: &MallService{}, wantErr: true},
+		{name: "disabled", service: &MallService{weatherFeatureEnabled: func() bool { return false }}, wantErr: true},
+		{name: "enabled", service: &MallService{weatherFeatureEnabled: func() bool { return true }}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			err := test.service.requireWeatherFeature(true)
+			if errors.Is(err, ErrMallWeatherDisabled) != test.wantErr {
+				t.Fatalf("requireWeatherFeature() error = %v, want disabled=%v", err, test.wantErr)
+			}
+		})
+	}
+}
+
 func TestMallDTORejectsCorruptStoredJSON(t *testing.T) {
 	if _, err := mallDTO(&model.Mall{BusinessHoursJSON: `{`}); err == nil {
 		t.Fatal("mallDTO() accepted invalid business hours JSON")

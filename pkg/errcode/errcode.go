@@ -116,6 +116,8 @@ func (e *Error) HttpStatusCode() int {
 		return http.StatusInternalServerError
 	case BadGateway.Code():
 		return http.StatusBadGateway
+	case ServiceUnavailable.Code():
+		return http.StatusServiceUnavailable
 	case GatewayTimeout.Code():
 		return http.StatusGatewayTimeout
 	}

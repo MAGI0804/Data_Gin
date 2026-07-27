@@ -293,6 +293,8 @@ func classifyMallError(err error) (*errcode.Error, string) {
 		return errcode.Conflict, "商场请求冲突，请刷新后重试"
 	case errors.Is(err, data_svc.ErrMallInvalidInput):
 		return errcode.UnprocessableEntity, "商场请求参数校验失败"
+	case errors.Is(err, data_svc.ErrMallWeatherDisabled):
+		return errcode.ServiceUnavailable, "商场天气服务未启用，请联系管理员完成配置后重试"
 	default:
 		return errcode.InternalServerError, "商场服务暂时不可用"
 	}

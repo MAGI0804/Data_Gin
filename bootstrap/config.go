@@ -34,10 +34,11 @@ func setupConfig() {
 	if err := validateMallWeatherConfig(); err != nil {
 		console.Exit("invalid mall weather configuration: %v", err)
 	}
+	global.MallWeatherEnabledAtStartup = pkgConfig.GetBool("cfg.mall_weather.enabled")
 
 	credentials, err := credential.Load(credential.Requirements{
 		Production:         pkgConfig.GetString("cfg.app.env") == "prod",
-		RequireMallWeather: pkgConfig.GetBool("cfg.mall_weather.enabled"),
+		RequireMallWeather: global.MallWeatherEnabledAtStartup,
 		RequireFeishu:      pkgConfig.GetBool("cfg.mall_weather.feishu_enabled"),
 	})
 	if err != nil {
@@ -117,6 +118,9 @@ func validateMallWeatherConfig() error {
 	queues, ok := pkgConfig.Get("cfg.queue_job.config_opt.queues").(map[string]int)
 	if !ok || queues["weather"] <= 0 {
 		return fmt.Errorf("weather queue must be configured with a positive weight")
+	}
+	if queues["export"] <= 0 {
+		return fmt.Errorf("export queue must be configured with a positive weight")
 	}
 	return nil
 }

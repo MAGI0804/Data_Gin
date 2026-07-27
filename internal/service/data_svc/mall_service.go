@@ -14,6 +14,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"gin-biz-web-api/global"
 	"gin-biz-web-api/internal/dao/data_dao"
 	"gin-biz-web-api/internal/requestbody"
 	"gin-biz-web-api/job"
@@ -46,6 +47,7 @@ var (
 	ErrMallConflict            = errors.New("mall service: conflict")
 	ErrMallIdempotencyConflict = errors.New("mall service: idempotency conflict")
 	ErrMallIdempotencyPending  = errors.New("mall service: idempotency request pending")
+	ErrMallWeatherDisabled     = errors.New("mall service: weather feature disabled")
 
 	mallCodePattern       = regexp.MustCompile(`^[A-Z0-9][A-Z0-9_-]{1,63}$`)
 	idempotencyKeyPattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._:-]{7,254}$`)
@@ -61,6 +63,7 @@ type MallService struct {
 	permissions           mallPermissionChecker
 	defaultDetailProfile  string
 	defaultCoverageRadius int
+	weatherFeatureEnabled func() bool
 	now                   func() time.Time
 }
 
@@ -129,6 +132,7 @@ func NewMallService() *MallService {
 		permissions:           data_dao.NewMallWeatherPermissionDAO(),
 		defaultDetailProfile:  config.GetString("cfg.mall_weather.default_detail_profile", "full"),
 		defaultCoverageRadius: config.GetInt("cfg.mall_weather.coverage_radius_m", 1000),
+		weatherFeatureEnabled: func() bool { return global.MallWeatherEnabledAtStartup },
 		now:                   time.Now,
 	}
 }
@@ -346,7 +350,10 @@ func (service *MallService) Update(ctx context.Context, actorUserID, mallID uint
 		if err != nil {
 			return err
 		}
-		updates, requiresGeocode, err := buildMallPatch(current, request, actorUserID)
+		if current.Version != request.ExpectedMallVersion {
+			return data_dao.ErrMallVersionConflict
+		}
+		updates, requiresGeocode, err := service.prepareMallPatch(current, request, actorUserID)
 		if err != nil {
 			return err
 		}
@@ -376,6 +383,36 @@ func (service *MallService) Update(ctx context.Context, actorUserID, mallID uint
 		return nil, err
 	}
 	return &dto, nil
+}
+
+func (service *MallService) prepareMallPatch(
+	current *model.Mall,
+	request requestbody.MallPatchRequest,
+	actorUserID uint,
+) (map[string]interface{}, bool, error) {
+	updates, requiresGeocode, err := buildMallPatch(current, request, actorUserID)
+	if err != nil {
+		return nil, false, err
+	}
+	requiresWeatherWorkers := requiresGeocode || mallPatchEnablesWeather(request)
+	if err := service.requireWeatherFeature(requiresWeatherWorkers); err != nil {
+		return nil, false, err
+	}
+	return updates, requiresGeocode, nil
+}
+
+func mallPatchEnablesWeather(request requestbody.MallPatchRequest) bool {
+	return request.Weather != nil && request.Weather.Enabled != nil && *request.Weather.Enabled
+}
+
+func (service *MallService) requireWeatherFeature(required bool) error {
+	if !required {
+		return nil
+	}
+	if service == nil || service.weatherFeatureEnabled == nil || !service.weatherFeatureEnabled() {
+		return ErrMallWeatherDisabled
+	}
+	return nil
 }
 
 func (service *MallService) Delete(ctx context.Context, actorUserID, mallID uint, expectedVersion uint64) error {

@@ -93,15 +93,17 @@ func TestMallControllerImportReturnsPerRowResult(t *testing.T) {
 
 func TestMallControllerMapsServiceErrorsWithoutLeakingDetails(t *testing.T) {
 	tests := []struct {
-		name       string
-		err        error
-		wantStatus int
+		name        string
+		err         error
+		wantStatus  int
+		wantMessage string
 	}{
 		{name: "forbidden", err: data_svc.ErrMallForbidden, wantStatus: http.StatusForbidden},
 		{name: "not found", err: data_dao.ErrMallNotFound, wantStatus: http.StatusNotFound},
 		{name: "candidate not found", err: data_dao.ErrMallGeocodeCandidateNotFound, wantStatus: http.StatusNotFound},
 		{name: "version conflict", err: data_dao.ErrMallVersionConflict, wantStatus: http.StatusConflict},
 		{name: "invalid", err: data_svc.ErrMallInvalidInput, wantStatus: http.StatusUnprocessableEntity},
+		{name: "weather disabled", err: errors.Join(errors.New("internal detail"), data_svc.ErrMallWeatherDisabled), wantStatus: http.StatusServiceUnavailable, wantMessage: "商场天气服务未启用，请联系管理员完成配置后重试"},
 		{name: "internal", err: errors.New("database password=secret unavailable"), wantStatus: http.StatusInternalServerError},
 	}
 	for _, test := range tests {
@@ -115,6 +117,12 @@ func TestMallControllerMapsServiceErrorsWithoutLeakingDetails(t *testing.T) {
 			}
 			if strings.Contains(recorder.Body.String(), "password") || strings.Contains(recorder.Body.String(), "secret") {
 				t.Fatalf("response leaked internal error: %s", recorder.Body.String())
+			}
+			if test.wantMessage != "" && !strings.Contains(recorder.Body.String(), test.wantMessage) {
+				t.Fatalf("response missing safe message %q: %s", test.wantMessage, recorder.Body.String())
+			}
+			if test.wantStatus == http.StatusServiceUnavailable && !strings.Contains(recorder.Body.String(), `"code":100503`) {
+				t.Fatalf("response missing service unavailable code: %s", recorder.Body.String())
 			}
 		})
 	}

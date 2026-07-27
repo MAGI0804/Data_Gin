@@ -73,7 +73,7 @@ func registerExcelMatchScheduledTasks(scheduler *asynq.Scheduler) {
 }
 
 func registerMallWeatherScheduledTasks(scheduler *asynq.Scheduler) {
-	if !config.GetBool("cfg.mall_weather.enabled") {
+	if !global.MallWeatherEnabledAtStartup {
 		return
 	}
 	cleanupTask, err := job.NewMallWeatherExportCleanupTask()

@@ -220,7 +220,7 @@ func registerMallWeatherRoutes(api *gin.RouterGroup, weatherCtrl *data_ctrl.Mall
 func registerMallWeatherRefreshRoutes(api *gin.RouterGroup, refreshCtrl *data_ctrl.MallWeatherRefreshController) {
 	weatherGroup := api.Group("/v1/malls")
 	weatherGroup.Use(middleware.AuthJWT())
-	weatherGroup.POST("/:id/weather-refresh", refreshCtrl.Refresh)
+	weatherGroup.POST("/:id/weather-refresh", middleware.RequireMallWeatherEnabled(), refreshCtrl.Refresh)
 }
 
 func registerMallWeatherExportProfileRoutes(
@@ -239,7 +239,7 @@ func registerMallWeatherExportJobRoutes(
 ) {
 	exportGroup := api.Group("/v1/weather-exports")
 	exportGroup.Use(middleware.AuthJWT())
-	exportGroup.POST("", exportCtrl.Create)
+	exportGroup.POST("", middleware.RequireMallWeatherEnabled(), exportCtrl.Create)
 	exportGroup.GET("/:job_id", exportCtrl.Get)
 	exportGroup.GET("/:job_id/download", exportCtrl.Download)
 	exportGroup.GET("/:job_id/content", exportCtrl.DownloadContent)
@@ -251,7 +251,7 @@ func registerMallWeatherFeishuPushRoutes(
 ) {
 	pushGroup := api.Group("/v1/weather-sheet-pushes")
 	pushGroup.Use(middleware.AuthJWT())
-	pushGroup.POST("", pushCtrl.Create)
+	pushGroup.POST("", middleware.RequireMallWeatherEnabled(), pushCtrl.Create)
 	pushGroup.GET("/:run_id", pushCtrl.Get)
 	pushGroup.POST("/dry-run", pushCtrl.DryRun)
 }
@@ -287,13 +287,14 @@ func registerMallRoutes(api *gin.RouterGroup, mallCtrl *data_ctrl.MallController
 	mallGroup := api.Group("/v1/malls")
 	mallGroup.Use(middleware.AuthJWT())
 	{
-		mallGroup.POST("", mallCtrl.Create)
-		mallGroup.POST("/import", mallCtrl.Import)
+		weatherWriteEnabled := middleware.RequireMallWeatherEnabled()
+		mallGroup.POST("", weatherWriteEnabled, mallCtrl.Create)
+		mallGroup.POST("/import", weatherWriteEnabled, mallCtrl.Import)
 		mallGroup.GET("", mallCtrl.List)
 		mallGroup.GET("/:id", mallCtrl.Get)
 		mallGroup.PATCH("/:id", mallCtrl.Update)
 		mallGroup.DELETE("/:id", mallCtrl.Delete)
-		mallGroup.POST("/:id/geocode", mallCtrl.TriggerGeocode)
+		mallGroup.POST("/:id/geocode", weatherWriteEnabled, mallCtrl.TriggerGeocode)
 		mallGroup.GET("/:id/geocode-candidates", mallCtrl.ListGeocodeCandidates)
 		mallGroup.POST("/:id/geocode-confirm", mallCtrl.ConfirmGeocode)
 	}

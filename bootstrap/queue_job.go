@@ -52,7 +52,7 @@ func setupQueueJob() {
 	} else if _, err := client.Enqueue(cleanupTask); err != nil && !errors.Is(err, asynq.ErrDuplicateTask) {
 		console.Warning("Failed to enqueue initial Excel match cleanup task: %v", err)
 	}
-	if config.GetBool("cfg.mall_weather.enabled") {
+	if global.MallWeatherEnabledAtStartup {
 		geocodeProcessor, err := data_svc.NewMallGeocodeProcessor()
 		if err != nil {
 			console.Exit("Mall Geocode Worker Init Failed %v", err)
