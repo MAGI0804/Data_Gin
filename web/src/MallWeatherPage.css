@@ -703,6 +703,13 @@
 }
 
 @media (max-width: 840px) {
+  .mall-weather-forecast-dataset,
+  #mall-weather-overview,
+  #mall-weather-export,
+  #mall-weather-management {
+    scroll-margin-top: 72px;
+  }
+
   .mall-weather-toolbar,
   .mall-weather-refresh-form,
   .mall-weather-create-form,

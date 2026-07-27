@@ -992,7 +992,12 @@ function App() {
           <span>查找页面</span>
           <div>
             <Search aria-hidden="true" />
-            <input value={navQuery} onChange={(event) => setNavQuery(event.currentTarget.value)} placeholder="输入页面名称或用途" />
+            <input
+              name="moduleNavigationSearch"
+              value={navQuery}
+              onChange={(event) => setNavQuery(event.currentTarget.value)}
+              placeholder="输入页面名称或用途"
+            />
           </div>
         </label>
         <nav className="module-nav" id="primary-navigation">
