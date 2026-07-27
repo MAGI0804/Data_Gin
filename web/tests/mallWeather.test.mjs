@@ -367,7 +367,7 @@ test('builds bounded complete-series paths and parses paged forecast contracts',
   assert.equal(daily?.items[0].dayPrecipitationProbabilityPct, 60)
   assert.equal(daily?.items[0].cloudrateAvgRatio, 0.65)
   assert.equal(daily?.items[0].aqiAvgUsa, 51)
-  const life = parseMallWeatherLifeIndexPage(pageEnvelope([{ sourceApi: 'v3_lifeindex', forecastDateLocal: '2026-07-22', indexType: 1, indexCode: 'comfort', isUnknownType: false, ...completeWeatherTimes, qualityStatus: 'VALID', qualityWarnings: [] }]))
+  const life = parseMallWeatherLifeIndexPage(pageEnvelope([{ sourceApi: 'v26_daily', forecastDateLocal: '2026-07-22', indexType: 1, indexCode: 'comfort', isUnknownType: false, ...completeWeatherTimes, qualityStatus: 'VALID', qualityWarnings: [] }]))
   assert.equal(life?.items[0].indexCode, 'comfort')
   assert.equal(parseMallWeatherHourlyPage(pageEnvelope([{ ...hourlyItem(2), forecastTimeLocal: 'bad' }])), null)
   assert.equal(parseMallWeatherHourlyPage(pageEnvelope([{ ...hourlyItem(2), humidityPct: '74' }])), null)
@@ -376,6 +376,7 @@ test('builds bounded complete-series paths and parses paged forecast contracts',
   assert.equal(parseMallWeatherMinutelyPage(pageEnvelope([{ ...minutelyItem(2), precipitationMmH: '0.2' }])), null)
   assert.equal(parseMallWeatherMinutelyPage(pageEnvelope([{ ...minutelyItem(2), forecastMinuteLocal: 'bad' }])), null)
   assert.equal(parseMallWeatherDailyPage(pageEnvelope([{ forecastDateLocal: '2026-02-30', ...completeWeatherTimes, qualityStatus: 'VALID', qualityWarnings: [] }])), null)
+  assert.equal(parseMallWeatherLifeIndexPage(pageEnvelope([{ sourceApi: 'v3_lifeindex', forecastDateLocal: '2026-07-22', indexType: 1, indexCode: 'comfort', isUnknownType: false, ...completeWeatherTimes, qualityStatus: 'VALID', qualityWarnings: [] }])), null)
   assert.equal(parseMallWeatherLifeIndexPage(pageEnvelope([{ sourceApi: 'v3_lifeindex', forecastDateLocal: '2026-07-22', indexType: 1.5, indexCode: 'bad', isUnknownType: false, ...completeWeatherTimes, qualityStatus: 'VALID', qualityWarnings: [] }])), null)
   assert.equal(parseMallWeatherLifeIndexPage(pageEnvelope([], '', { ...completeWeatherMeta, timeZone: '' })), null)
 })
@@ -470,7 +471,7 @@ test('loads every minutely page with one fixed 120-minute window and snapshot ti
 
 test('builds validated manual refresh requests and idempotency keys', () => {
   assert.equal(mallWeatherRefreshPath(7), '/v1/malls/7/weather-refresh')
-	assert.deepEqual(mallWeatherRefreshRequest(['V3_LIFE_INDEX', 'V26_FULL', 'V26_FULL'], ' 管理端补采 '), {
+	assert.deepEqual(mallWeatherRefreshRequest(['V26_FULL'], ' 管理端补采 '), {
 		kinds: ['V26_FULL'],
     force: false,
     reason: '管理端补采',
@@ -478,6 +479,7 @@ test('builds validated manual refresh requests and idempotency keys', () => {
   assert.equal(mallWeatherRefreshKey('12345678-abcd'), 'weather-refresh:12345678-abcd')
   assert.throws(() => mallWeatherRefreshKey('bad key'), /invalid refresh key/)
   assert.throws(() => mallWeatherRefreshRequest([], '补采'), /invalid refresh kinds/)
+	assert.throws(() => mallWeatherRefreshRequest(['V26_FULL', 'V26_FULL'], '补采'), /invalid refresh kinds/)
   assert.throws(() => mallWeatherRefreshRequest(['V26_FULL'], 'bad\nreason'), /invalid refresh reason/)
   assert.doesNotThrow(() => mallWeatherRefreshRequest(['V26_FULL'], '😀'.repeat(500)))
 })
@@ -490,8 +492,8 @@ test('persists pending refreshes by actor and mall without cross-account leakage
   }
 	const otherPending = {
 		key: mallWeatherRefreshKey('87654321-dcba'),
-		body: mallWeatherRefreshRequest(['V3_LIFE_INDEX'], '另一账号补采'),
-  }
+		body: mallWeatherRefreshRequest(['V26_FULL'], '另一账号补采'),
+	}
 
   saveMallWeatherPendingRefresh('42', 7, pending, storage)
   assert.deepEqual(loadMallWeatherPendingRefresh('42', 7, storage), pending)
@@ -549,7 +551,7 @@ test('parses queued and fresh-skipped refresh results without over-reporting que
 })
 
 test('keeps the original idempotent request for every uncertain refresh outcome', () => {
-  const request = mallWeatherRefreshRequest(['V26_FULL', 'V3_LIFE_INDEX'], '管理端补采')
+  const request = mallWeatherRefreshRequest(['V26_FULL'], '管理端补采')
   const acceptedData = { code: 0, data: {
     jobId: 31,
     mallId: 7,

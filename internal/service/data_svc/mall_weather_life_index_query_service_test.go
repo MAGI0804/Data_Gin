@@ -11,7 +11,7 @@ import (
 	"gin-biz-web-api/model"
 )
 
-func TestMallWeatherQueryServiceLifeIndicesMapsBothSourcesUnknownTypeAndCursor(t *testing.T) {
+func TestMallWeatherQueryServiceLifeIndicesUsesComprehensiveSourceAndCursor(t *testing.T) {
 	now := time.Date(2026, 7, 22, 4, 0, 0, 0, time.UTC)
 	longitude, latitude := 121.455, 31.228
 	level := 4
@@ -49,8 +49,9 @@ func TestMallWeatherQueryServiceLifeIndicesMapsBothSourcesUnknownTypeAndCursor(t
 		t.Fatalf("LifeIndices() error=%v", err)
 	}
 	if len(result.Items) != 1 || result.Items[0].SourceAPI != "v26_daily" || result.Items[0].Level == nil || *result.Items[0].Level != level ||
-		result.Meta.APIVersion != "v2.6+v3" || result.Meta.FreshnessStatus != "WARNING" || result.Pagination.NextCursor == "" ||
-		!weather.lifeIndexQuery.Latest || weather.lifeIndexQuery.Limit != 2 || weather.lifeIndexQuery.StartLocal.Location().String() != "Asia/Shanghai" {
+		result.Meta.APIVersion != "v2.6" || result.Meta.FreshnessStatus != "WARNING" || result.Pagination.NextCursor == "" ||
+		weather.lifeIndexQuery.SourceAPI != "v26_daily" || weather.latestLifeSource != "v26_daily" || !weather.lifeIndexQuery.Latest ||
+		weather.lifeIndexQuery.Limit != 2 || weather.lifeIndexQuery.StartLocal.Location().String() != "Asia/Shanghai" {
 		t.Fatalf("result=%+v query=%+v", result, weather.lifeIndexQuery)
 	}
 	cursor, err := decodeWeatherLifeIndexCursor(result.Pagination.NextCursor)

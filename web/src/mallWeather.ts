@@ -361,7 +361,7 @@ export type MallWeatherDaily = {
 }
 
 export type MallWeatherLifeIndex = {
-  sourceApi: string
+  sourceApi: 'v26_daily'
   forecastDateLocal: string
   indexType: number
   indexCode: string
@@ -405,7 +405,7 @@ export type MallWeatherPageRequester = (path: string) => Promise<{
   data: unknown
 }>
 
-export type MallWeatherRefreshKind = 'V26_FULL' | 'V3_LIFE_INDEX'
+export type MallWeatherRefreshKind = 'V26_FULL'
 
 export type MallWeatherRefreshRequest = {
   kinds: MallWeatherRefreshKind[]
@@ -1220,7 +1220,7 @@ export function parseMallWeatherLifeIndexPage(payload: unknown): MallWeatherPage
   if (!meta) return null
   const items: MallWeatherLifeIndex[] = []
   for (const item of page.data.items as unknown[]) {
-    if (!isRecord(item) || typeof item.sourceApi !== 'string' || !item.sourceApi.trim() || !isISODate(item.forecastDateLocal) ||
+    if (!isRecord(item) || item.sourceApi !== 'v26_daily' || !isISODate(item.forecastDateLocal) ||
       !Number.isSafeInteger(item.indexType) || Number(item.indexType) < 0 || typeof item.indexCode !== 'string' || !item.indexCode.trim() ||
       !isRFC3339(item.issuedAtUtc) || !isRFC3339(item.issuedAtLocal) || !isRFC3339(item.fetchedAtUtc) || !isRFC3339(item.fetchedAtLocal) ||
       typeof item.qualityStatus !== 'string' || !item.qualityStatus.trim() || typeof item.isUnknownType !== 'boolean') return null
@@ -1253,11 +1253,11 @@ export function parseMallWeatherRefreshResult(payload: unknown): MallWeatherRefr
   const data = envelopeData(payload)
   if (!data || !Number.isSafeInteger(data.jobId) || Number(data.jobId) <= 0 || !Number.isSafeInteger(data.mallId) || Number(data.mallId) <= 0 ||
     typeof data.force !== 'boolean' || typeof data.reason !== 'string' || !Number.isSafeInteger(data.requestedBy) || Number(data.requestedBy) <= 0 ||
-    !Array.isArray(data.kinds) || data.kinds.length === 0) return null
+    !Array.isArray(data.kinds) || data.kinds.length !== 1) return null
   const kinds: MallWeatherRefreshResult['kinds'] = []
   const seenKinds = new Set<MallWeatherRefreshKind>()
   for (const item of data.kinds) {
-    if (!isRecord(item) || (item.kind !== 'V26_FULL' && item.kind !== 'V3_LIFE_INDEX') ||
+    if (!isRecord(item) || item.kind !== 'V26_FULL' ||
       (item.status !== 'QUEUED' && item.status !== 'SKIPPED_FRESH')) return null
     if (seenKinds.has(item.kind)) return null
     seenKinds.add(item.kind)
@@ -1441,14 +1441,11 @@ export function mallWeatherRefreshPath(mallID: number) {
 
 export function mallWeatherRefreshRequest(kinds: MallWeatherRefreshKind[], reason: string): MallWeatherRefreshRequest {
 	const normalizedReason = reason.trim()
-	if (kinds.length === 0 || kinds.some((kind) => kind !== 'V26_FULL' && kind !== 'V3_LIFE_INDEX')) {
-		throw new Error('invalid refresh kinds')
-	}
-	const normalizedKinds: MallWeatherRefreshKind[] = ['V26_FULL']
+	if (kinds.length !== 1 || kinds[0] !== 'V26_FULL') throw new Error('invalid refresh kinds')
   if (!normalizedReason || Array.from(normalizedReason).length > 500 || /[\0\r\n]/.test(normalizedReason)) {
     throw new Error('invalid refresh reason')
   }
-  return { kinds: normalizedKinds, force: false, reason: normalizedReason }
+  return { kinds: ['V26_FULL'], force: false, reason: normalizedReason }
 }
 
 export function mallWeatherRefreshKey(seed?: string) {
@@ -1462,7 +1459,7 @@ export function loadMallWeatherPendingRefresh(actorID: string, mallID: number, s
   try {
     const snapshot: unknown = JSON.parse(raw)
     if (!isRecord(snapshot) || typeof snapshot.key !== 'string' || !isRecord(snapshot.body) || snapshot.body.force !== false ||
-      !Array.isArray(snapshot.body.kinds) || !snapshot.body.kinds.every((kind) => kind === 'V26_FULL' || kind === 'V3_LIFE_INDEX') ||
+      !Array.isArray(snapshot.body.kinds) || snapshot.body.kinds.length !== 1 || snapshot.body.kinds[0] !== 'V26_FULL' ||
       typeof snapshot.body.reason !== 'string' || !validMallWeatherRefreshKey(snapshot.key)) return null
     const body = mallWeatherRefreshRequest(snapshot.body.kinds as MallWeatherRefreshKind[], snapshot.body.reason)
     return { key: snapshot.key, body }

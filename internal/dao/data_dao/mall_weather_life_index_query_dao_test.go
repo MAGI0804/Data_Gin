@@ -39,6 +39,19 @@ func TestBuildLifeIndexQueryUsesBothSourcesAndLatestVersions(t *testing.T) {
 	}
 }
 
+func TestBuildLifeIndexQueryFiltersComprehensiveSource(t *testing.T) {
+	start := time.Date(2026, 7, 22, 0, 0, 0, 0, time.UTC)
+	statement, args, err := buildLifeIndexQuery(LifeIndexQuery{
+		MallID: 7, SourceAPI: "v26_daily", StartLocal: start, EndLocal: start.Add(7 * 24 * time.Hour), Latest: true,
+	})
+	if err != nil {
+		t.Fatalf("buildLifeIndexQuery() error=%v", err)
+	}
+	if !strings.Contains(statement, "w.source_api = ?") || len(args) != 5 || args[3] != "v26_daily" {
+		t.Fatalf("statement=%s args=%v", statement, args)
+	}
+}
+
 func TestBuildLifeIndexQuerySupportsVersionHistoryKeyset(t *testing.T) {
 	start := time.Date(2026, 7, 22, 0, 0, 0, 0, time.UTC)
 	cursorDate := start.Add(24 * time.Hour)

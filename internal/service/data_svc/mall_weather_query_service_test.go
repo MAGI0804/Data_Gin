@@ -238,6 +238,8 @@ type fakeMallWeatherQueryDAO struct {
 	fetchRunRows     []model.MallWeatherFetchRun
 	alertRows        []model.MallWeatherAlert
 	latest           *model.MallWeatherLatest
+	latestLife       *model.MallWeatherLatest
+	latestLifeSource string
 	latestByKind     map[string]*model.MallWeatherLatest
 	realtime         *model.MallWeatherRealtime
 	minutely         []model.MallWeatherMinutely
@@ -299,6 +301,17 @@ func (dao *fakeMallWeatherQueryDAO) FindCurrentLatest(_ context.Context, _ uint,
 			return nil, data_dao.ErrMallWeatherLatestNotFound
 		}
 		return latest, dao.err
+	}
+	if dao.latest == nil && dao.err == nil {
+		return nil, data_dao.ErrMallWeatherLatestNotFound
+	}
+	return dao.latest, dao.err
+}
+
+func (dao *fakeMallWeatherQueryDAO) FindCurrentLatestLifeSource(_ context.Context, _ uint, sourceAPI string) (*model.MallWeatherLatest, error) {
+	dao.latestLifeSource = sourceAPI
+	if dao.latestLife != nil {
+		return dao.latestLife, dao.err
 	}
 	if dao.latest == nil && dao.err == nil {
 		return nil, data_dao.ErrMallWeatherLatestNotFound

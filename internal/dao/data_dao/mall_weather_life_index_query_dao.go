@@ -11,6 +11,7 @@ import (
 
 type LifeIndexQuery struct {
 	MallID                 uint
+	SourceAPI              string
 	StartLocal             time.Time
 	EndLocal               time.Time
 	AsOfUTC                *time.Time
@@ -61,6 +62,10 @@ func buildLifeIndexQuery(query LifeIndexQuery) (string, []interface{}, error) {
 		query.MallID,
 		query.StartLocal.Format(dailyQueryLocalLayout),
 		query.EndLocal.Format(dailyQueryLocalLayout),
+	}
+	if query.SourceAPI != "" {
+		where = append(where, "w.source_api = ?")
+		args = append(args, query.SourceAPI)
 	}
 	if query.AsOfUTC != nil {
 		where = append(where, "w.issued_at_utc <= ?")

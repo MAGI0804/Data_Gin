@@ -69,7 +69,8 @@ func (service *MallWeatherQueryService) LifeIndices(ctx context.Context, actorUs
 		return nil, err
 	}
 	query := data_dao.LifeIndexQuery{
-		MallID: mallID, StartLocal: weatherLocalDate(normalized.StartUTC, location), EndLocal: weatherLocalDate(normalized.EndUTC, location),
+		MallID: mallID, SourceAPI: weatherdomain.SourceAPIV26Daily,
+		StartLocal: weatherLocalDate(normalized.StartUTC, location), EndLocal: weatherLocalDate(normalized.EndUTC, location),
 		AsOfUTC: normalized.AsOfUTC, Latest: normalized.Latest, QualityStatus: normalized.QualityStatus,
 		Limit: normalized.PageSize + 1,
 	}
@@ -101,9 +102,9 @@ func (service *MallWeatherQueryService) LifeIndices(ctx context.Context, actorUs
 		}
 	}
 	meta := weatherQueryMeta(mall, location, model.MallWeatherFreshnessFresh, nil)
-	meta.APIVersion = "v2.6+v3"
+	meta.APIVersion = "v2.6"
 	result := &MallWeatherLifeIndexResult{Items: items, Meta: meta, Pagination: MallWeatherPagination{PageSize: normalized.PageSize}}
-	latest, err := service.weather.FindCurrentLatest(ctx, mallID, model.MallWeatherDataKindLife)
+	latest, err := service.weather.FindCurrentLatestLifeSource(ctx, mallID, weatherdomain.SourceAPIV26Daily)
 	if err != nil && !errors.Is(err, data_dao.ErrMallWeatherLatestNotFound) {
 		return nil, fmt.Errorf("mall weather query: life index freshness: %w", err)
 	}
@@ -193,7 +194,7 @@ func decodeWeatherLifeIndexCursor(value string) (*weatherLifeIndexCursor, error)
 	decoder := json.NewDecoder(strings.NewReader(string(raw)))
 	decoder.DisallowUnknownFields()
 	if err := decoder.Decode(&cursor); err != nil || cursor.Version != 1 || cursor.ID == 0 || cursor.IndexType < 0 ||
-		(cursor.SourceAPI != weatherdomain.SourceAPIV26Daily && cursor.SourceAPI != weatherdomain.SourceAPIV3LifeIndex) ||
+		cursor.SourceAPI != weatherdomain.SourceAPIV26Daily ||
 		cursor.IssuedAtUnixMS < minWeatherCursorUnixMS || cursor.IssuedAtUnixMS >= maxWeatherCursorUnixMS {
 		return nil, fmt.Errorf("%w: invalid cursor", ErrMallWeatherInvalidQuery)
 	}

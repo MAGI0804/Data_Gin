@@ -849,7 +849,6 @@ function MallWeatherSheetPushPanel({ actorID, mall, client }: {
 
 function ManualRefreshPanel({ actorID, mall, client }: { actorID: string; mall: MallWeatherMall; client: MallWeatherApiClient }) {
   const [pending, setPending] = useState<MallWeatherPendingRefresh | null>(() => loadMallWeatherPendingRefresh(actorID, mall.id, window.sessionStorage))
-  const [profile, setProfile] = useState<'weather' | 'life' | 'all'>(() => refreshProfile(pending?.body.kinds))
   const [reason, setReason] = useState(() => pending?.body.reason || '管理端手工刷新')
   const [submitting, setSubmitting] = useState(false)
   const [message, setMessage] = useState('')
@@ -860,10 +859,9 @@ function ManualRefreshPanel({ actorID, mall, client }: { actorID: string; mall: 
     event.preventDefault()
     let request = pending
     if (!request) {
-      const kinds = profile === 'weather' ? ['V26_FULL'] as const : profile === 'life' ? ['V3_LIFE_INDEX'] as const : ['V26_FULL', 'V3_LIFE_INDEX'] as const
       let body: MallWeatherRefreshRequest
       try {
-        body = mallWeatherRefreshRequest([...kinds], reason)
+        body = mallWeatherRefreshRequest(['V26_FULL'], reason)
       } catch {
         setError('请填写单行刷新原因，最多 500 个字符')
         setMessage('')
@@ -900,11 +898,6 @@ function ManualRefreshPanel({ actorID, mall, client }: { actorID: string; mall: 
     setMessage(mallWeatherRefreshResultMessage(disposition.result))
   }
 
-  function changeProfile(value: string) {
-    if (value !== 'weather' && value !== 'life' && value !== 'all') return
-    setProfile(value)
-  }
-
   function changeReason(value: string) {
     setReason(value)
   }
@@ -913,11 +906,7 @@ function ManualRefreshPanel({ actorID, mall, client }: { actorID: string; mall: 
     <section className="workbench-panel mall-weather-refresh-panel">
       <div className="mall-weather-section-title"><div><strong>手工刷新</strong><span>提交异步采集任务，不阻塞等待供应商</span></div><RefreshCcw aria-hidden="true" /></div>
       <form className="mall-weather-refresh-form" onSubmit={submit} aria-busy={submitting}>
-        <label><span>采集范围</span><select value={profile} onChange={(event) => changeProfile(event.currentTarget.value)} disabled={submitting || Boolean(pending)}>
-          <option value="all">全量天气 + 生活指数</option>
-          <option value="weather">全量天气</option>
-          <option value="life">生活指数</option>
-        </select></label>
+        <label><span>采集范围</span><input value="综合天气（含实况、分钟、小时、逐日、预警、生活指数）" disabled /></label>
         <label><span>刷新原因</span><input value={reason} onChange={(event) => changeReason(event.currentTarget.value)} disabled={submitting || Boolean(pending)} aria-describedby={reasonHelpID} />
           <small id={reasonHelpID}>必填单行文本，最多 500 个字符</small>
         </label>
@@ -927,12 +916,6 @@ function ManualRefreshPanel({ actorID, mall, client }: { actorID: string; mall: 
       {error && <p className="mall-weather-action-message error" role="alert">{error}</p>}
     </section>
   )
-}
-
-function refreshProfile(kinds: MallWeatherRefreshRequest['kinds'] | undefined): 'weather' | 'life' | 'all' {
-  if (kinds?.length === 1 && kinds[0] === 'V26_FULL') return 'weather'
-  if (kinds?.length === 1 && kinds[0] === 'V3_LIFE_INDEX') return 'life'
-  return 'all'
 }
 
 function WeatherOverview({ mall, overview, refreshing, onRefresh }: { mall: MallWeatherMall; overview: MallWeatherOverview; refreshing: boolean; onRefresh: () => void }) {

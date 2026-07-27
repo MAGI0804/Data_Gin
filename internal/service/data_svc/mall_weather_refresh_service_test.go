@@ -26,7 +26,7 @@ func TestMallWeatherRefreshServiceNormalizesAndAuthorizesForce(t *testing.T) {
 		t.Fatalf("newMallWeatherRefreshService() error=%v", err)
 	}
 	result, _, err := service.Refresh(context.Background(), 17, 7, "refresh-key-1234", requestbody.MallWeatherRefreshRequest{
-		Kinds: []string{"v3_life_index", "v26_full"}, Force: true, Reason: "  operator review  ",
+		Kinds: []string{"v26_full"}, Force: true, Reason: "  operator review  ",
 	})
 	if err != nil || result.JobID != 9 {
 		t.Fatalf("Refresh() result=%+v error=%v", result, err)
@@ -35,6 +35,24 @@ func TestMallWeatherRefreshServiceNormalizesAndAuthorizesForce(t *testing.T) {
 		len(store.command.Kinds) != 1 || store.command.Kinds[0] != MallWeatherRefreshKindV26Full ||
 		len(store.command.KeyHash) != 64 || len(store.command.RequestHash) != 64 || len(store.command.TaskWindow) != 55 {
 		t.Fatalf("permissions=%v command=%+v", permissions.requested, store.command)
+	}
+}
+
+func TestMallWeatherRefreshServiceRejectsStandaloneLifeIndexKind(t *testing.T) {
+	service, err := newMallWeatherRefreshService(
+		fakeMallWeatherQueryMallReader{},
+		&recordingMallPermissionChecker{allowed: map[string]bool{PermissionWeatherRefresh: true}},
+		&fakeMallWeatherRefreshStore{},
+		time.Now,
+	)
+	if err != nil {
+		t.Fatalf("newMallWeatherRefreshService() error=%v", err)
+	}
+	_, _, err = service.Refresh(context.Background(), 17, 7, "refresh-key-1234", requestbody.MallWeatherRefreshRequest{
+		Kinds: []string{"V3_LIFE_INDEX"}, Reason: "operator review",
+	})
+	if !errors.Is(err, ErrMallInvalidInput) {
+		t.Fatalf("Refresh() error=%v", err)
 	}
 }
 
@@ -53,7 +71,7 @@ func TestMallWeatherRefreshServiceRequiresAdminPermissionForForce(t *testing.T) 
 	}
 }
 
-func TestMallWeatherRefreshKindFreshChecksAllV26PointersAndV3Source(t *testing.T) {
+func TestMallWeatherRefreshKindFreshChecksAllComprehensivePointers(t *testing.T) {
 	now := time.Date(2026, 7, 22, 4, 0, 0, 0, time.UTC)
 	latest := &fakeMallWeatherRefreshLatestReader{byKind: map[string]*model.MallWeatherLatest{}}
 	for _, kind := range []string{model.MallWeatherDataKindRealtime, model.MallWeatherDataKindMinutely, model.MallWeatherDataKindHourly, model.MallWeatherDataKindDaily} {
@@ -63,8 +81,8 @@ func TestMallWeatherRefreshKindFreshChecksAllV26PointersAndV3Source(t *testing.T
 	if fresh, err := mallWeatherRefreshKindFresh(context.Background(), latest, 7, MallWeatherRefreshKindV26Full, now); err != nil || !fresh {
 		t.Fatalf("v26 fresh=%v error=%v", fresh, err)
 	}
-	if fresh, err := mallWeatherRefreshKindFresh(context.Background(), latest, 7, MallWeatherRefreshKindV3LifeIndex, now); err != nil || !fresh || latest.lifeSource != "v26_daily" {
-		t.Fatalf("v3 fresh=%v source=%q error=%v", fresh, latest.lifeSource, err)
+	if latest.lifeSource != "v26_daily" {
+		t.Fatalf("life source=%q", latest.lifeSource)
 	}
 	latest.byKind[model.MallWeatherDataKindDaily] = &model.MallWeatherLatest{FetchedAtUTC: now.Add(-13 * time.Hour), FreshnessStatus: model.MallWeatherFreshnessFresh}
 	if fresh, err := mallWeatherRefreshKindFresh(context.Background(), latest, 7, MallWeatherRefreshKindV26Full, now); err != nil || fresh {
@@ -74,7 +92,7 @@ func TestMallWeatherRefreshKindFreshChecksAllV26PointersAndV3Source(t *testing.T
 
 func TestNewMallWeatherManualRefreshOutboxContainsOnlyMinimalPayload(t *testing.T) {
 	now := time.Now().UTC()
-	row, err := newMallWeatherManualRefreshOutbox(7, "manual:0123456789abcdef0123456789abcdef0123456789abcdef", MallWeatherRefreshKindV3LifeIndex, now)
+	row, err := newMallWeatherManualRefreshOutbox(7, "manual:0123456789abcdef0123456789abcdef0123456789abcdef", MallWeatherRefreshKindV26Full, now)
 	if err != nil {
 		t.Fatalf("newMallWeatherManualRefreshOutbox() error=%v", err)
 	}

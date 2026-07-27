@@ -26,8 +26,7 @@ import (
 )
 
 const (
-	MallWeatherRefreshKindV26Full     = "V26_FULL"
-	MallWeatherRefreshKindV3LifeIndex = "V3_LIFE_INDEX"
+	MallWeatherRefreshKindV26Full = "V26_FULL"
 
 	mallWeatherRefreshOperationScope = "weather.refresh"
 	maxMallWeatherRefreshReasonRunes = 500
@@ -144,17 +143,16 @@ func (service *MallWeatherRefreshService) authorize(ctx context.Context, actorUs
 }
 
 func normalizeMallWeatherRefreshRequest(request requestbody.MallWeatherRefreshRequest) (requestbody.MallWeatherRefreshRequest, error) {
-	if len(request.Kinds) == 0 || len(request.Kinds) > 2 {
+	if len(request.Kinds) != 1 {
 		return request, fmt.Errorf("%w: refresh kinds are required", ErrMallInvalidInput)
 	}
 	seen := make(map[string]struct{}, len(request.Kinds))
 	kinds := make([]string, 0, len(request.Kinds))
 	for _, value := range request.Kinds {
 		kind := strings.ToUpper(strings.TrimSpace(value))
-		if kind != MallWeatherRefreshKindV26Full && kind != MallWeatherRefreshKindV3LifeIndex {
+		if kind != MallWeatherRefreshKindV26Full {
 			return request, fmt.Errorf("%w: unsupported refresh kind", ErrMallInvalidInput)
 		}
-		kind = MallWeatherRefreshKindV26Full
 		if _, exists := seen[kind]; exists {
 			continue
 		}
@@ -271,10 +269,6 @@ func mallWeatherRefreshKindFresh(ctx context.Context, latest mallWeatherRefreshL
 	if ctx == nil || latest == nil || mallID == 0 || now.IsZero() {
 		return false, fmt.Errorf("mall weather refresh: invalid freshness request")
 	}
-	if kind == MallWeatherRefreshKindV3LifeIndex {
-		row, err := latest.FindCurrentLatestLifeSource(ctx, mallID, weatherdomain.SourceAPIV26Daily)
-		return mallWeatherRefreshPointerFresh(model.MallWeatherDataKindLife, row, now, err)
-	}
 	if kind != MallWeatherRefreshKindV26Full {
 		return false, fmt.Errorf("mall weather refresh: unsupported freshness kind")
 	}
@@ -291,7 +285,8 @@ func mallWeatherRefreshKindFresh(ctx context.Context, latest mallWeatherRefreshL
 			return false, nil
 		}
 	}
-	return true, nil
+	row, err := latest.FindCurrentLatestLifeSource(ctx, mallID, weatherdomain.SourceAPIV26Daily)
+	return mallWeatherRefreshPointerFresh(model.MallWeatherDataKindLife, row, now, err)
 }
 
 func mallWeatherRefreshPointerFresh(dataKind string, row *model.MallWeatherLatest, now time.Time, lookupErr error) (bool, error) {
@@ -312,15 +307,10 @@ func newMallWeatherManualRefreshOutbox(mallID uint, taskWindow, kind string, ava
 	if mallID == 0 || taskWindow == "" || availableAt.IsZero() {
 		return model.AsyncJobOutbox{}, fmt.Errorf("mall weather refresh: invalid outbox identity")
 	}
-	var endpointKind string
-	switch kind {
-	case MallWeatherRefreshKindV26Full:
-		endpointKind = caiyun.EndpointWeatherV26
-	case MallWeatherRefreshKindV3LifeIndex:
-		endpointKind = caiyun.EndpointWeatherV26
-	default:
+	if kind != MallWeatherRefreshKindV26Full {
 		return model.AsyncJobOutbox{}, fmt.Errorf("mall weather refresh: unsupported outbox kind")
 	}
+	endpointKind := caiyun.EndpointWeatherV26
 	payload, err := json.Marshal(job.MallTaskPayload{MallID: mallID, TaskWindow: taskWindow, EndpointKind: endpointKind})
 	if err != nil {
 		return model.AsyncJobOutbox{}, fmt.Errorf("mall weather refresh: encode outbox payload: %w", err)
