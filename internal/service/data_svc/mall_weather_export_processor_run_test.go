@@ -62,6 +62,91 @@ func TestMallWeatherExportProcessorCompletesOwnedRun(t *testing.T) {
 	}
 }
 
+func TestMallWeatherExportProcessorDoesNotAcknowledgeBusyRunAfterCancellation(t *testing.T) {
+	store := newFakeMallWeatherExportRunStore(t)
+	store.lease.Disposition = data_dao.MallWeatherExportRunDispositionBusy
+	store.beginRunSignal = make(chan struct{})
+	processor := newTestMallWeatherExportProcessor(
+		t,
+		store,
+		mallWeatherExportRendererFunc(writeFakeMallWeatherExportArtifact),
+		&fakeMallWeatherExportObjectStore{},
+		uuid.NewString(),
+	)
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() { done <- processor.Process(ctx, 17, true) }()
+	<-store.beginRunSignal
+	cancel()
+
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("Process() error=%v, want context.Canceled", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Process() did not stop after cancellation")
+	}
+	if state := store.snapshot(); state.progressUpdates != 0 || state.succeededKey != "" {
+		t.Fatalf("store state=%+v", state)
+	}
+}
+
+func TestMallWeatherExportProcessorStopsWaitingWhenBusyRunBecomesTerminal(t *testing.T) {
+	store := newFakeMallWeatherExportRunStore(t)
+	store.leaseDispositions = []data_dao.MallWeatherExportRunDisposition{
+		data_dao.MallWeatherExportRunDispositionBusy,
+		data_dao.MallWeatherExportRunDispositionTerminal,
+	}
+	renderCalls := 0
+	processor := newTestMallWeatherExportProcessor(
+		t,
+		store,
+		mallWeatherExportRendererFunc(func(
+			context.Context,
+			MallWeatherExportRenderRequest,
+			func(MallWeatherExportRenderProgress) error,
+		) (MallWeatherExportRenderResult, error) {
+			renderCalls++
+			return MallWeatherExportRenderResult{}, errors.New("renderer must not run")
+		}),
+		&fakeMallWeatherExportObjectStore{},
+		uuid.NewString(),
+	)
+	processor.heartbeatInterval = time.Millisecond
+
+	if err := processor.Process(t.Context(), 17, true); err != nil {
+		t.Fatalf("Process() error=%v", err)
+	}
+	if state := store.snapshot(); state.beginRuns != 2 || state.succeededKey != "" || renderCalls != 0 {
+		t.Fatalf("store state=%+v render calls=%d", state, renderCalls)
+	}
+}
+
+func TestMallWeatherExportProcessorRechecksBusyRunUntilLeaseIsAcquired(t *testing.T) {
+	store := newFakeMallWeatherExportRunStore(t)
+	store.leaseDispositions = []data_dao.MallWeatherExportRunDisposition{
+		data_dao.MallWeatherExportRunDispositionBusy,
+		data_dao.MallWeatherExportRunDispositionAcquired,
+	}
+	processor := newTestMallWeatherExportProcessor(
+		t,
+		store,
+		mallWeatherExportRendererFunc(writeFakeMallWeatherExportArtifact),
+		&fakeMallWeatherExportObjectStore{},
+		uuid.NewString(),
+	)
+	processor.heartbeatInterval = time.Millisecond
+
+	if err := processor.Process(t.Context(), 17, true); err != nil {
+		t.Fatalf("Process() error=%v", err)
+	}
+	state := store.snapshot()
+	if state.beginRuns != 2 || state.succeededKey == "" {
+		t.Fatalf("store state=%+v", state)
+	}
+}
+
 func TestMallWeatherExportProcessorKeepsObjectWhenSuccessCommitIsAmbiguous(t *testing.T) {
 	runToken := uuid.NewString()
 	store := newFakeMallWeatherExportRunStore(t)
@@ -556,6 +641,10 @@ func (renderer mallWeatherExportRendererFunc) Render(
 type fakeMallWeatherExportRunStore struct {
 	mu                   sync.Mutex
 	lease                data_dao.MallWeatherExportRunLease
+	leaseDispositions    []data_dao.MallWeatherExportRunDisposition
+	beginRuns            int
+	beginRunSignal       chan struct{}
+	beginRunSignalOnce   sync.Once
 	progressControl      data_dao.MallWeatherExportRunControl
 	heartbeatControl     data_dao.MallWeatherExportRunControl
 	progressUpdates      int
@@ -594,6 +683,17 @@ func (store *fakeMallWeatherExportRunStore) BeginRun(
 	store.mu.Lock()
 	defer store.mu.Unlock()
 	lease := store.lease
+	if len(store.leaseDispositions) > 0 {
+		index := store.beginRuns
+		if index >= len(store.leaseDispositions) {
+			index = len(store.leaseDispositions) - 1
+		}
+		lease.Disposition = store.leaseDispositions[index]
+	}
+	store.beginRuns++
+	if store.beginRunSignal != nil {
+		store.beginRunSignalOnce.Do(func() { close(store.beginRunSignal) })
+	}
 	lease.RunToken = runToken
 	return &lease, nil
 }
@@ -708,6 +808,7 @@ func (store *fakeMallWeatherExportRunStore) ReleaseRunForRetry(
 }
 
 type fakeMallWeatherExportRunStoreState struct {
+	beginRuns            int
 	progressUpdates      int
 	released             int
 	failed               int
@@ -721,6 +822,7 @@ func (store *fakeMallWeatherExportRunStore) snapshot() fakeMallWeatherExportRunS
 	store.mu.Lock()
 	defer store.mu.Unlock()
 	return fakeMallWeatherExportRunStoreState{
+		beginRuns:            store.beginRuns,
 		progressUpdates:      store.progressUpdates,
 		released:             store.released,
 		failed:               store.failed,

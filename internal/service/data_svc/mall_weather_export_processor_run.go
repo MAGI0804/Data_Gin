@@ -104,20 +104,31 @@ func (processor *MallWeatherExportProcessor) Process(
 		return err
 	}
 	runToken := processor.newRunToken()
-	startedAt := processor.now().UTC()
-	lease, err := processor.runs.BeginRun(ctx, jobID, runToken, startedAt, processor.staleAfter)
-	if err != nil {
-		return fmt.Errorf("mall weather export processor: begin run: %w", err)
-	}
-	if lease == nil {
-		return fmt.Errorf("mall weather export processor: nil run lease")
-	}
-	switch lease.Disposition {
-	case data_dao.MallWeatherExportRunDispositionBusy, data_dao.MallWeatherExportRunDispositionTerminal:
-		return nil
-	case data_dao.MallWeatherExportRunDispositionAcquired:
-	default:
-		return fmt.Errorf("mall weather export processor: invalid run disposition")
+	var lease *data_dao.MallWeatherExportRunLease
+	var startedAt time.Time
+	for {
+		startedAt = processor.now().UTC()
+		var err error
+		lease, err = processor.runs.BeginRun(ctx, jobID, runToken, startedAt, processor.staleAfter)
+		if err != nil {
+			return fmt.Errorf("mall weather export processor: begin run: %w", err)
+		}
+		if lease == nil {
+			return fmt.Errorf("mall weather export processor: nil run lease")
+		}
+		switch lease.Disposition {
+		case data_dao.MallWeatherExportRunDispositionBusy:
+			if err := waitForMallWeatherExportRunLease(ctx, processor.heartbeatInterval); err != nil {
+				return fmt.Errorf("mall weather export processor: wait for run lease: %w", err)
+			}
+			continue
+		case data_dao.MallWeatherExportRunDispositionTerminal:
+			return nil
+		case data_dao.MallWeatherExportRunDispositionAcquired:
+		default:
+			return fmt.Errorf("mall weather export processor: invalid run disposition")
+		}
+		break
 	}
 	if lease.RunToken != runToken || lease.Job.ID != jobID {
 		return fmt.Errorf("mall weather export processor: acquired lease identity mismatch")
@@ -144,6 +155,20 @@ func (processor *MallWeatherExportProcessor) Process(
 		retryAllowed,
 	)
 	return returnErr
+}
+
+func waitForMallWeatherExportRunLease(ctx context.Context, interval time.Duration) error {
+	if ctx == nil || interval <= 0 {
+		return fmt.Errorf("mall weather export processor: invalid run lease wait")
+	}
+	timer := time.NewTimer(interval)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
 }
 
 func (processor *MallWeatherExportProcessor) processOwnedRun(
