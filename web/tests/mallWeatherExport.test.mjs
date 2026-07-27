@@ -8,6 +8,7 @@ import {
   mallWeatherExportCreateRequest,
   mallWeatherExportCreateResultMatchesRequest,
   mallWeatherExportDownloadReadiness,
+  mallWeatherExportDownloadPreflightTimeoutMilliseconds,
   mallWeatherExportDownloadFrameLifetimeMilliseconds,
   mallWeatherExportMaximumPollRetryDelayMilliseconds,
   mallWeatherExportMaximumTransientPollRetries,
@@ -24,6 +25,7 @@ import {
   mallWeatherExportRequestTimeoutMilliseconds,
   mallWeatherExportRequestMatches,
   parseMallWeatherExportCreateResult,
+  parseMallWeatherExportContentStatus,
   submitMallWeatherExportContentDownload,
   parseMallWeatherExportJob,
   parseMallWeatherExportSafeErrorMessage,
@@ -262,8 +264,21 @@ test('builds stable authenticated download resource paths', () => {
   assert.throws(() => mallWeatherExportJobPath('bad'), /invalid mall weather export job id/)
 })
 
-test('submits authenticated content download without putting the token in the URL', async () => {
+test('preflights and submits authenticated streaming content without putting the token in the URL', async () => {
+  assert.equal(mallWeatherExportDownloadPreflightTimeoutMilliseconds, 65 * 1000)
   assert.equal(mallWeatherExportDownloadFrameLifetimeMilliseconds, 20 * 60 * 1000)
+  const fileName = `mall_weather_export_${jobID}.xlsx`
+  assert.deepEqual(parseMallWeatherExportContentStatus(envelope({
+    fileName,
+    fileSizeBytes: 8,
+    contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  })), {
+    fileName,
+    fileSizeBytes: 8,
+    contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+  })
+  assert.equal(parseMallWeatherExportContentStatus(envelope({ fileName, fileSizeBytes: 0, contentType: 'application/json' })), null)
+
   const appended = []
   const created = []
   let cleanup = null
@@ -302,7 +317,7 @@ test('submits authenticated content download without putting the token in the UR
     documentRef,
     action,
     'header.payload.signature',
-    `mall_weather_export_${jobID}.xlsx`,
+    fileName,
     (callback, delayMilliseconds) => {
       cleanup = callback
       assert.equal(delayMilliseconds, mallWeatherExportDownloadFrameLifetimeMilliseconds)
@@ -312,7 +327,7 @@ test('submits authenticated content download without putting the token in the UR
   const [frame, form, tokenInput] = created
   assert.equal(appended.length, 2)
   assert.equal(frame.hidden, true)
-  assert.equal(frame.title, `下载 mall_weather_export_${jobID}.xlsx`)
+  assert.equal(frame.title, `下载 ${fileName}`)
   assert.equal(frame.referrerPolicy, 'no-referrer')
   assert.equal(frame.attributes['aria-hidden'], 'true')
   assert.equal(frame.attributes.sandbox, 'allow-downloads')
@@ -334,7 +349,7 @@ test('submits authenticated content download without putting the token in the UR
     documentRef,
     `${action}?token=query-secret`,
     'form-token',
-    `mall_weather_export_${jobID}.xlsx`,
+    fileName,
     () => {},
   ), /invalid mall weather export browser download/)
 

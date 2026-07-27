@@ -47,6 +47,7 @@ func TestAPIDataRegistersMallCRUDRoutes(t *testing.T) {
 		http.MethodGet + " /api/v1/weather-exports/:job_id/download",
 		http.MethodGet + " /api/v1/weather-exports/:job_id/content",
 		http.MethodPost + " /api/v1/weather-exports/:job_id/content",
+		http.MethodGet + " /api/v1/weather-exports/:job_id/content/status",
 		http.MethodPost + " /api/v1/weather-sheet-pushes",
 		http.MethodGet + " /api/v1/weather-sheet-pushes/:run_id",
 		http.MethodPost + " /api/v1/weather-sheet-pushes/dry-run",

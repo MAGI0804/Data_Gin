@@ -175,6 +175,37 @@ func TestMallWeatherExportJobControllerStreamsPostFormDownloadContent(t *testing
 	}
 }
 
+func TestMallWeatherExportJobControllerChecksDownloadContentBeforeStreaming(t *testing.T) {
+	body := &trackingReadCloser{Reader: strings.NewReader("PK\x03\x04xlsx")}
+	service := fakeMallWeatherExportJobControllerService{
+		content: func(_ context.Context, actor uint, jobUUID string) (*data_svc.MallWeatherExportContentResult, error) {
+			if actor != 17 || jobUUID != mallWeatherExportJobTestUUID {
+				t.Fatalf("actor=%d job=%s", actor, jobUUID)
+			}
+			return &data_svc.MallWeatherExportContentResult{
+				Body: body, Size: 8,
+				FileName:    "mall_weather_export_" + jobUUID + ".xlsx",
+				ContentType: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+			}, nil
+		},
+	}
+	recorder := performMallWeatherExportJobRequest(
+		t,
+		service,
+		http.MethodGet,
+		"/api/v1/weather-exports/"+mallWeatherExportJobTestUUID+"/content/status",
+		"",
+		"",
+	)
+	if recorder.Code != http.StatusOK || !strings.Contains(recorder.Body.String(), `"fileSizeBytes":8`) ||
+		!strings.Contains(recorder.Body.String(), `"fileName":"mall_weather_export_`) {
+		t.Fatalf("status=%d body=%q", recorder.Code, recorder.Body.String())
+	}
+	if body.closeCalls != 1 {
+		t.Fatalf("content readiness check closeCalls=%d", body.closeCalls)
+	}
+}
+
 func TestMallWeatherExportJobControllerClosesInvalidDownloadContent(t *testing.T) {
 	body := &trackingReadCloser{Reader: strings.NewReader("PK\x03\x04xlsx")}
 	service := fakeMallWeatherExportJobControllerService{
@@ -313,6 +344,7 @@ func performMallWeatherExportJobRequest(
 	router.GET("/api/v1/weather-exports/:job_id/download", controller.Download)
 	router.GET("/api/v1/weather-exports/:job_id/content", controller.DownloadContent)
 	router.POST("/api/v1/weather-exports/:job_id/content", controller.DownloadContent)
+	router.GET("/api/v1/weather-exports/:job_id/content/status", controller.DownloadContentStatus)
 	request := httptest.NewRequest(method, path, strings.NewReader(body))
 	if method == http.MethodPost && strings.HasSuffix(path, "/content") {
 		request.Header.Set("Content-Type", "application/x-www-form-urlencoded")

@@ -6,6 +6,7 @@ import {
   loadMallWeatherExportSession,
   mallWeatherExportCreateRequest,
   mallWeatherExportContentPath,
+  mallWeatherExportDownloadPreflightTimeoutMilliseconds,
   mallWeatherExportJobPath,
   mallWeatherExportJobTerminal,
   mallWeatherExportKey,
@@ -316,6 +317,7 @@ export function MallWeatherExportPanel({ actorID, mallID, mallName, client, down
           controller.signal,
         ),
         controller,
+        mallWeatherExportDownloadPreflightTimeoutMilliseconds,
       )
       if (controller.signal.aborted) return
       if (!response.ok && response.status === 409) {

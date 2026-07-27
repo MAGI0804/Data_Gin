@@ -81,6 +81,7 @@ export type MallWeatherExportJob = {
 export type MallWeatherExportDownloadReadiness = 'ready' | 'not-ready' | 'expired'
 export type MallWeatherExportPollFailureAction = 'retry' | 'forget' | 'pause'
 
+export const mallWeatherExportDownloadPreflightTimeoutMilliseconds = 65 * 1000
 export const mallWeatherExportDownloadFrameLifetimeMilliseconds = 20 * 60 * 1000
 
 export class MallWeatherExportRequestTimeoutError extends Error {
@@ -365,13 +366,25 @@ export function parseMallWeatherExportJob(payload: unknown): MallWeatherExportJo
   }
 }
 
+export function parseMallWeatherExportContentStatus(payload: unknown) {
+  const data = envelopeData(payload)
+  if (!data || !nonEmptyString(data.fileName, 255) ||
+    !Number.isSafeInteger(data.fileSizeBytes) || Number(data.fileSizeBytes) < 4 ||
+    data.contentType !== 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet') return null
+  return {
+    fileName: data.fileName,
+    fileSizeBytes: Number(data.fileSizeBytes),
+    contentType: data.contentType,
+  }
+}
+
 export function submitMallWeatherExportContentDownload(
   documentRef: Document,
   action: string,
   token: string,
   fileName: string,
   scheduleCleanup: (callback: () => void, delayMilliseconds: number) => unknown,
-) {
+): void {
   if (!documentRef?.body || !nonEmptyString(action, 8_192) || !nonEmptyString(token, 16_384) ||
     !nonEmptyString(fileName, 255) || typeof scheduleCleanup !== 'function') {
     throw new Error('invalid mall weather export browser download')

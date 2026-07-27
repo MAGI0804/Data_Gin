@@ -141,6 +141,33 @@ func (controller *MallWeatherExportJobController) DownloadContent(c *gin.Context
 	}
 }
 
+func (controller *MallWeatherExportJobController) DownloadContentStatus(c *gin.Context) {
+	disableMallWeatherExportCaching(c)
+	result, err := controller.service.OpenDownloadContent(
+		c.Request.Context(),
+		auth.CurrentUserID(c),
+		c.Param("job_id"),
+	)
+	if err != nil {
+		writeMallWeatherExportJobError(c, err)
+		return
+	}
+	if result == nil || result.Body == nil {
+		writeMallWeatherExportJobError(c, errors.New("mall weather export: invalid content result"))
+		return
+	}
+	defer result.Body.Close()
+	if result.Size < 4 || result.FileName == "" || result.ContentType == "" {
+		writeMallWeatherExportJobError(c, errors.New("mall weather export: invalid content metadata"))
+		return
+	}
+	responses.New(c).ToResponseWithStatus(http.StatusOK, gin.H{
+		"fileName":      result.FileName,
+		"fileSizeBytes": result.Size,
+		"contentType":   result.ContentType,
+	})
+}
+
 func disableMallWeatherExportCaching(c *gin.Context) {
 	c.Header("Cache-Control", "no-store")
 }
