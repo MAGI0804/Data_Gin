@@ -11,11 +11,12 @@ import (
 
 func TestNormalizeOSSRegion(t *testing.T) {
 	tests := map[string]string{
-		"cn-shanghai":                            "cn-shanghai",
-		"oss-cn-shanghai":                        "cn-shanghai",
-		" https://oss-cn-shanghai.aliyuncs.com ": "cn-shanghai",
-		"http://oss-cn-hangzhou.aliyuncs.com":    "cn-hangzhou",
-		"":                                       "",
+		"cn-shanghai":                                   "cn-shanghai",
+		"oss-cn-shanghai":                               "cn-shanghai",
+		" https://oss-cn-shanghai.aliyuncs.com ":        "cn-shanghai",
+		"https://oss-cn-shanghai-internal.aliyuncs.com": "cn-shanghai",
+		"http://oss-cn-hangzhou.aliyuncs.com":           "cn-hangzhou",
+		"":                                              "",
 	}
 
 	for input, want := range tests {
@@ -70,19 +71,91 @@ func TestClientEndpointKeepsCNameWhenInternalEnabled(t *testing.T) {
 }
 
 func TestBrowserDownloadEndpointNeverUsesInternalOSSHost(t *testing.T) {
-	cfg := OSSConfig{
-		Region:      "oss-cn-shanghai",
-		Endpoint:    "https://oss-cn-shanghai.aliyuncs.com",
-		UseInternal: true,
+	tests := []struct {
+		name string
+		cfg  OSSConfig
+	}{
+		{
+			name: "internal upload enabled",
+			cfg: OSSConfig{
+				Region:      "oss-cn-shanghai",
+				Endpoint:    "https://oss-cn-shanghai.aliyuncs.com",
+				UseInternal: true,
+			},
+		},
+		{
+			name: "region copied from internal endpoint",
+			cfg: OSSConfig{
+				Region:      "https://oss-cn-shanghai-internal.aliyuncs.com",
+				Endpoint:    "https://oss-cn-shanghai-internal.aliyuncs.com",
+				UseInternal: true,
+			},
+		},
+		{
+			name: "aliyun internal endpoint is not a cname",
+			cfg: OSSConfig{
+				Region:   "cn-shanghai",
+				Endpoint: "https://oss-cn-shanghai-internal.aliyuncs.com",
+				UseCName: true,
+			},
+		},
 	}
 
-	got := browserDownloadEndpoint(cfg)
-	want := "https://oss-cn-shanghai.aliyuncs.com"
-	if got != want {
-		t.Fatalf("browserDownloadEndpoint() = %q, want %q", got, want)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, useCName := browserDownloadAddressing(tt.cfg)
+			want := "https://oss-cn-shanghai.aliyuncs.com"
+			if got != want {
+				t.Fatalf("browserDownloadEndpoint() = %q, want %q", got, want)
+			}
+			if useCName {
+				t.Fatal("browserDownloadAddressing() kept CNAME mode for a standard Aliyun endpoint")
+			}
+			if strings.Contains(got, "-internal.") {
+				t.Fatalf("browserDownloadEndpoint() returned browser-inaccessible internal endpoint %q", got)
+			}
+		})
 	}
-	if strings.Contains(got, "-internal.") {
-		t.Fatalf("browserDownloadEndpoint() returned browser-inaccessible internal endpoint %q", got)
+}
+
+func TestBrowserDownloadAddressingPreservesCustomCName(t *testing.T) {
+	endpoint, useCName := browserDownloadAddressing(OSSConfig{
+		Region:   "cn-shanghai",
+		Endpoint: "http://weather-files.example.com",
+		UseCName: true,
+	})
+	if endpoint != "https://weather-files.example.com" || !useCName {
+		t.Fatalf("browserDownloadAddressing() = (%q, %t), want custom HTTPS CNAME", endpoint, useCName)
+	}
+}
+
+func TestBrowserDownloadAddressingSignsWithBucketAfterInternalConversion(t *testing.T) {
+	cfg := OSSConfig{
+		Region:   "cn-shanghai",
+		Endpoint: "https://oss-cn-shanghai-internal.aliyuncs.com",
+		Bucket:   "weather-private",
+		UseCName: true,
+	}
+	endpoint, useCName := browserDownloadAddressing(cfg)
+	sdkClient := alioss.NewClient(alioss.LoadDefaultConfig().
+		WithCredentialsProvider(credentials.NewStaticCredentialsProvider("ak", "sk")).
+		WithRegion(cfg.Region).
+		WithEndpoint(endpoint).
+		WithUseCName(useCName).
+		WithUseInternalEndpoint(false))
+	client := &OSSClient{cfg: cfg, downloadClient: sdkClient}
+
+	signedURL, err := client.PresignDownloadURL(
+		t.Context(),
+		"mall-weather-exports/job/result.xlsx",
+		"mall-weather.xlsx",
+		5*time.Minute,
+	)
+	if err != nil {
+		t.Fatalf("PresignDownloadURL() error=%v", err)
+	}
+	if !strings.Contains(signedURL, "https://weather-private.oss-cn-shanghai.aliyuncs.com/") {
+		t.Fatalf("signed URL lost bucket addressing after internal conversion: %q", signedURL)
 	}
 }
 

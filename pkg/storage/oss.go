@@ -99,16 +99,17 @@ func NewOSSClientFromConfig() (*OSSClient, error) {
 	if endpoint := clientEndpoint(cfg); endpoint != "" {
 		ossCfg = ossCfg.WithEndpoint(endpoint)
 	}
+	downloadEndpoint, downloadUsesCName := browserDownloadAddressing(cfg)
 	downloadCfg := alioss.LoadDefaultConfig().
 		WithRegion(cfg.Region).
 		WithUseInternalEndpoint(false).
-		WithUseCName(cfg.UseCName).
+		WithUseCName(downloadUsesCName).
 		WithDisableSSL(false).
 		WithConnectTimeout(time.Duration(cfg.ConnectTimeoutSeconds) * time.Second).
 		WithReadWriteTimeout(time.Duration(cfg.ReadWriteTimeoutSeconds) * time.Second).
 		WithCredentialsProvider(credentialsProvider)
-	if endpoint := browserDownloadEndpoint(cfg); endpoint != "" {
-		downloadCfg = downloadCfg.WithEndpoint(endpoint)
+	if downloadEndpoint != "" {
+		downloadCfg = downloadCfg.WithEndpoint(downloadEndpoint)
 	}
 
 	return &OSSClient{
@@ -305,10 +306,15 @@ func (c *OSSClient) PublicURL(objectKey string) string {
 }
 
 func normalizeOSSRegion(region string) string {
-	region = strings.TrimSpace(region)
+	region = strings.ToLower(strings.TrimSpace(region))
 	region = strings.TrimPrefix(region, "https://")
 	region = strings.TrimPrefix(region, "http://")
+	region = strings.SplitN(region, "/", 2)[0]
 	region = strings.TrimSuffix(region, ".aliyuncs.com")
+	region = strings.TrimSuffix(region, "-internal")
+	if marker := strings.LastIndex(region, ".oss-"); marker >= 0 {
+		region = region[marker+1:]
+	}
 	region = strings.TrimPrefix(region, "oss-")
 	return strings.Trim(region, "/")
 }
@@ -321,19 +327,44 @@ func clientEndpoint(cfg OSSConfig) string {
 	return endpoint
 }
 
-func browserDownloadEndpoint(cfg OSSConfig) string {
+func browserDownloadAddressing(cfg OSSConfig) (string, bool) {
 	endpoint := strings.TrimSpace(cfg.Endpoint)
+	if strings.HasSuffix(strings.ToLower(endpointHostname(endpoint)), "-internal.aliyuncs.com") {
+		region := normalizeOSSRegion(cfg.Region)
+		if region == "" {
+			region = normalizeOSSRegion(endpoint)
+		}
+		if region == "" {
+			return "", false
+		}
+		return "https://oss-" + region + ".aliyuncs.com", false
+	}
 	if cfg.UseCName && endpoint != "" {
-		return httpsEndpoint(endpoint)
+		return httpsEndpoint(endpoint), true
 	}
 	if cfg.UseInternal || endpoint == "" || strings.Contains(endpoint, "-internal.") {
 		region := normalizeOSSRegion(cfg.Region)
 		if region == "" {
-			return ""
+			return "", false
 		}
-		return "https://oss-" + region + ".aliyuncs.com"
+		return "https://oss-" + region + ".aliyuncs.com", false
 	}
-	return httpsEndpoint(endpoint)
+	return httpsEndpoint(endpoint), false
+}
+
+func endpointHostname(endpoint string) string {
+	endpoint = strings.TrimSpace(endpoint)
+	if endpoint == "" {
+		return ""
+	}
+	if !strings.Contains(endpoint, "://") {
+		endpoint = "https://" + endpoint
+	}
+	parsed, err := url.Parse(endpoint)
+	if err != nil {
+		return ""
+	}
+	return parsed.Hostname()
 }
 
 func httpsEndpoint(endpoint string) string {
