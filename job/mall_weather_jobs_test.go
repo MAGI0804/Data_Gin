@@ -95,6 +95,18 @@ func TestDecodeMallWeatherSchedulePayloadRejectsUnknownFields(t *testing.T) {
 	}
 }
 
+func TestDecodeMallWeatherSchedulePayloadRoutesLegacyLifeIndexThroughFullWeather(t *testing.T) {
+	decoded, err := DecodeMallWeatherSchedulePayload([]byte(
+		`{"task_type":"mall:weather:life_index","detail_profile":"standard"}`,
+	))
+	if err != nil {
+		t.Fatalf("DecodeMallWeatherSchedulePayload() error=%v", err)
+	}
+	if decoded.TaskType != TypeMallWeatherFull || decoded.DetailProfile != "standard" {
+		t.Fatalf("decoded=%+v", decoded)
+	}
+}
+
 func TestDecodeMallWeatherExportTaskPayloadIsStrict(t *testing.T) {
 	payload, err := DecodeMallWeatherExportTaskPayload([]byte(`{"export_job_id":17}`))
 	if err != nil || payload.ExportJobID != 17 {

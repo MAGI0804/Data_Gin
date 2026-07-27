@@ -207,6 +207,9 @@ func DecodeMallWeatherSchedulePayload(payload []byte) (MallWeatherSchedulePayloa
 	if err := decodeStrictTaskPayload(payload, &decoded); err != nil {
 		return MallWeatherSchedulePayload{}, err
 	}
+	if decoded.TaskType == TypeMallWeatherLifeIndex {
+		decoded.TaskType = TypeMallWeatherFull
+	}
 	regularSchedule := (decoded.TaskType == TypeMallWeatherFast || decoded.TaskType == TypeMallWeatherFull) &&
 		(decoded.DetailProfile == "full" || decoded.DetailProfile == "standard" || decoded.DetailProfile == "economy")
 	repairSchedule := decoded.TaskType == TypeMallWeatherRepair && decoded.DetailProfile == ""
