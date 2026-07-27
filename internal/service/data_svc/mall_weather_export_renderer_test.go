@@ -31,6 +31,7 @@ func TestMallWeatherExportRendererWritesSplitWorkbookAndProgress(t *testing.T) {
 	output := filepath.Join(t.TempDir(), "weather.xlsx")
 	progressCalls := 0
 	result, err := renderer.Render(t.Context(), MallWeatherExportRenderRequest{
+		ProfileCode: "test_profile",
 		Config: MallWeatherExportProfileConfig{
 			TimeZone: "Asia/Shanghai", UnitSystem: "metric", DateFormat: "2006-01-02", DateTimeFormat: "2006-01-02 15:04:05",
 			Datasets: []requestbody.MallWeatherExportDataset{{
@@ -119,6 +120,7 @@ func TestMallWeatherExportRendererUsesRegularWriterForSmallJobs(t *testing.T) {
 	}
 	output := filepath.Join(t.TempDir(), "small.xlsx")
 	result, err := renderer.Render(context.Background(), MallWeatherExportRenderRequest{
+		ProfileCode: "test_profile",
 		Config: MallWeatherExportProfileConfig{
 			TimeZone: "UTC", UnitSystem: "metric", DateFormat: time.DateOnly, DateTimeFormat: time.RFC3339,
 			Datasets: []requestbody.MallWeatherExportDataset{{Kind: "malls", SheetName: "商场", MaxRows: 100,
@@ -128,6 +130,102 @@ func TestMallWeatherExportRendererUsesRegularWriterForSmallJobs(t *testing.T) {
 	}, nil)
 	if err != nil || result.UsedStream || result.ProcessedRows != 1 {
 		t.Fatalf("result=%+v error=%v", result, err)
+	}
+}
+
+func TestMallWeatherExportRendererUsesFixedCurrentForecastWindows(t *testing.T) {
+	pager := &fakeMallWeatherExportDataPager{}
+	renderer, err := newMallWeatherExportRenderer(pager, 100, 8)
+	if err != nil {
+		t.Fatalf("newMallWeatherExportRenderer() error=%v", err)
+	}
+	latest := true
+	snapshot := time.Date(2026, 7, 27, 12, 34, 56, 0, time.UTC)
+	output := filepath.Join(t.TempDir(), "current-weather.xlsx")
+	_, err = renderer.Render(t.Context(), MallWeatherExportRenderRequest{
+		ProfileCode: fixedMallWeatherExportProfileCode,
+		Config: MallWeatherExportProfileConfig{
+			TimeZone: "Asia/Shanghai", UnitSystem: "metric",
+			DateFormat: time.DateOnly, DateTimeFormat: time.RFC3339,
+			Datasets: []requestbody.MallWeatherExportDataset{
+				{Kind: "minutely", SheetName: "分钟", Latest: &latest},
+				{Kind: "hourly", SheetName: "小时", Latest: &latest},
+				{Kind: "daily", SheetName: "逐日", Latest: &latest},
+				{Kind: "life_indices", SheetName: "生活指数", Latest: &latest},
+			},
+		},
+		SnapshotAt: snapshot, EstimatedRows: 0, OutputPath: output,
+	}, nil)
+	if err != nil {
+		t.Fatalf("Render() error=%v", err)
+	}
+	if len(pager.requests) != 4 {
+		t.Fatalf("requests=%+v", pager.requests)
+	}
+	byKind := make(map[string]data_dao.MallWeatherExportDataPageRequest, len(pager.requests))
+	for _, request := range pager.requests {
+		byKind[request.Kind] = request
+	}
+	minutely := byKind["minutely"].Filter
+	if minutely.StartUTC == nil || minutely.EndUTC == nil ||
+		!minutely.StartUTC.Equal(time.Date(2026, 7, 27, 12, 34, 0, 0, time.UTC)) ||
+		!minutely.EndUTC.Equal(time.Date(2026, 7, 27, 14, 34, 0, 0, time.UTC)) {
+		t.Fatalf("minutely filter=%+v", minutely)
+	}
+	hourly := byKind["hourly"].Filter
+	if hourly.StartUTC == nil || hourly.EndUTC == nil ||
+		!hourly.StartUTC.Equal(time.Date(2026, 7, 27, 13, 0, 0, 0, time.UTC)) ||
+		!hourly.EndUTC.Equal(time.Date(2026, 8, 11, 13, 0, 0, 0, time.UTC)) {
+		t.Fatalf("hourly filter=%+v", hourly)
+	}
+	for _, kind := range []string{"daily", "life_indices"} {
+		filter := byKind[kind].Filter
+		if filter.StartDate != "2026-07-27" || filter.EndDate != "2026-08-11" {
+			t.Fatalf("kind=%s filter=%+v", kind, filter)
+		}
+	}
+}
+
+func TestMallWeatherExportRendererPreservesExplicitRange(t *testing.T) {
+	pager := &fakeMallWeatherExportDataPager{}
+	renderer, err := newMallWeatherExportRenderer(pager, 100, 8)
+	if err != nil {
+		t.Fatalf("newMallWeatherExportRenderer() error=%v", err)
+	}
+	latest := true
+	wantStart := time.Date(2026, 7, 1, 1, 2, 3, 0, time.UTC)
+	wantEnd := time.Date(2026, 7, 3, 4, 5, 6, 0, time.UTC)
+	output := filepath.Join(t.TempDir(), "explicit-range.xlsx")
+	_, err = renderer.Render(t.Context(), MallWeatherExportRenderRequest{
+		ProfileCode: fixedMallWeatherExportProfileCode,
+		Config: MallWeatherExportProfileConfig{
+			TimeZone: "Asia/Shanghai", UnitSystem: "metric",
+			DateFormat: time.DateOnly, DateTimeFormat: time.RFC3339,
+			Datasets: []requestbody.MallWeatherExportDataset{
+				{Kind: "hourly", SheetName: "小时", Latest: &latest},
+				{Kind: "daily", SheetName: "逐日", Latest: &latest},
+			},
+		},
+		Filter: data_dao.MallWeatherExportEstimateFilter{
+			StartUTC: &wantStart, EndUTC: &wantEnd,
+			StartDate: "2026-07-01", EndDate: "2026-07-03",
+		},
+		SnapshotAt: time.Date(2026, 7, 27, 12, 34, 56, 0, time.UTC),
+		OutputPath: output,
+	}, nil)
+	if err != nil {
+		t.Fatalf("Render() error=%v", err)
+	}
+	if len(pager.requests) != 2 {
+		t.Fatalf("requests=%+v", pager.requests)
+	}
+	for _, request := range pager.requests {
+		filter := request.Filter
+		if filter.StartUTC == nil || filter.EndUTC == nil ||
+			!filter.StartUTC.Equal(wantStart) || !filter.EndUTC.Equal(wantEnd) ||
+			filter.StartDate != "2026-07-01" || filter.EndDate != "2026-07-03" {
+			t.Fatalf("kind=%s filter=%+v", request.Kind, filter)
+		}
 	}
 }
 
@@ -146,6 +244,7 @@ func TestMallWeatherExportRendererRemovesPartialOutputWhenProgressStops(t *testi
 	output := filepath.Join(t.TempDir(), "cancelled.xlsx")
 	stopErr := errors.New("stop rendering")
 	_, err = renderer.Render(t.Context(), MallWeatherExportRenderRequest{
+		ProfileCode: "test_profile",
 		Config: MallWeatherExportProfileConfig{
 			TimeZone: "UTC", UnitSystem: "metric", DateFormat: time.DateOnly, DateTimeFormat: time.RFC3339,
 			Datasets: []requestbody.MallWeatherExportDataset{{
@@ -176,6 +275,7 @@ func TestMallWeatherExportRendererDoesNotOverwriteExistingOutput(t *testing.T) {
 		t.Fatalf("newMallWeatherExportRenderer() error=%v", err)
 	}
 	_, err = renderer.Render(t.Context(), MallWeatherExportRenderRequest{
+		ProfileCode: "test_profile",
 		Config: MallWeatherExportProfileConfig{
 			TimeZone: "UTC", UnitSystem: "metric", DateFormat: time.DateOnly, DateTimeFormat: time.RFC3339,
 			Datasets: []requestbody.MallWeatherExportDataset{{Kind: "malls", SheetName: "商场"}},
@@ -235,13 +335,15 @@ func TestValidateMallWeatherExportPage(t *testing.T) {
 }
 
 type fakeMallWeatherExportDataPager struct {
-	rows []data_dao.MallWeatherExportDataRow
+	rows     []data_dao.MallWeatherExportDataRow
+	requests []data_dao.MallWeatherExportDataPageRequest
 }
 
 func (pager *fakeMallWeatherExportDataPager) Page(
 	_ context.Context,
 	request data_dao.MallWeatherExportDataPageRequest,
 ) (*data_dao.MallWeatherExportDataPage, error) {
+	pager.requests = append(pager.requests, request)
 	start := 0
 	for start < len(pager.rows) && pager.rows[start].CursorID <= request.AfterID {
 		start++

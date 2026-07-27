@@ -28,6 +28,10 @@ func TestMallWeatherExportProcessorCompletesOwnedRun(t *testing.T) {
 		onProgress func(MallWeatherExportRenderProgress) error,
 	) (MallWeatherExportRenderResult, error) {
 		renderedDir = filepath.Dir(request.OutputPath)
+		if request.ProfileCode != "mall_weather" ||
+			!request.SnapshotAt.Equal(time.Date(2026, 7, 22, 7, 0, 0, 0, time.UTC)) {
+			t.Fatalf("render request=%+v", request)
+		}
 		if !strings.HasPrefix(os.TempDir(), renderedDir) {
 			t.Fatalf("Excelize temp dir=%q, want under %q", os.TempDir(), renderedDir)
 		}

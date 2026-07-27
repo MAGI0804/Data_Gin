@@ -529,19 +529,34 @@ func (service *MallWeatherExportJobService) Create(
 	); err != nil {
 		return nil, false, err
 	}
-	estimateRequest, err := mallWeatherExportEstimateRequest(profileDTO, effectiveFilters, limits.MaxEstimatedRows)
+	requestedAt := service.now().UTC()
+	estimateRequests, err := mallWeatherExportEstimateRequests(
+		profileDTO,
+		effectiveFilters,
+		limits.MaxEstimatedRows,
+		requestedAt,
+	)
 	if err != nil {
 		return nil, false, err
 	}
 	estimateTimeout := time.Duration(limits.EstimateTimeoutSeconds) * time.Second
 	estimateCtx, cancel := context.WithTimeout(ctx, estimateTimeout)
 	defer cancel()
-	estimatedRows, err := service.estimator.EstimateRows(estimateCtx, estimateRequest)
-	if err != nil {
-		return nil, false, fmt.Errorf("mall weather export: estimate rows: %w", err)
-	}
-	if estimatedRows > limits.MaxEstimatedRows {
-		return nil, false, ErrMallWeatherExportTooLarge
+	var estimatedRows int64
+	for _, estimateRequest := range estimateRequests {
+		remaining := limits.MaxEstimatedRows - estimatedRows
+		estimateRequest.StopAfter = remaining
+		if estimateRequest.StopAfter < 1 {
+			estimateRequest.StopAfter = 1
+		}
+		rows, estimateErr := service.estimator.EstimateRows(estimateCtx, estimateRequest)
+		if estimateErr != nil {
+			return nil, false, fmt.Errorf("mall weather export: estimate rows: %w", estimateErr)
+		}
+		if rows < 0 || rows > remaining {
+			return nil, false, ErrMallWeatherExportTooLarge
+		}
+		estimatedRows += rows
 	}
 	return service.createJob(
 		ctx,
@@ -552,6 +567,7 @@ func (service *MallWeatherExportJobService) Create(
 		profileDTO,
 		effectiveFilters,
 		estimatedRows,
+		requestedAt,
 	)
 }
 
@@ -637,6 +653,7 @@ func (service *MallWeatherExportJobService) createJob(
 	profileDTO MallWeatherExportProfileDTO,
 	filters requestbody.MallWeatherExportFilters,
 	estimatedRows int64,
+	requestedAt time.Time,
 ) (*MallWeatherExportCreateResult, bool, error) {
 	config := MallWeatherExportProfileConfig{
 		TimeZone: profileDTO.TimeZone, UnitSystem: profileDTO.UnitSystem,
@@ -668,7 +685,7 @@ func (service *MallWeatherExportJobService) createJob(
 		ProfileCode: profile.Code, ProfileName: profile.Name, ProfileJSON: profile.ProfileJSON,
 		ProfileSnapshotJSON: model.JSONText(profileSnapshot), FiltersJSON: model.JSONText(filtersJSON),
 		KeyHash: keyHash, JobIdempotencyHash: fmt.Sprintf("%x", jobIdempotencySum[:]), RequestHash: requestHash,
-		JobUUID: uuid.NewString(), EstimatedRows: estimatedRows, RequestedAt: service.now().UTC(),
+		JobUUID: uuid.NewString(), EstimatedRows: estimatedRows, RequestedAt: requestedAt,
 	}
 	return service.store.Create(ctx, command)
 }
@@ -753,6 +770,85 @@ func mallWeatherExportEstimateRequest(
 	return data_dao.MallWeatherExportEstimateRequest{Datasets: datasets, Filter: filter, StopAfter: stopAfter}, nil
 }
 
+func mallWeatherExportEstimateRequests(
+	profile MallWeatherExportProfileDTO,
+	filters requestbody.MallWeatherExportFilters,
+	stopAfter int64,
+	snapshotAt time.Time,
+) ([]data_dao.MallWeatherExportEstimateRequest, error) {
+	request, err := mallWeatherExportEstimateRequest(profile, filters, stopAfter)
+	if err != nil {
+		return nil, err
+	}
+	if !reservedFixedMallWeatherExportProfileCode(profile.Code) ||
+		mallWeatherExportFilterHasRange(request.Filter) {
+		return []data_dao.MallWeatherExportEstimateRequest{request}, nil
+	}
+	requests := make([]data_dao.MallWeatherExportEstimateRequest, 0, len(request.Datasets))
+	for _, dataset := range request.Datasets {
+		if dataset.Latest && dataset.AsOfUTC == nil {
+			asOf := snapshotAt.UTC()
+			dataset.AsOfUTC = &asOf
+		}
+		filter, err := mallWeatherExportDatasetFilter(
+			profile.Code,
+			dataset.Kind,
+			request.Filter,
+			snapshotAt,
+			profile.TimeZone,
+		)
+		if err != nil {
+			return nil, err
+		}
+		requests = append(requests, data_dao.MallWeatherExportEstimateRequest{
+			Datasets:  []data_dao.MallWeatherExportEstimateDataset{dataset},
+			Filter:    filter,
+			StopAfter: stopAfter,
+		})
+	}
+	return requests, nil
+}
+
+func mallWeatherExportDatasetFilter(
+	profileCode string,
+	datasetKind string,
+	filter data_dao.MallWeatherExportEstimateFilter,
+	snapshotAt time.Time,
+	timeZone string,
+) (data_dao.MallWeatherExportEstimateFilter, error) {
+	if !reservedFixedMallWeatherExportProfileCode(profileCode) || mallWeatherExportFilterHasRange(filter) {
+		return filter, nil
+	}
+	if snapshotAt.IsZero() {
+		return filter, fmt.Errorf("mall weather export: invalid current-window snapshot")
+	}
+	snapshotAt = snapshotAt.UTC()
+	switch datasetKind {
+	case "minutely":
+		start := snapshotAt.Truncate(time.Minute)
+		end := start.Add(120 * time.Minute)
+		filter.StartUTC, filter.EndUTC = &start, &end
+	case "hourly":
+		start := snapshotAt.Truncate(time.Hour).Add(time.Hour)
+		end := start.Add(360 * time.Hour)
+		filter.StartUTC, filter.EndUTC = &start, &end
+	case "daily", "life_indices":
+		location, err := time.LoadLocation(timeZone)
+		if err != nil {
+			return filter, fmt.Errorf("mall weather export: invalid current-window time zone")
+		}
+		local := snapshotAt.In(location)
+		start := time.Date(local.Year(), local.Month(), local.Day(), 0, 0, 0, 0, location)
+		filter.StartDate = start.Format(time.DateOnly)
+		filter.EndDate = start.AddDate(0, 0, 15).Format(time.DateOnly)
+	}
+	return filter, nil
+}
+
+func mallWeatherExportFilterHasRange(filter data_dao.MallWeatherExportEstimateFilter) bool {
+	return filter.StartUTC != nil || filter.EndUTC != nil || filter.StartDate != "" || filter.EndDate != ""
+}
+
 func (store gormMallWeatherExportJobStore) Create(
 	ctx context.Context,
 	command mallWeatherExportCreateCommand,
@@ -815,6 +911,10 @@ func (store gormMallWeatherExportJobStore) Create(
 			ProfileSnapshotJSON: command.ProfileSnapshotJSON, FiltersJSON: command.FiltersJSON,
 			IdempotencyKey: command.JobIdempotencyHash, Status: "pending", TotalRows: command.EstimatedRows,
 			CreatedBy: command.ActorUserID,
+			WeatherTimestamps: model.WeatherTimestamps{
+				CreatedAt: command.RequestedAt.UTC(),
+				UpdatedAt: command.RequestedAt.UTC(),
+			},
 		}
 		if err := tx.Create(row).Error; err != nil {
 			return fmt.Errorf("mall weather export: create job: %w", err)

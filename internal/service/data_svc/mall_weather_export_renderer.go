@@ -27,6 +27,7 @@ type mallWeatherExportDataPager interface {
 }
 
 type MallWeatherExportRenderRequest struct {
+	ProfileCode   string
 	Config        MallWeatherExportProfileConfig
 	Filter        data_dao.MallWeatherExportEstimateFilter
 	SnapshotAt    time.Time
@@ -96,7 +97,7 @@ func (renderer *MallWeatherExportRenderer) Render(
 ) (result MallWeatherExportRenderResult, returnErr error) {
 	invalidConfig := request.Config.UnitSystem != "metric" && request.Config.UnitSystem != "imperial"
 	invalidConfig = invalidConfig || request.Config.DateFormat == "" || request.Config.DateTimeFormat == ""
-	if renderer == nil || renderer.pager == nil || ctx == nil || request.OutputPath == "" ||
+	if renderer == nil || renderer.pager == nil || ctx == nil || request.ProfileCode == "" || request.OutputPath == "" ||
 		request.SnapshotAt.IsZero() || request.EstimatedRows < 0 || len(request.Config.Datasets) == 0 || invalidConfig {
 		return result, fmt.Errorf("mall weather export renderer: invalid request")
 	}
@@ -133,6 +134,16 @@ func (renderer *MallWeatherExportRenderer) Render(
 	allStates := make([]*mallWeatherExportSheetState, 0)
 	firstSheet := true
 	for datasetIndex, dataset := range request.Config.Datasets {
+		datasetFilter, err := mallWeatherExportDatasetFilter(
+			request.ProfileCode,
+			dataset.Kind,
+			request.Filter,
+			request.SnapshotAt,
+			request.Config.TimeZone,
+		)
+		if err != nil {
+			return result, err
+		}
 		columns, err := mallWeatherExportRenderColumns(dataset)
 		if err != nil {
 			return result, err
@@ -150,7 +161,7 @@ func (renderer *MallWeatherExportRenderer) Render(
 			pageRequest := data_dao.MallWeatherExportDataPageRequest{
 				Kind:       dataset.Kind,
 				Fields:     fields,
-				Filter:     request.Filter,
+				Filter:     datasetFilter,
 				AfterID:    afterID,
 				Limit:      renderer.pageSize,
 				SnapshotAt: request.SnapshotAt,

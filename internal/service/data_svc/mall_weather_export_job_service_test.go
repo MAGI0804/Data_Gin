@@ -70,10 +70,13 @@ func TestMallWeatherExportJobServiceCreatesWithFixedCompleteProfile(t *testing.T
 	profile.Version = 4
 	profile.WeatherTimestamps = model.WeatherTimestamps{CreatedAt: time.Now(), UpdatedAt: time.Now()}
 	now := time.Date(2026, 7, 27, 12, 0, 0, 0, time.UTC)
-	estimator := &fakeMallWeatherExportEstimator{rows: 321}
+	estimator := &fakeMallWeatherExportEstimator{rowsByKind: map[string]int64{
+		"malls": 1, "realtime": 1, "minutely": 120, "hourly": 360,
+		"daily": 15, "alerts": 0, "life_indices": 60,
+	}}
 	store := &fakeMallWeatherExportJobStore{result: &MallWeatherExportCreateResult{
 		JobID: uuid.NewString(), Status: "PENDING", ProfileID: 29, ProfileVersion: 4,
-		EstimatedRows: 321, CreatedBy: 17, CreatedAt: now,
+		EstimatedRows: 557, CreatedBy: 17, CreatedAt: now,
 	}}
 	profiles := &fakeMallWeatherExportProfileReader{systemRow: profile}
 	service, err := newMallWeatherExportJobService(
@@ -99,9 +102,9 @@ func TestMallWeatherExportJobServiceCreatesWithFixedCompleteProfile(t *testing.T
 	if err != nil || replayed || result.ProfileID != 29 || result.ProfileVersion != 4 {
 		t.Fatalf("Create() result=%+v replayed=%v error=%v", result, replayed, err)
 	}
-	if profiles.ensureCalls != 1 || store.command.ProfileID != 29 ||
-		len(estimator.request.Datasets) != 7 || len(estimator.request.Filter.MallIDs) != 1 {
-		t.Fatalf("profiles=%+v command=%+v estimate=%+v", profiles, store.command, estimator.request)
+	if profiles.ensureCalls != 1 || store.command.ProfileID != 29 || store.command.EstimatedRows != 557 ||
+		len(estimator.requests) != 7 || len(estimator.request.Filter.MallIDs) != 1 {
+		t.Fatalf("profiles=%+v command=%+v estimates=%+v", profiles, store.command, estimator.requests)
 	}
 	var snapshot MallWeatherExportProfileSnapshot
 	if err := json.Unmarshal([]byte(store.command.ProfileSnapshotJSON), &snapshot); err != nil {
@@ -109,6 +112,97 @@ func TestMallWeatherExportJobServiceCreatesWithFixedCompleteProfile(t *testing.T
 	}
 	if snapshot.Code != fixedMallWeatherExportProfileCode || len(snapshot.Config.Datasets) != 7 {
 		t.Fatalf("snapshot=%+v", snapshot)
+	}
+}
+
+func TestMallWeatherExportFixedProfileUsesCurrentForecastWindows(t *testing.T) {
+	snapshot := time.Date(2026, 7, 27, 12, 34, 56, 0, time.UTC)
+	latest := true
+	profile := MallWeatherExportProfileDTO{
+		Code: fixedMallWeatherExportProfileCode, TimeZone: "Asia/Shanghai",
+		Datasets: []requestbody.MallWeatherExportDataset{
+			{Kind: "realtime", Latest: &latest},
+			{Kind: "minutely", Latest: &latest},
+			{Kind: "hourly", Latest: &latest},
+			{Kind: "daily", Latest: &latest},
+			{Kind: "life_indices", Latest: &latest},
+		},
+	}
+	requests, err := mallWeatherExportEstimateRequests(
+		profile,
+		requestbody.MallWeatherExportFilters{MallIDs: []uint{7}},
+		1000,
+		snapshot,
+	)
+	if err != nil {
+		t.Fatalf("mallWeatherExportEstimateRequests() error=%v", err)
+	}
+	if len(requests) != 5 {
+		t.Fatalf("requests=%+v", requests)
+	}
+	byKind := make(map[string]data_dao.MallWeatherExportEstimateRequest, len(requests))
+	for _, request := range requests {
+		if len(request.Datasets) != 1 || request.Datasets[0].AsOfUTC == nil ||
+			!request.Datasets[0].AsOfUTC.Equal(snapshot) {
+			t.Fatalf("request=%+v", request)
+		}
+		byKind[request.Datasets[0].Kind] = request
+	}
+	minutely := byKind["minutely"].Filter
+	if minutely.StartUTC == nil || minutely.EndUTC == nil ||
+		!minutely.StartUTC.Equal(time.Date(2026, 7, 27, 12, 34, 0, 0, time.UTC)) ||
+		!minutely.EndUTC.Equal(time.Date(2026, 7, 27, 14, 34, 0, 0, time.UTC)) {
+		t.Fatalf("minutely filter=%+v", minutely)
+	}
+	hourly := byKind["hourly"].Filter
+	if hourly.StartUTC == nil || hourly.EndUTC == nil ||
+		!hourly.StartUTC.Equal(time.Date(2026, 7, 27, 13, 0, 0, 0, time.UTC)) ||
+		!hourly.EndUTC.Equal(time.Date(2026, 8, 11, 13, 0, 0, 0, time.UTC)) {
+		t.Fatalf("hourly filter=%+v", hourly)
+	}
+	for _, kind := range []string{"daily", "life_indices"} {
+		filter := byKind[kind].Filter
+		if filter.StartDate != "2026-07-27" || filter.EndDate != "2026-08-11" {
+			t.Fatalf("kind=%s filter=%+v", kind, filter)
+		}
+	}
+	if filter := byKind["realtime"].Filter; mallWeatherExportFilterHasRange(filter) {
+		t.Fatalf("realtime filter=%+v", filter)
+	}
+}
+
+func TestMallWeatherExportFixedProfilePreservesExplicitRange(t *testing.T) {
+	latest := true
+	profile := MallWeatherExportProfileDTO{
+		Code: fixedMallWeatherExportProfileCode, TimeZone: "Asia/Shanghai",
+		Datasets: []requestbody.MallWeatherExportDataset{
+			{Kind: "hourly", Latest: &latest},
+			{Kind: "daily", Latest: &latest},
+		},
+	}
+	requests, err := mallWeatherExportEstimateRequests(
+		profile,
+		requestbody.MallWeatherExportFilters{
+			MallIDs: []uint{7},
+			Start:   "2026-07-01T01:02:03+08:00",
+			End:     "2026-07-03T04:05:06+08:00",
+		},
+		1000,
+		time.Date(2026, 7, 27, 12, 34, 56, 0, time.UTC),
+	)
+	if err != nil {
+		t.Fatalf("mallWeatherExportEstimateRequests() error=%v", err)
+	}
+	if len(requests) != 1 || len(requests[0].Datasets) != 2 {
+		t.Fatalf("requests=%+v", requests)
+	}
+	filter := requests[0].Filter
+	wantStart := time.Date(2026, 6, 30, 17, 2, 3, 0, time.UTC)
+	wantEnd := time.Date(2026, 7, 2, 20, 5, 6, 0, time.UTC)
+	if filter.StartUTC == nil || filter.EndUTC == nil ||
+		!filter.StartUTC.Equal(wantStart) || !filter.EndUTC.Equal(wantEnd) ||
+		filter.StartDate != "2026-07-01" || filter.EndDate != "2026-07-03" {
+		t.Fatalf("filter=%+v", filter)
 	}
 }
 
@@ -581,10 +675,12 @@ func (reader *fakeMallWeatherExportProfileReader) EnsureSystemProfile(
 }
 
 type fakeMallWeatherExportEstimator struct {
-	request data_dao.MallWeatherExportEstimateRequest
-	rows    int64
-	err     error
-	calls   int
+	request    data_dao.MallWeatherExportEstimateRequest
+	requests   []data_dao.MallWeatherExportEstimateRequest
+	rows       int64
+	rowsByKind map[string]int64
+	err        error
+	calls      int
 }
 
 type fakeMallWeatherExportJobReader struct {
@@ -626,6 +722,10 @@ func (estimator *fakeMallWeatherExportEstimator) EstimateRows(
 ) (int64, error) {
 	estimator.calls++
 	estimator.request = request
+	estimator.requests = append(estimator.requests, request)
+	if len(request.Datasets) == 1 && estimator.rowsByKind != nil {
+		return estimator.rowsByKind[request.Datasets[0].Kind], estimator.err
+	}
 	return estimator.rows, estimator.err
 }
 

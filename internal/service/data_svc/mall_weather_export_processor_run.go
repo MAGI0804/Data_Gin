@@ -193,6 +193,7 @@ func (processor *MallWeatherExportProcessor) processOwnedRun(
 	renderErr := withExcelizeTempDir(filepath.Join(workDir, excelizeTempDirName), func() error {
 		var err error
 		renderResult, err = processor.renderer.Render(runCtx, MallWeatherExportRenderRequest{
+			ProfileCode:   prepared.ProfileCode,
 			Config:        prepared.Config,
 			Filter:        prepared.Filter,
 			SnapshotAt:    job.CreatedAt.UTC(),

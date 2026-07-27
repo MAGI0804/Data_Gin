@@ -25,9 +25,10 @@ import (
 const mallWeatherExportWorkRootName = "mall-weather-exports"
 
 type mallWeatherExportPreparedJob struct {
-	Config   MallWeatherExportProfileConfig
-	Filter   data_dao.MallWeatherExportEstimateFilter
-	FileName string
+	ProfileCode string
+	Config      MallWeatherExportProfileConfig
+	Filter      data_dao.MallWeatherExportEstimateFilter
+	FileName    string
 }
 
 func prepareMallWeatherExportJob(
@@ -103,9 +104,10 @@ func prepareMallWeatherExportJob(
 		return mallWeatherExportPreparedJob{}, err
 	}
 	return mallWeatherExportPreparedJob{
-		Config:   normalizedConfig,
-		Filter:   estimateRequest.Filter,
-		FileName: fileName,
+		ProfileCode: snapshot.Code,
+		Config:      normalizedConfig,
+		Filter:      estimateRequest.Filter,
+		FileName:    fileName,
 	}, nil
 }
 
