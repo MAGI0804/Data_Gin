@@ -2,16 +2,80 @@ export type MallWeatherMall = {
   id: number
   mallCode: string
   nameCn: string
+  province: string
   city: string
+  district: string
   address: string
+  longitude?: number
+  latitude?: number
+  coordinateSystem: string
   geocodeStatus: string
   weatherEnabled: boolean
+  detailProfile: string
+  coverageRadiusM: number
   status: string
+  version: number
 }
 
 export type MallWeatherMallList = {
   items: MallWeatherMall[]
   nextAfterId: number
+}
+
+export type MallWeatherCreateInput = {
+  mallCode: string
+  nameCn: string
+  province: string
+  city: string
+  district: string
+  address: string
+}
+
+export type MallWeatherCreateRequest = {
+  mallCode: string
+  nameCn: string
+  province: string
+  city: string
+  district?: string
+  address: string
+  weather: { detailProfile: 'full'; coverageRadiusM: 1000 }
+}
+
+export type MallWeatherCreateResult = {
+  id: number
+  mallCode: string
+  status: string
+  geocodeStatus: string
+  weatherStatus: string
+  version: number
+}
+
+export type MallWeatherPendingCreate = {
+  key: string
+  body: MallWeatherCreateRequest
+}
+
+export type MallWeatherGeocodeCandidate = {
+  id: number
+  candidateNo: number
+  formattedAddress: string
+  province: string
+  city: string
+  district: string
+  longitude: number
+  latitude: number
+  coordinateSystem: string
+  level: string
+  confidenceScore: number
+  selected: boolean
+}
+
+export type MallWeatherGeocodeCandidates = {
+  mallId: number
+  mallVersion: number
+  runId: number
+  runStatus: string
+  items: MallWeatherGeocodeCandidate[]
 }
 
 export type MallWeatherWarning = {
@@ -204,9 +268,30 @@ export type MallWeatherRefreshDisposition =
 
 type JsonRecord = Record<string, unknown>
 type RefreshStorage = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>
+type OnboardingStorage = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>
 
 function isRecord(value: unknown): value is JsonRecord {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+}
+
+function positiveSafeInteger(value: unknown): value is number {
+  return typeof value === 'number' && Number.isSafeInteger(value) && value > 0
+}
+
+function validCoordinateValue(value: unknown, minimum: number, maximum: number): value is number {
+  return typeof value === 'number' && Number.isFinite(value) && value >= minimum && value <= maximum
+}
+
+function positiveMallID(mallID: number) {
+  if (!Number.isSafeInteger(mallID) || mallID <= 0) throw new Error('invalid mall id')
+  return mallID
+}
+
+function mallWeatherOperationKey(scope: string, seed?: string, invalidMessage = 'invalid operation key') {
+  const value = seed || globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`
+  const key = `${scope}:${value}`
+  if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{7,254}$/.test(key)) throw new Error(invalidMessage)
+  return key
 }
 
 function envelopeData(payload: unknown): JsonRecord | null {
@@ -221,6 +306,40 @@ function textValue(record: JsonRecord, key: string) {
 function numberValue(record: JsonRecord, key: string) {
   const value = record[key]
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined
+}
+
+function mallWeatherMall(value: unknown): MallWeatherMall | null {
+  if (!isRecord(value) || !positiveSafeInteger(value.id) || !positiveSafeInteger(value.version) ||
+    typeof value.mallCode !== 'string' || typeof value.nameCn !== 'string' || typeof value.province !== 'string' ||
+    typeof value.city !== 'string' || typeof value.address !== 'string' || typeof value.geocodeStatus !== 'string' ||
+    typeof value.weatherEnabled !== 'boolean' || typeof value.weatherProvider !== 'string' ||
+    typeof value.detailProfile !== 'string' || typeof value.status !== 'string' ||
+    !value.mallCode.trim() || !value.nameCn.trim() || !value.province.trim() || !value.city.trim() || !value.address.trim() ||
+    !value.geocodeStatus.trim() || !value.weatherProvider.trim() || !['full', 'standard', 'economy'].includes(value.detailProfile) || !value.status.trim()) return null
+  const hasLongitude = value.longitude !== undefined
+  const hasLatitude = value.latitude !== undefined
+  if (hasLongitude !== hasLatitude || hasLongitude && (!validCoordinateValue(value.longitude, -180, 180) ||
+    !validCoordinateValue(value.latitude, -90, 90) || typeof value.coordinateSystem !== 'string' || !value.coordinateSystem.trim())) return null
+  const coverageRadiusM = numberValue(value, 'coverageRadiusM')
+  if (coverageRadiusM === undefined || !Number.isSafeInteger(coverageRadiusM) || coverageRadiusM < 100 || coverageRadiusM > 10000) return null
+  return {
+    id: value.id,
+    mallCode: value.mallCode,
+    nameCn: value.nameCn,
+    province: textValue(value, 'province'),
+    city: textValue(value, 'city'),
+    district: textValue(value, 'district'),
+    address: textValue(value, 'address'),
+    ...(typeof value.longitude === 'number' ? { longitude: value.longitude } : {}),
+    ...(typeof value.latitude === 'number' ? { latitude: value.latitude } : {}),
+    coordinateSystem: textValue(value, 'coordinateSystem'),
+    geocodeStatus: textValue(value, 'geocodeStatus'),
+    weatherEnabled: value.weatherEnabled === true,
+    detailProfile: textValue(value, 'detailProfile'),
+    coverageRadiusM,
+    status: textValue(value, 'status'),
+    version: value.version,
+  }
 }
 
 function warningValues(value: unknown): MallWeatherWarning[] {
@@ -362,21 +481,160 @@ export function parseMallWeatherMallList(payload: unknown): MallWeatherMallList 
 
   const items: MallWeatherMall[] = []
   for (const item of data.items) {
-    if (!isRecord(item) || !Number.isSafeInteger(item.id) || Number(item.id) <= 0 || typeof item.nameCn !== 'string') return null
-    items.push({
-      id: Number(item.id),
-      mallCode: typeof item.mallCode === 'string' ? item.mallCode : '',
-      nameCn: item.nameCn,
-      city: typeof item.city === 'string' ? item.city : '',
-      address: typeof item.address === 'string' ? item.address : '',
-      geocodeStatus: typeof item.geocodeStatus === 'string' ? item.geocodeStatus : '',
-      weatherEnabled: item.weatherEnabled === true,
-      status: typeof item.status === 'string' ? item.status : '',
-    })
+    const mall = mallWeatherMall(item)
+    if (!mall) return null
+    items.push(mall)
   }
   const nextAfterId = data.nextAfterId === undefined ? 0 : numberValue(data, 'nextAfterId')
   if (nextAfterId === undefined || !Number.isSafeInteger(nextAfterId) || nextAfterId < 0) return null
   return { items, nextAfterId }
+}
+
+export function parseMallWeatherMall(payload: unknown): MallWeatherMall | null {
+  const data = envelopeData(payload)
+  return data ? mallWeatherMall(data) : null
+}
+
+export function parseMallWeatherCreateResult(payload: unknown): MallWeatherCreateResult | null {
+  const data = envelopeData(payload)
+  if (!data || !positiveSafeInteger(data.id) || !positiveSafeInteger(data.version) || typeof data.mallCode !== 'string') return null
+  return {
+    id: Number(data.id),
+    mallCode: data.mallCode,
+    status: textValue(data, 'status'),
+    geocodeStatus: textValue(data, 'geocodeStatus'),
+    weatherStatus: textValue(data, 'weatherStatus'),
+    version: Number(data.version),
+  }
+}
+
+export function parseMallWeatherGeocodeCandidates(payload: unknown): MallWeatherGeocodeCandidates | null {
+  const data = envelopeData(payload)
+  if (!data || !positiveSafeInteger(data.mallId) || !positiveSafeInteger(data.mallVersion) || !Array.isArray(data.items)) return null
+  const items: MallWeatherGeocodeCandidate[] = []
+  for (const item of data.items) {
+    if (!isRecord(item) || !positiveSafeInteger(item.id) || !Number.isSafeInteger(item.candidateNo) || Number(item.candidateNo) < 1 ||
+      typeof item.formattedAddress !== 'string' || !validCoordinateValue(item.longitude, -180, 180) ||
+      !validCoordinateValue(item.latitude, -90, 90) || typeof item.coordinateSystem !== 'string' ||
+      typeof item.confidenceScore !== 'number' || !Number.isFinite(item.confidenceScore) || item.confidenceScore < 0 || item.confidenceScore > 1) return null
+    items.push({
+      id: Number(item.id),
+      candidateNo: Number(item.candidateNo),
+      formattedAddress: item.formattedAddress,
+      province: textValue(item, 'province'),
+      city: textValue(item, 'city'),
+      district: textValue(item, 'district'),
+      longitude: Number(item.longitude),
+      latitude: Number(item.latitude),
+      coordinateSystem: item.coordinateSystem,
+      level: textValue(item, 'level'),
+      confidenceScore: item.confidenceScore,
+      selected: item.selected === true,
+    })
+  }
+  const runId = data.runId === undefined ? 0 : numberValue(data, 'runId')
+  if (runId === undefined || !Number.isSafeInteger(runId) || runId < 0) return null
+  return {
+    mallId: Number(data.mallId),
+    mallVersion: Number(data.mallVersion),
+    runId,
+    runStatus: textValue(data, 'runStatus'),
+    items,
+  }
+}
+
+export function mallWeatherCreateRequest(input: MallWeatherCreateInput): MallWeatherCreateRequest {
+  const mallCode = input.mallCode.trim().toUpperCase()
+  const nameCn = input.nameCn.trim()
+  const province = input.province.trim()
+  const city = input.city.trim()
+  const district = input.district.trim()
+  const address = input.address.trim()
+  if (!/^[A-Z0-9][A-Z0-9_-]{1,63}$/.test(mallCode) || !nameCn || !province || !city || !address ||
+    nameCn.length > 255 || province.length > 128 || city.length > 128 || district.length > 128 || address.length > 1000) {
+    throw new Error('invalid mall create request')
+  }
+  return {
+    mallCode,
+    nameCn,
+    province,
+    city,
+    ...(district ? { district } : {}),
+    address,
+    weather: { detailProfile: 'full', coverageRadiusM: 1000 },
+  }
+}
+
+export function mallWeatherCreateKey(seed?: string) {
+  return mallWeatherOperationKey('mall-create', seed)
+}
+
+export function mallWeatherMallReady(mall: MallWeatherMall) {
+  return mall.status.toLowerCase() === 'active' && mall.geocodeStatus.toLowerCase() === 'confirmed' && mall.weatherEnabled &&
+    mall.longitude !== undefined && mall.latitude !== undefined && Boolean(mall.coordinateSystem.trim())
+}
+
+export function mergeMallWeatherMalls(current: MallWeatherMall[], incoming: MallWeatherMall[]) {
+  const byID = new Map(current.map((mall) => [mall.id, mall]))
+  for (const mall of incoming) {
+    const existing = byID.get(mall.id)
+    if (!existing || mall.version >= existing.version) byID.set(mall.id, mall)
+  }
+  return Array.from(byID.values())
+}
+
+export function loadMallWeatherPendingCreate(actorID: string, storage: OnboardingStorage): MallWeatherPendingCreate | null {
+  const storageKey = mallWeatherPendingCreateStorageKey(actorID)
+  const raw = storage.getItem(storageKey)
+  if (!raw) return null
+  try {
+    const snapshot: unknown = JSON.parse(raw)
+    if (!isRecord(snapshot) || typeof snapshot.key !== 'string' || !isRecord(snapshot.body) || !validMallWeatherCreateKey(snapshot.key)) return null
+    const body = mallWeatherCreateRequest({
+      mallCode: textValue(snapshot.body, 'mallCode'),
+      nameCn: textValue(snapshot.body, 'nameCn'),
+      province: textValue(snapshot.body, 'province'),
+      city: textValue(snapshot.body, 'city'),
+      district: textValue(snapshot.body, 'district'),
+      address: textValue(snapshot.body, 'address'),
+    })
+    return { key: snapshot.key, body }
+  } catch {
+    return null
+  }
+}
+
+export function saveMallWeatherPendingCreate(actorID: string, pending: MallWeatherPendingCreate, storage: OnboardingStorage) {
+  if (!validMallWeatherCreateKey(pending.key)) throw new Error('invalid create key')
+  const body = mallWeatherCreateRequest({
+    mallCode: pending.body.mallCode,
+    nameCn: pending.body.nameCn,
+    province: pending.body.province,
+    city: pending.body.city,
+    district: pending.body.district || '',
+    address: pending.body.address,
+  })
+  storage.setItem(mallWeatherPendingCreateStorageKey(actorID), JSON.stringify({ key: pending.key, body }))
+}
+
+export function clearMallWeatherPendingCreate(actorID: string, storage: OnboardingStorage) {
+  storage.removeItem(mallWeatherPendingCreateStorageKey(actorID))
+}
+
+export function mallWeatherGeocodeCandidatesPath(mallID: number) {
+  return `/v1/malls/${positiveMallID(mallID)}/geocode-candidates`
+}
+
+export function mallWeatherGeocodeTriggerPath(mallID: number) {
+  return `/v1/malls/${positiveMallID(mallID)}/geocode`
+}
+
+export function mallWeatherGeocodeConfirmPath(mallID: number) {
+  return `/v1/malls/${positiveMallID(mallID)}/geocode-confirm`
+}
+
+export function mallWeatherGeocodeRunTerminal(status: string) {
+  return ['SUCCEEDED', 'FAILED', 'STALE', 'NO_CANDIDATES', 'AUTO_CONFIRMED', 'REVIEW_REQUIRED'].includes(status.toUpperCase())
 }
 
 export function parseMallWeatherOverview(payload: unknown): MallWeatherOverview | null {
@@ -690,10 +948,7 @@ export function mallWeatherRefreshRequest(kinds: MallWeatherRefreshKind[], reaso
 }
 
 export function mallWeatherRefreshKey(seed?: string) {
-  const value = seed || globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random().toString(16).slice(2)}`
-  const key = `weather-refresh:${value}`
-  if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{7,254}$/.test(key)) throw new Error('invalid refresh key')
-  return key
+  return mallWeatherOperationKey('weather-refresh', seed, 'invalid refresh key')
 }
 
 export function loadMallWeatherPendingRefresh(actorID: string, mallID: number, storage: RefreshStorage): MallWeatherPendingRefresh | null {
@@ -727,6 +982,16 @@ function mallWeatherPendingRefreshStorageKey(actorID: string, mallID: number) {
   if (!/^[1-9]\d*$/.test(actorID) || !Number.isSafeInteger(numericActorID)) throw new Error('invalid actor id')
   if (!Number.isSafeInteger(mallID) || mallID <= 0) throw new Error('invalid mall id')
   return `mall-weather-pending-refresh:${actorID}:${mallID}`
+}
+
+function mallWeatherPendingCreateStorageKey(actorID: string) {
+  const numericActorID = Number(actorID)
+  if (!/^[1-9]\d*$/.test(actorID) || !Number.isSafeInteger(numericActorID)) throw new Error('invalid actor id')
+  return `mall-weather-pending-create:${actorID}`
+}
+
+function validMallWeatherCreateKey(key: string) {
+  return key.startsWith('mall-create:') && /^[A-Za-z0-9][A-Za-z0-9._:-]{7,254}$/.test(key)
 }
 
 function validMallWeatherRefreshKey(key: string) {

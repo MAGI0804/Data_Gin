@@ -3,13 +3,23 @@ import test from 'node:test'
 
 import {
   clearMallWeatherPendingRefresh,
+  clearMallWeatherPendingCreate,
   loadAllMallWeatherPages,
+  loadMallWeatherPendingCreate,
   loadMallWeatherPendingRefresh,
   mallWeatherChartSegments,
+  mallWeatherCreateKey,
+  mallWeatherCreateRequest,
   mallWeatherForecastQueryWindows,
   mallWeatherFreshnessLabel,
   mallWeatherMetric,
   mallWeatherOverviewPath,
+  mallWeatherGeocodeCandidatesPath,
+  mallWeatherGeocodeConfirmPath,
+  mallWeatherGeocodeRunTerminal,
+  mallWeatherGeocodeTriggerPath,
+  mallWeatherMallReady,
+  mergeMallWeatherMalls,
   mallWeatherRefreshKey,
   mallWeatherRefreshDisposition,
   mallWeatherRefreshPath,
@@ -17,8 +27,11 @@ import {
   mallWeatherRefreshResultMessage,
   mallWeatherSeriesPath,
   saveMallWeatherPendingRefresh,
+  saveMallWeatherPendingCreate,
   mallWeatherSkyconLabel,
   parseMallWeatherMallList,
+  parseMallWeatherCreateResult,
+  parseMallWeatherGeocodeCandidates,
   parseMallWeatherDailyPage,
   parseMallWeatherHourlyPage,
   parseMallWeatherLifeIndexPage,
@@ -77,7 +90,7 @@ test('parses valid malls and preserves the list cursor', () => {
     data: {
       nextAfterId: 7,
       items: [
-        { id: 7, mallCode: 'SH-001', nameCn: '示例商场', city: '上海', weatherEnabled: true, status: 'active' },
+        { id: 7, version: 3, mallCode: 'SH-001', nameCn: '示例商场', province: '上海市', city: '上海', district: '黄浦区', address: '示例路 1 号', longitude: 121.47, latitude: 31.23, coordinateSystem: 'GCJ02', geocodeStatus: 'confirmed', weatherEnabled: true, weatherProvider: 'caiyun', detailProfile: 'full', coverageRadiusM: 1000, status: 'active' },
       ],
     },
   })
@@ -88,15 +101,85 @@ test('parses valid malls and preserves the list cursor', () => {
       id: 7,
       mallCode: 'SH-001',
       nameCn: '示例商场',
+      province: '上海市',
       city: '上海',
-      address: '',
-      geocodeStatus: '',
+      district: '黄浦区',
+      address: '示例路 1 号',
+      longitude: 121.47,
+      latitude: 31.23,
+      coordinateSystem: 'GCJ02',
+      geocodeStatus: 'confirmed',
       weatherEnabled: true,
+      detailProfile: 'full',
+      coverageRadiusM: 1000,
       status: 'active',
+      version: 3,
     }],
   })
-  assert.equal(parseMallWeatherMallList({ code: 0, data: { items: [{ id: 0, nameCn: '无效商场' }] } }), null)
+  assert.equal(parseMallWeatherMallList({ code: 0, data: { items: [{ id: 0, version: 1, mallCode: 'BAD', nameCn: '无效商场' }] } }), null)
   assert.equal(parseMallWeatherMallList({ code: 0, data: { items: [], nextAfterId: 'bad' } }), null)
+})
+
+test('builds a normalized mall onboarding request and stable operation paths', () => {
+  assert.deepEqual(mallWeatherCreateRequest({
+    mallCode: ' sh-002 ', nameCn: ' 新商场 ', province: ' 上海市 ', city: ' 上海市 ', district: ' 浦东新区 ', address: ' 世纪大道 1 号 ',
+  }), {
+    mallCode: 'SH-002', nameCn: '新商场', province: '上海市', city: '上海市', district: '浦东新区', address: '世纪大道 1 号',
+    weather: { detailProfile: 'full', coverageRadiusM: 1000 },
+  })
+  assert.equal(mallWeatherCreateKey('12345678-abcd'), 'mall-create:12345678-abcd')
+  assert.equal(mallWeatherGeocodeCandidatesPath(7), '/v1/malls/7/geocode-candidates')
+  assert.equal(mallWeatherGeocodeTriggerPath(7), '/v1/malls/7/geocode')
+  assert.equal(mallWeatherGeocodeConfirmPath(7), '/v1/malls/7/geocode-confirm')
+  assert.throws(() => mallWeatherCreateRequest({ mallCode: '!', nameCn: '', province: '', city: '', district: '', address: '' }), /invalid mall create request/)
+  assert.throws(() => mallWeatherGeocodeConfirmPath(0), /invalid mall id/)
+})
+
+test('parses mall creation and geocode candidate contracts', () => {
+  assert.deepEqual(parseMallWeatherCreateResult({ code: 0, data: {
+    id: 9, mallCode: 'SH-002', status: 'DRAFT', geocodeStatus: 'PENDING', weatherStatus: 'WAITING_FOR_COORDINATE', version: 1,
+  } }), {
+    id: 9, mallCode: 'SH-002', status: 'DRAFT', geocodeStatus: 'PENDING', weatherStatus: 'WAITING_FOR_COORDINATE', version: 1,
+  })
+  const candidates = parseMallWeatherGeocodeCandidates({ code: 0, data: {
+    mallId: 9, mallVersion: 2, runId: 4, runStatus: 'SUCCEEDED', items: [{
+      id: 11, candidateNo: 1, formattedAddress: '上海市浦东新区世纪大道 1 号', province: '上海市', city: '上海市', district: '浦东新区',
+      longitude: 121.5, latitude: 31.2, coordinateSystem: 'GCJ02', level: '门牌号', confidenceScore: 0.96, selected: false,
+    }],
+  } })
+  assert.equal(candidates?.items[0].formattedAddress, '上海市浦东新区世纪大道 1 号')
+  assert.equal(candidates?.mallVersion, 2)
+  assert.equal(parseMallWeatherGeocodeCandidates({ code: 0, data: { mallId: 9, mallVersion: 2, items: [{ id: 1, candidateNo: 1, formattedAddress: 'bad', longitude: 200, latitude: 31, coordinateSystem: 'GCJ02', confidenceScore: 1 }] } }), null)
+  for (const status of ['NO_CANDIDATES', 'AUTO_CONFIRMED', 'REVIEW_REQUIRED', 'FAILED', 'STALE']) assert.equal(mallWeatherGeocodeRunTerminal(status), true)
+  assert.equal(mallWeatherGeocodeRunTerminal('RUNNING'), false)
+})
+
+test('recognizes only active confirmed weather-enabled malls as queryable', () => {
+  const mall = parseMallWeatherMallList({ code: 0, data: { items: [{
+    id: 7, version: 1, mallCode: 'SH-001', nameCn: '示例商场', province: '上海市', city: '上海市', address: '示例路 1 号',
+    longitude: 121.47, latitude: 31.23, coordinateSystem: 'GCJ02', geocodeStatus: 'confirmed', weatherEnabled: true,
+    weatherProvider: 'caiyun', detailProfile: 'full', coverageRadiusM: 1000, status: 'active',
+  }] } })?.items[0]
+  assert.equal(mallWeatherMallReady(mall), true)
+  assert.equal(mallWeatherMallReady({ ...mall, weatherEnabled: false }), false)
+  assert.equal(mallWeatherMallReady({ ...mall, longitude: undefined }), false)
+  assert.equal(parseMallWeatherMallList({ code: 0, data: { items: [{ ...mall, weatherProvider: undefined }] } }), null)
+  const newer = { ...mall, version: 2, weatherEnabled: true }
+  const older = { ...mall, version: 1, weatherEnabled: false }
+  assert.deepEqual(mergeMallWeatherMalls([newer], [older]), [newer])
+  assert.deepEqual(mergeMallWeatherMalls([older], [newer]), [newer])
+})
+
+test('persists uncertain mall creation requests per actor', () => {
+  const storage = new MemoryStorage()
+  const body = mallWeatherCreateRequest({ mallCode: 'SH-002', nameCn: '新商场', province: '上海市', city: '上海市', district: '', address: '世纪大道 1 号' })
+  const pending = { key: mallWeatherCreateKey('12345678-abcd'), body }
+  saveMallWeatherPendingCreate('42', pending, storage)
+  assert.deepEqual(loadMallWeatherPendingCreate('42', storage), pending)
+  assert.equal(loadMallWeatherPendingCreate('43', storage), null)
+  clearMallWeatherPendingCreate('42', storage)
+  assert.equal(loadMallWeatherPendingCreate('42', storage), null)
+  assert.throws(() => saveMallWeatherPendingCreate('invalid', pending, storage), /invalid actor id/)
 })
 
 test('rejects unsuccessful or structurally incomplete overview payloads', () => {
