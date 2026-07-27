@@ -129,7 +129,7 @@ export function MallWeatherForecastPanel({ mallID, timeZone, client }: { mallID:
         title={`未来逐小时预报（目标 ${mallWeatherHourlyForecastHours} 小时）`}
         state={hourly}
         empty={`未来 ${mallWeatherHourlyForecastHours} 小时窗口没有小时预报`}
-        notice={hourly.items.length > 0 && hourly.items.length < mallWeatherHourlyForecastHours
+        notice={!hourly.loading && !hourly.error && hourly.items.length > 0 && hourly.items.length < mallWeatherHourlyForecastHours
           ? `当前服务端可用 ${hourly.items.length} / ${mallWeatherHourlyForecastHours} 条连续逐小时数据，已展示全部可用内容。`
           : ''}
       >

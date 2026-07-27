@@ -587,6 +587,20 @@ test('accepts available configured horizons while rejecting discontinuous, unord
     assert.equal(result.items.length, availableCount)
   }
 
+  await assert.rejects(load(complete.slice(1, 25)), /逐小时预报时间不连续/)
+  await assert.rejects(load([hourlyItem(2)]), /逐小时预报时间不连续/)
+
+  const partialResponses = [
+    pageEnvelope(complete.slice(0, 200), 'partial-next'),
+    pageEnvelope(complete.slice(200, 359)),
+  ]
+  const partial = await loadAllMallWeatherPages(async () => ({
+    ok: true,
+    status: 200,
+    data: partialResponses.shift(),
+  }), 7, 'hourly', window, 'Asia/Shanghai', asOf, parseMallWeatherHourlyPage)
+  assert.equal(partial.items.length, 359)
+
   const missingMiddle = complete.filter((_, index) => index !== 120)
   missingMiddle.push(hourlyItem(363))
   await assert.rejects(load(missingMiddle), /逐小时预报时间不连续/)
