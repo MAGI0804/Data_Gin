@@ -37,8 +37,31 @@ func TestMallWeatherProcessorRoutesLegacyLifeIndexTaskThroughComprehensiveWeathe
 		t.Fatalf("snapshot=%+v batch=%+v", store.snapshot, store.batch)
 	}
 	if provider.weatherRequest.HourlySteps != 360 || provider.weatherRequest.DailySteps != 15 ||
-		provider.weatherCalls != 1 || provider.lifeCalls != 0 {
+		provider.weatherCalls != 1 {
 		t.Fatalf("provider=%+v", provider)
+	}
+}
+
+func TestMallWeatherProcessorPersistsEveryComprehensiveWeatherModule(t *testing.T) {
+	raw := fullComprehensiveWeatherResponse(t)
+	provider := &fakeMallWeatherProvider{weatherResponse: &caiyun.ProviderResponse{
+		EndpointKind: caiyun.EndpointWeatherV26, HTTPStatus: 200, ProviderStatus: "ok", RawBody: raw,
+	}}
+	store := newFakeMallWeatherTaskStore(data_dao.FetchAttemptDispositionAcquired)
+	processor := newTestMallWeatherProcessor(t, provider, store)
+
+	if err := processor.Process(context.Background(), job.TypeMallWeatherFull, job.MallTaskPayload{
+		MallID: 7, TaskWindow: "full:7:2026072203",
+	}); err != nil {
+		t.Fatalf("Process() error=%v", err)
+	}
+	batch := store.batch
+	if provider.weatherCalls != 1 || batch == nil || batch.EndpointKind != caiyun.EndpointWeatherV26 ||
+		batch.Status != weatherFetchStatusSuccess || batch.Forecasts == nil || batch.Forecasts.Realtime == nil ||
+		len(batch.Forecasts.Minutely) != 120 || len(batch.Forecasts.Hourly) != 1 || batch.Daily == nil ||
+		len(batch.Daily.Daily) != 1 || len(batch.Daily.LifeIndices) != 1 || batch.Alerts == nil ||
+		len(batch.StaleLatest.DataKinds) != 0 || len(batch.StaleLatest.LifeSourceAPIs) != 0 {
+		t.Fatalf("provider calls=%d batch=%+v", provider.weatherCalls, batch)
 	}
 }
 
@@ -629,24 +652,14 @@ func TestMallWeatherProcessorDiscardsSupersededAttemptResults(t *testing.T) {
 type fakeMallWeatherProvider struct {
 	weatherResponse *caiyun.ProviderResponse
 	weatherErr      error
-	lifeResponse    *caiyun.ProviderResponse
-	lifeErr         error
 	weatherRequest  caiyun.WeatherRequest
-	lifeRequest     caiyun.LifeIndexRequest
 	weatherCalls    int
-	lifeCalls       int
 }
 
 func (provider *fakeMallWeatherProvider) FetchWeather(_ context.Context, input caiyun.WeatherRequest) (*caiyun.ProviderResponse, error) {
 	provider.weatherCalls++
 	provider.weatherRequest = input
 	return provider.weatherResponse, provider.weatherErr
-}
-
-func (provider *fakeMallWeatherProvider) FetchLifeIndices(_ context.Context, input caiyun.LifeIndexRequest) (*caiyun.ProviderResponse, error) {
-	provider.lifeCalls++
-	provider.lifeRequest = input
-	return provider.lifeResponse, provider.lifeErr
 }
 
 type fakeMallWeatherTaskStore struct {
@@ -865,6 +878,52 @@ func readMallWeatherFixture(t *testing.T, path string) []byte {
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		t.Fatalf("os.ReadFile(%q) error=%v", path, err)
+	}
+	return raw
+}
+
+func fullComprehensiveWeatherResponse(t *testing.T) []byte {
+	t.Helper()
+	var envelope map[string]interface{}
+	if err := json.Unmarshal(readMallWeatherFixture(t, "../../../connector/caiyun/testdata/weather_v26_realtime.json"), &envelope); err != nil {
+		t.Fatalf("decode comprehensive weather fixture: %v", err)
+	}
+	result, ok := envelope["result"].(map[string]interface{})
+	if !ok {
+		t.Fatalf("comprehensive weather result=%T", envelope["result"])
+	}
+	precipitation2H := make([]float64, 120)
+	precipitation := make([]float64, 60)
+	result["minutely"] = map[string]interface{}{
+		"status": "ok", "datasource": "radar", "description": "未来两小时无明显降水",
+		"precipitation_2h": precipitation2H, "precipitation": precipitation,
+		"probability": []float64{0, 0, 0, 0},
+	}
+	result["hourly"] = map[string]interface{}{
+		"status": "ok", "description": "未来二十四小时天气稳定",
+		"temperature": []interface{}{map[string]interface{}{"datetime": "2026-07-22T11:00+08:00", "value": 33.2}},
+		"skycon":      []interface{}{map[string]interface{}{"datetime": "2026-07-22T11:00+08:00", "value": "PARTLY_CLOUDY_DAY"}},
+	}
+	result["daily"] = map[string]interface{}{
+		"status": "ok",
+		"temperature": []interface{}{map[string]interface{}{
+			"date": "2026-07-22T00:00+08:00", "max": 35.0, "min": 27.0, "avg": 31.0,
+		}},
+		"skycon": []interface{}{map[string]interface{}{
+			"date": "2026-07-22T00:00+08:00", "value": "PARTLY_CLOUDY_DAY",
+		}},
+		"life_index": map[string]interface{}{
+			"comfort": []interface{}{map[string]interface{}{
+				"date": "2026-07-22T00:00+08:00", "index": "5", "desc": "闷热",
+			}},
+		},
+	}
+	result["alert"] = map[string]interface{}{
+		"status": "ok", "request_status": "ok", "content": []interface{}{},
+	}
+	raw, err := json.Marshal(envelope)
+	if err != nil {
+		t.Fatalf("encode comprehensive weather fixture: %v", err)
 	}
 	return raw
 }
