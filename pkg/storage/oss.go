@@ -136,9 +136,6 @@ func NewOSSClientFromConfig() (*OSSClient, error) {
 	client.headObject = func(ctx context.Context, request *alioss.HeadObjectRequest) (*alioss.HeadObjectResult, error) {
 		return client.client.HeadObject(ctx, request)
 	}
-	client.getObject = func(ctx context.Context, request *alioss.GetObjectRequest) (*alioss.GetObjectResult, error) {
-		return client.client.GetObject(ctx, request)
-	}
 	return client, nil
 }
 
@@ -352,6 +349,11 @@ func (c *OSSClient) OpenDownloadObject(ctx context.Context, objectKey string) (D
 		return DownloadObject{}, fmt.Errorf("OSS 下载对象读取参数无效")
 	}
 	getObject := c.getObject
+	if getObject == nil && c.downloadClient != nil {
+		getObject = func(ctx context.Context, request *alioss.GetObjectRequest) (*alioss.GetObjectResult, error) {
+			return c.downloadClient.GetObject(ctx, request)
+		}
+	}
 	if getObject == nil && c.client != nil {
 		getObject = func(ctx context.Context, request *alioss.GetObjectRequest) (*alioss.GetObjectResult, error) {
 			return c.client.GetObject(ctx, request)

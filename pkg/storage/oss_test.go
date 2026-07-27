@@ -526,6 +526,58 @@ func TestOSSClientOpensDownloadObjectThroughConfiguredStorageClient(t *testing.T
 	}
 }
 
+func TestOSSClientOpensDownloadObjectThroughPublicDownloadClient(t *testing.T) {
+	provider := credentials.NewStaticCredentialsProvider("ak", "sk")
+	var uploadCalls int
+	var downloadHost string
+	uploadHTTPClient := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		uploadCalls++
+		return nil, errors.New("upload client must not read download content")
+	})}
+	downloadHTTPClient := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		downloadHost = request.URL.Host
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Length": []string{"8"}},
+			Body:       io.NopCloser(strings.NewReader("PK\x03\x04xlsx")),
+			Request:    request,
+		}, nil
+	})}
+	uploadClient := alioss.NewClient(alioss.LoadDefaultConfig().
+		WithCredentialsProvider(provider).
+		WithRegion("cn-shanghai").
+		WithEndpoint("https://oss-cn-shanghai-internal.aliyuncs.com").
+		WithUseInternalEndpoint(true).
+		WithHttpClient(uploadHTTPClient))
+	downloadClient := alioss.NewClient(alioss.LoadDefaultConfig().
+		WithCredentialsProvider(provider).
+		WithRegion("cn-shanghai").
+		WithEndpoint("https://oss-cn-shanghai.aliyuncs.com").
+		WithUseInternalEndpoint(false).
+		WithHttpClient(downloadHTTPClient))
+	client := &OSSClient{
+		cfg:            OSSConfig{Bucket: "weather-private", UseInternal: true},
+		client:         uploadClient,
+		downloadClient: downloadClient,
+	}
+
+	object, err := client.OpenDownloadObject(t.Context(), "mall-weather-exports/job/result.xlsx")
+	if err != nil {
+		t.Fatalf("OpenDownloadObject() error=%v", err)
+	}
+	defer object.Body.Close()
+	body, err := io.ReadAll(object.Body)
+	if err != nil || string(body) != "PK\x03\x04xlsx" || object.Size != 8 {
+		t.Fatalf("object=%+v body=%q error=%v", object, body, err)
+	}
+	if uploadCalls != 0 {
+		t.Fatalf("OpenDownloadObject() used upload client %d times", uploadCalls)
+	}
+	if downloadHost != "weather-private.oss-cn-shanghai.aliyuncs.com" {
+		t.Fatalf("OpenDownloadObject() host=%q, want public bucket host", downloadHost)
+	}
+}
+
 func TestOSSClientMapsMissingDownloadObject(t *testing.T) {
 	client := &OSSClient{
 		cfg: OSSConfig{Bucket: "weather-private"},
