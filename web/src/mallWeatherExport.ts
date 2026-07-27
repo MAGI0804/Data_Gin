@@ -350,7 +350,7 @@ export function parseMallWeatherExportJob(payload: unknown): MallWeatherExportJo
   const data = envelopeData(payload)
   if (!data || typeof data.jobId !== 'string' || !exportJobIDPattern.test(data.jobId) || !positiveInteger(data.profileId) ||
     !positiveInteger(data.profileVersion) || typeof data.status !== 'string' || !exportJobStatuses.has(data.status as MallWeatherExportJobStatus) ||
-    !nonNegativeInteger(data.totalRows) || !nonNegativeInteger(data.processedRows) || Number(data.processedRows) > Number(data.totalRows) ||
+    !nonNegativeInteger(data.totalRows) || !nonNegativeInteger(data.processedRows) ||
     typeof data.cancelRequested !== 'boolean' || !nonNegativeInteger(data.fileSizeBytes) ||
     (data.currentSheet !== undefined && (typeof data.currentSheet !== 'string' || Array.from(data.currentSheet).length > 255)) ||
     (data.errorMessageSafe !== undefined && (typeof data.errorMessageSafe !== 'string' || Array.from(data.errorMessageSafe).length > 2_000)) ||
@@ -360,7 +360,7 @@ export function parseMallWeatherExportJob(payload: unknown): MallWeatherExportJo
     profileId: data.profileId,
     profileVersion: data.profileVersion,
     status: data.status as MallWeatherExportJobStatus,
-    totalRows: data.totalRows,
+    totalRows: Math.max(data.totalRows, data.processedRows),
     processedRows: data.processedRows,
     currentSheet: typeof data.currentSheet === 'string' ? data.currentSheet : '',
     cancelRequested: data.cancelRequested,
@@ -386,8 +386,9 @@ export function mallWeatherExportDownloadReadiness(
 }
 
 export function mallWeatherExportProgress(job: Pick<MallWeatherExportJob, 'processedRows' | 'totalRows'>) {
-  if (job.totalRows <= 0) return job.processedRows > 0 ? 100 : 0
-  return Math.min(100, Math.max(0, Math.round(job.processedRows * 100 / job.totalRows)))
+  const totalRows = Math.max(job.totalRows, job.processedRows)
+  if (totalRows <= 0) return 0
+  return Math.min(100, Math.max(0, Math.round(job.processedRows * 100 / totalRows)))
 }
 
 export function mallWeatherExportPollStatusRetryable(status: number) {

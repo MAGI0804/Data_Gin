@@ -233,7 +233,14 @@ test('strictly parses export creation and job progress without leaking unsafe sh
   assert.equal(mallWeatherExportProgress(job), 25)
   assert.equal(mallWeatherExportJobTerminal('RUNNING'), false)
   assert.equal(mallWeatherExportJobTerminal('SUCCEEDED'), true)
-  assert.equal(parseMallWeatherExportJob(envelope({ ...job, processedRows: 481 })), null)
+  const underestimated = parseMallWeatherExportJob(envelope({ ...job, totalRows: 1, processedRows: 3 }))
+  assert.equal(underestimated?.totalRows, 3)
+  assert.equal(underestimated?.processedRows, 3)
+  assert.equal(mallWeatherExportProgress({ totalRows: 1, processedRows: 3 }), 100)
+  assert.equal(parseMallWeatherExportJob(envelope({ ...job, totalRows: 0, processedRows: 3 }))?.totalRows, 3)
+  for (const processedRows of [-1, 1.5, Number.MAX_SAFE_INTEGER + 1]) {
+    assert.equal(parseMallWeatherExportJob(envelope({ ...job, processedRows })), null)
+  }
   assert.equal(parseMallWeatherExportJob(envelope({ ...job, status: 'UNKNOWN' })), null)
 })
 
