@@ -306,16 +306,43 @@ button:focus-visible {
 
 .nav-group {
   display: grid;
-  gap: 6px;
+  gap: 4px;
 }
 
 .nav-group h2 {
   margin: 0;
-  color: #666666;
-  font-size: 10px;
-  font-weight: 800;
-  letter-spacing: 0.14em;
-  text-transform: uppercase;
+}
+
+.nav-group-toggle {
+  justify-content: space-between;
+  width: 100%;
+  min-height: 38px;
+  border-color: transparent;
+  padding: 7px 8px;
+  color: #3f3f46;
+  font-size: 12px;
+  letter-spacing: 0.08em;
+  text-align: left;
+}
+
+.nav-group-toggle:hover {
+  border-color: #d4d4d8;
+}
+
+.nav-group-toggle svg {
+  width: 16px;
+  height: 16px;
+  transition: transform 160ms ease;
+}
+
+.nav-group-toggle[aria-expanded="true"] svg {
+  transform: rotate(180deg);
+}
+
+.nav-group-items {
+  display: grid;
+  gap: 4px;
+  padding-left: 8px;
 }
 
 .workspace-header {

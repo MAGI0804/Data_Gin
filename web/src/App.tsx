@@ -5,6 +5,7 @@ import {
   ArrowUpFromLine,
   BookOpen,
   CheckCircle2,
+  ChevronDown,
   CloudSun,
   Database,
   Download,
@@ -551,7 +552,7 @@ type DeliveryStore = {
 
 const navGroups: NavGroup[] = [
   {
-    label: '监控',
+    label: '运行监控',
     items: [
       { key: 'overview', label: '运行总览', description: '运行与推送健康度', icon: <Activity aria-hidden="true" /> },
       { key: 'runs', label: '流水线运行', description: '按状态与 Trace 查询', icon: <ListChecks aria-hidden="true" /> },
@@ -562,7 +563,6 @@ const navGroups: NavGroup[] = [
   {
     label: '数据接入',
     items: [
-      { key: 'mall_weather', label: '商场天气', description: '实况、趋势与预警', icon: <CloudSun aria-hidden="true" /> },
       { key: 'sources', label: '数据源', description: '接入配置与启用状态', icon: <Database aria-hidden="true" /> },
       { key: 'receive', label: '接口接收', description: '外部推送入库记录', icon: <Inbox aria-hidden="true" /> },
       { key: 'pull_records', label: '拉取记录', description: '主动拉取原始数据', icon: <ArrowDownToLine aria-hidden="true" /> },
@@ -571,18 +571,29 @@ const navGroups: NavGroup[] = [
     ],
   },
   {
-    label: '处理与交付',
+    label: '数据服务',
+    items: [
+      { key: 'mall_weather', label: '商场天气', description: '实况、趋势与预警', icon: <CloudSun aria-hidden="true" /> },
+    ],
+  },
+  {
+    label: '数据处理',
     items: [
       { key: 'rules', label: '清洗规则', description: '规则类型与执行顺序', icon: <ListChecks aria-hidden="true" /> },
       { key: 'processed', label: '处理结果', description: '质量与业务数据查询', icon: <CheckCircle2 aria-hidden="true" /> },
       { key: 'methods', label: '方法目录', description: '配置与系统方法', icon: <Wrench aria-hidden="true" /> },
+    ],
+  },
+  {
+    label: '数据交付',
+    items: [
       { key: 'destinations', label: '推送目标', description: '目标接口配置', icon: <Send aria-hidden="true" /> },
       { key: 'tasks', label: '推送任务', description: '任务与目标关系', icon: <ArrowUpFromLine aria-hidden="true" /> },
       { key: 'push_policy', label: '推送策略', description: '订单少推送设置', icon: <ListChecks aria-hidden="true" /> },
     ],
   },
   {
-    label: '工具',
+    label: '数据工具',
     items: [
       { key: 'excel_jobs', label: 'Excel 任务', description: '状态与结果下载', icon: <ScrollText aria-hidden="true" /> },
       { key: 'excel_schemes', label: 'Excel 匹配', description: '自定义多步骤方案', icon: <Upload aria-hidden="true" /> },
@@ -592,6 +603,10 @@ const navGroups: NavGroup[] = [
 ]
 
 const navItems = navGroups.flatMap((group) => group.items)
+
+function navGroupFor(key: NavKey) {
+  return navGroups.find((group) => group.items.some((item) => item.key === key))
+}
 
 function navFromHash(): NavKey {
   const value = window.location.hash.replace(/^#\/?/, '') as NavKey
@@ -689,6 +704,7 @@ function App() {
   const actorID = useMemo(() => tokenActorID(token), [token])
   const [authenticated, setAuthenticated] = useState(() => Boolean(token))
   const [activeNav, setActiveNav] = useState<NavKey>(navFromHash)
+  const [expandedNavGroup, setExpandedNavGroup] = useState(() => navGroupFor(navFromHash())?.label ?? navGroups[0].label)
   const [navQuery, setNavQuery] = useState('')
   const [loading, setLoading] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
@@ -854,7 +870,11 @@ function App() {
   }, [token])
 
   useEffect(() => {
-    const handleHashChange = () => setActiveNav(navFromHash())
+    const handleHashChange = () => {
+      const nextNav = navFromHash()
+      setActiveNav(nextNav)
+      setExpandedNavGroup(navGroupFor(nextNav)?.label ?? navGroups[0].label)
+    }
     window.addEventListener('hashchange', handleHashChange)
     return () => window.removeEventListener('hashchange', handleHashChange)
   }, [])
@@ -970,15 +990,32 @@ function App() {
             const query = navQuery.trim().toLowerCase()
             const items = group.items.filter((item) => !query || `${item.label} ${item.description}`.toLowerCase().includes(query))
             if (items.length === 0) return null
+            const expanded = Boolean(query) || expandedNavGroup === group.label
+            const panelID = `nav-group-${group.items[0].key}`
             return (
               <section className="nav-group" key={group.label}>
-                <h2>{group.label}</h2>
-                {items.map((item) => (
-                  <button className={item.key === activeNav ? 'nav-item active' : 'nav-item'} key={item.key} type="button" onClick={() => navigate(item.key)}>
-                    {item.icon}
-                    <span><strong>{item.label}</strong><small>{item.description}</small></span>
+                <h2>
+                  <button
+                    className="nav-group-toggle"
+                    type="button"
+                    aria-expanded={expanded}
+                    aria-controls={panelID}
+                    onClick={() => setExpandedNavGroup((current) => current === group.label ? '' : group.label)}
+                  >
+                    <span>{group.label}</span>
+                    <ChevronDown aria-hidden="true" />
                   </button>
-                ))}
+                </h2>
+                {expanded && (
+                  <div className="nav-group-items" id={panelID}>
+                    {items.map((item) => (
+                      <button className={item.key === activeNav ? 'nav-item active' : 'nav-item'} key={item.key} type="button" onClick={() => navigate(item.key)}>
+                        {item.icon}
+                        <span><strong>{item.label}</strong><small>{item.description}</small></span>
+                      </button>
+                    ))}
+                  </div>
+                )}
               </section>
             )
           })}
