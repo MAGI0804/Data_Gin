@@ -88,16 +88,17 @@ func NewOSSClientFromConfig() (*OSSClient, error) {
 	}
 
 	credentialsProvider := credentialsProviderFromEnv()
+	uploadEndpoint, uploadUsesCName := uploadAddressing(cfg)
 	ossCfg := alioss.LoadDefaultConfig().
 		WithRegion(cfg.Region).
 		WithUseInternalEndpoint(cfg.UseInternal).
-		WithUseCName(cfg.UseCName).
+		WithUseCName(uploadUsesCName).
 		WithDisableSSL(cfg.DisableSSL).
 		WithConnectTimeout(time.Duration(cfg.ConnectTimeoutSeconds) * time.Second).
 		WithReadWriteTimeout(time.Duration(cfg.ReadWriteTimeoutSeconds) * time.Second).
 		WithCredentialsProvider(credentialsProvider)
-	if endpoint := clientEndpoint(cfg); endpoint != "" {
-		ossCfg = ossCfg.WithEndpoint(endpoint)
+	if uploadEndpoint != "" {
+		ossCfg = ossCfg.WithEndpoint(uploadEndpoint)
 	}
 	downloadEndpoint, downloadUsesCName := browserDownloadAddressing(cfg)
 	downloadCfg := alioss.LoadDefaultConfig().
@@ -230,8 +231,9 @@ func (c *OSSClient) UploadFileWithProgress(ctx context.Context, objectKey, local
 }
 
 func (c *OSSClient) UploadPlan(fileSize int64) UploadPlan {
+	endpoint, _ := uploadAddressing(c.cfg)
 	return UploadPlan{
-		Endpoint:                clientEndpoint(c.cfg),
+		Endpoint:                endpoint,
 		UseInternal:             c.cfg.UseInternal,
 		Multipart:               fileSize >= c.cfg.MultipartThresholdBytes,
 		MultipartThresholdBytes: c.cfg.MultipartThresholdBytes,
@@ -325,6 +327,34 @@ func clientEndpoint(cfg OSSConfig) string {
 		return internalEndpoint(cfg.Region, cfg.DisableSSL)
 	}
 	return endpoint
+}
+
+func uploadAddressing(cfg OSSConfig) (string, bool) {
+	endpoint := strings.TrimSpace(cfg.Endpoint)
+	if endpoint == "" {
+		if cfg.UseInternal {
+			return internalEndpoint(cfg.Region, cfg.DisableSSL), false
+		}
+		return "", false
+	}
+	if !isAliyunOSSEndpoint(endpoint) {
+		return clientEndpoint(cfg), cfg.UseCName
+	}
+	region := normalizeOSSRegion(cfg.Region)
+	if region == "" {
+		region = normalizeOSSRegion(endpoint)
+	}
+	if region == "" {
+		return "", false
+	}
+	if cfg.UseInternal {
+		return internalEndpoint(region, cfg.DisableSSL), false
+	}
+	scheme := "https"
+	if cfg.DisableSSL {
+		scheme = "http"
+	}
+	return fmt.Sprintf("%s://oss-%s.aliyuncs.com", scheme, region), false
 }
 
 func browserDownloadAddressing(cfg OSSConfig) (string, bool) {

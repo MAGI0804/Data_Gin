@@ -71,6 +71,114 @@ func TestClientEndpointKeepsCNameWhenInternalEnabled(t *testing.T) {
 	}
 }
 
+func TestUploadAddressingCanonicalizesAliyunEndpoints(t *testing.T) {
+	tests := []struct {
+		name string
+		cfg  OSSConfig
+		want string
+	}{
+		{
+			name: "public service endpoint",
+			cfg: OSSConfig{
+				Region: "cn-shanghai", Endpoint: "https://oss-cn-shanghai.aliyuncs.com", UseCName: true,
+			},
+			want: "https://oss-cn-shanghai.aliyuncs.com",
+		},
+		{
+			name: "bucket qualified endpoint",
+			cfg: OSSConfig{
+				Region: "cn-shanghai", Endpoint: "https://weather-private.oss-cn-shanghai.aliyuncs.com", UseCName: true,
+			},
+			want: "https://oss-cn-shanghai.aliyuncs.com",
+		},
+		{
+			name: "internal upload",
+			cfg: OSSConfig{
+				Region: "cn-shanghai", Endpoint: "https://oss-cn-shanghai.aliyuncs.com",
+				UseInternal: true, UseCName: true,
+			},
+			want: "https://oss-cn-shanghai-internal.aliyuncs.com",
+		},
+		{
+			name: "ssl disabled",
+			cfg: OSSConfig{
+				Region: "cn-shanghai", Endpoint: "https://oss-cn-shanghai.aliyuncs.com",
+				UseCName: true, DisableSSL: true,
+			},
+			want: "http://oss-cn-shanghai.aliyuncs.com",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			endpoint, useCName := uploadAddressing(tt.cfg)
+			if endpoint != tt.want || useCName {
+				t.Fatalf("uploadAddressing() = (%q, %t), want (%q, false)", endpoint, useCName, tt.want)
+			}
+		})
+	}
+}
+
+func TestUploadAddressingPreservesCustomCName(t *testing.T) {
+	endpoint, useCName := uploadAddressing(OSSConfig{
+		Region: "cn-shanghai", Endpoint: "https://weather-files.example.com",
+		UseInternal: true, UseCName: true,
+	})
+	if endpoint != "https://weather-files.example.com" || !useCName {
+		t.Fatalf("uploadAddressing() = (%q, %t), want custom CNAME", endpoint, useCName)
+	}
+}
+
+func TestUploadAddressingKeepsBucketInSDKRequests(t *testing.T) {
+	tests := []struct {
+		name     string
+		endpoint string
+		internal bool
+		wantHost string
+	}{
+		{
+			name: "public service", endpoint: "https://oss-cn-shanghai.aliyuncs.com",
+			wantHost: "weather-private.oss-cn-shanghai.aliyuncs.com",
+		},
+		{
+			name: "bucket qualified service", endpoint: "https://other-bucket.oss-cn-shanghai.aliyuncs.com",
+			wantHost: "weather-private.oss-cn-shanghai.aliyuncs.com",
+		},
+		{
+			name: "internal service", endpoint: "https://oss-cn-shanghai-internal.aliyuncs.com",
+			internal: true, wantHost: "weather-private.oss-cn-shanghai-internal.aliyuncs.com",
+		},
+		{
+			name: "internal default endpoint", endpoint: "",
+			internal: true, wantHost: "weather-private.oss-cn-shanghai-internal.aliyuncs.com",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := OSSConfig{
+				Region: "cn-shanghai", Endpoint: tt.endpoint, Bucket: "weather-private",
+				UseInternal: tt.internal, UseCName: true,
+			}
+			endpoint, useCName := uploadAddressing(cfg)
+			client := alioss.NewClient(alioss.LoadDefaultConfig().
+				WithCredentialsProvider(credentials.NewStaticCredentialsProvider("ak", "sk")).
+				WithRegion(cfg.Region).
+				WithEndpoint(endpoint).
+				WithUseCName(useCName).
+				WithUseInternalEndpoint(cfg.UseInternal))
+			signed, err := client.Presign(t.Context(), &alioss.PutObjectRequest{
+				Bucket: alioss.Ptr(cfg.Bucket), Key: alioss.Ptr("mall-weather-exports/job/result.xlsx"),
+			}, alioss.PresignExpires(5*time.Minute))
+			if err != nil {
+				t.Fatalf("Presign() error=%v", err)
+			}
+			parsed, err := url.Parse(signed.URL)
+			if err != nil || parsed.Hostname() != tt.wantHost {
+				t.Fatalf("signed upload host=%q error=%v, want %q", parsed.Hostname(), err, tt.wantHost)
+			}
+		})
+	}
+}
+
 func TestBrowserDownloadEndpointNeverUsesInternalOSSHost(t *testing.T) {
 	tests := []struct {
 		name string
@@ -208,6 +316,17 @@ func TestOSSClientUploadPlanMarksMultipart(t *testing.T) {
 	}
 	if plan.PartSizeBytes != 64*1024*1024 || plan.ParallelNum != 3 || !plan.EnableCheckpoint {
 		t.Fatalf("UploadPlan() = %+v, want configured multipart settings", plan)
+	}
+}
+
+func TestOSSClientUploadPlanReportsCanonicalEndpoint(t *testing.T) {
+	client := &OSSClient{cfg: OSSConfig{
+		Region: "cn-shanghai", Endpoint: "https://oss-cn-shanghai.aliyuncs.com",
+		UseInternal: true, UseCName: true,
+	}}
+	plan := client.UploadPlan(1)
+	if plan.Endpoint != "https://oss-cn-shanghai-internal.aliyuncs.com" || !plan.UseInternal {
+		t.Fatalf("UploadPlan() = %+v, want canonical internal endpoint", plan)
 	}
 }
 
