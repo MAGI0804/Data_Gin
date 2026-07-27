@@ -7,6 +7,7 @@ import {
   mallWeatherDefaultExportProfileRequest,
   mallWeatherExportCreateRequest,
   mallWeatherExportDownloadReadiness,
+  mallWeatherExportDownloadRequestTimeoutMilliseconds,
   mallWeatherExportDownloadPath,
   mallWeatherExportJobPath,
   mallWeatherExportJobTerminal,
@@ -23,6 +24,7 @@ import {
   saveMallWeatherExportSession,
   selectMallWeatherCompleteExportProfile,
   selectMallWeatherExportProfile,
+  waitForMallWeatherExportDownload,
 } from '../.test-dist/mallWeatherExport.js'
 
 const jobID = '123e4567-e89b-42d3-a456-426614174000'
@@ -211,6 +213,23 @@ test('accepts only short HTTPS download URLs and builds stable resource paths', 
   assert.equal(mallWeatherExportProfilesPath('next cursor'), '/v1/weather-export-profiles?enabled=true&pageSize=100&cursor=next+cursor')
   assert.equal(mallWeatherExportProfilesPath('', false), '/v1/weather-export-profiles?enabled=false&pageSize=100')
   assert.throws(() => mallWeatherExportJobPath('bad'), /invalid mall weather export job id/)
+})
+
+test('bounds download link requests and aborts clients that do not settle', async () => {
+  assert.equal(mallWeatherExportDownloadRequestTimeoutMilliseconds, 15_000)
+
+  const completedController = new AbortController()
+  assert.equal(await waitForMallWeatherExportDownload(
+    Promise.resolve('ready'), completedController, 100,
+  ), 'ready')
+  assert.equal(completedController.signal.aborted, false)
+
+  const stalledController = new AbortController()
+  await assert.rejects(
+    waitForMallWeatherExportDownload(new Promise(() => {}), stalledController, 5),
+    { name: 'MallWeatherExportDownloadTimeoutError' },
+  )
+  assert.equal(stalledController.signal.aborted, true)
 })
 
 test('reads only bounded safe API error messages', () => {

@@ -14,6 +14,7 @@ import {
   mallWeatherExportProfilesPath,
   mallWeatherExportProgress,
   mallWeatherExportRequestMatches,
+  MallWeatherExportDownloadTimeoutError,
   parseMallWeatherExportCreateResult,
   parseMallWeatherExportDownload,
   parseMallWeatherExportJob,
@@ -22,6 +23,7 @@ import {
   parseMallWeatherExportSafeErrorMessage,
   saveMallWeatherExportSession,
   selectMallWeatherCompleteExportProfile,
+  waitForMallWeatherExportDownload,
   type MallWeatherExportJob,
   type MallWeatherExportPendingCreate,
   type MallWeatherExportProfile,
@@ -393,9 +395,12 @@ export function MallWeatherExportPanel({ actorID, mallID, mallName, client, onDo
     setDownloading(true)
     setActionError('')
     try {
-      const response = await client(mallWeatherExportDownloadPath(job.jobId), {
-        method: 'GET', showResult: false, silentLoading: true, signal: controller.signal,
-      })
+      const response = await waitForMallWeatherExportDownload(
+        client(mallWeatherExportDownloadPath(job.jobId), {
+          method: 'GET', showResult: false, silentLoading: true, signal: controller.signal,
+        }),
+        controller,
+      )
       if (controller.signal.aborted) return
       if (!response.ok && response.status === 409) {
         const safeMessage = parseMallWeatherExportSafeErrorMessage(response.data)
@@ -421,9 +426,13 @@ export function MallWeatherExportPanel({ actorID, mallID, mallName, client, onDo
       if (!download) throw new Error('下载链接响应格式不正确，请联系管理员')
       saveMallWeatherExportSession(actorID, mallID, { pending: null, jobId: job.jobId }, window.sessionStorage)
       if (onDownloadURL) onDownloadURL(download.url)
-      else window.location.assign(download.url)
+      else triggerMallWeatherExportDownload(download.url)
     } catch (error) {
-      if (!controller.signal.aborted) setActionError(error instanceof Error ? error.message : '下载链接生成失败')
+      if (error instanceof MallWeatherExportDownloadTimeoutError) {
+        setActionError('下载链接生成超时，请检查网络后重试')
+      } else if (!controller.signal.aborted) {
+        setActionError(error instanceof Error ? error.message : '下载链接生成失败')
+      }
     } finally {
       if (actionController.current === controller) actionController.current = null
       setDownloading(false)
@@ -511,6 +520,15 @@ export function MallWeatherExportPanel({ actorID, mallID, mallName, client, onDo
       {actionError && <p className="mall-weather-action-message error" role="alert">{actionError}</p>}
     </section>
   )
+}
+
+function triggerMallWeatherExportDownload(url: string) {
+  const iframe = document.createElement('iframe')
+  iframe.title = '天气 Excel 下载'
+  iframe.hidden = true
+  iframe.src = url
+  document.body.appendChild(iframe)
+  window.setTimeout(() => iframe.remove(), 5 * 60 * 1000)
 }
 
 function exportStatusLabel(status: MallWeatherExportJob['status']) {

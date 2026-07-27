@@ -87,6 +87,15 @@ export type MallWeatherExportDownload = {
 
 export type MallWeatherExportDownloadReadiness = 'ready' | 'not-ready' | 'expired'
 
+export const mallWeatherExportDownloadRequestTimeoutMilliseconds = 15_000
+
+export class MallWeatherExportDownloadTimeoutError extends Error {
+  constructor() {
+    super('mall weather export download request timed out')
+    this.name = 'MallWeatherExportDownloadTimeoutError'
+  }
+}
+
 export type MallWeatherExportProfileSaveRequest = {
   code: string
   name: string
@@ -460,6 +469,28 @@ export function parseMallWeatherExportDownload(payload: unknown): MallWeatherExp
     return null
   }
   return { url: data.url, expiresAt: data.expiresAt }
+}
+
+export async function waitForMallWeatherExportDownload<T>(
+  request: Promise<T>,
+  controller: AbortController,
+  timeoutMilliseconds = mallWeatherExportDownloadRequestTimeoutMilliseconds,
+): Promise<T> {
+  if (!Number.isSafeInteger(timeoutMilliseconds) || timeoutMilliseconds < 1 || controller.signal.aborted) {
+    throw new Error('invalid mall weather export download timeout')
+  }
+  let timer = 0
+  try {
+    return await new Promise<T>((resolve, reject) => {
+      timer = globalThis.setTimeout(() => {
+        controller.abort()
+        reject(new MallWeatherExportDownloadTimeoutError())
+      }, timeoutMilliseconds)
+      request.then(resolve, reject)
+    })
+  } finally {
+    globalThis.clearTimeout(timer)
+  }
 }
 
 export function parseMallWeatherExportSafeErrorMessage(payload: unknown): string | null {
