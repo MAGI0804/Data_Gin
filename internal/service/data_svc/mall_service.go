@@ -95,6 +95,7 @@ type MallDTO struct {
 	WeatherProvider   string                                    `json:"weatherProvider"`
 	DetailProfile     string                                    `json:"detailProfile"`
 	CoverageRadiusM   int                                       `json:"coverageRadiusM"`
+	TimeZone          string                                    `json:"timeZone"`
 	Status            string                                    `json:"status"`
 	Version           uint64                                    `json:"version"`
 	CreatedAt         time.Time                                 `json:"createdAt"`
@@ -669,7 +670,8 @@ func mallDTO(mall *model.Mall) (MallDTO, error) {
 		GrossFloorAreaSQM: mall.GrossFloorAreaSQM, ParkingSpaces: mall.ParkingSpaces, Tags: tags,
 		WeatherEnabled: mall.WeatherEnabled, WeatherProvider: mall.WeatherProvider,
 		DetailProfile: mall.DetailProfile, CoverageRadiusM: mall.CoverageRadiusM,
-		Status: strings.ToUpper(mall.Status), Version: mall.Version, CreatedAt: mall.CreatedAt, UpdatedAt: mall.UpdatedAt,
+		TimeZone: mall.Timezone,
+		Status:   strings.ToUpper(mall.Status), Version: mall.Version, CreatedAt: mall.CreatedAt, UpdatedAt: mall.UpdatedAt,
 	}, nil
 }
 

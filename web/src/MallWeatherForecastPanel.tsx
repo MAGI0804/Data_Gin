@@ -1,17 +1,15 @@
 import { type Dispatch, type ReactNode, type SetStateAction, useCallback, useEffect, useRef, useState } from 'react'
-import { RefreshCcw } from 'lucide-react'
+import { RefreshCcw, Thermometer } from 'lucide-react'
+import { MallWeatherChart } from './MallWeatherChart'
 import {
+  mallWeatherDailyForecastDays,
   mallWeatherFreshnessLabel,
-  mallWeatherForecastQueryWindows,
+  mallWeatherHourlyForecastHours,
   mallWeatherMetric,
+  mallWeatherMinutelyForecastMinutes,
   mallWeatherSkyconLabel,
-  loadAllMallWeatherPages,
-  parseMallWeatherDailyPage,
-  parseMallWeatherHourlyPage,
-  parseMallWeatherLifeIndexPage,
-  parseMallWeatherMinutelyPage,
+  loadMallWeatherForecastDatasets,
   type MallWeatherDaily,
-  type MallWeatherForecastWindows,
   type MallWeatherHourly,
   type MallWeatherLifeIndex,
   type MallWeatherMeta,
@@ -53,9 +51,26 @@ export function MallWeatherForecastPanel({ mallID, timeZone, client }: { mallID:
     setHourly((state) => ({ ...state, loading: true, error: '' }))
     setDaily((state) => ({ ...state, loading: true, error: '' }))
     setLife((state) => ({ ...state, loading: true, error: '' }))
-    let windows: MallWeatherForecastWindows
+    async function request(path: string) {
+      const controller = new AbortController()
+      activeControllers.current.add(controller)
+      const timeout = window.setTimeout(() => controller.abort(), 15_000)
+      try {
+        return await client(path, {
+          method: 'GET',
+          showResult: false,
+          silentLoading: true,
+          signal: controller.signal,
+        })
+      } finally {
+        window.clearTimeout(timeout)
+        activeControllers.current.delete(controller)
+      }
+    }
+    let datasets: ReturnType<typeof loadMallWeatherForecastDatasets>
     try {
-      windows = mallWeatherForecastQueryWindows(new Date(), timeZone)
+      const requestedAt = new Date()
+      datasets = loadMallWeatherForecastDatasets(request, mallID, timeZone, requestedAt)
     } catch {
       const message = '商场时区无效，无法构造完整预报窗口'
       setMinutely((state) => ({ ...state, loading: false, error: message }))
@@ -64,23 +79,12 @@ export function MallWeatherForecastPanel({ mallID, timeZone, client }: { mallID:
       setLife((state) => ({ ...state, loading: false, error: message }))
       return
     }
-    const request = async (path: string) => {
-      const controller = new AbortController()
-      activeControllers.current.add(controller)
-      const timeout = window.setTimeout(() => controller.abort(), 15_000)
-      try {
-        return await client(path, { method: 'GET', showResult: false, silentLoading: true, signal: controller.signal })
-      } finally {
-        window.clearTimeout(timeout)
-        activeControllers.current.delete(controller)
-      }
-    }
     const isCurrent = () => !disposed.current && sequence === requestSequence.current
     void Promise.all([
-      settleDataset(loadAllMallWeatherPages(request, mallID, 'minutely', windows.minutely, timeZone, undefined, parseMallWeatherMinutelyPage), isCurrent, setMinutely),
-      settleDataset(loadAllMallWeatherPages(request, mallID, 'hourly', windows.hourly, timeZone, undefined, parseMallWeatherHourlyPage), isCurrent, setHourly),
-      settleDataset(loadAllMallWeatherPages(request, mallID, 'daily', windows.daily, timeZone, undefined, parseMallWeatherDailyPage), isCurrent, setDaily),
-      settleDataset(loadAllMallWeatherPages(request, mallID, 'life-indices', windows.daily, timeZone, undefined, parseMallWeatherLifeIndexPage), isCurrent, setLife),
+      settleDataset(datasets.minutely, isCurrent, setMinutely),
+      settleDataset(datasets.hourly, isCurrent, setHourly),
+      settleDataset(datasets.daily, isCurrent, setDaily),
+      settleDataset(datasets.life, isCurrent, setLife),
     ])
   }, [abortActiveRequests, client, mallID, timeZone])
 
@@ -97,26 +101,41 @@ export function MallWeatherForecastPanel({ mallID, timeZone, client }: { mallID:
   return (
     <section className="workbench-panel mall-weather-forecast-panel" aria-busy={loading}>
       <div className="mall-weather-section-title">
-        <div><strong>完整预报与生活指数</strong><span>中心点未来 120 分钟 · 72 小时 · 7 天 · 自动读取全部游标页</span></div>
+        <div>
+          <strong>完整预报与生活指数</strong>
+          <span>
+            中心点未来 {mallWeatherMinutelyForecastMinutes} 分钟 · {mallWeatherHourlyForecastHours} 小时 · {mallWeatherDailyForecastDays} 天 · 自动读取全部游标页
+          </span>
+        </div>
         <button type="button" onClick={load} disabled={loading}><RefreshCcw aria-hidden="true" />{loading ? '加载中' : '重新查询'}</button>
       </div>
-      <ForecastDataset id="mall-weather-minutely" title="中心点未来 120 分钟降水（约 1 km 分辨率）" state={minutely} empty="未来 120 分钟窗口没有分钟级降水预报">
-        <table className="data-table"><caption className="mall-weather-table-caption">商场中心点未来 120 分钟约 1 km 分辨率降水明细</caption><thead><tr><th scope="col">时间</th><th scope="col">分钟偏移</th><th scope="col">降水强度</th><th scope="col">概率</th><th scope="col">描述 / 关键点</th><th scope="col">数据源</th><th scope="col">质量</th></tr></thead><tbody>
+      <ForecastDataset id="mall-weather-minutely" title={`中心点未来 ${mallWeatherMinutelyForecastMinutes} 分钟降水（约 1 km 分辨率）`} state={minutely} empty={`未来 ${mallWeatherMinutelyForecastMinutes} 分钟窗口没有分钟级降水预报`}>
+        <table className="data-table"><caption className="mall-weather-table-caption">商场中心点未来 {mallWeatherMinutelyForecastMinutes} 分钟约 1 km 分辨率降水明细</caption><thead><tr><th scope="col">时间</th><th scope="col">分钟偏移</th><th scope="col">降水强度</th><th scope="col">概率</th><th scope="col">描述 / 关键点</th><th scope="col">数据源</th><th scope="col">质量</th></tr></thead><tbody>
           {minutely.items.map((item, index) => <tr key={`${item.forecastMinuteUtc}-${index}`}><td>{item.forecastMinuteLocal}</td><td>+{item.minuteOffset} 分钟</td><td>{mallWeatherMetric(item.precipitationMmH, ' mm/h')}</td><td>{mallWeatherMetric(item.probabilityPct, '%', 0)}</td><td>{[item.description, item.forecastKeypoint].filter(Boolean).join(' / ') || '—'}</td><td>{item.datasource || '—'}</td><td>{qualityLabel(item.qualityStatus, item.qualityWarnings.length)}</td></tr>)}
         </tbody></table>
       </ForecastDataset>
-      <ForecastDataset id="mall-weather-hourly" title="72 小时逐小时预报" state={hourly} empty="未来 72 小时窗口没有小时预报">
-        <table className="data-table"><caption className="mall-weather-table-caption">未来 72 小时逐小时天气明细</caption><thead><tr><th scope="col">时间</th><th scope="col">天气</th><th scope="col">温度 / 体感</th><th scope="col">湿度 / 云量</th><th scope="col">气压 / 辐射</th><th scope="col">降水 / 概率</th><th scope="col">风速 / 风向</th><th scope="col">能见度</th><th scope="col">PM2.5 / 中美 AQI</th><th scope="col">描述</th><th scope="col">质量</th></tr></thead><tbody>
+      {hourly.items.length > 0 && (
+        <MallWeatherChart
+          title={`未来 ${mallWeatherHourlyForecastHours} 小时温度趋势`}
+          detail="9～13 km 预报网格 · 自动读取全部游标页"
+          unit="°C"
+          icon={<Thermometer aria-hidden="true" />}
+          series={hourly.items.map((item) => ({ time: item.forecastTimeLocal, value: item.temperatureC }))}
+          showDetails={false}
+        />
+      )}
+      <ForecastDataset id="mall-weather-hourly" title={`${mallWeatherHourlyForecastHours} 小时逐小时预报`} state={hourly} empty={`未来 ${mallWeatherHourlyForecastHours} 小时窗口没有小时预报`}>
+        <table className="data-table"><caption className="mall-weather-table-caption">未来 {mallWeatherHourlyForecastHours} 小时逐小时天气明细（常规变量为 9～13 km 预报网格）</caption><thead><tr><th scope="col">时间</th><th scope="col">天气</th><th scope="col">温度 / 体感</th><th scope="col">湿度 / 云量</th><th scope="col">气压 / 辐射</th><th scope="col">降水 / 概率</th><th scope="col">风速 / 风向</th><th scope="col">能见度</th><th scope="col">PM2.5 / 中美 AQI</th><th scope="col">描述</th><th scope="col">质量</th></tr></thead><tbody>
           {hourly.items.map((item, index) => <tr key={`${item.forecastTimeLocal}-${index}`}><td>{item.forecastTimeLocal}</td><td>{mallWeatherSkyconLabel(item.skycon)}</td><td>{mallWeatherMetric(item.temperatureC, '°C')} / {mallWeatherMetric(item.apparentTemperatureC, '°C')}</td><td>{mallWeatherMetric(item.humidityPct, '%', 0)} / {ratioPercent(item.cloudrateRatio)}</td><td>{mallWeatherMetric(item.pressurePa, ' Pa', 0)} / {mallWeatherMetric(item.dswrfWM2, ' W/m²')}</td><td>{mallWeatherMetric(item.precipitationMmH, ' mm/h')} / {mallWeatherMetric(item.precipitationProbabilityPct, '%', 0)}</td><td>{mallWeatherMetric(item.windSpeedKph, ' km/h')} / {mallWeatherMetric(item.windDirectionDeg, '°', 0)}</td><td>{mallWeatherMetric(item.visibilityKm, ' km')}</td><td>{mallWeatherMetric(item.pm25UgM3, ' μg/m³')} / {mallWeatherMetric(item.aqiChn, '', 0)} / {mallWeatherMetric(item.aqiUsa, '', 0)}</td><td>{item.hourlyDescription || item.forecastKeypoint || '—'}</td><td>{qualityLabel(item.qualityStatus, item.qualityWarnings.length)}</td></tr>)}
         </tbody></table>
       </ForecastDataset>
-      <ForecastDataset title="7 日逐日预报" state={daily} empty="当前 7 天窗口没有逐日预报">
-        <table className="data-table"><caption className="mall-weather-table-caption">未来 7 个本地日逐日全部综合天气字段</caption><thead><tr><th scope="col">日期</th><th scope="col">全天 / 白天 / 夜间天气</th><th scope="col">全天温度 最低 / 最高 / 平均</th><th scope="col">白天温度 最低 / 最高 / 平均</th><th scope="col">夜间温度 最低 / 最高 / 平均</th><th scope="col">全天降水 最低 / 最高 / 平均 / 概率</th><th scope="col">白天降水 最低 / 最高 / 平均 / 概率</th><th scope="col">夜间降水 最低 / 最高 / 平均 / 概率</th><th scope="col">全天风 最低 / 最高 / 平均</th><th scope="col">白天风 最低 / 最高 / 平均</th><th scope="col">夜间风 最低 / 最高 / 平均</th><th scope="col">湿度 最低 / 最高 / 平均</th><th scope="col">云量 最低 / 最高 / 平均</th><th scope="col">气压 最低 / 最高 / 平均</th><th scope="col">能见度 最低 / 最高 / 平均</th><th scope="col">辐射 最低 / 最高 / 平均</th><th scope="col">PM2.5 最低 / 最高 / 平均</th><th scope="col">中国 AQI 最低 / 最高 / 平均</th><th scope="col">美国 AQI 最低 / 最高 / 平均</th><th scope="col">日出 / 日落</th><th scope="col">质量</th></tr></thead><tbody>
+      <ForecastDataset id="mall-weather-daily" title={`${mallWeatherDailyForecastDays} 日逐日预报`} state={daily} empty={`当前 ${mallWeatherDailyForecastDays} 天窗口没有逐日预报`}>
+        <table className="data-table"><caption className="mall-weather-table-caption">未来 {mallWeatherDailyForecastDays} 个本地日逐日全部综合天气字段（9～13 km 预报网格）</caption><thead><tr><th scope="col">日期</th><th scope="col">全天 / 白天 / 夜间天气</th><th scope="col">全天温度 最低 / 最高 / 平均</th><th scope="col">白天温度 最低 / 最高 / 平均</th><th scope="col">夜间温度 最低 / 最高 / 平均</th><th scope="col">全天降水 最低 / 最高 / 平均 / 概率</th><th scope="col">白天降水 最低 / 最高 / 平均 / 概率</th><th scope="col">夜间降水 最低 / 最高 / 平均 / 概率</th><th scope="col">全天风 最低 / 最高 / 平均</th><th scope="col">白天风 最低 / 最高 / 平均</th><th scope="col">夜间风 最低 / 最高 / 平均</th><th scope="col">湿度 最低 / 最高 / 平均</th><th scope="col">云量 最低 / 最高 / 平均</th><th scope="col">气压 最低 / 最高 / 平均</th><th scope="col">能见度 最低 / 最高 / 平均</th><th scope="col">辐射 最低 / 最高 / 平均</th><th scope="col">PM2.5 最低 / 最高 / 平均</th><th scope="col">中国 AQI 最低 / 最高 / 平均</th><th scope="col">美国 AQI 最低 / 最高 / 平均</th><th scope="col">日出 / 日落</th><th scope="col">质量</th></tr></thead><tbody>
           {daily.items.map((item, index) => <tr key={`${item.forecastDateLocal}-${index}`}><td>{item.forecastDateLocal}</td><td>{mallWeatherSkyconLabel(item.skycon)} / {mallWeatherSkyconLabel(item.daySkycon)} / {mallWeatherSkyconLabel(item.nightSkycon)}</td><td>{rangeMetric(item.temperatureMinC, item.temperatureMaxC, item.temperatureAvgC, '°C')}</td><td>{rangeMetric(item.dayTemperatureMinC, item.dayTemperatureMaxC, item.dayTemperatureAvgC, '°C')}</td><td>{rangeMetric(item.nightTemperatureMinC, item.nightTemperatureMaxC, item.nightTemperatureAvgC, '°C')}</td><td>{precipitationMetric(item.precipitationMinMmH, item.precipitationMaxMmH, item.precipitationAvgMmH, item.precipitationProbabilityPct)}</td><td>{precipitationMetric(item.dayPrecipitationMinMmH, item.dayPrecipitationMaxMmH, item.dayPrecipitationAvgMmH, item.dayPrecipitationProbabilityPct)}</td><td>{precipitationMetric(item.nightPrecipitationMinMmH, item.nightPrecipitationMaxMmH, item.nightPrecipitationAvgMmH, item.nightPrecipitationProbabilityPct)}</td><td>{windRangeMetric(item.windMinSpeedKph, item.windMinDirectionDeg, item.windMaxSpeedKph, item.windMaxDirectionDeg, item.windAvgSpeedKph, item.windAvgDirectionDeg)}</td><td>{windRangeMetric(item.dayWindMinSpeedKph, item.dayWindMinDirectionDeg, item.dayWindMaxSpeedKph, item.dayWindMaxDirectionDeg, item.dayWindAvgSpeedKph, item.dayWindAvgDirectionDeg)}</td><td>{windRangeMetric(item.nightWindMinSpeedKph, item.nightWindMinDirectionDeg, item.nightWindMaxSpeedKph, item.nightWindMaxDirectionDeg, item.nightWindAvgSpeedKph, item.nightWindAvgDirectionDeg)}</td><td>{rangeMetric(item.humidityMinPct, item.humidityMaxPct, item.humidityAvgPct, '%', 0)}</td><td>{ratioRangeMetric(item.cloudrateMinRatio, item.cloudrateMaxRatio, item.cloudrateAvgRatio)}</td><td>{rangeMetric(item.pressureMinPa, item.pressureMaxPa, item.pressureAvgPa, ' Pa', 0)}</td><td>{rangeMetric(item.visibilityMinKm, item.visibilityMaxKm, item.visibilityAvgKm, ' km')}</td><td>{rangeMetric(item.dswrfMinWM2, item.dswrfMaxWM2, item.dswrfAvgWM2, ' W/m²')}</td><td>{rangeMetric(item.pm25MinUgM3, item.pm25MaxUgM3, item.pm25AvgUgM3, ' μg/m³')}</td><td>{rangeMetric(item.aqiMinChn, item.aqiMaxChn, item.aqiAvgChn, '', 0)}</td><td>{rangeMetric(item.aqiMinUsa, item.aqiMaxUsa, item.aqiAvgUsa, '', 0)}</td><td>{item.sunriseLocalTime || '—'} / {item.sunsetLocalTime || '—'}</td><td>{qualityLabel(item.qualityStatus, item.qualityWarnings.length)}</td></tr>)}
         </tbody></table>
       </ForecastDataset>
-      <ForecastDataset title="7 日生活指数" state={life} empty="当前 7 天窗口没有生活指数">
-        <table className="data-table mall-weather-life-table"><caption className="mall-weather-table-caption">未来 7 个本地日全部生活指数明细</caption><thead><tr><th scope="col">日期</th><th scope="col">指数</th><th scope="col">等级</th><th scope="col">建议</th><th scope="col">来源</th><th scope="col">质量</th></tr></thead><tbody>
+      <ForecastDataset id="mall-weather-life-indices" title={`${mallWeatherDailyForecastDays} 日生活指数`} state={life} empty={`当前 ${mallWeatherDailyForecastDays} 天窗口没有生活指数`}>
+        <table className="data-table mall-weather-life-table"><caption className="mall-weather-table-caption">未来 {mallWeatherDailyForecastDays} 个本地日全部生活指数明细</caption><thead><tr><th scope="col">日期</th><th scope="col">指数</th><th scope="col">等级</th><th scope="col">建议</th><th scope="col">来源</th><th scope="col">质量</th></tr></thead><tbody>
           {life.items.map((item, index) => <tr key={`${item.forecastDateLocal}-${item.sourceApi}-${item.indexType}-${index}`}><td>{item.forecastDateLocal}</td><td>{item.indexName || item.indexCode}{item.isUnknownType ? '（未知类型）' : ''}</td><td>{item.level ?? '—'}</td><td>{item.shortDescription || item.detail || '—'}</td><td>{item.sourceApi}</td><td>{qualityLabel(item.qualityStatus, item.qualityWarnings.length)}</td></tr>)}
         </tbody></table>
       </ForecastDataset>

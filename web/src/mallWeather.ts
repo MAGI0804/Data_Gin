@@ -13,9 +13,14 @@ export type MallWeatherMall = {
   weatherEnabled: boolean
   detailProfile: string
   coverageRadiusM: number
+  timeZone: string
   status: string
   version: number
 }
+
+export const mallWeatherMinutelyForecastMinutes = 120
+export const mallWeatherHourlyForecastHours = 360
+export const mallWeatherDailyForecastDays = 15
 
 export type MallWeatherMallList = {
   items: MallWeatherMall[]
@@ -548,9 +553,10 @@ function mallWeatherMall(value: unknown): MallWeatherMall | null {
     typeof value.mallCode !== 'string' || typeof value.nameCn !== 'string' || typeof value.province !== 'string' ||
     typeof value.city !== 'string' || typeof value.address !== 'string' || typeof value.geocodeStatus !== 'string' ||
     typeof value.weatherEnabled !== 'boolean' || typeof value.weatherProvider !== 'string' ||
-    typeof value.detailProfile !== 'string' || typeof value.status !== 'string' ||
+    typeof value.detailProfile !== 'string' || typeof value.timeZone !== 'string' || typeof value.status !== 'string' ||
     !value.mallCode.trim() || !value.nameCn.trim() || !value.province.trim() || !value.city.trim() || !value.address.trim() ||
-    !value.geocodeStatus.trim() || !value.weatherProvider.trim() || !['full', 'standard', 'economy'].includes(value.detailProfile) || !value.status.trim()) return null
+    !value.geocodeStatus.trim() || !value.weatherProvider.trim() || !['full', 'standard', 'economy'].includes(value.detailProfile) ||
+    !value.timeZone.trim() || !value.status.trim()) return null
   const hasLongitude = value.longitude !== undefined
   const hasLatitude = value.latitude !== undefined
   if (hasLongitude !== hasLatitude || hasLongitude && (!validCoordinateValue(value.longitude, -180, 180) ||
@@ -573,6 +579,7 @@ function mallWeatherMall(value: unknown): MallWeatherMall | null {
     weatherEnabled: value.weatherEnabled === true,
     detailProfile: textValue(value, 'detailProfile'),
     coverageRadiusM,
+    timeZone: textValue(value, 'timeZone'),
     status: textValue(value, 'status'),
     version: value.version,
   }
@@ -1594,11 +1601,21 @@ export function mallWeatherForecastQueryWindows(now = new Date(), timeZone = 'As
   const hourlyStart = new Date(Math.floor(now.getTime() / hourMilliseconds) * hourMilliseconds)
   const localDate = datePartsInTimeZone(now, timeZone)
   const dailyStart = localMidnight(localDate.year, localDate.month, localDate.day, timeZone)
-  const normalizedEndDate = new Date(Date.UTC(localDate.year, localDate.month - 1, localDate.day + 7))
+  const normalizedEndDate = new Date(Date.UTC(
+    localDate.year,
+    localDate.month - 1,
+    localDate.day + mallWeatherDailyForecastDays,
+  ))
   const dailyEnd = localMidnight(normalizedEndDate.getUTCFullYear(), normalizedEndDate.getUTCMonth() + 1, normalizedEndDate.getUTCDate(), timeZone)
   return {
-    minutely: { start: minutelyStart, end: new Date(minutelyStart.getTime() + 120 * minuteMilliseconds) },
-    hourly: { start: hourlyStart, end: new Date(hourlyStart.getTime() + 72 * hourMilliseconds) },
+    minutely: {
+      start: minutelyStart,
+      end: new Date(minutelyStart.getTime() + mallWeatherMinutelyForecastMinutes * minuteMilliseconds),
+    },
+    hourly: {
+      start: hourlyStart,
+      end: new Date(hourlyStart.getTime() + mallWeatherHourlyForecastHours * hourMilliseconds),
+    },
     daily: { start: dailyStart, end: dailyEnd },
   }
 }
@@ -1638,6 +1655,29 @@ export async function loadAllMallWeatherPages<T>(
   throw new Error('分页数量超过安全上限，请联系管理员')
 }
 
+export function loadMallWeatherForecastDatasets(
+  request: MallWeatherPageRequester,
+  mallID: number,
+  timeZone: string,
+  requestedAt = new Date(),
+) {
+  const windows = mallWeatherForecastQueryWindows(requestedAt, timeZone)
+  return {
+    minutely: loadAllMallWeatherPages(
+      request, mallID, 'minutely', windows.minutely, timeZone, requestedAt, parseMallWeatherMinutelyPage,
+    ),
+    hourly: loadAllMallWeatherPages(
+      request, mallID, 'hourly', windows.hourly, timeZone, requestedAt, parseMallWeatherHourlyPage,
+    ),
+    daily: loadAllMallWeatherPages(
+      request, mallID, 'daily', windows.daily, timeZone, requestedAt, parseMallWeatherDailyPage,
+    ),
+    life: loadAllMallWeatherPages(
+      request, mallID, 'life-indices', windows.daily, timeZone, requestedAt, parseMallWeatherLifeIndexPage,
+    ),
+  }
+}
+
 function mallWeatherLogicalKey(series: MallWeatherSeries, value: unknown) {
   if (!isRecord(value)) return ''
   if (series === 'minutely') return typeof value.forecastMinuteUtc === 'string' ? value.forecastMinuteUtc : ''
@@ -1673,26 +1713,26 @@ function datePartsInTimeZone(value: Date, timeZone: string) {
 
 function localMidnight(year: number, month: number, day: number, timeZone: string) {
   const targetTimestamp = Date.UTC(year, month - 1, day)
-  let candidateTimestamp = targetTimestamp
-  const formatter = new Intl.DateTimeFormat('en-CA', {
-    timeZone,
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hourCycle: 'h23',
-  })
-  for (let attempt = 0; attempt < 3; attempt++) {
-    const parts = formatter.formatToParts(new Date(candidateTimestamp))
-    const part = (type: Intl.DateTimeFormatPartTypes) => Number(parts.find((item) => item.type === type)?.value)
-    const representedTimestamp = Date.UTC(part('year'), part('month') - 1, part('day'), part('hour'), part('minute'), part('second'))
-    const nextTimestamp = targetTimestamp - (representedTimestamp - candidateTimestamp)
-    if (nextTimestamp === candidateTimestamp) return new Date(candidateTimestamp)
-    candidateTimestamp = nextTimestamp
+  const normalized = new Date(targetTimestamp)
+  if (normalized.getUTCFullYear() !== year || normalized.getUTCMonth() + 1 !== month || normalized.getUTCDate() !== day) {
+    throw new Error('invalid local weather date')
   }
-  return new Date(candidateTimestamp)
+  const searchRadius = 36 * 60 * 60 * 1000
+  let before = targetTimestamp - searchRadius
+  let atOrAfter = targetTimestamp + searchRadius
+  while (atOrAfter - before > 1) {
+    const candidate = before + Math.floor((atOrAfter - before) / 2)
+    const local = datePartsInTimeZone(new Date(candidate), timeZone)
+    const representedDate = Date.UTC(local.year, local.month - 1, local.day)
+    if (representedDate >= targetTimestamp) atOrAfter = candidate
+    else before = candidate
+  }
+  const result = new Date(atOrAfter)
+  const local = datePartsInTimeZone(result, timeZone)
+  if (Date.UTC(local.year, local.month - 1, local.day) !== targetTimestamp) {
+    throw new Error('local weather date does not exist')
+  }
+  return result
 }
 
 export function mallWeatherRefreshPath(mallID: number) {

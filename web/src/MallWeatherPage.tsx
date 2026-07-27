@@ -1,11 +1,11 @@
-import { type FormEvent, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AlertTriangle, CloudRain, MapPin, RefreshCcw, Thermometer, Wind } from 'lucide-react'
 import './MallWeatherPage.css'
+import { MallWeatherChart } from './MallWeatherChart'
 import { MallWeatherExportPanel } from './MallWeatherExportPanel'
 import { MallWeatherForecastPanel } from './MallWeatherForecastPanel'
 import { MallDetailsFields, MallWeatherMallEditor } from './MallWeatherMallEditor'
 import {
-  mallWeatherChartSegments,
   mallWeatherCreateKey,
   mallWeatherCreateRequest,
   clearMallWeatherPendingCreate,
@@ -24,7 +24,6 @@ import {
   mallWeatherGeocodeTriggerPath,
   mallWeatherMallReady,
   mallWeatherOverviewHasBusinessData,
-  mallWeatherOverviewHasHourlyTemperature,
   mallWeatherOverviewReadiness,
   mallWeatherSheetPushKey,
   mallWeatherSheetPushRequest,
@@ -351,10 +350,6 @@ export function MallWeatherPage({ actorID, client }: { actorID: string | null; c
   const selectedMall = malls.find((mall) => mall.id === selectedMallID)
   const selectedOverview = selectedMallID === overviewMallID ? overview : null
   const selectedMallReady = Boolean(selectedMall && mallWeatherMallReady(selectedMall))
-  const selectedOverviewHourlyReady = Boolean(
-    selectedOverview && mallWeatherOverviewHasHourlyTemperature(selectedOverview),
-  )
-
   const handleMallCreated = useCallback((mall: MallWeatherMall) => {
     setMalls((current) => mergeMallWeatherMalls(current, [mall]))
     selectedMallIDRef.current = mall.id
@@ -377,7 +372,11 @@ export function MallWeatherPage({ actorID, client }: { actorID: string | null; c
   }, [malls])
 
   const reloadWeatherData = useCallback(async (mallID: number, signal: AbortSignal) => {
-    return loadOverview(mallID, signal)
+    const result = await loadOverview(mallID, signal)
+    if (result === 'waiting' && !signal.aborted) {
+      setWeatherReloadVersion((current) => current + 1)
+    }
+    return result
   }, [loadOverview])
 
   return (
@@ -451,7 +450,6 @@ export function MallWeatherPage({ actorID, client }: { actorID: string | null; c
             onMallUpdated={handleMallUpdated}
             onReloadMall={loadMall}
           />}
-          {!showCreate && selectedMallReady && selectedMall && <MallWeatherDataNavigation showActorActions={Boolean(actorID)} />}
           {!showCreate && selectedMallReady && selectedMall && (
             <div id="mall-weather-overview" tabIndex={-1}>
               {overviewState === 'loading' && !selectedOverview && <LoadingState label={`正在加载${selectedMall.nameCn}天气`} />}
@@ -474,11 +472,12 @@ export function MallWeatherPage({ actorID, client }: { actorID: string | null; c
                 />}
             </div>
           )}
-          {!showCreate && selectedMallReady && selectedMall && selectedOverviewHourlyReady && <MallWeatherForecastPanel
+          {!showCreate && selectedMallReady && selectedMall && <MallWeatherDataNavigation showActorActions={Boolean(actorID)} />}
+          {!showCreate && selectedMallReady && selectedMall && <MallWeatherForecastPanel
             mallID={selectedMall.id}
-            timeZone={selectedOverview?.meta.timeZone || 'Asia/Shanghai'}
+            timeZone={selectedMall.timeZone}
             client={client}
-            key={`forecast-${selectedMall.id}:${selectedOverview?.meta.timeZone || 'Asia/Shanghai'}:${weatherReloadVersion}`}
+            key={`forecast-${selectedMall.id}:${selectedMall.timeZone}:${weatherReloadVersion}`}
           />}
           {!showCreate && selectedMallReady && selectedMall && actorID && <MallWeatherExportPanel
             actorID={actorID}
@@ -521,7 +520,9 @@ function MallWeatherDataNavigation({ showActorActions }: { showActorActions: boo
       <strong>天气数据</strong>
       <button type="button" onClick={() => navigateTo('mall-weather-overview')}>实况与趋势</button>
       <button type="button" onClick={() => navigateTo('mall-weather-minutely')}>约 1 km 分钟降水</button>
-      <button type="button" onClick={() => navigateTo('mall-weather-hourly')}>逐小时预报</button>
+      <button type="button" onClick={() => navigateTo('mall-weather-hourly')}>360 小时逐小时预报</button>
+      <button type="button" onClick={() => navigateTo('mall-weather-daily')}>15 天逐日预报</button>
+      <button type="button" onClick={() => navigateTo('mall-weather-life-indices')}>15 天生活指数</button>
       {showActorActions && <button type="button" onClick={() => navigateTo('mall-weather-export')}>导出 Excel</button>}
       {showActorActions && <button type="button" onClick={() => navigateTo('mall-weather-management')}>管理操作</button>}
     </nav>
@@ -612,6 +613,7 @@ function MallCreatePanel({ actorID, client, onCreated, onCancel }: {
       weatherEnabled: false,
       detailProfile: request.body.weather.detailProfile,
       coverageRadiusM: request.body.weather.coverageRadiusM,
+      timeZone: 'Asia/Shanghai',
       status: created.status,
       version: created.version,
     })
@@ -1272,14 +1274,14 @@ function WeatherOverview({ mall, overview, refreshing, onRefresh }: { mall: Mall
       </section>
 
       <section className="content-grid two">
-        <WeatherChart
+        <MallWeatherChart
           title="未来 120 分钟降水"
           detail="1 km 级"
           unit="mm/h"
           icon={<CloudRain aria-hidden="true" />}
           series={overview.minutely.map((item) => ({ time: item.forecastMinuteLocal, value: item.precipitationMmH }))}
         />
-        <WeatherChart
+        <MallWeatherChart
           title="未来 24 小时温度"
           detail="9～13 km 预报网格"
           unit="°C"
@@ -1310,49 +1312,6 @@ function WeatherOverview({ mall, overview, refreshing, onRefresh }: { mall: Mall
 
 function weatherRatioPercent(value: number | undefined) {
   return mallWeatherMetric(value === undefined ? undefined : value * 100, '%', 0)
-}
-
-function WeatherChart({ title, detail, unit, icon, series }: { title: string; detail: string; unit: string; icon: ReactNode; series: Array<{ time: string; value?: number }> }) {
-  const values = series.map((item) => item.value)
-  const segments = mallWeatherChartSegments(values, 640, 140)
-  const available = series.filter((item): item is { time: string; value: number } => typeof item.value === 'number' && Number.isFinite(item.value))
-  const minimum = available.length ? Math.min(...available.map((item) => item.value)) : undefined
-  const maximum = available.length ? Math.max(...available.map((item) => item.value)) : undefined
-  const startTime = available[0]?.time || '未知'
-  const endTime = available[available.length - 1]?.time || '未知'
-  const description = `${startTime} 至 ${endTime}，最低 ${mallWeatherMetric(minimum, unit)}，最高 ${mallWeatherMetric(maximum, unit)}`
-  return (
-    <article className="workbench-panel mall-weather-chart-panel">
-      <div className="mall-weather-section-title"><div><strong>{title}</strong><span>{detail} · {unit}</span></div>{icon}</div>
-      {segments.length === 0 ? <EmptyState title="暂无趋势数据" detail="当前时间窗口没有可绘制的数据。" /> : (
-        <>
-        <svg viewBox="0 0 640 160" role="img" aria-label={`${title}趋势图`} preserveAspectRatio="none">
-          <title>{title}</title>
-          <desc>{description}</desc>
-          <path d="M0 140 H640" />
-          <path d="M0 70 H640" />
-          {segments.map((points, index) => points.includes(' ')
-            ? <polyline points={points} key={`${points}-${index}`} />
-            : <ChartPoint point={points} key={`${points}-${index}`} />)}
-        </svg>
-        <p className="mall-weather-chart-summary">{description}</p>
-        <details className="mall-weather-chart-data">
-          <summary>查看趋势明细（{series.length} 条）</summary>
-          <div className="data-table-wrap">
-            <table className="data-table"><thead><tr><th scope="col">时间</th><th scope="col">数值</th></tr></thead><tbody>
-              {series.map((item, index) => <tr key={`${item.time}-${index}`}><td>{item.time || '未知'}</td><td>{mallWeatherMetric(item.value, unit)}</td></tr>)}
-            </tbody></table>
-          </div>
-        </details>
-        </>
-      )}
-    </article>
-  )
-}
-
-function ChartPoint({ point }: { point: string }) {
-  const [cx = '0', cy = '0'] = point.split(',')
-  return <circle cx={cx} cy={cy} r="4" />
 }
 
 function MetaItem({ label, value }: { label: string; value: string }) {

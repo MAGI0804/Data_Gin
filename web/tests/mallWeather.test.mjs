@@ -6,6 +6,7 @@ import {
   clearMallWeatherPendingCreate,
   clearMallWeatherPendingSheetPush,
   loadAllMallWeatherPages,
+  loadMallWeatherForecastDatasets,
   loadMallWeatherPendingCreate,
   loadMallWeatherPendingRefresh,
   loadMallWeatherPendingSheetPush,
@@ -13,7 +14,10 @@ import {
   mallWeatherCreateKey,
   mallWeatherCreateRequest,
   mallWeatherForecastQueryWindows,
+  mallWeatherDailyForecastDays,
   mallWeatherFreshnessLabel,
+  mallWeatherHourlyForecastHours,
+  mallWeatherMinutelyForecastMinutes,
   mallWeatherMetric,
   mallWeatherOverviewHasBusinessData,
   mallWeatherOverviewHasHourlyTemperature,
@@ -100,14 +104,18 @@ const pageEnvelope = (items, nextCursor = '', meta = completeWeatherMeta) => ({ 
   pagination: { pageSize: 200, ...(nextCursor ? { nextCursor } : {}) },
 } })
 
-const hourlyItem = (hour, temperatureC = hour) => ({
-  forecastTimeUtc: `2026-07-22T${String(hour).padStart(2, '0')}:00:00Z`,
-  forecastTimeLocal: `2026-07-22T${String((hour + 8) % 24).padStart(2, '0')}:00:00+08:00`,
-  ...completeWeatherTimes,
-  temperatureC,
-  qualityStatus: 'VALID',
-  qualityWarnings: [],
-})
+const hourlyItem = (hour, temperatureC = hour) => {
+  const forecastTimeUtc = new Date(Date.UTC(2026, 6, 22) + hour * 60 * 60 * 1000)
+  const forecastTimeLocal = new Date(forecastTimeUtc.getTime() + 8 * 60 * 60 * 1000)
+  return {
+    forecastTimeUtc: forecastTimeUtc.toISOString(),
+    forecastTimeLocal: `${forecastTimeLocal.toISOString().slice(0, 19)}+08:00`,
+    ...completeWeatherTimes,
+    temperatureC,
+    qualityStatus: 'VALID',
+    qualityWarnings: [],
+  }
+}
 
 const minutelyItem = (minute, precipitationMmH = 0.2) => ({
   forecastMinuteUtc: `2026-07-22T00:${String(minute).padStart(2, '0')}:00Z`,
@@ -129,7 +137,7 @@ test('parses valid malls and preserves the list cursor', () => {
     data: {
       nextAfterId: 7,
       items: [
-        { id: 7, version: 3, mallCode: 'SH-001', nameCn: '示例商场', province: '上海市', city: '上海', district: '黄浦区', address: '示例路 1 号', longitude: 121.47, latitude: 31.23, coordinateSystem: 'GCJ02', geocodeStatus: 'confirmed', weatherEnabled: true, weatherProvider: 'caiyun', detailProfile: 'full', coverageRadiusM: 1000, status: 'active' },
+        { id: 7, version: 3, mallCode: 'SH-001', nameCn: '示例商场', province: '上海市', city: '上海', district: '黄浦区', address: '示例路 1 号', longitude: 121.47, latitude: 31.23, coordinateSystem: 'GCJ02', geocodeStatus: 'confirmed', weatherEnabled: true, weatherProvider: 'caiyun', detailProfile: 'full', coverageRadiusM: 1000, timeZone: 'America/New_York', status: 'active' },
       ],
     },
   })
@@ -151,6 +159,7 @@ test('parses valid malls and preserves the list cursor', () => {
       weatherEnabled: true,
       detailProfile: 'full',
       coverageRadiusM: 1000,
+      timeZone: 'America/New_York',
       status: 'active',
       version: 3,
     }],
@@ -229,13 +238,15 @@ test('recognizes only active confirmed weather-enabled malls as queryable', () =
   const mall = parseMallWeatherMallList({ code: 0, data: { items: [{
     id: 7, version: 1, mallCode: 'SH-001', nameCn: '示例商场', province: '上海市', city: '上海市', address: '示例路 1 号',
     longitude: 121.47, latitude: 31.23, coordinateSystem: 'GCJ02', geocodeStatus: 'confirmed', weatherEnabled: true,
-    weatherProvider: 'caiyun', detailProfile: 'full', coverageRadiusM: 1000, status: 'active',
+    weatherProvider: 'caiyun', detailProfile: 'full', coverageRadiusM: 1000, timeZone: 'Asia/Shanghai', status: 'active',
   }] } })?.items[0]
   assert.equal(mallWeatherMallReady(mall), true)
   assert.equal(mallWeatherMallReady({ ...mall, weatherEnabled: false }), false)
   assert.equal(mallWeatherMallReady({ ...mall, longitude: undefined }), false)
   assert.equal(mallWeatherMallReady({ ...mall, coordinateSystem: 'WGS84' }), false)
   assert.equal(parseMallWeatherMallList({ code: 0, data: { items: [{ ...mall, weatherProvider: undefined }] } }), null)
+  assert.equal(parseMallWeatherMallList({ code: 0, data: { items: [{ ...mall, timeZone: undefined }] } }), null)
+  assert.equal(parseMallWeatherMallList({ code: 0, data: { items: [{ ...mall, timeZone: ' ' }] } }), null)
   assert.equal(parseMallWeatherMallList({ code: 0, data: { items: [{ ...mall, coordinateSystem: 'WGS84' }] } }), null)
   assert.deepEqual(mallWeatherCoordinateAdjustmentRequest(mall, '121.4701', '31.2301', ' 调整高德坐标 '), {
     manualCoordinate: { longitude: 121.4701, latitude: 31.2301, coordinateSystem: 'GCJ02', reason: '调整高德坐标' },
@@ -444,18 +455,26 @@ test('builds bounded complete-series paths and parses paged forecast contracts',
   assert.equal(parseMallWeatherLifeIndexPage(pageEnvelope([], '', { ...completeWeatherMeta, timeZone: '' })), null)
 })
 
-test('builds an exact 72-hour window and 7 target-time-zone calendar days', () => {
+test('builds exact 120-minute, 360-hour, and 15-local-day forecast windows', () => {
   const shanghai = mallWeatherForecastQueryWindows(new Date('2026-07-22T02:34:56.000Z'), 'Asia/Shanghai')
+  assert.equal(mallWeatherMinutelyForecastMinutes, 120)
+  assert.equal(mallWeatherHourlyForecastHours, 360)
+  assert.equal(mallWeatherDailyForecastDays, 15)
   assert.equal(shanghai.minutely.start.toISOString(), '2026-07-22T02:34:00.000Z')
   assert.equal(shanghai.minutely.end.toISOString(), '2026-07-22T04:34:00.000Z')
   assert.equal(shanghai.hourly.start.toISOString(), '2026-07-22T02:00:00.000Z')
-  assert.equal(shanghai.hourly.end.toISOString(), '2026-07-25T02:00:00.000Z')
+  assert.equal(shanghai.hourly.end.toISOString(), '2026-08-06T02:00:00.000Z')
+  assert.equal(shanghai.hourly.end.getTime() - shanghai.hourly.start.getTime(), 360 * 60 * 60 * 1000)
   assert.equal(shanghai.daily.start.toISOString(), '2026-07-21T16:00:00.000Z')
-  assert.equal(shanghai.daily.end.toISOString(), '2026-07-28T16:00:00.000Z')
+  assert.equal(shanghai.daily.end.toISOString(), '2026-08-05T16:00:00.000Z')
 
   const newYorkAcrossDST = mallWeatherForecastQueryWindows(new Date('2026-03-07T17:00:00.000Z'), 'America/New_York')
   assert.equal(newYorkAcrossDST.daily.start.toISOString(), '2026-03-07T05:00:00.000Z')
-  assert.equal(newYorkAcrossDST.daily.end.toISOString(), '2026-03-14T04:00:00.000Z')
+  assert.equal(newYorkAcrossDST.daily.end.toISOString(), '2026-03-22T04:00:00.000Z')
+
+  const beirutMidnightGap = mallWeatherForecastQueryWindows(new Date('2026-03-29T12:00:00.000Z'), 'Asia/Beirut')
+  assert.equal(beirutMidnightGap.daily.start.toISOString(), '2026-03-28T22:00:00.000Z')
+  assert.equal(beirutMidnightGap.daily.end.toISOString(), '2026-04-12T21:00:00.000Z')
   assert.throws(() => mallWeatherForecastQueryWindows(new Date('invalid')), /invalid weather query time/)
   assert.throws(() => mallWeatherForecastQueryWindows(new Date(), 'Not/A_Time_Zone'), /time zone/i)
 })
@@ -468,13 +487,19 @@ test('loads every opaque cursor page without changing the original query window'
   const asOf = new Date('2026-07-22T00:02:00.000Z')
   const envelope = (hour, nextCursor = '') => pageEnvelope([hourlyItem(hour)], nextCursor)
   const paths = []
-  const responses = [envelope(10, 'opaque+/=cursor'), envelope(11)]
+  const forecasts = Array.from({ length: 360 }, (_, index) => hourlyItem(index))
+  const responses = [
+    pageEnvelope(forecasts.slice(0, 200), 'opaque+/=cursor'),
+    pageEnvelope(forecasts.slice(200)),
+  ]
   const result = await loadAllMallWeatherPages(async (path) => {
     paths.push(path)
     return { ok: true, status: 200, data: responses.shift() }
   }, 7, 'hourly', window, 'Asia/Shanghai', asOf, parseMallWeatherHourlyPage)
 
-  assert.deepEqual(result.items.map((item) => item.temperatureC), [10, 11])
+  assert.equal(result.items.length, 360)
+  assert.equal(result.items[0].temperatureC, 0)
+  assert.equal(result.items[359].temperatureC, 359)
   assert.equal(paths.length, 2)
   const first = new URL(paths[0], 'https://example.test')
   const second = new URL(paths[1], 'https://example.test')
@@ -530,6 +555,55 @@ test('loads every minutely page with one fixed 120-minute window and snapshot ti
   assert.equal(first.searchParams.get('end'), window.end.toISOString())
   assert.equal(first.searchParams.get('asOf'), asOf.toISOString())
   assert.equal(second.searchParams.get('cursor'), 'minute-cursor')
+})
+
+test('loads all forecast datasets with one snapshot and isolates a failed series', async () => {
+  const requestedAt = new Date('2026-07-22T02:34:56.000Z')
+  const paths = []
+  let hourlyPage = 0
+  const datasets = loadMallWeatherForecastDatasets(async (path) => {
+    paths.push(path)
+    const url = new URL(path, 'https://example.test')
+    const series = url.pathname.split('/').at(-1)
+    if (series === 'hourly') {
+      hourlyPage++
+      if (hourlyPage === 1) {
+        return { ok: true, status: 200, data: pageEnvelope([hourlyItem(0)], 'hourly-next') }
+      }
+      return { ok: false, status: 500, data: {} }
+    }
+    return { ok: true, status: 200, data: pageEnvelope([]) }
+  }, 7, 'Asia/Shanghai', requestedAt)
+
+  const results = await Promise.allSettled([
+    datasets.minutely,
+    datasets.hourly,
+    datasets.daily,
+    datasets.life,
+  ])
+  assert.deepEqual(results.map((result) => result.status), [
+    'fulfilled',
+    'rejected',
+    'fulfilled',
+    'fulfilled',
+  ])
+  assert.match(results[1].reason.message, /HTTP 500/)
+  assert.deepEqual(results[0].value.items, [])
+  assert.deepEqual(results[2].value.items, [])
+  assert.deepEqual(results[3].value.items, [])
+
+  assert.equal(paths.length, 5)
+  assert.deepEqual(
+    new Set(paths.map((path) => new URL(path, 'https://example.test').searchParams.get('asOf'))),
+    new Set([requestedAt.toISOString()]),
+  )
+  assert.deepEqual(
+    new Set(paths.map((path) => new URL(path, 'https://example.test').searchParams.get('timeZone'))),
+    new Set(['Asia/Shanghai']),
+  )
+  const hourlyPaths = paths.filter((path) => new URL(path, 'https://example.test').pathname.endsWith('/hourly'))
+  assert.equal(hourlyPaths.length, 2)
+  assert.equal(new URL(hourlyPaths[1], 'https://example.test').searchParams.get('cursor'), 'hourly-next')
 })
 
 test('builds validated manual refresh requests and idempotency keys', () => {
@@ -675,12 +749,12 @@ test('builds and parses bounded fetch-run audit queries for weather polling', ()
       provider: 'CAIYUN',
       endpointKind: 'v26_weather',
       taskKind: 'MANUAL',
-      requestedHourlySteps: 72,
-      requestedDailySteps: 7,
+      requestedHourlySteps: 360,
+      requestedDailySteps: 15,
       attemptCount: 1,
       status: 'SUCCESS',
       durationMs: 1200,
-      rowCounts: { hourly: 72, daily: 7 },
+      rowCounts: { hourly: 360, daily: 15 },
       parseWarnings: [],
       createdAtUtc: '2026-07-27T08:00:02Z',
       createdAtLocal: '2026-07-27T16:00:02+08:00',
@@ -692,7 +766,7 @@ test('builds and parses bounded fetch-run audit queries for weather polling', ()
     meta: { timeZone: 'Asia/Shanghai' },
     pagination: { pageSize: 10 },
   } })
-  assert.equal(parsed.items[0].rowCounts.hourly, 72)
+  assert.equal(parsed.items[0].rowCounts.hourly, 360)
   assert.equal(parsed.items[0].status, 'SUCCESS')
   assert.equal(mallWeatherFetchRunTerminal('SUCCESS'), true)
   assert.equal(mallWeatherFetchRunTerminal('PARTIAL_SUCCESS'), true)
@@ -715,7 +789,7 @@ test('polls serially until the matching manual weather run becomes terminal', as
       { status: 'SUCCESS', createdAtUtc: '2026-07-27T08:00:02Z', correlationId: `manual:${'b'.repeat(48)}` },
       { status: 'RUNNING', createdAtUtc: '2026-07-27T08:00:01Z' },
     ] },
-    { items: [{ status: 'SUCCESS', createdAtUtc: '2026-07-27T08:00:01Z', rowCounts: { hourly: 72 } }] },
+    { items: [{ status: 'SUCCESS', createdAtUtc: '2026-07-27T08:00:01Z', rowCounts: { hourly: 360 } }] },
   ]
   let active = 0
   let maximumActive = 0
@@ -733,8 +807,8 @@ test('polls serially until the matching manual weather run becomes terminal', as
         provider: 'CAIYUN',
         endpointKind: 'v26_weather',
         taskKind: 'MANUAL',
-        requestedHourlySteps: 72,
-        requestedDailySteps: 7,
+        requestedHourlySteps: 360,
+        requestedDailySteps: 15,
         attemptCount: 1,
         durationMs: 100,
         rowCounts: {},
@@ -755,7 +829,7 @@ test('polls serially until the matching manual weather run becomes terminal', as
   })
   assert.equal(result.kind, 'terminal')
   assert.equal(result.run.status, 'SUCCESS')
-  assert.equal(result.run.rowCounts.hourly, 72)
+  assert.equal(result.run.rowCounts.hourly, 360)
   assert.equal(waits, 2)
   assert.equal(maximumActive, 1)
 })
@@ -768,12 +842,12 @@ test('ignores old terminal runs and stops polling on timeout or cancellation', a
       provider: 'CAIYUN',
       endpointKind: 'v26_weather',
       taskKind: 'MANUAL',
-      requestedHourlySteps: 72,
-      requestedDailySteps: 7,
+      requestedHourlySteps: 360,
+      requestedDailySteps: 15,
       attemptCount: 1,
       status: 'SUCCESS',
       durationMs: 100,
-      rowCounts: { hourly: 72 },
+      rowCounts: { hourly: 360 },
       parseWarnings: [],
       createdAtUtc: '2026-07-27T07:59:59Z',
       createdAtLocal: '2026-07-27T15:59:59+08:00',
@@ -806,12 +880,12 @@ test('retries temporary fetch-run failures but stops on deterministic authorizat
       provider: 'CAIYUN',
       endpointKind: 'v26_weather',
       taskKind: 'MANUAL',
-      requestedHourlySteps: 72,
-      requestedDailySteps: 7,
+      requestedHourlySteps: 360,
+      requestedDailySteps: 15,
       attemptCount: 1,
       status: 'SUCCESS',
       durationMs: 100,
-      rowCounts: { hourly: 72 },
+      rowCounts: { hourly: 360 },
       parseWarnings: [],
       createdAtUtc: '2026-07-27T08:00:01Z',
       createdAtLocal: '2026-07-27T16:00:01+08:00',

@@ -149,6 +149,16 @@ func TestMallDTORejectsCorruptStoredJSON(t *testing.T) {
 	}
 }
 
+func TestMallDTOPreservesTimeZone(t *testing.T) {
+	dto, err := mallDTO(&model.Mall{Timezone: "America/New_York"})
+	if err != nil {
+		t.Fatalf("mallDTO() error=%v", err)
+	}
+	if dto.TimeZone != "America/New_York" {
+		t.Fatalf("mallDTO().TimeZone=%q", dto.TimeZone)
+	}
+}
+
 func TestMallServiceAuthorizationFailsClosed(t *testing.T) {
 	service := &MallService{
 		permissions: fakeMallPermissionChecker{allowed: false},
