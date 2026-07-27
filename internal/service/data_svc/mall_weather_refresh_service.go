@@ -39,13 +39,14 @@ type MallWeatherRefreshKindResult struct {
 }
 
 type MallWeatherRefreshResult struct {
-	JobID       uint                           `json:"jobId"`
-	MallID      uint                           `json:"mallId"`
-	Kinds       []MallWeatherRefreshKindResult `json:"kinds"`
-	Force       bool                           `json:"force"`
-	Reason      string                         `json:"reason"`
-	RequestedBy uint                           `json:"requestedBy"`
-	RequestedAt time.Time                      `json:"requestedAt"`
+	JobID         uint                           `json:"jobId"`
+	MallID        uint                           `json:"mallId"`
+	CorrelationID string                         `json:"correlationId"`
+	Kinds         []MallWeatherRefreshKindResult `json:"kinds"`
+	Force         bool                           `json:"force"`
+	Reason        string                         `json:"reason"`
+	RequestedBy   uint                           `json:"requestedBy"`
+	RequestedAt   time.Time                      `json:"requestedAt"`
 }
 
 type mallWeatherRefreshCommand struct {
@@ -128,7 +129,17 @@ func (service *MallWeatherRefreshService) Refresh(ctx context.Context, actorUser
 		KeyHash: sha256Hex([]byte(idempotencyKey)), RequestHash: requestHash,
 		TaskWindow: "manual:" + hex.EncodeToString(identityHash[:])[:48], RequestedAt: service.now().UTC(),
 	}
-	return service.store.Create(ctx, command)
+	result, replayed, err := service.store.Create(ctx, command)
+	if err != nil {
+		return nil, false, err
+	}
+	if result != nil {
+		// TaskWindow is derived deterministically from the idempotency identity, so
+		// this also upgrades responses replayed from snapshots written before the
+		// correlationId field existed.
+		result.CorrelationID = command.TaskWindow
+	}
+	return result, replayed, nil
 }
 
 func (service *MallWeatherRefreshService) authorize(ctx context.Context, actorUserID uint, permission string) error {
@@ -215,7 +226,8 @@ func (store gormMallWeatherRefreshStore) Create(ctx context.Context, command mal
 		}
 
 		created := &MallWeatherRefreshResult{
-			JobID: record.ID, MallID: command.MallID, Force: command.Force, Reason: command.Reason,
+			JobID: record.ID, MallID: command.MallID, CorrelationID: command.TaskWindow,
+			Force: command.Force, Reason: command.Reason,
 			RequestedBy: command.ActorUserID, RequestedAt: command.RequestedAt.UTC(),
 			Kinds: make([]MallWeatherRefreshKindResult, 0, len(command.Kinds)),
 		}

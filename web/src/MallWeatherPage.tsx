@@ -34,6 +34,7 @@ import {
   mallWeatherRefreshPath,
   mallWeatherRefreshRequest,
   mallWeatherRefreshResultMessage,
+  pollMallWeatherFetchRun,
   saveMallWeatherPendingRefresh,
   saveMallWeatherPendingCreate,
   saveMallWeatherPendingSheetPush,
@@ -54,6 +55,7 @@ import {
   type MallWeatherOverview,
   type MallWeatherPendingRefresh,
   type MallWeatherRefreshRequest,
+  type MallWeatherFetchRun,
   type MallWeatherSheetPushDryRun,
   type MallWeatherSheetPushOption,
 } from './mallWeather'
@@ -81,11 +83,15 @@ export function MallWeatherPage({ actorID, client }: { actorID: string | null; c
   const [overviewMallID, setOverviewMallID] = useState(0)
   const [overviewState, setOverviewState] = useState<LoadState>('idle')
   const [overviewError, setOverviewError] = useState('')
+  const [overviewErrorStatus, setOverviewErrorStatus] = useState(0)
+  const [overviewRetryCount, setOverviewRetryCount] = useState(0)
+  const [weatherReloadVersion, setWeatherReloadVersion] = useState(0)
   const [query, setQuery] = useState('')
   const [city, setCity] = useState('')
   const [showCreate, setShowCreate] = useState(false)
   const mallRequestSequence = useRef(0)
   const overviewRequestSequence = useRef(0)
+  const overviewController = useRef<AbortController | null>(null)
   const selectedMallIDRef = useRef(0)
 
   useEffect(() => {
@@ -149,31 +155,60 @@ export function MallWeatherPage({ actorID, client }: { actorID: string | null; c
     return parsed
   }, [client])
 
-  const loadOverview = useCallback(async (mallID: number) => {
-    if (!mallID) return
+  const loadOverview = useCallback(async (mallID: number, externalSignal?: AbortSignal) => {
+    if (!mallID || externalSignal?.aborted) return false
+    overviewController.current?.abort()
+    const controller = new AbortController()
+    overviewController.current = controller
+    const abortFromExternal = () => controller.abort()
+    externalSignal?.addEventListener('abort', abortFromExternal, { once: true })
     const sequence = ++overviewRequestSequence.current
-    setOverviewState('loading')
-    setOverviewError('')
-    const response = await client(mallWeatherOverviewPath(mallID), { method: 'GET', showResult: false, silentLoading: true })
-    if (sequence !== overviewRequestSequence.current) return
-    if (!response.ok) {
-      setOverview(null)
-      setOverviewMallID(0)
-      setOverviewState('error')
-      setOverviewError(weatherRequestError(response.status, '天气概览加载失败', '当前账号缺少 weather.read 权限'))
-      return
+    try {
+      setOverviewState('loading')
+      setOverviewError('')
+      setOverviewErrorStatus(0)
+      let response: MallWeatherApiResult
+      try {
+        response = await client(mallWeatherOverviewPath(mallID), {
+          method: 'GET', showResult: false, silentLoading: true, signal: controller.signal,
+        })
+      } catch {
+        if (controller.signal.aborted || sequence !== overviewRequestSequence.current) return false
+        setOverview(null)
+        setOverviewMallID(0)
+        setOverviewState('error')
+        setOverviewErrorStatus(0)
+        setOverviewError('天气概览加载异常，请检查网络后重试')
+        return false
+      }
+      if (controller.signal.aborted || sequence !== overviewRequestSequence.current) return false
+      if (!response.ok) {
+        setOverview(null)
+        setOverviewMallID(0)
+        setOverviewState('error')
+        setOverviewErrorStatus(response.status)
+        setOverviewError(weatherRequestError(response.status, '天气概览加载失败', '当前账号缺少 weather.read 权限'))
+        return false
+      }
+      const parsed = parseMallWeatherOverview(response.data)
+      if (!parsed) {
+        setOverview(null)
+        setOverviewMallID(0)
+        setOverviewState('error')
+        setOverviewErrorStatus(response.status)
+        setOverviewError('天气概览响应格式不正确，请联系管理员')
+        return false
+      }
+      setOverview(parsed)
+      setOverviewMallID(mallID)
+      setOverviewState('success')
+      setOverviewRetryCount(0)
+      setWeatherReloadVersion((current) => current + 1)
+      return true
+    } finally {
+      externalSignal?.removeEventListener('abort', abortFromExternal)
+      if (overviewController.current === controller) overviewController.current = null
     }
-    const parsed = parseMallWeatherOverview(response.data)
-    if (!parsed) {
-      setOverview(null)
-      setOverviewMallID(0)
-      setOverviewState('error')
-      setOverviewError('天气概览响应格式不正确，请联系管理员')
-      return
-    }
-    setOverview(parsed)
-    setOverviewMallID(mallID)
-    setOverviewState('success')
   }, [client])
 
   useEffect(() => {
@@ -187,11 +222,29 @@ export function MallWeatherPage({ actorID, client }: { actorID: string | null; c
       return
     }
     overviewRequestSequence.current++
+    overviewController.current?.abort()
     setOverview(null)
     setOverviewMallID(0)
     setOverviewState('idle')
     setOverviewError('')
+    setOverviewErrorStatus(0)
+    setOverviewRetryCount(0)
   }, [loadOverview, malls, selectedMallID])
+
+  useEffect(() => () => {
+    overviewController.current?.abort()
+    overviewRequestSequence.current++
+  }, [])
+
+  useEffect(() => {
+    const mall = malls.find((item) => item.id === selectedMallID)
+    if (!mall || !mallWeatherMallReady(mall) || overviewState !== 'error' || overviewErrorStatus !== 404 || overviewRetryCount >= 30) return
+    const timer = window.setTimeout(() => {
+      setOverviewRetryCount((current) => current + 1)
+      void loadOverview(mall.id)
+    }, 2_000)
+    return () => window.clearTimeout(timer)
+  }, [loadOverview, malls, overviewErrorStatus, overviewRetryCount, overviewState, selectedMallID])
 
   const cities = useMemo(() => Array.from(new Set(malls.map((mall) => mall.city).filter(Boolean))).sort(), [malls])
   useEffect(() => {
@@ -225,6 +278,10 @@ export function MallWeatherPage({ actorID, client }: { actorID: string | null; c
     selectedMallIDRef.current = nextID
     setSelectedMallID(nextID)
   }, [malls])
+
+  const reloadWeatherData = useCallback(async (mallID: number, signal: AbortSignal) => {
+    return loadOverview(mallID, signal)
+  }, [loadOverview])
 
   return (
     <div className="view-stack mall-weather-page">
@@ -301,15 +358,23 @@ export function MallWeatherPage({ actorID, client }: { actorID: string | null; c
           {!showCreate && selectedMallReady && selectedMall && (
             <div id="mall-weather-overview" tabIndex={-1}>
               {overviewState === 'loading' && !selectedOverview && <LoadingState label={`正在加载${selectedMall.nameCn}天气`} />}
-              {overviewState === 'error' && <RequestError message={overviewError} onRetry={() => void loadOverview(selectedMall.id)} />}
+              {overviewState === 'error' && overviewErrorStatus === 404 && overviewRetryCount < 30 &&
+                <LoadingState label={`首次天气采集中，正在等待实况与未来 72 小时数据（${overviewRetryCount + 1}/30）`} />}
+              {overviewState === 'error' && (overviewErrorStatus !== 404 || overviewRetryCount >= 30) &&
+                <RequestError
+                  message={overviewErrorStatus === 404
+                    ? '首次采集长时间未生成数据，请确认 MALL_WEATHER_ENABLED=true 且 weather 队列消费进程正在运行。'
+                    : overviewError}
+                  onRetry={() => { setOverviewRetryCount(0); void loadOverview(selectedMall.id) }}
+                />}
               {selectedOverview && <WeatherOverview mall={selectedMall} overview={selectedOverview} refreshing={overviewState === 'loading'} onRefresh={() => void loadOverview(selectedMall.id)} />}
             </div>
           )}
-          {!showCreate && selectedMallReady && selectedMall && <MallWeatherForecastPanel
+          {!showCreate && selectedMallReady && selectedMall && selectedOverview && <MallWeatherForecastPanel
             mallID={selectedMall.id}
             timeZone={selectedOverview?.meta.timeZone || 'Asia/Shanghai'}
             client={client}
-            key={`forecast-${selectedMall.id}:${selectedOverview?.meta.timeZone || 'Asia/Shanghai'}`}
+            key={`forecast-${selectedMall.id}:${selectedOverview.meta.timeZone || 'Asia/Shanghai'}:${weatherReloadVersion}`}
           />}
           {!showCreate && selectedMallReady && selectedMall && actorID && <MallWeatherExportPanel
             actorID={actorID}
@@ -323,7 +388,13 @@ export function MallWeatherPage({ actorID, client }: { actorID: string | null; c
               <div className="mall-weather-section-title"><div><strong>商场天气管理</strong><span>坐标调整、全量刷新与已有推送绑定</span></div></div>
               <MallWeatherMallEditor mall={selectedMall} client={client} onMallUpdated={handleMallUpdated} onMallDeleted={handleMallDeleted} key={`editor-active-${selectedMall.id}`} />
               <MallCoordinateAdjustmentPanel mall={selectedMall} client={client} onMallUpdated={handleMallUpdated} key={`coordinate-${selectedMall.id}:${selectedMall.version}`} />
-              <ManualRefreshPanel actorID={actorID} mall={selectedMall} client={client} key={`refresh-${actorID}:${selectedMall.id}`} />
+              <ManualRefreshPanel
+                actorID={actorID}
+                mall={selectedMall}
+                client={client}
+                onWeatherUpdated={(signal) => reloadWeatherData(selectedMall.id, signal)}
+                key={`refresh-${actorID}:${selectedMall.id}`}
+              />
               <MallWeatherSheetPushPanel actorID={actorID} mall={selectedMall} client={client} key={`push-${actorID}:${selectedMall.id}`} />
             </section>
             : <RequestError message="无法识别当前登录账号，请退出后重新登录再提交天气刷新。" onRetry={() => window.location.reload()} />)}
@@ -859,13 +930,22 @@ function MallWeatherSheetPushPanel({ actorID, mall, client }: {
   )
 }
 
-function ManualRefreshPanel({ actorID, mall, client }: { actorID: string; mall: MallWeatherMall; client: MallWeatherApiClient }) {
+function ManualRefreshPanel({ actorID, mall, client, onWeatherUpdated }: {
+  actorID: string
+  mall: MallWeatherMall
+  client: MallWeatherApiClient
+  onWeatherUpdated: (signal: AbortSignal) => Promise<boolean>
+}) {
   const [pending, setPending] = useState<MallWeatherPendingRefresh | null>(() => loadMallWeatherPendingRefresh(actorID, mall.id, window.sessionStorage))
   const [reason, setReason] = useState(() => pending?.body.reason || '管理端手工刷新')
   const [submitting, setSubmitting] = useState(false)
+  const [monitoring, setMonitoring] = useState(false)
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
+  const operationController = useRef<AbortController | null>(null)
   const reasonHelpID = `mall-weather-refresh-reason-help-${actorID}-${mall.id}`
+
+  useEffect(() => () => operationController.current?.abort(), [])
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -883,31 +963,102 @@ function ManualRefreshPanel({ actorID, mall, client }: { actorID: string; mall: 
       saveMallWeatherPendingRefresh(actorID, mall.id, request, window.sessionStorage)
       setPending(request)
     }
+    operationController.current?.abort()
+    const controller = new AbortController()
+    operationController.current = controller
     setSubmitting(true)
     setError('')
     setMessage('')
-    const response = await client(mallWeatherRefreshPath(mall.id), {
-      method: 'POST',
-      body: request.body,
-      headers: { 'Idempotency-Key': request.key },
-      showResult: false,
-      silentLoading: true,
-    })
-    setSubmitting(false)
-    const disposition = mallWeatherRefreshDisposition(response, actorID, mall.id, request.body)
-    if (disposition.kind === 'rejected') {
+    try {
+      const response = await client(mallWeatherRefreshPath(mall.id), {
+        method: 'POST',
+        body: request.body,
+        headers: { 'Idempotency-Key': request.key },
+        showResult: false,
+        silentLoading: true,
+        signal: controller.signal,
+      })
+      if (controller.signal.aborted) return
+      setSubmitting(false)
+      const disposition = mallWeatherRefreshDisposition(response, actorID, mall.id, request.body)
+      if (disposition.kind === 'rejected') {
+        clearMallWeatherPendingRefresh(actorID, mall.id, window.sessionStorage)
+        setPending(null)
+        setError(weatherRequestError(response.status, '天气刷新任务提交失败', '当前账号缺少 weather.refresh 权限'))
+        return
+      }
+      if (disposition.kind === 'uncertain') {
+        setError('刷新响应暂不确定；已保留原请求，请使用“重试原请求”确认。')
+        return
+      }
       clearMallWeatherPendingRefresh(actorID, mall.id, window.sessionStorage)
       setPending(null)
-      setError(weatherRequestError(response.status, '天气刷新任务提交失败', '当前账号缺少 weather.refresh 权限'))
-      return
+      const queued = disposition.result.kinds.some((item) => item.status === 'QUEUED')
+      if (!queued) {
+        const reloaded = await onWeatherUpdated(controller.signal)
+        if (controller.signal.aborted) return
+        if (!reloaded) {
+          setError('数据仍然新鲜，但页面重新加载失败，请点击“重新加载”重试。')
+          return
+        }
+        setMessage(mallWeatherRefreshResultMessage(disposition.result))
+        return
+      }
+
+      setMonitoring(true)
+      setMessage('采集任务已入队，正在等待彩云综合天气数据写入…')
+      const pollResult = await pollMallWeatherFetchRun(
+        client,
+        mall.id,
+        disposition.result.requestedAt,
+        'MANUAL',
+        disposition.result.correlationId,
+        { signal: controller.signal },
+      )
+      if (controller.signal.aborted) return
+      if (pollResult.kind === 'timed_out') {
+        setError('任务已入队，但 60 秒内未发现完成记录。请确认 MALL_WEATHER_ENABLED=true 且 weather 队列消费进程正在运行，然后重试。')
+        setMessage('')
+        return
+      }
+      if (pollResult.kind === 'query_error') {
+        setError(weatherRequestError(pollResult.status, '天气采集状态查询失败', '当前账号缺少 weather.read 权限'))
+        setMessage('')
+        return
+      }
+      if (pollResult.kind !== 'terminal') return
+      if (pollResult.run.status !== 'SUCCESS' && pollResult.run.status !== 'PARTIAL_SUCCESS') {
+        setError(weatherFetchRunFailureMessage(pollResult.run))
+        setMessage('')
+        return
+      }
+      const reloaded = await onWeatherUpdated(controller.signal)
+      if (controller.signal.aborted) return
+      if (!reloaded) {
+        setError('采集已完成，但天气数据重新加载失败，请点击页面上的“重新加载”重试。')
+        setMessage('')
+        return
+      }
+      const hourlyRows = pollResult.run.rowCounts.hourly ?? 0
+      if (hourlyRows < 1) {
+        setError('采集任务已完成，但没有写入未来逐小时数据。请查看任务的解析告警和服务端日志。')
+        setMessage('')
+        return
+      }
+      setMessage(`天气已更新并重新加载，共写入 ${hourlyRows} 条未来逐小时数据。`)
+    } catch {
+      if (controller.signal.aborted) return
+      setError('天气采集状态查询异常，请检查网络后重试。')
+      setMessage('')
+    } finally {
+      if (operationController.current === controller) {
+        operationController.current = null
+        if (!controller.signal.aborted) {
+          setSubmitting(false)
+          setMonitoring(false)
+        }
+      }
     }
-    if (disposition.kind === 'uncertain') {
-      setError('刷新响应暂不确定；已保留原请求，请使用“重试原请求”确认。')
-      return
-    }
-    clearMallWeatherPendingRefresh(actorID, mall.id, window.sessionStorage)
-    setPending(null)
-    setMessage(mallWeatherRefreshResultMessage(disposition.result))
   }
 
   function changeReason(value: string) {
@@ -917,17 +1068,24 @@ function ManualRefreshPanel({ actorID, mall, client }: { actorID: string; mall: 
   return (
     <section className="workbench-panel mall-weather-refresh-panel">
       <div className="mall-weather-section-title"><div><strong>手工刷新</strong><span>提交异步采集任务，不阻塞等待供应商</span></div><RefreshCcw aria-hidden="true" /></div>
-      <form className="mall-weather-refresh-form" onSubmit={submit} aria-busy={submitting}>
-        <label><span>采集范围</span><input value="综合天气（含实况、分钟、小时、逐日、预警、生活指数）" disabled /></label>
-        <label><span>刷新原因</span><input value={reason} onChange={(event) => changeReason(event.currentTarget.value)} disabled={submitting || Boolean(pending)} aria-describedby={reasonHelpID} />
+      <form className="mall-weather-refresh-form" onSubmit={submit} aria-busy={submitting || monitoring}>
+        <label><span>采集范围</span><input name="weatherRefreshScope" value="综合天气（含实况、分钟、小时、逐日、预警、生活指数）" disabled /></label>
+        <label><span>刷新原因</span><input name="weatherRefreshReason" value={reason} onChange={(event) => changeReason(event.currentTarget.value)} disabled={submitting || monitoring || Boolean(pending)} aria-describedby={reasonHelpID} />
           <small id={reasonHelpID}>必填单行文本，最多 500 个字符</small>
         </label>
-        <button className="primary" type="submit" disabled={submitting}>{submitting ? '提交中' : pending ? '重试原请求' : '提交刷新'}</button>
+        <button className="primary" type="submit" disabled={submitting || monitoring}>
+          {submitting ? '提交中' : monitoring ? '等待采集完成' : pending ? '重试原请求' : '提交刷新'}
+        </button>
       </form>
       {message && <p className="mall-weather-action-message" role="status">{message}</p>}
       {error && <p className="mall-weather-action-message error" role="alert">{error}</p>}
     </section>
   )
+}
+
+function weatherFetchRunFailureMessage(run: MallWeatherFetchRun) {
+  const detail = run.errorMessageSafe || run.errorCode || '未返回安全错误信息'
+  return `天气采集失败：${detail}`
 }
 
 function WeatherOverview({ mall, overview, refreshing, onRefresh }: { mall: MallWeatherMall; overview: MallWeatherOverview; refreshing: boolean; onRefresh: () => void }) {

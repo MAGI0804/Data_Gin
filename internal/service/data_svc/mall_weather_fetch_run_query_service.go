@@ -9,6 +9,7 @@ import (
 	"io"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"gin-biz-web-api/connector/caiyun"
 	"gin-biz-web-api/internal/dao/data_dao"
@@ -17,8 +18,11 @@ import (
 	"gin-biz-web-api/model"
 )
 
+const maxMallWeatherCorrelationIDLength = 128
+
 type MallWeatherFetchRunDTO struct {
 	RunUUID                 string                  `json:"runUuid"`
+	CorrelationID           string                  `json:"correlationId"`
 	Provider                string                  `json:"provider"`
 	EndpointKind            string                  `json:"endpointKind"`
 	TaskKind                string                  `json:"taskKind"`
@@ -85,7 +89,8 @@ func (service *MallWeatherQueryService) FetchRuns(ctx context.Context, actorUser
 	}
 	query := data_dao.FetchRunQuery{
 		MallID: mallID, StartUTC: normalized.StartUTC, EndUTC: normalized.EndUTC,
-		TaskKind: normalized.TaskKind, EndpointKind: normalized.EndpointKind, Status: normalized.Status,
+		CorrelationID: normalized.CorrelationID, TaskKind: normalized.TaskKind,
+		EndpointKind: normalized.EndpointKind, Status: normalized.Status,
 		Limit: normalized.PageSize + 1,
 	}
 	if cursor != nil {
@@ -138,6 +143,11 @@ func normalizeFetchRunWeatherRequest(request requestbody.MallWeatherFetchRunQuer
 		return nil, request, fmt.Errorf("%w: invalid time zone", ErrMallWeatherInvalidQuery)
 	}
 	request.StartUTC, request.EndUTC, request.TimeZone = request.StartUTC.UTC(), request.EndUTC.UTC(), location.String()
+	request.CorrelationID = strings.TrimSpace(request.CorrelationID)
+	if len(request.CorrelationID) > maxMallWeatherCorrelationIDLength || !utf8.ValidString(request.CorrelationID) ||
+		strings.ContainsAny(request.CorrelationID, "\x00\r\n") {
+		return nil, request, fmt.Errorf("%w: invalid correlation id", ErrMallWeatherInvalidQuery)
+	}
 	request.TaskKind, err = normalizeFetchRunTaskKind(request.TaskKind)
 	if err != nil {
 		return nil, request, err
@@ -195,6 +205,7 @@ func normalizeFetchRunEndpointKind(value string) (string, error) {
 
 func fetchRunWeatherDTO(row *model.MallWeatherFetchRun, location *time.Location) (MallWeatherFetchRunDTO, error) {
 	if row == nil || row.ID == 0 || strings.TrimSpace(row.RunUUID) == "" || row.MallID == 0 || row.Provider == "" ||
+		strings.TrimSpace(row.TaskWindow) == "" || len(row.TaskWindow) > maxMallWeatherCorrelationIDLength ||
 		row.EndpointKind == "" || row.TaskKind == "" || row.Status == "" || row.CreatedAt.IsZero() || row.UpdatedAt.IsZero() ||
 		row.RequestedHourlySteps < 0 || row.RequestedDailySteps < 0 || row.AttemptCount < 0 || row.DurationMS < 0 || location == nil {
 		return MallWeatherFetchRunDTO{}, fmt.Errorf("mall weather query: invalid fetch run row")
@@ -218,7 +229,8 @@ func fetchRunWeatherDTO(row *model.MallWeatherFetchRun, location *time.Location)
 		return MallWeatherFetchRunDTO{}, err
 	}
 	dto := MallWeatherFetchRunDTO{
-		RunUUID: row.RunUUID, Provider: strings.ToUpper(row.Provider), EndpointKind: row.EndpointKind,
+		RunUUID: row.RunUUID, CorrelationID: row.TaskWindow,
+		Provider: strings.ToUpper(row.Provider), EndpointKind: row.EndpointKind,
 		TaskKind: publicFetchRunTaskKind(row.TaskKind), RequestedHourlySteps: row.RequestedHourlySteps,
 		RequestedDailySteps: row.RequestedDailySteps, AttemptCount: row.AttemptCount, Status: strings.ToUpper(row.Status),
 		DurationMS: row.DurationMS, HTTPStatus: row.HTTPStatus, ProviderStatus: row.ProviderStatus,

@@ -82,6 +82,8 @@ const completeWeatherMeta = {
   freshnessStatus: 'FRESH',
 }
 
+const manualCorrelationID = `manual:${'a'.repeat(48)}`
+
 const completeWeatherTimes = {
   issuedAtUtc: '2026-07-22T00:00:00Z',
   issuedAtLocal: '2026-07-22T08:00:00+08:00',
@@ -548,6 +550,7 @@ test('parses queued and fresh-skipped refresh results without over-reporting que
     reason: '管理端补采',
     requestedBy: 42,
     requestedAt: '2026-07-27T08:00:00Z',
+    correlationId: manualCorrelationID,
     kinds: [{ kind: 'V26_FULL', status: 'QUEUED', outboxJobId: 41 }],
   } })
   assert.equal(mallWeatherRefreshResultMessage(result), '1 个采集任务已进入异步队列；稍后重新加载天气即可查看结果。')
@@ -559,6 +562,7 @@ test('parses queued and fresh-skipped refresh results without over-reporting que
     reason: '管理端补采',
     requestedBy: 42,
     requestedAt: '2026-07-27T08:00:00Z',
+    correlationId: manualCorrelationID,
     kinds: [{ kind: 'V26_FULL', status: 'SKIPPED_FRESH' }],
   } })
   assert.equal(mallWeatherRefreshResultMessage(skipped), '1 项数据仍新鲜，本次未重复入队。')
@@ -570,6 +574,7 @@ test('parses queued and fresh-skipped refresh results without over-reporting que
     reason: '管理端补采',
     requestedBy: 42,
     requestedAt: '2026-07-27T08:00:00Z',
+    correlationId: manualCorrelationID,
     kinds: [
       { kind: 'V26_FULL', status: 'QUEUED', outboxJobId: 41 },
       { kind: 'V26_FULL', status: 'SKIPPED_FRESH' },
@@ -582,6 +587,7 @@ test('parses queued and fresh-skipped refresh results without over-reporting que
     reason: '管理端补采',
     requestedBy: 42,
     requestedAt: '2026-07-27T08:00:00Z',
+    correlationId: manualCorrelationID,
     kinds: [{ kind: 'V3_LIFE_INDEX', status: 'SKIPPED_FRESH', outboxJobId: 42 }],
   } }), null)
 })
@@ -595,6 +601,7 @@ test('keeps the original idempotent request for every uncertain refresh outcome'
     reason: '管理端补采',
     requestedBy: 42,
     requestedAt: '2026-07-27T08:00:00Z',
+    correlationId: manualCorrelationID,
     kinds: [{ kind: 'V26_FULL', status: 'QUEUED', outboxJobId: 41 }],
   } }
 
@@ -615,6 +622,7 @@ test('keeps the original idempotent request for every uncertain refresh outcome'
     reason: '管理端补采',
     requestedBy: 42,
     requestedAt: '2026-07-27T08:00:00Z',
+    correlationId: manualCorrelationID,
     kinds: [{ kind: 'V3_LIFE_INDEX', status: 'SKIPPED_FRESH' }],
   } } }, '42', 7, request).kind, 'uncertain')
 })
@@ -622,17 +630,19 @@ test('keeps the original idempotent request for every uncertain refresh outcome'
 test('builds and parses bounded fetch-run audit queries for weather polling', () => {
   const start = new Date('2026-07-27T08:00:00Z')
   const end = new Date('2026-07-27T08:10:00Z')
-  const path = new URL(mallWeatherFetchRunsPath(7, start, end, 'MANUAL'), 'https://example.test')
+  const path = new URL(mallWeatherFetchRunsPath(7, start, end, 'MANUAL', manualCorrelationID), 'https://example.test')
   assert.equal(path.pathname, '/v1/malls/7/weather/fetch-runs')
   assert.equal(path.searchParams.get('start'), start.toISOString())
   assert.equal(path.searchParams.get('end'), end.toISOString())
   assert.equal(path.searchParams.get('taskKind'), 'MANUAL')
   assert.equal(path.searchParams.get('endpointKind'), 'v26_weather')
+  assert.equal(path.searchParams.get('correlationId'), manualCorrelationID)
   assert.equal(path.searchParams.get('pageSize'), '10')
 
   const parsed = parseMallWeatherFetchRuns({ code: 0, data: {
     items: [{
       runUuid: 'run-20260727-1',
+      correlationId: manualCorrelationID,
       provider: 'CAIYUN',
       endpointKind: 'v26_weather',
       taskKind: 'MANUAL',
@@ -660,7 +670,7 @@ test('builds and parses bounded fetch-run audit queries for weather polling', ()
   assert.equal(mallWeatherFetchRunTerminal('FAILED'), true)
   assert.equal(mallWeatherFetchRunTerminal('RUNNING'), false)
 
-  assert.throws(() => mallWeatherFetchRunsPath(7, end, start, 'MANUAL'), /invalid weather fetch run range/)
+  assert.throws(() => mallWeatherFetchRunsPath(7, end, start, 'MANUAL', manualCorrelationID), /invalid weather fetch run range/)
   assert.equal(parseMallWeatherFetchRuns({ code: 0, data: {
     items: [{ ...parsed.items[0], rowCounts: { hourly: -1 } }],
     meta: { timeZone: 'Asia/Shanghai' },
@@ -672,7 +682,10 @@ test('polls serially until the matching manual weather run becomes terminal', as
   const requestedAt = '2026-07-27T08:00:00Z'
   const responses = [
     { items: [] },
-    { items: [{ status: 'RUNNING', createdAtUtc: '2026-07-27T08:00:01Z' }] },
+    { items: [
+      { status: 'SUCCESS', createdAtUtc: '2026-07-27T08:00:02Z', correlationId: `manual:${'b'.repeat(48)}` },
+      { status: 'RUNNING', createdAtUtc: '2026-07-27T08:00:01Z' },
+    ] },
     { items: [{ status: 'SUCCESS', createdAtUtc: '2026-07-27T08:00:01Z', rowCounts: { hourly: 72 } }] },
   ]
   let active = 0
@@ -687,6 +700,7 @@ test('polls serially until the matching manual weather run becomes terminal', as
     return { ok: true, status: 200, data: { code: 0, data: {
       items: current.items.map((item, index) => ({
         runUuid: `run-${responses.length}-${index}`,
+        correlationId: manualCorrelationID,
         provider: 'CAIYUN',
         endpointKind: 'v26_weather',
         taskKind: 'MANUAL',
@@ -705,7 +719,7 @@ test('polls serially until the matching manual weather run becomes terminal', as
       pagination: { pageSize: 10 },
     } } }
   }
-  const result = await pollMallWeatherFetchRun(request, 7, requestedAt, 'MANUAL', {
+  const result = await pollMallWeatherFetchRun(request, 7, requestedAt, 'MANUAL', manualCorrelationID, {
     maxAttempts: 5,
     now: () => new Date('2026-07-27T08:02:00Z'),
     wait: async () => { waits++ },
@@ -721,6 +735,7 @@ test('ignores old terminal runs and stops polling on timeout or cancellation', a
   const oldRunResponse = { ok: true, status: 200, data: { code: 0, data: {
     items: [{
       runUuid: 'old-run',
+      correlationId: manualCorrelationID,
       provider: 'CAIYUN',
       endpointKind: 'v26_weather',
       taskKind: 'MANUAL',
@@ -739,7 +754,7 @@ test('ignores old terminal runs and stops polling on timeout or cancellation', a
     meta: { timeZone: 'Asia/Shanghai' },
     pagination: { pageSize: 10 },
   } } }
-  const timedOut = await pollMallWeatherFetchRun(async () => oldRunResponse, 7, '2026-07-27T08:00:00Z', 'MANUAL', {
+  const timedOut = await pollMallWeatherFetchRun(async () => oldRunResponse, 7, '2026-07-27T08:00:00Z', 'MANUAL', manualCorrelationID, {
     maxAttempts: 2,
     now: () => new Date('2026-07-27T08:02:00Z'),
     wait: async () => {},
@@ -748,10 +763,60 @@ test('ignores old terminal runs and stops polling on timeout or cancellation', a
 
   const controller = new AbortController()
   controller.abort()
-  const cancelled = await pollMallWeatherFetchRun(async () => oldRunResponse, 7, '2026-07-27T08:00:00Z', 'MANUAL', {
+  const cancelled = await pollMallWeatherFetchRun(async () => oldRunResponse, 7, '2026-07-27T08:00:00Z', 'MANUAL', manualCorrelationID, {
     signal: controller.signal,
   })
   assert.deepEqual(cancelled, { kind: 'cancelled' })
+})
+
+test('retries temporary fetch-run failures but stops on deterministic authorization errors', async () => {
+  const successResponse = { ok: true, status: 200, data: { code: 0, data: {
+    items: [{
+      runUuid: 'manual-run-after-retry',
+      correlationId: manualCorrelationID,
+      provider: 'CAIYUN',
+      endpointKind: 'v26_weather',
+      taskKind: 'MANUAL',
+      requestedHourlySteps: 72,
+      requestedDailySteps: 7,
+      attemptCount: 1,
+      status: 'SUCCESS',
+      durationMs: 100,
+      rowCounts: { hourly: 72 },
+      parseWarnings: [],
+      createdAtUtc: '2026-07-27T08:00:01Z',
+      createdAtLocal: '2026-07-27T16:00:01+08:00',
+      updatedAtUtc: '2026-07-27T08:00:02Z',
+      updatedAtLocal: '2026-07-27T16:00:02+08:00',
+      finishedAtUtc: '2026-07-27T08:00:02Z',
+      finishedAtLocal: '2026-07-27T16:00:02+08:00',
+    }],
+    meta: { timeZone: 'Asia/Shanghai' },
+    pagination: { pageSize: 10 },
+  } } }
+  let temporaryCalls = 0
+  const recovered = await pollMallWeatherFetchRun(async () => {
+    temporaryCalls++
+    return temporaryCalls === 1 ? { ok: false, status: 503, data: {} } : successResponse
+  }, 7, '2026-07-27T08:00:00Z', 'MANUAL', manualCorrelationID, {
+    maxAttempts: 3,
+    now: () => new Date('2026-07-27T08:02:00Z'),
+    wait: async () => {},
+  })
+  assert.equal(recovered.kind, 'terminal')
+  assert.equal(temporaryCalls, 2)
+
+  let forbiddenCalls = 0
+  const forbidden = await pollMallWeatherFetchRun(async () => {
+    forbiddenCalls++
+    return { ok: false, status: 403, data: {} }
+  }, 7, '2026-07-27T08:00:00Z', 'MANUAL', manualCorrelationID, {
+    maxAttempts: 3,
+    now: () => new Date('2026-07-27T08:02:00Z'),
+    wait: async () => {},
+  })
+  assert.deepEqual(forbidden, { kind: 'query_error', status: 403 })
+  assert.equal(forbiddenCalls, 1)
 })
 
 test('formats weather statuses, conditions, metrics, and chart points', () => {

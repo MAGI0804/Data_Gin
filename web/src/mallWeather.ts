@@ -434,6 +434,7 @@ export type MallWeatherRefreshResult = {
   reason: string
   requestedBy: number
   requestedAt: string
+  correlationId: string
   kinds: Array<{
     kind: MallWeatherRefreshKind
     status: 'QUEUED' | 'SKIPPED_FRESH'
@@ -450,6 +451,7 @@ export type MallWeatherFetchRunTaskKind = 'MANUAL' | 'FULL'
 
 export type MallWeatherFetchRun = {
   runUuid: string
+  correlationId: string
   provider: string
   endpointKind: string
   taskKind: string
@@ -1359,7 +1361,8 @@ export function parseMallWeatherRefreshResult(payload: unknown): MallWeatherRefr
   const data = envelopeData(payload)
   if (!data || !Number.isSafeInteger(data.jobId) || Number(data.jobId) <= 0 || !Number.isSafeInteger(data.mallId) || Number(data.mallId) <= 0 ||
     typeof data.force !== 'boolean' || typeof data.reason !== 'string' || !Number.isSafeInteger(data.requestedBy) || Number(data.requestedBy) <= 0 ||
-    !isRFC3339(data.requestedAt) || !Array.isArray(data.kinds) || data.kinds.length !== 1) return null
+    !isRFC3339(data.requestedAt) || typeof data.correlationId !== 'string' || !validMallWeatherCorrelationID(data.correlationId) ||
+    !Array.isArray(data.kinds) || data.kinds.length !== 1) return null
   const kinds: MallWeatherRefreshResult['kinds'] = []
   const seenKinds = new Set<MallWeatherRefreshKind>()
   for (const item of data.kinds) {
@@ -1379,6 +1382,7 @@ export function parseMallWeatherRefreshResult(payload: unknown): MallWeatherRefr
     reason: data.reason,
     requestedBy: Number(data.requestedBy),
     requestedAt: data.requestedAt,
+    correlationId: data.correlationId,
     kinds,
   }
 }
@@ -1390,7 +1394,8 @@ export function parseMallWeatherFetchRuns(payload: unknown): MallWeatherFetchRun
   if (!pagination) return null
   const items: MallWeatherFetchRun[] = []
   for (const item of data.items) {
-    if (!isRecord(item) || typeof item.runUuid !== 'string' || !item.runUuid.trim() || typeof item.provider !== 'string' ||
+    if (!isRecord(item) || typeof item.runUuid !== 'string' || !item.runUuid.trim() ||
+      typeof item.correlationId !== 'string' || !validMallWeatherCorrelationID(item.correlationId) || typeof item.provider !== 'string' ||
       typeof item.endpointKind !== 'string' || !item.endpointKind.trim() || typeof item.taskKind !== 'string' || !item.taskKind.trim() ||
       typeof item.status !== 'string' || !item.status.trim() || !nonNegativeSafeInteger(item.requestedHourlySteps) ||
       !nonNegativeSafeInteger(item.requestedDailySteps) || !nonNegativeSafeInteger(item.attemptCount) ||
@@ -1409,6 +1414,7 @@ export function parseMallWeatherFetchRuns(payload: unknown): MallWeatherFetchRun
     if (!parseWarnings) return null
     items.push({
       runUuid: item.runUuid,
+      correlationId: item.correlationId,
       provider: item.provider,
       endpointKind: item.endpointKind,
       taskKind: item.taskKind.toUpperCase(),
@@ -1441,6 +1447,7 @@ export async function pollMallWeatherFetchRun(
   mallID: number,
   requestedAt: string,
   taskKind: MallWeatherFetchRunTaskKind,
+  correlationID: string,
   options: MallWeatherFetchRunPollOptions = {},
 ): Promise<MallWeatherFetchRunPollResult> {
   const requestedAtMS = Date.parse(requestedAt)
@@ -1457,18 +1464,24 @@ export async function pollMallWeatherFetchRun(
     const currentTime = now()
     const endMS = Math.max(currentTime.getTime() + 5 * 60 * 1000, requestedAtMS + 60 * 1000)
     const startMS = Math.max(requestedAtMS, endMS - 24 * 60 * 60 * 1000)
-    const response = await request(mallWeatherFetchRunsPath(mallID, new Date(startMS), new Date(endMS), taskKind), {
+    const response = await request(mallWeatherFetchRunsPath(mallID, new Date(startMS), new Date(endMS), taskKind, correlationID), {
       method: 'GET',
       showResult: false,
       silentLoading: true,
       signal: options.signal,
     })
     if (options.signal?.aborted) return { kind: 'cancelled' }
-    if (!response.ok) return { kind: 'query_error', status: response.status }
+    if (!response.ok) {
+      const retryable = response.status === 0 || response.status === 408 || response.status === 425 ||
+        response.status === 429 || response.status >= 500
+      if (!retryable) return { kind: 'query_error', status: response.status }
+      if (attempt + 1 < maxAttempts) await wait(intervalMs, options.signal)
+      continue
+    }
     const parsed = parseMallWeatherFetchRuns(response.data)
     if (!parsed) return { kind: 'query_error', status: response.status }
     const run = parsed.items
-      .filter((item) => item.taskKind === taskKind && Date.parse(item.createdAtUtc) >= requestedAtMS)
+      .filter((item) => item.taskKind === taskKind && item.correlationId === correlationID && Date.parse(item.createdAtUtc) >= requestedAtMS)
       .sort((left, right) => Date.parse(right.createdAtUtc) - Date.parse(left.createdAtUtc))[0]
     if (run && mallWeatherFetchRunTerminal(run.status)) return { kind: 'terminal', run }
     if (attempt + 1 < maxAttempts) await wait(intervalMs, options.signal)
@@ -1667,6 +1680,7 @@ export function mallWeatherFetchRunsPath(
   start: Date,
   end: Date,
   taskKind: MallWeatherFetchRunTaskKind,
+  correlationID: string,
 ) {
   positiveMallID(mallID)
   const duration = end.getTime() - start.getTime()
@@ -1674,11 +1688,13 @@ export function mallWeatherFetchRunsPath(
     throw new Error('invalid weather fetch run range')
   }
   if (taskKind !== 'MANUAL' && taskKind !== 'FULL') throw new Error('invalid weather fetch run task kind')
+  if (!validMallWeatherCorrelationID(correlationID)) throw new Error('invalid weather fetch run correlation id')
   const query = new URLSearchParams({
     start: start.toISOString(),
     end: end.toISOString(),
     taskKind,
     endpointKind: 'v26_weather',
+    correlationId: correlationID,
     pageSize: '10',
   })
   return `/v1/malls/${mallID}/weather/fetch-runs?${query.toString()}`
@@ -1753,6 +1769,10 @@ function validMallWeatherSheetPushKey(key: string) {
 
 function validMallWeatherRefreshKey(key: string) {
   return /^[A-Za-z0-9][A-Za-z0-9._:-]{7,254}$/.test(key)
+}
+
+function validMallWeatherCorrelationID(value: string) {
+  return /^[A-Za-z0-9][A-Za-z0-9:_-]{7,254}$/.test(value)
 }
 
 export function mallWeatherFreshnessLabel(status: string) {

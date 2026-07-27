@@ -21,12 +21,13 @@ func TestMallWeatherRefreshControllerReturnsAcceptedAndReplayHeader(t *testing.T
 	var gotRequest requestbody.MallWeatherRefreshRequest
 	service := fakeMallWeatherRefreshControllerService{refresh: func(_ context.Context, actor, mallID uint, key string, request requestbody.MallWeatherRefreshRequest) (*data_svc.MallWeatherRefreshResult, bool, error) {
 		gotActor, gotMall, gotKey, gotRequest = actor, mallID, key, request
-		return &data_svc.MallWeatherRefreshResult{JobID: 31, MallID: mallID}, true, nil
+		return &data_svc.MallWeatherRefreshResult{JobID: 31, MallID: mallID, CorrelationID: "manual:opaque-123"}, true, nil
 	}}
 	recorder := performMallWeatherRefreshRequest(t, service, "7", `{"kinds":["V26_FULL","V3_LIFE_INDEX"],"force":false,"reason":"operator review"}`, "refresh-key-1234")
 	if recorder.Code != http.StatusAccepted || recorder.Header().Get("Idempotency-Replayed") != "true" ||
 		gotActor != 17 || gotMall != 7 || gotKey != "refresh-key-1234" || len(gotRequest.Kinds) != 2 ||
-		!strings.Contains(recorder.Body.String(), `"jobId":31`) {
+		!strings.Contains(recorder.Body.String(), `"jobId":31`) ||
+		!strings.Contains(recorder.Body.String(), `"correlationId":"manual:opaque-123"`) {
 		t.Fatalf("status=%d headers=%v actor=%d mall=%d key=%q request=%+v body=%s", recorder.Code, recorder.Header(), gotActor, gotMall, gotKey, gotRequest, recorder.Body.String())
 	}
 }

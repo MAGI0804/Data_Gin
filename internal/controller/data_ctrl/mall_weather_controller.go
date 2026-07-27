@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"gin-biz-web-api/internal/dao/data_dao"
 	"gin-biz-web-api/internal/requestbody"
@@ -284,6 +285,10 @@ func parseMallWeatherFetchRunRequest(c *gin.Context) (requestbody.MallWeatherFet
 	if err != nil {
 		return request, err
 	}
+	request.CorrelationID, err = parseMallWeatherCorrelationID(c)
+	if err != nil {
+		return request, err
+	}
 	request.TaskKind, err = weatherAliasedQuery(c, "taskKind", "task_kind")
 	if err != nil {
 		return request, err
@@ -305,6 +310,21 @@ func parseMallWeatherFetchRunRequest(c *gin.Context) (requestbody.MallWeatherFet
 	}
 	request.Cursor = strings.TrimSpace(c.Query("cursor"))
 	return request, nil
+}
+
+func parseMallWeatherCorrelationID(c *gin.Context) (string, error) {
+	values, exists := c.GetQueryArray("correlationId")
+	if !exists {
+		return "", nil
+	}
+	if len(values) != 1 {
+		return "", fmt.Errorf("%w: invalid correlationId", data_svc.ErrMallWeatherInvalidQuery)
+	}
+	value := strings.TrimSpace(values[0])
+	if len(value) > 128 || !utf8.ValidString(value) || strings.ContainsAny(value, "\x00\r\n") {
+		return "", fmt.Errorf("%w: invalid correlationId", data_svc.ErrMallWeatherInvalidQuery)
+	}
+	return value, nil
 }
 
 type parsedMallWeatherTimeSeriesRequest struct {

@@ -13,6 +13,7 @@ type FetchRunQuery struct {
 	MallID         uint
 	StartUTC       time.Time
 	EndUTC         time.Time
+	CorrelationID  string
 	TaskKind       string
 	EndpointKind   string
 	Status         string
@@ -53,6 +54,10 @@ func buildFetchRunQuery(query FetchRunQuery) (string, []interface{}, error) {
 		"r.created_at < ?",
 	}
 	args := []interface{}{query.MallID, query.StartUTC.UTC(), query.EndUTC.UTC()}
+	if query.CorrelationID != "" {
+		where = append(where, "r.task_window = ?")
+		args = append(args, query.CorrelationID)
+	}
 	if query.TaskKind != "" {
 		where = append(where, "r.task_kind = ?")
 		args = append(args, query.TaskKind)

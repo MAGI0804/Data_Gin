@@ -33,8 +33,31 @@ func TestMallWeatherRefreshServiceNormalizesAndAuthorizesForce(t *testing.T) {
 	}
 	if len(permissions.requested) != 2 || store.command.Reason != "operator review" || !store.command.Force ||
 		len(store.command.Kinds) != 1 || store.command.Kinds[0] != MallWeatherRefreshKindV26Full ||
-		len(store.command.KeyHash) != 64 || len(store.command.RequestHash) != 64 || len(store.command.TaskWindow) != 55 {
+		len(store.command.KeyHash) != 64 || len(store.command.RequestHash) != 64 || len(store.command.TaskWindow) != 55 ||
+		result.CorrelationID != store.command.TaskWindow {
 		t.Fatalf("permissions=%v command=%+v", permissions.requested, store.command)
+	}
+}
+
+func TestMallWeatherRefreshServiceRestoresCorrelationIDForLegacyReplay(t *testing.T) {
+	now := time.Date(2026, 7, 22, 4, 0, 0, 0, time.UTC)
+	longitude, latitude := 121.455, 31.228
+	store := &fakeMallWeatherRefreshStore{
+		result:   &MallWeatherRefreshResult{JobID: 9},
+		replayed: true,
+	}
+	service, err := newMallWeatherRefreshService(fakeMallWeatherQueryMallReader{mall: &model.Mall{
+		BaseModel: model.BaseModel{ID: 7}, Status: "active", WeatherEnabled: true, WeatherProvider: "caiyun",
+		GeocodeStatus: "confirmed", WeatherLongitude: &longitude, WeatherLatitude: &latitude,
+	}}, &recordingMallPermissionChecker{allowed: map[string]bool{PermissionWeatherRefresh: true}}, store, func() time.Time { return now })
+	if err != nil {
+		t.Fatalf("newMallWeatherRefreshService() error=%v", err)
+	}
+	result, replayed, err := service.Refresh(context.Background(), 17, 7, "refresh-key-1234", requestbody.MallWeatherRefreshRequest{
+		Kinds: []string{MallWeatherRefreshKindV26Full}, Reason: "operator review",
+	})
+	if err != nil || !replayed || result == nil || result.CorrelationID == "" || result.CorrelationID != store.command.TaskWindow {
+		t.Fatalf("Refresh() result=%+v replayed=%v command=%+v error=%v", result, replayed, store.command, err)
 	}
 }
 
@@ -113,14 +136,15 @@ func (checker *recordingMallPermissionChecker) HasPermission(_ context.Context, 
 }
 
 type fakeMallWeatherRefreshStore struct {
-	command mallWeatherRefreshCommand
-	result  *MallWeatherRefreshResult
-	err     error
+	command  mallWeatherRefreshCommand
+	result   *MallWeatherRefreshResult
+	replayed bool
+	err      error
 }
 
 func (store *fakeMallWeatherRefreshStore) Create(_ context.Context, command mallWeatherRefreshCommand) (*MallWeatherRefreshResult, bool, error) {
 	store.command = command
-	return store.result, false, store.err
+	return store.result, store.replayed, store.err
 }
 
 type fakeMallWeatherRefreshLatestReader struct {

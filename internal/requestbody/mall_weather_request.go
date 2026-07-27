@@ -69,14 +69,15 @@ type MallWeatherLifeIndexQueryRequest struct {
 }
 
 type MallWeatherFetchRunQueryRequest struct {
-	StartUTC     time.Time
-	EndUTC       time.Time
-	TimeZone     string
-	TaskKind     string
-	EndpointKind string
-	Status       string
-	Cursor       string
-	PageSize     int
+	StartUTC      time.Time
+	EndUTC        time.Time
+	TimeZone      string
+	CorrelationID string
+	TaskKind      string
+	EndpointKind  string
+	Status        string
+	Cursor        string
+	PageSize      int
 }
 
 type MallWeatherRefreshRequest struct {
