@@ -359,6 +359,20 @@
   font-size: 11px;
 }
 
+.mall-weather-refresh-submit {
+  display: grid;
+  gap: 6px;
+  color: #3b3b3b;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.mall-weather-refresh-submit small {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 400;
+}
+
 .mall-weather-forecast-panel {
   display: grid;
   gap: 12px;

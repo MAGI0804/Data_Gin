@@ -1209,13 +1209,19 @@ function ManualRefreshPanel({ actorID, mall, client, onWeatherUpdated }: {
     <section className="workbench-panel mall-weather-refresh-panel">
       <div className="mall-weather-section-title"><div><strong>手工刷新</strong><span>提交异步采集任务，不阻塞等待供应商</span></div><RefreshCcw aria-hidden="true" /></div>
       <form className="mall-weather-refresh-form" onSubmit={submit} aria-busy={submitting || monitoring}>
-        <label><span>采集范围</span><input name="weatherRefreshScope" value="综合天气（含实况、分钟、小时、逐日、预警、生活指数）" disabled /></label>
+        <label><span>采集范围</span><input name="weatherRefreshScope" value="综合天气（含实况、分钟、小时、逐日、预警、生活指数）" disabled />
+          <small>固定提交全部天气数据类型</small>
+        </label>
         <label><span>刷新原因</span><input name="weatherRefreshReason" value={reason} onChange={(event) => changeReason(event.currentTarget.value)} disabled={submitting || monitoring || Boolean(pending)} aria-describedby={reasonHelpID} />
           <small id={reasonHelpID}>必填单行文本，最多 500 个字符</small>
         </label>
-        <button className="primary" type="submit" disabled={submitting || monitoring}>
-          {submitting ? '提交中' : monitoring ? '等待采集完成' : pending ? '重试原请求' : '提交刷新'}
-        </button>
+        <div className="mall-weather-refresh-submit">
+          <span>操作</span>
+          <button className="primary" type="submit" disabled={submitting || monitoring}>
+            {submitting ? '提交中' : monitoring ? '等待采集完成' : pending ? '重试原请求' : '提交刷新'}
+          </button>
+          <small>提交后异步执行并跟踪结果</small>
+        </div>
       </form>
       {message && <p className="mall-weather-action-message" role="status">{message}</p>}
       {error && <p className="mall-weather-action-message error" role="alert">{error}</p>}
