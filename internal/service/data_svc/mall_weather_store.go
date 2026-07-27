@@ -35,7 +35,6 @@ func NewMallWeatherProcessor() (*MallWeatherProcessor, error) {
 	}
 	requestBuilder, err := caiyun.NewRequestBuilder(
 		config.GetString("cfg.caiyun.base_url"),
-		config.GetString("cfg.caiyun.life_index_base_url"),
 		global.Credentials.CaiyunAppKey(),
 		global.Credentials.CaiyunAppSecret(),
 	)

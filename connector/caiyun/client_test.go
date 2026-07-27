@@ -50,25 +50,6 @@ func TestClientFetchWeatherUsesSignedRequestAndRedactsRawBody(t *testing.T) {
 	}
 }
 
-func TestClientFetchLifeIndicesAcceptsOfficialDataEnvelope(t *testing.T) {
-	handler := http.HandlerFunc(func(w http.ResponseWriter, request *http.Request) {
-		if request.URL.EscapedPath() != "/v3/lifeindex" || request.Header.Get("x-cy-app-key") != testAppKey {
-			t.Fatalf("request URL=%s headers=%#v", request.URL, request.Header)
-		}
-		fmt.Fprint(w, `{"data":[{"date":"2026-07-22","lifeindex":[{"type":1,"level":2,"desc":"舒适","detail":"无需开机"}]}]}`)
-	})
-	client := testClient(t, handler)
-	response, err := client.FetchLifeIndices(context.Background(), LifeIndexRequest{
-		Longitude: 121.4551234, Latitude: 31.2285678, Days: 15, Fields: "all",
-	})
-	if err != nil {
-		t.Fatalf("FetchLifeIndices() error=%v", err)
-	}
-	if response.EndpointKind != EndpointLifeIndexV3 || response.ProviderStatus != "ok" || !json.Valid(response.RawBody) {
-		t.Fatalf("response=%+v", response)
-	}
-}
-
 func TestClientClassifiesHTTPFailures(t *testing.T) {
 	tests := []struct {
 		name      string
@@ -100,31 +81,22 @@ func TestClientClassifiesHTTPFailures(t *testing.T) {
 
 func TestClientRejectsProviderBusinessAndMalformedEnvelopes(t *testing.T) {
 	tests := []struct {
-		name      string
-		lifeIndex bool
-		body      string
-		class     providerhttp.ErrorClass
-		status    string
-		code      string
+		name   string
+		body   string
+		class  providerhttp.ErrorClass
+		status string
+		code   string
 	}{
 		{name: "weather provider rejected", body: `{"status":"failed","result":{}}`, class: providerhttp.ErrorClassProvider, status: "failed", code: "failed"},
 		{name: "weather missing result", body: `{"status":"ok"}`, class: providerhttp.ErrorClassResponse, status: "ok"},
 		{name: "weather invalid status", body: `{"status":"bad\nstatus","result":{}}`, class: providerhttp.ErrorClassResponse},
-		{name: "life provider rejected", lifeIndex: true, body: `{"code":40101,"message":"invalid app key"}`, class: providerhttp.ErrorClassProvider, status: "40101", code: "40101"},
-		{name: "life missing data", lifeIndex: true, body: `{"message":"missing"}`, class: providerhttp.ErrorClassResponse},
 		{name: "malformed JSON", body: `not-json`, class: providerhttp.ErrorClassResponse},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			handler := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { fmt.Fprint(w, test.body) })
 			client := testClient(t, handler)
-			var response *ProviderResponse
-			var err error
-			if test.lifeIndex {
-				response, err = client.FetchLifeIndices(context.Background(), LifeIndexRequest{Longitude: 121, Latitude: 31, Days: 1, Fields: "all"})
-			} else {
-				response, err = client.FetchWeather(context.Background(), validWeatherRequest())
-			}
+			response, err := client.FetchWeather(context.Background(), validWeatherRequest())
 			providerError := requireProviderError(t, err)
 			if providerError.Class != test.class || providerError.Code != test.code {
 				t.Fatalf("ProviderError=%+v", providerError)
@@ -179,9 +151,6 @@ func TestClientRejectsInvalidInputAndRedactsFormatting(t *testing.T) {
 		t.Fatal("provider called for invalid input")
 	}))
 	if _, err := client.FetchWeather(context.Background(), WeatherRequest{}); requireProviderError(t, err).Class != providerhttp.ErrorClassRequest {
-		t.Fatalf("error=%v", err)
-	}
-	if _, err := client.FetchLifeIndices(nil, LifeIndexRequest{}); requireProviderError(t, err).Class != providerhttp.ErrorClassRequest {
 		t.Fatalf("error=%v", err)
 	}
 	for _, rendered := range []string{fmt.Sprint(client), fmt.Sprintf("%+v", client), fmt.Sprintf("%#v", client)} {

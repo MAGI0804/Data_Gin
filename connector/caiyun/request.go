@@ -31,31 +31,19 @@ type WeatherRequest struct {
 	Unit        string
 }
 
-type LifeIndexRequest struct {
-	Longitude float64
-	Latitude  float64
-	Days      int
-	Fields    string
-}
-
 type RequestBuilder struct {
-	weatherBaseURL   *url.URL
-	lifeIndexBaseURL *url.URL
-	signer           *Signer
-	now              func() time.Time
-	nonce            func() (string, error)
+	weatherBaseURL *url.URL
+	signer         *Signer
+	now            func() time.Time
+	nonce          func() (string, error)
 }
 
-func NewRequestBuilder(weatherBaseURL, lifeIndexBaseURL, appKey, appSecret string) (*RequestBuilder, error) {
-	return newRequestBuilder(weatherBaseURL, lifeIndexBaseURL, appKey, appSecret, time.Now, secureNonce)
+func NewRequestBuilder(weatherBaseURL, appKey, appSecret string) (*RequestBuilder, error) {
+	return newRequestBuilder(weatherBaseURL, appKey, appSecret, time.Now, secureNonce)
 }
 
-func newRequestBuilder(weatherBaseURL, lifeIndexBaseURL, appKey, appSecret string, now func() time.Time, nonce func() (string, error)) (*RequestBuilder, error) {
+func newRequestBuilder(weatherBaseURL, appKey, appSecret string, now func() time.Time, nonce func() (string, error)) (*RequestBuilder, error) {
 	weatherBase, err := parseBaseURL(weatherBaseURL)
-	if err != nil {
-		return nil, err
-	}
-	lifeIndexBase, err := parseBaseURL(lifeIndexBaseURL)
 	if err != nil {
 		return nil, err
 	}
@@ -67,8 +55,8 @@ func newRequestBuilder(weatherBaseURL, lifeIndexBaseURL, appKey, appSecret strin
 		return nil, fmt.Errorf("caiyun request builder: clock and nonce source are required")
 	}
 	return &RequestBuilder{
-		weatherBaseURL: weatherBase, lifeIndexBaseURL: lifeIndexBase,
-		signer: signer, now: now, nonce: nonce,
+		weatherBaseURL: weatherBase,
+		signer:         signer, now: now, nonce: nonce,
 	}, nil
 }
 
@@ -94,28 +82,10 @@ func (builder *RequestBuilder) NewWeatherRequest(ctx context.Context, input Weat
 	query.Set("dailysteps", strconv.Itoa(input.DailySteps))
 	query.Set("hourlysteps", strconv.Itoa(input.HourlySteps))
 	query.Set("unit", input.Unit)
-	return builder.newSignedRequest(ctx, requestURL, query, false)
+	return builder.newSignedRequest(ctx, requestURL, query)
 }
 
-func (builder *RequestBuilder) NewLifeIndexRequest(ctx context.Context, input LifeIndexRequest) (*http.Request, error) {
-	if builder == nil || builder.lifeIndexBaseURL == nil || builder.signer == nil {
-		return nil, fmt.Errorf("caiyun request builder: not configured")
-	}
-	input.Fields = strings.TrimSpace(input.Fields)
-	if ctx == nil || !validCoordinates(input.Longitude, input.Latitude) || input.Days < 1 || input.Days > maximumDailySteps || input.Fields != "all" {
-		return nil, fmt.Errorf("caiyun request builder: invalid life index request")
-	}
-
-	requestURL := builder.lifeIndexBaseURL.JoinPath("v3", "lifeindex")
-	query := make(url.Values, 4)
-	query.Set("days", strconv.Itoa(input.Days))
-	query.Set("fields", input.Fields)
-	query.Set("latitude", formatCoordinate(input.Latitude))
-	query.Set("longitude", formatCoordinate(input.Longitude))
-	return builder.newSignedRequest(ctx, requestURL, query, true)
-}
-
-func (builder *RequestBuilder) newSignedRequest(ctx context.Context, requestURL *url.URL, query url.Values, includeAppKeyHeader bool) (*http.Request, error) {
+func (builder *RequestBuilder) newSignedRequest(ctx context.Context, requestURL *url.URL, query url.Values) (*http.Request, error) {
 	nonce, err := builder.nonce()
 	if err != nil || !validNonce(nonce) {
 		return nil, fmt.Errorf("caiyun request builder: generate nonce")
@@ -134,9 +104,6 @@ func (builder *RequestBuilder) newSignedRequest(ctx context.Context, requestURL 
 	request.Header.Set("x-cy-nonce", nonce)
 	request.Header.Set("x-cy-timestamp", strconv.FormatInt(timestamp, 10))
 	request.Header.Set("x-cy-signature", signature)
-	if includeAppKeyHeader {
-		request.Header.Set("x-cy-app-key", builder.signer.appKey)
-	}
 	return request, nil
 }
 

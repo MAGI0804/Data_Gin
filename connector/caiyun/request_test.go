@@ -36,27 +36,6 @@ func TestRequestBuilderConstructsSignedV26Request(t *testing.T) {
 	assertFixedSigningHeaders(t, request, "jW2s-OXHx_tLmeu4uMRnfWqUeHvw1mbDWOjYFK9Yvbk=")
 }
 
-func TestRequestBuilderConstructsSignedV3Request(t *testing.T) {
-	builder := fixedRequestBuilder(t)
-	request, err := builder.NewLifeIndexRequest(context.Background(), LifeIndexRequest{
-		Longitude: 121.4551234, Latitude: -31.2285678, Days: 15, Fields: " all ",
-	})
-	if err != nil {
-		path := builder.lifeIndexBaseURL.JoinPath("v3", "lifeindex").EscapedPath()
-		t.Fatalf("NewLifeIndexRequest() error=%v path=%q validPath=%t validNonce=%t", err, path, validEscapedPath(path), validNonce(testNonce))
-	}
-	if request.URL.Host != "life.caiyun.invalid" || request.URL.EscapedPath() != "/v3/lifeindex" {
-		t.Fatalf("URL=%s", request.URL)
-	}
-	if request.URL.RawQuery != "days=15&fields=all&latitude=-31.2285678&longitude=121.4551234" {
-		t.Fatalf("query=%q", request.URL.RawQuery)
-	}
-	if request.Header.Get("x-cy-app-key") != testAppKey {
-		t.Fatalf("v3 app key header=%q", request.Header.Get("x-cy-app-key"))
-	}
-	assertFixedSigningHeaders(t, request, "57yLnEA-zpAWn2MYSN6WBcb_U78EgD9OnICjFio6WLk=")
-}
-
 func TestRequestBuilderRejectsInvalidBoundaries(t *testing.T) {
 	builder := fixedRequestBuilder(t)
 	weatherRequests := []WeatherRequest{
@@ -73,26 +52,16 @@ func TestRequestBuilderRejectsInvalidBoundaries(t *testing.T) {
 			t.Fatalf("weather request %d error=nil", index)
 		}
 	}
-	lifeRequests := []LifeIndexRequest{
-		{Longitude: 121, Latitude: 31, Days: 0, Fields: "all"},
-		{Longitude: 121, Latitude: 31, Days: 16, Fields: "all"},
-		{Longitude: 121, Latitude: 31, Days: 15, Fields: "basic"},
-	}
-	for index, input := range lifeRequests {
-		if _, err := builder.NewLifeIndexRequest(context.Background(), input); err == nil {
-			t.Fatalf("life request %d error=nil", index)
-		}
-	}
 }
 
 func TestRequestBuilderRejectsUnsafeConfigurationAndNonce(t *testing.T) {
 	for _, baseURL := range []string{"http://api.caiyun.invalid", "https://user:pass@api.caiyun.invalid", "https://api.caiyun.invalid?token=value", "not-a-url"} {
-		if _, err := NewRequestBuilder(baseURL, "https://life.caiyun.invalid", testAppKey, testAppSecret); err == nil {
+		if _, err := NewRequestBuilder(baseURL, testAppKey, testAppSecret); err == nil {
 			t.Fatalf("NewRequestBuilder(%q) error=nil", baseURL)
 		}
 	}
 	builder, err := newRequestBuilder(
-		"https://api.caiyun.invalid", "https://life.caiyun.invalid", testAppKey, testAppSecret,
+		"https://api.caiyun.invalid", testAppKey, testAppSecret,
 		func() time.Time { return time.Unix(testTimestamp, 0) },
 		func() (string, error) { return "bad\r\nInjected: true", nil },
 	)
@@ -143,7 +112,7 @@ func TestSecureNonceIsUniqueAndWithinContract(t *testing.T) {
 func fixedRequestBuilder(t *testing.T) *RequestBuilder {
 	t.Helper()
 	builder, err := newRequestBuilder(
-		"https://api.caiyun.invalid", "https://life.caiyun.invalid", testAppKey, testAppSecret,
+		"https://api.caiyun.invalid", testAppKey, testAppSecret,
 		func() time.Time { return time.Unix(testTimestamp, 0) },
 		func() (string, error) { return testNonce, nil },
 	)
