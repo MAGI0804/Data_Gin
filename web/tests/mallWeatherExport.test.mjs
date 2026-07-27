@@ -5,15 +5,15 @@ import {
   closeMallWeatherExportDownloadTarget,
   clearMallWeatherExportSession,
   loadMallWeatherExportSession,
-  mallWeatherDefaultExportProfileRequest,
+  mallWeatherExportCreateDisposition,
   mallWeatherExportCreateRequest,
+  mallWeatherExportCreateResultMatchesRequest,
   mallWeatherExportDownloadReadiness,
   mallWeatherExportDownloadRequestTimeoutMilliseconds,
   mallWeatherExportDownloadPath,
   mallWeatherExportJobPath,
   mallWeatherExportJobTerminal,
   mallWeatherExportKey,
-  mallWeatherExportProfilesPath,
   mallWeatherExportProgress,
   mallWeatherExportRequestMatches,
   navigateMallWeatherExportDownloadTarget,
@@ -22,30 +22,11 @@ import {
   parseMallWeatherExportJob,
   parseMallWeatherExportSafeErrorMessage,
   prepareMallWeatherExportDownloadTarget,
-  parseMallWeatherExportProfile,
-  parseMallWeatherExportProfilePage,
   saveMallWeatherExportSession,
-  selectMallWeatherCompleteExportProfile,
-  selectMallWeatherExportProfile,
   waitForMallWeatherExportDownload,
 } from '../.test-dist/mallWeatherExport.js'
 
 const jobID = '123e4567-e89b-42d3-a456-426614174000'
-
-const profile = (overrides = {}) => ({
-  id: 9,
-  code: 'mall_weather_full',
-  name: '完整天气',
-  version: 3,
-  enabled: true,
-  timeZone: 'Asia/Shanghai',
-  datasets: [
-    { kind: 'minutely', sheetName: '分钟降水', latest: true },
-    { kind: 'hourly', sheetName: '小时预报', latest: true },
-  ],
-  ...overrides,
-})
-
 const envelope = (data) => ({ code: 0, data })
 const memoryStorage = () => {
   const values = new Map()
@@ -55,121 +36,126 @@ const memoryStorage = () => {
     removeItem: (key) => values.delete(key),
   }
 }
-
-test('strictly parses enabled export profiles and bounded pagination', () => {
-  const parsed = parseMallWeatherExportProfilePage(envelope({
-    items: [profile()],
-    pagination: { pageSize: 100, nextCursor: 'next' },
-  }))
-  assert.equal(parsed?.items[0].datasets[0].kind, 'minutely')
-  assert.equal(parsed?.pagination.nextCursor, 'next')
-  assert.equal(parseMallWeatherExportProfile(envelope(profile()))?.version, 3)
-
-  assert.equal(parseMallWeatherExportProfilePage(envelope({
-    items: [profile({ enabled: false })],
-    pagination: { pageSize: 100 },
-  }))?.items[0].enabled, false)
-  assert.equal(parseMallWeatherExportProfilePage(envelope({ items: [profile({ datasets: [{ kind: 'secret', sheetName: 'bad' }] })], pagination: { pageSize: 100 } })), null)
-  assert.equal(parseMallWeatherExportProfilePage(envelope({ items: [profile(), profile()], pagination: { pageSize: 100 } })), null)
-  assert.equal(parseMallWeatherExportProfilePage({ code: 500, data: {} }), null)
+const createdResult = (overrides = {}) => ({
+  jobId: jobID,
+  status: 'PENDING',
+  profileId: 9,
+  profileVersion: 3,
+  estimatedRows: 480,
+  createdBy: 17,
+  createdAt: '2026-07-27T10:00:00Z',
+  ...overrides,
+})
+const legacyRequest = (overrides = {}) => ({
+  profileId: 9,
+  expectedProfileVersion: 3,
+  filters: {
+    mallIds: [7],
+    start: '2026-07-26T10:00:00.000Z',
+    end: '2026-08-12T10:00:00.000Z',
+  },
+  ...overrides,
 })
 
-test('prefers a profile containing both minutely and hourly datasets', () => {
-  const realtimeOnly = parseMallWeatherExportProfile(envelope(profile({
-    id: 1,
-    code: 'realtime_only',
-    datasets: [{ kind: 'realtime', sheetName: '实况', latest: true }],
-  })))
-  const forecast = parseMallWeatherExportProfile(envelope(profile()))
-  assert.equal(selectMallWeatherExportProfile([realtimeOnly, forecast].filter(Boolean))?.id, 9)
-  assert.equal(selectMallWeatherExportProfile([]), null)
-})
-
-test('selects only the fixed complete weather export template', () => {
-  const datasets = mallWeatherDefaultExportProfileRequest().datasets.map(({ kind, sheetName, latest }) => ({
-    kind, sheetName, ...(latest ? { latest } : {}),
-  }))
-  const incomplete = parseMallWeatherExportProfile(envelope(profile()))
-  const complete = parseMallWeatherExportProfile(envelope(profile({ datasets, version: 4 })))
-  const dynamic = parseMallWeatherExportProfile(envelope(profile({ id: 10, code: 'custom_weather', datasets, version: 9 })))
-  assert.equal(selectMallWeatherCompleteExportProfile([incomplete, dynamic, complete].filter(Boolean))?.version, 4)
-  assert.equal(selectMallWeatherCompleteExportProfile([incomplete, dynamic].filter(Boolean)), null)
-})
-
-test('builds the complete default export profile with latest forecast semantics', () => {
-  const request = mallWeatherDefaultExportProfileRequest()
-  assert.equal(request.code, 'mall_weather_full')
-  assert.equal(request.datasets.length, 7)
-  assert.deepEqual(request.datasets.map((dataset) => dataset.kind), [
-    'malls', 'realtime', 'minutely', 'hourly', 'daily', 'alerts', 'life_indices',
-  ])
-  assert.equal('latest' in request.datasets[0], false)
-  for (const dataset of request.datasets.slice(1)) {
-    assert.equal(dataset.latest, true)
-    assert.equal(dataset.freezeHeader, true)
-    assert.equal(dataset.autoFilter, true)
-  }
-  assert.equal(request.datasets[2].sheetName, '约1公里分钟降水')
-  assert.match(request.fileNameTemplate, /\.xlsx$/)
-  assert.equal(mallWeatherDefaultExportProfileRequest(7).expectedVersion, 7)
-})
-
-test('creates a mall-scoped deterministic time window and reusable idempotency key', () => {
-  const parsedProfile = parseMallWeatherExportProfile(envelope(profile()))
-  assert.ok(parsedProfile)
-  const request = mallWeatherExportCreateRequest(parsedProfile, 7, new Date('2026-07-27T10:37:00Z'))
-  assert.deepEqual(request, {
-    profileId: 9,
-    expectedProfileVersion: 3,
-    filters: {
-      mallIds: [7],
-      start: '2026-07-26T10:00:00.000Z',
-      end: '2026-08-12T10:00:00.000Z',
-    },
-  })
-  assert.equal(mallWeatherExportRequestMatches(request, parsedProfile, 7), true)
-  assert.equal(mallWeatherExportRequestMatches(request, parsedProfile, 8), false)
+test('builds a fixed mall-scoped request without client-managed profile selectors', () => {
+  const request = mallWeatherExportCreateRequest(7)
+  assert.deepEqual(request, { filters: { mallIds: [7] } })
+  assert.equal(Object.hasOwn(request, 'profileId'), false)
+  assert.equal(Object.hasOwn(request, 'expectedProfileVersion'), false)
+  assert.equal(mallWeatherExportRequestMatches(request, 7), true)
+  assert.equal(mallWeatherExportRequestMatches(request, 8), false)
   assert.equal(mallWeatherExportKey('12345678-abcd'), 'weather-export:12345678-abcd')
   assert.throws(() => mallWeatherExportKey('bad/key'), /invalid mall weather export key/)
-  assert.throws(() => mallWeatherExportCreateRequest(parsedProfile, 0), /invalid mall weather export request/)
+  assert.throws(() => mallWeatherExportCreateRequest(0), /invalid mall weather export request/)
 })
 
-test('persists and restores mall-scoped idempotent requests and active jobs', () => {
+test('persists fixed and legacy pending requests without changing their idempotent body', () => {
   const storage = memoryStorage()
-  const parsedProfile = parseMallWeatherExportProfile(envelope(profile()))
-  assert.ok(parsedProfile)
-  const pending = {
-    key: mallWeatherExportKey('12345678-session'),
-    body: mallWeatherExportCreateRequest(parsedProfile, 7, new Date('2026-07-27T10:37:00Z')),
+  const fixedPending = {
+    key: mallWeatherExportKey('12345678-fixed'),
+    body: mallWeatherExportCreateRequest(7),
   }
-  saveMallWeatherExportSession('17', 7, { pending, jobId: '' }, storage)
-  assert.deepEqual(loadMallWeatherExportSession('17', 7, storage), { pending, jobId: '' })
+  saveMallWeatherExportSession('17', 7, { pending: fixedPending, jobId: '' }, storage)
+  assert.deepEqual(loadMallWeatherExportSession('17', 7, storage), { pending: fixedPending, jobId: '' })
   assert.equal(loadMallWeatherExportSession('17', 8, storage), null)
+
+  const legacyPending = {
+    key: mallWeatherExportKey('12345678-legacy'),
+    body: legacyRequest(),
+  }
+  saveMallWeatherExportSession('17', 7, { pending: legacyPending, jobId: '' }, storage)
+  assert.deepEqual(loadMallWeatherExportSession('17', 7, storage), { pending: legacyPending, jobId: '' })
+
+  const rangedFixedPending = {
+    key: mallWeatherExportKey('12345678-ranged'),
+    body: { filters: legacyRequest().filters },
+  }
+  saveMallWeatherExportSession('17', 7, { pending: rangedFixedPending, jobId: '' }, storage)
+  assert.deepEqual(loadMallWeatherExportSession('17', 7, storage), { pending: rangedFixedPending, jobId: '' })
 
   saveMallWeatherExportSession('17', 7, { pending: null, jobId: jobID }, storage)
   assert.deepEqual(loadMallWeatherExportSession('17', 7, storage), { pending: null, jobId: jobID })
   clearMallWeatherExportSession('17', 7, storage)
   assert.equal(loadMallWeatherExportSession('17', 7, storage), null)
-
-  assert.throws(() => saveMallWeatherExportSession('17', 7, {
-    pending: { ...pending, body: { ...pending.body, filters: { ...pending.body.filters, mallIds: [8] } } },
-    jobId: '',
-  }, storage), /invalid mall weather export session/)
   assert.throws(() => loadMallWeatherExportSession('actor', 7, storage), /invalid actor id/)
 })
 
+test('rejects incomplete, null, zero and cross-mall stored request selectors', () => {
+  const storage = memoryStorage()
+  const saveInvalid = (body) => saveMallWeatherExportSession('17', 7, {
+    pending: { key: mallWeatherExportKey('12345678-invalid'), body },
+    jobId: '',
+  }, storage)
+
+  assert.throws(() => saveInvalid({ profileId: 9, filters: legacyRequest().filters }), /invalid mall weather export session/)
+  assert.throws(() => saveInvalid({ expectedProfileVersion: 3, filters: legacyRequest().filters }), /invalid mall weather export session/)
+  assert.throws(() => saveInvalid({ profileId: 0, expectedProfileVersion: 3, filters: legacyRequest().filters }), /invalid mall weather export session/)
+  assert.throws(() => saveInvalid({ profileId: null, expectedProfileVersion: null, filters: legacyRequest().filters }), /invalid mall weather export session/)
+  assert.throws(() => saveInvalid({ filters: { mallIds: [8] } }), /invalid mall weather export session/)
+  assert.throws(() => saveInvalid({ filters: { mallIds: [7], start: '2026-07-26T10:00:00Z' } }), /invalid mall weather export session/)
+  assert.throws(() => saveInvalid({ profileId: 9, expectedProfileVersion: 3, filters: { mallIds: [7] } }), /invalid mall weather export session/)
+  assert.throws(() => saveInvalid({
+    filters: { mallIds: [7], start: '2026-01-01T00:00:00Z', end: '2027-01-03T00:00:00Z' },
+  }), /invalid mall weather export session/)
+})
+
+test('matches fixed create results while preserving strict legacy profile matching', () => {
+  const result = parseMallWeatherExportCreateResult(envelope(createdResult()))
+  assert.ok(result)
+  assert.equal(mallWeatherExportCreateResultMatchesRequest(result, mallWeatherExportCreateRequest(7)), true)
+  assert.equal(mallWeatherExportCreateResultMatchesRequest(result, legacyRequest()), true)
+  assert.equal(mallWeatherExportCreateResultMatchesRequest(result, legacyRequest({ profileId: 10 })), false)
+  assert.equal(mallWeatherExportCreateResultMatchesRequest(result, legacyRequest({ expectedProfileVersion: 4 })), false)
+})
+
+test('accepts only a trusted 202 and preserves the pending request for every other outcome', () => {
+  const fixed = mallWeatherExportCreateRequest(7)
+  const accepted = envelope(createdResult())
+  assert.equal(mallWeatherExportCreateDisposition(
+    { ok: true, status: 202, data: accepted },
+    fixed,
+  ).kind, 'accepted')
+
+  for (const status of [0, 200, 400, 403, 404, 408, 409, 422, 500, 503]) {
+    assert.equal(mallWeatherExportCreateDisposition(
+      { ok: status >= 200 && status < 300, status, data: accepted },
+      fixed,
+    ).kind, 'uncertain')
+  }
+  assert.equal(mallWeatherExportCreateDisposition(
+    { ok: true, status: 202, data: { code: 0, data: { invalid: true } } },
+    fixed,
+  ).kind, 'uncertain')
+  assert.equal(mallWeatherExportCreateDisposition(
+    { ok: true, status: 202, data: accepted },
+    legacyRequest({ profileId: 10 }),
+  ).kind, 'uncertain')
+})
+
 test('strictly parses export creation and job progress without leaking unsafe shapes', () => {
-  const created = parseMallWeatherExportCreateResult(envelope({
-    jobId: jobID,
-    status: 'PENDING',
-    profileId: 9,
-    profileVersion: 3,
-    estimatedRows: 480,
-    createdBy: 17,
-    createdAt: '2026-07-27T10:00:00Z',
-  }))
+  const created = parseMallWeatherExportCreateResult(envelope(createdResult()))
   assert.equal(created?.estimatedRows, 480)
-  assert.equal(parseMallWeatherExportCreateResult(envelope({ ...created, status: 'RUNNING' })), null)
+  assert.equal(parseMallWeatherExportCreateResult(envelope(createdResult({ status: 'RUNNING' }))), null)
 
   const job = parseMallWeatherExportJob(envelope({
     jobId: jobID,
@@ -213,8 +199,6 @@ test('accepts only short HTTPS download URLs and builds stable resource paths', 
   })), null)
   assert.equal(mallWeatherExportJobPath(jobID), `/v1/weather-exports/${jobID}`)
   assert.equal(mallWeatherExportDownloadPath(jobID), `/v1/weather-exports/${jobID}/download`)
-  assert.equal(mallWeatherExportProfilesPath('next cursor'), '/v1/weather-export-profiles?enabled=true&pageSize=100&cursor=next+cursor')
-  assert.equal(mallWeatherExportProfilesPath('', false), '/v1/weather-export-profiles?enabled=false&pageSize=100')
   assert.throws(() => mallWeatherExportJobPath('bad'), /invalid mall weather export job id/)
 })
 

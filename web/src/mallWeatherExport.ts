@@ -1,48 +1,39 @@
 export const mallWeatherExportPollIntervalMilliseconds = 2_000
 export const mallWeatherExportMaximumPollAttempts = 150
 
-export type MallWeatherExportDatasetKind =
-  | 'malls'
-  | 'realtime'
-  | 'minutely'
-  | 'hourly'
-  | 'daily'
-  | 'alerts'
-  | 'life_indices'
-  | 'fetch_runs'
+export type MallWeatherExportFixedFilters =
+  | {
+      mallIds: number[]
+      start?: never
+      end?: never
+    }
+  | {
+      mallIds: number[]
+      start: string
+      end: string
+    }
 
-export type MallWeatherExportDataset = {
-  kind: MallWeatherExportDatasetKind
-  sheetName: string
-  latest?: boolean
-}
-
-export type MallWeatherExportProfile = {
-  id: number
-  code: string
-  name: string
-  version: number
-  enabled: boolean
-  timeZone: string
-  datasets: MallWeatherExportDataset[]
-}
-
-export type MallWeatherExportProfilePage = {
-  items: MallWeatherExportProfile[]
-  pagination: { pageSize: number; nextCursor: string }
-}
-
-export type MallWeatherExportFilters = {
+export type MallWeatherExportLegacyFilters = {
   mallIds: number[]
   start: string
   end: string
 }
 
-export type MallWeatherExportCreateRequest = {
+export type MallWeatherExportFixedCreateRequest = {
+  filters: MallWeatherExportFixedFilters
+  profileId?: never
+  expectedProfileVersion?: never
+}
+
+export type MallWeatherExportLegacyCreateRequest = {
   profileId: number
   expectedProfileVersion: number
-  filters: MallWeatherExportFilters
+  filters: MallWeatherExportLegacyFilters
 }
+
+export type MallWeatherExportCreateRequest =
+  | MallWeatherExportFixedCreateRequest
+  | MallWeatherExportLegacyCreateRequest
 
 export type MallWeatherExportPendingCreate = {
   key: string
@@ -63,6 +54,10 @@ export type MallWeatherExportCreateResult = {
   createdBy: number
   createdAt: string
 }
+
+export type MallWeatherExportCreateDisposition =
+  | { kind: 'accepted'; result: MallWeatherExportCreateResult }
+  | { kind: 'uncertain' }
 
 export type MallWeatherExportJobStatus = 'PENDING' | 'RUNNING' | 'SUCCEEDED' | 'FAILED' | 'CANCELLED' | 'EXPIRED'
 
@@ -117,44 +112,21 @@ export type MallWeatherExportDownloadTarget = {
   location: { replace: (url: string) => void }
 }
 
-export type MallWeatherExportProfileSaveRequest = {
-  code: string
-  name: string
-  expectedVersion?: number
-  enabled: true
-  timeZone: string
-  unitSystem: 'metric'
-  dateFormat: string
-  dateTimeFormat: string
-  fileNameTemplate: string
-  filters: Record<string, never>
-  datasets: Array<{
-    kind: Exclude<MallWeatherExportDatasetKind, 'fetch_runs'>
-    sheetName: string
-    latest?: true
-    freezeHeader: true
-    autoFilter: true
-  }>
-}
-
 type JsonRecord = Record<string, unknown>
 type ExportStorage = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>
 
-const exportProfileCodePattern = /^[a-z][a-z0-9_-]{2,99}$/
 const exportJobIDPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 const exportKeyPattern = /^[A-Za-z0-9][A-Za-z0-9._:-]{7,254}$/
-const exportDatasetKinds = new Set<MallWeatherExportDatasetKind>([
-  'malls', 'realtime', 'minutely', 'hourly', 'daily', 'alerts', 'life_indices', 'fetch_runs',
-])
 const exportJobStatuses = new Set<MallWeatherExportJobStatus>([
   'PENDING', 'RUNNING', 'SUCCEEDED', 'FAILED', 'CANCELLED', 'EXPIRED',
 ])
-const completeExportDatasetKinds: MallWeatherExportDatasetKind[] = [
-  'malls', 'realtime', 'minutely', 'hourly', 'daily', 'alerts', 'life_indices',
-]
 
 function isRecord(value: unknown): value is JsonRecord {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value)
+}
+
+function hasOwn(value: object, key: string) {
+  return Object.prototype.hasOwnProperty.call(value, key)
 }
 
 function envelopeData(payload: unknown): JsonRecord | null {
@@ -180,142 +152,14 @@ function isRFC3339(value: unknown): value is string {
   return Number.isFinite(parsed) && /(?:Z|[+-]\d{2}:\d{2})$/.test(value)
 }
 
-function parseDataset(value: unknown): MallWeatherExportDataset | null {
-  if (!isRecord(value) || typeof value.kind !== 'string' || !exportDatasetKinds.has(value.kind as MallWeatherExportDatasetKind) ||
-    !nonEmptyString(value.sheetName, 31)) return null
-  if (value.latest !== undefined && typeof value.latest !== 'boolean') return null
-  return {
-    kind: value.kind as MallWeatherExportDatasetKind,
-    sheetName: value.sheetName,
-    ...(typeof value.latest === 'boolean' ? { latest: value.latest } : {}),
-  }
-}
-
-export function parseMallWeatherExportProfile(payload: unknown): MallWeatherExportProfile | null {
-  const data = envelopeData(payload)
-  return data ? parseProfile(data) : null
-}
-
-function parseProfile(value: unknown): MallWeatherExportProfile | null {
-  if (!isRecord(value) || !positiveInteger(value.id) || !positiveInteger(value.version) || typeof value.enabled !== 'boolean' ||
-    typeof value.code !== 'string' || !exportProfileCodePattern.test(value.code) || !nonEmptyString(value.name, 255) ||
-    !nonEmptyString(value.timeZone, 128) || !Array.isArray(value.datasets) || value.datasets.length < 1 || value.datasets.length > 8) return null
-  const datasets: MallWeatherExportDataset[] = []
-  const kinds = new Set<MallWeatherExportDatasetKind>()
-  for (const rawDataset of value.datasets) {
-    const dataset = parseDataset(rawDataset)
-    if (!dataset || kinds.has(dataset.kind)) return null
-    kinds.add(dataset.kind)
-    datasets.push(dataset)
-  }
-  return {
-    id: value.id,
-    code: value.code,
-    name: value.name,
-    version: value.version,
-    enabled: value.enabled,
-    timeZone: value.timeZone,
-    datasets,
-  }
-}
-
-export function parseMallWeatherExportProfilePage(payload: unknown): MallWeatherExportProfilePage | null {
-  const data = envelopeData(payload)
-  if (!data || !Array.isArray(data.items) || !isRecord(data.pagination) ||
-    !positiveInteger(data.pagination.pageSize) || Number(data.pagination.pageSize) > 100 ||
-    (data.pagination.nextCursor !== undefined && typeof data.pagination.nextCursor !== 'string')) return null
-  const items: MallWeatherExportProfile[] = []
-  const ids = new Set<number>()
-  for (const value of data.items) {
-    const profile = parseProfile(value)
-    if (!profile || ids.has(profile.id)) return null
-    ids.add(profile.id)
-    items.push(profile)
-  }
-  return {
-    items,
-    pagination: {
-      pageSize: Number(data.pagination.pageSize),
-      nextCursor: typeof data.pagination.nextCursor === 'string' ? data.pagination.nextCursor : '',
-    },
-  }
-}
-
-export function mallWeatherExportProfilesPath(cursor = '', enabled = true) {
-  const query = new URLSearchParams({ enabled: String(enabled), pageSize: '100' })
-  if (cursor.trim()) query.set('cursor', cursor.trim())
-  return `/v1/weather-export-profiles?${query.toString()}`
-}
-
-export function selectMallWeatherExportProfile(profiles: MallWeatherExportProfile[]): MallWeatherExportProfile | null {
-  const enabledProfiles = profiles.filter((profile) => profile.enabled)
-  if (enabledProfiles.length === 0) return null
-  return enabledProfiles.sort((left, right) => {
-    const leftKinds = new Set(left.datasets.map((dataset) => dataset.kind))
-    const rightKinds = new Set(right.datasets.map((dataset) => dataset.kind))
-    const leftForecast = Number(leftKinds.has('minutely') && leftKinds.has('hourly'))
-    const rightForecast = Number(rightKinds.has('minutely') && rightKinds.has('hourly'))
-    return rightForecast - leftForecast || rightKinds.size - leftKinds.size || left.code.localeCompare(right.code) || left.id - right.id
-  })[0] ?? null
-}
-
-export function selectMallWeatherCompleteExportProfile(profiles: MallWeatherExportProfile[]): MallWeatherExportProfile | null {
-  return profiles
-    .filter((profile) => profile.enabled && profile.code === 'mall_weather_full' && profileHasCompleteWeatherData(profile))
-    .sort((left, right) => right.version - left.version || left.id - right.id)[0] ?? null
-}
-
-function profileHasCompleteWeatherData(profile: MallWeatherExportProfile) {
-  const kinds = new Set(profile.datasets.map((dataset) => dataset.kind))
-  return completeExportDatasetKinds.every((kind) => kinds.has(kind))
-}
-
-export function mallWeatherDefaultExportProfileRequest(expectedVersion?: number): MallWeatherExportProfileSaveRequest {
-  const dataset = (kind: Exclude<MallWeatherExportDatasetKind, 'fetch_runs'>, sheetName: string, latest = true) => ({
-    kind,
-    sheetName,
-    ...(latest ? { latest: true as const } : {}),
-    freezeHeader: true as const,
-    autoFilter: true as const,
-  })
-  return {
-    code: 'mall_weather_full',
-    name: '商场天气完整导出',
-    ...(expectedVersion ? { expectedVersion } : {}),
-    enabled: true,
-    timeZone: 'Asia/Shanghai',
-    unitSystem: 'metric',
-    dateFormat: '2006-01-02',
-    dateTimeFormat: '2006-01-02 15:04:05',
-    fileNameTemplate: '商场天气_{{date:20060102_150405}}.xlsx',
-    filters: {},
-    datasets: [
-      dataset('malls', '商场', false),
-      dataset('realtime', '实时天气'),
-      dataset('minutely', '约1公里分钟降水'),
-      dataset('hourly', '小时预报'),
-      dataset('daily', '每日预报'),
-      dataset('alerts', '气象预警'),
-      dataset('life_indices', '生活指数'),
-    ],
-  }
-}
-
 export function mallWeatherExportCreateRequest(
-  profile: MallWeatherExportProfile,
   mallID: number,
-  now = new Date(),
 ): MallWeatherExportCreateRequest {
-  if (!positiveInteger(mallID) || !positiveInteger(profile.id) || !positiveInteger(profile.version) || !Number.isFinite(now.getTime())) {
+  if (!positiveInteger(mallID)) {
     throw new Error('invalid mall weather export request')
   }
-  const hour = 60 * 60 * 1_000
-  const start = new Date(Math.floor(now.getTime() / hour) * hour - 24 * hour)
-  const end = new Date(start.getTime() + 17 * 24 * hour)
   return {
-    profileId: profile.id,
-    expectedProfileVersion: profile.version,
-    filters: { mallIds: [mallID], start: start.toISOString(), end: end.toISOString() },
+    filters: { mallIds: [mallID] },
   }
 }
 
@@ -328,11 +172,27 @@ export function mallWeatherExportKey(seed?: string) {
 
 export function mallWeatherExportRequestMatches(
   request: MallWeatherExportCreateRequest,
-  profile: MallWeatherExportProfile,
   mallID: number,
 ) {
-  return request.profileId === profile.id && request.expectedProfileVersion === profile.version &&
-    request.filters.mallIds.length === 1 && request.filters.mallIds[0] === mallID
+  return storedExportRequestIsValid(request, mallID)
+}
+
+export function mallWeatherExportCreateResultMatchesRequest(
+  result: MallWeatherExportCreateResult,
+  request: MallWeatherExportCreateRequest,
+) {
+  if (!requestHasLegacyProfile(request)) return true
+  return result.profileId === request.profileId && result.profileVersion === request.expectedProfileVersion
+}
+
+export function mallWeatherExportCreateDisposition(
+  response: { ok: boolean; status: number; data: unknown },
+  request: MallWeatherExportCreateRequest,
+): MallWeatherExportCreateDisposition {
+  if (!response.ok || response.status !== 202) return { kind: 'uncertain' }
+  const result = parseMallWeatherExportCreateResult(response.data)
+  if (!result || !mallWeatherExportCreateResultMatchesRequest(result, request)) return { kind: 'uncertain' }
+  return { kind: 'accepted', result }
 }
 
 export function loadMallWeatherExportSession(
@@ -387,29 +247,59 @@ function parseStoredPendingCreate(value: unknown, mallID: number): MallWeatherEx
   if (!isRecord(value) || typeof value.key !== 'string' || !exportKeyPattern.test(value.key) ||
     !isRecord(value.body)) return null
   const body = value.body
-  if (!positiveInteger(body.profileId) || !positiveInteger(body.expectedProfileVersion) ||
-    !isRecord(body.filters) || !Array.isArray(body.filters.mallIds) ||
-    body.filters.mallIds.length !== 1 || body.filters.mallIds[0] !== mallID ||
-    !isRFC3339(body.filters.start) || !isRFC3339(body.filters.end)) return null
-  const request: MallWeatherExportCreateRequest = {
-    profileId: body.profileId,
-    expectedProfileVersion: body.expectedProfileVersion,
-    filters: {
-      mallIds: [mallID],
-      start: body.filters.start,
-      end: body.filters.end,
-    },
-  }
+  if (!isRecord(body.filters) || !Array.isArray(body.filters.mallIds) ||
+    body.filters.mallIds.length !== 1 || body.filters.mallIds[0] !== mallID) return null
+  const hasProfileID = hasOwn(body, 'profileId')
+  const hasProfileVersion = hasOwn(body, 'expectedProfileVersion')
+  const hasStart = hasOwn(body.filters, 'start')
+  const hasEnd = hasOwn(body.filters, 'end')
+  if (hasProfileID !== hasProfileVersion || hasStart !== hasEnd) return null
+  if (hasProfileID && (!positiveInteger(body.profileId) || !positiveInteger(body.expectedProfileVersion))) return null
+  if (hasStart && (!isRFC3339(body.filters.start) || !isRFC3339(body.filters.end))) return null
+  if (hasProfileID && !hasStart) return null
+  const request: MallWeatherExportCreateRequest = hasProfileID
+    ? {
+        profileId: body.profileId as number,
+        expectedProfileVersion: body.expectedProfileVersion as number,
+        filters: {
+          mallIds: [mallID],
+          start: body.filters.start as string,
+          end: body.filters.end as string,
+        },
+      }
+    : {
+        filters: hasStart
+          ? {
+              mallIds: [mallID],
+              start: body.filters.start as string,
+              end: body.filters.end as string,
+            }
+          : { mallIds: [mallID] },
+      }
   return storedExportRequestIsValid(request, mallID) ? { key: value.key, body: request } : null
 }
 
 function storedExportRequestIsValid(request: MallWeatherExportCreateRequest, mallID: number) {
-  if (!positiveInteger(request.profileId) || !positiveInteger(request.expectedProfileVersion) ||
-    request.filters.mallIds.length !== 1 || request.filters.mallIds[0] !== mallID ||
-    !isRFC3339(request.filters.start) || !isRFC3339(request.filters.end)) return false
+  if (!isRecord(request) || !isRecord(request.filters) || !Array.isArray(request.filters.mallIds) ||
+    request.filters.mallIds.length !== 1 || request.filters.mallIds[0] !== mallID) return false
+  const hasProfileID = hasOwn(request, 'profileId')
+  const hasProfileVersion = hasOwn(request, 'expectedProfileVersion')
+  if (hasProfileID !== hasProfileVersion) return false
+  if (hasProfileID && (!positiveInteger(request.profileId) || !positiveInteger(request.expectedProfileVersion))) return false
+  const hasStart = hasOwn(request.filters, 'start')
+  const hasEnd = hasOwn(request.filters, 'end')
+  if (hasStart !== hasEnd || hasProfileID && !hasStart) return false
+  if (!hasStart) return true
+  if (!isRFC3339(request.filters.start) || !isRFC3339(request.filters.end)) return false
   const start = Date.parse(request.filters.start)
   const end = Date.parse(request.filters.end)
   return end > start && end - start <= 366 * 24 * 60 * 60 * 1_000
+}
+
+function requestHasLegacyProfile(
+  request: MallWeatherExportCreateRequest,
+): request is MallWeatherExportLegacyCreateRequest {
+  return hasOwn(request, 'profileId') && hasOwn(request, 'expectedProfileVersion')
 }
 
 function mallWeatherExportSessionStorageKey(actorID: string, mallID: number) {
