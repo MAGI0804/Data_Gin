@@ -343,10 +343,16 @@ func parseDailyDate(raw json.RawMessage, path string, issuedAtUTC time.Time, zon
 		*warnings = append(*warnings, ParseWarning{Code: "INVALID_DATE", Path: path})
 		return time.Time{}, false
 	}
-	date, err := time.Parse("2006-01-02", strings.TrimSpace(value))
+	value = strings.TrimSpace(value)
+	date, err := time.Parse("2006-01-02", value)
 	if err != nil {
-		*warnings = append(*warnings, ParseWarning{Code: "INVALID_DATE", Path: path})
-		return time.Time{}, false
+		providerTime, providerErr := parseCaiyunISOTime(value)
+		if providerErr != nil {
+			*warnings = append(*warnings, ParseWarning{Code: "INVALID_DATE", Path: path})
+			return time.Time{}, false
+		}
+		localTime := providerTime.In(zone)
+		date = time.Date(localTime.Year(), localTime.Month(), localTime.Day(), 0, 0, 0, 0, time.UTC)
 	}
 	issuedLocal := issuedAtUTC.In(zone)
 	issuedDate := time.Date(issuedLocal.Year(), issuedLocal.Month(), issuedLocal.Day(), 0, 0, 0, 0, time.UTC)

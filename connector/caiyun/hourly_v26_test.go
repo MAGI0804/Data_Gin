@@ -10,9 +10,9 @@ import (
 
 func TestParseHourlyV26MergesUnionSortsAndUsesLastDuplicate(t *testing.T) {
 	issuedAt := time.Date(2026, 7, 22, 2, 3, 47, 0, time.UTC)
-	t0 := "2026-07-22T11:00:00+08:00"
-	t1 := "2026-07-22T12:00:00+08:00"
-	t2 := "2026-07-22T13:00:00+08:00"
+	t0 := "2026-07-22T11:00+08:00"
+	t1 := "2026-07-22T12:00+08:00"
+	t2 := "2026-07-22T13:00+08:00"
 	weather := hourlyWeatherWithPayload(t, issuedAt, map[string]interface{}{
 		"status": "ok", "description": " 未来天气稳定 ",
 		"temperature": []interface{}{

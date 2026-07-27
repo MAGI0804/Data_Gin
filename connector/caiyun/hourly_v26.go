@@ -4,7 +4,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"sort"
-	"strings"
 	"time"
 )
 
@@ -270,7 +269,7 @@ func parseHourlyTime(raw json.RawMessage, path string, issuedAtUTC time.Time, wa
 		*warnings = append(*warnings, ParseWarning{Code: "INVALID_DATETIME", Path: path})
 		return time.Time{}, false
 	}
-	forecastTime, err := time.Parse(time.RFC3339Nano, strings.TrimSpace(value))
+	forecastTime, err := parseCaiyunISOTime(value)
 	if err != nil {
 		*warnings = append(*warnings, ParseWarning{Code: "INVALID_DATETIME", Path: path})
 		return time.Time{}, false

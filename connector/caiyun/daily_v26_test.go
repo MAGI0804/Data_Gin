@@ -53,6 +53,23 @@ func TestParseDailyV26MergesCoreGroupsAndAstro(t *testing.T) {
 	}
 }
 
+func TestParseDailyV26AcceptsOfficialTimezoneDate(t *testing.T) {
+	issuedAt := time.Date(2026, 7, 22, 2, 3, 47, 0, time.UTC)
+	providerDate := "2026-07-22T00:00+08:00"
+	weather := dailyWeatherWithPayload(t, issuedAt, map[string]interface{}{
+		"status":      "ok",
+		"temperature": []interface{}{dailyMetricItem(providerDate, 34, 26, 30)},
+		"skycon":      []interface{}{map[string]interface{}{"date": providerDate, "value": "CLEAR_DAY"}},
+	})
+	bundle, err := ParseDailyV26(weather)
+	if err != nil {
+		t.Fatalf("ParseDailyV26() error=%v", err)
+	}
+	if len(bundle.Forecasts) != 1 || bundle.Forecasts[0].ForecastDateLocal.Format("2006-01-02") != "2026-07-22" {
+		t.Fatalf("forecasts=%+v", bundle.Forecasts)
+	}
+}
+
 func TestParseDailyV26ContainsBadDatesAndMetricValues(t *testing.T) {
 	issuedAt := time.Date(2026, 7, 22, 2, 3, 47, 0, time.UTC)
 	weather := dailyWeatherWithPayload(t, issuedAt, map[string]interface{}{
