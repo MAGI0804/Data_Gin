@@ -13,6 +13,7 @@ import {
   Inbox,
   ListChecks,
   LogOut,
+  Menu,
   RefreshCcw,
   Search,
   ScrollText,
@@ -706,6 +707,7 @@ function App() {
   const [activeNav, setActiveNav] = useState<NavKey>(navFromHash)
   const [expandedNavGroup, setExpandedNavGroup] = useState(() => navGroupFor(navFromHash())?.label ?? navGroups[0].label)
   const [navQuery, setNavQuery] = useState('')
+  const [mobileNavOpen, setMobileNavOpen] = useState(false)
   const [loading, setLoading] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
   const [result, setResult] = useState<ApiResult | null>(null)
@@ -882,6 +884,7 @@ function App() {
   function navigate(key: NavKey) {
     window.location.hash = key
     setActiveNav(key)
+    setMobileNavOpen(false)
   }
 
   function handleLogin(nextToken: string) {
@@ -970,10 +973,20 @@ function App() {
 
   return (
     <main className="ops-shell">
-      <aside className="ops-sidebar" aria-label="主导航">
+      <aside className={mobileNavOpen ? 'ops-sidebar mobile-open' : 'ops-sidebar'} aria-label="主导航">
         <div className="brand">
           <img className="brand-logo" src="/logo.jpg" alt="系统 Logo" />
         </div>
+        <button
+          className="mobile-nav-toggle"
+          type="button"
+          aria-expanded={mobileNavOpen}
+          aria-controls="primary-navigation"
+          onClick={() => setMobileNavOpen((open) => !open)}
+        >
+          {mobileNavOpen ? <X aria-hidden="true" /> : <Menu aria-hidden="true" />}
+          {mobileNavOpen ? '收起菜单' : '展开菜单'}
+        </button>
         <label className="nav-search">
           <span>查找页面</span>
           <div>
@@ -981,7 +994,7 @@ function App() {
             <input value={navQuery} onChange={(event) => setNavQuery(event.currentTarget.value)} placeholder="输入页面名称或用途" />
           </div>
         </label>
-        <nav className="module-nav">
+        <nav className="module-nav" id="primary-navigation">
           {navGroups.map((group) => {
             const query = navQuery.trim().toLowerCase()
             const items = group.items.filter((item) => !query || `${item.label} ${item.description}`.toLowerCase().includes(query))
@@ -1082,8 +1095,8 @@ function LoginScreen({ onLogin }: { onLogin: (token: string) => void }) {
           <h1 className="sr-only">登录</h1>
         </div>
         <form className="login-form" onSubmit={submit}>
-          <Field label="用户名" name="username" />
-          <Field label="密码" name="password" type="password" />
+          <Field label="用户名" name="username" autoComplete="username" />
+          <Field label="密码" name="password" type="password" autoComplete="current-password" />
           {error && <div className="login-error">{error}</div>}
           <button className="primary" type="submit">登录</button>
         </form>
@@ -3370,11 +3383,11 @@ function EmptyState({ text }: { text: string }) {
   return <div className="empty-state">{text}</div>
 }
 
-function Field({ label, name, defaultValue = '', type = 'text', value, onChange, required = false }: { label: string; name: string; defaultValue?: string; type?: string; value?: string; onChange?: (value: string) => void; required?: boolean }) {
+function Field({ label, name, defaultValue = '', type = 'text', value, onChange, required = false, autoComplete }: { label: string; name: string; defaultValue?: string; type?: string; value?: string; onChange?: (value: string) => void; required?: boolean; autoComplete?: string }) {
   return (
     <label>
       {label}
-      <input name={name} defaultValue={value === undefined ? defaultValue : undefined} value={value} type={type} required={required} onChange={onChange ? (event) => onChange(event.currentTarget.value) : undefined} />
+      <input name={name} defaultValue={value === undefined ? defaultValue : undefined} value={value} type={type} required={required} autoComplete={autoComplete} onChange={onChange ? (event) => onChange(event.currentTarget.value) : undefined} />
     </label>
   )
 }

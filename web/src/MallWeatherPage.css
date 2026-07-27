@@ -388,6 +388,7 @@
   position: sticky;
   top: 0;
   max-height: calc(100vh - 118px);
+  max-height: calc(100dvh - 118px);
   overflow-y: auto;
 }
 
@@ -554,7 +555,7 @@
 .mall-weather-chart-panel > svg {
   display: block;
   width: 100%;
-  height: 180px;
+  height: clamp(120px, 18vh, 180px);
   overflow: visible;
 }
 
@@ -589,7 +590,7 @@
 }
 
 .mall-weather-chart-data .data-table-wrap {
-  max-height: 280px;
+  max-height: clamp(180px, 32vh, 280px);
   margin-top: 8px;
 }
 
@@ -645,6 +646,26 @@
   }
 }
 
+@media (max-width: 1024px) {
+  .mall-weather-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .mall-weather-malls {
+    position: static;
+    max-height: 320px;
+  }
+
+  .mall-weather-toolbar,
+  .mall-weather-create-form {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .mall-weather-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
 @media (max-width: 840px) {
   .mall-weather-toolbar,
   .mall-weather-refresh-form,
@@ -654,7 +675,6 @@
   .mall-weather-layout,
   .mall-weather-overview-grid,
   .mall-weather-meta,
-  .mall-weather-metrics,
   .mall-weather-steps,
   .mall-weather-candidates {
     grid-template-columns: 1fr;
@@ -692,10 +712,20 @@
   }
 
   .mall-weather-summary-heading,
+  .mall-weather-section-title,
   .mall-weather-export-progress > div,
   .mall-weather-export-panel .mall-weather-section-title,
   .mall-weather-alerts article > div {
     align-items: stretch;
     flex-direction: column;
+  }
+}
+
+@media (max-width: 480px) {
+  .mall-weather-toolbar,
+  .mall-weather-create-form,
+  .mall-weather-metrics,
+  .mall-weather-push-summary {
+    grid-template-columns: 1fr;
   }
 }
