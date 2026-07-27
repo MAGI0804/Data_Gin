@@ -78,6 +78,18 @@ export type MallWeatherGeocodeCandidates = {
   items: MallWeatherGeocodeCandidate[]
 }
 
+export type MallWeatherGeocodeConfirmRequest = {
+  candidateId?: number
+  manualCoordinate?: {
+    longitude: number
+    latitude: number
+    coordinateSystem: 'GCJ02'
+    reason: string
+  }
+  expectedMallVersion: number
+  weatherEnabled: true
+}
+
 export type MallWeatherSheetPushOption = {
   destinationId: number
   name: string
@@ -372,7 +384,8 @@ function mallWeatherMall(value: unknown): MallWeatherMall | null {
   const hasLongitude = value.longitude !== undefined
   const hasLatitude = value.latitude !== undefined
   if (hasLongitude !== hasLatitude || hasLongitude && (!validCoordinateValue(value.longitude, -180, 180) ||
-    !validCoordinateValue(value.latitude, -90, 90) || typeof value.coordinateSystem !== 'string' || !value.coordinateSystem.trim())) return null
+    !validCoordinateValue(value.latitude, -90, 90) || typeof value.coordinateSystem !== 'string' ||
+    value.coordinateSystem.trim().toUpperCase() !== 'GCJ02')) return null
   const coverageRadiusM = numberValue(value, 'coverageRadiusM')
   if (coverageRadiusM === undefined || !Number.isSafeInteger(coverageRadiusM) || coverageRadiusM < 100 || coverageRadiusM > 10000) return null
   return {
@@ -385,7 +398,7 @@ function mallWeatherMall(value: unknown): MallWeatherMall | null {
     address: textValue(value, 'address'),
     ...(typeof value.longitude === 'number' ? { longitude: value.longitude } : {}),
     ...(typeof value.latitude === 'number' ? { latitude: value.latitude } : {}),
-    coordinateSystem: textValue(value, 'coordinateSystem'),
+    coordinateSystem: hasLongitude ? 'GCJ02' : '',
     geocodeStatus: textValue(value, 'geocodeStatus'),
     weatherEnabled: value.weatherEnabled === true,
     detailProfile: textValue(value, 'detailProfile'),
@@ -625,7 +638,7 @@ export function mallWeatherCreateKey(seed?: string) {
 
 export function mallWeatherMallReady(mall: MallWeatherMall) {
   return mall.status.toLowerCase() === 'active' && mall.geocodeStatus.toLowerCase() === 'confirmed' && mall.weatherEnabled &&
-    mall.longitude !== undefined && mall.latitude !== undefined && Boolean(mall.coordinateSystem.trim())
+    mall.longitude !== undefined && mall.latitude !== undefined && mall.coordinateSystem.trim().toUpperCase() === 'GCJ02'
 }
 
 export function mergeMallWeatherMalls(current: MallWeatherMall[], incoming: MallWeatherMall[]) {
@@ -689,6 +702,48 @@ export function mallWeatherGeocodeConfirmPath(mallID: number) {
 
 export function mallWeatherGeocodeRunTerminal(status: string) {
   return ['SUCCEEDED', 'FAILED', 'STALE', 'NO_CANDIDATES', 'AUTO_CONFIRMED', 'REVIEW_REQUIRED'].includes(status.toUpperCase())
+}
+
+export function mallWeatherCandidateConfirmationRequest(
+  candidate: MallWeatherGeocodeCandidate,
+  longitudeInput: string,
+  latitudeInput: string,
+  reasonInput: string,
+  expectedMallVersion: number,
+): MallWeatherGeocodeConfirmRequest {
+  if (!positiveSafeInteger(candidate.id) || candidate.coordinateSystem.trim().toUpperCase() !== 'GCJ02' ||
+    !positiveSafeInteger(expectedMallVersion)) throw new Error('invalid geocode candidate')
+  const coordinate = mallWeatherCoordinateInput(longitudeInput, latitudeInput, reasonInput)
+  if (coordinate.longitude === candidate.longitude && coordinate.latitude === candidate.latitude) {
+    return { candidateId: candidate.id, expectedMallVersion, weatherEnabled: true }
+  }
+  return { manualCoordinate: coordinate, expectedMallVersion, weatherEnabled: true }
+}
+
+export function mallWeatherCoordinateAdjustmentRequest(
+  mall: MallWeatherMall,
+  longitudeInput: string,
+  latitudeInput: string,
+  reasonInput: string,
+): MallWeatherGeocodeConfirmRequest {
+  if (!positiveSafeInteger(mall.version) || mall.longitude === undefined || mall.latitude === undefined ||
+    mall.coordinateSystem.trim().toUpperCase() !== 'GCJ02') throw new Error('invalid mall coordinate')
+  return {
+    manualCoordinate: mallWeatherCoordinateInput(longitudeInput, latitudeInput, reasonInput),
+    expectedMallVersion: mall.version,
+    weatherEnabled: true,
+  }
+}
+
+function mallWeatherCoordinateInput(longitudeInput: string, latitudeInput: string, reasonInput: string) {
+  const longitude = Number(longitudeInput.trim())
+  const latitude = Number(latitudeInput.trim())
+  const reason = reasonInput.trim()
+  if (!longitudeInput.trim() || !latitudeInput.trim() || !validCoordinateValue(longitude, -180, 180) ||
+    !validCoordinateValue(latitude, -90, 90) || !reason || reason.length > 500 || reason.includes('\n') || reason.includes('\r')) {
+    throw new Error('invalid coordinate adjustment')
+  }
+  return { longitude, latitude, coordinateSystem: 'GCJ02' as const, reason }
 }
 
 export function parseMallWeatherSheetPushOptions(payload: unknown): MallWeatherSheetPushOption[] | null {

@@ -15,6 +15,8 @@ import {
   mallWeatherFreshnessLabel,
   mallWeatherMetric,
   mallWeatherGeocodeCandidatesPath,
+  mallWeatherCandidateConfirmationRequest,
+  mallWeatherCoordinateAdjustmentRequest,
   mallWeatherGeocodeConfirmPath,
   mallWeatherGeocodeRunTerminal,
   mallWeatherGeocodeTriggerPath,
@@ -280,6 +282,7 @@ export function MallWeatherPage({ actorID, client }: { actorID: string | null; c
           />}
           {!showCreate && selectedMallReady && selectedMall && (actorID
             ? <>
+              <MallCoordinateAdjustmentPanel mall={selectedMall} client={client} onMallUpdated={handleMallUpdated} key={`coordinate-${selectedMall.id}:${selectedMall.version}`} />
               <ManualRefreshPanel actorID={actorID} mall={selectedMall} client={client} key={`refresh-${actorID}:${selectedMall.id}`} />
               <MallWeatherSheetPushPanel actorID={actorID} mall={selectedMall} client={client} key={`push-${actorID}:${selectedMall.id}`} />
             </>
@@ -418,9 +421,10 @@ function MallOnboardingPanel({ mall, client, onMallUpdated, onReloadMall }: {
   const [candidateState, setCandidateState] = useState<LoadState>('idle')
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState('')
-  const [longitude, setLongitude] = useState(mall.longitude === undefined ? '' : String(mall.longitude))
-  const [latitude, setLatitude] = useState(mall.latitude === undefined ? '' : String(mall.latitude))
-  const [reason, setReason] = useState('管理端人工确认商场坐标')
+  const [selectedCandidateID, setSelectedCandidateID] = useState(0)
+  const [longitude, setLongitude] = useState('')
+  const [latitude, setLatitude] = useState('')
+  const [reason, setReason] = useState('基于高德候选人工调整商场坐标')
   const candidateRequestSequence = useRef(0)
   const candidateAbort = useRef<AbortController | null>(null)
   const cancelCandidateRequests = useCallback(() => {
@@ -449,6 +453,10 @@ function MallOnboardingPanel({ mall, client, onMallUpdated, onReloadMall }: {
       return
     }
     setCandidates(parsed)
+    const defaultCandidate = parsed.items.find((candidate) => candidate.selected) || parsed.items[0]
+    setSelectedCandidateID(defaultCandidate?.id || 0)
+    setLongitude(defaultCandidate ? String(defaultCandidate.longitude) : '')
+    setLatitude(defaultCandidate ? String(defaultCandidate.latitude) : '')
     setCandidateState('success')
     if (parsed.runStatus === 'AUTO_CONFIRMED') await onReloadMall(mall.id)
   }, [client, mall.id, onReloadMall])
@@ -480,20 +488,29 @@ function MallOnboardingPanel({ mall, client, onMallUpdated, onReloadMall }: {
     await loadCandidates()
   }
 
-  async function confirmCoordinate(candidateID?: number) {
+  function selectCandidate(candidateID: number) {
+    const candidate = candidates?.items.find((item) => item.id === candidateID)
+    if (!candidate) return
+    setSelectedCandidateID(candidate.id)
+    setLongitude(String(candidate.longitude))
+    setLatitude(String(candidate.latitude))
+    setReason('基于高德候选人工调整商场坐标')
+    setError('')
+  }
+
+  async function confirmCoordinate() {
     const expectedMallVersion = candidates?.mallVersion || mall.version
+    const selectedCandidate = candidates?.items.find((candidate) => candidate.id === selectedCandidateID)
+    if (!selectedCandidate) {
+      setError('请先选择一个高德解析候选，再确认或修改坐标。')
+      return
+    }
     let body: unknown
-    if (candidateID) {
-      body = { candidateId: candidateID, expectedMallVersion, weatherEnabled: true }
-    } else {
-      const nextLongitude = Number(longitude)
-      const nextLatitude = Number(latitude)
-      const nextReason = reason.trim()
-      if (!longitude.trim() || !latitude.trim() || !Number.isFinite(nextLongitude) || nextLongitude < -180 || nextLongitude > 180 || !Number.isFinite(nextLatitude) || nextLatitude < -90 || nextLatitude > 90 || !nextReason || nextReason.length > 500) {
-        setError('请填写有效的经纬度和 500 字以内的确认原因。')
-        return
-      }
-      body = { manualCoordinate: { longitude: nextLongitude, latitude: nextLatitude, coordinateSystem: 'GCJ02', reason: nextReason }, expectedMallVersion, weatherEnabled: true }
+    try {
+      body = mallWeatherCandidateConfirmationRequest(selectedCandidate, longitude, latitude, reason, expectedMallVersion)
+    } catch {
+      setError('请填写有效的高德 GCJ-02 经纬度和 500 字以内的单行修改原因。')
+      return
     }
     setSubmitting(true)
     setError('')
@@ -519,12 +536,12 @@ function MallOnboardingPanel({ mall, client, onMallUpdated, onReloadMall }: {
       </div>
       <ol className="mall-weather-steps" aria-label="商场天气接入步骤">
         <li className="done"><strong>1. 商场已创建</strong><span>{mall.province} {mall.city} {mall.district} {mall.address}</span></li>
-        <li className={mall.geocodeStatus.toLowerCase() === 'confirmed' ? 'done' : 'current'} aria-current={mall.geocodeStatus.toLowerCase() === 'confirmed' ? undefined : 'step'}><strong>2. 确认坐标</strong><span>候选解析或人工录入 GCJ02 坐标</span></li>
+        <li className={mall.geocodeStatus.toLowerCase() === 'confirmed' ? 'done' : 'current'} aria-current={mall.geocodeStatus.toLowerCase() === 'confirmed' ? undefined : 'step'}><strong>2. 确认坐标</strong><span>先读取高德 GCJ-02 候选，再确认或修改</span></li>
         <li className={mall.geocodeStatus.toLowerCase() === 'confirmed' && !mall.weatherEnabled ? 'current' : ''} aria-current={mall.geocodeStatus.toLowerCase() === 'confirmed' && !mall.weatherEnabled ? 'step' : undefined}><strong>3. 启用天气</strong><span>确认坐标时同步启用并创建首次采集任务</span></li>
       </ol>
 
       <div className="mall-weather-geocode-actions">
-        <div><strong>自动解析候选</strong><span>任务状态：{candidates?.runStatus || mall.geocodeStatus || '等待处理'}</span></div>
+        <div><strong>高德地址解析</strong><span>任务状态：{candidates?.runStatus || mall.geocodeStatus || '等待处理'} · 输出坐标系 GCJ-02</span></div>
         <div className="mall-weather-form-actions">
           <button type="button" onClick={() => void loadCandidates()} disabled={candidateState === 'loading' || submitting}>{candidateState === 'loading' ? '加载中' : '刷新候选'}</button>
           <button type="button" onClick={() => void triggerGeocode()} disabled={submitting || candidateState === 'loading'}>{submitting ? '处理中' : '重新解析地址'}</button>
@@ -534,19 +551,73 @@ function MallOnboardingPanel({ mall, client, onMallUpdated, onReloadMall }: {
         {candidates.items.map((candidate) => <article key={candidate.id}>
           <div><strong>候选 {candidate.candidateNo}</strong><span>置信度 {candidate.confidenceScore.toFixed(0)}% · {candidate.level || '层级未知'}</span></div>
           <p>{candidate.formattedAddress}</p>
-          <small>{candidate.longitude.toFixed(6)}, {candidate.latitude.toFixed(6)} {candidate.coordinateSystem}</small>
-          <button className="primary" type="button" onClick={() => void confirmCoordinate(candidate.id)} disabled={submitting || candidateState === 'loading'}>选用并启用天气</button>
+          <small>{candidate.longitude.toFixed(6)}, {candidate.latitude.toFixed(6)} · 高德 {candidate.coordinateSystem}</small>
+          <button className={candidate.id === selectedCandidateID ? 'primary' : ''} type="button" onClick={() => selectCandidate(candidate.id)} disabled={submitting || candidateState === 'loading'}>{candidate.id === selectedCandidateID ? '已选择，可在下方修改' : '选择此高德坐标'}</button>
         </article>)}
       </div>}
-      {candidateState === 'success' && candidates?.items.length === 0 && <p className="mall-weather-action-message">暂未产生候选；后台任务会继续处理，也可直接使用下方人工坐标。</p>}
+      {candidateState === 'success' && candidates?.items.length === 0 && <p className="mall-weather-action-message">高德暂未返回候选。请确认地址完整、AMAP_WEB_SERVICE_KEY 已配置且天气 Worker 已启用，然后重新解析地址。</p>}
 
-      <form className="mall-weather-manual-coordinate" onSubmit={(event) => { event.preventDefault(); void confirmCoordinate() }}>
-        <div className="mall-weather-section-title"><div><strong>人工确认坐标</strong><span>自动解析不可用时的高可用兜底，坐标系固定为 GCJ02</span></div></div>
-        <label><span>经度</span><input name="longitude" inputMode="decimal" value={longitude} onChange={(event) => setLongitude(event.currentTarget.value)} placeholder="121.473701" required disabled={submitting || candidateState === 'loading'} /></label>
-        <label><span>纬度</span><input name="latitude" inputMode="decimal" value={latitude} onChange={(event) => setLatitude(event.currentTarget.value)} placeholder="31.230416" required disabled={submitting || candidateState === 'loading'} /></label>
-        <label className="mall-weather-form-wide"><span>确认原因</span><input name="reason" value={reason} onChange={(event) => setReason(event.currentTarget.value)} maxLength={500} disabled={submitting || candidateState === 'loading'} /></label>
-        <button className="primary mall-weather-form-wide" type="submit" disabled={submitting || candidateState === 'loading'}>{submitting ? '确认中' : '确认坐标并启用天气'}</button>
-      </form>
+      {selectedCandidateID > 0 && <form className="mall-weather-manual-coordinate" onSubmit={(event) => { event.preventDefault(); void confirmCoordinate() }}>
+        <div className="mall-weather-section-title"><div><strong>确认或修改高德坐标</strong><span>默认带入所选高德候选；如位置有偏差，可修改后再确认</span></div><span>GCJ-02</span></div>
+        <label><span>高德经度</span><input name="longitude" inputMode="decimal" value={longitude} onChange={(event) => setLongitude(event.currentTarget.value)} required disabled={submitting || candidateState === 'loading'} /></label>
+        <label><span>高德纬度</span><input name="latitude" inputMode="decimal" value={latitude} onChange={(event) => setLatitude(event.currentTarget.value)} required disabled={submitting || candidateState === 'loading'} /></label>
+        <label className="mall-weather-form-wide"><span>修改原因</span><input name="reason" value={reason} onChange={(event) => setReason(event.currentTarget.value)} maxLength={500} disabled={submitting || candidateState === 'loading'} /></label>
+        <button className="primary mall-weather-form-wide" type="submit" disabled={submitting || candidateState === 'loading'}>{submitting ? '确认中' : '确认高德坐标并启用天气'}</button>
+      </form>}
+      {error && <p className="mall-weather-action-message error" role="alert">{error}</p>}
+    </section>
+  )
+}
+
+function MallCoordinateAdjustmentPanel({ mall, client, onMallUpdated }: {
+  mall: MallWeatherMall
+  client: MallWeatherApiClient
+  onMallUpdated: (mall: MallWeatherMall) => void
+}) {
+  const [editing, setEditing] = useState(false)
+  const [longitude, setLongitude] = useState(String(mall.longitude))
+  const [latitude, setLatitude] = useState(String(mall.latitude))
+  const [reason, setReason] = useState('人工调整高德商场坐标')
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError] = useState('')
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    let body: unknown
+    try {
+      body = mallWeatherCoordinateAdjustmentRequest(mall, longitude, latitude, reason)
+    } catch {
+      setError('请填写有效的高德 GCJ-02 经纬度和 500 字以内的单行修改原因。')
+      return
+    }
+    setSubmitting(true)
+    setError('')
+    const response = await client(mallWeatherGeocodeConfirmPath(mall.id), { method: 'POST', body, showResult: false, silentLoading: true })
+    setSubmitting(false)
+    if (!response.ok) {
+      setError(weatherActionError(response.status, '高德坐标修改失败', '当前账号缺少 mall.geocode.confirm 权限'))
+      return
+    }
+    const updated = parseMallWeatherMall(response.data)
+    if (!updated) {
+      setError('坐标已提交，但响应格式不正确；请刷新商场列表确认。')
+      return
+    }
+    onMallUpdated(updated)
+  }
+
+  return (
+    <section className="workbench-panel mall-weather-onboarding-panel">
+      <div className="mall-weather-section-title">
+        <div><strong>高德商场坐标</strong><span>{Number(mall.longitude).toFixed(6)}, {Number(mall.latitude).toFixed(6)} · GCJ-02</span></div>
+        <button type="button" onClick={() => { setEditing((current) => !current); setError('') }} disabled={submitting}>{editing ? '取消修改' : '修改坐标'}</button>
+      </div>
+      {editing && <form className="mall-weather-manual-coordinate" onSubmit={submit}>
+        <label><span>高德经度</span><input name="longitude" inputMode="decimal" value={longitude} onChange={(event) => setLongitude(event.currentTarget.value)} required disabled={submitting} /></label>
+        <label><span>高德纬度</span><input name="latitude" inputMode="decimal" value={latitude} onChange={(event) => setLatitude(event.currentTarget.value)} required disabled={submitting} /></label>
+        <label className="mall-weather-form-wide"><span>修改原因</span><input name="reason" value={reason} onChange={(event) => setReason(event.currentTarget.value)} maxLength={500} required disabled={submitting} /></label>
+        <button className="primary mall-weather-form-wide" type="submit" disabled={submitting}>{submitting ? '保存中' : '保存高德坐标'}</button>
+      </form>}
       {error && <p className="mall-weather-action-message error" role="alert">{error}</p>}
     </section>
   )

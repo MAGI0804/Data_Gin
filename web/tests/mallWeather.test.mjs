@@ -18,6 +18,8 @@ import {
   mallWeatherOverviewPath,
   mallWeatherGeocodeCandidatesPath,
   mallWeatherGeocodeConfirmPath,
+  mallWeatherCandidateConfirmationRequest,
+  mallWeatherCoordinateAdjustmentRequest,
   mallWeatherGeocodeRunTerminal,
   mallWeatherGeocodeTriggerPath,
   mallWeatherMallReady,
@@ -162,6 +164,14 @@ test('parses mall creation and geocode candidate contracts', () => {
   assert.equal(candidates?.mallVersion, 2)
   assert.equal(parseMallWeatherGeocodeCandidates({ code: 0, data: { mallId: 9, mallVersion: 2, items: [{ id: 1, candidateNo: 1, formattedAddress: 'bad', longitude: 200, latitude: 31, coordinateSystem: 'GCJ02', confidenceScore: 1 }] } }), null)
   assert.equal(parseMallWeatherGeocodeCandidates({ code: 0, data: { mallId: 9, mallVersion: 2, items: [{ id: 1, candidateNo: 1, formattedAddress: 'bad', longitude: 121, latitude: 31, coordinateSystem: 'WGS84', confidenceScore: 80 }] } }), null)
+  assert.deepEqual(mallWeatherCandidateConfirmationRequest(candidates.items[0], '121.5', '31.2', ' unchanged ', 2), {
+    candidateId: 11, expectedMallVersion: 2, weatherEnabled: true,
+  })
+  assert.deepEqual(mallWeatherCandidateConfirmationRequest(candidates.items[0], '121.5001', '31.2001', ' 调整到主入口 ', 2), {
+    manualCoordinate: { longitude: 121.5001, latitude: 31.2001, coordinateSystem: 'GCJ02', reason: '调整到主入口' },
+    expectedMallVersion: 2, weatherEnabled: true,
+  })
+  assert.throws(() => mallWeatherCandidateConfirmationRequest(candidates.items[0], '', '31.2', 'bad', 2), /invalid coordinate adjustment/)
   for (const status of ['NO_CANDIDATES', 'AUTO_CONFIRMED', 'REVIEW_REQUIRED', 'FAILED', 'STALE']) assert.equal(mallWeatherGeocodeRunTerminal(status), true)
   assert.equal(mallWeatherGeocodeRunTerminal('RUNNING'), false)
 })
@@ -175,7 +185,13 @@ test('recognizes only active confirmed weather-enabled malls as queryable', () =
   assert.equal(mallWeatherMallReady(mall), true)
   assert.equal(mallWeatherMallReady({ ...mall, weatherEnabled: false }), false)
   assert.equal(mallWeatherMallReady({ ...mall, longitude: undefined }), false)
+  assert.equal(mallWeatherMallReady({ ...mall, coordinateSystem: 'WGS84' }), false)
   assert.equal(parseMallWeatherMallList({ code: 0, data: { items: [{ ...mall, weatherProvider: undefined }] } }), null)
+  assert.equal(parseMallWeatherMallList({ code: 0, data: { items: [{ ...mall, coordinateSystem: 'WGS84' }] } }), null)
+  assert.deepEqual(mallWeatherCoordinateAdjustmentRequest(mall, '121.4701', '31.2301', ' 调整高德坐标 '), {
+    manualCoordinate: { longitude: 121.4701, latitude: 31.2301, coordinateSystem: 'GCJ02', reason: '调整高德坐标' },
+    expectedMallVersion: 1, weatherEnabled: true,
+  })
   const newer = { ...mall, version: 2, weatherEnabled: true }
   const older = { ...mall, version: 1, weatherEnabled: false }
   assert.deepEqual(mergeMallWeatherMalls([newer], [older]), [newer])
