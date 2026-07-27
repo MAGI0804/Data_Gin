@@ -32,7 +32,7 @@ func TestMallWeatherRefreshServiceNormalizesAndAuthorizesForce(t *testing.T) {
 		t.Fatalf("Refresh() result=%+v error=%v", result, err)
 	}
 	if len(permissions.requested) != 2 || store.command.Reason != "operator review" || !store.command.Force ||
-		len(store.command.Kinds) != 2 || store.command.Kinds[0] != MallWeatherRefreshKindV26Full ||
+		len(store.command.Kinds) != 1 || store.command.Kinds[0] != MallWeatherRefreshKindV26Full ||
 		len(store.command.KeyHash) != 64 || len(store.command.RequestHash) != 64 || len(store.command.TaskWindow) != 55 {
 		t.Fatalf("permissions=%v command=%+v", permissions.requested, store.command)
 	}
@@ -63,7 +63,7 @@ func TestMallWeatherRefreshKindFreshChecksAllV26PointersAndV3Source(t *testing.T
 	if fresh, err := mallWeatherRefreshKindFresh(context.Background(), latest, 7, MallWeatherRefreshKindV26Full, now); err != nil || !fresh {
 		t.Fatalf("v26 fresh=%v error=%v", fresh, err)
 	}
-	if fresh, err := mallWeatherRefreshKindFresh(context.Background(), latest, 7, MallWeatherRefreshKindV3LifeIndex, now); err != nil || !fresh || latest.lifeSource != "v3_lifeindex" {
+	if fresh, err := mallWeatherRefreshKindFresh(context.Background(), latest, 7, MallWeatherRefreshKindV3LifeIndex, now); err != nil || !fresh || latest.lifeSource != "v26_daily" {
 		t.Fatalf("v3 fresh=%v source=%q error=%v", fresh, latest.lifeSource, err)
 	}
 	latest.byKind[model.MallWeatherDataKindDaily] = &model.MallWeatherLatest{FetchedAtUTC: now.Add(-13 * time.Hour), FreshnessStatus: model.MallWeatherFreshnessFresh}
@@ -79,7 +79,7 @@ func TestNewMallWeatherManualRefreshOutboxContainsOnlyMinimalPayload(t *testing.
 		t.Fatalf("newMallWeatherManualRefreshOutbox() error=%v", err)
 	}
 	if row.TaskType != "mall:weather:manual" || row.QueueName != "weather" ||
-		string(row.PayloadJSON) != `{"mall_id":7,"task_window":"manual:0123456789abcdef0123456789abcdef0123456789abcdef","endpoint_kind":"v3_life_index"}` {
+		string(row.PayloadJSON) != `{"mall_id":7,"task_window":"manual:0123456789abcdef0123456789abcdef0123456789abcdef","endpoint_kind":"v26_weather"}` {
 		t.Fatalf("outbox=%+v", row)
 	}
 }

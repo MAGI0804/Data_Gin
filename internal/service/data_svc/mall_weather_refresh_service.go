@@ -154,8 +154,9 @@ func normalizeMallWeatherRefreshRequest(request requestbody.MallWeatherRefreshRe
 		if kind != MallWeatherRefreshKindV26Full && kind != MallWeatherRefreshKindV3LifeIndex {
 			return request, fmt.Errorf("%w: unsupported refresh kind", ErrMallInvalidInput)
 		}
+		kind = MallWeatherRefreshKindV26Full
 		if _, exists := seen[kind]; exists {
-			return request, fmt.Errorf("%w: duplicate refresh kind", ErrMallInvalidInput)
+			continue
 		}
 		seen[kind] = struct{}{}
 		kinds = append(kinds, kind)
@@ -271,7 +272,7 @@ func mallWeatherRefreshKindFresh(ctx context.Context, latest mallWeatherRefreshL
 		return false, fmt.Errorf("mall weather refresh: invalid freshness request")
 	}
 	if kind == MallWeatherRefreshKindV3LifeIndex {
-		row, err := latest.FindCurrentLatestLifeSource(ctx, mallID, weatherdomain.SourceAPIV3LifeIndex)
+		row, err := latest.FindCurrentLatestLifeSource(ctx, mallID, weatherdomain.SourceAPIV26Daily)
 		return mallWeatherRefreshPointerFresh(model.MallWeatherDataKindLife, row, now, err)
 	}
 	if kind != MallWeatherRefreshKindV26Full {
@@ -316,7 +317,7 @@ func newMallWeatherManualRefreshOutbox(mallID uint, taskWindow, kind string, ava
 	case MallWeatherRefreshKindV26Full:
 		endpointKind = caiyun.EndpointWeatherV26
 	case MallWeatherRefreshKindV3LifeIndex:
-		endpointKind = caiyun.EndpointLifeIndexV3
+		endpointKind = caiyun.EndpointWeatherV26
 	default:
 		return model.AsyncJobOutbox{}, fmt.Errorf("mall weather refresh: unsupported outbox kind")
 	}

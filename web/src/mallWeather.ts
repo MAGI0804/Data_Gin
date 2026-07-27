@@ -1260,11 +1260,11 @@ export function mallWeatherRefreshPath(mallID: number) {
 }
 
 export function mallWeatherRefreshRequest(kinds: MallWeatherRefreshKind[], reason: string): MallWeatherRefreshRequest {
-  const normalizedReason = reason.trim()
-  const normalizedKinds = Array.from(new Set(kinds)).sort() as MallWeatherRefreshKind[]
-  if (normalizedKinds.length === 0 || normalizedKinds.some((kind) => kind !== 'V26_FULL' && kind !== 'V3_LIFE_INDEX')) {
-    throw new Error('invalid refresh kinds')
-  }
+	const normalizedReason = reason.trim()
+	if (kinds.length === 0 || kinds.some((kind) => kind !== 'V26_FULL' && kind !== 'V3_LIFE_INDEX')) {
+		throw new Error('invalid refresh kinds')
+	}
+	const normalizedKinds: MallWeatherRefreshKind[] = ['V26_FULL']
   if (!normalizedReason || Array.from(normalizedReason).length > 500 || /[\0\r\n]/.test(normalizedReason)) {
     throw new Error('invalid refresh reason')
   }

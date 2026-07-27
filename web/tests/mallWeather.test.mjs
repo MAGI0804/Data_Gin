@@ -450,8 +450,8 @@ test('loads every minutely page with one fixed 120-minute window and snapshot ti
 
 test('builds validated manual refresh requests and idempotency keys', () => {
   assert.equal(mallWeatherRefreshPath(7), '/v1/malls/7/weather-refresh')
-  assert.deepEqual(mallWeatherRefreshRequest(['V3_LIFE_INDEX', 'V26_FULL', 'V26_FULL'], ' 管理端补采 '), {
-    kinds: ['V26_FULL', 'V3_LIFE_INDEX'],
+	assert.deepEqual(mallWeatherRefreshRequest(['V3_LIFE_INDEX', 'V26_FULL', 'V26_FULL'], ' 管理端补采 '), {
+		kinds: ['V26_FULL'],
     force: false,
     reason: '管理端补采',
   })
@@ -468,9 +468,9 @@ test('persists pending refreshes by actor and mall without cross-account leakage
     key: mallWeatherRefreshKey('12345678-abcd'),
     body: mallWeatherRefreshRequest(['V26_FULL'], '网络结果未知'),
   }
-  const otherPending = {
-    key: mallWeatherRefreshKey('87654321-dcba'),
-    body: mallWeatherRefreshRequest(['V3_LIFE_INDEX'], '另一账号补采'),
+	const otherPending = {
+		key: mallWeatherRefreshKey('87654321-dcba'),
+		body: mallWeatherRefreshRequest(['V3_LIFE_INDEX'], '另一账号补采'),
   }
 
   saveMallWeatherPendingRefresh('42', 7, pending, storage)
@@ -493,12 +493,9 @@ test('parses queued and fresh-skipped refresh results without over-reporting que
     force: false,
     reason: '管理端补采',
     requestedBy: 42,
-    kinds: [
-      { kind: 'V26_FULL', status: 'QUEUED', outboxJobId: 41 },
-      { kind: 'V3_LIFE_INDEX', status: 'SKIPPED_FRESH' },
-    ],
+    kinds: [{ kind: 'V26_FULL', status: 'QUEUED', outboxJobId: 41 }],
   } })
-  assert.equal(mallWeatherRefreshResultMessage(result), '1 个采集任务已入队，1 项数据仍新鲜并已跳过。')
+  assert.equal(mallWeatherRefreshResultMessage(result), '1 个采集任务已进入异步队列；稍后重新加载天气即可查看结果。')
 
   const skipped = parseMallWeatherRefreshResult({ code: 0, data: {
     jobId: 32,
@@ -539,10 +536,7 @@ test('keeps the original idempotent request for every uncertain refresh outcome'
     force: false,
     reason: '管理端补采',
     requestedBy: 42,
-    kinds: [
-      { kind: 'V26_FULL', status: 'QUEUED', outboxJobId: 41 },
-      { kind: 'V3_LIFE_INDEX', status: 'SKIPPED_FRESH' },
-    ],
+    kinds: [{ kind: 'V26_FULL', status: 'QUEUED', outboxJobId: 41 }],
   } }
 
   assert.equal(mallWeatherRefreshDisposition({ ok: true, status: 202, data: acceptedData }, '42', 7, request).kind, 'accepted')
@@ -561,7 +555,7 @@ test('keeps the original idempotent request for every uncertain refresh outcome'
     force: false,
     reason: '管理端补采',
     requestedBy: 42,
-    kinds: [{ kind: 'V26_FULL', status: 'QUEUED', outboxJobId: 41 }],
+    kinds: [{ kind: 'V3_LIFE_INDEX', status: 'SKIPPED_FRESH' }],
   } } }, '42', 7, request).kind, 'uncertain')
 })
 

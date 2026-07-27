@@ -55,7 +55,6 @@ func (processError *MallWeatherProcessError) Unwrap() error {
 
 type mallWeatherProvider interface {
 	FetchWeather(ctx context.Context, input caiyun.WeatherRequest) (*caiyun.ProviderResponse, error)
-	FetchLifeIndices(ctx context.Context, input caiyun.LifeIndexRequest) (*caiyun.ProviderResponse, error)
 }
 
 type mallWeatherTaskStore interface {
@@ -333,7 +332,8 @@ func (processor *MallWeatherProcessor) taskStart(taskType string, payload job.Ma
 		start.RequestedDailySteps = processor.config.FullDailySteps
 	case job.TypeMallWeatherLifeIndex:
 		start.TaskKind = "lifeindex"
-		start.RequestedDailySteps = processor.config.LifeIndexDays
+		start.RequestedHourlySteps = processor.config.FullHourlySteps
+		start.RequestedDailySteps = processor.config.FullDailySteps
 	case job.TypeMallWeatherRepair:
 		start.TaskKind = "repair"
 		processor.setEndpointSteps(&start)
@@ -347,21 +347,11 @@ func (processor *MallWeatherProcessor) taskStart(taskType string, payload job.Ma
 }
 
 func (processor *MallWeatherProcessor) setEndpointSteps(start *mallWeatherTaskStart) {
-	if start.Payload.EndpointKind == caiyun.EndpointLifeIndexV3 {
-		start.RequestedDailySteps = processor.config.LifeIndexDays
-		return
-	}
 	start.RequestedHourlySteps = processor.config.FullHourlySteps
 	start.RequestedDailySteps = processor.config.FullDailySteps
 }
 
 func (processor *MallWeatherProcessor) fetch(ctx context.Context, start mallWeatherTaskStart, mall *model.Mall) (*caiyun.ProviderResponse, error) {
-	if start.Payload.EndpointKind == caiyun.EndpointLifeIndexV3 {
-		return processor.provider.FetchLifeIndices(ctx, caiyun.LifeIndexRequest{
-			Longitude: *mall.WeatherLongitude, Latitude: *mall.WeatherLatitude,
-			Days: start.RequestedDailySteps, Fields: "all",
-		})
-	}
 	return processor.provider.FetchWeather(ctx, caiyun.WeatherRequest{
 		Longitude: *mall.WeatherLongitude, Latitude: *mall.WeatherLatitude,
 		HourlySteps: start.RequestedHourlySteps, DailySteps: start.RequestedDailySteps,

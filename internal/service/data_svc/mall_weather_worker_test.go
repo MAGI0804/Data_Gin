@@ -17,10 +17,10 @@ import (
 	"gin-biz-web-api/pkg/providerhttp"
 )
 
-func TestMallWeatherProcessorPersistsLifeIndexAfterRawSnapshot(t *testing.T) {
-	raw := readMallWeatherFixture(t, "../../../connector/caiyun/testdata/life_index_v3.json")
-	provider := &fakeMallWeatherProvider{lifeResponse: &caiyun.ProviderResponse{
-		EndpointKind: caiyun.EndpointLifeIndexV3, HTTPStatus: 200, ProviderStatus: "ok", RawBody: raw,
+func TestMallWeatherProcessorRoutesLegacyLifeIndexTaskThroughComprehensiveWeather(t *testing.T) {
+	raw := readMallWeatherFixture(t, "../../../connector/caiyun/testdata/weather_v26_realtime.json")
+	provider := &fakeMallWeatherProvider{weatherResponse: &caiyun.ProviderResponse{
+		EndpointKind: caiyun.EndpointWeatherV26, HTTPStatus: 200, ProviderStatus: "ok", RawBody: raw,
 	}}
 	store := newFakeMallWeatherTaskStore(data_dao.FetchAttemptDispositionAcquired)
 	processor := newTestMallWeatherProcessor(t, provider, store)
@@ -33,18 +33,19 @@ func TestMallWeatherProcessorPersistsLifeIndexAfterRawSnapshot(t *testing.T) {
 		t.Fatalf("events=%v", store.events)
 	}
 	if store.snapshot == nil || store.snapshot.ResponseChecksum == "" || store.batch == nil ||
-		store.batch.Status != weatherFetchStatusSuccess || store.batch.LifeIndices == nil || len(store.batch.LifeIndices.LifeIndices) == 0 {
+		store.batch.Status != weatherFetchStatusPartialSuccess || store.batch.EndpointKind != caiyun.EndpointWeatherV26 {
 		t.Fatalf("snapshot=%+v batch=%+v", store.snapshot, store.batch)
 	}
-	if provider.lifeRequest.Days != 15 || provider.lifeRequest.Fields != "all" || provider.weatherCalls != 0 || provider.lifeCalls != 1 {
+	if provider.weatherRequest.HourlySteps != 360 || provider.weatherRequest.DailySteps != 15 ||
+		provider.weatherCalls != 1 || provider.lifeCalls != 0 {
 		t.Fatalf("provider=%+v", provider)
 	}
 }
 
 func TestMallWeatherProcessorRecordsSuccessfulFetchMetrics(t *testing.T) {
-	raw := readMallWeatherFixture(t, "../../../connector/caiyun/testdata/life_index_v3.json")
-	provider := &fakeMallWeatherProvider{lifeResponse: &caiyun.ProviderResponse{
-		EndpointKind: caiyun.EndpointLifeIndexV3, HTTPStatus: 200, ProviderStatus: "ok", RawBody: raw,
+	raw := readMallWeatherFixture(t, "../../../connector/caiyun/testdata/weather_v26_realtime.json")
+	provider := &fakeMallWeatherProvider{weatherResponse: &caiyun.ProviderResponse{
+		EndpointKind: caiyun.EndpointWeatherV26, HTTPStatus: 200, ProviderStatus: "ok", RawBody: raw,
 	}}
 	store := newFakeMallWeatherTaskStore(data_dao.FetchAttemptDispositionAcquired)
 	metrics := newInMemoryMallWeatherMetricRecorder()
@@ -57,11 +58,11 @@ func TestMallWeatherProcessorRecordsSuccessfulFetchMetrics(t *testing.T) {
 	}
 	counters := metrics.CounterSnapshot()
 	if !mallWeatherMetricCounterExists(counters, MallWeatherMetricProviderRequestsTotal, map[string]string{
-		"endpoint": caiyun.EndpointLifeIndexV3,
+		"endpoint": caiyun.EndpointWeatherV26,
 		"status":   mallWeatherMetricStatusSuccess,
 	}, 1) || !mallWeatherMetricCounterExists(counters, MallWeatherMetricFetchTotal, map[string]string{
 		"kind":   "lifeindex",
-		"status": weatherFetchStatusSuccess,
+		"status": weatherFetchStatusPartialSuccess,
 	}, 1) {
 		t.Fatalf("CounterSnapshot()=%+v missing success fetch counters", counters)
 	}
@@ -608,9 +609,9 @@ func TestMallWeatherProcessorFinalizesCanceledAttempt(t *testing.T) {
 }
 
 func TestMallWeatherProcessorDiscardsSupersededAttemptResults(t *testing.T) {
-	raw := readMallWeatherFixture(t, "../../../connector/caiyun/testdata/life_index_v3.json")
-	provider := &fakeMallWeatherProvider{lifeResponse: &caiyun.ProviderResponse{
-		EndpointKind: caiyun.EndpointLifeIndexV3, HTTPStatus: 200, ProviderStatus: "ok", RawBody: raw,
+	raw := readMallWeatherFixture(t, "../../../connector/caiyun/testdata/weather_v26_realtime.json")
+	provider := &fakeMallWeatherProvider{weatherResponse: &caiyun.ProviderResponse{
+		EndpointKind: caiyun.EndpointWeatherV26, HTTPStatus: 200, ProviderStatus: "ok", RawBody: raw,
 	}}
 	store := newFakeMallWeatherTaskStore(data_dao.FetchAttemptDispositionAcquired)
 	store.recordErr = ErrMallWeatherAttemptSuperseded

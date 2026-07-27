@@ -67,12 +67,15 @@ func TestMallWeatherScheduleDefinitionsCoverProfiles(t *testing.T) {
 	if err != nil {
 		t.Fatalf("MallWeatherScheduleDefinitions() error=%v", err)
 	}
-	if len(definitions) != 10 {
+	if len(definitions) != 7 {
 		t.Fatalf("definitions=%v", definitions)
 	}
-	wantProfiles := map[string]int{"full": 3, "standard": 3, "economy": 3, "": 1}
+	wantProfiles := map[string]int{"full": 2, "standard": 2, "economy": 2, "": 1}
 	gotProfiles := make(map[string]int)
 	for _, definition := range definitions {
+		if definition.Payload.TaskType == TypeMallWeatherLifeIndex {
+			t.Fatalf("life index schedule must use the comprehensive weather task: %+v", definition)
+		}
 		gotProfiles[definition.Payload.DetailProfile]++
 		if _, err := NewMallWeatherScheduleTask(definition.Payload); err != nil {
 			t.Fatalf("NewMallWeatherScheduleTask(%+v) error=%v", definition.Payload, err)

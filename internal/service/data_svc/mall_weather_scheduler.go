@@ -176,7 +176,7 @@ func (planner *MallWeatherSchedulePlanner) repairOutbox(run *model.MallWeatherFe
 	}
 	window := fmt.Sprintf("repair:%d:%d", sourceRunID, repairRound)
 	payloadJSON, err := json.Marshal(job.MallTaskPayload{
-		MallID: run.MallID, TaskWindow: window, EndpointKind: run.EndpointKind,
+		MallID: run.MallID, TaskWindow: window, EndpointKind: caiyun.EndpointWeatherV26,
 	})
 	if err != nil {
 		return model.AsyncJobOutbox{}, false, fmt.Errorf("mall weather scheduler: encode repair payload: %w", err)

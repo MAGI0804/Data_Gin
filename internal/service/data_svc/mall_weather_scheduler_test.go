@@ -89,7 +89,7 @@ func TestMallWeatherSchedulePlannerCreatesBoundedRepairOutboxes(t *testing.T) {
 		t.Fatalf("first repair=%+v", store.rows[0])
 	}
 	if store.rows[1].TaskKey != "mall:weather:repair:41:2" ||
-		string(store.rows[1].PayloadJSON) != `{"mall_id":8,"task_window":"repair:41:2","endpoint_kind":"v3_life_index"}` {
+		string(store.rows[1].PayloadJSON) != `{"mall_id":8,"task_window":"repair:41:2","endpoint_kind":"v26_weather"}` {
 		t.Fatalf("second repair=%+v", store.rows[1])
 	}
 }

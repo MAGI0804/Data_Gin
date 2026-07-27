@@ -377,18 +377,12 @@ func newInitialWeatherOutboxes(mallID uint, version uint64, now time.Time) ([]*m
 		return nil, fmt.Errorf("mall geocode: invalid initial weather identity")
 	}
 	fullWindow := fmt.Sprintf("full:%d:init:v%d", mallID, version)
-	lifeWindow := fmt.Sprintf("life:%d:init:v%d", mallID, version)
 	fullPayloadJSON, err := json.Marshal(job.MallTaskPayload{MallID: mallID, TaskWindow: fullWindow})
 	if err != nil {
 		return nil, fmt.Errorf("mall geocode: encode initial full weather payload: %w", err)
 	}
-	lifePayloadJSON, err := json.Marshal(job.MallTaskPayload{MallID: mallID, TaskWindow: lifeWindow})
-	if err != nil {
-		return nil, fmt.Errorf("mall geocode: encode initial life index payload: %w", err)
-	}
 	rows := []*model.AsyncJobOutbox{
 		{TaskKey: "mall:weather:" + fullWindow, TaskType: job.TypeMallWeatherFull, PayloadJSON: model.JSONText(fullPayloadJSON), QueueName: job.MallWeatherQueueName, AvailableAt: now.UTC()},
-		{TaskKey: "mall:weather:" + lifeWindow, TaskType: job.TypeMallWeatherLifeIndex, PayloadJSON: model.JSONText(lifePayloadJSON), QueueName: job.MallWeatherQueueName, AvailableAt: now.UTC()},
 	}
 	return rows, nil
 }

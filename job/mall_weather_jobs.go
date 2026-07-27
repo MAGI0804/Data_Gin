@@ -187,8 +187,8 @@ func NewMallWeatherScheduleTask(payload MallWeatherSchedulePayload) (*asynq.Task
 	), nil
 }
 
-func MallWeatherScheduleDefinitions(fastCron, fullCron, lifeCron string) ([]MallWeatherScheduleDefinition, error) {
-	if strings.TrimSpace(fastCron) == "" || strings.TrimSpace(fullCron) == "" || strings.TrimSpace(lifeCron) == "" {
+func MallWeatherScheduleDefinitions(fastCron, fullCron, _ string) ([]MallWeatherScheduleDefinition, error) {
+	if strings.TrimSpace(fastCron) == "" || strings.TrimSpace(fullCron) == "" {
 		return nil, fmt.Errorf("mall weather task: schedule cron is required")
 	}
 	return []MallWeatherScheduleDefinition{
@@ -198,9 +198,6 @@ func MallWeatherScheduleDefinitions(fastCron, fullCron, lifeCron string) ([]Mall
 		{CronExpr: fullCron, Payload: MallWeatherSchedulePayload{TaskType: TypeMallWeatherFull, DetailProfile: "full"}},
 		{CronExpr: fullCron, Payload: MallWeatherSchedulePayload{TaskType: TypeMallWeatherFull, DetailProfile: "standard"}},
 		{CronExpr: "7 */3 * * *", Payload: MallWeatherSchedulePayload{TaskType: TypeMallWeatherFull, DetailProfile: "economy"}},
-		{CronExpr: lifeCron, Payload: MallWeatherSchedulePayload{TaskType: TypeMallWeatherLifeIndex, DetailProfile: "full"}},
-		{CronExpr: "17 */3 * * *", Payload: MallWeatherSchedulePayload{TaskType: TypeMallWeatherLifeIndex, DetailProfile: "standard"}},
-		{CronExpr: "17 */6 * * *", Payload: MallWeatherSchedulePayload{TaskType: TypeMallWeatherLifeIndex, DetailProfile: "economy"}},
 		{CronExpr: "*/15 * * * *", Payload: MallWeatherSchedulePayload{TaskType: TypeMallWeatherRepair}},
 	}, nil
 }
@@ -210,7 +207,7 @@ func DecodeMallWeatherSchedulePayload(payload []byte) (MallWeatherSchedulePayloa
 	if err := decodeStrictTaskPayload(payload, &decoded); err != nil {
 		return MallWeatherSchedulePayload{}, err
 	}
-	regularSchedule := (decoded.TaskType == TypeMallWeatherFast || decoded.TaskType == TypeMallWeatherFull || decoded.TaskType == TypeMallWeatherLifeIndex) &&
+	regularSchedule := (decoded.TaskType == TypeMallWeatherFast || decoded.TaskType == TypeMallWeatherFull) &&
 		(decoded.DetailProfile == "full" || decoded.DetailProfile == "standard" || decoded.DetailProfile == "economy")
 	repairSchedule := decoded.TaskType == TypeMallWeatherRepair && decoded.DetailProfile == ""
 	if !regularSchedule && !repairSchedule {
@@ -339,13 +336,17 @@ func normalizeWeatherTaskEndpoint(taskType string, payload *MallTaskPayload) boo
 		payload.EndpointKind = "v26_weather"
 		return true
 	case TypeMallWeatherLifeIndex:
-		if payload.EndpointKind != "" && payload.EndpointKind != "v3_life_index" {
+		if payload.EndpointKind != "" && payload.EndpointKind != "v3_life_index" && payload.EndpointKind != "v26_weather" {
 			return false
 		}
-		payload.EndpointKind = "v3_life_index"
+		payload.EndpointKind = "v26_weather"
 		return true
 	case TypeMallWeatherRepair, TypeMallWeatherManual:
-		return payload.EndpointKind == "v26_weather" || payload.EndpointKind == "v3_life_index"
+		if payload.EndpointKind != "v26_weather" && payload.EndpointKind != "v3_life_index" {
+			return false
+		}
+		payload.EndpointKind = "v26_weather"
+		return true
 	default:
 		return false
 	}

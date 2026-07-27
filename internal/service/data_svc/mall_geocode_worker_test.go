@@ -157,13 +157,13 @@ func TestGormMallGeocodeStoreBuildsAuditableAutoConfirmRows(t *testing.T) {
 	}
 }
 
-func TestNewInitialWeatherOutboxesBuildsIndependentMinimalTasks(t *testing.T) {
+func TestNewInitialWeatherOutboxesBuildsOneComprehensiveTask(t *testing.T) {
 	now := time.Date(2026, 7, 22, 8, 0, 0, 0, time.FixedZone("CST", 8*60*60))
 	rows, err := newInitialWeatherOutboxes(7, 4, now)
 	if err != nil {
 		t.Fatalf("newInitialWeatherOutboxes() error = %v", err)
 	}
-	if len(rows) != 2 || rows[0].TaskType != job.TypeMallWeatherFull || rows[1].TaskType != job.TypeMallWeatherLifeIndex {
+	if len(rows) != 1 || rows[0].TaskType != job.TypeMallWeatherFull {
 		t.Fatalf("rows = %+v", rows)
 	}
 	for _, row := range rows {
