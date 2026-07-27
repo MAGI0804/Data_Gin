@@ -202,6 +202,10 @@ test('accepts only short HTTPS download URLs and builds stable resource paths', 
   assert.match(download?.url ?? '', /^https:/)
   assert.equal(parseMallWeatherExportDownload(envelope({ url: 'http://example.com/result.xlsx', expiresAt: '2026-07-27T10:05:00Z' })), null)
   assert.equal(parseMallWeatherExportDownload(envelope({ url: 'https://user:secret@example.com/result.xlsx', expiresAt: '2026-07-27T10:05:00Z' })), null)
+  assert.equal(parseMallWeatherExportDownload(envelope({
+    url: 'https://bucket.oss-cn-shanghai-internal.aliyuncs.com/result.xlsx?signature=private-network',
+    expiresAt: '2026-07-27T10:05:00Z',
+  })), null)
   assert.equal(mallWeatherExportJobPath(jobID), `/v1/weather-exports/${jobID}`)
   assert.equal(mallWeatherExportDownloadPath(jobID), `/v1/weather-exports/${jobID}/download`)
   assert.equal(mallWeatherExportProfilesPath('next cursor'), '/v1/weather-export-profiles?enabled=true&pageSize=100&cursor=next+cursor')

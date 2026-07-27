@@ -69,6 +69,23 @@ func TestClientEndpointKeepsCNameWhenInternalEnabled(t *testing.T) {
 	}
 }
 
+func TestBrowserDownloadEndpointNeverUsesInternalOSSHost(t *testing.T) {
+	cfg := OSSConfig{
+		Region:      "oss-cn-shanghai",
+		Endpoint:    "https://oss-cn-shanghai.aliyuncs.com",
+		UseInternal: true,
+	}
+
+	got := browserDownloadEndpoint(cfg)
+	want := "https://oss-cn-shanghai.aliyuncs.com"
+	if got != want {
+		t.Fatalf("browserDownloadEndpoint() = %q, want %q", got, want)
+	}
+	if strings.Contains(got, "-internal.") {
+		t.Fatalf("browserDownloadEndpoint() returned browser-inaccessible internal endpoint %q", got)
+	}
+}
+
 func TestOSSClientUploadPlanMarksMultipart(t *testing.T) {
 	client := &OSSClient{
 		cfg: OSSConfig{
@@ -112,5 +129,38 @@ func TestOSSClientPresignDownloadURL(t *testing.T) {
 	}
 	if _, err := client.PresignDownloadURL(t.Context(), "key", "file.xlsx", 24*time.Hour); err == nil {
 		t.Fatal("PresignDownloadURL() accepted excessive expiry")
+	}
+}
+
+func TestOSSClientPresignDownloadURLUsesBrowserClient(t *testing.T) {
+	provider := credentials.NewStaticCredentialsProvider("ak", "sk")
+	uploadClient := alioss.NewClient(alioss.LoadDefaultConfig().
+		WithCredentialsProvider(provider).
+		WithRegion("cn-shanghai").
+		WithEndpoint("https://oss-cn-shanghai-internal.aliyuncs.com").
+		WithUseInternalEndpoint(true))
+	downloadClient := alioss.NewClient(alioss.LoadDefaultConfig().
+		WithCredentialsProvider(provider).
+		WithRegion("cn-shanghai").
+		WithEndpoint("https://oss-cn-shanghai.aliyuncs.com").
+		WithUseInternalEndpoint(false))
+	client := &OSSClient{
+		cfg:            OSSConfig{Bucket: "weather-private", UseInternal: true},
+		client:         uploadClient,
+		downloadClient: downloadClient,
+	}
+
+	signedURL, err := client.PresignDownloadURL(
+		t.Context(),
+		"mall-weather-exports/job/result.xlsx",
+		"商场天气.xlsx",
+		5*time.Minute,
+	)
+	if err != nil {
+		t.Fatalf("PresignDownloadURL() error=%v", err)
+	}
+	if strings.Contains(signedURL, "-internal.") ||
+		!strings.Contains(signedURL, "weather-private.oss-cn-shanghai.aliyuncs.com") {
+		t.Fatalf("signed URL is not browser-accessible: %q", signedURL)
 	}
 }

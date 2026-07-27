@@ -454,7 +454,8 @@ export function parseMallWeatherExportDownload(payload: unknown): MallWeatherExp
   if (!data || typeof data.url !== 'string' || data.url.length > 8_192 || !isRFC3339(data.expiresAt)) return null
   try {
     const url = new URL(data.url)
-    if (url.protocol !== 'https:' || !url.hostname || url.username || url.password) return null
+    if (url.protocol !== 'https:' || !url.hostname || url.username || url.password ||
+      url.hostname.toLowerCase().endsWith('-internal.aliyuncs.com')) return null
   } catch {
     return null
   }

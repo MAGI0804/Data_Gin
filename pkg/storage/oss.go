@@ -38,8 +38,9 @@ type OSSConfig struct {
 }
 
 type OSSClient struct {
-	cfg    OSSConfig
-	client *alioss.Client
+	cfg            OSSConfig
+	client         *alioss.Client
+	downloadClient *alioss.Client
 }
 
 type UploadResult struct {
@@ -86,6 +87,7 @@ func NewOSSClientFromConfig() (*OSSClient, error) {
 		return nil, errors.New("OSS endpoint 未配置")
 	}
 
+	credentialsProvider := credentialsProviderFromEnv()
 	ossCfg := alioss.LoadDefaultConfig().
 		WithRegion(cfg.Region).
 		WithUseInternalEndpoint(cfg.UseInternal).
@@ -93,14 +95,26 @@ func NewOSSClientFromConfig() (*OSSClient, error) {
 		WithDisableSSL(cfg.DisableSSL).
 		WithConnectTimeout(time.Duration(cfg.ConnectTimeoutSeconds) * time.Second).
 		WithReadWriteTimeout(time.Duration(cfg.ReadWriteTimeoutSeconds) * time.Second).
-		WithCredentialsProvider(credentialsProviderFromEnv())
+		WithCredentialsProvider(credentialsProvider)
 	if endpoint := clientEndpoint(cfg); endpoint != "" {
 		ossCfg = ossCfg.WithEndpoint(endpoint)
 	}
+	downloadCfg := alioss.LoadDefaultConfig().
+		WithRegion(cfg.Region).
+		WithUseInternalEndpoint(false).
+		WithUseCName(cfg.UseCName).
+		WithDisableSSL(false).
+		WithConnectTimeout(time.Duration(cfg.ConnectTimeoutSeconds) * time.Second).
+		WithReadWriteTimeout(time.Duration(cfg.ReadWriteTimeoutSeconds) * time.Second).
+		WithCredentialsProvider(credentialsProvider)
+	if endpoint := browserDownloadEndpoint(cfg); endpoint != "" {
+		downloadCfg = downloadCfg.WithEndpoint(endpoint)
+	}
 
 	return &OSSClient{
-		cfg:    cfg,
-		client: alioss.NewClient(ossCfg),
+		cfg:            cfg,
+		client:         alioss.NewClient(ossCfg),
+		downloadClient: alioss.NewClient(downloadCfg),
 	}, nil
 }
 
@@ -246,10 +260,17 @@ func (c *OSSClient) PresignDownloadURL(
 	expires time.Duration,
 ) (string, error) {
 	objectKey = cleanObjectKey(objectKey)
-	if c == nil || c.client == nil || ctx == nil || objectKey == "" || expires < time.Minute || expires > time.Hour {
+	if c == nil || ctx == nil || objectKey == "" || expires < time.Minute || expires > time.Hour {
 		return "", fmt.Errorf("OSS 下载签名参数无效")
 	}
-	result, err := c.client.Presign(ctx, &alioss.GetObjectRequest{
+	presignClient := c.downloadClient
+	if presignClient == nil {
+		presignClient = c.client
+	}
+	if presignClient == nil {
+		return "", fmt.Errorf("OSS 下载签名客户端无效")
+	}
+	result, err := presignClient.Presign(ctx, &alioss.GetObjectRequest{
 		Bucket:                     alioss.Ptr(c.cfg.Bucket),
 		Key:                        alioss.Ptr(objectKey),
 		ResponseCacheControl:       alioss.Ptr("private, no-store"),
@@ -298,6 +319,32 @@ func clientEndpoint(cfg OSSConfig) string {
 		return internalEndpoint(cfg.Region, cfg.DisableSSL)
 	}
 	return endpoint
+}
+
+func browserDownloadEndpoint(cfg OSSConfig) string {
+	endpoint := strings.TrimSpace(cfg.Endpoint)
+	if cfg.UseCName && endpoint != "" {
+		return httpsEndpoint(endpoint)
+	}
+	if cfg.UseInternal || endpoint == "" || strings.Contains(endpoint, "-internal.") {
+		region := normalizeOSSRegion(cfg.Region)
+		if region == "" {
+			return ""
+		}
+		return "https://oss-" + region + ".aliyuncs.com"
+	}
+	return httpsEndpoint(endpoint)
+}
+
+func httpsEndpoint(endpoint string) string {
+	host := strings.TrimSpace(endpoint)
+	host = strings.TrimPrefix(host, "https://")
+	host = strings.TrimPrefix(host, "http://")
+	host = strings.TrimRight(host, "/")
+	if host == "" {
+		return ""
+	}
+	return "https://" + host
 }
 
 func internalEndpoint(region string, disableSSL bool) string {
