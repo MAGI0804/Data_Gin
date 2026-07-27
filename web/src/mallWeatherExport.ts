@@ -169,13 +169,27 @@ export function mallWeatherExportCreateDisposition(
   return { kind: 'accepted', result }
 }
 
+export function resolveMallWeatherExportStorage(resolve: () => ExportStorage): ExportStorage | null {
+  try {
+    return resolve()
+  } catch {
+    return null
+  }
+}
+
 export function loadMallWeatherExportSession(
   actorID: string,
   mallID: number,
-  storage: ExportStorage,
+  storage: ExportStorage | null,
 ): MallWeatherExportSession | null {
   const storageKey = mallWeatherExportSessionStorageKey(actorID, mallID)
-  const raw = storage.getItem(storageKey)
+  if (!storage) return null
+  let raw: string | null
+  try {
+    raw = storage.getItem(storageKey)
+  } catch {
+    return null
+  }
   if (!raw) return null
   try {
     const snapshot: unknown = JSON.parse(raw)
@@ -197,12 +211,17 @@ export function saveMallWeatherExportSession(
   actorID: string,
   mallID: number,
   session: MallWeatherExportSession,
-  storage: ExportStorage,
-) {
+  storage: ExportStorage | null,
+): boolean {
   const storageKey = mallWeatherExportSessionStorageKey(actorID, mallID)
   if (!session.pending && !session.jobId) {
-    storage.removeItem(storageKey)
-    return
+    if (!storage) return false
+    try {
+      storage.removeItem(storageKey)
+      return true
+    } catch {
+      return false
+    }
   }
   const pending = session.pending
   if (pending && (!exportKeyPattern.test(pending.key) ||
@@ -210,11 +229,29 @@ export function saveMallWeatherExportSession(
     session.jobId && !exportJobIDPattern.test(session.jobId)) {
     throw new Error('invalid mall weather export session')
   }
-  storage.setItem(storageKey, JSON.stringify(session))
+  const serialized = JSON.stringify(session)
+  if (!storage) return false
+  try {
+    storage.setItem(storageKey, serialized)
+    return true
+  } catch {
+    return false
+  }
 }
 
-export function clearMallWeatherExportSession(actorID: string, mallID: number, storage: ExportStorage) {
-  storage.removeItem(mallWeatherExportSessionStorageKey(actorID, mallID))
+export function clearMallWeatherExportSession(
+  actorID: string,
+  mallID: number,
+  storage: ExportStorage | null,
+): boolean {
+  const storageKey = mallWeatherExportSessionStorageKey(actorID, mallID)
+  if (!storage) return false
+  try {
+    storage.removeItem(storageKey)
+    return true
+  } catch {
+    return false
+  }
 }
 
 function parseStoredPendingCreate(value: unknown, mallID: number): MallWeatherExportPendingCreate | null {

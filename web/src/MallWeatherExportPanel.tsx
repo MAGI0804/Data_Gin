@@ -1,5 +1,5 @@
 import { Download, FileSpreadsheet, RefreshCcw } from 'lucide-react'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   clearMallWeatherExportSession,
   mallWeatherExportCreateDisposition,
@@ -16,11 +16,15 @@ import {
   MallWeatherExportDownloadTimeoutError,
   parseMallWeatherExportJob,
   parseMallWeatherExportSafeErrorMessage,
+  resolveMallWeatherExportStorage,
   saveMallWeatherExportSession,
   waitForMallWeatherExportDownload,
   type MallWeatherExportJob,
   type MallWeatherExportPendingCreate,
+  type MallWeatherExportSession,
 } from './mallWeatherExport'
+
+const exportStorageWarning = '浏览器无法更新导出恢复信息；当前页面可继续使用，请勿刷新或关闭页面。'
 
 type WeatherExportAPIResult = {
   ok: boolean
@@ -55,9 +59,13 @@ type MallWeatherExportPanelProps = {
 }
 
 export function MallWeatherExportPanel({ actorID, mallID, mallName, client, downloadFile }: MallWeatherExportPanelProps) {
+  const exportStorage = useMemo(
+    () => resolveMallWeatherExportStorage(() => window.sessionStorage),
+    [],
+  )
   const restoredSession = useMemo(
-    () => loadMallWeatherExportSession(actorID, mallID, window.sessionStorage),
-    [actorID, mallID],
+    () => loadMallWeatherExportSession(actorID, mallID, exportStorage),
+    [actorID, exportStorage, mallID],
   )
   const [creatingJob, setCreatingJob] = useState(false)
   const [downloading, setDownloading] = useState(false)
@@ -66,12 +74,25 @@ export function MallWeatherExportPanel({ actorID, mallID, mallName, client, down
   )
   const [actionError, setActionError] = useState('')
   const [pollError, setPollError] = useState('')
+  const [storageWarning, setStorageWarning] = useState(() => exportStorage ? '' : exportStorageWarning)
   const [pollRevision, setPollRevision] = useState(0)
   const [, setPendingRevision] = useState(0)
   const actionController = useRef<AbortController | null>(null)
   const pendingCreate = useRef<MallWeatherExportPendingCreate | null>(restoredSession?.pending ?? null)
   const polledJobID = job?.jobId ?? ''
   const polledJobStatus = job?.status
+
+  const persistSession = useCallback((session: MallWeatherExportSession) => {
+    const persisted = saveMallWeatherExportSession(actorID, mallID, session, exportStorage)
+    setStorageWarning(persisted ? '' : exportStorageWarning)
+    return persisted
+  }, [actorID, exportStorage, mallID])
+
+  const clearSession = useCallback(() => {
+    const cleared = clearMallWeatherExportSession(actorID, mallID, exportStorage)
+    setStorageWarning(cleared ? '' : exportStorageWarning)
+    return cleared
+  }, [actorID, exportStorage, mallID])
 
   function replacePendingCreate(next: MallWeatherExportPendingCreate | null) {
     pendingCreate.current = next
@@ -109,7 +130,7 @@ export function MallWeatherExportPanel({ actorID, mallID, mallName, client, down
         })
         if (controller.signal.aborted) return
         if (!response.ok && response.status === 404) {
-          clearMallWeatherExportSession(actorID, mallID, window.sessionStorage)
+          clearSession()
           setJob(null)
           setPollError('原导出任务已不存在，已清理本地记录；可以重新生成 Excel。')
           return
@@ -124,12 +145,12 @@ export function MallWeatherExportPanel({ actorID, mallID, mallName, client, down
         setJob(nextJob)
         setPollError('')
         if (nextJob.status === 'FAILED' || nextJob.status === 'CANCELLED' || nextJob.status === 'EXPIRED') {
-          clearMallWeatherExportSession(actorID, mallID, window.sessionStorage)
+          clearSession()
         } else {
-          saveMallWeatherExportSession(actorID, mallID, {
+          persistSession({
             pending: null,
             jobId: nextJob.jobId,
-          }, window.sessionStorage)
+          })
         }
         if (!mallWeatherExportJobTerminal(nextJob.status)) {
           timer = window.setTimeout(() => void poll(), mallWeatherExportPollIntervalMilliseconds)
@@ -144,7 +165,7 @@ export function MallWeatherExportPanel({ actorID, mallID, mallName, client, down
       window.clearTimeout(timer)
       controller.abort()
     }
-  }, [actorID, client, mallID, polledJobID, polledJobStatus, pollRevision])
+  }, [clearSession, client, persistSession, polledJobID, polledJobStatus, pollRevision])
 
   async function createJob() {
     let pending = pendingCreate.current
@@ -164,7 +185,7 @@ export function MallWeatherExportPanel({ actorID, mallID, mallName, client, down
       }
       replacePendingCreate(pending)
       setJob(null)
-      saveMallWeatherExportSession(actorID, mallID, { pending, jobId: '' }, window.sessionStorage)
+      persistSession({ pending, jobId: '' })
     }
     actionController.current?.abort()
     const controller = new AbortController()
@@ -211,10 +232,10 @@ export function MallWeatherExportPanel({ actorID, mallID, mallName, client, down
         errorMessageSafe: '',
       }
       setJob(acceptedJob)
-      saveMallWeatherExportSession(actorID, mallID, {
+      persistSession({
         pending: null,
         jobId: acceptedJob.jobId,
-      }, window.sessionStorage)
+      })
     } catch (error) {
       if (!controller.signal.aborted) setActionError(error instanceof Error ? error.message : '天气导出任务创建失败')
     } finally {
@@ -244,12 +265,12 @@ export function MallWeatherExportPanel({ actorID, mallID, mallName, client, down
         const safeMessage = parseMallWeatherExportSafeErrorMessage(response.data)
         if (safeMessage === '天气导出文件已过期') {
           setJob({ ...job, status: 'EXPIRED' })
-          clearMallWeatherExportSession(actorID, mallID, window.sessionStorage)
+          clearSession()
           throw new Error('天气导出文件已过期，请重新生成')
         }
         if (safeMessage === '天气导出文件尚未生成') {
           setJob({ ...job, status: 'RUNNING' })
-          saveMallWeatherExportSession(actorID, mallID, { pending: null, jobId: job.jobId }, window.sessionStorage)
+          persistSession({ pending: null, jobId: job.jobId })
           setPollRevision((current) => current + 1)
           throw new Error('天气导出文件尚未生成，已恢复任务查询，请稍后重试')
         }
@@ -260,7 +281,7 @@ export function MallWeatherExportPanel({ actorID, mallID, mallName, client, down
         '当前账号缺少 weather.export 权限',
         response.data,
       ))
-      saveMallWeatherExportSession(actorID, mallID, { pending: null, jobId: job.jobId }, window.sessionStorage)
+      persistSession({ pending: null, jobId: job.jobId })
     } catch (error) {
       if (error instanceof MallWeatherExportDownloadTimeoutError) {
         setActionError('Excel 文件下载超时，请检查网络后重试')
@@ -277,7 +298,7 @@ export function MallWeatherExportPanel({ actorID, mallID, mallName, client, down
 
   function abandonPendingCreate() {
     replacePendingCreate(null)
-    clearMallWeatherExportSession(actorID, mallID, window.sessionStorage)
+    clearSession()
     setActionError('')
     setPollError('')
     setJob(null)
@@ -331,6 +352,7 @@ export function MallWeatherExportPanel({ actorID, mallID, mallName, client, down
           )}
         </div>
       )}
+      {storageWarning && <p className="mall-weather-action-message" role="status">{storageWarning}</p>}
       {actionError && <p className="mall-weather-action-message error" role="alert">{actionError}</p>}
     </section>
   )

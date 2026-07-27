@@ -19,6 +19,7 @@ import {
   parseMallWeatherExportCreateResult,
   parseMallWeatherExportJob,
   parseMallWeatherExportSafeErrorMessage,
+  resolveMallWeatherExportStorage,
   saveMallWeatherExportSession,
   waitForMallWeatherExportDownload,
 } from '../.test-dist/mallWeatherExport.js'
@@ -72,7 +73,7 @@ test('persists fixed and legacy pending requests without changing their idempote
     key: mallWeatherExportKey('12345678-fixed'),
     body: mallWeatherExportCreateRequest(7),
   }
-  saveMallWeatherExportSession('17', 7, { pending: fixedPending, jobId: '' }, storage)
+  assert.equal(saveMallWeatherExportSession('17', 7, { pending: fixedPending, jobId: '' }, storage), true)
   assert.deepEqual(loadMallWeatherExportSession('17', 7, storage), { pending: fixedPending, jobId: '' })
   assert.equal(loadMallWeatherExportSession('17', 8, storage), null)
 
@@ -92,9 +93,66 @@ test('persists fixed and legacy pending requests without changing their idempote
 
   saveMallWeatherExportSession('17', 7, { pending: null, jobId: jobID }, storage)
   assert.deepEqual(loadMallWeatherExportSession('17', 7, storage), { pending: null, jobId: jobID })
-  clearMallWeatherExportSession('17', 7, storage)
+  assert.equal(saveMallWeatherExportSession('17', 7, { pending: null, jobId: '' }, storage), true)
+  assert.equal(loadMallWeatherExportSession('17', 7, storage), null)
+  assert.equal(saveMallWeatherExportSession('17', 7, { pending: null, jobId: jobID }, storage), true)
+  assert.equal(clearMallWeatherExportSession('17', 7, storage), true)
   assert.equal(loadMallWeatherExportSession('17', 7, storage), null)
   assert.throws(() => loadMallWeatherExportSession('actor', 7, storage), /invalid actor id/)
+})
+
+test('keeps exports usable when browser session storage is unavailable', () => {
+  const unavailableStorage = {
+    getItem: () => { throw new DOMException('blocked', 'SecurityError') },
+    setItem: () => { throw new DOMException('quota', 'QuotaExceededError') },
+    removeItem: () => { throw new DOMException('blocked', 'SecurityError') },
+  }
+  const pending = {
+    key: mallWeatherExportKey('12345678-unavailable'),
+    body: mallWeatherExportCreateRequest(7),
+  }
+
+  assert.equal(resolveMallWeatherExportStorage(() => unavailableStorage), unavailableStorage)
+  assert.equal(resolveMallWeatherExportStorage(() => {
+    throw new DOMException('blocked', 'SecurityError')
+  }), null)
+  assert.equal(loadMallWeatherExportSession('17', 7, null), null)
+  assert.equal(loadMallWeatherExportSession('17', 7, unavailableStorage), null)
+  assert.equal(saveMallWeatherExportSession(
+    '17', 7, { pending, jobId: '' }, unavailableStorage,
+  ), false)
+  assert.equal(saveMallWeatherExportSession(
+    '17', 7, { pending: null, jobId: '' }, unavailableStorage,
+  ), false)
+  assert.equal(saveMallWeatherExportSession('17', 7, { pending, jobId: '' }, null), false)
+  assert.equal(clearMallWeatherExportSession('17', 7, unavailableStorage), false)
+  assert.equal(clearMallWeatherExportSession('17', 7, null), false)
+
+  assert.throws(
+    () => loadMallWeatherExportSession('actor', 7, unavailableStorage),
+    /invalid actor id/,
+  )
+  assert.throws(
+    () => saveMallWeatherExportSession('actor', 7, { pending, jobId: '' }, null),
+    /invalid actor id/,
+  )
+  assert.throws(
+    () => clearMallWeatherExportSession('17', 0, null),
+    /invalid mall id/,
+  )
+  assert.throws(
+    () => saveMallWeatherExportSession('17', 7, {
+      pending: { ...pending, body: { filters: { mallIds: [8] } } },
+      jobId: '',
+    }, unavailableStorage),
+    /invalid mall weather export session/,
+  )
+  const circularSession = { pending, jobId: '' }
+  circularSession.self = circularSession
+  assert.throws(
+    () => saveMallWeatherExportSession('17', 7, circularSession, null),
+    /circular|cyclic/i,
+  )
 })
 
 test('rejects incomplete, null, zero and cross-mall stored request selectors', () => {
