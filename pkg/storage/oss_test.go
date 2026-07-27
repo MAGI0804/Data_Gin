@@ -1,6 +1,8 @@
 package storage
 
 import (
+	"context"
+	"errors"
 	"net/url"
 	"strings"
 	"testing"
@@ -9,6 +11,59 @@ import (
 	alioss "github.com/aliyun/alibabacloud-oss-go-sdk-v2/oss"
 	"github.com/aliyun/alibabacloud-oss-go-sdk-v2/oss/credentials"
 )
+
+func TestOSSClientStatsBrowserDownloadObject(t *testing.T) {
+	tests := []struct {
+		name       string
+		statErr    error
+		wantSize   int64
+		wantErr    error
+		wantAnyErr bool
+	}{
+		{name: "available", wantSize: 4096},
+		{name: "missing", statErr: &alioss.ServiceError{StatusCode: 404, Code: "NoSuchKey"}, wantErr: ErrOSSObjectNotFound},
+		{name: "missing alternate code", statErr: &alioss.ServiceError{StatusCode: 404, Code: "ObjectNotExist"}, wantErr: ErrOSSObjectNotFound},
+		{name: "bucket missing", statErr: &alioss.ServiceError{StatusCode: 404, Code: "NoSuchBucket"}, wantAnyErr: true},
+		{name: "unclassified 404", statErr: &alioss.ServiceError{StatusCode: 404, Code: "BadErrorResponse"}, wantAnyErr: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var requestedBucket string
+			var requestedKey string
+			client := &OSSClient{
+				cfg: OSSConfig{Bucket: "weather-private"},
+				headDownloadObject: func(_ context.Context, request *alioss.HeadObjectRequest) (*alioss.HeadObjectResult, error) {
+					requestedBucket = alioss.ToString(request.Bucket)
+					requestedKey = alioss.ToString(request.Key)
+					if tt.statErr != nil {
+						return nil, tt.statErr
+					}
+					return &alioss.HeadObjectResult{ContentLength: 4096}, nil
+				},
+			}
+
+			metadata, err := client.StatDownloadObject(
+				context.Background(),
+				"mall-weather-exports/job/result.xlsx",
+			)
+			wrongError := false
+			switch {
+			case tt.wantErr != nil:
+				wrongError = !errors.Is(err, tt.wantErr)
+			case tt.wantAnyErr:
+				wrongError = err == nil || errors.Is(err, ErrOSSObjectNotFound)
+			default:
+				wrongError = err != nil
+			}
+			if wrongError || metadata.Size != tt.wantSize {
+				t.Fatalf("StatDownloadObject() metadata=%+v error=%v, want size=%d error=%v", metadata, err, tt.wantSize, tt.wantErr)
+			}
+			if requestedBucket != "weather-private" || requestedKey != "mall-weather-exports/job/result.xlsx" {
+				t.Fatalf("HeadObject() bucket=%q key=%q", requestedBucket, requestedKey)
+			}
+		})
+	}
+}
 
 func TestNormalizeOSSRegion(t *testing.T) {
 	tests := map[string]string{

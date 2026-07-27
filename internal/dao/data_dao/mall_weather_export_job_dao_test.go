@@ -64,7 +64,7 @@ func TestMallWeatherExportDownloadQuerySelectsPrivateObjectForActor(t *testing.T
 	}
 	statement := query.Statement.SQL.String()
 	for _, fragment := range []string{
-		"`status`", "`result_object_key`", "`expires_at`", "job_uuid = ?", "created_by = ?",
+		"`status`", "`result_object_key`", "`file_size_bytes`", "`expires_at`", "job_uuid = ?", "created_by = ?",
 	} {
 		if !strings.Contains(statement, fragment) {
 			t.Fatalf("download lookup does not contain %q: %s", fragment, statement)

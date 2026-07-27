@@ -37,12 +37,14 @@ var mallWeatherExportJobQueryColumns = []string{
 var mallWeatherExportDownloadJobQueryColumns = []string{
 	"status",
 	"result_object_key",
+	"file_size_bytes",
 	"expires_at",
 }
 
 type MallWeatherExportDownloadJob struct {
 	Status          string     `gorm:"column:status"`
 	ResultObjectKey string     `gorm:"column:result_object_key"`
+	FileSizeBytes   int64      `gorm:"column:file_size_bytes"`
 	ExpiresAt       *time.Time `gorm:"column:expires_at"`
 }
 

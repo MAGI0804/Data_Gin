@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"mime"
+	"net/http"
 	"net/url"
 	"os"
 	"path"
@@ -17,6 +18,8 @@ import (
 	alioss "github.com/aliyun/alibabacloud-oss-go-sdk-v2/oss"
 	"github.com/aliyun/alibabacloud-oss-go-sdk-v2/oss/credentials"
 )
+
+var ErrOSSObjectNotFound = errors.New("oss object not found")
 
 type OSSConfig struct {
 	Enabled                 bool
@@ -38,14 +41,19 @@ type OSSConfig struct {
 }
 
 type OSSClient struct {
-	cfg            OSSConfig
-	client         *alioss.Client
-	downloadClient *alioss.Client
+	cfg                OSSConfig
+	client             *alioss.Client
+	downloadClient     *alioss.Client
+	headDownloadObject func(context.Context, *alioss.HeadObjectRequest) (*alioss.HeadObjectResult, error)
 }
 
 type UploadResult struct {
 	ObjectKey string
 	URL       string
+}
+
+type ObjectMetadata struct {
+	Size int64
 }
 
 type UploadProgress struct {
@@ -113,11 +121,15 @@ func NewOSSClientFromConfig() (*OSSClient, error) {
 		downloadCfg = downloadCfg.WithEndpoint(downloadEndpoint)
 	}
 
-	return &OSSClient{
+	client := &OSSClient{
 		cfg:            cfg,
 		client:         alioss.NewClient(ossCfg),
 		downloadClient: alioss.NewClient(downloadCfg),
-	}, nil
+	}
+	client.headDownloadObject = func(ctx context.Context, request *alioss.HeadObjectRequest) (*alioss.HeadObjectResult, error) {
+		return client.downloadClient.HeadObject(ctx, request)
+	}
+	return client, nil
 }
 
 func LoadOSSConfig() OSSConfig {
@@ -286,6 +298,54 @@ func (c *OSSClient) PresignDownloadURL(
 		return "", fmt.Errorf("OSS 下载签名结果无效")
 	}
 	return result.URL, nil
+}
+
+func (c *OSSClient) StatDownloadObject(ctx context.Context, objectKey string) (ObjectMetadata, error) {
+	objectKey = cleanObjectKey(objectKey)
+	if c == nil || ctx == nil || objectKey == "" {
+		return ObjectMetadata{}, fmt.Errorf("OSS 下载对象查询参数无效")
+	}
+	headObject := c.headDownloadObject
+	if headObject == nil && c.downloadClient != nil {
+		headObject = func(ctx context.Context, request *alioss.HeadObjectRequest) (*alioss.HeadObjectResult, error) {
+			return c.downloadClient.HeadObject(ctx, request)
+		}
+	}
+	if headObject == nil && c.client != nil {
+		headObject = func(ctx context.Context, request *alioss.HeadObjectRequest) (*alioss.HeadObjectResult, error) {
+			return c.client.HeadObject(ctx, request)
+		}
+	}
+	if headObject == nil {
+		return ObjectMetadata{}, fmt.Errorf("OSS 下载对象查询客户端无效")
+	}
+	result, err := headObject(ctx, &alioss.HeadObjectRequest{
+		Bucket: alioss.Ptr(c.cfg.Bucket),
+		Key:    alioss.Ptr(objectKey),
+	})
+	if err != nil {
+		var serviceError *alioss.ServiceError
+		if errors.As(err, &serviceError) && ossObjectMissing(serviceError) {
+			return ObjectMetadata{}, fmt.Errorf("%w: %w", ErrOSSObjectNotFound, err)
+		}
+		return ObjectMetadata{}, fmt.Errorf("OSS 查询下载对象失败: %w", err)
+	}
+	if result == nil || result.ContentLength < 0 {
+		return ObjectMetadata{}, fmt.Errorf("OSS 下载对象元数据无效")
+	}
+	return ObjectMetadata{Size: result.ContentLength}, nil
+}
+
+func ossObjectMissing(serviceError *alioss.ServiceError) bool {
+	if serviceError == nil || serviceError.StatusCode != http.StatusNotFound {
+		return false
+	}
+	switch serviceError.Code {
+	case "NoSuchKey", "ObjectNotExist":
+		return true
+	default:
+		return false
+	}
 }
 
 func (c *OSSClient) PublicURL(objectKey string) string {

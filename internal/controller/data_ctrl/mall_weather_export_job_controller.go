@@ -122,6 +122,12 @@ func classifyMallWeatherExportJobError(err error) (*errcode.Error, string) {
 		return errcode.Conflict, "天气导出文件尚未生成"
 	case errors.Is(err, data_svc.ErrMallWeatherExportExpired):
 		return errcode.Conflict, "天气导出文件已过期"
+	case errors.Is(err, context.DeadlineExceeded):
+		return errcode.GatewayTimeout, "天气导出存储访问超时，请稍后重试"
+	case errors.Is(err, data_svc.ErrMallWeatherExportArtifactMissing):
+		return errcode.Conflict, "天气导出文件不存在，请重新生成"
+	case errors.Is(err, data_svc.ErrMallWeatherExportStorageUnavailable):
+		return errcode.BadGateway, "天气导出存储暂时不可用，请稍后重试"
 	case errors.Is(err, data_svc.ErrMallWeatherExportInvalid),
 		errors.Is(err, data_svc.ErrMallWeatherExportTooLarge):
 		return errcode.UnprocessableEntity, "天气导出参数校验失败"

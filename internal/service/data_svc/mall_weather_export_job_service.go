@@ -36,13 +36,16 @@ const (
 	maxMallWeatherExportConfiguredRows       = int64(20_000_000)
 	maxMallWeatherExportConfiguredRangeDays  = 3_660
 	defaultMallWeatherExportDownloadTTL      = 5 * time.Minute
+	defaultMallWeatherExportStatTimeout      = 8 * time.Second
 )
 
 var (
-	ErrMallWeatherExportInvalid  = errors.New("mall weather export: invalid input")
-	ErrMallWeatherExportTooLarge = errors.New("mall weather export: estimated rows exceed limit")
-	ErrMallWeatherExportNotReady = errors.New("mall weather export: result is not ready")
-	ErrMallWeatherExportExpired  = errors.New("mall weather export: result expired")
+	ErrMallWeatherExportInvalid            = errors.New("mall weather export: invalid input")
+	ErrMallWeatherExportTooLarge           = errors.New("mall weather export: estimated rows exceed limit")
+	ErrMallWeatherExportNotReady           = errors.New("mall weather export: result is not ready")
+	ErrMallWeatherExportExpired            = errors.New("mall weather export: result expired")
+	ErrMallWeatherExportArtifactMissing    = errors.New("mall weather export: artifact missing")
+	ErrMallWeatherExportStorageUnavailable = errors.New("mall weather export: storage unavailable")
 )
 
 type MallWeatherExportCreateResult struct {
@@ -115,6 +118,7 @@ type mallWeatherExportLimitReader interface {
 }
 
 type mallWeatherExportDownloadSigner interface {
+	StatDownloadObject(context.Context, string) (storage.ObjectMetadata, error)
 	PresignDownloadURL(context.Context, string, string, time.Duration) (string, error)
 }
 
@@ -154,6 +158,7 @@ type MallWeatherExportJobService struct {
 	store       mallWeatherExportJobStore
 	newSigner   mallWeatherExportDownloadSignerFactory
 	downloadTTL time.Duration
+	statTimeout time.Duration
 	now         func() time.Time
 }
 
@@ -169,6 +174,7 @@ func NewMallWeatherExportJobService() *MallWeatherExportJobService {
 			return storage.NewOSSClientFromConfig()
 		},
 		downloadTTL: defaultMallWeatherExportDownloadTTL,
+		statTimeout: defaultMallWeatherExportStatTimeout,
 		now:         time.Now,
 	}
 }
@@ -192,6 +198,7 @@ func newMallWeatherExportJobService(
 			return storage.NewOSSClientFromConfig()
 		},
 		downloadTTL: defaultMallWeatherExportDownloadTTL,
+		statTimeout: defaultMallWeatherExportStatTimeout,
 		now:         now,
 	}, nil
 }
@@ -230,6 +237,7 @@ func (service *MallWeatherExportJobService) Download(
 	jobUUID = strings.TrimSpace(jobUUID)
 	if service == nil || service.newSigner == nil || service.downloadTTL < time.Minute ||
 		service.downloadTTL > time.Hour || ctx == nil || actorUserID == 0 ||
+		service.statTimeout <= 0 || service.statTimeout > 30*time.Second ||
 		len(jobUUID) != 36 || uuid.Validate(jobUUID) != nil {
 		return nil, fmt.Errorf("%w: invalid download request", ErrMallWeatherExportInvalid)
 	}
@@ -244,10 +252,15 @@ func (service *MallWeatherExportJobService) Download(
 		return nil, fmt.Errorf("mall weather export: nil stored job")
 	}
 	now := service.now().UTC()
-	if strings.ToLower(strings.TrimSpace(row.Status)) != "succeeded" {
+	status := strings.ToLower(strings.TrimSpace(row.Status))
+	if status == "expired" {
+		return nil, ErrMallWeatherExportExpired
+	}
+	if status != "succeeded" {
 		return nil, ErrMallWeatherExportNotReady
 	}
-	if row.ExpiresAt == nil || !row.ExpiresAt.UTC().After(now) || !validMallWeatherExportResultObjectKey(row.ResultObjectKey) {
+	if row.ExpiresAt == nil || !row.ExpiresAt.UTC().After(now) ||
+		!validMallWeatherExportResultObjectKey(row.ResultObjectKey) || row.FileSizeBytes <= 0 {
 		return nil, ErrMallWeatherExportExpired
 	}
 	validFor := service.downloadTTL
@@ -259,15 +272,32 @@ func (service *MallWeatherExportJobService) Download(
 	}
 	signer, err := service.newSigner()
 	if err != nil {
-		return nil, fmt.Errorf("mall weather export: create download signer: %w", err)
+		return nil, fmt.Errorf("%w: create signer: %w", ErrMallWeatherExportStorageUnavailable, err)
 	}
 	if signer == nil {
 		return nil, fmt.Errorf("mall weather export: nil download signer")
 	}
+	statCtx, cancelStat := context.WithTimeout(ctx, service.statTimeout)
+	metadata, err := signer.StatDownloadObject(statCtx, row.ResultObjectKey)
+	cancelStat()
+	if err != nil {
+		if errors.Is(err, storage.ErrOSSObjectNotFound) {
+			return nil, fmt.Errorf("%w: %w", ErrMallWeatherExportArtifactMissing, err)
+		}
+		return nil, fmt.Errorf("%w: %w", ErrMallWeatherExportStorageUnavailable, err)
+	}
+	if metadata.Size != row.FileSizeBytes {
+		return nil, fmt.Errorf(
+			"%w: stored size %d differs from object size %d",
+			ErrMallWeatherExportArtifactMissing,
+			row.FileSizeBytes,
+			metadata.Size,
+		)
+	}
 	fileName := "mall_weather_export_" + jobUUID + ".xlsx"
 	url, err := signer.PresignDownloadURL(ctx, row.ResultObjectKey, fileName, validFor)
 	if err != nil {
-		return nil, fmt.Errorf("mall weather export: sign download: %w", err)
+		return nil, fmt.Errorf("%w: sign download: %w", ErrMallWeatherExportStorageUnavailable, err)
 	}
 	return &MallWeatherExportDownloadResult{URL: url, ExpiresAt: now.Add(validFor)}, nil
 }

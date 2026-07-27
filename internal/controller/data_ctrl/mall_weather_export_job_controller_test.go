@@ -3,6 +3,7 @@ package data_ctrl
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -155,6 +156,9 @@ func TestMallWeatherExportJobControllerMapsSafeErrors(t *testing.T) {
 		{name: "profile conflict", err: data_svc.ErrMallWeatherExportProfileConflict, wantStatus: http.StatusConflict},
 		{name: "not ready", err: data_svc.ErrMallWeatherExportNotReady, wantStatus: http.StatusConflict},
 		{name: "expired", err: data_svc.ErrMallWeatherExportExpired, wantStatus: http.StatusConflict},
+		{name: "artifact missing", err: data_svc.ErrMallWeatherExportArtifactMissing, wantStatus: http.StatusConflict},
+		{name: "storage unavailable", err: data_svc.ErrMallWeatherExportStorageUnavailable, wantStatus: http.StatusBadGateway},
+		{name: "storage timeout", err: fmt.Errorf("verify storage: %w", context.DeadlineExceeded), wantStatus: http.StatusGatewayTimeout},
 		{name: "invalid", err: data_svc.ErrMallWeatherExportInvalid, wantStatus: http.StatusUnprocessableEntity},
 		{name: "too large", err: data_svc.ErrMallWeatherExportTooLarge, wantStatus: http.StatusUnprocessableEntity},
 		{name: "internal", err: errors.New("database password=secret"), wantStatus: http.StatusInternalServerError},
