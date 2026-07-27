@@ -395,6 +395,30 @@ export function MallWeatherPage({
 
   return (
     <div className="view-stack mall-weather-page">
+      {!showCreate && selectedMallReady && selectedMall && (
+        <div id="mall-weather-overview" tabIndex={-1}>
+          {!selectedOverview && overviewState !== 'error' && overviewState !== 'waiting' &&
+            <LoadingState label={`正在加载${selectedMall.nameCn}天气`} />}
+          {selectedOverview && <WeatherRealtime mall={selectedMall} overview={selectedOverview} />}
+          {overviewState === 'error' &&
+            <RequestError
+              message={overviewError}
+              onRetry={() => { setOverviewRetryCount(0); void loadOverview(selectedMall.id) }}
+            />}
+          {overviewState === 'waiting' && overviewRetryCount < 30 &&
+            <LoadingState label={overviewWaitingReason === 'waiting-empty'
+              ? `首次天气采集中，正在等待实况与未来逐小时数据（${overviewRetryCount + 1}/30）`
+              : `实况已加载，未来逐小时温度正在同步（${overviewRetryCount + 1}/30）`} />}
+          {overviewState === 'waiting' && overviewRetryCount >= 30 &&
+            <RequestError
+              message={overviewWaitingReason === 'waiting-empty'
+                ? '首次采集长时间未生成数据，请确认 MALL_WEATHER_ENABLED=true 且 weather 队列消费进程正在运行。'
+                : '实况已加载，但未来逐小时温度长时间不可用。请确认天气业务事务已提交，并检查最近采集记录。'}
+              onRetry={() => { setOverviewRetryCount(0); void loadOverview(selectedMall.id) }}
+            />}
+        </div>
+      )}
+
       <section className="mall-weather-toolbar" aria-label="商场天气筛选">
         <label>
           <span>搜索商场</span>
@@ -464,28 +488,13 @@ export function MallWeatherPage({
             onMallUpdated={handleMallUpdated}
             onReloadMall={loadMall}
           />}
-          {!showCreate && selectedMallReady && selectedMall && (
-            <div id="mall-weather-overview" tabIndex={-1}>
-              {overviewState === 'loading' && !selectedOverview && <LoadingState label={`正在加载${selectedMall.nameCn}天气`} />}
-              {selectedOverview && <WeatherOverview mall={selectedMall} overview={selectedOverview} refreshing={overviewState === 'loading'} onRefresh={() => void loadOverview(selectedMall.id)} />}
-              {overviewState === 'error' &&
-                <RequestError
-                  message={overviewError}
-                  onRetry={() => { setOverviewRetryCount(0); void loadOverview(selectedMall.id) }}
-                />}
-              {overviewState === 'waiting' && overviewRetryCount < 30 &&
-                <LoadingState label={overviewWaitingReason === 'waiting-empty'
-                  ? `首次天气采集中，正在等待实况与未来逐小时数据（${overviewRetryCount + 1}/30）`
-                  : `实况已加载，未来逐小时温度正在同步（${overviewRetryCount + 1}/30）`} />}
-              {overviewState === 'waiting' && overviewRetryCount >= 30 &&
-                <RequestError
-                  message={overviewWaitingReason === 'waiting-empty'
-                    ? '首次采集长时间未生成数据，请确认 MALL_WEATHER_ENABLED=true 且 weather 队列消费进程正在运行。'
-                    : '实况已加载，但未来逐小时温度长时间不可用。请确认天气业务事务已提交，并检查最近采集记录。'}
-                  onRetry={() => { setOverviewRetryCount(0); void loadOverview(selectedMall.id) }}
-                />}
-            </div>
-          )}
+          {!showCreate && selectedMallReady && selectedMall && selectedOverview &&
+            <WeatherOverviewDetails
+              mall={selectedMall}
+              overview={selectedOverview}
+              refreshing={overviewState === 'loading'}
+              onRefresh={() => void loadOverview(selectedMall.id)}
+            />}
           {!showCreate && selectedMallReady && selectedMall && <MallWeatherDataNavigation showActorActions={Boolean(actorID)} />}
           {!showCreate && selectedMallReady && selectedMall && <MallWeatherForecastPanel
             mallID={selectedMall.id}
@@ -533,7 +542,7 @@ function MallWeatherDataNavigation({ showActorActions }: { showActorActions: boo
   return (
     <nav className="mall-weather-data-nav" aria-label="天气数据快速入口">
       <strong>天气数据</strong>
-      <button type="button" onClick={() => navigateTo('mall-weather-overview')}>实况与趋势</button>
+      <button type="button" onClick={() => navigateTo('mall-weather-overview')}>当前实况</button>
       <button type="button" onClick={() => navigateTo('mall-weather-minutely')}>约 1 km 分钟降水</button>
       <button type="button" onClick={() => navigateTo('mall-weather-hourly')}>360 小时逐小时预报</button>
       <button type="button" onClick={() => navigateTo('mall-weather-daily')}>15 天逐日预报</button>
@@ -1219,55 +1228,59 @@ function weatherFetchRunFailureMessage(run: MallWeatherFetchRun) {
   return `天气采集失败：${detail}`
 }
 
-function WeatherOverview({ mall, overview, refreshing, onRefresh }: { mall: MallWeatherMall; overview: MallWeatherOverview; refreshing: boolean; onRefresh: () => void }) {
+function WeatherRealtime({ mall, overview }: { mall: MallWeatherMall; overview: MallWeatherOverview }) {
+  const { realtime } = overview
+
+  return (
+    <article className="workbench-panel mall-weather-realtime" aria-label="当前实况天气">
+      <div className="mall-weather-section-title"><div><strong>当前实况</strong><span>{mall.nameCn} · {realtime?.snapshotAtLocal || '暂无快照时间'}</span></div><Thermometer aria-hidden="true" /></div>
+      {realtime ? (
+        <>
+          <div className="mall-weather-temperature"><strong>{mallWeatherMetric(realtime.temperatureC, '°C')}</strong><span>{mallWeatherSkyconLabel(realtime.skycon)}</span></div>
+          <div className="mall-weather-metrics">
+            <MetaItem label="体感" value={mallWeatherMetric(realtime.apparentTemperatureC, '°C')} />
+            <MetaItem label="湿度" value={mallWeatherMetric(realtime.humidityPct, '%', 0)} />
+            <MetaItem label="风速" value={mallWeatherMetric(realtime.windSpeedKph, ' km/h')} />
+            <MetaItem label="风向" value={mallWeatherMetric(realtime.windDirectionDeg, '°', 0)} />
+            <MetaItem label="气压" value={mallWeatherMetric(realtime.pressurePa, ' Pa', 0)} />
+            <MetaItem label="云量" value={weatherRatioPercent(realtime.cloudrateRatio)} />
+            <MetaItem label="短波辐射" value={mallWeatherMetric(realtime.dswrfWM2, ' W/m²')} />
+            <MetaItem label="能见度" value={mallWeatherMetric(realtime.visibilityKm, ' km')} />
+            <MetaItem label="本地降水" value={mallWeatherMetric(realtime.localPrecipitationMmH, ' mm/h')} />
+            <MetaItem label="本地降水状态" value={[realtime.localPrecipitationStatus, realtime.localPrecipitationSource].filter(Boolean).join(' · ') || '暂无'} />
+            <MetaItem label="最近降水" value={realtime.nearestPrecipitationDistanceKm === undefined && realtime.nearestPrecipitationMmH === undefined
+              ? realtime.nearestPrecipitationStatus || '暂无'
+              : `${mallWeatherMetric(realtime.nearestPrecipitationDistanceKm, ' km')} · ${mallWeatherMetric(realtime.nearestPrecipitationMmH, ' mm/h')}`} />
+            <MetaItem label="质量" value={`${realtime.qualityStatus || '未知'}${realtime.qualityWarnings.length ? ` · ${realtime.qualityWarnings.length} 项告警` : ''}`} />
+            <MetaItem label="舒适度" value={[realtime.comfortIndex, realtime.comfortDescription].filter((value) => value !== undefined && value !== '').join(' · ') || '暂无'} />
+            <MetaItem label="紫外线" value={[realtime.ultravioletIndex, realtime.ultravioletDescription].filter((value) => value !== undefined && value !== '').join(' · ') || '暂无'} />
+          </div>
+          <p className="mall-weather-caption">供应商时间 {realtime.providerServerTimeLocal || '—'} · 采集时间 {realtime.fetchedAtLocal || '—'}</p>
+        </>
+      ) : <EmptyState title="暂无实况" detail="最近一次采集尚未产生可用实况。" />}
+    </article>
+  )
+}
+
+function WeatherOverviewDetails({ mall, overview, refreshing, onRefresh }: { mall: MallWeatherMall; overview: MallWeatherOverview; refreshing: boolean; onRefresh: () => void }) {
   const { realtime, meta } = overview
   const representativePoint = ['MALL_CENTER', 'CENTER', 'center'].includes(meta.representativePoint) ? '商场中心点' : meta.representativePoint || '口径缺失'
   const coverageRadius = meta.coverageRadiusM > 0 ? `业务半径 ${meta.coverageRadiusM} m` : '业务半径口径缺失'
 
   return (
     <div className="view-stack">
-      <section className="mall-weather-overview-grid">
-        <article className="workbench-panel mall-weather-realtime">
-          <div className="mall-weather-section-title"><div><strong>当前实况</strong><span>{realtime?.snapshotAtLocal || '暂无快照时间'}</span></div><Thermometer aria-hidden="true" /></div>
-          {realtime ? (
-            <>
-              <div className="mall-weather-temperature"><strong>{mallWeatherMetric(realtime.temperatureC, '°C')}</strong><span>{mallWeatherSkyconLabel(realtime.skycon)}</span></div>
-              <div className="mall-weather-metrics">
-                <MetaItem label="体感" value={mallWeatherMetric(realtime.apparentTemperatureC, '°C')} />
-                <MetaItem label="湿度" value={mallWeatherMetric(realtime.humidityPct, '%', 0)} />
-                <MetaItem label="风速" value={mallWeatherMetric(realtime.windSpeedKph, ' km/h')} />
-                <MetaItem label="风向" value={mallWeatherMetric(realtime.windDirectionDeg, '°', 0)} />
-                <MetaItem label="气压" value={mallWeatherMetric(realtime.pressurePa, ' Pa', 0)} />
-                <MetaItem label="云量" value={weatherRatioPercent(realtime.cloudrateRatio)} />
-                <MetaItem label="短波辐射" value={mallWeatherMetric(realtime.dswrfWM2, ' W/m²')} />
-                <MetaItem label="能见度" value={mallWeatherMetric(realtime.visibilityKm, ' km')} />
-                <MetaItem label="本地降水" value={mallWeatherMetric(realtime.localPrecipitationMmH, ' mm/h')} />
-                <MetaItem label="本地降水状态" value={[realtime.localPrecipitationStatus, realtime.localPrecipitationSource].filter(Boolean).join(' · ') || '暂无'} />
-                <MetaItem label="最近降水" value={realtime.nearestPrecipitationDistanceKm === undefined && realtime.nearestPrecipitationMmH === undefined
-                  ? realtime.nearestPrecipitationStatus || '暂无'
-                  : `${mallWeatherMetric(realtime.nearestPrecipitationDistanceKm, ' km')} · ${mallWeatherMetric(realtime.nearestPrecipitationMmH, ' mm/h')}`} />
-                <MetaItem label="质量" value={`${realtime.qualityStatus || '未知'}${realtime.qualityWarnings.length ? ` · ${realtime.qualityWarnings.length} 项告警` : ''}`} />
-                <MetaItem label="舒适度" value={[realtime.comfortIndex, realtime.comfortDescription].filter((value) => value !== undefined && value !== '').join(' · ') || '暂无'} />
-                <MetaItem label="紫外线" value={[realtime.ultravioletIndex, realtime.ultravioletDescription].filter((value) => value !== undefined && value !== '').join(' · ') || '暂无'} />
-              </div>
-              <p className="mall-weather-caption">供应商时间 {realtime.providerServerTimeLocal || '—'} · 采集时间 {realtime.fetchedAtLocal || '—'}</p>
-            </>
-          ) : <EmptyState title="暂无实况" detail="最近一次采集尚未产生可用实况。" />}
-        </article>
-
-        <article className="workbench-panel">
-          <div className="mall-weather-section-title"><div><strong>空气质量</strong><span>{realtime?.aqiDescriptionChn || '中国 AQI 标准'}</span></div><Wind aria-hidden="true" /></div>
-          <div className="mall-weather-aqi"><strong>{mallWeatherMetric(realtime?.aqiChn, '', 0)}</strong><span>AQI</span></div>
-          <div className="mall-weather-metrics compact">
-            <MetaItem label="PM2.5" value={mallWeatherMetric(realtime?.pm25UgM3, ' μg/m³')} />
-            <MetaItem label="PM10" value={mallWeatherMetric(realtime?.pm10UgM3, ' μg/m³')} />
-            <MetaItem label="O₃" value={mallWeatherMetric(realtime?.o3UgM3, ' μg/m³')} />
-            <MetaItem label="NO₂" value={mallWeatherMetric(realtime?.no2UgM3, ' μg/m³')} />
-            <MetaItem label="SO₂" value={mallWeatherMetric(realtime?.so2UgM3, ' μg/m³')} />
-            <MetaItem label="CO" value={mallWeatherMetric(realtime?.coMgM3, ' mg/m³')} />
-            <MetaItem label="美国 AQI" value={`${mallWeatherMetric(realtime?.aqiUsa, '', 0)}${realtime?.aqiDescriptionUsa ? ` · ${realtime.aqiDescriptionUsa}` : ''}`} />
-          </div>
-        </article>
+      <section className="workbench-panel" aria-label="空气质量">
+        <div className="mall-weather-section-title"><div><strong>空气质量</strong><span>{realtime?.aqiDescriptionChn || '中国 AQI 标准'}</span></div><Wind aria-hidden="true" /></div>
+        <div className="mall-weather-aqi"><strong>{mallWeatherMetric(realtime?.aqiChn, '', 0)}</strong><span>AQI</span></div>
+        <div className="mall-weather-metrics compact">
+          <MetaItem label="PM2.5" value={mallWeatherMetric(realtime?.pm25UgM3, ' μg/m³')} />
+          <MetaItem label="PM10" value={mallWeatherMetric(realtime?.pm10UgM3, ' μg/m³')} />
+          <MetaItem label="O₃" value={mallWeatherMetric(realtime?.o3UgM3, ' μg/m³')} />
+          <MetaItem label="NO₂" value={mallWeatherMetric(realtime?.no2UgM3, ' μg/m³')} />
+          <MetaItem label="SO₂" value={mallWeatherMetric(realtime?.so2UgM3, ' μg/m³')} />
+          <MetaItem label="CO" value={mallWeatherMetric(realtime?.coMgM3, ' mg/m³')} />
+          <MetaItem label="美国 AQI" value={`${mallWeatherMetric(realtime?.aqiUsa, '', 0)}${realtime?.aqiDescriptionUsa ? ` · ${realtime.aqiDescriptionUsa}` : ''}`} />
+        </div>
       </section>
 
       <section className="workbench-panel mall-weather-summary">

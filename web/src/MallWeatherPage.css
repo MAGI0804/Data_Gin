@@ -563,12 +563,6 @@
   padding: 8px 10px;
 }
 
-.mall-weather-overview-grid {
-  display: grid;
-  grid-template-columns: minmax(0, 1.4fr) minmax(260px, 0.6fr);
-  gap: 14px;
-}
-
 .mall-weather-temperature,
 .mall-weather-aqi {
   display: flex;
@@ -676,8 +670,7 @@
 }
 
 @media (max-width: 1280px) {
-  .mall-weather-meta,
-  .mall-weather-overview-grid {
+  .mall-weather-meta {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
@@ -716,7 +709,6 @@
   .mall-weather-manual-coordinate,
   .mall-weather-push-controls,
   .mall-weather-layout,
-  .mall-weather-overview-grid,
   .mall-weather-meta,
   .mall-weather-steps,
   .mall-weather-candidates {
@@ -767,8 +759,15 @@
 @media (max-width: 480px) {
   .mall-weather-toolbar,
   .mall-weather-create-form,
-  .mall-weather-metrics,
   .mall-weather-push-summary {
     grid-template-columns: 1fr;
+  }
+
+  .mall-weather-content .mall-weather-metrics {
+    grid-template-columns: 1fr;
+  }
+
+  .mall-weather-realtime .mall-weather-metrics {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
