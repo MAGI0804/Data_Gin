@@ -41,10 +41,10 @@ type OSSConfig struct {
 }
 
 type OSSClient struct {
-	cfg                OSSConfig
-	client             *alioss.Client
-	downloadClient     *alioss.Client
-	headDownloadObject func(context.Context, *alioss.HeadObjectRequest) (*alioss.HeadObjectResult, error)
+	cfg            OSSConfig
+	client         *alioss.Client
+	downloadClient *alioss.Client
+	headObject     func(context.Context, *alioss.HeadObjectRequest) (*alioss.HeadObjectResult, error)
 }
 
 type UploadResult struct {
@@ -126,8 +126,8 @@ func NewOSSClientFromConfig() (*OSSClient, error) {
 		client:         alioss.NewClient(ossCfg),
 		downloadClient: alioss.NewClient(downloadCfg),
 	}
-	client.headDownloadObject = func(ctx context.Context, request *alioss.HeadObjectRequest) (*alioss.HeadObjectResult, error) {
-		return client.downloadClient.HeadObject(ctx, request)
+	client.headObject = func(ctx context.Context, request *alioss.HeadObjectRequest) (*alioss.HeadObjectResult, error) {
+		return client.client.HeadObject(ctx, request)
 	}
 	return client, nil
 }
@@ -305,15 +305,15 @@ func (c *OSSClient) StatDownloadObject(ctx context.Context, objectKey string) (O
 	if c == nil || ctx == nil || objectKey == "" {
 		return ObjectMetadata{}, fmt.Errorf("OSS 下载对象查询参数无效")
 	}
-	headObject := c.headDownloadObject
-	if headObject == nil && c.downloadClient != nil {
-		headObject = func(ctx context.Context, request *alioss.HeadObjectRequest) (*alioss.HeadObjectResult, error) {
-			return c.downloadClient.HeadObject(ctx, request)
-		}
-	}
+	headObject := c.headObject
 	if headObject == nil && c.client != nil {
 		headObject = func(ctx context.Context, request *alioss.HeadObjectRequest) (*alioss.HeadObjectResult, error) {
 			return c.client.HeadObject(ctx, request)
+		}
+	}
+	if headObject == nil && c.downloadClient != nil {
+		headObject = func(ctx context.Context, request *alioss.HeadObjectRequest) (*alioss.HeadObjectResult, error) {
+			return c.downloadClient.HeadObject(ctx, request)
 		}
 	}
 	if headObject == nil {

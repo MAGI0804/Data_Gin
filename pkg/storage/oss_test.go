@@ -3,6 +3,8 @@ package storage
 import (
 	"context"
 	"errors"
+	"io"
+	"net/http"
 	"net/url"
 	"strings"
 	"testing"
@@ -12,7 +14,7 @@ import (
 	"github.com/aliyun/alibabacloud-oss-go-sdk-v2/oss/credentials"
 )
 
-func TestOSSClientStatsBrowserDownloadObject(t *testing.T) {
+func TestOSSClientStatsDownloadObject(t *testing.T) {
 	tests := []struct {
 		name       string
 		statErr    error
@@ -32,7 +34,7 @@ func TestOSSClientStatsBrowserDownloadObject(t *testing.T) {
 			var requestedKey string
 			client := &OSSClient{
 				cfg: OSSConfig{Bucket: "weather-private"},
-				headDownloadObject: func(_ context.Context, request *alioss.HeadObjectRequest) (*alioss.HeadObjectResult, error) {
+				headObject: func(_ context.Context, request *alioss.HeadObjectRequest) (*alioss.HeadObjectResult, error) {
 					requestedBucket = alioss.ToString(request.Bucket)
 					requestedKey = alioss.ToString(request.Key)
 					if tt.statErr != nil {
@@ -440,4 +442,65 @@ func TestOSSClientPresignDownloadURLUsesBrowserClient(t *testing.T) {
 		!strings.Contains(signedURL, "weather-private.oss-cn-shanghai.aliyuncs.com") {
 		t.Fatalf("signed URL is not browser-accessible: %q", signedURL)
 	}
+}
+
+func TestOSSClientStatsInternallyAndPresignsForBrowser(t *testing.T) {
+	provider := credentials.NewStaticCredentialsProvider("ak", "sk")
+	var statHost string
+	uploadHTTPClient := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		statHost = request.URL.Host
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Length": []string{"4096"}},
+			Body:       io.NopCloser(strings.NewReader("")),
+			Request:    request,
+		}, nil
+	})}
+	downloadHTTPClient := &http.Client{Transport: roundTripFunc(func(request *http.Request) (*http.Response, error) {
+		return nil, errors.New("browser download client must not perform object stat")
+	})}
+	uploadClient := alioss.NewClient(alioss.LoadDefaultConfig().
+		WithCredentialsProvider(provider).
+		WithRegion("cn-shanghai").
+		WithEndpoint("https://oss-cn-shanghai-internal.aliyuncs.com").
+		WithUseInternalEndpoint(true).
+		WithHttpClient(uploadHTTPClient))
+	downloadClient := alioss.NewClient(alioss.LoadDefaultConfig().
+		WithCredentialsProvider(provider).
+		WithRegion("cn-shanghai").
+		WithEndpoint("https://oss-cn-shanghai.aliyuncs.com").
+		WithUseInternalEndpoint(false).
+		WithHttpClient(downloadHTTPClient))
+	client := &OSSClient{
+		cfg:            OSSConfig{Bucket: "weather-private", UseInternal: true},
+		client:         uploadClient,
+		downloadClient: downloadClient,
+	}
+
+	metadata, err := client.StatDownloadObject(t.Context(), "mall-weather-exports/job/result.xlsx")
+	if err != nil || metadata.Size != 4096 {
+		t.Fatalf("StatDownloadObject() metadata=%+v error=%v", metadata, err)
+	}
+	if statHost != "weather-private.oss-cn-shanghai-internal.aliyuncs.com" {
+		t.Fatalf("StatDownloadObject() host=%q, want internal bucket host", statHost)
+	}
+	signedURL, err := client.PresignDownloadURL(
+		t.Context(),
+		"mall-weather-exports/job/result.xlsx",
+		"mall-weather.xlsx",
+		5*time.Minute,
+	)
+	if err != nil {
+		t.Fatalf("PresignDownloadURL() error=%v", err)
+	}
+	parsedURL, err := url.Parse(signedURL)
+	if err != nil || parsedURL.Hostname() != "weather-private.oss-cn-shanghai.aliyuncs.com" {
+		t.Fatalf("PresignDownloadURL() url=%q error=%v, want public bucket host", signedURL, err)
+	}
+}
+
+type roundTripFunc func(*http.Request) (*http.Response, error)
+
+func (roundTrip roundTripFunc) RoundTrip(request *http.Request) (*http.Response, error) {
+	return roundTrip(request)
 }
