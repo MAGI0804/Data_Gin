@@ -1305,22 +1305,22 @@ export function mallWeatherOverviewPath(mallID: number, timeZone = '') {
   return `/v1/malls/${mallID}/weather/overview${suffix ? `?${suffix}` : ''}`
 }
 
-export function mallWeatherSeriesPath(mallID: number, series: MallWeatherSeries, start: Date, end: Date, cursor = '', timeZone = 'Asia/Shanghai', asOf = new Date()) {
+export function mallWeatherSeriesPath(mallID: number, series: MallWeatherSeries, start: Date, end: Date, cursor = '', timeZone = 'Asia/Shanghai', asOf?: Date) {
   if (!Number.isSafeInteger(mallID) || mallID <= 0) throw new Error('invalid mall id')
   if (!['minutely', 'hourly', 'daily', 'life-indices'].includes(series)) throw new Error('invalid weather series')
   if (!Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime()) || start >= end || end.getTime() - start.getTime() > 31 * 24 * 60 * 60 * 1000) {
     throw new Error('invalid weather range')
   }
-  if (!Number.isFinite(asOf.getTime())) throw new Error('invalid weather snapshot time')
+  if (asOf !== undefined && !Number.isFinite(asOf.getTime())) throw new Error('invalid weather snapshot time')
   if (!timeZone.trim()) throw new Error('invalid weather time zone')
   const query = new URLSearchParams({
     start: start.toISOString(),
     end: end.toISOString(),
     timeZone,
     latest: 'true',
-    asOf: asOf.toISOString(),
     pageSize: '200',
   })
+  if (asOf !== undefined) query.set('asOf', asOf.toISOString())
   if (cursor) query.set('cursor', cursor)
   return `/v1/malls/${mallID}/weather/${series}?${query.toString()}`
 }
@@ -1348,7 +1348,7 @@ export async function loadAllMallWeatherPages<T>(
   series: MallWeatherSeries,
   window: MallWeatherQueryWindow,
   timeZone: string,
-  asOf: Date,
+  asOf: Date | undefined,
   parser: MallWeatherPageParser<T>,
 ): Promise<{ items: T[]; meta: MallWeatherMeta | null }> {
   const items: T[] = []

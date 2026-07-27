@@ -322,6 +322,9 @@ test('builds encoded weather overview paths and rejects invalid mall ids', () =>
 test('builds bounded complete-series paths and parses paged forecast contracts', () => {
   const start = new Date('2026-07-22T00:00:00.000Z')
   const end = new Date('2026-08-06T00:00:00.000Z')
+  const latestURL = new URL(mallWeatherSeriesPath(7, 'hourly', start, end), 'https://example.test')
+  assert.equal(latestURL.searchParams.get('latest'), 'true')
+  assert.equal(latestURL.searchParams.has('asOf'), false)
   const asOf = new Date('2026-07-22T00:02:00.000Z')
   const url = new URL(mallWeatherSeriesPath(7, 'hourly', start, end, 'next-page', 'Asia/Shanghai', asOf), 'https://example.test')
   assert.equal(url.pathname, '/v1/malls/7/weather/hourly')

@@ -64,7 +64,6 @@ export function MallWeatherForecastPanel({ mallID, timeZone, client }: { mallID:
       setLife((state) => ({ ...state, loading: false, error: message }))
       return
     }
-    const asOf = new Date()
     const request = async (path: string) => {
       const controller = new AbortController()
       activeControllers.current.add(controller)
@@ -78,10 +77,10 @@ export function MallWeatherForecastPanel({ mallID, timeZone, client }: { mallID:
     }
     const isCurrent = () => !disposed.current && sequence === requestSequence.current
     void Promise.all([
-      settleDataset(loadAllMallWeatherPages(request, mallID, 'minutely', windows.minutely, timeZone, asOf, parseMallWeatherMinutelyPage), isCurrent, setMinutely),
-      settleDataset(loadAllMallWeatherPages(request, mallID, 'hourly', windows.hourly, timeZone, asOf, parseMallWeatherHourlyPage), isCurrent, setHourly),
-      settleDataset(loadAllMallWeatherPages(request, mallID, 'daily', windows.daily, timeZone, asOf, parseMallWeatherDailyPage), isCurrent, setDaily),
-      settleDataset(loadAllMallWeatherPages(request, mallID, 'life-indices', windows.daily, timeZone, asOf, parseMallWeatherLifeIndexPage), isCurrent, setLife),
+      settleDataset(loadAllMallWeatherPages(request, mallID, 'minutely', windows.minutely, timeZone, undefined, parseMallWeatherMinutelyPage), isCurrent, setMinutely),
+      settleDataset(loadAllMallWeatherPages(request, mallID, 'hourly', windows.hourly, timeZone, undefined, parseMallWeatherHourlyPage), isCurrent, setHourly),
+      settleDataset(loadAllMallWeatherPages(request, mallID, 'daily', windows.daily, timeZone, undefined, parseMallWeatherDailyPage), isCurrent, setDaily),
+      settleDataset(loadAllMallWeatherPages(request, mallID, 'life-indices', windows.daily, timeZone, undefined, parseMallWeatherLifeIndexPage), isCurrent, setLife),
     ])
   }, [abortActiveRequests, client, mallID, timeZone])
 
