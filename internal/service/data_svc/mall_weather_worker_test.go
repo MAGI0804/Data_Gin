@@ -58,8 +58,8 @@ func TestMallWeatherProcessorPersistsEveryComprehensiveWeatherModule(t *testing.
 	batch := store.batch
 	if provider.weatherCalls != 1 || batch == nil || batch.EndpointKind != caiyun.EndpointWeatherV26 ||
 		batch.Status != weatherFetchStatusSuccess || batch.Forecasts == nil || batch.Forecasts.Realtime == nil ||
-		len(batch.Forecasts.Minutely) != 120 || len(batch.Forecasts.Hourly) != 1 || batch.Daily == nil ||
-		len(batch.Daily.Daily) != 1 || len(batch.Daily.LifeIndices) != 1 || batch.Alerts == nil ||
+		len(batch.Forecasts.Minutely) != 120 || len(batch.Forecasts.Hourly) != 72 || batch.Daily == nil ||
+		len(batch.Daily.Daily) != 7 || len(batch.Daily.LifeIndices) != 7 || batch.Alerts == nil ||
 		len(batch.StaleLatest.DataKinds) != 0 || len(batch.StaleLatest.LifeSourceAPIs) != 0 {
 		t.Fatalf("provider calls=%d batch=%+v", provider.weatherCalls, batch)
 	}
@@ -899,23 +899,40 @@ func fullComprehensiveWeatherResponse(t *testing.T) []byte {
 		"precipitation_2h": precipitation2H, "precipitation": precipitation,
 		"probability": []float64{0, 0, 0, 0},
 	}
+	hourlyTemperature := make([]interface{}, 0, 72)
+	hourlySkycon := make([]interface{}, 0, 72)
+	hourlyStart := time.Date(2026, 7, 22, 11, 0, 0, 0, time.FixedZone("CST", 8*60*60))
+	for hour := 0; hour < 72; hour++ {
+		forecastTime := hourlyStart.Add(time.Duration(hour) * time.Hour).Format("2006-01-02T15:04Z07:00")
+		hourlyTemperature = append(hourlyTemperature, map[string]interface{}{"datetime": forecastTime, "value": 33.2})
+		hourlySkycon = append(hourlySkycon, map[string]interface{}{"datetime": forecastTime, "value": "PARTLY_CLOUDY_DAY"})
+	}
 	result["hourly"] = map[string]interface{}{
 		"status": "ok", "description": "未来二十四小时天气稳定",
-		"temperature": []interface{}{map[string]interface{}{"datetime": "2026-07-22T11:00+08:00", "value": 33.2}},
-		"skycon":      []interface{}{map[string]interface{}{"datetime": "2026-07-22T11:00+08:00", "value": "PARTLY_CLOUDY_DAY"}},
+		"temperature": hourlyTemperature,
+		"skycon":      hourlySkycon,
+	}
+	dailyTemperature := make([]interface{}, 0, 7)
+	dailySkycon := make([]interface{}, 0, 7)
+	dailyComfort := make([]interface{}, 0, 7)
+	for day := 0; day < 7; day++ {
+		forecastDate := hourlyStart.AddDate(0, 0, day).Format("2006-01-02T00:00Z07:00")
+		dailyTemperature = append(dailyTemperature, map[string]interface{}{
+			"date": forecastDate, "max": 35.0, "min": 27.0, "avg": 31.0,
+		})
+		dailySkycon = append(dailySkycon, map[string]interface{}{
+			"date": forecastDate, "value": "PARTLY_CLOUDY_DAY",
+		})
+		dailyComfort = append(dailyComfort, map[string]interface{}{
+			"date": forecastDate, "index": "5", "desc": "闷热",
+		})
 	}
 	result["daily"] = map[string]interface{}{
-		"status": "ok",
-		"temperature": []interface{}{map[string]interface{}{
-			"date": "2026-07-22T00:00+08:00", "max": 35.0, "min": 27.0, "avg": 31.0,
-		}},
-		"skycon": []interface{}{map[string]interface{}{
-			"date": "2026-07-22T00:00+08:00", "value": "PARTLY_CLOUDY_DAY",
-		}},
+		"status":      "ok",
+		"temperature": dailyTemperature,
+		"skycon":      dailySkycon,
 		"life_index": map[string]interface{}{
-			"comfort": []interface{}{map[string]interface{}{
-				"date": "2026-07-22T00:00+08:00", "index": "5", "desc": "闷热",
-			}},
+			"comfort": dailyComfort,
 		},
 	}
 	result["alert"] = map[string]interface{}{
