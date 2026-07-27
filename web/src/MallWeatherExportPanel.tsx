@@ -5,7 +5,7 @@ import {
   mallWeatherExportCreateDisposition,
   loadMallWeatherExportSession,
   mallWeatherExportCreateRequest,
-  mallWeatherExportContentPath,
+  mallWeatherExportDownloadPath,
   mallWeatherExportJobPath,
   mallWeatherExportJobTerminal,
   mallWeatherExportKey,
@@ -17,13 +17,11 @@ import {
   mallWeatherExportPollRetryDelayMilliseconds,
   mallWeatherExportProgress,
   mallWeatherExportRequestMatches,
-  MallWeatherExportDownloadTimeoutError,
   MallWeatherExportRequestTimeoutError,
   parseMallWeatherExportJob,
   parseMallWeatherExportSafeErrorMessage,
   resolveMallWeatherExportStorage,
   saveMallWeatherExportSession,
-  waitForMallWeatherExportDownload,
   waitForMallWeatherExportRequest,
   type MallWeatherExportJob,
   type MallWeatherExportPendingCreate,
@@ -79,6 +77,7 @@ export function MallWeatherExportPanel({ actorID, mallID, mallName, client, down
     () => restoredSession?.jobId ? pendingJob(restoredSession.jobId) : null,
   )
   const [actionError, setActionError] = useState('')
+  const [downloadMessage, setDownloadMessage] = useState('')
   const [pollError, setPollError] = useState('')
   const [storageWarning, setStorageWarning] = useState(() => exportStorage ? '' : exportStorageWarning)
   const [pollRevision, setPollRevision] = useState(0)
@@ -111,6 +110,7 @@ export function MallWeatherExportPanel({ actorID, mallID, mallName, client, down
     replacePendingCreate(restoredSession?.pending ?? null)
     setJob(restoredSession?.jobId ? pendingJob(restoredSession.jobId) : null)
     setActionError('')
+    setDownloadMessage('')
     setPollError('')
     setPollRevision(0)
     setCreatingJob(false)
@@ -239,6 +239,7 @@ export function MallWeatherExportPanel({ actorID, mallID, mallName, client, down
     actionController.current = controller
     setCreatingJob(true)
     setActionError('')
+    setDownloadMessage('')
     setPollError('')
     try {
       const response = await waitForMallWeatherExportRequest(
@@ -306,10 +307,11 @@ export function MallWeatherExportPanel({ actorID, mallID, mallName, client, down
     actionController.current = controller
     setDownloading(true)
     setActionError('')
+    setDownloadMessage('')
     try {
-      const response = await waitForMallWeatherExportDownload(
+      const response = await waitForMallWeatherExportRequest(
         downloadFile(
-          mallWeatherExportContentPath(job.jobId),
+          mallWeatherExportDownloadPath(job.jobId),
           `mall_weather_export_${job.jobId}.xlsx`,
           controller.signal,
         ),
@@ -337,9 +339,10 @@ export function MallWeatherExportPanel({ actorID, mallID, mallName, client, down
         response.data,
       ))
       persistSession({ pending: null, jobId: job.jobId })
+      setDownloadMessage('下载请求已提交给浏览器，请在下载列表中查看保存进度。')
     } catch (error) {
-      if (error instanceof MallWeatherExportDownloadTimeoutError) {
-        setActionError('Excel 文件下载超时，请检查网络后重试')
+      if (error instanceof MallWeatherExportRequestTimeoutError) {
+        setActionError('获取 Excel 下载地址超时，请检查网络后重试')
       } else if (!controller.signal.aborted) {
         setActionError(error instanceof Error ? error.message : 'Excel 文件下载失败')
       }
@@ -358,6 +361,7 @@ export function MallWeatherExportPanel({ actorID, mallID, mallName, client, down
     replacePendingCreate(null)
     clearSession()
     setActionError('')
+    setDownloadMessage('')
     setPollError('')
     setJob(null)
   }
@@ -414,6 +418,7 @@ export function MallWeatherExportPanel({ actorID, mallID, mallName, client, down
         </div>
       )}
       {storageWarning && <p className="mall-weather-action-message" role="status">{storageWarning}</p>}
+      {downloadMessage && <p className="mall-weather-action-message" role="status">{downloadMessage}</p>}
       {actionError && <p className="mall-weather-action-message error" role="alert">{actionError}</p>}
     </section>
   )

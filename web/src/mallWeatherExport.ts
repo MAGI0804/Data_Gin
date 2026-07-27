@@ -81,19 +81,15 @@ export type MallWeatherExportJob = {
 export type MallWeatherExportDownloadReadiness = 'ready' | 'not-ready' | 'expired'
 export type MallWeatherExportPollFailureAction = 'retry' | 'forget' | 'pause'
 
-export const mallWeatherExportDownloadRequestTimeoutMilliseconds = 900_000
+export type MallWeatherExportDownloadGrant = {
+  url: string
+  expiresAt: string
+}
 
 export class MallWeatherExportRequestTimeoutError extends Error {
   constructor() {
     super('mall weather export request timed out')
     this.name = 'MallWeatherExportRequestTimeoutError'
-  }
-}
-
-export class MallWeatherExportDownloadTimeoutError extends Error {
-  constructor() {
-    super('mall weather export download request timed out')
-    this.name = 'MallWeatherExportDownloadTimeoutError'
   }
 }
 
@@ -371,6 +367,25 @@ export function parseMallWeatherExportJob(payload: unknown): MallWeatherExportJo
   }
 }
 
+export function parseMallWeatherExportDownloadGrant(
+  payload: unknown,
+  now = new Date(),
+): MallWeatherExportDownloadGrant | null {
+  const data = envelopeData(payload)
+  if (!data || !nonEmptyString(data.url, 8_192) || !isRFC3339(data.expiresAt) || !Number.isFinite(now.getTime())) return null
+  const expiresAtMilliseconds = Date.parse(data.expiresAt)
+  const lifetimeMilliseconds = expiresAtMilliseconds - now.getTime()
+  if (lifetimeMilliseconds < 30_000 || lifetimeMilliseconds > 60 * 60 * 1000) return null
+  let parsedURL: URL
+  try {
+    parsedURL = new URL(data.url)
+  } catch {
+    return null
+  }
+  if (parsedURL.protocol !== 'https:' || parsedURL.username || parsedURL.password || parsedURL.hash || !parsedURL.hostname) return null
+  return { url: data.url, expiresAt: data.expiresAt }
+}
+
 export function mallWeatherExportJobTerminal(status: MallWeatherExportJobStatus) {
   return status === 'SUCCEEDED' || status === 'FAILED' || status === 'CANCELLED' || status === 'EXPIRED'
 }
@@ -429,19 +444,6 @@ export async function waitForMallWeatherExportRequest<T>(
     controller,
     timeoutMilliseconds,
     () => new MallWeatherExportRequestTimeoutError(),
-  )
-}
-
-export async function waitForMallWeatherExportDownload<T>(
-  request: Promise<T>,
-  controller: AbortController,
-  timeoutMilliseconds = mallWeatherExportDownloadRequestTimeoutMilliseconds,
-): Promise<T> {
-  return waitForMallWeatherExportAbortableRequest(
-    request,
-    controller,
-    timeoutMilliseconds,
-    () => new MallWeatherExportDownloadTimeoutError(),
   )
 }
 

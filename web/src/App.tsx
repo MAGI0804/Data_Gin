@@ -27,6 +27,7 @@ import { effectiveApiStatus } from './apiResponse'
 import { apiURL as buildApiURL } from './apiURL'
 import { clearStoredToken, loadStoredToken, saveStoredToken, storedTokenExpiresAt, tokenActorID } from './authStorage'
 import { MallWeatherPage } from './MallWeatherPage'
+import { parseMallWeatherExportDownloadGrant } from './mallWeatherExport'
 import {
   buildExcelExportConfig,
   cloneExcelMatchSteps,
@@ -769,55 +770,29 @@ function App() {
       const validFileName = /^mall_weather_export_[0-9a-f-]{36}\.xlsx$/i.test(fileName)
       if (!validFileName) return { ok: false, status: 422, data: 'invalid download file name' }
       try {
-        const response = await fetch(apiURL(path), {
-          method: 'GET',
-          signal,
-          headers: {
-            ...(token ? { token } : {}),
-          },
+        const response = await client(path, {
+          method: 'GET', signal, showResult: false, silentLoading: true,
         })
-        const contentType = response.headers.get('Content-Type')?.split(';', 1)[0].trim().toLowerCase() ?? ''
-        if (!response.ok || contentType !== 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet') {
-          const data = await response.json().catch(() => ({}))
-          const effectiveStatus = effectiveApiStatus(response.status, data)
-          if (effectiveStatus === 401) {
-            clearStoredToken(window.localStorage)
-            setToken('')
-            setAuthenticated(false)
-          }
-          return { ok: false, status: effectiveStatus, data }
-        }
-        const declaredSizeValue = response.headers.get('Content-Length')
-        const declaredSize = declaredSizeValue === null ? null : Number(declaredSizeValue)
-        if (declaredSize !== null && (!Number.isSafeInteger(declaredSize) || declaredSize < 4)) {
-          return { ok: false, status: 502, data: 'invalid XLSX download size' }
-        }
-        const blob = await response.blob()
-        const header = new Uint8Array(await blob.slice(0, 4).arrayBuffer())
-        if (declaredSize !== null && blob.size !== declaredSize) {
-          return { ok: false, status: 502, data: 'incomplete XLSX download content' }
-        }
-        if (blob.size < 4 || header[0] !== 0x50 || header[1] !== 0x4b || header[2] !== 0x03 || header[3] !== 0x04) {
-          return { ok: false, status: 502, data: 'invalid XLSX download content' }
-        }
-        const objectURL = URL.createObjectURL(blob)
+        if (!response.ok) return response
+        const grant = parseMallWeatherExportDownloadGrant(response.data)
+        if (!grant) return { ok: false, status: 502, data: 'invalid XLSX download grant' }
         const anchor = document.createElement('a')
         try {
-          anchor.href = objectURL
+          anchor.href = grant.url
           anchor.download = fileName
-          anchor.rel = 'noopener'
+          anchor.rel = 'noopener noreferrer'
+          anchor.referrerPolicy = 'no-referrer'
           document.body.append(anchor)
           anchor.click()
         } finally {
           anchor.remove()
-          window.setTimeout(() => URL.revokeObjectURL(objectURL), 60_000)
         }
-        return { ok: true, status: response.status, data: { fileName, size: blob.size } }
+        return { ok: true, status: response.status, data: { fileName, expiresAt: grant.expiresAt } }
       } catch (error) {
         return { ok: false, status: 0, data: error instanceof Error ? error.message : String(error) }
       }
     },
-    [token],
+    [client],
   )
 
   const loadConfiguredMethods = useCallback(async (pipelines: PipelineDefinition[]) => {

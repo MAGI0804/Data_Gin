@@ -8,7 +8,6 @@ import {
   mallWeatherExportCreateRequest,
   mallWeatherExportCreateResultMatchesRequest,
   mallWeatherExportDownloadReadiness,
-  mallWeatherExportDownloadRequestTimeoutMilliseconds,
   mallWeatherExportMaximumPollRetryDelayMilliseconds,
   mallWeatherExportMaximumTransientPollRetries,
   mallWeatherExportContentPath,
@@ -24,11 +23,11 @@ import {
   mallWeatherExportRequestTimeoutMilliseconds,
   mallWeatherExportRequestMatches,
   parseMallWeatherExportCreateResult,
+  parseMallWeatherExportDownloadGrant,
   parseMallWeatherExportJob,
   parseMallWeatherExportSafeErrorMessage,
   resolveMallWeatherExportStorage,
   saveMallWeatherExportSession,
-  waitForMallWeatherExportDownload,
   waitForMallWeatherExportRequest,
 } from '../.test-dist/mallWeatherExport.js'
 
@@ -262,21 +261,24 @@ test('builds stable authenticated download resource paths', () => {
   assert.throws(() => mallWeatherExportJobPath('bad'), /invalid mall weather export job id/)
 })
 
-test('bounds authenticated file downloads and aborts clients that do not settle', async () => {
-  assert.equal(mallWeatherExportDownloadRequestTimeoutMilliseconds, 900_000)
-
-  const completedController = new AbortController()
-  assert.equal(await waitForMallWeatherExportDownload(
-    Promise.resolve('ready'), completedController, 100,
-  ), 'ready')
-  assert.equal(completedController.signal.aborted, false)
-
-  const stalledController = new AbortController()
-  await assert.rejects(
-    waitForMallWeatherExportDownload(new Promise(() => {}), stalledController, 5),
-    { name: 'MallWeatherExportDownloadTimeoutError' },
-  )
-  assert.equal(stalledController.signal.aborted, true)
+test('accepts only short-lived HTTPS download grants', async () => {
+  const now = new Date('2026-07-27T10:00:00Z')
+  const valid = envelope({
+    url: 'https://weather-files.example.com/export.xlsx?signature=abc123',
+    expiresAt: '2026-07-27T10:05:00Z',
+  })
+  assert.deepEqual(parseMallWeatherExportDownloadGrant(valid, now), valid.data)
+  for (const invalid of [
+    { ...valid.data, url: 'http://weather-files.example.com/export.xlsx' },
+    { ...valid.data, url: 'javascript:alert(1)' },
+    { ...valid.data, url: 'https://user:secret@weather-files.example.com/export.xlsx' },
+    { ...valid.data, url: 'https://weather-files.example.com/export.xlsx#fragment' },
+    { ...valid.data, expiresAt: '2026-07-27T10:00:29Z' },
+    { ...valid.data, expiresAt: '2026-07-27T11:00:01Z' },
+  ]) {
+    assert.equal(parseMallWeatherExportDownloadGrant(envelope(invalid), now), null)
+  }
+  assert.equal(parseMallWeatherExportDownloadGrant({ code: 0, data: valid.data }, new Date('invalid')), null)
 
   const cancelledController = new AbortController()
   const cancelledRequest = waitForMallWeatherExportRequest(
