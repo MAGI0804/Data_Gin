@@ -5,7 +5,12 @@ import { MallWeatherChart } from './MallWeatherChart'
 import { MallWeatherExportPanel } from './MallWeatherExportPanel'
 import { MallWeatherForecastPanel, type MallWeatherForecastDataSnapshot } from './MallWeatherForecastPanel'
 import { MallDetailsFields, MallWeatherMallEditor } from './MallWeatherMallEditor'
-import { createMallWeatherDatasetCsv, downloadMallWeatherBytes, mallWeatherCsvFileName } from './mallWeatherCsv'
+import {
+  createMallWeatherDatasetCsv,
+  downloadMallWeatherBytes,
+  mallWeatherCsvFileName,
+  type MallWeatherCsvZipData,
+} from './mallWeatherCsv'
 import { mallWeatherDataNavigationItems, navigateMallWeatherSection } from './mallWeatherNavigation'
 import {
   mallWeatherCreateKey,
@@ -118,7 +123,7 @@ export function MallWeatherPage({
   const [overviewRetryCount, setOverviewRetryCount] = useState(0)
   const [overviewWaitingReason, setOverviewWaitingReason] = useState<OverviewWaitingReason>('')
   const [weatherReloadVersion, setWeatherReloadVersion] = useState(0)
-  const [, setForecastSnapshot] = useState<MallWeatherForecastDataSnapshot | null>(null)
+  const [forecastSnapshot, setForecastSnapshot] = useState<MallWeatherForecastDataSnapshot | null>(null)
   const [alertSnapshot, setAlertSnapshot] = useState<AlertDataSnapshot>({ mallID: 0, items: [], loading: false, ready: false, error: '' })
   const [query, setQuery] = useState('')
   const [city, setCity] = useState('')
@@ -321,6 +326,7 @@ export function MallWeatherPage({
       setOverviewMallID(mallID)
       updateOverviewStableState(mallID, 'success', '')
       setOverviewRetryCount(0)
+      setForecastSnapshot(null)
       setWeatherReloadVersion((current) => current + 1)
       return 'ready'
     } finally {
@@ -403,6 +409,7 @@ export function MallWeatherPage({
   const reloadWeatherData = useCallback(async (mallID: number, signal: AbortSignal) => {
     const result = await loadOverview(mallID, signal)
     if (result === 'waiting' && !signal.aborted) {
+      setForecastSnapshot(null)
       setWeatherReloadVersion((current) => current + 1)
     }
     return result
@@ -472,6 +479,33 @@ export function MallWeatherPage({
   const selectedAlerts = alertSnapshot.mallID === selectedMallID
     ? alertSnapshot
     : { mallID: selectedMallID, items: [], loading: true, ready: false, error: '' }
+  const selectedForecast = forecastSnapshot?.mallID === selectedMallID ? forecastSnapshot : null
+  const csvZipData = useMemo<MallWeatherCsvZipData>(() => ({
+    realtime: selectedOverview?.realtime ? [selectedOverview.realtime] : [],
+    minutely: selectedForecast?.minutely ?? [],
+    hourly: selectedForecast?.hourly ?? [],
+    daily: selectedForecast?.daily ?? [],
+    alerts: selectedAlerts.items,
+    life_indices: selectedForecast?.lifeIndices ?? [],
+  }), [selectedAlerts.items, selectedForecast, selectedOverview])
+  const csvZipReady = Boolean(overviewState === 'success' && selectedOverview && selectedForecast?.ready && selectedAlerts.ready)
+  const csvZipLoading = overviewState === 'idle' || overviewState === 'loading' || overviewState === 'waiting' ||
+    Boolean(selectedForecast?.loading) || selectedAlerts.loading
+  const csvZipStatus = overviewState === 'loading'
+    ? '正在重新加载当前商场实况'
+    : overviewState === 'error'
+      ? overviewError || '当前商场实况加载失败'
+      : overviewState === 'waiting'
+        ? '正在等待当前商场完整实况数据'
+        : !selectedOverview
+          ? '正在等待当前商场实况数据'
+          : !selectedForecast || selectedForecast.loading
+      ? '正在加载完整预报与生活指数'
+      : selectedForecast.error
+        ? selectedForecast.error
+        : selectedAlerts.loading
+          ? '正在加载全部气象预警'
+          : selectedAlerts.error || (csvZipReady ? '六类天气数据已就绪' : '天气数据尚未准备完成')
 
   return (
     <div className="view-stack mall-weather-page">
@@ -534,6 +568,19 @@ export function MallWeatherPage({
               key={`refresh-${actorID}:${selectedMall.id}`}
             />
             : <RequestError message="无法识别当前登录账号，请退出后重新登录再提交天气刷新。" onRetry={() => window.location.reload()} />)}
+          {!showCreate && selectedMallReady && selectedMall && actorID && <MallWeatherExportPanel
+            actorID={actorID}
+            mallID={selectedMall.id}
+            mallCode={selectedMall.mallCode}
+            mallName={selectedMall.nameCn}
+            csvData={csvZipData}
+            csvReady={csvZipReady}
+            csvLoading={csvZipLoading}
+            csvStatus={csvZipStatus}
+            client={client}
+            downloadFile={downloadFile}
+            key={`weather-export-${actorID}:${selectedMall.id}`}
+          />}
           {!showCreate && selectedMallReady && selectedMall && <MallWeatherDataNavigation showActorActions={Boolean(actorID)} />}
           {showCreate && (actorID
             ? <MallCreatePanel actorID={actorID} client={client} onCreated={handleMallCreated} onCancel={() => setShowCreate(false)} />
@@ -593,14 +640,6 @@ export function MallWeatherPage({
             client={client}
             onDatasetsChange={handleForecastDatasetsChange}
             key={`forecast-${selectedMall.id}:${selectedMall.timeZone}:${weatherReloadVersion}`}
-          />}
-          {!showCreate && selectedMallReady && selectedMall && actorID && <MallWeatherExportPanel
-            actorID={actorID}
-            mallID={selectedMall.id}
-            mallName={selectedMall.nameCn}
-            client={client}
-            downloadFile={downloadFile}
-            key={`excel-export-${actorID}:${selectedMall.id}`}
           />}
           {!showCreate && selectedMallReady && selectedMall && (actorID
             ? <section className="view-stack mall-weather-management" id="mall-weather-management" tabIndex={-1}>

@@ -1,6 +1,12 @@
 import { Download, FileSpreadsheet, RefreshCcw } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
+  createMallWeatherCsvZip,
+  downloadMallWeatherBytes,
+  mallWeatherCsvZipFileName,
+  type MallWeatherCsvZipData,
+} from './mallWeatherCsv'
+import {
   clearMallWeatherExportSession,
   mallWeatherExportCreateDisposition,
   loadMallWeatherExportSession,
@@ -58,12 +64,28 @@ type WeatherExportFileClient = (
 type MallWeatherExportPanelProps = {
   actorID: string
   mallID: number
+  mallCode: string
   mallName: string
+  csvData: MallWeatherCsvZipData
+  csvReady: boolean
+  csvLoading: boolean
+  csvStatus: string
   client: WeatherExportAPIClient
   downloadFile: WeatherExportFileClient
 }
 
-export function MallWeatherExportPanel({ actorID, mallID, mallName, client, downloadFile }: MallWeatherExportPanelProps) {
+export function MallWeatherExportPanel({
+  actorID,
+  mallID,
+  mallCode,
+  mallName,
+  csvData,
+  csvReady,
+  csvLoading,
+  csvStatus,
+  client,
+  downloadFile,
+}: MallWeatherExportPanelProps) {
   const exportStorage = useMemo(
     () => resolveMallWeatherExportStorage(() => window.sessionStorage),
     [],
@@ -82,6 +104,9 @@ export function MallWeatherExportPanel({ actorID, mallID, mallName, client, down
   const [pollError, setPollError] = useState('')
   const [storageWarning, setStorageWarning] = useState(() => exportStorage ? '' : exportStorageWarning)
   const [pollRevision, setPollRevision] = useState(0)
+  const [format, setFormat] = useState<'csv' | 'excel'>(() => restoredSession?.jobId || restoredSession?.pending ? 'excel' : 'csv')
+  const [csvError, setCsvError] = useState('')
+  const [csvMessage, setCsvMessage] = useState('')
   const [, setPendingRevision] = useState(0)
   const actionController = useRef<AbortController | null>(null)
   const pendingCreate = useRef<MallWeatherExportPendingCreate | null>(restoredSession?.pending ?? null)
@@ -114,6 +139,9 @@ export function MallWeatherExportPanel({ actorID, mallID, mallName, client, down
     setDownloadMessage('')
     setPollError('')
     setPollRevision(0)
+    setFormat(restoredSession?.jobId || restoredSession?.pending ? 'excel' : 'csv')
+    setCsvError('')
+    setCsvMessage('')
     setCreatingJob(false)
     setDownloading(false)
     return () => {
@@ -368,43 +396,87 @@ export function MallWeatherExportPanel({ actorID, mallID, mallName, client, down
     setJob(null)
   }
 
+  function downloadCsvZip() {
+    if (!csvReady) return
+    setCsvError('')
+    setCsvMessage('')
+    try {
+      downloadMallWeatherBytes(
+        createMallWeatherCsvZip(csvData, { mallCode, mallName }),
+        mallWeatherCsvZipFileName(mallCode),
+      )
+      setCsvMessage('六类天气 CSV 已打包，下载请求已交给浏览器。')
+    } catch {
+      setCsvError('CSV 压缩包生成失败，请重新加载当前商场数据后重试。')
+    }
+  }
+
   return (
     <section className="workbench-panel mall-weather-export-panel" id="mall-weather-export" tabIndex={-1}
-      aria-busy={creatingJob || downloading || mallWeatherExportPollingActive(job?.status, pollingPaused)}>
+      aria-busy={(format === 'csv' && csvLoading) || creatingJob || downloading || mallWeatherExportPollingActive(job?.status, pollingPaused)}>
       <div className="mall-weather-section-title">
-        <div><strong>导出 Excel</strong><span>{mallName} · 当前商场天气数据</span></div>
+        <div><strong>下载全部</strong><span>{mallName} · 当前商场六类天气数据</span></div>
         <FileSpreadsheet aria-hidden="true" />
       </div>
 
-      <div className="mall-weather-request-state">
-        <strong>完整天气 Excel</strong>
-        <span>固定导出商场资料、实况、约 1 km 分钟降水、逐小时与逐日预报、预警和生活指数。</span>
-        <button className="primary" type="button" onClick={() => void createJob()}
-          disabled={creatingJob || downloading || Boolean(job && !mallWeatherExportJobTerminal(job.status))}>
-          {creatingJob ? '提交中' : pendingCreate.current ? '重试原请求' : '生成 Excel'}
-        </button>
+      <div className="mall-weather-export-format">
+        <label htmlFor={`mall-weather-export-format-${mallID}`}>
+          <span>文件格式</span>
+          <select
+            id={`mall-weather-export-format-${mallID}`}
+            value={format}
+            onChange={(event) => setFormat(event.currentTarget.value === 'excel' ? 'excel' : 'csv')}
+          >
+            <option value="csv">CSV（六个文件 ZIP）</option>
+            <option value="excel">Excel（单个工作簿）</option>
+          </select>
+        </label>
       </div>
-      {pendingCreate.current && (
-        <button type="button" onClick={abandonPendingCreate} disabled={creatingJob}>放弃原请求</button>
-      )}
 
-      {job && (
-        <div className="mall-weather-export-progress">
-          <div role="status" aria-live="polite" aria-atomic="true">
-            <strong>{exportStatusLabel(job.status)}</strong><span>{job.processedRows} / {job.totalRows} 行 · {progress}%</span>
-          </div>
-          <progress max="100" value={progress} aria-label="天气 Excel 生成进度">{progress}%</progress>
-          {job.currentSheet && <small>正在处理：{job.currentSheet}</small>}
-          {job.status === 'FAILED' && <p className="mall-weather-action-message error" role="alert">{job.errorMessageSafe || '导出文件生成失败，请重试'}</p>}
-          {job.status === 'CANCELLED' && <p className="mall-weather-action-message error" role="alert">导出任务已取消</p>}
-          {job.status === 'EXPIRED' && <p className="mall-weather-action-message error" role="alert">导出文件已过期，请重新生成</p>}
-          {job.status === 'SUCCEEDED' && (
-            <button className="primary" type="button" onClick={() => void downloadResult()} disabled={downloading}>
-              <Download aria-hidden="true" />{downloading ? '正在下载文件' : '下载 Excel'}
-            </button>
-          )}
+      {format === 'csv' ? (
+        <div className="mall-weather-request-state">
+          <strong>六类天气 CSV 压缩包</strong>
+          <span>包含实况、分钟降水、逐小时、逐日、预警和生活指数，所有列头均为中文。</span>
+          <small role="status" aria-live="polite">{csvStatus}</small>
+          <button className="primary" type="button" onClick={downloadCsvZip} disabled={!csvReady}>
+            <Download aria-hidden="true" />下载全部
+          </button>
         </div>
-      )}
+      ) : <>
+        <div className="mall-weather-request-state">
+          <strong>完整天气 Excel</strong>
+          <span>固定导出商场资料、实况、约 1 km 分钟降水、逐小时与逐日预报、预警和生活指数。</span>
+          <button className="primary" type="button" onClick={() => void createJob()}
+            disabled={creatingJob || downloading || Boolean(job && !mallWeatherExportJobTerminal(job.status))}>
+            {creatingJob ? '提交中' : pendingCreate.current ? '重试原请求' : '生成全部 Excel'}
+          </button>
+        </div>
+        {pendingCreate.current && (
+          <button type="button" onClick={abandonPendingCreate} disabled={creatingJob}>放弃原请求</button>
+        )}
+
+        {job && (
+          <div className="mall-weather-export-progress">
+            <div role="status" aria-live="polite" aria-atomic="true">
+              <strong>{exportStatusLabel(job.status)}</strong><span>{job.processedRows} / {job.totalRows} 行 · {progress}%</span>
+            </div>
+            <progress max="100" value={progress} aria-label="天气 Excel 生成进度">{progress}%</progress>
+            {job.currentSheet && <small>正在处理：{job.currentSheet}</small>}
+            {job.status === 'FAILED' && <p className="mall-weather-action-message error" role="alert">{job.errorMessageSafe || '导出文件生成失败，请重试'}</p>}
+            {job.status === 'CANCELLED' && <p className="mall-weather-action-message error" role="alert">导出任务已取消</p>}
+            {job.status === 'EXPIRED' && <p className="mall-weather-action-message error" role="alert">导出文件已过期，请重新生成</p>}
+            {job.status === 'SUCCEEDED' && (
+              <button className="primary" type="button" onClick={() => void downloadResult()} disabled={downloading}>
+                <Download aria-hidden="true" />{downloading ? '正在下载文件' : '下载 Excel'}
+              </button>
+            )}
+          </div>
+        )}
+      </>}
+      {format === 'csv' && <>
+        {csvMessage && <p className="mall-weather-action-message" role="status">{csvMessage}</p>}
+        {csvError && <p className="mall-weather-action-message error" role="alert">{csvError}</p>}
+      </>}
       {pollError && (
         <div className="mall-weather-action-message error" role="alert">
           {pollError}

@@ -296,6 +296,16 @@
   gap: 8px;
 }
 
+.mall-weather-export-format {
+  display: grid;
+  grid-template-columns: minmax(240px, 420px);
+}
+
+.mall-weather-export-format label,
+.mall-weather-request-state small {
+  color: var(--muted);
+}
+
 .mall-weather-export-progress {
   display: grid;
   gap: 8px;

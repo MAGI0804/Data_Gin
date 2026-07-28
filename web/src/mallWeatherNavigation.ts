@@ -5,7 +5,7 @@ export const mallWeatherDataNavigationItems = [
   { targetID: 'mall-weather-daily', label: '15 天逐日预报', requiresActor: false },
   { targetID: 'mall-weather-alerts', label: '气象预警', requiresActor: false },
   { targetID: 'mall-weather-life-indices', label: '15 天生活指数', requiresActor: false },
-  { targetID: 'mall-weather-export', label: '导出 Excel', requiresActor: true },
+  { targetID: 'mall-weather-export', label: '下载全部', requiresActor: true },
   { targetID: 'mall-weather-management', label: '管理操作', requiresActor: true },
 ] as const
 
