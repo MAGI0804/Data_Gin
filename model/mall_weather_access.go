@@ -28,6 +28,19 @@ var mallWeatherAdminPermissions = [...]string{
 	PermissionBojunOrderRead,
 }
 
+var grantableDataPermissions = [...]string{
+	PermissionWeatherRead,
+	PermissionBojunOrderRead,
+}
+
+// GrantableDataPermissions returns the fixed permissions an administrator may
+// delegate to an open API account.
+func GrantableDataPermissions() []string {
+	permissions := make([]string, len(grantableDataPermissions))
+	copy(permissions, grantableDataPermissions[:])
+	return permissions
+}
+
 // MallWeatherAdminPermissions returns the complete permanent permission set
 // assigned to the console admin. The returned slice is safe for callers to
 // modify.

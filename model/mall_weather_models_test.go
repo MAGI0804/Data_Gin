@@ -39,6 +39,8 @@ func TestMallWeatherModelSchemas(t *testing.T) {
 		{"outbox", &AsyncJobOutbox{}, "async_job_outbox"},
 		{"user permission", &MallWeatherUserPermission{}, "mall_weather_user_permissions"},
 		{"API idempotency", &APIIdempotencyRecord{}, "api_idempotency_records"},
+		{"open API credential", &OpenAPICredential{}, "open_api_credentials"},
+		{"data authorization audit", &DataAuthorizationAudit{}, "data_authorization_audits"},
 	}
 
 	for _, tt := range tests {
@@ -80,6 +82,7 @@ func TestMallWeatherBusinessIndexes(t *testing.T) {
 		{"sheet row number", &MallWeatherSheetRow{}, "uk_weather_sheet_row_number", []string{"destination_id", "dataset_kind", "row_number"}},
 		{"user permission", &MallWeatherUserPermission{}, "uk_mall_weather_permission", []string{"user_id", "permission"}},
 		{"API idempotency", &APIIdempotencyRecord{}, "uk_api_idempotency", []string{"operation_scope", "actor_user_id", "key_hash"}},
+		{"open API credential hash", &OpenAPICredential{}, "uk_open_api_credential_hash", []string{"token_hash"}},
 	}
 
 	for _, tt := range tests {
@@ -103,6 +106,35 @@ func TestMallWeatherBusinessIndexes(t *testing.T) {
 				t.Fatalf("index %q fields = %v, want %v", tt.indexName, got, tt.fieldNames)
 			}
 		})
+	}
+}
+
+func TestDataAuthorizationSecretsAreNotSerialized(t *testing.T) {
+	data, err := json.Marshal(struct {
+		Credential OpenAPICredential      `json:"credential"`
+		Audit      DataAuthorizationAudit `json:"audit"`
+	}{
+		Credential: OpenAPICredential{TokenHash: strings.Repeat("a", 64)},
+		Audit:      DataAuthorizationAudit{IdempotencyKeyHash: strings.Repeat("b", 64)},
+	})
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+	for _, secret := range []string{strings.Repeat("a", 64), strings.Repeat("b", 64)} {
+		if strings.Contains(string(data), secret) {
+			t.Fatalf("serialized authorization model leaked secret hash")
+		}
+	}
+}
+
+func TestGrantableDataPermissionsReturnsDefensiveAllowlist(t *testing.T) {
+	permissions := GrantableDataPermissions()
+	if !reflect.DeepEqual(permissions, []string{PermissionWeatherRead, PermissionBojunOrderRead}) {
+		t.Fatalf("permissions = %v", permissions)
+	}
+	permissions[0] = "mall.write"
+	if GrantableDataPermissions()[0] != PermissionWeatherRead {
+		t.Fatal("GrantableDataPermissions() returned shared storage")
 	}
 }
 
