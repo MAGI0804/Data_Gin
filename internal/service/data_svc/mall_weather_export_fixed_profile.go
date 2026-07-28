@@ -42,6 +42,13 @@ func fixedMallWeatherExportProfile() (*model.MallWeatherExportProfile, error) {
 			{Kind: "life_indices", SheetName: "生活指数", Latest: &latest, FreezeHeader: true, AutoFilter: true},
 		},
 	}
+	for index := range request.Datasets {
+		columns, err := mallWeatherExportChineseColumns(request.Datasets[index].Kind)
+		if err != nil {
+			return nil, fmt.Errorf("mall weather export: resolve fixed profile columns: %w", err)
+		}
+		request.Datasets[index].Columns = columns
+	}
 	normalized, config, err := normalizeMallWeatherExportProfile(request)
 	if err != nil {
 		return nil, fmt.Errorf("mall weather export: normalize fixed profile: %w", err)

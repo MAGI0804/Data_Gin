@@ -3,6 +3,7 @@ package data_svc
 import (
 	"encoding/json"
 	"testing"
+	"unicode"
 )
 
 func TestFixedMallWeatherExportProfileContainsCompleteWorkbook(t *testing.T) {
@@ -34,6 +35,27 @@ func TestFixedMallWeatherExportProfileContainsCompleteWorkbook(t *testing.T) {
 			}
 		} else if dataset.Latest == nil || !*dataset.Latest {
 			t.Fatalf("dataset[%d]=%+v, want latest snapshot", index, dataset)
+		}
+	}
+}
+
+func TestFixedMallWeatherExportProfileDefaultColumnsUseChineseTitles(t *testing.T) {
+	for _, kind := range []string{"malls", "realtime", "minutely", "hourly", "daily", "alerts", "life_indices"} {
+		columns, err := mallWeatherExportChineseColumns(kind)
+		if err != nil {
+			t.Fatalf("mallWeatherExportChineseColumns(%q) error=%v", kind, err)
+		}
+		for _, column := range columns {
+			hasChinese := false
+			for _, character := range column.Title {
+				if unicode.Is(unicode.Han, character) {
+					hasChinese = true
+					break
+				}
+			}
+			if column.Title == column.Field || !hasChinese {
+				t.Fatalf("kind=%q field=%q title=%q, want Chinese display title", kind, column.Field, column.Title)
+			}
 		}
 	}
 }
