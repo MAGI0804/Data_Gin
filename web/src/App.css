@@ -186,6 +186,16 @@ button:focus-visible {
   gap: 12px;
 }
 
+.login-guidance {
+  margin: 0;
+  border-left: 4px solid var(--accent);
+  background: #fffbeb;
+  color: #52525b;
+  font-size: 12px;
+  line-height: 1.5;
+  padding: 10px;
+}
+
 .login-error {
   border: 1px solid #111111;
   border-radius: 0;

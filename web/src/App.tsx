@@ -18,6 +18,7 @@ import {
   Search,
   ScrollText,
   Send,
+  ShieldCheck,
   Upload,
   Wrench,
   X,
@@ -27,6 +28,7 @@ import { effectiveApiStatus } from './apiResponse'
 import { apiURL as buildApiURL } from './apiURL'
 import { clearStoredToken, loadStoredToken, saveStoredToken, storedTokenExpiresAt, tokenActorID } from './authStorage'
 import { MallWeatherPage } from './MallWeatherPage'
+import { DataAuthorizationPage } from './DataAuthorizationPage'
 import { parseMallWeatherExportContentStatus, submitMallWeatherExportContentDownload } from './mallWeatherExport'
 import {
   buildExcelExportConfig,
@@ -60,7 +62,7 @@ type ApiClientOptions = {
 
 type ApiClient = (path: string, options?: ApiClientOptions) => Promise<ApiResult>
 type FileDownloadClient = (path: string, fileName: string, signal: AbortSignal) => Promise<ApiResult>
-type NavKey = 'overview' | 'runs' | 'delivery_logs' | 'step_runs' | 'mall_weather' | 'sources' | 'receive' | 'pull_records' | 'backfill' | 'youzan_distribution' | 'rules' | 'processed' | 'methods' | 'destinations' | 'tasks' | 'push_policy' | 'excel_jobs' | 'excel_schemes' | 'excel_write'
+type NavKey = 'overview' | 'runs' | 'delivery_logs' | 'step_runs' | 'mall_weather' | 'data_authorizations' | 'sources' | 'receive' | 'pull_records' | 'backfill' | 'youzan_distribution' | 'rules' | 'processed' | 'methods' | 'destinations' | 'tasks' | 'push_policy' | 'excel_jobs' | 'excel_schemes' | 'excel_write'
 type NavItem = { key: NavKey; label: string; description: string; icon: ReactNode }
 type NavGroup = { label: string; items: NavItem[] }
 type MethodKind = 'configured' | 'builtin'
@@ -581,6 +583,12 @@ const navGroups: NavGroup[] = [
     ],
   },
   {
+    label: '数据授权',
+    items: [
+      { key: 'data_authorizations', label: '授权管理', description: '开户、授权与访问审计', icon: <ShieldCheck aria-hidden="true" /> },
+    ],
+  },
+  {
     label: '数据处理',
     items: [
       { key: 'rules', label: '清洗规则', description: '规则类型与执行顺序', icon: <ListChecks aria-hidden="true" /> },
@@ -740,7 +748,7 @@ function App() {
           headers: {
             'Content-Type': 'application/json',
             ...options.headers,
-            ...(token ? { token } : {}),
+            ...(token ? { token, Authorization: `Bearer ${token}` } : {}),
           },
           body: method === 'GET' || options.body === undefined ? undefined : JSON.stringify(options.body),
         })
@@ -1085,6 +1093,7 @@ function App() {
         {activeNav === 'delivery_logs' && <DeliveryLogsQueryPage logs={deliveryLogs} onRetryLog={retryDeliveryLog} />}
         {activeNav === 'step_runs' && <StepRunsQueryPage runs={runs} stepRuns={stepRuns} onLoadSteps={loadStepRuns} />}
         {activeNav === 'mall_weather' && <MallWeatherPage actorID={actorID} client={client} downloadFile={downloadFile} />}
+        {activeNav === 'data_authorizations' && <DataAuthorizationPage client={client} />}
         {activeNav === 'sources' && <SourcesQueryPage sources={sources} />}
         {activeNav === 'methods' && <MethodsView methods={methods} coreMethods={coreMethods} onToggle={toggleTarget} />}
         {activeNav === 'receive' && <RawRecordsQueryPage title="接口接收记录" records={receivedData} />}
@@ -1106,22 +1115,31 @@ function App() {
 
 function LoginScreen({ onLogin }: { onLogin: (token: string) => void }) {
   const [error, setError] = useState('')
+  const [submitting, setSubmitting] = useState(false)
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
+    setSubmitting(true)
+    setError('')
     const form = new FormData(event.currentTarget)
-    const response = await fetch(apiURL('/auth/login'), {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ username: formValue(form, 'username'), password: formValue(form, 'password') }),
-    })
-    const data: unknown = await response.json().catch(() => ({}))
-    const token = readToken(data)
-    if (!response.ok || !token) {
-      setError(readMessage(data) || '登录失败')
-      return
+    try {
+      const response = await fetch(apiURL('/auth/login'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ username: formValue(form, 'username'), password: formValue(form, 'password') }),
+      })
+      const data: unknown = await response.json().catch(() => ({}))
+      const token = readToken(data)
+      if (!response.ok || !token) {
+        setError(readMessage(data) || '登录失败，请检查管理员账号和密码。')
+        return
+      }
+      onLogin(token)
+    } catch {
+      setError('无法连接登录服务，请检查后端服务或代理配置。')
+    } finally {
+      setSubmitting(false)
     }
-    onLogin(token)
   }
 
   return (
@@ -1132,10 +1150,11 @@ function LoginScreen({ onLogin }: { onLogin: (token: string) => void }) {
           <h1 className="sr-only">登录</h1>
         </div>
         <form className="login-form" onSubmit={submit}>
-          <Field label="用户名" name="username" autoComplete="username" />
-          <Field label="密码" name="password" type="password" autoComplete="current-password" />
-          {error && <div className="login-error">{error}</div>}
-          <button className="primary" type="submit">登录</button>
+          <p className="login-guidance">内部控制台仅允许管理员登录；开放接口账号由管理员在“数据授权”中创建，无需登录本页面。</p>
+          <Field label="管理员账号" name="username" defaultValue="admin" required autoComplete="username" />
+          <Field label="管理员密码" name="password" type="password" required autoComplete="current-password" />
+          {error && <div className="login-error" role="alert" aria-live="polite">{error}</div>}
+          <button className="primary" type="submit" disabled={submitting}>{submitting ? '正在登录…' : '管理员登录'}</button>
         </form>
       </section>
     </main>
@@ -1149,6 +1168,7 @@ function ModuleHeader({ activeNav, loading }: { activeNav: NavKey; loading: bool
     delivery_logs: { title: '推送日志', subtitle: '按成功状态、门店和业务键查询外部交付结果。' },
     step_runs: { title: '步骤运行', subtitle: '选择一次流水线运行并查看每个步骤的输入输出。' },
     mall_weather: { title: '商场天气', subtitle: '查看商场中心点实况、未来降水、小时趋势和气象预警。' },
+    data_authorizations: { title: '数据授权', subtitle: '由管理员开通开放接口账号，并管理权限有效期、凭证与审计。' },
     sources: { title: '数据源', subtitle: '查询数据接入配置、类型和启用状态。' },
     receive: { title: '接口接收', subtitle: '查询外部系统主动推送进来的原始数据。' },
     pull_records: { title: '拉取记录', subtitle: '查询系统主动从外部接口拉取的数据。' },
