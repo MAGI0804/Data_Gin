@@ -94,11 +94,7 @@ func apiAuth(api *gin.RouterGroup) {
 		loginCtrl := auth_ctrl.NewLoginController()
 		authGroup.POST("/login", loginCtrl.ConsoleLogin) // 管理台登录
 
-		registerCtrl := new(auth_ctrl.RegisterController)
-		authGroup.POST("/register/using-email", middleware.LimitRoute("300-H"), registerCtrl.SignupUsingEmail) // 使用邮箱注册用户
-
 		userCtrl := new(auth_ctrl.UserController)
-		authGroup.GET("/user", userCtrl.Index)                       // 用户列表
 		authGroup.GET("/me", middleware.AuthJWT(), userCtrl.Profile) // 用户个人信息
 
 		tokenCtrl := new(auth_ctrl.TokenController)
