@@ -125,6 +125,27 @@ func (dao *MallDAO) ListEnabledWeatherAfterID(ctx context.Context, afterID uint,
 	})
 }
 
+// ListOpenWeatherMallsAfterID returns only the public identity fields for malls
+// whose stored weather coordinates are immediately usable by open queries.
+func (dao *MallDAO) ListOpenWeatherMallsAfterID(ctx context.Context, afterID uint, limit int) ([]model.Mall, error) {
+	var malls []model.Mall
+	query := dao.db.WithContext(ctx).
+		Model(&model.Mall{}).
+		Select("id", "mall_code", "name_cn", "name_en", "province", "city", "district", "timezone", "weather_enabled").
+		Where("status = ?", "active").
+		Where("geocode_status = ?", "confirmed").
+		Where("weather_enabled = ?", true).
+		Where("weather_longitude BETWEEN ? AND ?", -180, 180).
+		Where("weather_latitude BETWEEN ? AND ?", -90, 90)
+	if afterID > 0 {
+		query = query.Where("id > ?", afterID)
+	}
+	if err := query.Order("id ASC").Limit(normalizePageSize(limit)).Find(&malls).Error; err != nil {
+		return nil, fmt.Errorf("mall: list open weather malls: %w", err)
+	}
+	return malls, nil
+}
+
 func (dao *MallDAO) UpdateWithVersion(ctx context.Context, id uint, expectedVersion uint64, updates map[string]interface{}) error {
 	safeUpdates, err := sanitizeMallUpdates(updates)
 	if err != nil {

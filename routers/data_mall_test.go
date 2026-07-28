@@ -14,7 +14,11 @@ func TestAPIDataRegistersMallCRUDRoutes(t *testing.T) {
 	router := gin.New()
 	registerMallRoutes(router.Group("/api"), &data_ctrl.MallController{})
 	registerMallWeatherRoutes(router.Group("/api"), &data_ctrl.MallWeatherController{})
-	registerOpenWeatherRoutes(router.Group("/api"), &data_ctrl.MallWeatherController{})
+	registerOpenWeatherRoutes(
+		router.Group("/api"),
+		&data_ctrl.MallWeatherController{},
+		&data_ctrl.OpenWeatherMallController{},
+	)
 	registerOpenBojunOrderRoutes(router.Group("/api"), &data_ctrl.OpenBojunOrderController{})
 	registerMallWeatherRefreshRoutes(router.Group("/api"), &data_ctrl.MallWeatherRefreshController{})
 	registerMallWeatherExportProfileRoutes(router.Group("/api"), &data_ctrl.MallWeatherExportProfileController{})
@@ -48,6 +52,7 @@ func TestAPIDataRegistersMallCRUDRoutes(t *testing.T) {
 		http.MethodPost + " /api/open/weather/malls/:id/daily",
 		http.MethodPost + " /api/open/weather/malls/:id/alerts",
 		http.MethodPost + " /api/open/weather/malls/:id/life-indices",
+		http.MethodPost + " /api/open/weather/malls/query",
 		http.MethodPost + " /api/open/bojun/orders/query",
 		http.MethodPost + " /api/v1/malls/:id/weather-refresh",
 		http.MethodPost + " /api/v1/weather-export-profiles",
