@@ -29,6 +29,7 @@ import {
   mallWeatherCandidateConfirmationRequest,
   mallWeatherCoordinateAdjustmentRequest,
   mallWeatherGeocodeRunTerminal,
+  mallWeatherShouldPollGeocode,
   mallWeatherGeocodeTriggerPath,
   mallWeatherMallReady,
   mallWeatherMallDeletePath,
@@ -51,6 +52,8 @@ import {
   saveMallWeatherPendingCreate,
   saveMallWeatherPendingSheetPush,
   mallWeatherSkyconLabel,
+  submitMallWeatherGeocodeConfirmation,
+  submitMallWeatherGeocodeTrigger,
   parseMallWeatherMallList,
   parseMallWeatherCreateResult,
   parseMallWeatherGeocodeCandidates,
@@ -234,6 +237,157 @@ test('parses mall creation and geocode candidate contracts', () => {
   assert.throws(() => mallWeatherCandidateConfirmationRequest(candidates.items[0], '', '31.2', 'bad', 2), /invalid coordinate adjustment/)
   for (const status of ['NO_CANDIDATES', 'AUTO_CONFIRMED', 'REVIEW_REQUIRED', 'FAILED', 'STALE']) assert.equal(mallWeatherGeocodeRunTerminal(status), true)
   assert.equal(mallWeatherGeocodeRunTerminal('RUNNING'), false)
+})
+
+test('keeps polling geocode while the mall is pending despite stale terminal candidates', () => {
+  const staleTerminalCandidates = {
+    mallId: 9,
+    mallVersion: 3,
+    runId: 10,
+    runStatus: 'REVIEW_REQUIRED',
+    items: [{ id: 11 }],
+  }
+
+  assert.equal(mallWeatherShouldPollGeocode('PENDING', staleTerminalCandidates), true)
+  assert.equal(mallWeatherShouldPollGeocode('PENDING', staleTerminalCandidates, true), false)
+  assert.equal(mallWeatherShouldPollGeocode('PENDING', staleTerminalCandidates, false), true)
+  assert.equal(mallWeatherShouldPollGeocode('FAILED', staleTerminalCandidates), false)
+  assert.equal(mallWeatherShouldPollGeocode('PENDING', null), true)
+  assert.equal(mallWeatherShouldPollGeocode('FAILED', {
+    ...staleTerminalCandidates,
+    runStatus: 'RUNNING',
+    items: [],
+  }), true)
+})
+
+test('submits geocode with the freshly loaded mall version', async () => {
+  const requests = []
+  let mallReloads = 0
+  let candidateReloads = 0
+  const outcome = await submitMallWeatherGeocodeTrigger(
+    async (path, options) => {
+      requests.push({ path, options })
+      return { ok: true, status: 202, data: { mallId: 9, mallVersion: 5 } }
+    },
+    9,
+    async () => {
+      mallReloads++
+      return { id: 9, version: 4 }
+    },
+    async () => {
+      candidateReloads++
+      return true
+    },
+  )
+
+  assert.equal(outcome.kind, 'accepted')
+  assert.equal(mallReloads, 1)
+  assert.equal(candidateReloads, 0)
+  assert.equal(requests.length, 1)
+  assert.equal(requests[0].path, '/v1/malls/9/geocode')
+  assert.deepEqual(requests[0].options.body, { expectedMallVersion: 4 })
+})
+
+test('refreshes both mall and candidates after a geocode version conflict', async () => {
+  let mallReloads = 0
+  let candidateReloads = 0
+  let posts = 0
+  const outcome = await submitMallWeatherGeocodeTrigger(
+    async () => {
+      posts++
+      return { ok: false, status: 409, data: null }
+    },
+    9,
+    async () => {
+      mallReloads++
+      return mallReloads === 1 ? { id: 9, version: 4 } : { id: 9, version: 5 }
+    },
+    async () => {
+      candidateReloads++
+      return true
+    },
+  )
+
+  assert.deepEqual(outcome, { kind: 'conflict', refreshed: true })
+  assert.equal(posts, 1)
+  assert.equal(mallReloads, 2)
+  assert.equal(candidateReloads, 1)
+})
+
+test('does not reuse a stale geocode candidate before or after conflict refresh', async () => {
+  let posts = 0
+  let mallReloads = 0
+  let candidateReloads = 0
+  const reloadMall = async () => {
+    mallReloads++
+    return { id: 9, version: 5 }
+  }
+  const reloadCandidates = async () => {
+    candidateReloads++
+    return true
+  }
+  const staleOutcome = await submitMallWeatherGeocodeConfirmation(
+    async () => {
+      posts++
+      return { ok: true, status: 200, data: {} }
+    },
+    9,
+    4,
+    3,
+    { candidateId: 11, expectedMallVersion: 3, weatherEnabled: true },
+    reloadMall,
+    reloadCandidates,
+  )
+  assert.deepEqual(staleOutcome, { kind: 'stale', refreshed: true })
+  assert.equal(posts, 0)
+
+  const mismatchedBodyOutcome = await submitMallWeatherGeocodeConfirmation(
+    async () => {
+      posts++
+      return { ok: true, status: 200, data: {} }
+    },
+    9,
+    5,
+    5,
+    { candidateId: 11, expectedMallVersion: 3, weatherEnabled: true },
+    reloadMall,
+    reloadCandidates,
+  )
+  assert.deepEqual(mismatchedBodyOutcome, { kind: 'stale', refreshed: true })
+  assert.equal(posts, 0)
+
+  const conflictOutcome = await submitMallWeatherGeocodeConfirmation(
+    async (_path, options) => {
+      posts++
+      assert.deepEqual(options.body, { candidateId: 12, expectedMallVersion: 5, weatherEnabled: true })
+      return { ok: false, status: 409, data: null }
+    },
+    9,
+    5,
+    5,
+    { candidateId: 12, expectedMallVersion: 5, weatherEnabled: true },
+    reloadMall,
+    reloadCandidates,
+  )
+  assert.deepEqual(conflictOutcome, { kind: 'conflict', refreshed: true })
+  assert.equal(posts, 1)
+  assert.equal(mallReloads, 3)
+  assert.equal(candidateReloads, 3)
+})
+
+test('reports when geocode conflict refresh cannot load authoritative state', async () => {
+  let mallReloads = 0
+  const outcome = await submitMallWeatherGeocodeTrigger(
+    async () => ({ ok: false, status: 409, data: null }),
+    9,
+    async () => {
+      mallReloads++
+      return mallReloads === 1 ? { id: 9, version: 4 } : null
+    },
+    async () => false,
+  )
+
+  assert.deepEqual(outcome, { kind: 'conflict', refreshed: false })
 })
 
 test('recognizes only active confirmed weather-enabled malls as queryable', () => {

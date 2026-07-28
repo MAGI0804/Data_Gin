@@ -29,7 +29,7 @@ import {
   mallWeatherCoordinateAdjustmentRequest,
   mallWeatherGeocodeConfirmPath,
   mallWeatherGeocodeRunTerminal,
-  mallWeatherGeocodeTriggerPath,
+  mallWeatherShouldPollGeocode,
   mallWeatherMallReady,
   mallWeatherOverviewHasBusinessData,
   mallWeatherOverviewReadiness,
@@ -57,10 +57,13 @@ import {
   parseMallWeatherSheetPushDryRun,
   parseMallWeatherSheetPushOptions,
   parseMallWeatherSheetPushResult,
+  submitMallWeatherGeocodeConfirmation,
+  submitMallWeatherGeocodeTrigger,
   type MallWeatherCreateInput,
   type MallWeatherAlert,
   type MallWeatherPendingCreate,
   type MallWeatherPendingSheetPush,
+  type MallWeatherGeocodeConfirmRequest,
   type MallWeatherGeocodeCandidates,
   type MallWeatherMall,
   type MallWeatherOverview,
@@ -394,7 +397,7 @@ export function MallWeatherPage({
   }, [loadMall])
 
   const handleMallUpdated = useCallback((mall: MallWeatherMall) => {
-    setMalls((current) => current.map((item) => item.id === mall.id ? mall : item))
+    setMalls((current) => mergeMallWeatherMalls(current, [mall]))
     setSelectedMallID(mall.id)
   }, [])
 
@@ -810,25 +813,26 @@ function MallOnboardingPanel({ mall, client, onMallUpdated, onReloadMall }: {
     setCandidateState('loading')
     setError('')
     const response = await client(mallWeatherGeocodeCandidatesPath(mall.id), { method: 'GET', showResult: false, silentLoading: true, signal: controller.signal })
-    if (sequence !== candidateRequestSequence.current) return
+    if (sequence !== candidateRequestSequence.current) return false
     if (!response.ok) {
       setCandidateState('error')
       setError(weatherActionError(response.status, '坐标候选加载失败', '当前账号缺少 mall.read 权限'))
-      return
+      return false
     }
     const parsed = parseMallWeatherGeocodeCandidates(response.data)
     if (!parsed) {
       setCandidateState('error')
       setError('坐标候选响应格式不正确，请联系管理员')
-      return
+      return false
     }
     setCandidates(parsed)
     const defaultCandidate = parsed.items.find((candidate) => candidate.selected) || parsed.items[0]
     setSelectedCandidateID(defaultCandidate?.id || 0)
     setLongitude(defaultCandidate ? String(defaultCandidate.longitude) : '')
     setLatitude(defaultCandidate ? String(defaultCandidate.latitude) : '')
+    if (mallWeatherGeocodeRunTerminal(parsed.runStatus)) await onReloadMall(mall.id)
     setCandidateState('success')
-    if (parsed.runStatus === 'AUTO_CONFIRMED') await onReloadMall(mall.id)
+    return true
   }, [client, mall.id, onReloadMall])
 
   useEffect(() => {
@@ -837,25 +841,41 @@ function MallOnboardingPanel({ mall, client, onMallUpdated, onReloadMall }: {
   }, [cancelCandidateRequests, loadCandidates, mall.version])
 
   useEffect(() => {
-    if (!candidates || candidates.items.length > 0 || mallWeatherGeocodeRunTerminal(candidates.runStatus)) return
+    if (!mallWeatherShouldPollGeocode(mall.geocodeStatus, candidates, candidateState === 'loading')) return
     const timer = window.setTimeout(() => void loadCandidates(), 5000)
     return () => window.clearTimeout(timer)
-  }, [candidates, loadCandidates])
+  }, [candidateState, candidates, loadCandidates, mall.geocodeStatus])
 
   async function triggerGeocode() {
     setSubmitting(true)
     setError('')
-    const expectedMallVersion = candidates?.mallVersion || mall.version
-    const response = await client(mallWeatherGeocodeTriggerPath(mall.id), {
-      method: 'POST', body: { expectedMallVersion }, showResult: false, silentLoading: true,
-    })
-    setSubmitting(false)
-    if (!response.ok) {
-      setError(weatherActionError(response.status, '坐标解析任务提交失败', '当前账号缺少 mall.write 权限'))
+    const outcome = await submitMallWeatherGeocodeTrigger(
+      client,
+      mall.id,
+      () => onReloadMall(mall.id),
+      loadCandidates,
+    )
+    if (outcome.kind === 'latest_mall_unavailable') {
+      setSubmitting(false)
+      setError('无法获取商场最新状态，请检查网络后重试。')
       return
     }
-    await onReloadMall(mall.id)
-    await loadCandidates()
+    if (outcome.kind === 'conflict') {
+      setSubmitting(false)
+      setError(outcome.refreshed
+        ? '商场状态已更新，请再次点击“重新解析地址”。'
+        : '商场版本已变化，但最新状态刷新失败，请检查网络后重试。')
+      return
+    }
+    if (outcome.kind === 'rejected') {
+      setSubmitting(false)
+      setError(weatherActionError(outcome.response.status, '坐标解析任务提交失败', '当前账号缺少 mall.write 权限'))
+      return
+    }
+    const candidatesLoaded = await loadCandidates()
+    const latestMall = await onReloadMall(mall.id)
+    setSubmitting(false)
+    if (!latestMall || !candidatesLoaded) setError('坐标解析任务已提交，但最新状态刷新失败；页面会继续尝试刷新。')
   }
 
   function selectCandidate(candidateID: number) {
@@ -869,13 +889,13 @@ function MallOnboardingPanel({ mall, client, onMallUpdated, onReloadMall }: {
   }
 
   async function confirmCoordinate() {
-    const expectedMallVersion = candidates?.mallVersion || mall.version
+    const expectedMallVersion = candidates?.mallVersion || 0
     const selectedCandidate = candidates?.items.find((candidate) => candidate.id === selectedCandidateID)
     if (!selectedCandidate) {
       setError('请先选择一个高德解析候选，再确认或修改坐标。')
       return
     }
-    let body: unknown
+    let body: MallWeatherGeocodeConfirmRequest
     try {
       body = mallWeatherCandidateConfirmationRequest(selectedCandidate, longitude, latitude, reason, expectedMallVersion)
     } catch {
@@ -884,13 +904,30 @@ function MallOnboardingPanel({ mall, client, onMallUpdated, onReloadMall }: {
     }
     setSubmitting(true)
     setError('')
-    const response = await client(mallWeatherGeocodeConfirmPath(mall.id), { method: 'POST', body, showResult: false, silentLoading: true })
-    setSubmitting(false)
-    if (!response.ok) {
-      setError(weatherActionError(response.status, '坐标确认失败', '当前账号缺少 mall.geocode.confirm 权限'))
+    const outcome = await submitMallWeatherGeocodeConfirmation(
+      client,
+      mall.id,
+      mall.version,
+      expectedMallVersion,
+      body,
+      () => onReloadMall(mall.id),
+      loadCandidates,
+    )
+    if (outcome.kind === 'stale' || outcome.kind === 'conflict') {
+      setSelectedCandidateID(0)
+      setSubmitting(false)
+      setError(outcome.refreshed
+        ? '商场或高德候选已更新，请重新选择坐标后再确认。'
+        : '商场或高德候选已变化，但最新状态刷新失败，请检查网络后重试。')
       return
     }
-    const updated = parseMallWeatherMall(response.data)
+    if (outcome.kind === 'rejected') {
+      setSubmitting(false)
+      setError(weatherActionError(outcome.response.status, '坐标确认失败', '当前账号缺少 mall.geocode.confirm 权限'))
+      return
+    }
+    setSubmitting(false)
+    const updated = parseMallWeatherMall(outcome.response.data)
     if (!updated) {
       setError('坐标已提交，但响应格式不正确；请刷新商场列表确认。')
       return

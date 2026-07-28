@@ -104,6 +104,24 @@ export type MallWeatherGeocodeConfirmRequest = {
   weatherEnabled: true
 }
 
+export type MallWeatherGeocodeActionResponse = {
+  ok: boolean
+  status: number
+  data: unknown
+}
+
+export type MallWeatherGeocodeTriggerOutcome =
+  | { kind: 'accepted'; response: MallWeatherGeocodeActionResponse }
+  | { kind: 'rejected'; response: MallWeatherGeocodeActionResponse }
+  | { kind: 'latest_mall_unavailable' }
+  | { kind: 'conflict'; refreshed: boolean }
+
+export type MallWeatherGeocodeConfirmationOutcome =
+  | { kind: 'accepted'; response: MallWeatherGeocodeActionResponse }
+  | { kind: 'rejected'; response: MallWeatherGeocodeActionResponse }
+  | { kind: 'stale'; refreshed: boolean }
+  | { kind: 'conflict'; refreshed: boolean }
+
 export type MallWeatherSheetPushOption = {
   destinationId: number
   name: string
@@ -961,6 +979,74 @@ export function mallWeatherGeocodeConfirmPath(mallID: number) {
 
 export function mallWeatherGeocodeRunTerminal(status: string) {
   return ['SUCCEEDED', 'FAILED', 'STALE', 'NO_CANDIDATES', 'AUTO_CONFIRMED', 'REVIEW_REQUIRED'].includes(status.toUpperCase())
+}
+
+export function mallWeatherShouldPollGeocode(
+  mallGeocodeStatus: string,
+  candidates: MallWeatherGeocodeCandidates | null,
+  candidateLoading = false,
+) {
+  if (candidateLoading) return false
+  if (mallGeocodeStatus.trim().toUpperCase() === 'PENDING') return true
+  return Boolean(candidates && candidates.items.length === 0 && !mallWeatherGeocodeRunTerminal(candidates.runStatus))
+}
+
+type MallWeatherGeocodeActionRequester = (
+  path: string,
+  options: { method: 'POST'; body: unknown; showResult: false; silentLoading: true },
+) => Promise<MallWeatherGeocodeActionResponse>
+
+type MallWeatherMallReloader = () => Promise<MallWeatherMall | null>
+type MallWeatherCandidatesReloader = () => Promise<boolean>
+
+async function refreshMallWeatherGeocodeState(
+  reloadMall: MallWeatherMallReloader,
+  reloadCandidates: MallWeatherCandidatesReloader,
+) {
+  const candidatesLoaded = await reloadCandidates()
+  const mall = await reloadMall()
+  return Boolean(mall && candidatesLoaded)
+}
+
+export async function submitMallWeatherGeocodeTrigger(
+  request: MallWeatherGeocodeActionRequester,
+  mallID: number,
+  reloadMall: MallWeatherMallReloader,
+  reloadCandidates: MallWeatherCandidatesReloader,
+): Promise<MallWeatherGeocodeTriggerOutcome> {
+  const latestMall = await reloadMall()
+  if (!latestMall) return { kind: 'latest_mall_unavailable' }
+  const response = await request(mallWeatherGeocodeTriggerPath(mallID), {
+    method: 'POST',
+    body: { expectedMallVersion: latestMall.version },
+    showResult: false,
+    silentLoading: true,
+  })
+  if (response.status === 409) {
+    return { kind: 'conflict', refreshed: await refreshMallWeatherGeocodeState(reloadMall, reloadCandidates) }
+  }
+  return response.ok && response.status === 202 ? { kind: 'accepted', response } : { kind: 'rejected', response }
+}
+
+export async function submitMallWeatherGeocodeConfirmation(
+  request: MallWeatherGeocodeActionRequester,
+  mallID: number,
+  mallVersion: number,
+  candidateVersion: number,
+  body: MallWeatherGeocodeConfirmRequest,
+  reloadMall: MallWeatherMallReloader,
+  reloadCandidates: MallWeatherCandidatesReloader,
+): Promise<MallWeatherGeocodeConfirmationOutcome> {
+  if (mallVersion !== candidateVersion || body.expectedMallVersion !== candidateVersion) {
+    return { kind: 'stale', refreshed: await refreshMallWeatherGeocodeState(reloadMall, reloadCandidates) }
+  }
+  const response = await request(mallWeatherGeocodeConfirmPath(mallID), {
+    method: 'POST', body, showResult: false, silentLoading: true,
+  })
+  if (response.status === 409) {
+    return { kind: 'conflict', refreshed: await refreshMallWeatherGeocodeState(reloadMall, reloadCandidates) }
+  }
+  return response.ok && response.status === 200 ? { kind: 'accepted', response } : { kind: 'rejected', response }
 }
 
 export function mallWeatherCandidateConfirmationRequest(
