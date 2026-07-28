@@ -2,6 +2,8 @@
 package middleware
 
 import (
+	"strings"
+
 	"gin-biz-web-api/constant"
 
 	"github.com/gin-gonic/gin"
@@ -43,4 +45,44 @@ func AuthJWT() gin.HandlerFunc {
 
 		c.Next() // 继续执行后续中间件和处理函数
 	}
+}
+
+// AuthOpenJWT authenticates open API requests from the standard Authorization
+// header only. Unlike the legacy middleware, it does not accept credentials in
+// query parameters, form fields, or custom headers and always returns a stable
+// HTTP 401 response for invalid credentials.
+func AuthOpenJWT() gin.HandlerFunc {
+	return func(c *gin.Context) {
+		response := responses.New(c)
+		token, ok := bearerToken(c.GetHeader("Authorization"))
+		if !ok {
+			response.ToSafeErrorResponse(errcode.Unauthorized, "身份凭证缺失或格式错误")
+			return
+		}
+
+		claims, err := jwt.NewJWT().ParseToken(c, token)
+		if err != nil {
+			response.ToSafeErrorResponse(errcode.Unauthorized, "身份凭证无效或已过期")
+			return
+		}
+
+		var user model.User
+		result := database.DB.First(&user, claims.U)
+		if result.Error != nil || user.ID == 0 {
+			response.ToSafeErrorResponse(errcode.Unauthorized, "身份凭证无效或已过期")
+			return
+		}
+
+		c.Set(constant.CurrentUserID, user.GetStringID())
+		c.Set(constant.CurrentUserInfo, user)
+		c.Next()
+	}
+}
+
+func bearerToken(authorization string) (string, bool) {
+	parts := strings.Fields(authorization)
+	if len(parts) != 2 || !strings.EqualFold(parts[0], "Bearer") || parts[1] == "" {
+		return "", false
+	}
+	return parts[1], true
 }

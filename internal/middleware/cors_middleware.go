@@ -18,7 +18,7 @@ func Cors() gin.HandlerFunc {
 		c.Header("Access-Control-Allow-Methods", "POST,GET,OPTIONS,DELETE,PUT")
 		c.Header("Access-Control-Max-Age", "3628800")
 		c.Header("Access-Control-Allow-Headers", "DNT,Keep-Alive,User-Agent,Cache-Control,Content-Type,Authorization,Token,AccessToken,X-Token,X-User-Id")
-		c.Header("Access-Control-Expose-Headers", "Content-Length, Access-Control-Allow-Origin, Access-Control-Allow-Headers, Content-Type")
+		c.Header("Access-Control-Expose-Headers", "Content-Length, Access-Control-Allow-Origin, Access-Control-Allow-Headers, Content-Type, X-RateLimit-Limit, X-RateLimit-Remaining, X-RateLimit-Reset, Retry-After")
 
 		if c.Request.Method == "OPTIONS" {
 			c.AbortWithStatus(http.StatusNoContent)
