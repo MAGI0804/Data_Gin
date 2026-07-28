@@ -14,6 +14,7 @@ func TestAPIDataRegistersMallCRUDRoutes(t *testing.T) {
 	router := gin.New()
 	registerMallRoutes(router.Group("/api"), &data_ctrl.MallController{})
 	registerMallWeatherRoutes(router.Group("/api"), &data_ctrl.MallWeatherController{})
+	registerOpenWeatherRoutes(router.Group("/api"), &data_ctrl.MallWeatherController{})
 	registerMallWeatherRefreshRoutes(router.Group("/api"), &data_ctrl.MallWeatherRefreshController{})
 	registerMallWeatherExportProfileRoutes(router.Group("/api"), &data_ctrl.MallWeatherExportProfileController{})
 	registerMallWeatherExportJobRoutes(router.Group("/api"), &data_ctrl.MallWeatherExportJobController{})
@@ -39,6 +40,13 @@ func TestAPIDataRegistersMallCRUDRoutes(t *testing.T) {
 		http.MethodGet + " /api/v1/malls/:id/weather/alerts",
 		http.MethodGet + " /api/v1/malls/:id/weather/life-indices",
 		http.MethodGet + " /api/v1/malls/:id/weather/fetch-runs",
+		http.MethodPost + " /api/open/weather/malls/:id/overview",
+		http.MethodPost + " /api/open/weather/malls/:id/realtime",
+		http.MethodPost + " /api/open/weather/malls/:id/minutely",
+		http.MethodPost + " /api/open/weather/malls/:id/hourly",
+		http.MethodPost + " /api/open/weather/malls/:id/daily",
+		http.MethodPost + " /api/open/weather/malls/:id/alerts",
+		http.MethodPost + " /api/open/weather/malls/:id/life-indices",
 		http.MethodPost + " /api/v1/malls/:id/weather-refresh",
 		http.MethodPost + " /api/v1/weather-export-profiles",
 		http.MethodGet + " /api/v1/weather-export-profiles",
@@ -55,6 +63,16 @@ func TestAPIDataRegistersMallCRUDRoutes(t *testing.T) {
 	} {
 		if _, ok := routes[expected]; !ok {
 			t.Errorf("route %q is not registered", expected)
+		}
+	}
+	for _, forbidden := range []string{
+		http.MethodGet + " /api/open/weather/malls/:id/hourly",
+		http.MethodPost + " /api/open/weather/malls/:id/fetch-runs",
+		http.MethodPost + " /api/open/weather/malls/:id/download",
+		http.MethodPost + " /api/open/weather/malls/:id/refresh",
+	} {
+		if _, ok := routes[forbidden]; ok {
+			t.Errorf("route %q must not be registered", forbidden)
 		}
 	}
 }

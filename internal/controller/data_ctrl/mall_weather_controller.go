@@ -35,6 +35,21 @@ type MallWeatherController struct {
 	service MallWeatherQueryService
 }
 
+type openMallWeatherOverviewRequest struct {
+	TimeZone string `json:"timeZone"`
+}
+
+type openMallWeatherTimeSeriesRequest struct {
+	Start         string `json:"start"`
+	End           string `json:"end"`
+	TimeZone      string `json:"timeZone"`
+	Latest        *bool  `json:"latest"`
+	AsOf          string `json:"asOf"`
+	QualityStatus string `json:"qualityStatus"`
+	Cursor        string `json:"cursor"`
+	PageSize      *int   `json:"pageSize"`
+}
+
 func NewMallWeatherController() *MallWeatherController {
 	return NewMallWeatherControllerWithService(data_svc.NewMallWeatherQueryService())
 }
@@ -196,6 +211,180 @@ func (controller *MallWeatherController) FetchRuns(c *gin.Context) {
 		return
 	}
 	responses.New(c).ToResponseWithStatus(http.StatusOK, result)
+}
+
+func (controller *MallWeatherController) OpenOverview(c *gin.Context) {
+	mallID, err := parseMallUint(c.Param("id"), "mall id")
+	if err != nil {
+		writeMallWeatherError(c, err)
+		return
+	}
+	var request openMallWeatherOverviewRequest
+	if err := decodeMallJSON(c, &request); err != nil {
+		writeMallWeatherError(c, fmt.Errorf("%w: invalid JSON body", data_svc.ErrMallWeatherInvalidQuery))
+		return
+	}
+	result, err := controller.service.Overview(
+		c.Request.Context(), auth.CurrentUserID(c), mallID, strings.TrimSpace(request.TimeZone),
+	)
+	if err != nil {
+		writeMallWeatherError(c, err)
+		return
+	}
+	responses.New(c).ToResponseWithStatus(http.StatusOK, result)
+}
+
+func (controller *MallWeatherController) OpenRealtime(c *gin.Context) {
+	mallID, request, err := parseOpenMallWeatherRequest(c)
+	if err != nil {
+		writeMallWeatherError(c, err)
+		return
+	}
+	result, err := controller.service.Realtime(c.Request.Context(), auth.CurrentUserID(c), mallID, requestbody.MallWeatherRealtimeQueryRequest{
+		StartUTC: request.StartUTC, EndUTC: request.EndUTC, TimeZone: request.TimeZone,
+		Latest: request.Latest, AsOfUTC: request.AsOfUTC, QualityStatus: request.QualityStatus,
+		Cursor: request.Cursor, PageSize: request.PageSize,
+	})
+	if err != nil {
+		writeMallWeatherError(c, err)
+		return
+	}
+	responses.New(c).ToResponseWithStatus(http.StatusOK, result)
+}
+
+func (controller *MallWeatherController) OpenMinutely(c *gin.Context) {
+	mallID, request, err := parseOpenMallWeatherRequest(c)
+	if err != nil {
+		writeMallWeatherError(c, err)
+		return
+	}
+	result, err := controller.service.Minutely(c.Request.Context(), auth.CurrentUserID(c), mallID, requestbody.MallWeatherMinutelyQueryRequest{
+		StartUTC: request.StartUTC, EndUTC: request.EndUTC, TimeZone: request.TimeZone,
+		Latest: request.Latest, AsOfUTC: request.AsOfUTC, QualityStatus: request.QualityStatus,
+		Cursor: request.Cursor, PageSize: request.PageSize,
+	})
+	if err != nil {
+		writeMallWeatherError(c, err)
+		return
+	}
+	responses.New(c).ToResponseWithStatus(http.StatusOK, result)
+}
+
+func (controller *MallWeatherController) OpenHourly(c *gin.Context) {
+	mallID, request, err := parseOpenMallWeatherRequest(c)
+	if err != nil {
+		writeMallWeatherError(c, err)
+		return
+	}
+	result, err := controller.service.Hourly(c.Request.Context(), auth.CurrentUserID(c), mallID, requestbody.MallWeatherHourlyQueryRequest{
+		StartUTC: request.StartUTC, EndUTC: request.EndUTC, TimeZone: request.TimeZone,
+		Latest: request.Latest, AsOfUTC: request.AsOfUTC, QualityStatus: request.QualityStatus,
+		Cursor: request.Cursor, PageSize: request.PageSize,
+	})
+	if err != nil {
+		writeMallWeatherError(c, err)
+		return
+	}
+	responses.New(c).ToResponseWithStatus(http.StatusOK, result)
+}
+
+func (controller *MallWeatherController) OpenDaily(c *gin.Context) {
+	mallID, request, err := parseOpenMallWeatherRequest(c)
+	if err != nil {
+		writeMallWeatherError(c, err)
+		return
+	}
+	result, err := controller.service.Daily(c.Request.Context(), auth.CurrentUserID(c), mallID, requestbody.MallWeatherDailyQueryRequest{
+		StartUTC: request.StartUTC, EndUTC: request.EndUTC, TimeZone: request.TimeZone,
+		Latest: request.Latest, AsOfUTC: request.AsOfUTC, QualityStatus: request.QualityStatus,
+		Cursor: request.Cursor, PageSize: request.PageSize,
+	})
+	if err != nil {
+		writeMallWeatherError(c, err)
+		return
+	}
+	responses.New(c).ToResponseWithStatus(http.StatusOK, result)
+}
+
+func (controller *MallWeatherController) OpenAlerts(c *gin.Context) {
+	mallID, request, err := parseOpenMallWeatherRequest(c)
+	if err != nil {
+		writeMallWeatherError(c, err)
+		return
+	}
+	result, err := controller.service.Alerts(c.Request.Context(), auth.CurrentUserID(c), mallID, requestbody.MallWeatherAlertQueryRequest{
+		StartUTC: request.StartUTC, EndUTC: request.EndUTC, TimeZone: request.TimeZone,
+		Latest: request.Latest, AsOfUTC: request.AsOfUTC, QualityStatus: request.QualityStatus,
+		Cursor: request.Cursor, PageSize: request.PageSize,
+	})
+	if err != nil {
+		writeMallWeatherError(c, err)
+		return
+	}
+	responses.New(c).ToResponseWithStatus(http.StatusOK, result)
+}
+
+func (controller *MallWeatherController) OpenLifeIndices(c *gin.Context) {
+	mallID, request, err := parseOpenMallWeatherRequest(c)
+	if err != nil {
+		writeMallWeatherError(c, err)
+		return
+	}
+	result, err := controller.service.LifeIndices(c.Request.Context(), auth.CurrentUserID(c), mallID, requestbody.MallWeatherLifeIndexQueryRequest{
+		StartUTC: request.StartUTC, EndUTC: request.EndUTC, TimeZone: request.TimeZone,
+		Latest: request.Latest, AsOfUTC: request.AsOfUTC, QualityStatus: request.QualityStatus,
+		Cursor: request.Cursor, PageSize: request.PageSize,
+	})
+	if err != nil {
+		writeMallWeatherError(c, err)
+		return
+	}
+	responses.New(c).ToResponseWithStatus(http.StatusOK, result)
+}
+
+func parseOpenMallWeatherRequest(c *gin.Context) (uint, parsedMallWeatherTimeSeriesRequest, error) {
+	mallID, err := parseMallUint(c.Param("id"), "mall id")
+	if err != nil {
+		return 0, parsedMallWeatherTimeSeriesRequest{}, err
+	}
+	var body openMallWeatherTimeSeriesRequest
+	if err := decodeMallJSON(c, &body); err != nil {
+		return 0, parsedMallWeatherTimeSeriesRequest{}, fmt.Errorf("%w: invalid JSON body", data_svc.ErrMallWeatherInvalidQuery)
+	}
+	start, err := parseRequiredWeatherTime(body.Start, "start")
+	if err != nil {
+		return 0, parsedMallWeatherTimeSeriesRequest{}, err
+	}
+	end, err := parseRequiredWeatherTime(body.End, "end")
+	if err != nil {
+		return 0, parsedMallWeatherTimeSeriesRequest{}, err
+	}
+	request := parsedMallWeatherTimeSeriesRequest{
+		StartUTC:      start.UTC(),
+		EndUTC:        end.UTC(),
+		TimeZone:      strings.TrimSpace(body.TimeZone),
+		Latest:        true,
+		QualityStatus: strings.TrimSpace(body.QualityStatus),
+		Cursor:        strings.TrimSpace(body.Cursor),
+	}
+	if body.Latest != nil {
+		request.Latest = *body.Latest
+	}
+	if body.PageSize != nil {
+		if *body.PageSize <= 0 {
+			return 0, parsedMallWeatherTimeSeriesRequest{}, fmt.Errorf("%w: invalid pageSize", data_svc.ErrMallWeatherInvalidQuery)
+		}
+		request.PageSize = *body.PageSize
+	}
+	if asOfValue := strings.TrimSpace(body.AsOf); asOfValue != "" {
+		asOf, err := time.Parse(time.RFC3339Nano, asOfValue)
+		if err != nil {
+			return 0, parsedMallWeatherTimeSeriesRequest{}, fmt.Errorf("%w: invalid asOf", data_svc.ErrMallWeatherInvalidQuery)
+		}
+		asOf = asOf.UTC()
+		request.AsOfUTC = &asOf
+	}
+	return mallID, request, nil
 }
 
 func parseMallWeatherRealtimeRequest(c *gin.Context) (requestbody.MallWeatherRealtimeQueryRequest, error) {

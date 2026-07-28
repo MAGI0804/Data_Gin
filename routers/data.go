@@ -9,7 +9,9 @@ import (
 
 func apiData(api *gin.RouterGroup) {
 	registerMallRoutes(api, data_ctrl.NewMallController())
-	registerMallWeatherRoutes(api, data_ctrl.NewMallWeatherController())
+	weatherCtrl := data_ctrl.NewMallWeatherController()
+	registerMallWeatherRoutes(api, weatherCtrl)
+	registerOpenWeatherRoutes(api, weatherCtrl)
 	registerMallWeatherRefreshRoutes(api, data_ctrl.NewMallWeatherRefreshController())
 	registerMallWeatherExportProfileRoutes(api, data_ctrl.NewMallWeatherExportProfileController())
 	registerMallWeatherExportJobRoutes(api, data_ctrl.NewMallWeatherExportJobController())
@@ -199,6 +201,29 @@ func apiData(api *gin.RouterGroup) {
 		dataGroup.POST("/raw/list", dataCtrl.QueryController.GetRawDataList)
 		dataGroup.GET("/processed", dataCtrl.QueryController.GetProcessedData)
 		dataGroup.GET("/statistics", dataCtrl.QueryController.GetStatistics)
+	}
+}
+
+const (
+	openWeatherPreAuthIPRateLimit = "600-M"
+	openWeatherUserRouteRateLimit = "120-M"
+)
+
+func registerOpenWeatherRoutes(api *gin.RouterGroup, weatherCtrl *data_ctrl.MallWeatherController) {
+	weatherGroup := api.Group("/open/weather")
+	weatherGroup.Use(
+		middleware.LimitOpenAPIIP("weather", openWeatherPreAuthIPRateLimit),
+		middleware.AuthOpenJWT(),
+		middleware.LimitOpenAPIUserRoute("weather", openWeatherUserRouteRateLimit),
+	)
+	{
+		weatherGroup.POST("/malls/:id/overview", weatherCtrl.OpenOverview)
+		weatherGroup.POST("/malls/:id/realtime", weatherCtrl.OpenRealtime)
+		weatherGroup.POST("/malls/:id/minutely", weatherCtrl.OpenMinutely)
+		weatherGroup.POST("/malls/:id/hourly", weatherCtrl.OpenHourly)
+		weatherGroup.POST("/malls/:id/daily", weatherCtrl.OpenDaily)
+		weatherGroup.POST("/malls/:id/alerts", weatherCtrl.OpenAlerts)
+		weatherGroup.POST("/malls/:id/life-indices", weatherCtrl.OpenLifeIndices)
 	}
 }
 
