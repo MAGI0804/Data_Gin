@@ -44,6 +44,28 @@ func TestMallWeatherExportDataQueryUsesCatalogAndStableKeyset(t *testing.T) {
 	}
 }
 
+func TestMallWeatherExportRealtimeWithoutRangeOmitsNullTimePredicates(t *testing.T) {
+	dao := NewMallWeatherExportDataDAO(dryRunWeatherDAOTestDB(t))
+	snapshot := time.Date(2026, 7, 28, 8, 0, 0, 0, time.UTC)
+	query, _, err := dao.buildPageQuery(t.Context(), MallWeatherExportDataPageRequest{
+		Kind: "realtime", Fields: []string{"mall_code", "snapshot_at"},
+		Latest: true, Limit: 100, SnapshotAt: snapshot,
+	})
+	if err != nil {
+		t.Fatalf("buildPageQuery() error=%v", err)
+	}
+	var rows []struct{}
+	query = query.Find(&rows)
+	if query.Error != nil {
+		t.Fatalf("build realtime query SQL error=%v", query.Error)
+	}
+	statement := query.Statement.SQL.String()
+	if strings.Contains(statement, "w.snapshot_at_utc >= ?") ||
+		strings.Contains(statement, "w.snapshot_at_utc < ?") {
+		t.Fatalf("realtime query contains a null time-range predicate: %s", statement)
+	}
+}
+
 func TestMallWeatherExportDataCatalogIsCanonicalAndDefensive(t *testing.T) {
 	for _, kind := range []string{"malls", "realtime", "minutely", "hourly", "daily", "alerts", "life_indices", "fetch_runs"} {
 		fields, ok := MallWeatherExportDatasetFields(kind)

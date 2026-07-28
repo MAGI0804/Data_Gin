@@ -145,6 +145,66 @@ func TestMallWeatherExportRendererUsesRegularWriterForSmallJobs(t *testing.T) {
 	}
 }
 
+func TestMallWeatherExportRendererWritesFixedRealtimeData(t *testing.T) {
+	snapshot := time.Date(2026, 7, 28, 8, 0, 0, 0, time.UTC)
+	columns, err := mallWeatherExportChineseColumns("realtime")
+	if err != nil {
+		t.Fatalf("mallWeatherExportChineseColumns() error=%v", err)
+	}
+	pager := &fakeMallWeatherExportDataPager{rows: []data_dao.MallWeatherExportDataRow{{
+		CursorID: 1,
+		Values: map[string]interface{}{
+			"mall_code":     "M001",
+			"snapshot_at":   snapshot.Add(-time.Minute),
+			"temperature_c": 28.5,
+		},
+	}}}
+	renderer, err := newMallWeatherExportRenderer(pager, 100, 8)
+	if err != nil {
+		t.Fatalf("newMallWeatherExportRenderer() error=%v", err)
+	}
+	latest := true
+	output := filepath.Join(t.TempDir(), "realtime.xlsx")
+	result, err := renderer.Render(t.Context(), MallWeatherExportRenderRequest{
+		ProfileCode: fixedMallWeatherExportProfileCode,
+		Config: MallWeatherExportProfileConfig{
+			TimeZone: "Asia/Shanghai", UnitSystem: "metric",
+			DateFormat: time.DateOnly, DateTimeFormat: "2006-01-02 15:04:05",
+			Datasets: []requestbody.MallWeatherExportDataset{{
+				Kind: "realtime", SheetName: "实时天气", Latest: &latest, Columns: columns,
+			}},
+		},
+		GeneratedAt: snapshot, SnapshotAt: snapshot, EstimatedRows: 1, OutputPath: output,
+	}, nil)
+	if err != nil {
+		t.Fatalf("Render() error=%v", err)
+	}
+	if result.ProcessedRows != 1 {
+		t.Fatalf("result=%+v", result)
+	}
+	workbook, err := excelize.OpenFile(output)
+	if err != nil {
+		t.Fatalf("OpenFile() error=%v", err)
+	}
+	t.Cleanup(func() {
+		if err := workbook.Close(); err != nil {
+			t.Errorf("Close() error=%v", err)
+		}
+	})
+	header, err := workbook.GetCellValue("实时天气", "A1")
+	if err != nil || header != "商场编码" {
+		t.Fatalf("realtime header=%q error=%v", header, err)
+	}
+	mallCode, err := workbook.GetCellValue("实时天气", "A2")
+	if err != nil || mallCode != "M001" {
+		t.Fatalf("realtime mall code=%q error=%v", mallCode, err)
+	}
+	temperature, err := workbook.GetCellValue("实时天气", "C2")
+	if err != nil || temperature != "28.5" {
+		t.Fatalf("realtime temperature=%q error=%v", temperature, err)
+	}
+}
+
 func TestMallWeatherExportRendererUsesFixedCurrentForecastWindows(t *testing.T) {
 	pager := &fakeMallWeatherExportDataPager{}
 	renderer, err := newMallWeatherExportRenderer(pager, 100, 8)

@@ -117,6 +117,39 @@ func TestMallWeatherExportEstimateUsesBoundFiltersAndLatestIdentity(t *testing.T
 	}
 }
 
+func TestMallWeatherExportEstimateTimeValuesPreserveOptionalBounds(t *testing.T) {
+	start := time.Date(2026, 7, 28, 8, 0, 0, 0, time.UTC)
+	end := start.Add(time.Hour)
+	tests := []struct {
+		name      string
+		filter    MallWeatherExportEstimateFilter
+		wantStart *time.Time
+		wantEnd   *time.Time
+	}{
+		{name: "no range"},
+		{name: "start only", filter: MallWeatherExportEstimateFilter{StartUTC: &start}, wantStart: &start},
+		{name: "end only", filter: MallWeatherExportEstimateFilter{EndUTC: &end}, wantEnd: &end},
+		{name: "complete range", filter: MallWeatherExportEstimateFilter{StartUTC: &start, EndUTC: &end}, wantStart: &start, wantEnd: &end},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotStart, gotEnd := mallWeatherExportEstimateTimeValues("realtime", tt.filter)
+			if !mallWeatherExportTestTimeValueEqual(gotStart, tt.wantStart) ||
+				!mallWeatherExportTestTimeValueEqual(gotEnd, tt.wantEnd) {
+				t.Fatalf("mallWeatherExportEstimateTimeValues()=(%v,%v)", gotStart, gotEnd)
+			}
+		})
+	}
+}
+
+func mallWeatherExportTestTimeValueEqual(got interface{}, want *time.Time) bool {
+	if want == nil {
+		return got == nil
+	}
+	value, ok := got.(*time.Time)
+	return ok && value != nil && value.Equal(*want)
+}
+
 func TestMallWeatherExportEstimateLifeIndicesOnlyUsesComprehensiveSource(t *testing.T) {
 	dao := NewMallWeatherExportJobDAO(dryRunWeatherDAOTestDB(t))
 	query, countExpression, _, _, _, err := dao.exportEstimateQuery(

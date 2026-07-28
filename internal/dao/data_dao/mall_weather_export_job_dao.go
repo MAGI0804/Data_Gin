@@ -288,5 +288,13 @@ func mallWeatherExportEstimateTimeValues(
 		}
 		return start, end
 	}
-	return filter.StartUTC, filter.EndUTC
+	var start interface{}
+	var end interface{}
+	if filter.StartUTC != nil {
+		start = filter.StartUTC
+	}
+	if filter.EndUTC != nil {
+		end = filter.EndUTC
+	}
+	return start, end
 }
