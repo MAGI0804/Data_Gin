@@ -58,6 +58,8 @@ func RegisterAPIRoutes(r *gin.Engine) {
 	apiExample(api)
 	// 数据存储相关
 	apiData(api)
+	// 开放接口账号与数据授权，仅可信管理员可用
+	registerDataAuthorizationRoutes(api)
 
 }
 

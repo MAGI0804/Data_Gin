@@ -2,11 +2,14 @@
 package middleware
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
 	"strings"
 
 	"gin-biz-web-api/constant"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 
 	"gin-biz-web-api/model"
 	"gin-biz-web-api/pkg/database"
@@ -60,14 +63,25 @@ func AuthOpenJWT() gin.HandlerFunc {
 			return
 		}
 
-		claims, err := jwt.NewJWT().ParseToken(c, token)
-		if err != nil {
-			response.ToSafeErrorResponse(errcode.Unauthorized, "身份凭证无效或已过期")
-			return
-		}
-
 		var user model.User
-		result := database.DB.First(&user, claims.U)
+		var result *gorm.DB
+		if strings.HasPrefix(token, "dg_open_") {
+			sum := sha256.Sum256([]byte(token))
+			var credential model.OpenAPICredential
+			credentialResult := database.DB.Where("token_hash = ? AND status = ?", hex.EncodeToString(sum[:]), model.OpenAPICredentialStatusActive).First(&credential)
+			if credentialResult.Error != nil {
+				response.ToSafeErrorResponse(errcode.Unauthorized, "身份凭证无效或已过期")
+				return
+			}
+			result = database.DB.First(&user, credential.UserID)
+		} else {
+			claims, err := jwt.NewJWT().ParseToken(c, token)
+			if err != nil {
+				response.ToSafeErrorResponse(errcode.Unauthorized, "身份凭证无效或已过期")
+				return
+			}
+			result = database.DB.First(&user, claims.U)
+		}
 		if result.Error != nil || user.ID == 0 {
 			response.ToSafeErrorResponse(errcode.Unauthorized, "身份凭证无效或已过期")
 			return
