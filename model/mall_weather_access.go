@@ -12,6 +12,7 @@ const (
 	PermissionWeatherFeishuPush   = "weather.feishu.push"
 	PermissionWeatherConfigManage = "weather.config.manage"
 	PermissionWeatherRawRead      = "weather.raw.read"
+	PermissionBojunOrderRead      = "bojun.order.read"
 )
 
 var mallWeatherAdminPermissions = [...]string{
@@ -24,6 +25,7 @@ var mallWeatherAdminPermissions = [...]string{
 	PermissionWeatherFeishuPush,
 	PermissionWeatherConfigManage,
 	PermissionWeatherRawRead,
+	PermissionBojunOrderRead,
 }
 
 // MallWeatherAdminPermissions returns the complete permanent permission set
