@@ -398,7 +398,7 @@ export type MallWeatherPageResult<T> = {
   pagination: { pageSize: number; nextCursor: string }
 }
 
-export type MallWeatherSeries = 'minutely' | 'hourly' | 'daily' | 'life-indices'
+export type MallWeatherSeries = 'minutely' | 'hourly' | 'daily' | 'alerts' | 'life-indices'
 
 export type MallWeatherQueryWindow = {
   start: Date
@@ -1388,6 +1388,29 @@ export function parseMallWeatherLifeIndexPage(payload: unknown): MallWeatherPage
   return { items, meta, pagination: page.pagination }
 }
 
+export function parseMallWeatherAlertPage(payload: unknown): MallWeatherPageResult<MallWeatherAlert> | null {
+  const page = mallWeatherPageData(payload)
+  if (!page) return null
+  const meta = strictMallWeatherMeta(page.data.meta)
+  if (!meta) return null
+  const items: MallWeatherAlert[] = []
+  for (const item of page.data.items as unknown[]) {
+    if (!isRecord(item) || typeof item.alertId !== 'string' || !item.alertId.trim() ||
+      typeof item.status !== 'string' || !item.status.trim() || typeof item.title !== 'string' || !item.title.trim() ||
+      typeof item.qualityStatus !== 'string' || !item.qualityStatus.trim() || !hasOnlyOptionalFiniteNumbers(item, [
+        'latitude', 'longitude',
+      ]) || !hasOnlyOptionalStrings(item, [
+        'description', 'code', 'alertTypeCode', 'alertLevelCode', 'alertTypeName', 'alertLevelName',
+        'publishedAtLocal', 'source', 'province', 'city', 'county', 'location', 'regionId', 'adcode',
+        'firstSeenAtLocal', 'lastSeenAtLocal', 'endedAtLocal',
+      ])) return null
+    const warnings = strictWarningValues(item.qualityWarnings)
+    if (!warnings) return null
+    items.push({ ...mallWeatherAlert(item), qualityWarnings: warnings })
+  }
+  return { items, meta, pagination: page.pagination }
+}
+
 export function parseMallWeatherRefreshResult(payload: unknown): MallWeatherRefreshResult | null {
   const data = envelopeData(payload)
   if (!data || !Number.isSafeInteger(data.jobId) || Number(data.jobId) <= 0 || !Number.isSafeInteger(data.mallId) || Number(data.mallId) <= 0 ||
@@ -1575,7 +1598,7 @@ export function mallWeatherOverviewPath(mallID: number, timeZone = '') {
 
 export function mallWeatherSeriesPath(mallID: number, series: MallWeatherSeries, start: Date, end: Date, cursor = '', timeZone = 'Asia/Shanghai', asOf?: Date) {
   if (!Number.isSafeInteger(mallID) || mallID <= 0) throw new Error('invalid mall id')
-  if (!['minutely', 'hourly', 'daily', 'life-indices'].includes(series)) throw new Error('invalid weather series')
+  if (!['minutely', 'hourly', 'daily', 'alerts', 'life-indices'].includes(series)) throw new Error('invalid weather series')
   if (!Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime()) || start >= end || end.getTime() - start.getTime() > 31 * 24 * 60 * 60 * 1000) {
     throw new Error('invalid weather range')
   }
@@ -1709,11 +1732,34 @@ export function loadMallWeatherForecastDatasets(
   }
 }
 
+export function loadAllMallWeatherAlerts(
+  request: MallWeatherPageRequester,
+  mallID: number,
+  timeZone: string,
+  requestedAt = new Date(),
+) {
+  if (!Number.isFinite(requestedAt.getTime())) throw new Error('invalid weather alert query time')
+  const dayMilliseconds = 24 * 60 * 60 * 1_000
+  return loadAllMallWeatherPages(
+    request,
+    mallID,
+    'alerts',
+    {
+      start: new Date(requestedAt.getTime() - 30 * dayMilliseconds),
+      end: new Date(requestedAt.getTime() + dayMilliseconds),
+    },
+    timeZone,
+    requestedAt,
+    parseMallWeatherAlertPage,
+  )
+}
+
 function mallWeatherLogicalKey(series: MallWeatherSeries, value: unknown) {
   if (!isRecord(value)) return ''
   if (series === 'minutely') return typeof value.forecastMinuteUtc === 'string' ? value.forecastMinuteUtc : ''
   if (series === 'hourly') return typeof value.forecastTimeUtc === 'string' ? value.forecastTimeUtc : ''
   if (series === 'daily') return typeof value.forecastDateLocal === 'string' ? value.forecastDateLocal : ''
+  if (series === 'alerts') return typeof value.alertId === 'string' ? value.alertId : ''
   return typeof value.forecastDateLocal === 'string' && typeof value.sourceApi === 'string' && Number.isSafeInteger(value.indexType)
     ? `${value.forecastDateLocal}\u0000${value.sourceApi}\u0000${value.indexType}`
     : ''

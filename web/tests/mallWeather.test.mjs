@@ -6,6 +6,7 @@ import {
   clearMallWeatherPendingCreate,
   clearMallWeatherPendingSheetPush,
   loadAllMallWeatherPages,
+  loadAllMallWeatherAlerts,
   loadMallWeatherForecastDatasets,
   loadMallWeatherPendingCreate,
   loadMallWeatherPendingRefresh,
@@ -57,6 +58,7 @@ import {
   parseMallWeatherSheetPushOptions,
   parseMallWeatherSheetPushResult,
   parseMallWeatherDailyPage,
+  parseMallWeatherAlertPage,
   parseMallWeatherHourlyPage,
   parseMallWeatherLifeIndexPage,
   parseMallWeatherMinutelyPage,
@@ -443,6 +445,12 @@ test('builds bounded complete-series paths and parses paged forecast contracts',
   assert.equal(daily?.items[0].aqiAvgUsa, 51)
   const life = parseMallWeatherLifeIndexPage(pageEnvelope([{ sourceApi: 'v26_daily', forecastDateLocal: '2026-07-22', indexType: 1, indexCode: 'comfort', isUnknownType: false, ...completeWeatherTimes, qualityStatus: 'VALID', qualityWarnings: [] }]))
   assert.equal(life?.items[0].indexCode, 'comfort')
+  const alerts = parseMallWeatherAlertPage(pageEnvelope([{
+    alertId: 'alert-1', status: 'ACTIVE', title: '暴雨预警', source: '气象台',
+    latitude: 31.23, longitude: 121.47, qualityStatus: 'VALID', qualityWarnings: [],
+  }], 'alert-next'))
+  assert.equal(alerts?.items[0].title, '暴雨预警')
+  assert.equal(alerts?.pagination.nextCursor, 'alert-next')
   assert.equal(parseMallWeatherHourlyPage(pageEnvelope([{ ...hourlyItem(2), forecastTimeLocal: 'bad' }])), null)
   assert.equal(parseMallWeatherHourlyPage(pageEnvelope([{ ...hourlyItem(2), humidityPct: '74' }])), null)
   assert.equal(parseMallWeatherHourlyPage(pageEnvelope([{ ...hourlyItem(2), qualityWarnings: [{ code: 7, path: '' }] }])), null)
@@ -452,7 +460,37 @@ test('builds bounded complete-series paths and parses paged forecast contracts',
   assert.equal(parseMallWeatherDailyPage(pageEnvelope([{ forecastDateLocal: '2026-02-30', ...completeWeatherTimes, qualityStatus: 'VALID', qualityWarnings: [] }])), null)
   assert.equal(parseMallWeatherLifeIndexPage(pageEnvelope([{ sourceApi: 'v3_lifeindex', forecastDateLocal: '2026-07-22', indexType: 1, indexCode: 'comfort', isUnknownType: false, ...completeWeatherTimes, qualityStatus: 'VALID', qualityWarnings: [] }])), null)
   assert.equal(parseMallWeatherLifeIndexPage(pageEnvelope([{ sourceApi: 'v3_lifeindex', forecastDateLocal: '2026-07-22', indexType: 1.5, indexCode: 'bad', isUnknownType: false, ...completeWeatherTimes, qualityStatus: 'VALID', qualityWarnings: [] }])), null)
+  assert.equal(parseMallWeatherAlertPage(pageEnvelope([{ alertId: 'alert-2', status: 'ACTIVE', title: '预警', latitude: '31.23', qualityStatus: 'VALID', qualityWarnings: [] }])), null)
   assert.equal(parseMallWeatherLifeIndexPage(pageEnvelope([], '', { ...completeWeatherMeta, timeZone: '' })), null)
+})
+
+test('loads every active alert cursor page beyond the overview limit', async () => {
+  const requestedAt = new Date('2026-07-28T02:00:00.000Z')
+  const alert = (index) => ({
+    alertId: `alert-${index}`, status: 'ACTIVE', title: `预警 ${index}`,
+    qualityStatus: 'VALID', qualityWarnings: [],
+  })
+  const responses = [
+    pageEnvelope(Array.from({ length: 20 }, (_, index) => alert(index + 1)), 'alerts-page-2'),
+    pageEnvelope([alert(21)]),
+  ]
+  const paths = []
+  const result = await loadAllMallWeatherAlerts(async (path) => {
+    paths.push(path)
+    return { ok: true, status: 200, data: responses.shift() }
+  }, 7, 'Asia/Shanghai', requestedAt)
+
+  assert.equal(result.items.length, 21)
+  assert.equal(paths.length, 2)
+  const first = new URL(paths[0], 'https://example.test')
+  const second = new URL(paths[1], 'https://example.test')
+  assert.equal(first.pathname, '/v1/malls/7/weather/alerts')
+  assert.equal(first.searchParams.get('latest'), 'true')
+  assert.equal(first.searchParams.get('asOf'), requestedAt.toISOString())
+  assert.equal(new Date(first.searchParams.get('end')).getTime() - new Date(first.searchParams.get('start')).getTime(), 31 * 24 * 60 * 60 * 1_000)
+  assert.equal(second.searchParams.get('cursor'), 'alerts-page-2')
+  assert.equal(second.searchParams.get('start'), first.searchParams.get('start'))
+  assert.equal(second.searchParams.get('end'), first.searchParams.get('end'))
 })
 
 test('builds exact 120-minute, 360-hour, and 15-local-day forecast windows', () => {
