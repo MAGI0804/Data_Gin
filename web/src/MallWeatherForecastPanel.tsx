@@ -1,6 +1,7 @@
 import { type Dispatch, type ReactNode, type SetStateAction, useCallback, useEffect, useRef, useState } from 'react'
-import { RefreshCcw, Thermometer } from 'lucide-react'
+import { Download, RefreshCcw, Thermometer } from 'lucide-react'
 import { MallWeatherChart } from './MallWeatherChart'
+import { createMallWeatherDatasetCsv, downloadMallWeatherBytes, mallWeatherCsvFileName } from './mallWeatherCsv'
 import {
   mallWeatherDailyForecastDays,
   mallWeatherFreshnessLabel,
@@ -28,16 +29,53 @@ type QueryState<T> = {
   meta: MallWeatherMeta | null
 }
 
-const emptyState = <T,>(): QueryState<T> => ({ loading: false, error: '', items: [], meta: null })
+export type MallWeatherForecastDataSnapshot = {
+  mallID: number
+  minutely: MallWeatherMinutely[]
+  hourly: MallWeatherHourly[]
+  daily: MallWeatherDaily[]
+  lifeIndices: MallWeatherLifeIndex[]
+  loading: boolean
+  ready: boolean
+  error: string
+}
 
-export function MallWeatherForecastPanel({ mallID, timeZone, client }: { mallID: number; timeZone: string; client: QueryClient }) {
+type MallWeatherForecastPanelProps = {
+  mallID: number
+  mallCode: string
+  mallName: string
+  timeZone: string
+  client: QueryClient
+  onDatasetsChange: (snapshot: MallWeatherForecastDataSnapshot) => void
+}
+
+type ForecastDatasetKind = 'minutely' | 'hourly' | 'daily' | 'life_indices'
+
+const emptyState = <T,>(): QueryState<T> => ({ loading: true, error: '', items: [], meta: null })
+
+export function MallWeatherForecastPanel({
+  mallID,
+  mallCode,
+  mallName,
+  timeZone,
+  client,
+  onDatasetsChange,
+}: MallWeatherForecastPanelProps) {
   const [minutely, setMinutely] = useState<QueryState<MallWeatherMinutely>>(emptyState)
   const [hourly, setHourly] = useState<QueryState<MallWeatherHourly>>(emptyState)
   const [daily, setDaily] = useState<QueryState<MallWeatherDaily>>(emptyState)
   const [life, setLife] = useState<QueryState<MallWeatherLifeIndex>>(emptyState)
+  const [datasetMallID, setDatasetMallID] = useState(mallID)
+  const [csvError, setCsvError] = useState('')
   const requestSequence = useRef(0)
   const disposed = useRef(false)
   const activeControllers = useRef(new Set<AbortController>())
+  const datasetMallIDRef = useRef(mallID)
+  const onDatasetsChangeRef = useRef(onDatasetsChange)
+
+  useEffect(() => {
+    onDatasetsChangeRef.current = onDatasetsChange
+  }, [onDatasetsChange])
 
   const abortActiveRequests = useCallback(() => {
     for (const controller of activeControllers.current) controller.abort()
@@ -47,10 +85,14 @@ export function MallWeatherForecastPanel({ mallID, timeZone, client }: { mallID:
   const load = useCallback(() => {
     abortActiveRequests()
     const sequence = ++requestSequence.current
-    setMinutely((state) => ({ ...state, loading: true, error: '' }))
-    setHourly((state) => ({ ...state, loading: true, error: '' }))
-    setDaily((state) => ({ ...state, loading: true, error: '' }))
-    setLife((state) => ({ ...state, loading: true, error: '' }))
+    const mallChanged = datasetMallIDRef.current !== mallID
+    datasetMallIDRef.current = mallID
+    setDatasetMallID(mallID)
+    setCsvError('')
+    setMinutely((state) => beginDatasetLoad(state, mallChanged))
+    setHourly((state) => beginDatasetLoad(state, mallChanged))
+    setDaily((state) => beginDatasetLoad(state, mallChanged))
+    setLife((state) => beginDatasetLoad(state, mallChanged))
     async function request(path: string) {
       const controller = new AbortController()
       activeControllers.current.add(controller)
@@ -97,7 +139,44 @@ export function MallWeatherForecastPanel({ mallID, timeZone, client }: { mallID:
     }
   }, [abortActiveRequests, load])
 
-  const loading = minutely.loading || hourly.loading || daily.loading || life.loading
+  const currentMallData = datasetMallID === mallID
+  const loading = !currentMallData || minutely.loading || hourly.loading || daily.loading || life.loading
+  const datasetError = currentMallData
+    ? [
+        minutely.error ? `分钟预报：${minutely.error}` : '',
+        hourly.error ? `小时预报：${hourly.error}` : '',
+        daily.error ? `逐日预报：${daily.error}` : '',
+        life.error ? `生活指数：${life.error}` : '',
+      ].filter(Boolean).join('；')
+    : ''
+
+  useEffect(() => {
+    const snapshot: MallWeatherForecastDataSnapshot = {
+      mallID,
+      minutely: currentMallData ? minutely.items : [],
+      hourly: currentMallData ? hourly.items : [],
+      daily: currentMallData ? daily.items : [],
+      lifeIndices: currentMallData ? life.items : [],
+      loading,
+      ready: currentMallData && !loading && !datasetError,
+      error: datasetError,
+    }
+    onDatasetsChangeRef.current(snapshot)
+  }, [currentMallData, daily.items, datasetError, hourly.items, life.items, loading, mallID, minutely.items])
+
+  const downloadCsv = useCallback((kind: ForecastDatasetKind, createBytes: () => Uint8Array) => {
+    setCsvError('')
+    try {
+      const bytes = createBytes()
+      downloadMallWeatherBytes(
+        bytes,
+        mallWeatherCsvFileName(kind, mallCode),
+      )
+    } catch {
+      setCsvError('CSV 文件生成失败，请重新查询数据后重试。')
+    }
+  }, [mallCode])
+
   return (
     <section className="workbench-panel mall-weather-forecast-panel" aria-busy={loading}>
       <div className="mall-weather-section-title">
@@ -109,7 +188,16 @@ export function MallWeatherForecastPanel({ mallID, timeZone, client }: { mallID:
         </div>
         <button type="button" onClick={load} disabled={loading}><RefreshCcw aria-hidden="true" />{loading ? '加载中' : '重新查询'}</button>
       </div>
-      <ForecastDataset id="mall-weather-minutely" title={`中心点未来 ${mallWeatherMinutelyForecastMinutes} 分钟降水（约 1 km 分辨率）`} state={minutely} empty={`未来 ${mallWeatherMinutelyForecastMinutes} 分钟窗口没有分钟级降水预报`} defaultOpen>
+      {csvError && <p className="mall-weather-action-message error" role="alert">{csvError}</p>}
+      <ForecastDataset
+        id="mall-weather-minutely"
+        title={`中心点未来 ${mallWeatherMinutelyForecastMinutes} 分钟降水（约 1 km 分辨率）`}
+        state={minutely}
+        empty={`未来 ${mallWeatherMinutelyForecastMinutes} 分钟窗口没有分钟级降水预报`}
+        onDownload={() => downloadCsv('minutely', () => createMallWeatherDatasetCsv('minutely', minutely.items, { mallCode, mallName }))}
+        downloadDisabled={!currentMallData || minutely.loading || Boolean(minutely.error)}
+        defaultOpen
+      >
         <table className="data-table"><caption className="mall-weather-table-caption">商场中心点未来 {mallWeatherMinutelyForecastMinutes} 分钟约 1 km 分辨率降水明细</caption><thead><tr><th scope="col">时间</th><th scope="col">分钟偏移</th><th scope="col">降水强度</th><th scope="col">概率</th><th scope="col">描述 / 关键点</th><th scope="col">数据源</th><th scope="col">质量</th></tr></thead><tbody>
           {minutely.items.map((item, index) => <tr key={`${item.forecastMinuteUtc}-${index}`}><td>{item.forecastMinuteLocal}</td><td>+{item.minuteOffset} 分钟</td><td>{mallWeatherMetric(item.precipitationMmH, ' mm/h')}</td><td>{mallWeatherMetric(item.probabilityPct, '%', 0)}</td><td>{[item.description, item.forecastKeypoint].filter(Boolean).join(' / ') || '—'}</td><td>{item.datasource || '—'}</td><td>{qualityLabel(item.qualityStatus, item.qualityWarnings.length)}</td></tr>)}
         </tbody></table>
@@ -133,17 +221,33 @@ export function MallWeatherForecastPanel({ mallID, timeZone, client }: { mallID:
         notice={!hourly.loading && !hourly.error && hourly.items.length > 0 && hourly.items.length < mallWeatherHourlyForecastHours
           ? `当前服务端可用 ${hourly.items.length} / ${mallWeatherHourlyForecastHours} 条连续逐小时数据，已展示全部可用内容。`
           : ''}
+        onDownload={() => downloadCsv('hourly', () => createMallWeatherDatasetCsv('hourly', hourly.items, { mallCode, mallName }))}
+        downloadDisabled={!currentMallData || hourly.loading || Boolean(hourly.error)}
       >
         <table className="data-table"><caption className="mall-weather-table-caption">当前可用 {hourly.items.length} 条未来逐小时天气明细，目标最多 {mallWeatherHourlyForecastHours} 小时（常规变量为 9～13 km 预报网格）</caption><thead><tr><th scope="col">时间</th><th scope="col">天气</th><th scope="col">温度 / 体感</th><th scope="col">湿度 / 云量</th><th scope="col">气压 / 辐射</th><th scope="col">降水 / 概率</th><th scope="col">风速 / 风向</th><th scope="col">能见度</th><th scope="col">PM2.5 / 中美 AQI</th><th scope="col">描述</th><th scope="col">质量</th></tr></thead><tbody>
           {hourly.items.map((item, index) => <tr key={`${item.forecastTimeLocal}-${index}`}><td>{item.forecastTimeLocal}</td><td>{mallWeatherSkyconLabel(item.skycon)}</td><td>{mallWeatherMetric(item.temperatureC, '°C')} / {mallWeatherMetric(item.apparentTemperatureC, '°C')}</td><td>{mallWeatherMetric(item.humidityPct, '%', 0)} / {ratioPercent(item.cloudrateRatio)}</td><td>{mallWeatherMetric(item.pressurePa, ' Pa', 0)} / {mallWeatherMetric(item.dswrfWM2, ' W/m²')}</td><td>{mallWeatherMetric(item.precipitationMmH, ' mm/h')} / {mallWeatherMetric(item.precipitationProbabilityPct, '%', 0)}</td><td>{mallWeatherMetric(item.windSpeedKph, ' km/h')} / {mallWeatherMetric(item.windDirectionDeg, '°', 0)}</td><td>{mallWeatherMetric(item.visibilityKm, ' km')}</td><td>{mallWeatherMetric(item.pm25UgM3, ' μg/m³')} / {mallWeatherMetric(item.aqiChn, '', 0)} / {mallWeatherMetric(item.aqiUsa, '', 0)}</td><td>{item.hourlyDescription || item.forecastKeypoint || '—'}</td><td>{qualityLabel(item.qualityStatus, item.qualityWarnings.length)}</td></tr>)}
         </tbody></table>
       </ForecastDataset>
-      <ForecastDataset id="mall-weather-daily" title={`${mallWeatherDailyForecastDays} 日逐日预报`} state={daily} empty={`当前 ${mallWeatherDailyForecastDays} 天窗口没有逐日预报`}>
+      <ForecastDataset
+        id="mall-weather-daily"
+        title={`${mallWeatherDailyForecastDays} 日逐日预报`}
+        state={daily}
+        empty={`当前 ${mallWeatherDailyForecastDays} 天窗口没有逐日预报`}
+        onDownload={() => downloadCsv('daily', () => createMallWeatherDatasetCsv('daily', daily.items, { mallCode, mallName }))}
+        downloadDisabled={!currentMallData || daily.loading || Boolean(daily.error)}
+      >
         <table className="data-table"><caption className="mall-weather-table-caption">未来 {mallWeatherDailyForecastDays} 个本地日逐日全部综合天气字段（9～13 km 预报网格）</caption><thead><tr><th scope="col">日期</th><th scope="col">全天 / 白天 / 夜间天气</th><th scope="col">全天温度 最低 / 最高 / 平均</th><th scope="col">白天温度 最低 / 最高 / 平均</th><th scope="col">夜间温度 最低 / 最高 / 平均</th><th scope="col">全天降水 最低 / 最高 / 平均 / 概率</th><th scope="col">白天降水 最低 / 最高 / 平均 / 概率</th><th scope="col">夜间降水 最低 / 最高 / 平均 / 概率</th><th scope="col">全天风 最低 / 最高 / 平均</th><th scope="col">白天风 最低 / 最高 / 平均</th><th scope="col">夜间风 最低 / 最高 / 平均</th><th scope="col">湿度 最低 / 最高 / 平均</th><th scope="col">云量 最低 / 最高 / 平均</th><th scope="col">气压 最低 / 最高 / 平均</th><th scope="col">能见度 最低 / 最高 / 平均</th><th scope="col">辐射 最低 / 最高 / 平均</th><th scope="col">PM2.5 最低 / 最高 / 平均</th><th scope="col">中国 AQI 最低 / 最高 / 平均</th><th scope="col">美国 AQI 最低 / 最高 / 平均</th><th scope="col">日出 / 日落</th><th scope="col">质量</th></tr></thead><tbody>
           {daily.items.map((item, index) => <tr key={`${item.forecastDateLocal}-${index}`}><td>{item.forecastDateLocal}</td><td>{mallWeatherSkyconLabel(item.skycon)} / {mallWeatherSkyconLabel(item.daySkycon)} / {mallWeatherSkyconLabel(item.nightSkycon)}</td><td>{rangeMetric(item.temperatureMinC, item.temperatureMaxC, item.temperatureAvgC, '°C')}</td><td>{rangeMetric(item.dayTemperatureMinC, item.dayTemperatureMaxC, item.dayTemperatureAvgC, '°C')}</td><td>{rangeMetric(item.nightTemperatureMinC, item.nightTemperatureMaxC, item.nightTemperatureAvgC, '°C')}</td><td>{precipitationMetric(item.precipitationMinMmH, item.precipitationMaxMmH, item.precipitationAvgMmH, item.precipitationProbabilityPct)}</td><td>{precipitationMetric(item.dayPrecipitationMinMmH, item.dayPrecipitationMaxMmH, item.dayPrecipitationAvgMmH, item.dayPrecipitationProbabilityPct)}</td><td>{precipitationMetric(item.nightPrecipitationMinMmH, item.nightPrecipitationMaxMmH, item.nightPrecipitationAvgMmH, item.nightPrecipitationProbabilityPct)}</td><td>{windRangeMetric(item.windMinSpeedKph, item.windMinDirectionDeg, item.windMaxSpeedKph, item.windMaxDirectionDeg, item.windAvgSpeedKph, item.windAvgDirectionDeg)}</td><td>{windRangeMetric(item.dayWindMinSpeedKph, item.dayWindMinDirectionDeg, item.dayWindMaxSpeedKph, item.dayWindMaxDirectionDeg, item.dayWindAvgSpeedKph, item.dayWindAvgDirectionDeg)}</td><td>{windRangeMetric(item.nightWindMinSpeedKph, item.nightWindMinDirectionDeg, item.nightWindMaxSpeedKph, item.nightWindMaxDirectionDeg, item.nightWindAvgSpeedKph, item.nightWindAvgDirectionDeg)}</td><td>{rangeMetric(item.humidityMinPct, item.humidityMaxPct, item.humidityAvgPct, '%', 0)}</td><td>{ratioRangeMetric(item.cloudrateMinRatio, item.cloudrateMaxRatio, item.cloudrateAvgRatio)}</td><td>{rangeMetric(item.pressureMinPa, item.pressureMaxPa, item.pressureAvgPa, ' Pa', 0)}</td><td>{rangeMetric(item.visibilityMinKm, item.visibilityMaxKm, item.visibilityAvgKm, ' km')}</td><td>{rangeMetric(item.dswrfMinWM2, item.dswrfMaxWM2, item.dswrfAvgWM2, ' W/m²')}</td><td>{rangeMetric(item.pm25MinUgM3, item.pm25MaxUgM3, item.pm25AvgUgM3, ' μg/m³')}</td><td>{rangeMetric(item.aqiMinChn, item.aqiMaxChn, item.aqiAvgChn, '', 0)}</td><td>{rangeMetric(item.aqiMinUsa, item.aqiMaxUsa, item.aqiAvgUsa, '', 0)}</td><td>{item.sunriseLocalTime || '—'} / {item.sunsetLocalTime || '—'}</td><td>{qualityLabel(item.qualityStatus, item.qualityWarnings.length)}</td></tr>)}
         </tbody></table>
       </ForecastDataset>
-      <ForecastDataset id="mall-weather-life-indices" title={`${mallWeatherDailyForecastDays} 日生活指数`} state={life} empty={`当前 ${mallWeatherDailyForecastDays} 天窗口没有生活指数`}>
+      <ForecastDataset
+        id="mall-weather-life-indices"
+        title={`${mallWeatherDailyForecastDays} 日生活指数`}
+        state={life}
+        empty={`当前 ${mallWeatherDailyForecastDays} 天窗口没有生活指数`}
+        onDownload={() => downloadCsv('life_indices', () => createMallWeatherDatasetCsv('life_indices', life.items, { mallCode, mallName }))}
+        downloadDisabled={!currentMallData || life.loading || Boolean(life.error)}
+      >
         <table className="data-table mall-weather-life-table"><caption className="mall-weather-table-caption">未来 {mallWeatherDailyForecastDays} 个本地日全部生活指数明细</caption><thead><tr><th scope="col">日期</th><th scope="col">指数</th><th scope="col">等级</th><th scope="col">建议</th><th scope="col">来源</th><th scope="col">质量</th></tr></thead><tbody>
           {life.items.map((item, index) => <tr key={`${item.forecastDateLocal}-${item.sourceApi}-${item.indexType}-${index}`}><td>{item.forecastDateLocal}</td><td>{item.indexName || item.indexCode}{item.isUnknownType ? '（未知类型）' : ''}</td><td>{item.level ?? '—'}</td><td>{item.shortDescription || item.detail || '—'}</td><td>{item.sourceApi}</td><td>{qualityLabel(item.qualityStatus, item.qualityWarnings.length)}</td></tr>)}
         </tbody></table>
@@ -152,18 +256,30 @@ export function MallWeatherForecastPanel({ mallID, timeZone, client }: { mallID:
   )
 }
 
-function ForecastDataset<T>({ id, title, state, empty, notice = '', defaultOpen = false, children }: {
+function ForecastDataset<T>({ id, title, state, empty, notice = '', defaultOpen = false, onDownload, downloadDisabled = false, children }: {
   id?: string
   title: string
   state: QueryState<T>
   empty: string
   notice?: string
   defaultOpen?: boolean
+  onDownload: () => void
+  downloadDisabled?: boolean
   children: ReactNode
 }) {
   return (
     <details id={id} className="mall-weather-forecast-dataset" tabIndex={-1} open={defaultOpen}>
       <summary>{title}（{state.items.length} 条）{state.meta ? ` · ${mallWeatherFreshnessLabel(state.meta.freshnessStatus)}` : ''}</summary>
+      <div className="mall-weather-form-actions">
+        <button
+          type="button"
+          aria-label={`下载${title} CSV`}
+          disabled={downloadDisabled}
+          onClick={onDownload}
+        >
+          <Download aria-hidden="true" />下载 CSV
+        </button>
+      </div>
       {state.loading && state.items.length === 0 && <p role="status">正在加载全部分页…</p>}
       {state.error && <p className="mall-weather-action-message error" role="alert">{state.error}</p>}
       {!state.loading && !state.error && state.items.length === 0 && <p role="status">{empty}</p>}
@@ -175,6 +291,15 @@ function ForecastDataset<T>({ id, title, state, empty, notice = '', defaultOpen 
       )}
     </details>
   )
+}
+
+function beginDatasetLoad<T>(state: QueryState<T>, clearData: boolean): QueryState<T> {
+  return {
+    loading: true,
+    error: '',
+    items: clearData ? [] : state.items,
+    meta: clearData ? null : state.meta,
+  }
 }
 
 async function settleDataset<T>(
