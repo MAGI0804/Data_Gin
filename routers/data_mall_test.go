@@ -15,6 +15,7 @@ func TestAPIDataRegistersMallCRUDRoutes(t *testing.T) {
 	registerMallRoutes(router.Group("/api"), &data_ctrl.MallController{})
 	registerMallWeatherRoutes(router.Group("/api"), &data_ctrl.MallWeatherController{})
 	registerOpenWeatherRoutes(router.Group("/api"), &data_ctrl.MallWeatherController{})
+	registerOpenBojunOrderRoutes(router.Group("/api"), &data_ctrl.OpenBojunOrderController{})
 	registerMallWeatherRefreshRoutes(router.Group("/api"), &data_ctrl.MallWeatherRefreshController{})
 	registerMallWeatherExportProfileRoutes(router.Group("/api"), &data_ctrl.MallWeatherExportProfileController{})
 	registerMallWeatherExportJobRoutes(router.Group("/api"), &data_ctrl.MallWeatherExportJobController{})
@@ -47,6 +48,7 @@ func TestAPIDataRegistersMallCRUDRoutes(t *testing.T) {
 		http.MethodPost + " /api/open/weather/malls/:id/daily",
 		http.MethodPost + " /api/open/weather/malls/:id/alerts",
 		http.MethodPost + " /api/open/weather/malls/:id/life-indices",
+		http.MethodPost + " /api/open/bojun/orders/query",
 		http.MethodPost + " /api/v1/malls/:id/weather-refresh",
 		http.MethodPost + " /api/v1/weather-export-profiles",
 		http.MethodGet + " /api/v1/weather-export-profiles",
@@ -70,6 +72,7 @@ func TestAPIDataRegistersMallCRUDRoutes(t *testing.T) {
 		http.MethodPost + " /api/open/weather/malls/:id/fetch-runs",
 		http.MethodPost + " /api/open/weather/malls/:id/download",
 		http.MethodPost + " /api/open/weather/malls/:id/refresh",
+		http.MethodGet + " /api/open/bojun/orders/query",
 	} {
 		if _, ok := routes[forbidden]; ok {
 			t.Errorf("route %q must not be registered", forbidden)

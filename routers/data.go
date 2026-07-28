@@ -12,6 +12,7 @@ func apiData(api *gin.RouterGroup) {
 	weatherCtrl := data_ctrl.NewMallWeatherController()
 	registerMallWeatherRoutes(api, weatherCtrl)
 	registerOpenWeatherRoutes(api, weatherCtrl)
+	registerOpenBojunOrderRoutes(api, data_ctrl.NewOpenBojunOrderController())
 	registerMallWeatherRefreshRoutes(api, data_ctrl.NewMallWeatherRefreshController())
 	registerMallWeatherExportProfileRoutes(api, data_ctrl.NewMallWeatherExportProfileController())
 	registerMallWeatherExportJobRoutes(api, data_ctrl.NewMallWeatherExportJobController())
@@ -202,6 +203,24 @@ func apiData(api *gin.RouterGroup) {
 		dataGroup.GET("/processed", dataCtrl.QueryController.GetProcessedData)
 		dataGroup.GET("/statistics", dataCtrl.QueryController.GetStatistics)
 	}
+}
+
+const (
+	openBojunPreAuthIPRateLimit = "300-M"
+	openBojunUserRouteRateLimit = "30-M"
+)
+
+func registerOpenBojunOrderRoutes(
+	api *gin.RouterGroup,
+	controller *data_ctrl.OpenBojunOrderController,
+) {
+	bojunGroup := api.Group("/open/bojun")
+	bojunGroup.Use(
+		middleware.LimitOpenAPIIP("bojun", openBojunPreAuthIPRateLimit),
+		middleware.AuthOpenJWT(),
+		middleware.LimitOpenAPIUserRoute("bojun", openBojunUserRouteRateLimit),
+	)
+	bojunGroup.POST("/orders/query", controller.Query)
 }
 
 const (
