@@ -206,6 +206,7 @@ button:focus-visible {
 .ops-shell {
   display: grid;
   grid-template-columns: 272px minmax(0, 1fr);
+  grid-template-rows: minmax(0, 1fr);
   height: 100vh;
   height: 100dvh;
   overflow: hidden;
@@ -221,6 +222,12 @@ button:focus-visible {
   border-right: 1px solid #111111;
   align-content: start;
   overflow-y: auto;
+}
+
+.ops-sidebar,
+.ops-workspace {
+  min-height: 0;
+  min-block-size: 0;
 }
 
 .mobile-nav-toggle {
@@ -1240,6 +1247,7 @@ summary {
   }
 
   .ops-shell {
+    grid-template-rows: auto;
     height: auto;
     overflow: visible;
   }
