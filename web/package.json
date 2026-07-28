@@ -7,13 +7,14 @@
     "dev": "vite",
     "build": "tsc -b && vite build",
     "lint": "eslint .",
-    "test": "npm run test:api && npm run test:auth && npm run test:excel && npm run test:weather && npm run test:weather-navigation && npm run test:weather-export",
+    "test": "npm run test:api && npm run test:auth && npm run test:excel && npm run test:weather && npm run test:weather-navigation && npm run test:weather-export && npm run test:weather-csv",
     "test:auth": "tsc src/authStorage.ts --target ES2020 --module ES2020 --lib ES2020,DOM --outDir .test-dist --skipLibCheck && node --test tests/authStorage.test.mjs",
     "test:api": "tsc src/apiResponse.ts src/apiURL.ts --target ES2020 --module ES2020 --lib ES2020,DOM --outDir .test-dist --skipLibCheck && node --test tests/apiResponse.test.mjs",
     "test:excel": "tsc src/excelMatchConfig.ts --target ES2020 --module ES2020 --lib ES2020,DOM --outDir .test-dist --skipLibCheck && node --test tests/excelMatchConfig.test.mjs",
     "test:weather": "tsc src/mallWeather.ts --target ES2020 --module ES2020 --lib ES2020,DOM --outDir .test-dist --skipLibCheck && node --test tests/mallWeather.test.mjs",
     "test:weather-navigation": "tsc src/mallWeatherNavigation.ts --target ES2020 --module ES2020 --lib ES2020,DOM --outDir .test-dist --skipLibCheck && node --test tests/mallWeatherNavigation.test.mjs",
     "test:weather-export": "tsc src/mallWeatherExport.ts --target ES2020 --module ES2020 --lib ES2020,DOM --outDir .test-dist --skipLibCheck && node --test tests/mallWeatherExport.test.mjs",
+    "test:weather-csv": "tsc src/mallWeather.ts src/mallWeatherCsv.ts --target ES2020 --module ES2020 --lib ES2020,DOM --outDir .test-dist --skipLibCheck && node --test tests/mallWeatherCsv.test.mjs",
     "preview": "vite preview"
   },
   "dependencies": {
