@@ -59,6 +59,10 @@ func TestLimitOpenAPIUserRouteReturnsReal429(t *testing.T) {
 	if recorder.Header().Get("Retry-After") == "" {
 		t.Fatalf("headers=%v", recorder.Header())
 	}
+	if !strings.Contains(recorder.Body.String(), "开放接口请求过于频繁") ||
+		strings.Contains(recorder.Body.String(), "天气") {
+		t.Fatalf("body=%s", recorder.Body.String())
+	}
 	assertOpenRateLimitCode(t, recorder, errcode.TooManyRequests.Code())
 }
 

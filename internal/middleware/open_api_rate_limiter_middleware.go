@@ -109,7 +109,7 @@ func checkOpenAPIRate(c *gin.Context, key, limit string, checker openAPIRateChec
 		retryAfter = 1
 	}
 	c.Header("Retry-After", strconv.FormatInt(retryAfter, 10))
-	responses.New(c).ToSafeErrorResponse(errcode.TooManyRequests, "开放天气接口请求过于频繁")
+	responses.New(c).ToSafeErrorResponse(errcode.TooManyRequests, "开放接口请求过于频繁")
 	return false
 }
 
