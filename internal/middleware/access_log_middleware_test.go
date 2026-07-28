@@ -2,6 +2,7 @@ package middleware
 
 import (
 	"bytes"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -10,6 +11,23 @@ import (
 
 	"github.com/gin-gonic/gin"
 )
+
+func TestAccessLogSanitizesPrivateErrors(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	context, _ := gin.CreateTestContext(httptest.NewRecorder())
+	privateError := errors.New("storage password=database-secret https://example.test/file?token=query-secret")
+	_ = context.Error(privateError).SetType(gin.ErrorTypePrivate)
+
+	got := sanitizedAccessLogPrivateErrors(context)
+	for _, forbidden := range []string{"database-secret", "query-secret"} {
+		if strings.Contains(got, forbidden) {
+			t.Fatalf("sanitized private errors leaked %q: %s", forbidden, got)
+		}
+	}
+	if !strings.Contains(got, "storage password=***") || !strings.Contains(got, "token=***") {
+		t.Fatalf("sanitized private errors lost diagnostic context: %s", got)
+	}
+}
 
 func TestAccessLogWriterDoesNotBufferExcelResponses(t *testing.T) {
 	gin.SetMode(gin.TestMode)

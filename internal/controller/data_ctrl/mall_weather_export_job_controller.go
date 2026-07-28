@@ -174,6 +174,9 @@ func disableMallWeatherExportCaching(c *gin.Context) {
 
 func writeMallWeatherExportJobError(c *gin.Context, err error) {
 	code, message := classifyMallWeatherExportJobError(err)
+	if err != nil {
+		_ = c.Error(err).SetType(gin.ErrorTypePrivate)
+	}
 	responses.New(c).ToSafeErrorResponse(code, message)
 }
 

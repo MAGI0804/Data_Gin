@@ -56,9 +56,12 @@ func TestRedactHeadersReturnsSanitizedClone(t *testing.T) {
 }
 
 func TestRedactTextSanitizesQueryHeadersAndExactValues(t *testing.T) {
-	message := "Get \"https://example.com/v2/path-secret?key=query-secret\"\nAuthorization: Bearer access-token\nx-cy-signature=signature-value"
+	message := "Get \"https://example.com/v2/path-secret?key=query-secret\"\nAuthorization: Bearer access-token\nx-cy-signature=signature-value database password=database-secret DB_PASSWORD=db-secret CAIYUN_APP_SECRET=caiyun-secret"
 	redacted := RedactText(message, "path-secret")
-	for _, forbidden := range []string{"path-secret", "query-secret", "access-token", "signature-value"} {
+	for _, forbidden := range []string{
+		"path-secret", "query-secret", "access-token", "signature-value",
+		"database-secret", "db-secret", "caiyun-secret",
+	} {
 		if strings.Contains(redacted, forbidden) {
 			t.Fatalf("RedactText() contains %q: %s", forbidden, redacted)
 		}

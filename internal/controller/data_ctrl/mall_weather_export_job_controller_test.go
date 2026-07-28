@@ -319,6 +319,39 @@ func TestMallWeatherExportJobControllerMapsSafeErrors(t *testing.T) {
 	}
 }
 
+func TestMallWeatherExportJobControllerRecordsPrivateErrorWithoutLeakingResponse(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	ginContext, _ := gin.CreateTestContext(recorder)
+	ginContext.Request = httptest.NewRequest(
+		http.MethodGet,
+		"/api/v1/weather-exports/"+mallWeatherExportJobTestUUID,
+		nil,
+	)
+	ginContext.Params = gin.Params{{Key: "job_id", Value: mallWeatherExportJobTestUUID}}
+	ginContext.Set(constant.CurrentUserID, "17")
+	technicalError := errors.New("database password=secret")
+	controller := NewMallWeatherExportJobControllerWithService(
+		fakeMallWeatherExportJobControllerService{
+			get: func(context.Context, uint, string) (*data_svc.MallWeatherExportJobDTO, error) {
+				return nil, technicalError
+			},
+		},
+	)
+
+	controller.Get(ginContext)
+
+	privateErrors := ginContext.Errors.ByType(gin.ErrorTypePrivate)
+	if len(privateErrors) != 1 || !errors.Is(privateErrors[0].Err, technicalError) {
+		t.Fatalf("private errors=%v, want original technical error", privateErrors)
+	}
+	if recorder.Code != http.StatusInternalServerError ||
+		strings.Contains(recorder.Body.String(), "password") ||
+		strings.Contains(recorder.Body.String(), "secret") {
+		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
+	}
+}
+
 func performMallWeatherExportJobRequest(
 	t *testing.T,
 	service MallWeatherExportJobServiceAPI,

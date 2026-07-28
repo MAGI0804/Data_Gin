@@ -25,9 +25,10 @@ var (
 		"tenant-access-token": {}, "x-access-token": {}, "x-api-key": {}, "x-cy-app-key": {}, "x-cy-nonce": {},
 		"x-cy-signature": {}, "x-cy-timestamp": {},
 	}
-	sensitiveQueryPattern  = regexp.MustCompile(`(?i)([?&](?:access_key|access_key_id|access_key_secret|access_token|api_key|apikey|app_id|app_key|app_secret|client_secret|key|password|secret|signature|tenant_access_token|token|x-cy-signature)=)[^&#\s\"]*`)
-	authorizationPattern   = regexp.MustCompile(`(?i)(authorization|proxy-authorization)\s*[:=]\s*[^\r\n,;]+`)
-	sensitiveHeaderPattern = regexp.MustCompile(`(?i)(tenant-access-token|x-access-token|x-api-key|x-cy-app-key|x-cy-nonce|x-cy-signature|x-cy-timestamp)\s*[:=]\s*[^\s,;]+`)
+	sensitiveQueryPattern      = regexp.MustCompile(`(?i)([?&](?:access_key|access_key_id|access_key_secret|access_token|api_key|apikey|app_id|app_key|app_secret|client_secret|key|password|secret|signature|tenant_access_token|token|x-cy-signature)=)[^&#\s\"]*`)
+	sensitiveAssignmentPattern = regexp.MustCompile(`(?i)(^|[\s,;])((?:[a-z0-9]+[_-])*(?:password|passwd|secret|token|signature|key(?:[_-](?:id|secret))?)=)[^&#\s\",;]*`)
+	authorizationPattern       = regexp.MustCompile(`(?i)(authorization|proxy-authorization)\s*[:=]\s*[^\r\n,;]+`)
+	sensitiveHeaderPattern     = regexp.MustCompile(`(?i)(tenant-access-token|x-access-token|x-api-key|x-cy-app-key|x-cy-nonce|x-cy-signature|x-cy-timestamp)\s*[:=]\s*[^\s,;]+`)
 )
 
 func RedactURL(rawURL string, sensitiveValues ...string) string {
@@ -67,6 +68,7 @@ func RedactHeaders(headers http.Header) http.Header {
 
 func RedactText(message string, sensitiveValues ...string) string {
 	redacted := sensitiveQueryPattern.ReplaceAllString(message, "${1}"+redactedValue)
+	redacted = sensitiveAssignmentPattern.ReplaceAllString(redacted, "${1}${2}"+redactedValue)
 	redacted = authorizationPattern.ReplaceAllString(redacted, "${1}: "+redactedValue)
 	redacted = sensitiveHeaderPattern.ReplaceAllString(redacted, "${1}: "+redactedValue)
 	return redactExactValues(redacted, sensitiveValues...)

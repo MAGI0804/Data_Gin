@@ -17,6 +17,7 @@ import (
 	"gin-biz-web-api/pkg/config"
 	"gin-biz-web-api/pkg/helper/strx"
 	"gin-biz-web-api/pkg/logger"
+	"gin-biz-web-api/pkg/providerhttp"
 )
 
 const maxAccessLogResponseBodyBytes = 64 << 10
@@ -122,7 +123,7 @@ func AccessLog() gin.HandlerFunc {
 			zap.String("remote_addr", c.Request.RemoteAddr),
 			zap.String("user_agent", c.Request.UserAgent()),                 // 用户请求头
 			zap.Any("headers", sanitizedAccessLogHeaders(c.Request.Header)), // 请求头
-			zap.String("errors", c.Errors.ByType(gin.ErrorTypePrivate).String()),
+			zap.String("errors", sanitizedAccessLogPrivateErrors(c)),
 			zap.Int("response_status", responseStatus), // 当前的响应结果状态码
 			zap.Int("response_size", responseBodyWriter.Size()),
 			zap.Bool("response_body_truncated", responseBodyWriter.truncated),
@@ -146,6 +147,13 @@ func AccessLog() gin.HandlerFunc {
 		logger.Info("HTTP Access Log [ "+cast.ToString(responseStatus)+" ]", logFields...)
 
 	}
+}
+
+func sanitizedAccessLogPrivateErrors(c *gin.Context) string {
+	if c == nil {
+		return ""
+	}
+	return providerhttp.RedactText(c.Errors.ByType(gin.ErrorTypePrivate).String())
 }
 
 func sanitizedAccessLogHeaders(headers http.Header) http.Header {
