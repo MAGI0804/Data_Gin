@@ -1,10 +1,11 @@
 import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { AlertTriangle, CloudRain, MapPin, RefreshCcw, Thermometer, Wind } from 'lucide-react'
+import { CloudRain, Download, MapPin, RefreshCcw, Thermometer, Wind } from 'lucide-react'
 import './MallWeatherPage.css'
 import { MallWeatherChart } from './MallWeatherChart'
 import { MallWeatherExportPanel } from './MallWeatherExportPanel'
-import { MallWeatherForecastPanel } from './MallWeatherForecastPanel'
+import { MallWeatherForecastPanel, type MallWeatherForecastDataSnapshot } from './MallWeatherForecastPanel'
 import { MallDetailsFields, MallWeatherMallEditor } from './MallWeatherMallEditor'
+import { createMallWeatherDatasetCsv, downloadMallWeatherBytes, mallWeatherCsvFileName } from './mallWeatherCsv'
 import { mallWeatherDataNavigationItems, navigateMallWeatherSection } from './mallWeatherNavigation'
 import {
   mallWeatherCreateKey,
@@ -15,6 +16,7 @@ import {
   loadMallWeatherPendingCreate,
   loadMallWeatherPendingRefresh,
   loadMallWeatherPendingSheetPush,
+  loadAllMallWeatherAlerts,
   mallWeatherFreshnessLabel,
   mallWeatherMetric,
   mallWeatherGeocodeCandidatesPath,
@@ -51,6 +53,7 @@ import {
   parseMallWeatherSheetPushOptions,
   parseMallWeatherSheetPushResult,
   type MallWeatherCreateInput,
+  type MallWeatherAlert,
   type MallWeatherPendingCreate,
   type MallWeatherPendingSheetPush,
   type MallWeatherGeocodeCandidates,
@@ -86,6 +89,13 @@ type OverviewLoadState = LoadState | 'waiting'
 type WeatherOverviewReloadResult = 'ready' | 'waiting' | 'failed' | 'aborted'
 type OverviewWaitingReason = Exclude<MallWeatherOverviewReadiness, 'ready'> | ''
 type OverviewStableState = { mallID: number; state: 'success' | 'waiting'; reason: OverviewWaitingReason }
+type AlertDataSnapshot = {
+  mallID: number
+  items: MallWeatherAlert[]
+  loading: boolean
+  ready: boolean
+  error: string
+}
 
 export function MallWeatherPage({
   actorID,
@@ -108,6 +118,8 @@ export function MallWeatherPage({
   const [overviewRetryCount, setOverviewRetryCount] = useState(0)
   const [overviewWaitingReason, setOverviewWaitingReason] = useState<OverviewWaitingReason>('')
   const [weatherReloadVersion, setWeatherReloadVersion] = useState(0)
+  const [, setForecastSnapshot] = useState<MallWeatherForecastDataSnapshot | null>(null)
+  const [alertSnapshot, setAlertSnapshot] = useState<AlertDataSnapshot>({ mallID: 0, items: [], loading: false, ready: false, error: '' })
   const [query, setQuery] = useState('')
   const [city, setCity] = useState('')
   const [showCreate, setShowCreate] = useState(false)
@@ -119,6 +131,8 @@ export function MallWeatherPage({
   const overviewRetryMallIDRef = useRef(0)
   const overviewLastStableRef = useRef<OverviewStableState | null>(null)
   const selectedMallIDRef = useRef(0)
+  const alertRequestSequence = useRef(0)
+  const alertController = useRef<AbortController | null>(null)
 
   const updateOverviewState = useCallback((state: OverviewLoadState) => {
     setOverviewState(state)
@@ -394,56 +408,94 @@ export function MallWeatherPage({
     return result
   }, [loadOverview])
 
+  const loadAlerts = useCallback(async (mallID: number, timeZone: string) => {
+    if (!mallID || selectedMallIDRef.current !== mallID) return
+    alertController.current?.abort()
+    const controller = new AbortController()
+    alertController.current = controller
+    const sequence = ++alertRequestSequence.current
+    setAlertSnapshot({ mallID, items: [], loading: true, ready: false, error: '' })
+    let timedOut = false
+    const timeout = window.setTimeout(() => {
+      timedOut = true
+      controller.abort()
+    }, 15_000)
+    try {
+      const result = await loadAllMallWeatherAlerts(
+        (path) => client(path, {
+          method: 'GET', showResult: false, silentLoading: true, signal: controller.signal,
+        }),
+        mallID,
+        timeZone,
+      )
+      if (controller.signal.aborted || sequence !== alertRequestSequence.current || selectedMallIDRef.current !== mallID) return
+      setAlertSnapshot({ mallID, items: result.items, loading: false, ready: true, error: '' })
+    } catch (error) {
+      if (sequence !== alertRequestSequence.current || selectedMallIDRef.current !== mallID || (controller.signal.aborted && !timedOut)) return
+      setAlertSnapshot({
+        mallID,
+        items: [],
+        loading: false,
+        ready: false,
+        error: timedOut ? '气象预警查询超时，请检查网络后重试' : error instanceof Error ? error.message : '气象预警查询失败',
+      })
+    } finally {
+      window.clearTimeout(timeout)
+      if (alertController.current === controller) alertController.current = null
+    }
+  }, [client])
+
+  useEffect(() => {
+    setForecastSnapshot(null)
+  }, [selectedMallID, weatherReloadVersion])
+
+  useEffect(() => {
+    if (!selectedMall || !selectedMallReady) {
+      alertRequestSequence.current++
+      alertController.current?.abort()
+      alertController.current = null
+      setAlertSnapshot({ mallID: 0, items: [], loading: false, ready: false, error: '' })
+      return
+    }
+    void loadAlerts(selectedMall.id, selectedMall.timeZone)
+  }, [loadAlerts, selectedMall, selectedMallReady, weatherReloadVersion])
+
+  useEffect(() => () => {
+    alertRequestSequence.current++
+    alertController.current?.abort()
+  }, [])
+
+  const handleForecastDatasetsChange = useCallback((snapshot: MallWeatherForecastDataSnapshot) => {
+    if (selectedMallIDRef.current === snapshot.mallID) setForecastSnapshot(snapshot)
+  }, [])
+
+  const selectedAlerts = alertSnapshot.mallID === selectedMallID
+    ? alertSnapshot
+    : { mallID: selectedMallID, items: [], loading: true, ready: false, error: '' }
+
   return (
     <div className="view-stack mall-weather-page">
-      {!showCreate && selectedMallReady && selectedMall && (
-        <div id="mall-weather-overview" tabIndex={-1}>
-          {!selectedOverview && overviewState !== 'error' && overviewState !== 'waiting' &&
-            <LoadingState label={`正在加载${selectedMall.nameCn}天气`} />}
-          {selectedOverview && <WeatherRealtime mall={selectedMall} overview={selectedOverview} />}
-          {overviewState === 'error' &&
-            <RequestError
-              message={overviewError}
-              onRetry={() => { setOverviewRetryCount(0); void loadOverview(selectedMall.id) }}
-            />}
-          {overviewState === 'waiting' && overviewRetryCount < 30 &&
-            <LoadingState label={overviewWaitingReason === 'waiting-empty'
-              ? `首次天气采集中，正在等待实况与未来逐小时数据（${overviewRetryCount + 1}/30）`
-              : `实况已加载，未来逐小时温度正在同步（${overviewRetryCount + 1}/30）`} />}
-          {overviewState === 'waiting' && overviewRetryCount >= 30 &&
-            <RequestError
-              message={overviewWaitingReason === 'waiting-empty'
-                ? '首次采集长时间未生成数据，请确认 MALL_WEATHER_ENABLED=true 且 weather 队列消费进程正在运行。'
-                : '实况已加载，但未来逐小时温度长时间不可用。请确认天气业务事务已提交，并检查最近采集记录。'}
-              onRetry={() => { setOverviewRetryCount(0); void loadOverview(selectedMall.id) }}
-            />}
-        </div>
-      )}
-
-      <section className="mall-weather-toolbar" aria-label="商场天气筛选">
-        <label>
-          <span>搜索商场</span>
-          <input name="mallWeatherQuery" type="search" autoComplete="off" value={query} onChange={(event) => setQuery(event.currentTarget.value)} placeholder="名称、编码或地址" />
-        </label>
-        <label>
-          <span>城市</span>
-          <select name="mallWeatherCity" value={city} onChange={(event) => setCity(event.currentTarget.value)}>
-            <option value="">全部城市</option>
-            {cities.map((item) => <option value={item} key={item}>{item}</option>)}
-          </select>
-        </label>
-        <button type="button" onClick={() => void loadMalls()} disabled={mallState === 'loading'}>
-          <RefreshCcw aria-hidden="true" />刷新列表
-        </button>
-        <button className="primary" type="button" onClick={() => setShowCreate((current) => !current)} aria-expanded={showCreate} aria-controls="mall-weather-create-panel">
-          {showCreate ? '关闭新增' : '新增商场'}
-        </button>
-      </section>
-
-      {!showCreate && selectedMallReady && selectedMall && <MallWeatherDataNavigation showActorActions={Boolean(actorID)} />}
-
       <div className="mall-weather-layout">
         <aside className="workbench-panel mall-weather-malls" aria-label="商场接入列表">
+          <section className="mall-weather-toolbar" aria-label="商场天气筛选">
+            <label>
+              <span>搜索商场</span>
+              <input name="mallWeatherQuery" type="search" autoComplete="off" value={query} onChange={(event) => setQuery(event.currentTarget.value)} placeholder="名称、编码或地址" />
+            </label>
+            <label>
+              <span>城市</span>
+              <select name="mallWeatherCity" value={city} onChange={(event) => setCity(event.currentTarget.value)}>
+                <option value="">全部城市</option>
+                {cities.map((item) => <option value={item} key={item}>{item}</option>)}
+              </select>
+            </label>
+            <button type="button" onClick={() => void loadMalls()} disabled={mallState === 'loading'}>
+              <RefreshCcw aria-hidden="true" />刷新列表
+            </button>
+            <button className="primary" type="button" onClick={() => setShowCreate((current) => !current)} aria-expanded={showCreate} aria-controls="mall-weather-create-panel">
+              {showCreate ? '关闭新增' : '新增商场'}
+            </button>
+          </section>
           <div className="mall-weather-section-title">
             <div><strong>商场</strong><span>全部接入状态</span></div>
             <span>{visibleMalls.length} / {malls.length}</span>
@@ -473,6 +525,16 @@ export function MallWeatherPage({
         </aside>
 
         <section className="mall-weather-content">
+          {!showCreate && selectedMallReady && selectedMall && (actorID
+            ? <ManualRefreshPanel
+              actorID={actorID}
+              mall={selectedMall}
+              client={client}
+              onWeatherUpdated={(signal) => reloadWeatherData(selectedMall.id, signal)}
+              key={`refresh-${actorID}:${selectedMall.id}`}
+            />
+            : <RequestError message="无法识别当前登录账号，请退出后重新登录再提交天气刷新。" onRetry={() => window.location.reload()} />)}
+          {!showCreate && selectedMallReady && selectedMall && <MallWeatherDataNavigation showActorActions={Boolean(actorID)} />}
           {showCreate && (actorID
             ? <MallCreatePanel actorID={actorID} client={client} onCreated={handleMallCreated} onCancel={() => setShowCreate(false)} />
             : <RequestError message="无法识别当前登录账号，请退出后重新登录再新增商场。" onRetry={() => window.location.reload()} />)}
@@ -491,17 +553,45 @@ export function MallWeatherPage({
             onMallUpdated={handleMallUpdated}
             onReloadMall={loadMall}
           />}
+          {!showCreate && selectedMallReady && selectedMall && (
+            <div id="mall-weather-overview" tabIndex={-1}>
+              {!selectedOverview && overviewState !== 'error' && overviewState !== 'waiting' &&
+                <LoadingState label={`正在加载${selectedMall.nameCn}天气`} />}
+              {selectedOverview && <WeatherRealtime mall={selectedMall} overview={selectedOverview} />}
+              {overviewState === 'error' &&
+                <RequestError
+                  message={overviewError}
+                  onRetry={() => { setOverviewRetryCount(0); void loadOverview(selectedMall.id) }}
+                />}
+              {overviewState === 'waiting' && overviewRetryCount < 30 &&
+                <LoadingState label={overviewWaitingReason === 'waiting-empty'
+                  ? `首次天气采集中，正在等待实况与未来逐小时数据（${overviewRetryCount + 1}/30）`
+                  : `实况已加载，未来逐小时温度正在同步（${overviewRetryCount + 1}/30）`} />}
+              {overviewState === 'waiting' && overviewRetryCount >= 30 &&
+                <RequestError
+                  message={overviewWaitingReason === 'waiting-empty'
+                    ? '首次采集长时间未生成数据，请确认 MALL_WEATHER_ENABLED=true 且 weather 队列消费进程正在运行。'
+                    : '实况已加载，但未来逐小时温度长时间不可用。请确认天气业务事务已提交，并检查最近采集记录。'}
+                  onRetry={() => { setOverviewRetryCount(0); void loadOverview(selectedMall.id) }}
+                />}
+            </div>
+          )}
           {!showCreate && selectedMallReady && selectedMall && selectedOverview &&
             <WeatherOverviewDetails
               mall={selectedMall}
               overview={selectedOverview}
+              alerts={selectedAlerts}
               refreshing={overviewState === 'loading'}
               onRefresh={() => void loadOverview(selectedMall.id)}
+              onAlertsRetry={() => void loadAlerts(selectedMall.id, selectedMall.timeZone)}
             />}
           {!showCreate && selectedMallReady && selectedMall && <MallWeatherForecastPanel
             mallID={selectedMall.id}
+            mallCode={selectedMall.mallCode}
+            mallName={selectedMall.nameCn}
             timeZone={selectedMall.timeZone}
             client={client}
+            onDatasetsChange={handleForecastDatasetsChange}
             key={`forecast-${selectedMall.id}:${selectedMall.timeZone}:${weatherReloadVersion}`}
           />}
           {!showCreate && selectedMallReady && selectedMall && actorID && <MallWeatherExportPanel
@@ -514,16 +604,9 @@ export function MallWeatherPage({
           />}
           {!showCreate && selectedMallReady && selectedMall && (actorID
             ? <section className="view-stack mall-weather-management" id="mall-weather-management" tabIndex={-1}>
-              <div className="mall-weather-section-title"><div><strong>商场天气管理</strong><span>坐标调整、全量刷新与已有推送绑定</span></div></div>
+              <div className="mall-weather-section-title"><div><strong>商场天气管理</strong><span>坐标调整与已有推送绑定</span></div></div>
               <MallWeatherMallEditor mall={selectedMall} client={client} onMallUpdated={handleMallUpdated} onMallDeleted={handleMallDeleted} key={`editor-active-${selectedMall.id}`} />
               <MallCoordinateAdjustmentPanel mall={selectedMall} client={client} onMallUpdated={handleMallUpdated} key={`coordinate-${selectedMall.id}:${selectedMall.version}`} />
-              <ManualRefreshPanel
-                actorID={actorID}
-                mall={selectedMall}
-                client={client}
-                onWeatherUpdated={(signal) => reloadWeatherData(selectedMall.id, signal)}
-                key={`refresh-${actorID}:${selectedMall.id}`}
-              />
               <MallWeatherSheetPushPanel actorID={actorID} mall={selectedMall} client={client} key={`push-${actorID}:${selectedMall.id}`} />
             </section>
             : <RequestError message="无法识别当前登录账号，请退出后重新登录再提交天气刷新。" onRetry={() => window.location.reload()} />)}
@@ -1237,10 +1320,27 @@ function weatherFetchRunFailureMessage(run: MallWeatherFetchRun) {
 
 function WeatherRealtime({ mall, overview }: { mall: MallWeatherMall; overview: MallWeatherOverview }) {
   const { realtime } = overview
+  const [downloadError, setDownloadError] = useState('')
+
+  function downloadCsv() {
+    setDownloadError('')
+    try {
+      downloadMallWeatherBytes(
+        createMallWeatherDatasetCsv('realtime', realtime ? [realtime] : [], { mallCode: mall.mallCode, mallName: mall.nameCn }),
+        mallWeatherCsvFileName('realtime', mall.mallCode),
+      )
+    } catch {
+      setDownloadError('实况 CSV 文件生成失败，请重新加载后重试。')
+    }
+  }
 
   return (
     <article className="workbench-panel mall-weather-realtime" aria-label="当前实况天气">
-      <div className="mall-weather-section-title"><div><strong>当前实况</strong><span>{mall.nameCn} · {realtime?.snapshotAtLocal || '暂无快照时间'}</span></div><Thermometer aria-hidden="true" /></div>
+      <div className="mall-weather-section-title">
+        <div><strong>当前实况</strong><span>{mall.nameCn} · {realtime?.snapshotAtLocal || '暂无快照时间'}</span></div>
+        <button type="button" onClick={downloadCsv} aria-label={`下载${mall.nameCn}当前实况 CSV`}><Download aria-hidden="true" />下载 CSV</button>
+      </div>
+      {downloadError && <p className="mall-weather-action-message error" role="alert">{downloadError}</p>}
       {realtime ? (
         <>
           <div className="mall-weather-temperature"><strong>{mallWeatherMetric(realtime.temperatureC, '°C')}</strong><span>{mallWeatherSkyconLabel(realtime.skycon)}</span></div>
@@ -1269,10 +1369,30 @@ function WeatherRealtime({ mall, overview }: { mall: MallWeatherMall; overview: 
   )
 }
 
-function WeatherOverviewDetails({ mall, overview, refreshing, onRefresh }: { mall: MallWeatherMall; overview: MallWeatherOverview; refreshing: boolean; onRefresh: () => void }) {
+function WeatherOverviewDetails({ mall, overview, alerts, refreshing, onRefresh, onAlertsRetry }: {
+  mall: MallWeatherMall
+  overview: MallWeatherOverview
+  alerts: AlertDataSnapshot
+  refreshing: boolean
+  onRefresh: () => void
+  onAlertsRetry: () => void
+}) {
   const { realtime, meta } = overview
+  const [alertDownloadError, setAlertDownloadError] = useState('')
   const representativePoint = ['MALL_CENTER', 'CENTER', 'center'].includes(meta.representativePoint) ? '商场中心点' : meta.representativePoint || '口径缺失'
   const coverageRadius = meta.coverageRadiusM > 0 ? `业务半径 ${meta.coverageRadiusM} m` : '业务半径口径缺失'
+
+  function downloadAlertsCsv() {
+    setAlertDownloadError('')
+    try {
+      downloadMallWeatherBytes(
+        createMallWeatherDatasetCsv('alerts', alerts.items, { mallCode: mall.mallCode, mallName: mall.nameCn }),
+        mallWeatherCsvFileName('alerts', mall.mallCode),
+      )
+    } catch {
+      setAlertDownloadError('气象预警 CSV 文件生成失败，请重新查询后重试。')
+    }
+  }
 
   return (
     <div className="view-stack">
@@ -1325,11 +1445,20 @@ function WeatherOverviewDetails({ mall, overview, refreshing, onRefresh }: { mal
         />
       </section>
 
-      <section className="workbench-panel">
-        <div className="mall-weather-section-title"><div><strong>气象预警</strong><span>行政区域口径</span></div><AlertTriangle aria-hidden="true" /></div>
-        {overview.alerts.length === 0 ? <EmptyState title="当前无有效预警" detail="最近一次概览没有返回气象预警。" /> : (
-          <div className="mall-weather-alerts">
-            {overview.alerts.map((alert) => (
+      <section className="workbench-panel" id="mall-weather-alerts" tabIndex={-1} aria-busy={alerts.loading}>
+        <div className="mall-weather-section-title">
+          <div><strong>气象预警</strong><span>行政区域口径 · 自动读取全部游标页</span></div>
+          <button type="button" onClick={downloadAlertsCsv} disabled={alerts.loading || Boolean(alerts.error)} aria-label={`下载${mall.nameCn}气象预警 CSV`}>
+            <Download aria-hidden="true" />下载 CSV
+          </button>
+        </div>
+        {alertDownloadError && <p className="mall-weather-action-message error" role="alert">{alertDownloadError}</p>}
+        {alerts.loading && <LoadingState label="正在加载全部气象预警" />}
+        {alerts.error && <RequestError message={alerts.error} onRetry={onAlertsRetry} />}
+        {alerts.ready && (alerts.items.length === 0
+          ? <EmptyState title="当前无有效预警" detail="当前 31 天查询窗口没有返回有效气象预警。" />
+          : <div className="mall-weather-alerts">
+            {alerts.items.map((alert) => (
               <article key={alert.alertId || alert.title}>
                 <div><strong>{alert.title}</strong><span>{[alert.alertTypeName, alert.alertLevelName].filter(Boolean).join(' · ') || alert.status}</span></div>
                 {alert.description && <p>{alert.description}</p>}
@@ -1338,8 +1467,7 @@ function WeatherOverviewDetails({ mall, overview, refreshing, onRefresh }: { mal
                 <small>首次发现 {alert.firstSeenAtLocal || '—'} · 最近发现 {alert.lastSeenAtLocal || '—'}</small>
               </article>
             ))}
-          </div>
-        )}
+          </div>)}
       </section>
     </div>
   )

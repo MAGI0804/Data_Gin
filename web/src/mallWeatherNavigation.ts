@@ -3,6 +3,7 @@ export const mallWeatherDataNavigationItems = [
   { targetID: 'mall-weather-minutely', label: '约 1 km 分钟降水', requiresActor: false },
   { targetID: 'mall-weather-hourly', label: '未来逐小时预报', requiresActor: false },
   { targetID: 'mall-weather-daily', label: '15 天逐日预报', requiresActor: false },
+  { targetID: 'mall-weather-alerts', label: '气象预警', requiresActor: false },
   { targetID: 'mall-weather-life-indices', label: '15 天生活指数', requiresActor: false },
   { targetID: 'mall-weather-export', label: '导出 Excel', requiresActor: true },
   { targetID: 'mall-weather-management', label: '管理操作', requiresActor: true },

@@ -14,12 +14,13 @@
 
 .mall-weather-toolbar {
   display: grid;
-  grid-template-columns: minmax(220px, 1fr) minmax(160px, 240px) auto auto;
+  grid-template-columns: 1fr;
   align-items: end;
-  gap: 12px;
-  border: 1px solid #111111;
+  gap: 10px;
+  border: 0;
+  border-bottom: 1px solid #d0d0d0;
   background: #ffffff;
-  padding: 12px;
+  padding: 0 0 12px;
 }
 
 .mall-weather-create-form,
@@ -274,6 +275,7 @@
 
 .mall-weather-forecast-dataset,
 #mall-weather-overview,
+#mall-weather-alerts,
 #mall-weather-export,
 #mall-weather-management {
   scroll-margin-top: 16px;
@@ -407,6 +409,7 @@
 
 .mall-weather-forecast-dataset:focus-visible,
 #mall-weather-overview:focus-visible,
+#mall-weather-alerts:focus-visible,
 #mall-weather-export:focus-visible,
 #mall-weather-management:focus-visible {
   outline: 2px solid #111111;
@@ -720,6 +723,7 @@
 @media (max-width: 840px) {
   .mall-weather-forecast-dataset,
   #mall-weather-overview,
+  #mall-weather-alerts,
   #mall-weather-export,
   #mall-weather-management {
     scroll-margin-top: 72px;

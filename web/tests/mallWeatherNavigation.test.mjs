@@ -14,6 +14,7 @@ test('defines unique weather navigation targets in the intended information orde
       ['mall-weather-minutely', '约 1 km 分钟降水', false],
       ['mall-weather-hourly', '未来逐小时预报', false],
       ['mall-weather-daily', '15 天逐日预报', false],
+      ['mall-weather-alerts', '气象预警', false],
       ['mall-weather-life-indices', '15 天生活指数', false],
       ['mall-weather-export', '导出 Excel', true],
       ['mall-weather-management', '管理操作', true],
