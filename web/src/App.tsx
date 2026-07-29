@@ -1012,7 +1012,7 @@ function App() {
   if (!authenticated) return <LoginScreen onLogin={handleLogin} />
 
   return (
-    <main className="ops-shell">
+    <main className={activeNav === 'mall_weather' ? 'ops-shell mall-weather-shell' : 'ops-shell'}>
       <aside className={mobileNavOpen ? 'ops-sidebar mobile-open' : 'ops-sidebar'} aria-label="主导航">
         <div className="brand">
           <img className="brand-logo" src="/logo.jpg" alt="系统 Logo" />

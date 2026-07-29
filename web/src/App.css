@@ -318,6 +318,28 @@ button:focus-visible {
   overflow-y: auto;
 }
 
+@media (min-width: 841px) {
+  .ops-shell.mall-weather-shell {
+    grid-template-rows: auto;
+    align-items: start;
+    height: auto;
+    min-height: 100vh;
+    min-height: 100dvh;
+    overflow: visible;
+  }
+
+  .mall-weather-shell .ops-sidebar {
+    position: sticky;
+    top: 0;
+    height: 100vh;
+    height: 100dvh;
+  }
+
+  .mall-weather-shell .ops-workspace {
+    overflow: visible;
+  }
+}
+
 .nav-search {
   gap: 7px;
 }

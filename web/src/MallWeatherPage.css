@@ -408,7 +408,7 @@
 }
 
 .mall-weather-forecast-dataset .data-table-wrap {
-  max-height: min(64vh, 640px);
+  max-height: none;
   border: 1px solid var(--line);
 }
 
@@ -456,11 +456,9 @@
 }
 
 .mall-weather-malls {
-  position: sticky;
-  top: 0;
-  max-height: calc(100vh - 118px);
-  max-height: calc(100dvh - 118px);
-  overflow-y: auto;
+  position: static;
+  max-height: none;
+  overflow: visible;
 }
 
 .mall-weather-content {
@@ -655,7 +653,7 @@
 }
 
 .mall-weather-chart-data .data-table-wrap {
-  max-height: clamp(180px, 32vh, 280px);
+  max-height: none;
   margin-top: 8px;
 }
 
@@ -717,7 +715,8 @@
 
   .mall-weather-malls {
     position: static;
-    max-height: 320px;
+    max-height: none;
+    overflow: visible;
   }
 
   .mall-weather-toolbar,
