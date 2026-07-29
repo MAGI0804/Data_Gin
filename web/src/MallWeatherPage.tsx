@@ -105,15 +105,26 @@ type AlertDataSnapshot = {
   error: string
 }
 
-export function MallWeatherPage({
-  actorID,
-  client,
-  downloadFile,
-}: {
+type MallModulePageProps = {
   actorID: string | null
   client: MallWeatherApiClient
   downloadFile: MallWeatherFileClient
-}) {
+}
+
+export function MallWeatherPage(props: MallModulePageProps) {
+  return <MallModulePage {...props} view="weather" />
+}
+
+export function StoreInfoPage(props: MallModulePageProps) {
+  return <MallModulePage {...props} view="stores" />
+}
+
+function MallModulePage({
+  actorID,
+  client,
+  downloadFile,
+  view,
+}: MallModulePageProps & { view: 'weather' | 'stores' }) {
   const [malls, setMalls] = useState<MallWeatherMall[]>([])
   const [nextAfterID, setNextAfterID] = useState(0)
   const [mallState, setMallState] = useState<LoadState>('idle')
@@ -344,7 +355,7 @@ export function MallWeatherPage({
 
   useEffect(() => {
     const mall = malls.find((item) => item.id === selectedMallID)
-    if (mall && mallWeatherMallReady(mall)) {
+    if (view === 'weather' && mall && mallWeatherMallReady(mall)) {
       void loadOverview(selectedMallID)
       return
     }
@@ -360,7 +371,7 @@ export function MallWeatherPage({
     updateOverviewWaitingReason('')
     setOverviewError('')
     setOverviewRetryCount(0)
-  }, [loadOverview, malls, selectedMallID, updateOverviewState, updateOverviewWaitingReason])
+  }, [loadOverview, malls, selectedMallID, updateOverviewState, updateOverviewWaitingReason, view])
 
   useEffect(() => () => {
     overviewController.current?.abort()
@@ -369,13 +380,13 @@ export function MallWeatherPage({
 
   useEffect(() => {
     const mall = malls.find((item) => item.id === selectedMallID)
-    if (!mall || !mallWeatherMallReady(mall) || overviewState !== 'waiting' || overviewRetryCount >= 30) return
+    if (view !== 'weather' || !mall || !mallWeatherMallReady(mall) || overviewState !== 'waiting' || overviewRetryCount >= 30) return
     const timer = window.setTimeout(() => {
       setOverviewRetryCount((current) => current + 1)
       void loadOverview(mall.id)
     }, 2_000)
     return () => window.clearTimeout(timer)
-  }, [loadOverview, malls, overviewRetryCount, overviewState, selectedMallID])
+  }, [loadOverview, malls, overviewRetryCount, overviewState, selectedMallID, view])
 
   const cities = useMemo(() => Array.from(new Set(malls.map((mall) => mall.city).filter(Boolean))).sort(), [malls])
   useEffect(() => {
@@ -460,7 +471,7 @@ export function MallWeatherPage({
   }, [selectedMallID, weatherReloadVersion])
 
   useEffect(() => {
-    if (!selectedMall || !selectedMallReady) {
+    if (view !== 'weather' || !selectedMall || !selectedMallReady) {
       alertRequestSequence.current++
       alertController.current?.abort()
       alertController.current = null
@@ -468,7 +479,7 @@ export function MallWeatherPage({
       return
     }
     void loadAlerts(selectedMall.id, selectedMall.timeZone)
-  }, [loadAlerts, selectedMall, selectedMallReady, weatherReloadVersion])
+  }, [loadAlerts, selectedMall, selectedMallReady, view, weatherReloadVersion])
 
   useEffect(() => () => {
     alertRequestSequence.current++
@@ -509,6 +520,86 @@ export function MallWeatherPage({
         : selectedAlerts.loading
           ? '正在加载全部气象预警'
           : selectedAlerts.error || (csvZipReady ? '六类天气数据已就绪' : '天气数据尚未准备完成')
+
+  if (view === 'stores') {
+    return (
+      <div className="view-stack mall-weather-page store-info-page">
+        <div className="mall-weather-layout">
+          <aside className="workbench-panel mall-weather-malls" aria-label="店铺列表">
+            <section className="mall-weather-toolbar" aria-label="店铺筛选">
+              <label>
+                <span>搜索店铺</span>
+                <input name="storeInfoQuery" type="search" autoComplete="off" value={query} onChange={(event) => setQuery(event.currentTarget.value)} placeholder="名称、编码或地址" />
+              </label>
+              <label>
+                <span>城市</span>
+                <select name="storeInfoCity" value={city} onChange={(event) => setCity(event.currentTarget.value)}>
+                  <option value="">全部城市</option>
+                  {cities.map((item) => <option value={item} key={item}>{item}</option>)}
+                </select>
+              </label>
+              <button type="button" onClick={() => void loadMalls()} disabled={mallState === 'loading'}>
+                <RefreshCcw aria-hidden="true" />刷新列表
+              </button>
+              <button className="primary" type="button" onClick={() => setShowCreate((current) => !current)} aria-expanded={showCreate} aria-controls="mall-weather-create-panel">
+                {showCreate ? '关闭新增' : '新增店铺'}
+              </button>
+            </section>
+            <div className="mall-weather-section-title">
+              <div><strong>店铺</strong><span>基础资料目录</span></div>
+              <span>{visibleMalls.length} / {malls.length}</span>
+            </div>
+            {mallState === 'error' && <RequestError message={mallError} onRetry={() => void loadMalls()} />}
+            {mallState === 'loading' && malls.length === 0 && <LoadingState label="正在加载店铺" />}
+            {mallState === 'success' && malls.length === 0 && <EmptyState title="还没有店铺" detail="点击“新增店铺”开始维护基础资料。" />}
+            {malls.length > 0 && visibleMalls.length === 0 && <EmptyState title="没有匹配结果" detail="请调整名称或城市筛选。" />}
+            <div className="mall-weather-mall-list">
+              {visibleMalls.map((mall) => (
+                <button
+                  type="button"
+                  className={mall.id === selectedMallID ? 'mall-weather-mall active' : 'mall-weather-mall'}
+                  aria-label={`${mall.nameCn}，店铺编码 ${mall.mallCode}`}
+                  aria-pressed={mall.id === selectedMallID}
+                  key={mall.id}
+                  onClick={() => { selectedMallIDRef.current = mall.id; setSelectedMallID(mall.id); setShowCreate(false) }}
+                >
+                  <strong>{mall.nameCn}</strong>
+                </button>
+              ))}
+            </div>
+            {nextAfterID > 0 && (
+              <button type="button" onClick={() => void loadMalls(nextAfterID)} disabled={mallState === 'loading'}>加载更多店铺</button>
+            )}
+          </aside>
+
+          <section className="mall-weather-content store-info-content">
+            {showCreate && (actorID
+              ? <MallCreatePanel actorID={actorID} client={client} onCreated={handleMallCreated} onCancel={() => setShowCreate(false)} />
+              : <RequestError message="无法识别当前登录账号，请退出后重新登录再新增店铺。" onRetry={() => window.location.reload()} />)}
+            {!showCreate && !selectedMall && mallState !== 'loading' && <EmptyState title="请选择或新增店铺" detail="选择左侧店铺维护资料，或新增一个店铺。" />}
+            {!showCreate && selectedMall && (actorID
+              ? <section className="view-stack mall-weather-management" aria-label={`${selectedMall.nameCn}店铺资料维护`}>
+                <div className="mall-weather-section-title">
+                  <div><strong>{selectedMall.nameCn}</strong><span>店铺资料、地址与天气服务坐标</span></div>
+                  <span>{selectedMall.mallCode}</span>
+                </div>
+                <MallWeatherMallEditor
+                  mall={selectedMall}
+                  client={client}
+                  onMallUpdated={handleMallUpdated}
+                  onMallDeleted={handleMallDeleted}
+                  key={`store-editor-${selectedMall.id}`}
+                />
+                {selectedMallReady
+                  ? <MallCoordinateAdjustmentPanel mall={selectedMall} client={client} onMallUpdated={handleMallUpdated} key={`store-coordinate-${selectedMall.id}:${selectedMall.version}`} />
+                  : <MallOnboardingPanel mall={selectedMall} client={client} onMallUpdated={handleMallUpdated} onReloadMall={loadMall} key={`store-onboarding-${selectedMall.id}`} />}
+              </section>
+              : <RequestError message="无法识别当前登录账号，请退出后重新登录再维护店铺。" onRetry={() => window.location.reload()} />)}
+          </section>
+        </div>
+      </div>
+    )
+  }
 
   return (
     <div className="view-stack mall-weather-page">

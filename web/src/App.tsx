@@ -4,6 +4,7 @@ import {
   ArrowDownToLine,
   ArrowUpFromLine,
   BookOpen,
+  Building2,
   CheckCircle2,
   ChevronDown,
   CloudSun,
@@ -27,7 +28,7 @@ import './App.css'
 import { effectiveApiStatus } from './apiResponse'
 import { apiURL as buildApiURL } from './apiURL'
 import { clearStoredToken, loadStoredToken, saveStoredToken, storedTokenExpiresAt, tokenActorID } from './authStorage'
-import { MallWeatherPage } from './MallWeatherPage'
+import { MallWeatherPage, StoreInfoPage } from './MallWeatherPage'
 import { DataAuthorizationPage } from './DataAuthorizationPage'
 import { parseMallWeatherExportContentStatus, submitMallWeatherExportContentDownload } from './mallWeatherExport'
 import {
@@ -62,7 +63,7 @@ type ApiClientOptions = {
 
 type ApiClient = (path: string, options?: ApiClientOptions) => Promise<ApiResult>
 type FileDownloadClient = (path: string, fileName: string, signal: AbortSignal) => Promise<ApiResult>
-type NavKey = 'overview' | 'runs' | 'delivery_logs' | 'step_runs' | 'mall_weather' | 'data_authorizations' | 'sources' | 'receive' | 'pull_records' | 'backfill' | 'youzan_distribution' | 'rules' | 'processed' | 'methods' | 'destinations' | 'tasks' | 'push_policy' | 'excel_jobs' | 'excel_schemes' | 'excel_write'
+type NavKey = 'overview' | 'runs' | 'delivery_logs' | 'step_runs' | 'store_info' | 'mall_weather' | 'data_authorizations' | 'sources' | 'receive' | 'pull_records' | 'backfill' | 'youzan_distribution' | 'rules' | 'processed' | 'methods' | 'destinations' | 'tasks' | 'push_policy' | 'excel_jobs' | 'excel_schemes' | 'excel_write'
 type NavItem = { key: NavKey; label: string; description: string; icon: ReactNode }
 type NavGroup = { label: string; items: NavItem[] }
 type MethodKind = 'configured' | 'builtin'
@@ -558,6 +559,12 @@ type DeliveryStore = {
 
 const navGroups: NavGroup[] = [
   {
+    label: '基础信息',
+    items: [
+      { key: 'store_info', label: '店铺信息', description: '店铺资料与坐标维护', icon: <Building2 aria-hidden="true" /> },
+    ],
+  },
+  {
     label: '运行监控',
     items: [
       { key: 'overview', label: '运行总览', description: '运行与推送健康度', icon: <Activity aria-hidden="true" /> },
@@ -1012,7 +1019,7 @@ function App() {
   if (!authenticated) return <LoginScreen onLogin={handleLogin} />
 
   return (
-    <main className={activeNav === 'mall_weather' ? 'ops-shell mall-weather-shell' : 'ops-shell'}>
+    <main className={activeNav === 'mall_weather' || activeNav === 'store_info' ? 'ops-shell mall-weather-shell' : 'ops-shell'}>
       <aside className={mobileNavOpen ? 'ops-sidebar mobile-open' : 'ops-sidebar'} aria-label="主导航">
         <div className="brand">
           <img className="brand-logo" src="/logo.jpg" alt="系统 Logo" />
@@ -1092,6 +1099,7 @@ function App() {
         {activeNav === 'runs' && <RunsQueryPage runs={runs} onLoadSteps={loadStepRuns} />}
         {activeNav === 'delivery_logs' && <DeliveryLogsQueryPage logs={deliveryLogs} onRetryLog={retryDeliveryLog} />}
         {activeNav === 'step_runs' && <StepRunsQueryPage runs={runs} stepRuns={stepRuns} onLoadSteps={loadStepRuns} />}
+        {activeNav === 'store_info' && <StoreInfoPage actorID={actorID} client={client} downloadFile={downloadFile} />}
         {activeNav === 'mall_weather' && <MallWeatherPage actorID={actorID} client={client} downloadFile={downloadFile} />}
         {activeNav === 'data_authorizations' && <DataAuthorizationPage client={client} />}
         {activeNav === 'sources' && <SourcesQueryPage sources={sources} />}
@@ -1167,6 +1175,7 @@ function ModuleHeader({ activeNav, loading }: { activeNav: NavKey; loading: bool
     runs: { title: '流水线运行', subtitle: '按状态、运行类型和 Trace ID 查询执行记录。' },
     delivery_logs: { title: '推送日志', subtitle: '按成功状态、门店和业务键查询外部交付结果。' },
     step_runs: { title: '步骤运行', subtitle: '选择一次流水线运行并查看每个步骤的输入输出。' },
+    store_info: { title: '店铺信息', subtitle: '统一维护店铺资料、地址与天气服务坐标。' },
     mall_weather: { title: '商场天气', subtitle: '查看商场中心点实况、未来降水、小时趋势和气象预警。' },
     data_authorizations: { title: '数据授权', subtitle: '由管理员开通开放接口账号，并管理权限有效期、凭证与审计。' },
     sources: { title: '数据源', subtitle: '查询数据接入配置、类型和启用状态。' },
