@@ -615,20 +615,25 @@
   font-size: 13px;
 }
 
-.mall-weather-chart-panel > svg {
+.mall-weather-chart-visual {
+  position: relative;
+}
+
+.mall-weather-chart-visual > svg {
   display: block;
   width: 100%;
   height: clamp(120px, 18vh, 180px);
   overflow: visible;
+  cursor: crosshair;
 }
 
-.mall-weather-chart-panel > svg path {
+.mall-weather-chart-visual > svg path {
   fill: none;
   stroke: #d0d0d0;
   stroke-width: 1;
 }
 
-.mall-weather-chart-panel > svg polyline {
+.mall-weather-chart-visual > svg polyline {
   fill: none;
   stroke: #111111;
   stroke-width: 3;
@@ -637,9 +642,63 @@
   vector-effect: non-scaling-stroke;
 }
 
-.mall-weather-chart-panel > svg circle {
+.mall-weather-chart-visual > svg circle {
   fill: #111111;
   vector-effect: non-scaling-stroke;
+}
+
+.mall-weather-chart-active line {
+  stroke: #555555;
+  stroke-width: 1;
+  stroke-dasharray: 5 4;
+  vector-effect: non-scaling-stroke;
+}
+
+.mall-weather-chart-visual > svg .mall-weather-chart-active circle {
+  fill: #ffffff;
+  stroke: #111111;
+  stroke-width: 3;
+}
+
+.mall-weather-chart-tooltip {
+  position: absolute;
+  z-index: 2;
+  display: grid;
+  gap: 3px;
+  min-width: 112px;
+  border: 1px solid #111111;
+  background: #ffffff;
+  padding: 7px 9px;
+  color: #111111;
+  font-size: 11px;
+  line-height: 1.35;
+  pointer-events: none;
+  white-space: nowrap;
+}
+
+.mall-weather-chart-tooltip strong,
+.mall-weather-chart-tooltip span {
+  display: block;
+}
+
+.mall-weather-chart-tooltip.start {
+  --mall-weather-tooltip-x: 0%;
+}
+
+.mall-weather-chart-tooltip.center {
+  --mall-weather-tooltip-x: -50%;
+}
+
+.mall-weather-chart-tooltip.end {
+  --mall-weather-tooltip-x: -100%;
+}
+
+.mall-weather-chart-tooltip.above {
+  transform: translate(var(--mall-weather-tooltip-x), calc(-100% - 9px));
+}
+
+.mall-weather-chart-tooltip.below {
+  transform: translate(var(--mall-weather-tooltip-x), 9px);
 }
 
 .mall-weather-chart-summary {

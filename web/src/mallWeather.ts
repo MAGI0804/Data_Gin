@@ -2039,7 +2039,13 @@ export function mallWeatherMetric(value: number | undefined, unit: string, fract
   return `${value.toFixed(fractionDigits)}${unit}`
 }
 
-export function mallWeatherChartSegments(values: Array<number | undefined>, width: number, height: number) {
+export type MallWeatherChartPoint = {
+  index: number
+  x: number
+  y: number
+}
+
+export function mallWeatherChartPoints(values: Array<number | undefined>, width: number, height: number) {
   const finiteValues = values.filter((value): value is number => typeof value === 'number' && Number.isFinite(value))
   if (finiteValues.length === 0 || width <= 0 || height <= 0) return []
   const minimum = Math.min(...finiteValues)
@@ -2047,17 +2053,37 @@ export function mallWeatherChartSegments(values: Array<number | undefined>, widt
   const range = maximum - minimum || 1
   const denominator = Math.max(values.length - 1, 1)
 
+  return values.flatMap((value, index): MallWeatherChartPoint[] => {
+    if (typeof value !== 'number' || !Number.isFinite(value)) return []
+    return [{
+      index,
+      x: index / denominator * width,
+      y: height - (value - minimum) / range * height,
+    }]
+  })
+}
+
+export function mallWeatherNearestChartPoint(points: MallWeatherChartPoint[], targetX: number) {
+  if (points.length === 0 || !Number.isFinite(targetX)) return undefined
+  return points.reduce((nearest, point) =>
+    Math.abs(point.x - targetX) < Math.abs(nearest.x - targetX) ? point : nearest)
+}
+
+export function mallWeatherChartSegments(values: Array<number | undefined>, width: number, height: number) {
+  const points = mallWeatherChartPoints(values, width, height)
+  if (points.length === 0) return []
+  const pointsByIndex = new Map(points.map((point) => [point.index, point]))
+
   const segments: string[] = []
   let current: string[] = []
-  values.forEach((value, index) => {
-    if (typeof value !== 'number' || !Number.isFinite(value)) {
+  values.forEach((_value, index) => {
+    const point = pointsByIndex.get(index)
+    if (!point) {
       if (current.length > 0) segments.push(current.join(' '))
       current = []
       return
     }
-    const x = index / denominator * width
-    const y = height - (value - minimum) / range * height
-    current.push(`${x.toFixed(1)},${y.toFixed(1)}`)
+    current.push(`${point.x.toFixed(1)},${point.y.toFixed(1)}`)
   })
   if (current.length > 0) segments.push(current.join(' '))
   return segments

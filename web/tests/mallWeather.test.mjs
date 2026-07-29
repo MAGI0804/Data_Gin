@@ -11,7 +11,9 @@ import {
   loadMallWeatherPendingCreate,
   loadMallWeatherPendingRefresh,
   loadMallWeatherPendingSheetPush,
+  mallWeatherChartPoints,
   mallWeatherChartSegments,
+  mallWeatherNearestChartPoint,
   mallWeatherCreateKey,
   mallWeatherCreateRequest,
   mallWeatherForecastQueryWindows,
@@ -1277,6 +1279,21 @@ test('formats weather statuses, conditions, metrics, and chart points', () => {
   assert.equal(mallWeatherSkyconLabel('NEW_CONDITION'), 'NEW_CONDITION')
   assert.equal(mallWeatherMetric(31.25, '°C'), '31.3°C')
   assert.equal(mallWeatherMetric(Number.NaN, '°C'), '—')
+  const points = mallWeatherChartPoints([1, undefined, 3, 2], 100, 40)
+  assert.deepEqual(points.map((point) => ({
+    index: point.index,
+    x: point.x.toFixed(1),
+    y: point.y.toFixed(1),
+  })), [
+    { index: 0, x: '0.0', y: '40.0' },
+    { index: 2, x: '66.7', y: '0.0' },
+    { index: 3, x: '100.0', y: '20.0' },
+  ])
+  assert.equal(mallWeatherNearestChartPoint(points, 70)?.index, 2)
+  assert.equal(mallWeatherNearestChartPoint(points, 95)?.index, 3)
+  assert.equal(mallWeatherNearestChartPoint(points, Number.NaN), undefined)
+  assert.deepEqual(mallWeatherChartPoints([5, 5], 100, 40).map((point) => point.y), [40, 40])
+  assert.deepEqual(mallWeatherChartPoints([1], 0, 40), [])
   assert.deepEqual(mallWeatherChartSegments([1, undefined, 3, 2], 100, 40), ['0.0,40.0', '66.7,0.0 100.0,20.0'])
   assert.deepEqual(mallWeatherChartSegments([], 100, 40), [])
 })
