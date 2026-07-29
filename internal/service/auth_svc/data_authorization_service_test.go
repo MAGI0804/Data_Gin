@@ -1,6 +1,8 @@
 package auth_svc
 
 import (
+	"context"
+	"database/sql"
 	"encoding/json"
 	"strings"
 	"testing"
@@ -8,6 +10,9 @@ import (
 
 	"gin-biz-web-api/internal/requests/auth_request"
 	"gin-biz-web-api/model"
+
+	"gorm.io/driver/mysql"
+	"gorm.io/gorm"
 )
 
 func TestNormalizeDataAuthorizationGrantEnforcesAllowlistAndExpiry(t *testing.T) {
@@ -54,6 +59,41 @@ func TestNormalizeDataAuthorizationCreateRejectsReservedAndDuplicatePermissions(
 	duplicate.Permissions = append(duplicate.Permissions, duplicate.Permissions[0])
 	if _, _, err := service.normalizeCreate(duplicate); err == nil {
 		t.Fatal("normalizeCreate() accepted duplicate permission")
+	}
+}
+
+func TestCreateDataAuthorizationUserOmitsNullablePhone(t *testing.T) {
+	db, err := gorm.Open(mysql.New(mysql.Config{
+		Conn:                      &sql.DB{},
+		SkipInitializeWithVersion: true,
+	}), &gorm.Config{DryRun: true, DisableAutomaticPing: true})
+	if err != nil {
+		t.Fatalf("gorm.Open() error = %v", err)
+	}
+	db = db.Session(&gorm.Session{SkipDefaultTransaction: true})
+
+	var insertSQL string
+	if err := db.Callback().Create().After("gorm:create").Register("test:capture_open_api_user", func(tx *gorm.DB) {
+		insertSQL = tx.Statement.SQL.String()
+	}); err != nil {
+		t.Fatalf("register SQL capture callback: %v", err)
+	}
+	user := &model.User{
+		BaseModel:             &model.BaseModel{},
+		CommonTimestampsField: &model.CommonTimestampsField{},
+		Account:               "partner_weather_01",
+		Email:                 "owner@example.com",
+		Nickname:              "合作方账号",
+		Password:              strings.Repeat("x", 60),
+	}
+	if err := createDataAuthorizationUser(context.Background(), db, user); err != nil {
+		t.Fatalf("createDataAuthorizationUser() error = %v", err)
+	}
+	if insertSQL == "" || !strings.Contains(insertSQL, "`account`") {
+		t.Fatalf("user INSERT was not captured: %q", insertSQL)
+	}
+	if strings.Contains(insertSQL, "`phone`") {
+		t.Fatalf("user INSERT contains nullable phone zero value: %q", insertSQL)
 	}
 }
 

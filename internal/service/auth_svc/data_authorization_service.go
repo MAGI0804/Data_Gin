@@ -202,7 +202,7 @@ func (service *DataAuthorizationService) CreateAccount(ctx context.Context, acto
 		}
 		now := service.now().UTC().Truncate(time.Millisecond)
 		user := model.User{BaseModel: &model.BaseModel{}, CommonTimestampsField: &model.CommonTimestampsField{CreatedAt: int(now.Unix()), UpdatedAt: int(now.Unix())}, Account: normalized.Account, Email: normalized.Email, Nickname: normalized.Nickname, Password: password}
-		if err := tx.WithContext(ctx).Create(&user).Error; err != nil {
+		if err := createDataAuthorizationUser(ctx, tx, &user); err != nil {
 			if isDuplicateEntry(err) {
 				return ErrDataAuthorizationConflict
 			}
@@ -237,6 +237,12 @@ func (service *DataAuthorizationService) CreateAccount(ctx context.Context, acto
 		return nil
 	})
 	return result, err
+}
+
+func createDataAuthorizationUser(ctx context.Context, db *gorm.DB, user *model.User) error {
+	// Phone is nullable and unique. Omitting its string zero value stores NULL,
+	// so multiple API-only accounts can exist without synthetic phone numbers.
+	return db.WithContext(ctx).Omit("Phone").Create(user).Error
 }
 
 func (service *DataAuthorizationService) Grant(ctx context.Context, actorUserID, targetUserID uint, idempotencyKey string, request auth_request.DataAuthorizationGrantRequest) (*DataAuthorizationMutationResult, error) {
