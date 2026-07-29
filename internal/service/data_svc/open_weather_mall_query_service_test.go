@@ -62,7 +62,7 @@ func TestOpenWeatherMallQueryServiceReturnsPublicCursorPage(t *testing.T) {
 	if permissions.permission != model.PermissionWeatherRead || malls.calls != 1 || malls.afterID != 0 || malls.limit != 2 {
 		t.Fatalf("permission=%q calls=%d afterID=%d limit=%d", permissions.permission, malls.calls, malls.afterID, malls.limit)
 	}
-	if len(result.Items) != 1 || result.Items[0].ID != 7 || result.Items[0].TimeZone != "Asia/Shanghai" ||
+	if len(result.Items) != 1 || result.Items[0].MallID != 7 || result.Items[0].TimeZone != "Asia/Shanghai" ||
 		!result.Pagination.HasMore || result.Pagination.NextCursor == "" {
 		t.Fatalf("result=%+v", result)
 	}

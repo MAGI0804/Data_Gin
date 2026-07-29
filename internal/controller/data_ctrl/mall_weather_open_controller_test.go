@@ -31,16 +31,17 @@ func TestMallWeatherControllerOpenHourlyParsesJSON(t *testing.T) {
 		}, nil
 	}}
 	body := `{
-		"start":"2026-07-22T08:00:00+08:00",
-		"end":"2026-07-23T08:00:00+08:00",
+		"mallId":7,
+		"start":"2026-07-22 08:00:00",
+		"end":"2026-07-23 08:00:00",
 		"timeZone":"Asia/Shanghai",
 		"latest":false,
-		"asOf":"2026-07-22T09:00:00+08:00",
+		"asOf":"2026-07-22 09:00:00",
 		"qualityStatus":"valid",
 		"cursor":"abc",
 		"pageSize":25
 	}`
-	recorder := performOpenMallWeatherRequest(t, service, "/api/open/weather/malls/7/hourly", body)
+	recorder := performOpenMallWeatherRequest(t, service, "/api/open/weather/hourly", body)
 	if recorder.Code != http.StatusOK || gotActor != 17 || gotMall != 7 {
 		t.Fatalf("status=%d actor=%d mall=%d body=%s", recorder.Code, gotActor, gotMall, recorder.Body.String())
 	}
@@ -61,10 +62,48 @@ func TestMallWeatherControllerOpenHourlyDefaultsLatest(t *testing.T) {
 		gotRequest = request
 		return &data_svc.MallWeatherHourlyResult{Items: []data_svc.MallWeatherHourlyDTO{}}, nil
 	}}
-	body := `{"start":"2026-07-22T00:00:00Z","end":"2026-07-23T00:00:00Z"}`
-	recorder := performOpenMallWeatherRequest(t, service, "/api/open/weather/malls/7/hourly", body)
+	body := `{"mallId":7,"start":"2026-07-22 00:00:00","end":"2026-07-23 00:00:00"}`
+	recorder := performOpenMallWeatherRequest(t, service, "/api/open/weather/hourly", body)
 	if recorder.Code != http.StatusOK || !gotRequest.Latest {
 		t.Fatalf("status=%d request=%+v body=%s", recorder.Code, gotRequest, recorder.Body.String())
+	}
+}
+
+func TestMallWeatherControllerOpenHourlyRejectsConflictingPathAndBodyMallID(t *testing.T) {
+	calls := 0
+	service := fakeMallWeatherControllerService{hourly: func(
+		context.Context,
+		uint,
+		uint,
+		requestbody.MallWeatherHourlyQueryRequest,
+	) (*data_svc.MallWeatherHourlyResult, error) {
+		calls++
+		return nil, nil
+	}}
+	body := `{"mallId":8,"start":"2026-07-22 00:00:00","end":"2026-07-23 00:00:00"}`
+	recorder := performOpenMallWeatherRequest(t, service, "/api/open/weather/malls/7/hourly", body)
+	if recorder.Code != http.StatusUnprocessableEntity || calls != 0 {
+		t.Fatalf("status=%d calls=%d body=%s", recorder.Code, calls, recorder.Body.String())
+	}
+}
+
+func TestMallWeatherControllerOpenHourlyFormatsResponseDateTimes(t *testing.T) {
+	service := fakeMallWeatherControllerService{hourly: func(
+		context.Context,
+		uint,
+		uint,
+		requestbody.MallWeatherHourlyQueryRequest,
+	) (*data_svc.MallWeatherHourlyResult, error) {
+		return &data_svc.MallWeatherHourlyResult{Items: []data_svc.MallWeatherHourlyDTO{{
+			ForecastTimeUTC:   time.Date(2026, 7, 22, 1, 2, 3, 0, time.UTC),
+			ForecastTimeLocal: "2026-07-22T09:02:03+08:00",
+		}}}, nil
+	}}
+	body := `{"mallId":7,"start":"2026-07-22 00:00:00","end":"2026-07-23 00:00:00"}`
+	recorder := performOpenMallWeatherRequest(t, service, "/api/open/weather/hourly", body)
+	if recorder.Code != http.StatusOK || !strings.Contains(recorder.Body.String(), `"forecastTimeUtc":"2026-07-22 01:02:03"`) ||
+		!strings.Contains(recorder.Body.String(), `"forecastTimeLocal":"2026-07-22 09:02:03"`) {
+		t.Fatalf("status=%d body=%s", recorder.Code, recorder.Body.String())
 	}
 }
 
@@ -80,12 +119,13 @@ func TestMallWeatherControllerOpenHourlyRejectsInvalidJSON(t *testing.T) {
 		return nil, nil
 	}}
 	tests := []string{
-		`{"start":"2026-07-22T00:00:00Z","end":"2026-07-23T00:00:00Z","unknown":true}`,
-		`{"start":"bad","end":"2026-07-23T00:00:00Z"}`,
-		`{"start":"2026-07-22T00:00:00Z","end":"2026-07-23T00:00:00Z","pageSize":0}`,
+		`{"mallId":7,"start":"2026-07-22 00:00:00","end":"2026-07-23 00:00:00","unknown":true}`,
+		`{"mallId":7,"start":"bad","end":"2026-07-23 00:00:00"}`,
+		`{"mallId":7,"start":"2026-07-22 00:00:00","end":"2026-07-23 00:00:00","pageSize":0}`,
+		`{"start":"2026-07-22 00:00:00","end":"2026-07-23 00:00:00"}`,
 	}
 	for _, body := range tests {
-		recorder := performOpenMallWeatherRequest(t, service, "/api/open/weather/malls/7/hourly", body)
+		recorder := performOpenMallWeatherRequest(t, service, "/api/open/weather/hourly", body)
 		if recorder.Code != http.StatusUnprocessableEntity || strings.Contains(recorder.Body.String(), "unknown") {
 			t.Fatalf("status=%d response=%s request=%s", recorder.Code, recorder.Body.String(), body)
 		}
@@ -109,6 +149,7 @@ func performOpenMallWeatherRequest(
 		c.Next()
 	})
 	controller := NewMallWeatherControllerWithService(service)
+	router.POST("/api/open/weather/hourly", controller.OpenHourly)
 	router.POST("/api/open/weather/malls/:id/hourly", controller.OpenHourly)
 	recorder := httptest.NewRecorder()
 	request := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))

@@ -241,6 +241,14 @@ func registerOpenWeatherRoutes(
 	)
 	{
 		weatherGroup.POST("/malls/query", mallCtrl.Query)
+		weatherGroup.POST("/overview", weatherCtrl.OpenOverview)
+		weatherGroup.POST("/realtime", weatherCtrl.OpenRealtime)
+		weatherGroup.POST("/minutely", weatherCtrl.OpenMinutely)
+		weatherGroup.POST("/hourly", weatherCtrl.OpenHourly)
+		weatherGroup.POST("/daily", weatherCtrl.OpenDaily)
+		weatherGroup.POST("/alerts", weatherCtrl.OpenAlerts)
+		weatherGroup.POST("/life-indices", weatherCtrl.OpenLifeIndices)
+		// Legacy path aliases remain available while clients migrate mallId into JSON bodies.
 		weatherGroup.POST("/malls/:id/overview", weatherCtrl.OpenOverview)
 		weatherGroup.POST("/malls/:id/realtime", weatherCtrl.OpenRealtime)
 		weatherGroup.POST("/malls/:id/minutely", weatherCtrl.OpenMinutely)

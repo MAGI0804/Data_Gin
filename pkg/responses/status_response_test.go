@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"gin-biz-web-api/pkg/errcode"
 
@@ -49,5 +50,33 @@ func TestToSafeErrorResponseMapsStatusWithoutLeakingDetails(t *testing.T) {
 func TestForbiddenUsesForbiddenHTTPStatus(t *testing.T) {
 	if got := errcode.Forbidden.HttpStatusCode(); got != http.StatusForbidden {
 		t.Fatalf("Forbidden HTTP status = %d, want %d", got, http.StatusForbidden)
+	}
+}
+
+func TestForOpenAPIFormatsNestedDateTimes(t *testing.T) {
+	value := ForOpenAPI(gin.H{
+		"fetchedAtUtc": time.Date(2026, 7, 29, 4, 5, 6, 123, time.UTC),
+		"items": []interface{}{gin.H{
+			"observedAtLocal": "2026-07-29T12:05:06+08:00",
+			"issuedAtLocal":   "2026-07-29T12:05:06+08:00",
+			"forecastDate":    "2026-07-30",
+			"description":     "2026-07-29T12:05:06+08:00",
+		}},
+	})
+	raw, err := json.Marshal(value)
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+	body := string(raw)
+	for _, expected := range []string{
+		`"fetchedAtUtc":"2026-07-29 04:05:06"`,
+		`"observedAtLocal":"2026-07-29T12:05:06+08:00"`,
+		`"issuedAtLocal":"2026-07-29 12:05:06"`,
+		`"forecastDate":"2026-07-30"`,
+		`"description":"2026-07-29T12:05:06+08:00"`,
+	} {
+		if !strings.Contains(body, expected) {
+			t.Fatalf("response = %s, want %s", body, expected)
+		}
 	}
 }

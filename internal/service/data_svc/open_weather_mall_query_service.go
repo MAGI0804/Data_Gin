@@ -49,7 +49,7 @@ type OpenWeatherMallQueryResult struct {
 }
 
 type OpenWeatherMallDTO struct {
-	ID             uint   `json:"id"`
+	MallID         uint   `json:"mallId"`
 	MallCode       string `json:"mallCode"`
 	NameCN         string `json:"nameCn"`
 	NameEN         string `json:"nameEn"`
@@ -176,7 +176,7 @@ func normalizeOpenWeatherMallQuery(request requestbody.OpenWeatherMallQueryReque
 
 func openWeatherMallDTO(mall *model.Mall) OpenWeatherMallDTO {
 	return OpenWeatherMallDTO{
-		ID:             mall.ID,
+		MallID:         mall.ID,
 		MallCode:       mall.MallCode,
 		NameCN:         mall.NameCN,
 		NameEN:         mall.NameEN,

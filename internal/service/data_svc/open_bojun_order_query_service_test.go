@@ -73,7 +73,7 @@ func TestOpenBojunOrderQueryServiceReturnsSanitizedCursorPage(t *testing.T) {
 		orders.query.Limit != 2 {
 		t.Fatalf("query=%+v", orders.query)
 	}
-	if len(result.Items) != 1 || result.Items[0].OrderDate != "2026-07-03" ||
+	if len(result.Items) != 1 || result.Items[0].OrderDate != "2026-07-03 00:00:00" ||
 		result.Items[0].ActualAmount != "446.40" || len(result.Items[0].Items) != 1 ||
 		result.Items[0].Items[0].SKUNo != "SKU001" {
 		t.Fatalf("result=%+v", result)

@@ -325,7 +325,7 @@ func formatOpenBojunBillDate(value int) string {
 	if err != nil {
 		return ""
 	}
-	return parsed.Format("2006-01-02")
+	return parsed.Format("2006-01-02 15:04:05")
 }
 
 func encodeOpenBojunOrderCursor(cursor openBojunOrderCursor) (string, error) {
