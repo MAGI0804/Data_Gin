@@ -51,17 +51,14 @@ func (reader *fakeOpenWeatherMallPermissionReader) HasPermission(
 }
 
 func TestOpenWeatherMallQueryServiceReturnsPublicCursorPage(t *testing.T) {
-	longitude, latitude := 121.501, 31.239
 	weatherLongitude, weatherLatitude := 121.502, 31.240
-	confidence := 98.5
 	malls := &fakeOpenWeatherMallReader{malls: []model.Mall{
 		{
 			BaseModel: model.BaseModel{ID: 7}, MallCode: "M001", NameCN: "上海某商场",
 			NameEN: "Shanghai Mall", Country: "中国", Province: "上海市", City: "上海市", District: "浦东新区",
 			Township: "陆家嘴街道", Street: "世纪大道", StreetNumber: "1号", AddressRaw: "浦东陆家嘴附近",
-			AddressStandardized: "上海市浦东新区世纪大道1号", Longitude: &longitude, Latitude: &latitude,
-			CoordinateSystem: "gcj02", WeatherLongitude: &weatherLongitude, WeatherLatitude: &weatherLatitude,
-			WeatherCoordinateSystem: "gcj02", GeocodeLevel: "building", GeocodeConfidence: &confidence,
+			AddressStandardized: "上海市浦东新区世纪大道1号", WeatherLongitude: &weatherLongitude,
+			WeatherLatitude: &weatherLatitude, WeatherCoordinateSystem: "gcj02",
 			Timezone: "Asia/Shanghai", WeatherEnabled: true, ContactPhone: "secret",
 		},
 		{
@@ -83,10 +80,9 @@ func TestOpenWeatherMallQueryServiceReturnsPublicCursorPage(t *testing.T) {
 		t.Fatalf("result=%+v", result)
 	}
 	item := result.Items[0]
-	if item.Location != "上海市 浦东新区 陆家嘴街道" || item.AddressRaw != "浦东陆家嘴附近" ||
-		item.AddressStandardized != "上海市浦东新区世纪大道1号" || item.Longitude == nil || *item.Longitude != longitude ||
-		item.WeatherLongitude == nil || *item.WeatherLongitude != weatherLongitude ||
-		item.CoordinateSystem != "GCJ02" || item.GeocodeConfidence == nil {
+	if item.Location != "上海市 浦东新区 陆家嘴街道" || item.Address != "上海市浦东新区世纪大道1号" ||
+		item.Longitude == nil || *item.Longitude != weatherLongitude || item.Latitude == nil ||
+		*item.Latitude != weatherLatitude || item.CoordinateSystem != "GCJ02" {
 		t.Fatalf("mall item=%+v", item)
 	}
 	if result.Pagination.Page != 1 || result.Pagination.PageSize != 1 || result.Pagination.TotalItems != 2 || result.Pagination.TotalPages != 2 {
@@ -96,12 +92,41 @@ func TestOpenWeatherMallQueryServiceReturnsPublicCursorPage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal result: %v", err)
 	}
-	if strings.Contains(string(payload), "secret") || strings.Contains(string(payload), "contactPhone") {
-		t.Fatalf("response leaked internal field: %s", payload)
+	for _, forbidden := range []string{
+		"secret", "contactPhone", "addressRaw", "addressStandardized", "weatherLongitude",
+		"weatherLatitude", "weatherCoordinateSystem", "weatherEnabled", "geocodeConfidence",
+	} {
+		if strings.Contains(string(payload), forbidden) {
+			t.Fatalf("response contains redundant or internal field %q: %s", forbidden, payload)
+		}
+	}
+	var decodedResult struct {
+		Items []map[string]json.RawMessage `json:"items"`
+	}
+	if err := json.Unmarshal(payload, &decodedResult); err != nil {
+		t.Fatalf("unmarshal result: %v", err)
+	}
+	if len(decodedResult.Items) != 1 || len(decodedResult.Items[0]) != 10 {
+		t.Fatalf("public mall fields=%v", decodedResult.Items)
+	}
+	for _, field := range []string{
+		"mallId", "mallCode", "nameCn", "nameEn", "location", "address",
+		"longitude", "latitude", "coordinateSystem", "timeZone",
+	} {
+		if _, exists := decodedResult.Items[0][field]; !exists {
+			t.Fatalf("public mall response missing %q: %s", field, payload)
+		}
 	}
 	cursor, err := decodeOpenWeatherMallCursor(result.Pagination.NextCursor)
 	if err != nil || cursor.ID != 7 || cursor.Version != 1 || cursor.Page != 2 {
 		t.Fatalf("cursor=%+v error=%v", cursor, err)
+	}
+}
+
+func TestOpenWeatherMallAddressFallsBackToRawAddress(t *testing.T) {
+	mall := &model.Mall{AddressRaw: "  浦东陆家嘴附近  "}
+	if address := openWeatherMallAddress(mall); address != "浦东陆家嘴附近" {
+		t.Fatalf("address=%q", address)
 	}
 }
 

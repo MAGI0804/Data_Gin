@@ -50,33 +50,16 @@ type OpenWeatherMallQueryResult struct {
 }
 
 type OpenWeatherMallDTO struct {
-	MallID                  uint     `json:"mallId"`
-	MallCode                string   `json:"mallCode"`
-	NameCN                  string   `json:"nameCn"`
-	NameEN                  string   `json:"nameEn"`
-	Country                 string   `json:"country"`
-	Province                string   `json:"province"`
-	City                    string   `json:"city"`
-	District                string   `json:"district"`
-	Township                string   `json:"township"`
-	Street                  string   `json:"street"`
-	StreetNumber            string   `json:"streetNumber"`
-	PostalCode              string   `json:"postalCode"`
-	Location                string   `json:"location"`
-	AddressRaw              string   `json:"addressRaw"`
-	AddressStandardized     string   `json:"addressStandardized"`
-	Adcode                  string   `json:"adcode"`
-	CityCode                string   `json:"cityCode"`
-	Longitude               *float64 `json:"longitude"`
-	Latitude                *float64 `json:"latitude"`
-	CoordinateSystem        string   `json:"coordinateSystem"`
-	WeatherLongitude        *float64 `json:"weatherLongitude"`
-	WeatherLatitude         *float64 `json:"weatherLatitude"`
-	WeatherCoordinateSystem string   `json:"weatherCoordinateSystem"`
-	GeocodeLevel            string   `json:"geocodeLevel"`
-	GeocodeConfidence       *float64 `json:"geocodeConfidence"`
-	TimeZone                string   `json:"timeZone"`
-	WeatherEnabled          bool     `json:"weatherEnabled"`
+	MallID           uint     `json:"mallId"`
+	MallCode         string   `json:"mallCode"`
+	NameCN           string   `json:"nameCn"`
+	NameEN           string   `json:"nameEn"`
+	Location         string   `json:"location"`
+	Address          string   `json:"address"`
+	Longitude        *float64 `json:"longitude"`
+	Latitude         *float64 `json:"latitude"`
+	CoordinateSystem string   `json:"coordinateSystem"`
+	TimeZone         string   `json:"timeZone"`
 }
 
 type OpenWeatherMallPagination struct {
@@ -205,34 +188,27 @@ func normalizeOpenWeatherMallQuery(request requestbody.OpenWeatherMallQueryReque
 
 func openWeatherMallDTO(mall *model.Mall) OpenWeatherMallDTO {
 	return OpenWeatherMallDTO{
-		MallID:                  mall.ID,
-		MallCode:                mall.MallCode,
-		NameCN:                  mall.NameCN,
-		NameEN:                  mall.NameEN,
-		Country:                 mall.Country,
-		Province:                mall.Province,
-		City:                    mall.City,
-		District:                mall.District,
-		Township:                mall.Township,
-		Street:                  mall.Street,
-		StreetNumber:            mall.StreetNumber,
-		PostalCode:              mall.PostalCode,
-		Location:                openWeatherMallLocation(mall),
-		AddressRaw:              mall.AddressRaw,
-		AddressStandardized:     mall.AddressStandardized,
-		Adcode:                  mall.Adcode,
-		CityCode:                mall.Citycode,
-		Longitude:               mall.Longitude,
-		Latitude:                mall.Latitude,
-		CoordinateSystem:        strings.ToUpper(mall.CoordinateSystem),
-		WeatherLongitude:        mall.WeatherLongitude,
-		WeatherLatitude:         mall.WeatherLatitude,
-		WeatherCoordinateSystem: strings.ToUpper(mall.WeatherCoordinateSystem),
-		GeocodeLevel:            mall.GeocodeLevel,
-		GeocodeConfidence:       mall.GeocodeConfidence,
-		TimeZone:                mall.Timezone,
-		WeatherEnabled:          mall.WeatherEnabled,
+		MallID:           mall.ID,
+		MallCode:         mall.MallCode,
+		NameCN:           mall.NameCN,
+		NameEN:           mall.NameEN,
+		Location:         openWeatherMallLocation(mall),
+		Address:          openWeatherMallAddress(mall),
+		Longitude:        mall.WeatherLongitude,
+		Latitude:         mall.WeatherLatitude,
+		CoordinateSystem: strings.ToUpper(mall.WeatherCoordinateSystem),
+		TimeZone:         mall.Timezone,
 	}
+}
+
+func openWeatherMallAddress(mall *model.Mall) string {
+	if mall == nil {
+		return ""
+	}
+	if address := strings.TrimSpace(mall.AddressStandardized); address != "" {
+		return address
+	}
+	return strings.TrimSpace(mall.AddressRaw)
 }
 
 func openWeatherMallLocation(mall *model.Mall) string {

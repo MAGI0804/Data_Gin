@@ -136,11 +136,9 @@ func (dao *MallDAO) ListOpenWeatherMallsAfterID(ctx context.Context, afterID uin
 	query = query.
 		Model(&model.Mall{}).
 		Select([]string{
-			"id", "mall_code", "name_cn", "name_en", "country", "province", "city", "district",
-			"township", "street", "street_number", "postal_code", "address_raw", "address_standardized",
-			"adcode", "citycode", "longitude", "latitude", "coordinate_system", "weather_longitude",
-			"weather_latitude", "weather_coordinate_system", "geocode_level", "geocode_confidence",
-			"timezone", "weather_enabled",
+			"id", "mall_code", "name_cn", "name_en", "province", "city", "district", "township",
+			"address_raw", "address_standardized", "weather_longitude", "weather_latitude",
+			"weather_coordinate_system", "timezone",
 		})
 	if afterID > 0 {
 		query = query.Where("id > ?", afterID)

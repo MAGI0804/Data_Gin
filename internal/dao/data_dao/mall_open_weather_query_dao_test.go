@@ -25,12 +25,8 @@ func TestMallDAOListOpenWeatherMallsUsesBoundedPublicQuery(t *testing.T) {
 	for _, fragment := range []string{
 		"`address_raw`",
 		"`address_standardized`",
-		"`longitude`",
-		"`latitude`",
 		"`weather_longitude`",
 		"`weather_latitude`",
-		"`geocode_level`",
-		"`geocode_confidence`",
 		"status = ?",
 		"geocode_status = ?",
 		"weather_enabled = ?",
@@ -44,7 +40,10 @@ func TestMallDAOListOpenWeatherMallsUsesBoundedPublicQuery(t *testing.T) {
 			t.Fatalf("statement missing %q: %s", fragment, statement)
 		}
 	}
-	for _, internalColumn := range []string{"contact_phone", "custom_fields_json", "source_reference"} {
+	for _, internalColumn := range []string{
+		"contact_phone", "custom_fields_json", "source_reference", "`longitude`", "`latitude`",
+		"`coordinate_system`", "geocode_level", "geocode_confidence",
+	} {
 		if strings.Contains(statement, internalColumn) {
 			t.Fatalf("statement selects internal column %q: %s", internalColumn, statement)
 		}
