@@ -241,7 +241,7 @@
 
 .mall-weather-layout {
   display: grid;
-  grid-template-columns: minmax(240px, 300px) minmax(0, 1fr);
+  grid-template-columns: minmax(170px, 190px) minmax(0, 1fr);
   align-items: start;
   gap: 14px;
 }
@@ -465,6 +465,31 @@
   min-width: 0;
 }
 
+@media (min-width: 1025px) {
+  .mall-weather-page {
+    grid-template-rows: minmax(0, 1fr);
+    height: 100%;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .mall-weather-layout {
+    align-items: stretch;
+    height: 100%;
+    min-height: 0;
+    overflow: hidden;
+  }
+
+  .mall-weather-malls,
+  .mall-weather-content {
+    min-height: 0;
+    align-content: start;
+    overflow-y: auto;
+    overscroll-behavior-y: contain;
+    scrollbar-gutter: stable;
+  }
+}
+
 .mall-weather-section-title,
 .mall-weather-summary-heading {
   display: flex;
@@ -506,18 +531,8 @@
   padding: 10px;
 }
 
-.mall-weather-mall strong,
-.mall-weather-mall span,
-.mall-weather-mall small {
+.mall-weather-mall strong {
   display: block;
-}
-
-.mall-weather-mall span,
-.mall-weather-mall small {
-  margin-top: 3px;
-  color: #666666;
-  font-size: 11px;
-  font-weight: 500;
   overflow-wrap: anywhere;
 }
 
@@ -525,11 +540,6 @@
   border-color: #111111;
   background: #111111;
   color: #ffffff;
-}
-
-.mall-weather-mall.active span,
-.mall-weather-mall.active small {
-  color: #d6d6d6;
 }
 
 .mall-weather-summary-heading h3 {

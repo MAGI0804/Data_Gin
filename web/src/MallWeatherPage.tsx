@@ -546,13 +546,12 @@ export function MallWeatherPage({
               <button
                 type="button"
                 className={mall.id === selectedMallID ? 'mall-weather-mall active' : 'mall-weather-mall'}
+                aria-label={`${mall.nameCn}，商场编码 ${mall.mallCode}`}
                 aria-pressed={mall.id === selectedMallID}
                 key={mall.id}
                 onClick={() => { selectedMallIDRef.current = mall.id; setSelectedMallID(mall.id); setShowCreate(false) }}
               >
                 <strong>{mall.nameCn}</strong>
-                <span>{mall.mallCode} · {mall.city || '城市未填写'} · {mallWeatherMallReady(mall) ? '可查询' : mallLifecycleLabel(mall)}</span>
-                <small>{mall.address || '地址未填写'}</small>
               </button>
             ))}
           </div>
