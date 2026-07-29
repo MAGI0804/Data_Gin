@@ -318,6 +318,13 @@ button:focus-visible {
   overflow-y: auto;
 }
 
+@media (min-width: 841px) {
+  :root:has(.mall-weather-shell),
+  body:has(.mall-weather-shell) {
+    overflow: hidden;
+  }
+}
+
 @media (min-width: 1025px) {
   .mall-weather-shell .ops-workspace {
     display: grid;

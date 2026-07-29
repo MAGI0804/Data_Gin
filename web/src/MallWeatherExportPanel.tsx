@@ -72,6 +72,7 @@ type MallWeatherExportPanelProps = {
   csvStatus: string
   client: WeatherExportAPIClient
   downloadFile: WeatherExportFileClient
+  compact?: boolean
 }
 
 export function MallWeatherExportPanel({
@@ -85,6 +86,7 @@ export function MallWeatherExportPanel({
   csvStatus,
   client,
   downloadFile,
+  compact = false,
 }: MallWeatherExportPanelProps) {
   const exportStorage = useMemo(
     () => resolveMallWeatherExportStorage(() => window.sessionStorage),
@@ -411,8 +413,8 @@ export function MallWeatherExportPanel({
     }
   }
 
-  return (
-    <section className="workbench-panel mall-weather-export-panel" id="mall-weather-export" tabIndex={-1}
+  const exportPanel = (
+    <section className="workbench-panel mall-weather-export-panel" id={compact ? undefined : 'mall-weather-export'} tabIndex={compact ? undefined : -1}
       aria-busy={(format === 'csv' && csvLoading) || creatingJob || downloading || mallWeatherExportPollingActive(job?.status, pollingPaused)}>
       <div className="mall-weather-section-title">
         <div><strong>下载全部</strong><span>{mallName} · 当前商场六类天气数据</span></div>
@@ -495,6 +497,15 @@ export function MallWeatherExportPanel({
       {downloadMessage && <p className="mall-weather-action-message" role="status">{downloadMessage}</p>}
       {actionError && <p className="mall-weather-action-message error" role="alert">{actionError}</p>}
     </section>
+  )
+
+  if (!compact) return exportPanel
+
+  return (
+    <details className="mall-weather-export-compact">
+      <summary aria-label={`下载${mallName}全部天气数据`}><Download aria-hidden="true" />下载全部</summary>
+      <div className="mall-weather-export-popover">{exportPanel}</div>
+    </details>
   )
 }
 
