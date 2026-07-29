@@ -22,6 +22,7 @@ import (
 
 type MallWeatherQueryService interface {
 	Overview(context.Context, uint, uint, string) (*data_svc.MallWeatherOverviewResult, error)
+	CurrentRealtime(context.Context, uint, uint, string) (*data_svc.MallWeatherCurrentRealtimeResult, error)
 	Realtime(context.Context, uint, uint, requestbody.MallWeatherRealtimeQueryRequest) (*data_svc.MallWeatherRealtimeResult, error)
 	Minutely(context.Context, uint, uint, requestbody.MallWeatherMinutelyQueryRequest) (*data_svc.MallWeatherMinutelyResult, error)
 	Hourly(context.Context, uint, uint, requestbody.MallWeatherHourlyQueryRequest) (*data_svc.MallWeatherHourlyResult, error)
@@ -35,7 +36,7 @@ type MallWeatherController struct {
 	service MallWeatherQueryService
 }
 
-type openMallWeatherOverviewRequest struct {
+type openMallWeatherCurrentRequest struct {
 	MallID   uint   `json:"mallId"`
 	TimeZone string `json:"timeZone"`
 }
@@ -216,7 +217,7 @@ func (controller *MallWeatherController) FetchRuns(c *gin.Context) {
 }
 
 func (controller *MallWeatherController) OpenOverview(c *gin.Context) {
-	var request openMallWeatherOverviewRequest
+	var request openMallWeatherCurrentRequest
 	if err := decodeMallJSON(c, &request); err != nil {
 		writeMallWeatherError(c, fmt.Errorf("%w: invalid JSON body", data_svc.ErrMallWeatherInvalidQuery))
 		return
@@ -237,16 +238,19 @@ func (controller *MallWeatherController) OpenOverview(c *gin.Context) {
 }
 
 func (controller *MallWeatherController) OpenRealtime(c *gin.Context) {
-	mallID, request, err := parseOpenMallWeatherRequest(c)
+	var request openMallWeatherCurrentRequest
+	if err := decodeMallJSON(c, &request); err != nil {
+		writeMallWeatherError(c, fmt.Errorf("%w: invalid JSON body", data_svc.ErrMallWeatherInvalidQuery))
+		return
+	}
+	mallID, err := openMallWeatherID(c, request.MallID)
 	if err != nil {
 		writeMallWeatherError(c, err)
 		return
 	}
-	result, err := controller.service.Realtime(c.Request.Context(), auth.CurrentUserID(c), mallID, requestbody.MallWeatherRealtimeQueryRequest{
-		StartUTC: request.StartUTC, EndUTC: request.EndUTC, TimeZone: request.TimeZone,
-		Latest: request.Latest, AsOfUTC: request.AsOfUTC, QualityStatus: request.QualityStatus,
-		Cursor: request.Cursor, PageSize: request.PageSize, IncludeTotals: true,
-	})
+	result, err := controller.service.CurrentRealtime(
+		c.Request.Context(), auth.CurrentUserID(c), mallID, strings.TrimSpace(request.TimeZone),
+	)
 	if err != nil {
 		writeMallWeatherError(c, err)
 		return

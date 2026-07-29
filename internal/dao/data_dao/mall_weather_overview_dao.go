@@ -13,14 +13,25 @@ const (
 	maxWeatherOverviewAlerts   = 20
 )
 
-func (dao *MallWeatherDAO) FindOverviewRealtime(ctx context.Context, mallID uint) (*model.MallWeatherRealtime, error) {
+type MallWeatherCurrentRealtime struct {
+	Weather model.MallWeatherRealtime
+	Latest  model.MallWeatherLatest
+}
+
+type mallWeatherCurrentRealtimeRow struct {
+	model.MallWeatherRealtime
+	LatestFetchedAtUTC    time.Time `gorm:"column:latest_fetched_at_utc"`
+	LatestFreshnessStatus string    `gorm:"column:latest_freshness_status"`
+}
+
+func (dao *MallWeatherDAO) FindCurrentRealtime(ctx context.Context, mallID uint) (*MallWeatherCurrentRealtime, error) {
 	if dao == nil || dao.db == nil || ctx == nil || mallID == 0 {
-		return nil, fmt.Errorf("mall weather: invalid overview realtime query")
+		return nil, fmt.Errorf("mall weather: invalid current realtime query")
 	}
-	var row model.MallWeatherRealtime
+	var row mallWeatherCurrentRealtimeRow
 	err := dao.db.WithContext(ctx).
 		Table("mall_weather_latest AS latest").
-		Select("weather.*").
+		Select("weather.*, latest.fetched_at_utc AS latest_fetched_at_utc, latest.freshness_status AS latest_freshness_status").
 		Joins("INNER JOIN mall_weather_realtime AS weather ON weather.id = latest.source_row_id AND weather.mall_id = latest.mall_id").
 		Where("latest.mall_id = ? AND latest.data_kind = ?", mallID, model.MallWeatherDataKindRealtime).
 		Order("latest.fetched_at_utc DESC").
@@ -28,12 +39,26 @@ func (dao *MallWeatherDAO) FindOverviewRealtime(ctx context.Context, mallID uint
 		Limit(1).
 		Scan(&row).Error
 	if err != nil {
-		return nil, fmt.Errorf("mall weather: query overview realtime: %w", err)
+		return nil, fmt.Errorf("mall weather: query current realtime: %w", err)
 	}
 	if row.ID == 0 {
 		return nil, ErrMallWeatherLatestNotFound
 	}
-	return &row, nil
+	return &MallWeatherCurrentRealtime{
+		Weather: row.MallWeatherRealtime,
+		Latest: model.MallWeatherLatest{
+			MallID: mallID, DataKind: model.MallWeatherDataKindRealtime, SourceRowID: row.ID,
+			FetchedAtUTC: row.LatestFetchedAtUTC, FreshnessStatus: row.LatestFreshnessStatus,
+		},
+	}, nil
+}
+
+func (dao *MallWeatherDAO) FindOverviewRealtime(ctx context.Context, mallID uint) (*model.MallWeatherRealtime, error) {
+	current, err := dao.FindCurrentRealtime(ctx, mallID)
+	if err != nil {
+		return nil, err
+	}
+	return &current.Weather, nil
 }
 
 func (dao *MallWeatherDAO) ListOverviewMinutely(ctx context.Context, mallID uint, startUTC, endUTC time.Time, limit int) ([]model.MallWeatherMinutely, error) {

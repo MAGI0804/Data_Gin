@@ -389,6 +389,20 @@ func (dao *fakeMallWeatherQueryDAO) FindCurrentLatestLifeSource(_ context.Contex
 	return dao.latest, dao.err
 }
 
+func (dao *fakeMallWeatherQueryDAO) FindCurrentRealtime(context.Context, uint) (*data_dao.MallWeatherCurrentRealtime, error) {
+	if dao.overviewError != nil {
+		return nil, dao.overviewError
+	}
+	if dao.realtime == nil {
+		return nil, data_dao.ErrMallWeatherLatestNotFound
+	}
+	latest := model.MallWeatherLatest{FetchedAtUTC: dao.realtime.FetchedAtUTC}
+	if dao.latest != nil {
+		latest = *dao.latest
+	}
+	return &data_dao.MallWeatherCurrentRealtime{Weather: *dao.realtime, Latest: latest}, nil
+}
+
 func (dao *fakeMallWeatherQueryDAO) FindOverviewRealtime(context.Context, uint) (*model.MallWeatherRealtime, error) {
 	if dao.realtime == nil && dao.overviewError == nil {
 		return nil, data_dao.ErrMallWeatherLatestNotFound

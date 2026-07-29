@@ -273,14 +273,15 @@ func performMallWeatherRequest(t *testing.T, service MallWeatherQueryService, pa
 }
 
 type fakeMallWeatherControllerService struct {
-	overview    func(context.Context, uint, uint, string) (*data_svc.MallWeatherOverviewResult, error)
-	realtime    func(context.Context, uint, uint, requestbody.MallWeatherRealtimeQueryRequest) (*data_svc.MallWeatherRealtimeResult, error)
-	minutely    func(context.Context, uint, uint, requestbody.MallWeatherMinutelyQueryRequest) (*data_svc.MallWeatherMinutelyResult, error)
-	hourly      func(context.Context, uint, uint, requestbody.MallWeatherHourlyQueryRequest) (*data_svc.MallWeatherHourlyResult, error)
-	daily       func(context.Context, uint, uint, requestbody.MallWeatherDailyQueryRequest) (*data_svc.MallWeatherDailyResult, error)
-	alerts      func(context.Context, uint, uint, requestbody.MallWeatherAlertQueryRequest) (*data_svc.MallWeatherAlertResult, error)
-	lifeIndices func(context.Context, uint, uint, requestbody.MallWeatherLifeIndexQueryRequest) (*data_svc.MallWeatherLifeIndexResult, error)
-	fetchRuns   func(context.Context, uint, uint, requestbody.MallWeatherFetchRunQueryRequest) (*data_svc.MallWeatherFetchRunResult, error)
+	overview        func(context.Context, uint, uint, string) (*data_svc.MallWeatherOverviewResult, error)
+	currentRealtime func(context.Context, uint, uint, string) (*data_svc.MallWeatherCurrentRealtimeResult, error)
+	realtime        func(context.Context, uint, uint, requestbody.MallWeatherRealtimeQueryRequest) (*data_svc.MallWeatherRealtimeResult, error)
+	minutely        func(context.Context, uint, uint, requestbody.MallWeatherMinutelyQueryRequest) (*data_svc.MallWeatherMinutelyResult, error)
+	hourly          func(context.Context, uint, uint, requestbody.MallWeatherHourlyQueryRequest) (*data_svc.MallWeatherHourlyResult, error)
+	daily           func(context.Context, uint, uint, requestbody.MallWeatherDailyQueryRequest) (*data_svc.MallWeatherDailyResult, error)
+	alerts          func(context.Context, uint, uint, requestbody.MallWeatherAlertQueryRequest) (*data_svc.MallWeatherAlertResult, error)
+	lifeIndices     func(context.Context, uint, uint, requestbody.MallWeatherLifeIndexQueryRequest) (*data_svc.MallWeatherLifeIndexResult, error)
+	fetchRuns       func(context.Context, uint, uint, requestbody.MallWeatherFetchRunQueryRequest) (*data_svc.MallWeatherFetchRunResult, error)
 }
 
 func (service fakeMallWeatherControllerService) Overview(ctx context.Context, actor, mallID uint, timeZone string) (*data_svc.MallWeatherOverviewResult, error) {
@@ -288,6 +289,13 @@ func (service fakeMallWeatherControllerService) Overview(ctx context.Context, ac
 		panic("unexpected Overview call")
 	}
 	return service.overview(ctx, actor, mallID, timeZone)
+}
+
+func (service fakeMallWeatherControllerService) CurrentRealtime(ctx context.Context, actor, mallID uint, timeZone string) (*data_svc.MallWeatherCurrentRealtimeResult, error) {
+	if service.currentRealtime == nil {
+		panic("unexpected CurrentRealtime call")
+	}
+	return service.currentRealtime(ctx, actor, mallID, timeZone)
 }
 
 func (service fakeMallWeatherControllerService) Realtime(ctx context.Context, actor, mallID uint, request requestbody.MallWeatherRealtimeQueryRequest) (*data_svc.MallWeatherRealtimeResult, error) {
