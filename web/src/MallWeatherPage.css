@@ -486,7 +486,11 @@
     align-content: start;
     overflow-y: auto;
     overscroll-behavior-y: contain;
-    scrollbar-gutter: stable;
+  }
+
+  .mall-weather-content .data-table-wrap {
+    min-height: max-content;
+    overflow-y: hidden;
   }
 }
 
