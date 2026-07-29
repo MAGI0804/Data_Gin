@@ -129,14 +129,19 @@ func (dao *MallDAO) ListEnabledWeatherAfterID(ctx context.Context, afterID uint,
 // whose stored weather coordinates are immediately usable by open queries.
 func (dao *MallDAO) ListOpenWeatherMallsAfterID(ctx context.Context, afterID uint, limit int) ([]model.Mall, error) {
 	var malls []model.Mall
-	query := dao.db.WithContext(ctx).
+	query, err := dao.openWeatherMallsQuery(ctx)
+	if err != nil {
+		return nil, err
+	}
+	query = query.
 		Model(&model.Mall{}).
-		Select("id", "mall_code", "name_cn", "name_en", "province", "city", "district", "timezone", "weather_enabled").
-		Where("status = ?", "active").
-		Where("geocode_status = ?", "confirmed").
-		Where("weather_enabled = ?", true).
-		Where("weather_longitude BETWEEN ? AND ?", -180, 180).
-		Where("weather_latitude BETWEEN ? AND ?", -90, 90)
+		Select([]string{
+			"id", "mall_code", "name_cn", "name_en", "country", "province", "city", "district",
+			"township", "street", "street_number", "postal_code", "address_raw", "address_standardized",
+			"adcode", "citycode", "longitude", "latitude", "coordinate_system", "weather_longitude",
+			"weather_latitude", "weather_coordinate_system", "geocode_level", "geocode_confidence",
+			"timezone", "weather_enabled",
+		})
 	if afterID > 0 {
 		query = query.Where("id > ?", afterID)
 	}
@@ -144,6 +149,30 @@ func (dao *MallDAO) ListOpenWeatherMallsAfterID(ctx context.Context, afterID uin
 		return nil, fmt.Errorf("mall: list open weather malls: %w", err)
 	}
 	return malls, nil
+}
+
+func (dao *MallDAO) CountOpenWeatherMalls(ctx context.Context) (int64, error) {
+	query, err := dao.openWeatherMallsQuery(ctx)
+	if err != nil {
+		return 0, err
+	}
+	var total int64
+	if err := query.Model(&model.Mall{}).Count(&total).Error; err != nil {
+		return 0, fmt.Errorf("mall: count open weather malls: %w", err)
+	}
+	return total, nil
+}
+
+func (dao *MallDAO) openWeatherMallsQuery(ctx context.Context) (*gorm.DB, error) {
+	if dao == nil || dao.db == nil || ctx == nil {
+		return nil, fmt.Errorf("mall: invalid open weather query")
+	}
+	return dao.db.WithContext(ctx).
+		Where("status = ?", "active").
+		Where("geocode_status = ?", "confirmed").
+		Where("weather_enabled = ?", true).
+		Where("weather_longitude BETWEEN ? AND ?", -180, 180).
+		Where("weather_latitude BETWEEN ? AND ?", -90, 90), nil
 }
 
 func (dao *MallDAO) UpdateWithVersion(ctx context.Context, id uint, expectedVersion uint64, updates map[string]interface{}) error {

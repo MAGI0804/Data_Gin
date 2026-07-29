@@ -61,3 +61,29 @@ func TestBojunRetailOrderDAOListOpenOrdersRejectsUnboundedQuery(t *testing.T) {
 		t.Fatal("ListOpenOrders() accepted unbounded query")
 	}
 }
+
+func TestBojunRetailOrderDAOCountOpenOrdersIgnoresCursorBoundary(t *testing.T) {
+	t.Parallel()
+	db := dryRunWeatherDAOTestDB(t)
+	var statement string
+	if err := db.Callback().Query().After("gorm:query").Register("test:capture_open_bojun_count_sql", func(tx *gorm.DB) {
+		statement = tx.Statement.SQL.String()
+	}); err != nil {
+		t.Fatalf("register SQL capture callback: %v", err)
+	}
+	_, err := NewBojunRetailOrderDAO(db).CountOpenOrders(t.Context(), OpenBojunOrderQuery{
+		StartBillDate: 20260701, EndBillDate: 20260731, StoreCodes: []string{"ABCN001P012"},
+		OrderTypes: []string{"CMR"}, BeforeBillDate: 20260720, BeforeID: 99,
+	})
+	if err != nil {
+		t.Fatalf("CountOpenOrders() error=%v", err)
+	}
+	for _, fragment := range []string{"SELECT count(*)", "billdate BETWEEN ? AND ?", "c_store_code IN (?)", "order_type_code IN (?)"} {
+		if !strings.Contains(statement, fragment) {
+			t.Fatalf("statement missing %q: %s", fragment, statement)
+		}
+	}
+	if strings.Contains(statement, "billdate < ?") || strings.Contains(statement, "LIMIT") || strings.Contains(statement, "ORDER BY") {
+		t.Fatalf("count statement contains page boundary: %s", statement)
+	}
+}

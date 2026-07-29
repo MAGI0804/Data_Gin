@@ -51,6 +51,12 @@ func formatOpenAPIField(field string, value interface{}) interface{} {
 		}
 		return typed
 	case string:
+		if openAPIDateFields[field] {
+			parsed, err := time.Parse(time.DateOnly, typed)
+			if err == nil {
+				return parsed.Format(OpenAPIDateTimeLayout)
+			}
+		}
 		if openAPIDateTimeFields[field] {
 			parsed, err := time.Parse(time.RFC3339Nano, typed)
 			if err == nil {
@@ -59,6 +65,10 @@ func formatOpenAPIField(field string, value interface{}) interface{} {
 		}
 	}
 	return value
+}
+
+var openAPIDateFields = map[string]bool{
+	"forecastDateLocal": true,
 }
 
 var openAPIDateTimeFields = map[string]bool{

@@ -47,7 +47,7 @@ func TestMallWeatherControllerOpenHourlyParsesJSON(t *testing.T) {
 	}
 	if gotRequest.Latest || gotRequest.PageSize != 25 || gotRequest.TimeZone != "Asia/Shanghai" ||
 		gotRequest.QualityStatus != "valid" || gotRequest.Cursor != "abc" || gotRequest.AsOfUTC == nil ||
-		!gotRequest.StartUTC.Equal(time.Date(2026, 7, 22, 0, 0, 0, 0, time.UTC)) {
+		!gotRequest.IncludeTotals || !gotRequest.StartUTC.Equal(time.Date(2026, 7, 22, 0, 0, 0, 0, time.UTC)) {
 		t.Fatalf("request=%+v", gotRequest)
 	}
 }

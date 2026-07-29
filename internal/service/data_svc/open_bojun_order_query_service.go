@@ -42,6 +42,7 @@ type OpenBojunOrderQueryService struct {
 
 type openBojunOrderReader interface {
 	ListOpenOrders(context.Context, data_dao.OpenBojunOrderQuery) ([]model.BojunRetailOrder, error)
+	CountOpenOrders(context.Context, data_dao.OpenBojunOrderQuery) (int64, error)
 }
 
 type openBojunOrderPermissionReader interface {
@@ -54,7 +55,7 @@ type OpenBojunOrderQueryResult struct {
 }
 
 type OpenBojunOrderPagination struct {
-	PageSize   int    `json:"pageSize"`
+	OpenPagination
 	NextCursor string `json:"nextCursor"`
 	HasMore    bool   `json:"hasMore"`
 }
@@ -87,6 +88,7 @@ type OpenBojunOrderLineDTO struct {
 type openBojunOrderCursor struct {
 	BillDate int  `json:"billDate"`
 	ID       uint `json:"id"`
+	Page     int  `json:"page,omitempty"`
 }
 
 func NewOpenBojunOrderQueryService() *OpenBojunOrderQueryService {
@@ -119,13 +121,17 @@ func (service *OpenBojunOrderQueryService) Query(
 	if err := service.authorize(ctx, actorUserID); err != nil {
 		return nil, err
 	}
-	query, pageSize, err := normalizeOpenBojunOrderQuery(request)
+	query, page, pageSize, err := normalizeOpenBojunOrderQuery(request)
 	if err != nil {
 		return nil, err
 	}
 
 	queryCtx, cancel := context.WithTimeout(ctx, openBojunOrderQueryTimeout)
 	defer cancel()
+	totalItems, err := service.orders.CountOpenOrders(queryCtx, query)
+	if err != nil {
+		return nil, fmt.Errorf("open bojun order query: count orders: %w", err)
+	}
 	orders, err := service.orders.ListOpenOrders(queryCtx, query)
 	if err != nil {
 		return nil, fmt.Errorf("open bojun order query: list orders: %w", err)
@@ -141,9 +147,14 @@ func (service *OpenBojunOrderQueryService) Query(
 	}
 	nextCursor := ""
 	if hasMore && len(orders) > 0 {
+		nextPage, pageErr := nextOpenCursorPage(page)
+		if pageErr != nil {
+			return nil, pageErr
+		}
 		nextCursor, err = encodeOpenBojunOrderCursor(openBojunOrderCursor{
 			BillDate: orders[len(orders)-1].BillDate,
 			ID:       orders[len(orders)-1].ID,
+			Page:     nextPage,
 		})
 		if err != nil {
 			return nil, fmt.Errorf("open bojun order query: encode cursor: %w", err)
@@ -152,7 +163,8 @@ func (service *OpenBojunOrderQueryService) Query(
 	return &OpenBojunOrderQueryResult{
 		Items: items,
 		Pagination: OpenBojunOrderPagination{
-			PageSize: pageSize, NextCursor: nextCursor, HasMore: hasMore,
+			OpenPagination: newOpenPagination(page, pageSize, totalItems),
+			NextCursor:     nextCursor, HasMore: hasMore,
 		},
 	}, nil
 }
@@ -178,30 +190,30 @@ func (service *OpenBojunOrderQueryService) authorize(ctx context.Context, actorU
 
 func normalizeOpenBojunOrderQuery(
 	request requestbody.OpenBojunOrderQueryRequest,
-) (data_dao.OpenBojunOrderQuery, int, error) {
+) (data_dao.OpenBojunOrderQuery, int, int, error) {
 	start, err := time.Parse("2006-01-02", strings.TrimSpace(request.StartDate))
 	if err != nil {
-		return data_dao.OpenBojunOrderQuery{}, 0, fmt.Errorf("%w: invalid startDate", ErrOpenBojunOrderInvalidQuery)
+		return data_dao.OpenBojunOrderQuery{}, 0, 0, fmt.Errorf("%w: invalid startDate", ErrOpenBojunOrderInvalidQuery)
 	}
 	end, err := time.Parse("2006-01-02", strings.TrimSpace(request.EndDate))
 	if err != nil || end.Before(start) || end.Sub(start) > (openBojunOrderMaxRangeDays-1)*24*time.Hour {
-		return data_dao.OpenBojunOrderQuery{}, 0, fmt.Errorf("%w: invalid endDate", ErrOpenBojunOrderInvalidQuery)
+		return data_dao.OpenBojunOrderQuery{}, 0, 0, fmt.Errorf("%w: invalid endDate", ErrOpenBojunOrderInvalidQuery)
 	}
 
 	storeCodes, err := normalizeOpenBojunStoreCodes(request.StoreCodes)
 	if err != nil {
-		return data_dao.OpenBojunOrderQuery{}, 0, err
+		return data_dao.OpenBojunOrderQuery{}, 0, 0, err
 	}
 	orderTypes, err := normalizeOpenBojunOrderTypes(request.OrderTypes)
 	if err != nil {
-		return data_dao.OpenBojunOrderQuery{}, 0, err
+		return data_dao.OpenBojunOrderQuery{}, 0, 0, err
 	}
 	pageSize := request.PageSize
 	if pageSize == 0 {
 		pageSize = openBojunOrderDefaultPageSize
 	}
 	if pageSize < 1 || pageSize > openBojunOrderMaxPageSize {
-		return data_dao.OpenBojunOrderQuery{}, 0, fmt.Errorf("%w: invalid pageSize", ErrOpenBojunOrderInvalidQuery)
+		return data_dao.OpenBojunOrderQuery{}, 0, 0, fmt.Errorf("%w: invalid pageSize", ErrOpenBojunOrderInvalidQuery)
 	}
 
 	startBillDate, _ := strconv.Atoi(start.Format("20060102"))
@@ -213,15 +225,17 @@ func normalizeOpenBojunOrderQuery(
 		OrderTypes:    orderTypes,
 		Limit:         pageSize + 1,
 	}
+	page := 1
 	if cursorValue := strings.TrimSpace(request.Cursor); cursorValue != "" {
 		cursor, err := decodeOpenBojunOrderCursor(cursorValue)
 		if err != nil || cursor.BillDate < startBillDate || cursor.BillDate > endBillDate {
-			return data_dao.OpenBojunOrderQuery{}, 0, fmt.Errorf("%w: invalid cursor", ErrOpenBojunOrderInvalidQuery)
+			return data_dao.OpenBojunOrderQuery{}, 0, 0, fmt.Errorf("%w: invalid cursor", ErrOpenBojunOrderInvalidQuery)
 		}
 		query.BeforeBillDate = cursor.BillDate
 		query.BeforeID = cursor.ID
+		page = openCursorPage(cursor.Page, true)
 	}
-	return query, pageSize, nil
+	return query, page, pageSize, nil
 }
 
 func normalizeOpenBojunStoreCodes(values []string) ([]string, error) {
@@ -345,7 +359,7 @@ func decodeOpenBojunOrderCursor(value string) (openBojunOrderCursor, error) {
 		return openBojunOrderCursor{}, err
 	}
 	var cursor openBojunOrderCursor
-	if err := json.Unmarshal(decoded, &cursor); err != nil || cursor.BillDate <= 0 || cursor.ID == 0 {
+	if err := json.Unmarshal(decoded, &cursor); err != nil || cursor.BillDate <= 0 || cursor.ID == 0 || invalidOpenCursorPage(cursor.Page) {
 		return openBojunOrderCursor{}, ErrOpenBojunOrderInvalidQuery
 	}
 	return cursor, nil

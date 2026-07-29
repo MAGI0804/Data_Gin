@@ -31,7 +31,7 @@ func (service *fakeOpenBojunOrderQueryService) Query(
 	return &data_svc.OpenBojunOrderQueryResult{
 		Items: []data_svc.OpenBojunOrderDTO{},
 		Pagination: data_svc.OpenBojunOrderPagination{
-			PageSize: 50,
+			OpenPagination: data_svc.OpenPagination{PageSize: 50},
 		},
 	}, nil
 }

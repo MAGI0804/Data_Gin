@@ -17,6 +17,12 @@ type fakeOpenWeatherMallReader struct {
 	limit   int
 	malls   []model.Mall
 	calls   int
+	counts  int
+}
+
+func (reader *fakeOpenWeatherMallReader) CountOpenWeatherMalls(context.Context) (int64, error) {
+	reader.counts++
+	return int64(len(reader.malls)), nil
 }
 
 func (reader *fakeOpenWeatherMallReader) ListOpenWeatherMallsAfterID(
@@ -45,13 +51,23 @@ func (reader *fakeOpenWeatherMallPermissionReader) HasPermission(
 }
 
 func TestOpenWeatherMallQueryServiceReturnsPublicCursorPage(t *testing.T) {
+	longitude, latitude := 121.501, 31.239
+	weatherLongitude, weatherLatitude := 121.502, 31.240
+	confidence := 98.5
 	malls := &fakeOpenWeatherMallReader{malls: []model.Mall{
 		{
 			BaseModel: model.BaseModel{ID: 7}, MallCode: "M001", NameCN: "上海某商场",
-			NameEN: "Shanghai Mall", Province: "上海市", City: "上海市", District: "浦东新区",
+			NameEN: "Shanghai Mall", Country: "中国", Province: "上海市", City: "上海市", District: "浦东新区",
+			Township: "陆家嘴街道", Street: "世纪大道", StreetNumber: "1号", AddressRaw: "浦东陆家嘴附近",
+			AddressStandardized: "上海市浦东新区世纪大道1号", Longitude: &longitude, Latitude: &latitude,
+			CoordinateSystem: "gcj02", WeatherLongitude: &weatherLongitude, WeatherLatitude: &weatherLatitude,
+			WeatherCoordinateSystem: "gcj02", GeocodeLevel: "building", GeocodeConfidence: &confidence,
 			Timezone: "Asia/Shanghai", WeatherEnabled: true, ContactPhone: "secret",
 		},
-		{BaseModel: model.BaseModel{ID: 8}, MallCode: "M002", WeatherEnabled: true},
+		{
+			BaseModel: model.BaseModel{ID: 8}, MallCode: "M002", WeatherEnabled: true,
+			WeatherLongitude: &weatherLongitude, WeatherLatitude: &weatherLatitude,
+		},
 	}}
 	permissions := &fakeOpenWeatherMallPermissionReader{allowed: true}
 	service := newOpenWeatherMallQueryService(malls, permissions, time.Now)
@@ -59,12 +75,22 @@ func TestOpenWeatherMallQueryServiceReturnsPublicCursorPage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Query() error=%v", err)
 	}
-	if permissions.permission != model.PermissionWeatherRead || malls.calls != 1 || malls.afterID != 0 || malls.limit != 2 {
+	if permissions.permission != model.PermissionWeatherRead || malls.calls != 1 || malls.counts != 1 || malls.afterID != 0 || malls.limit != 2 {
 		t.Fatalf("permission=%q calls=%d afterID=%d limit=%d", permissions.permission, malls.calls, malls.afterID, malls.limit)
 	}
 	if len(result.Items) != 1 || result.Items[0].MallID != 7 || result.Items[0].TimeZone != "Asia/Shanghai" ||
 		!result.Pagination.HasMore || result.Pagination.NextCursor == "" {
 		t.Fatalf("result=%+v", result)
+	}
+	item := result.Items[0]
+	if item.Location != "上海市 浦东新区 陆家嘴街道" || item.AddressRaw != "浦东陆家嘴附近" ||
+		item.AddressStandardized != "上海市浦东新区世纪大道1号" || item.Longitude == nil || *item.Longitude != longitude ||
+		item.WeatherLongitude == nil || *item.WeatherLongitude != weatherLongitude ||
+		item.CoordinateSystem != "GCJ02" || item.GeocodeConfidence == nil {
+		t.Fatalf("mall item=%+v", item)
+	}
+	if result.Pagination.Page != 1 || result.Pagination.PageSize != 1 || result.Pagination.TotalItems != 2 || result.Pagination.TotalPages != 2 {
+		t.Fatalf("pagination totals=%+v", result.Pagination)
 	}
 	payload, err := json.Marshal(result)
 	if err != nil {
@@ -74,13 +100,13 @@ func TestOpenWeatherMallQueryServiceReturnsPublicCursorPage(t *testing.T) {
 		t.Fatalf("response leaked internal field: %s", payload)
 	}
 	cursor, err := decodeOpenWeatherMallCursor(result.Pagination.NextCursor)
-	if err != nil || cursor.ID != 7 || cursor.Version != 1 {
+	if err != nil || cursor.ID != 7 || cursor.Version != 1 || cursor.Page != 2 {
 		t.Fatalf("cursor=%+v error=%v", cursor, err)
 	}
 }
 
 func TestOpenWeatherMallQueryServiceContinuesFromCursor(t *testing.T) {
-	cursor, err := encodeOpenWeatherMallCursor(7)
+	cursor, err := encodeOpenWeatherMallCursor(7, 2)
 	if err != nil {
 		t.Fatalf("encode cursor: %v", err)
 	}

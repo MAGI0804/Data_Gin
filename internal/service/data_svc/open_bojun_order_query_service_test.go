@@ -19,6 +19,10 @@ type fakeOpenBojunOrderReader struct {
 	calls  int
 }
 
+func (reader *fakeOpenBojunOrderReader) CountOpenOrders(context.Context, data_dao.OpenBojunOrderQuery) (int64, error) {
+	return int64(len(reader.orders)), nil
+}
+
 func (reader *fakeOpenBojunOrderReader) ListOpenOrders(
 	_ context.Context,
 	query data_dao.OpenBojunOrderQuery,
@@ -81,6 +85,9 @@ func TestOpenBojunOrderQueryServiceReturnsSanitizedCursorPage(t *testing.T) {
 	if !result.Pagination.HasMore || result.Pagination.NextCursor == "" {
 		t.Fatalf("pagination=%+v", result.Pagination)
 	}
+	if result.Pagination.Page != 1 || result.Pagination.PageSize != 1 || result.Pagination.TotalItems != 2 || result.Pagination.TotalPages != 2 {
+		t.Fatalf("pagination totals=%+v", result.Pagination)
+	}
 	payload, err := json.Marshal(result)
 	if err != nil {
 		t.Fatalf("marshal result: %v", err)
@@ -91,7 +98,7 @@ func TestOpenBojunOrderQueryServiceReturnsSanitizedCursorPage(t *testing.T) {
 		}
 	}
 	cursor, err := decodeOpenBojunOrderCursor(result.Pagination.NextCursor)
-	if err != nil || cursor.BillDate != 20260703 || cursor.ID != 9 {
+	if err != nil || cursor.BillDate != 20260703 || cursor.ID != 9 || cursor.Page != 2 {
 		t.Fatalf("cursor=%+v error=%v", cursor, err)
 	}
 }

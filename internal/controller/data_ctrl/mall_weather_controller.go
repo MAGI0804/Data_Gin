@@ -245,7 +245,7 @@ func (controller *MallWeatherController) OpenRealtime(c *gin.Context) {
 	result, err := controller.service.Realtime(c.Request.Context(), auth.CurrentUserID(c), mallID, requestbody.MallWeatherRealtimeQueryRequest{
 		StartUTC: request.StartUTC, EndUTC: request.EndUTC, TimeZone: request.TimeZone,
 		Latest: request.Latest, AsOfUTC: request.AsOfUTC, QualityStatus: request.QualityStatus,
-		Cursor: request.Cursor, PageSize: request.PageSize,
+		Cursor: request.Cursor, PageSize: request.PageSize, IncludeTotals: true,
 	})
 	if err != nil {
 		writeMallWeatherError(c, err)
@@ -263,7 +263,7 @@ func (controller *MallWeatherController) OpenMinutely(c *gin.Context) {
 	result, err := controller.service.Minutely(c.Request.Context(), auth.CurrentUserID(c), mallID, requestbody.MallWeatherMinutelyQueryRequest{
 		StartUTC: request.StartUTC, EndUTC: request.EndUTC, TimeZone: request.TimeZone,
 		Latest: request.Latest, AsOfUTC: request.AsOfUTC, QualityStatus: request.QualityStatus,
-		Cursor: request.Cursor, PageSize: request.PageSize,
+		Cursor: request.Cursor, PageSize: request.PageSize, IncludeTotals: true,
 	})
 	if err != nil {
 		writeMallWeatherError(c, err)
@@ -281,7 +281,7 @@ func (controller *MallWeatherController) OpenHourly(c *gin.Context) {
 	result, err := controller.service.Hourly(c.Request.Context(), auth.CurrentUserID(c), mallID, requestbody.MallWeatherHourlyQueryRequest{
 		StartUTC: request.StartUTC, EndUTC: request.EndUTC, TimeZone: request.TimeZone,
 		Latest: request.Latest, AsOfUTC: request.AsOfUTC, QualityStatus: request.QualityStatus,
-		Cursor: request.Cursor, PageSize: request.PageSize,
+		Cursor: request.Cursor, PageSize: request.PageSize, IncludeTotals: true,
 	})
 	if err != nil {
 		writeMallWeatherError(c, err)
@@ -299,7 +299,7 @@ func (controller *MallWeatherController) OpenDaily(c *gin.Context) {
 	result, err := controller.service.Daily(c.Request.Context(), auth.CurrentUserID(c), mallID, requestbody.MallWeatherDailyQueryRequest{
 		StartUTC: request.StartUTC, EndUTC: request.EndUTC, TimeZone: request.TimeZone,
 		Latest: request.Latest, AsOfUTC: request.AsOfUTC, QualityStatus: request.QualityStatus,
-		Cursor: request.Cursor, PageSize: request.PageSize,
+		Cursor: request.Cursor, PageSize: request.PageSize, IncludeTotals: true,
 	})
 	if err != nil {
 		writeMallWeatherError(c, err)
@@ -317,7 +317,7 @@ func (controller *MallWeatherController) OpenAlerts(c *gin.Context) {
 	result, err := controller.service.Alerts(c.Request.Context(), auth.CurrentUserID(c), mallID, requestbody.MallWeatherAlertQueryRequest{
 		StartUTC: request.StartUTC, EndUTC: request.EndUTC, TimeZone: request.TimeZone,
 		Latest: request.Latest, AsOfUTC: request.AsOfUTC, QualityStatus: request.QualityStatus,
-		Cursor: request.Cursor, PageSize: request.PageSize,
+		Cursor: request.Cursor, PageSize: request.PageSize, IncludeTotals: true,
 	})
 	if err != nil {
 		writeMallWeatherError(c, err)
@@ -335,7 +335,7 @@ func (controller *MallWeatherController) OpenLifeIndices(c *gin.Context) {
 	result, err := controller.service.LifeIndices(c.Request.Context(), auth.CurrentUserID(c), mallID, requestbody.MallWeatherLifeIndexQueryRequest{
 		StartUTC: request.StartUTC, EndUTC: request.EndUTC, TimeZone: request.TimeZone,
 		Latest: request.Latest, AsOfUTC: request.AsOfUTC, QualityStatus: request.QualityStatus,
-		Cursor: request.Cursor, PageSize: request.PageSize,
+		Cursor: request.Cursor, PageSize: request.PageSize, IncludeTotals: true,
 	})
 	if err != nil {
 		writeMallWeatherError(c, err)

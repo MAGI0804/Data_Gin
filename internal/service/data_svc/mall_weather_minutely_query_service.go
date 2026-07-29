@@ -26,6 +26,7 @@ type weatherMinutelyCursor struct {
 	ForecastMinuteUnixMS int64 `json:"forecastMinuteUnixMs"`
 	IssuedAtUnixMS       int64 `json:"issuedAtUnixMs,omitempty"`
 	ID                   uint  `json:"id"`
+	Page                 int   `json:"page,omitempty"`
 }
 
 func (service *MallWeatherQueryService) Minutely(
@@ -51,6 +52,10 @@ func (service *MallWeatherQueryService) Minutely(
 	cursor, err := decodeWeatherMinutelyCursor(normalized.Cursor)
 	if err != nil {
 		return nil, err
+	}
+	page := 1
+	if cursor != nil {
+		page = openCursorPage(cursor.Page, true)
 	}
 	query := data_dao.MinutelyQuery{
 		MallID: mallID, StartUTC: normalized.StartUTC, EndUTC: normalized.EndUTC,
@@ -86,6 +91,13 @@ func (service *MallWeatherQueryService) Minutely(
 		Meta:       weatherQueryMeta(mall, location, model.MallWeatherFreshnessFresh, nil),
 		Pagination: MallWeatherPagination{PageSize: normalized.PageSize},
 	}
+	if normalized.IncludeTotals {
+		totalItems, err := service.weather.CountMinutely(ctx, query)
+		if err != nil {
+			return nil, fmt.Errorf("mall weather query: count minutely rows: %w", err)
+		}
+		applyOpenWeatherPagination(&result.Pagination, page, totalItems)
+	}
 	latest, err := service.weather.FindCurrentLatest(ctx, mallID, model.MallWeatherDataKindMinutely)
 	if err != nil && !errors.Is(err, data_dao.ErrMallWeatherLatestNotFound) {
 		return nil, fmt.Errorf("mall weather query: minutely freshness: %w", err)
@@ -101,7 +113,11 @@ func (service *MallWeatherQueryService) Minutely(
 		result.Meta.DataAgeSeconds = &age
 	}
 	if hasMore && len(rows) > 0 {
-		result.Pagination.NextCursor, err = encodeWeatherMinutelyCursor(&rows[len(rows)-1])
+		nextPage, pageErr := nextOpenCursorPage(page)
+		if pageErr != nil {
+			return nil, pageErr
+		}
+		result.Pagination.NextCursor, err = encodeWeatherMinutelyCursor(&rows[len(rows)-1], nextPage)
 		if err != nil {
 			return nil, err
 		}
@@ -129,13 +145,13 @@ func normalizeMinutelyWeatherRequest(request requestbody.MallWeatherMinutelyQuer
 	return location, request, nil
 }
 
-func encodeWeatherMinutelyCursor(row *model.MallWeatherMinutely) (string, error) {
+func encodeWeatherMinutelyCursor(row *model.MallWeatherMinutely, page int) (string, error) {
 	if row == nil || row.ID == 0 || row.ForecastMinuteUTC.IsZero() || row.IssuedAtUTC.IsZero() {
 		return "", fmt.Errorf("mall weather query: invalid minutely cursor row")
 	}
 	payload, err := json.Marshal(weatherMinutelyCursor{
 		Version: 1, ForecastMinuteUnixMS: row.ForecastMinuteUTC.UTC().UnixMilli(),
-		IssuedAtUnixMS: row.IssuedAtUTC.UTC().UnixMilli(), ID: row.ID,
+		IssuedAtUnixMS: row.IssuedAtUTC.UTC().UnixMilli(), ID: row.ID, Page: page,
 	})
 	if err != nil {
 		return "", fmt.Errorf("mall weather query: encode minutely cursor: %w", err)
@@ -158,7 +174,7 @@ func decodeWeatherMinutelyCursor(value string) (*weatherMinutelyCursor, error) {
 	var cursor weatherMinutelyCursor
 	decoder := json.NewDecoder(strings.NewReader(string(raw)))
 	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&cursor); err != nil || cursor.Version != 1 || cursor.ID == 0 ||
+	if err := decoder.Decode(&cursor); err != nil || cursor.Version != 1 || cursor.ID == 0 || invalidOpenCursorPage(cursor.Page) ||
 		cursor.ForecastMinuteUnixMS < minWeatherCursorUnixMS || cursor.ForecastMinuteUnixMS >= maxWeatherCursorUnixMS ||
 		cursor.IssuedAtUnixMS < minWeatherCursorUnixMS || cursor.IssuedAtUnixMS >= maxWeatherCursorUnixMS {
 		return nil, fmt.Errorf("%w: invalid cursor", ErrMallWeatherInvalidQuery)

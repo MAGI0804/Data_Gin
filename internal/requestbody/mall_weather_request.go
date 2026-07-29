@@ -11,6 +11,7 @@ type MallWeatherHourlyQueryRequest struct {
 	QualityStatus string
 	Cursor        string
 	PageSize      int
+	IncludeTotals bool
 }
 
 type MallWeatherRealtimeQueryRequest struct {
@@ -22,6 +23,7 @@ type MallWeatherRealtimeQueryRequest struct {
 	QualityStatus string
 	Cursor        string
 	PageSize      int
+	IncludeTotals bool
 }
 
 type MallWeatherMinutelyQueryRequest struct {
@@ -33,6 +35,7 @@ type MallWeatherMinutelyQueryRequest struct {
 	QualityStatus string
 	Cursor        string
 	PageSize      int
+	IncludeTotals bool
 }
 
 type MallWeatherDailyQueryRequest struct {
@@ -44,6 +47,7 @@ type MallWeatherDailyQueryRequest struct {
 	QualityStatus string
 	Cursor        string
 	PageSize      int
+	IncludeTotals bool
 }
 
 type MallWeatherAlertQueryRequest struct {
@@ -55,6 +59,7 @@ type MallWeatherAlertQueryRequest struct {
 	QualityStatus string
 	Cursor        string
 	PageSize      int
+	IncludeTotals bool
 }
 
 type MallWeatherLifeIndexQueryRequest struct {
@@ -66,6 +71,7 @@ type MallWeatherLifeIndexQueryRequest struct {
 	QualityStatus string
 	Cursor        string
 	PageSize      int
+	IncludeTotals bool
 }
 
 type MallWeatherFetchRunQueryRequest struct {

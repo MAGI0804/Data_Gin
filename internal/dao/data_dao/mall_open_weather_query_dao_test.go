@@ -23,7 +23,14 @@ func TestMallDAOListOpenWeatherMallsUsesBoundedPublicQuery(t *testing.T) {
 	}
 	_ = rows
 	for _, fragment := range []string{
-		"SELECT `id`,`mall_code`,`name_cn`,`name_en`,`province`,`city`,`district`,`timezone`,`weather_enabled`",
+		"`address_raw`",
+		"`address_standardized`",
+		"`longitude`",
+		"`latitude`",
+		"`weather_longitude`",
+		"`weather_latitude`",
+		"`geocode_level`",
+		"`geocode_confidence`",
 		"status = ?",
 		"geocode_status = ?",
 		"weather_enabled = ?",
@@ -41,5 +48,27 @@ func TestMallDAOListOpenWeatherMallsUsesBoundedPublicQuery(t *testing.T) {
 		if strings.Contains(statement, internalColumn) {
 			t.Fatalf("statement selects internal column %q: %s", internalColumn, statement)
 		}
+	}
+}
+
+func TestMallDAOCountOpenWeatherMallsUsesSamePublicFilters(t *testing.T) {
+	t.Parallel()
+	db := dryRunWeatherDAOTestDB(t)
+	var statement string
+	if err := db.Callback().Query().After("gorm:query").Register("test:capture_open_weather_malls_count_sql", func(tx *gorm.DB) {
+		statement = tx.Statement.SQL.String()
+	}); err != nil {
+		t.Fatalf("register SQL capture callback: %v", err)
+	}
+	if _, err := NewMallDAO(db).CountOpenWeatherMalls(t.Context()); err != nil {
+		t.Fatalf("CountOpenWeatherMalls() error=%v", err)
+	}
+	for _, fragment := range []string{"SELECT count(*)", "status = ?", "geocode_status = ?", "weather_enabled = ?", "weather_longitude BETWEEN ? AND ?", "weather_latitude BETWEEN ? AND ?"} {
+		if !strings.Contains(statement, fragment) {
+			t.Fatalf("statement missing %q: %s", fragment, statement)
+		}
+	}
+	if strings.Contains(statement, "id > ?") || strings.Contains(statement, "LIMIT") || strings.Contains(statement, "ORDER BY") {
+		t.Fatalf("count statement contains page boundary: %s", statement)
 	}
 }

@@ -57,10 +57,10 @@ func TestForOpenAPIFormatsNestedDateTimes(t *testing.T) {
 	value := ForOpenAPI(gin.H{
 		"fetchedAtUtc": time.Date(2026, 7, 29, 4, 5, 6, 123, time.UTC),
 		"items": []interface{}{gin.H{
-			"observedAtLocal": "2026-07-29T12:05:06+08:00",
-			"issuedAtLocal":   "2026-07-29T12:05:06+08:00",
-			"forecastDate":    "2026-07-30",
-			"description":     "2026-07-29T12:05:06+08:00",
+			"observedAtLocal":   "2026-07-29T12:05:06+08:00",
+			"issuedAtLocal":     "2026-07-29T12:05:06+08:00",
+			"forecastDateLocal": "2026-07-30",
+			"description":       "2026-07-29T12:05:06+08:00",
 		}},
 	})
 	raw, err := json.Marshal(value)
@@ -72,7 +72,7 @@ func TestForOpenAPIFormatsNestedDateTimes(t *testing.T) {
 		`"fetchedAtUtc":"2026-07-29 04:05:06"`,
 		`"observedAtLocal":"2026-07-29T12:05:06+08:00"`,
 		`"issuedAtLocal":"2026-07-29 12:05:06"`,
-		`"forecastDate":"2026-07-30"`,
+		`"forecastDateLocal":"2026-07-30 00:00:00"`,
 		`"description":"2026-07-29T12:05:06+08:00"`,
 	} {
 		if !strings.Contains(body, expected) {

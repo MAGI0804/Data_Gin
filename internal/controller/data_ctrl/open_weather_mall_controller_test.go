@@ -30,7 +30,7 @@ func (service *fakeOpenWeatherMallQueryService) Query(
 	service.actor, service.request = actor, request
 	return &data_svc.OpenWeatherMallQueryResult{
 		Items:      []data_svc.OpenWeatherMallDTO{},
-		Pagination: data_svc.OpenWeatherMallPagination{PageSize: request.PageSize},
+		Pagination: data_svc.OpenWeatherMallPagination{OpenPagination: data_svc.OpenPagination{PageSize: request.PageSize}},
 	}, nil
 }
 

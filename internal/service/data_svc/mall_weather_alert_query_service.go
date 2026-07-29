@@ -25,6 +25,7 @@ type weatherAlertCursor struct {
 	Version        int   `json:"v"`
 	SortTimeUnixMS int64 `json:"sortTimeUnixMs"`
 	ID             uint  `json:"id"`
+	Page           int   `json:"page,omitempty"`
 }
 
 func (service *MallWeatherQueryService) Alerts(ctx context.Context, actorUserID, mallID uint, request requestbody.MallWeatherAlertQueryRequest) (*MallWeatherAlertResult, error) {
@@ -45,6 +46,10 @@ func (service *MallWeatherQueryService) Alerts(ctx context.Context, actorUserID,
 	cursor, err := decodeWeatherAlertCursor(normalized.Cursor)
 	if err != nil {
 		return nil, err
+	}
+	page := 1
+	if cursor != nil {
+		page = openCursorPage(cursor.Page, true)
 	}
 	query := data_dao.AlertQuery{
 		MallID: mallID, StartUTC: normalized.StartUTC, EndUTC: normalized.EndUTC,
@@ -72,6 +77,13 @@ func (service *MallWeatherQueryService) Alerts(ctx context.Context, actorUserID,
 		}
 	}
 	result := &MallWeatherAlertResult{Items: items, Meta: weatherQueryMeta(mall, location, model.MallWeatherFreshnessFresh, nil), Pagination: MallWeatherPagination{PageSize: normalized.PageSize}}
+	if normalized.IncludeTotals {
+		totalItems, err := service.weather.CountAlerts(ctx, query)
+		if err != nil {
+			return nil, fmt.Errorf("mall weather query: count alert rows: %w", err)
+		}
+		applyOpenWeatherPagination(&result.Pagination, page, totalItems)
+	}
 	latest, err := service.weather.FindCurrentLatest(ctx, mallID, model.MallWeatherDataKindRealtime)
 	if err != nil && !errors.Is(err, data_dao.ErrMallWeatherLatestNotFound) {
 		return nil, fmt.Errorf("mall weather query: alert freshness: %w", err)
@@ -87,7 +99,11 @@ func (service *MallWeatherQueryService) Alerts(ctx context.Context, actorUserID,
 		result.Meta.DataAgeSeconds = &age
 	}
 	if hasMore && len(rows) > 0 {
-		result.Pagination.NextCursor, err = encodeWeatherAlertCursor(&rows[len(rows)-1])
+		nextPage, pageErr := nextOpenCursorPage(page)
+		if pageErr != nil {
+			return nil, pageErr
+		}
+		result.Pagination.NextCursor, err = encodeWeatherAlertCursor(&rows[len(rows)-1], nextPage)
 		if err != nil {
 			return nil, err
 		}
@@ -110,7 +126,7 @@ func normalizeAlertWeatherRequest(request requestbody.MallWeatherAlertQueryReque
 	return location, request, nil
 }
 
-func encodeWeatherAlertCursor(row *model.MallWeatherAlert) (string, error) {
+func encodeWeatherAlertCursor(row *model.MallWeatherAlert, page int) (string, error) {
 	if row == nil || row.ID == 0 {
 		return "", fmt.Errorf("mall weather query: invalid alert cursor row")
 	}
@@ -121,7 +137,7 @@ func encodeWeatherAlertCursor(row *model.MallWeatherAlert) (string, error) {
 	if sortTime.IsZero() {
 		return "", fmt.Errorf("mall weather query: invalid alert cursor time")
 	}
-	payload, err := json.Marshal(weatherAlertCursor{Version: 1, SortTimeUnixMS: sortTime.UTC().UnixMilli(), ID: row.ID})
+	payload, err := json.Marshal(weatherAlertCursor{Version: 1, SortTimeUnixMS: sortTime.UTC().UnixMilli(), ID: row.ID, Page: page})
 	if err != nil {
 		return "", fmt.Errorf("mall weather query: encode alert cursor: %w", err)
 	}
@@ -143,7 +159,7 @@ func decodeWeatherAlertCursor(value string) (*weatherAlertCursor, error) {
 	var cursor weatherAlertCursor
 	decoder := json.NewDecoder(strings.NewReader(string(raw)))
 	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&cursor); err != nil || cursor.Version != 1 || cursor.ID == 0 ||
+	if err := decoder.Decode(&cursor); err != nil || cursor.Version != 1 || cursor.ID == 0 || invalidOpenCursorPage(cursor.Page) ||
 		cursor.SortTimeUnixMS < minWeatherCursorUnixMS || cursor.SortTimeUnixMS >= maxWeatherCursorUnixMS {
 		return nil, fmt.Errorf("%w: invalid cursor", ErrMallWeatherInvalidQuery)
 	}

@@ -47,6 +47,7 @@ type weatherLifeIndexCursor struct {
 	IndexType         int    `json:"indexType"`
 	IssuedAtUnixMS    int64  `json:"issuedAtUnixMs"`
 	ID                uint   `json:"id"`
+	Page              int    `json:"page,omitempty"`
 }
 
 func (service *MallWeatherQueryService) LifeIndices(ctx context.Context, actorUserID, mallID uint, request requestbody.MallWeatherLifeIndexQueryRequest) (*MallWeatherLifeIndexResult, error) {
@@ -67,6 +68,10 @@ func (service *MallWeatherQueryService) LifeIndices(ctx context.Context, actorUs
 	cursor, err := decodeWeatherLifeIndexCursor(normalized.Cursor)
 	if err != nil {
 		return nil, err
+	}
+	page := 1
+	if cursor != nil {
+		page = openCursorPage(cursor.Page, true)
 	}
 	query := data_dao.LifeIndexQuery{
 		MallID: mallID, SourceAPI: weatherdomain.SourceAPIV26Daily,
@@ -104,6 +109,13 @@ func (service *MallWeatherQueryService) LifeIndices(ctx context.Context, actorUs
 	meta := weatherQueryMeta(mall, location, model.MallWeatherFreshnessFresh, nil)
 	meta.APIVersion = "v2.6"
 	result := &MallWeatherLifeIndexResult{Items: items, Meta: meta, Pagination: MallWeatherPagination{PageSize: normalized.PageSize}}
+	if normalized.IncludeTotals {
+		totalItems, err := service.weather.CountLifeIndices(ctx, query)
+		if err != nil {
+			return nil, fmt.Errorf("mall weather query: count life index rows: %w", err)
+		}
+		applyOpenWeatherPagination(&result.Pagination, page, totalItems)
+	}
 	latest, err := service.weather.FindCurrentLatestLifeSource(ctx, mallID, weatherdomain.SourceAPIV26Daily)
 	if err != nil && !errors.Is(err, data_dao.ErrMallWeatherLatestNotFound) {
 		return nil, fmt.Errorf("mall weather query: life index freshness: %w", err)
@@ -119,7 +131,11 @@ func (service *MallWeatherQueryService) LifeIndices(ctx context.Context, actorUs
 		result.Meta.DataAgeSeconds = &age
 	}
 	if hasMore && len(rows) > 0 {
-		result.Pagination.NextCursor, err = encodeWeatherLifeIndexCursor(&rows[len(rows)-1])
+		nextPage, pageErr := nextOpenCursorPage(page)
+		if pageErr != nil {
+			return nil, pageErr
+		}
+		result.Pagination.NextCursor, err = encodeWeatherLifeIndexCursor(&rows[len(rows)-1], nextPage)
 		if err != nil {
 			return nil, err
 		}
@@ -164,13 +180,13 @@ func lifeIndexWeatherDTO(row *model.MallWeatherLifeIndex, location *time.Locatio
 	}, nil
 }
 
-func encodeWeatherLifeIndexCursor(row *model.MallWeatherLifeIndex) (string, error) {
+func encodeWeatherLifeIndexCursor(row *model.MallWeatherLifeIndex, page int) (string, error) {
 	if row == nil || row.ID == 0 || row.ForecastDateLocal.IsZero() || row.SourceAPI == "" || row.IndexType < 0 || row.IssuedAtUTC.IsZero() {
 		return "", fmt.Errorf("mall weather query: invalid life index cursor row")
 	}
 	payload, err := json.Marshal(weatherLifeIndexCursor{
 		Version: 1, ForecastDateLocal: row.ForecastDateLocal.Format("2006-01-02"), SourceAPI: row.SourceAPI,
-		IndexType: row.IndexType, IssuedAtUnixMS: row.IssuedAtUTC.UTC().UnixMilli(), ID: row.ID,
+		IndexType: row.IndexType, IssuedAtUnixMS: row.IssuedAtUTC.UTC().UnixMilli(), ID: row.ID, Page: page,
 	})
 	if err != nil {
 		return "", fmt.Errorf("mall weather query: encode life index cursor: %w", err)
@@ -193,7 +209,7 @@ func decodeWeatherLifeIndexCursor(value string) (*weatherLifeIndexCursor, error)
 	var cursor weatherLifeIndexCursor
 	decoder := json.NewDecoder(strings.NewReader(string(raw)))
 	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&cursor); err != nil || cursor.Version != 1 || cursor.ID == 0 || cursor.IndexType < 0 ||
+	if err := decoder.Decode(&cursor); err != nil || cursor.Version != 1 || cursor.ID == 0 || cursor.IndexType < 0 || invalidOpenCursorPage(cursor.Page) ||
 		cursor.SourceAPI != weatherdomain.SourceAPIV26Daily ||
 		cursor.IssuedAtUnixMS < minWeatherCursorUnixMS || cursor.IssuedAtUnixMS >= maxWeatherCursorUnixMS {
 		return nil, fmt.Errorf("%w: invalid cursor", ErrMallWeatherInvalidQuery)

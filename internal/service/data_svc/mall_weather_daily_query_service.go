@@ -107,6 +107,7 @@ type weatherDailyCursor struct {
 	ForecastDateLocal string `json:"forecastDateLocal"`
 	IssuedAtUnixMS    int64  `json:"issuedAtUnixMs"`
 	ID                uint   `json:"id"`
+	Page              int    `json:"page,omitempty"`
 }
 
 func (service *MallWeatherQueryService) Daily(ctx context.Context, actorUserID, mallID uint, request requestbody.MallWeatherDailyQueryRequest) (*MallWeatherDailyResult, error) {
@@ -127,6 +128,10 @@ func (service *MallWeatherQueryService) Daily(ctx context.Context, actorUserID, 
 	cursor, err := decodeWeatherDailyCursor(normalized.Cursor)
 	if err != nil {
 		return nil, err
+	}
+	page := 1
+	if cursor != nil {
+		page = openCursorPage(cursor.Page, true)
 	}
 	query := data_dao.DailyQuery{
 		MallID: mallID, StartLocal: weatherLocalDate(normalized.StartUTC, location), EndLocal: weatherLocalDate(normalized.EndUTC, location),
@@ -159,6 +164,13 @@ func (service *MallWeatherQueryService) Daily(ctx context.Context, actorUserID, 
 		}
 	}
 	result := &MallWeatherDailyResult{Items: items, Meta: weatherQueryMeta(mall, location, model.MallWeatherFreshnessFresh, nil), Pagination: MallWeatherPagination{PageSize: normalized.PageSize}}
+	if normalized.IncludeTotals {
+		totalItems, err := service.weather.CountDaily(ctx, query)
+		if err != nil {
+			return nil, fmt.Errorf("mall weather query: count daily rows: %w", err)
+		}
+		applyOpenWeatherPagination(&result.Pagination, page, totalItems)
+	}
 	latest, err := service.weather.FindCurrentLatest(ctx, mallID, model.MallWeatherDataKindDaily)
 	if err != nil && !errors.Is(err, data_dao.ErrMallWeatherLatestNotFound) {
 		return nil, fmt.Errorf("mall weather query: daily freshness: %w", err)
@@ -174,7 +186,11 @@ func (service *MallWeatherQueryService) Daily(ctx context.Context, actorUserID, 
 		result.Meta.DataAgeSeconds = &age
 	}
 	if hasMore && len(rows) > 0 {
-		result.Pagination.NextCursor, err = encodeWeatherDailyCursor(&rows[len(rows)-1])
+		nextPage, pageErr := nextOpenCursorPage(page)
+		if pageErr != nil {
+			return nil, pageErr
+		}
+		result.Pagination.NextCursor, err = encodeWeatherDailyCursor(&rows[len(rows)-1], nextPage)
 		if err != nil {
 			return nil, err
 		}
@@ -250,11 +266,11 @@ func dailyWeatherDTO(row *model.MallWeatherDaily, location *time.Location) (Mall
 	}, nil
 }
 
-func encodeWeatherDailyCursor(row *model.MallWeatherDaily) (string, error) {
+func encodeWeatherDailyCursor(row *model.MallWeatherDaily, page int) (string, error) {
 	if row == nil || row.ID == 0 || row.ForecastDateLocal.IsZero() || row.IssuedAtUTC.IsZero() {
 		return "", fmt.Errorf("mall weather query: invalid daily cursor row")
 	}
-	payload, err := json.Marshal(weatherDailyCursor{Version: 1, ForecastDateLocal: row.ForecastDateLocal.Format("2006-01-02"), IssuedAtUnixMS: row.IssuedAtUTC.UTC().UnixMilli(), ID: row.ID})
+	payload, err := json.Marshal(weatherDailyCursor{Version: 1, ForecastDateLocal: row.ForecastDateLocal.Format("2006-01-02"), IssuedAtUnixMS: row.IssuedAtUTC.UTC().UnixMilli(), ID: row.ID, Page: page})
 	if err != nil {
 		return "", fmt.Errorf("mall weather query: encode daily cursor: %w", err)
 	}
@@ -276,7 +292,7 @@ func decodeWeatherDailyCursor(value string) (*weatherDailyCursor, error) {
 	var cursor weatherDailyCursor
 	decoder := json.NewDecoder(strings.NewReader(string(raw)))
 	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&cursor); err != nil || cursor.Version != 1 || cursor.ID == 0 ||
+	if err := decoder.Decode(&cursor); err != nil || cursor.Version != 1 || cursor.ID == 0 || invalidOpenCursorPage(cursor.Page) ||
 		cursor.IssuedAtUnixMS < minWeatherCursorUnixMS || cursor.IssuedAtUnixMS >= maxWeatherCursorUnixMS {
 		return nil, fmt.Errorf("%w: invalid cursor", ErrMallWeatherInvalidQuery)
 	}

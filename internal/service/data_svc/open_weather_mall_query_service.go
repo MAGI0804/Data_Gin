@@ -31,6 +31,7 @@ var (
 
 type openWeatherMallReader interface {
 	ListOpenWeatherMallsAfterID(context.Context, uint, int) ([]model.Mall, error)
+	CountOpenWeatherMalls(context.Context) (int64, error)
 }
 
 type openWeatherMallPermissionReader interface {
@@ -49,19 +50,37 @@ type OpenWeatherMallQueryResult struct {
 }
 
 type OpenWeatherMallDTO struct {
-	MallID         uint   `json:"mallId"`
-	MallCode       string `json:"mallCode"`
-	NameCN         string `json:"nameCn"`
-	NameEN         string `json:"nameEn"`
-	Province       string `json:"province"`
-	City           string `json:"city"`
-	District       string `json:"district"`
-	TimeZone       string `json:"timeZone"`
-	WeatherEnabled bool   `json:"weatherEnabled"`
+	MallID                  uint     `json:"mallId"`
+	MallCode                string   `json:"mallCode"`
+	NameCN                  string   `json:"nameCn"`
+	NameEN                  string   `json:"nameEn"`
+	Country                 string   `json:"country"`
+	Province                string   `json:"province"`
+	City                    string   `json:"city"`
+	District                string   `json:"district"`
+	Township                string   `json:"township"`
+	Street                  string   `json:"street"`
+	StreetNumber            string   `json:"streetNumber"`
+	PostalCode              string   `json:"postalCode"`
+	Location                string   `json:"location"`
+	AddressRaw              string   `json:"addressRaw"`
+	AddressStandardized     string   `json:"addressStandardized"`
+	Adcode                  string   `json:"adcode"`
+	CityCode                string   `json:"cityCode"`
+	Longitude               *float64 `json:"longitude"`
+	Latitude                *float64 `json:"latitude"`
+	CoordinateSystem        string   `json:"coordinateSystem"`
+	WeatherLongitude        *float64 `json:"weatherLongitude"`
+	WeatherLatitude         *float64 `json:"weatherLatitude"`
+	WeatherCoordinateSystem string   `json:"weatherCoordinateSystem"`
+	GeocodeLevel            string   `json:"geocodeLevel"`
+	GeocodeConfidence       *float64 `json:"geocodeConfidence"`
+	TimeZone                string   `json:"timeZone"`
+	WeatherEnabled          bool     `json:"weatherEnabled"`
 }
 
 type OpenWeatherMallPagination struct {
-	PageSize   int    `json:"pageSize"`
+	OpenPagination
 	NextCursor string `json:"nextCursor"`
 	HasMore    bool   `json:"hasMore"`
 }
@@ -69,6 +88,7 @@ type OpenWeatherMallPagination struct {
 type openWeatherMallCursor struct {
 	Version int  `json:"version"`
 	ID      uint `json:"id"`
+	Page    int  `json:"page,omitempty"`
 }
 
 func NewOpenWeatherMallQueryService() *OpenWeatherMallQueryService {
@@ -101,13 +121,17 @@ func (service *OpenWeatherMallQueryService) Query(
 	if err := service.authorize(ctx, actorUserID); err != nil {
 		return nil, err
 	}
-	afterID, pageSize, err := normalizeOpenWeatherMallQuery(request)
+	afterID, page, pageSize, err := normalizeOpenWeatherMallQuery(request)
 	if err != nil {
 		return nil, err
 	}
 
 	queryCtx, cancel := context.WithTimeout(ctx, openWeatherMallQueryTimeout)
 	defer cancel()
+	totalItems, err := service.malls.CountOpenWeatherMalls(queryCtx)
+	if err != nil {
+		return nil, fmt.Errorf("open weather mall query: count malls: %w", err)
+	}
 	rows, err := service.malls.ListOpenWeatherMallsAfterID(queryCtx, afterID, pageSize+1)
 	if err != nil {
 		return nil, fmt.Errorf("open weather mall query: list malls: %w", err)
@@ -123,7 +147,11 @@ func (service *OpenWeatherMallQueryService) Query(
 	}
 	nextCursor := ""
 	if hasMore && len(rows) > 0 {
-		nextCursor, err = encodeOpenWeatherMallCursor(rows[len(rows)-1].ID)
+		nextPage, pageErr := nextOpenCursorPage(page)
+		if pageErr != nil {
+			return nil, pageErr
+		}
+		nextCursor, err = encodeOpenWeatherMallCursor(rows[len(rows)-1].ID, nextPage)
 		if err != nil {
 			return nil, fmt.Errorf("open weather mall query: encode cursor: %w", err)
 		}
@@ -131,7 +159,8 @@ func (service *OpenWeatherMallQueryService) Query(
 	return &OpenWeatherMallQueryResult{
 		Items: items,
 		Pagination: OpenWeatherMallPagination{
-			PageSize: pageSize, NextCursor: nextCursor, HasMore: hasMore,
+			OpenPagination: newOpenPagination(page, pageSize, totalItems),
+			NextCursor:     nextCursor, HasMore: hasMore,
 		},
 	}, nil
 }
@@ -155,41 +184,79 @@ func (service *OpenWeatherMallQueryService) authorize(ctx context.Context, actor
 	return nil
 }
 
-func normalizeOpenWeatherMallQuery(request requestbody.OpenWeatherMallQueryRequest) (uint, int, error) {
+func normalizeOpenWeatherMallQuery(request requestbody.OpenWeatherMallQueryRequest) (uint, int, int, error) {
 	pageSize := request.PageSize
 	if pageSize == 0 {
 		pageSize = openWeatherMallDefaultPageSize
 	}
 	if pageSize < 1 || pageSize > openWeatherMallMaxPageSize {
-		return 0, 0, fmt.Errorf("%w: invalid pageSize", ErrOpenWeatherMallInvalidQuery)
+		return 0, 0, 0, fmt.Errorf("%w: invalid pageSize", ErrOpenWeatherMallInvalidQuery)
 	}
 	cursorValue := strings.TrimSpace(request.Cursor)
 	if cursorValue == "" {
-		return 0, pageSize, nil
+		return 0, 1, pageSize, nil
 	}
 	cursor, err := decodeOpenWeatherMallCursor(cursorValue)
 	if err != nil {
-		return 0, 0, fmt.Errorf("%w: invalid cursor", ErrOpenWeatherMallInvalidQuery)
+		return 0, 0, 0, fmt.Errorf("%w: invalid cursor", ErrOpenWeatherMallInvalidQuery)
 	}
-	return cursor.ID, pageSize, nil
+	return cursor.ID, openCursorPage(cursor.Page, true), pageSize, nil
 }
 
 func openWeatherMallDTO(mall *model.Mall) OpenWeatherMallDTO {
 	return OpenWeatherMallDTO{
-		MallID:         mall.ID,
-		MallCode:       mall.MallCode,
-		NameCN:         mall.NameCN,
-		NameEN:         mall.NameEN,
-		Province:       mall.Province,
-		City:           mall.City,
-		District:       mall.District,
-		TimeZone:       mall.Timezone,
-		WeatherEnabled: mall.WeatherEnabled,
+		MallID:                  mall.ID,
+		MallCode:                mall.MallCode,
+		NameCN:                  mall.NameCN,
+		NameEN:                  mall.NameEN,
+		Country:                 mall.Country,
+		Province:                mall.Province,
+		City:                    mall.City,
+		District:                mall.District,
+		Township:                mall.Township,
+		Street:                  mall.Street,
+		StreetNumber:            mall.StreetNumber,
+		PostalCode:              mall.PostalCode,
+		Location:                openWeatherMallLocation(mall),
+		AddressRaw:              mall.AddressRaw,
+		AddressStandardized:     mall.AddressStandardized,
+		Adcode:                  mall.Adcode,
+		CityCode:                mall.Citycode,
+		Longitude:               mall.Longitude,
+		Latitude:                mall.Latitude,
+		CoordinateSystem:        strings.ToUpper(mall.CoordinateSystem),
+		WeatherLongitude:        mall.WeatherLongitude,
+		WeatherLatitude:         mall.WeatherLatitude,
+		WeatherCoordinateSystem: strings.ToUpper(mall.WeatherCoordinateSystem),
+		GeocodeLevel:            mall.GeocodeLevel,
+		GeocodeConfidence:       mall.GeocodeConfidence,
+		TimeZone:                mall.Timezone,
+		WeatherEnabled:          mall.WeatherEnabled,
 	}
 }
 
-func encodeOpenWeatherMallCursor(id uint) (string, error) {
-	payload, err := json.Marshal(openWeatherMallCursor{Version: 1, ID: id})
+func openWeatherMallLocation(mall *model.Mall) string {
+	if mall == nil {
+		return ""
+	}
+	parts := make([]string, 0, 4)
+	seen := make(map[string]struct{}, 4)
+	for _, value := range []string{mall.Province, mall.City, mall.District, mall.Township} {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			continue
+		}
+		if _, exists := seen[value]; exists {
+			continue
+		}
+		seen[value] = struct{}{}
+		parts = append(parts, value)
+	}
+	return strings.Join(parts, " ")
+}
+
+func encodeOpenWeatherMallCursor(id uint, page int) (string, error) {
+	payload, err := json.Marshal(openWeatherMallCursor{Version: 1, ID: id, Page: page})
 	if err != nil {
 		return "", err
 	}
@@ -207,7 +274,7 @@ func decodeOpenWeatherMallCursor(value string) (openWeatherMallCursor, error) {
 	decoder := json.NewDecoder(bytes.NewReader(payload))
 	decoder.DisallowUnknownFields()
 	var cursor openWeatherMallCursor
-	if err := decoder.Decode(&cursor); err != nil || cursor.Version != 1 || cursor.ID == 0 {
+	if err := decoder.Decode(&cursor); err != nil || cursor.Version != 1 || cursor.ID == 0 || invalidOpenCursorPage(cursor.Page) {
 		return openWeatherMallCursor{}, ErrOpenWeatherMallInvalidQuery
 	}
 	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {

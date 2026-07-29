@@ -36,7 +36,7 @@ func TestMallWeatherQueryServiceHourlyMapsMetadataAndCursor(t *testing.T) {
 		},
 	}
 	weather := &fakeMallWeatherQueryDAO{
-		rows: rows,
+		rows: rows, totalItems: 3,
 		latest: &model.MallWeatherLatest{
 			FetchedAtUTC: now.Add(-3 * time.Hour), FreshnessStatus: model.MallWeatherFreshnessFresh,
 		},
@@ -46,7 +46,7 @@ func TestMallWeatherQueryServiceHourlyMapsMetadataAndCursor(t *testing.T) {
 		t.Fatalf("newMallWeatherQueryService() error=%v", err)
 	}
 	result, err := service.Hourly(context.Background(), 17, 7, requestbody.MallWeatherHourlyQueryRequest{
-		StartUTC: now, EndUTC: now.Add(24 * time.Hour), TimeZone: "Asia/Shanghai", Latest: true, PageSize: 1,
+		StartUTC: now, EndUTC: now.Add(24 * time.Hour), TimeZone: "Asia/Shanghai", Latest: true, PageSize: 1, IncludeTotals: true,
 	})
 	if err != nil {
 		t.Fatalf("Hourly() error=%v", err)
@@ -56,8 +56,12 @@ func TestMallWeatherQueryServiceHourlyMapsMetadataAndCursor(t *testing.T) {
 		result.Meta.DataAgeSeconds == nil || *result.Meta.DataAgeSeconds != 3*60*60 || result.Pagination.NextCursor == "" {
 		t.Fatalf("result=%+v", result)
 	}
+	if result.Pagination.Page != 1 || result.Pagination.TotalItems == nil || *result.Pagination.TotalItems != 3 ||
+		result.Pagination.TotalPages == nil || *result.Pagination.TotalPages != 3 {
+		t.Fatalf("pagination=%+v", result.Pagination)
+	}
 	decoded, err := decodeWeatherHourlyCursor(result.Pagination.NextCursor)
-	if err != nil || decoded.ID != 11 || weather.query.Limit != 2 || !weather.query.PreferNonNullTemperature {
+	if err != nil || decoded.ID != 11 || decoded.Page != 2 || weather.query.Limit != 2 || !weather.query.PreferNonNullTemperature {
 		t.Fatalf("cursor=%+v query=%+v error=%v", decoded, weather.query, err)
 	}
 }
@@ -298,6 +302,31 @@ type fakeMallWeatherQueryDAO struct {
 	minutelyEndUTC   time.Time
 	minutelyLimit    int
 	alertLimit       int
+	totalItems       int64
+}
+
+func (dao *fakeMallWeatherQueryDAO) CountRealtime(context.Context, data_dao.RealtimeQuery) (int64, error) {
+	return dao.totalItems, dao.err
+}
+
+func (dao *fakeMallWeatherQueryDAO) CountMinutely(context.Context, data_dao.MinutelyQuery) (int64, error) {
+	return dao.totalItems, dao.err
+}
+
+func (dao *fakeMallWeatherQueryDAO) CountHourly(context.Context, data_dao.HourlyQuery) (int64, error) {
+	return dao.totalItems, dao.err
+}
+
+func (dao *fakeMallWeatherQueryDAO) CountDaily(context.Context, data_dao.DailyQuery) (int64, error) {
+	return dao.totalItems, dao.err
+}
+
+func (dao *fakeMallWeatherQueryDAO) CountAlerts(context.Context, data_dao.AlertQuery) (int64, error) {
+	return dao.totalItems, dao.err
+}
+
+func (dao *fakeMallWeatherQueryDAO) CountLifeIndices(context.Context, data_dao.LifeIndexQuery) (int64, error) {
+	return dao.totalItems, dao.err
 }
 
 func (dao *fakeMallWeatherQueryDAO) QueryRealtime(_ context.Context, query data_dao.RealtimeQuery) ([]model.MallWeatherRealtime, error) {

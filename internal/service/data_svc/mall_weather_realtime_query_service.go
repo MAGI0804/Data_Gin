@@ -25,6 +25,7 @@ type weatherRealtimeCursor struct {
 	Version        int   `json:"v"`
 	SnapshotUnixMS int64 `json:"snapshotUnixMs"`
 	ID             uint  `json:"id"`
+	Page           int   `json:"page,omitempty"`
 }
 
 func (service *MallWeatherQueryService) Realtime(
@@ -51,6 +52,7 @@ func (service *MallWeatherQueryService) Realtime(
 	if err != nil {
 		return nil, err
 	}
+	page := openCursorPage(weatherRealtimeCursorPage(cursor), cursor != nil)
 	query := data_dao.RealtimeQuery{
 		MallID: mallID, StartUTC: normalized.StartUTC, EndUTC: normalized.EndUTC,
 		AsOfUTC: normalized.AsOfUTC, QualityStatus: normalized.QualityStatus, Limit: normalized.PageSize + 1,
@@ -80,6 +82,13 @@ func (service *MallWeatherQueryService) Realtime(
 		Meta:       weatherQueryMeta(mall, location, model.MallWeatherFreshnessFresh, nil),
 		Pagination: MallWeatherPagination{PageSize: normalized.PageSize},
 	}
+	if normalized.IncludeTotals {
+		totalItems, err := service.weather.CountRealtime(ctx, query)
+		if err != nil {
+			return nil, fmt.Errorf("mall weather query: count realtime rows: %w", err)
+		}
+		applyOpenWeatherPagination(&result.Pagination, page, totalItems)
+	}
 	latest, err := service.weather.FindCurrentLatest(ctx, mallID, model.MallWeatherDataKindRealtime)
 	if err != nil && !errors.Is(err, data_dao.ErrMallWeatherLatestNotFound) {
 		return nil, fmt.Errorf("mall weather query: realtime freshness: %w", err)
@@ -95,7 +104,11 @@ func (service *MallWeatherQueryService) Realtime(
 		result.Meta.DataAgeSeconds = &age
 	}
 	if hasMore && len(rows) > 0 {
-		result.Pagination.NextCursor, err = encodeWeatherRealtimeCursor(&rows[len(rows)-1])
+		nextPage, pageErr := nextOpenCursorPage(page)
+		if pageErr != nil {
+			return nil, pageErr
+		}
+		result.Pagination.NextCursor, err = encodeWeatherRealtimeCursor(&rows[len(rows)-1], nextPage)
 		if err != nil {
 			return nil, err
 		}
@@ -123,15 +136,22 @@ func normalizeRealtimeWeatherRequest(request requestbody.MallWeatherRealtimeQuer
 	return location, request, nil
 }
 
-func encodeWeatherRealtimeCursor(row *model.MallWeatherRealtime) (string, error) {
+func encodeWeatherRealtimeCursor(row *model.MallWeatherRealtime, page int) (string, error) {
 	if row == nil || row.ID == 0 || row.SnapshotAtUTC.IsZero() {
 		return "", fmt.Errorf("mall weather query: invalid realtime cursor row")
 	}
-	payload, err := json.Marshal(weatherRealtimeCursor{Version: 1, SnapshotUnixMS: row.SnapshotAtUTC.UTC().UnixMilli(), ID: row.ID})
+	payload, err := json.Marshal(weatherRealtimeCursor{Version: 1, SnapshotUnixMS: row.SnapshotAtUTC.UTC().UnixMilli(), ID: row.ID, Page: page})
 	if err != nil {
 		return "", fmt.Errorf("mall weather query: encode realtime cursor: %w", err)
 	}
 	return base64.RawURLEncoding.EncodeToString(payload), nil
+}
+
+func weatherRealtimeCursorPage(cursor *weatherRealtimeCursor) int {
+	if cursor == nil {
+		return 0
+	}
+	return cursor.Page
 }
 
 func decodeWeatherRealtimeCursor(value string) (*weatherRealtimeCursor, error) {
@@ -149,7 +169,7 @@ func decodeWeatherRealtimeCursor(value string) (*weatherRealtimeCursor, error) {
 	var cursor weatherRealtimeCursor
 	decoder := json.NewDecoder(strings.NewReader(string(raw)))
 	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&cursor); err != nil || cursor.Version != 1 || cursor.ID == 0 ||
+	if err := decoder.Decode(&cursor); err != nil || cursor.Version != 1 || cursor.ID == 0 || invalidOpenCursorPage(cursor.Page) ||
 		cursor.SnapshotUnixMS < minWeatherCursorUnixMS || cursor.SnapshotUnixMS >= maxWeatherCursorUnixMS {
 		return nil, fmt.Errorf("%w: invalid cursor", ErrMallWeatherInvalidQuery)
 	}
