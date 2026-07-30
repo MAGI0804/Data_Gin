@@ -244,6 +244,7 @@ func registerOpenWeatherRoutes(
 		weatherGroup.POST("/overview", weatherCtrl.OpenOverview)
 		weatherGroup.POST("/realtime", weatherCtrl.OpenRealtime)
 		weatherGroup.POST("/history/day", weatherCtrl.OpenHistoryDay)
+		weatherGroup.POST("/history/day/summary", weatherCtrl.OpenHistoryDaySummary)
 		weatherGroup.POST("/history/range", weatherCtrl.OpenHistoryRange)
 		weatherGroup.POST("/minutely", weatherCtrl.OpenMinutely)
 		weatherGroup.POST("/hourly", weatherCtrl.OpenHourly)

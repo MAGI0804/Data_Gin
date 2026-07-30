@@ -309,6 +309,18 @@ type fakeMallWeatherQueryDAO struct {
 	minutelyLimit    int
 	alertLimit       int
 	totalItems       int64
+	daySummary       *data_dao.RealtimeDaySummary
+	daySummaryQuery  data_dao.RealtimeDaySummaryQuery
+	daySummaryCalls  int
+}
+
+func (dao *fakeMallWeatherQueryDAO) SummarizeRealtimeDay(
+	_ context.Context,
+	query data_dao.RealtimeDaySummaryQuery,
+) (*data_dao.RealtimeDaySummary, error) {
+	dao.daySummaryCalls++
+	dao.daySummaryQuery = query
+	return dao.daySummary, dao.err
 }
 
 func (dao *fakeMallWeatherQueryDAO) CountRealtime(context.Context, data_dao.RealtimeQuery) (int64, error) {

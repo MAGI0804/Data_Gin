@@ -36,6 +36,7 @@ var (
 
 type mallWeatherQueryDAO interface {
 	QueryRealtime(ctx context.Context, query data_dao.RealtimeQuery) ([]model.MallWeatherRealtime, error)
+	SummarizeRealtimeDay(ctx context.Context, query data_dao.RealtimeDaySummaryQuery) (*data_dao.RealtimeDaySummary, error)
 	CountRealtime(ctx context.Context, query data_dao.RealtimeQuery) (int64, error)
 	QueryMinutely(ctx context.Context, query data_dao.MinutelyQuery) ([]model.MallWeatherMinutely, error)
 	CountMinutely(ctx context.Context, query data_dao.MinutelyQuery) (int64, error)

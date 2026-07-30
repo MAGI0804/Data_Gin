@@ -98,19 +98,8 @@ func (service *MallWeatherQueryService) realtimeForMall(
 		}
 		applyOpenWeatherPagination(&result.Pagination, page, totalItems)
 	}
-	latest, err := service.weather.FindCurrentLatest(ctx, mallID, model.MallWeatherDataKindRealtime)
-	if err != nil && !errors.Is(err, data_dao.ErrMallWeatherLatestNotFound) {
-		return nil, fmt.Errorf("mall weather query: realtime freshness: %w", err)
-	}
-	if latest == nil {
-		result.Meta.FreshnessStatus = "UNAVAILABLE"
-	} else {
-		status, age, err := currentWeatherFreshness(model.MallWeatherDataKindRealtime, latest, service.now().UTC())
-		if err != nil {
-			return nil, err
-		}
-		result.Meta.FreshnessStatus = strings.ToUpper(status)
-		result.Meta.DataAgeSeconds = &age
+	if err := service.applyRealtimeFreshness(ctx, mallID, &result.Meta); err != nil {
+		return nil, err
 	}
 	if hasMore && len(rows) > 0 {
 		nextPage, pageErr := nextOpenCursorPage(page)
@@ -123,6 +112,32 @@ func (service *MallWeatherQueryService) realtimeForMall(
 		}
 	}
 	return result, nil
+}
+
+func (service *MallWeatherQueryService) applyRealtimeFreshness(
+	ctx context.Context,
+	mallID uint,
+	meta *MallWeatherQueryMeta,
+) error {
+	if service == nil || ctx == nil || mallID == 0 || meta == nil {
+		return fmt.Errorf("mall weather query: invalid realtime freshness request")
+	}
+	latest, err := service.weather.FindCurrentLatest(ctx, mallID, model.MallWeatherDataKindRealtime)
+	if err != nil && !errors.Is(err, data_dao.ErrMallWeatherLatestNotFound) {
+		return fmt.Errorf("mall weather query: realtime freshness: %w", err)
+	}
+	if latest == nil {
+		meta.FreshnessStatus = "UNAVAILABLE"
+		meta.DataAgeSeconds = nil
+		return nil
+	}
+	status, age, err := currentWeatherFreshness(model.MallWeatherDataKindRealtime, latest, service.now().UTC())
+	if err != nil {
+		return err
+	}
+	meta.FreshnessStatus = strings.ToUpper(status)
+	meta.DataAgeSeconds = &age
+	return nil
 }
 
 func normalizeRealtimeWeatherRequest(request requestbody.MallWeatherRealtimeQueryRequest, mall *model.Mall) (*time.Location, requestbody.MallWeatherRealtimeQueryRequest, error) {

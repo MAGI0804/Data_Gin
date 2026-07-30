@@ -92,4 +92,8 @@ var openAPIDateTimeFields = map[string]bool{
 	"lastSeenAtLocal":         true,
 	"endedAtUtc":              true,
 	"endedAtLocal":            true,
+	"observedStartUtc":        true,
+	"observedStartLocal":      true,
+	"observedEndUtc":          true,
+	"observedEndLocal":        true,
 }

@@ -34,6 +34,12 @@ type OpenWeatherHistoryDayQueryRequest struct {
 	PageSize      int
 }
 
+type OpenWeatherHistoryDaySummaryRequest struct {
+	Date          string
+	TimeZone      string
+	QualityStatus string
+}
+
 type OpenWeatherHistoryRangeQueryRequest struct {
 	StartTime     string
 	EndTime       string

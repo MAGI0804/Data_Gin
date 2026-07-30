@@ -55,6 +55,7 @@ func TestAPIDataRegistersMallCRUDRoutes(t *testing.T) {
 		http.MethodPost + " /api/open/weather/overview",
 		http.MethodPost + " /api/open/weather/realtime",
 		http.MethodPost + " /api/open/weather/history/day",
+		http.MethodPost + " /api/open/weather/history/day/summary",
 		http.MethodPost + " /api/open/weather/history/range",
 		http.MethodPost + " /api/open/weather/minutely",
 		http.MethodPost + " /api/open/weather/hourly",
@@ -84,6 +85,7 @@ func TestAPIDataRegistersMallCRUDRoutes(t *testing.T) {
 	for _, forbidden := range []string{
 		http.MethodGet + " /api/open/weather/malls/:id/hourly",
 		http.MethodGet + " /api/open/weather/history/day",
+		http.MethodGet + " /api/open/weather/history/day/summary",
 		http.MethodGet + " /api/open/weather/history/range",
 		http.MethodPost + " /api/open/weather/malls/:id/fetch-runs",
 		http.MethodPost + " /api/open/weather/malls/:id/download",

@@ -273,17 +273,18 @@ func performMallWeatherRequest(t *testing.T, service MallWeatherQueryService, pa
 }
 
 type fakeMallWeatherControllerService struct {
-	overview        func(context.Context, uint, uint, string) (*data_svc.MallWeatherOverviewResult, error)
-	currentRealtime func(context.Context, uint, uint, string) (*data_svc.MallWeatherCurrentRealtimeResult, error)
-	historyDay      func(context.Context, uint, uint, requestbody.OpenWeatherHistoryDayQueryRequest) (*data_svc.MallWeatherRealtimeResult, error)
-	historyRange    func(context.Context, uint, uint, requestbody.OpenWeatherHistoryRangeQueryRequest) (*data_svc.MallWeatherRealtimeResult, error)
-	realtime        func(context.Context, uint, uint, requestbody.MallWeatherRealtimeQueryRequest) (*data_svc.MallWeatherRealtimeResult, error)
-	minutely        func(context.Context, uint, uint, requestbody.MallWeatherMinutelyQueryRequest) (*data_svc.MallWeatherMinutelyResult, error)
-	hourly          func(context.Context, uint, uint, requestbody.MallWeatherHourlyQueryRequest) (*data_svc.MallWeatherHourlyResult, error)
-	daily           func(context.Context, uint, uint, requestbody.MallWeatherDailyQueryRequest) (*data_svc.MallWeatherDailyResult, error)
-	alerts          func(context.Context, uint, uint, requestbody.MallWeatherAlertQueryRequest) (*data_svc.MallWeatherAlertResult, error)
-	lifeIndices     func(context.Context, uint, uint, requestbody.MallWeatherLifeIndexQueryRequest) (*data_svc.MallWeatherLifeIndexResult, error)
-	fetchRuns       func(context.Context, uint, uint, requestbody.MallWeatherFetchRunQueryRequest) (*data_svc.MallWeatherFetchRunResult, error)
+	overview          func(context.Context, uint, uint, string) (*data_svc.MallWeatherOverviewResult, error)
+	currentRealtime   func(context.Context, uint, uint, string) (*data_svc.MallWeatherCurrentRealtimeResult, error)
+	historyDay        func(context.Context, uint, uint, requestbody.OpenWeatherHistoryDayQueryRequest) (*data_svc.MallWeatherRealtimeResult, error)
+	historyDaySummary func(context.Context, uint, uint, requestbody.OpenWeatherHistoryDaySummaryRequest) (*data_svc.OpenWeatherHistoryDaySummaryResult, error)
+	historyRange      func(context.Context, uint, uint, requestbody.OpenWeatherHistoryRangeQueryRequest) (*data_svc.MallWeatherRealtimeResult, error)
+	realtime          func(context.Context, uint, uint, requestbody.MallWeatherRealtimeQueryRequest) (*data_svc.MallWeatherRealtimeResult, error)
+	minutely          func(context.Context, uint, uint, requestbody.MallWeatherMinutelyQueryRequest) (*data_svc.MallWeatherMinutelyResult, error)
+	hourly            func(context.Context, uint, uint, requestbody.MallWeatherHourlyQueryRequest) (*data_svc.MallWeatherHourlyResult, error)
+	daily             func(context.Context, uint, uint, requestbody.MallWeatherDailyQueryRequest) (*data_svc.MallWeatherDailyResult, error)
+	alerts            func(context.Context, uint, uint, requestbody.MallWeatherAlertQueryRequest) (*data_svc.MallWeatherAlertResult, error)
+	lifeIndices       func(context.Context, uint, uint, requestbody.MallWeatherLifeIndexQueryRequest) (*data_svc.MallWeatherLifeIndexResult, error)
+	fetchRuns         func(context.Context, uint, uint, requestbody.MallWeatherFetchRunQueryRequest) (*data_svc.MallWeatherFetchRunResult, error)
 }
 
 func (service fakeMallWeatherControllerService) Overview(ctx context.Context, actor, mallID uint, timeZone string) (*data_svc.MallWeatherOverviewResult, error) {
@@ -305,6 +306,13 @@ func (service fakeMallWeatherControllerService) HistoryDay(ctx context.Context, 
 		panic("unexpected HistoryDay call")
 	}
 	return service.historyDay(ctx, actor, mallID, request)
+}
+
+func (service fakeMallWeatherControllerService) HistoryDaySummary(ctx context.Context, actor, mallID uint, request requestbody.OpenWeatherHistoryDaySummaryRequest) (*data_svc.OpenWeatherHistoryDaySummaryResult, error) {
+	if service.historyDaySummary == nil {
+		panic("unexpected HistoryDaySummary call")
+	}
+	return service.historyDaySummary(ctx, actor, mallID, request)
 }
 
 func (service fakeMallWeatherControllerService) HistoryRange(ctx context.Context, actor, mallID uint, request requestbody.OpenWeatherHistoryRangeQueryRequest) (*data_svc.MallWeatherRealtimeResult, error) {

@@ -149,6 +149,71 @@ func TestMallWeatherControllerOpenHistoryRangeUsesSecondPrecision(t *testing.T) 
 	}
 }
 
+func TestMallWeatherControllerOpenHistoryDaySummaryUsesBodyAndFormatsTimes(t *testing.T) {
+	var gotActor, gotMall uint
+	var gotRequest requestbody.OpenWeatherHistoryDaySummaryRequest
+	service := fakeMallWeatherControllerService{historyDaySummary: func(
+		_ context.Context,
+		actor, mallID uint,
+		request requestbody.OpenWeatherHistoryDaySummaryRequest,
+	) (*data_svc.OpenWeatherHistoryDaySummaryResult, error) {
+		gotActor, gotMall, gotRequest = actor, mallID, request
+		return &data_svc.OpenWeatherHistoryDaySummaryResult{
+			ObservationStatus: "AVAILABLE",
+			Summary: &data_svc.OpenWeatherHistoryDaySummaryDTO{
+				Date: "2026-07-28", SampleCount: 144,
+				ObservedStartUTC:   time.Date(2026, 7, 27, 16, 0, 0, 0, time.UTC),
+				ObservedEndUTC:     time.Date(2026, 7, 28, 15, 50, 0, 0, time.UTC),
+				ObservedStartLocal: "2026-07-28T00:00:00+08:00",
+				ObservedEndLocal:   "2026-07-28T23:50:00+08:00",
+			},
+			Meta: data_svc.MallWeatherQueryMeta{TimeZone: "Asia/Shanghai"},
+		}, nil
+	}}
+	recorder := performOpenMallWeatherRequest(
+		t, service, "/api/open/weather/history/day/summary",
+		`{"mallId":7,"date":"2026-07-28","timeZone":"Asia/Shanghai","qualityStatus":"VALID"}`,
+	)
+	response := recorder.Body.String()
+	if recorder.Code != http.StatusOK || gotActor != 17 || gotMall != 7 || gotRequest.Date != "2026-07-28" ||
+		gotRequest.TimeZone != "Asia/Shanghai" || gotRequest.QualityStatus != "VALID" ||
+		!strings.Contains(response, `"observedStartUtc":"2026-07-27 16:00:00"`) ||
+		!strings.Contains(response, `"observedEndLocal":"2026-07-28 23:50:00"`) ||
+		strings.Contains(response, `"items"`) || strings.Contains(response, `"pagination"`) {
+		t.Fatalf("status=%d actor=%d mall=%d request=%+v body=%s", recorder.Code, gotActor, gotMall, gotRequest, response)
+	}
+}
+
+func TestMallWeatherControllerOpenHistoryDaySummaryRejectsNonBodyParameters(t *testing.T) {
+	calls := 0
+	service := fakeMallWeatherControllerService{historyDaySummary: func(
+		context.Context,
+		uint,
+		uint,
+		requestbody.OpenWeatherHistoryDaySummaryRequest,
+	) (*data_svc.OpenWeatherHistoryDaySummaryResult, error) {
+		calls++
+		return nil, nil
+	}}
+	for _, test := range []struct {
+		path string
+		body string
+	}{
+		{path: "/api/open/weather/history/day/summary?mallId=7", body: `{"mallId":7,"date":"2026-07-28"}`},
+		{path: "/api/open/weather/history/day/summary", body: `{"mallId":7,"date":"2026-07-28","pageSize":50}`},
+		{path: "/api/open/weather/history/day/summary", body: `{"mallId":7,"date":"2026-07-28"}{}`},
+		{path: "/api/open/weather/history/day/summary", body: `{}`},
+	} {
+		recorder := performOpenMallWeatherRequest(t, service, test.path, test.body)
+		if recorder.Code != http.StatusUnprocessableEntity {
+			t.Fatalf("path=%s status=%d body=%s", test.path, recorder.Code, recorder.Body.String())
+		}
+	}
+	if calls != 0 {
+		t.Fatalf("service calls=%d", calls)
+	}
+}
+
 func TestMallWeatherControllerOpenHistoryRejectsWrongFieldLevel(t *testing.T) {
 	service := fakeMallWeatherControllerService{
 		historyDay: func(context.Context, uint, uint, requestbody.OpenWeatherHistoryDayQueryRequest) (*data_svc.MallWeatherRealtimeResult, error) {
@@ -396,6 +461,7 @@ func performOpenMallWeatherRequest(
 	router.POST("/api/open/weather/realtime", controller.OpenRealtime)
 	router.POST("/api/open/weather/malls/:id/realtime", controller.OpenRealtime)
 	router.POST("/api/open/weather/history/day", controller.OpenHistoryDay)
+	router.POST("/api/open/weather/history/day/summary", controller.OpenHistoryDaySummary)
 	router.POST("/api/open/weather/history/range", controller.OpenHistoryRange)
 	router.POST("/api/open/weather/hourly", controller.OpenHourly)
 	router.POST("/api/open/weather/malls/:id/hourly", controller.OpenHourly)

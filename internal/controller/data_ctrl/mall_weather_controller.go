@@ -24,6 +24,7 @@ type MallWeatherQueryService interface {
 	Overview(context.Context, uint, uint, string) (*data_svc.MallWeatherOverviewResult, error)
 	CurrentRealtime(context.Context, uint, uint, string) (*data_svc.MallWeatherCurrentRealtimeResult, error)
 	HistoryDay(context.Context, uint, uint, requestbody.OpenWeatherHistoryDayQueryRequest) (*data_svc.MallWeatherRealtimeResult, error)
+	HistoryDaySummary(context.Context, uint, uint, requestbody.OpenWeatherHistoryDaySummaryRequest) (*data_svc.OpenWeatherHistoryDaySummaryResult, error)
 	HistoryRange(context.Context, uint, uint, requestbody.OpenWeatherHistoryRangeQueryRequest) (*data_svc.MallWeatherRealtimeResult, error)
 	Realtime(context.Context, uint, uint, requestbody.MallWeatherRealtimeQueryRequest) (*data_svc.MallWeatherRealtimeResult, error)
 	Minutely(context.Context, uint, uint, requestbody.MallWeatherMinutelyQueryRequest) (*data_svc.MallWeatherMinutelyResult, error)
@@ -73,6 +74,13 @@ type openWeatherHistoryDayRequest struct {
 	QualityStatus string `json:"qualityStatus"`
 	Cursor        string `json:"cursor"`
 	PageSize      *int   `json:"pageSize"`
+}
+
+type openWeatherHistoryDaySummaryRequest struct {
+	MallID        uint   `json:"mallId"`
+	Date          string `json:"date"`
+	TimeZone      string `json:"timeZone"`
+	QualityStatus string `json:"qualityStatus"`
 }
 
 type openWeatherHistoryRangeRequest struct {
@@ -316,6 +324,38 @@ func (controller *MallWeatherController) OpenHistoryDay(c *gin.Context) {
 			QualityStatus: strings.TrimSpace(body.QualityStatus),
 			Cursor:        strings.TrimSpace(body.Cursor),
 			PageSize:      pageSize,
+		},
+	)
+	if err != nil {
+		writeMallWeatherError(c, err)
+		return
+	}
+	writeOpenMallWeatherResult(c, result)
+}
+
+func (controller *MallWeatherController) OpenHistoryDaySummary(c *gin.Context) {
+	if c.Request.URL.RawQuery != "" {
+		writeMallWeatherError(c, fmt.Errorf("%w: query parameters are not supported", data_svc.ErrMallWeatherInvalidQuery))
+		return
+	}
+	var body openWeatherHistoryDaySummaryRequest
+	if err := decodeMallJSON(c, &body); err != nil {
+		writeMallWeatherError(c, fmt.Errorf("%w: invalid JSON body", data_svc.ErrMallWeatherInvalidQuery))
+		return
+	}
+	mallID, err := openMallWeatherID(c, body.MallID)
+	if err != nil {
+		writeMallWeatherError(c, err)
+		return
+	}
+	result, err := controller.service.HistoryDaySummary(
+		c.Request.Context(),
+		auth.CurrentUserID(c),
+		mallID,
+		requestbody.OpenWeatherHistoryDaySummaryRequest{
+			Date:          strings.TrimSpace(body.Date),
+			TimeZone:      strings.TrimSpace(body.TimeZone),
+			QualityStatus: strings.TrimSpace(body.QualityStatus),
 		},
 	)
 	if err != nil {
