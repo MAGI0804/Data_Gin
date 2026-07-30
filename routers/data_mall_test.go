@@ -54,6 +54,8 @@ func TestAPIDataRegistersMallCRUDRoutes(t *testing.T) {
 		http.MethodPost + " /api/open/weather/malls/:id/life-indices",
 		http.MethodPost + " /api/open/weather/overview",
 		http.MethodPost + " /api/open/weather/realtime",
+		http.MethodPost + " /api/open/weather/history/day",
+		http.MethodPost + " /api/open/weather/history/range",
 		http.MethodPost + " /api/open/weather/minutely",
 		http.MethodPost + " /api/open/weather/hourly",
 		http.MethodPost + " /api/open/weather/daily",
@@ -81,6 +83,8 @@ func TestAPIDataRegistersMallCRUDRoutes(t *testing.T) {
 	}
 	for _, forbidden := range []string{
 		http.MethodGet + " /api/open/weather/malls/:id/hourly",
+		http.MethodGet + " /api/open/weather/history/day",
+		http.MethodGet + " /api/open/weather/history/range",
 		http.MethodPost + " /api/open/weather/malls/:id/fetch-runs",
 		http.MethodPost + " /api/open/weather/malls/:id/download",
 		http.MethodPost + " /api/open/weather/malls/:id/refresh",

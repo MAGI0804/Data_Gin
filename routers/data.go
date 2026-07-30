@@ -243,6 +243,8 @@ func registerOpenWeatherRoutes(
 		weatherGroup.POST("/malls/query", mallCtrl.Query)
 		weatherGroup.POST("/overview", weatherCtrl.OpenOverview)
 		weatherGroup.POST("/realtime", weatherCtrl.OpenRealtime)
+		weatherGroup.POST("/history/day", weatherCtrl.OpenHistoryDay)
+		weatherGroup.POST("/history/range", weatherCtrl.OpenHistoryRange)
 		weatherGroup.POST("/minutely", weatherCtrl.OpenMinutely)
 		weatherGroup.POST("/hourly", weatherCtrl.OpenHourly)
 		weatherGroup.POST("/daily", weatherCtrl.OpenDaily)

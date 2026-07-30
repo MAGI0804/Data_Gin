@@ -101,6 +101,81 @@ func TestMallWeatherControllerOpenRealtimeReturnsNullWhenUnavailable(t *testing.
 	}
 }
 
+func TestMallWeatherControllerOpenHistoryDayUsesDatePrecision(t *testing.T) {
+	var gotActor, gotMall uint
+	var gotRequest requestbody.OpenWeatherHistoryDayQueryRequest
+	service := fakeMallWeatherControllerService{historyDay: func(
+		_ context.Context,
+		actor, mallID uint,
+		request requestbody.OpenWeatherHistoryDayQueryRequest,
+	) (*data_svc.MallWeatherRealtimeResult, error) {
+		gotActor, gotMall, gotRequest = actor, mallID, request
+		return &data_svc.MallWeatherRealtimeResult{
+			Items:      []data_svc.MallWeatherRealtimeDTO{},
+			Pagination: data_svc.MallWeatherPagination{Page: 1, PageSize: 50},
+		}, nil
+	}}
+	recorder := performOpenMallWeatherRequest(
+		t,
+		service,
+		"/api/open/weather/history/day",
+		`{"mallId":7,"date":"2026-07-28","timeZone":"Asia/Shanghai","qualityStatus":"VALID","pageSize":50}`,
+	)
+	if recorder.Code != http.StatusOK || gotActor != 17 || gotMall != 7 || gotRequest.Date != "2026-07-28" ||
+		gotRequest.TimeZone != "Asia/Shanghai" || gotRequest.QualityStatus != "VALID" || gotRequest.PageSize != 50 {
+		t.Fatalf("status=%d actor=%d mall=%d request=%+v body=%s", recorder.Code, gotActor, gotMall, gotRequest, recorder.Body.String())
+	}
+}
+
+func TestMallWeatherControllerOpenHistoryRangeUsesSecondPrecision(t *testing.T) {
+	var gotRequest requestbody.OpenWeatherHistoryRangeQueryRequest
+	service := fakeMallWeatherControllerService{historyRange: func(
+		_ context.Context,
+		_, _ uint,
+		request requestbody.OpenWeatherHistoryRangeQueryRequest,
+	) (*data_svc.MallWeatherRealtimeResult, error) {
+		gotRequest = request
+		return &data_svc.MallWeatherRealtimeResult{Items: []data_svc.MallWeatherRealtimeDTO{}}, nil
+	}}
+	recorder := performOpenMallWeatherRequest(
+		t,
+		service,
+		"/api/open/weather/history/range",
+		`{"mallId":7,"startTime":"2026-07-28 01:02:03","endTime":"2026-07-28 04:05:06","cursor":"next"}`,
+	)
+	if recorder.Code != http.StatusOK || gotRequest.StartTime != "2026-07-28 01:02:03" ||
+		gotRequest.EndTime != "2026-07-28 04:05:06" || gotRequest.Cursor != "next" {
+		t.Fatalf("status=%d request=%+v body=%s", recorder.Code, gotRequest, recorder.Body.String())
+	}
+}
+
+func TestMallWeatherControllerOpenHistoryRejectsWrongFieldLevel(t *testing.T) {
+	service := fakeMallWeatherControllerService{
+		historyDay: func(context.Context, uint, uint, requestbody.OpenWeatherHistoryDayQueryRequest) (*data_svc.MallWeatherRealtimeResult, error) {
+			t.Fatal("HistoryDay must not be called")
+			return nil, nil
+		},
+		historyRange: func(context.Context, uint, uint, requestbody.OpenWeatherHistoryRangeQueryRequest) (*data_svc.MallWeatherRealtimeResult, error) {
+			t.Fatal("HistoryRange must not be called")
+			return nil, nil
+		},
+	}
+	tests := []struct {
+		path string
+		body string
+	}{
+		{path: "/api/open/weather/history/day", body: `{"mallId":7,"date":"2026-07-28","startTime":"2026-07-28 00:00:00"}`},
+		{path: "/api/open/weather/history/day", body: `{"mallId":7,"date":"2026-07-28","pageSize":0}`},
+		{path: "/api/open/weather/history/range", body: `{"mallId":7,"start":"2026-07-28 00:00:00","end":"2026-07-29 00:00:00"}`},
+	}
+	for _, test := range tests {
+		recorder := performOpenMallWeatherRequest(t, service, test.path, test.body)
+		if recorder.Code != http.StatusUnprocessableEntity {
+			t.Fatalf("path=%s status=%d body=%s", test.path, recorder.Code, recorder.Body.String())
+		}
+	}
+}
+
 func TestMallWeatherControllerOpenRealtimeRejectsConflictingPathAndBodyMallID(t *testing.T) {
 	calls := 0
 	service := fakeMallWeatherControllerService{currentRealtime: func(
@@ -255,6 +330,8 @@ func performOpenMallWeatherRequest(
 	controller := NewMallWeatherControllerWithService(service)
 	router.POST("/api/open/weather/realtime", controller.OpenRealtime)
 	router.POST("/api/open/weather/malls/:id/realtime", controller.OpenRealtime)
+	router.POST("/api/open/weather/history/day", controller.OpenHistoryDay)
+	router.POST("/api/open/weather/history/range", controller.OpenHistoryRange)
 	router.POST("/api/open/weather/hourly", controller.OpenHourly)
 	router.POST("/api/open/weather/malls/:id/hourly", controller.OpenHourly)
 	recorder := httptest.NewRecorder()

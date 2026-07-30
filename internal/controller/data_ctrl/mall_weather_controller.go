@@ -23,6 +23,8 @@ import (
 type MallWeatherQueryService interface {
 	Overview(context.Context, uint, uint, string) (*data_svc.MallWeatherOverviewResult, error)
 	CurrentRealtime(context.Context, uint, uint, string) (*data_svc.MallWeatherCurrentRealtimeResult, error)
+	HistoryDay(context.Context, uint, uint, requestbody.OpenWeatherHistoryDayQueryRequest) (*data_svc.MallWeatherRealtimeResult, error)
+	HistoryRange(context.Context, uint, uint, requestbody.OpenWeatherHistoryRangeQueryRequest) (*data_svc.MallWeatherRealtimeResult, error)
 	Realtime(context.Context, uint, uint, requestbody.MallWeatherRealtimeQueryRequest) (*data_svc.MallWeatherRealtimeResult, error)
 	Minutely(context.Context, uint, uint, requestbody.MallWeatherMinutelyQueryRequest) (*data_svc.MallWeatherMinutelyResult, error)
 	Hourly(context.Context, uint, uint, requestbody.MallWeatherHourlyQueryRequest) (*data_svc.MallWeatherHourlyResult, error)
@@ -48,6 +50,25 @@ type openMallWeatherTimeSeriesRequest struct {
 	TimeZone      string `json:"timeZone"`
 	Latest        *bool  `json:"latest"`
 	AsOf          string `json:"asOf"`
+	QualityStatus string `json:"qualityStatus"`
+	Cursor        string `json:"cursor"`
+	PageSize      *int   `json:"pageSize"`
+}
+
+type openWeatherHistoryDayRequest struct {
+	MallID        uint   `json:"mallId"`
+	Date          string `json:"date"`
+	TimeZone      string `json:"timeZone"`
+	QualityStatus string `json:"qualityStatus"`
+	Cursor        string `json:"cursor"`
+	PageSize      *int   `json:"pageSize"`
+}
+
+type openWeatherHistoryRangeRequest struct {
+	MallID        uint   `json:"mallId"`
+	StartTime     string `json:"startTime"`
+	EndTime       string `json:"endTime"`
+	TimeZone      string `json:"timeZone"`
 	QualityStatus string `json:"qualityStatus"`
 	Cursor        string `json:"cursor"`
 	PageSize      *int   `json:"pageSize"`
@@ -256,6 +277,87 @@ func (controller *MallWeatherController) OpenRealtime(c *gin.Context) {
 		return
 	}
 	writeOpenMallWeatherResult(c, result)
+}
+
+func (controller *MallWeatherController) OpenHistoryDay(c *gin.Context) {
+	var body openWeatherHistoryDayRequest
+	if err := decodeMallJSON(c, &body); err != nil {
+		writeMallWeatherError(c, fmt.Errorf("%w: invalid JSON body", data_svc.ErrMallWeatherInvalidQuery))
+		return
+	}
+	mallID, err := openMallWeatherID(c, body.MallID)
+	if err != nil {
+		writeMallWeatherError(c, err)
+		return
+	}
+	pageSize, err := openWeatherPageSize(body.PageSize)
+	if err != nil {
+		writeMallWeatherError(c, err)
+		return
+	}
+	result, err := controller.service.HistoryDay(
+		c.Request.Context(),
+		auth.CurrentUserID(c),
+		mallID,
+		requestbody.OpenWeatherHistoryDayQueryRequest{
+			Date:          strings.TrimSpace(body.Date),
+			TimeZone:      strings.TrimSpace(body.TimeZone),
+			QualityStatus: strings.TrimSpace(body.QualityStatus),
+			Cursor:        strings.TrimSpace(body.Cursor),
+			PageSize:      pageSize,
+		},
+	)
+	if err != nil {
+		writeMallWeatherError(c, err)
+		return
+	}
+	writeOpenMallWeatherResult(c, result)
+}
+
+func (controller *MallWeatherController) OpenHistoryRange(c *gin.Context) {
+	var body openWeatherHistoryRangeRequest
+	if err := decodeMallJSON(c, &body); err != nil {
+		writeMallWeatherError(c, fmt.Errorf("%w: invalid JSON body", data_svc.ErrMallWeatherInvalidQuery))
+		return
+	}
+	mallID, err := openMallWeatherID(c, body.MallID)
+	if err != nil {
+		writeMallWeatherError(c, err)
+		return
+	}
+	pageSize, err := openWeatherPageSize(body.PageSize)
+	if err != nil {
+		writeMallWeatherError(c, err)
+		return
+	}
+	result, err := controller.service.HistoryRange(
+		c.Request.Context(),
+		auth.CurrentUserID(c),
+		mallID,
+		requestbody.OpenWeatherHistoryRangeQueryRequest{
+			StartTime:     strings.TrimSpace(body.StartTime),
+			EndTime:       strings.TrimSpace(body.EndTime),
+			TimeZone:      strings.TrimSpace(body.TimeZone),
+			QualityStatus: strings.TrimSpace(body.QualityStatus),
+			Cursor:        strings.TrimSpace(body.Cursor),
+			PageSize:      pageSize,
+		},
+	)
+	if err != nil {
+		writeMallWeatherError(c, err)
+		return
+	}
+	writeOpenMallWeatherResult(c, result)
+}
+
+func openWeatherPageSize(value *int) (int, error) {
+	if value == nil {
+		return 0, nil
+	}
+	if *value <= 0 {
+		return 0, fmt.Errorf("%w: invalid pageSize", data_svc.ErrMallWeatherInvalidQuery)
+	}
+	return *value, nil
 }
 
 func (controller *MallWeatherController) OpenMinutely(c *gin.Context) {

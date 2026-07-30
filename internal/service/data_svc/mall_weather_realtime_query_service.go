@@ -44,6 +44,15 @@ func (service *MallWeatherQueryService) Realtime(
 	if err != nil {
 		return nil, err
 	}
+	return service.realtimeForMall(ctx, mallID, mall, request)
+}
+
+func (service *MallWeatherQueryService) realtimeForMall(
+	ctx context.Context,
+	mallID uint,
+	mall *model.Mall,
+	request requestbody.MallWeatherRealtimeQueryRequest,
+) (*MallWeatherRealtimeResult, error) {
 	location, normalized, err := normalizeRealtimeWeatherRequest(request, mall)
 	if err != nil {
 		return nil, err

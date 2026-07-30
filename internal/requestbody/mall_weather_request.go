@@ -26,6 +26,23 @@ type MallWeatherRealtimeQueryRequest struct {
 	IncludeTotals bool
 }
 
+type OpenWeatherHistoryDayQueryRequest struct {
+	Date          string
+	TimeZone      string
+	QualityStatus string
+	Cursor        string
+	PageSize      int
+}
+
+type OpenWeatherHistoryRangeQueryRequest struct {
+	StartTime     string
+	EndTime       string
+	TimeZone      string
+	QualityStatus string
+	Cursor        string
+	PageSize      int
+}
+
 type MallWeatherMinutelyQueryRequest struct {
 	StartUTC      time.Time
 	EndUTC        time.Time

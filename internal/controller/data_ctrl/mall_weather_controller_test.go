@@ -275,6 +275,8 @@ func performMallWeatherRequest(t *testing.T, service MallWeatherQueryService, pa
 type fakeMallWeatherControllerService struct {
 	overview        func(context.Context, uint, uint, string) (*data_svc.MallWeatherOverviewResult, error)
 	currentRealtime func(context.Context, uint, uint, string) (*data_svc.MallWeatherCurrentRealtimeResult, error)
+	historyDay      func(context.Context, uint, uint, requestbody.OpenWeatherHistoryDayQueryRequest) (*data_svc.MallWeatherRealtimeResult, error)
+	historyRange    func(context.Context, uint, uint, requestbody.OpenWeatherHistoryRangeQueryRequest) (*data_svc.MallWeatherRealtimeResult, error)
 	realtime        func(context.Context, uint, uint, requestbody.MallWeatherRealtimeQueryRequest) (*data_svc.MallWeatherRealtimeResult, error)
 	minutely        func(context.Context, uint, uint, requestbody.MallWeatherMinutelyQueryRequest) (*data_svc.MallWeatherMinutelyResult, error)
 	hourly          func(context.Context, uint, uint, requestbody.MallWeatherHourlyQueryRequest) (*data_svc.MallWeatherHourlyResult, error)
@@ -296,6 +298,20 @@ func (service fakeMallWeatherControllerService) CurrentRealtime(ctx context.Cont
 		panic("unexpected CurrentRealtime call")
 	}
 	return service.currentRealtime(ctx, actor, mallID, timeZone)
+}
+
+func (service fakeMallWeatherControllerService) HistoryDay(ctx context.Context, actor, mallID uint, request requestbody.OpenWeatherHistoryDayQueryRequest) (*data_svc.MallWeatherRealtimeResult, error) {
+	if service.historyDay == nil {
+		panic("unexpected HistoryDay call")
+	}
+	return service.historyDay(ctx, actor, mallID, request)
+}
+
+func (service fakeMallWeatherControllerService) HistoryRange(ctx context.Context, actor, mallID uint, request requestbody.OpenWeatherHistoryRangeQueryRequest) (*data_svc.MallWeatherRealtimeResult, error) {
+	if service.historyRange == nil {
+		panic("unexpected HistoryRange call")
+	}
+	return service.historyRange(ctx, actor, mallID, request)
 }
 
 func (service fakeMallWeatherControllerService) Realtime(ctx context.Context, actor, mallID uint, request requestbody.MallWeatherRealtimeQueryRequest) (*data_svc.MallWeatherRealtimeResult, error) {
