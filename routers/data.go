@@ -217,7 +217,7 @@ func registerOpenBojunOrderRoutes(
 	bojunGroup := api.Group("/open/bojun")
 	bojunGroup.Use(
 		middleware.LimitOpenAPIIP("bojun", openBojunPreAuthIPRateLimit),
-		middleware.AuthOpenJWT(),
+		middleware.AuthOpenToken(),
 		middleware.LimitOpenAPIUserRoute("bojun", openBojunUserRouteRateLimit),
 	)
 	bojunGroup.POST("/orders/query", controller.Query)
@@ -236,7 +236,7 @@ func registerOpenWeatherRoutes(
 	weatherGroup := api.Group("/open/weather")
 	weatherGroup.Use(
 		middleware.LimitOpenAPIIP("weather", openWeatherPreAuthIPRateLimit),
-		middleware.AuthOpenJWT(),
+		middleware.AuthOpenToken(),
 		middleware.LimitOpenAPIUserRoute("weather", openWeatherUserRouteRateLimit),
 	)
 	{

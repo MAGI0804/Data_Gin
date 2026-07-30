@@ -12,7 +12,7 @@ func registerDataAuthorizationRoutes(api *gin.RouterGroup) {
 	group := api.Group("/v1/data-authorizations")
 	group.Use(
 		middleware.LimitOpenAPIIP("data-authorization-admin", "300-M"),
-		middleware.AuthOpenJWT(),
+		middleware.AuthInternalBearerJWT(),
 		middleware.LimitOpenAPIUserRoute("data-authorization-admin", "60-M"),
 	)
 	group.POST("/accounts/query", controller.QueryAccounts)
