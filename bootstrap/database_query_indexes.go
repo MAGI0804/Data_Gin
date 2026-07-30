@@ -72,6 +72,14 @@ func queryIndexSpecs() []queryIndexSpec {
 			Columns: []queryIndexColumn{{Name: "c_store_code"}, {Name: "billdate", Desc: true}, {Name: "id", Desc: true}},
 		},
 		{
+			TableName: "bojun_retail_orders", IndexName: "idx_bojun_open_completed_query",
+			Columns: []queryIndexColumn{{Name: "completed_at", Desc: true}, {Name: "id", Desc: true}},
+		},
+		{
+			TableName: "bojun_retail_orders", IndexName: "idx_bojun_open_completed_mall_query",
+			Columns: []queryIndexColumn{{Name: "c_store_code"}, {Name: "completed_at", Desc: true}, {Name: "id", Desc: true}},
+		},
+		{
 			TableName: "malls", IndexName: "idx_malls_open_weather_query",
 			Columns: []queryIndexColumn{{Name: "status"}, {Name: "weather_enabled"}, {Name: "geocode_status"}},
 		},

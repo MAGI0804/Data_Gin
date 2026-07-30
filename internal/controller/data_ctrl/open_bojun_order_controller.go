@@ -34,6 +34,10 @@ func NewOpenBojunOrderControllerWithService(service OpenBojunOrderQueryService) 
 }
 
 func (controller *OpenBojunOrderController) Query(c *gin.Context) {
+	if len(c.Request.URL.Query()) > 0 {
+		writeOpenBojunOrderError(c, data_svc.ErrOpenBojunOrderInvalidQuery)
+		return
+	}
 	var request requestbody.OpenBojunOrderQueryRequest
 	if err := decodeMallJSON(c, &request); err != nil {
 		writeOpenBojunOrderError(c, data_svc.ErrOpenBojunOrderInvalidQuery)

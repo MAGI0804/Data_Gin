@@ -7,8 +7,8 @@ import (
 
 func TestQueryIndexSpecsCoverOpenQueryPaths(t *testing.T) {
 	specs := queryIndexSpecs()
-	if len(specs) != 10 {
-		t.Fatalf("queryIndexSpecs() count=%d want=10", len(specs))
+	if len(specs) != 12 {
+		t.Fatalf("queryIndexSpecs() count=%d want=12", len(specs))
 	}
 	want := map[string]bool{
 		"mall_weather_realtime.idx_weather_realtime_query":               false,
@@ -20,6 +20,8 @@ func TestQueryIndexSpecsCoverOpenQueryPaths(t *testing.T) {
 		"mall_weather_latest.idx_weather_latest_business_time":           false,
 		"mall_weather_alert_relations.idx_weather_alert_relation_active": false,
 		"bojun_retail_orders.idx_bojun_open_query":                       false,
+		"bojun_retail_orders.idx_bojun_open_completed_query":             false,
+		"bojun_retail_orders.idx_bojun_open_completed_mall_query":        false,
 		"malls.idx_malls_open_weather_query":                             false,
 	}
 	for _, spec := range specs {

@@ -39,14 +39,25 @@ func (service *fakeOpenBojunOrderQueryService) Query(
 func TestOpenBojunOrderControllerParsesStrictJSON(t *testing.T) {
 	service := &fakeOpenBojunOrderQueryService{}
 	recorder := performOpenBojunControllerRequest(t, service, `{
-		"startDate":"2026-07-01",
-		"endDate":"2026-07-31",
-		"storeCodes":["ABCN001P012"],
+		"startTime":"2026-07-01 00:00:00",
+		"endTime":"2026-07-31 23:59:59",
+		"mallCodes":["ABCN001P012"],
 		"pageSize":50
 	}`)
 	if recorder.Code != http.StatusOK || service.calls != 1 || service.actor != 17 ||
-		service.request.StartDate != "2026-07-01" || service.request.PageSize != 50 {
+		service.request.StartTime != "2026-07-01 00:00:00" || service.request.PageSize != 50 {
 		t.Fatalf("status=%d service=%+v body=%s", recorder.Code, service, recorder.Body.String())
+	}
+}
+
+func TestOpenBojunOrderControllerRejectsQueryParameters(t *testing.T) {
+	service := &fakeOpenBojunOrderQueryService{}
+	recorder := performOpenBojunControllerRequestAtPath(
+		t, service, "/api/open/bojun/orders/query?pageSize=20",
+		`{"startTime":"2026-07-01 00:00:00","endTime":"2026-07-02 00:00:00"}`,
+	)
+	if recorder.Code != http.StatusUnprocessableEntity || service.calls != 0 {
+		t.Fatalf("status=%d calls=%d body=%s", recorder.Code, service.calls, recorder.Body.String())
 	}
 }
 
@@ -69,6 +80,15 @@ func performOpenBojunControllerRequest(
 	service OpenBojunOrderQueryService,
 	body string,
 ) *httptest.ResponseRecorder {
+	return performOpenBojunControllerRequestAtPath(t, service, "/api/open/bojun/orders/query", body)
+}
+
+func performOpenBojunControllerRequestAtPath(
+	t *testing.T,
+	service OpenBojunOrderQueryService,
+	path string,
+	body string,
+) *httptest.ResponseRecorder {
 	t.Helper()
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
@@ -80,7 +100,7 @@ func performOpenBojunControllerRequest(
 	router.POST("/api/open/bojun/orders/query", controller.Query)
 	request := httptest.NewRequest(
 		http.MethodPost,
-		"/api/open/bojun/orders/query",
+		path,
 		strings.NewReader(body),
 	)
 	request.Header.Set("Content-Type", "application/json")

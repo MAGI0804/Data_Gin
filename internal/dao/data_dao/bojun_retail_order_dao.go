@@ -15,13 +15,16 @@ type BojunRetailOrderDAO struct {
 }
 
 type OpenBojunOrderQuery struct {
-	StartBillDate  int
-	EndBillDate    int
-	StoreCodes     []string
-	OrderTypes     []string
-	BeforeBillDate int
-	BeforeID       uint
-	Limit          int
+	StartCompletedAt  time.Time
+	EndCompletedAt    time.Time
+	BeforeCompletedAt *time.Time
+	StartBillDate     int
+	EndBillDate       int
+	BeforeBillDate    int
+	StoreCodes        []string
+	OrderTypes        []string
+	BeforeID          uint
+	Limit             int
 }
 
 func NewBojunRetailOrderDAO(databases ...*gorm.DB) *BojunRetailOrderDAO {
@@ -146,11 +149,19 @@ func (dao *BojunRetailOrderDAO) ListOpenOrders(
 	}
 	dbQuery = dbQuery.
 		Select([]string{
-			"id", "otherdocno", "docno", "billdate", "c_store_code", "c_store_name",
+			"id", "otherdocno", "docno", "billdate", "completed_at", "c_store_code", "c_store_name",
 			"order_type_code", "order_type_name", "tot_lines", "tot_qty", "tot_amt_list",
 			"tot_amt_actual", "avg_discount", "related_normal_docno", "items_json",
 		})
-	if query.BeforeBillDate > 0 && query.BeforeID > 0 {
+	completedAtMode := !query.StartCompletedAt.IsZero()
+	if completedAtMode && query.BeforeCompletedAt != nil && query.BeforeID > 0 {
+		dbQuery = dbQuery.Where(
+			"completed_at < ? OR (completed_at = ? AND id < ?)",
+			*query.BeforeCompletedAt,
+			*query.BeforeCompletedAt,
+			query.BeforeID,
+		)
+	} else if !completedAtMode && query.BeforeBillDate > 0 && query.BeforeID > 0 {
 		dbQuery = dbQuery.Where(
 			"billdate < ? OR (billdate = ? AND id < ?)",
 			query.BeforeBillDate,
@@ -160,7 +171,12 @@ func (dao *BojunRetailOrderDAO) ListOpenOrders(
 	}
 
 	orders := make([]model.BojunRetailOrder, 0)
-	err = dbQuery.Order("billdate DESC").Order("id DESC").Limit(query.Limit).Find(&orders).Error
+	if completedAtMode {
+		dbQuery = dbQuery.Order("completed_at DESC")
+	} else {
+		dbQuery = dbQuery.Order("billdate DESC")
+	}
+	err = dbQuery.Order("id DESC").Limit(query.Limit).Find(&orders).Error
 	return orders, err
 }
 
@@ -177,14 +193,33 @@ func (dao *BojunRetailOrderDAO) CountOpenOrders(ctx context.Context, query OpenB
 }
 
 func (dao *BojunRetailOrderDAO) openOrdersQuery(ctx context.Context, query OpenBojunOrderQuery) (*gorm.DB, error) {
-	if dao == nil || dao.db == nil || ctx == nil || query.StartBillDate <= 0 ||
-		query.EndBillDate < query.StartBillDate || len(query.StoreCodes) == 0 {
+	if dao == nil || dao.db == nil || ctx == nil {
 		return nil, gorm.ErrInvalidData
 	}
-	dbQuery := dao.db.WithContext(ctx).
-		Model(&model.BojunRetailOrder{}).
-		Where("billdate BETWEEN ? AND ?", query.StartBillDate, query.EndBillDate).
-		Where("c_store_code IN ?", query.StoreCodes)
+	completedAtMode := !query.StartCompletedAt.IsZero() || !query.EndCompletedAt.IsZero()
+	billDateMode := query.StartBillDate > 0 || query.EndBillDate > 0
+	if completedAtMode == billDateMode {
+		return nil, gorm.ErrInvalidData
+	}
+	dbQuery := dao.db.WithContext(ctx).Model(&model.BojunRetailOrder{})
+	if completedAtMode {
+		if query.StartCompletedAt.IsZero() || !query.EndCompletedAt.After(query.StartCompletedAt) {
+			return nil, gorm.ErrInvalidData
+		}
+		dbQuery = dbQuery.Where(
+			"completed_at >= ? AND completed_at < ?",
+			query.StartCompletedAt,
+			query.EndCompletedAt,
+		)
+	} else {
+		if query.StartBillDate <= 0 || query.EndBillDate < query.StartBillDate {
+			return nil, gorm.ErrInvalidData
+		}
+		dbQuery = dbQuery.Where("billdate BETWEEN ? AND ?", query.StartBillDate, query.EndBillDate)
+	}
+	if len(query.StoreCodes) > 0 {
+		dbQuery = dbQuery.Where("c_store_code IN ?", query.StoreCodes)
+	}
 	if len(query.OrderTypes) > 0 {
 		dbQuery = dbQuery.Where("order_type_code IN ?", query.OrderTypes)
 	}

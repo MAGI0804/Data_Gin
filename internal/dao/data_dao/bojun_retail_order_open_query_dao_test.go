@@ -54,14 +54,15 @@ func TestBojunRetailOrderDAOListOpenOrdersUsesBoundedSanitizedQuery(t *testing.T
 		t.Fatalf("register SQL capture callback: %v", err)
 	}
 	dao := NewBojunRetailOrderDAO(db)
+	before := time.Date(2026, 7, 20, 12, 30, 0, 0, time.FixedZone("Asia/Shanghai", 8*60*60))
 	orders, err := dao.ListOpenOrders(t.Context(), OpenBojunOrderQuery{
-		StartBillDate:  20260701,
-		EndBillDate:    20260731,
-		StoreCodes:     []string{"ABCN001P012"},
-		OrderTypes:     []string{"CMR"},
-		BeforeBillDate: 20260720,
-		BeforeID:       99,
-		Limit:          51,
+		StartCompletedAt:  time.Date(2026, 7, 1, 0, 0, 0, 0, before.Location()),
+		EndCompletedAt:    time.Date(2026, 8, 1, 0, 0, 0, 0, before.Location()),
+		BeforeCompletedAt: &before,
+		StoreCodes:        []string{"ABCN001P012"},
+		OrderTypes:        []string{"CMR"},
+		BeforeID:          99,
+		Limit:             51,
 	})
 	if err != nil {
 		t.Fatalf("ListOpenOrders() error=%v", err)
@@ -70,12 +71,12 @@ func TestBojunRetailOrderDAOListOpenOrdersUsesBoundedSanitizedQuery(t *testing.T
 		t.Fatal("ListOpenOrders() returned nil slice")
 	}
 	for _, fragment := range []string{
-		"SELECT `id`,`otherdocno`,`docno`,`billdate`,`c_store_code`,`c_store_name`",
-		"billdate BETWEEN ? AND ?",
+		"SELECT `id`,`otherdocno`,`docno`,`billdate`,`completed_at`,`c_store_code`,`c_store_name`",
+		"completed_at >= ? AND completed_at < ?",
 		"c_store_code IN (?)",
 		"order_type_code IN (?)",
-		"billdate < ? OR (billdate = ? AND id < ?)",
-		"ORDER BY billdate DESC,id DESC",
+		"completed_at < ? OR (completed_at = ? AND id < ?)",
+		"ORDER BY completed_at DESC,id DESC",
 		"LIMIT 51",
 	} {
 		if !strings.Contains(statement, fragment) {
@@ -89,6 +90,31 @@ func TestBojunRetailOrderDAOListOpenOrdersUsesBoundedSanitizedQuery(t *testing.T
 	}
 	if strings.Contains(statement, "ABCN001P012") || strings.Contains(statement, "CMR") {
 		t.Fatalf("statement interpolates filters: %s", statement)
+	}
+}
+
+func TestBojunRetailOrderDAOCountOpenOrdersAllowsOmittedMallCodes(t *testing.T) {
+	t.Parallel()
+	db := dryRunWeatherDAOTestDB(t)
+	var statement string
+	if err := db.Callback().Query().After("gorm:query").Register("test:capture_open_bojun_all_malls_count_sql", func(tx *gorm.DB) {
+		statement = tx.Statement.SQL.String()
+	}); err != nil {
+		t.Fatalf("register SQL capture callback: %v", err)
+	}
+	location := time.FixedZone("Asia/Shanghai", 8*60*60)
+	_, err := NewBojunRetailOrderDAO(db).CountOpenOrders(t.Context(), OpenBojunOrderQuery{
+		StartCompletedAt: time.Date(2026, 7, 11, 0, 0, 0, 0, location),
+		EndCompletedAt:   time.Date(2026, 7, 12, 0, 0, 0, 0, location),
+	})
+	if err != nil {
+		t.Fatalf("CountOpenOrders() error=%v", err)
+	}
+	if !strings.Contains(statement, "completed_at >= ? AND completed_at < ?") {
+		t.Fatalf("statement missing completed-at range: %s", statement)
+	}
+	if strings.Contains(statement, "c_store_code IN") {
+		t.Fatalf("statement unexpectedly filters malls: %s", statement)
 	}
 }
 

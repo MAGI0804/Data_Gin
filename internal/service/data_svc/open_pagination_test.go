@@ -11,11 +11,11 @@ func TestNewOpenPaginationCalculatesTotals(t *testing.T) {
 	if pagination.Page != 2 || pagination.PageSize != 50 || pagination.TotalItems != 101 || pagination.TotalPages != 3 {
 		t.Fatalf("pagination=%+v", pagination)
 	}
-	raw, err := json.Marshal(OpenBojunOrderPagination{OpenPagination: pagination})
+	raw, err := json.Marshal(OpenBojunOrderPagination{OpenPagination: pagination, CurrentItems: 50})
 	if err != nil {
 		t.Fatalf("json.Marshal() error=%v", err)
 	}
-	for _, field := range []string{`"page":2`, `"pageSize":50`, `"totalItems":101`, `"totalPages":3`} {
+	for _, field := range []string{`"page":2`, `"pageSize":50`, `"totalItems":101`, `"totalPages":3`, `"currentItems":50`} {
 		if !strings.Contains(string(raw), field) {
 			t.Fatalf("response=%s missing %s", raw, field)
 		}
