@@ -15,19 +15,75 @@ func TestMallWeatherPermissionDAORejectsInvalidLookupBeforeDatabase(t *testing.T
 	dao := &MallWeatherPermissionDAO{}
 	tests := []struct {
 		name       string
+		ctx        context.Context
 		userID     uint
 		permission string
 	}{
-		{"missing user", 0, "mall.read"},
-		{"missing permission", 1, ""},
-		{"oversized permission", 1, string(make([]byte, 65))},
+		{name: "missing database", ctx: context.Background(), userID: 1, permission: "mall.read"},
+		{name: "missing context", userID: 1, permission: "mall.read"},
+		{name: "missing user", ctx: context.Background(), permission: "mall.read"},
+		{name: "missing permission", ctx: context.Background(), userID: 1},
+		{name: "oversized permission", ctx: context.Background(), userID: 1, permission: string(make([]byte, 65))},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			if _, err := dao.HasPermission(context.Background(), tt.userID, tt.permission, time.Now()); err == nil {
+			if _, err := dao.HasPermission(tt.ctx, tt.userID, tt.permission, time.Now()); err == nil {
 				t.Fatal("HasPermission() error = nil")
 			}
 		})
+	}
+}
+
+func TestMallWeatherPermissionDAOHasPermissionUsesBoundedExistenceQuery(t *testing.T) {
+	t.Parallel()
+	db := dryRunWeatherDAOTestDB(t)
+	type contextKey string
+	ctx := context.WithValue(t.Context(), contextKey("request"), "open-weather")
+	var statement string
+	var statementContext context.Context
+	var statementVars []interface{}
+	if err := db.Callback().Query().After("gorm:query").Register("test:capture_permission_exists_sql", func(tx *gorm.DB) {
+		statement = tx.Statement.SQL.String()
+		statementContext = tx.Statement.Context
+		statementVars = append([]interface{}{}, tx.Statement.Vars...)
+	}); err != nil {
+		t.Fatalf("register SQL capture callback: %v", err)
+	}
+
+	allowed, err := NewMallWeatherPermissionDAO(db).HasPermission(
+		ctx,
+		7,
+		" weather.read ",
+		time.Date(2026, 7, 30, 3, 0, 0, 0, time.FixedZone("CST", 8*60*60)),
+	)
+	if err != nil {
+		t.Fatalf("HasPermission() error = %v", err)
+	}
+	if allowed {
+		t.Fatal("HasPermission() returned true in dry-run mode")
+	}
+	for _, fragment := range []string{
+		"SELECT 1 AS permission_exists",
+		"FROM `mall_weather_user_permissions`",
+		"user_id = ? AND permission = ?",
+		"expires_at IS NULL OR expires_at > ?",
+		"LIMIT 1",
+	} {
+		if !strings.Contains(statement, fragment) {
+			t.Fatalf("statement missing %q: %s", fragment, statement)
+		}
+	}
+	if strings.Contains(strings.ToUpper(statement), "COUNT(") {
+		t.Fatalf("permission lookup uses count query: %s", statement)
+	}
+	if statementContext != ctx {
+		t.Fatal("permission lookup did not preserve request context")
+	}
+	if len(statementVars) != 3 || statementVars[0] != uint(7) || statementVars[1] != "weather.read" {
+		t.Fatalf("statement vars = %v", statementVars)
+	}
+	if expiry, ok := statementVars[2].(time.Time); !ok || expiry.Location() != time.UTC {
+		t.Fatalf("expiry variable is not UTC: %#v", statementVars[2])
 	}
 }
 

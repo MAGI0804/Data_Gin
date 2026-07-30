@@ -77,19 +77,23 @@ func (dao *MallWeatherPermissionDAO) GrantPermanentPermissions(
 
 func (dao *MallWeatherPermissionDAO) HasPermission(ctx context.Context, userID uint, permission string, now time.Time) (bool, error) {
 	permission = strings.TrimSpace(permission)
-	if userID == 0 || permission == "" || len(permission) > 64 {
+	if dao == nil || dao.db == nil || ctx == nil || userID == 0 || permission == "" || len(permission) > 64 {
 		return false, fmt.Errorf("mall weather permission: invalid lookup")
 	}
-	var count int64
-	err := dao.db.WithContext(ctx).
+	var match struct {
+		Exists int `gorm:"column:permission_exists"`
+	}
+	result := dao.db.WithContext(ctx).
 		Model(&model.MallWeatherUserPermission{}).
+		Select("1 AS permission_exists").
 		Where("user_id = ? AND permission = ?", userID, permission).
 		Where("expires_at IS NULL OR expires_at > ?", now.UTC()).
-		Count(&count).Error
-	if err != nil {
-		return false, fmt.Errorf("mall weather permission: lookup: %w", err)
+		Limit(1).
+		Find(&match)
+	if result.Error != nil {
+		return false, fmt.Errorf("mall weather permission: lookup: %w", result.Error)
 	}
-	return count > 0, nil
+	return result.RowsAffected == 1 && match.Exists == 1, nil
 }
 
 type APIIdempotencyDAO struct {
