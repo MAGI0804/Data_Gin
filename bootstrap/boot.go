@@ -38,3 +38,15 @@ func Initialize() {
 	setupScheduler()
 
 }
+
+// InitializeMigration initializes only the dependencies needed by one-shot
+// database migration commands. It deliberately avoids starting Redis-backed
+// workers, cron jobs, queues, schedulers, and the service AutoMigrate path.
+func InitializeMigration() {
+	fmt.Println(console.Cyan(string(global.LogoContent)))
+	console.Info("Initializing migration database ...")
+
+	setupConfig()
+	setupLogger()
+	setupDBConnection()
+}

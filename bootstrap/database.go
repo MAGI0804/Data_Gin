@@ -21,6 +21,11 @@ import (
 
 // setupDB 初始化数据库和 ORM
 func setupDB() {
+	setupDBConnection()
+	autoMigrateTables()
+}
+
+func setupDBConnection() {
 
 	console.Info("init database ...")
 
@@ -70,9 +75,6 @@ func setupDBMySQL() {
 	}
 
 	database.ConnectMySQL(dbConfigs)
-
-	// 数据库迁移 - 自动同步表结构
-	autoMigrateTables()
 }
 
 // autoMigrateTables 自动迁移数据存储相关表

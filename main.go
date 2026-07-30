@@ -30,6 +30,12 @@ var rootCmd = &cobra.Command{
 	Long:  `Default will run "server" command, you can use "-h" flag to see all subcommands.`,
 	// 会在 Run 之前执行，并且所有的子命令都会继承并执行
 	PersistentPreRun: func(command *cobra.Command, args []string) {
+		for current := command; current != nil; current = current.Parent() {
+			if current == cmd.MigrateCmd {
+				bootstrap.InitializeMigration()
+				return
+			}
+		}
 		// 初始化框架
 		bootstrap.Initialize()
 	},
