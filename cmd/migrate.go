@@ -1,6 +1,7 @@
 package cmd
 
 import (
+	"gin-biz-web-api/bootstrap"
 	"gin-biz-web-api/model"
 	"gin-biz-web-api/pkg/console"
 	"gin-biz-web-api/pkg/database"
@@ -44,6 +45,22 @@ var migrateDataTablesCmd = &cobra.Command{
 	},
 }
 
+var migrateQueryIndexesCmd = &cobra.Command{
+	Use:     "query-indexes",
+	Short:   "低峰在线创建开放查询复合索引",
+	Example: "go run main.go migrate query-indexes",
+	Args:    cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		console.Info("开始迁移开放查询复合索引...")
+		if err := bootstrap.ApplyQueryIndexes(cmd.Context(), database.DB); err != nil {
+			return err
+		}
+		console.Success("开放查询复合索引迁移完成")
+		return nil
+	},
+}
+
 func init() {
 	MigrateCmd.AddCommand(migrateDataTablesCmd)
+	MigrateCmd.AddCommand(migrateQueryIndexesCmd)
 }
