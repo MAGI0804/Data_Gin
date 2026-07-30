@@ -49,9 +49,9 @@ type mallWeatherQueryDAO interface {
 	CountLifeIndices(ctx context.Context, query data_dao.LifeIndexQuery) (int64, error)
 	QueryFetchRuns(ctx context.Context, query data_dao.FetchRunQuery) ([]model.MallWeatherFetchRun, error)
 	FindCurrentLatest(ctx context.Context, mallID uint, dataKind string) (*model.MallWeatherLatest, error)
+	FindCurrentLatestByKinds(ctx context.Context, mallID uint, dataKinds []string) (map[string]model.MallWeatherLatest, error)
 	FindCurrentLatestLifeSource(ctx context.Context, mallID uint, sourceAPI string) (*model.MallWeatherLatest, error)
 	FindCurrentRealtime(ctx context.Context, mallID uint) (*data_dao.MallWeatherCurrentRealtime, error)
-	FindOverviewRealtime(ctx context.Context, mallID uint) (*model.MallWeatherRealtime, error)
 	ListOverviewMinutely(ctx context.Context, mallID uint, startUTC, endUTC time.Time, limit int) ([]model.MallWeatherMinutely, error)
 	ListOverviewAlerts(ctx context.Context, mallID uint, limit int) ([]model.MallWeatherAlert, error)
 }
@@ -385,9 +385,15 @@ func (service *MallWeatherQueryService) Overview(ctx context.Context, actorUserI
 	now := service.now().UTC()
 	minutelyStartUTC := now.Truncate(time.Minute)
 	hourlyStartUTC := now.Truncate(time.Hour)
-	realtime, err := service.weather.FindOverviewRealtime(ctx, mallID)
+	currentRealtime, err := service.weather.FindCurrentRealtime(ctx, mallID)
 	if err != nil && !errors.Is(err, data_dao.ErrMallWeatherLatestNotFound) {
 		return nil, fmt.Errorf("mall weather query: overview realtime: %w", err)
+	}
+	var realtime *model.MallWeatherRealtime
+	preloadedLatest := make(map[string]model.MallWeatherLatest, 1)
+	if currentRealtime != nil {
+		realtime = &currentRealtime.Weather
+		preloadedLatest[model.MallWeatherDataKindRealtime] = currentRealtime.Latest
 	}
 	minutely, err := service.weather.ListOverviewMinutely(ctx, mallID, minutelyStartUTC, minutelyStartUTC.Add(2*time.Hour), maxWeatherOverviewMinutely)
 	if err != nil {
@@ -435,7 +441,7 @@ func (service *MallWeatherQueryService) Overview(ctx context.Context, actorUserI
 			return nil, err
 		}
 	}
-	status, age, err := service.overviewFreshness(ctx, mallID, now)
+	status, age, err := service.overviewFreshness(ctx, mallID, now, preloadedLatest)
 	if err != nil {
 		return nil, err
 	}
@@ -645,7 +651,12 @@ func weatherQualityWarnings(raw model.JSONText) ([]MallWeatherWarningDTO, error)
 	return warnings, nil
 }
 
-func (service *MallWeatherQueryService) overviewFreshness(ctx context.Context, mallID uint, now time.Time) (string, *int64, error) {
+func (service *MallWeatherQueryService) overviewFreshness(
+	ctx context.Context,
+	mallID uint,
+	now time.Time,
+	preloaded map[string]model.MallWeatherLatest,
+) (string, *int64, error) {
 	if service == nil || service.weather == nil || ctx == nil || mallID == 0 || now.IsZero() {
 		return "", nil, fmt.Errorf("mall weather query: invalid overview freshness request")
 	}
@@ -654,20 +665,36 @@ func (service *MallWeatherQueryService) overviewFreshness(ctx context.Context, m
 		model.MallWeatherDataKindMinutely,
 		model.MallWeatherDataKindHourly,
 	}
+	latestByKind := make(map[string]model.MallWeatherLatest, len(kinds))
+	for dataKind, latest := range preloaded {
+		latestByKind[dataKind] = latest
+	}
+	missing := make([]string, 0, len(kinds))
+	for _, dataKind := range kinds {
+		if _, exists := latestByKind[dataKind]; !exists {
+			missing = append(missing, dataKind)
+		}
+	}
+	if len(missing) > 0 {
+		batch, err := service.weather.FindCurrentLatestByKinds(ctx, mallID, missing)
+		if err != nil {
+			return "", nil, fmt.Errorf("mall weather query: find overview freshness: %w", err)
+		}
+		for dataKind, latest := range batch {
+			latestByKind[dataKind] = latest
+		}
+	}
 	worstStatus := model.MallWeatherFreshnessFresh
 	worstRank := weatherFreshnessRank(worstStatus)
 	var maxAge *int64
 	unavailable := false
 	for _, dataKind := range kinds {
-		latest, err := service.weather.FindCurrentLatest(ctx, mallID, dataKind)
-		if errors.Is(err, data_dao.ErrMallWeatherLatestNotFound) || (err == nil && latest == nil) {
+		latest, exists := latestByKind[dataKind]
+		if !exists {
 			unavailable = true
 			continue
 		}
-		if err != nil {
-			return "", nil, fmt.Errorf("mall weather query: find %s freshness: %w", dataKind, err)
-		}
-		status, age, err := currentWeatherFreshness(dataKind, latest, now)
+		status, age, err := currentWeatherFreshness(dataKind, &latest, now)
 		if err != nil {
 			return "", nil, err
 		}

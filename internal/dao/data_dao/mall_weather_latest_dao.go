@@ -98,6 +98,67 @@ func (dao *MallWeatherDAO) FindCurrentLatest(ctx context.Context, mallID uint, d
 	return &row, nil
 }
 
+func (dao *MallWeatherDAO) FindCurrentLatestByKinds(
+	ctx context.Context,
+	mallID uint,
+	dataKinds []string,
+) (map[string]model.MallWeatherLatest, error) {
+	if dao == nil || dao.db == nil || ctx == nil || mallID == 0 {
+		return nil, fmt.Errorf("mall weather: invalid latest batch lookup")
+	}
+	statement, args, err := buildCurrentLatestByKindsQuery(mallID, dataKinds)
+	if err != nil {
+		return nil, err
+	}
+	var rows []model.MallWeatherLatest
+	if err := dao.db.WithContext(ctx).Raw(statement, args...).Scan(&rows).Error; err != nil {
+		return nil, fmt.Errorf("mall weather: find current latest pointers: %w", err)
+	}
+	result := make(map[string]model.MallWeatherLatest, len(rows))
+	for index := range rows {
+		result[rows[index].DataKind] = rows[index]
+	}
+	return result, nil
+}
+
+func buildCurrentLatestByKindsQuery(mallID uint, dataKinds []string) (string, []interface{}, error) {
+	if mallID == 0 || len(dataKinds) == 0 {
+		return "", nil, fmt.Errorf("mall weather: invalid latest batch lookup")
+	}
+	allowed := map[string]struct{}{
+		model.MallWeatherDataKindRealtime: {},
+		model.MallWeatherDataKindMinutely: {},
+		model.MallWeatherDataKindHourly:   {},
+		model.MallWeatherDataKindDaily:    {},
+	}
+	unique := make(map[string]struct{}, len(dataKinds))
+	for _, dataKind := range dataKinds {
+		if _, exists := allowed[dataKind]; !exists {
+			return "", nil, fmt.Errorf("mall weather: invalid latest batch data kind")
+		}
+		unique[dataKind] = struct{}{}
+	}
+	kinds := make([]string, 0, len(unique))
+	for dataKind := range unique {
+		kinds = append(kinds, dataKind)
+	}
+	sort.Strings(kinds)
+
+	branches := make([]string, 0, len(kinds))
+	args := make([]interface{}, 0, len(kinds)*2)
+	for index, dataKind := range kinds {
+		alias := "latest_" + strconv.Itoa(index)
+		branches = append(branches, `SELECT `+alias+`.* FROM (
+SELECT * FROM mall_weather_latest
+WHERE mall_id = ? AND data_kind = ?
+ORDER BY fetched_at_utc DESC, issued_at_utc DESC, id DESC
+LIMIT 1
+) AS `+alias)
+		args = append(args, mallID, dataKind)
+	}
+	return strings.Join(branches, "\nUNION ALL\n"), args, nil
+}
+
 func (dao *MallWeatherDAO) FindCurrentLatestLifeSource(ctx context.Context, mallID uint, sourceAPI string) (*model.MallWeatherLatest, error) {
 	if sourceAPI != weatherdomain.SourceAPIV26Daily && sourceAPI != weatherdomain.SourceAPIV3LifeIndex {
 		return nil, fmt.Errorf("mall weather: invalid life latest source")

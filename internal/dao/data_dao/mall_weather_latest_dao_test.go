@@ -19,6 +19,41 @@ func TestFindCurrentLatestLifeSourceRejectsUnknownSource(t *testing.T) {
 	}
 }
 
+func TestBuildCurrentLatestByKindsQueryUsesBoundedIndexSeeks(t *testing.T) {
+	statement, args, err := buildCurrentLatestByKindsQuery(7, []string{
+		model.MallWeatherDataKindMinutely,
+		model.MallWeatherDataKindHourly,
+		model.MallWeatherDataKindMinutely,
+	})
+	if err != nil {
+		t.Fatalf("buildCurrentLatestByKindsQuery() error=%v", err)
+	}
+	if strings.Count(statement, "SELECT * FROM mall_weather_latest") != 2 ||
+		strings.Count(statement, "ORDER BY fetched_at_utc DESC, issued_at_utc DESC, id DESC") != 2 ||
+		strings.Count(statement, "LIMIT 1") != 2 || strings.Count(statement, "UNION ALL") != 1 {
+		t.Fatalf("statement=%s", statement)
+	}
+	wantArgs := []interface{}{
+		uint(7), model.MallWeatherDataKindHourly,
+		uint(7), model.MallWeatherDataKindMinutely,
+	}
+	if !reflect.DeepEqual(args, wantArgs) {
+		t.Fatalf("args=%#v want=%#v", args, wantArgs)
+	}
+}
+
+func TestBuildCurrentLatestByKindsQueryRejectsAmbiguousKinds(t *testing.T) {
+	for _, kinds := range [][]string{
+		nil,
+		{model.MallWeatherDataKindLife},
+		{"alerts"},
+	} {
+		if _, _, err := buildCurrentLatestByKindsQuery(7, kinds); err == nil {
+			t.Fatalf("buildCurrentLatestByKindsQuery() accepted kinds=%v", kinds)
+		}
+	}
+}
+
 func TestLatestConvertersBuildStableBusinessKeys(t *testing.T) {
 	issuedAt := time.Date(2026, 7, 22, 3, 4, 5, 678000000, time.UTC)
 	fetchedAt := issuedAt.Add(time.Minute)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"errors"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -226,7 +227,9 @@ func TestMallWeatherQueryServiceOverviewReturnsBoundedSummary(t *testing.T) {
 	if result.Meta.FreshnessStatus != "STALE" || result.Meta.DataAgeSeconds == nil || *result.Meta.DataAgeSeconds != 3*60*60 ||
 		weather.minutelyStartUTC != now.Truncate(time.Minute) || weather.minutelyEndUTC != now.Truncate(time.Minute).Add(2*time.Hour) || weather.minutelyLimit != maxWeatherOverviewMinutely ||
 		weather.query.StartUTC != now.Truncate(time.Hour) || weather.query.EndUTC != now.Truncate(time.Hour).Add(25*time.Hour) ||
-		!weather.query.Latest || !weather.query.PreferNonNullTemperature || weather.query.Limit != 24 || weather.alertLimit != maxWeatherOverviewAlerts {
+		!weather.query.Latest || !weather.query.PreferNonNullTemperature || weather.query.Limit != 24 || weather.alertLimit != maxWeatherOverviewAlerts ||
+		weather.batchLatestCalls != 1 || !reflect.DeepEqual(weather.batchLatestKinds, []string{model.MallWeatherDataKindMinutely, model.MallWeatherDataKindHourly}) ||
+		len(weather.latestCalls) != 0 {
 		t.Fatalf("meta=%+v query=%+v minutely=[%s,%s,%d] alertLimit=%d", result.Meta, weather.query, weather.minutelyStartUTC, weather.minutelyEndUTC, weather.minutelyLimit, weather.alertLimit)
 	}
 }
@@ -286,6 +289,9 @@ type fakeMallWeatherQueryDAO struct {
 	latestLife       *model.MallWeatherLatest
 	latestLifeSource string
 	latestByKind     map[string]*model.MallWeatherLatest
+	batchLatestKinds []string
+	batchLatestCalls int
+	latestCalls      []string
 	realtime         *model.MallWeatherRealtime
 	minutely         []model.MallWeatherMinutely
 	alerts           []model.MallWeatherAlert
@@ -365,6 +371,7 @@ func (dao *fakeMallWeatherQueryDAO) QueryHourly(_ context.Context, query data_da
 }
 
 func (dao *fakeMallWeatherQueryDAO) FindCurrentLatest(_ context.Context, _ uint, dataKind string) (*model.MallWeatherLatest, error) {
+	dao.latestCalls = append(dao.latestCalls, dataKind)
 	if dao.latestByKind != nil {
 		latest, exists := dao.latestByKind[dataKind]
 		if !exists {
@@ -376,6 +383,18 @@ func (dao *fakeMallWeatherQueryDAO) FindCurrentLatest(_ context.Context, _ uint,
 		return nil, data_dao.ErrMallWeatherLatestNotFound
 	}
 	return dao.latest, dao.err
+}
+
+func (dao *fakeMallWeatherQueryDAO) FindCurrentLatestByKinds(_ context.Context, _ uint, dataKinds []string) (map[string]model.MallWeatherLatest, error) {
+	dao.batchLatestCalls++
+	dao.batchLatestKinds = append([]string(nil), dataKinds...)
+	result := make(map[string]model.MallWeatherLatest, len(dataKinds))
+	for _, dataKind := range dataKinds {
+		if latest := dao.latestByKind[dataKind]; latest != nil {
+			result[dataKind] = *latest
+		}
+	}
+	return result, dao.err
 }
 
 func (dao *fakeMallWeatherQueryDAO) FindCurrentLatestLifeSource(_ context.Context, _ uint, sourceAPI string) (*model.MallWeatherLatest, error) {
@@ -397,7 +416,9 @@ func (dao *fakeMallWeatherQueryDAO) FindCurrentRealtime(context.Context, uint) (
 		return nil, data_dao.ErrMallWeatherLatestNotFound
 	}
 	latest := model.MallWeatherLatest{FetchedAtUTC: dao.realtime.FetchedAtUTC}
-	if dao.latest != nil {
+	if current := dao.latestByKind[model.MallWeatherDataKindRealtime]; current != nil {
+		latest = *current
+	} else if dao.latest != nil {
 		latest = *dao.latest
 	}
 	return &data_dao.MallWeatherCurrentRealtime{Weather: *dao.realtime, Latest: latest}, nil
