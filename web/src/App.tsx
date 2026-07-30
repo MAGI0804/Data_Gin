@@ -2289,7 +2289,11 @@ function ExcelMatchView({
     }
 
     const confirmWrite = form.get('confirmWrite') === 'on'
-    if (confirmWrite && !window.confirm('确认写入数据库？本次只会填充空的 matched_docno，不会覆盖已有匹配单号。')) {
+    const writeField = formValue(form, 'dbWriteField').trim()
+    const confirmMessage = writeField === 'completed_at'
+      ? '确认写入数据库？本次只会填充为空的订单完成时间，不会覆盖已有 completed_at。'
+      : '确认写入数据库？本次只会填充空的 matched_docno，不会覆盖已有匹配单号。'
+    if (confirmWrite && !window.confirm(confirmMessage)) {
       return
     }
 
@@ -2799,6 +2803,7 @@ function ExcelMatchView({
               写入字段
               <select name="dbWriteField" defaultValue={importDefaults.dbWriteField}>
                 <option value="matched_docno">匹配单号 matched_docno</option>
+                <option value="completed_at">订单完成时间 completed_at</option>
               </select>
             </label>
             <Field label="Excel 写入值列名" name="writeExcelColumn" defaultValue={importDefaults.writeExcelColumn} />
@@ -2808,7 +2813,7 @@ function ExcelMatchView({
               确认写入数据库
             </label>
             <p className="excel-mode-note">
-              不勾选时只预检匹配数量，不写库；勾选后只写入空的 matched_docno，不覆盖已有匹配单号，不修改伯俊原始字段。
+              不勾选时只预检匹配数量，不写库；匹配单号只填充空值；订单完成时间要求 yyyy-mm-dd hh:mm:ss 格式且只填充为空的 completed_at。
             </p>
             {uploadProgress && <p className="excel-mode-note">{uploadProgress}</p>}
             <div className="excel-form-actions">

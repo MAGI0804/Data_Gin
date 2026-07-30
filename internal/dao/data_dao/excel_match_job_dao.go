@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"regexp"
+	"sort"
 	"strings"
 	"time"
 
@@ -528,6 +529,16 @@ func (dao *ExcelMatchJobDAO) FindTableFieldByKeys(ctx context.Context, tableName
 }
 
 func (dao *ExcelMatchJobDAO) FindBojunKeys(ctx context.Context, matchField string, keys []string) (map[string]struct{}, error) {
+	return dao.FindWritableBojunKeys(ctx, matchField, "matched_docno", false, keys)
+}
+
+func (dao *ExcelMatchJobDAO) FindWritableBojunKeys(
+	ctx context.Context,
+	matchField string,
+	writeField string,
+	onlyEmpty bool,
+	keys []string,
+) (map[string]struct{}, error) {
 	result := make(map[string]struct{}, len(keys))
 	if len(keys) == 0 {
 		return result, nil
@@ -536,7 +547,23 @@ func (dao *ExcelMatchJobDAO) FindBojunKeys(ctx context.Context, matchField strin
 		return nil, fmt.Errorf("bojun match field is not allowed: %s", matchField)
 	}
 
-	query := fmt.Sprintf("SELECT CAST(%s AS CHAR) AS match_key FROM bojun_retail_orders WHERE %s IN ?", matchField, matchField)
+	query := fmt.Sprintf(
+		"SELECT CAST(`%s` AS CHAR) AS match_key FROM bojun_retail_orders WHERE `%s` IN ?",
+		matchField,
+		matchField,
+	)
+	if onlyEmpty {
+		switch writeField {
+		case "matched_docno":
+			query += " AND (matched_docno IS NULL OR matched_docno = '')"
+		case "completed_at":
+			query += " AND completed_at IS NULL"
+		default:
+			return nil, fmt.Errorf("bojun update field is not allowed")
+		}
+	} else if writeField != "matched_docno" {
+		return nil, fmt.Errorf("bojun update field is not allowed")
+	}
 	rows, err := dao.db.WithContext(ctx).Raw(query, keys).Rows()
 	if err != nil {
 		return nil, err
@@ -562,28 +589,56 @@ func (dao *ExcelMatchJobDAO) BatchUpdateBojunFieldByKeys(ctx context.Context, ma
 	if len(values) == 0 {
 		return 0, nil
 	}
-	if !isAllowedBojunExcelField(matchField) || writeField != "matched_docno" {
+	if !isAllowedBojunExcelField(matchField) {
 		return 0, fmt.Errorf("bojun update field is not allowed")
 	}
 
 	keys := make([]string, 0, len(values))
+	for key := range values {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
 	caseSQL := strings.Builder{}
 	args := make([]interface{}, 0, len(values)*2+2)
-	for key, value := range values {
-		keys = append(keys, key)
+	for _, key := range keys {
+		value := values[key]
+		var writeValue interface{} = value
+		if writeField == "completed_at" {
+			completedAt, err := parseBojunExcelCompletedAt(value)
+			if err != nil {
+				return 0, err
+			}
+			writeValue = completedAt
+		} else if writeField != "matched_docno" {
+			return 0, fmt.Errorf("bojun update field is not allowed")
+		}
 		caseSQL.WriteString(" WHEN ? THEN ?")
-		args = append(args, key, value)
+		args = append(args, key, writeValue)
 	}
 	args = append(args, time.Now().Unix(), keys)
 
 	query := fmt.Sprintf(
-		"UPDATE bojun_retail_orders SET %s = CASE %s%s ELSE %s END, updated_at = ? WHERE %s IN ?",
+		"UPDATE bojun_retail_orders SET `%s` = CASE `%s`%s ELSE `%s` END, updated_at = ? WHERE `%s` IN ?",
 		writeField,
 		matchField,
 		caseSQL.String(),
 		writeField,
 		matchField,
 	)
+	if writeField == "completed_at" {
+		query += " AND completed_at IS NULL"
+	} else {
+		allEmpty := true
+		for _, value := range values {
+			if value != "" {
+				allEmpty = false
+				break
+			}
+		}
+		if !allEmpty {
+			query += " AND (matched_docno IS NULL OR matched_docno = '')"
+		}
+	}
 	result := dao.db.WithContext(ctx).Exec(query, args...)
 	return result.RowsAffected, result.Error
 }
@@ -592,21 +647,17 @@ func (dao *ExcelMatchJobDAO) UpdateBojunFieldByKey(ctx context.Context, matchFie
 	if key == "" {
 		return 0, nil
 	}
-	if !isAllowedBojunExcelField(matchField) || writeField != "matched_docno" {
-		return 0, fmt.Errorf("bojun update field is not allowed")
-	}
+	return dao.BatchUpdateBojunFieldByKeys(ctx, matchField, writeField, map[string]string{key: value})
+}
 
-	query := fmt.Sprintf(
-		"UPDATE bojun_retail_orders SET %s = ? WHERE %s = ?",
-		writeField,
-		matchField,
-	)
-	args := []interface{}{value, key}
-	if writeField == "matched_docno" && value != "" {
-		query += " AND (matched_docno IS NULL OR matched_docno = '')"
+func parseBojunExcelCompletedAt(value string) (time.Time, error) {
+	const layout = "2006-01-02 15:04:05"
+	location := time.FixedZone("Asia/Shanghai", 8*60*60)
+	parsed, err := time.ParseInLocation(layout, value, location)
+	if err != nil || parsed.Format(layout) != value {
+		return time.Time{}, fmt.Errorf("bojun completed_at value must use yyyy-mm-dd hh:mm:ss")
 	}
-	result := dao.db.WithContext(ctx).Exec(query, args...)
-	return result.RowsAffected, result.Error
+	return parsed, nil
 }
 
 func isAllowedBojunExcelField(field string) bool {

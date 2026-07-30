@@ -73,6 +73,7 @@ var excelizeTempMu sync.Mutex
 
 var allowedBojunValueFields = map[string]struct{}{
 	"billdate":             {},
+	"completed_at":         {},
 	"c_store_code":         {},
 	"c_store_name":         {},
 	"docno":                {},
@@ -104,6 +105,7 @@ var allowedBojunImportMatchFields = map[string]struct{}{
 
 var allowedBojunImportWriteFields = map[string]struct{}{
 	"matched_docno": {},
+	"completed_at":  {},
 }
 
 var allowedExcelExportColumnFormats = map[string]struct{}{
@@ -247,8 +249,14 @@ type ExcelMatchSchemaValidator interface {
 }
 
 type ExcelImportUpdater interface {
-	FindKeys(ctx context.Context, matchField string, keys []string) (map[string]struct{}, error)
-	UpdateByKey(ctx context.Context, matchField, key, writeField, value string) (int64, error)
+	FindWritableKeys(
+		ctx context.Context,
+		matchField string,
+		writeField string,
+		onlyEmpty bool,
+		keys []string,
+	) (map[string]struct{}, error)
+	BatchUpdateByKeys(ctx context.Context, matchField, writeField string, values map[string]string) (int64, error)
 }
 
 type databaseExcelMatchLookup struct {
@@ -263,12 +271,23 @@ type bojunExcelImportUpdater struct {
 	dao *data_dao.ExcelMatchJobDAO
 }
 
-func (u bojunExcelImportUpdater) FindKeys(ctx context.Context, matchField string, keys []string) (map[string]struct{}, error) {
-	return u.dao.FindBojunKeys(ctx, matchField, keys)
+func (u bojunExcelImportUpdater) FindWritableKeys(
+	ctx context.Context,
+	matchField string,
+	writeField string,
+	onlyEmpty bool,
+	keys []string,
+) (map[string]struct{}, error) {
+	return u.dao.FindWritableBojunKeys(ctx, matchField, writeField, onlyEmpty, keys)
 }
 
-func (u bojunExcelImportUpdater) UpdateByKey(ctx context.Context, matchField, key, writeField, value string) (int64, error) {
-	return u.dao.UpdateBojunFieldByKey(ctx, matchField, key, writeField, value)
+func (u bojunExcelImportUpdater) BatchUpdateByKeys(
+	ctx context.Context,
+	matchField string,
+	writeField string,
+	values map[string]string,
+) (int64, error) {
+	return u.dao.BatchUpdateBojunFieldByKeys(ctx, matchField, writeField, values)
 }
 
 type excelJobSource struct {
@@ -1131,24 +1150,39 @@ func processExcelImportUpdateFileWithProgress(
 		if len(buffered) == 0 {
 			return nil
 		}
-		keys := make([]string, 0, len(buffered))
+		uniqueValues := make(map[string]string, len(buffered))
 		for _, row := range buffered {
-			keys = append(keys, row.key)
+			if previous, exists := uniqueValues[row.key]; exists && previous != row.value {
+				return fmt.Errorf("Excel 匹配键 %q 在同一批次存在冲突写入值", row.key)
+			}
+			uniqueValues[row.key] = row.value
 		}
-		existing, err := updater.FindKeys(ctx, config.DBMatchField, keys)
+		keys := make([]string, 0, len(uniqueValues))
+		for key := range uniqueValues {
+			keys = append(keys, key)
+		}
+		writable, err := updater.FindWritableKeys(
+			ctx,
+			config.DBMatchField,
+			config.DBWriteField,
+			config.Operation != excelOperationClearMatched,
+			keys,
+		)
 		if err != nil {
 			return err
 		}
+		updates := make(map[string]string, len(buffered))
 		for _, row := range buffered {
-			if _, ok := existing[row.key]; ok {
+			if _, ok := writable[row.key]; ok {
 				stats.MatchedRows++
-				if !config.DryRun {
-					if _, err := updater.UpdateByKey(ctx, config.DBMatchField, row.key, config.DBWriteField, row.value); err != nil {
-						return err
-					}
-				}
+				updates[row.key] = row.value
 			} else {
 				stats.UnmatchedRows++
+			}
+		}
+		if !config.DryRun && len(updates) > 0 {
+			if _, err := updater.BatchUpdateByKeys(ctx, config.DBMatchField, config.DBWriteField, updates); err != nil {
+				return err
 			}
 		}
 		stats.ProcessedRows += len(buffered)
@@ -1160,7 +1194,9 @@ func processExcelImportUpdateFileWithProgress(
 	}
 
 	headerRead := false
+	rowNumber := 0
 	for rows.Next() {
+		rowNumber++
 		if err := ctx.Err(); err != nil {
 			return stats, err
 		}
@@ -1203,6 +1239,10 @@ func processExcelImportUpdateFileWithProgress(
 			stats.ProcessedRows++
 			continue
 		}
+		value, err = normalizeExcelImportWriteValue(config.DBWriteField, value)
+		if err != nil {
+			return stats, fmt.Errorf("Excel 第 %d 行写入值无效: %w", rowNumber, err)
+		}
 		buffered = append(buffered, importRow{key: key, value: value})
 		if len(buffered) >= config.BatchSize {
 			if err := flush(); err != nil {
@@ -1220,6 +1260,19 @@ func processExcelImportUpdateFileWithProgress(
 		return stats, err
 	}
 	return stats, nil
+}
+
+func normalizeExcelImportWriteValue(writeField, value string) (string, error) {
+	if writeField != "completed_at" {
+		return value, nil
+	}
+	const layout = "2006-01-02 15:04:05"
+	location := time.FixedZone("Asia/Shanghai", 8*60*60)
+	parsed, err := time.ParseInLocation(layout, value, location)
+	if err != nil || parsed.Format(layout) != value {
+		return "", errors.New("订单完成时间必须使用 yyyy-mm-dd hh:mm:ss 格式")
+	}
+	return parsed.Format(layout), nil
 }
 
 func initExcelMatchWriter(output *excelize.File) (*excelize.StreamWriter, string, error) {

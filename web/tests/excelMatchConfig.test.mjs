@@ -171,6 +171,15 @@ const modelCatalog = [{
       mapping: 'BojunRetailOrder.StoreName → bojun_retail_orders.c_store_name',
       nullable: true,
     },
+    {
+      name: '订单完成时间',
+      modelField: 'CompletedAt',
+      columnName: 'completed_at',
+      dataType: 'datetime',
+      description: '伯俊返回的订单完成时间',
+      mapping: 'BojunRetailOrder.CompletedAt → bojun_retail_orders.completed_at',
+      nullable: true,
+    },
   ],
 }, {
   name: '企迈订单',
@@ -195,6 +204,7 @@ test('model and field option labels explain model-to-database mappings', () => {
 
   assert.equal(modelOptions[0].label, '伯俊零售订单（BojunRetailOrder → bojun_retail_orders）')
   assert.equal(fieldOptions[0].label, '伯俊零售单号（DocNo → docno）')
+  assert.equal(fieldOptions[2].label, '订单完成时间（CompletedAt → completed_at）')
 })
 
 test('selectExcelMatchStepModel clears fields missing from the selected model', () => {

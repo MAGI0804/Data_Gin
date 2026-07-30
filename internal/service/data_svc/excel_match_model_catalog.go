@@ -95,6 +95,7 @@ var excelMatchRegisteredModels = []excelMatchRegisteredModel{
 var excelMatchFieldLabels = map[string]excelMatchFieldLabel{
 	"bojun_retail_orders.docno":            {name: "伯俊零售单号", description: "伯俊系统生成的零售单号"},
 	"bojun_retail_orders.otherdocno":       {name: "外部订单号", description: "伯俊订单关联的外部平台订单号"},
+	"bojun_retail_orders.completed_at":     {name: "订单完成时间", description: "伯俊返回的订单完成时间，来源字段 extendedFields1"},
 	"bojun_retail_orders.matched_docno":    {name: "已匹配订单号", description: "回填或关联得到的匹配单号"},
 	"bojun_retail_orders.c_store_code":     {name: "伯俊门店编码", description: "伯俊订单所属门店编码"},
 	"bojun_retail_orders.c_store_name":     {name: "伯俊门店名称", description: "伯俊订单所属门店名称"},

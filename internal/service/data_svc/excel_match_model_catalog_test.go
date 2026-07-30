@@ -34,6 +34,14 @@ func TestBuildExcelMatchModelCatalogAddsReadableMappings(t *testing.T) {
 			OrdinalPosition: 2,
 			IsNullable:      "NO",
 		},
+		{
+			TableName:       "bojun_retail_orders",
+			ColumnName:      "completed_at",
+			DataType:        "datetime",
+			ColumnType:      "datetime",
+			OrdinalPosition: 4,
+			IsNullable:      "YES",
+		},
 	}
 
 	models := buildExcelMatchModelCatalog(rows)
@@ -51,7 +59,8 @@ func TestBuildExcelMatchModelCatalogAddsReadableMappings(t *testing.T) {
 	if !strings.Contains(bojun.Mapping, "BojunRetailOrder") || !strings.Contains(bojun.Mapping, "bojun_retail_orders") {
 		t.Fatalf("bojun mapping = %q", bojun.Mapping)
 	}
-	if len(bojun.Fields) != 2 || bojun.Fields[0].ColumnName != "docno" || bojun.Fields[1].ColumnName != "c_store_name" {
+	if len(bojun.Fields) != 3 || bojun.Fields[0].ColumnName != "docno" ||
+		bojun.Fields[1].ColumnName != "c_store_name" || bojun.Fields[2].ColumnName != "completed_at" {
 		t.Fatalf("bojun fields = %#v", bojun.Fields)
 	}
 
@@ -67,6 +76,17 @@ func TestBuildExcelMatchModelCatalogAddsReadableMappings(t *testing.T) {
 	}
 	if !strings.Contains(docNo.Description, "数据库列") {
 		t.Fatalf("docno description = %q", docNo.Description)
+	}
+
+	completedAt := bojun.Fields[2]
+	if completedAt.Name != "订单完成时间" || completedAt.ModelField != "CompletedAt" ||
+		completedAt.DataType != "datetime" || !completedAt.Nullable {
+		t.Fatalf("completed_at metadata = %#v", completedAt)
+	}
+	if !strings.Contains(completedAt.Mapping, "BojunRetailOrder.CompletedAt") ||
+		!strings.Contains(completedAt.Mapping, "bojun_retail_orders.completed_at") ||
+		!strings.Contains(completedAt.Description, "extendedFields1") {
+		t.Fatalf("completed_at mapping = %#v", completedAt)
 	}
 
 	qimaiOrderNo := models[1].Fields[0]
