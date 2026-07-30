@@ -47,6 +47,10 @@ type openMallWeatherTimeSeriesRequest struct {
 	MallID        uint   `json:"mallId"`
 	Start         string `json:"start"`
 	End           string `json:"end"`
+	StartTime     string `json:"startTime"`
+	EndTime       string `json:"endTime"`
+	StartDate     string `json:"startDate"`
+	EndDate       string `json:"endDate"`
 	TimeZone      string `json:"timeZone"`
 	Latest        *bool  `json:"latest"`
 	AsOf          string `json:"asOf"`
@@ -54,6 +58,13 @@ type openMallWeatherTimeSeriesRequest struct {
 	Cursor        string `json:"cursor"`
 	PageSize      *int   `json:"pageSize"`
 }
+
+type openWeatherRangePrecision uint8
+
+const (
+	openWeatherTimePrecision openWeatherRangePrecision = iota + 1
+	openWeatherDatePrecision
+)
 
 type openWeatherHistoryDayRequest struct {
 	MallID        uint   `json:"mallId"`
@@ -361,7 +372,7 @@ func openWeatherPageSize(value *int) (int, error) {
 }
 
 func (controller *MallWeatherController) OpenMinutely(c *gin.Context) {
-	mallID, request, err := parseOpenMallWeatherRequest(c)
+	mallID, request, err := parseOpenMallWeatherRequest(c, openWeatherTimePrecision)
 	if err != nil {
 		writeMallWeatherError(c, err)
 		return
@@ -379,7 +390,7 @@ func (controller *MallWeatherController) OpenMinutely(c *gin.Context) {
 }
 
 func (controller *MallWeatherController) OpenHourly(c *gin.Context) {
-	mallID, request, err := parseOpenMallWeatherRequest(c)
+	mallID, request, err := parseOpenMallWeatherRequest(c, openWeatherTimePrecision)
 	if err != nil {
 		writeMallWeatherError(c, err)
 		return
@@ -397,7 +408,7 @@ func (controller *MallWeatherController) OpenHourly(c *gin.Context) {
 }
 
 func (controller *MallWeatherController) OpenDaily(c *gin.Context) {
-	mallID, request, err := parseOpenMallWeatherRequest(c)
+	mallID, request, err := parseOpenMallWeatherRequest(c, openWeatherDatePrecision)
 	if err != nil {
 		writeMallWeatherError(c, err)
 		return
@@ -415,7 +426,7 @@ func (controller *MallWeatherController) OpenDaily(c *gin.Context) {
 }
 
 func (controller *MallWeatherController) OpenAlerts(c *gin.Context) {
-	mallID, request, err := parseOpenMallWeatherRequest(c)
+	mallID, request, err := parseOpenMallWeatherRequest(c, openWeatherTimePrecision)
 	if err != nil {
 		writeMallWeatherError(c, err)
 		return
@@ -433,7 +444,7 @@ func (controller *MallWeatherController) OpenAlerts(c *gin.Context) {
 }
 
 func (controller *MallWeatherController) OpenLifeIndices(c *gin.Context) {
-	mallID, request, err := parseOpenMallWeatherRequest(c)
+	mallID, request, err := parseOpenMallWeatherRequest(c, openWeatherDatePrecision)
 	if err != nil {
 		writeMallWeatherError(c, err)
 		return
@@ -450,7 +461,7 @@ func (controller *MallWeatherController) OpenLifeIndices(c *gin.Context) {
 	writeOpenMallWeatherResult(c, result)
 }
 
-func parseOpenMallWeatherRequest(c *gin.Context) (uint, parsedMallWeatherTimeSeriesRequest, error) {
+func parseOpenMallWeatherRequest(c *gin.Context, precision openWeatherRangePrecision) (uint, parsedMallWeatherTimeSeriesRequest, error) {
 	var body openMallWeatherTimeSeriesRequest
 	if err := decodeMallJSON(c, &body); err != nil {
 		return 0, parsedMallWeatherTimeSeriesRequest{}, fmt.Errorf("%w: invalid JSON body", data_svc.ErrMallWeatherInvalidQuery)
@@ -463,11 +474,7 @@ func parseOpenMallWeatherRequest(c *gin.Context) (uint, parsedMallWeatherTimeSer
 	if err != nil {
 		return 0, parsedMallWeatherTimeSeriesRequest{}, err
 	}
-	start, err := parseOpenWeatherTime(body.Start, "start", location)
-	if err != nil {
-		return 0, parsedMallWeatherTimeSeriesRequest{}, err
-	}
-	end, err := parseOpenWeatherTime(body.End, "end", location)
+	start, end, err := parseOpenWeatherRange(body, precision, location)
 	if err != nil {
 		return 0, parsedMallWeatherTimeSeriesRequest{}, err
 	}
@@ -497,6 +504,70 @@ func parseOpenMallWeatherRequest(c *gin.Context) (uint, parsedMallWeatherTimeSer
 		request.AsOfUTC = &asOf
 	}
 	return mallID, request, nil
+}
+
+func parseOpenWeatherRange(
+	body openMallWeatherTimeSeriesRequest,
+	precision openWeatherRangePrecision,
+	location *time.Location,
+) (time.Time, time.Time, error) {
+	legacyStart, legacyEnd := strings.TrimSpace(body.Start), strings.TrimSpace(body.End)
+	startTime, endTime := strings.TrimSpace(body.StartTime), strings.TrimSpace(body.EndTime)
+	startDate, endDate := strings.TrimSpace(body.StartDate), strings.TrimSpace(body.EndDate)
+
+	switch precision {
+	case openWeatherTimePrecision:
+		if startDate != "" || endDate != "" || ((startTime != "" || endTime != "") && (legacyStart != "" || legacyEnd != "")) {
+			return time.Time{}, time.Time{}, fmt.Errorf("%w: conflicting time range fields", data_svc.ErrMallWeatherInvalidQuery)
+		}
+		if startTime != "" || endTime != "" {
+			start, err := parseOpenWeatherStrictTime(startTime, "startTime", location)
+			if err != nil {
+				return time.Time{}, time.Time{}, err
+			}
+			end, err := parseOpenWeatherStrictTime(endTime, "endTime", location)
+			return start, end, err
+		}
+	case openWeatherDatePrecision:
+		if startTime != "" || endTime != "" || ((startDate != "" || endDate != "") && (legacyStart != "" || legacyEnd != "")) {
+			return time.Time{}, time.Time{}, fmt.Errorf("%w: conflicting date range fields", data_svc.ErrMallWeatherInvalidQuery)
+		}
+		if startDate != "" || endDate != "" {
+			start, err := parseOpenWeatherDate(startDate, "startDate", location)
+			if err != nil {
+				return time.Time{}, time.Time{}, err
+			}
+			end, err := parseOpenWeatherDate(endDate, "endDate", location)
+			return start, end, err
+		}
+	default:
+		return time.Time{}, time.Time{}, fmt.Errorf("%w: invalid range precision", data_svc.ErrMallWeatherInvalidQuery)
+	}
+
+	start, err := parseOpenWeatherTime(legacyStart, "start", location)
+	if err != nil {
+		return time.Time{}, time.Time{}, err
+	}
+	end, err := parseOpenWeatherTime(legacyEnd, "end", location)
+	return start, end, err
+}
+
+func parseOpenWeatherStrictTime(value, field string, location *time.Location) (time.Time, error) {
+	value = strings.TrimSpace(value)
+	parsed, err := time.ParseInLocation(responses.OpenAPIDateTimeLayout, value, location)
+	if err != nil || parsed.Format(responses.OpenAPIDateTimeLayout) != value {
+		return time.Time{}, fmt.Errorf("%w: invalid %s", data_svc.ErrMallWeatherInvalidQuery, field)
+	}
+	return parsed, nil
+}
+
+func parseOpenWeatherDate(value, field string, location *time.Location) (time.Time, error) {
+	value = strings.TrimSpace(value)
+	parsed, err := time.ParseInLocation("2006-01-02", value, location)
+	if err != nil || parsed.Format("2006-01-02") != value {
+		return time.Time{}, fmt.Errorf("%w: invalid %s", data_svc.ErrMallWeatherInvalidQuery, field)
+	}
+	return parsed, nil
 }
 
 func openMallWeatherID(c *gin.Context, bodyMallID uint) (uint, error) {

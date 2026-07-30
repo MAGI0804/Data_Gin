@@ -248,6 +248,71 @@ func TestMallWeatherControllerOpenHourlyDefaultsLatest(t *testing.T) {
 	}
 }
 
+func TestMallWeatherControllerOpenHourlyAcceptsTimePrecisionFields(t *testing.T) {
+	var gotRequest requestbody.MallWeatherHourlyQueryRequest
+	service := fakeMallWeatherControllerService{hourly: func(
+		_ context.Context,
+		_, _ uint,
+		request requestbody.MallWeatherHourlyQueryRequest,
+	) (*data_svc.MallWeatherHourlyResult, error) {
+		gotRequest = request
+		return &data_svc.MallWeatherHourlyResult{Items: []data_svc.MallWeatherHourlyDTO{}}, nil
+	}}
+	body := `{"mallId":7,"startTime":"2026-07-22 08:01:02","endTime":"2026-07-22 09:02:03","timeZone":"Asia/Shanghai"}`
+	recorder := performOpenMallWeatherRequest(t, service, "/api/open/weather/hourly", body)
+	if recorder.Code != http.StatusOK ||
+		!gotRequest.StartUTC.Equal(time.Date(2026, 7, 22, 0, 1, 2, 0, time.UTC)) ||
+		!gotRequest.EndUTC.Equal(time.Date(2026, 7, 22, 1, 2, 3, 0, time.UTC)) {
+		t.Fatalf("status=%d request=%+v body=%s", recorder.Code, gotRequest, recorder.Body.String())
+	}
+}
+
+func TestMallWeatherControllerOpenDailyAcceptsDatePrecisionFields(t *testing.T) {
+	var gotRequest requestbody.MallWeatherDailyQueryRequest
+	service := fakeMallWeatherControllerService{daily: func(
+		_ context.Context,
+		_, _ uint,
+		request requestbody.MallWeatherDailyQueryRequest,
+	) (*data_svc.MallWeatherDailyResult, error) {
+		gotRequest = request
+		return &data_svc.MallWeatherDailyResult{Items: []data_svc.MallWeatherDailyDTO{}}, nil
+	}}
+	body := `{"mallId":7,"startDate":"2026-07-22","endDate":"2026-07-24","timeZone":"Asia/Shanghai"}`
+	recorder := performOpenMallWeatherRequest(t, service, "/api/open/weather/daily", body)
+	if recorder.Code != http.StatusOK ||
+		!gotRequest.StartUTC.Equal(time.Date(2026, 7, 21, 16, 0, 0, 0, time.UTC)) ||
+		!gotRequest.EndUTC.Equal(time.Date(2026, 7, 23, 16, 0, 0, 0, time.UTC)) {
+		t.Fatalf("status=%d request=%+v body=%s", recorder.Code, gotRequest, recorder.Body.String())
+	}
+}
+
+func TestMallWeatherControllerOpenWeatherRejectsMixedRangeLevels(t *testing.T) {
+	service := fakeMallWeatherControllerService{
+		hourly: func(context.Context, uint, uint, requestbody.MallWeatherHourlyQueryRequest) (*data_svc.MallWeatherHourlyResult, error) {
+			t.Fatal("Hourly must not be called")
+			return nil, nil
+		},
+		daily: func(context.Context, uint, uint, requestbody.MallWeatherDailyQueryRequest) (*data_svc.MallWeatherDailyResult, error) {
+			t.Fatal("Daily must not be called")
+			return nil, nil
+		},
+	}
+	tests := []struct {
+		path string
+		body string
+	}{
+		{path: "/api/open/weather/hourly", body: `{"mallId":7,"startTime":"2026-07-22 00:00:00","endTime":"2026-07-23 00:00:00","start":"2026-07-22 00:00:00","end":"2026-07-23 00:00:00"}`},
+		{path: "/api/open/weather/hourly", body: `{"mallId":7,"startDate":"2026-07-22","endDate":"2026-07-23"}`},
+		{path: "/api/open/weather/daily", body: `{"mallId":7,"startTime":"2026-07-22 00:00:00","endTime":"2026-07-23 00:00:00"}`},
+	}
+	for _, test := range tests {
+		recorder := performOpenMallWeatherRequest(t, service, test.path, test.body)
+		if recorder.Code != http.StatusUnprocessableEntity {
+			t.Fatalf("path=%s status=%d body=%s", test.path, recorder.Code, recorder.Body.String())
+		}
+	}
+}
+
 func TestMallWeatherControllerOpenHourlyRejectsConflictingPathAndBodyMallID(t *testing.T) {
 	calls := 0
 	service := fakeMallWeatherControllerService{hourly: func(
@@ -334,6 +399,7 @@ func performOpenMallWeatherRequest(
 	router.POST("/api/open/weather/history/range", controller.OpenHistoryRange)
 	router.POST("/api/open/weather/hourly", controller.OpenHourly)
 	router.POST("/api/open/weather/malls/:id/hourly", controller.OpenHourly)
+	router.POST("/api/open/weather/daily", controller.OpenDaily)
 	recorder := httptest.NewRecorder()
 	request := httptest.NewRequest(http.MethodPost, path, strings.NewReader(body))
 	request.Header.Set("Content-Type", "application/json")
