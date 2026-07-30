@@ -2,6 +2,7 @@
 package middleware
 
 import (
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"strings"
@@ -9,6 +10,7 @@ import (
 	"gin-biz-web-api/constant"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/gorm"
 
 	"gin-biz-web-api/model"
 	"gin-biz-web-api/pkg/database"
@@ -63,19 +65,12 @@ func AuthOpenToken() gin.HandlerFunc {
 		}
 
 		sum := sha256.Sum256([]byte(token))
-		var credential model.OpenAPICredential
-		credentialResult := database.DB.Where(
-			"token_hash = ? AND status = ?",
-			hex.EncodeToString(sum[:]),
-			model.OpenAPICredentialStatusActive,
-		).First(&credential)
-		if credentialResult.Error != nil {
-			response.ToSafeErrorResponse(errcode.Unauthorized, "身份凭证无效或已过期")
-			return
-		}
-
 		var user model.User
-		result := database.DB.First(&user, credential.UserID)
+		result := openAPIUserLookup(
+			c.Request.Context(),
+			database.DB,
+			hex.EncodeToString(sum[:]),
+		).Take(&user)
 		if result.Error != nil || user.ID == 0 {
 			response.ToSafeErrorResponse(errcode.Unauthorized, "身份凭证无效或已过期")
 			return
@@ -85,6 +80,14 @@ func AuthOpenToken() gin.HandlerFunc {
 		c.Set(constant.CurrentUserInfo, user)
 		c.Next()
 	}
+}
+
+func openAPIUserLookup(ctx context.Context, db *gorm.DB, tokenHash string) *gorm.DB {
+	return db.WithContext(ctx).
+		Table("users AS open_user").
+		Select("open_user.*").
+		Joins("INNER JOIN open_api_credentials AS credential ON credential.user_id = open_user.id").
+		Where("credential.token_hash = ? AND credential.status = ?", tokenHash, model.OpenAPICredentialStatusActive)
 }
 
 // AuthInternalBearerJWT authenticates internal management requests from the

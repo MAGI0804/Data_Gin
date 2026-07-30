@@ -1,15 +1,21 @@
 package middleware
 
 import (
+	"context"
+	"database/sql"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
+	"gin-biz-web-api/model"
 	"gin-biz-web-api/pkg/errcode"
 	"gin-biz-web-api/pkg/responses"
 
 	"github.com/gin-gonic/gin"
+	"gorm.io/driver/mysql"
+	"gorm.io/gorm"
 )
 
 func TestAuthOpenTokenRejectsOtherCredentialSources(t *testing.T) {
@@ -79,6 +85,34 @@ func TestOpenAPIToken(t *testing.T) {
 		if _, accepted := openAPIToken(values); accepted {
 			t.Fatalf("accepted values %#v", values)
 		}
+	}
+}
+
+func TestOpenAPIUserLookupUsesSingleCredentialJoin(t *testing.T) {
+	db, err := gorm.Open(mysql.New(mysql.Config{
+		Conn:                      &sql.DB{},
+		SkipInitializeWithVersion: true,
+	}), &gorm.Config{DryRun: true, DisableAutomaticPing: true})
+	if err != nil {
+		t.Fatalf("gorm.Open() error=%v", err)
+	}
+	var user model.User
+	result := openAPIUserLookup(context.Background(), db, strings.Repeat("a", 64)).Take(&user)
+	if result.Error != nil {
+		t.Fatalf("openAPIUserLookup() error=%v", result.Error)
+	}
+	statement := result.Statement.SQL.String()
+	for _, fragment := range []string{
+		"FROM users AS open_user",
+		"INNER JOIN open_api_credentials AS credential ON credential.user_id = open_user.id",
+		"credential.token_hash = ? AND credential.status = ?",
+	} {
+		if !strings.Contains(statement, fragment) {
+			t.Fatalf("statement does not contain %q: %s", fragment, statement)
+		}
+	}
+	if len(result.Statement.Vars) != 2 {
+		t.Fatalf("vars=%v", result.Statement.Vars)
 	}
 }
 
