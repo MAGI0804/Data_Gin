@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"testing"
+	"time"
 
 	"gin-biz-web-api/model"
 	"gin-biz-web-api/pkg/orderpush"
@@ -26,9 +27,10 @@ func (f *fakeBojunRawDataCreator) Create(ctx context.Context, rawData *model.Raw
 }
 
 type fakeBojunRetailOrderWriter struct {
-	existing map[string]bool
-	created  []string
-	failFind bool
+	existing           map[string]bool
+	created            []string
+	completedAtUpdates map[string]time.Time
+	failFind           bool
 }
 
 func (f *fakeBojunRetailOrderWriter) ExistsByDocNo(ctx context.Context, docNo string) (bool, error) {
@@ -46,6 +48,21 @@ func (f *fakeBojunRetailOrderWriter) CreateIfNotExists(ctx context.Context, orde
 	}
 	f.created = append(f.created, order.DocNo)
 	f.existing[order.DocNo] = true
+	return true, nil
+}
+
+func (f *fakeBojunRetailOrderWriter) UpdateCompletedAtIfEmpty(
+	_ context.Context,
+	docNo string,
+	completedAt time.Time,
+) (bool, error) {
+	if f.completedAtUpdates == nil {
+		f.completedAtUpdates = make(map[string]time.Time)
+	}
+	if _, exists := f.completedAtUpdates[docNo]; exists {
+		return false, nil
+	}
+	f.completedAtUpdates[docNo] = completedAt
 	return true, nil
 }
 
@@ -323,16 +340,17 @@ func TestNormalizeBojunOrderTimeRangeRequiresStartBeforeEnd(t *testing.T) {
 
 func TestBuildBojunRetailOrderMapsNormalOrder(t *testing.T) {
 	record := map[string]interface{}{
-		"docno":          "ABCN001P012P12607031240270004",
-		"billdate":       float64(20260703),
-		"retailbilltype": "CMR",
-		"retailsaletype": "CMR",
-		"cStoreCode":     "ABCN001P012",
-		"cStoreName":     "ALLBLU幼岚（上海浦东新区晶耀前滩店）",
-		"totQty":         float64(2),
-		"totAmtActual":   float64(446.4),
-		"items":          []interface{}{map[string]interface{}{"no": "SKU001"}},
-		"payItems":       []interface{}{map[string]interface{}{"cPaywayName": "微信"}},
+		"docno":           "ABCN001P012P12607031240270004",
+		"billdate":        float64(20260703),
+		"extendedFields1": "2026-07-03 12:40:27",
+		"retailbilltype":  "CMR",
+		"retailsaletype":  "CMR",
+		"cStoreCode":      "ABCN001P012",
+		"cStoreName":      "ALLBLU幼岚（上海浦东新区晶耀前滩店）",
+		"totQty":          float64(2),
+		"totAmtActual":    float64(446.4),
+		"items":           []interface{}{map[string]interface{}{"no": "SKU001"}},
+		"payItems":        []interface{}{map[string]interface{}{"cPaywayName": "微信"}},
 	}
 
 	order, err := buildBojunRetailOrder(9, record)
@@ -342,6 +360,9 @@ func TestBuildBojunRetailOrderMapsNormalOrder(t *testing.T) {
 	if order.RawDataID != 9 || order.DocNo != "ABCN001P012P12607031240270004" {
 		t.Fatalf("order key = %d/%s", order.RawDataID, order.DocNo)
 	}
+	if order.CompletedAt == nil || order.CompletedAt.Format("2006-01-02 15:04:05") != "2026-07-03 12:40:27" {
+		t.Fatalf("completed at = %v", order.CompletedAt)
+	}
 	if order.OrderTypeCode != "CMR" || order.OrderTypeName != "正常零售" {
 		t.Fatalf("order type = %s/%s", order.OrderTypeCode, order.OrderTypeName)
 	}
@@ -350,6 +371,56 @@ func TestBuildBojunRetailOrderMapsNormalOrder(t *testing.T) {
 	}
 	if order.TotalQty != 2 || order.TotalAmtActual != 446.4 {
 		t.Fatalf("totals = %d/%v", order.TotalQty, order.TotalAmtActual)
+	}
+}
+
+func TestBuildBojunRetailOrderAllowsMissingCompletedAt(t *testing.T) {
+	order, err := buildBojunRetailOrder(9, map[string]interface{}{
+		"docno": "B001", "items": []interface{}{}, "payItems": []interface{}{},
+	})
+	if err != nil || order.CompletedAt != nil {
+		t.Fatalf("order=%+v error=%v", order, err)
+	}
+}
+
+func TestBuildBojunRetailOrderIgnoresInvalidCompletedAt(t *testing.T) {
+	order, err := buildBojunRetailOrder(9, map[string]interface{}{
+		"docno": "B001", "extendedFields1": "2026-07-03T12:40:27",
+	})
+	if err != nil || order.CompletedAt != nil {
+		t.Fatalf("order=%+v error=%v", order, err)
+	}
+}
+
+func TestProcessBojunOrderRecordCountsInvalidCompletedAtWithoutDroppingOrder(t *testing.T) {
+	rawCreator := &fakeBojunRawDataCreator{}
+	orderWriter := &fakeBojunRetailOrderWriter{existing: map[string]bool{}}
+	service := &BojunOrderService{rawDataDAO: rawCreator, retailOrderDAO: orderWriter}
+	result := &BojunOrderSyncResult{}
+	service.processBojunOrderRecord(
+		context.Background(),
+		map[string]interface{}{"docno": "B001", "extendedFields1": map[string]interface{}{"bad": true}},
+		defaultBojunOrderMethod, "", "", 1, true, result, OrderPushSkipConfig{},
+	)
+	if result.InvalidCompletedAtCount != 1 || result.RetailCount != 1 || result.FailedCount != 0 {
+		t.Fatalf("result=%+v", result)
+	}
+}
+
+func TestProcessBojunOrderRecordBackfillsExistingCompletedAt(t *testing.T) {
+	orderWriter := &fakeBojunRetailOrderWriter{existing: map[string]bool{"B001": true}}
+	service := &BojunOrderService{retailOrderDAO: orderWriter}
+	result := &BojunOrderSyncResult{}
+	service.processBojunOrderRecord(
+		context.Background(),
+		map[string]interface{}{"docno": "B001", "extendedFields1": "2026-07-03 12:40:27"},
+		defaultBojunOrderMethod, "", "", 1, true, result, OrderPushSkipConfig{},
+	)
+	if result.UpdatedCount != 1 || result.ExistingCount != 0 || result.FailedCount != 0 {
+		t.Fatalf("result=%+v", result)
+	}
+	if got := orderWriter.completedAtUpdates["B001"].Format("2006-01-02 15:04:05"); got != "2026-07-03 12:40:27" {
+		t.Fatalf("completed at=%s", got)
 	}
 }
 

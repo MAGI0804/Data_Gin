@@ -30,6 +30,7 @@ type rawDataCreator interface {
 type bojunRetailOrderWriter interface {
 	ExistsByDocNo(ctx context.Context, docNo string) (bool, error)
 	CreateIfNotExists(ctx context.Context, order *model.BojunRetailOrder) (bool, error)
+	UpdateCompletedAtIfEmpty(ctx context.Context, docNo string, completedAt time.Time) (bool, error)
 }
 
 type pipelineRunRecorder interface {
@@ -46,22 +47,24 @@ type BojunOrderService struct {
 }
 
 type BojunOrderSyncResult struct {
-	StartTime     string                  `json:"start_time"`
-	EndTime       string                  `json:"end_time"`
-	PageSize      int                     `json:"page_size"`
-	MaxPages      int                     `json:"max_pages"`
-	FetchPages    int                     `json:"fetch_pages"`
-	TotalCount    int                     `json:"total_count"`
-	PreviewCount  int                     `json:"preview_count"`
-	WritableCount int                     `json:"writable_count"`
-	ExistingCount int                     `json:"existing_count"`
-	SavedCount    int                     `json:"saved_count"`
-	RetailCount   int                     `json:"retail_count"`
-	SkippedCount  int                     `json:"skipped_count"`
-	FailedCount   int                     `json:"failed_count"`
-	Samples       []BojunOrderPreviewItem `json:"samples"`
-	FailedSamples []BojunOrderPreviewItem `json:"failed_samples"`
-	pushPosition  int
+	StartTime               string                  `json:"start_time"`
+	EndTime                 string                  `json:"end_time"`
+	PageSize                int                     `json:"page_size"`
+	MaxPages                int                     `json:"max_pages"`
+	FetchPages              int                     `json:"fetch_pages"`
+	TotalCount              int                     `json:"total_count"`
+	PreviewCount            int                     `json:"preview_count"`
+	WritableCount           int                     `json:"writable_count"`
+	ExistingCount           int                     `json:"existing_count"`
+	SavedCount              int                     `json:"saved_count"`
+	UpdatedCount            int                     `json:"updated_count"`
+	InvalidCompletedAtCount int                     `json:"invalid_completed_at_count"`
+	RetailCount             int                     `json:"retail_count"`
+	SkippedCount            int                     `json:"skipped_count"`
+	FailedCount             int                     `json:"failed_count"`
+	Samples                 []BojunOrderPreviewItem `json:"samples"`
+	FailedSamples           []BojunOrderPreviewItem `json:"failed_samples"`
+	pushPosition            int
 }
 
 type BojunOrderPreviewItem struct {
@@ -185,6 +188,11 @@ func (s *BojunOrderService) processBojunOrderRecord(
 		addBojunOrderFailedSample(result, sample)
 		return
 	}
+	completedAt, err := parseBojunOrderCompletedAt(record["extendedFields1"])
+	if err != nil {
+		result.InvalidCompletedAtCount++
+		completedAt = nil
+	}
 
 	exists, err := s.retailOrderDAO.ExistsByDocNo(ctx, docNo)
 	if err != nil {
@@ -195,6 +203,23 @@ func (s *BojunOrderService) processBojunOrderRecord(
 		return
 	}
 	if exists {
+		if confirmWrite && completedAt != nil {
+			updated, updateErr := s.retailOrderDAO.UpdateCompletedAtIfEmpty(ctx, docNo, *completedAt)
+			if updateErr != nil {
+				result.FailedCount++
+				sample.Status = "failed"
+				sample.Reason = "补充订单完成时间失败: " + updateErr.Error()
+				addBojunOrderFailedSample(result, sample)
+				return
+			}
+			if updated {
+				result.UpdatedCount++
+				sample.Status = "updated"
+				sample.Reason = "已补充订单完成时间"
+				addBojunOrderSample(result, sample)
+				return
+			}
+		}
 		result.SkippedCount++
 		result.ExistingCount++
 		sample.Status = "exists"
@@ -372,7 +397,14 @@ func (s *BojunOrderService) finishBojunOrderRun(
 	if runErr != nil {
 		errorMessage = runErr.Error()
 	}
-	if err := s.pipelineRunDAO.Finish(ctx, runID, status, result.RetailCount+result.SkippedCount, result.FailedCount, errorMessage); err != nil {
+	if err := s.pipelineRunDAO.Finish(
+		ctx,
+		runID,
+		status,
+		result.RetailCount+result.UpdatedCount+result.SkippedCount,
+		result.FailedCount,
+		errorMessage,
+	); err != nil {
 		if runErr != nil {
 			return fmt.Errorf("%w; finish run: %v", runErr, err)
 		}
@@ -490,6 +522,10 @@ func buildBojunRetailOrder(rawDataID uint, record map[string]interface{}) (*mode
 	if err != nil {
 		return nil, err
 	}
+	completedAt, err := parseBojunOrderCompletedAt(record["extendedFields1"])
+	if err != nil {
+		completedAt = nil
+	}
 
 	retailSaleType := stringFromAny(record["retailsaletype"])
 	orderTypeCode, orderTypeName := bojunOrderType(retailSaleType)
@@ -507,6 +543,7 @@ func buildBojunRetailOrder(rawDataID uint, record map[string]interface{}) (*mode
 		OtherDocNo:      stringFromAny(record["otherdocno"]),
 		DocNo:           docNo,
 		BillDate:        intFromAny(record["billdate"]),
+		CompletedAt:     completedAt,
 		RetailBillType:  stringFromAny(record["retailbilltype"]),
 		StoreCode:       stringFromAny(record["cStoreCode"]),
 		StoreName:       stringFromAny(record["cStoreName"]),
@@ -537,6 +574,27 @@ func buildBojunRetailOrder(rawDataID uint, record map[string]interface{}) (*mode
 		PayItemsJSON:    payItemsJSON,
 		RawContentJSON:  rawContentJSON,
 	}, nil
+}
+
+func parseBojunOrderCompletedAt(value interface{}) (*time.Time, error) {
+	const layout = "2006-01-02 15:04:05"
+	if value == nil {
+		return nil, nil
+	}
+	rawValue, ok := value.(string)
+	if !ok {
+		return nil, fmt.Errorf("must be a string using YYYY-MM-DD HH:mm:ss")
+	}
+	raw := strings.TrimSpace(rawValue)
+	if raw == "" {
+		return nil, nil
+	}
+	location := time.FixedZone("Asia/Shanghai", 8*60*60)
+	parsed, err := time.ParseInLocation(layout, raw, location)
+	if err != nil || parsed.Format(layout) != raw {
+		return nil, fmt.Errorf("must use YYYY-MM-DD HH:mm:ss")
+	}
+	return &parsed, nil
 }
 
 func buildBojunOrderPreviewItem(record map[string]interface{}) BojunOrderPreviewItem {

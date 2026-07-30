@@ -115,6 +115,24 @@ func (dao *BojunRetailOrderDAO) UpdateSyncStatus(ctx context.Context, id uint, s
 		Error
 }
 
+func (dao *BojunRetailOrderDAO) UpdateCompletedAtIfEmpty(
+	ctx context.Context,
+	docNo string,
+	completedAt time.Time,
+) (bool, error) {
+	if dao == nil || dao.db == nil || ctx == nil || docNo == "" || completedAt.IsZero() {
+		return false, gorm.ErrInvalidData
+	}
+	result := dao.db.WithContext(ctx).
+		Model(&model.BojunRetailOrder{}).
+		Where("docno = ? AND completed_at IS NULL", docNo).
+		Updates(map[string]interface{}{
+			"completed_at": completedAt,
+			"updated_at":   time.Now().Unix(),
+		})
+	return result.RowsAffected > 0, result.Error
+}
+
 func (dao *BojunRetailOrderDAO) ListOpenOrders(
 	ctx context.Context,
 	query OpenBojunOrderQuery,

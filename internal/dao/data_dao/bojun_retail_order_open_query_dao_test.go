@@ -3,9 +3,46 @@ package data_dao
 import (
 	"strings"
 	"testing"
+	"time"
 
 	"gorm.io/gorm"
 )
+
+func TestBojunRetailOrderDAOUpdateCompletedAtIfEmptyUsesNarrowUpdate(t *testing.T) {
+	t.Parallel()
+	db := dryRunWeatherDAOTestDB(t)
+	var statement string
+	if err := db.Callback().Update().After("gorm:update").Register("test:capture_bojun_completed_at_sql", func(tx *gorm.DB) {
+		statement = tx.Statement.SQL.String()
+	}); err != nil {
+		t.Fatalf("register SQL capture callback: %v", err)
+	}
+	updated, err := NewBojunRetailOrderDAO(db).UpdateCompletedAtIfEmpty(
+		t.Context(),
+		"B001",
+		time.Date(2026, 7, 11, 10, 31, 22, 0, time.FixedZone("CST", 8*60*60)),
+	)
+	if err != nil {
+		t.Fatalf("UpdateCompletedAtIfEmpty() error=%v", err)
+	}
+	if updated {
+		t.Fatal("dry-run update unexpectedly reported rows affected")
+	}
+	for _, fragment := range []string{
+		"UPDATE `bojun_retail_orders`",
+		"SET `completed_at`=?,`updated_at`=?",
+		"docno = ? AND completed_at IS NULL",
+	} {
+		if !strings.Contains(statement, fragment) {
+			t.Fatalf("statement missing %q: %s", fragment, statement)
+		}
+	}
+	for _, forbidden := range []string{"synced", "matched_docno", "raw_data_id"} {
+		if strings.Contains(statement, forbidden) {
+			t.Fatalf("statement updates %q: %s", forbidden, statement)
+		}
+	}
+}
 
 func TestBojunRetailOrderDAOListOpenOrdersUsesBoundedSanitizedQuery(t *testing.T) {
 	t.Parallel()
