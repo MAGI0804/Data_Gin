@@ -772,14 +772,15 @@ const emptyMallCreateInput: MallWeatherCreateInput = {
 
 function MallImportPanel({ client, onImported }: { client: MallWeatherApiClient; onImported: () => void }) {
   const [rows, setRows] = useState<MallImportRow[]>([]); const [error, setError] = useState(''); const [submitting, setSubmitting] = useState(false)
+  const requestKeyRef = useRef(mallWeatherCreateKey())
   async function submit() {
     const items = rows.flatMap((row) => row.item ? [row.item] : [])
     if (!items.length || rows.some((row) => row.error)) return setError('请先修正 CSV 中的错误行。')
-    setSubmitting(true); const response = await client('/v1/malls/import', { method: 'POST', body: { items }, headers: { 'Idempotency-Key': mallWeatherCreateKey() }, showResult: false, silentLoading: true }); setSubmitting(false)
+    setSubmitting(true); const response = await client('/v1/malls/import', { method: 'POST', body: { items }, headers: { 'Idempotency-Key': requestKeyRef.current }, showResult: false, silentLoading: true }); setSubmitting(false)
     if (!response.ok) return setError(weatherActionError(response.status, '批量导入失败', '当前账号缺少 mall.write 权限'))
     onImported(); setError('导入已提交；成功店铺仍需确认坐标后启用天气。')
   }
-  return <section className="workbench-panel"><div className="mall-weather-section-title"><strong>批量导入店铺</strong></div><label>CSV 文件<input type="file" accept=".csv,text/csv" onChange={(event) => { const file = event.currentTarget.files?.[0]; if (!file) return; void file.text().then((text) => { try { setRows(parseMallImportCSV(text)); setError('') } catch (cause) { setRows([]); setError(cause instanceof Error ? cause.message : 'CSV 解析失败') } }) }} /></label>{rows.length > 0 && <p>已解析 {rows.length} 行；有效 {rows.filter((row) => row.item).length} 行。</p>}{rows.filter((row) => row.error).map((row) => <p key={row.row} role="alert">第 {row.row} 行：{row.error}</p>)}<button className="primary" type="button" disabled={submitting || !rows.length} onClick={() => void submit()}>{submitting ? '导入中…' : '提交导入'}</button>{error && <p role="alert">{error}</p>}</section>
+  return <section className="workbench-panel"><div className="mall-weather-section-title"><strong>批量导入店铺</strong></div><label>CSV 文件<input type="file" accept=".csv,text/csv" onChange={(event) => { const file = event.currentTarget.files?.[0]; if (!file) return; void file.text().then((text) => { try { requestKeyRef.current = mallWeatherCreateKey(); setRows(parseMallImportCSV(text)); setError('') } catch (cause) { setRows([]); setError(cause instanceof Error ? cause.message : 'CSV 解析失败') } }) }} /></label>{rows.length > 0 && <p>已解析 {rows.length} 行；有效 {rows.filter((row) => row.item).length} 行。</p>}{rows.filter((row) => row.error).map((row) => <p key={row.row} role="alert">第 {row.row} 行：{row.error}</p>)}<button className="primary" type="button" disabled={submitting || !rows.length} onClick={() => void submit()}>{submitting ? '导入中…' : '提交导入'}</button>{error && <p role="alert">{error}</p>}</section>
 }
 
 function pendingCreateInput(pending: MallWeatherPendingCreate | null): MallWeatherCreateInput {
