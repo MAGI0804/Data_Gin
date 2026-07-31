@@ -1,11 +1,11 @@
 :root {
-  --ink: #18181b;
+  --ink: #171717;
   --muted: #71717a;
-  --line: #d4d4d8;
+  --line: #e6e3dc;
   --paper: #ffffff;
-  --canvas: #f2f2f0;
-  --surface: #fafafa;
-  --accent: #f59e0b;
+  --canvas: #ffffff;
+  --surface: #f5f4f0;
+  --accent: #f5a623;
   color: var(--ink);
   background: var(--canvas);
   font-family: "IBM Plex Sans", "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
@@ -29,7 +29,7 @@
 
 body {
   margin: 0;
-  background: var(--canvas);
+  background: var(--paper);
 }
 
 button,
@@ -45,17 +45,17 @@ button {
   justify-content: center;
   gap: 8px;
   min-height: 36px;
-  border: 1px solid #111111;
+  border: 1px solid var(--line);
   border-radius: 0;
   background: #ffffff;
-  color: #111111;
+  color: var(--ink);
   cursor: pointer;
   font-weight: 650;
   padding: 7px 11px;
 }
 
 button:hover {
-  background: #eeeeee;
+  background: var(--surface);
 }
 
 button:disabled {
@@ -71,23 +71,8 @@ button svg,
   flex: 0 0 auto;
 }
 
-.brand-logo {
-  width: 32px;
-  height: 32px;
-  flex: 0 0 32px;
-  border-radius: 0;
-  object-fit: cover;
-  border: 2px solid var(--accent);
-}
-
-.brand-logo.large {
-  width: 44px;
-  height: 44px;
-  flex-basis: 44px;
-}
-
 button.primary {
-  background: #111111;
+  background: var(--ink);
   color: #ffffff;
 }
 
@@ -128,16 +113,18 @@ button:focus-visible {
 .login-shell {
   display: grid;
   min-height: 100vh;
-  place-items: center;
+  place-items: start center;
   padding: 20px;
+  padding-top: min(20vh, 168px);
 }
 
 .login-panel {
   width: min(420px, 100%);
-  border: 1px solid #111111;
+  border-top: 3px solid var(--accent);
+  border-bottom: 1px solid var(--line);
   border-radius: 0;
   background: #ffffff;
-  padding: 24px;
+  padding: 28px 0 24px;
 }
 
 .login-title,
@@ -156,7 +143,7 @@ button:focus-visible {
 }
 
 .login-title {
-  justify-content: center;
+  justify-content: flex-start;
 }
 
 .login-title h1,
@@ -166,13 +153,56 @@ button:focus-visible {
   margin: 0;
 }
 
-.login-title p,
-.brand span,
+.allblu-brand,
+.login-title,
 .panel-title span,
 .workspace-header span,
 .eyebrow {
   color: #666666;
   font-size: 12px;
+}
+
+.allblu-brand {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--ink);
+}
+
+.allblu-brand__logo {
+  width: 32px;
+  height: 32px;
+  flex: 0 0 32px;
+  object-fit: cover;
+}
+
+.allblu-brand__name {
+  color: var(--ink);
+  font-size: 19px;
+  font-weight: 750;
+  letter-spacing: -0.03em;
+}
+
+.allblu-brand--large .allblu-brand__logo {
+  width: 44px;
+  height: 44px;
+  flex-basis: 44px;
+}
+
+.allblu-brand--large .allblu-brand__name {
+  font-size: 26px;
+}
+
+.login-title,
+.login-form {
+  margin-inline: 24px;
+}
+
+.login-form > h1 {
+  margin: 12px 0 6px;
+  color: var(--ink);
+  font-size: 22px;
+  letter-spacing: -0.03em;
 }
 
 .login-form,
@@ -186,18 +216,8 @@ button:focus-visible {
   gap: 12px;
 }
 
-.login-guidance {
-  margin: 0;
-  border-left: 4px solid var(--accent);
-  background: #fffbeb;
-  color: #52525b;
-  font-size: 12px;
-  line-height: 1.5;
-  padding: 10px;
-}
-
 .login-error {
-  border: 1px solid #111111;
+  border: 1px solid #d92d20;
   border-radius: 0;
   background: #f0f0f0;
   padding: 8px 10px;
@@ -205,7 +225,7 @@ button:focus-visible {
 
 .ops-shell {
   display: grid;
-  grid-template-columns: 272px minmax(0, 1fr);
+  grid-template-columns: 224px minmax(0, 1fr);
   grid-template-rows: minmax(0, 1fr);
   height: 100vh;
   height: 100dvh;
@@ -219,7 +239,7 @@ button:focus-visible {
 }
 
 .ops-sidebar {
-  border-right: 1px solid #111111;
+  border-right: 1px solid var(--line);
   align-content: start;
   overflow-y: auto;
 }
@@ -234,6 +254,11 @@ button:focus-visible {
   display: none;
 }
 
+.workspace-menu-button,
+.mobile-nav-backdrop {
+  display: none;
+}
+
 .result-panel {
   position: fixed;
   z-index: 60;
@@ -241,8 +266,8 @@ button:focus-visible {
   right: 0;
   width: min(520px, 100vw);
   height: 100vh;
-  border-left: 1px solid #111111;
-  box-shadow: -12px 0 32px rgba(0, 0, 0, 0.16);
+  border-left: 1px solid var(--line);
+  box-shadow: -12px 0 32px rgba(23, 23, 23, 0.08);
   min-width: 0;
   overflow-y: auto;
 }
@@ -265,8 +290,8 @@ button:focus-visible {
 
 .module-nav {
   gap: 16px;
-  border-top: 1px solid #d0d0d0;
-  border-bottom: 1px solid #d0d0d0;
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
   padding: 12px 0;
 }
 
@@ -299,12 +324,13 @@ button:focus-visible {
 }
 
 .nav-item.active {
-  background: #111111;
-  color: #ffffff;
+  background: var(--surface);
+  border-color: var(--accent);
+  color: var(--ink);
 }
 
 .nav-item.active small {
-  color: #d6d6d6;
+  color: var(--muted);
 }
 
 .sidebar-actions {
@@ -314,7 +340,7 @@ button:focus-visible {
 
 .ops-workspace {
   min-width: 0;
-  padding: 18px;
+  padding: 28px clamp(20px, 3vw, 48px);
   overflow-y: auto;
 }
 
@@ -402,12 +428,22 @@ button:focus-visible {
 .workspace-header {
   justify-content: space-between;
   gap: 16px;
-  margin-bottom: 14px;
+  border-bottom: 1px solid var(--line);
+  margin-bottom: 24px;
+  padding-bottom: 18px;
 }
 
 .workspace-header h2 {
   font-size: 24px;
   line-height: 1.2;
+}
+
+.workspace-session {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--muted);
+  font-size: 13px;
 }
 
 .overview-grid {
@@ -427,7 +463,7 @@ button:focus-visible {
 
 .metric,
 .workbench-panel {
-  border: 1px solid #111111;
+  border: 1px solid var(--line);
   border-radius: 0;
   background: #ffffff;
 }
@@ -1243,28 +1279,32 @@ summary {
 }
 
 @media (max-width: 840px) {
-  .ops-shell,
   .method-row,
   .record-row {
     grid-template-columns: 1fr;
   }
 
   .ops-sidebar {
-    position: sticky;
-    top: 0;
+    position: fixed;
+    inset: 0 auto 0 0;
     z-index: 40;
-    grid-template-columns: minmax(0, 1fr) auto;
-    max-height: 100dvh;
-    border-right: 0;
-    border-bottom: 1px solid #111111;
-    padding: 8px 12px;
-    overflow-y: auto;
+    width: min(320px, calc(100vw - 36px));
+    min-height: 100dvh;
+    border-right: 1px solid var(--line);
+    padding: 16px;
+    transform: translateX(-100%);
+    transition: transform 160ms ease-out;
+    box-shadow: 10px 0 32px rgba(23, 23, 23, 0.08);
   }
 
   .ops-shell {
-    grid-template-rows: auto;
+    display: block;
     height: auto;
     overflow: visible;
+  }
+
+  .ops-sidebar.mobile-open {
+    transform: translateX(0);
   }
 
   .ops-workspace {
@@ -1273,19 +1313,19 @@ summary {
 
   .mobile-nav-toggle {
     display: inline-flex;
-    justify-self: end;
+    justify-self: start;
   }
 
-  .ops-sidebar > .nav-search,
-  .ops-sidebar > .module-nav,
-  .ops-sidebar > .sidebar-actions {
-    grid-column: 1 / -1;
-  }
-
-  .ops-sidebar:not(.mobile-open) > .nav-search,
-  .ops-sidebar:not(.mobile-open) > .module-nav,
-  .ops-sidebar:not(.mobile-open) > .sidebar-actions {
-    display: none;
+  .mobile-nav-backdrop {
+    position: fixed;
+    z-index: 30;
+    inset: 0;
+    display: block;
+    width: 100%;
+    min-height: 100dvh;
+    border: 0;
+    background: rgba(23, 23, 23, 0.24);
+    padding: 0;
   }
 
   .workspace-header,
@@ -1364,6 +1404,23 @@ summary {
   .ops-workspace {
     padding: 12px;
   }
+
+  .workspace-header {
+    align-items: flex-start;
+  }
+
+  .workspace-menu-button {
+    display: inline-flex;
+    width: 36px;
+    min-height: 36px;
+    margin-bottom: 10px;
+    padding: 0;
+  }
+
+  .workspace-session {
+    align-items: flex-start;
+    flex-direction: column;
+  }
 }
 
 @media (max-width: 480px) {
@@ -1376,5 +1433,19 @@ summary {
 
   .data-table {
     font-size: 12px;
+  }
+
+  .login-shell {
+    padding: 16px;
+    padding-top: 72px;
+  }
+
+  .login-panel {
+    padding-top: 24px;
+  }
+
+  .login-title,
+  .login-form {
+    margin-inline: 18px;
   }
 }

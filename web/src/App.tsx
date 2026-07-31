@@ -1,4 +1,4 @@
-import { FormEvent, ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { FormEvent, ReactNode, type RefObject, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   Activity,
   ArrowDownToLine,
@@ -31,6 +31,7 @@ import { createApiClient, type ApiRequestOptions, type ClientResponse, type HTTP
 import { readSessionUser, readTokenInfo, type SessionUser } from './api/auth'
 import { MallWeatherPage, StoreInfoPage } from './MallWeatherPage'
 import { DataAuthorizationPage } from './DataAuthorizationPage'
+import { Brand } from './components/Brand'
 import { parseMallWeatherExportContentStatus, submitMallWeatherExportContentDownload } from './mallWeatherExport'
 import {
   buildExcelExportConfig,
@@ -726,6 +727,8 @@ function App() {
   const [expandedNavGroup, setExpandedNavGroup] = useState(() => navGroupFor(navFromHash())?.label ?? navGroups[0].label)
   const [navQuery, setNavQuery] = useState('')
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
+  const mobileNavTriggerRef = useRef<HTMLButtonElement>(null)
+  const mobileNavRef = useRef<HTMLElement>(null)
   const [loading, setLoading] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
   const [result, setResult] = useState<ApiResult | null>(null)
@@ -968,6 +971,42 @@ function App() {
   }, [apiClient, clearSession, token])
 
   useEffect(() => {
+    if (!mobileNavOpen) return
+    const previousOverflow = document.body.style.overflow
+    document.body.style.overflow = 'hidden'
+    const focusableSelector = 'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+    const closeNavigation = () => setMobileNavOpen(false)
+    const handleKeydown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        closeNavigation()
+        return
+      }
+      if (event.key !== 'Tab') return
+      const items = Array.from(mobileNavRef.current?.querySelectorAll<HTMLElement>(focusableSelector) ?? []).filter((item) => !item.hasAttribute('hidden'))
+      if (items.length === 0) return
+      const first = items[0]
+      const last = items[items.length - 1]
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault()
+        last.focus()
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault()
+        first.focus()
+      }
+    }
+    window.addEventListener('keydown', handleKeydown)
+    const firstFocusable = mobileNavRef.current?.querySelector<HTMLElement>(focusableSelector)
+    const mobileNavTrigger = mobileNavTriggerRef.current
+    firstFocusable?.focus()
+    return () => {
+      document.body.style.overflow = previousOverflow
+      window.removeEventListener('keydown', handleKeydown)
+      mobileNavTrigger?.focus()
+    }
+  }, [mobileNavOpen])
+
+  useEffect(() => {
     const handleHashChange = () => {
       const nextNav = navFromHash()
       setActiveNav(nextNav)
@@ -981,6 +1020,10 @@ function App() {
     window.location.hash = key
     setActiveNav(key)
     setMobileNavOpen(false)
+  }
+
+  function openMobileNavigation() {
+    setMobileNavOpen(true)
   }
 
   function handleLogin(nextToken: string) {
@@ -1065,10 +1108,9 @@ function App() {
 
   return (
     <main className={activeNav === 'mall_weather' || activeNav === 'store_info' ? 'ops-shell mall-weather-shell' : 'ops-shell'}>
-      <aside className={mobileNavOpen ? 'ops-sidebar mobile-open' : 'ops-sidebar'} aria-label="主导航">
-        <div className="brand">
-          <img className="brand-logo" src="/logo.jpg" alt="系统 Logo" />
-        </div>
+      {mobileNavOpen && <button className="mobile-nav-backdrop" type="button" aria-label="关闭导航抽屉" onClick={() => setMobileNavOpen(false)} />}
+      <aside ref={mobileNavRef} className={mobileNavOpen ? 'ops-sidebar mobile-open' : 'ops-sidebar'} aria-label="主导航">
+        <Brand />
         <button
           className="mobile-nav-toggle"
           type="button"
@@ -1076,8 +1118,8 @@ function App() {
           aria-controls="primary-navigation"
           onClick={() => setMobileNavOpen((open) => !open)}
         >
-          {mobileNavOpen ? <X aria-hidden="true" /> : <Menu aria-hidden="true" />}
-          {mobileNavOpen ? '收起菜单' : '展开菜单'}
+          <X aria-hidden="true" />
+          关闭菜单
         </button>
         <label className="nav-search">
           <span>查找页面</span>
@@ -1139,7 +1181,7 @@ function App() {
       </aside>
 
       <section className="ops-workspace">
-        <ModuleHeader activeNav={activeNav} loading={loading || refreshing} sessionUser={sessionUser} />
+        <ModuleHeader activeNav={activeNav} loading={loading || refreshing} sessionUser={sessionUser} onOpenNavigation={openMobileNavigation} mobileNavTriggerRef={mobileNavTriggerRef} />
         {activeNav === 'overview' && <PushStatusView runs={runs} deliveryLogs={deliveryLogs} onLoadSteps={loadStepRuns} />}
         {activeNav === 'runs' && <RunsQueryPage runs={runs} onLoadSteps={loadStepRuns} />}
         {activeNav === 'delivery_logs' && <DeliveryLogsQueryPage logs={deliveryLogs} onRetryLog={retryDeliveryLog} />}
@@ -1184,7 +1226,7 @@ function LoginScreen({ onLogin, checking }: { onLogin: (token: string) => void; 
       const data: unknown = await response.json().catch(() => ({}))
       const token = readToken(data)
       if (!response.ok || !token) {
-        setError(readMessage(data) || '登录失败，请检查管理员账号和密码。')
+        setError(loginFailureMessage(response.status))
         return
       }
       onLogin(token)
@@ -1199,12 +1241,11 @@ function LoginScreen({ onLogin, checking }: { onLogin: (token: string) => void; 
     <main className="login-shell">
       <section className="login-panel">
         <div className="login-title">
-          <img className="brand-logo large" src="/logo.jpg" alt="系统 Logo" />
-          <h1 className="sr-only">登录</h1>
+          <Brand size="large" />
         </div>
         <form className="login-form" onSubmit={submit}>
-          <p className="login-guidance">内部控制台仅允许管理员登录；开放接口账号由管理员在“数据授权”中创建，无需登录本页面。</p>
-          <Field label="管理员账号" name="username" defaultValue="admin" required autoComplete="username" />
+          <h1>管理员登录</h1>
+          <Field label="管理员账号" name="username" required autoComplete="username" />
           <Field label="管理员密码" name="password" type="password" required autoComplete="current-password" />
           {error && <div className="login-error" role="alert" aria-live="polite">{error}</div>}
           <button className="primary" type="submit" disabled={submitting || checking}>{submitting || checking ? '正在验证会话…' : '管理员登录'}</button>
@@ -1214,7 +1255,7 @@ function LoginScreen({ onLogin, checking }: { onLogin: (token: string) => void; 
   )
 }
 
-function ModuleHeader({ activeNav, loading, sessionUser }: { activeNav: NavKey; loading: boolean; sessionUser: SessionUser | null }) {
+function ModuleHeader({ activeNav, loading, sessionUser, onOpenNavigation, mobileNavTriggerRef }: { activeNav: NavKey; loading: boolean; sessionUser: SessionUser | null; onOpenNavigation: () => void; mobileNavTriggerRef: RefObject<HTMLButtonElement> }) {
   const titles: Record<NavKey, { title: string; subtitle: string }> = {
     overview: { title: '运行总览', subtitle: '只看当前运行与交付健康度，快速定位失败。' },
     runs: { title: '流水线运行', subtitle: '按状态、运行类型和 Trace ID 查询执行记录。' },
@@ -1241,6 +1282,9 @@ function ModuleHeader({ activeNav, loading, sessionUser }: { activeNav: NavKey; 
   return (
     <header className="workspace-header">
       <div>
+        <button ref={mobileNavTriggerRef} className="workspace-menu-button" type="button" aria-label="打开主导航" onClick={onOpenNavigation}>
+          <Menu aria-hidden="true" />
+        </button>
         <h2>{titles[activeNav].title}</h2>
         <span>{titles[activeNav].subtitle}</span>
       </div>
@@ -3911,6 +3955,13 @@ function readMessage(data: unknown) {
   if (!data || typeof data !== 'object') return ''
   const envelope = data as { msg?: unknown }
   return typeof envelope.msg === 'string' ? envelope.msg : ''
+}
+
+function loginFailureMessage(status: number) {
+  if (status === 401) return '账号或密码不正确，请重试。'
+  if (status === 429) return '登录尝试过于频繁，请稍后再试。'
+  if (status >= 500) return '登录服务暂时不可用，请稍后再试。'
+  return '登录请求未完成，请检查账号和密码后重试。'
 }
 
 function isSuccessPayload(data: unknown) {
