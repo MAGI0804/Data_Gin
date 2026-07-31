@@ -1,10 +1,9 @@
 package data_ctrl
 
 import (
-	"encoding/json"
-	"net/url"
 	"strings"
 
+	"gin-biz-web-api/internal/configsecret"
 	"gin-biz-web-api/model"
 )
 
@@ -154,83 +153,5 @@ func safeDeliveryLogText(value string) string {
 }
 
 func redactConfigJSON(config string) (string, bool) {
-	if !json.Valid([]byte(config)) {
-		return "{}", true
-	}
-	var value interface{}
-	if json.Unmarshal([]byte(config), &value) != nil {
-		return "{}", true
-	}
-	redacted, hasSecret := redactConfigValue(value, "")
-	encoded, err := json.Marshal(redacted)
-	if err != nil {
-		return "{}", true
-	}
-	return string(encoded), hasSecret
-}
-
-func redactConfigValue(value interface{}, key string) (interface{}, bool) {
-	if sensitiveConfigKey(key) {
-		return "[已隐藏]", true
-	}
-	if strings.EqualFold(strings.TrimSpace(key), "url") {
-		if rawURL, ok := value.(string); ok {
-			return redactConfigURL(rawURL)
-		}
-	}
-	switch typed := value.(type) {
-	case map[string]interface{}:
-		result := make(map[string]interface{}, len(typed))
-		hasSecret := false
-		pairName, pairHasName := typed["name"].(string)
-		pairValueIsSecret := pairHasName && sensitiveConfigKey(pairName)
-		for childKey, childValue := range typed {
-			if pairValueIsSecret && childKey == "value" {
-				result[childKey] = "[已隐藏]"
-				hasSecret = true
-				continue
-			}
-			clean, hidden := redactConfigValue(childValue, childKey)
-			result[childKey] = clean
-			hasSecret = hasSecret || hidden
-		}
-		return result, hasSecret
-	case []interface{}:
-		result := make([]interface{}, len(typed))
-		hasSecret := false
-		for index, childValue := range typed {
-			clean, hidden := redactConfigValue(childValue, key)
-			result[index] = clean
-			hasSecret = hasSecret || hidden
-		}
-		return result, hasSecret
-	default:
-		return value, false
-	}
-}
-
-func sensitiveConfigKey(key string) bool {
-	key = strings.ToLower(strings.ReplaceAll(key, "-", "_"))
-	return strings.Contains(key, "secret") || strings.Contains(key, "token") || strings.Contains(key, "password") || strings.Contains(key, "authorization") || strings.Contains(key, "api_key") || strings.Contains(key, "private_key") || key == "dsn"
-}
-
-func redactConfigURL(rawURL string) (string, bool) {
-	parsed, err := url.Parse(rawURL)
-	if err != nil {
-		return rawURL, false
-	}
-	hasSecret := false
-	if parsed.User != nil {
-		parsed.User = url.User("[已隐藏]")
-		hasSecret = true
-	}
-	query := parsed.Query()
-	for key := range query {
-		if sensitiveConfigKey(key) {
-			query[key] = []string{"[已隐藏]"}
-			hasSecret = true
-		}
-	}
-	parsed.RawQuery = query.Encode()
-	return parsed.String(), hasSecret
+	return configsecret.RedactJSON(config)
 }

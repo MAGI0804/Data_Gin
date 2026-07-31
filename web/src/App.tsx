@@ -1813,7 +1813,7 @@ function SourcesQueryPage({ client, sources, onFetchSource, onTestSource, onRefr
 
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    if (!draft || saving || draft.hasSecret) return
+    if (!draft || saving) return
     if (!draft.name.trim() || !draft.code.trim()) { setMessage('请填写数据源名称和编码。'); return }
     try {
       const config = JSON.parse(draft.configJSON) as unknown
@@ -1843,19 +1843,19 @@ function SourcesQueryPage({ client, sources, onFetchSource, onTestSource, onRefr
       <div className="record-actions"><button type="button" className="primary" onClick={() => setDraft({ id: null, name: '', code: '', sourceType: 'api_poll', enabled: true, authType: 'none', configJSON: '{\n  "url": "",\n  "method": "GET",\n  "records_path": "data"\n}', schemaJSON: '{}', dedupeKeys: '[]', sourceQueryKey: '', hasSecret: false })}>新增数据源</button></div>
       <Panel title="数据源配置" icon={<Database />} meta={`查询命中 ${filtered.length} 条`}><SourceList sources={filtered} onDetail={(source) => { void openDetail(source.id) }} onFetchSource={onFetchSource} onTestSource={onTestSource} /></Panel>
       {draft && <Modal title={draft.id ? '数据源详情与编辑' : '新增数据源'} onClose={() => { if (!saving) setDraft(null) }}>
-        {draft.hasSecret && <div className="result-banner error" role="alert">该配置含已隐藏凭据，当前仅可查看、测试和拉取；完整更新会覆盖真实凭据。</div>}
+        {draft.hasSecret && <div className="result-banner" role="status">配置中的敏感值已隐藏。保留“[已隐藏]”会保留原值；改为新值即可轮换，且不会回显旧值。</div>}
         <form className="excel-upload-form" onSubmit={save}>
           <Field label="数据源名称" name="source_name" value={draft.name} required onChange={(name) => setDraft({ ...draft, name })} />
           <Field label="数据源编码" name="source_code" value={draft.code} required onChange={(code) => setDraft({ ...draft, code })} />
-          <label>数据源类型<select value={draft.sourceType} disabled={draft.hasSecret || saving} onChange={(event) => setDraft({ ...draft, sourceType: event.currentTarget.value })}><option value="api_poll">API 轮询</option><option value="database">数据库</option><option value="webhook">Webhook</option></select></label>
+          <label>数据源类型<select value={draft.sourceType} disabled={saving} onChange={(event) => setDraft({ ...draft, sourceType: event.currentTarget.value })}><option value="api_poll">API 轮询</option><option value="database">数据库</option><option value="webhook">Webhook</option></select></label>
           <Field label="鉴权类型" name="source_auth_type" value={draft.authType} onChange={(authType) => setDraft({ ...draft, authType })} />
-          <label className="checkbox-label"><input type="checkbox" checked={draft.enabled} disabled={draft.hasSecret || saving} onChange={(event) => setDraft({ ...draft, enabled: event.currentTarget.checked })} />启用数据源</label>
+          <label className="checkbox-label"><input type="checkbox" checked={draft.enabled} disabled={saving} onChange={(event) => setDraft({ ...draft, enabled: event.currentTarget.checked })} />启用数据源</label>
           <Field label="来源查询键" name="source_query_key" value={draft.sourceQueryKey} onChange={(sourceQueryKey) => setDraft({ ...draft, sourceQueryKey })} />
-          <label>连接配置 JSON<textarea rows={10} value={draft.configJSON} disabled={draft.hasSecret || saving} onChange={(event) => setDraft({ ...draft, configJSON: event.currentTarget.value })} /></label>
-          <label>Schema JSON<textarea rows={5} value={draft.schemaJSON} disabled={draft.hasSecret || saving} onChange={(event) => setDraft({ ...draft, schemaJSON: event.currentTarget.value })} /></label>
-          <label>去重键 JSON 数组<textarea rows={4} value={draft.dedupeKeys} disabled={draft.hasSecret || saving} onChange={(event) => setDraft({ ...draft, dedupeKeys: event.currentTarget.value })} /></label>
+          <label>连接配置 JSON<textarea rows={10} value={draft.configJSON} disabled={saving} onChange={(event) => setDraft({ ...draft, configJSON: event.currentTarget.value })} /></label>
+          <label>Schema JSON<textarea rows={5} value={draft.schemaJSON} disabled={saving} onChange={(event) => setDraft({ ...draft, schemaJSON: event.currentTarget.value })} /></label>
+          <label>去重键 JSON 数组<textarea rows={4} value={draft.dedupeKeys} disabled={saving} onChange={(event) => setDraft({ ...draft, dedupeKeys: event.currentTarget.value })} /></label>
           <p className="query-contract-note">API 测试会发起真实连通性请求；Webhook 不支持主动拉取。Schema 与去重键目前由服务端保存，未参与拉取校验。</p>
-          <div className="excel-form-actions"><button className="primary" type="submit" disabled={draft.hasSecret || saving}>{saving ? '保存中…' : '保存数据源'}</button></div>
+          <div className="excel-form-actions"><button className="primary" type="submit" disabled={saving}>{saving ? '保存中…' : '保存数据源'}</button></div>
         </form>
       </Modal>}
     </div>
@@ -2082,7 +2082,7 @@ function RulesQueryPage({ client, rules, sources, onRulesChange }: { client: Api
 
   async function saveDraft(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    if (!draft || saving || draft.hasSecret) return
+    if (!draft || saving) return
     const sourceID = Number(draft.sourceID)
     const orderIndex = Number(draft.orderIndex)
     if (!Number.isInteger(sourceID) || sourceID <= 0 || !draft.name.trim() || !Number.isInteger(orderIndex)) {
@@ -2109,7 +2109,7 @@ function RulesQueryPage({ client, rules, sources, onRulesChange }: { client: Api
 
   async function runTest(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    if (!draft || draft.ruleType !== 'mapping' || draft.hasSecret || testing) return
+    if (!draft || draft.ruleType !== 'mapping' || testing) return
     let parsedContent: Record<string, unknown>
     try {
       parsedContent = JSON.parse(rawContent) as Record<string, unknown>
@@ -2131,7 +2131,7 @@ function RulesQueryPage({ client, rules, sources, onRulesChange }: { client: Api
     setTesting(false)
   }
 
-  const testable = draft?.ruleType === 'mapping' && !draft.hasSecret
+  const testable = draft?.ruleType === 'mapping'
   return (
     <div className="view-stack">
       {operationError && <div className="result-banner error" role="alert">{operationError}</div>}
@@ -2144,24 +2144,24 @@ function RulesQueryPage({ client, rules, sources, onRulesChange }: { client: Api
       <Panel title="清洗规则" icon={<ListChecks />} meta={`查询命中 ${filtered.length} 条`}><TransformRuleList rules={filtered} onDetail={(rule) => { void openDetail(rule.id) }} /></Panel>
       {draft && (
         <Modal title={draft.id ? '清洗规则详情与编辑' : '新增清洗规则'} onClose={() => { if (!saving && !testing) setDraft(null) }}>
-          {draft.hasSecret && <div className="result-banner error" role="alert">该规则包含已隐藏的密钥。当前后端仅支持完整更新，不能安全回写脱敏配置；请使用专用保留密钥编辑接口。</div>}
+          {draft.hasSecret && <div className="result-banner" role="status">配置中的敏感值已隐藏。保留“[已隐藏]”会保留原值；改为新值即可轮换，且不会回显旧值。</div>}
           <form className="excel-upload-form" onSubmit={saveDraft}>
             <label>来源
-              <select value={draft.sourceID} disabled={draft.hasSecret || saving} required onChange={(event) => setDraft({ ...draft, sourceID: event.currentTarget.value })}>
+              <select value={draft.sourceID} disabled={saving} required onChange={(event) => setDraft({ ...draft, sourceID: event.currentTarget.value })}>
                 <option value="">选择数据源</option>
                 {sources.map((source) => <option value={source.id} key={source.id}>#{source.id} {source.name}</option>)}
               </select>
             </label>
             <Field label="规则名称" name="rule_name" value={draft.name} required onChange={(name) => setDraft({ ...draft, name })} />
             <label>规则类型
-              <select value={draft.ruleType} disabled={draft.hasSecret || saving} onChange={(event) => setDraft({ ...draft, ruleType: event.currentTarget.value })}>
+              <select value={draft.ruleType} disabled={saving} onChange={(event) => setDraft({ ...draft, ruleType: event.currentTarget.value })}>
                 {['mapping', 'http_enrich', 'db_enrich', 'script', 'validator'].map((type) => <option key={type} value={type}>{type}</option>)}
               </select>
             </label>
             <Field label="执行顺序" name="rule_order" type="number" value={draft.orderIndex} required onChange={(orderIndex) => setDraft({ ...draft, orderIndex })} />
-            <label className="checkbox-label"><input type="checkbox" checked={draft.enabled} disabled={draft.hasSecret || saving} onChange={(event) => setDraft({ ...draft, enabled: event.currentTarget.checked })} />启用规则</label>
-            <label>规则配置 JSON<textarea value={draft.configJSON} disabled={draft.hasSecret || saving} rows={12} onChange={(event) => setDraft({ ...draft, configJSON: event.currentTarget.value })} /></label>
-            <div className="excel-form-actions"><button className="primary" type="submit" disabled={draft.hasSecret || saving}>{saving ? '保存中…' : '保存规则'}</button></div>
+            <label className="checkbox-label"><input type="checkbox" checked={draft.enabled} disabled={saving} onChange={(event) => setDraft({ ...draft, enabled: event.currentTarget.checked })} />启用规则</label>
+            <label>规则配置 JSON<textarea value={draft.configJSON} disabled={saving} rows={12} onChange={(event) => setDraft({ ...draft, configJSON: event.currentTarget.value })} /></label>
+            <div className="excel-form-actions"><button className="primary" type="submit" disabled={saving}>{saving ? '保存中…' : '保存规则'}</button></div>
           </form>
           <hr />
           <form className="excel-upload-form" onSubmit={runTest}>
@@ -2637,7 +2637,7 @@ function DestinationsQueryPage({ client, destinations, onRefresh }: { client: Ap
 
   async function save(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    if (!draft || saving || draft.hasSecret) return
+    if (!draft || saving) return
     if (!draft.name.trim() || !draft.code.trim()) { setMessage('请填写目标名称和编码。'); return }
     try { JSON.parse(draft.configJSON) } catch { setMessage('配置必须是有效 JSON。'); return }
     setSaving(true)
@@ -2667,14 +2667,14 @@ function DestinationsQueryPage({ client, destinations, onRefresh }: { client: Ap
       <div className="record-actions"><button type="button" className="primary" onClick={() => setDraft({ id: null, name: '', code: '', destinationType: 'http', configJSON: '{\n  "url": "",\n  "method": "POST"\n}', enabled: true, hasSecret: false })}>新增目标</button></div>
       <Panel title="推送目标" icon={<Send />} meta={`查询命中 ${filtered.length} 条`}><DestinationList destinations={filtered} testingID={testingID} onDetail={(item) => { void openDetail(item.id) }} onTest={setPendingTest} /></Panel>
       {draft && <Modal title={draft.id ? '推送目标详情与编辑' : '新增推送目标'} onClose={() => { if (!saving) setDraft(null) }}>
-        {draft.hasSecret && <div className="result-banner error" role="alert">该目标包含已隐藏密钥，当前仅可查看与测试；完整更新会覆盖真实密钥。</div>}
+        {draft.hasSecret && <div className="result-banner" role="status">配置中的敏感值已隐藏。保留“[已隐藏]”会保留原值；改为新值即可轮换，且不会回显旧值。</div>}
         <form className="excel-upload-form" onSubmit={save}>
           <Field label="目标名称" name="destination_name" value={draft.name} required onChange={(name) => setDraft({ ...draft, name })} />
           <Field label="目标编码" name="destination_code" value={draft.code} required onChange={(code) => setDraft({ ...draft, code })} />
-          <label>目标类型<select value={draft.destinationType} disabled={draft.hasSecret || saving} onChange={(event) => setDraft({ ...draft, destinationType: event.currentTarget.value })}><option value="http">http</option><option value="soap">soap</option></select></label>
-          <label className="checkbox-label"><input type="checkbox" checked={draft.enabled} disabled={draft.hasSecret || saving} onChange={(event) => setDraft({ ...draft, enabled: event.currentTarget.checked })} />启用目标</label>
-          <label>配置 JSON<textarea rows={10} value={draft.configJSON} disabled={draft.hasSecret || saving} onChange={(event) => setDraft({ ...draft, configJSON: event.currentTarget.value })} /></label>
-          <div className="excel-form-actions"><button className="primary" type="submit" disabled={draft.hasSecret || saving}>{saving ? '保存中…' : '保存目标'}</button></div>
+          <label>目标类型<select value={draft.destinationType} disabled={saving} onChange={(event) => setDraft({ ...draft, destinationType: event.currentTarget.value })}><option value="http">http</option><option value="soap">soap</option></select></label>
+          <label className="checkbox-label"><input type="checkbox" checked={draft.enabled} disabled={saving} onChange={(event) => setDraft({ ...draft, enabled: event.currentTarget.checked })} />启用目标</label>
+          <label>配置 JSON<textarea rows={10} value={draft.configJSON} disabled={saving} onChange={(event) => setDraft({ ...draft, configJSON: event.currentTarget.value })} /></label>
+          <div className="excel-form-actions"><button className="primary" type="submit" disabled={saving}>{saving ? '保存中…' : '保存目标'}</button></div>
         </form>
       </Modal>}
       {pendingTest && <Modal title="确认测试推送目标" onClose={() => { if (testingID === null) setPendingTest(null) }} footer={<><button type="button" disabled={testingID !== null} onClick={() => setPendingTest(null)}>取消</button><button className="primary" type="button" disabled={testingID !== null} onClick={() => { const target = pendingTest; setPendingTest(null); void test(target) }}>{testingID === pendingTest.id ? '测试中…' : '确认测试'}</button></>}><p>将向“{pendingTest.name}”配置的目标地址发起真实连通性请求。系统仅允许无业务载荷的 HEAD 或 GET；请确认目标的 GET 接口无副作用。确认继续？</p></Modal>}
@@ -4830,7 +4830,7 @@ function SourceList({ sources, onDetail, onFetchSource, onTestSource }: { source
           <div>
             <strong>{source.name}</strong>
             <span>{source.code} / {source.source_type} / {source.auth_type || 'none'}</span>
-	            {source.has_secret && <small>配置包含已隐藏的密钥；编辑时仅可重新填写。</small>}
+	            {source.has_secret && <small>配置包含已隐藏的密钥；保留占位符可保持旧值，替换为新值可轮换。</small>}
           </div>
           <div className="record-actions">
             <StatusPill label={source.enabled ? '启用' : '停用'} />
@@ -4854,7 +4854,7 @@ function TransformRuleList({ rules, onDetail }: { rules: TransformRule[]; onDeta
           <div>
             <strong>{rule.name}</strong>
             <span>{rule.rule_type} / source #{rule.source_id} / 顺序 {rule.order_index}</span>
-            {rule.has_secret && <small>配置包含已隐藏的密钥；当前仅可查看。</small>}
+            {rule.has_secret && <small>配置包含已隐藏的密钥；保留占位符可保持旧值，替换为新值可轮换。</small>}
           </div>
           <div className="record-actions"><StatusPill label={rule.enabled ? '启用' : '停用'} /><button type="button" onClick={() => onDetail(rule)}>详情</button></div>
         </article>
@@ -4906,7 +4906,7 @@ function DestinationList({ destinations, testingID, onDetail, onTest }: { destin
           <div>
             <strong>{destination.name}</strong>
             <span>{destination.code} / {destination.destination_type}</span>
-            {destination.has_secret && <small>配置包含已隐藏密钥；当前仅可查看和测试。</small>}
+            {destination.has_secret && <small>配置包含已隐藏密钥；保留占位符可保持旧值，替换为新值可轮换。</small>}
           </div>
           <div className="record-actions"><StatusPill label={destination.enabled ? '启用' : '停用'} /><button type="button" onClick={() => onDetail(destination)}>详情</button><button type="button" disabled={testingID !== null} onClick={() => onTest(destination)}>{testingID === destination.id ? '测试中…' : '测试连接'}</button></div>
         </article>
@@ -5285,7 +5285,6 @@ async function updateTargetEnabled(client: ApiClient, target: ToggleTarget, enab
   if (target.type === 'source') {
     const source = data.sources.find((item) => item.id === target.id)
     if (!source) return { ok: false, status: 404, data: 'source not found' }
-    if (source.has_secret) return protectedConfigUpdateFailure()
     return client(`/v1/sources/${target.id}`, {
       method: 'PUT',
       body: {
@@ -5304,7 +5303,6 @@ async function updateTargetEnabled(client: ApiClient, target: ToggleTarget, enab
   if (target.type === 'transform_rule') {
     const rule = data.transformRules.find((item) => item.id === target.id)
     if (!rule) return { ok: false, status: 404, data: 'transform rule not found' }
-    if (rule.has_secret) return protectedConfigUpdateFailure()
     return client(`/v1/transform-rules/${target.id}`, {
       method: 'PUT',
       body: {
@@ -5320,7 +5318,6 @@ async function updateTargetEnabled(client: ApiClient, target: ToggleTarget, enab
   if (target.type === 'destination') {
     const destination = data.destinations.find((item) => item.id === target.id)
     if (!destination) return { ok: false, status: 404, data: 'destination not found' }
-    if (destination.has_secret) return protectedConfigUpdateFailure()
     return client(`/v1/destinations/${target.id}`, {
       method: 'PUT',
       body: {
@@ -5348,11 +5345,6 @@ async function updateTargetEnabled(client: ApiClient, target: ToggleTarget, enab
       enabled,
     },
   })
-}
-
-function protectedConfigUpdateFailure(): ApiResult {
-  const message = '该配置含有已隐藏的密钥，不能通过完整更新覆盖；请使用保留密钥的专用编辑操作。'
-  return { ok: false, status: 422, data: { message }, error: { kind: 'client', message } }
 }
 
 function legacyCategory(task: LegacyTask) {

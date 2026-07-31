@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"strings"
 
+	"gin-biz-web-api/internal/configsecret"
 	"gin-biz-web-api/internal/service/data_svc"
 	"gin-biz-web-api/model"
 )
@@ -111,7 +112,7 @@ func safeMethodStepDetail(detail data_svc.MethodStepDetail) methodStepDetailResp
 }
 
 func safeMethodParamValue(param model.MethodParam) string {
-	if param.Secret || strings.EqualFold(strings.TrimSpace(param.ValueSource), "secret") || sensitiveConfigKey(param.Name) {
+	if param.Secret || strings.EqualFold(strings.TrimSpace(param.ValueSource), "secret") || configsecret.SensitiveKey(param.Name) {
 		return "[已隐藏]"
 	}
 	return boundPipelineResponseText(param.Value)
@@ -126,7 +127,7 @@ func safeStageGeneratedConfig(config model.StageGeneratedConfig) stageGeneratedC
 }
 
 func safePipelinePreview(preview map[string]interface{}) map[string]interface{} {
-	redacted, _ := redactConfigValue(preview, "")
+	redacted, _ := configsecret.RedactValue(preview, "")
 	if result, ok := boundPipelineResponseValue(redacted).(map[string]interface{}); ok {
 		return result
 	}
@@ -158,7 +159,7 @@ func redactPipelineJSON(value string) string {
 	if err := json.Unmarshal([]byte(value), &decoded); err != nil {
 		return "{}"
 	}
-	redacted, _ := redactConfigValue(decoded, "")
+	redacted, _ := configsecret.RedactValue(decoded, "")
 	encoded, err := json.Marshal(boundPipelineResponseValue(redacted))
 	if err != nil {
 		return "{}"

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	destinationconnector "gin-biz-web-api/connector/destination"
+	"gin-biz-web-api/internal/configsecret"
 	"gin-biz-web-api/internal/dao/data_dao"
 	"gin-biz-web-api/internal/requestbody"
 	"gin-biz-web-api/internal/service/config_svc"
@@ -59,8 +60,9 @@ func NewDeliveryService() *DeliveryService {
 }
 
 func (s *DeliveryService) CreateDestination(ctx context.Context, req *requestbody.DestinationCreateRequest) (*model.DestinationDefinition, error) {
-	if !json.Valid([]byte(req.ConfigJSON)) {
-		return nil, fmt.Errorf("config_json must be valid json")
+	configJSON, err := configsecret.NewJSON(req.ConfigJSON, "")
+	if err != nil {
+		return nil, err
 	}
 
 	enabled := true
@@ -72,10 +74,10 @@ func (s *DeliveryService) CreateDestination(ctx context.Context, req *requestbod
 		Name:            req.Name,
 		Code:            req.Code,
 		DestinationType: req.DestinationType,
-		ConfigJSON:      req.ConfigJSON,
+		ConfigJSON:      configJSON,
 		Enabled:         enabled,
 	}
-	_, err := s.destinationDAO.Create(ctx, destination)
+	_, err = s.destinationDAO.Create(ctx, destination)
 	if err != nil {
 		return nil, err
 	}
@@ -91,11 +93,11 @@ func (s *DeliveryService) GetDestination(ctx context.Context, id uint) (*model.D
 }
 
 func (s *DeliveryService) UpdateDestination(ctx context.Context, id uint, req *requestbody.DestinationUpdateRequest) (*model.DestinationDefinition, error) {
-	if !json.Valid([]byte(req.ConfigJSON)) {
-		return nil, fmt.Errorf("config_json must be valid json")
-	}
-
 	destination, err := s.destinationDAO.FindByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	configJSON, err := configsecret.MergeJSON(destination.ConfigJSON, req.ConfigJSON)
 	if err != nil {
 		return nil, err
 	}
@@ -108,7 +110,7 @@ func (s *DeliveryService) UpdateDestination(ctx context.Context, id uint, req *r
 	destination.Name = req.Name
 	destination.Code = req.Code
 	destination.DestinationType = req.DestinationType
-	destination.ConfigJSON = req.ConfigJSON
+	destination.ConfigJSON = configJSON
 	destination.Enabled = enabled
 
 	if err := s.destinationDAO.Update(ctx, destination); err != nil {

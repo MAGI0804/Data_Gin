@@ -8,6 +8,7 @@ import (
 	"time"
 
 	sourceconnector "gin-biz-web-api/connector/source"
+	"gin-biz-web-api/internal/configsecret"
 	"gin-biz-web-api/internal/dao/data_dao"
 	"gin-biz-web-api/internal/requestbody"
 	"gin-biz-web-api/job"
@@ -34,6 +35,10 @@ func NewSourceService() *SourceService {
 }
 
 func (s *SourceService) CreateSourceDefinition(ctx context.Context, req *requestbody.SourceDefinitionCreateRequest) (*model.SourceDefinition, error) {
+	configJSON, err := configsecret.NewJSON(req.ConfigJSON, "{}")
+	if err != nil {
+		return nil, err
+	}
 	enabled := true
 	if req.Enabled != nil {
 		enabled = *req.Enabled
@@ -45,13 +50,13 @@ func (s *SourceService) CreateSourceDefinition(ctx context.Context, req *request
 		SourceType:     strings.TrimSpace(req.SourceType),
 		Enabled:        enabled,
 		AuthType:       defaultString(strings.TrimSpace(req.AuthType), "none"),
-		ConfigJSON:     defaultJSON(req.ConfigJSON, "{}"),
+		ConfigJSON:     configJSON,
 		SchemaJSON:     defaultJSON(req.SchemaJSON, "{}"),
 		DedupeKeys:     defaultJSON(req.DedupeKeys, "[]"),
 		SourceQueryKey: strings.TrimSpace(req.SourceQueryKey),
 	}
 
-	_, err := s.sourceDAO.Create(ctx, source)
+	_, err = s.sourceDAO.Create(ctx, source)
 	if err != nil {
 		return nil, err
 	}
@@ -72,6 +77,10 @@ func (s *SourceService) UpdateSourceDefinition(ctx context.Context, id uint, req
 	if err != nil {
 		return nil, err
 	}
+	configJSON, err := configsecret.MergeJSON(source.ConfigJSON, req.ConfigJSON)
+	if err != nil {
+		return nil, err
+	}
 
 	enabled := true
 	if req.Enabled != nil {
@@ -83,7 +92,7 @@ func (s *SourceService) UpdateSourceDefinition(ctx context.Context, id uint, req
 	source.SourceType = strings.TrimSpace(req.SourceType)
 	source.Enabled = enabled
 	source.AuthType = defaultString(strings.TrimSpace(req.AuthType), "none")
-	source.ConfigJSON = defaultJSON(req.ConfigJSON, "{}")
+	source.ConfigJSON = configJSON
 	source.SchemaJSON = defaultJSON(req.SchemaJSON, "{}")
 	source.DedupeKeys = defaultJSON(req.DedupeKeys, "[]")
 	source.SourceQueryKey = strings.TrimSpace(req.SourceQueryKey)
