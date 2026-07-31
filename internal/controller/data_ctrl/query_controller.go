@@ -121,6 +121,42 @@ func (ctrl *QueryController) GetProcessedData(c *gin.Context) {
 	c.JSON(200, msg.SuccessResponse("查询成功", &data))
 }
 
+// GetProcessedDataList 查询处理结果（分页）。业务键并不属于 legacy
+// processed_data，须使用 clean_records 的独立查询接口。
+func (ctrl *QueryController) GetProcessedDataList(c *gin.Context) {
+	var req requestbody.ProcessedDataListQueryRequest
+	if err := c.ShouldBindQuery(&req); err != nil {
+		c.JSON(400, msg.ErrResponse("无效的请求参数", err))
+		return
+	}
+	if !processedDataListQueryValid(req) {
+		c.JSON(400, msg.ErrResponse("无效的筛选范围", nil))
+		return
+	}
+	if req.Page == 0 {
+		req.Page = 1
+	}
+	if req.PageSize == 0 {
+		req.PageSize = 20
+	}
+	result, err := ctrl.service.GetProcessedDataList(c.Request.Context(), req.Page, req.PageSize, req.DataType, req.MinQuality, req.MaxQuality, req.CreatedFrom, req.CreatedTo)
+	if err != nil {
+		c.JSON(500, msg.ErrResponse("查询处理后的数据失败", err))
+		return
+	}
+	c.JSON(200, msg.SuccessResponse("查询成功", &map[string]any{
+		"list": result.List, "total": result.Total, "page": result.Page, "page_size": result.PageSize, "total_pages": result.TotalPages,
+		"summary": map[string]any{"total_count": result.Total, "avg_quality": result.AverageQuality},
+	}))
+}
+
+func processedDataListQueryValid(req requestbody.ProcessedDataListQueryRequest) bool {
+	if req.MinQuality != nil && req.MaxQuality != nil && *req.MinQuality > *req.MaxQuality {
+		return false
+	}
+	return req.CreatedFrom == 0 || req.CreatedTo == 0 || req.CreatedFrom <= req.CreatedTo
+}
+
 // GetStatistics 查询统计数据
 // @Summary 查询统计数据
 // @Description 查询数据统计信息

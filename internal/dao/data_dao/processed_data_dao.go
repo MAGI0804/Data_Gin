@@ -14,6 +14,22 @@ type ProcessedDataDAO struct {
 	db *gorm.DB
 }
 
+type ProcessedDataListQuery struct {
+	DataType    string
+	MinQuality  *float64
+	MaxQuality  *float64
+	CreatedFrom int64
+	CreatedTo   int64
+	Page        int
+	PageSize    int
+}
+
+type ProcessedDataWithTotal struct {
+	List           []model.ProcessedData
+	Total          int64
+	AverageQuality float64
+}
+
 func NewProcessedDataDAO() *ProcessedDataDAO {
 	return &ProcessedDataDAO{db: database.DB}
 }
@@ -62,6 +78,44 @@ func (dao *ProcessedDataDAO) FindByDataType(ctx context.Context, dataType string
 
 	err := query.Order("created_at DESC").Find(&processedDataList).Error
 	return processedDataList, err
+}
+
+func (dao *ProcessedDataDAO) FindWithPagination(ctx context.Context, params ProcessedDataListQuery) (*ProcessedDataWithTotal, error) {
+	query := dao.applyListFilters(dao.db.WithContext(ctx).Model(&model.ProcessedData{}), params)
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		return nil, err
+	}
+	var average struct{ Value float64 }
+	if err := query.Select("COALESCE(AVG(quality_score), 0) AS value").Scan(&average).Error; err != nil {
+		return nil, err
+	}
+	var list []model.ProcessedData
+	offset := (params.Page - 1) * params.PageSize
+	if err := query.Order("created_at DESC").Offset(offset).Limit(params.PageSize).Find(&list).Error; err != nil {
+		return nil, err
+	}
+	return &ProcessedDataWithTotal{List: list, Total: total, AverageQuality: average.Value}, nil
+}
+
+func (dao *ProcessedDataDAO) applyListFilters(query *gorm.DB, params ProcessedDataListQuery) *gorm.DB {
+	query = query.Where("is_current = ?", true)
+	if condition, args := processedDataTypeCondition(params.DataType); condition != "" {
+		query = query.Where(condition, args...)
+	}
+	if params.MinQuality != nil {
+		query = query.Where("quality_score >= ?", *params.MinQuality)
+	}
+	if params.MaxQuality != nil {
+		query = query.Where("quality_score <= ?", *params.MaxQuality)
+	}
+	if params.CreatedFrom > 0 {
+		query = query.Where("created_at >= ?", params.CreatedFrom)
+	}
+	if params.CreatedTo > 0 {
+		query = query.Where("created_at <= ?", params.CreatedTo)
+	}
+	return query
 }
 
 func processedDataTypeCondition(dataType string) (string, []interface{}) {

@@ -51,6 +51,27 @@ type RawDataListResult struct {
 	TotalPages int               `json:"total_pages"`
 }
 
+type ProcessedDataListResult struct {
+	List           []model.ProcessedData `json:"list"`
+	Total          int64                 `json:"total"`
+	Page           int                   `json:"page"`
+	PageSize       int                   `json:"page_size"`
+	TotalPages     int                   `json:"total_pages"`
+	AverageQuality float64               `json:"avg_quality"`
+}
+
+func (s *QueryService) GetProcessedDataList(ctx context.Context, page, pageSize int, dataType string, minQuality, maxQuality *float64, createdFrom, createdTo int64) (*ProcessedDataListResult, error) {
+	result, err := s.processedDataDAO.FindWithPagination(ctx, data_dao.ProcessedDataListQuery{Page: page, PageSize: pageSize, DataType: dataType, MinQuality: minQuality, MaxQuality: maxQuality, CreatedFrom: createdFrom, CreatedTo: createdTo})
+	if err != nil {
+		return nil, err
+	}
+	totalPages := int(result.Total) / pageSize
+	if int(result.Total)%pageSize > 0 {
+		totalPages++
+	}
+	return &ProcessedDataListResult{List: result.List, Total: result.Total, Page: page, PageSize: pageSize, TotalPages: totalPages, AverageQuality: result.AverageQuality}, nil
+}
+
 func (s *QueryService) GetRawDataList(ctx context.Context, page, pageSize int, source, startTime, endTime, origin string) (*RawDataListResult, error) {
 	logger.Info("查询原始数据列表", zap.Int("page", page), zap.Int("page_size", pageSize), zap.String("source", source), zap.String("start_time", startTime), zap.String("end_time", endTime), zap.String("origin", origin))
 

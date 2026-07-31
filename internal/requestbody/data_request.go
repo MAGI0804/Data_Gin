@@ -41,6 +41,19 @@ type ProcessedDataQueryRequest struct {
 	Limit    int    `form:"limit" binding:"min=1,max=1000"`
 }
 
+// ProcessedDataListQueryRequest is the paginated query contract for legacy
+// processed_data records. Business-key filtering belongs to clean_records and
+// is intentionally not accepted here.
+type ProcessedDataListQueryRequest struct {
+	Page        int      `form:"page" binding:"min=1"`
+	PageSize    int      `form:"page_size" binding:"min=1,max=100"`
+	DataType    string   `form:"data_type" binding:"max=50"`
+	MinQuality  *float64 `form:"min_quality" binding:"omitempty,min=0,max=100"`
+	MaxQuality  *float64 `form:"max_quality" binding:"omitempty,min=0,max=100"`
+	CreatedFrom int64    `form:"created_from" binding:"min=0"`
+	CreatedTo   int64    `form:"created_to" binding:"min=0"`
+}
+
 // StatisticsQueryRequest 统计数据查询请求
 type StatisticsQueryRequest struct {
 	StartDate string `form:"start_date" binding:"max=10"`
