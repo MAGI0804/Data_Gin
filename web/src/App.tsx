@@ -826,6 +826,7 @@ function App() {
   const mobileNavRef = useRef<HTMLElement>(null)
   const [loading, setLoading] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
+  const [workspaceError, setWorkspaceError] = useState('')
   const [result, setResult] = useState<ApiResult | null>(null)
   const [runs, setRuns] = useState<PipelineRun[]>([])
   const [stepRuns, setStepRuns] = useState<StepRun[]>([])
@@ -964,6 +965,7 @@ function App() {
       const controller = new AbortController()
       workspaceRequestRef.current = controller
       setRefreshing(true)
+      setWorkspaceError('')
       try {
         const get = (path: string) => client(path, { method: 'GET', signal: controller.signal, showResult: false, silentLoading: true })
         if (activeNav === 'overview') {
@@ -977,22 +979,30 @@ function App() {
           if (!controller.signal.aborted && runResult.ok) setRuns(readList<PipelineRun>(runResult, 'runs'))
         } else if (activeNav === 'sources') {
           const sourceResult = await get('/v1/sources')
-          if (!controller.signal.aborted && sourceResult.ok) setSources(readList<SourceDefinition>(sourceResult, 'sources'))
+          if (!controller.signal.aborted) {
+            if (sourceResult.ok) setSources(readList<SourceDefinition>(sourceResult, 'sources'))
+            else setWorkspaceError('数据源列表加载失败，已保留上一次成功数据。')
+          }
         } else if (activeNav === 'rules') {
           const [sourceResult, ruleResult] = await Promise.all([get('/v1/sources'), get('/v1/transform-rules')])
           if (!controller.signal.aborted) {
             if (sourceResult.ok) setSources(readList<SourceDefinition>(sourceResult, 'sources'))
             if (ruleResult.ok) setTransformRules(readList<TransformRule>(ruleResult, 'rules'))
+            if (!sourceResult.ok || !ruleResult.ok) setWorkspaceError('规则配置加载不完整，已保留上一次成功数据。')
           }
         } else if (activeNav === 'destinations') {
           const destinationResult = await get('/v1/destinations')
-          if (!controller.signal.aborted && destinationResult.ok) setDestinations(readList<DestinationDefinition>(destinationResult, 'destinations'))
+          if (!controller.signal.aborted) {
+            if (destinationResult.ok) setDestinations(readList<DestinationDefinition>(destinationResult, 'destinations'))
+            else setWorkspaceError('推送目标列表加载失败，已保留上一次成功数据。')
+          }
         } else if (activeNav === 'tasks') {
           const [sourceResult, destinationResult, taskResult] = await Promise.all([get('/v1/sources'), get('/v1/destinations'), get('/v1/delivery-tasks')])
           if (!controller.signal.aborted) {
             if (sourceResult.ok) setSources(readList<SourceDefinition>(sourceResult, 'sources'))
             if (destinationResult.ok) setDestinations(readList<DestinationDefinition>(destinationResult, 'destinations'))
             if (taskResult.ok) setDeliveryTasks(readList<DeliveryTask>(taskResult, 'tasks'))
+            if (!sourceResult.ok || !destinationResult.ok || !taskResult.ok) setWorkspaceError('推送任务配置加载不完整，已保留上一次成功数据。')
           }
         } else if (activeNav === 'push_policy') {
           const [sourceResult, ruleResult, destinationResult, taskResult, orderPushSkipResult] = await Promise.all([get('/v1/sources'), get('/v1/transform-rules'), get('/v1/destinations'), get('/v1/delivery-tasks'), get('/v1/order-push-skip-config')])
@@ -1005,6 +1015,7 @@ function App() {
               setOrderPushSkipConfig(normalizeOrderPushSkipConfig(readObject<OrderPushSkipConfig>(orderPushSkipResult, 'config')))
               setOrderPushTargets(readList<OrderPushTargetOption>(orderPushSkipResult, 'targets'))
             }
+            if (!sourceResult.ok || !ruleResult.ok || !destinationResult.ok || !taskResult.ok || !orderPushSkipResult.ok) setWorkspaceError('推送策略配置加载不完整，已保留上一次成功数据。')
           }
         } else if (activeNav === 'youzan_distribution') {
           const legacyTaskResult = await get('/v1/legacy-tasks')
@@ -1029,7 +1040,10 @@ function App() {
             const nextPipelines = pipelineResult.ok ? readList<PipelineDefinition>(pipelineResult, 'pipelines') : []
             if (pipelineResult.ok) setPipelines(nextPipelines)
             const configuredMethods = pipelineResult.ok ? await loadConfiguredMethods(nextPipelines, controller.signal) : []
-            if (!controller.signal.aborted) setMethods([...buildConfiguredMethodDisplays(nextSources, nextRules, nextDestinations, nextTasks), ...buildLegacyMethodDisplays(nextLegacyTasks, nextLegacyRules), ...configuredMethods, ...builtinMethods])
+            if (!controller.signal.aborted) {
+              if (!pipelineResult.ok || !sourceResult.ok || !ruleResult.ok || !destinationResult.ok || !taskResult.ok || !legacyTaskResult.ok || !legacyRuleResult.ok) setWorkspaceError('方法目录加载不完整，已保留上一次成功数据。')
+              setMethods([...buildConfiguredMethodDisplays(nextSources, nextRules, nextDestinations, nextTasks), ...buildLegacyMethodDisplays(nextLegacyTasks, nextLegacyRules), ...configuredMethods, ...builtinMethods])
+            }
           }
         }
         if (!controller.signal.aborted && showResult) setResult({ ok: true, status: 200, data: { refreshed_at: new Date().toISOString() } })
@@ -1386,6 +1400,7 @@ function App() {
 
       <section className="ops-workspace">
         <ModuleHeader activeNav={activeNav} loading={loading || refreshing} sessionUser={sessionUser} onOpenNavigation={openMobileNavigation} mobileNavTriggerRef={mobileNavTriggerRef} />
+        {workspaceError && <div className="result-banner error" role="alert">{workspaceError} <button type="button" onClick={() => void refreshWorkspace(false)} disabled={refreshing}>重试</button></div>}
         {activeNav === 'overview' && <PushStatusView runs={runs} deliveryLogs={deliveryLogs} monitoring={monitoring} stale={monitoringStale} onLoadSteps={loadStepRuns} />}
         {activeNav === 'runs' && <RunsQueryPage client={client} onLoadSteps={loadStepRuns} />}
         {activeNav === 'delivery_logs' && <DeliveryLogsQueryPage client={client} onRetryLog={retryDeliveryLog} />}
