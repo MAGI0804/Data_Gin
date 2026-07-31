@@ -76,6 +76,15 @@ button.primary {
   color: #ffffff;
 }
 
+button.danger {
+  border-color: #d92d20;
+  color: #d92d20;
+}
+
+button.danger:hover {
+  background: #fff3f2;
+}
+
 label {
   display: grid;
   gap: 6px;

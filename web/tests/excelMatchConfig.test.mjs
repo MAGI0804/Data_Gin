@@ -3,11 +3,18 @@ import test from 'node:test'
 
 import {
   buildExcelExportConfig,
+  excelMatchSchemePath,
   excelFieldSelectOptions,
   excelModelSelectOptions,
   migrateExcelMatchSteps,
   selectExcelMatchStepModel,
 } from '../.test-dist/excelMatchConfig.js'
+
+test('excelMatchSchemePath only builds a positive scheme resource path', () => {
+  assert.equal(excelMatchSchemePath(42), '/v1/excel-match-jobs/schemes/42')
+  assert.throws(() => excelMatchSchemePath(0), RangeError)
+  assert.throws(() => excelMatchSchemePath(1.5), RangeError)
+})
 
 const fallbackStep = {
   name: '匹配伯俊门店',

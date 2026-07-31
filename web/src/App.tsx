@@ -40,6 +40,7 @@ import { buildCleanRecordsQuery, buildProcessedRecordsQuery, parseProcessedRecor
 import {
   buildExcelExportConfig,
   cloneExcelMatchSteps,
+  excelMatchSchemePath,
   excelFieldSelectOptions,
   excelModelSelectOptions,
   migrateExcelMatchSteps,
@@ -2501,6 +2502,8 @@ function ExcelMatchView({
   const [importFormKey, setImportFormKey] = useState(0)
   const [selectedExportSchemeID, setSelectedExportSchemeID] = useState('')
   const [selectedImportSchemeID, setSelectedImportSchemeID] = useState('')
+  const [pendingSchemeDelete, setPendingSchemeDelete] = useState<ExcelMatchScheme | null>(null)
+  const [deletingSchemeID, setDeletingSchemeID] = useState<number | null>(null)
   const [jobQuery, setJobQuery] = useState('')
   const [jobStatus, setJobStatus] = useState('all')
   const [jobOperation, setJobOperation] = useState('all')
@@ -2904,6 +2907,33 @@ function ExcelMatchView({
     }
   }
 
+  async function deleteScheme(scheme: ExcelMatchScheme) {
+    setDeletingSchemeID(scheme.id)
+    try {
+      const response = await fetch(apiURL(excelMatchSchemePath(scheme.id)), {
+        method: 'DELETE',
+        headers: token ? { token } : undefined,
+      })
+      const data = await response.json().catch(() => ({}))
+      const nextResult = { ok: response.ok && isSuccessPayload(data), status: response.status, data }
+      setResult(nextResult)
+      if (!nextResult.ok) return
+
+      if (scheme.operation === 'export_match' && selectedExportSchemeID === String(scheme.id)) {
+        applyExportScheme('')
+      }
+      if (scheme.operation === 'import_update' && selectedImportSchemeID === String(scheme.id)) {
+        applyImportScheme('')
+      }
+      await loadSchemes()
+      setPendingSchemeDelete(null)
+    } catch (error) {
+      setResult({ ok: false, status: 0, data: error instanceof Error ? error.message : String(error) })
+    } finally {
+      setDeletingSchemeID(null)
+    }
+  }
+
   function applyExportScheme(schemeID: string) {
     setSelectedExportSchemeID(schemeID)
     if (!schemeID) {
@@ -3226,7 +3256,7 @@ function ExcelMatchView({
           </div>
         </Panel>
         <Panel title="已保存导出方案" icon={<ListChecks />} meta={`${exportSchemes.length} 个方案`}>
-          <ExcelSchemeList schemes={exportSchemes} onOpen={(id) => { applyExportScheme(String(id)); openExcelDialog('export') }} />
+          <ExcelSchemeList schemes={exportSchemes} deletingSchemeID={deletingSchemeID} onDelete={setPendingSchemeDelete} onOpen={(id) => { applyExportScheme(String(id)); openExcelDialog('export') }} />
         </Panel>
       </>}
 
@@ -3252,7 +3282,7 @@ function ExcelMatchView({
         </div>
       </Panel>
         <Panel title="已保存导入方案" icon={<ListChecks />} meta={`${importSchemes.length} 个方案`}>
-          <ExcelSchemeList schemes={importSchemes} onOpen={(id) => { applyImportScheme(String(id)); openExcelDialog('import') }} />
+          <ExcelSchemeList schemes={importSchemes} deletingSchemeID={deletingSchemeID} onDelete={setPendingSchemeDelete} onOpen={(id) => { applyImportScheme(String(id)); openExcelDialog('import') }} />
         </Panel>
       </>}
 
@@ -3619,11 +3649,23 @@ function ExcelMatchView({
           </div>
         </Modal>
       )}
+
+      {pendingSchemeDelete && (
+        <Modal title="删除 Excel 匹配方案" onClose={() => { if (deletingSchemeID === null) setPendingSchemeDelete(null) }}>
+          <p>确认删除方案“{pendingSchemeDelete.name}”？删除后不能恢复，已创建的任务不会受影响。</p>
+          <div className="excel-form-actions">
+            <button type="button" onClick={() => setPendingSchemeDelete(null)} disabled={deletingSchemeID !== null}>取消</button>
+            <button type="button" className="danger" onClick={() => void deleteScheme(pendingSchemeDelete)} disabled={deletingSchemeID !== null}>
+              {deletingSchemeID === pendingSchemeDelete.id ? '删除中…' : '确认删除'}
+            </button>
+          </div>
+        </Modal>
+      )}
     </div>
   )
 }
 
-function ExcelSchemeList({ schemes, onOpen }: { schemes: ExcelMatchScheme[]; onOpen: (id: number) => void }) {
+function ExcelSchemeList({ schemes, deletingSchemeID, onDelete, onOpen }: { schemes: ExcelMatchScheme[]; deletingSchemeID: number | null; onDelete: (scheme: ExcelMatchScheme) => void; onOpen: (id: number) => void }) {
   if (schemes.length === 0) return <EmptyState text="暂无已保存方案。" />
   return (
     <div className="data-table-wrap">
@@ -3644,7 +3686,14 @@ function ExcelSchemeList({ schemes, onOpen }: { schemes: ExcelMatchScheme[]; onO
               <td>{excelJobOperationLabel(scheme.operation)}</td>
               <td>{scheme.operation === 'export_match' ? (scheme.config.steps?.length || 1) : '-'}</td>
               <td>{formatUnixTime(scheme.updated_at)}</td>
-              <td><button type="button" onClick={() => onOpen(scheme.id)}>打开配置</button></td>
+              <td>
+                <div className="table-actions">
+                  <button type="button" onClick={() => onOpen(scheme.id)} disabled={deletingSchemeID !== null}>打开配置</button>
+                  <button type="button" className="danger" onClick={() => onDelete(scheme)} disabled={deletingSchemeID !== null}>
+                    {deletingSchemeID === scheme.id ? '删除中…' : '删除'}
+                  </button>
+                </div>
+              </td>
             </tr>
           ))}
         </tbody>

@@ -82,6 +82,13 @@ export function cloneExcelMatchSteps(steps: ExcelMatchStepConfig[]) {
   }))
 }
 
+export function excelMatchSchemePath(schemeID: number) {
+  if (!Number.isSafeInteger(schemeID) || schemeID <= 0) {
+    throw new RangeError('Excel 匹配方案 ID 必须是正整数')
+  }
+  return `/v1/excel-match-jobs/schemes/${schemeID}`
+}
+
 export function excelModelSelectOptions(models: ExcelMatchModel[], currentValue: string): ExcelCatalogSelectOption[] {
   const options: ExcelCatalogSelectOption[] = models.map((model) => ({
     value: model.tableName,
