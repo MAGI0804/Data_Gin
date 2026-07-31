@@ -35,6 +35,7 @@ import { DataAuthorizationPage } from './DataAuthorizationPage'
 import { Brand } from './components/Brand'
 import { parseMallWeatherExportContentStatus, submitMallWeatherExportContentDownload } from './mallWeatherExport'
 import { buildRawRecordsRequest, parseRawRecordsPage, type RawRecordOrigin, type RawRecordsPage } from './rawRecords'
+import { parseSourceFetchSummary } from './sourceOperations'
 import {
   buildExcelExportConfig,
   cloneExcelMatchSteps,
@@ -1085,6 +1086,11 @@ function App() {
   async function fetchSource(sourceID: number) {
     const response = await client(`/v1/sources/${sourceID}/fetch`, { method: 'POST' })
     if (response.ok) await refreshAll(false)
+    return response
+  }
+
+  async function testSource(sourceID: number) {
+    return client(`/v1/sources/${sourceID}/test`, { method: 'POST' })
   }
 
   async function saveOrderPushSkipConfig(config: OrderPushSkipConfig) {
@@ -1224,7 +1230,7 @@ function App() {
         {activeNav === 'store_info' && <StoreInfoPage actorID={actorID} client={client} downloadFile={downloadFile} />}
         {activeNav === 'mall_weather' && <MallWeatherPage actorID={actorID} client={client} downloadFile={downloadFile} />}
         {activeNav === 'data_authorizations' && <DataAuthorizationPage client={client} />}
-        {activeNav === 'sources' && <SourcesQueryPage sources={sources} onFetchSource={fetchSource} />}
+        {activeNav === 'sources' && <SourcesQueryPage sources={sources} onFetchSource={fetchSource} onTestSource={testSource} />}
         {activeNav === 'methods' && <MethodsView methods={methods} coreMethods={coreMethods} onToggle={toggleTarget} />}
         {activeNav === 'receive' && <RawRecordsQueryPage title="接口接收记录" origin="receive" client={client} />}
         {activeNav === 'pull_records' && <RawRecordsQueryPage title="数据拉取记录" origin="pull" client={client} />}
@@ -1523,7 +1529,7 @@ function StepRunsQueryPage({ runs, stepRuns, selectedRunID, onLoadSteps }: { run
   )
 }
 
-function SourcesQueryPage({ sources, onFetchSource }: { sources: SourceDefinition[]; onFetchSource: (sourceID: number) => Promise<void> }) {
+function SourcesQueryPage({ sources, onFetchSource, onTestSource }: { sources: SourceDefinition[]; onFetchSource: (sourceID: number) => Promise<ApiResult>; onTestSource: (sourceID: number) => Promise<ApiResult> }) {
   const [query, setQuery] = useState('')
   const [status, setStatus] = useState('all')
   const [sourceType, setSourceType] = useState('all')
@@ -1537,7 +1543,7 @@ function SourcesQueryPage({ sources, onFetchSource }: { sources: SourceDefinitio
         <SelectFilter label="状态" value={status} onChange={setStatus} options={[{ value: 'enabled', label: '启用' }, { value: 'disabled', label: '停用' }]} />
         <SelectFilter label="类型" value={sourceType} onChange={setSourceType} options={uniqueOptions(sources.map((source) => source.source_type))} />
       </QueryBar>
-      <Panel title="数据源配置" icon={<Database />} meta={`查询命中 ${filtered.length} 条`}><SourceList sources={filtered} onFetchSource={onFetchSource} /></Panel>
+      <Panel title="数据源配置" icon={<Database />} meta={`查询命中 ${filtered.length} 条`}><SourceList sources={filtered} onFetchSource={onFetchSource} onTestSource={onTestSource} /></Panel>
     </div>
   )
 }
@@ -3473,9 +3479,32 @@ function RawDataList({ records }: { records: RawData[] }) {
   )
 }
 
-function SourceList({ sources, onFetchSource }: { sources: SourceDefinition[]; onFetchSource: (sourceID: number) => Promise<void> }) {
-  const [pendingID, setPendingID] = useState<number | null>(null)
+function SourceList({ sources, onFetchSource, onTestSource }: { sources: SourceDefinition[]; onFetchSource: (sourceID: number) => Promise<ApiResult>; onTestSource: (sourceID: number) => Promise<ApiResult> }) {
+  const [fetchingID, setFetchingID] = useState<number | null>(null)
+  const [testingID, setTestingID] = useState<number | null>(null)
+  const [messageByID, setMessageByID] = useState<Record<number, string>>({})
   if (sources.length === 0) return <EmptyState text="暂无数据源配置。" />
+
+  async function fetch(sourceID: number) {
+    setFetchingID(sourceID)
+    const response = await onFetchSource(sourceID)
+    const summary = response.ok ? parseSourceFetchSummary(response.data) : null
+    setMessageByID((current) => ({
+      ...current,
+      [sourceID]: summary
+        ? `拉取完成：成功 ${summary.successCount}/${summary.totalCount}，失败 ${summary.failedCount}；追踪 ${summary.traceID}`
+        : response.error?.message || '拉取完成，但未收到可验证的结果摘要。',
+    }))
+    setFetchingID(null)
+  }
+
+  async function test(sourceID: number) {
+    setTestingID(sourceID)
+    const response = await onTestSource(sourceID)
+    setMessageByID((current) => ({ ...current, [sourceID]: response.ok ? '连接测试通过。' : response.error?.message || '连接测试未完成，请稍后重试。' }))
+    setTestingID(null)
+  }
+
   return (
     <div className="record-list">
       {sources.map((source) => (
@@ -3486,11 +3515,10 @@ function SourceList({ sources, onFetchSource }: { sources: SourceDefinition[]; o
           </div>
           <div className="record-actions">
             <StatusPill label={source.enabled ? '启用' : '停用'} />
-            <button type="button" disabled={pendingID !== null || !source.enabled} onClick={() => {
-              setPendingID(source.id)
-              void onFetchSource(source.id).finally(() => setPendingID(null))
-            }}>{pendingID === source.id ? '拉取中…' : '手动拉取'}</button>
+            <button type="button" disabled={testingID === source.id || fetchingID === source.id || !source.enabled} onClick={() => { void test(source.id) }}>{testingID === source.id ? '测试中…' : '测试连接'}</button>
+            <button type="button" disabled={testingID === source.id || fetchingID === source.id || !source.enabled} onClick={() => { void fetch(source.id) }}>{fetchingID === source.id ? '拉取中…' : '手动拉取'}</button>
           </div>
+          {messageByID[source.id] && <small className="source-operation-message" role="status" aria-live="polite">{messageByID[source.id]}</small>}
         </article>
       ))}
     </div>

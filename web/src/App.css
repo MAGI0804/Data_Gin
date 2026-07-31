@@ -568,6 +568,11 @@ button:focus-visible {
   padding-top: 12px;
 }
 
+.source-operation-message {
+  grid-column: 1 / -1;
+  color: #52525b;
+}
+
 .table-actions {
   min-width: max-content;
 }
