@@ -87,10 +87,19 @@ function defaultWait(milliseconds: number) {
   return new Promise<void>((resolve) => globalThis.setTimeout(resolve, milliseconds))
 }
 
-function authorizedHeaders(token: string, extra: Record<string, string> | undefined, hasBody: boolean) {
+function isFormData(body: unknown): body is FormData {
+  return typeof FormData !== 'undefined' && body instanceof FormData
+}
+
+function withoutContentType(headers: Record<string, string> | undefined) {
+  if (!headers) return undefined
+  return Object.fromEntries(Object.entries(headers).filter(([name]) => name.toLowerCase() !== 'content-type'))
+}
+
+function authorizedHeaders(token: string, extra: Record<string, string> | undefined, hasJSONBody: boolean, omitContentType = false) {
   return {
-    ...(hasBody ? { 'Content-Type': 'application/json' } : {}),
-    ...extra,
+    ...(hasJSONBody ? { 'Content-Type': 'application/json' } : {}),
+    ...(omitContentType ? withoutContentType(extra) : extra),
     ...(token ? { token, Authorization: `Bearer ${token}` } : {}),
   }
 }
@@ -140,11 +149,13 @@ export function createApiClient(options: ApiClientOptions) {
     while (true) {
       const requestSignal = createRequestSignal(signal, requestOptions.timeoutMs ?? timeoutMs)
       try {
+        const canSendBody = method !== 'GET' && body !== undefined
+        const formDataBody = canSendBody && isFormData(body)
         const response = await fetchImpl(apiURL(path, options.baseURL), {
           method,
           signal: requestSignal.signal,
-          headers: authorizedHeaders(options.getToken(), headers, body !== undefined),
-          body: method === 'GET' || body === undefined ? undefined : JSON.stringify(body),
+          headers: authorizedHeaders(options.getToken(), headers, canSendBody && !formDataBody, formDataBody || method === 'GET'),
+          body: !canSendBody ? undefined : formDataBody ? body : JSON.stringify(body),
         })
         const payload: unknown = await response.json().catch(() => null)
         const status = effectiveApiStatus(response.status, payload)

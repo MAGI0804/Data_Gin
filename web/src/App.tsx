@@ -1394,7 +1394,7 @@ function App() {
         {activeNav === 'destinations' && <DestinationsQueryPage client={client} destinations={destinations} onRefresh={() => refreshWorkspace(false)} />}
         {activeNav === 'tasks' && <DeliveryTasksQueryPage client={client} tasks={deliveryTasks} sources={sources} destinations={destinations} onRefresh={() => refreshWorkspace(false)} />}
         {activeNav === 'push_policy' && <PushPolicyPage coreMethod={coreMethods.find((item) => item.key === 'mall_push')} config={orderPushSkipConfig} targets={orderPushTargets} onSave={saveOrderPushSkipConfig} onToggle={toggleTarget} />}
-        {(activeNav === 'excel_jobs' || activeNav === 'excel_schemes' || activeNav === 'excel_write') && <ExcelMatchView section={activeNav === 'excel_jobs' ? 'jobs' : activeNav === 'excel_schemes' ? 'schemes' : 'write'} token={token} loading={loading} setLoading={setLoading} setResult={setResult} onNavigateToJobs={() => navigate('excel_jobs')} />}
+        {(activeNav === 'excel_jobs' || activeNav === 'excel_schemes' || activeNav === 'excel_write') && <ExcelMatchView section={activeNav === 'excel_jobs' ? 'jobs' : activeNav === 'excel_schemes' ? 'schemes' : 'write'} client={client} token={token} loading={loading} setLoading={setLoading} setResult={setResult} onNavigateToJobs={() => navigate('excel_jobs')} />}
       </section>
 
       <ResultPanel result={result} onClose={() => setResult(null)} />
@@ -2679,6 +2679,7 @@ function OrderPushSkipConfigForm({ config, targets, onSave }: { config: OrderPus
 
 function ExcelMatchView({
   section,
+  client,
   token,
   loading,
   setLoading,
@@ -2686,6 +2687,7 @@ function ExcelMatchView({
   onNavigateToJobs,
 }: {
   section: 'jobs' | 'schemes' | 'write'
+  client: ApiClient
   token: string
   loading: boolean
   setLoading: (value: boolean) => void
@@ -2737,6 +2739,7 @@ function ExcelMatchView({
     ? (pendingSchemeSave.operation === 'export_match' ? exportSchemes : importSchemes)
       .find((scheme) => scheme.name === pendingSchemeSave.name.trim()) ?? null
     : null
+  const requestErrorMessage = (response: ApiResult, fallback: string) => response.error?.message || fallback
 
   const applyJobResult = useCallback((result: ApiResult, options: { track?: boolean } = {}) => {
     const nextJob = readObject<ExcelMatchJob>(result, 'job')
@@ -2878,38 +2881,26 @@ function ExcelMatchView({
   }
 
   const fetchSchemes = useCallback(async (operation: 'export_match' | 'import_update') => {
-    const response = await fetch(apiURL(`/v1/excel-match-jobs/schemes?operation=${operation}`), {
-      method: 'GET',
-      headers: token ? { token } : undefined,
-    })
-    const data = await response.json().catch(() => ({}))
-    if (!response.ok || !isSuccessPayload(data)) {
-      throw new Error(readMessage(data) || '查询 Excel 方案失败')
-    }
-    const value = readDataField(data, 'schemes')
+    const response = await client(`/v1/excel-match-jobs/schemes?operation=${operation}`, { method: 'GET', showResult: false, silentLoading: true })
+    if (!response.ok) throw new Error(requestErrorMessage(response, '查询 Excel 方案失败'))
+    const value = readDataField(response.data, 'schemes')
     return Array.isArray(value) ? (value as ExcelMatchScheme[]) : []
-  }, [token])
+  }, [client])
 
   const loadExcelModels = useCallback(async () => {
     setExcelModelsLoading(true)
     setExcelModelsError('')
     try {
-      const response = await fetch(apiURL('/v1/excel-match-jobs/models'), {
-        method: 'GET',
-        headers: token ? { token } : undefined,
-      })
-      const data = await response.json().catch(() => ({}))
-      if (!response.ok || !isSuccessPayload(data)) {
-        throw new Error(readMessage(data) || '查询模型与字段目录失败')
-      }
-      const value = readDataField(data, 'models')
+      const response = await client('/v1/excel-match-jobs/models', { method: 'GET', showResult: false, silentLoading: true })
+      if (!response.ok) throw new Error(requestErrorMessage(response, '查询模型与字段目录失败'))
+      const value = readDataField(response.data, 'models')
       setExcelModels(Array.isArray(value) ? (value as ExcelMatchModel[]) : [])
     } catch (error) {
-      setExcelModelsError(error instanceof Error ? error.message : String(error))
+      setExcelModelsError(error instanceof Error ? error.message : '查询模型与字段目录失败')
     } finally {
       setExcelModelsLoading(false)
     }
-  }, [token])
+  }, [client])
 
   const loadSchemes = useCallback(async () => {
     try {
@@ -2926,20 +2917,14 @@ function ExcelMatchView({
 
   const loadJobHistory = useCallback(async () => {
     try {
-      const response = await fetch(apiURL('/v1/excel-match-jobs?limit=30'), {
-        method: 'GET',
-        headers: token ? { token } : undefined,
-      })
-      const data = await response.json().catch(() => ({}))
-      if (!response.ok || !isSuccessPayload(data)) {
-        throw new Error(readMessage(data) || '查询 Excel 任务历史失败')
-      }
-      const value = readDataField(data, 'jobs')
+      const response = await client('/v1/excel-match-jobs?limit=30', { method: 'GET', showResult: false, silentLoading: true })
+      if (!response.ok) throw new Error(requestErrorMessage(response, '查询 Excel 任务历史失败'))
+      const value = readDataField(response.data, 'jobs')
       setJobHistory(Array.isArray(value) ? (value as ExcelMatchJob[]) : [])
     } catch (error) {
-      setResult({ ok: false, status: 0, data: error instanceof Error ? error.message : String(error) })
+      setResult({ ok: false, status: 0, data: { message: error instanceof Error ? error.message : '查询 Excel 任务历史失败' } })
     }
-  }, [setResult, token])
+  }, [client, setResult])
 
   useEffect(() => {
     if (!token) return
@@ -2981,34 +2966,28 @@ function ExcelMatchView({
   const refreshJobByID = useCallback(async (id: number, options: { silent?: boolean; track?: boolean; signal?: AbortSignal } = {}) => {
     if (!options.silent) setLoading(true)
     try {
-      const response = await fetch(apiURL(`/v1/excel-match-jobs/${id}`), {
-        method: 'GET',
-        headers: token ? { token } : undefined,
-        signal: options.signal,
-      })
-      const data = await response.json().catch(() => ({}))
-      const nextResult = { ok: response.ok && isSuccessPayload(data), status: response.status, data }
-      if (!options.silent) setResult(nextResult)
+      const nextResult = await client(`/v1/excel-match-jobs/${id}`, { method: 'GET', signal: options.signal, showResult: false, silentLoading: true })
+      if (!options.silent && !nextResult.ok) setResult(nextResult)
       if (nextResult.ok) {
         applyJobResult(nextResult, { track: options.track })
         if (!options.silent) await loadJobHistory()
         return readObject<ExcelMatchJob>(nextResult, 'job')
       }
       if (options.silent) {
-        setAutoRefreshText(`自动刷新失败：${readMessage(data) || response.status}`)
+        setAutoRefreshText(`自动刷新失败：${requestErrorMessage(nextResult, '请稍后重试。')}`)
       }
-    } catch (error) {
+    } catch {
       if (options.signal?.aborted) return null
       if (!options.silent) {
-        setResult({ ok: false, status: 0, data: error instanceof Error ? error.message : String(error) })
+        setResult({ ok: false, status: 0, data: { message: '查询 Excel 任务失败，请稍后重试。' } })
       } else {
-        setAutoRefreshText(`自动刷新失败：${error instanceof Error ? error.message : String(error)}`)
+        setAutoRefreshText('自动刷新失败，请稍后重试。')
       }
     } finally {
       if (!options.silent) setLoading(false)
     }
     return null
-  }, [applyJobResult, loadJobHistory, setLoading, setResult, token])
+  }, [applyJobResult, client, loadJobHistory, setLoading, setResult])
 
   useEffect(() => {
     if (!token || !trackingJobID) return
@@ -3125,16 +3104,15 @@ function ExcelMatchView({
     const totalChunks = Math.ceil(file.size / excelChunkSize)
     setUploadProgress(`准备上传 ${file.name}，共 ${totalChunks} 个分片`)
 
-    const createResponse = await fetch(apiURL('/v1/excel-match-jobs/uploads'), {
+    const createResult = await client('/v1/excel-match-jobs/uploads', {
       method: 'POST',
-      headers: token ? { token, 'Content-Type': 'application/json' } : { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ fileName: file.name, totalChunks }),
+      body: { fileName: file.name, totalChunks },
+      showResult: false,
+      silentLoading: true,
+      retry: false,
     })
-    const createData = await createResponse.json().catch(() => ({}))
-    if (!createResponse.ok || !isSuccessPayload(createData)) {
-      throw new Error(readMessage(createData) || '创建分片上传会话失败')
-    }
-    const session = readObjectFromData<ExcelUploadSession>(createData, 'upload')
+    if (!createResult.ok) throw new Error(requestErrorMessage(createResult, '创建分片上传会话失败'))
+    const session = readObject<ExcelUploadSession>(createResult, 'upload')
     if (!session?.uploadId) throw new Error('上传会话返回缺少 uploadId')
 
     for (let index = 0; index < totalChunks; index++) {
@@ -3145,27 +3123,26 @@ function ExcelMatchView({
       chunkForm.append('totalChunks', String(totalChunks))
       chunkForm.append('chunk', file.slice(start, end), `${file.name}.part${index}`)
       setUploadProgress(`上传分片 ${index + 1}/${totalChunks}`)
-      const chunkResponse = await fetch(apiURL(`/v1/excel-match-jobs/uploads/${session.uploadId}/chunks`), {
+      const chunkResult = await client(`/v1/excel-match-jobs/uploads/${encodeURIComponent(session.uploadId)}/chunks`, {
         method: 'POST',
-        headers: token ? { token } : undefined,
         body: chunkForm,
+        showResult: false,
+        silentLoading: true,
+        retry: false,
+        timeoutMs: 120_000,
       })
-      const chunkData = await chunkResponse.json().catch(() => ({}))
-      if (!chunkResponse.ok || !isSuccessPayload(chunkData)) {
-        throw new Error(readMessage(chunkData) || `上传分片 ${index + 1} 失败`)
-      }
+      if (!chunkResult.ok) throw new Error(requestErrorMessage(chunkResult, `上传分片 ${index + 1} 失败`))
     }
 
     setUploadProgress('合并 Excel 分片')
-    const completeResponse = await fetch(apiURL(`/v1/excel-match-jobs/uploads/${session.uploadId}/complete`), {
+    const completeResult = await client(`/v1/excel-match-jobs/uploads/${encodeURIComponent(session.uploadId)}/complete`, {
       method: 'POST',
-      headers: token ? { token, 'Content-Type': 'application/json' } : { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ totalChunks }),
+      body: { totalChunks },
+      showResult: false,
+      silentLoading: true,
+      retry: false,
     })
-    const completeData = await completeResponse.json().catch(() => ({}))
-    if (!completeResponse.ok || !isSuccessPayload(completeData)) {
-      throw new Error(readMessage(completeData) || '合并 Excel 分片失败')
-    }
+    if (!completeResult.ok) throw new Error(requestErrorMessage(completeResult, '合并 Excel 分片失败'))
 
     const nextRef = {
       uploadId: session.uploadId,
@@ -3201,16 +3178,16 @@ function ExcelMatchView({
     schemeSaveInFlightRef.current = true
     setLoading(true)
     try {
-      const response = await fetch(apiURL('/v1/excel-match-jobs/schemes'), {
+      const nextResult = await client('/v1/excel-match-jobs/schemes', {
         method: 'POST',
-        headers: token ? { token, 'Content-Type': 'application/json' } : { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: name.trim(), operation, config }),
+        body: { name: name.trim(), operation, config },
+        showResult: false,
+        silentLoading: true,
+        retry: false,
       })
-      const data = await response.json().catch(() => ({}))
-      const nextResult = { ok: response.ok && isSuccessPayload(data), status: response.status, data }
-      setResult(nextResult)
+      setResult({ ok: nextResult.ok, status: nextResult.status, data: { message: nextResult.ok ? 'Excel 方案已保存。' : requestErrorMessage(nextResult, '保存 Excel 方案失败。') }, error: nextResult.error })
       if (nextResult.ok) {
-        const savedScheme = readObjectFromData<ExcelMatchScheme>(data, 'scheme')
+        const savedScheme = readObject<ExcelMatchScheme>(nextResult, 'scheme')
         if (savedScheme?.id) {
           if (operation === 'export_match') {
             setSelectedExportSchemeID(String(savedScheme.id))
@@ -3221,8 +3198,8 @@ function ExcelMatchView({
         await loadSchemes()
       }
       return nextResult.ok
-    } catch (error) {
-      setResult({ ok: false, status: 0, data: error instanceof Error ? error.message : String(error) })
+    } catch {
+      setResult({ ok: false, status: 0, data: { message: '保存 Excel 方案失败，请稍后重试。' } })
       return false
     } finally {
       schemeSaveInFlightRef.current = false
@@ -3251,13 +3228,13 @@ function ExcelMatchView({
   async function deleteScheme(scheme: ExcelMatchScheme) {
     setDeletingSchemeID(scheme.id)
     try {
-      const response = await fetch(apiURL(excelMatchSchemePath(scheme.id)), {
+      const nextResult = await client(excelMatchSchemePath(scheme.id), {
         method: 'DELETE',
-        headers: token ? { token } : undefined,
+        showResult: false,
+        silentLoading: true,
+        retry: false,
       })
-      const data = await response.json().catch(() => ({}))
-      const nextResult = { ok: response.ok && isSuccessPayload(data), status: response.status, data }
-      setResult(nextResult)
+      setResult({ ok: nextResult.ok, status: nextResult.status, data: { message: nextResult.ok ? 'Excel 方案已删除。' : requestErrorMessage(nextResult, '删除 Excel 方案失败。') }, error: nextResult.error })
       if (!nextResult.ok) return
 
       if (scheme.operation === 'export_match' && selectedExportSchemeID === String(scheme.id)) {
@@ -3268,8 +3245,8 @@ function ExcelMatchView({
       }
       await loadSchemes()
       setPendingSchemeDelete(null)
-    } catch (error) {
-      setResult({ ok: false, status: 0, data: error instanceof Error ? error.message : String(error) })
+    } catch {
+      setResult({ ok: false, status: 0, data: { message: '删除 Excel 方案失败，请稍后重试。' } })
     } finally {
       setDeletingSchemeID(null)
     }
@@ -3327,20 +3304,21 @@ function ExcelMatchView({
     try {
       const uploadId = await ensureExcelUpload('export', file)
       const payload = buildConfigPayload(uploadId, buildExportConfig(form))
-      const response = await fetch(apiURL('/v1/excel-match-jobs'), {
+      const nextResult = await client('/v1/excel-match-jobs', {
         method: 'POST',
-        headers: token ? { token } : undefined,
         body: payload,
+        showResult: false,
+        silentLoading: true,
+        retry: false,
+        timeoutMs: 120_000,
       })
-      const data = await response.json().catch(() => ({}))
-      const nextResult = { ok: response.ok && isSuccessPayload(data), status: response.status, data }
       if (nextResult.ok) {
         showCreatedJob(nextResult)
       } else {
         setResult(nextResult)
       }
-    } catch (error) {
-      setResult({ ok: false, status: 0, data: error instanceof Error ? error.message : String(error) })
+    } catch {
+      setResult({ ok: false, status: 0, data: { message: '创建 Excel 导出任务失败，请稍后重试。' } })
     } finally {
       setLoading(false)
     }
@@ -3358,19 +3336,20 @@ function ExcelMatchView({
     try {
       const uploadId = await ensureExcelUpload('export', file)
       const payload = buildConfigPayload(uploadId, buildExportConfig(form))
-      const response = await fetch(apiURL('/v1/excel-match-jobs/preview'), {
+      const nextResult = await client('/v1/excel-match-jobs/preview', {
         method: 'POST',
-        headers: token ? { token } : undefined,
         body: payload,
+        showResult: false,
+        silentLoading: true,
+        retry: false,
+        timeoutMs: 120_000,
       })
-      const data = await response.json().catch(() => ({}))
-      const nextResult = { ok: response.ok && isSuccessPayload(data), status: response.status, data }
-      setResult(nextResult)
+      setResult({ ok: nextResult.ok, status: nextResult.status, data: { message: nextResult.ok ? 'Excel 匹配预览已更新。' : requestErrorMessage(nextResult, '预览 Excel 匹配失败。') }, error: nextResult.error })
       if (nextResult.ok) {
         setPreviewResult(readObject<ExcelMatchPreviewResult>(nextResult, 'preview'))
       }
-    } catch (error) {
-      setResult({ ok: false, status: 0, data: error instanceof Error ? error.message : String(error) })
+    } catch {
+      setResult({ ok: false, status: 0, data: { message: '预览 Excel 匹配失败，请稍后重试。' } })
     } finally {
       setLoading(false)
     }
@@ -3380,17 +3359,18 @@ function ExcelMatchView({
     setLoading(true)
     try {
       const uploadId = await ensureExcelUpload(slot, file)
-      const response = await fetch(apiURL('/v1/excel-match-jobs'), {
+      const nextResult = await client('/v1/excel-match-jobs', {
         method: 'POST',
-        headers: token ? { token } : undefined,
         body: buildConfigPayload(uploadId, config),
+        showResult: false,
+        silentLoading: true,
+        retry: false,
+        timeoutMs: 120_000,
       })
-      const data = await response.json().catch(() => ({}))
-      const nextResult = { ok: response.ok && isSuccessPayload(data), status: response.status, data }
       if (nextResult.ok) showCreatedJob(nextResult)
       else setResult(nextResult)
-    } catch (error) {
-      setResult({ ok: false, status: 0, data: error instanceof Error ? error.message : String(error) })
+    } catch {
+      setResult({ ok: false, status: 0, data: { message: '创建 Excel 写入任务失败，请稍后重试。' } })
     } finally {
       setLoading(false)
     }
@@ -3595,7 +3575,7 @@ function ExcelMatchView({
                 </button>
                 {!canDownloadExcelJob(job) && <span>{job.download_message || '只有匹配导出成功任务会生成可下载结果文件。'}</span>}
               </div>
-              {job.error_message && <div className="login-error">{job.error_message}</div>}
+              {job.error_message && <div className="login-error" role="alert">任务执行失败，请查看受控服务日志。</div>}
               <section className="content-grid two">
                 <ReadonlyJSON value={job.config_json || '{}'} />
                 <ExcelJobLogList logs={jobLogs} />
@@ -4264,9 +4244,8 @@ function ExcelJobLogList({ logs }: { logs: ExcelMatchJobLog[] }) {
       {logs.map((log) => (
         <article className="record-row" key={log.id}>
           <div>
-            <strong>{log.message}</strong>
+            <strong>任务日志已记录</strong>
             <span>{excelLogLevelLabel(log.level)} / {formatUnixTime(log.created_at)}</span>
-            <span>{compactText(log.detail_json || '{}')}</span>
           </div>
         </article>
       ))}
@@ -5143,11 +5122,6 @@ function readObject<T>(result: ApiResult, key: string): T | null {
   return value && typeof value === 'object' ? (value as T) : null
 }
 
-function readObjectFromData<T>(data: unknown, key: string): T | null {
-  const value = readDataField(data, key)
-  return value && typeof value === 'object' ? (value as T) : null
-}
-
 function readDataField(data: unknown, key: string) {
   if (!data || typeof data !== 'object') return undefined
   const envelope = data as { data?: Record<string, unknown> }
@@ -5159,23 +5133,11 @@ function readToken(data: unknown) {
   return typeof value === 'string' ? value : ''
 }
 
-function readMessage(data: unknown) {
-  if (!data || typeof data !== 'object') return ''
-  const envelope = data as { msg?: unknown }
-  return typeof envelope.msg === 'string' ? envelope.msg : ''
-}
-
 function loginFailureMessage(status: number) {
   if (status === 401) return '账号或密码不正确，请重试。'
   if (status === 429) return '登录尝试过于频繁，请稍后再试。'
   if (status >= 500) return '登录服务暂时不可用，请稍后再试。'
   return '登录请求未完成，请检查账号和密码后重试。'
-}
-
-function isSuccessPayload(data: unknown) {
-  if (!data || typeof data !== 'object') return false
-  const envelope = data as { code?: unknown }
-  return envelope.code === 0 || envelope.code === 200
 }
 
 function formValue(form: FormData, key: string) {

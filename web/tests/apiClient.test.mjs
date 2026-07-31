@@ -25,7 +25,7 @@ function clientOptions(overrides = {}) {
   }
 }
 
-test('GET requests do not include a body', async () => {
+test('GET requests discard supplied bodies and content types', async () => {
   let received
   const client = createApiClient(clientOptions({
     fetch: async (_input, init) => {
@@ -33,12 +33,48 @@ test('GET requests do not include a body', async () => {
       return response(200, payload({ items: [] }))
     },
   }))
+  const form = new FormData()
+  form.append('ignored', 'value')
 
-  const result = await client.request('/v1/runs', { method: 'GET' })
+  const result = await client.request('/v1/runs', {
+    method: 'GET',
+    body: form,
+    headers: { 'Content-Type': 'application/json' },
+  })
 
   assert.equal(result.ok, true)
   assert.equal(received.method, 'GET')
   assert.equal(received.body, undefined)
+  assert.equal(received.headers['Content-Type'], undefined)
+  assert.equal(received.headers.token, 'secret-token-that-must-not-leak')
+  assert.equal(received.headers.Authorization, 'Bearer secret-token-that-must-not-leak')
+})
+
+test('FormData requests preserve multipart boundaries and authentication headers', async () => {
+  let received
+  const client = createApiClient(clientOptions({
+    fetch: async (_input, init) => {
+      received = init
+      return response(200, payload({ uploaded: true }))
+    },
+  }))
+  const form = new FormData()
+  form.append('file', 'workbook contents')
+
+  const result = await client.request('/v1/uploads', {
+    method: 'POST',
+    body: form,
+    headers: { 'Content-Type': 'application/json', 'X-Upload-Source': 'excel' },
+  })
+
+  assert.equal(result.ok, true)
+  assert.equal(received.method, 'POST')
+  assert.equal(received.body, form)
+  assert.equal(received.headers['Content-Type'], undefined)
+  assert.equal(received.headers['content-type'], undefined)
+  assert.equal(received.headers['X-Upload-Source'], 'excel')
+  assert.equal(received.headers.token, 'secret-token-that-must-not-leak')
+  assert.equal(received.headers.Authorization, 'Bearer secret-token-that-must-not-leak')
 })
 
 test('concurrent unauthorized GETs use one refresh and replay once', async () => {
