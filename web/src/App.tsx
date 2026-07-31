@@ -2179,8 +2179,43 @@ function RulesQueryPage({ client, rules, sources, onRulesChange }: { client: Api
 
 function ProcessedQueryPage({ client }: { client: ApiClient }) {
   const [view, setView] = useState<'legacy' | 'clean'>('legacy')
+  const [statistics, setStatistics] = useState<DataStatisticsSummary | null>(null)
+  const [statisticsLoading, setStatisticsLoading] = useState(true)
+  const [statisticsError, setStatisticsError] = useState('')
+  const [statisticsRequest, setStatisticsRequest] = useState(0)
+
+  useEffect(() => {
+    const controller = new AbortController()
+    setStatisticsLoading(true)
+    setStatisticsError('')
+    void client('/v1/data/statistics', { method: 'GET', signal: controller.signal, showResult: false, silentLoading: true }).then((response) => {
+      if (controller.signal.aborted) return
+      const parsed = response.ok ? parseDataStatisticsSummary(response.data) : null
+      if (!parsed) {
+        setStatisticsError('处理统计暂时不可用，记录列表仍可继续查询。')
+        setStatisticsLoading(false)
+        return
+      }
+      setStatistics(parsed)
+      setStatisticsLoading(false)
+    }).catch(() => {
+      if (controller.signal.aborted) return
+      setStatisticsError('处理统计暂时不可用，记录列表仍可继续查询。')
+      setStatisticsLoading(false)
+    })
+    return () => controller.abort()
+  }, [client, statisticsRequest])
+
   return (
     <div className="view-stack">
+      {statistics && <section className="overview-grid compact" aria-label="处理统计">
+        <Metric label="接收总量" value={statistics.totalCount} />
+        <Metric label="已处理" value={statistics.processedCount} />
+        <Metric label="处理失败" value={statistics.errorCount} />
+        <Metric label="平均质量分" value={statistics.averageQualityScore === null ? '-' : statistics.averageQualityScore.toFixed(1)} />
+      </section>}
+      {statisticsLoading && !statistics && <p className="query-contract-note" role="status">正在加载处理统计…</p>}
+      {statisticsError && <div className="result-banner error" role="alert">{statisticsError} {statistics && '当前展示的是上一次成功数据。'} <button type="button" onClick={() => setStatisticsRequest((current) => current + 1)} disabled={statisticsLoading}>重试统计</button></div>}
       <div className="tab-actions" role="tablist" aria-label="处理结果数据视图">
         <button type="button" role="tab" aria-selected={view === 'legacy'} className={view === 'legacy' ? 'active' : ''} onClick={() => setView('legacy')}>旧处理结果</button>
         <button type="button" role="tab" aria-selected={view === 'clean'} className={view === 'clean' ? 'active' : ''} onClick={() => setView('clean')}>清洗记录</button>
