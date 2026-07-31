@@ -803,6 +803,7 @@ function App() {
   const [stepRuns, setStepRuns] = useState<StepRun[]>([])
   const [selectedStepRunID, setSelectedStepRunID] = useState<number | null>(null)
   const stepRequestRef = useRef<AbortController | null>(null)
+  const workspaceRequestRef = useRef<AbortController | null>(null)
   const [methods, setMethods] = useState<MethodDisplay[]>(builtinMethods)
   const [sources, setSources] = useState<SourceDefinition[]>([])
   const [transformRules, setTransformRules] = useState<TransformRule[]>([])
@@ -904,9 +905,9 @@ function App() {
     [client, token],
   )
 
-  const loadConfiguredMethods = useCallback(async (pipelines: PipelineDefinition[]) => {
+  const loadConfiguredMethods = useCallback(async (pipelines: PipelineDefinition[], signal: AbortSignal) => {
     const details = await Promise.all(
-      pipelines.map((pipeline) => client(`/v1/pipelines/${pipeline.id}`, { method: 'GET', showResult: false, silentLoading: true })),
+      pipelines.map((pipeline) => client(`/v1/pipelines/${pipeline.id}`, { method: 'GET', signal, showResult: false, silentLoading: true })),
     )
     return details.flatMap((detailResult, index) => {
       const detail = readObject<PipelineDetail>(detailResult, 'pipeline')
@@ -927,58 +928,97 @@ function App() {
     })
   }, [client])
 
-  const refreshAll = useCallback(
+  const refreshWorkspace = useCallback(
     async (showResult = false) => {
       if (!token) return
+      workspaceRequestRef.current?.abort()
+      const controller = new AbortController()
+      workspaceRequestRef.current = controller
       setRefreshing(true)
       try {
-        const [pipelineResult, runResult, sourceResult, ruleResult, destinationResult, taskResult, logResult, orderPushSkipResult, legacyTaskResult, legacyRuleResult] = await Promise.all([
-          client('/v1/pipelines', { method: 'GET', showResult: false, silentLoading: true }),
-          client('/v1/runs?limit=50', { method: 'GET', showResult: false, silentLoading: true }),
-          client('/v1/sources', { method: 'GET', showResult: false, silentLoading: true }),
-          client('/v1/transform-rules', { method: 'GET', showResult: false, silentLoading: true }),
-          client('/v1/destinations', { method: 'GET', showResult: false, silentLoading: true }),
-          client('/v1/delivery-tasks', { method: 'GET', showResult: false, silentLoading: true }),
-          client('/v1/delivery-logs?limit=50', { method: 'GET', showResult: false, silentLoading: true }),
-          client('/v1/order-push-skip-config', { method: 'GET', showResult: false, silentLoading: true }),
-          client('/v1/legacy-tasks', { method: 'GET', showResult: false, silentLoading: true }),
-          client('/v1/legacy-transform-rules', { method: 'GET', showResult: false, silentLoading: true }),
-        ])
-
-        if (runResult.ok) setRuns(readList<PipelineRun>(runResult, 'runs'))
-        const nextSources = sourceResult.ok ? readList<SourceDefinition>(sourceResult, 'sources') : []
-        const nextRules = ruleResult.ok ? readList<TransformRule>(ruleResult, 'rules') : []
-        const nextDestinations = destinationResult.ok ? readList<DestinationDefinition>(destinationResult, 'destinations') : []
-        const nextTasks = taskResult.ok ? readList<DeliveryTask>(taskResult, 'tasks') : []
-        const nextLegacyTasks = legacyTaskResult.ok ? readList<LegacyTask>(legacyTaskResult, 'tasks') : []
-        const nextLegacyRules = legacyRuleResult.ok ? readList<LegacyTransformRule>(legacyRuleResult, 'rules') : []
-        if (sourceResult.ok) setSources(nextSources)
-        if (ruleResult.ok) setTransformRules(nextRules)
-        if (destinationResult.ok) setDestinations(nextDestinations)
-        if (taskResult.ok) setDeliveryTasks(nextTasks)
-        if (logResult.ok) setDeliveryLogs(readList<DeliveryLog>(logResult, 'logs'))
-        if (orderPushSkipResult.ok) {
-          setOrderPushSkipConfig(normalizeOrderPushSkipConfig(readObject<OrderPushSkipConfig>(orderPushSkipResult, 'config')))
-          setOrderPushTargets(readList<OrderPushTargetOption>(orderPushSkipResult, 'targets'))
+        const get = (path: string) => client(path, { method: 'GET', signal: controller.signal, showResult: false, silentLoading: true })
+        if (activeNav === 'overview') {
+          const [runResult, logResult] = await Promise.all([get('/v1/runs?limit=50'), get('/v1/delivery-logs?limit=50')])
+          if (!controller.signal.aborted) {
+            if (runResult.ok) setRuns(readList<PipelineRun>(runResult, 'runs'))
+            if (logResult.ok) setDeliveryLogs(readList<DeliveryLog>(logResult, 'logs'))
+          }
+        } else if (activeNav === 'runs' || activeNav === 'step_runs') {
+          const runResult = await get('/v1/runs?limit=50')
+          if (!controller.signal.aborted && runResult.ok) setRuns(readList<PipelineRun>(runResult, 'runs'))
+        } else if (activeNav === 'delivery_logs') {
+          const logResult = await get('/v1/delivery-logs?limit=50')
+          if (!controller.signal.aborted && logResult.ok) setDeliveryLogs(readList<DeliveryLog>(logResult, 'logs'))
+        } else if (activeNav === 'sources') {
+          const sourceResult = await get('/v1/sources')
+          if (!controller.signal.aborted && sourceResult.ok) setSources(readList<SourceDefinition>(sourceResult, 'sources'))
+        } else if (activeNav === 'rules') {
+          const [sourceResult, ruleResult] = await Promise.all([get('/v1/sources'), get('/v1/transform-rules')])
+          if (!controller.signal.aborted) {
+            if (sourceResult.ok) setSources(readList<SourceDefinition>(sourceResult, 'sources'))
+            if (ruleResult.ok) setTransformRules(readList<TransformRule>(ruleResult, 'rules'))
+          }
+        } else if (activeNav === 'destinations') {
+          const destinationResult = await get('/v1/destinations')
+          if (!controller.signal.aborted && destinationResult.ok) setDestinations(readList<DestinationDefinition>(destinationResult, 'destinations'))
+        } else if (activeNav === 'tasks') {
+          const [sourceResult, destinationResult, taskResult] = await Promise.all([get('/v1/sources'), get('/v1/destinations'), get('/v1/delivery-tasks')])
+          if (!controller.signal.aborted) {
+            if (sourceResult.ok) setSources(readList<SourceDefinition>(sourceResult, 'sources'))
+            if (destinationResult.ok) setDestinations(readList<DestinationDefinition>(destinationResult, 'destinations'))
+            if (taskResult.ok) setDeliveryTasks(readList<DeliveryTask>(taskResult, 'tasks'))
+          }
+        } else if (activeNav === 'push_policy') {
+          const [sourceResult, ruleResult, destinationResult, taskResult, orderPushSkipResult] = await Promise.all([get('/v1/sources'), get('/v1/transform-rules'), get('/v1/destinations'), get('/v1/delivery-tasks'), get('/v1/order-push-skip-config')])
+          if (!controller.signal.aborted) {
+            if (sourceResult.ok) setSources(readList<SourceDefinition>(sourceResult, 'sources'))
+            if (ruleResult.ok) setTransformRules(readList<TransformRule>(ruleResult, 'rules'))
+            if (destinationResult.ok) setDestinations(readList<DestinationDefinition>(destinationResult, 'destinations'))
+            if (taskResult.ok) setDeliveryTasks(readList<DeliveryTask>(taskResult, 'tasks'))
+            if (orderPushSkipResult.ok) {
+              setOrderPushSkipConfig(normalizeOrderPushSkipConfig(readObject<OrderPushSkipConfig>(orderPushSkipResult, 'config')))
+              setOrderPushTargets(readList<OrderPushTargetOption>(orderPushSkipResult, 'targets'))
+            }
+          }
+        } else if (activeNav === 'youzan_distribution') {
+          const legacyTaskResult = await get('/v1/legacy-tasks')
+          if (!controller.signal.aborted && legacyTaskResult.ok) setLegacyTasks(readList<LegacyTask>(legacyTaskResult, 'tasks'))
+        } else if (activeNav === 'methods') {
+          const [pipelineResult, sourceResult, ruleResult, destinationResult, taskResult, legacyTaskResult, legacyRuleResult] = await Promise.all([
+            get('/v1/pipelines'), get('/v1/sources'), get('/v1/transform-rules'), get('/v1/destinations'), get('/v1/delivery-tasks'), get('/v1/legacy-tasks'), get('/v1/legacy-transform-rules'),
+          ])
+          if (!controller.signal.aborted) {
+            const nextSources = sourceResult.ok ? readList<SourceDefinition>(sourceResult, 'sources') : []
+            const nextRules = ruleResult.ok ? readList<TransformRule>(ruleResult, 'rules') : []
+            const nextDestinations = destinationResult.ok ? readList<DestinationDefinition>(destinationResult, 'destinations') : []
+            const nextTasks = taskResult.ok ? readList<DeliveryTask>(taskResult, 'tasks') : []
+            const nextLegacyTasks = legacyTaskResult.ok ? readList<LegacyTask>(legacyTaskResult, 'tasks') : []
+            const nextLegacyRules = legacyRuleResult.ok ? readList<LegacyTransformRule>(legacyRuleResult, 'rules') : []
+            if (sourceResult.ok) setSources(nextSources)
+            if (ruleResult.ok) setTransformRules(nextRules)
+            if (destinationResult.ok) setDestinations(nextDestinations)
+            if (taskResult.ok) setDeliveryTasks(nextTasks)
+            if (legacyTaskResult.ok) setLegacyTasks(nextLegacyTasks)
+            if (legacyRuleResult.ok) setLegacyRules(nextLegacyRules)
+            const configuredMethods = pipelineResult.ok ? await loadConfiguredMethods(readList<PipelineDefinition>(pipelineResult, 'pipelines'), controller.signal) : []
+            if (!controller.signal.aborted) setMethods([...buildConfiguredMethodDisplays(nextSources, nextRules, nextDestinations, nextTasks), ...buildLegacyMethodDisplays(nextLegacyTasks, nextLegacyRules), ...configuredMethods, ...builtinMethods])
+          }
         }
-        if (legacyTaskResult.ok) setLegacyTasks(nextLegacyTasks)
-        if (legacyRuleResult.ok) setLegacyRules(nextLegacyRules)
-        if (pipelineResult.ok) {
-          const pipelines = readList<PipelineDefinition>(pipelineResult, 'pipelines')
-          const configuredMethods = await loadConfiguredMethods(pipelines)
-          setMethods([...buildConfiguredMethodDisplays(nextSources, nextRules, nextDestinations, nextTasks), ...buildLegacyMethodDisplays(nextLegacyTasks, nextLegacyRules), ...configuredMethods, ...builtinMethods])
-        }
-        if (showResult) setResult({ ok: true, status: 200, data: { refreshed_at: new Date().toISOString() } })
+        if (!controller.signal.aborted && showResult) setResult({ ok: true, status: 200, data: { refreshed_at: new Date().toISOString() } })
       } finally {
-        setRefreshing(false)
+        if (workspaceRequestRef.current === controller) {
+          workspaceRequestRef.current = null
+          setRefreshing(false)
+        }
       }
     },
-    [client, loadConfiguredMethods, token],
+    [activeNav, client, loadConfiguredMethods, token],
   )
 
   useEffect(() => {
-    if (sessionState === 'authenticated') void refreshAll(false)
-  }, [refreshAll, sessionState])
+    if (sessionState === 'authenticated') void refreshWorkspace(false)
+    return () => workspaceRequestRef.current?.abort()
+  }, [refreshWorkspace, sessionState])
 
   useEffect(() => {
     if (!token) return
@@ -1135,17 +1175,17 @@ function App() {
 
   async function toggleTarget(target: ToggleTarget, enabled: boolean) {
     const response = await updateTargetEnabled(client, target, enabled, { sources, transformRules, destinations, deliveryTasks })
-    if (response.ok) await refreshAll(false)
+    if (response.ok) await refreshWorkspace(false)
   }
 
   async function retryDeliveryLog(logId: number) {
     const response = await client(`/v1/delivery-logs/${logId}/retry`, { method: 'POST' })
-    if (response.ok) await refreshAll(false)
+    if (response.ok) await refreshWorkspace(false)
   }
 
   async function fetchSource(sourceID: number) {
     const response = await client(`/v1/sources/${sourceID}/fetch`, { method: 'POST' })
-    if (response.ok) await refreshAll(false)
+    if (response.ok) await refreshWorkspace(false)
     return response
   }
 
@@ -1160,7 +1200,7 @@ function App() {
     })
     if (response.ok) {
       setOrderPushSkipConfig(normalizeOrderPushSkipConfig(readObject<OrderPushSkipConfig>(response, 'config')) ?? config)
-      await refreshAll(false)
+      await refreshWorkspace(false)
     }
   }
 
@@ -1178,7 +1218,7 @@ function App() {
       body: payload,
     })
     if (response.ok) {
-      await refreshAll(false)
+      await refreshWorkspace(false)
       return readObject<BojunOrderBackfillResult>(response, 'result')
     }
     return null
@@ -1270,7 +1310,7 @@ function App() {
           })}
         </nav>
         <div className="sidebar-actions">
-          <button type="button" onClick={() => refreshAll(true)} disabled={refreshing}>
+          <button type="button" onClick={() => void refreshWorkspace(true)} disabled={refreshing}>
             <RefreshCcw aria-hidden="true" />
             刷新
           </button>
@@ -1290,7 +1330,7 @@ function App() {
         {activeNav === 'store_info' && <StoreInfoPage actorID={actorID} client={client} downloadFile={downloadFile} />}
         {activeNav === 'mall_weather' && <MallWeatherPage actorID={actorID} client={client} downloadFile={downloadFile} />}
         {activeNav === 'data_authorizations' && <DataAuthorizationPage client={client} />}
-        {activeNav === 'sources' && <SourcesQueryPage client={client} sources={sources} onFetchSource={fetchSource} onTestSource={testSource} onRefresh={() => refreshAll(false)} />}
+        {activeNav === 'sources' && <SourcesQueryPage client={client} sources={sources} onFetchSource={fetchSource} onTestSource={testSource} onRefresh={() => refreshWorkspace(false)} />}
         {activeNav === 'methods' && <MethodsView methods={methods} coreMethods={coreMethods} onToggle={toggleTarget} />}
         {activeNav === 'receive' && <RawRecordsQueryPage title="接口接收记录" origin="receive" client={client} />}
         {activeNav === 'pull_records' && <RawRecordsQueryPage title="数据拉取记录" origin="pull" client={client} />}
@@ -1298,8 +1338,8 @@ function App() {
         {activeNav === 'youzan_distribution' && <YouzanDistributionPage task={legacyTasks.find((item) => item.code === 'youzan_distribution_order_fetch')} loading={loading || refreshing} onPreview={previewYouzanDistributionBackfill} onConfirm={confirmYouzanDistributionBackfill} />}
         {activeNav === 'rules' && <RulesQueryPage client={client} rules={transformRules} sources={sources} onRulesChange={setTransformRules} />}
         {activeNav === 'processed' && <ProcessedQueryPage client={client} />}
-        {activeNav === 'destinations' && <DestinationsQueryPage client={client} destinations={destinations} onRefresh={() => refreshAll(false)} />}
-        {activeNav === 'tasks' && <DeliveryTasksQueryPage client={client} tasks={deliveryTasks} sources={sources} destinations={destinations} onRefresh={() => refreshAll(false)} />}
+        {activeNav === 'destinations' && <DestinationsQueryPage client={client} destinations={destinations} onRefresh={() => refreshWorkspace(false)} />}
+        {activeNav === 'tasks' && <DeliveryTasksQueryPage client={client} tasks={deliveryTasks} sources={sources} destinations={destinations} onRefresh={() => refreshWorkspace(false)} />}
         {activeNav === 'push_policy' && <PushPolicyPage coreMethod={coreMethods.find((item) => item.key === 'mall_push')} config={orderPushSkipConfig} targets={orderPushTargets} onSave={saveOrderPushSkipConfig} onToggle={toggleTarget} />}
         {(activeNav === 'excel_jobs' || activeNav === 'excel_schemes' || activeNav === 'excel_write') && <ExcelMatchView section={activeNav === 'excel_jobs' ? 'jobs' : activeNav === 'excel_schemes' ? 'schemes' : 'write'} token={token} loading={loading} setLoading={setLoading} setResult={setResult} onNavigateToJobs={() => navigate('excel_jobs')} />}
       </section>
