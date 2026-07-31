@@ -40,6 +40,29 @@ export type CursorPagination = {
   hasMore: boolean
 }
 
+export type DataAuthorizationAuditAction =
+  | 'ACCOUNT_CREATE'
+  | 'GRANT'
+  | 'RENEW'
+  | 'REVOKE'
+  | 'TOKEN_REISSUE'
+
+export type DataAuthorizationAuditQuery = {
+  targetUserId: number
+  permission: string
+  action: DataAuthorizationAuditAction | ''
+  beforeId: number
+  pageSize: number
+}
+
+export const dataAuthorizationAuditActions: readonly DataAuthorizationAuditAction[] = [
+  'ACCOUNT_CREATE',
+  'GRANT',
+  'RENEW',
+  'REVOKE',
+  'TOKEN_REISSUE',
+]
+
 type JsonRecord = Record<string, unknown>
 
 function record(value: unknown): JsonRecord | null {
@@ -135,6 +158,37 @@ export function parseDataAuthorizationAudits(payload: unknown) {
     }
   }
   return { audits, pagination: parsePagination(data?.pagination) }
+}
+
+/**
+ * Builds the exact POST body accepted by the audit query endpoint. The server
+ * deliberately supports an ID cursor rather than offset pages and does not
+ * accept account text or time-range fields.
+ */
+export function buildDataAuthorizationAuditQuery(input: Partial<DataAuthorizationAuditQuery>): DataAuthorizationAuditQuery {
+  const action = dataAuthorizationAuditActions.includes(input.action as DataAuthorizationAuditAction)
+    ? input.action as DataAuthorizationAuditAction
+    : ''
+  const positive = (value: unknown) => typeof value === 'number' && Number.isSafeInteger(value) && value > 0 ? value : 0
+  return {
+    targetUserId: positive(input.targetUserId),
+    permission: typeof input.permission === 'string' ? input.permission : '',
+    action,
+    beforeId: positive(input.beforeId),
+    pageSize: Math.min(100, positive(input.pageSize) || 20),
+  }
+}
+
+/**
+ * The current server query contract has no created-at filter. This helper is
+ * intentionally for filtering the records already loaded in the UI only.
+ */
+export function auditOccursWithinLoadedRange(createdAt: string, startTime: string, endTime: string) {
+  const created = new Date(createdAt).getTime()
+  const start = startTime ? new Date(startTime).getTime() : null
+  const end = endTime ? new Date(endTime).getTime() : null
+  return Number.isFinite(created) && (start === null || Number.isFinite(start)) && (end === null || Number.isFinite(end)) &&
+    (start === null || end === null || start <= end) && (start === null || created >= start) && (end === null || created <= end)
 }
 
 export function parseCreatedAuthorization(payload: unknown) {

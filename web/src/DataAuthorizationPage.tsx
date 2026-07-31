@@ -2,12 +2,16 @@ import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 're
 import { Check, Clipboard, KeyRound, Plus, RefreshCcw, RotateCcw, Search, ShieldCheck, ShieldOff, UserRound } from 'lucide-react'
 import {
   authorizationExpiryISO,
+  auditOccursWithinLoadedRange,
+  buildDataAuthorizationAuditQuery,
+  dataAuthorizationAuditActions,
   defaultAuthorizationExpiry,
   newAuthorizationIdempotencyKey,
   parseCreatedAuthorization,
   parseDataAuthorizationAccounts,
   parseDataAuthorizationAudits,
   type CursorPagination,
+  type DataAuthorizationAuditAction,
   type DataAuthorizationAccount,
   type DataAuthorizationAudit,
   type DataAuthorizationPermission,
@@ -41,6 +45,8 @@ type SubmittedAction = {
 }
 
 const emptyPagination: CursorPagination = { pageSize: 20, nextBeforeId: 0, hasMore: false }
+type AuditFilters = { targetUserId: number; action: DataAuthorizationAuditAction | ''; startTime: string; endTime: string }
+const emptyAuditFilters: AuditFilters = { targetUserId: 0, action: '', startTime: '', endTime: '' }
 const permissionCatalog: Array<{ permission: DataPermissionCode; label: string; description: string }> = [
   { permission: 'weather.read', label: '天气数据查询', description: '可查询全部商场的天气实况、预报、预警和生活指数。' },
   { permission: 'bojun.order.read', label: 'Bojun 订单查询', description: '可按时间、商场和游标分页查询脱敏订单明细。' },
@@ -56,6 +62,10 @@ export function DataAuthorizationPage({ client }: { client: ApiClient }) {
   const [error, setError] = useState('')
   const [notice, setNotice] = useState('')
   const [audits, setAudits] = useState<DataAuthorizationAudit[]>([])
+  const [auditPagination, setAuditPagination] = useState(emptyPagination)
+  const [auditFilters, setAuditFilters] = useState<AuditFilters>(emptyAuditFilters)
+  const [appliedAuditFilters, setAppliedAuditFilters] = useState<AuditFilters>(emptyAuditFilters)
+  const [auditLoading, setAuditLoading] = useState(false)
   const [createOpen, setCreateOpen] = useState(false)
   const [actionDialog, setActionDialog] = useState<ActionDialog>(null)
   const [pendingAction, setPendingAction] = useState<SubmittedAction | null>(null)
@@ -63,6 +73,8 @@ export function DataAuthorizationPage({ client }: { client: ApiClient }) {
   const [oneTimeToken, setOneTimeToken] = useState('')
   const [tokenCopied, setTokenCopied] = useState(false)
   const requestSequence = useRef(0)
+  const auditRequestRef = useRef<AbortController | null>(null)
+  const auditRequestSequence = useRef(0)
   const mutationInFlight = useRef(false)
 
   const selected = useMemo(() => accounts.find((account) => account.id === selectedID) ?? accounts[0] ?? null, [accounts, selectedID])
@@ -90,21 +102,54 @@ export function DataAuthorizationPage({ client }: { client: ApiClient }) {
     if (!append && parsed.accounts.length > 0) setSelectedID((current) => parsed.accounts.some((account) => account.id === current) ? current : parsed.accounts[0].id)
   }, [client, keyword, pagination.nextBeforeId])
 
-  const loadAudits = useCallback(async (targetUserID = 0) => {
-    const response = await client('/v1/data-authorizations/audits/query', {
-      method: 'POST', body: { targetUserId: targetUserID, pageSize: 30 }, showResult: false, silentLoading: true,
-    })
-    if (response.ok) setAudits(parseDataAuthorizationAudits(response.data).audits)
+  const loadAudits = useCallback(async (filters: AuditFilters, options: { append?: boolean; beforeId?: number } = {}) => {
+    auditRequestRef.current?.abort()
+    const controller = new AbortController()
+    auditRequestRef.current = controller
+    const sequence = ++auditRequestSequence.current
+    const append = options.append === true
+    setAuditLoading(true)
+    setError('')
+    try {
+      const response = await client('/v1/data-authorizations/audits/query', {
+        method: 'POST',
+        body: buildDataAuthorizationAuditQuery({ targetUserId: filters.targetUserId, action: filters.action, beforeId: append ? options.beforeId : 0, pageSize: 30 }),
+        showResult: false,
+        silentLoading: true,
+        signal: controller.signal,
+      })
+      if (controller.signal.aborted || sequence !== auditRequestSequence.current) return
+      if (!response.ok) {
+        setError(response.status === 403 ? '当前登录账号不是可信管理员，无法查看授权审计。' : '授权审计加载失败，请稍后重试。')
+        return
+      }
+      const parsed = parseDataAuthorizationAudits(response.data)
+      setAudits((current) => append ? deduplicateAudits([...current, ...parsed.audits]) : parsed.audits)
+      setAuditPagination(parsed.pagination)
+    } catch {
+      if (!controller.signal.aborted && sequence === auditRequestSequence.current) setError('授权审计加载失败，请检查网络后重试。')
+    } finally {
+      if (!controller.signal.aborted && sequence === auditRequestSequence.current) setAuditLoading(false)
+    }
   }, [client])
 
   useEffect(() => { void loadAccounts({ search: '' }) }, []) // eslint-disable-line react-hooks/exhaustive-deps
-  useEffect(() => { void loadAudits(selected?.id ?? 0) }, [loadAudits, selected?.id])
+  useEffect(() => {
+    const nextFilters = { ...emptyAuditFilters, targetUserId: selected?.id ?? 0 }
+    setAuditFilters(nextFilters)
+    setAppliedAuditFilters(nextFilters)
+    void loadAudits(nextFilters)
+  }, [loadAudits, selected?.id])
+  useEffect(() => () => auditRequestRef.current?.abort(), [])
 
   async function refreshAfterMutation(message: string, targetID?: number) {
     setNotice(message)
     if (targetID) setSelectedID(targetID)
     await loadAccounts({ search: keyword })
-    await loadAudits(targetID ?? selected?.id ?? 0)
+    const nextFilters = { ...appliedAuditFilters, targetUserId: targetID ?? selected?.id ?? 0 }
+    setAuditFilters(nextFilters)
+    setAppliedAuditFilters(nextFilters)
+    await loadAudits(nextFilters)
   }
 
   async function createAccount(event: FormEvent<HTMLFormElement>) {
@@ -235,6 +280,30 @@ export function DataAuthorizationPage({ client }: { client: ApiClient }) {
     }
   }
 
+  function submitAuditFilters(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (auditFilters.startTime && auditFilters.endTime && new Date(auditFilters.startTime).getTime() > new Date(auditFilters.endTime).getTime()) {
+      setError('审计结束时间不能早于开始时间。')
+      return
+    }
+    const nextFilters = { ...auditFilters }
+    setAppliedAuditFilters(nextFilters)
+    void loadAudits(nextFilters)
+  }
+
+  function cancelAuditLoad() {
+    auditRequestRef.current?.abort()
+    auditRequestRef.current = null
+    auditRequestSequence.current += 1
+    setAuditLoading(false)
+    setNotice('已取消授权审计查询，保留最近一次成功数据。')
+  }
+
+  const visibleAudits = useMemo(
+    () => audits.filter((audit) => auditOccursWithinLoadedRange(audit.createdAt, appliedAuditFilters.startTime, appliedAuditFilters.endTime)),
+    [appliedAuditFilters.endTime, appliedAuditFilters.startTime, audits],
+  )
+
   return (
     <div className="view-stack data-authorization-page" aria-busy={loading || mutating}>
       <section className="data-authorization-toolbar">
@@ -288,8 +357,29 @@ export function DataAuthorizationPage({ client }: { client: ApiClient }) {
       </section>
 
       <section className="workbench-panel data-authorization-audits">
-        <div className="panel-title"><ShieldCheck aria-hidden="true" /><div><h3>授权审计</h3><span>{selected ? `当前账号 ${selected.account}` : '最近变更'} · 追加式记录</span></div></div>
-        {audits.length === 0 ? <div className="empty-state">暂无授权变更记录。</div> : <div className="data-table-wrap"><table className="data-table"><thead><tr><th>时间</th><th>动作</th><th>账号</th><th>权限</th><th>有效期变更</th><th>原因</th></tr></thead><tbody>{audits.map((audit) => <tr key={audit.id}><td>{formatDateTime(audit.createdAt)}</td><td>{auditActionLabel(audit.action)}</td><td>{audit.targetAccount || `#${audit.targetUserId}`}</td><td>{permissionLabel(audit.permission)}</td><td>{formatAuditExpiry(audit)}</td><td className="data-authorization-reason">{audit.reason}</td></tr>)}</tbody></table></div>}
+        <div className="panel-title"><ShieldCheck aria-hidden="true" /><div><h3>授权审计</h3><span>{appliedAuditFilters.targetUserId ? `目标账号 #${appliedAuditFilters.targetUserId}` : '最近变更'} · ID 游标分页</span></div></div>
+        <form className="query-bar" onSubmit={submitAuditFilters} aria-label="授权审计筛选">
+          <div className="query-fields">
+            <label>目标账号
+              <select value={String(auditFilters.targetUserId)} disabled={auditLoading} onChange={(event) => setAuditFilters((current) => ({ ...current, targetUserId: Number(event.currentTarget.value) || 0 }))}>
+                <option value="0">全部已加载账号</option>
+                {accounts.map((account) => <option value={account.id} key={account.id}>{account.account}</option>)}
+              </select>
+            </label>
+            <label>审计动作
+              <select value={auditFilters.action} disabled={auditLoading} onChange={(event) => setAuditFilters((current) => ({ ...current, action: event.currentTarget.value as DataAuthorizationAuditAction | '' }))}>
+                <option value="">全部动作</option>
+                {dataAuthorizationAuditActions.map((action) => <option value={action} key={action}>{auditActionLabel(action)}</option>)}
+              </select>
+            </label>
+            <label>开始时间（已加载记录）<input type="datetime-local" value={auditFilters.startTime} disabled={auditLoading} onChange={(event) => setAuditFilters((current) => ({ ...current, startTime: event.currentTarget.value }))} /></label>
+            <label>结束时间（已加载记录）<input type="datetime-local" value={auditFilters.endTime} disabled={auditLoading} onChange={(event) => setAuditFilters((current) => ({ ...current, endTime: event.currentTarget.value }))} /></label>
+          </div>
+          <div className="record-actions"><button type="submit" disabled={auditLoading}>{auditLoading ? '查询中…' : '查询审计'}</button><button type="button" onClick={cancelAuditLoad} disabled={!auditLoading}>取消</button></div>
+        </form>
+        <p className="query-contract-note">服务端按目标账号、动作和 <code>beforeId</code> 游标筛选；当前接口未提供时间字段，时间范围只筛选本次已加载的记录。</p>
+        {visibleAudits.length === 0 ? <div className="empty-state">{auditLoading ? '授权审计加载中…' : '暂无匹配的授权变更记录。'}</div> : <div className="data-table-wrap"><table className="data-table"><thead><tr><th>时间</th><th>动作</th><th>账号</th><th>权限</th><th>有效期变更</th><th>原因</th></tr></thead><tbody>{visibleAudits.map((audit) => <tr key={audit.id}><td>{formatDateTime(audit.createdAt)}</td><td>{auditActionLabel(audit.action)}</td><td>{audit.targetAccount || `#${audit.targetUserId}`}</td><td>{permissionLabel(audit.permission)}</td><td>{formatAuditExpiry(audit)}</td><td className="data-authorization-reason">{audit.reason}</td></tr>)}</tbody></table></div>}
+        {auditPagination.hasMore && <div className="record-actions"><button type="button" disabled={auditLoading} onClick={() => void loadAudits(appliedAuditFilters, { append: true, beforeId: auditPagination.nextBeforeId })}>{auditLoading ? '加载中…' : '加载更早记录'}</button></div>}
       </section>
 
       {createOpen && <Modal title="开通开放 API 账号" closeDisabled={mutating} onClose={() => setCreateOpen(false)}><form className="data-authorization-form" onSubmit={createAccount}>
@@ -378,6 +468,7 @@ function Modal({ title, children, onClose, closeDisabled = false }: { title: str
 function responseData(payload: unknown) { return payload && typeof payload === 'object' && !Array.isArray(payload) && (payload as { data?: unknown }).data && typeof (payload as { data?: unknown }).data === 'object' ? (payload as { data: Record<string, unknown> }).data : null }
 function formString(form: FormData, key: string) { const value = form.get(key); return typeof value === 'string' ? value.trim() : '' }
 function deduplicateAccounts(accounts: DataAuthorizationAccount[]) { return [...new Map(accounts.map((account) => [account.id, account])).values()] }
+function deduplicateAudits(audits: DataAuthorizationAudit[]) { return [...new Map(audits.map((audit) => [audit.id, audit])).values()] }
 function fallbackPermission(permission: DataPermissionCode, label: string): DataAuthorizationPermission { return { permission, label, scope: '全模块数据', status: 'NOT_GRANTED', expiresAt: null } }
 function permissionLabel(permission: string) { return permission === 'weather.read' ? '天气数据查询' : permission === 'bojun.order.read' ? 'Bojun 订单查询' : permission === 'open_api.account' ? '开放接口账号' : permission === 'open_api.credential' ? '访问凭证' : permission }
 function permissionStatusLabel(status: string) { return status === 'ACTIVE' ? '生效中' : status === 'EXPIRED' ? '已过期' : '未授权' }
