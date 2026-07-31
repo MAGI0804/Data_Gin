@@ -28,7 +28,7 @@ func (ctrl *SourceController) ListSources(c *gin.Context) {
 	}
 
 	c.JSON(200, msg.SuccessResponse("查询数据源成功", &map[string]any{
-		"sources": sources,
+		"sources": safeSourceDefinitions(sources),
 	}))
 }
 
@@ -46,7 +46,7 @@ func (ctrl *SourceController) GetSource(c *gin.Context) {
 	}
 
 	c.JSON(200, msg.SuccessResponse("查询数据源详情成功", &map[string]any{
-		"source": source,
+		"source": safeSourceDefinition(*source),
 	}))
 }
 
@@ -64,7 +64,7 @@ func (ctrl *SourceController) CreateSource(c *gin.Context) {
 	}
 
 	c.JSON(200, msg.SuccessResponse("创建数据源成功", &map[string]any{
-		"source": source,
+		"source": safeSourceDefinition(*source),
 	}))
 }
 
@@ -88,7 +88,7 @@ func (ctrl *SourceController) UpdateSource(c *gin.Context) {
 	}
 
 	c.JSON(200, msg.SuccessResponse("更新数据源成功", &map[string]any{
-		"source": source,
+		"source": safeSourceDefinition(*source),
 	}))
 }
 

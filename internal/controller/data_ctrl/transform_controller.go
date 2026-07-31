@@ -28,7 +28,7 @@ func (ctrl *TransformController) ListRules(c *gin.Context) {
 	}
 
 	c.JSON(200, msg.SuccessResponse("查询清洗规则成功", &map[string]any{
-		"rules": rules,
+		"rules": safeTransformRules(rules),
 	}))
 }
 
@@ -46,7 +46,7 @@ func (ctrl *TransformController) GetRule(c *gin.Context) {
 	}
 
 	c.JSON(200, msg.SuccessResponse("查询清洗规则详情成功", &map[string]any{
-		"rule": rule,
+		"rule": safeTransformRule(*rule),
 	}))
 }
 
@@ -64,7 +64,7 @@ func (ctrl *TransformController) CreateRule(c *gin.Context) {
 	}
 
 	c.JSON(200, msg.SuccessResponse("创建清洗规则成功", &map[string]any{
-		"rule": rule,
+		"rule": safeTransformRule(*rule),
 	}))
 }
 
@@ -88,7 +88,7 @@ func (ctrl *TransformController) UpdateRule(c *gin.Context) {
 	}
 
 	c.JSON(200, msg.SuccessResponse("更新清洗规则成功", &map[string]any{
-		"rule": rule,
+		"rule": safeTransformRule(*rule),
 	}))
 }
 
