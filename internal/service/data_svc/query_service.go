@@ -27,20 +27,20 @@ func NewQueryService() *QueryService {
 
 type RawDataResponse struct {
 	ID           uint                   `json:"id"`
-	DataSourceID uint                  `json:"data_source_id"`
+	DataSourceID uint                   `json:"data_source_id"`
 	ExternalID   string                 `json:"external_id"`
 	DataType     string                 `json:"data_type"`
 	RawContent   map[string]interface{} `json:"raw_content"`
 	Metadata     map[string]interface{} `json:"metadata"`
 	Status       string                 `json:"status"`
 	ErrorMessage string                 `json:"error_message"`
-	ProcessedAt  int                   `json:"processed_at"`
+	ProcessedAt  int                    `json:"processed_at"`
 	Remark       string                 `json:"remark"`
 	Source       string                 `json:"source"`
 	ClientIP     string                 `json:"client_ip"`
-	IngestedAt   interface{}           `json:"ingested_at"`
-	CreatedAt    interface{}           `json:"created_at"`
-	UpdatedAt    interface{}           `json:"updated_at"`
+	IngestedAt   interface{}            `json:"ingested_at"`
+	CreatedAt    interface{}            `json:"created_at"`
+	UpdatedAt    interface{}            `json:"updated_at"`
 }
 
 type RawDataListResult struct {
@@ -51,13 +51,14 @@ type RawDataListResult struct {
 	TotalPages int               `json:"total_pages"`
 }
 
-func (s *QueryService) GetRawDataList(ctx context.Context, page, pageSize int, source, startTime, endTime string) (*RawDataListResult, error) {
-	logger.Info("查询原始数据列表", zap.Int("page", page), zap.Int("page_size", pageSize), zap.String("source", source), zap.String("start_time", startTime), zap.String("end_time", endTime))
+func (s *QueryService) GetRawDataList(ctx context.Context, page, pageSize int, source, startTime, endTime, origin string) (*RawDataListResult, error) {
+	logger.Info("查询原始数据列表", zap.Int("page", page), zap.Int("page_size", pageSize), zap.String("source", source), zap.String("start_time", startTime), zap.String("end_time", endTime), zap.String("origin", origin))
 
 	params := data_dao.RawDataQueryParams{
 		Source:    source,
 		StartTime: startTime,
 		EndTime:   endTime,
+		Origin:    origin,
 		Page:      page,
 		PageSize:  pageSize,
 	}

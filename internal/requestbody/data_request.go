@@ -63,4 +63,5 @@ type RawDataListQueryRequest struct {
 	Source    string `json:"source" binding:"max=100"`
 	StartTime string `json:"start_time" binding:"max=20"`
 	EndTime   string `json:"end_time" binding:"max=20"`
+	Origin    string `json:"origin" binding:"omitempty,oneof=receive pull"`
 }

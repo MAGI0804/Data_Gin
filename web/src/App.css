@@ -556,6 +556,18 @@ button:focus-visible {
   flex-wrap: wrap;
 }
 
+.query-contract-note {
+  margin: -4px 0 0;
+  color: #71717a;
+  font-size: 12px;
+}
+
+.raw-record-pagination {
+  margin-top: 12px;
+  border-top: 1px solid #e6e3dc;
+  padding-top: 12px;
+}
+
 .table-actions {
   min-width: max-content;
 }

@@ -34,6 +34,7 @@ import { MallWeatherPage, StoreInfoPage } from './MallWeatherPage'
 import { DataAuthorizationPage } from './DataAuthorizationPage'
 import { Brand } from './components/Brand'
 import { parseMallWeatherExportContentStatus, submitMallWeatherExportContentDownload } from './mallWeatherExport'
+import { buildRawRecordsRequest, parseRawRecordsPage, type RawRecordOrigin, type RawRecordsPage } from './rawRecords'
 import {
   buildExcelExportConfig,
   cloneExcelMatchSteps,
@@ -740,7 +741,6 @@ function App() {
   const stepRequestRef = useRef<AbortController | null>(null)
   const [methods, setMethods] = useState<MethodDisplay[]>(builtinMethods)
   const [sources, setSources] = useState<SourceDefinition[]>([])
-  const [rawData, setRawData] = useState<RawData[]>([])
   const [processedData, setProcessedData] = useState<ProcessedData[]>([])
   const [transformRules, setTransformRules] = useState<TransformRule[]>([])
   const [destinations, setDestinations] = useState<DestinationDefinition[]>([])
@@ -869,11 +869,10 @@ function App() {
       if (!token) return
       setRefreshing(true)
       try {
-        const [pipelineResult, runResult, sourceResult, rawResult, processedResult, ruleResult, destinationResult, taskResult, logResult, orderPushSkipResult, legacyTaskResult, legacyRuleResult] = await Promise.all([
+        const [pipelineResult, runResult, sourceResult, processedResult, ruleResult, destinationResult, taskResult, logResult, orderPushSkipResult, legacyTaskResult, legacyRuleResult] = await Promise.all([
           client('/v1/pipelines', { method: 'GET', showResult: false, silentLoading: true }),
           client('/v1/runs?limit=50', { method: 'GET', showResult: false, silentLoading: true }),
           client('/v1/sources', { method: 'GET', showResult: false, silentLoading: true }),
-          client('/v1/data/raw?limit=50', { method: 'GET', showResult: false, silentLoading: true }),
           client('/v1/data/processed?limit=50', { method: 'GET', showResult: false, silentLoading: true }),
           client('/v1/transform-rules', { method: 'GET', showResult: false, silentLoading: true }),
           client('/v1/destinations', { method: 'GET', showResult: false, silentLoading: true }),
@@ -892,7 +891,6 @@ function App() {
         const nextLegacyTasks = legacyTaskResult.ok ? readList<LegacyTask>(legacyTaskResult, 'tasks') : []
         const nextLegacyRules = legacyRuleResult.ok ? readList<LegacyTransformRule>(legacyRuleResult, 'rules') : []
         if (sourceResult.ok) setSources(nextSources)
-        if (rawResult.ok) setRawData(readList<RawData>(rawResult, 'data'))
         if (processedResult.ok) setProcessedData(readList<ProcessedData>(processedResult, 'data'))
         if (ruleResult.ok) setTransformRules(nextRules)
         if (destinationResult.ok) setDestinations(nextDestinations)
@@ -1136,8 +1134,6 @@ function App() {
     return response.ok ? readObject<YouzanDistributionBackfillResult>(response, 'result') : null
   }
 
-  const receivedData = useMemo(() => rawData.filter((item) => !isPulledOrigin(rawDataOrigin(item))), [rawData])
-  const pulledData = useMemo(() => rawData.filter((item) => isPulledOrigin(rawDataOrigin(item))), [rawData])
   const coreMethods = useMemo(
     () => buildCoreMethods({ sources, transformRules, destinations, deliveryTasks, legacyTasks, legacyRules }),
     [deliveryTasks, destinations, legacyRules, legacyTasks, sources, transformRules],
@@ -1230,8 +1226,8 @@ function App() {
         {activeNav === 'data_authorizations' && <DataAuthorizationPage client={client} />}
         {activeNav === 'sources' && <SourcesQueryPage sources={sources} onFetchSource={fetchSource} />}
         {activeNav === 'methods' && <MethodsView methods={methods} coreMethods={coreMethods} onToggle={toggleTarget} />}
-        {activeNav === 'receive' && <RawRecordsQueryPage title="接口接收记录" records={receivedData} />}
-        {activeNav === 'pull_records' && <RawRecordsQueryPage title="数据拉取记录" records={pulledData} />}
+        {activeNav === 'receive' && <RawRecordsQueryPage title="接口接收记录" origin="receive" client={client} />}
+        {activeNav === 'pull_records' && <RawRecordsQueryPage title="数据拉取记录" origin="pull" client={client} />}
         {activeNav === 'backfill' && <BojunBackfillPage loading={loading || refreshing} onPreview={previewBojunOrderBackfill} onConfirm={confirmBojunOrderBackfill} />}
         {activeNav === 'youzan_distribution' && <YouzanDistributionPage task={legacyTasks.find((item) => item.code === 'youzan_distribution_order_fetch')} loading={loading || refreshing} onPreview={previewYouzanDistributionBackfill} onConfirm={confirmYouzanDistributionBackfill} />}
         {activeNav === 'rules' && <RulesQueryPage rules={transformRules} />}
@@ -1546,21 +1542,69 @@ function SourcesQueryPage({ sources, onFetchSource }: { sources: SourceDefinitio
   )
 }
 
-function RawRecordsQueryPage({ title, records }: { title: string; records: RawData[] }) {
-  const [query, setQuery] = useState('')
-  const [status, setStatus] = useState('all')
-  const [origin, setOrigin] = useState('all')
-  const filtered = records.filter((record) => includesQuery([record.id, record.external_id, record.data_type, record.remark, record.source, JSON.stringify(record.raw_content ?? record.rawContent ?? '')], query)
-    && (status === 'all' || record.status === status)
-    && (origin === 'all' || rawDataOrigin(record) === origin))
+function RawRecordsQueryPage({ title, origin, client }: { title: string; origin: RawRecordOrigin; client: ApiClient }) {
+  const [source, setSource] = useState('')
+  const [startTime, setStartTime] = useState('')
+  const [endTime, setEndTime] = useState('')
+  const [appliedQuery, setAppliedQuery] = useState({ source: '', startTime: '', endTime: '' })
+  const [page, setPage] = useState(1)
+  const [recordsPage, setRecordsPage] = useState<RawRecordsPage<RawData> | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const requestRef = useRef<AbortController | null>(null)
+
+  useEffect(() => {
+    requestRef.current?.abort()
+    const controller = new AbortController()
+    requestRef.current = controller
+    setLoading(true)
+    setError('')
+    const body = buildRawRecordsRequest({ page, pageSize: 20, origin, ...appliedQuery })
+    void client('/v1/data/raw/list', {
+      method: 'POST', body, signal: controller.signal, showResult: false, silentLoading: true,
+    }).then((response) => {
+      if (controller.signal.aborted) return
+      const nextPage = response.ok ? parseRawRecordsPage<RawData>(response.data) : null
+      if (nextPage) {
+        setRecordsPage(nextPage)
+        return
+      }
+      setError(response.error?.message || '记录查询暂时不可用，请稍后重试。')
+    }).finally(() => {
+      if (!controller.signal.aborted) setLoading(false)
+    })
+    return () => controller.abort()
+  }, [appliedQuery, client, origin, page])
+
+  function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    setPage(1)
+    setAppliedQuery({ source, startTime: backendDateTime(startTime), endTime: backendDateTime(endTime) })
+  }
+
+  const records = recordsPage?.list ?? []
+  const total = recordsPage?.total ?? 0
+  const totalPages = recordsPage?.totalPages ?? 0
   return (
     <div className="view-stack">
-      <QueryBar count={filtered.length} total={records.length}>
-        <Field label="ID / 外部编号 / 内容" name="raw_query" value={query} onChange={setQuery} />
-        <SelectFilter label="状态" value={status} onChange={setStatus} options={uniqueOptions(records.map((record) => record.status))} />
-        <SelectFilter label="来源" value={origin} onChange={setOrigin} options={uniqueOptions(records.map(rawDataOrigin))} />
-      </QueryBar>
-      <Panel title={title} icon={<Inbox />} meta={`查询命中 ${filtered.length} 条`}><RawDataList records={filtered} /></Panel>
+      <form className="query-bar" onSubmit={submit}>
+        <div className="query-fields">
+          <Field label="来源" name="raw_source" value={source} onChange={setSource} />
+          <Field label="开始时间" name="raw_start_time" type="datetime-local" value={startTime} onChange={setStartTime} />
+          <Field label="结束时间" name="raw_end_time" type="datetime-local" value={endTime} onChange={setEndTime} />
+        </div>
+        <button type="submit" disabled={loading}>{loading ? '查询中…' : '查询'}</button>
+      </form>
+      <p className="query-contract-note">已按真实后端能力提供来源、时间范围和分页筛选；类型、状态及业务键筛选需后端增加对应索引后再开放。</p>
+      {error && <div className="result-banner error" role="alert">{error} 已保留最近一次成功数据。</div>}
+      <Panel title={title} icon={<Inbox />} meta={loading && !recordsPage ? '正在加载…' : `共 ${total} 条`}>
+        <RawDataList records={records} />
+        <div className="record-actions raw-record-pagination" role="status" aria-live="polite">
+          <span>第 {recordsPage?.page ?? page} / {Math.max(totalPages, 1)} 页</span>
+          <button type="button" onClick={() => setPage((current) => Math.max(1, current - 1))} disabled={loading || page <= 1}>上一页</button>
+          <button type="button" onClick={() => setPage((current) => current + 1)} disabled={loading || totalPages === 0 || page >= totalPages}>下一页</button>
+        </div>
+      </Panel>
     </div>
   )
 }
@@ -3970,17 +4014,13 @@ function methodTypeLabel(type: MethodType) {
 
 function rawDataOrigin(record: RawData) {
   const metadata = parseMaybeJson(record.metadata)
+  if (metadata && typeof metadata === 'object' && (metadata as JsonRecord).format === 'fetch') return 'fetch'
+  if (metadata && typeof metadata === 'object' && typeof (metadata as JsonRecord).format === 'string') return String((metadata as JsonRecord).format)
   if (record.source) return record.source
   if (record.remark) return record.remark
   if (metadata && typeof metadata === 'object' && typeof (metadata as JsonRecord).source === 'string') return String((metadata as JsonRecord).source)
   if (metadata && typeof metadata === 'object' && typeof (metadata as JsonRecord).remark === 'string') return String((metadata as JsonRecord).remark)
-  if (metadata && typeof metadata === 'object' && (metadata as JsonRecord).format === 'fetch') return 'fetch'
-  if (metadata && typeof metadata === 'object' && typeof (metadata as JsonRecord).format === 'string') return String((metadata as JsonRecord).format)
   return 'ingest'
-}
-
-function isPulledOrigin(origin: string) {
-  return origin === 'fetch' || origin === 'bojun_order' || origin === 'youzan_order' || origin === 'youzan_refund'
 }
 
 function readList<T>(result: ApiResult, key: string): T[] {
