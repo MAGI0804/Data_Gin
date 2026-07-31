@@ -270,6 +270,13 @@ type ExcelMatchScheme = {
   updated_at: number
 }
 
+type PendingSchemeSave = {
+  operation: 'export_match' | 'import_update'
+  config: unknown
+  name: string
+  overwriteConfirmed: boolean
+}
+
 type ExcelMatchPreviewStats = {
   TotalRows?: number
   ProcessedRows?: number
@@ -2698,6 +2705,9 @@ function ExcelMatchView({
   const [selectedExportSchemeID, setSelectedExportSchemeID] = useState('')
   const [selectedImportSchemeID, setSelectedImportSchemeID] = useState('')
   const [pendingSchemeDelete, setPendingSchemeDelete] = useState<ExcelMatchScheme | null>(null)
+  const [pendingSchemeSave, setPendingSchemeSave] = useState<PendingSchemeSave | null>(null)
+  const [schemeSaveError, setSchemeSaveError] = useState('')
+  const schemeSaveInFlightRef = useRef(false)
   const [deletingSchemeID, setDeletingSchemeID] = useState<number | null>(null)
   const [pendingWrite, setPendingWrite] = useState<{ slot: 'import' | 'clear'; file: File; config: unknown; message: string } | null>(null)
   const [jobQuery, setJobQuery] = useState('')
@@ -2707,6 +2717,10 @@ function ExcelMatchView({
   const filteredJobHistory = useMemo(() => jobHistory.filter((item) => includesQuery([item.id, item.source_file_name, item.error_message], jobQuery)
     && (jobStatus === 'all' || item.status === jobStatus)
     && (jobOperation === 'all' || excelJobOperation(item) === jobOperation)), [jobHistory, jobOperation, jobQuery, jobStatus])
+  const pendingSchemeNameConflict = pendingSchemeSave
+    ? (pendingSchemeSave.operation === 'export_match' ? exportSchemes : importSchemes)
+      .find((scheme) => scheme.name === pendingSchemeSave.name.trim()) ?? null
+    : null
 
   const applyJobResult = useCallback((result: ApiResult, options: { track?: boolean } = {}) => {
     const nextJob = readObject<ExcelMatchJob>(result, 'job')
@@ -2738,12 +2752,16 @@ function ExcelMatchView({
 
   function openExcelDialog(mode: ExcelDialogMode) {
     setPendingWrite(null)
+    setPendingSchemeSave(null)
+    setSchemeSaveError('')
     resetExcelDialogFiles()
     setExcelDialog(mode)
   }
 
   function closeExcelDialog() {
     setPendingWrite(null)
+    setPendingSchemeSave(null)
+    setSchemeSaveError('')
     setExcelDialog(null)
     resetExcelDialogFiles()
   }
@@ -3145,21 +3163,26 @@ function ExcelMatchView({
     return session.uploadId
   }
 
-  async function saveScheme(formElement: HTMLFormElement, operation: 'export_match' | 'import_update', mode: 'current' | 'new') {
+  function beginSchemeSave(formElement: HTMLFormElement, operation: 'export_match' | 'import_update', mode: 'current' | 'new') {
     const selectedSchemeID = operation === 'export_match' ? selectedExportSchemeID : selectedImportSchemeID
     const schemes = operation === 'export_match' ? exportSchemes : importSchemes
     const selectedScheme = schemes.find((item) => String(item.id) === selectedSchemeID)
-    let name = selectedScheme?.name ?? ''
-    if (mode === 'new' || !name) {
-      const prompted = window.prompt('请输入方案名称', name)
-      if (!prompted?.trim()) return
-      name = prompted.trim()
-    }
     const form = new FormData(formElement)
     const config = operation === 'export_match'
       ? buildExportConfig(form)
       : buildImportConfig(form, false)
 
+    if (mode === 'current' && selectedScheme?.name) {
+      void persistScheme(operation, config, selectedScheme.name)
+      return
+    }
+    setSchemeSaveError('')
+    setPendingSchemeSave({ operation, config, name: '', overwriteConfirmed: false })
+  }
+
+  async function persistScheme(operation: 'export_match' | 'import_update', config: unknown, name: string) {
+    if (schemeSaveInFlightRef.current) return false
+    schemeSaveInFlightRef.current = true
     setLoading(true)
     try {
       const response = await fetch(apiURL('/v1/excel-match-jobs/schemes'), {
@@ -3181,10 +3204,31 @@ function ExcelMatchView({
         }
         await loadSchemes()
       }
+      return nextResult.ok
     } catch (error) {
       setResult({ ok: false, status: 0, data: error instanceof Error ? error.message : String(error) })
+      return false
     } finally {
+      schemeSaveInFlightRef.current = false
       setLoading(false)
+    }
+  }
+
+  async function confirmPendingSchemeSave() {
+    if (!pendingSchemeSave || loading) return
+    const name = pendingSchemeSave.name.trim()
+    if (name.length < 1 || name.length > 100) {
+      setSchemeSaveError('方案名称应为 1 至 100 个字符。')
+      return
+    }
+    if (pendingSchemeNameConflict && !pendingSchemeSave.overwriteConfirmed) {
+      setSchemeSaveError('存在同类型同名方案；请确认覆盖后再保存。')
+      return
+    }
+    const saved = await persistScheme(pendingSchemeSave.operation, pendingSchemeSave.config, name)
+    if (saved) {
+      setPendingSchemeSave(null)
+      setSchemeSaveError('')
     }
   }
 
@@ -3435,6 +3479,43 @@ function ExcelMatchView({
     }
   }
 
+  function renderPendingSchemeSave() {
+    if (!pendingSchemeSave) return null
+    return (
+      <form className="view-stack" onSubmit={(event) => { event.preventDefault(); void confirmPendingSchemeSave() }}>
+        <p>将保存当前表单的配置快照；取消后可继续编辑，已填写内容不会丢失。</p>
+        <label>
+          方案名称
+          <input
+            value={pendingSchemeSave.name}
+            maxLength={100}
+            data-autofocus
+            onChange={(event) => {
+              const name = event.currentTarget.value
+              setPendingSchemeSave((current) => current ? { ...current, name, overwriteConfirmed: false } : current)
+              setSchemeSaveError('')
+            }}
+          />
+        </label>
+        {pendingSchemeNameConflict && (
+          <label className="checkbox-label">
+            <input
+              type="checkbox"
+              checked={pendingSchemeSave.overwriteConfirmed}
+              onChange={(event) => setPendingSchemeSave((current) => current ? { ...current, overwriteConfirmed: event.currentTarget.checked } : current)}
+            />
+            覆盖同类型的“{pendingSchemeNameConflict.name}”方案
+          </label>
+        )}
+        {schemeSaveError && <p className="result-banner error" role="alert">{schemeSaveError}</p>}
+        <div className="excel-form-actions">
+          <button type="button" disabled={loading} onClick={() => { setPendingSchemeSave(null); setSchemeSaveError('') }}>返回编辑</button>
+          <button className="primary" type="submit" disabled={loading}>{loading ? '保存中…' : '保存方案'}</button>
+        </div>
+      </form>
+    )
+  }
+
   return (
     <div className="view-stack">
       {section === 'jobs' && <>
@@ -3557,9 +3638,11 @@ function ExcelMatchView({
 
       {excelDialog === 'export' && (
         <Modal
-          title="匹配导出参数"
-          onClose={closeExcelDialog}
-          footer={(
+          title={pendingSchemeSave ? '保存 Excel 匹配方案' : '匹配导出参数'}
+          focusKey={pendingSchemeSave ? 'scheme-save' : 'form'}
+          closeDisabled={loading || schemeSaveInFlightRef.current}
+          onClose={() => { if (!loading && !schemeSaveInFlightRef.current) closeExcelDialog() }}
+          footer={pendingSchemeSave ? undefined : (
             <div className="excel-modal-footer-content">
               {uploadProgress && <p className="excel-mode-note modal-footer-status" role="status" aria-live="polite">{uploadProgress}</p>}
               <div className="excel-form-actions">
@@ -3583,7 +3666,8 @@ function ExcelMatchView({
             </div>
           )}
         >
-          <form id="excel-export-job-form" className="excel-upload-form" onSubmit={createExportJob} key={exportFormKey}>
+          {renderPendingSchemeSave()}
+          <form id="excel-export-job-form" className="excel-upload-form" onSubmit={createExportJob} key={exportFormKey} hidden={pendingSchemeSave !== null}>
             <label>
               已保存方案
               <select value={selectedExportSchemeID} onChange={(event) => applyExportScheme(event.currentTarget.value)}>
@@ -3596,7 +3680,7 @@ function ExcelMatchView({
               disabled={!selectedExportSchemeID || loading}
               onClick={(event) => {
                 const form = event.currentTarget.form
-                if (form?.reportValidity()) void saveScheme(form, 'export_match', 'current')
+                if (form?.reportValidity()) beginSchemeSave(form, 'export_match', 'current')
               }}
             >
               保存到当前方案
@@ -3606,7 +3690,7 @@ function ExcelMatchView({
               disabled={loading}
               onClick={(event) => {
                 const form = event.currentTarget.form
-                if (form?.reportValidity()) void saveScheme(form, 'export_match', 'new')
+                if (form?.reportValidity()) beginSchemeSave(form, 'export_match', 'new')
               }}
             >
               另存为新方案
@@ -3768,9 +3852,10 @@ function ExcelMatchView({
       )}
 
       {excelDialog === 'import' && (
-        <Modal title={pendingWrite?.slot === 'import' ? '确认写入数据库' : '匹配导入参数'} focusKey={pendingWrite?.slot === 'import' ? 'confirm' : 'form'} closeDisabled={loading} onClose={() => { if (!loading) { setPendingWrite(null); closeExcelDialog() } }}>
+        <Modal title={pendingSchemeSave ? '保存 Excel 匹配方案' : pendingWrite?.slot === 'import' ? '确认写入数据库' : '匹配导入参数'} focusKey={pendingSchemeSave ? 'scheme-save' : pendingWrite?.slot === 'import' ? 'confirm' : 'form'} closeDisabled={loading || schemeSaveInFlightRef.current} onClose={() => { if (!loading && !schemeSaveInFlightRef.current) { setPendingWrite(null); closeExcelDialog() } }}>
           {pendingWrite?.slot === 'import' && <div className="view-stack"><p>{pendingWrite.message}</p><div className="excel-form-actions"><button type="button" disabled={loading} onClick={() => setPendingWrite(null)}>返回修改</button><button className="primary" type="button" disabled={loading} onClick={() => void confirmPendingWrite()}>{loading ? '创建任务中…' : '确认写入'}</button></div></div>}
-          <form className="excel-upload-form" onSubmit={createImportJob} key={importFormKey} hidden={pendingWrite?.slot === 'import'}>
+          {renderPendingSchemeSave()}
+          <form className="excel-upload-form" onSubmit={createImportJob} key={importFormKey} hidden={pendingWrite?.slot === 'import' || pendingSchemeSave !== null}>
             <label>
               已保存方案
               <select value={selectedImportSchemeID} onChange={(event) => applyImportScheme(event.currentTarget.value)}>
@@ -3783,7 +3868,7 @@ function ExcelMatchView({
               disabled={!selectedImportSchemeID || loading}
               onClick={(event) => {
                 const form = event.currentTarget.form
-                if (form) void saveScheme(form, 'import_update', 'current')
+                if (form?.reportValidity()) beginSchemeSave(form, 'import_update', 'current')
               }}
             >
               保存到当前方案
@@ -3793,7 +3878,7 @@ function ExcelMatchView({
               disabled={loading}
               onClick={(event) => {
                 const form = event.currentTarget.form
-                if (form) void saveScheme(form, 'import_update', 'new')
+                if (form?.reportValidity()) beginSchemeSave(form, 'import_update', 'new')
               }}
             >
               另存为新方案
@@ -4084,7 +4169,8 @@ function Modal({ title, onClose, children, footer, closeDisabled = false, focusK
 
   useEffect(() => {
     const focusableSelector = 'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
-    const initialFocus = Array.from(panelRef.current?.querySelectorAll<HTMLElement>(focusableSelector) ?? []).find((element) => !element.closest('[hidden], [aria-hidden="true"]'))
+    const initialFocus = panelRef.current?.querySelector<HTMLElement>('[data-autofocus]')
+      ?? Array.from(panelRef.current?.querySelectorAll<HTMLElement>(focusableSelector) ?? []).find((element) => !element.closest('[hidden], [aria-hidden="true"]'))
     initialFocus?.focus()
   }, [focusKey])
 
