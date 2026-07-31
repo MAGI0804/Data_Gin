@@ -15,23 +15,50 @@ export function PipelineRunPanel({ pipelines, client, onRunCompleted }: { pipeli
   const [result, setResult] = useState<PipelineRunResult | null>(null)
   const controllerRef = useRef<AbortController | null>(null)
   const confirmRef = useRef<HTMLButtonElement>(null)
+  const dialogRef = useRef<HTMLDivElement>(null)
+  const openerRef = useRef<HTMLElement | null>(null)
   const selected = enabledPipelines.find((pipeline) => pipeline.id === selectedID) ?? enabledPipelines[0]
 
   useEffect(() => () => controllerRef.current?.abort(), [])
   useEffect(() => {
-    if (confirming) confirmRef.current?.focus()
+    if (confirming) {
+      confirmRef.current?.focus()
+      return
+    }
+    openerRef.current?.focus()
+    openerRef.current = null
   }, [confirming])
   useEffect(() => {
-    function closeOnEscape(event: KeyboardEvent) { if (event.key === 'Escape') setConfirming(false) }
+    function closeOnEscape(event: KeyboardEvent) {
+      if (event.key === 'Escape') closeConfirm()
+      if (event.key !== 'Tab' || !dialogRef.current) return
+      const controls = [...dialogRef.current.querySelectorAll<HTMLButtonElement>('button:not(:disabled)')]
+      if (controls.length === 0) return
+      const first = controls[0]
+      const last = controls[controls.length - 1]
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault()
+        last.focus()
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault()
+        first.focus()
+      }
+    }
     window.addEventListener('keydown', closeOnEscape)
     return () => window.removeEventListener('keydown', closeOnEscape)
-  }, [])
+  })
 
   function openConfirm() {
     if (!selected || running) return
+    openerRef.current = document.activeElement instanceof HTMLElement ? document.activeElement : null
     setError('')
     setResult(null)
     setConfirming(true)
+  }
+
+  function closeConfirm() {
+    if (running) return
+    setConfirming(false)
   }
 
   async function run() {
@@ -68,7 +95,7 @@ export function PipelineRunPanel({ pipelines, client, onRunCompleted }: { pipeli
   return <section className="pipeline-run-panel" aria-busy={running}>
     <div><strong>手动执行流水线</strong><span>仅可执行已启用的流水线；执行前需要确认，提交不会自动重试。</span></div>
     {enabledPipelines.length === 0 ? <p role="status">暂无可执行的已启用流水线。</p> : <div className="pipeline-run-controls"><label><span>流水线</span><select value={selected?.id ?? ''} onChange={(event) => setSelectedID(Number(event.currentTarget.value))} disabled={running}>{enabledPipelines.map((pipeline) => <option key={pipeline.id} value={pipeline.id}>{pipeline.name} · {pipeline.code}</option>)}</select></label><button className="primary" type="button" onClick={openConfirm} disabled={running}><Play aria-hidden="true" />执行</button></div>}
-    {confirming && selected && <div className="pipeline-run-confirm" role="dialog" aria-modal="true" aria-labelledby="pipeline-run-confirm-title"><div><strong id="pipeline-run-confirm-title">确认执行流水线</strong><span>将立即执行“{selected.name}”（{selected.code}）的已启用步骤。</span></div><div><button type="button" onClick={() => setConfirming(false)} disabled={running}><X aria-hidden="true" />取消</button><button ref={confirmRef} className="primary" type="button" onClick={() => void run()} disabled={running}><Play aria-hidden="true" />{running ? '执行中' : '确认执行'}</button></div></div>}
+    {confirming && selected && <div ref={dialogRef} className="pipeline-run-confirm" role="dialog" aria-modal="true" aria-labelledby="pipeline-run-confirm-title"><div><strong id="pipeline-run-confirm-title">确认执行流水线</strong><span>将立即执行“{selected.name}”（{selected.code}）的已启用步骤。</span></div><div><button type="button" onClick={closeConfirm} disabled={running}><X aria-hidden="true" />取消</button><button ref={confirmRef} className="primary" type="button" onClick={() => void run()} disabled={running}><Play aria-hidden="true" />{running ? '执行中' : '确认执行'}</button></div></div>}
     {result && <p className="pipeline-run-result" role="status" aria-live="polite">已创建运行 #{result.runID} · Trace ID {result.traceID} · 成功 {result.successCount} · 失败 {result.failedCount}</p>}
     {error && <p className="pipeline-run-result error" role="alert">{error}</p>}
   </section>
