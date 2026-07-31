@@ -1,6 +1,7 @@
 package data_ctrl
 
 import (
+	"errors"
 	"strconv"
 	"strings"
 
@@ -193,6 +194,10 @@ func (ctrl *DeliveryController) RunTask(c *gin.Context) {
 
 	result, err := ctrl.service.RunDeliveryTask(c.Request.Context(), id)
 	if err != nil {
+		if errors.Is(err, data_svc.ErrDeliveryTaskBusy) {
+			c.JSON(409, msg.ErrResponseStr("推送任务正在执行，请等待当前任务完成"))
+			return
+		}
 		c.JSON(500, msg.ErrResponse("执行推送任务失败", err))
 		return
 	}
