@@ -494,6 +494,19 @@ type DeliveryTask = {
   enabled: boolean
 }
 
+type DeliveryTaskDraft = {
+  id: number | null
+  name: string
+  sourceID: string
+  cleanTable: string
+  destinationID: string
+  triggerType: string
+  cronExpr: string
+  filterJSON: string
+  payloadTemplate: string
+  enabled: boolean
+}
+
 type OrderPushSkipConfig = {
   targets: OrderPushSkipTargetConfig[]
 }
@@ -1271,7 +1284,7 @@ function App() {
         {activeNav === 'rules' && <RulesQueryPage client={client} rules={transformRules} sources={sources} onRulesChange={setTransformRules} />}
         {activeNav === 'processed' && <ProcessedQueryPage client={client} />}
         {activeNav === 'destinations' && <DestinationsQueryPage client={client} destinations={destinations} onRefresh={() => refreshAll(false)} />}
-        {activeNav === 'tasks' && <DeliveryTasksQueryPage client={client} tasks={deliveryTasks} destinations={destinations} onRefresh={() => refreshAll(false)} />}
+        {activeNav === 'tasks' && <DeliveryTasksQueryPage client={client} tasks={deliveryTasks} sources={sources} destinations={destinations} onRefresh={() => refreshAll(false)} />}
         {activeNav === 'push_policy' && <PushPolicyPage coreMethod={coreMethods.find((item) => item.key === 'mall_push')} config={orderPushSkipConfig} targets={orderPushTargets} onSave={saveOrderPushSkipConfig} onToggle={toggleTarget} />}
         {(activeNav === 'excel_jobs' || activeNav === 'excel_schemes' || activeNav === 'excel_write') && <ExcelMatchView section={activeNav === 'excel_jobs' ? 'jobs' : activeNav === 'excel_schemes' ? 'schemes' : 'write'} token={token} loading={loading} setLoading={setLoading} setResult={setResult} onNavigateToJobs={() => navigate('excel_jobs')} />}
       </section>
@@ -2169,16 +2182,101 @@ function DestinationsQueryPage({ client, destinations, onRefresh }: { client: Ap
   )
 }
 
-function DeliveryTasksQueryPage({ client, tasks, destinations, onRefresh }: { client: ApiClient; tasks: DeliveryTask[]; destinations: DestinationDefinition[]; onRefresh: () => Promise<void> }) {
+function DeliveryTasksQueryPage({ client, tasks, sources, destinations, onRefresh }: { client: ApiClient; tasks: DeliveryTask[]; sources: SourceDefinition[]; destinations: DestinationDefinition[]; onRefresh: () => Promise<void> }) {
   const [query, setQuery] = useState('')
   const [status, setStatus] = useState('all')
   const [destinationID, setDestinationID] = useState('all')
+  const [draft, setDraft] = useState<DeliveryTaskDraft | null>(null)
   const filtered = tasks.filter((task) => includesQuery([task.id, task.name, task.clean_table, task.trigger_type], query)
     && (status === 'all' || (status === 'enabled' ? task.enabled : !task.enabled))
     && (destinationID === 'all' || String(task.destination_id) === destinationID))
   const destinationOptions = destinations.map((destination) => ({ value: String(destination.id), label: destination.name || destination.code }))
   const [runningID, setRunningID] = useState<number | null>(null)
+  const [loadingDetailID, setLoadingDetailID] = useState<number | null>(null)
+  const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState('')
+
+  function openCreate() {
+    setMessage('')
+    setDraft({
+      id: null,
+      name: '',
+      sourceID: sources[0]?.id ? String(sources[0].id) : '',
+      cleanTable: '',
+      destinationID: destinations[0]?.id ? String(destinations[0].id) : '',
+      triggerType: 'manual',
+      cronExpr: '',
+      filterJSON: '{}',
+      payloadTemplate: '',
+      enabled: true,
+    })
+  }
+
+  async function openDetail(id: number) {
+    if (loadingDetailID !== null) return
+    setMessage('')
+    setLoadingDetailID(id)
+    const response = await client(`/v1/delivery-tasks/${id}`, { method: 'GET', showResult: false, silentLoading: true })
+    setLoadingDetailID(null)
+    const task = response.ok ? readObject<DeliveryTask>(response, 'task') : null
+    if (!task) {
+      setMessage(response.error?.message || '推送任务详情暂时不可用，请稍后重试。')
+      return
+    }
+    setDraft(deliveryTaskDraftFrom(task))
+  }
+
+  async function saveDraft(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!draft || saving) return
+    const sourceID = Number(draft.sourceID)
+    const nextDestinationID = Number(draft.destinationID)
+    if (!draft.name.trim() || !draft.cleanTable.trim() || !Number.isInteger(sourceID) || sourceID <= 0 || !Number.isInteger(nextDestinationID) || nextDestinationID <= 0) {
+      setMessage('请填写任务名称、来源、清洗表和推送目标。')
+      return
+    }
+    if (draft.triggerType === 'schedule' && !draft.cronExpr.trim()) {
+      setMessage('定时触发任务必须填写 Cron 表达式。')
+      return
+    }
+    try {
+      const filter = JSON.parse(draft.filterJSON) as unknown
+      if (!filter || Array.isArray(filter) || typeof filter !== 'object') {
+        setMessage('筛选条件必须是 JSON 对象。')
+        return
+      }
+    } catch {
+      setMessage('筛选条件必须是有效 JSON。')
+      return
+    }
+    setSaving(true)
+    setMessage('')
+    const response = await client(draft.id ? `/v1/delivery-tasks/${draft.id}` : '/v1/delivery-tasks', {
+      method: draft.id ? 'PUT' : 'POST',
+      showResult: false,
+      silentLoading: true,
+      body: {
+        name: draft.name.trim(),
+        source_id: sourceID,
+        clean_table: draft.cleanTable.trim(),
+        destination_id: nextDestinationID,
+        trigger_type: draft.triggerType,
+        cron_expr: draft.cronExpr.trim(),
+        filter_json: draft.filterJSON,
+        payload_template: draft.payloadTemplate,
+        enabled: draft.enabled,
+      },
+    })
+    setSaving(false)
+    if (!response.ok || !readObject<DeliveryTask>(response, 'task')) {
+      setMessage(response.error?.message || '推送任务保存未完成，请稍后重试。')
+      return
+    }
+    setDraft(null)
+    setMessage('推送任务已保存。')
+    await onRefresh()
+  }
+
   async function run(task: DeliveryTask) {
     const destination = destinations.find((item) => item.id === task.destination_id)
     if (runningID !== null || !window.confirm(`确认执行“${task.name}”？最多向 ${destination?.name || `目标 #${task.destination_id}`} 推送 100 条 ready 记录；成功记录将标记为已交付。`)) return
@@ -2197,7 +2295,39 @@ function DeliveryTasksQueryPage({ client, tasks, destinations, onRefresh }: { cl
         <SelectFilter label="状态" value={status} onChange={setStatus} options={[{ value: 'enabled', label: '启用' }, { value: 'disabled', label: '停用' }]} />
         <SelectFilter label="推送目标" value={destinationID} onChange={setDestinationID} options={destinationOptions} />
       </QueryBar>
-      <Panel title="推送任务" icon={<ArrowUpFromLine />} meta={`查询命中 ${filtered.length} 条`}><DeliveryTaskList tasks={filtered} runningID={runningID} onRun={(task) => { void run(task) }} /></Panel>
+      <div className="record-actions"><button type="button" className="primary" onClick={openCreate}>新增推送任务</button></div>
+      <Panel title="推送任务" icon={<ArrowUpFromLine />} meta={`查询命中 ${filtered.length} 条`}><DeliveryTaskList tasks={filtered} runningID={runningID} loadingDetailID={loadingDetailID} destinations={destinations} onDetail={(task) => { void openDetail(task.id) }} onRun={(task) => { void run(task) }} /></Panel>
+      {draft && <Modal title={draft.id ? '推送任务详情与编辑' : '新增推送任务'} onClose={() => { if (!saving) setDraft(null) }}>
+        <form className="excel-upload-form" onSubmit={saveDraft}>
+          <Field label="任务名称" name="delivery_task_name" value={draft.name} required onChange={(name) => setDraft({ ...draft, name })} />
+          <label>来源
+            <select value={draft.sourceID} required disabled={saving} onChange={(event) => setDraft({ ...draft, sourceID: event.currentTarget.value })}>
+              <option value="">选择数据源</option>
+              {sources.map((source) => <option value={source.id} key={source.id}>#{source.id} {source.name || source.code}{source.enabled ? '' : '（已停用）'}</option>)}
+            </select>
+          </label>
+          <Field label="清洗结果表" name="delivery_clean_table" value={draft.cleanTable} required onChange={(cleanTable) => setDraft({ ...draft, cleanTable })} />
+          <label>推送目标
+            <select value={draft.destinationID} required disabled={saving} onChange={(event) => setDraft({ ...draft, destinationID: event.currentTarget.value })}>
+              <option value="">选择推送目标</option>
+              {destinations.map((destination) => <option value={destination.id} key={destination.id}>#{destination.id} {destination.name || destination.code}{destination.enabled ? '' : '（已停用）'}</option>)}
+            </select>
+          </label>
+          <label>触发方式
+            <select value={draft.triggerType} disabled={saving} onChange={(event) => setDraft({ ...draft, triggerType: event.currentTarget.value })}>
+              <option value="manual">手动</option>
+              <option value="schedule">定时</option>
+              <option value="event">事件</option>
+            </select>
+          </label>
+          <Field label="Cron 表达式" name="delivery_task_cron" value={draft.cronExpr} required={draft.triggerType === 'schedule'} onChange={(cronExpr) => setDraft({ ...draft, cronExpr })} />
+          <label className="checkbox-label"><input type="checkbox" checked={draft.enabled} disabled={saving} onChange={(event) => setDraft({ ...draft, enabled: event.currentTarget.checked })} />启用任务</label>
+          <label>筛选条件 JSON<textarea rows={8} value={draft.filterJSON} disabled={saving} onChange={(event) => setDraft({ ...draft, filterJSON: event.currentTarget.value })} /></label>
+          <label>推送载荷模板<textarea rows={8} value={draft.payloadTemplate} disabled={saving} onChange={(event) => setDraft({ ...draft, payloadTemplate: event.currentTarget.value })} /></label>
+          <p className="query-contract-note">完整保存会覆盖任务配置；筛选条件仅接受 JSON 对象。手动运行请从列表单独确认执行。</p>
+          <div className="excel-form-actions"><button className="primary" type="submit" disabled={saving}>{saving ? '保存中…' : '保存任务'}</button></div>
+        </form>
+      </Modal>}
     </div>
   )
 }
@@ -3931,7 +4061,14 @@ function DestinationList({ destinations, testingID, onDetail, onTest }: { destin
   )
 }
 
-function DeliveryTaskList({ tasks, runningID, onRun }: { tasks: DeliveryTask[]; runningID: number | null; onRun: (task: DeliveryTask) => void }) {
+function DeliveryTaskList({ tasks, runningID, loadingDetailID, destinations, onDetail, onRun }: {
+  tasks: DeliveryTask[]
+  runningID: number | null
+  loadingDetailID: number | null
+  destinations: DestinationDefinition[]
+  onDetail: (task: DeliveryTask) => void
+  onRun: (task: DeliveryTask) => void
+}) {
   if (tasks.length === 0) return <EmptyState text="暂无推送任务。" />
   return (
     <div className="record-list">
@@ -3939,9 +4076,13 @@ function DeliveryTaskList({ tasks, runningID, onRun }: { tasks: DeliveryTask[]; 
         <article className="record-row" key={task.id}>
           <div>
             <strong>{task.name}</strong>
-            <span>{`${task.clean_table} -> destination #${task.destination_id} / ${task.trigger_type}`}</span>
+            <span>{`${task.clean_table} -> ${deliveryTaskDestinationLabel(task, destinations)} / ${deliveryTaskTriggerLabel(task.trigger_type)}`}</span>
           </div>
-          <div className="record-actions"><StatusPill label={task.enabled ? '启用' : '停用'} /><button type="button" disabled={!task.enabled || runningID !== null} onClick={() => onRun(task)}>{runningID === task.id ? '推送中…' : '手动运行'}</button></div>
+          <div className="record-actions">
+            <StatusPill label={task.enabled ? '启用' : '停用'} />
+            <button type="button" disabled={loadingDetailID !== null || runningID !== null} onClick={() => onDetail(task)}>{loadingDetailID === task.id ? '加载中…' : '详情'}</button>
+            <button type="button" disabled={!task.enabled || runningID !== null || loadingDetailID !== null} onClick={() => onRun(task)}>{runningID === task.id ? '推送中…' : '手动运行'}</button>
+          </div>
         </article>
       ))}
     </div>
@@ -4436,6 +4577,31 @@ function ruleDraftFrom(rule: TransformRule): RuleDraft {
 
 function destinationDraftFrom(destination: DestinationDefinition): DestinationDraft {
   return { id: destination.id, name: destination.name, code: destination.code, destinationType: destination.destination_type, configJSON: destination.config_json || '{}', enabled: destination.enabled, hasSecret: Boolean(destination.has_secret) }
+}
+
+function deliveryTaskDraftFrom(task: DeliveryTask): DeliveryTaskDraft {
+  return {
+    id: task.id,
+    name: task.name,
+    sourceID: String(task.source_id),
+    cleanTable: task.clean_table,
+    destinationID: String(task.destination_id),
+    triggerType: task.trigger_type,
+    cronExpr: task.cron_expr,
+    filterJSON: jsonText(task.filter_json || '{}'),
+    payloadTemplate: task.payload_template,
+    enabled: task.enabled,
+  }
+}
+
+function deliveryTaskDestinationLabel(task: DeliveryTask, destinations: DestinationDefinition[]) {
+  const destination = destinations.find((item) => item.id === task.destination_id)
+  return destination ? `${destination.name || destination.code} (#${destination.id})` : `目标 #${task.destination_id}`
+}
+
+function deliveryTaskTriggerLabel(value: string) {
+  const labels: Record<string, string> = { manual: '手动', schedule: '定时', event: '事件' }
+  return labels[value] ?? (value || '-')
 }
 
 function readList<T>(result: ApiResult, key: string): T[] {
