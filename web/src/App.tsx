@@ -36,6 +36,7 @@ import { Brand } from './components/Brand'
 import { parseMallWeatherExportContentStatus, submitMallWeatherExportContentDownload } from './mallWeatherExport'
 import { buildRawRecordsRequest, parseRawRecordsPage, type RawRecordOrigin, type RawRecordsPage } from './rawRecords'
 import { parseSourceFetchSummary } from './sourceOperations'
+import { buildProcessedRecordsQuery, parseProcessedRecordsPage, type ProcessedRecordsPage } from './processedRecords'
 import {
   buildExcelExportConfig,
   cloneExcelMatchSteps,
@@ -742,7 +743,6 @@ function App() {
   const stepRequestRef = useRef<AbortController | null>(null)
   const [methods, setMethods] = useState<MethodDisplay[]>(builtinMethods)
   const [sources, setSources] = useState<SourceDefinition[]>([])
-  const [processedData, setProcessedData] = useState<ProcessedData[]>([])
   const [transformRules, setTransformRules] = useState<TransformRule[]>([])
   const [destinations, setDestinations] = useState<DestinationDefinition[]>([])
   const [deliveryTasks, setDeliveryTasks] = useState<DeliveryTask[]>([])
@@ -870,11 +870,10 @@ function App() {
       if (!token) return
       setRefreshing(true)
       try {
-        const [pipelineResult, runResult, sourceResult, processedResult, ruleResult, destinationResult, taskResult, logResult, orderPushSkipResult, legacyTaskResult, legacyRuleResult] = await Promise.all([
+        const [pipelineResult, runResult, sourceResult, ruleResult, destinationResult, taskResult, logResult, orderPushSkipResult, legacyTaskResult, legacyRuleResult] = await Promise.all([
           client('/v1/pipelines', { method: 'GET', showResult: false, silentLoading: true }),
           client('/v1/runs?limit=50', { method: 'GET', showResult: false, silentLoading: true }),
           client('/v1/sources', { method: 'GET', showResult: false, silentLoading: true }),
-          client('/v1/data/processed?limit=50', { method: 'GET', showResult: false, silentLoading: true }),
           client('/v1/transform-rules', { method: 'GET', showResult: false, silentLoading: true }),
           client('/v1/destinations', { method: 'GET', showResult: false, silentLoading: true }),
           client('/v1/delivery-tasks', { method: 'GET', showResult: false, silentLoading: true }),
@@ -892,7 +891,6 @@ function App() {
         const nextLegacyTasks = legacyTaskResult.ok ? readList<LegacyTask>(legacyTaskResult, 'tasks') : []
         const nextLegacyRules = legacyRuleResult.ok ? readList<LegacyTransformRule>(legacyRuleResult, 'rules') : []
         if (sourceResult.ok) setSources(nextSources)
-        if (processedResult.ok) setProcessedData(readList<ProcessedData>(processedResult, 'data'))
         if (ruleResult.ok) setTransformRules(nextRules)
         if (destinationResult.ok) setDestinations(nextDestinations)
         if (taskResult.ok) setDeliveryTasks(nextTasks)
@@ -1237,7 +1235,7 @@ function App() {
         {activeNav === 'backfill' && <BojunBackfillPage loading={loading || refreshing} onPreview={previewBojunOrderBackfill} onConfirm={confirmBojunOrderBackfill} />}
         {activeNav === 'youzan_distribution' && <YouzanDistributionPage task={legacyTasks.find((item) => item.code === 'youzan_distribution_order_fetch')} loading={loading || refreshing} onPreview={previewYouzanDistributionBackfill} onConfirm={confirmYouzanDistributionBackfill} />}
         {activeNav === 'rules' && <RulesQueryPage rules={transformRules} />}
-        {activeNav === 'processed' && <ProcessedQueryPage records={processedData} />}
+        {activeNav === 'processed' && <ProcessedQueryPage client={client} />}
         {activeNav === 'destinations' && <DestinationsQueryPage destinations={destinations} />}
         {activeNav === 'tasks' && <DeliveryTasksQueryPage tasks={deliveryTasks} destinations={destinations} />}
         {activeNav === 'push_policy' && <PushPolicyPage coreMethod={coreMethods.find((item) => item.key === 'mall_push')} config={orderPushSkipConfig} targets={orderPushTargets} onSave={saveOrderPushSkipConfig} onToggle={toggleTarget} />}
@@ -1634,18 +1632,68 @@ function RulesQueryPage({ rules }: { rules: TransformRule[] }) {
   )
 }
 
-function ProcessedQueryPage({ records }: { records: ProcessedData[] }) {
-  const [query, setQuery] = useState('')
-  const [quality, setQuality] = useState('all')
-  const filtered = records.filter((record) => includesQuery([record.id, record.raw_data_id, record.data_type, record.data_fields], query)
-    && (quality === 'all' || (quality === 'good' ? record.quality_score >= 80 : record.quality_score < 80)))
+function ProcessedQueryPage({ client }: { client: ApiClient }) {
+  const [dataType, setDataType] = useState('')
+  const [minQuality, setMinQuality] = useState('')
+  const [maxQuality, setMaxQuality] = useState('')
+  const [createdFrom, setCreatedFrom] = useState('')
+  const [createdTo, setCreatedTo] = useState('')
+  const [appliedQuery, setAppliedQuery] = useState({ dataType: '', minQuality: '', maxQuality: '', createdFrom: '', createdTo: '' })
+  const [page, setPage] = useState(1)
+  const [recordsPage, setRecordsPage] = useState<ProcessedRecordsPage<ProcessedData> | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const requestRef = useRef<AbortController | null>(null)
+
+  useEffect(() => {
+    requestRef.current?.abort()
+    const controller = new AbortController()
+    requestRef.current = controller
+    setLoading(true)
+    setError('')
+    const query = buildProcessedRecordsQuery({ page, pageSize: 20, ...appliedQuery })
+    void client(`/v1/data/processed/list?${query}`, { method: 'GET', signal: controller.signal, showResult: false, silentLoading: true }).then((response) => {
+      if (controller.signal.aborted) return
+      const nextPage = response.ok ? parseProcessedRecordsPage<ProcessedData>(response.data) : null
+      if (nextPage) {
+        setRecordsPage(nextPage)
+        return
+      }
+      setError(response.error?.message || '处理结果查询暂时不可用，请稍后重试。')
+    }).finally(() => { if (!controller.signal.aborted) setLoading(false) })
+    return () => controller.abort()
+  }, [appliedQuery, client, page])
+
+  function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    setPage(1)
+    setAppliedQuery({ dataType, minQuality, maxQuality, createdFrom: unixTimestamp(createdFrom), createdTo: unixTimestamp(createdTo) })
+  }
+
+  const records = recordsPage?.list ?? []
+  const totalPages = recordsPage?.totalPages ?? 0
   return (
     <div className="view-stack">
-      <QueryBar count={filtered.length} total={records.length}>
-        <Field label="ID / Raw ID / 类型 / 内容" name="processed_query" value={query} onChange={setQuery} />
-        <SelectFilter label="质量" value={quality} onChange={setQuality} options={[{ value: 'good', label: '80 分及以上' }, { value: 'low', label: '低于 80 分' }]} />
-      </QueryBar>
-      <Panel title="处理结果" icon={<CheckCircle2 />} meta={`查询命中 ${filtered.length} 条`}><ProcessedDataList records={filtered} /></Panel>
+      <form className="query-bar" onSubmit={submit}>
+        <div className="query-fields">
+          <Field label="数据类型" name="processed_type" value={dataType} onChange={setDataType} />
+          <Field label="最低质量分" name="processed_min_quality" type="number" value={minQuality} onChange={setMinQuality} />
+          <Field label="最高质量分" name="processed_max_quality" type="number" value={maxQuality} onChange={setMaxQuality} />
+          <Field label="开始时间" name="processed_from" type="datetime-local" value={createdFrom} onChange={setCreatedFrom} />
+          <Field label="结束时间" name="processed_to" type="datetime-local" value={createdTo} onChange={setCreatedTo} />
+        </div>
+        <button type="submit" disabled={loading}>{loading ? '查询中…' : '查询'}</button>
+      </form>
+      <p className="query-contract-note">旧处理结果支持类型、质量和时间范围筛选；业务键属于 clean records，待独立查询接口接入后提供。</p>
+      {error && <div className="result-banner error" role="alert">{error} 已保留最近一次成功数据。</div>}
+      <Panel title="处理结果" icon={<CheckCircle2 />} meta={loading && !recordsPage ? '正在加载…' : `共 ${recordsPage?.total ?? 0} 条 / 平均质量 ${recordsPage?.averageQuality.toFixed(1) ?? '-'}`}>
+        <ProcessedDataList records={records} />
+        <div className="record-actions raw-record-pagination" role="status" aria-live="polite">
+          <span>第 {recordsPage?.page ?? page} / {Math.max(totalPages, 1)} 页</span>
+          <button type="button" onClick={() => setPage((current) => Math.max(1, current - 1))} disabled={loading || page <= 1}>上一页</button>
+          <button type="button" onClick={() => setPage((current) => current + 1)} disabled={loading || totalPages === 0 || page >= totalPages}>下一页</button>
+        </div>
+      </Panel>
     </div>
   )
 }
@@ -4349,6 +4397,12 @@ function previousDayDateTimeLocal(endOfDay: boolean) {
 function backendDateTime(value: string) {
   const normalized = value.trim().replace('T', ' ')
   return /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/.test(normalized) ? `${normalized}:00` : normalized
+}
+
+function unixTimestamp(value: string) {
+  if (!value) return ''
+  const timestamp = Date.parse(value)
+  return Number.isFinite(timestamp) ? String(Math.floor(timestamp / 1000)) : ''
 }
 
 function groupBy<T>(items: T[], keyFn: (item: T) => string) {
