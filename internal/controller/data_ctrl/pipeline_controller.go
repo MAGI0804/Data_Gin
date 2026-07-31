@@ -1,6 +1,7 @@
 package data_ctrl
 
 import (
+	"fmt"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
@@ -189,7 +190,24 @@ func (ctrl *PipelineController) UpdateStep(c *gin.Context) {
 		c.JSON(400, msg.ErrResponse("无效的方法步骤参数", err))
 		return
 	}
-	step, err := ctrl.service.UpdateStep(c.Request.Context(), stepID, &req)
+	var step *data_svc.MethodStepDetail
+	if c.Param("id") != "" {
+		pipelineID, parseErr := parsePipelineID(c)
+		if parseErr != nil {
+			c.JSON(400, msg.ErrResponse("无效的流水线ID", parseErr))
+			return
+		}
+		step, err = ctrl.service.UpdateStepInPipeline(c.Request.Context(), pipelineID, stepID, &req)
+	} else if c.Param("stage_id") != "" {
+		stageID, parseErr := parseStageID(c)
+		if parseErr != nil {
+			c.JSON(400, msg.ErrResponse("无效的流水线阶段ID", parseErr))
+			return
+		}
+		step, err = ctrl.service.UpdateStepInStage(c.Request.Context(), stageID, stepID, &req)
+	} else {
+		err = fmt.Errorf("missing pipeline or stage scope")
+	}
 	if err != nil {
 		c.JSON(500, msg.ErrResponse("更新方法步骤失败", err))
 		return

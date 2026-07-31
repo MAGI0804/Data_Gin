@@ -130,6 +130,9 @@ func (s *PipelineService) UpdatePipeline(ctx context.Context, id uint, req *requ
 }
 
 func (s *PipelineService) CreateStep(ctx context.Context, pipelineID uint, req *requestbody.MethodStepCreateRequest) (*MethodStepDetail, error) {
+	if _, err := s.pipelineDAO.FindByID(ctx, pipelineID); err != nil {
+		return nil, err
+	}
 	stageID := req.StageID
 	if stageID == 0 {
 		stage, err := s.findDefaultStageForMethod(ctx, pipelineID, req.MethodType)
@@ -138,13 +141,20 @@ func (s *PipelineService) CreateStep(ctx context.Context, pipelineID uint, req *
 		}
 		stageID = stage.ID
 	}
-	return s.CreateStepInStage(ctx, stageID, req)
+	return s.createStepInStage(ctx, pipelineID, stageID, req)
 }
 
 func (s *PipelineService) CreateStepInStage(ctx context.Context, stageID uint, req *requestbody.MethodStepCreateRequest) (*MethodStepDetail, error) {
+	return s.createStepInStage(ctx, 0, stageID, req)
+}
+
+func (s *PipelineService) createStepInStage(ctx context.Context, expectedPipelineID, stageID uint, req *requestbody.MethodStepCreateRequest) (*MethodStepDetail, error) {
 	stage, err := s.stageDAO.FindByID(ctx, stageID)
 	if err != nil {
 		return nil, err
+	}
+	if expectedPipelineID != 0 && stage.PipelineID != expectedPipelineID {
+		return nil, fmt.Errorf("stage %d does not belong to pipeline %d", stage.ID, expectedPipelineID)
 	}
 	if err := validateStageMethodType(stage.StageType, req.MethodType); err != nil {
 		return nil, err
@@ -203,6 +213,41 @@ func (s *PipelineService) UpdateStep(ctx context.Context, stepID uint, req *requ
 	return s.GetStep(ctx, step.ID)
 }
 
+func (s *PipelineService) UpdateStepInPipeline(ctx context.Context, pipelineID, stepID uint, req *requestbody.MethodStepUpdateRequest) (*MethodStepDetail, error) {
+	if _, err := s.pipelineDAO.FindByID(ctx, pipelineID); err != nil {
+		return nil, err
+	}
+	current, err := s.stepDAO.FindByID(ctx, stepID)
+	if err != nil {
+		return nil, err
+	}
+	if current.PipelineID != pipelineID {
+		return nil, fmt.Errorf("step %d does not belong to pipeline %d", current.ID, pipelineID)
+	}
+	if req.StageID != 0 && req.StageID != current.StageID {
+		return nil, fmt.Errorf("moving a step between stages is not supported")
+	}
+	return s.UpdateStep(ctx, stepID, req)
+}
+
+func (s *PipelineService) UpdateStepInStage(ctx context.Context, stageID, stepID uint, req *requestbody.MethodStepUpdateRequest) (*MethodStepDetail, error) {
+	stage, err := s.stageDAO.FindByID(ctx, stageID)
+	if err != nil {
+		return nil, err
+	}
+	current, err := s.stepDAO.FindByID(ctx, stepID)
+	if err != nil {
+		return nil, err
+	}
+	if current.PipelineID != stage.PipelineID || current.StageID != stage.ID {
+		return nil, fmt.Errorf("step %d does not belong to stage %d", current.ID, stage.ID)
+	}
+	if req.StageID != 0 && req.StageID != stage.ID {
+		return nil, fmt.Errorf("moving a step between stages is not supported")
+	}
+	return s.UpdateStep(ctx, stepID, req)
+}
+
 func (s *PipelineService) buildStepModel(pipelineID, stageID uint, req *requestbody.MethodStepCreateRequest) (*model.MethodStep, []model.MethodParam, []model.MethodOutput, error) {
 	enabled := true
 	if req.Enabled != nil {
@@ -229,6 +274,9 @@ func (s *PipelineService) buildStepModel(pipelineID, stageID uint, req *requestb
 }
 
 func (s *PipelineService) CreateStage(ctx context.Context, pipelineID uint, req *requestbody.PipelineStageCreateRequest) (*model.PipelineStage, error) {
+	if _, err := s.pipelineDAO.FindByID(ctx, pipelineID); err != nil {
+		return nil, err
+	}
 	enabled := true
 	if req.Enabled != nil {
 		enabled = *req.Enabled
@@ -251,6 +299,15 @@ func (s *PipelineService) UpdateStage(ctx context.Context, stageID uint, req *re
 	if err != nil {
 		return nil, err
 	}
+	steps, err := s.stepDAO.FindByStageID(ctx, stageID)
+	if err != nil {
+		return nil, err
+	}
+	for _, step := range steps {
+		if err := validateStageMethodType(req.StageType, step.MethodType); err != nil {
+			return nil, fmt.Errorf("stage type cannot change while step %d uses %q: %w", step.ID, step.MethodType, err)
+		}
+	}
 	enabled := true
 	if req.Enabled != nil {
 		enabled = *req.Enabled
@@ -263,6 +320,9 @@ func (s *PipelineService) UpdateStage(ctx context.Context, stageID uint, req *re
 }
 
 func (s *PipelineService) GetPipelineStages(ctx context.Context, pipelineID uint) ([]PipelineStageDetail, error) {
+	if _, err := s.pipelineDAO.FindByID(ctx, pipelineID); err != nil {
+		return nil, err
+	}
 	if err := s.ensureDefaultStages(ctx, pipelineID); err != nil {
 		return nil, err
 	}
@@ -507,8 +567,14 @@ func (s *PipelineService) RunPipeline(ctx context.Context, pipelineID uint) (*Pi
 	runtime := map[string]map[string]interface{}{}
 	successCount := 0
 	failedCount := 0
+	disabledStageIDs := make(map[uint]bool, len(detail.Stages))
+	for _, stage := range detail.Stages {
+		if !stage.Stage.Enabled {
+			disabledStageIDs[stage.Stage.ID] = true
+		}
+	}
 	for _, step := range detail.Steps {
-		if !step.Step.Enabled {
+		if !step.Step.Enabled || disabledStageIDs[step.Step.StageID] {
 			continue
 		}
 		outputs, runErr := s.runStep(ctx, runID, detail.Pipeline.ID, step, runtime)
