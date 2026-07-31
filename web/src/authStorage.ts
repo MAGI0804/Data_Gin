@@ -1,9 +1,16 @@
 const tokenStorageKey = 'warehouse-token'
 const tokenExpiryStorageKey = 'warehouse-token-expires-at'
+const sessionUserStorageKey = 'warehouse-session-user'
 
 export const defaultTokenLifetimeMs = 24 * 60 * 60 * 1000
 
 type TokenStorage = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>
+
+export type StoredSessionUser = {
+  id: number
+  account: string
+  nickname: string
+}
 
 function decodedTokenParts(token: string): string[] | null {
   try {
@@ -37,6 +44,7 @@ export function storedTokenExpiresAt(storage: TokenStorage): number | null {
 export function clearStoredToken(storage: TokenStorage) {
   storage.removeItem(tokenStorageKey)
   storage.removeItem(tokenExpiryStorageKey)
+  storage.removeItem(sessionUserStorageKey)
 }
 
 export function loadStoredToken(storage: TokenStorage, now = Date.now()): string {
@@ -54,4 +62,26 @@ export function saveStoredToken(token: string, storage: TokenStorage, now = Date
   storage.setItem(tokenStorageKey, token)
   storage.setItem(tokenExpiryStorageKey, String(expiresAt))
   return expiresAt
+}
+
+export function saveStoredTokenExpiry(expiresAt: number, storage: TokenStorage) {
+  if (!Number.isSafeInteger(expiresAt) || expiresAt <= 0) return false
+  storage.setItem(tokenExpiryStorageKey, String(expiresAt))
+  return true
+}
+
+export function loadStoredSessionUser(storage: TokenStorage): StoredSessionUser | null {
+  try {
+    const value: unknown = JSON.parse(storage.getItem(sessionUserStorageKey) ?? '')
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+    const candidate = value as Record<string, unknown>
+    if (typeof candidate.id !== 'number' || !Number.isSafeInteger(candidate.id) || candidate.id <= 0 || typeof candidate.account !== 'string' || typeof candidate.nickname !== 'string') return null
+    return { id: candidate.id, account: candidate.account, nickname: candidate.nickname }
+  } catch {
+    return null
+  }
+}
+
+export function saveStoredSessionUser(user: StoredSessionUser, storage: TokenStorage) {
+  storage.setItem(sessionUserStorageKey, JSON.stringify(user))
 }

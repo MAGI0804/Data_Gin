@@ -25,9 +25,10 @@ import {
   X,
 } from 'lucide-react'
 import './App.css'
-import { effectiveApiStatus } from './apiResponse'
 import { apiURL as buildApiURL } from './apiURL'
-import { clearStoredToken, loadStoredToken, saveStoredToken, storedTokenExpiresAt, tokenActorID } from './authStorage'
+import { clearStoredToken, loadStoredSessionUser, loadStoredToken, saveStoredSessionUser, saveStoredToken, saveStoredTokenExpiry, storedTokenExpiresAt, tokenActorID, type StoredSessionUser } from './authStorage'
+import { createApiClient, type ApiRequestOptions, type ClientResponse, type HTTPMethod } from './api/client'
+import { readSessionUser, readTokenInfo, type SessionUser } from './api/auth'
 import { MallWeatherPage, StoreInfoPage } from './MallWeatherPage'
 import { DataAuthorizationPage } from './DataAuthorizationPage'
 import { parseMallWeatherExportContentStatus, submitMallWeatherExportContentDownload } from './mallWeatherExport'
@@ -46,19 +47,12 @@ import {
 
 const defaultApiBaseURL = import.meta.env.VITE_API_BASE_URL ?? ''
 
-type ApiResult = {
-  ok: boolean
-  status: number
-  data: unknown
-}
+type ApiResult = ClientResponse
 
-type ApiClientOptions = {
-  method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
-  body?: unknown
-  headers?: Record<string, string>
+type ApiClientOptions = Omit<ApiRequestOptions, 'method'> & {
+  method?: HTTPMethod
   showResult?: boolean
   silentLoading?: boolean
-  signal?: AbortSignal
 }
 
 type ApiClient = (path: string, options?: ApiClientOptions) => Promise<ApiResult>
@@ -720,8 +714,14 @@ const builtinMethods: MethodDisplay[] = [
 
 function App() {
   const [token, setToken] = useState(() => loadStoredToken(window.localStorage))
+  const tokenRef = useRef(token)
   const actorID = useMemo(() => tokenActorID(token), [token])
-  const [authenticated, setAuthenticated] = useState(() => Boolean(token))
+  const [sessionState, setSessionState] = useState<'checking' | 'authenticated' | 'anonymous'>(() => token ? 'checking' : 'anonymous')
+  const [sessionUser, setSessionUser] = useState<SessionUser | null>(() => {
+    const user = loadStoredSessionUser(window.localStorage)
+    return user ? { ...user, email: '', consoleManaged: true } : null
+  })
+  const [sessionExpiresAt, setSessionExpiresAt] = useState(() => storedTokenExpiresAt(window.localStorage))
   const [activeNav, setActiveNav] = useState<NavKey>(navFromHash)
   const [expandedNavGroup, setExpandedNavGroup] = useState(() => navGroupFor(navFromHash())?.label ?? navGroups[0].label)
   const [navQuery, setNavQuery] = useState('')
@@ -744,40 +744,63 @@ function App() {
   const [legacyTasks, setLegacyTasks] = useState<LegacyTask[]>([])
   const [legacyRules, setLegacyRules] = useState<LegacyTransformRule[]>([])
 
+  const clearSession = useCallback(() => {
+    clearStoredToken(window.localStorage)
+    tokenRef.current = ''
+    setToken('')
+    setSessionUser(null)
+    setSessionExpiresAt(null)
+    setSessionState('anonymous')
+    setResult(null)
+  }, [])
+
+  const updateSessionToken = useCallback((nextToken: string) => {
+    const expiresAt = saveStoredToken(nextToken, window.localStorage)
+    tokenRef.current = nextToken
+    setToken(nextToken)
+    setSessionExpiresAt(expiresAt)
+  }, [])
+
+  const apiClient = useMemo(
+    () => createApiClient({
+      baseURL: defaultApiBaseURL,
+      getToken: () => tokenRef.current,
+      onTokenRefreshed: updateSessionToken,
+      onUnauthorized: clearSession,
+    }),
+    [clearSession, updateSessionToken],
+  )
+
   const client = useCallback<ApiClient>(
     async (path, options = {}) => {
-      const method = options.method ?? 'POST'
       if (!options.silentLoading) setLoading(true)
       try {
-        const response = await fetch(apiURL(path), {
-          method,
-          signal: options.signal,
-          headers: {
-            'Content-Type': 'application/json',
-            ...options.headers,
-            ...(token ? { token, Authorization: `Bearer ${token}` } : {}),
-          },
-          body: method === 'GET' || options.body === undefined ? undefined : JSON.stringify(options.body),
-        })
-        const data = await response.json().catch(() => ({}))
-        const effectiveStatus = effectiveApiStatus(response.status, data)
-        const nextResult = { ok: response.ok && isSuccessPayload(data), status: effectiveStatus, data }
-        if (effectiveStatus === 401) {
-          clearStoredToken(window.localStorage)
-          setToken('')
-          setAuthenticated(false)
+        if (!options.method) {
+          const nextResult: ApiResult = {
+            ok: false,
+            status: 0,
+            data: { message: '请求方法未指定。' },
+            error: { kind: 'client', message: '请求方法未指定。' },
+          }
+          if (options.showResult !== false) setResult(nextResult)
+          return nextResult
         }
-        if (options.showResult !== false) setResult(nextResult)
-        return nextResult
-      } catch (error) {
-        const nextResult = { ok: false, status: 0, data: error instanceof Error ? error.message : String(error) }
+        const requestOptions: ApiRequestOptions = {
+          method: options.method,
+          body: options.body,
+          headers: options.headers,
+          signal: options.signal,
+          retry: options.retry,
+          timeoutMs: options.timeoutMs,
+        }
+        const nextResult = await apiClient.request(path, requestOptions)
         if (options.showResult !== false) setResult(nextResult)
         return nextResult
       } finally {
         if (!options.silentLoading) setLoading(false)
       }
     },
-    [token],
+    [apiClient],
   )
 
   const downloadFile = useCallback<FileDownloadClient>(
@@ -886,37 +909,63 @@ function App() {
   )
 
   useEffect(() => {
-    if (authenticated) void refreshAll(false)
-  }, [authenticated, refreshAll])
+    if (sessionState === 'authenticated') void refreshAll(false)
+  }, [refreshAll, sessionState])
 
   useEffect(() => {
     if (!token) return
-    const expiresAt = storedTokenExpiresAt(window.localStorage)
-
-    const expireSession = () => {
-      clearStoredToken(window.localStorage)
-      setToken('')
-      setAuthenticated(false)
-      setResult(null)
-    }
-
-    if (expiresAt === null || expiresAt <= Date.now()) {
-      expireSession()
+    if (sessionExpiresAt === null || sessionExpiresAt <= Date.now()) {
+      clearSession()
       return
     }
 
     let timer = 0
-    const scheduleExpiry = () => {
-      const remaining = expiresAt - Date.now()
+    const scheduleRefresh = () => {
+      const remaining = sessionExpiresAt - Date.now()
       if (remaining <= 0) {
-        expireSession()
+        clearSession()
         return
       }
-      timer = window.setTimeout(scheduleExpiry, Math.min(remaining, 2_147_000_000))
+      const refreshDelay = Math.max(0, remaining - 60_000)
+      timer = window.setTimeout(() => {
+        void apiClient.refresh().then((refreshed) => {
+          if (!refreshed) clearSession()
+        })
+      }, Math.min(refreshDelay, 2_147_000_000))
     }
-    scheduleExpiry()
+    scheduleRefresh()
     return () => window.clearTimeout(timer)
-  }, [token])
+  }, [apiClient, clearSession, sessionExpiresAt, token])
+
+  useEffect(() => {
+    if (!token) return
+    let current = true
+    const controller = new AbortController()
+    setSessionState('checking')
+    void Promise.all([
+      apiClient.request('/auth/me', { method: 'GET', signal: controller.signal }),
+      apiClient.request('/auth/token/info', { method: 'GET', signal: controller.signal }),
+    ]).then(([profileResponse, tokenInfoResponse]) => {
+      if (!current) return
+      const user = profileResponse.ok ? readSessionUser(profileResponse.data) : null
+      const tokenInfo = tokenInfoResponse.ok ? readTokenInfo(tokenInfoResponse.data) : null
+      if (!user || !tokenInfo || tokenInfo.userID !== user.id) {
+        if (profileResponse.error?.kind === 'unauthorized' || tokenInfoResponse.error?.kind === 'unauthorized') clearSession()
+        else setSessionState('anonymous')
+        return
+      }
+      const storedUser: StoredSessionUser = { id: user.id, account: user.account, nickname: user.nickname }
+      saveStoredSessionUser(storedUser, window.localStorage)
+      saveStoredTokenExpiry(tokenInfo.expireTime * 1000, window.localStorage)
+      setSessionUser(user)
+      setSessionExpiresAt(tokenInfo.expireTime * 1000)
+      setSessionState('authenticated')
+    })
+    return () => {
+      current = false
+      controller.abort()
+    }
+  }, [apiClient, clearSession, token])
 
   useEffect(() => {
     const handleHashChange = () => {
@@ -935,16 +984,12 @@ function App() {
   }
 
   function handleLogin(nextToken: string) {
-    saveStoredToken(nextToken, window.localStorage)
-    setToken(nextToken)
-    setAuthenticated(true)
+    updateSessionToken(nextToken)
+    setSessionState('checking')
   }
 
   function handleLogout() {
-    clearStoredToken(window.localStorage)
-    setToken('')
-    setAuthenticated(false)
-    setResult(null)
+    clearSession()
   }
 
   async function loadStepRuns(runId: number) {
@@ -1016,7 +1061,7 @@ function App() {
     [deliveryTasks, destinations, legacyRules, legacyTasks, sources, transformRules],
   )
 
-  if (!authenticated) return <LoginScreen onLogin={handleLogin} />
+  if (sessionState !== 'authenticated') return <LoginScreen onLogin={handleLogin} checking={sessionState === 'checking'} />
 
   return (
     <main className={activeNav === 'mall_weather' || activeNav === 'store_info' ? 'ops-shell mall-weather-shell' : 'ops-shell'}>
@@ -1094,7 +1139,7 @@ function App() {
       </aside>
 
       <section className="ops-workspace">
-        <ModuleHeader activeNav={activeNav} loading={loading || refreshing} />
+        <ModuleHeader activeNav={activeNav} loading={loading || refreshing} sessionUser={sessionUser} />
         {activeNav === 'overview' && <PushStatusView runs={runs} deliveryLogs={deliveryLogs} onLoadSteps={loadStepRuns} />}
         {activeNav === 'runs' && <RunsQueryPage runs={runs} onLoadSteps={loadStepRuns} />}
         {activeNav === 'delivery_logs' && <DeliveryLogsQueryPage logs={deliveryLogs} onRetryLog={retryDeliveryLog} />}
@@ -1121,7 +1166,7 @@ function App() {
   )
 }
 
-function LoginScreen({ onLogin }: { onLogin: (token: string) => void }) {
+function LoginScreen({ onLogin, checking }: { onLogin: (token: string) => void; checking: boolean }) {
   const [error, setError] = useState('')
   const [submitting, setSubmitting] = useState(false)
 
@@ -1162,14 +1207,14 @@ function LoginScreen({ onLogin }: { onLogin: (token: string) => void }) {
           <Field label="管理员账号" name="username" defaultValue="admin" required autoComplete="username" />
           <Field label="管理员密码" name="password" type="password" required autoComplete="current-password" />
           {error && <div className="login-error" role="alert" aria-live="polite">{error}</div>}
-          <button className="primary" type="submit" disabled={submitting}>{submitting ? '正在登录…' : '管理员登录'}</button>
+          <button className="primary" type="submit" disabled={submitting || checking}>{submitting || checking ? '正在验证会话…' : '管理员登录'}</button>
         </form>
       </section>
     </main>
   )
 }
 
-function ModuleHeader({ activeNav, loading }: { activeNav: NavKey; loading: boolean }) {
+function ModuleHeader({ activeNav, loading, sessionUser }: { activeNav: NavKey; loading: boolean; sessionUser: SessionUser | null }) {
   const titles: Record<NavKey, { title: string; subtitle: string }> = {
     overview: { title: '运行总览', subtitle: '只看当前运行与交付健康度，快速定位失败。' },
     runs: { title: '流水线运行', subtitle: '按状态、运行类型和 Trace ID 查询执行记录。' },
@@ -1199,7 +1244,10 @@ function ModuleHeader({ activeNav, loading }: { activeNav: NavKey; loading: bool
         <h2>{titles[activeNav].title}</h2>
         <span>{titles[activeNav].subtitle}</span>
       </div>
-      <StatusPill label={loading ? '加载中' : '已就绪'} />
+      <div className="workspace-session">
+        {sessionUser && <span>{sessionUser.nickname || sessionUser.account}</span>}
+        <StatusPill label={loading ? '加载中' : '已就绪'} />
+      </div>
     </header>
   )
 }
