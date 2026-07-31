@@ -1,4 +1,4 @@
-import { FormEvent, ReactNode, type RefObject, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { FormEvent, ReactNode, type RefObject, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import {
   Activity,
   ArrowDownToLine,
@@ -1090,6 +1090,7 @@ function App() {
   useEffect(() => {
     if (!mobileNavOpen) return
     const previousOverflow = document.body.style.overflow
+    const navigation = mobileNavRef.current
     document.body.style.overflow = 'hidden'
     const focusableSelector = 'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
     const closeNavigation = () => setMobileNavOpen(false)
@@ -1100,7 +1101,7 @@ function App() {
         return
       }
       if (event.key !== 'Tab') return
-      const items = Array.from(mobileNavRef.current?.querySelectorAll<HTMLElement>(focusableSelector) ?? []).filter((item) => !item.hasAttribute('hidden'))
+      const items = Array.from(navigation?.querySelectorAll<HTMLElement>(focusableSelector) ?? []).filter((item) => !item.hasAttribute('hidden'))
       if (items.length === 0) return
       const first = items[0]
       const last = items[items.length - 1]
@@ -1113,14 +1114,38 @@ function App() {
       }
     }
     window.addEventListener('keydown', handleKeydown)
-    const firstFocusable = mobileNavRef.current?.querySelector<HTMLElement>(focusableSelector)
+    const firstFocusable = navigation?.querySelector<HTMLElement>(focusableSelector)
     const mobileNavTrigger = mobileNavTriggerRef.current
     firstFocusable?.focus()
     return () => {
       document.body.style.overflow = previousOverflow
       window.removeEventListener('keydown', handleKeydown)
-      mobileNavTrigger?.focus()
+      if (window.matchMedia('(max-width: 840px)').matches) {
+        mobileNavTrigger?.focus()
+      } else {
+        const desktopNavigationTarget = navigation?.querySelector<HTMLElement>('.nav-item.active')
+          ?? navigation?.querySelector<HTMLElement>(focusableSelector)
+        desktopNavigationTarget?.focus()
+      }
     }
+  }, [mobileNavOpen])
+
+  useLayoutEffect(() => {
+    const mobileViewport = window.matchMedia('(max-width: 840px)')
+    const syncMobileNavigationAccessibility = () => {
+      const navigation = mobileNavRef.current
+      if (!navigation) return
+      const shouldHideNavigation = mobileViewport.matches && !mobileNavOpen
+      if (shouldHideNavigation && navigation.contains(document.activeElement)) mobileNavTriggerRef.current?.focus()
+      navigation.toggleAttribute('inert', shouldHideNavigation)
+      if (shouldHideNavigation) navigation.setAttribute('aria-hidden', 'true')
+      else navigation.removeAttribute('aria-hidden')
+      if (!mobileViewport.matches) setMobileNavOpen(false)
+    }
+
+    syncMobileNavigationAccessibility()
+    mobileViewport.addEventListener('change', syncMobileNavigationAccessibility)
+    return () => mobileViewport.removeEventListener('change', syncMobileNavigationAccessibility)
   }, [mobileNavOpen])
 
   useEffect(() => {
@@ -2959,8 +2984,9 @@ function ExcelMatchView({
     let consecutiveFailures = 0
     let timer: number | null = null
     let inFlight = false
-    let resumeWhenVisible = false
+    const pollingState = { resumeWhenVisible: false }
     const controller = new AbortController()
+    const isPageVisible = () => document.visibilityState !== 'hidden'
 
     const clearScheduledRefresh = () => {
       if (timer !== null) {
@@ -2988,7 +3014,7 @@ function ExcelMatchView({
     const refreshTrackedJob = async () => {
       if (cancelled || document.visibilityState === 'hidden') return
       if (inFlight) {
-        resumeWhenVisible = true
+        pollingState.resumeWhenVisible = true
         return
       }
       if (attempts >= excelJobPollMaxAttempts) {
@@ -3024,8 +3050,8 @@ function ExcelMatchView({
         nextDelay = 2_000
       } finally {
         inFlight = false
-        if (resumeWhenVisible && !cancelled && !controller.signal.aborted && document.visibilityState !== 'hidden') {
-          resumeWhenVisible = false
+        if (pollingState.resumeWhenVisible && !cancelled && !controller.signal.aborted && isPageVisible()) {
+          pollingState.resumeWhenVisible = false
           scheduleRefresh(0)
         } else if (nextDelay !== null) {
           scheduleRefresh(nextDelay)
@@ -3041,7 +3067,7 @@ function ExcelMatchView({
         return
       }
       if (inFlight) {
-        resumeWhenVisible = true
+        pollingState.resumeWhenVisible = true
         return
       }
       scheduleRefresh(0)
