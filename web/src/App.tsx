@@ -3986,6 +3986,7 @@ async function updateTargetEnabled(client: ApiClient, target: ToggleTarget, enab
   if (target.type === 'source') {
     const source = data.sources.find((item) => item.id === target.id)
     if (!source) return { ok: false, status: 404, data: 'source not found' }
+    if (source.has_secret) return protectedConfigUpdateFailure()
     return client(`/v1/sources/${target.id}`, {
       method: 'PUT',
       body: {
@@ -4004,6 +4005,7 @@ async function updateTargetEnabled(client: ApiClient, target: ToggleTarget, enab
   if (target.type === 'transform_rule') {
     const rule = data.transformRules.find((item) => item.id === target.id)
     if (!rule) return { ok: false, status: 404, data: 'transform rule not found' }
+    if (rule.has_secret) return protectedConfigUpdateFailure()
     return client(`/v1/transform-rules/${target.id}`, {
       method: 'PUT',
       body: {
@@ -4046,6 +4048,11 @@ async function updateTargetEnabled(client: ApiClient, target: ToggleTarget, enab
       enabled,
     },
   })
+}
+
+function protectedConfigUpdateFailure(): ApiResult {
+  const message = '该配置含有已隐藏的密钥，不能通过完整更新覆盖；请使用保留密钥的专用编辑操作。'
+  return { ok: false, status: 422, data: { message }, error: { kind: 'client', message } }
 }
 
 function legacyCategory(task: LegacyTask) {
