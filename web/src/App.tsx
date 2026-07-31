@@ -2148,42 +2148,46 @@ function PushPolicyPage({ coreMethod, config, targets, onSave, onToggle }: {
 }
 
 function OrderPushSkipConfigForm({ config, targets, onSave }: { config: OrderPushSkipConfig; targets: OrderPushTargetOption[]; onSave: (config: OrderPushSkipConfig) => void }) {
-  const enabledCount = config.targets.filter((target) => target.cycle > 0 && target.skip > 0).length
+  const [draft, setDraft] = useState(() => targets.map((target) => orderPushTargetConfig(config, target.code)))
+  const [error, setError] = useState('')
+  const enabledCount = draft.filter((target) => target.cycle > 0 && target.skip > 0).length
+
+  useEffect(() => setDraft(targets.map((target) => orderPushTargetConfig(config, target.code))), [config, targets])
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    const form = new FormData(event.currentTarget)
-    onSave({
-      targets: targets.map((target, index) => ({
-        target_code: target.code,
-        target_name: target.name,
-        cycle: Number(formValue(form, `cycle_${index}`) || 0),
-        skip: Number(formValue(form, `skip_${index}`) || 0),
-      })),
-    })
+    if (draft.some((item) => !Number.isInteger(item.cycle) || !Number.isInteger(item.skip) || item.cycle < 0 || item.skip < 0 || (item.cycle === 0 && item.skip !== 0) || (item.cycle > 0 && item.skip >= item.cycle))) {
+      setError('循环和少推数量必须是非负整数；启用少推时，少推单数必须小于循环总单数。')
+      return
+    }
+    setError('')
+    onSave({ targets: draft })
   }
 
   return (
-    <form className="push-skip-form" key={JSON.stringify(config.targets)} onSubmit={submit}>
+    <form className="push-skip-form" onSubmit={submit}>
       <div className="push-skip-summary">
         <StatusPill label={enabledCount > 0 ? `已启用 ${enabledCount} 个目标` : '未启用'} />
         <span>只对下方配置的推送目标生效；未配置或填 0 的目标不少推。</span>
       </div>
       {targets.length === 0 ? <EmptyState text="后端未返回可配置推送目标。" /> : <div className="push-skip-list">
         {targets.map((target, index) => {
-          const value = orderPushTargetConfig(config, target.code)
+          const value = draft[index] ?? { target_code: target.code, target_name: target.name, cycle: 0, skip: 0 }
+          const ratio = value.cycle > 0 ? `${(((value.cycle - value.skip) / value.cycle) * 100).toFixed(1)}%` : '100.0%'
           return (
             <div className="push-skip-row" key={target.code}>
               <div>
                 <strong>{target.name}</strong>
                 <span>{target.code}</span>
               </div>
-              <Field label="循环总单数" name={`cycle_${index}`} defaultValue={String(value.cycle || 0)} type="number" />
-              <Field label="少推单数" name={`skip_${index}`} defaultValue={String(value.skip || 0)} type="number" />
+              <Field label="循环总单数" name={`cycle_${index}`} value={String(value.cycle)} type="number" onChange={(raw) => setDraft((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, cycle: Number(raw) } : item))} />
+              <Field label="少推单数" name={`skip_${index}`} value={String(value.skip)} type="number" onChange={(raw) => setDraft((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, skip: Number(raw) } : item))} />
+              <small>预计推送比例：{ratio}</small>
             </div>
           )
         })}
       </div>}
+      {error && <div className="result-banner error" role="alert">{error}</div>}
       <button className="primary" type="submit">保存配置</button>
     </form>
   )
