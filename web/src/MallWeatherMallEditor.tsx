@@ -1,4 +1,4 @@
-import { type FormEvent, useEffect, useState } from 'react'
+import { type FormEvent, useEffect, useRef, useState } from 'react'
 import { Pencil, Trash2 } from 'lucide-react'
 import {
   mallWeatherGeocodeConfirmPath,
@@ -10,6 +10,7 @@ import {
   type MallWeatherCreateInput,
   type MallWeatherMall,
 } from './mallWeather'
+import { runSingleFlight } from './singleFlight'
 
 type MallWeatherMutationClient = (
   path: string,
@@ -64,10 +65,12 @@ export function MallWeatherMallEditor({ mall, client, onMallUpdated, onMallDelet
   const [latitude, setLatitude] = useState(mall.latitude === undefined ? '' : String(mall.latitude))
   const [reason, setReason] = useState('人工确认商场地址与高德坐标')
   const [submitting, setSubmitting] = useState(false)
+  const [coordinateConfirming, setCoordinateConfirming] = useState(false)
   const [deleteConfirming, setDeleteConfirming] = useState(false)
   const [deleteName, setDeleteName] = useState('')
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
+  const coordinateConfirmationInFlight = useRef({ current: false })
 
   useEffect(() => {
     setWorkingMall(mall)
@@ -155,6 +158,23 @@ export function MallWeatherMallEditor({ mall, client, onMallUpdated, onMallDelet
     setMessage(confirmCoordinate ? '商场信息和高德坐标已确认，天气已启用。' : '商场信息已保存，地址解析已重新提交。')
   }
 
+  function requestCoordinateConfirmation() {
+    try {
+      mallWeatherMallPatchRequest(workingMall, form)
+    } catch {
+      setError('请完整填写商场名称、省市和详细地址，并检查字段长度。')
+      return
+    }
+    try {
+      mallWeatherManualCoordinateConfirmationRequest(workingMall.version, longitude, latitude, reason)
+    } catch {
+      setError('请填写有效的高德 GCJ-02 经纬度和 500 字以内的单行确认原因。')
+      return
+    }
+    setError('')
+    setCoordinateConfirming(true)
+  }
+
   async function deleteMall() {
     if (deleteName !== workingMall.nameCn) return
     setSubmitting(true)
@@ -195,9 +215,14 @@ export function MallWeatherMallEditor({ mall, client, onMallUpdated, onMallDelet
         </div>
         <div className="mall-weather-form-actions mall-weather-form-wide">
           <button type="submit" disabled={submitting}>{submitting ? '保存中' : '保存地址并重新解析'}</button>
-          <button className="primary" type="button" onClick={() => void save(true)} disabled={submitting}>{submitting ? '确认中' : '保存并确认高德坐标'}</button>
+          <button className="primary" type="button" onClick={requestCoordinateConfirmation} disabled={submitting}>{submitting ? '确认中' : '保存并确认高德坐标'}</button>
         </div>
       </form>}
+      {coordinateConfirming && <div className="mall-weather-delete-confirm" role="alertdialog" aria-modal="true" aria-label="确认高德坐标并启用天气">
+        <strong>确认高德坐标并启用天气？</strong>
+        <p>将使用当前 GCJ-02 坐标启用天气服务，并创建首次采集任务。</p>
+        <div className="mall-weather-form-actions"><button className="primary" type="button" disabled={submitting} onClick={() => { setCoordinateConfirming(false); void runSingleFlight(coordinateConfirmationInFlight.current, () => save(true)) }}>{submitting ? '确认中' : '确认启用天气'}</button><button type="button" disabled={submitting} onClick={() => setCoordinateConfirming(false)}>返回修改</button></div>
+      </div>}
       {deleteConfirming && <div className="mall-weather-delete-confirm" role="group" aria-label="删除商场二次确认">
         <strong>此操作会删除商场及其天气配置</strong>
         <label><span>请输入商场名称“{workingMall.nameCn}”确认</span><input value={deleteName} onChange={(event) => setDeleteName(event.currentTarget.value)} disabled={submitting} autoComplete="off" /></label>

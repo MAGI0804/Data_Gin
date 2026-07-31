@@ -6,6 +6,7 @@ import { MallWeatherExportPanel } from './MallWeatherExportPanel'
 import { MallWeatherExportProfilePanel } from './MallWeatherExportProfilePanel'
 import { MallWeatherForecastPanel, type MallWeatherForecastDataSnapshot } from './MallWeatherForecastPanel'
 import { MallDetailsFields, MallWeatherMallEditor } from './MallWeatherMallEditor'
+import { runSingleFlight } from './singleFlight'
 import { mallWeatherCapacityPlanPath, parseMallWeatherCapacityPlan, type MallWeatherCapacityPlan, type MallWeatherCapacityPlanInput } from './mallWeatherCapacityPlan'
 import { parseMallWeatherMetricsSummary, type MallWeatherMetricsSummary } from './monitoring'
 import { mallImportRequestWithinLimit, parseMallImportCSV, parseMallImportResult, type MallImportResult, type MallImportRow } from './mallImport'
@@ -151,6 +152,9 @@ function MallModulePage({
   const [showCreate, setShowCreate] = useState(false)
   const [showImport, setShowImport] = useState(false)
   const mallRequestSequence = useRef(0)
+  const mallController = useRef<AbortController | null>(null)
+  const mallDetailRequestSequence = useRef(0)
+  const mallDetailController = useRef<AbortController | null>(null)
   const overviewRequestSequence = useRef(0)
   const overviewController = useRef<AbortController | null>(null)
   const overviewSnapshotRef = useRef<MallWeatherOverview | null>(null)
@@ -185,59 +189,80 @@ function MallModulePage({
 
   const loadMalls = useCallback(async (afterID = 0) => {
     const sequence = ++mallRequestSequence.current
+    mallController.current?.abort()
+    const controller = new AbortController()
+    mallController.current = controller
     setMallState('loading')
     setMallError('')
     const search = new URLSearchParams({ limit: '50' })
     if (afterID > 0) search.set('afterId', String(afterID))
-    const response = await client(`/v1/malls?${search.toString()}`, { method: 'GET', showResult: false, silentLoading: true })
-    if (sequence !== mallRequestSequence.current) return
-    if (!response.ok) {
-      setMallState('error')
-      setMallError(weatherRequestError(response.status, '商场列表加载失败', '当前账号缺少 mall.read 权限'))
-      return
-    }
-    const parsed = parseMallWeatherMallList(response.data)
-    if (!parsed) {
-      setMallState('error')
-      setMallError('商场列表响应格式不正确，请联系管理员')
-      return
-    }
-    if (parsed.items.length === 50 && parsed.nextAfterId <= afterID) {
-      setMallState('error')
-      setMallError('商场列表游标无效，请联系管理员')
-      return
-    }
-    let nextItems = parsed.items
-    const selectedID = selectedMallIDRef.current
-    if (afterID === 0 && selectedID > 0 && !nextItems.some((mall) => mall.id === selectedID)) {
-      const selectedResponse = await client(`/v1/malls/${selectedID}`, { method: 'GET', showResult: false, silentLoading: true })
-      if (sequence !== mallRequestSequence.current) return
-      const selected = selectedResponse.ok ? parseMallWeatherMall(selectedResponse.data) : null
-      if (selected) nextItems = mergeMallWeatherMalls(nextItems, [selected])
-    }
-    setMalls((current) => {
-      if (afterID > 0) return mergeMallWeatherMalls(current, nextItems)
-      const liveSelected = current.find((mall) => mall.id === selectedMallIDRef.current)
-      const base = liveSelected && !nextItems.some((mall) => mall.id === liveSelected.id) ? [...nextItems, liveSelected] : nextItems
-      const baseByID = new Map(base.map((mall) => [mall.id, mall]))
-      const fresherCurrent = current.filter((mall) => {
-        const incoming = baseByID.get(mall.id)
-        return Boolean(incoming && mall.version > incoming.version)
+    try {
+      const response = await client(`/v1/malls?${search.toString()}`, { method: 'GET', showResult: false, silentLoading: true, signal: controller.signal })
+      if (controller.signal.aborted || sequence !== mallRequestSequence.current) return
+      if (!response.ok) {
+        setMallState('error')
+        setMallError(weatherRequestError(response.status, '商场列表加载失败', '当前账号缺少 mall.read 权限'))
+        return
+      }
+      const parsed = parseMallWeatherMallList(response.data)
+      if (!parsed) {
+        setMallState('error')
+        setMallError('商场列表响应格式不正确，请联系管理员')
+        return
+      }
+      if (parsed.items.length === 50 && parsed.nextAfterId <= afterID) {
+        setMallState('error')
+        setMallError('商场列表游标无效，请联系管理员')
+        return
+      }
+      let nextItems = parsed.items
+      const selectedID = selectedMallIDRef.current
+      if (afterID === 0 && selectedID > 0 && !nextItems.some((mall) => mall.id === selectedID)) {
+        const selectedResponse = await client(`/v1/malls/${selectedID}`, { method: 'GET', showResult: false, silentLoading: true, signal: controller.signal })
+        if (controller.signal.aborted || sequence !== mallRequestSequence.current) return
+        const selected = selectedResponse.ok ? parseMallWeatherMall(selectedResponse.data) : null
+        if (selected) nextItems = mergeMallWeatherMalls(nextItems, [selected])
+      }
+      setMalls((current) => {
+        if (afterID > 0) return mergeMallWeatherMalls(current, nextItems)
+        const liveSelected = current.find((mall) => mall.id === selectedMallIDRef.current)
+        const base = liveSelected && !nextItems.some((mall) => mall.id === liveSelected.id) ? [...nextItems, liveSelected] : nextItems
+        const baseByID = new Map(base.map((mall) => [mall.id, mall]))
+        const fresherCurrent = current.filter((mall) => {
+          const incoming = baseByID.get(mall.id)
+          return Boolean(incoming && mall.version > incoming.version)
+        })
+        return mergeMallWeatherMalls(base, fresherCurrent)
       })
-      return mergeMallWeatherMalls(base, fresherCurrent)
-    })
-    setNextAfterID(parsed.items.length === 50 ? parsed.nextAfterId : 0)
-    setMallState('success')
-    if (afterID === 0) setSelectedMallID((current) => current !== selectedID ? current : nextItems.some((mall) => mall.id === current) ? current : nextItems[0]?.id || 0)
+      setNextAfterID(parsed.items.length === 50 ? parsed.nextAfterId : 0)
+      setMallState('success')
+      if (afterID === 0) setSelectedMallID((current) => current !== selectedID ? current : nextItems.some((mall) => mall.id === current) ? current : nextItems[0]?.id || 0)
+    } catch {
+      if (controller.signal.aborted || sequence !== mallRequestSequence.current) return
+      setMallState('error')
+      setMallError('商场列表加载异常，请检查网络后重试')
+    } finally {
+      if (mallController.current === controller) mallController.current = null
+    }
   }, [client])
 
   const loadMall = useCallback(async (mallID: number) => {
-    const response = await client(`/v1/malls/${mallID}`, { method: 'GET', showResult: false, silentLoading: true })
-    if (!response.ok) return null
-    const parsed = parseMallWeatherMall(response.data)
-    if (!parsed) return null
-    setMalls((current) => mergeMallWeatherMalls(current, [parsed]))
-    return parsed
+    const sequence = ++mallDetailRequestSequence.current
+    mallDetailController.current?.abort()
+    const controller = new AbortController()
+    mallDetailController.current = controller
+    try {
+      const response = await client(`/v1/malls/${mallID}`, { method: 'GET', showResult: false, silentLoading: true, signal: controller.signal })
+      if (controller.signal.aborted || sequence !== mallDetailRequestSequence.current || !response.ok) return null
+      const parsed = parseMallWeatherMall(response.data)
+      if (!parsed) return null
+      setMalls((current) => mergeMallWeatherMalls(current, [parsed]))
+      return parsed
+    } catch {
+      return null
+    } finally {
+      if (mallDetailController.current === controller) mallDetailController.current = null
+    }
   }, [client])
 
   const loadOverview = useCallback(async (
@@ -382,6 +407,10 @@ function MallModulePage({
   }, [loadOverview, malls, selectedMallID, updateOverviewState, updateOverviewWaitingReason, view])
 
   useEffect(() => () => {
+    mallRequestSequence.current++
+    mallController.current?.abort()
+    mallDetailRequestSequence.current++
+    mallDetailController.current?.abort()
     overviewController.current?.abort()
     overviewRequestSequence.current++
   }, [])
@@ -1183,8 +1212,10 @@ function MallOnboardingPanel({ mall, client, onMallUpdated, onReloadMall }: {
   const [longitude, setLongitude] = useState('')
   const [latitude, setLatitude] = useState('')
   const [reason, setReason] = useState('基于高德候选人工调整商场坐标')
+  const [coordinateConfirming, setCoordinateConfirming] = useState(false)
   const candidateRequestSequence = useRef(0)
   const candidateAbort = useRef<AbortController | null>(null)
+  const coordinateConfirmationInFlight = useRef({ current: false })
   const cancelCandidateRequests = useCallback(() => {
     candidateRequestSequence.current++
     candidateAbort.current?.abort()
@@ -1320,6 +1351,23 @@ function MallOnboardingPanel({ mall, client, onMallUpdated, onReloadMall }: {
     onMallUpdated(updated)
   }
 
+  function requestCoordinateConfirmation() {
+    const expectedMallVersion = candidates?.mallVersion || 0
+    const selectedCandidate = candidates?.items.find((candidate) => candidate.id === selectedCandidateID)
+    if (!selectedCandidate) {
+      setError('请先选择一个高德解析候选，再确认或修改坐标。')
+      return
+    }
+    try {
+      mallWeatherCandidateConfirmationRequest(selectedCandidate, longitude, latitude, reason, expectedMallVersion)
+    } catch {
+      setError('请填写有效的高德 GCJ-02 经纬度和 500 字以内的单行修改原因。')
+      return
+    }
+    setError('')
+    setCoordinateConfirming(true)
+  }
+
   return (
     <section className="workbench-panel mall-weather-onboarding-panel">
       <div className="mall-weather-section-title">
@@ -1349,13 +1397,21 @@ function MallOnboardingPanel({ mall, client, onMallUpdated, onReloadMall }: {
       </div>}
       {candidateState === 'success' && candidates?.items.length === 0 && <p className="mall-weather-action-message">高德暂未返回候选。请确认地址完整、AMAP_WEB_SERVICE_KEY 已配置且天气 Worker 已启用，然后重新解析地址。</p>}
 
-      {selectedCandidateID > 0 && <form className="mall-weather-manual-coordinate" onSubmit={(event) => { event.preventDefault(); void confirmCoordinate() }}>
+      {selectedCandidateID > 0 && <form className="mall-weather-manual-coordinate" onSubmit={(event) => { event.preventDefault(); requestCoordinateConfirmation() }}>
         <div className="mall-weather-section-title"><div><strong>确认或修改高德坐标</strong><span>默认带入所选高德候选；如位置有偏差，可修改后再确认</span></div><span>GCJ-02</span></div>
         <label><span>高德经度</span><input name="longitude" inputMode="decimal" value={longitude} onChange={(event) => setLongitude(event.currentTarget.value)} required disabled={submitting || candidateState === 'loading'} /></label>
         <label><span>高德纬度</span><input name="latitude" inputMode="decimal" value={latitude} onChange={(event) => setLatitude(event.currentTarget.value)} required disabled={submitting || candidateState === 'loading'} /></label>
         <label className="mall-weather-form-wide"><span>修改原因</span><input name="reason" value={reason} onChange={(event) => setReason(event.currentTarget.value)} maxLength={500} disabled={submitting || candidateState === 'loading'} /></label>
         <button className="primary mall-weather-form-wide" type="submit" disabled={submitting || candidateState === 'loading'}>{submitting ? '确认中' : '确认高德坐标并启用天气'}</button>
       </form>}
+      {coordinateConfirming && <div className="mall-weather-delete-confirm" role="alertdialog" aria-modal="true" aria-label="确认高德坐标并启用天气">
+        <strong>确认高德坐标并启用天气？</strong>
+        <p>将使用当前 GCJ-02 坐标启用天气服务，并创建首次采集任务。</p>
+        <div className="mall-weather-form-actions">
+          <button className="primary" type="button" disabled={submitting} onClick={() => { setCoordinateConfirming(false); void runSingleFlight(coordinateConfirmationInFlight.current, confirmCoordinate) }}>{submitting ? '确认中' : '确认启用天气'}</button>
+          <button type="button" disabled={submitting} onClick={() => setCoordinateConfirming(false)}>返回修改</button>
+        </div>
+      </div>}
       {error && <p className="mall-weather-action-message error" role="alert">{error}</p>}
     </section>
   )
