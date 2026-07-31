@@ -76,6 +76,37 @@ test('concurrent unauthorized GETs use one refresh and replay once', async () =>
   assert.equal(secondResult.ok, true)
 })
 
+test('does not restore a token or replay a request after logout during refresh', async () => {
+  let token = 'expired-token'
+  let refreshed = 0
+  let protectedRequests = 0
+  let releasedRefresh
+  const refreshGate = new Promise((resolve) => { releasedRefresh = resolve })
+  const client = createApiClient(clientOptions({
+    getToken: () => token,
+    onTokenRefreshed: () => { refreshed += 1 },
+    fetch: async (input) => {
+      if (String(input).endsWith('/auth/token/refresh')) {
+        await refreshGate
+        return response(200, payload({ token: 'fresh-token' }))
+      }
+      protectedRequests += 1
+      return response(401, { code: 100401, data: {} })
+    },
+  }))
+
+  const request = client.request('/v1/runs', { method: 'GET' })
+  await new Promise((resolve) => setImmediate(resolve))
+  token = ''
+  releasedRefresh()
+  const result = await request
+
+  assert.equal(refreshed, 0)
+  assert.equal(protectedRequests, 1)
+  assert.equal(result.ok, false)
+  assert.equal(result.error?.kind, 'unauthorized')
+})
+
 test('failed refresh exits the session and does not loop', async () => {
   let unauthorized = 0
   let requests = 0

@@ -119,6 +119,7 @@ export function createApiClient(options: ApiClientOptions) {
         const status = effectiveApiStatus(response.status, payload)
         const token = response.ok && status < 400 && isSuccessfulPayload(payload) ? readEnvelopeToken(payload) : ''
         if (!token) return false
+        if (options.getToken() !== currentToken) return false
         options.onTokenRefreshed(token)
         return true
       } catch {
