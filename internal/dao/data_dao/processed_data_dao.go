@@ -51,7 +51,10 @@ func (dao *ProcessedDataDAO) FindByRawDataID(ctx context.Context, rawDataID uint
 // FindByDataType 根据数据类型查找处理结果
 func (dao *ProcessedDataDAO) FindByDataType(ctx context.Context, dataType string, limit int) ([]model.ProcessedData, error) {
 	var processedDataList []model.ProcessedData
-	query := dao.db.WithContext(ctx).Where("data_type = ? AND is_current = ?", dataType, true)
+	query := dao.db.WithContext(ctx).Where("is_current = ?", true)
+	if condition, args := processedDataTypeCondition(dataType); condition != "" {
+		query = query.Where(condition, args...)
+	}
 
 	if limit > 0 {
 		query = query.Limit(limit)
@@ -59,6 +62,13 @@ func (dao *ProcessedDataDAO) FindByDataType(ctx context.Context, dataType string
 
 	err := query.Order("created_at DESC").Find(&processedDataList).Error
 	return processedDataList, err
+}
+
+func processedDataTypeCondition(dataType string) (string, []interface{}) {
+	if dataType == "" {
+		return "", nil
+	}
+	return "data_type = ?", []interface{}{dataType}
 }
 
 // UpdateQualityScore 更新数据质量评分
