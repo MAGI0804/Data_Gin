@@ -450,6 +450,17 @@ type TransformRule = {
   enabled: boolean
 }
 
+type RuleDraft = {
+  id: number | null
+  sourceID: string
+  name: string
+  ruleType: string
+  orderIndex: string
+  configJSON: string
+  enabled: boolean
+  hasSecret: boolean
+}
+
 type DestinationDefinition = {
   id: number
   name: string
@@ -1247,7 +1258,7 @@ function App() {
         {activeNav === 'pull_records' && <RawRecordsQueryPage title="数据拉取记录" origin="pull" client={client} />}
         {activeNav === 'backfill' && <BojunBackfillPage loading={loading || refreshing} onPreview={previewBojunOrderBackfill} onConfirm={confirmBojunOrderBackfill} />}
         {activeNav === 'youzan_distribution' && <YouzanDistributionPage task={legacyTasks.find((item) => item.code === 'youzan_distribution_order_fetch')} loading={loading || refreshing} onPreview={previewYouzanDistributionBackfill} onConfirm={confirmYouzanDistributionBackfill} />}
-        {activeNav === 'rules' && <RulesQueryPage rules={transformRules} />}
+        {activeNav === 'rules' && <RulesQueryPage client={client} rules={transformRules} sources={sources} onRulesChange={setTransformRules} />}
         {activeNav === 'processed' && <ProcessedQueryPage client={client} />}
         {activeNav === 'destinations' && <DestinationsQueryPage destinations={destinations} />}
         {activeNav === 'tasks' && <DeliveryTasksQueryPage tasks={deliveryTasks} destinations={destinations} />}
@@ -1626,21 +1637,129 @@ function RawRecordsQueryPage({ title, origin, client }: { title: string; origin:
   )
 }
 
-function RulesQueryPage({ rules }: { rules: TransformRule[] }) {
+function RulesQueryPage({ client, rules, sources, onRulesChange }: { client: ApiClient; rules: TransformRule[]; sources: SourceDefinition[]; onRulesChange: (rules: TransformRule[]) => void }) {
   const [query, setQuery] = useState('')
   const [status, setStatus] = useState('all')
   const [ruleType, setRuleType] = useState('all')
+  const [draft, setDraft] = useState<RuleDraft | null>(null)
+  const [rawContent, setRawContent] = useState('{}')
+  const [testResult, setTestResult] = useState<unknown>(null)
+  const [saving, setSaving] = useState(false)
+  const [testing, setTesting] = useState(false)
+  const [operationError, setOperationError] = useState('')
   const filtered = rules.filter((rule) => includesQuery([rule.id, rule.name, rule.source_id, rule.rule_type], query)
     && (status === 'all' || (status === 'enabled' ? rule.enabled : !rule.enabled))
     && (ruleType === 'all' || rule.rule_type === ruleType))
+
+  function openCreate() {
+    setOperationError('')
+    setDraft({ id: null, sourceID: sources[0]?.id ? String(sources[0].id) : '', name: '', ruleType: 'mapping', orderIndex: '0', configJSON: '{\n  "table_name": "",\n  "business_key_field": "",\n  "fields": []\n}', enabled: true, hasSecret: false })
+  }
+
+  async function openDetail(ruleID: number) {
+    setOperationError('')
+    const response = await client(`/v1/transform-rules/${ruleID}`, { method: 'GET', showResult: false, silentLoading: true })
+    const rule = response.ok ? readObject<TransformRule>(response, 'rule') : null
+    if (!rule) {
+      setOperationError(response.error?.message || '规则详情暂时不可用，请稍后重试。')
+      return
+    }
+    setDraft(ruleDraftFrom(rule))
+  }
+
+  async function saveDraft(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!draft || saving || draft.hasSecret) return
+    const sourceID = Number(draft.sourceID)
+    const orderIndex = Number(draft.orderIndex)
+    if (!Number.isInteger(sourceID) || sourceID <= 0 || !draft.name.trim() || !Number.isInteger(orderIndex)) {
+      setOperationError('请填写来源、名称和有效的顺序号。')
+      return
+    }
+    try { JSON.parse(draft.configJSON) } catch { setOperationError('配置必须是有效 JSON。'); return }
+    setSaving(true)
+    setOperationError('')
+    const response = await client(draft.id ? `/v1/transform-rules/${draft.id}` : '/v1/transform-rules', {
+      method: draft.id ? 'PUT' : 'POST', showResult: false, silentLoading: true,
+      body: { source_id: sourceID, name: draft.name.trim(), rule_type: draft.ruleType, order_index: orderIndex, config_json: draft.configJSON, enabled: draft.enabled },
+    })
+    const saved = response.ok ? readObject<TransformRule>(response, 'rule') : null
+    if (!saved) {
+      setOperationError(response.error?.message || '规则保存未完成，请稍后重试。')
+      setSaving(false)
+      return
+    }
+    onRulesChange(draft.id ? rules.map((rule) => rule.id === saved.id ? saved : rule) : [...rules, saved].sort((left, right) => left.source_id - right.source_id || left.order_index - right.order_index || right.id - left.id))
+    setSaving(false)
+    setDraft(null)
+  }
+
+  async function runTest(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!draft || draft.ruleType !== 'mapping' || draft.hasSecret || testing) return
+    let parsedContent: Record<string, unknown>
+    try {
+      parsedContent = JSON.parse(rawContent) as Record<string, unknown>
+      JSON.parse(draft.configJSON)
+    } catch {
+      setOperationError('测试内容和规则配置都必须是有效 JSON。')
+      return
+    }
+    if (!parsedContent || Array.isArray(parsedContent) || typeof parsedContent !== 'object') {
+      setOperationError('测试原始内容必须是 JSON 对象。')
+      return
+    }
+    setTesting(true)
+    setOperationError('')
+    const response = await client('/v1/transform-rules/test', { method: 'POST', body: { raw_content: parsedContent, config_json: draft.configJSON }, showResult: false, silentLoading: true })
+    const cleanContent = response.ok ? readObject<unknown>(response, 'clean_content') : null
+    if (cleanContent === null) setOperationError(response.error?.message || '规则测试未完成，请稍后重试。')
+    else setTestResult(redactMonitoringJSON(cleanContent))
+    setTesting(false)
+  }
+
+  const testable = draft?.ruleType === 'mapping' && !draft.hasSecret
   return (
     <div className="view-stack">
+      {operationError && <div className="result-banner error" role="alert">{operationError}</div>}
       <QueryBar count={filtered.length} total={rules.length}>
         <Field label="名称 / 来源 ID / 类型" name="rule_query" value={query} onChange={setQuery} />
         <SelectFilter label="状态" value={status} onChange={setStatus} options={[{ value: 'enabled', label: '启用' }, { value: 'disabled', label: '停用' }]} />
         <SelectFilter label="规则类型" value={ruleType} onChange={setRuleType} options={uniqueOptions(rules.map((rule) => rule.rule_type))} />
       </QueryBar>
-      <Panel title="清洗规则" icon={<ListChecks />} meta={`查询命中 ${filtered.length} 条`}><TransformRuleList rules={filtered} /></Panel>
+      <div className="record-actions"><button type="button" className="primary" onClick={openCreate}>新增规则</button></div>
+      <Panel title="清洗规则" icon={<ListChecks />} meta={`查询命中 ${filtered.length} 条`}><TransformRuleList rules={filtered} onDetail={(rule) => { void openDetail(rule.id) }} /></Panel>
+      {draft && (
+        <Modal title={draft.id ? '清洗规则详情与编辑' : '新增清洗规则'} onClose={() => { if (!saving && !testing) setDraft(null) }}>
+          {draft.hasSecret && <div className="result-banner error" role="alert">该规则包含已隐藏的密钥。当前后端仅支持完整更新，不能安全回写脱敏配置；请使用专用保留密钥编辑接口。</div>}
+          <form className="excel-upload-form" onSubmit={saveDraft}>
+            <label>来源
+              <select value={draft.sourceID} disabled={draft.hasSecret || saving} required onChange={(event) => setDraft({ ...draft, sourceID: event.currentTarget.value })}>
+                <option value="">选择数据源</option>
+                {sources.map((source) => <option value={source.id} key={source.id}>#{source.id} {source.name}</option>)}
+              </select>
+            </label>
+            <Field label="规则名称" name="rule_name" value={draft.name} required onChange={(name) => setDraft({ ...draft, name })} />
+            <label>规则类型
+              <select value={draft.ruleType} disabled={draft.hasSecret || saving} onChange={(event) => setDraft({ ...draft, ruleType: event.currentTarget.value })}>
+                {['mapping', 'http_enrich', 'db_enrich', 'script', 'validator'].map((type) => <option key={type} value={type}>{type}</option>)}
+              </select>
+            </label>
+            <Field label="执行顺序" name="rule_order" type="number" value={draft.orderIndex} required onChange={(orderIndex) => setDraft({ ...draft, orderIndex })} />
+            <label className="checkbox-label"><input type="checkbox" checked={draft.enabled} disabled={draft.hasSecret || saving} onChange={(event) => setDraft({ ...draft, enabled: event.currentTarget.checked })} />启用规则</label>
+            <label>规则配置 JSON<textarea value={draft.configJSON} disabled={draft.hasSecret || saving} rows={12} onChange={(event) => setDraft({ ...draft, configJSON: event.currentTarget.value })} /></label>
+            <div className="excel-form-actions"><button className="primary" type="submit" disabled={draft.hasSecret || saving}>{saving ? '保存中…' : '保存规则'}</button></div>
+          </form>
+          <hr />
+          <form className="excel-upload-form" onSubmit={runTest}>
+            <h4>Mapping 规则测试</h4>
+            <p className="query-contract-note">测试只使用当前草稿，不会保存配置；仅 mapping 类型有真实后端执行能力。</p>
+            <label>测试原始内容 JSON<textarea value={rawContent} disabled={!testable || testing} rows={8} onChange={(event) => setRawContent(event.currentTarget.value)} /></label>
+            <div className="excel-form-actions"><button type="submit" disabled={!testable || testing}>{testing ? '测试中…' : '执行测试'}</button></div>
+            {testResult !== null && <ReadonlyJSON value={testResult} />}
+          </form>
+        </Modal>
+      )}
     </div>
   )
 }
@@ -3671,7 +3790,7 @@ function SourceList({ sources, onFetchSource, onTestSource }: { sources: SourceD
   )
 }
 
-function TransformRuleList({ rules }: { rules: TransformRule[] }) {
+function TransformRuleList({ rules, onDetail }: { rules: TransformRule[]; onDetail: (rule: TransformRule) => void }) {
   if (rules.length === 0) return <EmptyState text="暂无处理规则。" />
   return (
     <div className="record-list">
@@ -3680,8 +3799,9 @@ function TransformRuleList({ rules }: { rules: TransformRule[] }) {
           <div>
             <strong>{rule.name}</strong>
             <span>{rule.rule_type} / source #{rule.source_id} / 顺序 {rule.order_index}</span>
+            {rule.has_secret && <small>配置包含已隐藏的密钥；当前仅可查看。</small>}
           </div>
-          <StatusPill label={rule.enabled ? '启用' : '停用'} />
+          <div className="record-actions"><StatusPill label={rule.enabled ? '启用' : '停用'} /><button type="button" onClick={() => onDetail(rule)}>详情</button></div>
         </article>
       ))}
     </div>
@@ -4226,6 +4346,19 @@ function cleanRecordStatusLabel(status: string) {
   if (status === 'invalid') return '无效'
   if (status === 'delivered') return '已交付'
   return status || '-'
+}
+
+function ruleDraftFrom(rule: TransformRule): RuleDraft {
+  return {
+    id: rule.id,
+    sourceID: String(rule.source_id),
+    name: rule.name,
+    ruleType: rule.rule_type,
+    orderIndex: String(rule.order_index),
+    configJSON: rule.config_json || '{}',
+    enabled: rule.enabled,
+    hasSecret: Boolean(rule.has_secret),
+  }
 }
 
 function readList<T>(result: ApiResult, key: string): T[] {
