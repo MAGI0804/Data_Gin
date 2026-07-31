@@ -1612,22 +1612,34 @@ function DeliveryLogsQueryPage({ logs, onRetryLog }: { logs: DeliveryLog[]; onRe
   const [query, setQuery] = useState('')
   const [status, setStatus] = useState('all')
   const [retryingLogID, setRetryingLogID] = useState<number | null>(null)
+  const [pendingRetryLog, setPendingRetryLog] = useState<DeliveryLog | null>(null)
   const filtered = useMemo(() => logs.filter((log) => {
     const matchesQuery = includesQuery([log.id, log.trace_id, log.business_key, log.source_code, log.destination_code, log.destination_name, log.error_message], query)
     const matchesStatus = status === 'all' || (status === 'success' ? log.success : !log.success)
     return matchesQuery && matchesStatus
   }), [logs, query, status])
+
+  async function retryPendingLog() {
+    if (!pendingRetryLog || retryingLogID !== null) return
+    setRetryingLogID(pendingRetryLog.id)
+    try {
+      await onRetryLog(pendingRetryLog.id)
+    } finally {
+      setRetryingLogID(null)
+      setPendingRetryLog(null)
+    }
+  }
+
   return (
     <div className="view-stack">
       <QueryBar count={filtered.length} total={logs.length}>
         <Field label="业务键 / Trace / 来源 / 目标" name="delivery_query" value={query} onChange={setQuery} />
         <SelectFilter label="交付状态" value={status} onChange={setStatus} options={[{ value: 'success', label: '成功' }, { value: 'failed', label: '失败' }]} />
       </QueryBar>
-      <Panel title="推送日志" icon={<Send />} meta={`当前仅显示后端返回的最近 ${logs.length} 条`}><DeliveryLogList logs={filtered} retryingLogID={retryingLogID} onRetryLog={async (log) => {
-        if (log.success || retryingLogID !== null || !window.confirm(`确认重试失败日志 #${log.id}？`)) return
-        setRetryingLogID(log.id)
-        try { await onRetryLog(log.id) } finally { setRetryingLogID(null) }
+      <Panel title="推送日志" icon={<Send />} meta={`当前仅显示后端返回的最近 ${logs.length} 条`}><DeliveryLogList logs={filtered} retryingLogID={retryingLogID} onRetryLog={(log) => {
+        if (!log.success && retryingLogID === null) setPendingRetryLog(log)
       }} /></Panel>
+      {pendingRetryLog && <Modal title="确认重试推送日志" closeDisabled={retryingLogID !== null} onClose={() => { if (retryingLogID === null) setPendingRetryLog(null) }} footer={<><button type="button" disabled={retryingLogID !== null} onClick={() => setPendingRetryLog(null)}>取消</button><button className="primary" type="button" disabled={retryingLogID !== null} onClick={() => void retryPendingLog()}>{retryingLogID === pendingRetryLog.id ? '重试中…' : '确认重试'}</button></>}><p>确认重试失败日志 #{pendingRetryLog.id}？这会再次向原推送目标发起交付请求。</p></Modal>}
     </div>
   )
 }
@@ -2073,6 +2085,8 @@ function BojunBackfillPage({ loading, onPreview, onConfirm }: {
   const [payload, setPayload] = useState<{ start_time: string; end_time: string } | null>(null)
   const [preview, setPreview] = useState<BojunOrderBackfillResult | null>(null)
   const [confirmed, setConfirmed] = useState<BojunOrderBackfillResult | null>(null)
+  const [confirmingWrite, setConfirmingWrite] = useState(false)
+  const [writing, setWriting] = useState(false)
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const form = new FormData(event.currentTarget)
@@ -2082,9 +2096,15 @@ function BojunBackfillPage({ loading, onPreview, onConfirm }: {
     setPayload(result ? nextPayload : null)
     setPreview(result)
   }
-  async function confirm() {
-    if (!payload || !preview || !window.confirm(`确认写入 ${preview.writable_count} 条伯俊订单？`)) return
-    setConfirmed(await onConfirm(payload))
+  async function confirmWrite() {
+    if (!payload || !preview || writing) return
+    setWriting(true)
+    try {
+      setConfirmed(await onConfirm(payload))
+      setConfirmingWrite(false)
+    } finally {
+      setWriting(false)
+    }
   }
   return (
     <div className="view-stack">
@@ -2093,11 +2113,12 @@ function BojunBackfillPage({ loading, onPreview, onConfirm }: {
           <Field label="开始时间" name="start_time" type="datetime-local" defaultValue={datetimeLocalMinutesAgo(60)} required />
           <Field label="结束时间" name="end_time" type="datetime-local" defaultValue={datetimeLocalMinutesAgo(0)} required />
           <button className="primary" type="submit" disabled={loading}>预览补拉</button>
-          <button type="button" disabled={loading || !preview || preview.writable_count === 0} onClick={confirm}>确认写入</button>
+          <button type="button" disabled={loading || writing || !preview || preview.writable_count === 0} onClick={() => setConfirmingWrite(true)}>确认写入</button>
         </form>
         {preview && <BojunBackfillResultView title="预览结果" result={preview} />}
         {confirmed && <BojunBackfillResultView title="写入结果" result={confirmed} />}
       </Panel>
+      {confirmingWrite && preview && <Modal title="确认写入伯俊订单" closeDisabled={loading || writing} onClose={() => { if (!loading && !writing) setConfirmingWrite(false) }} footer={<><button type="button" disabled={loading || writing} onClick={() => setConfirmingWrite(false)}>取消</button><button className="primary" type="button" disabled={loading || writing} onClick={() => void confirmWrite()}>{writing ? '写入中…' : '确认写入'}</button></>}><p>确认写入 {preview.writable_count} 条伯俊订单？系统会按 docno 判重，已有订单不会覆盖。</p></Modal>}
     </div>
   )
 }
@@ -2119,6 +2140,8 @@ function YouzanDistributionPage({ task, loading, onPreview, onConfirm, onRun }: 
   const [manualRunResult, setManualRunResult] = useState<LegacyTaskRunResult | null>(null)
   const [manualRunError, setManualRunError] = useState('')
   const [runningManualTask, setRunningManualTask] = useState(false)
+  const [confirmingBackfill, setConfirmingBackfill] = useState(false)
+  const [writingBackfill, setWritingBackfill] = useState(false)
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -2134,9 +2157,15 @@ function YouzanDistributionPage({ task, loading, onPreview, onConfirm, onRun }: 
     setPreview(result)
   }
 
-  async function confirm() {
-    if (!payload || !preview || !window.confirm(`确认写入 ${preview.writable_count} 条有赞分销订单？`)) return
-    setConfirmed(await onConfirm(payload))
+  async function confirmBackfill() {
+    if (!payload || !preview || writingBackfill) return
+    setWritingBackfill(true)
+    try {
+      setConfirmed(await onConfirm(payload))
+      setConfirmingBackfill(false)
+    } finally {
+      setWritingBackfill(false)
+    }
   }
 
   function changeTimeFilter(value: string) {
@@ -2151,6 +2180,7 @@ function YouzanDistributionPage({ task, loading, onPreview, onConfirm, onRun }: 
     setPayload(null)
     setPreview(null)
     setConfirmed(null)
+    setConfirmingBackfill(false)
     setShowBackfill(true)
   }
 
@@ -2214,8 +2244,8 @@ function YouzanDistributionPage({ task, loading, onPreview, onConfirm, onRun }: 
       )}
 
       {showBackfill && (
-        <Modal title="补拉有赞分销订单" onClose={() => { if (!loading) setShowBackfill(false) }}>
-          <form className="youzan-backfill-form" onSubmit={submit}>
+        <Modal title={confirmingBackfill ? '确认写入有赞分销订单' : '补拉有赞分销订单'} focusKey={confirmingBackfill ? 'confirm' : 'form'} closeDisabled={loading || writingBackfill} onClose={() => { if (!loading && !writingBackfill) setShowBackfill(false) }}>
+          {confirmingBackfill && preview ? <div className="view-stack"><p>确认写入 {preview.writable_count} 条有赞分销订单？系统会按 tid 判重，已有订单不会覆盖。</p><div className="excel-form-actions"><button type="button" disabled={loading || writingBackfill} onClick={() => setConfirmingBackfill(false)}>返回预览</button><button className="primary" type="button" disabled={loading || writingBackfill} onClick={() => void confirmBackfill()}>{writingBackfill ? '写入中…' : '确认写入'}</button></div></div> : <><form className="youzan-backfill-form" onSubmit={submit}>
             <label>
               时间筛选方式
               <select name="time_filter" value={timeFilter} onChange={(event) => changeTimeFilter(event.currentTarget.value)}>
@@ -2226,11 +2256,11 @@ function YouzanDistributionPage({ task, loading, onPreview, onConfirm, onRun }: 
             <Field label={timeFilter === 'created' ? '下单开始时间' : '完成开始时间'} name="start_time" type="datetime-local" defaultValue={previousDayDateTimeLocal(false)} required />
             <Field label={timeFilter === 'created' ? '下单结束时间' : '完成结束时间'} name="end_time" type="datetime-local" defaultValue={previousDayDateTimeLocal(true)} required />
             <button className="primary" type="submit" disabled={loading}>{loading ? '预览中' : '预览补拉'}</button>
-            <button type="button" disabled={loading || !preview || preview.writable_count === 0} onClick={confirm}>确认写入</button>
+            <button type="button" disabled={loading || writingBackfill || !preview || preview.writable_count === 0} onClick={() => setConfirmingBackfill(true)}>确认写入</button>
           </form>
           <p className="backfill-note">当前按{youzanDistributionTimeFilterLabel(timeFilter)}筛选。预览会真实拉取、解密并判重，但不写数据库；确认后重新拉取相同筛选方式和时间范围并写入，已有 tid 不覆盖。</p>
           {preview && <YouzanDistributionBackfillResultView title="预览结果" result={preview} />}
-          {confirmed && <YouzanDistributionBackfillResultView title="写入结果" result={confirmed} />}
+          {confirmed && <YouzanDistributionBackfillResultView title="写入结果" result={confirmed} />}</>}
         </Modal>
       )}
 
@@ -2643,6 +2673,7 @@ function ExcelMatchView({
   const [selectedImportSchemeID, setSelectedImportSchemeID] = useState('')
   const [pendingSchemeDelete, setPendingSchemeDelete] = useState<ExcelMatchScheme | null>(null)
   const [deletingSchemeID, setDeletingSchemeID] = useState<number | null>(null)
+  const [pendingWrite, setPendingWrite] = useState<{ slot: 'import' | 'clear'; file: File; config: unknown; message: string } | null>(null)
   const [jobQuery, setJobQuery] = useState('')
   const [jobStatus, setJobStatus] = useState('all')
   const [jobOperation, setJobOperation] = useState('all')
@@ -2680,11 +2711,13 @@ function ExcelMatchView({
   }
 
   function openExcelDialog(mode: ExcelDialogMode) {
+    setPendingWrite(null)
     resetExcelDialogFiles()
     setExcelDialog(mode)
   }
 
   function closeExcelDialog() {
+    setPendingWrite(null)
     setExcelDialog(null)
     resetExcelDialogFiles()
   }
@@ -2860,6 +2893,7 @@ function ExcelMatchView({
   }, [loadExcelModels, section, token])
 
   useEffect(() => {
+    setPendingWrite(null)
     setExcelDialog(null)
     setSelectedExportFileName('')
     setSelectedImportFileName('')
@@ -3174,6 +3208,32 @@ function ExcelMatchView({
     }
   }
 
+  async function createExcelWriteJob(slot: 'import' | 'clear', file: File, config: unknown) {
+    setLoading(true)
+    try {
+      const uploadId = await ensureExcelUpload(slot, file)
+      const response = await fetch(apiURL('/v1/excel-match-jobs'), {
+        method: 'POST',
+        headers: token ? { token } : undefined,
+        body: buildConfigPayload(uploadId, config),
+      })
+      const data = await response.json().catch(() => ({}))
+      const nextResult = { ok: response.ok && isSuccessPayload(data), status: response.status, data }
+      if (nextResult.ok) showCreatedJob(nextResult)
+      else setResult(nextResult)
+    } catch (error) {
+      setResult({ ok: false, status: 0, data: error instanceof Error ? error.message : String(error) })
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function confirmPendingWrite() {
+    if (!pendingWrite || loading) return
+    await createExcelWriteJob(pendingWrite.slot, pendingWrite.file, pendingWrite.config)
+    setPendingWrite(null)
+  }
+
   async function createImportJob(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const form = new FormData(event.currentTarget)
@@ -3188,31 +3248,12 @@ function ExcelMatchView({
     const confirmMessage = writeField === 'completed_at'
       ? '确认写入数据库？本次只会填充为空的订单完成时间，不会覆盖已有 completed_at。'
       : '确认写入数据库？本次只会填充空的 matched_docno，不会覆盖已有匹配单号。'
-    if (confirmWrite && !window.confirm(confirmMessage)) {
+    const config = buildImportConfig(form, confirmWrite)
+    if (confirmWrite) {
+      setPendingWrite({ slot: 'import', file, config, message: confirmMessage })
       return
     }
-
-    setLoading(true)
-    try {
-      const uploadId = await ensureExcelUpload('import', file)
-      const payload = buildConfigPayload(uploadId, buildImportConfig(form, confirmWrite))
-      const response = await fetch(apiURL('/v1/excel-match-jobs'), {
-        method: 'POST',
-        headers: token ? { token } : undefined,
-        body: payload,
-      })
-      const data = await response.json().catch(() => ({}))
-      const nextResult = { ok: response.ok && isSuccessPayload(data), status: response.status, data }
-      if (nextResult.ok) {
-        showCreatedJob(nextResult)
-      } else {
-        setResult(nextResult)
-      }
-    } catch (error) {
-      setResult({ ok: false, status: 0, data: error instanceof Error ? error.message : String(error) })
-    } finally {
-      setLoading(false)
-    }
+    await createExcelWriteJob('import', file, config)
   }
 
   async function createClearMatchedJob(event: FormEvent<HTMLFormElement>) {
@@ -3225,41 +3266,22 @@ function ExcelMatchView({
     }
 
     const confirmWrite = form.get('confirmWrite') === 'on'
-    if (confirmWrite && !window.confirm('确认清空命中行的 matched_docno？该操作用于退回未匹配状态。')) {
+    const config = {
+      operation: 'clear_matched_docno',
+      sheetName: formValue(form, 'sheetName').trim() || 'Sheet1',
+      tableName: formValue(form, 'tableName').trim(),
+      dbMatchField: formValue(form, 'dbMatchField').trim(),
+      matchExcelColumn: formValue(form, 'matchExcelColumn').trim(),
+      dbWriteField: 'matched_docno',
+      batchSize: Number(formValue(form, 'batchSize') || 1000),
+      dryRun: !confirmWrite,
+      confirmWrite,
+    }
+    if (confirmWrite) {
+      setPendingWrite({ slot: 'clear', file, config, message: '确认清空命中行的 matched_docno？该操作会将这些订单退回未匹配状态。' })
       return
     }
-
-    setLoading(true)
-    try {
-      const uploadId = await ensureExcelUpload('clear', file)
-      const payload = buildConfigPayload(uploadId, {
-        operation: 'clear_matched_docno',
-        sheetName: formValue(form, 'sheetName').trim() || 'Sheet1',
-        tableName: formValue(form, 'tableName').trim(),
-        dbMatchField: formValue(form, 'dbMatchField').trim(),
-        matchExcelColumn: formValue(form, 'matchExcelColumn').trim(),
-        dbWriteField: 'matched_docno',
-        batchSize: Number(formValue(form, 'batchSize') || 1000),
-        dryRun: !confirmWrite,
-        confirmWrite,
-      })
-      const response = await fetch(apiURL('/v1/excel-match-jobs'), {
-        method: 'POST',
-        headers: token ? { token } : undefined,
-        body: payload,
-      })
-      const data = await response.json().catch(() => ({}))
-      const nextResult = { ok: response.ok && isSuccessPayload(data), status: response.status, data }
-      if (nextResult.ok) {
-        showCreatedJob(nextResult)
-      } else {
-        setResult(nextResult)
-      }
-    } catch (error) {
-      setResult({ ok: false, status: 0, data: error instanceof Error ? error.message : String(error) })
-    } finally {
-      setLoading(false)
-    }
+    await createExcelWriteJob('clear', file, config)
   }
 
   function showCreatedJob(result: ApiResult) {
@@ -3638,8 +3660,9 @@ function ExcelMatchView({
       )}
 
       {excelDialog === 'import' && (
-        <Modal title="匹配导入参数" onClose={closeExcelDialog}>
-          <form className="excel-upload-form" onSubmit={createImportJob} key={importFormKey}>
+        <Modal title={pendingWrite?.slot === 'import' ? '确认写入数据库' : '匹配导入参数'} focusKey={pendingWrite?.slot === 'import' ? 'confirm' : 'form'} closeDisabled={loading} onClose={() => { if (!loading) { setPendingWrite(null); closeExcelDialog() } }}>
+          {pendingWrite?.slot === 'import' && <div className="view-stack"><p>{pendingWrite.message}</p><div className="excel-form-actions"><button type="button" disabled={loading} onClick={() => setPendingWrite(null)}>返回修改</button><button className="primary" type="button" disabled={loading} onClick={() => void confirmPendingWrite()}>{loading ? '创建任务中…' : '确认写入'}</button></div></div>}
+          <form className="excel-upload-form" onSubmit={createImportJob} key={importFormKey} hidden={pendingWrite?.slot === 'import'}>
             <label>
               已保存方案
               <select value={selectedImportSchemeID} onChange={(event) => applyImportScheme(event.currentTarget.value)}>
@@ -3722,8 +3745,9 @@ function ExcelMatchView({
       )}
 
       {excelDialog === 'clear' && (
-        <Modal title="退回未匹配参数" onClose={closeExcelDialog}>
-          <form className="excel-upload-form" onSubmit={createClearMatchedJob}>
+        <Modal title={pendingWrite?.slot === 'clear' ? '确认退回未匹配' : '退回未匹配参数'} focusKey={pendingWrite?.slot === 'clear' ? 'confirm' : 'form'} closeDisabled={loading} onClose={() => { if (!loading) { setPendingWrite(null); closeExcelDialog() } }}>
+          {pendingWrite?.slot === 'clear' && <div className="view-stack"><p>{pendingWrite.message}</p><div className="excel-form-actions"><button type="button" disabled={loading} onClick={() => setPendingWrite(null)}>返回修改</button><button className="danger" type="button" disabled={loading} onClick={() => void confirmPendingWrite()}>{loading ? '创建任务中…' : '确认退回'}</button></div></div>}
+          <form className="excel-upload-form" onSubmit={createClearMatchedJob} hidden={pendingWrite?.slot === 'clear'}>
             <label className="file-input-label">
               Excel 文件
               <input
@@ -3905,10 +3929,14 @@ function ExcelJobHistoryTable({
   )
 }
 
-function Modal({ title, onClose, children, footer }: { title: string; onClose: () => void; children: ReactNode; footer?: ReactNode }) {
+function Modal({ title, onClose, children, footer, closeDisabled = false, focusKey }: { title: string; onClose: () => void; children: ReactNode; footer?: ReactNode; closeDisabled?: boolean; focusKey?: string }) {
   const panelRef = useRef<HTMLElement>(null)
   const returnFocusRef = useRef<HTMLElement | null>(document.activeElement instanceof HTMLElement ? document.activeElement : null)
   const titleID = useMemo(() => `modal-title-${Math.random().toString(36).slice(2)}`, [])
+  const onCloseRef = useRef(onClose)
+  const closeDisabledRef = useRef(closeDisabled)
+  onCloseRef.current = onClose
+  closeDisabledRef.current = closeDisabled
 
   useEffect(() => {
     const previousOverflow = document.body.style.overflow
@@ -3917,11 +3945,11 @@ function Modal({ title, onClose, children, footer }: { title: string; onClose: (
     const handleKeyDown = (event: KeyboardEvent) => {
       if (event.key === 'Escape') {
         event.preventDefault()
-        onClose()
+        if (!closeDisabledRef.current) onCloseRef.current()
         return
       }
       if (event.key !== 'Tab') return
-      const focusable = Array.from(panelRef.current?.querySelectorAll<HTMLElement>(focusableSelector) ?? [])
+      const focusable = Array.from(panelRef.current?.querySelectorAll<HTMLElement>(focusableSelector) ?? []).filter((element) => !element.closest('[hidden], [aria-hidden="true"]'))
       if (focusable.length === 0) {
         event.preventDefault()
         panelRef.current?.focus()
@@ -3939,21 +3967,25 @@ function Modal({ title, onClose, children, footer }: { title: string; onClose: (
     }
     document.body.style.overflow = 'hidden'
     window.addEventListener('keydown', handleKeyDown)
-    const initialFocus = panelRef.current?.querySelector<HTMLElement>(focusableSelector)
-    initialFocus?.focus()
     return () => {
       document.body.style.overflow = previousOverflow
       window.removeEventListener('keydown', handleKeyDown)
       returnFocus?.focus()
     }
-  }, [onClose])
+  }, [])
+
+  useEffect(() => {
+    const focusableSelector = 'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+    const initialFocus = Array.from(panelRef.current?.querySelectorAll<HTMLElement>(focusableSelector) ?? []).find((element) => !element.closest('[hidden], [aria-hidden="true"]'))
+    initialFocus?.focus()
+  }, [focusKey])
 
   return (
     <div className="modal-backdrop" role="presentation">
       <section ref={panelRef} className="modal-panel" role="dialog" aria-modal="true" aria-labelledby={titleID} tabIndex={-1}>
         <div className="modal-title">
           <h3 id={titleID}>{title}</h3>
-          <button type="button" onClick={onClose} aria-label={`关闭${title}`}>关闭</button>
+          <button type="button" onClick={onClose} disabled={closeDisabled} aria-label={`关闭${title}`}>关闭</button>
         </div>
         <div className="modal-body">{children}</div>
         {footer && <div className="modal-footer">{footer}</div>}
