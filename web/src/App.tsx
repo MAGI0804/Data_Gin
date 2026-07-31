@@ -29,6 +29,7 @@ import { apiURL as buildApiURL } from './apiURL'
 import { clearStoredToken, loadStoredSessionUser, loadStoredToken, saveStoredSessionUser, saveStoredToken, saveStoredTokenExpiry, storedTokenExpiresAt, tokenActorID, type StoredSessionUser } from './authStorage'
 import { createApiClient, type ApiRequestOptions, type ClientResponse, type HTTPMethod } from './api/client'
 import { readSessionUser, readTokenInfo, type SessionUser } from './api/auth'
+import { parseDataStatisticsSummary, parseHealthSummary, parseMallWeatherMetricsSummary, redactMonitoringJSON, type DataStatisticsSummary, type HealthSummary, type MallWeatherMetricsSummary } from './monitoring'
 import { MallWeatherPage, StoreInfoPage } from './MallWeatherPage'
 import { DataAuthorizationPage } from './DataAuthorizationPage'
 import { Brand } from './components/Brand'
@@ -57,6 +58,7 @@ type ApiClientOptions = Omit<ApiRequestOptions, 'method'> & {
 }
 
 type ApiClient = (path: string, options?: ApiClientOptions) => Promise<ApiResult>
+type MonitoringSnapshot = { statistics: DataStatisticsSummary | null; weather: MallWeatherMetricsSummary | null; health: HealthSummary | null }
 type FileDownloadClient = (path: string, fileName: string, signal: AbortSignal) => Promise<ApiResult>
 type NavKey = 'overview' | 'runs' | 'delivery_logs' | 'step_runs' | 'store_info' | 'mall_weather' | 'data_authorizations' | 'sources' | 'receive' | 'pull_records' | 'backfill' | 'youzan_distribution' | 'rules' | 'processed' | 'methods' | 'destinations' | 'tasks' | 'push_policy' | 'excel_jobs' | 'excel_schemes' | 'excel_write'
 type NavItem = { key: NavKey; label: string; description: string; icon: ReactNode }
@@ -734,6 +736,8 @@ function App() {
   const [result, setResult] = useState<ApiResult | null>(null)
   const [runs, setRuns] = useState<PipelineRun[]>([])
   const [stepRuns, setStepRuns] = useState<StepRun[]>([])
+  const [selectedStepRunID, setSelectedStepRunID] = useState<number | null>(null)
+  const stepRequestRef = useRef<AbortController | null>(null)
   const [methods, setMethods] = useState<MethodDisplay[]>(builtinMethods)
   const [sources, setSources] = useState<SourceDefinition[]>([])
   const [rawData, setRawData] = useState<RawData[]>([])
@@ -742,6 +746,8 @@ function App() {
   const [destinations, setDestinations] = useState<DestinationDefinition[]>([])
   const [deliveryTasks, setDeliveryTasks] = useState<DeliveryTask[]>([])
   const [deliveryLogs, setDeliveryLogs] = useState<DeliveryLog[]>([])
+  const [monitoring, setMonitoring] = useState<MonitoringSnapshot>({ statistics: null, weather: null, health: null })
+  const [monitoringStale, setMonitoringStale] = useState(false)
   const [orderPushSkipConfig, setOrderPushSkipConfig] = useState<OrderPushSkipConfig>(defaultOrderPushSkipConfig)
   const [orderPushTargets, setOrderPushTargets] = useState<OrderPushTargetOption[]>([])
   const [legacyTasks, setLegacyTasks] = useState<LegacyTask[]>([])
@@ -1016,6 +1022,30 @@ function App() {
     return () => window.removeEventListener('hashchange', handleHashChange)
   }, [])
 
+  useEffect(() => () => stepRequestRef.current?.abort(), [])
+
+  useEffect(() => {
+    if (sessionState !== 'authenticated' || activeNav !== 'overview') return
+    const controller = new AbortController()
+    void Promise.all([
+      client('/v1/data/statistics', { method: 'GET', signal: controller.signal, showResult: false, silentLoading: true }),
+      client('/v1/mall-weather/metrics', { method: 'GET', signal: controller.signal, showResult: false, silentLoading: true }),
+      client('/health', { method: 'GET', signal: controller.signal, showResult: false, silentLoading: true }),
+    ]).then(([statisticsResponse, weatherResponse, healthResponse]) => {
+      if (controller.signal.aborted) return
+      const nextStatistics = statisticsResponse.ok ? parseDataStatisticsSummary(statisticsResponse.data) : null
+      const nextWeather = weatherResponse.ok ? parseMallWeatherMetricsSummary(weatherResponse.data) : null
+      const nextHealth = healthResponse.ok ? parseHealthSummary(healthResponse.data) : null
+      setMonitoring((current) => ({
+        statistics: nextStatistics ?? current.statistics,
+        weather: nextWeather ?? current.weather,
+        health: nextHealth ?? current.health,
+      }))
+      setMonitoringStale(!nextStatistics || !nextWeather || !nextHealth)
+    })
+    return () => controller.abort()
+  }, [activeNav, client, sessionState])
+
   function navigate(key: NavKey) {
     window.location.hash = key
     setActiveNav(key)
@@ -1036,8 +1066,12 @@ function App() {
   }
 
   async function loadStepRuns(runId: number) {
-    const response = await client(`/v1/pipeline-runs/${runId}/steps`, { method: 'GET' })
-    if (response.ok) setStepRuns(readList<StepRun>(response, 'step_runs'))
+    stepRequestRef.current?.abort()
+    const controller = new AbortController()
+    stepRequestRef.current = controller
+    setSelectedStepRunID(runId)
+    const response = await client(`/v1/pipeline-runs/${runId}/steps`, { method: 'GET', signal: controller.signal })
+    if (!controller.signal.aborted && response.ok) setStepRuns(readList<StepRun>(response, 'step_runs'))
   }
 
   async function toggleTarget(target: ToggleTarget, enabled: boolean) {
@@ -1182,10 +1216,10 @@ function App() {
 
       <section className="ops-workspace">
         <ModuleHeader activeNav={activeNav} loading={loading || refreshing} sessionUser={sessionUser} onOpenNavigation={openMobileNavigation} mobileNavTriggerRef={mobileNavTriggerRef} />
-        {activeNav === 'overview' && <PushStatusView runs={runs} deliveryLogs={deliveryLogs} onLoadSteps={loadStepRuns} />}
+        {activeNav === 'overview' && <PushStatusView runs={runs} deliveryLogs={deliveryLogs} monitoring={monitoring} stale={monitoringStale} onLoadSteps={loadStepRuns} />}
         {activeNav === 'runs' && <RunsQueryPage runs={runs} onLoadSteps={loadStepRuns} />}
         {activeNav === 'delivery_logs' && <DeliveryLogsQueryPage logs={deliveryLogs} onRetryLog={retryDeliveryLog} />}
-        {activeNav === 'step_runs' && <StepRunsQueryPage runs={runs} stepRuns={stepRuns} onLoadSteps={loadStepRuns} />}
+        {activeNav === 'step_runs' && <StepRunsQueryPage runs={runs} stepRuns={stepRuns} selectedRunID={selectedStepRunID} onLoadSteps={loadStepRuns} />}
         {activeNav === 'store_info' && <StoreInfoPage actorID={actorID} client={client} downloadFile={downloadFile} />}
         {activeNav === 'mall_weather' && <MallWeatherPage actorID={actorID} client={client} downloadFile={downloadFile} />}
         {activeNav === 'data_authorizations' && <DataAuthorizationPage client={client} />}
@@ -1296,17 +1330,24 @@ function ModuleHeader({ activeNav, loading, sessionUser, onOpenNavigation, mobil
   )
 }
 
-function PushStatusView({ runs, deliveryLogs, onLoadSteps }: { runs: PipelineRun[]; deliveryLogs: DeliveryLog[]; onLoadSteps: (runId: number) => void }) {
+function PushStatusView({ runs, deliveryLogs, monitoring, stale, onLoadSteps }: { runs: PipelineRun[]; deliveryLogs: DeliveryLog[]; monitoring: MonitoringSnapshot; stale: boolean; onLoadSteps: (runId: number) => void }) {
   const deliveryRuns = runs.filter((run) => run.run_type === 'delivery')
   const failedLogs = deliveryLogs.filter((log) => !log.success)
   return (
     <div className="view-stack">
       <section className="overview-grid">
-        <Metric label="推送运行" value={deliveryRuns.length} />
-        <Metric label="成功记录" value={sum(deliveryRuns, 'success_count')} />
-        <Metric label="失败记录" value={sum(deliveryRuns, 'failed_count') + failedLogs.length} />
-        <Metric label="最近日志" value={deliveryLogs.length} />
+        <Metric label="接收总量" value={monitoring.statistics?.totalCount ?? '-'} />
+        <Metric label="已处理" value={monitoring.statistics?.processedCount ?? '-'} />
+        <Metric label="处理失败" value={monitoring.statistics?.errorCount ?? '-'} />
+        <Metric label="交付失败" value={sum(deliveryRuns, 'failed_count') + failedLogs.length} />
       </section>
+      <section className="overview-grid compact" aria-live="polite">
+        <Metric label="天气告警" value={monitoring.weather?.firingAlerts ?? '-'} />
+        <Metric label="天气拉取失败" value={monitoring.weather?.failedFetches ?? '-'} />
+        <Metric label="服务健康" value={monitoring.health?.healthy ? '正常' : '未知'} />
+        <Metric label="运行记录" value={deliveryLogs.length} />
+      </section>
+      {stale && <p className="backfill-note" role="status">部分监控数据暂时不可用，正在保留最近一次成功结果。</p>}
       <section className="content-grid two">
         <Panel title="最近推送运行" icon={<Activity />} meta="delivery runs">
           <RunTable runs={deliveryRuns.length ? deliveryRuns : runs.slice(0, 12)} onLoadSteps={onLoadSteps} />
@@ -1438,9 +1479,10 @@ function RunsQueryPage({ runs, onLoadSteps }: { runs: PipelineRun[]; onLoadSteps
   )
 }
 
-function DeliveryLogsQueryPage({ logs, onRetryLog }: { logs: DeliveryLog[]; onRetryLog: (logId: number) => void }) {
+function DeliveryLogsQueryPage({ logs, onRetryLog }: { logs: DeliveryLog[]; onRetryLog: (logId: number) => Promise<void> }) {
   const [query, setQuery] = useState('')
   const [status, setStatus] = useState('all')
+  const [retryingLogID, setRetryingLogID] = useState<number | null>(null)
   const filtered = useMemo(() => logs.filter((log) => {
     const matchesQuery = includesQuery([log.id, log.trace_id, log.business_key, log.source_code, log.destination_code, log.destination_name, log.error_message], query)
     const matchesStatus = status === 'all' || (status === 'success' ? log.success : !log.success)
@@ -1452,12 +1494,16 @@ function DeliveryLogsQueryPage({ logs, onRetryLog }: { logs: DeliveryLog[]; onRe
         <Field label="业务键 / Trace / 来源 / 目标" name="delivery_query" value={query} onChange={setQuery} />
         <SelectFilter label="交付状态" value={status} onChange={setStatus} options={[{ value: 'success', label: '成功' }, { value: 'failed', label: '失败' }]} />
       </QueryBar>
-      <Panel title="推送日志" icon={<Send />} meta={`查询命中 ${filtered.length} 条`}><DeliveryLogList logs={filtered} onRetryLog={onRetryLog} /></Panel>
+      <Panel title="推送日志" icon={<Send />} meta={`当前仅显示后端返回的最近 ${logs.length} 条`}><DeliveryLogList logs={filtered} retryingLogID={retryingLogID} onRetryLog={async (log) => {
+        if (log.success || retryingLogID !== null || !window.confirm(`确认重试失败日志 #${log.id}？`)) return
+        setRetryingLogID(log.id)
+        try { await onRetryLog(log.id) } finally { setRetryingLogID(null) }
+      }} /></Panel>
     </div>
   )
 }
 
-function StepRunsQueryPage({ runs, stepRuns, onLoadSteps }: { runs: PipelineRun[]; stepRuns: StepRun[]; onLoadSteps: (runId: number) => void }) {
+function StepRunsQueryPage({ runs, stepRuns, selectedRunID, onLoadSteps }: { runs: PipelineRun[]; stepRuns: StepRun[]; selectedRunID: number | null; onLoadSteps: (runId: number) => void }) {
   const [runQuery, setRunQuery] = useState('')
   const [stepQuery, setStepQuery] = useState('')
   const visibleRuns = runs.filter((run) => includesQuery([run.id, run.trace_id, run.run_type], runQuery))
@@ -1471,7 +1517,7 @@ function StepRunsQueryPage({ runs, stepRuns, onLoadSteps }: { runs: PipelineRun[
       <QueryBar count={visibleSteps.length} total={stepRuns.length}>
         <Field label="步骤编码 / 类型 / 状态" name="step_query" value={stepQuery} onChange={setStepQuery} />
       </QueryBar>
-      <Panel title="步骤明细" icon={<BookOpen />} meta={`当前 ${visibleSteps.length} 条`}><StepRunList stepRuns={visibleSteps} /></Panel>
+      <Panel title="步骤明细" icon={<BookOpen />} meta={selectedRunID ? `运行 #${selectedRunID} / ${visibleSteps.length} 条` : '请先选择运行'}><StepRunList stepRuns={visibleSteps} /></Panel>
     </div>
   )
 }
@@ -3238,7 +3284,7 @@ function RunTable({ runs, onLoadSteps, onSelectRun }: { runs: PipelineRun[]; onL
   )
 }
 
-function DeliveryLogList({ logs, onSelectLog, onRetryLog }: { logs: DeliveryLog[]; onSelectLog?: (log: DeliveryLog) => void; onRetryLog?: (logId: number) => void }) {
+function DeliveryLogList({ logs, onSelectLog, onRetryLog, retryingLogID }: { logs: DeliveryLog[]; onSelectLog?: (log: DeliveryLog) => void; onRetryLog?: (log: DeliveryLog) => void | Promise<void>; retryingLogID?: number | null }) {
   const [storeFilter, setStoreFilter] = useState('all')
   const matchedLogs = useMemo(
 	    () => logs.map((log) => ({ log, store: matchDeliveryStore(log) ?? otherDeliveryStore })),
@@ -3297,7 +3343,7 @@ function DeliveryLogList({ logs, onSelectLog, onRetryLog }: { logs: DeliveryLog[
                       </div>
                       <div className="record-actions">
                         <small>{formatDate(log.sent_at)}</small>
-                        {!log.success && onRetryLog && <button type="button" onClick={() => onRetryLog(log.id)}>重试</button>}
+                        {!log.success && onRetryLog && <button type="button" disabled={retryingLogID !== null} onClick={() => void onRetryLog(log)}>{retryingLogID === log.id ? '重试中…' : '重试'}</button>}
                         {onSelectLog && <button type="button" onClick={() => onSelectLog(log)}>详情</button>}
                       </div>
                     </article>
@@ -3470,7 +3516,7 @@ function StepRunList({ stepRuns }: { stepRuns: StepRun[] }) {
       {stepRuns.map((run) => (
         <details key={run.id}>
           <summary>{run.step_code} / {run.method_type} / {run.status}</summary>
-          <ReadonlyJSON value={{ input: parseJsonText(run.input_json), output: parseJsonText(run.output_json), error: run.error_message }} />
+          <ReadonlyJSON value={redactMonitoringJSON({ input: parseJsonText(run.input_json), output: parseJsonText(run.output_json), error: run.error_message })} />
         </details>
       ))}
     </div>
@@ -3485,7 +3531,7 @@ function ResultPanel({ result, onClose }: { result: ApiResult | null; onClose: (
         <PanelTitle icon={<FileJson />} title="接口结果" meta={String(result.status)} />
         <button type="button" onClick={onClose} aria-label="关闭接口结果"><X aria-hidden="true" /></button>
       </div>
-      <ReadonlyJSON value={result.data} />
+      <ReadonlyJSON value={redactMonitoringJSON(result.data)} />
     </aside>
   )
 }
