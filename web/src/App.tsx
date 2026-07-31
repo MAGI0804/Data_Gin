@@ -467,6 +467,7 @@ type DestinationDefinition = {
   code: string
   destination_type: string
   config_json: string
+  has_secret?: boolean
   enabled: boolean
 }
 
@@ -566,8 +567,7 @@ type DeliveryLog = {
   destination_id: number
   clean_record_id: number
   business_key: string
-  request_body: string
-  response_body: string
+  response_summary: string
   http_status: number
   success: boolean
   error_message: string
@@ -3704,8 +3704,7 @@ function matchDeliveryStore(log: DeliveryLog) {
     log.destination_name,
     log.source_code,
     log.business_key,
-    log.request_body,
-    log.response_body,
+    log.response_summary,
     log.error_message,
   ].join(' ').toLowerCase()
 
@@ -3713,10 +3712,8 @@ function matchDeliveryStore(log: DeliveryLog) {
 }
 
 function deliveryLogPreview(log: DeliveryLog) {
-  const response = compactText(log.response_body)
+  const response = compactText(log.response_summary)
   if (response) return response
-  const request = compactText(log.request_body)
-  if (request) return `请求 ${request}`
   return `trace: ${log.trace_id || '-'}`
 }
 
@@ -4253,6 +4250,7 @@ async function updateTargetEnabled(client: ApiClient, target: ToggleTarget, enab
   if (target.type === 'destination') {
     const destination = data.destinations.find((item) => item.id === target.id)
     if (!destination) return { ok: false, status: 404, data: 'destination not found' }
+    if (destination.has_secret) return protectedConfigUpdateFailure()
     return client(`/v1/destinations/${target.id}`, {
       method: 'PUT',
       body: {

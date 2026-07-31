@@ -28,7 +28,7 @@ func (ctrl *DeliveryController) ListDestinations(c *gin.Context) {
 	}
 
 	c.JSON(200, msg.SuccessResponse("查询推送目标成功", &map[string]any{
-		"destinations": destinations,
+		"destinations": safeDestinationDefinitions(destinations),
 	}))
 }
 
@@ -46,7 +46,7 @@ func (ctrl *DeliveryController) GetDestination(c *gin.Context) {
 	}
 
 	c.JSON(200, msg.SuccessResponse("查询推送目标详情成功", &map[string]any{
-		"destination": destination,
+		"destination": safeDestinationDefinition(*destination),
 	}))
 }
 
@@ -64,7 +64,7 @@ func (ctrl *DeliveryController) CreateDestination(c *gin.Context) {
 	}
 
 	c.JSON(200, msg.SuccessResponse("创建推送目标成功", &map[string]any{
-		"destination": destination,
+		"destination": safeDestinationDefinition(*destination),
 	}))
 }
 
@@ -88,7 +88,7 @@ func (ctrl *DeliveryController) UpdateDestination(c *gin.Context) {
 	}
 
 	c.JSON(200, msg.SuccessResponse("更新推送目标成功", &map[string]any{
-		"destination": destination,
+		"destination": safeDestinationDefinition(*destination),
 	}))
 }
 
@@ -214,7 +214,7 @@ func (ctrl *DeliveryController) ListLogs(c *gin.Context) {
 	}
 
 	c.JSON(200, msg.SuccessResponse("查询推送日志成功", &map[string]any{
-		"logs": logs,
+		"logs": safeDeliveryLogs(logs),
 	}))
 }
 
