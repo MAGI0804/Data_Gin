@@ -2323,6 +2323,7 @@ function DestinationsQueryPage({ client, destinations, onRefresh }: { client: Ap
   const [draft, setDraft] = useState<DestinationDraft | null>(null)
   const [saving, setSaving] = useState(false)
   const [testingID, setTestingID] = useState<number | null>(null)
+  const [pendingTest, setPendingTest] = useState<DestinationDefinition | null>(null)
   const [message, setMessage] = useState('')
   const filtered = destinations.filter((destination) => includesQuery([destination.id, destination.name, destination.code, destination.config_json], query)
     && (status === 'all' || (status === 'enabled' ? destination.enabled : !destination.enabled))
@@ -2351,7 +2352,7 @@ function DestinationsQueryPage({ client, destinations, onRefresh }: { client: Ap
   }
 
   async function test(destination: DestinationDefinition) {
-    if (testingID !== null || !window.confirm(`将向“${destination.name}”配置的目标 URL 发起真实连通性请求，不会推送业务记录。确认继续？`)) return
+    if (testingID !== null) return
     setTestingID(destination.id)
     const response = await client(`/v1/destinations/${destination.id}/test`, { method: 'POST', showResult: false, silentLoading: true })
     setTestingID(null)
@@ -2366,7 +2367,7 @@ function DestinationsQueryPage({ client, destinations, onRefresh }: { client: Ap
         <SelectFilter label="类型" value={destinationType} onChange={setDestinationType} options={uniqueOptions(destinations.map((destination) => destination.destination_type))} />
       </QueryBar>
       <div className="record-actions"><button type="button" className="primary" onClick={() => setDraft({ id: null, name: '', code: '', destinationType: 'http', configJSON: '{\n  "url": "",\n  "method": "POST"\n}', enabled: true, hasSecret: false })}>新增目标</button></div>
-      <Panel title="推送目标" icon={<Send />} meta={`查询命中 ${filtered.length} 条`}><DestinationList destinations={filtered} testingID={testingID} onDetail={(item) => { void openDetail(item.id) }} onTest={(item) => { void test(item) }} /></Panel>
+      <Panel title="推送目标" icon={<Send />} meta={`查询命中 ${filtered.length} 条`}><DestinationList destinations={filtered} testingID={testingID} onDetail={(item) => { void openDetail(item.id) }} onTest={setPendingTest} /></Panel>
       {draft && <Modal title={draft.id ? '推送目标详情与编辑' : '新增推送目标'} onClose={() => { if (!saving) setDraft(null) }}>
         {draft.hasSecret && <div className="result-banner error" role="alert">该目标包含已隐藏密钥，当前仅可查看与测试；完整更新会覆盖真实密钥。</div>}
         <form className="excel-upload-form" onSubmit={save}>
@@ -2378,6 +2379,7 @@ function DestinationsQueryPage({ client, destinations, onRefresh }: { client: Ap
           <div className="excel-form-actions"><button className="primary" type="submit" disabled={draft.hasSecret || saving}>{saving ? '保存中…' : '保存目标'}</button></div>
         </form>
       </Modal>}
+      {pendingTest && <Modal title="确认测试推送目标" onClose={() => { if (testingID === null) setPendingTest(null) }} footer={<><button type="button" disabled={testingID !== null} onClick={() => setPendingTest(null)}>取消</button><button className="primary" type="button" disabled={testingID !== null} onClick={() => { const target = pendingTest; setPendingTest(null); void test(target) }}>{testingID === pendingTest.id ? '测试中…' : '确认测试'}</button></>}><p>将向“{pendingTest.name}”配置的目标地址发起真实连通性请求，不会推送业务记录。确认继续？</p></Modal>}
     </div>
   )
 }
@@ -2392,6 +2394,7 @@ function DeliveryTasksQueryPage({ client, tasks, sources, destinations, onRefres
     && (destinationID === 'all' || String(task.destination_id) === destinationID))
   const destinationOptions = destinations.map((destination) => ({ value: String(destination.id), label: destination.name || destination.code }))
   const [runningID, setRunningID] = useState<number | null>(null)
+  const [pendingRun, setPendingRun] = useState<DeliveryTask | null>(null)
   const [loadingDetailID, setLoadingDetailID] = useState<number | null>(null)
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState('')
@@ -2478,8 +2481,7 @@ function DeliveryTasksQueryPage({ client, tasks, sources, destinations, onRefres
   }
 
   async function run(task: DeliveryTask) {
-    const destination = destinations.find((item) => item.id === task.destination_id)
-    if (runningID !== null || !window.confirm(`确认执行“${task.name}”？最多向 ${destination?.name || `目标 #${task.destination_id}`} 推送 100 条 ready 记录；成功记录将标记为已交付。`)) return
+    if (runningID !== null) return
     setRunningID(task.id)
     const response = await client(`/v1/delivery-tasks/${task.id}/run`, { method: 'POST', showResult: false, silentLoading: true })
     const result = response.ok ? readObject<{ total_count: number; success_count: number; failed_count: number; skipped_count: number }>(response, 'result') : null
@@ -2496,7 +2498,7 @@ function DeliveryTasksQueryPage({ client, tasks, sources, destinations, onRefres
         <SelectFilter label="推送目标" value={destinationID} onChange={setDestinationID} options={destinationOptions} />
       </QueryBar>
       <div className="record-actions"><button type="button" className="primary" onClick={openCreate}>新增推送任务</button></div>
-      <Panel title="推送任务" icon={<ArrowUpFromLine />} meta={`查询命中 ${filtered.length} 条`}><DeliveryTaskList tasks={filtered} runningID={runningID} loadingDetailID={loadingDetailID} destinations={destinations} onDetail={(task) => { void openDetail(task.id) }} onRun={(task) => { void run(task) }} /></Panel>
+      <Panel title="推送任务" icon={<ArrowUpFromLine />} meta={`查询命中 ${filtered.length} 条`}><DeliveryTaskList tasks={filtered} runningID={runningID} loadingDetailID={loadingDetailID} destinations={destinations} onDetail={(task) => { void openDetail(task.id) }} onRun={setPendingRun} /></Panel>
       {draft && <Modal title={draft.id ? '推送任务详情与编辑' : '新增推送任务'} onClose={() => { if (!saving) setDraft(null) }}>
         <form className="excel-upload-form" onSubmit={saveDraft}>
           <Field label="任务名称" name="delivery_task_name" value={draft.name} required onChange={(name) => setDraft({ ...draft, name })} />
@@ -2528,6 +2530,7 @@ function DeliveryTasksQueryPage({ client, tasks, sources, destinations, onRefres
           <div className="excel-form-actions"><button className="primary" type="submit" disabled={saving}>{saving ? '保存中…' : '保存任务'}</button></div>
         </form>
       </Modal>}
+      {pendingRun && <Modal title="确认执行推送任务" onClose={() => { if (runningID === null) setPendingRun(null) }} footer={<><button type="button" disabled={runningID !== null} onClick={() => setPendingRun(null)}>取消</button><button className="primary" type="button" disabled={runningID !== null} onClick={() => { const task = pendingRun; setPendingRun(null); void run(task) }}>{runningID === pendingRun.id ? '执行中…' : '确认执行'}</button></>}><p>将执行“{pendingRun.name}”，最多向 {destinations.find((item) => item.id === pendingRun.destination_id)?.name || `目标 #${pendingRun.destination_id}`} 推送 100 条 ready 记录；成功记录将标记为已交付。</p></Modal>}
     </div>
   )
 }
