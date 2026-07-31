@@ -3896,25 +3896,54 @@ function ExcelJobHistoryTable({
 }
 
 function Modal({ title, onClose, children, footer }: { title: string; onClose: () => void; children: ReactNode; footer?: ReactNode }) {
+  const panelRef = useRef<HTMLElement>(null)
+  const returnFocusRef = useRef<HTMLElement | null>(document.activeElement instanceof HTMLElement ? document.activeElement : null)
+  const titleID = useMemo(() => `modal-title-${Math.random().toString(36).slice(2)}`, [])
+
   useEffect(() => {
     const previousOverflow = document.body.style.overflow
+    const returnFocus = returnFocusRef.current
+    const focusableSelector = 'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose()
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        onClose()
+        return
+      }
+      if (event.key !== 'Tab') return
+      const focusable = Array.from(panelRef.current?.querySelectorAll<HTMLElement>(focusableSelector) ?? [])
+      if (focusable.length === 0) {
+        event.preventDefault()
+        panelRef.current?.focus()
+        return
+      }
+      const first = focusable[0]
+      const last = focusable[focusable.length - 1]
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault()
+        last.focus()
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault()
+        first.focus()
+      }
     }
     document.body.style.overflow = 'hidden'
     window.addEventListener('keydown', handleKeyDown)
+    const initialFocus = panelRef.current?.querySelector<HTMLElement>(focusableSelector)
+    initialFocus?.focus()
     return () => {
       document.body.style.overflow = previousOverflow
       window.removeEventListener('keydown', handleKeyDown)
+      returnFocus?.focus()
     }
   }, [onClose])
 
   return (
     <div className="modal-backdrop" role="presentation">
-      <section className="modal-panel" role="dialog" aria-modal="true" aria-label={title}>
+      <section ref={panelRef} className="modal-panel" role="dialog" aria-modal="true" aria-labelledby={titleID} tabIndex={-1}>
         <div className="modal-title">
-          <h3>{title}</h3>
-          <button type="button" onClick={onClose}>关闭</button>
+          <h3 id={titleID}>{title}</h3>
+          <button type="button" onClick={onClose} aria-label={`关闭${title}`}>关闭</button>
         </div>
         <div className="modal-body">{children}</div>
         {footer && <div className="modal-footer">{footer}</div>}
