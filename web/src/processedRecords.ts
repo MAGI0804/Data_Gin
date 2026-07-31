@@ -8,6 +8,19 @@ export type ProcessedRecordsQuery = {
   createdTo?: string
 }
 
+export type CleanRecordsQuery = {
+  page: number
+  pageSize: number
+  sourceID?: string
+  tableName?: string
+  businessKey?: string
+  status?: string
+  minQuality?: string
+  maxQuality?: string
+  createdFrom?: string
+  createdTo?: string
+}
+
 export type ProcessedRecordsPage<T> = {
   list: T[]
   total: number
@@ -34,6 +47,29 @@ export function buildProcessedRecordsQuery(query: ProcessedRecordsQuery) {
   })
   const optional = {
     data_type: query.dataType?.trim(),
+    min_quality: optionalQuality(query.minQuality),
+    max_quality: optionalQuality(query.maxQuality),
+    created_from: query.createdFrom?.trim(),
+    created_to: query.createdTo?.trim(),
+  }
+  for (const [key, value] of Object.entries(optional)) if (value) parameters.set(key, value)
+  return parameters.toString()
+}
+
+export function buildCleanRecordsQuery(query: CleanRecordsQuery) {
+  const parameters = new URLSearchParams({
+    page: String(boundedInteger(query.page, 1, 1, Number.MAX_SAFE_INTEGER)),
+    page_size: String(boundedInteger(query.pageSize, 20, 1, 100)),
+  })
+  const sourceID = query.sourceID?.trim()
+  if (sourceID) {
+    const source = Number(sourceID)
+    if (Number.isInteger(source) && source > 0) parameters.set('source_id', String(source))
+  }
+  const optional = {
+    table_name: query.tableName?.trim(),
+    business_key: query.businessKey?.trim(),
+    status: query.status?.trim(),
     min_quality: optionalQuality(query.minQuality),
     max_quality: optionalQuality(query.maxQuality),
     created_from: query.createdFrom?.trim(),
