@@ -33,6 +33,7 @@ import { parseDataStatisticsSummary, parseHealthSummary, parseMallWeatherMetrics
 import { MallWeatherPage, StoreInfoPage } from './MallWeatherPage'
 import { DataAuthorizationPage } from './DataAuthorizationPage'
 import { PipelineRunPanel } from './PipelineRunPanel'
+import { PipelineComposerPanel } from './PipelineComposerPanel'
 import { Brand } from './components/Brand'
 import { parseMallWeatherExportContentStatus, submitMallWeatherExportContentDownload } from './mallWeatherExport'
 import { buildRawRecordsRequest, parseRawRecordsPage, type RawRecordOrigin, type RawRecordsPage } from './rawRecords'
@@ -1506,6 +1507,7 @@ function MethodsView({ methods, pipelines, client, coreMethods, onToggle, onPipe
         <CoreMethodList methods={coreMethods} onToggle={onToggle} />
       </Panel>
       <PipelineRunPanel pipelines={pipelines} client={client} onRunCompleted={onPipelineRunCompleted} />
+      <PipelineComposerPanel pipelines={pipelines} client={client} onRefresh={onPipelineRunCompleted} />
       <QueryBar count={filtered.length} total={methods.length}>
         <Field label="名称 / 编码 / 负责人" name="method_query" value={query} onChange={setQuery} />
         <SelectFilter label="分类" value={category} onChange={setCategory} options={uniqueOptions(methods.map((method) => method.category))} />

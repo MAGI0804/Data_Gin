@@ -564,6 +564,162 @@ button:focus-visible {
   color: #d92d20;
 }
 
+.pipeline-composer,
+.pipeline-composer-head,
+.pipeline-composer-layout,
+.pipeline-stage-workspace,
+.pipeline-stage,
+.pipeline-stage-head,
+.pipeline-step-list,
+.pipeline-step,
+.pipeline-editor,
+.pipeline-composer-actions,
+.pipeline-generated-config,
+.pipeline-publish-confirm {
+  display: grid;
+  gap: 12px;
+}
+
+.pipeline-composer {
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  padding: 18px 0;
+}
+
+.pipeline-composer-head,
+.pipeline-stage-head,
+.pipeline-step,
+.pipeline-detail-title,
+.pipeline-generated-config {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.pipeline-composer-head > div:first-child,
+.pipeline-stage-head > div:first-child,
+.pipeline-step > div,
+.pipeline-detail-title {
+  min-width: 0;
+}
+
+.pipeline-composer-head strong,
+.pipeline-stage strong,
+.pipeline-step strong,
+.pipeline-detail-title strong {
+  display: block;
+}
+
+.pipeline-composer-head span,
+.pipeline-stage-head span,
+.pipeline-step span,
+.pipeline-detail-title span,
+.pipeline-generated-config span,
+.pipeline-empty-step,
+.pipeline-composer-message {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.pipeline-composer-actions {
+  grid-auto-flow: column;
+  grid-auto-columns: max-content;
+  justify-content: end;
+}
+
+.pipeline-composer-layout {
+  grid-template-columns: minmax(180px, 0.3fr) minmax(0, 1fr);
+  align-items: start;
+  border-top: 1px solid var(--line);
+  padding-top: 14px;
+}
+
+.pipeline-composer-layout > label {
+  display: grid;
+  gap: 6px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.pipeline-stage-workspace {
+  border-left: 1px solid var(--line);
+  min-width: 0;
+  padding-left: 18px;
+}
+
+.pipeline-detail-title {
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 10px;
+}
+
+.pipeline-stage {
+  border-left: 3px solid var(--accent);
+  border-bottom: 1px solid var(--line);
+  padding: 12px 0 12px 14px;
+}
+
+.pipeline-stage-kind {
+  color: var(--ink) !important;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+  margin-right: 8px;
+}
+
+.pipeline-step-list {
+  border-top: 1px dashed var(--line);
+  padding-top: 10px;
+}
+
+.pipeline-step {
+  align-items: start;
+  padding: 8px 0;
+}
+
+.pipeline-generated-config {
+  background: var(--surface);
+  margin-top: 10px;
+  padding: 9px;
+}
+
+.pipeline-publish-confirm {
+  align-items: center;
+  grid-auto-flow: column;
+  grid-auto-columns: max-content;
+  color: var(--ink);
+  font-size: 12px;
+}
+
+.pipeline-editor,
+.pipeline-preview {
+  border: 1px solid var(--line);
+  margin: 0;
+  padding: 14px;
+}
+
+.pipeline-editor label {
+  display: grid;
+  gap: 6px;
+}
+
+.pipeline-editor h4 {
+  margin: 0;
+}
+
+.pipeline-composer-error {
+  color: #d92d20;
+  margin: 0;
+}
+
+.pipeline-preview {
+  background: var(--surface);
+  max-height: 420px;
+  max-width: 100%;
+  overflow: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
 .method-row,
 .record-row {
   display: grid;
@@ -1354,6 +1510,32 @@ summary {
 @media (max-width: 840px) {
   .pipeline-run-controls {
     grid-template-columns: 1fr;
+  }
+
+  .pipeline-composer-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .pipeline-stage-workspace {
+    border-left: 0;
+    border-top: 1px solid var(--line);
+    padding: 14px 0 0;
+  }
+
+  .pipeline-composer-head,
+  .pipeline-stage-head,
+  .pipeline-detail-title,
+  .pipeline-generated-config,
+  .pipeline-step {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .pipeline-composer-actions,
+  .pipeline-publish-confirm {
+    grid-auto-flow: row;
+    grid-auto-columns: auto;
+    justify-content: stretch;
   }
 
   .method-row,
