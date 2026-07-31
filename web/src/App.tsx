@@ -404,6 +404,20 @@ type SourceDefinition = {
   source_query_key: string
 }
 
+type SourceDraft = {
+  id: number | null
+  name: string
+  code: string
+  sourceType: string
+  enabled: boolean
+  authType: string
+  configJSON: string
+  schemaJSON: string
+  dedupeKeys: string
+  sourceQueryKey: string
+  hasSecret: boolean
+}
+
 type RawData = {
   id: number
   data_source_id: number
@@ -1275,7 +1289,7 @@ function App() {
         {activeNav === 'store_info' && <StoreInfoPage actorID={actorID} client={client} downloadFile={downloadFile} />}
         {activeNav === 'mall_weather' && <MallWeatherPage actorID={actorID} client={client} downloadFile={downloadFile} />}
         {activeNav === 'data_authorizations' && <DataAuthorizationPage client={client} />}
-        {activeNav === 'sources' && <SourcesQueryPage sources={sources} onFetchSource={fetchSource} onTestSource={testSource} />}
+        {activeNav === 'sources' && <SourcesQueryPage client={client} sources={sources} onFetchSource={fetchSource} onTestSource={testSource} onRefresh={() => refreshAll(false)} />}
         {activeNav === 'methods' && <MethodsView methods={methods} coreMethods={coreMethods} onToggle={toggleTarget} />}
         {activeNav === 'receive' && <RawRecordsQueryPage title="接口接收记录" origin="receive" client={client} />}
         {activeNav === 'pull_records' && <RawRecordsQueryPage title="数据拉取记录" origin="pull" client={client} />}
@@ -1574,21 +1588,72 @@ function StepRunsQueryPage({ runs, stepRuns, selectedRunID, onLoadSteps }: { run
   )
 }
 
-function SourcesQueryPage({ sources, onFetchSource, onTestSource }: { sources: SourceDefinition[]; onFetchSource: (sourceID: number) => Promise<ApiResult>; onTestSource: (sourceID: number) => Promise<ApiResult> }) {
+function SourcesQueryPage({ client, sources, onFetchSource, onTestSource, onRefresh }: { client: ApiClient; sources: SourceDefinition[]; onFetchSource: (sourceID: number) => Promise<ApiResult>; onTestSource: (sourceID: number) => Promise<ApiResult>; onRefresh: () => Promise<void> }) {
   const [query, setQuery] = useState('')
   const [status, setStatus] = useState('all')
   const [sourceType, setSourceType] = useState('all')
+  const [draft, setDraft] = useState<SourceDraft | null>(null)
+  const [saving, setSaving] = useState(false)
+  const [message, setMessage] = useState('')
   const filtered = sources.filter((source) => includesQuery([source.id, source.name, source.code, source.auth_type], query)
     && (status === 'all' || (status === 'enabled' ? source.enabled : !source.enabled))
     && (sourceType === 'all' || source.source_type === sourceType))
+
+  async function openDetail(id: number) {
+    setMessage('')
+    const response = await client(`/v1/sources/${id}`, { method: 'GET', showResult: false, silentLoading: true })
+    const source = response.ok ? readObject<SourceDefinition>(response, 'source') : null
+    if (!source) { setMessage(response.error?.message || '数据源详情暂时不可用。'); return }
+    setDraft(sourceDraftFrom(source))
+  }
+
+  async function save(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!draft || saving || draft.hasSecret) return
+    if (!draft.name.trim() || !draft.code.trim()) { setMessage('请填写数据源名称和编码。'); return }
+    try {
+      const config = JSON.parse(draft.configJSON) as unknown
+      const schema = JSON.parse(draft.schemaJSON) as unknown
+      const dedupe = JSON.parse(draft.dedupeKeys) as unknown
+      if (!config || Array.isArray(config) || typeof config !== 'object' || !schema || Array.isArray(schema) || typeof schema !== 'object' || !Array.isArray(dedupe)) throw new Error('shape')
+    } catch { setMessage('配置和 Schema 必须为 JSON 对象，去重键必须为 JSON 数组。'); return }
+    setSaving(true)
+    const response = await client(draft.id ? `/v1/sources/${draft.id}` : '/v1/sources', {
+      method: draft.id ? 'PUT' : 'POST', showResult: false, silentLoading: true,
+      body: { name: draft.name.trim(), code: draft.code.trim(), source_type: draft.sourceType, enabled: draft.enabled, auth_type: draft.authType.trim() || 'none', config_json: draft.configJSON, schema_json: draft.schemaJSON, dedupe_keys: draft.dedupeKeys, source_query_key: draft.sourceQueryKey.trim() },
+    })
+    setSaving(false)
+    if (!response.ok) { setMessage(response.error?.message || '数据源保存未完成。'); return }
+    setDraft(null)
+    setMessage('数据源已保存。')
+    await onRefresh()
+  }
   return (
     <div className="view-stack">
+      {message && <div className="result-banner" role="status">{message}</div>}
       <QueryBar count={filtered.length} total={sources.length}>
         <Field label="名称 / 编码 / 鉴权" name="source_query" value={query} onChange={setQuery} />
         <SelectFilter label="状态" value={status} onChange={setStatus} options={[{ value: 'enabled', label: '启用' }, { value: 'disabled', label: '停用' }]} />
         <SelectFilter label="类型" value={sourceType} onChange={setSourceType} options={uniqueOptions(sources.map((source) => source.source_type))} />
       </QueryBar>
-      <Panel title="数据源配置" icon={<Database />} meta={`查询命中 ${filtered.length} 条`}><SourceList sources={filtered} onFetchSource={onFetchSource} onTestSource={onTestSource} /></Panel>
+      <div className="record-actions"><button type="button" className="primary" onClick={() => setDraft({ id: null, name: '', code: '', sourceType: 'api_poll', enabled: true, authType: 'none', configJSON: '{\n  "url": "",\n  "method": "GET",\n  "records_path": "data"\n}', schemaJSON: '{}', dedupeKeys: '[]', sourceQueryKey: '', hasSecret: false })}>新增数据源</button></div>
+      <Panel title="数据源配置" icon={<Database />} meta={`查询命中 ${filtered.length} 条`}><SourceList sources={filtered} onDetail={(source) => { void openDetail(source.id) }} onFetchSource={onFetchSource} onTestSource={onTestSource} /></Panel>
+      {draft && <Modal title={draft.id ? '数据源详情与编辑' : '新增数据源'} onClose={() => { if (!saving) setDraft(null) }}>
+        {draft.hasSecret && <div className="result-banner error" role="alert">该配置含已隐藏凭据，当前仅可查看、测试和拉取；完整更新会覆盖真实凭据。</div>}
+        <form className="excel-upload-form" onSubmit={save}>
+          <Field label="数据源名称" name="source_name" value={draft.name} required onChange={(name) => setDraft({ ...draft, name })} />
+          <Field label="数据源编码" name="source_code" value={draft.code} required onChange={(code) => setDraft({ ...draft, code })} />
+          <label>数据源类型<select value={draft.sourceType} disabled={draft.hasSecret || saving} onChange={(event) => setDraft({ ...draft, sourceType: event.currentTarget.value })}><option value="api_poll">API 轮询</option><option value="database">数据库</option><option value="webhook">Webhook</option></select></label>
+          <Field label="鉴权类型" name="source_auth_type" value={draft.authType} onChange={(authType) => setDraft({ ...draft, authType })} />
+          <label className="checkbox-label"><input type="checkbox" checked={draft.enabled} disabled={draft.hasSecret || saving} onChange={(event) => setDraft({ ...draft, enabled: event.currentTarget.checked })} />启用数据源</label>
+          <Field label="来源查询键" name="source_query_key" value={draft.sourceQueryKey} onChange={(sourceQueryKey) => setDraft({ ...draft, sourceQueryKey })} />
+          <label>连接配置 JSON<textarea rows={10} value={draft.configJSON} disabled={draft.hasSecret || saving} onChange={(event) => setDraft({ ...draft, configJSON: event.currentTarget.value })} /></label>
+          <label>Schema JSON<textarea rows={5} value={draft.schemaJSON} disabled={draft.hasSecret || saving} onChange={(event) => setDraft({ ...draft, schemaJSON: event.currentTarget.value })} /></label>
+          <label>去重键 JSON 数组<textarea rows={4} value={draft.dedupeKeys} disabled={draft.hasSecret || saving} onChange={(event) => setDraft({ ...draft, dedupeKeys: event.currentTarget.value })} /></label>
+          <p className="query-contract-note">API 测试会发起真实连通性请求；Webhook 不支持主动拉取。Schema 与去重键目前由服务端保存，未参与拉取校验。</p>
+          <div className="excel-form-actions"><button className="primary" type="submit" disabled={draft.hasSecret || saving}>{saving ? '保存中…' : '保存数据源'}</button></div>
+        </form>
+      </Modal>}
     </div>
   )
 }
@@ -3944,7 +4009,7 @@ function RawDataList({ records }: { records: RawData[] }) {
   )
 }
 
-function SourceList({ sources, onFetchSource, onTestSource }: { sources: SourceDefinition[]; onFetchSource: (sourceID: number) => Promise<ApiResult>; onTestSource: (sourceID: number) => Promise<ApiResult> }) {
+function SourceList({ sources, onDetail, onFetchSource, onTestSource }: { sources: SourceDefinition[]; onDetail: (source: SourceDefinition) => void; onFetchSource: (sourceID: number) => Promise<ApiResult>; onTestSource: (sourceID: number) => Promise<ApiResult> }) {
   const [fetchingID, setFetchingID] = useState<number | null>(null)
   const [testingID, setTestingID] = useState<number | null>(null)
   const [messageByID, setMessageByID] = useState<Record<number, string>>({})
@@ -3981,8 +4046,9 @@ function SourceList({ sources, onFetchSource, onTestSource }: { sources: SourceD
           </div>
           <div className="record-actions">
             <StatusPill label={source.enabled ? '启用' : '停用'} />
+            <button type="button" disabled={testingID !== null || fetchingID !== null} onClick={() => onDetail(source)}>详情</button>
             <button type="button" disabled={testingID === source.id || fetchingID === source.id || !source.enabled} onClick={() => { void test(source.id) }}>{testingID === source.id ? '测试中…' : '测试连接'}</button>
-            <button type="button" disabled={testingID === source.id || fetchingID === source.id || !source.enabled} onClick={() => { void fetch(source.id) }}>{fetchingID === source.id ? '拉取中…' : '手动拉取'}</button>
+            <button type="button" disabled={testingID === source.id || fetchingID === source.id || !source.enabled || source.source_type === 'webhook'} onClick={() => { void fetch(source.id) }}>{fetchingID === source.id ? '拉取中…' : '手动拉取'}</button>
           </div>
           {messageByID[source.id] && <small className="source-operation-message" role="status" aria-live="polite">{messageByID[source.id]}</small>}
         </article>
@@ -4577,6 +4643,10 @@ function ruleDraftFrom(rule: TransformRule): RuleDraft {
 
 function destinationDraftFrom(destination: DestinationDefinition): DestinationDraft {
   return { id: destination.id, name: destination.name, code: destination.code, destinationType: destination.destination_type, configJSON: destination.config_json || '{}', enabled: destination.enabled, hasSecret: Boolean(destination.has_secret) }
+}
+
+function sourceDraftFrom(source: SourceDefinition): SourceDraft {
+  return { id: source.id, name: source.name, code: source.code, sourceType: source.source_type, enabled: source.enabled, authType: source.auth_type, configJSON: jsonText(source.config_json || '{}'), schemaJSON: jsonText(source.schema_json || '{}'), dedupeKeys: jsonText(source.dedupe_keys || '[]'), sourceQueryKey: source.source_query_key, hasSecret: Boolean(source.has_secret) }
 }
 
 function deliveryTaskDraftFrom(task: DeliveryTask): DeliveryTaskDraft {
