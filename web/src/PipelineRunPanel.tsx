@@ -1,6 +1,7 @@
 import { Play, X } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { parsePipelineRunResult, pipelineRunPath, type PipelineRunResult } from './pipelineRun'
+import { runSingleFlight } from './singleFlight'
 
 type Pipeline = { id: number; name: string; code: string; enabled: boolean }
 type ApiResult = { ok: boolean; status: number; data: unknown }
@@ -14,6 +15,7 @@ export function PipelineRunPanel({ pipelines, client, onRunCompleted }: { pipeli
   const [error, setError] = useState('')
   const [result, setResult] = useState<PipelineRunResult | null>(null)
   const controllerRef = useRef<AbortController | null>(null)
+  const runInFlightRef = useRef(false)
   const confirmRef = useRef<HTMLButtonElement>(null)
   const dialogRef = useRef<HTMLDivElement>(null)
   const openerRef = useRef<HTMLElement | null>(null)
@@ -62,34 +64,38 @@ export function PipelineRunPanel({ pipelines, client, onRunCompleted }: { pipeli
   }
 
   async function run() {
-    if (!selected || running) return
-    const controller = new AbortController()
-    controllerRef.current = controller
-    setRunning(true)
-    setError('')
-    try {
-      const response = await client(pipelineRunPath(selected.id), { method: 'POST', showResult: false, silentLoading: true, signal: controller.signal })
-      if (controller.signal.aborted) return
-      if (!response.ok) {
-        setError(runError(response.status))
-        return
+    if (!selected) return
+    const runPromise = runSingleFlight(runInFlightRef, async () => {
+      const controller = new AbortController()
+      controllerRef.current = controller
+      setRunning(true)
+      setError('')
+      try {
+        const response = await client(pipelineRunPath(selected.id), { method: 'POST', showResult: false, silentLoading: true, signal: controller.signal })
+        if (controller.signal.aborted) return
+        if (!response.ok) {
+          setError(runError(response.status))
+          return
+        }
+        const next = parsePipelineRunResult(response.data)
+        if (!next) {
+          setError('流水线运行结果格式不正确，请刷新运行记录确认状态。')
+          return
+        }
+        setResult(next)
+        setConfirming(false)
+        onRunCompleted()
+      } catch {
+        if (!controller.signal.aborted) setError('流水线运行请求未完成，请刷新运行记录确认状态。')
+      } finally {
+        if (controllerRef.current === controller) {
+          controllerRef.current = null
+          if (!controller.signal.aborted) setRunning(false)
+        }
       }
-      const next = parsePipelineRunResult(response.data)
-      if (!next) {
-        setError('流水线运行结果格式不正确，请刷新运行记录确认状态。')
-        return
-      }
-      setResult(next)
-      setConfirming(false)
-      onRunCompleted()
-    } catch {
-      if (!controller.signal.aborted) setError('流水线运行请求未完成，请刷新运行记录确认状态。')
-    } finally {
-      if (controllerRef.current === controller) {
-        controllerRef.current = null
-        if (!controller.signal.aborted) setRunning(false)
-      }
-    }
+    })
+    if (!runPromise) return
+    await runPromise
   }
 
   return <section className="pipeline-run-panel" aria-busy={running}>

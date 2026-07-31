@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { runSingleFlight, validateOrderPushSkipPolicy } from '../.test-dist/orderPushPolicy.js'
+import { validateOrderPushSkipPolicy } from '../.test-dist/orderPushPolicy.js'
+import { runSingleFlight } from '../.test-dist/singleFlight.js'
 
 test('rejects order push skip policies that the backend does not accept', () => {
   assert.equal(validateOrderPushSkipPolicy([{ cycle: 5, skip: 1 }]), '')
