@@ -398,6 +398,7 @@ type SourceDefinition = {
   enabled: boolean
   auth_type: string
   config_json: string
+	 has_secret?: boolean
   schema_json: string
   dedupe_keys: string
   source_query_key: string
@@ -434,6 +435,7 @@ type TransformRule = {
   rule_type: string
   order_index: number
   config_json: string
+	 has_secret?: boolean
   enabled: boolean
 }
 
@@ -1617,13 +1619,13 @@ function RulesQueryPage({ rules }: { rules: TransformRule[] }) {
   const [query, setQuery] = useState('')
   const [status, setStatus] = useState('all')
   const [ruleType, setRuleType] = useState('all')
-  const filtered = rules.filter((rule) => includesQuery([rule.id, rule.name, rule.source_id, rule.config_json], query)
+  const filtered = rules.filter((rule) => includesQuery([rule.id, rule.name, rule.source_id, rule.rule_type], query)
     && (status === 'all' || (status === 'enabled' ? rule.enabled : !rule.enabled))
     && (ruleType === 'all' || rule.rule_type === ruleType))
   return (
     <div className="view-stack">
       <QueryBar count={filtered.length} total={rules.length}>
-        <Field label="名称 / 来源 ID / 配置" name="rule_query" value={query} onChange={setQuery} />
+        <Field label="名称 / 来源 ID / 类型" name="rule_query" value={query} onChange={setQuery} />
         <SelectFilter label="状态" value={status} onChange={setStatus} options={[{ value: 'enabled', label: '启用' }, { value: 'disabled', label: '停用' }]} />
         <SelectFilter label="规则类型" value={ruleType} onChange={setRuleType} options={uniqueOptions(rules.map((rule) => rule.rule_type))} />
       </QueryBar>
@@ -3560,6 +3562,7 @@ function SourceList({ sources, onFetchSource, onTestSource }: { sources: SourceD
           <div>
             <strong>{source.name}</strong>
             <span>{source.code} / {source.source_type} / {source.auth_type || 'none'}</span>
+	            {source.has_secret && <small>配置包含已隐藏的密钥；编辑时仅可重新填写。</small>}
           </div>
           <div className="record-actions">
             <StatusPill label={source.enabled ? '启用' : '停用'} />
