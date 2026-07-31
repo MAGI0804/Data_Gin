@@ -471,6 +471,16 @@ type DestinationDefinition = {
   enabled: boolean
 }
 
+type DestinationDraft = {
+  id: number | null
+  name: string
+  code: string
+  destinationType: string
+  configJSON: string
+  enabled: boolean
+  hasSecret: boolean
+}
+
 type DeliveryTask = {
   id: number
   name: string
@@ -1260,7 +1270,7 @@ function App() {
         {activeNav === 'youzan_distribution' && <YouzanDistributionPage task={legacyTasks.find((item) => item.code === 'youzan_distribution_order_fetch')} loading={loading || refreshing} onPreview={previewYouzanDistributionBackfill} onConfirm={confirmYouzanDistributionBackfill} />}
         {activeNav === 'rules' && <RulesQueryPage client={client} rules={transformRules} sources={sources} onRulesChange={setTransformRules} />}
         {activeNav === 'processed' && <ProcessedQueryPage client={client} />}
-        {activeNav === 'destinations' && <DestinationsQueryPage destinations={destinations} />}
+        {activeNav === 'destinations' && <DestinationsQueryPage client={client} destinations={destinations} onRefresh={() => refreshAll(false)} />}
         {activeNav === 'tasks' && <DeliveryTasksQueryPage tasks={deliveryTasks} destinations={destinations} />}
         {activeNav === 'push_policy' && <PushPolicyPage coreMethod={coreMethods.find((item) => item.key === 'mall_push')} config={orderPushSkipConfig} targets={orderPushTargets} onSave={saveOrderPushSkipConfig} onToggle={toggleTarget} />}
         {(activeNav === 'excel_jobs' || activeNav === 'excel_schemes' || activeNav === 'excel_write') && <ExcelMatchView section={activeNav === 'excel_jobs' ? 'jobs' : activeNav === 'excel_schemes' ? 'schemes' : 'write'} token={token} loading={loading} setLoading={setLoading} setResult={setResult} onNavigateToJobs={() => navigate('excel_jobs')} />}
@@ -2093,21 +2103,68 @@ function YouzanDistributionBackfillResultView({ title, result }: { title: string
   )
 }
 
-function DestinationsQueryPage({ destinations }: { destinations: DestinationDefinition[] }) {
+function DestinationsQueryPage({ client, destinations, onRefresh }: { client: ApiClient; destinations: DestinationDefinition[]; onRefresh: () => Promise<void> }) {
   const [query, setQuery] = useState('')
   const [status, setStatus] = useState('all')
   const [destinationType, setDestinationType] = useState('all')
+  const [draft, setDraft] = useState<DestinationDraft | null>(null)
+  const [saving, setSaving] = useState(false)
+  const [testingID, setTestingID] = useState<number | null>(null)
+  const [message, setMessage] = useState('')
   const filtered = destinations.filter((destination) => includesQuery([destination.id, destination.name, destination.code, destination.config_json], query)
     && (status === 'all' || (status === 'enabled' ? destination.enabled : !destination.enabled))
     && (destinationType === 'all' || destination.destination_type === destinationType))
+
+  async function openDetail(id: number) {
+    setMessage('')
+    const response = await client(`/v1/destinations/${id}`, { method: 'GET', showResult: false, silentLoading: true })
+    const destination = response.ok ? readObject<DestinationDefinition>(response, 'destination') : null
+    if (!destination) { setMessage(response.error?.message || '推送目标详情暂时不可用。'); return }
+    setDraft(destinationDraftFrom(destination))
+  }
+
+  async function save(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!draft || saving || draft.hasSecret) return
+    if (!draft.name.trim() || !draft.code.trim()) { setMessage('请填写目标名称和编码。'); return }
+    try { JSON.parse(draft.configJSON) } catch { setMessage('配置必须是有效 JSON。'); return }
+    setSaving(true)
+    const response = await client(draft.id ? `/v1/destinations/${draft.id}` : '/v1/destinations', { method: draft.id ? 'PUT' : 'POST', showResult: false, silentLoading: true, body: { name: draft.name.trim(), code: draft.code.trim(), destination_type: draft.destinationType, config_json: draft.configJSON, enabled: draft.enabled } })
+    setSaving(false)
+    if (!response.ok) { setMessage(response.error?.message || '推送目标保存未完成。'); return }
+    setDraft(null)
+    setMessage('推送目标已保存。')
+    await onRefresh()
+  }
+
+  async function test(destination: DestinationDefinition) {
+    if (testingID !== null || !window.confirm(`将向“${destination.name}”配置的目标 URL 发起真实连通性请求，不会推送业务记录。确认继续？`)) return
+    setTestingID(destination.id)
+    const response = await client(`/v1/destinations/${destination.id}/test`, { method: 'POST', showResult: false, silentLoading: true })
+    setTestingID(null)
+    setMessage(response.ok ? '连通性测试通过，未推送业务记录。' : response.error?.message || '连通性测试未完成。')
+  }
   return (
     <div className="view-stack">
+      {message && <div className="result-banner" role="status">{message}</div>}
       <QueryBar count={filtered.length} total={destinations.length}>
-        <Field label="名称 / 编码 / 配置" name="destination_query" value={query} onChange={setQuery} />
+        <Field label="名称 / 编码" name="destination_query" value={query} onChange={setQuery} />
         <SelectFilter label="状态" value={status} onChange={setStatus} options={[{ value: 'enabled', label: '启用' }, { value: 'disabled', label: '停用' }]} />
         <SelectFilter label="类型" value={destinationType} onChange={setDestinationType} options={uniqueOptions(destinations.map((destination) => destination.destination_type))} />
       </QueryBar>
-      <Panel title="推送目标" icon={<Send />} meta={`查询命中 ${filtered.length} 条`}><DestinationList destinations={filtered} /></Panel>
+      <div className="record-actions"><button type="button" className="primary" onClick={() => setDraft({ id: null, name: '', code: '', destinationType: 'http', configJSON: '{\n  "url": "",\n  "method": "POST"\n}', enabled: true, hasSecret: false })}>新增目标</button></div>
+      <Panel title="推送目标" icon={<Send />} meta={`查询命中 ${filtered.length} 条`}><DestinationList destinations={filtered} testingID={testingID} onDetail={(item) => { void openDetail(item.id) }} onTest={(item) => { void test(item) }} /></Panel>
+      {draft && <Modal title={draft.id ? '推送目标详情与编辑' : '新增推送目标'} onClose={() => { if (!saving) setDraft(null) }}>
+        {draft.hasSecret && <div className="result-banner error" role="alert">该目标包含已隐藏密钥，当前仅可查看与测试；完整更新会覆盖真实密钥。</div>}
+        <form className="excel-upload-form" onSubmit={save}>
+          <Field label="目标名称" name="destination_name" value={draft.name} required onChange={(name) => setDraft({ ...draft, name })} />
+          <Field label="目标编码" name="destination_code" value={draft.code} required onChange={(code) => setDraft({ ...draft, code })} />
+          <label>目标类型<select value={draft.destinationType} disabled={draft.hasSecret || saving} onChange={(event) => setDraft({ ...draft, destinationType: event.currentTarget.value })}><option value="http">http</option><option value="soap">soap</option></select></label>
+          <label className="checkbox-label"><input type="checkbox" checked={draft.enabled} disabled={draft.hasSecret || saving} onChange={(event) => setDraft({ ...draft, enabled: event.currentTarget.checked })} />启用目标</label>
+          <label>配置 JSON<textarea rows={10} value={draft.configJSON} disabled={draft.hasSecret || saving} onChange={(event) => setDraft({ ...draft, configJSON: event.currentTarget.value })} /></label>
+          <div className="excel-form-actions"><button className="primary" type="submit" disabled={draft.hasSecret || saving}>{saving ? '保存中…' : '保存目标'}</button></div>
+        </form>
+      </Modal>}
     </div>
   )
 }
@@ -3843,7 +3900,7 @@ function CleanRecordList({ records }: { records: CleanRecord[] }) {
   )
 }
 
-function DestinationList({ destinations }: { destinations: DestinationDefinition[] }) {
+function DestinationList({ destinations, testingID, onDetail, onTest }: { destinations: DestinationDefinition[]; testingID: number | null; onDetail: (destination: DestinationDefinition) => void; onTest: (destination: DestinationDefinition) => void }) {
   if (destinations.length === 0) return <EmptyState text="暂无推送目标。" />
   return (
     <div className="record-list">
@@ -3852,8 +3909,9 @@ function DestinationList({ destinations }: { destinations: DestinationDefinition
           <div>
             <strong>{destination.name}</strong>
             <span>{destination.code} / {destination.destination_type}</span>
+            {destination.has_secret && <small>配置包含已隐藏密钥；当前仅可查看和测试。</small>}
           </div>
-          <StatusPill label={destination.enabled ? '启用' : '停用'} />
+          <div className="record-actions"><StatusPill label={destination.enabled ? '启用' : '停用'} /><button type="button" onClick={() => onDetail(destination)}>详情</button><button type="button" disabled={testingID !== null} onClick={() => onTest(destination)}>{testingID === destination.id ? '测试中…' : '测试连接'}</button></div>
         </article>
       ))}
     </div>
@@ -4361,6 +4419,10 @@ function ruleDraftFrom(rule: TransformRule): RuleDraft {
     enabled: rule.enabled,
     hasSecret: Boolean(rule.has_secret),
   }
+}
+
+function destinationDraftFrom(destination: DestinationDefinition): DestinationDraft {
+  return { id: destination.id, name: destination.name, code: destination.code, destinationType: destination.destination_type, configJSON: destination.config_json || '{}', enabled: destination.enabled, hasSecret: Boolean(destination.has_secret) }
 }
 
 function readList<T>(result: ApiResult, key: string): T[] {
