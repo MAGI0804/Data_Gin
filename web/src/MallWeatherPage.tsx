@@ -5,6 +5,7 @@ import { MallWeatherChart } from './MallWeatherChart'
 import { MallWeatherExportPanel } from './MallWeatherExportPanel'
 import { MallWeatherForecastPanel, type MallWeatherForecastDataSnapshot } from './MallWeatherForecastPanel'
 import { MallDetailsFields, MallWeatherMallEditor } from './MallWeatherMallEditor'
+import { mallWeatherCapacityPlanPath, parseMallWeatherCapacityPlan, type MallWeatherCapacityPlan, type MallWeatherCapacityPlanInput } from './mallWeatherCapacityPlan'
 import { mallImportRequestWithinLimit, parseMallImportCSV, parseMallImportResult, type MallImportResult, type MallImportRow } from './mallImport'
 import {
   createMallWeatherDatasetCsv,
@@ -672,6 +673,8 @@ function MallModulePage({
         </div>
       </section>
 
+      <MallWeatherCapacityPlanPanel client={client} />
+
       {mallState === 'error' && <RequestError message={mallError} onRetry={() => void loadMalls()} />}
       {mallState === 'loading' && malls.length === 0 && <LoadingState label="正在加载商场" />}
       {mallState === 'success' && malls.length === 0 && <EmptyState title="还没有可用商场" detail="请先到“基础信息 → 店铺信息”新增并维护店铺。" />}
@@ -771,6 +774,82 @@ function MallWeatherDataNavigation() {
 
 const emptyMallCreateInput: MallWeatherCreateInput = {
   mallCode: '', nameCn: '', province: '', city: '', district: '', address: '',
+}
+
+const defaultMallWeatherCapacityInput: MallWeatherCapacityPlanInput = {
+  mallCount: '', providerQps: '', hourlySteps: '360', dailySteps: '15', lifeIndexDays: '15', alertsPerMall: '0', feishuBatchRows: '200',
+}
+
+function MallWeatherCapacityPlanPanel({ client }: { client: MallWeatherApiClient }) {
+  const [form, setForm] = useState(defaultMallWeatherCapacityInput)
+  const [plan, setPlan] = useState<MallWeatherCapacityPlan | null>(null)
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError] = useState('')
+  const controllerRef = useRef<AbortController | null>(null)
+
+  useEffect(() => () => controllerRef.current?.abort(), [])
+
+  function change(field: keyof MallWeatherCapacityPlanInput, value: string) {
+    setForm((current) => ({ ...current, [field]: value }))
+    setError('')
+  }
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    let path: string
+    try {
+      path = mallWeatherCapacityPlanPath(form)
+    } catch {
+      setError('请输入有效的目标商场数、供应商 QPS 和各数据集范围。')
+      return
+    }
+    controllerRef.current?.abort()
+    const controller = new AbortController()
+    controllerRef.current = controller
+    setSubmitting(true)
+    setError('')
+    const response = await client(path, { method: 'GET', showResult: false, silentLoading: true, signal: controller.signal })
+    if (controller.signal.aborted) return
+    setSubmitting(false)
+    if (!response.ok) {
+      setError(weatherRequestError(response.status, '容量规划计算失败', '当前账号缺少 weather.config.manage 权限'))
+      return
+    }
+    const parsed = parseMallWeatherCapacityPlan(response.data)
+    if (!parsed) {
+      setError('容量规划响应格式不正确，请联系管理员。')
+      return
+    }
+    setPlan(parsed)
+  }
+
+  return <section className="workbench-panel mall-weather-capacity-panel" aria-busy={submitting}>
+    <div className="mall-weather-section-title"><div><strong>天气容量规划</strong><span>按规划目标测算供应商调用、数据库写入和飞书批次；不会修改任何配置。</span></div></div>
+    <form className="mall-weather-capacity-form" onSubmit={submit}>
+      <label><span>目标商场数 *</span><input name="capacityMallCount" inputMode="numeric" type="number" min="1" max="100000" value={form.mallCount} onChange={(event) => change('mallCount', event.currentTarget.value)} required disabled={submitting} /></label>
+      <label><span>供应商 QPS *</span><input name="capacityProviderQps" inputMode="decimal" type="number" min="0" max="10000" step="any" value={form.providerQps} onChange={(event) => change('providerQps', event.currentTarget.value)} required disabled={submitting} /></label>
+      <label><span>逐小时预报步数</span><input name="capacityHourlySteps" inputMode="numeric" type="number" min="1" max="360" value={form.hourlySteps} onChange={(event) => change('hourlySteps', event.currentTarget.value)} required disabled={submitting} /></label>
+      <label><span>逐日预报天数</span><input name="capacityDailySteps" inputMode="numeric" type="number" min="1" max="15" value={form.dailySteps} onChange={(event) => change('dailySteps', event.currentTarget.value)} required disabled={submitting} /></label>
+      <label><span>生活指数天数</span><input name="capacityLifeIndexDays" inputMode="numeric" type="number" min="1" max="15" value={form.lifeIndexDays} onChange={(event) => change('lifeIndexDays', event.currentTarget.value)} required disabled={submitting} /></label>
+      <label><span>每商场预警数</span><input name="capacityAlertsPerMall" inputMode="numeric" type="number" min="0" max="256" value={form.alertsPerMall} onChange={(event) => change('alertsPerMall', event.currentTarget.value)} required disabled={submitting} /></label>
+      <label><span>飞书每批行数</span><input name="capacityFeishuBatchRows" inputMode="numeric" type="number" min="1" max="500" value={form.feishuBatchRows} onChange={(event) => change('feishuBatchRows', event.currentTarget.value)} required disabled={submitting} /></label>
+      <div className="mall-weather-form-actions"><button className="primary" type="submit" disabled={submitting}>{submitting ? '计算中' : '计算容量'}</button></div>
+    </form>
+    {plan && <>
+      <div className="mall-weather-meta" aria-live="polite">
+        <MetaItem label="每日供应商请求" value={String(plan.providerRequests)} />
+        <MetaItem label="预计耗时" value={`${plan.providerDrainSeconds.toFixed(1)} 秒`} />
+        <MetaItem label="一小时最低 QPS" value={plan.minimumQpsForOneHourDrain.toFixed(2)} />
+        <MetaItem label="数据库总行数" value={String(plan.totalDatabaseRows)} />
+        <MetaItem label="数据库批次" value={String(plan.totalDatabaseBatches)} />
+        <MetaItem label="飞书批次" value={String(plan.totalFeishuBatches)} />
+        <MetaItem label="飞书每批行数" value={String(plan.feishuBatchRows)} />
+        <MetaItem label="规划商场数" value={String(plan.mallCount)} />
+      </div>
+      <div className="data-table-wrap"><table className="data-table"><caption>各天气数据集容量明细</caption><thead><tr><th>数据集</th><th>行数</th><th>数据库批次</th><th>飞书批次</th></tr></thead><tbody>{plan.datasets.map((dataset) => <tr key={dataset.kind}><td>{dataset.kind}</td><td>{dataset.rows}</td><td>{dataset.databaseBatches}</td><td>{dataset.feishuBatches}</td></tr>)}</tbody></table></div>
+    </>}
+    {error && <p className="mall-weather-action-message error" role="alert">{error}</p>}
+  </section>
 }
 
 function MallImportPanel({ client, onImported }: { client: MallWeatherApiClient; onImported: () => void }) {
