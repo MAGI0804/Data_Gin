@@ -305,6 +305,7 @@ const bojunMatchFieldOptions = [
 ]
 
 const excelChunkSize = 4 * 1024 * 1024
+const excelJobPollMaxAttempts = 60
 
 const excelMatchFilterOperatorOptions = [
   { value: 'eq', label: '等于' },
@@ -2918,12 +2919,13 @@ function ExcelMatchView({
     return () => window.cancelAnimationFrame(animationFrame)
   }, [focusedJobID, section])
 
-  const refreshJobByID = useCallback(async (id: number, options: { silent?: boolean; track?: boolean } = {}) => {
+  const refreshJobByID = useCallback(async (id: number, options: { silent?: boolean; track?: boolean; signal?: AbortSignal } = {}) => {
     if (!options.silent) setLoading(true)
     try {
       const response = await fetch(apiURL(`/v1/excel-match-jobs/${id}`), {
         method: 'GET',
         headers: token ? { token } : undefined,
+        signal: options.signal,
       })
       const data = await response.json().catch(() => ({}))
       const nextResult = { ok: response.ok && isSuccessPayload(data), status: response.status, data }
@@ -2937,6 +2939,7 @@ function ExcelMatchView({
         setAutoRefreshText(`自动刷新失败：${readMessage(data) || response.status}`)
       }
     } catch (error) {
+      if (options.signal?.aborted) return null
       if (!options.silent) {
         setResult({ ok: false, status: 0, data: error instanceof Error ? error.message : String(error) })
       } else {
@@ -2952,25 +2955,104 @@ function ExcelMatchView({
     if (!token || !trackingJobID) return
 
     let cancelled = false
-    const refreshTrackedJob = async () => {
-      const nextJob = await refreshJobByID(trackingJobID, { silent: true })
-      if (cancelled || !nextJob) return
+    let attempts = 0
+    let consecutiveFailures = 0
+    let timer: number | null = null
+    let inFlight = false
+    let resumeWhenVisible = false
+    const controller = new AbortController()
 
-      setAutoRefreshText(`自动刷新中：任务 #${nextJob.id}，${excelJobStatusLabel(nextJob.status)}，${new Date().toLocaleTimeString()}`)
-      if (!isExcelJobActive(nextJob)) {
-        setTrackingJobID(null)
-        void loadJobHistory()
+    const clearScheduledRefresh = () => {
+      if (timer !== null) {
+        window.clearTimeout(timer)
+        timer = null
+      }
+    }
+
+    const stopPolling = (message: string) => {
+      clearScheduledRefresh()
+      setAutoRefreshText(message)
+      setTrackingJobID(null)
+    }
+
+    const scheduleRefresh = (delayMilliseconds: number) => {
+      clearScheduledRefresh()
+      if (cancelled || document.visibilityState === 'hidden') return
+      if (inFlight) return
+      timer = window.setTimeout(() => {
+        timer = null
+        void refreshTrackedJob()
+      }, delayMilliseconds)
+    }
+
+    const refreshTrackedJob = async () => {
+      if (cancelled || document.visibilityState === 'hidden') return
+      if (inFlight) {
+        resumeWhenVisible = true
+        return
+      }
+      if (attempts >= excelJobPollMaxAttempts) {
+        stopPolling(`自动刷新已在 ${excelJobPollMaxAttempts} 次后停止，请手动查询任务状态。`)
+        return
+      }
+
+      attempts += 1
+      inFlight = true
+      let nextDelay: number | null = null
+      try {
+        const nextJob = await refreshJobByID(trackingJobID, { silent: true, signal: controller.signal })
+        if (cancelled || controller.signal.aborted) return
+        if (!nextJob) {
+          consecutiveFailures += 1
+          const delayMilliseconds = Math.min(30_000, 2_000 * 2 ** Math.min(consecutiveFailures, 4))
+          if (attempts >= excelJobPollMaxAttempts) {
+            stopPolling(`自动刷新已在 ${excelJobPollMaxAttempts} 次后停止，请手动查询任务状态。`)
+            return
+          }
+          setAutoRefreshText(`自动刷新失败，将在 ${Math.ceil(delayMilliseconds / 1000)} 秒后重试。`)
+          nextDelay = delayMilliseconds
+          return
+        }
+
+        consecutiveFailures = 0
+        setAutoRefreshText(`自动刷新中：任务 #${nextJob.id}，${excelJobStatusLabel(nextJob.status)}，${new Date().toLocaleTimeString()}`)
+        if (!isExcelJobActive(nextJob)) {
+          setTrackingJobID(null)
+          void loadJobHistory()
+          return
+        }
+        nextDelay = 2_000
+      } finally {
+        inFlight = false
+        if (resumeWhenVisible && !cancelled && !controller.signal.aborted && document.visibilityState !== 'hidden') {
+          resumeWhenVisible = false
+          scheduleRefresh(0)
+        } else if (nextDelay !== null) {
+          scheduleRefresh(nextDelay)
+        }
       }
     }
 
     void refreshTrackedJob()
-    const timer = window.setInterval(() => {
-      void refreshTrackedJob()
-    }, 2000)
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        clearScheduledRefresh()
+        setAutoRefreshText('页面已隐藏，任务自动刷新已暂停。')
+        return
+      }
+      if (inFlight) {
+        resumeWhenVisible = true
+        return
+      }
+      scheduleRefresh(0)
+    }
+    document.addEventListener('visibilitychange', handleVisibilityChange)
 
     return () => {
       cancelled = true
-      window.clearInterval(timer)
+      clearScheduledRefresh()
+      controller.abort()
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
     }
   }, [loadJobHistory, refreshJobByID, token, trackingJobID])
 
