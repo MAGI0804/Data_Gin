@@ -37,6 +37,7 @@ import { PipelineComposerPanel } from './PipelineComposerPanel'
 import { Brand } from './components/Brand'
 import { parseMallWeatherExportContentStatus, submitMallWeatherExportContentDownload } from './mallWeatherExport'
 import { buildRawRecordsRequest, buildWarehouseRawRecordsQuery, parseRawRecordsPage, type RawRecordOrigin, type RawRecordsPage } from './rawRecords'
+import { buildDeliveryLogListQuery, buildRunListQuery, parseMonitoringPage, type MonitoringPage } from './monitoringRecords'
 import { parseSourceFetchSummary } from './sourceOperations'
 import { buildCleanRecordsQuery, buildProcessedRecordsQuery, parseProcessedRecordsPage, type ProcessedRecordsPage } from './processedRecords'
 import {
@@ -165,7 +166,6 @@ type PipelineRun = {
   failed_count: number
   source_id: number
   destination_id: number
-  error_message: string
   started_at: string | null
   finished_at: string | null
 }
@@ -970,12 +970,9 @@ function App() {
             if (runResult.ok) setRuns(readList<PipelineRun>(runResult, 'runs'))
             if (logResult.ok) setDeliveryLogs(readList<DeliveryLog>(logResult, 'logs'))
           }
-        } else if (activeNav === 'runs' || activeNav === 'step_runs') {
+        } else if (activeNav === 'step_runs') {
           const runResult = await get('/v1/runs?limit=50')
           if (!controller.signal.aborted && runResult.ok) setRuns(readList<PipelineRun>(runResult, 'runs'))
-        } else if (activeNav === 'delivery_logs') {
-          const logResult = await get('/v1/delivery-logs?limit=50')
-          if (!controller.signal.aborted && logResult.ok) setDeliveryLogs(readList<DeliveryLog>(logResult, 'logs'))
         } else if (activeNav === 'sources') {
           const sourceResult = await get('/v1/sources')
           if (!controller.signal.aborted && sourceResult.ok) setSources(readList<SourceDefinition>(sourceResult, 'sources'))
@@ -1387,8 +1384,8 @@ function App() {
       <section className="ops-workspace">
         <ModuleHeader activeNav={activeNav} loading={loading || refreshing} sessionUser={sessionUser} onOpenNavigation={openMobileNavigation} mobileNavTriggerRef={mobileNavTriggerRef} />
         {activeNav === 'overview' && <PushStatusView runs={runs} deliveryLogs={deliveryLogs} monitoring={monitoring} stale={monitoringStale} onLoadSteps={loadStepRuns} />}
-        {activeNav === 'runs' && <RunsQueryPage runs={runs} onLoadSteps={loadStepRuns} />}
-        {activeNav === 'delivery_logs' && <DeliveryLogsQueryPage logs={deliveryLogs} onRetryLog={retryDeliveryLog} />}
+        {activeNav === 'runs' && <RunsQueryPage client={client} onLoadSteps={loadStepRuns} />}
+        {activeNav === 'delivery_logs' && <DeliveryLogsQueryPage client={client} onRetryLog={retryDeliveryLog} />}
         {activeNav === 'step_runs' && <StepRunsQueryPage runs={runs} stepRuns={stepRuns} selectedRunID={selectedStepRunID} onLoadSteps={loadStepRuns} />}
         {activeNav === 'store_info' && <StoreInfoPage actorID={actorID} client={client} downloadFile={downloadFile} />}
         {activeNav === 'mall_weather' && <MallWeatherPage actorID={actorID} client={client} downloadFile={downloadFile} />}
@@ -1631,36 +1628,110 @@ function BojunBackfillResultView({ title, result }: { title: string; result: Boj
   )
 }
 
-function RunsQueryPage({ runs, onLoadSteps }: { runs: PipelineRun[]; onLoadSteps: (runId: number) => void }) {
-  const [query, setQuery] = useState('')
+function RunsQueryPage({ client, onLoadSteps }: { client: ApiClient; onLoadSteps: (runId: number) => void }) {
+  const [traceID, setTraceID] = useState('')
   const [status, setStatus] = useState('all')
   const [runType, setRunType] = useState('all')
-  const filtered = useMemo(() => runs.filter((run) => {
-    const matchesQuery = includesQuery([run.id, run.trace_id, run.trigger_type, run.error_message], query)
-    return matchesQuery && (status === 'all' || run.status === status) && (runType === 'all' || run.run_type === runType)
-  }), [query, runType, runs, status])
+  const [startTime, setStartTime] = useState('')
+  const [endTime, setEndTime] = useState('')
+  const [applied, setApplied] = useState({ traceID: '', status: '', runType: '', startTime: '', endTime: '' })
+  const [page, setPage] = useState(1)
+  const [recordsPage, setRecordsPage] = useState<MonitoringPage<PipelineRun> | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const requestRef = useRef<AbortController | null>(null)
+
+  useEffect(() => {
+    requestRef.current?.abort()
+    const controller = new AbortController()
+    requestRef.current = controller
+    setLoading(true)
+    setError('')
+    const query = buildRunListQuery({ page, pageSize: 20, ...applied })
+    void client(`/v1/runs?${query}`, { method: 'GET', signal: controller.signal, showResult: false, silentLoading: true }).then((response) => {
+      if (controller.signal.aborted) return
+      const parsed = response.ok ? parseMonitoringPage<unknown>(response.data, 'runs') : null
+      const runs = parsed?.list.map(parsePipelineRun) ?? []
+      if (parsed && runs.every((run): run is PipelineRun => run !== null)) {
+        setRecordsPage({ ...parsed, list: runs })
+        return
+      }
+      setError(response.error?.message || '运行记录查询暂时不可用，请稍后重试。')
+    }).finally(() => { if (!controller.signal.aborted) setLoading(false) })
+    return () => controller.abort()
+  }, [applied, client, page])
+
+  function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    setPage(1)
+    setApplied({ traceID, status: status === 'all' ? '' : status, runType: runType === 'all' ? '' : runType, startTime, endTime })
+  }
+
+  const runs = recordsPage?.list ?? []
+  const pagination = recordsPage?.pagination
   return (
     <div className="view-stack">
-      <QueryBar count={filtered.length} total={runs.length}>
-        <Field label="ID / Trace / 错误" name="run_query" value={query} onChange={setQuery} />
-        <SelectFilter label="状态" value={status} onChange={setStatus} options={uniqueOptions(runs.map((run) => run.status))} />
-        <SelectFilter label="运行类型" value={runType} onChange={setRunType} options={uniqueOptions(runs.map((run) => run.run_type))} />
-      </QueryBar>
-      <Panel title="运行记录" icon={<Activity />} meta={`查询命中 ${filtered.length} 条`}><RunTable runs={filtered} onLoadSteps={onLoadSteps} /></Panel>
+      <form className="query-bar" onSubmit={submit}>
+        <div className="query-fields">
+          <Field label="Trace ID" name="run_trace_id" value={traceID} onChange={setTraceID} />
+          <SelectFilter label="状态" value={status} onChange={setStatus} options={[{ value: 'running', label: '运行中' }, { value: 'success', label: '成功' }, { value: 'failed', label: '失败' }, { value: 'partial_success', label: '部分成功' }]} />
+          <SelectFilter label="运行类型" value={runType} onChange={setRunType} options={[{ value: 'fetch', label: '拉取' }, { value: 'ingest', label: '接收' }, { value: 'transform', label: '清洗' }, { value: 'delivery', label: '推送' }]} />
+          <Field label="开始时间" name="run_start_time" type="datetime-local" value={startTime} onChange={setStartTime} />
+          <Field label="结束时间" name="run_end_time" type="datetime-local" value={endTime} onChange={setEndTime} />
+        </div>
+        <button type="submit" disabled={loading}>{loading ? '查询中…' : '查询'}</button>
+      </form>
+      {error && <div className="result-banner error" role="alert">{error} 已保留最近一次成功数据。</div>}
+      <Panel title="运行记录" icon={<Activity />} meta={loading && !recordsPage ? '正在加载…' : `共 ${pagination?.total ?? 0} 条`}>
+        <RunTable runs={runs} onLoadSteps={onLoadSteps} />
+        <MonitoringPaginationControls page={pagination?.page ?? page} totalPages={pagination?.totalPages ?? 0} loading={loading} onPrevious={() => setPage((current) => Math.max(1, current - 1))} onNext={() => setPage((current) => current + 1)} />
+      </Panel>
     </div>
   )
 }
 
-function DeliveryLogsQueryPage({ logs, onRetryLog }: { logs: DeliveryLog[]; onRetryLog: (logId: number) => Promise<void> }) {
-  const [query, setQuery] = useState('')
+function DeliveryLogsQueryPage({ client, onRetryLog }: { client: ApiClient; onRetryLog: (logId: number) => Promise<void> }) {
+  const [destination, setDestination] = useState('')
+  const [source, setSource] = useState('')
   const [status, setStatus] = useState('all')
+  const [businessKey, setBusinessKey] = useState('')
+  const [startTime, setStartTime] = useState('')
+  const [endTime, setEndTime] = useState('')
+  const [applied, setApplied] = useState({ destination: '', source: '', success: '' as '' | 'true' | 'false', businessKey: '', startTime: '', endTime: '' })
+  const [page, setPage] = useState(1)
+  const [recordsPage, setRecordsPage] = useState<MonitoringPage<DeliveryLog> | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
   const [retryingLogID, setRetryingLogID] = useState<number | null>(null)
   const [pendingRetryLog, setPendingRetryLog] = useState<DeliveryLog | null>(null)
-  const filtered = useMemo(() => logs.filter((log) => {
-    const matchesQuery = includesQuery([log.id, log.trace_id, log.business_key, log.source_code, log.destination_code, log.destination_name, log.error_message], query)
-    const matchesStatus = status === 'all' || (status === 'success' ? log.success : !log.success)
-    return matchesQuery && matchesStatus
-  }), [logs, query, status])
+  const [reloadVersion, setReloadVersion] = useState(0)
+  const requestRef = useRef<AbortController | null>(null)
+
+  useEffect(() => {
+    requestRef.current?.abort()
+    const controller = new AbortController()
+    requestRef.current = controller
+    setLoading(true)
+    setError('')
+    const query = buildDeliveryLogListQuery({ page, pageSize: 20, ...applied })
+    void client(`/v1/delivery-logs?${query}`, { method: 'GET', signal: controller.signal, showResult: false, silentLoading: true }).then((response) => {
+      if (controller.signal.aborted) return
+      const parsed = response.ok ? parseMonitoringPage<unknown>(response.data, 'logs') : null
+      const logs = parsed?.list.map(parseDeliveryLog) ?? []
+      if (parsed && logs.every((log): log is DeliveryLog => log !== null)) {
+        setRecordsPage({ ...parsed, list: logs })
+        return
+      }
+      setError(response.error?.message || '推送日志查询暂时不可用，请稍后重试。')
+    }).finally(() => { if (!controller.signal.aborted) setLoading(false) })
+    return () => controller.abort()
+  }, [applied, client, page, reloadVersion])
+
+  function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    setPage(1)
+    setApplied({ destination, source, success: status === 'success' ? 'true' : status === 'failed' ? 'false' : '', businessKey, startTime, endTime })
+  }
 
   async function retryPendingLog() {
     if (!pendingRetryLog || retryingLogID !== null) return
@@ -1670,18 +1741,30 @@ function DeliveryLogsQueryPage({ logs, onRetryLog }: { logs: DeliveryLog[]; onRe
     } finally {
       setRetryingLogID(null)
       setPendingRetryLog(null)
+      setReloadVersion((version) => version + 1)
     }
   }
 
+  const logs = recordsPage?.list ?? []
+  const pagination = recordsPage?.pagination
+
   return (
     <div className="view-stack">
-      <QueryBar count={filtered.length} total={logs.length}>
-        <Field label="业务键 / Trace / 来源 / 目标" name="delivery_query" value={query} onChange={setQuery} />
+      <form className="query-bar" onSubmit={submit}>
+        <div className="query-fields">
+        <Field label="推送目标编码" name="delivery_destination" value={destination} onChange={setDestination} />
+        <Field label="来源编码" name="delivery_source" value={source} onChange={setSource} />
         <SelectFilter label="交付状态" value={status} onChange={setStatus} options={[{ value: 'success', label: '成功' }, { value: 'failed', label: '失败' }]} />
-      </QueryBar>
-      <Panel title="推送日志" icon={<Send />} meta={`当前仅显示后端返回的最近 ${logs.length} 条`}><DeliveryLogList logs={filtered} retryingLogID={retryingLogID} onRetryLog={(log) => {
+        <Field label="业务键" name="delivery_business_key" value={businessKey} onChange={setBusinessKey} />
+        <Field label="开始时间" name="delivery_start_time" type="datetime-local" value={startTime} onChange={setStartTime} />
+        <Field label="结束时间" name="delivery_end_time" type="datetime-local" value={endTime} onChange={setEndTime} />
+        </div>
+        <button type="submit" disabled={loading || retryingLogID !== null}>{loading ? '查询中…' : '查询'}</button>
+      </form>
+      {error && <div className="result-banner error" role="alert">{error} 已保留最近一次成功数据。</div>}
+      <Panel title="推送日志" icon={<Send />} meta={loading && !recordsPage ? '正在加载…' : `共 ${pagination?.total ?? 0} 条`}><DeliveryLogList logs={logs} retryingLogID={retryingLogID} onRetryLog={(log) => {
         if (!log.success && retryingLogID === null) setPendingRetryLog(log)
-      }} /></Panel>
+      }} /><MonitoringPaginationControls page={pagination?.page ?? page} totalPages={pagination?.totalPages ?? 0} loading={loading || retryingLogID !== null} onPrevious={() => setPage((current) => Math.max(1, current - 1))} onNext={() => setPage((current) => current + 1)} /></Panel>
       {pendingRetryLog && <Modal title="确认重试推送日志" closeDisabled={retryingLogID !== null} onClose={() => { if (retryingLogID === null) setPendingRetryLog(null) }} footer={<><button type="button" disabled={retryingLogID !== null} onClick={() => setPendingRetryLog(null)}>取消</button><button className="primary" type="button" disabled={retryingLogID !== null} onClick={() => void retryPendingLog()}>{retryingLogID === pendingRetryLog.id ? '重试中…' : '确认重试'}</button></>}><p>确认重试失败日志 #{pendingRetryLog.id}？这会再次向原推送目标发起交付请求。</p></Modal>}
     </div>
   )
@@ -4488,7 +4571,7 @@ function DeliveryLogList({ logs, onSelectLog, onRetryLog, retryingLogID }: { log
                   <StatusPill label={failedCount > 0 ? '存在失败' : '全部成功'} />
                 </div>
                 <div className="record-list">
-                  {group.logs.slice(0, 8).map((log) => (
+                  {group.logs.map((log) => (
                     <article className="record-row" key={log.id}>
                       <div>
                         <strong>#{log.id} / {log.business_key || '-'}</strong>
@@ -4561,10 +4644,86 @@ function compactText(value: string) {
   return `${text.slice(0, 120)}...`
 }
 
+function MonitoringPaginationControls({ page, totalPages, loading, onPrevious, onNext }: { page: number; totalPages: number; loading: boolean; onPrevious: () => void; onNext: () => void }) {
+  return <div className="record-actions raw-record-pagination" role="status" aria-live="polite">
+    <span>第 {page} / {Math.max(totalPages, 1)} 页</span>
+    <button type="button" onClick={onPrevious} disabled={loading || page <= 1}>上一页</button>
+    <button type="button" onClick={onNext} disabled={loading || totalPages === 0 || page >= totalPages}>下一页</button>
+  </div>
+}
+
 function publicText(value: unknown, maximumLength: number) {
   if (typeof value !== 'string') return ''
   const text = value.trim()
   return text.length <= maximumLength ? text : ''
+}
+
+function publicDateTime(value: unknown) {
+  return value === null ? null : publicText(value, 32) || null
+}
+
+function publicNonNegativeInteger(value: unknown) {
+  const number = Number(value)
+  return Number.isSafeInteger(number) && number >= 0 ? number : -1
+}
+
+function parsePipelineRun(value: unknown): PipelineRun | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const run = value as Record<string, unknown>
+  const id = publicNonNegativeInteger(run.id)
+  const sourceID = publicNonNegativeInteger(run.source_id)
+  const destinationID = publicNonNegativeInteger(run.destination_id)
+  const totalCount = publicNonNegativeInteger(run.total_count)
+  const successCount = publicNonNegativeInteger(run.success_count)
+  const failedCount = publicNonNegativeInteger(run.failed_count)
+  const status = publicText(run.status, 24)
+  const runType = publicText(run.run_type, 32)
+  if (id <= 0 || sourceID < 0 || destinationID < 0 || totalCount < 0 || successCount < 0 || failedCount < 0
+    || !['running', 'success', 'failed', 'partial_success'].includes(status)
+    || !['fetch', 'ingest', 'transform', 'delivery'].includes(runType)) return null
+  return {
+    id,
+    trace_id: publicText(run.trace_id, 64),
+    run_type: runType,
+    trigger_type: publicText(run.trigger_type, 50),
+    status,
+    total_count: totalCount,
+    success_count: successCount,
+    failed_count: failedCount,
+    source_id: sourceID,
+    destination_id: destinationID,
+    started_at: publicDateTime(run.started_at),
+    finished_at: publicDateTime(run.finished_at),
+  }
+}
+
+function parseDeliveryLog(value: unknown): DeliveryLog | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const log = value as Record<string, unknown>
+  const id = publicNonNegativeInteger(log.id)
+  const runID = publicNonNegativeInteger(log.run_id)
+  const destinationID = publicNonNegativeInteger(log.destination_id)
+  const cleanRecordID = publicNonNegativeInteger(log.clean_record_id)
+  const retryCount = publicNonNegativeInteger(log.retry_count)
+  const httpStatus = publicNonNegativeInteger(log.http_status)
+  if (id <= 0 || runID < 0 || destinationID < 0 || cleanRecordID < 0 || retryCount < 0 || httpStatus < 0 || typeof log.success !== 'boolean') return null
+  return {
+    id,
+    trace_id: publicText(log.trace_id, 64),
+    run_id: runID,
+    source_code: publicText(log.source_code, 100),
+    destination_code: publicText(log.destination_code, 100),
+    destination_name: publicText(log.destination_name, 100),
+    destination_id: destinationID,
+    clean_record_id: cleanRecordID,
+    business_key: publicText(log.business_key, 255),
+    response_summary: publicText(log.response_summary, 240),
+    http_status: httpStatus,
+    success: log.success,
+    error_message: publicText(log.error_message, 240),
+    retry_count: retryCount,
+    sent_at: publicDateTime(log.sent_at),
+  }
 }
 
 function parseWarehouseRawRecord(value: unknown): WarehouseRawRecord | null {

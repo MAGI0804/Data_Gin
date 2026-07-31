@@ -61,6 +61,23 @@ type deliveryLogResponse struct {
 	SentAt          any    `json:"sent_at"`
 }
 
+// pipelineRunResponse is the public management projection. In particular it
+// intentionally omits ErrorMessage, which can contain internal or third-party details.
+type pipelineRunResponse struct {
+	ID            uint              `json:"id"`
+	TraceID       string            `json:"trace_id"`
+	RunType       string            `json:"run_type"`
+	TriggerType   string            `json:"trigger_type"`
+	SourceID      uint              `json:"source_id"`
+	DestinationID uint              `json:"destination_id"`
+	Status        string            `json:"status"`
+	TotalCount    int               `json:"total_count"`
+	SuccessCount  int               `json:"success_count"`
+	FailedCount   int               `json:"failed_count"`
+	StartedAt     *model.TimeNormal `json:"started_at"`
+	FinishedAt    *model.TimeNormal `json:"finished_at"`
+}
+
 func safeSourceDefinition(source model.SourceDefinition) sourceDefinitionResponse {
 	config, hasSecret := redactConfigJSON(source.ConfigJSON)
 	return sourceDefinitionResponse{ID: source.ID, Name: source.Name, Code: source.Code, SourceType: source.SourceType, Enabled: source.Enabled, AuthType: source.AuthType, ConfigJSON: config, HasSecret: hasSecret, SchemaJSON: source.SchemaJSON, DedupeKeys: source.DedupeKeys, SourceQueryKey: source.SourceQueryKey}
@@ -104,6 +121,19 @@ func safeDeliveryLogs(logs []model.DeliveryLog) []deliveryLogResponse {
 	result := make([]deliveryLogResponse, 0, len(logs))
 	for _, log := range logs {
 		result = append(result, deliveryLogResponse{ID: log.ID, TraceID: log.TraceID, RunID: log.RunID, SourceCode: log.SourceCode, DestinationCode: log.DestinationCode, DestinationName: log.DestinationName, DestinationID: log.DestinationID, CleanRecordID: log.CleanRecordID, BusinessKey: log.BusinessKey, HTTPStatus: log.HTTPStatus, Success: log.Success, ErrorMessage: safeDeliveryLogText(log.ErrorMessage), ResponseSummary: safeDeliveryLogText(log.ResponseSummary), RetryCount: log.RetryCount, SentAt: log.SentAt})
+	}
+	return result
+}
+
+func safePipelineRuns(runs []model.PipelineRun) []pipelineRunResponse {
+	result := make([]pipelineRunResponse, 0, len(runs))
+	for _, run := range runs {
+		result = append(result, pipelineRunResponse{
+			ID: run.ID, TraceID: run.TraceID, RunType: run.RunType, TriggerType: run.TriggerType,
+			SourceID: run.SourceID, DestinationID: run.DestinationID, Status: run.Status,
+			TotalCount: run.TotalCount, SuccessCount: run.SuccessCount, FailedCount: run.FailedCount,
+			StartedAt: run.StartedAt, FinishedAt: run.FinishedAt,
+		})
 	}
 	return result
 }

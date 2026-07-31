@@ -182,6 +182,10 @@ func (s *DeliveryService) ListDeliveryLogs(ctx context.Context, limit int) ([]mo
 	return s.logDAO.FindRecent(ctx, limit)
 }
 
+func (s *DeliveryService) ListDeliveryLogsPage(ctx context.Context, query data_dao.DeliveryLogListQuery) (*data_dao.DeliveryLogListPage, error) {
+	return s.logDAO.FindPage(ctx, query)
+}
+
 func (s *DeliveryService) RetryDeliveryLog(ctx context.Context, id uint) (*DeliveryLogRetryResult, error) {
 	log, err := s.logDAO.FindByID(ctx, id)
 	if err != nil {

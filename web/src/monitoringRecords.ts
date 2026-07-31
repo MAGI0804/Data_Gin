@@ -1,0 +1,88 @@
+export type MonitoringPagination = {
+  page: number
+  pageSize: number
+  total: number
+  totalPages: number
+}
+
+export type MonitoringPage<T> = {
+  list: T[]
+  pagination: MonitoringPagination
+}
+
+export type RunListQuery = {
+  page: number
+  pageSize: number
+  status?: string
+  runType?: string
+  traceID?: string
+  startTime?: string
+  endTime?: string
+}
+
+export type DeliveryLogListQuery = {
+  page: number
+  pageSize: number
+  destination?: string
+  source?: string
+  success?: '' | 'true' | 'false'
+  businessKey?: string
+  startTime?: string
+  endTime?: string
+}
+
+const runStatuses = ['running', 'success', 'failed', 'partial_success']
+const runTypes = ['fetch', 'ingest', 'transform', 'delivery']
+
+function boundedPositive(value: number, fallback: number, maximum: number) {
+  return Number.isInteger(value) && value > 0 && value <= maximum ? value : fallback
+}
+
+function appendText(params: URLSearchParams, name: string, value: string | undefined, maximum: number) {
+  const normalized = value?.trim() ?? ''
+  if (normalized) params.set(name, normalized.slice(0, maximum))
+}
+
+function baseQuery(page: number, pageSize: number) {
+  const params = new URLSearchParams()
+  params.set('page', String(boundedPositive(page, 1, 1_000_000)))
+  params.set('page_size', String(boundedPositive(pageSize, 20, 100)))
+  return params
+}
+
+export function buildRunListQuery(query: RunListQuery) {
+  const params = baseQuery(query.page, query.pageSize)
+  if (runStatuses.includes(query.status ?? '')) params.set('status', query.status!)
+  if (runTypes.includes(query.runType ?? '')) params.set('run_type', query.runType!)
+  appendText(params, 'trace_id', query.traceID, 64)
+  appendText(params, 'start_time', query.startTime, 32)
+  appendText(params, 'end_time', query.endTime, 32)
+  return params.toString()
+}
+
+export function buildDeliveryLogListQuery(query: DeliveryLogListQuery) {
+  const params = baseQuery(query.page, query.pageSize)
+  appendText(params, 'destination', query.destination, 100)
+  appendText(params, 'source', query.source, 100)
+  if (query.success === 'true' || query.success === 'false') params.set('success', query.success)
+  appendText(params, 'business_key', query.businessKey, 255)
+  appendText(params, 'start_time', query.startTime, 32)
+  appendText(params, 'end_time', query.endTime, 32)
+  return params.toString()
+}
+
+export function parseMonitoringPage<T>(payload: unknown, key: string): MonitoringPage<T> | null {
+  if (!payload || typeof payload !== 'object' || !key) return null
+  const data = (payload as { data?: unknown }).data
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return null
+  const record = data as Record<string, unknown>
+  if (!Array.isArray(record[key]) || !record.pagination || typeof record.pagination !== 'object' || Array.isArray(record.pagination)) return null
+  const pagination = record.pagination as Record<string, unknown>
+  const page = Number(pagination.page)
+  const pageSize = Number(pagination.page_size)
+  const total = Number(pagination.total)
+  const totalPages = Number(pagination.total_pages)
+  if (!Number.isInteger(page) || page < 1 || !Number.isInteger(pageSize) || pageSize < 1 || pageSize > 100
+    || !Number.isInteger(total) || total < 0 || !Number.isInteger(totalPages) || totalPages < 0) return null
+  return { list: record[key] as T[], pagination: { page, pageSize, total, totalPages } }
+}

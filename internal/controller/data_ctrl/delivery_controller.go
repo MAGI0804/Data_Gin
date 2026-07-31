@@ -2,9 +2,11 @@ package data_ctrl
 
 import (
 	"strconv"
+	"strings"
 
 	"github.com/gin-gonic/gin"
 
+	"gin-biz-web-api/internal/dao/data_dao"
 	"gin-biz-web-api/internal/msg"
 	"gin-biz-web-api/internal/requestbody"
 	"gin-biz-web-api/internal/service/data_svc"
@@ -201,21 +203,90 @@ func (ctrl *DeliveryController) RunTask(c *gin.Context) {
 }
 
 func (ctrl *DeliveryController) ListLogs(c *gin.Context) {
-	limit, err := parseLimit(c)
+	values := c.Request.URL.Query()
+	if !monitoringQueryKeysAllowed(values, "limit", "page", "page_size", "destination", "source", "success", "business_key", "start_time", "end_time") {
+		c.JSON(400, msg.ErrResponseStr("无效的推送日志查询参数"))
+		return
+	}
+	page, pageSize, err := parseMonitoringPagination(values)
 	if err != nil {
-		c.JSON(400, msg.ErrResponse("无效的日志条数", err))
+		c.JSON(400, msg.ErrResponseStr("无效的推送日志分页参数"))
+		return
+	}
+	sentFrom, err := parseMonitoringTime(values.Get("start_time"))
+	if err != nil {
+		c.JSON(400, msg.ErrResponseStr("无效的推送日志时间范围"))
+		return
+	}
+	sentTo, err := parseMonitoringTime(values.Get("end_time"))
+	if err != nil || !monitoringTimeRangeValid(sentFrom, sentTo) {
+		c.JSON(400, msg.ErrResponseStr("无效的推送日志时间范围"))
+		return
+	}
+	success, err := parseDeliveryLogSuccess(values.Get("success"))
+	if err != nil {
+		c.JSON(400, msg.ErrResponseStr("无效的推送日志查询参数"))
+		return
+	}
+	destination := strings.TrimSpace(values.Get("destination"))
+	source := strings.TrimSpace(values.Get("source"))
+	businessKey := strings.TrimSpace(values.Get("business_key"))
+	if len(destination) > 100 || len(source) > 100 || len(businessKey) > 255 {
+		c.JSON(400, msg.ErrResponseStr("无效的推送日志查询参数"))
 		return
 	}
 
-	logs, err := ctrl.service.ListDeliveryLogs(c.Request.Context(), limit)
-	if err != nil {
-		c.JSON(500, msg.ErrResponse("查询推送日志失败", err))
+	if isLegacyDeliveryLogQuery(values) {
+		limit, limitErr := parseLimit(c)
+		if limitErr != nil {
+			c.JSON(400, msg.ErrResponseStr("无效的日志条数"))
+			return
+		}
+		logs, serviceErr := ctrl.service.ListDeliveryLogs(c.Request.Context(), limit)
+		if serviceErr != nil {
+			c.JSON(500, msg.ErrResponseStr("查询推送日志失败"))
+			return
+		}
+		c.JSON(200, msg.SuccessResponse("查询推送日志成功", &map[string]any{"logs": safeDeliveryLogs(logs)}))
 		return
 	}
 
+	result, err := ctrl.service.ListDeliveryLogsPage(c.Request.Context(), data_dao.DeliveryLogListQuery{
+		Page: page, PageSize: pageSize, DestinationCode: destination, SourceCode: source, Success: success,
+		BusinessKey: businessKey, SentFrom: sentFrom, SentTo: sentTo,
+	})
+	if err != nil {
+		c.JSON(500, msg.ErrResponseStr("查询推送日志失败"))
+		return
+	}
+	pagination := monitoringPaginationResponse(page, pageSize, result.Total)
 	c.JSON(200, msg.SuccessResponse("查询推送日志成功", &map[string]any{
-		"logs": safeDeliveryLogs(logs),
+		"logs": safeDeliveryLogs(result.List), "pagination": pagination,
 	}))
+}
+
+func isLegacyDeliveryLogQuery(values map[string][]string) bool {
+	for _, key := range []string{"page", "page_size", "destination", "source", "success", "business_key", "start_time", "end_time"} {
+		if _, ok := values[key]; ok {
+			return false
+		}
+	}
+	return true
+}
+
+func parseDeliveryLogSuccess(value string) (*bool, error) {
+	switch strings.TrimSpace(value) {
+	case "":
+		return nil, nil
+	case "true":
+		result := true
+		return &result, nil
+	case "false":
+		result := false
+		return &result, nil
+	default:
+		return nil, strconv.ErrSyntax
+	}
 }
 
 func (ctrl *DeliveryController) RetryLog(c *gin.Context) {

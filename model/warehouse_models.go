@@ -152,7 +152,7 @@ type PipelineRun struct {
 	TotalCount    int         `gorm:"column:total_count;default:0" json:"total_count"`
 	SuccessCount  int         `gorm:"column:success_count;default:0" json:"success_count"`
 	FailedCount   int         `gorm:"column:failed_count;default:0" json:"failed_count"`
-	StartedAt     *TimeNormal `gorm:"column:started_at" json:"started_at"`
+	StartedAt     *TimeNormal `gorm:"column:started_at;index:idx_pipeline_runs_started_at" json:"started_at"`
 	FinishedAt    *TimeNormal `gorm:"column:finished_at" json:"finished_at"`
 	ErrorMessage  string      `gorm:"column:error_message;type:text" json:"error_message"`
 
@@ -194,7 +194,7 @@ type DeliveryLog struct {
 	RetryCount      int         `gorm:"column:retry_count;default:0" json:"retry_count"`
 	StartedAt       *TimeNormal `gorm:"column:started_at" json:"started_at,omitempty"`
 	FinishedAt      *TimeNormal `gorm:"column:finished_at" json:"finished_at,omitempty"`
-	SentAt          *TimeNormal `gorm:"column:sent_at" json:"sent_at"`
+	SentAt          *TimeNormal `gorm:"column:sent_at;index:idx_delivery_logs_sent_at" json:"sent_at"`
 
 	CommonTimestampsField
 }

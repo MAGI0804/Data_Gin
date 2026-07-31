@@ -455,6 +455,23 @@ type DeliveryLogDAO struct {
 	db *gorm.DB
 }
 
+// DeliveryLogListQuery contains bounded management list filters.
+type DeliveryLogListQuery struct {
+	Page            int
+	PageSize        int
+	DestinationCode string
+	SourceCode      string
+	Success         *bool
+	BusinessKey     string
+	SentFrom        *time.Time
+	SentTo          *time.Time
+}
+
+type DeliveryLogListPage struct {
+	List  []model.DeliveryLog
+	Total int64
+}
+
 func NewDeliveryLogDAO(databases ...*gorm.DB) *DeliveryLogDAO {
 	db := database.DB
 	if len(databases) > 0 && databases[0] != nil {
@@ -502,6 +519,42 @@ func (dao *DeliveryLogDAO) FindRecent(ctx context.Context, limit int) ([]model.D
 		Find(&logs).
 		Error
 	return logs, err
+}
+
+func (dao *DeliveryLogDAO) FindPage(ctx context.Context, params DeliveryLogListQuery) (*DeliveryLogListPage, error) {
+	query := dao.applyListFilters(dao.db.WithContext(ctx).Model(&model.DeliveryLog{}), params)
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		return nil, err
+	}
+	logs := make([]model.DeliveryLog, 0)
+	offset := (params.Page - 1) * params.PageSize
+	if err := query.Order("id DESC").Offset(offset).Limit(params.PageSize).Find(&logs).Error; err != nil {
+		return nil, err
+	}
+	return &DeliveryLogListPage{List: logs, Total: total}, nil
+}
+
+func (dao *DeliveryLogDAO) applyListFilters(query *gorm.DB, params DeliveryLogListQuery) *gorm.DB {
+	if params.DestinationCode != "" {
+		query = query.Where("destination_code = ?", params.DestinationCode)
+	}
+	if params.SourceCode != "" {
+		query = query.Where("source_code = ?", params.SourceCode)
+	}
+	if params.Success != nil {
+		query = query.Where("success = ?", *params.Success)
+	}
+	if params.BusinessKey != "" {
+		query = query.Where("business_key = ?", params.BusinessKey)
+	}
+	if params.SentFrom != nil {
+		query = query.Where("sent_at >= ?", *params.SentFrom)
+	}
+	if params.SentTo != nil {
+		query = query.Where("sent_at <= ?", *params.SentTo)
+	}
+	return query
 }
 
 type DeliveryLogBatchFinish struct {
@@ -630,6 +683,21 @@ type PipelineRunDAO struct {
 	db *gorm.DB
 }
 
+type PipelineRunListQuery struct {
+	Page      int
+	PageSize  int
+	Status    string
+	RunType   string
+	TraceID   string
+	StartedAt *time.Time
+	EndedAt   *time.Time
+}
+
+type PipelineRunListPage struct {
+	List  []model.PipelineRun
+	Total int64
+}
+
 func NewPipelineRunDAO() *PipelineRunDAO {
 	return &PipelineRunDAO{db: database.DB}
 }
@@ -675,4 +743,37 @@ func (dao *PipelineRunDAO) FindRecent(ctx context.Context, limit int) ([]model.P
 		Find(&runs).
 		Error
 	return runs, err
+}
+
+func (dao *PipelineRunDAO) FindPage(ctx context.Context, params PipelineRunListQuery) (*PipelineRunListPage, error) {
+	query := dao.applyListFilters(dao.db.WithContext(ctx).Model(&model.PipelineRun{}), params)
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		return nil, err
+	}
+	runs := make([]model.PipelineRun, 0)
+	offset := (params.Page - 1) * params.PageSize
+	if err := query.Order("id DESC").Offset(offset).Limit(params.PageSize).Find(&runs).Error; err != nil {
+		return nil, err
+	}
+	return &PipelineRunListPage{List: runs, Total: total}, nil
+}
+
+func (dao *PipelineRunDAO) applyListFilters(query *gorm.DB, params PipelineRunListQuery) *gorm.DB {
+	if params.Status != "" {
+		query = query.Where("status = ?", params.Status)
+	}
+	if params.RunType != "" {
+		query = query.Where("run_type = ?", params.RunType)
+	}
+	if params.TraceID != "" {
+		query = query.Where("trace_id = ?", params.TraceID)
+	}
+	if params.StartedAt != nil {
+		query = query.Where("started_at >= ?", *params.StartedAt)
+	}
+	if params.EndedAt != nil {
+		query = query.Where("started_at <= ?", *params.EndedAt)
+	}
+	return query
 }
