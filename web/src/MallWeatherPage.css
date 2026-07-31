@@ -20,6 +20,94 @@
   gap: 12px;
 }
 
+.mall-import-panel,
+.mall-import-result {
+  display: grid;
+  gap: 12px;
+}
+
+.mall-import-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1px;
+  border: 1px solid var(--line);
+  background: var(--line);
+}
+
+.mall-import-summary .mall-weather-meta-item {
+  background: #ffffff;
+}
+
+.mall-import-actions,
+.mall-import-confirm {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.mall-import-confirm {
+  border-left: 3px solid var(--accent);
+  background: var(--surface);
+  padding: 10px 12px;
+  font-size: 12px;
+}
+
+.mall-import-confirm span {
+  flex: 1 1 260px;
+}
+
+.mall-import-errors,
+.mall-import-result-rows {
+  display: grid;
+  gap: 1px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.mall-import-errors {
+  border-left: 3px solid #d92d20;
+  background: #fff3f2;
+  color: #8d1f17;
+  padding: 9px 12px 9px 28px;
+  font-size: 12px;
+}
+
+.mall-import-result-rows {
+  border: 1px solid var(--line);
+}
+
+.mall-import-result-rows li {
+  display: grid;
+  grid-template-columns: minmax(84px, auto) minmax(110px, auto) minmax(0, 1fr) minmax(180px, 1.5fr);
+  gap: 8px 12px;
+  align-items: baseline;
+  padding: 9px 10px;
+  border-bottom: 1px solid var(--line);
+  font-size: 12px;
+}
+
+.mall-import-result-rows li:last-child {
+  border-bottom: 0;
+}
+
+.mall-import-result-rows li[data-status='FAILED'] strong,
+.mall-import-result-rows li[data-status='FAILED'] span:last-child {
+  color: #d92d20;
+}
+
+@media (max-width: 700px) {
+  .mall-import-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .mall-import-result-rows li {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
+}
+
 .mall-weather-push-panel {
   border-top: 4px solid #1f2937;
 }
