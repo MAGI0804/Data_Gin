@@ -1084,6 +1084,11 @@ function App() {
     if (response.ok) await refreshAll(false)
   }
 
+  async function fetchSource(sourceID: number) {
+    const response = await client(`/v1/sources/${sourceID}/fetch`, { method: 'POST' })
+    if (response.ok) await refreshAll(false)
+  }
+
   async function saveOrderPushSkipConfig(config: OrderPushSkipConfig) {
     const response = await client('/v1/order-push-skip-config', {
       method: 'PUT',
@@ -1223,7 +1228,7 @@ function App() {
         {activeNav === 'store_info' && <StoreInfoPage actorID={actorID} client={client} downloadFile={downloadFile} />}
         {activeNav === 'mall_weather' && <MallWeatherPage actorID={actorID} client={client} downloadFile={downloadFile} />}
         {activeNav === 'data_authorizations' && <DataAuthorizationPage client={client} />}
-        {activeNav === 'sources' && <SourcesQueryPage sources={sources} />}
+        {activeNav === 'sources' && <SourcesQueryPage sources={sources} onFetchSource={fetchSource} />}
         {activeNav === 'methods' && <MethodsView methods={methods} coreMethods={coreMethods} onToggle={toggleTarget} />}
         {activeNav === 'receive' && <RawRecordsQueryPage title="接口接收记录" records={receivedData} />}
         {activeNav === 'pull_records' && <RawRecordsQueryPage title="数据拉取记录" records={pulledData} />}
@@ -1522,7 +1527,7 @@ function StepRunsQueryPage({ runs, stepRuns, selectedRunID, onLoadSteps }: { run
   )
 }
 
-function SourcesQueryPage({ sources }: { sources: SourceDefinition[] }) {
+function SourcesQueryPage({ sources, onFetchSource }: { sources: SourceDefinition[]; onFetchSource: (sourceID: number) => Promise<void> }) {
   const [query, setQuery] = useState('')
   const [status, setStatus] = useState('all')
   const [sourceType, setSourceType] = useState('all')
@@ -1536,7 +1541,7 @@ function SourcesQueryPage({ sources }: { sources: SourceDefinition[] }) {
         <SelectFilter label="状态" value={status} onChange={setStatus} options={[{ value: 'enabled', label: '启用' }, { value: 'disabled', label: '停用' }]} />
         <SelectFilter label="类型" value={sourceType} onChange={setSourceType} options={uniqueOptions(sources.map((source) => source.source_type))} />
       </QueryBar>
-      <Panel title="数据源配置" icon={<Database />} meta={`查询命中 ${filtered.length} 条`}><SourceList sources={filtered} /></Panel>
+      <Panel title="数据源配置" icon={<Database />} meta={`查询命中 ${filtered.length} 条`}><SourceList sources={filtered} onFetchSource={onFetchSource} /></Panel>
     </div>
   )
 }
@@ -3424,7 +3429,8 @@ function RawDataList({ records }: { records: RawData[] }) {
   )
 }
 
-function SourceList({ sources }: { sources: SourceDefinition[] }) {
+function SourceList({ sources, onFetchSource }: { sources: SourceDefinition[]; onFetchSource: (sourceID: number) => Promise<void> }) {
+  const [pendingID, setPendingID] = useState<number | null>(null)
   if (sources.length === 0) return <EmptyState text="暂无数据源配置。" />
   return (
     <div className="record-list">
@@ -3434,7 +3440,13 @@ function SourceList({ sources }: { sources: SourceDefinition[] }) {
             <strong>{source.name}</strong>
             <span>{source.code} / {source.source_type} / {source.auth_type || 'none'}</span>
           </div>
-          <StatusPill label={source.enabled ? '启用' : '停用'} />
+          <div className="record-actions">
+            <StatusPill label={source.enabled ? '启用' : '停用'} />
+            <button type="button" disabled={pendingID !== null || !source.enabled} onClick={() => {
+              setPendingID(source.id)
+              void onFetchSource(source.id).finally(() => setPendingID(null))
+            }}>{pendingID === source.id ? '拉取中…' : '手动拉取'}</button>
+          </div>
         </article>
       ))}
     </div>
