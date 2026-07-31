@@ -2654,7 +2654,7 @@ function DestinationsQueryPage({ client, destinations, onRefresh }: { client: Ap
     setTestingID(destination.id)
     const response = await client(`/v1/destinations/${destination.id}/test`, { method: 'POST', showResult: false, silentLoading: true })
     setTestingID(null)
-    setMessage(response.ok ? '连通性测试通过，未推送业务记录。' : response.error?.message || '连通性测试未完成。')
+    setMessage(response.ok ? '连通性测试通过；仅发送了无业务载荷的 HEAD 或 GET 请求。' : response.error?.message || '连通性测试未完成。')
   }
   return (
     <div className="view-stack">
@@ -2677,7 +2677,7 @@ function DestinationsQueryPage({ client, destinations, onRefresh }: { client: Ap
           <div className="excel-form-actions"><button className="primary" type="submit" disabled={draft.hasSecret || saving}>{saving ? '保存中…' : '保存目标'}</button></div>
         </form>
       </Modal>}
-      {pendingTest && <Modal title="确认测试推送目标" onClose={() => { if (testingID === null) setPendingTest(null) }} footer={<><button type="button" disabled={testingID !== null} onClick={() => setPendingTest(null)}>取消</button><button className="primary" type="button" disabled={testingID !== null} onClick={() => { const target = pendingTest; setPendingTest(null); void test(target) }}>{testingID === pendingTest.id ? '测试中…' : '确认测试'}</button></>}><p>将向“{pendingTest.name}”配置的目标地址发起真实连通性请求，不会推送业务记录。确认继续？</p></Modal>}
+      {pendingTest && <Modal title="确认测试推送目标" onClose={() => { if (testingID === null) setPendingTest(null) }} footer={<><button type="button" disabled={testingID !== null} onClick={() => setPendingTest(null)}>取消</button><button className="primary" type="button" disabled={testingID !== null} onClick={() => { const target = pendingTest; setPendingTest(null); void test(target) }}>{testingID === pendingTest.id ? '测试中…' : '确认测试'}</button></>}><p>将向“{pendingTest.name}”配置的目标地址发起真实连通性请求。系统仅允许无业务载荷的 HEAD 或 GET；请确认目标的 GET 接口无副作用。确认继续？</p></Modal>}
     </div>
   )
 }
