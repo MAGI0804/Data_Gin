@@ -551,6 +551,12 @@ type LegacyTask = {
   description: string
 }
 
+type LegacyTaskRunResult = {
+  id: string
+  queue: string
+  type: string
+}
+
 type YouzanDistributionBackfillSample = {
   tid: string
   status: string
@@ -1240,6 +1246,15 @@ function App() {
     return response.ok ? readObject<YouzanDistributionBackfillResult>(response, 'result') : null
   }
 
+  async function runLegacyTask(code: string, payload: YouzanDistributionBackfillPayload) {
+    const response = await client(`/v1/legacy-tasks/${encodeURIComponent(code)}/run`, {
+      method: 'POST',
+      body: payload,
+    })
+    if (response.ok) await refreshWorkspace(false)
+    return response
+  }
+
   const coreMethods = useMemo(
     () => buildCoreMethods({ sources, transformRules, destinations, deliveryTasks, legacyTasks, legacyRules }),
     [deliveryTasks, destinations, legacyRules, legacyTasks, sources, transformRules],
@@ -1335,7 +1350,7 @@ function App() {
         {activeNav === 'receive' && <RawRecordsQueryPage title="接口接收记录" origin="receive" client={client} />}
         {activeNav === 'pull_records' && <RawRecordsQueryPage title="数据拉取记录" origin="pull" client={client} />}
         {activeNav === 'backfill' && <BojunBackfillPage loading={loading || refreshing} onPreview={previewBojunOrderBackfill} onConfirm={confirmBojunOrderBackfill} />}
-        {activeNav === 'youzan_distribution' && <YouzanDistributionPage task={legacyTasks.find((item) => item.code === 'youzan_distribution_order_fetch')} loading={loading || refreshing} onPreview={previewYouzanDistributionBackfill} onConfirm={confirmYouzanDistributionBackfill} />}
+        {activeNav === 'youzan_distribution' && <YouzanDistributionPage task={legacyTasks.find((item) => item.code === 'youzan_distribution_order_fetch')} loading={loading || refreshing} onPreview={previewYouzanDistributionBackfill} onConfirm={confirmYouzanDistributionBackfill} onRun={runLegacyTask} />}
         {activeNav === 'rules' && <RulesQueryPage client={client} rules={transformRules} sources={sources} onRulesChange={setTransformRules} />}
         {activeNav === 'processed' && <ProcessedQueryPage client={client} />}
         {activeNav === 'destinations' && <DestinationsQueryPage client={client} destinations={destinations} onRefresh={() => refreshWorkspace(false)} />}
@@ -2080,17 +2095,23 @@ function BojunBackfillPage({ loading, onPreview, onConfirm }: {
   )
 }
 
-function YouzanDistributionPage({ task, loading, onPreview, onConfirm }: {
+function YouzanDistributionPage({ task, loading, onPreview, onConfirm, onRun }: {
   task?: LegacyTask
   loading: boolean
   onPreview: (payload: YouzanDistributionBackfillPayload) => Promise<YouzanDistributionBackfillResult | null>
   onConfirm: (payload: YouzanDistributionBackfillPayload) => Promise<YouzanDistributionBackfillResult | null>
+  onRun: (code: string, payload: YouzanDistributionBackfillPayload) => Promise<ApiResult>
 }) {
   const [showBackfill, setShowBackfill] = useState(false)
   const [timeFilter, setTimeFilter] = useState<YouzanDistributionTimeFilter>('created')
   const [payload, setPayload] = useState<YouzanDistributionBackfillPayload | null>(null)
   const [preview, setPreview] = useState<YouzanDistributionBackfillResult | null>(null)
   const [confirmed, setConfirmed] = useState<YouzanDistributionBackfillResult | null>(null)
+  const [showManualRun, setShowManualRun] = useState(false)
+  const [manualRunPayload, setManualRunPayload] = useState<YouzanDistributionBackfillPayload | null>(null)
+  const [manualRunResult, setManualRunResult] = useState<LegacyTaskRunResult | null>(null)
+  const [manualRunError, setManualRunError] = useState('')
+  const [runningManualTask, setRunningManualTask] = useState(false)
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -2126,6 +2147,38 @@ function YouzanDistributionPage({ task, loading, onPreview, onConfirm }: {
     setShowBackfill(true)
   }
 
+  function openManualRun() {
+    setManualRunPayload(null)
+    setManualRunResult(null)
+    setManualRunError('')
+    setShowManualRun(true)
+  }
+
+  function prepareManualRun(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const form = new FormData(event.currentTarget)
+    setManualRunPayload({
+      time_filter: formValue(form, 'time_filter') === 'success' ? 'success' : 'created',
+      start_time: backendDateTime(formValue(form, 'start_time')),
+      end_time: backendDateTime(formValue(form, 'end_time')),
+    })
+  }
+
+  async function confirmManualRun() {
+    if (!task || !manualRunPayload || runningManualTask) return
+    setRunningManualTask(true)
+    setManualRunError('')
+    const response = await onRun(task.code, manualRunPayload)
+    if (response.ok) {
+      const result = readObject<LegacyTaskRunResult>(response, 'result')
+      if (result?.id && result.queue && result.type) setManualRunResult(result)
+      else setManualRunError('任务已提交，但未收到完整的队列任务信息。请在任务系统中核对执行状态。')
+    } else {
+      setManualRunError(response.error?.message || '任务投递失败，请稍后重试。')
+    }
+    setRunningManualTask(false)
+  }
+
   return (
     <div className="view-stack">
       <Panel title="每日自动拉取" icon={<ArrowDownToLine />} meta={task?.cron_expr || '等待后端任务定义'}>
@@ -2141,6 +2194,7 @@ function YouzanDistributionPage({ task, loading, onPreview, onConfirm }: {
             </dl>
             <div className="task-page-actions">
               <button className="primary" type="button" onClick={openBackfill} disabled={loading}>发起补拉</button>
+              <button type="button" onClick={openManualRun} disabled={loading}>运行计划任务</button>
             </div>
           </>
         )}
@@ -2170,6 +2224,41 @@ function YouzanDistributionPage({ task, loading, onPreview, onConfirm }: {
           <p className="backfill-note">当前按{youzanDistributionTimeFilterLabel(timeFilter)}筛选。预览会真实拉取、解密并判重，但不写数据库；确认后重新拉取相同筛选方式和时间范围并写入，已有 tid 不覆盖。</p>
           {preview && <YouzanDistributionBackfillResultView title="预览结果" result={preview} />}
           {confirmed && <YouzanDistributionBackfillResultView title="写入结果" result={confirmed} />}
+        </Modal>
+      )}
+
+      {showManualRun && task && (
+        <Modal title="运行有赞分销计划任务" onClose={() => { if (!runningManualTask) setShowManualRun(false) }}>
+          {!manualRunPayload ? (
+            <form className="youzan-backfill-form" onSubmit={prepareManualRun}>
+              <p className="backfill-note">此操作会投递异步任务，不直接写入本页。请确认任务编码和时间范围后再继续。</p>
+              <label>任务编码<input name="task_code" value={task.code} readOnly /></label>
+              <label>
+                时间筛选方式
+                <select name="time_filter" defaultValue="created">
+                  <option value="created">下单时间</option>
+                  <option value="success">订单完成时间</option>
+                </select>
+              </label>
+              <Field label="开始时间" name="start_time" type="datetime-local" defaultValue={previousDayDateTimeLocal(false)} required />
+              <Field label="结束时间" name="end_time" type="datetime-local" defaultValue={previousDayDateTimeLocal(true)} required />
+              <button className="primary" type="submit">继续确认</button>
+            </form>
+          ) : (
+            <div className="view-stack">
+              <dl className="task-definition-grid">
+                <div><dt>任务编码</dt><dd><code>{task.code}</code></dd></div>
+                <div><dt>筛选方式</dt><dd>{youzanDistributionTimeFilterLabel(manualRunPayload.time_filter)}</dd></div>
+                <div className="wide"><dt>执行时间范围</dt><dd>{manualRunPayload.start_time} ~ {manualRunPayload.end_time}</dd></div>
+              </dl>
+              {!manualRunResult && <div className="excel-form-actions">
+                <button type="button" onClick={() => setManualRunPayload(null)} disabled={runningManualTask}>返回修改</button>
+                <button className="primary" type="button" onClick={() => void confirmManualRun()} disabled={runningManualTask}>{runningManualTask ? '投递中…' : '确认投递任务'}</button>
+              </div>}
+              {manualRunError && <div className="result-banner error" role="alert">{manualRunError}</div>}
+              {manualRunResult && <div className="result-banner" role="status">已投递：任务 ID {manualRunResult.id}，队列 {manualRunResult.queue}，类型 {manualRunResult.type}。</div>}
+            </div>
+          )}
         </Modal>
       )}
     </div>
