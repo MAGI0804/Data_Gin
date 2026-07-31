@@ -3,6 +3,7 @@ import { CloudRain, Download, MapPin, RefreshCcw, Thermometer, Wind } from 'luci
 import './MallWeatherPage.css'
 import { MallWeatherChart } from './MallWeatherChart'
 import { MallWeatherExportPanel } from './MallWeatherExportPanel'
+import { MallWeatherExportProfilePanel } from './MallWeatherExportProfilePanel'
 import { MallWeatherForecastPanel, type MallWeatherForecastDataSnapshot } from './MallWeatherForecastPanel'
 import { MallDetailsFields, MallWeatherMallEditor } from './MallWeatherMallEditor'
 import { mallWeatherCapacityPlanPath, parseMallWeatherCapacityPlan, type MallWeatherCapacityPlan, type MallWeatherCapacityPlanInput } from './mallWeatherCapacityPlan'
@@ -674,6 +675,7 @@ function MallModulePage({
       </section>
 
       <MallWeatherCapacityPlanPanel client={client} />
+      <MallWeatherExportProfilePanel client={client} />
 
       {mallState === 'error' && <RequestError message={mallError} onRetry={() => void loadMalls()} />}
       {mallState === 'loading' && malls.length === 0 && <LoadingState label="正在加载商场" />}
