@@ -517,6 +517,53 @@ button:focus-visible {
   gap: 14px;
 }
 
+.pipeline-run-panel,
+.pipeline-run-controls,
+.pipeline-run-confirm {
+  display: grid;
+  gap: 12px;
+}
+
+.pipeline-run-panel {
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+  padding: 14px 0;
+}
+
+.pipeline-run-panel > div:first-child,
+.pipeline-run-confirm > div:first-child {
+  display: grid;
+  gap: 4px;
+}
+
+.pipeline-run-panel span,
+.pipeline-run-confirm span,
+.pipeline-run-result {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.pipeline-run-controls {
+  grid-template-columns: minmax(0, 360px) auto;
+  align-items: end;
+}
+
+.pipeline-run-confirm {
+  border-left: 3px solid var(--accent);
+  background: var(--surface);
+  padding: 12px;
+}
+
+.pipeline-run-confirm > div:last-child {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.pipeline-run-result.error {
+  color: #d92d20;
+}
+
 .method-row,
 .record-row {
   display: grid;
@@ -1305,6 +1352,10 @@ summary {
 }
 
 @media (max-width: 840px) {
+  .pipeline-run-controls {
+    grid-template-columns: 1fr;
+  }
+
   .method-row,
   .record-row {
     grid-template-columns: 1fr;

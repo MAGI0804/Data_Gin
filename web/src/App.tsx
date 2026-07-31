@@ -32,6 +32,7 @@ import { readSessionUser, readTokenInfo, type SessionUser } from './api/auth'
 import { parseDataStatisticsSummary, parseHealthSummary, parseMallWeatherMetricsSummary, redactMonitoringJSON, type DataStatisticsSummary, type HealthSummary, type MallWeatherMetricsSummary } from './monitoring'
 import { MallWeatherPage, StoreInfoPage } from './MallWeatherPage'
 import { DataAuthorizationPage } from './DataAuthorizationPage'
+import { PipelineRunPanel } from './PipelineRunPanel'
 import { Brand } from './components/Brand'
 import { parseMallWeatherExportContentStatus, submitMallWeatherExportContentDownload } from './mallWeatherExport'
 import { buildRawRecordsRequest, parseRawRecordsPage, type RawRecordOrigin, type RawRecordsPage } from './rawRecords'
@@ -811,6 +812,7 @@ function App() {
   const stepRequestRef = useRef<AbortController | null>(null)
   const workspaceRequestRef = useRef<AbortController | null>(null)
   const [methods, setMethods] = useState<MethodDisplay[]>(builtinMethods)
+  const [pipelines, setPipelines] = useState<PipelineDefinition[]>([])
   const [sources, setSources] = useState<SourceDefinition[]>([])
   const [transformRules, setTransformRules] = useState<TransformRule[]>([])
   const [destinations, setDestinations] = useState<DestinationDefinition[]>([])
@@ -1006,7 +1008,9 @@ function App() {
             if (taskResult.ok) setDeliveryTasks(nextTasks)
             if (legacyTaskResult.ok) setLegacyTasks(nextLegacyTasks)
             if (legacyRuleResult.ok) setLegacyRules(nextLegacyRules)
-            const configuredMethods = pipelineResult.ok ? await loadConfiguredMethods(readList<PipelineDefinition>(pipelineResult, 'pipelines'), controller.signal) : []
+            const nextPipelines = pipelineResult.ok ? readList<PipelineDefinition>(pipelineResult, 'pipelines') : []
+            if (pipelineResult.ok) setPipelines(nextPipelines)
+            const configuredMethods = pipelineResult.ok ? await loadConfiguredMethods(nextPipelines, controller.signal) : []
             if (!controller.signal.aborted) setMethods([...buildConfiguredMethodDisplays(nextSources, nextRules, nextDestinations, nextTasks), ...buildLegacyMethodDisplays(nextLegacyTasks, nextLegacyRules), ...configuredMethods, ...builtinMethods])
           }
         }
@@ -1346,7 +1350,7 @@ function App() {
         {activeNav === 'mall_weather' && <MallWeatherPage actorID={actorID} client={client} downloadFile={downloadFile} />}
         {activeNav === 'data_authorizations' && <DataAuthorizationPage client={client} />}
         {activeNav === 'sources' && <SourcesQueryPage client={client} sources={sources} onFetchSource={fetchSource} onTestSource={testSource} onRefresh={() => refreshWorkspace(false)} />}
-        {activeNav === 'methods' && <MethodsView methods={methods} coreMethods={coreMethods} onToggle={toggleTarget} />}
+        {activeNav === 'methods' && <MethodsView methods={methods} pipelines={pipelines} client={client} coreMethods={coreMethods} onToggle={toggleTarget} onPipelineRunCompleted={() => void refreshWorkspace(false)} />}
         {activeNav === 'receive' && <RawRecordsQueryPage title="接口接收记录" origin="receive" client={client} />}
         {activeNav === 'pull_records' && <RawRecordsQueryPage title="数据拉取记录" origin="pull" client={client} />}
         {activeNav === 'backfill' && <BojunBackfillPage loading={loading || refreshing} onPreview={previewBojunOrderBackfill} onConfirm={confirmBojunOrderBackfill} />}
@@ -1482,7 +1486,7 @@ function PushStatusView({ runs, deliveryLogs, monitoring, stale, onLoadSteps }: 
   )
 }
 
-function MethodsView({ methods, coreMethods, onToggle }: { methods: MethodDisplay[]; coreMethods: CoreMethod[]; onToggle: (target: ToggleTarget, enabled: boolean) => void }) {
+function MethodsView({ methods, pipelines, client, coreMethods, onToggle, onPipelineRunCompleted }: { methods: MethodDisplay[]; pipelines: PipelineDefinition[]; client: ApiClient; coreMethods: CoreMethod[]; onToggle: (target: ToggleTarget, enabled: boolean) => void; onPipelineRunCompleted: () => void }) {
   const [query, setQuery] = useState('')
   const [category, setCategory] = useState('all')
   const [status, setStatus] = useState('all')
@@ -1501,6 +1505,7 @@ function MethodsView({ methods, coreMethods, onToggle }: { methods: MethodDispla
       <Panel title="当前已有核心方法" icon={<Wrench />} meta="可开启的真实配置会显示操作按钮">
         <CoreMethodList methods={coreMethods} onToggle={onToggle} />
       </Panel>
+      <PipelineRunPanel pipelines={pipelines} client={client} onRunCompleted={onPipelineRunCompleted} />
       <QueryBar count={filtered.length} total={methods.length}>
         <Field label="名称 / 编码 / 负责人" name="method_query" value={query} onChange={setQuery} />
         <SelectFilter label="分类" value={category} onChange={setCategory} options={uniqueOptions(methods.map((method) => method.category))} />
