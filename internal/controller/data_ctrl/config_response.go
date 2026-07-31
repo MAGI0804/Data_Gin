@@ -2,6 +2,7 @@ package data_ctrl
 
 import (
 	"encoding/json"
+	"net/url"
 	"strings"
 
 	"gin-biz-web-api/model"
@@ -142,6 +143,11 @@ func redactConfigValue(value interface{}, key string) (interface{}, bool) {
 	if sensitiveConfigKey(key) {
 		return "[已隐藏]", true
 	}
+	if strings.EqualFold(strings.TrimSpace(key), "url") {
+		if rawURL, ok := value.(string); ok {
+			return redactConfigURL(rawURL)
+		}
+	}
 	switch typed := value.(type) {
 	case map[string]interface{}:
 		result := make(map[string]interface{}, len(typed))
@@ -175,5 +181,26 @@ func redactConfigValue(value interface{}, key string) (interface{}, bool) {
 
 func sensitiveConfigKey(key string) bool {
 	key = strings.ToLower(strings.ReplaceAll(key, "-", "_"))
-	return strings.Contains(key, "secret") || strings.Contains(key, "token") || strings.Contains(key, "password") || strings.Contains(key, "authorization") || strings.Contains(key, "api_key") || strings.Contains(key, "private_key")
+	return strings.Contains(key, "secret") || strings.Contains(key, "token") || strings.Contains(key, "password") || strings.Contains(key, "authorization") || strings.Contains(key, "api_key") || strings.Contains(key, "private_key") || key == "dsn"
+}
+
+func redactConfigURL(rawURL string) (string, bool) {
+	parsed, err := url.Parse(rawURL)
+	if err != nil {
+		return rawURL, false
+	}
+	hasSecret := false
+	if parsed.User != nil {
+		parsed.User = url.User("[已隐藏]")
+		hasSecret = true
+	}
+	query := parsed.Query()
+	for key := range query {
+		if sensitiveConfigKey(key) {
+			query[key] = []string{"[已隐藏]"}
+			hasSecret = true
+		}
+	}
+	parsed.RawQuery = query.Encode()
+	return parsed.String(), hasSecret
 }
