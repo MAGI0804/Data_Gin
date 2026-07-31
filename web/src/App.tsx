@@ -36,7 +36,7 @@ import { PipelineRunPanel } from './PipelineRunPanel'
 import { PipelineComposerPanel } from './PipelineComposerPanel'
 import { Brand } from './components/Brand'
 import { parseMallWeatherExportContentStatus, submitMallWeatherExportContentDownload } from './mallWeatherExport'
-import { buildRawRecordsRequest, parseRawRecordsPage, type RawRecordOrigin, type RawRecordsPage } from './rawRecords'
+import { buildRawRecordsRequest, buildWarehouseRawRecordsQuery, parseRawRecordsPage, type RawRecordOrigin, type RawRecordsPage } from './rawRecords'
 import { parseSourceFetchSummary } from './sourceOperations'
 import { buildCleanRecordsQuery, buildProcessedRecordsQuery, parseProcessedRecordsPage, type ProcessedRecordsPage } from './processedRecords'
 import {
@@ -442,6 +442,16 @@ type RawData = {
   source: string
   created_at: number
   updated_at: number
+}
+
+type WarehouseRawRecord = {
+  id: number
+  sourceID: number
+  sourceCode: string
+  status: 'received' | 'queued' | 'cleaning' | 'cleaned' | 'failed'
+  traceID: string
+  receivedAt: string
+  createdAt: number
 }
 
 type ProcessedData = {
@@ -1829,7 +1839,128 @@ function RawRecordsQueryPage({ title, origin, client }: { title: string; origin:
           <button type="button" onClick={() => setPage((current) => current + 1)} disabled={loading || totalPages === 0 || page >= totalPages}>下一页</button>
         </div>
       </Panel>
+      {origin === 'receive' && <WarehouseRawRecordsPanel client={client} />}
     </div>
+  )
+}
+
+function WarehouseRawRecordsPanel({ client }: { client: ApiClient }) {
+  const [source, setSource] = useState('')
+  const [status, setStatus] = useState('')
+  const [traceID, setTraceID] = useState('')
+  const [startTime, setStartTime] = useState('')
+  const [endTime, setEndTime] = useState('')
+  const [appliedQuery, setAppliedQuery] = useState({ source: '', status: '', traceID: '', startTime: '', endTime: '' })
+  const [page, setPage] = useState(1)
+  const [recordsPage, setRecordsPage] = useState<RawRecordsPage<WarehouseRawRecord> | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const [message, setMessage] = useState('')
+  const [pendingRetransform, setPendingRetransform] = useState<WarehouseRawRecord | null>(null)
+  const [retransformingID, setRetransformingID] = useState<number | null>(null)
+  const [reloadVersion, setReloadVersion] = useState(0)
+  const requestRef = useRef<AbortController | null>(null)
+
+  useEffect(() => {
+    requestRef.current?.abort()
+    const controller = new AbortController()
+    requestRef.current = controller
+    setLoading(true)
+    setError('')
+    const query = buildWarehouseRawRecordsQuery({ page, pageSize: 20, origin: 'receive', ...appliedQuery })
+    void client(`/v1/raw-records?${query}`, {
+      method: 'GET', signal: controller.signal, showResult: false, silentLoading: true,
+    }).then((response) => {
+      if (controller.signal.aborted) return
+      const parsed = response.ok ? parseRawRecordsPage<unknown>(response.data) : null
+      const records = parsed?.list.map(parseWarehouseRawRecord) ?? []
+      if (parsed && records.every((record): record is WarehouseRawRecord => record !== null)) {
+        setRecordsPage({ ...parsed, list: records })
+        return
+      }
+      setError(response.error?.message || '可重新处理记录查询暂时不可用，请稍后重试。')
+    }).finally(() => {
+      if (!controller.signal.aborted) setLoading(false)
+    })
+    return () => controller.abort()
+  }, [appliedQuery, client, page, reloadVersion])
+
+  function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    setPage(1)
+    setAppliedQuery({ source, status, traceID, startTime: backendDateTime(startTime), endTime: backendDateTime(endTime) })
+  }
+
+  async function retransform() {
+    const record = pendingRetransform
+    if (!record || retransformingID !== null) return
+    setRetransformingID(record.id)
+    setError('')
+    const response = await client(`/v1/raw-records/${record.id}/retransform`, {
+      method: 'POST', retry: false, showResult: false, silentLoading: true,
+    })
+    setRetransformingID(null)
+    if (!response.ok) {
+      setError(response.error?.message || '重新处理未完成，请稍后重试。')
+      return
+    }
+    const result = parseRetransformResult(response.data)
+    if (!result) {
+      setError('重新处理已提交，但未收到可验证的结果摘要。')
+      return
+    }
+    setPendingRetransform(null)
+    setMessage(`重新处理完成：追踪 ${result.traceID || '-'}，清洗记录 #${result.cleanRecordID}。`)
+    setReloadVersion((version) => version + 1)
+  }
+
+  const records = recordsPage?.list ?? []
+  const total = recordsPage?.total ?? 0
+  const totalPages = recordsPage?.totalPages ?? 0
+  return (
+    <>
+      <Panel title="可重新处理原始记录" icon={<RefreshCcw />} meta={loading && !recordsPage ? '正在加载…' : `共 ${total} 条`}>
+        <p className="query-contract-note">此列表仅展示新仓库的脱敏原始记录。历史“接口接收记录”仍只读；只有本列表中的 ID 可安全重新处理。</p>
+        <form className="query-bar" onSubmit={submit}>
+          <div className="query-fields">
+            <Field label="来源" name="warehouse_raw_source" value={source} onChange={setSource} />
+            <SelectFilter label="状态" value={status || 'all'} onChange={(next) => setStatus(next === 'all' ? '' : next)} options={[
+              { value: 'received', label: '已接收' }, { value: 'queued', label: '排队中' }, { value: 'cleaning', label: '处理中' }, { value: 'cleaned', label: '已清洗' }, { value: 'failed', label: '失败' },
+            ]} />
+            <Field label="追踪 ID" name="warehouse_raw_trace_id" value={traceID} onChange={setTraceID} />
+            <Field label="开始时间" name="warehouse_raw_start_time" type="datetime-local" value={startTime} onChange={setStartTime} />
+            <Field label="结束时间" name="warehouse_raw_end_time" type="datetime-local" value={endTime} onChange={setEndTime} />
+          </div>
+          <button type="submit" disabled={loading || retransformingID !== null}>{loading ? '查询中…' : '查询'}</button>
+        </form>
+        {message && <div className="result-banner" role="status" aria-live="polite">{message}</div>}
+        {error && <div className="result-banner error" role="alert">{error} 已保留最近一次成功数据。</div>}
+        {records.length === 0 ? <EmptyState text="暂无可重新处理的原始记录。" /> : (
+          <div className="record-list">
+            {records.map((record) => (
+              <article className="record-row" key={record.id}>
+                <div>
+                  <strong>#{record.id} / {record.sourceCode || '未命名来源'}</strong>
+                  <span>来源 #{record.sourceID || '-'} / 追踪 {record.traceID || '-'} / {record.receivedAt || `创建于 ${record.createdAt || '-'}`}</span>
+                </div>
+                <div className="record-actions">
+                  <StatusPill label={rawRecordStatusLabel(record.status)} />
+                  <button type="button" disabled={retransformingID !== null || record.status === 'cleaning'} onClick={() => setPendingRetransform(record)}>
+                    {retransformingID === record.id ? '处理中…' : '重新处理'}
+                  </button>
+                </div>
+              </article>
+            ))}
+          </div>
+        )}
+        <div className="record-actions raw-record-pagination" role="status" aria-live="polite">
+          <span>第 {recordsPage?.page ?? page} / {Math.max(totalPages, 1)} 页</span>
+          <button type="button" onClick={() => setPage((current) => Math.max(1, current - 1))} disabled={loading || retransformingID !== null || page <= 1}>上一页</button>
+          <button type="button" onClick={() => setPage((current) => current + 1)} disabled={loading || retransformingID !== null || totalPages === 0 || page >= totalPages}>下一页</button>
+        </div>
+      </Panel>
+      {pendingRetransform && <Modal title="确认重新处理原始记录" closeDisabled={retransformingID !== null} onClose={() => { if (retransformingID === null) setPendingRetransform(null) }} footer={<><button type="button" disabled={retransformingID !== null} onClick={() => setPendingRetransform(null)}>取消</button><button className="primary" type="button" disabled={retransformingID !== null} onClick={() => void retransform()}>{retransformingID === pendingRetransform.id ? '处理中…' : '确认重新处理'}</button></>}><p>确认重新处理仓库原始记录 #{pendingRetransform.id}？系统会创建新的清洗记录；原始内容不会在管理端展示。</p></Modal>}
+    </>
   )
 }
 
@@ -4428,6 +4559,48 @@ function compactText(value: string) {
   const text = (value || '').replace(/\s+/g, ' ').trim()
   if (text.length <= 120) return text
   return `${text.slice(0, 120)}...`
+}
+
+function publicText(value: unknown, maximumLength: number) {
+  if (typeof value !== 'string') return ''
+  const text = value.trim()
+  return text.length <= maximumLength ? text : ''
+}
+
+function parseWarehouseRawRecord(value: unknown): WarehouseRawRecord | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const record = value as Record<string, unknown>
+  const id = Number(record.id)
+  const sourceID = Number(record.source_id)
+  const createdAt = Number(record.created_at)
+  const status = publicText(record.status, 16)
+  if (!Number.isInteger(id) || id <= 0 || !Number.isInteger(sourceID) || sourceID < 0
+    || !Number.isInteger(createdAt) || createdAt < 0
+    || !['received', 'queued', 'cleaning', 'cleaned', 'failed'].includes(status)) return null
+  return {
+    id,
+    sourceID,
+    sourceCode: publicText(record.source_code, 100),
+    status: status as WarehouseRawRecord['status'],
+    traceID: publicText(record.trace_id, 64),
+    receivedAt: publicText(record.received_at, 32),
+    createdAt,
+  }
+}
+
+function parseRetransformResult(payload: unknown): { traceID: string; cleanRecordID: number } | null {
+  if (!payload || typeof payload !== 'object') return null
+  const data = (payload as { data?: unknown }).data
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return null
+  const result = (data as { result?: unknown }).result
+  if (!result || typeof result !== 'object' || Array.isArray(result)) return null
+  const cleanRecordID = Number((result as Record<string, unknown>).clean_record_id)
+  if (!Number.isInteger(cleanRecordID) || cleanRecordID <= 0) return null
+  return { traceID: publicText((result as Record<string, unknown>).trace_id, 64), cleanRecordID }
+}
+
+function rawRecordStatusLabel(status: WarehouseRawRecord['status']) {
+  return ({ received: '已接收', queued: '排队中', cleaning: '处理中', cleaned: '已清洗', failed: '失败' } as const)[status]
 }
 
 function RawDataList({ records }: { records: RawData[] }) {

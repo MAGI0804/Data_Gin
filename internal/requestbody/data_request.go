@@ -94,3 +94,17 @@ type RawDataListQueryRequest struct {
 	EndTime   string `json:"end_time" binding:"max=20"`
 	Origin    string `json:"origin" binding:"omitempty,oneof=receive pull"`
 }
+
+// RawRecordListQueryRequest is the safe pagination contract for warehouse
+// raw_records. It deliberately accepts only metadata that is safe to list;
+// raw content, request headers and processing errors are never query fields.
+type RawRecordListQueryRequest struct {
+	Page      int    `form:"page" binding:"omitempty,min=1,max=1000000"`
+	PageSize  int    `form:"page_size" binding:"omitempty,min=1,max=100"`
+	Source    string `form:"source" binding:"max=100"`
+	Status    string `form:"status" binding:"omitempty,oneof=received queued cleaning cleaned failed"`
+	TraceID   string `form:"trace_id" binding:"max=64"`
+	StartTime string `form:"start_time" binding:"max=19"`
+	EndTime   string `form:"end_time" binding:"max=19"`
+	Origin    string `form:"origin" binding:"omitempty,oneof=receive pull"`
+}

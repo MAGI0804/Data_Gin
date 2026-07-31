@@ -48,6 +48,8 @@ func apiData(api *gin.RouterGroup) {
 	rawRecordsGroup.Use(middleware.AuthJWT())
 	{
 		transformCtrl := data_ctrl.NewTransformController()
+		rawRecordCtrl := data_ctrl.NewRawRecordController()
+		rawRecordsGroup.GET("", rawRecordCtrl.List)
 		rawRecordsGroup.POST("/:id/retransform", transformCtrl.RetransformRawRecord)
 	}
 

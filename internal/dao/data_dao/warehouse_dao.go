@@ -75,6 +75,35 @@ type RawRecordDAO struct {
 	db *gorm.DB
 }
 
+// RawRecordListQuery contains validated raw_records list filters.
+type RawRecordListQuery struct {
+	Page      int
+	PageSize  int
+	Source    string
+	Status    string
+	TraceID   string
+	StartTime *time.Time
+	EndTime   *time.Time
+	Origin    string
+}
+
+// RawRecordListItem is the database projection safe for management list views.
+// It intentionally excludes raw request data, metadata and error details.
+type RawRecordListItem struct {
+	ID         uint              `gorm:"column:id"`
+	SourceID   uint              `gorm:"column:source_id"`
+	SourceCode string            `gorm:"column:source_code"`
+	Status     string            `gorm:"column:status"`
+	TraceID    string            `gorm:"column:trace_id"`
+	ReceivedAt *model.TimeNormal `gorm:"column:received_at"`
+	CreatedAt  int               `gorm:"column:created_at"`
+}
+
+type RawRecordListPage struct {
+	List  []RawRecordListItem
+	Total int64
+}
+
 func NewRawRecordDAO() *RawRecordDAO {
 	return &RawRecordDAO{db: database.DB}
 }
@@ -111,6 +140,71 @@ func (dao *RawRecordDAO) UpdateStatus(ctx context.Context, id uint, status, erro
 		Where("id = ?", id).
 		Updates(updates).
 		Error
+}
+
+func (dao *RawRecordDAO) FindPage(ctx context.Context, params RawRecordListQuery) (*RawRecordListPage, error) {
+	query := dao.db.WithContext(ctx).Model(&model.RawRecord{})
+	if params.Source != "" {
+		query = query.Where("source_code = ?", params.Source)
+	}
+	if params.Status != "" {
+		query = query.Where("status = ?", params.Status)
+	}
+	if params.TraceID != "" {
+		query = query.Where("trace_id = ?", params.TraceID)
+	}
+	if params.StartTime != nil {
+		query = query.Where("received_at >= ?", *params.StartTime)
+	}
+	if params.EndTime != nil {
+		query = query.Where("received_at <= ?", *params.EndTime)
+	}
+	if condition, args := rawRecordOriginCondition(params.Origin); condition != "" {
+		query = query.Where(condition, args...)
+	}
+
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		return nil, err
+	}
+
+	items := make([]RawRecordListItem, 0)
+	offset := (params.Page - 1) * params.PageSize
+	if err := query.
+		Select(rawRecordListColumns()).
+		Order("received_at DESC, id DESC").
+		Offset(offset).
+		Limit(params.PageSize).
+		Find(&items).
+		Error; err != nil {
+		return nil, err
+	}
+
+	return &RawRecordListPage{List: items, Total: total}, nil
+}
+
+func rawRecordListColumns() []string {
+	return []string{
+		"id",
+		"source_id",
+		"source_code",
+		"status",
+		"trace_id",
+		"received_at",
+		"created_at",
+	}
+}
+
+func rawRecordOriginCondition(origin string) (string, []interface{}) {
+	const fetchedFormat = "%\"format\":\"fetch\"%"
+	switch origin {
+	case "pull":
+		return "metadata_json LIKE ?", []interface{}{fetchedFormat}
+	case "receive":
+		return "(metadata_json IS NULL OR metadata_json NOT LIKE ?)", []interface{}{fetchedFormat}
+	default:
+		return "", nil
+	}
 }
 
 type TransformRuleDAO struct {

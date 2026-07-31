@@ -113,17 +113,24 @@ func (ctrl *TransformController) TestRule(c *gin.Context) {
 func (ctrl *TransformController) RetransformRawRecord(c *gin.Context) {
 	rawRecordID, err := strconv.ParseUint(c.Param("id"), 10, 32)
 	if err != nil {
-		c.JSON(400, msg.ErrResponse("无效的原始记录ID", err))
+		c.JSON(400, msg.ErrResponseStr("无效的原始记录ID"))
 		return
 	}
 
 	result, err := ctrl.service.TransformRawRecord(c.Request.Context(), uint(rawRecordID))
 	if err != nil {
-		c.JSON(500, msg.ErrResponse("重新清洗失败", err))
+		c.JSON(500, msg.ErrResponseStr("重新清洗失败"))
 		return
 	}
 
 	c.JSON(200, msg.SuccessResponse("重新清洗成功", &map[string]any{
-		"result": result,
+		"result": safeTransformRawRecordResult(result),
 	}))
+}
+
+func safeTransformRawRecordResult(result *data_svc.TransformRawRecordResult) map[string]any {
+	return map[string]any{
+		"trace_id":        result.TraceID,
+		"clean_record_id": result.CleanRecordID,
+	}
 }

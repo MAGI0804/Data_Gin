@@ -17,6 +17,11 @@ export type RawRecordsPage<T> = {
   totalPages: number
 }
 
+export type WarehouseRawRecordsQuery = RawRecordsQuery & {
+  status?: string
+  traceID?: string
+}
+
 const defaultPageSize = 20
 
 function boundedInteger(value: number, fallback: number, minimum: number, maximum: number) {
@@ -33,6 +38,22 @@ export function buildRawRecordsRequest(query: RawRecordsQuery) {
     end_time: query.endTime?.trim() ?? '',
     origin: query.origin,
   }
+}
+
+export function buildWarehouseRawRecordsQuery(query: WarehouseRawRecordsQuery) {
+  const params = new URLSearchParams()
+  const request = buildRawRecordsRequest(query)
+  params.set('page', String(request.page))
+  params.set('page_size', String(request.page_size))
+  params.set('origin', request.origin)
+  if (request.source) params.set('source', request.source.slice(0, 100))
+  if (request.start_time) params.set('start_time', request.start_time)
+  if (request.end_time) params.set('end_time', request.end_time)
+  const status = query.status?.trim() ?? ''
+  if (['received', 'queued', 'cleaning', 'cleaned', 'failed'].includes(status)) params.set('status', status)
+  const traceID = query.traceID?.trim() ?? ''
+  if (traceID) params.set('trace_id', traceID.slice(0, 64))
+  return params.toString()
 }
 
 export function parseRawRecordsPage<T>(payload: unknown): RawRecordsPage<T> | null {
