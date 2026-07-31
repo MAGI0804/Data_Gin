@@ -1271,7 +1271,7 @@ function App() {
         {activeNav === 'rules' && <RulesQueryPage client={client} rules={transformRules} sources={sources} onRulesChange={setTransformRules} />}
         {activeNav === 'processed' && <ProcessedQueryPage client={client} />}
         {activeNav === 'destinations' && <DestinationsQueryPage client={client} destinations={destinations} onRefresh={() => refreshAll(false)} />}
-        {activeNav === 'tasks' && <DeliveryTasksQueryPage tasks={deliveryTasks} destinations={destinations} />}
+        {activeNav === 'tasks' && <DeliveryTasksQueryPage client={client} tasks={deliveryTasks} destinations={destinations} onRefresh={() => refreshAll(false)} />}
         {activeNav === 'push_policy' && <PushPolicyPage coreMethod={coreMethods.find((item) => item.key === 'mall_push')} config={orderPushSkipConfig} targets={orderPushTargets} onSave={saveOrderPushSkipConfig} onToggle={toggleTarget} />}
         {(activeNav === 'excel_jobs' || activeNav === 'excel_schemes' || activeNav === 'excel_write') && <ExcelMatchView section={activeNav === 'excel_jobs' ? 'jobs' : activeNav === 'excel_schemes' ? 'schemes' : 'write'} token={token} loading={loading} setLoading={setLoading} setResult={setResult} onNavigateToJobs={() => navigate('excel_jobs')} />}
       </section>
@@ -2169,7 +2169,7 @@ function DestinationsQueryPage({ client, destinations, onRefresh }: { client: Ap
   )
 }
 
-function DeliveryTasksQueryPage({ tasks, destinations }: { tasks: DeliveryTask[]; destinations: DestinationDefinition[] }) {
+function DeliveryTasksQueryPage({ client, tasks, destinations, onRefresh }: { client: ApiClient; tasks: DeliveryTask[]; destinations: DestinationDefinition[]; onRefresh: () => Promise<void> }) {
   const [query, setQuery] = useState('')
   const [status, setStatus] = useState('all')
   const [destinationID, setDestinationID] = useState('all')
@@ -2177,14 +2177,27 @@ function DeliveryTasksQueryPage({ tasks, destinations }: { tasks: DeliveryTask[]
     && (status === 'all' || (status === 'enabled' ? task.enabled : !task.enabled))
     && (destinationID === 'all' || String(task.destination_id) === destinationID))
   const destinationOptions = destinations.map((destination) => ({ value: String(destination.id), label: destination.name || destination.code }))
+  const [runningID, setRunningID] = useState<number | null>(null)
+  const [message, setMessage] = useState('')
+  async function run(task: DeliveryTask) {
+    const destination = destinations.find((item) => item.id === task.destination_id)
+    if (runningID !== null || !window.confirm(`确认执行“${task.name}”？最多向 ${destination?.name || `目标 #${task.destination_id}`} 推送 100 条 ready 记录；成功记录将标记为已交付。`)) return
+    setRunningID(task.id)
+    const response = await client(`/v1/delivery-tasks/${task.id}/run`, { method: 'POST', showResult: false, silentLoading: true })
+    const result = response.ok ? readObject<{ total_count: number; success_count: number; failed_count: number; skipped_count: number }>(response, 'result') : null
+    setRunningID(null)
+    setMessage(result ? `执行完成：总计 ${result.total_count}，成功 ${result.success_count}，失败 ${result.failed_count}，跳过 ${result.skipped_count}。` : response.error?.message || '推送任务未完成。')
+    if (response.ok) await onRefresh()
+  }
   return (
     <div className="view-stack">
+      {message && <div className="result-banner" role="status">{message}</div>}
       <QueryBar count={filtered.length} total={tasks.length}>
         <Field label="名称 / 表 / 触发方式" name="task_query" value={query} onChange={setQuery} />
         <SelectFilter label="状态" value={status} onChange={setStatus} options={[{ value: 'enabled', label: '启用' }, { value: 'disabled', label: '停用' }]} />
         <SelectFilter label="推送目标" value={destinationID} onChange={setDestinationID} options={destinationOptions} />
       </QueryBar>
-      <Panel title="推送任务" icon={<ArrowUpFromLine />} meta={`查询命中 ${filtered.length} 条`}><DeliveryTaskList tasks={filtered} /></Panel>
+      <Panel title="推送任务" icon={<ArrowUpFromLine />} meta={`查询命中 ${filtered.length} 条`}><DeliveryTaskList tasks={filtered} runningID={runningID} onRun={(task) => { void run(task) }} /></Panel>
     </div>
   )
 }
@@ -3918,7 +3931,7 @@ function DestinationList({ destinations, testingID, onDetail, onTest }: { destin
   )
 }
 
-function DeliveryTaskList({ tasks }: { tasks: DeliveryTask[] }) {
+function DeliveryTaskList({ tasks, runningID, onRun }: { tasks: DeliveryTask[]; runningID: number | null; onRun: (task: DeliveryTask) => void }) {
   if (tasks.length === 0) return <EmptyState text="暂无推送任务。" />
   return (
     <div className="record-list">
@@ -3928,7 +3941,7 @@ function DeliveryTaskList({ tasks }: { tasks: DeliveryTask[] }) {
             <strong>{task.name}</strong>
             <span>{`${task.clean_table} -> destination #${task.destination_id} / ${task.trigger_type}`}</span>
           </div>
-          <StatusPill label={task.enabled ? '启用' : '停用'} />
+          <div className="record-actions"><StatusPill label={task.enabled ? '启用' : '停用'} /><button type="button" disabled={!task.enabled || runningID !== null} onClick={() => onRun(task)}>{runningID === task.id ? '推送中…' : '手动运行'}</button></div>
         </article>
       ))}
     </div>
