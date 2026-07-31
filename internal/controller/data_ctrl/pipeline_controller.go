@@ -38,7 +38,7 @@ func (ctrl *PipelineController) GetPipeline(c *gin.Context) {
 		c.JSON(500, msg.ErrResponse("查询流水线详情失败", err))
 		return
 	}
-	c.JSON(200, msg.SuccessResponse("查询流水线详情成功", &map[string]any{"pipeline": pipeline}))
+	c.JSON(200, msg.SuccessResponse("查询流水线详情成功", &map[string]any{"pipeline": safePipelineDetail(pipeline)}))
 }
 
 func (ctrl *PipelineController) CreatePipeline(c *gin.Context) {
@@ -85,7 +85,7 @@ func (ctrl *PipelineController) ListStages(c *gin.Context) {
 		c.JSON(500, msg.ErrResponse("查询流水线阶段失败", err))
 		return
 	}
-	c.JSON(200, msg.SuccessResponse("查询流水线阶段成功", &map[string]any{"stages": stages}))
+	c.JSON(200, msg.SuccessResponse("查询流水线阶段成功", &map[string]any{"stages": safePipelineStageDetails(stages)}))
 }
 
 func (ctrl *PipelineController) CreateStage(c *gin.Context) {
@@ -137,7 +137,7 @@ func (ctrl *PipelineController) ListSteps(c *gin.Context) {
 		c.JSON(500, msg.ErrResponse("查询方法步骤失败", err))
 		return
 	}
-	c.JSON(200, msg.SuccessResponse("查询方法步骤成功", &map[string]any{"steps": steps}))
+	c.JSON(200, msg.SuccessResponse("查询方法步骤成功", &map[string]any{"steps": safeMethodStepDetails(steps)}))
 }
 
 func (ctrl *PipelineController) CreateStageStep(c *gin.Context) {
@@ -156,7 +156,7 @@ func (ctrl *PipelineController) CreateStageStep(c *gin.Context) {
 		c.JSON(500, msg.ErrResponse("创建阶段方法步骤失败", err))
 		return
 	}
-	c.JSON(200, msg.SuccessResponse("创建阶段方法步骤成功", &map[string]any{"step": step}))
+	c.JSON(200, msg.SuccessResponse("创建阶段方法步骤成功", &map[string]any{"step": safeMethodStepDetail(*step)}))
 }
 
 func (ctrl *PipelineController) CreateStep(c *gin.Context) {
@@ -175,7 +175,7 @@ func (ctrl *PipelineController) CreateStep(c *gin.Context) {
 		c.JSON(500, msg.ErrResponse("创建方法步骤失败", err))
 		return
 	}
-	c.JSON(200, msg.SuccessResponse("创建方法步骤成功", &map[string]any{"step": step}))
+	c.JSON(200, msg.SuccessResponse("创建方法步骤成功", &map[string]any{"step": safeMethodStepDetail(*step)}))
 }
 
 func (ctrl *PipelineController) UpdateStep(c *gin.Context) {
@@ -194,7 +194,7 @@ func (ctrl *PipelineController) UpdateStep(c *gin.Context) {
 		c.JSON(500, msg.ErrResponse("更新方法步骤失败", err))
 		return
 	}
-	c.JSON(200, msg.SuccessResponse("更新方法步骤成功", &map[string]any{"step": step}))
+	c.JSON(200, msg.SuccessResponse("更新方法步骤成功", &map[string]any{"step": safeMethodStepDetail(*step)}))
 }
 
 func (ctrl *PipelineController) GenerateStageConfig(c *gin.Context) {
@@ -208,7 +208,7 @@ func (ctrl *PipelineController) GenerateStageConfig(c *gin.Context) {
 		c.JSON(500, msg.ErrResponse("生成阶段大块配置失败", err))
 		return
 	}
-	c.JSON(200, msg.SuccessResponse("生成阶段大块配置成功", &map[string]any{"config": config}))
+	c.JSON(200, msg.SuccessResponse("生成阶段大块配置成功", &map[string]any{"config": safeStageGeneratedConfig(*config)}))
 }
 
 func (ctrl *PipelineController) PublishStageConfig(c *gin.Context) {
@@ -222,7 +222,7 @@ func (ctrl *PipelineController) PublishStageConfig(c *gin.Context) {
 		c.JSON(500, msg.ErrResponse("发布阶段大块配置失败", err))
 		return
 	}
-	c.JSON(200, msg.SuccessResponse("发布阶段大块配置成功", &map[string]any{"config": config}))
+	c.JSON(200, msg.SuccessResponse("发布阶段大块配置成功", &map[string]any{"config": safeStageGeneratedConfig(*config)}))
 }
 
 func (ctrl *PipelineController) PreviewJSON(c *gin.Context) {
@@ -236,7 +236,7 @@ func (ctrl *PipelineController) PreviewJSON(c *gin.Context) {
 		c.JSON(500, msg.ErrResponse("生成流水线 JSON 失败", err))
 		return
 	}
-	c.JSON(200, msg.SuccessResponse("生成流水线 JSON 成功", &map[string]any{"preview": preview}))
+	c.JSON(200, msg.SuccessResponse("生成流水线 JSON 成功", &map[string]any{"preview": safePipelinePreview(preview)}))
 }
 
 func (ctrl *PipelineController) RunPipeline(c *gin.Context) {
@@ -250,7 +250,7 @@ func (ctrl *PipelineController) RunPipeline(c *gin.Context) {
 		c.JSON(500, msg.ErrResponse("执行流水线失败", err))
 		return
 	}
-	c.JSON(200, msg.SuccessResponse("执行流水线完成", &map[string]any{"result": result}))
+	c.JSON(200, msg.SuccessResponse("执行流水线完成", &map[string]any{"result": safePipelineRunResult(result)}))
 }
 
 func (ctrl *PipelineController) ListStepRuns(c *gin.Context) {
@@ -264,7 +264,7 @@ func (ctrl *PipelineController) ListStepRuns(c *gin.Context) {
 		c.JSON(500, msg.ErrResponse("查询步骤运行明细失败", err))
 		return
 	}
-	c.JSON(200, msg.SuccessResponse("查询步骤运行明细成功", &map[string]any{"step_runs": stepRuns}))
+	c.JSON(200, msg.SuccessResponse("查询步骤运行明细成功", &map[string]any{"step_runs": safeStepRuns(stepRuns)}))
 }
 
 func parsePipelineID(c *gin.Context) (uint, error) {

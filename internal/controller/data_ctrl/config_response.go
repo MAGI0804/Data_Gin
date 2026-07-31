@@ -112,7 +112,8 @@ func safeDeliveryLogText(value string) string {
 	if value == "" {
 		return ""
 	}
-	if strings.Contains(strings.ToLower(value), "token") || strings.Contains(strings.ToLower(value), "secret") || strings.Contains(strings.ToLower(value), "password") || strings.Contains(strings.ToLower(value), "authorization") {
+	lowerValue := strings.ToLower(value)
+	if strings.Contains(lowerValue, "token") || strings.Contains(lowerValue, "secret") || strings.Contains(lowerValue, "password") || strings.Contains(lowerValue, "authorization") || strings.Contains(lowerValue, "api_key") || strings.Contains(lowerValue, "private_key") {
 		return "第三方响应包含敏感信息，详情已隐藏。"
 	}
 	if len(value) > 240 {
@@ -145,7 +146,14 @@ func redactConfigValue(value interface{}, key string) (interface{}, bool) {
 	case map[string]interface{}:
 		result := make(map[string]interface{}, len(typed))
 		hasSecret := false
+		pairName, pairHasName := typed["name"].(string)
+		pairValueIsSecret := pairHasName && sensitiveConfigKey(pairName)
 		for childKey, childValue := range typed {
+			if pairValueIsSecret && childKey == "value" {
+				result[childKey] = "[已隐藏]"
+				hasSecret = true
+				continue
+			}
 			clean, hidden := redactConfigValue(childValue, childKey)
 			result[childKey] = clean
 			hasSecret = hasSecret || hidden
