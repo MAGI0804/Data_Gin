@@ -38,6 +38,7 @@ import {
   mallWeatherSheetPushRequest,
   mallWeatherSheetPushRequestMatchesOption,
   mallWeatherSheetPushResultMatchesRequest,
+  mallWeatherSheetPushRunMatchesResult,
   mergeMallWeatherMalls,
   mallWeatherOverviewPath,
   mallWeatherRefreshKey,
@@ -58,6 +59,7 @@ import {
   parseMallWeatherSheetPushDryRun,
   parseMallWeatherSheetPushOptions,
   parseMallWeatherSheetPushResult,
+  pollMallWeatherSheetPushRun,
   submitMallWeatherGeocodeConfirmation,
   submitMallWeatherGeocodeTrigger,
   type MallWeatherCreateInput,
@@ -74,6 +76,7 @@ import {
   type MallWeatherFetchRun,
   type MallWeatherSheetPushDryRun,
   type MallWeatherSheetPushOption,
+  type MallWeatherSheetPushRun,
 } from './mallWeather'
 
 type MallWeatherApiResult = {
@@ -1260,9 +1263,12 @@ function MallWeatherSheetPushPanel({ actorID, mall, client }: {
   const [pending, setPending] = useState<MallWeatherPendingSheetPush | null>(restored)
   const [checking, setChecking] = useState(false)
   const [submitting, setSubmitting] = useState(false)
+  const [monitoring, setMonitoring] = useState(false)
+  const [run, setRun] = useState<MallWeatherSheetPushRun | null>(null)
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
   const optionRequestSequence = useRef(0)
+  const pollController = useRef<AbortController | null>(null)
 
   const loadOptions = useCallback(async (signal?: AbortSignal) => {
     const sequence = ++optionRequestSequence.current
@@ -1292,6 +1298,8 @@ function MallWeatherSheetPushPanel({ actorID, mall, client }: {
     void loadOptions(controller.signal)
     return () => controller.abort()
   }, [loadOptions])
+
+  useEffect(() => () => pollController.current?.abort(), [])
 
   const selectedOption = options.find((option) => option.destinationId === selectedDestinationID)
   const pendingMatchesOption = Boolean(selectedOption && pending && mallWeatherSheetPushRequestMatchesOption(pending.body, selectedOption, mall.id))
@@ -1389,7 +1397,40 @@ function MallWeatherSheetPushPanel({ actorID, mall, client }: {
     setSubmitting(false)
     setPending(null)
     clearMallWeatherPendingSheetPush(actorID, mall.id, window.sessionStorage)
-    setMessage(`推送任务 #${result.runId} 已创建，预计 ${result.estimatedRows} 行，状态 ${result.status}。`)
+    setRun({
+      runId: result.runId, traceId: result.traceId, status: result.status === 'RUNNING' ? 'RUNNING' : 'PENDING',
+      destinationId: result.destinationId, profileId: result.profileId, profileVersion: result.profileVersion,
+      totalCount: result.estimatedRows, successCount: 0, failedCount: 0,
+    })
+    setMonitoring(true)
+    setMessage(`推送任务 #${result.runId} 已创建，正在查询真实执行状态。`)
+    pollController.current?.abort()
+    const controller = new AbortController()
+    pollController.current = controller
+    const pollResult = await pollMallWeatherSheetPushRun(client, result.runId, {
+      signal: controller.signal,
+      isPageVisible: () => document.visibilityState === 'visible',
+    })
+    if (controller.signal.aborted) return
+    setMonitoring(false)
+    if (pollResult.kind === 'timed_out') {
+      setError('推送任务仍在处理中，60 秒内未到达终止状态。已停止轮询，可稍后刷新页面确认。')
+      return
+    }
+    if (pollResult.kind === 'query_error') {
+      setError(weatherPushError(pollResult.status, '推送运行状态查询失败'))
+      return
+    }
+    if (pollResult.kind !== 'terminal' || !mallWeatherSheetPushRunMatchesResult(pollResult.run, result)) {
+      setError('推送运行记录与创建结果不一致，已停止轮询；请刷新页面后确认。')
+      return
+    }
+    setRun(pollResult.run)
+    if (pollResult.run.status === 'FAILED') {
+      setError(`推送任务 #${pollResult.run.runId} 失败：成功 ${pollResult.run.successCount} 行，失败 ${pollResult.run.failedCount} 行。`)
+      return
+    }
+    setMessage(`推送任务 #${pollResult.run.runId} ${pollResult.run.status === 'SUCCESS' ? '已完成' : '部分完成'}：成功 ${pollResult.run.successCount} 行，失败 ${pollResult.run.failedCount} 行。`)
   }
 
   function abandonPending() {
@@ -1407,11 +1448,11 @@ function MallWeatherSheetPushPanel({ actorID, mall, client }: {
       {optionState === 'error' && <RequestError message={error} onRetry={() => void loadOptions()} />}
       {optionState === 'success' && options.length === 0 && <EmptyState title="没有可用推送目标" detail="请先启用 feishu_sheet 推送目标，并关联已启用的天气导出 Profile。" />}
       {optionState === 'success' && options.length > 0 && <div className="mall-weather-push-controls">
-        <label><span>已有推送目标</span><select name="weatherSheetPushTarget" value={selectedDestinationID} onChange={(event) => changeOption(event.currentTarget.value)} disabled={checking || submitting}>
+        <label><span>已有推送目标</span><select name="weatherSheetPushTarget" value={selectedDestinationID} onChange={(event) => changeOption(event.currentTarget.value)} disabled={checking || submitting || monitoring}>
           {options.map((option) => <option value={option.destinationId} key={option.destinationId}>{option.name} · {option.code} · {option.profileCode} v{option.profileVersion}</option>)}
         </select></label>
-        <button type="button" onClick={() => void checkBinding()} disabled={checking || submitting}>{checking ? '验证中' : '验证绑定'}</button>
-        <button className="primary" type="button" onClick={() => void submitPush()} disabled={checking || submitting || !dryRun?.canExecute || Boolean(pending && !pendingMatchesOption)}>{submitting ? '提交中' : pending ? '重试原请求' : '绑定并发起推送'}</button>
+        <button type="button" onClick={() => void checkBinding()} disabled={checking || submitting || monitoring}>{checking ? '验证中' : '验证绑定'}</button>
+        <button className="primary" type="button" onClick={() => void submitPush()} disabled={checking || submitting || monitoring || !dryRun?.canExecute || Boolean(pending && !pendingMatchesOption)}>{submitting ? '提交中' : pending ? '重试原请求' : '绑定并发起推送'}</button>
       </div>}
       {pending && <div className="mall-weather-pending-push" role="status">
         <span>存在结果待确认的原请求：商场 #{pending.body.filters.mallIds[0]}，目标 #{pending.body.destinationId}，Profile #{pending.body.profileId} v{pending.body.expectedProfileVersion}。{pendingMatchesOption ? ' 重试前仍需重新验证绑定。' : ' 当前选择与原请求不一致。'}</span>
@@ -1430,6 +1471,12 @@ function MallWeatherSheetPushPanel({ actorID, mall, client }: {
           <span>预计 {dataset.estimatedRows} 行 / {dataset.estimatedCells} 单元格 · 可执行：{dataset.canExecute ? '是' : '否'}</span>
           {dataset.warnings.length > 0 && <ul className="mall-weather-push-warnings">{dataset.warnings.map((warning, warningIndex) => <li key={`${warningIndex}:${warning}`}>{warning}</li>)}</ul>}
         </section>)}
+      </div>}
+      {run && <div className="mall-weather-push-summary" aria-live="polite">
+        <MetaItem label="运行状态" value={monitoring ? `${run.status}（查询中）` : run.status} />
+        <MetaItem label="成功行数" value={String(run.successCount)} />
+        <MetaItem label="失败行数" value={String(run.failedCount)} />
+        <MetaItem label="总行数" value={String(run.totalCount)} />
       </div>}
       {message && <p className="mall-weather-action-message" role="status">{message}</p>}
       {error && optionState !== 'error' && <p className="mall-weather-action-message error" role="alert">{error}</p>}

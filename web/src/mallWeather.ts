@@ -170,6 +170,24 @@ export type MallWeatherSheetPushResult = {
   estimatedRows: number
 }
 
+export type MallWeatherSheetPushRun = {
+  runId: number
+  traceId: string
+  status: 'PENDING' | 'RUNNING' | 'SUCCESS' | 'PARTIAL_SUCCESS' | 'FAILED'
+  destinationId: number
+  profileId: number
+  profileVersion: number
+  totalCount: number
+  successCount: number
+  failedCount: number
+}
+
+export type MallWeatherSheetPushPollResult =
+  | { kind: 'terminal'; run: MallWeatherSheetPushRun }
+  | { kind: 'timed_out' }
+  | { kind: 'query_error'; status: number }
+  | { kind: 'cancelled' }
+
 export type MallWeatherPendingSheetPush = {
   key: string
   body: MallWeatherSheetPushRequest
@@ -520,6 +538,19 @@ type MallWeatherFetchRunPollOptions = {
   wait?: (intervalMs: number, signal?: AbortSignal) => Promise<void>
 }
 
+type MallWeatherSheetPushRequester = (
+  path: string,
+  options: { method: 'GET'; showResult: false; silentLoading: true; signal?: AbortSignal },
+) => Promise<{ ok: boolean; status: number; data: unknown }>
+
+type MallWeatherSheetPushPollOptions = {
+  maxAttempts?: number
+  intervalMs?: number
+  signal?: AbortSignal
+  isPageVisible?: () => boolean
+  wait?: (intervalMs: number, signal?: AbortSignal) => Promise<void>
+}
+
 type JsonRecord = Record<string, unknown>
 type RefreshStorage = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>
 type OnboardingStorage = Pick<Storage, 'getItem' | 'setItem' | 'removeItem'>
@@ -564,6 +595,10 @@ function textValue(record: JsonRecord, key: string) {
 function numberValue(record: JsonRecord, key: string) {
   const value = record[key]
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined
+}
+
+function isMallWeatherSheetPushStatus(value: unknown): value is MallWeatherSheetPushRun['status'] {
+  return value === 'PENDING' || value === 'RUNNING' || value === 'SUCCESS' || value === 'PARTIAL_SUCCESS' || value === 'FAILED'
 }
 
 function mallWeatherMall(value: unknown): MallWeatherMall | null {
@@ -1200,6 +1235,68 @@ export function parseMallWeatherSheetPushResult(payload: unknown): MallWeatherSh
   }
 }
 
+export function parseMallWeatherSheetPushRun(payload: unknown): MallWeatherSheetPushRun | null {
+  const data = envelopeData(payload)
+  if (!data || !positiveSafeInteger(data.runId) || !positiveSafeInteger(data.destinationId) || !positiveSafeInteger(data.profileId) ||
+    !positiveSafeInteger(data.profileVersion) || typeof data.traceId !== 'string' || !data.traceId.trim() || !isMallWeatherSheetPushStatus(data.status) ||
+    !nonNegativeSafeInteger(data.totalCount) || !nonNegativeSafeInteger(data.successCount) || !nonNegativeSafeInteger(data.failedCount) ||
+    Number(data.successCount) + Number(data.failedCount) > Number(data.totalCount)) return null
+  return {
+    runId: data.runId,
+    traceId: data.traceId,
+    status: data.status,
+    destinationId: data.destinationId,
+    profileId: data.profileId,
+    profileVersion: data.profileVersion,
+    totalCount: data.totalCount,
+    successCount: data.successCount,
+    failedCount: data.failedCount,
+  }
+}
+
+export function mallWeatherSheetPushRunTerminal(status: string) {
+  return ['SUCCESS', 'PARTIAL_SUCCESS', 'FAILED'].includes(status.trim().toUpperCase())
+}
+
+export function mallWeatherSheetPushRunMatchesResult(run: MallWeatherSheetPushRun, result: MallWeatherSheetPushResult) {
+  return run.runId === result.runId && run.destinationId === result.destinationId && run.profileId === result.profileId &&
+    run.profileVersion === result.profileVersion && run.traceId === result.traceId
+}
+
+export async function pollMallWeatherSheetPushRun(
+  request: MallWeatherSheetPushRequester,
+  runID: number,
+  options: MallWeatherSheetPushPollOptions = {},
+): Promise<MallWeatherSheetPushPollResult> {
+  const maxAttempts = options.maxAttempts ?? 30
+  const intervalMs = options.intervalMs ?? 2_000
+  const wait = options.wait ?? waitForMallWeatherPoll
+  if (!positiveSafeInteger(runID) || !Number.isSafeInteger(maxAttempts) || maxAttempts < 1 || maxAttempts > 120 ||
+    !Number.isFinite(intervalMs) || intervalMs < 0 || intervalMs > 60_000) throw new Error('invalid weather sheet push poll')
+
+  let failures = 0
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
+    if (options.signal?.aborted) return { kind: 'cancelled' }
+    const response = await request(`/v1/weather-sheet-pushes/${runID}`, {
+      method: 'GET', showResult: false, silentLoading: true, signal: options.signal,
+    })
+    if (options.signal?.aborted) return { kind: 'cancelled' }
+    if (!response.ok) {
+      const retryable = response.status === 0 || response.status === 408 || response.status === 425 || response.status === 429 || response.status >= 500
+      if (!retryable || attempt + 1 >= maxAttempts) return { kind: 'query_error', status: response.status }
+      failures++
+      await wait(sheetPushPollDelay(intervalMs, failures, options.isPageVisible), options.signal)
+      continue
+    }
+    const run = parseMallWeatherSheetPushRun(response.data)
+    if (!run) return { kind: 'query_error', status: response.status }
+    if (mallWeatherSheetPushRunTerminal(run.status)) return { kind: 'terminal', run }
+    failures = 0
+    if (attempt + 1 < maxAttempts) await wait(sheetPushPollDelay(intervalMs, failures, options.isPageVisible), options.signal)
+  }
+  return options.signal?.aborted ? { kind: 'cancelled' } : { kind: 'timed_out' }
+}
+
 export function mallWeatherSheetPushKey(seed?: string) {
   return mallWeatherOperationKey('weather-sheet-push', seed)
 }
@@ -1644,6 +1741,12 @@ function waitForMallWeatherPoll(intervalMs: number, signal?: AbortSignal) {
     const timer = globalThis.setTimeout(finish, intervalMs)
     signal?.addEventListener('abort', finish, { once: true })
   })
+}
+
+function sheetPushPollDelay(intervalMs: number, failures: number, isPageVisible: (() => boolean) | undefined) {
+  const backoff = 2 ** Math.min(failures, 3)
+  const hiddenFactor = isPageVisible?.() === false ? 5 : 1
+  return Math.min(60_000, intervalMs * backoff * hiddenFactor)
 }
 
 export function mallWeatherRefreshDisposition(

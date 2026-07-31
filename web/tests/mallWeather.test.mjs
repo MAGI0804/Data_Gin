@@ -62,6 +62,10 @@ import {
   parseMallWeatherSheetPushDryRun,
   parseMallWeatherSheetPushOptions,
   parseMallWeatherSheetPushResult,
+  parseMallWeatherSheetPushRun,
+  mallWeatherSheetPushRunMatchesResult,
+  mallWeatherSheetPushRunTerminal,
+  pollMallWeatherSheetPushRun,
   parseMallWeatherDailyPage,
   parseMallWeatherAlertPage,
   parseMallWeatherHourlyPage,
@@ -468,6 +472,33 @@ test('builds, parses, and persists a mall-scoped existing-target push', () => {
   clearMallWeatherPendingSheetPush('42', 7, storage)
   assert.equal(loadMallWeatherPendingSheetPush('42', 7, storage), null)
   assert.equal(parseMallWeatherSheetPushOptions({ code: 0, data: { items: [{ destinationId: 8, name: 'bad' }] } }), null)
+})
+
+test('polls a weather sheet push to its terminal status with bounded hidden-page polling', async () => {
+  const created = { runId: 31, traceId: 'trace-31', status: 'PENDING', destinationId: 8, profileId: 9, profileVersion: 3, estimatedRows: 42 }
+  const running = { code: 0, data: {
+    ...created, status: 'RUNNING', totalCount: 42, successCount: 0, failedCount: 0,
+  } }
+  const completed = { code: 0, data: {
+    ...created, status: 'SUCCESS', totalCount: 42, successCount: 42, failedCount: 0,
+  } }
+  const responses = [running, completed]
+  const waits = []
+  const result = await pollMallWeatherSheetPushRun(async (path, options) => {
+    assert.equal(path, '/v1/weather-sheet-pushes/31')
+    assert.equal(options.method, 'GET')
+    return { ok: true, status: 200, data: responses.shift() }
+  }, 31, { intervalMs: 10, maxAttempts: 3, isPageVisible: () => false, wait: async (milliseconds) => { waits.push(milliseconds) } })
+  assert.equal(result.kind, 'terminal')
+  assert.equal(result.run.status, 'SUCCESS')
+  assert.deepEqual(waits, [50])
+  assert.equal(mallWeatherSheetPushRunMatchesResult(result.run, created), true)
+  assert.equal(mallWeatherSheetPushRunTerminal('PARTIAL_SUCCESS'), true)
+  assert.equal(mallWeatherSheetPushRunTerminal('RUNNING'), false)
+  assert.equal(parseMallWeatherSheetPushRun({ code: 0, data: { ...completed.data, successCount: 43 } }), null)
+
+  const forbidden = await pollMallWeatherSheetPushRun(async () => ({ ok: false, status: 403, data: {} }), 31, { maxAttempts: 3, wait: async () => assert.fail('forbidden requests must not retry') })
+  assert.deepEqual(forbidden, { kind: 'query_error', status: 403 })
 })
 
 test('rejects unsuccessful or structurally incomplete overview payloads', () => {
