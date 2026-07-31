@@ -38,6 +38,7 @@ import { Brand } from './components/Brand'
 import { parseMallWeatherExportContentStatus, submitMallWeatherExportContentDownload } from './mallWeatherExport'
 import { buildRawRecordsRequest, buildWarehouseRawRecordsQuery, parseRawRecordsPage, type RawRecordOrigin, type RawRecordsPage } from './rawRecords'
 import { buildDeliveryLogListQuery, buildRunListQuery, parseMonitoringPage, type MonitoringPage } from './monitoringRecords'
+import { runSingleFlight, validateOrderPushSkipPolicy } from './orderPushPolicy'
 import { parseSourceFetchSummary } from './sourceOperations'
 import { buildCleanRecordsQuery, buildProcessedRecordsQuery, parseProcessedRecordsPage, type ProcessedRecordsPage } from './processedRecords'
 import {
@@ -1253,6 +1254,7 @@ function App() {
       setOrderPushSkipConfig(normalizeOrderPushSkipConfig(readObject<OrderPushSkipConfig>(response, 'config')) ?? config)
       await refreshWorkspace(false)
     }
+    return response
   }
 
   async function previewBojunOrderBackfill(payload: { start_time: string; end_time: string }) {
@@ -2834,7 +2836,7 @@ function PushPolicyPage({ coreMethod, config, targets, onSave, onToggle }: {
   coreMethod?: CoreMethod
   config: OrderPushSkipConfig
   targets: OrderPushTargetOption[]
-  onSave: (config: OrderPushSkipConfig) => void
+  onSave: (config: OrderPushSkipConfig) => Promise<ApiResult>
   onToggle: (target: ToggleTarget, enabled: boolean) => void
 }) {
   return (
@@ -2845,48 +2847,63 @@ function PushPolicyPage({ coreMethod, config, targets, onSave, onToggle }: {
   )
 }
 
-function OrderPushSkipConfigForm({ config, targets, onSave }: { config: OrderPushSkipConfig; targets: OrderPushTargetOption[]; onSave: (config: OrderPushSkipConfig) => void }) {
+function OrderPushSkipConfigForm({ config, targets, onSave }: { config: OrderPushSkipConfig; targets: OrderPushTargetOption[]; onSave: (config: OrderPushSkipConfig) => Promise<ApiResult> }) {
   const [draft, setDraft] = useState(() => targets.map((target) => orderPushTargetConfig(config, target.code)))
   const [error, setError] = useState('')
+  const [saving, setSaving] = useState(false)
+  const saveInFlightRef = useRef(false)
   const enabledCount = draft.filter((target) => target.cycle > 0 && target.skip > 0).length
 
   useEffect(() => setDraft(targets.map((target) => orderPushTargetConfig(config, target.code))), [config, targets])
 
-  function submit(event: FormEvent<HTMLFormElement>) {
+  async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    if (draft.some((item) => !Number.isInteger(item.cycle) || !Number.isInteger(item.skip) || item.cycle < 0 || item.skip < 0 || (item.cycle === 0 && item.skip !== 0) || (item.cycle > 0 && item.skip >= item.cycle))) {
-      setError('循环和少推数量必须是非负整数；启用少推时，少推单数必须小于循环总单数。')
+    const validationError = validateOrderPushSkipPolicy(draft)
+    if (validationError) {
+      setError(validationError)
       return
     }
     setError('')
-    onSave({ targets: draft })
+    const responsePromise = runSingleFlight(saveInFlightRef, () => onSave({ targets: draft }))
+    if (!responsePromise) return
+    setSaving(true)
+    try {
+      const response = await responsePromise
+      if (!response.ok) setError(response.error?.message || '配置保存未完成，请稍后重试。')
+    } catch {
+      setError('配置保存未完成，请稍后重试。')
+    } finally {
+      setSaving(false)
+    }
   }
 
   return (
     <form className="push-skip-form" onSubmit={submit}>
-      <div className="push-skip-summary">
-        <StatusPill label={enabledCount > 0 ? `已启用 ${enabledCount} 个目标` : '未启用'} />
-        <span>只对下方配置的推送目标生效；未配置或填 0 的目标不少推。</span>
-      </div>
-      {targets.length === 0 ? <EmptyState text="后端未返回可配置推送目标。" /> : <div className="push-skip-list">
-        {targets.map((target, index) => {
-          const value = draft[index] ?? { target_code: target.code, target_name: target.name, cycle: 0, skip: 0 }
-          const ratio = value.cycle > 0 ? `${(((value.cycle - value.skip) / value.cycle) * 100).toFixed(1)}%` : '100.0%'
-          return (
-            <div className="push-skip-row" key={target.code}>
-              <div>
-                <strong>{target.name}</strong>
-                <span>{target.code}</span>
+      <fieldset disabled={saving}>
+        <div className="push-skip-summary">
+          <StatusPill label={enabledCount > 0 ? `已启用 ${enabledCount} 个目标` : '未启用'} />
+          <span>只对下方配置的推送目标生效；未配置或填 0 的目标不少推。</span>
+        </div>
+        {targets.length === 0 ? <EmptyState text="后端未返回可配置推送目标。" /> : <div className="push-skip-list">
+          {targets.map((target, index) => {
+            const value = draft[index] ?? { target_code: target.code, target_name: target.name, cycle: 0, skip: 0 }
+            const ratio = value.cycle > 0 ? `${(((value.cycle - value.skip) / value.cycle) * 100).toFixed(1)}%` : '100.0%'
+            return (
+              <div className="push-skip-row" key={target.code}>
+                <div>
+                  <strong>{target.name}</strong>
+                  <span>{target.code}</span>
+                </div>
+                <Field label="循环总单数" name={`cycle_${index}`} value={String(value.cycle)} type="number" onChange={(raw) => setDraft((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, cycle: Number(raw) } : item))} />
+                <Field label="少推单数" name={`skip_${index}`} value={String(value.skip)} type="number" onChange={(raw) => setDraft((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, skip: Number(raw) } : item))} />
+                <small>预计推送比例：{ratio}</small>
               </div>
-              <Field label="循环总单数" name={`cycle_${index}`} value={String(value.cycle)} type="number" onChange={(raw) => setDraft((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, cycle: Number(raw) } : item))} />
-              <Field label="少推单数" name={`skip_${index}`} value={String(value.skip)} type="number" onChange={(raw) => setDraft((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, skip: Number(raw) } : item))} />
-              <small>预计推送比例：{ratio}</small>
-            </div>
-          )
-        })}
-      </div>}
-      {error && <div className="result-banner error" role="alert">{error}</div>}
-      <button className="primary" type="submit">保存配置</button>
+            )
+          })}
+        </div>}
+        {error && <div className="result-banner error" role="alert">{error}</div>}
+        <button className="primary" type="submit">{saving ? '保存中…' : '保存配置'}</button>
+      </fieldset>
     </form>
   )
 }

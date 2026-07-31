@@ -37,6 +37,9 @@ func (p SkipPolicy) Normalized() (SkipPolicy, error) {
 	if p.Cycle < 0 || p.Skip < 0 {
 		return SkipPolicy{}, fmt.Errorf("cycle and skip must be greater than or equal to 0")
 	}
+	if p.Cycle == 0 && p.Skip != 0 {
+		return SkipPolicy{}, fmt.Errorf("skip must be 0 when cycle is 0")
+	}
 	if p.Cycle == 0 || p.Skip == 0 {
 		return SkipPolicy{}, nil
 	}

@@ -961,6 +961,15 @@ button:focus-visible {
   gap: 12px;
 }
 
+.push-skip-form fieldset {
+  display: grid;
+  min-width: 0;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
 .push-skip-summary {
   display: flex;
   align-items: center;
