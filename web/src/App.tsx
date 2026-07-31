@@ -2115,17 +2115,27 @@ function BojunBackfillPage({ loading, onPreview, onConfirm }: {
   onPreview: (payload: { start_time: string; end_time: string }) => Promise<BojunOrderBackfillResult | null>
   onConfirm: (payload: { start_time: string; end_time: string }) => Promise<BojunOrderBackfillResult | null>
 }) {
+  const previewVersionRef = useRef(0)
   const [payload, setPayload] = useState<{ start_time: string; end_time: string } | null>(null)
   const [preview, setPreview] = useState<BojunOrderBackfillResult | null>(null)
   const [confirmed, setConfirmed] = useState<BojunOrderBackfillResult | null>(null)
   const [confirmingWrite, setConfirmingWrite] = useState(false)
   const [writing, setWriting] = useState(false)
+  function invalidatePreview() {
+    previewVersionRef.current += 1
+    setPayload(null)
+    setPreview(null)
+    setConfirmed(null)
+    setConfirmingWrite(false)
+  }
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const form = new FormData(event.currentTarget)
     const nextPayload = { start_time: formValue(form, 'start_time'), end_time: formValue(form, 'end_time') }
-    setConfirmed(null)
+    const requestVersion = previewVersionRef.current + 1
+    invalidatePreview()
     const result = await onPreview(nextPayload)
+    if (previewVersionRef.current !== requestVersion) return
     setPayload(result ? nextPayload : null)
     setPreview(result)
   }
@@ -2143,8 +2153,8 @@ function BojunBackfillPage({ loading, onPreview, onConfirm }: {
     <div className="view-stack">
       <Panel title="伯俊订单补拉" icon={<Download />} meta="预览不写库，确认后按 docno 判重">
         <form className="bojun-backfill-form" onSubmit={submit}>
-          <Field label="开始时间" name="start_time" type="datetime-local" defaultValue={datetimeLocalMinutesAgo(60)} required />
-          <Field label="结束时间" name="end_time" type="datetime-local" defaultValue={datetimeLocalMinutesAgo(0)} required />
+          <Field label="开始时间" name="start_time" type="datetime-local" defaultValue={datetimeLocalMinutesAgo(60)} onChange={invalidatePreview} required />
+          <Field label="结束时间" name="end_time" type="datetime-local" defaultValue={datetimeLocalMinutesAgo(0)} onChange={invalidatePreview} required />
           <button className="primary" type="submit" disabled={loading}>预览补拉</button>
           <button type="button" disabled={loading || writing || !preview || preview.writable_count === 0} onClick={() => setConfirmingWrite(true)}>确认写入</button>
         </form>
@@ -2163,6 +2173,7 @@ function YouzanDistributionPage({ task, loading, onPreview, onConfirm, onRun }: 
   onConfirm: (payload: YouzanDistributionBackfillPayload) => Promise<YouzanDistributionBackfillResult | null>
   onRun: (code: string, payload: YouzanDistributionBackfillPayload) => Promise<ApiResult>
 }) {
+  const previewVersionRef = useRef(0)
   const [showBackfill, setShowBackfill] = useState(false)
   const [timeFilter, setTimeFilter] = useState<YouzanDistributionTimeFilter>('created')
   const [payload, setPayload] = useState<YouzanDistributionBackfillPayload | null>(null)
@@ -2176,6 +2187,14 @@ function YouzanDistributionPage({ task, loading, onPreview, onConfirm, onRun }: 
   const [confirmingBackfill, setConfirmingBackfill] = useState(false)
   const [writingBackfill, setWritingBackfill] = useState(false)
 
+  function invalidateBackfillPreview() {
+    previewVersionRef.current += 1
+    setPayload(null)
+    setPreview(null)
+    setConfirmed(null)
+    setConfirmingBackfill(false)
+  }
+
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const form = new FormData(event.currentTarget)
@@ -2184,8 +2203,10 @@ function YouzanDistributionPage({ task, loading, onPreview, onConfirm, onRun }: 
       start_time: backendDateTime(formValue(form, 'start_time')),
       end_time: backendDateTime(formValue(form, 'end_time')),
     }
-    setConfirmed(null)
+    const requestVersion = previewVersionRef.current + 1
+    invalidateBackfillPreview()
     const result = await onPreview(nextPayload)
+    if (previewVersionRef.current !== requestVersion) return
     setPayload(result ? nextPayload : null)
     setPreview(result)
   }
@@ -2204,16 +2225,11 @@ function YouzanDistributionPage({ task, loading, onPreview, onConfirm, onRun }: 
   function changeTimeFilter(value: string) {
     if (value !== 'created' && value !== 'success') return
     setTimeFilter(value)
-    setPayload(null)
-    setPreview(null)
-    setConfirmed(null)
+    invalidateBackfillPreview()
   }
 
   function openBackfill() {
-    setPayload(null)
-    setPreview(null)
-    setConfirmed(null)
-    setConfirmingBackfill(false)
+    invalidateBackfillPreview()
     setShowBackfill(true)
   }
 
@@ -2286,8 +2302,8 @@ function YouzanDistributionPage({ task, loading, onPreview, onConfirm, onRun }: 
                 <option value="success">订单完成时间</option>
               </select>
             </label>
-            <Field label={timeFilter === 'created' ? '下单开始时间' : '完成开始时间'} name="start_time" type="datetime-local" defaultValue={previousDayDateTimeLocal(false)} required />
-            <Field label={timeFilter === 'created' ? '下单结束时间' : '完成结束时间'} name="end_time" type="datetime-local" defaultValue={previousDayDateTimeLocal(true)} required />
+            <Field label={timeFilter === 'created' ? '下单开始时间' : '完成开始时间'} name="start_time" type="datetime-local" defaultValue={previousDayDateTimeLocal(false)} onChange={invalidateBackfillPreview} required />
+            <Field label={timeFilter === 'created' ? '下单结束时间' : '完成结束时间'} name="end_time" type="datetime-local" defaultValue={previousDayDateTimeLocal(true)} onChange={invalidateBackfillPreview} required />
             <button className="primary" type="submit" disabled={loading}>{loading ? '预览中' : '预览补拉'}</button>
             <button type="button" disabled={loading || writingBackfill || !preview || preview.writable_count === 0} onClick={() => setConfirmingBackfill(true)}>确认写入</button>
           </form>
