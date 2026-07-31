@@ -202,6 +202,7 @@ func apiData(api *gin.RouterGroup) {
 		dataGroup.POST("/raw/list", dataCtrl.QueryController.GetRawDataList)
 		dataGroup.GET("/processed", dataCtrl.QueryController.GetProcessedData)
 		dataGroup.GET("/processed/list", dataCtrl.QueryController.GetProcessedDataList)
+		dataGroup.GET("/clean-records/list", dataCtrl.QueryController.GetCleanRecordList)
 		dataGroup.GET("/statistics", dataCtrl.QueryController.GetStatistics)
 	}
 }

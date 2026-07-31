@@ -3,6 +3,7 @@ package data_ctrl
 import (
 	"github.com/gin-gonic/gin"
 
+	"gin-biz-web-api/internal/dao/data_dao"
 	"gin-biz-web-api/internal/msg"
 	"gin-biz-web-api/internal/requestbody"
 	"gin-biz-web-api/internal/service/data_svc"
@@ -151,6 +152,45 @@ func (ctrl *QueryController) GetProcessedDataList(c *gin.Context) {
 }
 
 func processedDataListQueryValid(req requestbody.ProcessedDataListQueryRequest) bool {
+	if req.MinQuality != nil && req.MaxQuality != nil && *req.MinQuality > *req.MaxQuality {
+		return false
+	}
+	return req.CreatedFrom == 0 || req.CreatedTo == 0 || req.CreatedFrom <= req.CreatedTo
+}
+
+// GetCleanRecordList queries clean_records independently from legacy
+// processed_data so source, business key and delivery status remain truthful.
+func (ctrl *QueryController) GetCleanRecordList(c *gin.Context) {
+	var req requestbody.CleanRecordListQueryRequest
+	if err := c.ShouldBindQuery(&req); err != nil {
+		c.JSON(400, msg.ErrResponse("无效的请求参数", err))
+		return
+	}
+	if !cleanRecordListQueryValid(req) {
+		c.JSON(400, msg.ErrResponse("无效的筛选范围", nil))
+		return
+	}
+	if req.Page == 0 {
+		req.Page = 1
+	}
+	if req.PageSize == 0 {
+		req.PageSize = 20
+	}
+	result, err := ctrl.service.GetCleanRecordList(c.Request.Context(), data_dao.CleanRecordListQuery{
+		Page: req.Page, PageSize: req.PageSize, SourceID: req.SourceID, TableName: req.TableName, BusinessKey: req.BusinessKey,
+		Status: req.Status, MinQuality: req.MinQuality, MaxQuality: req.MaxQuality, CreatedFrom: req.CreatedFrom, CreatedTo: req.CreatedTo,
+	})
+	if err != nil {
+		c.JSON(500, msg.ErrResponse("查询清洗记录失败", err))
+		return
+	}
+	c.JSON(200, msg.SuccessResponse("查询成功", &map[string]any{
+		"list": result.List, "total": result.Total, "page": result.Page, "page_size": result.PageSize, "total_pages": result.TotalPages,
+		"summary": map[string]any{"total_count": result.Total, "avg_quality": result.AverageQuality},
+	}))
+}
+
+func cleanRecordListQueryValid(req requestbody.CleanRecordListQueryRequest) bool {
 	if req.MinQuality != nil && req.MaxQuality != nil && *req.MinQuality > *req.MaxQuality {
 		return false
 	}

@@ -54,6 +54,22 @@ type ProcessedDataListQueryRequest struct {
 	CreatedTo   int64    `form:"created_to" binding:"min=0"`
 }
 
+// CleanRecordListQueryRequest is the paginated query contract for clean_records.
+// It is deliberately separate from legacy processed_data because only clean
+// records have a business key, source and delivery status.
+type CleanRecordListQueryRequest struct {
+	Page        int      `form:"page" binding:"min=1"`
+	PageSize    int      `form:"page_size" binding:"min=1,max=100"`
+	SourceID    uint     `form:"source_id" binding:"min=0"`
+	TableName   string   `form:"table_name" binding:"max=100"`
+	BusinessKey string   `form:"business_key" binding:"max=255"`
+	Status      string   `form:"status" binding:"omitempty,oneof=ready invalid delivered"`
+	MinQuality  *float64 `form:"min_quality" binding:"omitempty,min=0,max=100"`
+	MaxQuality  *float64 `form:"max_quality" binding:"omitempty,min=0,max=100"`
+	CreatedFrom int64    `form:"created_from" binding:"min=0"`
+	CreatedTo   int64    `form:"created_to" binding:"min=0"`
+}
+
 // StatisticsQueryRequest 统计数据查询请求
 type StatisticsQueryRequest struct {
 	StartDate string `form:"start_date" binding:"max=10"`

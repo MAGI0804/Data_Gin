@@ -167,6 +167,25 @@ type CleanRecordDAO struct {
 	db *gorm.DB
 }
 
+type CleanRecordListQuery struct {
+	SourceID    uint
+	TableName   string
+	BusinessKey string
+	Status      string
+	MinQuality  *float64
+	MaxQuality  *float64
+	CreatedFrom int64
+	CreatedTo   int64
+	Page        int
+	PageSize    int
+}
+
+type CleanRecordWithTotal struct {
+	List           []model.CleanRecord
+	Total          int64
+	AverageQuality float64
+}
+
 func NewCleanRecordDAO() *CleanRecordDAO {
 	return &CleanRecordDAO{db: database.DB}
 }
@@ -190,6 +209,52 @@ func (dao *CleanRecordDAO) FindReadyBySourceAndTable(ctx context.Context, source
 
 	err := query.Order("id ASC").Find(&records).Error
 	return records, err
+}
+
+func (dao *CleanRecordDAO) FindWithPagination(ctx context.Context, params CleanRecordListQuery) (*CleanRecordWithTotal, error) {
+	query := dao.applyListFilters(dao.db.WithContext(ctx).Model(&model.CleanRecord{}), params)
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		return nil, err
+	}
+	var average struct{ Value float64 }
+	if err := query.Select("COALESCE(AVG(quality_score), 0) AS value").Scan(&average).Error; err != nil {
+		return nil, err
+	}
+	var list []model.CleanRecord
+	offset := (params.Page - 1) * params.PageSize
+	if err := query.Order("created_at DESC").Offset(offset).Limit(params.PageSize).Find(&list).Error; err != nil {
+		return nil, err
+	}
+	return &CleanRecordWithTotal{List: list, Total: total, AverageQuality: average.Value}, nil
+}
+
+func (dao *CleanRecordDAO) applyListFilters(query *gorm.DB, params CleanRecordListQuery) *gorm.DB {
+	if params.SourceID > 0 {
+		query = query.Where("source_id = ?", params.SourceID)
+	}
+	if params.TableName != "" {
+		query = query.Where("table_name = ?", params.TableName)
+	}
+	if params.BusinessKey != "" {
+		query = query.Where("business_key LIKE ?", "%"+params.BusinessKey+"%")
+	}
+	if params.Status != "" {
+		query = query.Where("status = ?", params.Status)
+	}
+	if params.MinQuality != nil {
+		query = query.Where("quality_score >= ?", *params.MinQuality)
+	}
+	if params.MaxQuality != nil {
+		query = query.Where("quality_score <= ?", *params.MaxQuality)
+	}
+	if params.CreatedFrom > 0 {
+		query = query.Where("created_at >= ?", params.CreatedFrom)
+	}
+	if params.CreatedTo > 0 {
+		query = query.Where("created_at <= ?", params.CreatedTo)
+	}
+	return query
 }
 
 func (dao *CleanRecordDAO) MarkDelivered(ctx context.Context, id uint) error {
