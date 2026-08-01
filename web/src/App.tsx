@@ -3292,6 +3292,8 @@ function ExcelMatchView({
   const schemeSaveInFlightRef = useRef(false)
   const [deletingSchemeID, setDeletingSchemeID] = useState<number | null>(null)
   const [pendingWrite, setPendingWrite] = useState<{ slot: 'import' | 'clear'; file: File; config: unknown; message: string } | null>(null)
+  const [writeMode, setWriteMode] = useState<'import' | 'clear'>('import')
+  const [latestWriteJob, setLatestWriteJob] = useState<ExcelMatchJob | null>(null)
   const [jobQuery, setJobQuery] = useState('')
   const [jobStatus, setJobStatus] = useState('all')
   const [appliedJobHistoryFilters, setAppliedJobHistoryFilters] = useState({ keyword: '', status: '' })
@@ -3464,7 +3466,7 @@ function ExcelMatchView({
       const response = await client('/v1/excel-match-jobs/models', { method: 'GET', showResult: false, silentLoading: true })
       if (!response.ok) throw new Error(requestErrorMessage(response, '查询模型与字段目录失败'))
       const value = readDataField(response.data, 'models')
-      setExcelModels(Array.isArray(value) ? (value as ExcelMatchModel[]) : [])
+      setExcelModels(Array.isArray(value) ? filterSensitiveExcelModels(value as ExcelMatchModel[]) : [])
     } catch (error) {
       setExcelModelsError(error instanceof Error ? error.message : '查询模型与字段目录失败')
     } finally {
@@ -3966,7 +3968,7 @@ function ExcelMatchView({
         retry: false,
         timeoutMs: 120_000,
       })
-      if (nextResult.ok) showCreatedJob(nextResult)
+      if (nextResult.ok) showCreatedWriteJob(nextResult)
       else setResult(nextResult)
     } catch {
       setResult({ ok: false, status: 0, data: { message: '创建 Excel 写入任务失败，请稍后重试。' } })
@@ -4041,6 +4043,17 @@ function ExcelMatchView({
     onNavigateToJobs()
   }
 
+  function showCreatedWriteJob(result: ApiResult) {
+    const createdJob = applyJobResult(result)
+    if (createdJob) {
+      setLatestWriteJob(createdJob)
+      pendingJobFocusIDRef.current = createdJob.id
+    }
+    setAutoRefreshText('')
+    setResult(null)
+    setJobHistoryReloadVersion((version) => version + 1)
+  }
+
   async function refreshJob() {
     const id = Number(jobID)
     if (!id) {
@@ -4110,6 +4123,64 @@ function ExcelMatchView({
         </div>
       </form>
     )
+  }
+
+  function renderExportMatchForm() {
+    return (
+      <form className="excel-upload-form" onSubmit={createExportJob} key={exportFormKey}>
+        <label>已保存方案<select value={selectedExportSchemeID} onChange={(event) => applyExportScheme(event.currentTarget.value)}><option value="">选择方案</option>{exportSchemes.map((scheme) => <option value={scheme.id} key={scheme.id}>{scheme.name}</option>)}</select></label>
+        <button type="button" disabled={!selectedExportSchemeID || loading} onClick={(event) => { const form = event.currentTarget.form; if (form?.reportValidity()) beginSchemeSave(form, 'export_match', 'current') }}>保存到当前方案</button>
+        <button type="button" disabled={loading} onClick={(event) => { const form = event.currentTarget.form; if (form?.reportValidity()) beginSchemeSave(form, 'export_match', 'new') }}>另存为新方案</button>
+        <label className="file-input-label">Excel 文件<input name="file" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={(event) => { setSelectedExportFileName(event.currentTarget.files?.[0]?.name ?? ''); clearUploadRef('export'); setPreviewResult(null) }} /><span>{selectedExportFileName || '请选择需要匹配导出的 .xlsx 文件'}</span></label>
+        <Field label="Sheet 页名称" name="sheetName" defaultValue={exportDefaults.sheetName} />
+        <div className="excel-step-editor">
+          <div className="excel-step-editor-title"><div><strong>匹配步骤</strong><span>每一步从完整 Excel 行集独立筛选；前一步跳过的行仍可进入后续步骤。</span></div><button type="button" onClick={addExportStep} disabled={exportSteps.length >= 20}>添加步骤</button></div>
+          {excelModelsLoading && <p className="excel-mode-note">正在加载模型与字段目录…</p>}
+          {excelModelsError && <div className="excel-catalog-error" role="alert"><span>模型与字段目录加载失败：{excelModelsError}</span><button type="button" onClick={() => void loadExcelModels()}>重试加载</button></div>}
+          {!excelModelsLoading && !excelModelsError && excelModels.length === 0 && <p className="excel-mode-note">当前数据库没有返回可选择的模型；历史配置仍可查看，但新步骤需要先确认数据库连接和模型表。</p>}
+          {exportSteps.map((step, index) => (
+            <article className="excel-step-card" key={`${exportFormKey}-${index}`}>
+              <div className="excel-step-heading"><strong><span className="excel-step-index" aria-hidden="true">{index + 1}</span>步骤 {index + 1}</strong><div className="table-actions"><button type="button" onClick={() => moveExportStep(index, -1)} disabled={index === 0}>上移</button><button type="button" onClick={() => moveExportStep(index, 1)} disabled={index === exportSteps.length - 1}>下移</button><button type="button" onClick={() => removeExportStep(index)} disabled={exportSteps.length === 1}>删除</button></div></div>
+              <div className="excel-step-fields">
+                <Field label="步骤名称" name={`step_name_${index}`} value={step.name} onChange={(value) => updateExportStep(index, 'name', value)} required />
+                <label>匹配模式<select name={`step_mode_${index}`} value={step.matchMode} onChange={(event) => updateExportStep(index, 'matchMode', event.currentTarget.value)}><option value="field">普通字段匹配</option><option value="order_item_sku">订单商品 SKU 匹配</option></select></label>
+                <ExcelModelSelector name={`step_table_${index}`} models={excelModels} value={step.tableName} onChange={(value) => selectExportStepModel(index, value)} />
+                <Field label={step.matchMode === 'order_item_sku' ? '订单号 Excel 列' : 'Excel 输入列'} name={`step_excel_${index}`} value={step.matchExcelColumn} onChange={(value) => updateExportStep(index, 'matchExcelColumn', value)} required />
+                <ExcelModelFieldSelector label={step.matchMode === 'order_item_sku' ? '数据库订单号字段' : '匹配模型字段'} name={`step_match_${index}`} models={excelModels} tableName={step.tableName} value={step.dbMatchField} onChange={(value) => updateExportStep(index, 'dbMatchField', value)} />
+                <ExcelModelFieldSelector label={step.matchMode === 'order_item_sku' ? '数据库购物明细字段' : '取值模型字段'} name={`step_value_${index}`} models={excelModels} tableName={step.tableName} value={step.dbValueField} onChange={(value) => updateExportStep(index, 'dbValueField', value)} />
+                <Field label={step.matchMode === 'order_item_sku' ? 'SKU 输出列' : '追加输出列'} name={`step_output_${index}`} value={step.outputColumnName} onChange={(value) => updateExportStep(index, 'outputColumnName', value)} required />
+                {step.matchMode === 'order_item_sku' && <><Field label="规格编码 Excel 列" name={`step_spec_${index}`} value={step.specExcelColumn} onChange={(value) => updateExportStep(index, 'specExcelColumn', value)} required /><Field label="销售金额 Excel 列（对应 totAmtActual）" name={`step_price_${index}`} value={step.priceExcelColumn} onChange={(value) => updateExportStep(index, 'priceExcelColumn', value)} required /><Field label="销售数量 Excel 列" name={`step_qty_${index}`} value={step.qtyExcelColumn} onChange={(value) => updateExportStep(index, 'qtyExcelColumn', value)} required /></>}
+              </div>
+              {step.matchMode === 'order_item_sku' && <p className="excel-mode-note">按数据库购物明细字段匹配并输出完整 no：优先用规格编码匹配 mProductName 前缀，并同时校验销售金额和数量；规格编码为 15 位或 16 位时直接跳过。</p>}
+              <div className="excel-step-filter-editor"><div className="excel-step-filter-heading"><div><strong>本步骤筛选</strong><span>{step.matchMode === 'order_item_sku' ? '多条条件需要同时满足，订单商品 SKU 模式仅可引用原始 Excel 列。' : '多条条件需要同时满足，可引用原始列或前序步骤追加列。'}</span></div><button type="button" onClick={() => addExportStepFilter(index)}>添加条件</button></div>{step.filters.length === 0 && <p className="excel-step-filter-empty">未设置条件，本步骤处理全部 Excel 行。</p>}{step.filters.map((filter, filterIndex) => { const valueNotRequired = filter.op === 'empty' || filter.op === 'not_empty'; return <div className="excel-step-filter-row" key={`${exportFormKey}-${index}-${filterIndex}`}><Field label={`条件 ${filterIndex + 1} · Excel 列`} name={`step_filter_column_${index}_${filterIndex}`} value={filter.column} onChange={(value) => updateExportStepFilter(index, filterIndex, 'column', value)} required /><label>运算符<select name={`step_filter_op_${index}_${filterIndex}`} value={filter.op} onChange={(event) => updateExportStepFilter(index, filterIndex, 'op', event.currentTarget.value)}>{excelMatchFilterOperatorOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>{valueNotRequired ? <label>筛选值<input value="此运算无需填写" readOnly disabled /></label> : <Field label="筛选值" name={`step_filter_value_${index}_${filterIndex}`} value={filter.value} onChange={(value) => updateExportStepFilter(index, filterIndex, 'value', value)} required />}<button type="button" onClick={() => removeExportStepFilter(index, filterIndex)} aria-label={`删除步骤 ${index + 1} 的条件 ${filterIndex + 1}`}>删除条件</button></div> })}</div>
+            </article>
+          ))}
+        </div>
+        <label>导出列内容格式<textarea name="exportColumnFormats" defaultValue={exportDefaults.exportColumnFormats} rows={4} placeholder={'每行一个：列名=格式\n例如：金额=number\n下单时间=date'} /><small>支持格式：text、number、integer、bool、date。列名可填原 Excel 表头或追加列名。</small></label>
+        <Field label="批量查询大小" name="batchSize" defaultValue={exportDefaults.batchSize} />
+        {previewResult && <ExcelMatchPreviewPanel preview={previewResult} />}
+        {uploadProgress && <p className="excel-mode-note" role="status" aria-live="polite">{uploadProgress}</p>}
+        <div className="excel-form-actions"><button type="button" onClick={(event) => { const form = event.currentTarget.form; if (form?.reportValidity()) void previewExportJob(form) }} disabled={loading}><FileJson aria-hidden="true" />预览匹配</button><button className="primary" type="submit" disabled={loading}><Upload aria-hidden="true" />创建导出任务</button></div>
+      </form>
+    )
+  }
+
+  function renderImportWriteForm() {
+    return <form className="excel-upload-form" onSubmit={createImportJob} key={importFormKey}>
+      <label>已保存方案<select value={selectedImportSchemeID} onChange={(event) => applyImportScheme(event.currentTarget.value)}><option value="">选择方案</option>{importSchemes.map((scheme) => <option value={scheme.id} key={scheme.id}>{scheme.name}</option>)}</select></label>
+      <button type="button" disabled={!selectedImportSchemeID || loading} onClick={(event) => { const form = event.currentTarget.form; if (form?.reportValidity()) beginSchemeSave(form, 'import_update', 'current') }}>保存到当前方案</button><button type="button" disabled={loading} onClick={(event) => { const form = event.currentTarget.form; if (form?.reportValidity()) beginSchemeSave(form, 'import_update', 'new') }}>另存为新方案</button>
+      <label className="file-input-label">Excel 文件<input name="file" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={(event) => { setSelectedImportFileName(event.currentTarget.files?.[0]?.name ?? ''); clearUploadRef('import') }} /><span>{selectedImportFileName || '请选择需要导入更新的 .xlsx 文件'}</span></label>
+      <Field label="Sheet 页名称" name="sheetName" defaultValue={importDefaults.sheetName} /><label>匹配表名<select name="tableName" defaultValue={importDefaults.tableName}><option value="bojun_retail_orders">伯俊零售单 bojun_retail_orders</option></select></label><label>数据库匹配字段<select name="dbMatchField" defaultValue={importDefaults.dbMatchField}>{bojunMatchFieldOptions.map((option) => <option value={option.value} key={option.value}>{option.label}</option>)}</select></label><Field label="Excel 匹配列名" name="matchExcelColumn" defaultValue={importDefaults.matchExcelColumn} /><label>写入字段<select name="dbWriteField" defaultValue={importDefaults.dbWriteField}><option value="matched_docno">匹配单号 matched_docno</option><option value="completed_at">订单完成时间 completed_at</option></select></label><Field label="Excel 写入值列名" name="writeExcelColumn" defaultValue={importDefaults.writeExcelColumn} /><Field label="批量更新大小" name="batchSize" defaultValue={importDefaults.batchSize} />
+      <label className="checkbox-label"><input name="confirmWrite" type="checkbox" />确认写入数据库</label><p className="excel-mode-note">不勾选时只预检匹配数量，不写库；匹配单号只填充空值；订单完成时间只填充为空的 completed_at。</p>{uploadProgress && <p className="excel-mode-note" role="status" aria-live="polite">{uploadProgress}</p>}<div className="excel-form-actions"><button className="primary" type="submit" disabled={loading}><Upload aria-hidden="true" />创建预检/导入任务</button></div>
+    </form>
+  }
+
+  function renderClearWriteForm() {
+    return <form className="excel-upload-form" onSubmit={createClearMatchedJob}>
+      <label className="file-input-label">Excel 文件<input name="file" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={(event) => { setSelectedClearFileName(event.currentTarget.files?.[0]?.name ?? ''); clearUploadRef('clear') }} /><span>{selectedClearFileName || '请选择需要退回的 .xlsx 文件'}</span></label>
+      <Field label="Sheet 页名称" name="sheetName" defaultValue="Sheet1" /><label>匹配表名<select name="tableName" defaultValue="bojun_retail_orders"><option value="bojun_retail_orders">伯俊零售单 bojun_retail_orders</option></select></label><label>数据库匹配字段<select name="dbMatchField" defaultValue="docno">{bojunMatchFieldOptions.map((option) => <option value={option.value} key={option.value}>{option.label}</option>)}</select></label><Field label="Excel 匹配列名" name="matchExcelColumn" defaultValue="外部订单编号" /><Field label="批量处理大小" name="batchSize" defaultValue="1000" />
+      <label className="checkbox-label"><input name="confirmWrite" type="checkbox" />确认清空 matched_docno</label><p className="excel-mode-note">不勾选时只预检会命中的行；勾选后会把命中行的 matched_docno 清空，用于退回未匹配状态。</p>{uploadProgress && <p className="excel-mode-note" role="status" aria-live="polite">{uploadProgress}</p>}<div className="excel-form-actions"><button type="submit" disabled={loading}><RefreshCcw aria-hidden="true" />创建预检/退回任务</button></div>
+    </form>
   }
 
   return (
@@ -4208,17 +4279,15 @@ function ExcelMatchView({
           <Metric label="筛选规则" value="可选" />
         </section>
         <section className="excel-config-workspace">
-          <Panel title="自定义匹配流程" icon={<Upload />} meta="步骤顺序与预览都基于真实导出配置">
+          <Panel title="匹配导出配置" icon={<Upload />} meta="步骤顺序与预览都基于真实导出配置">
             <div className="excel-config-summary">
               <strong>{selectedExportSchemeID ? '正在编辑已保存方案' : '新建匹配方案'}</strong>
-              <span>当前包含 {exportSteps.length} 个步骤；打开配置后可调整顺序、筛选和输出字段。</span>
+              <span>当前包含 {exportSteps.length} 个步骤；可直接调整顺序、筛选和输出字段。</span>
             </div>
-            <div className="excel-action-grid compact-actions">
-              <button type="button" className="excel-action-card" onClick={() => openExcelDialog('export')}><Upload aria-hidden="true" /><span>打开匹配配置</span><small>预览匹配或创建真实导出任务</small></button>
-            </div>
+            {renderExportMatchForm()}
           </Panel>
           <aside className="excel-config-aside" aria-label="已保存导出方案">
-            <Panel title="已保存导出方案" icon={<ListChecks />} meta={`${exportSchemes.length} 个方案`}><ExcelSchemeList schemes={exportSchemes} deletingSchemeID={deletingSchemeID} onDelete={setPendingSchemeDelete} onOpen={(id) => { applyExportScheme(String(id)); openExcelDialog('export') }} /></Panel>
+            <Panel title="已保存导出方案" icon={<ListChecks />} meta={`${exportSchemes.length} 个方案`}><ExcelSchemeList schemes={exportSchemes} deletingSchemeID={deletingSchemeID} onDelete={setPendingSchemeDelete} onOpen={(id) => applyExportScheme(String(id))} /></Panel>
           </aside>
         </section>
       </>}
@@ -4232,14 +4301,18 @@ function ExcelMatchView({
         </section>
         <section className="excel-config-workspace">
           <Panel title="数据库回写" icon={<Database />} meta="默认只预检；写入与退回均需二次确认">
-            <div className="excel-action-grid compact-actions">
-              <button type="button" className="excel-action-card" onClick={() => openExcelDialog('import')}><Database aria-hidden="true" /><span>匹配导入</span><small>先预检，确认后只填充空字段</small></button>
-              <button type="button" className="excel-action-card" onClick={() => openExcelDialog('clear')}><RefreshCcw aria-hidden="true" /><span>退回未匹配</span><small>先预检，确认后清空 matched_docno</small></button>
-            </div>
+            <div className="excel-mode-switch" role="group" aria-label="数据库回写模式"><button type="button" className={writeMode === 'import' ? 'active' : undefined} onClick={() => setWriteMode('import')}><Database aria-hidden="true" />匹配导入</button><button type="button" className={writeMode === 'clear' ? 'active danger' : 'danger'} onClick={() => setWriteMode('clear')}><RefreshCcw aria-hidden="true" />退回未匹配</button></div>
+            <p className="excel-mode-note">{writeMode === 'import' ? '先预检，确认后只填充空字段。' : '先预检，确认后清空命中行的 matched_docno。'}</p>
+            {writeMode === 'import' ? renderImportWriteForm() : renderClearWriteForm()}
+            {latestWriteJob && <section className="excel-write-summary" aria-labelledby="excel-write-summary-title"><div><strong id="excel-write-summary-title">最近预检/写入任务</strong><span>以下数据来自服务端安全任务摘要；不覆盖与错误计数未返回。</span></div><div className="excel-job-detail"><Metric label="任务 ID" value={latestWriteJob.id} /><Metric label="状态" value={excelJobStatusLabel(latestWriteJob.status)} /><Metric label="总行数" value={latestWriteJob.total_rows} /><Metric label="已处理" value={latestWriteJob.processed_rows} /><Metric label="预计命中" value={latestWriteJob.matched_rows} /><Metric label="未匹配" value={latestWriteJob.unmatched_rows} /></div><div className="excel-detail-actions"><span>不覆盖/错误：服务端未返回独立计数。</span><button type="button" onClick={onNavigateToJobs}>查看任务详情</button></div></section>}
           </Panel>
-          <aside className="excel-config-aside" aria-label="已保存导入方案"><Panel title="已保存导入方案" icon={<ListChecks />} meta={`${importSchemes.length} 个方案`}><ExcelSchemeList schemes={importSchemes} deletingSchemeID={deletingSchemeID} onDelete={setPendingSchemeDelete} onOpen={(id) => { applyImportScheme(String(id)); openExcelDialog('import') }} /></Panel></aside>
+          <aside className="excel-config-aside" aria-label="已保存导入方案"><Panel title="已保存导入方案" icon={<ListChecks />} meta={`${importSchemes.length} 个方案`}><ExcelSchemeList schemes={importSchemes} deletingSchemeID={deletingSchemeID} onDelete={setPendingSchemeDelete} onOpen={(id) => { setWriteMode('import'); applyImportScheme(String(id)) }} /></Panel></aside>
         </section>
       </>}
+
+      {pendingSchemeSave && <Modal title="保存 Excel 匹配方案" focusKey="scheme-save" closeDisabled={loading || schemeSaveInFlightRef.current} onClose={() => { if (!loading && !schemeSaveInFlightRef.current) { setPendingSchemeSave(null); setSchemeSaveError('') } }}>{renderPendingSchemeSave()}</Modal>}
+
+      {pendingWrite && <Modal title={pendingWrite.slot === 'import' ? '确认写入数据库' : '确认退回未匹配'} focusKey="confirm" closeDisabled={loading} onClose={() => { if (!loading) setPendingWrite(null) }}><div className="view-stack"><p>{pendingWrite.message}</p><div className="excel-form-actions"><button type="button" disabled={loading} onClick={() => setPendingWrite(null)}>返回修改</button><button className={pendingWrite.slot === 'clear' ? 'danger' : 'primary'} type="button" disabled={loading} onClick={() => void confirmPendingWrite()}>{loading ? '创建任务中…' : pendingWrite.slot === 'clear' ? '确认退回' : '确认写入'}</button></div></div></Modal>}
 
       {excelDialog === 'export' && (
         <Modal
@@ -4630,7 +4703,7 @@ function ExcelSchemeList({ schemes, deletingSchemeID, onDelete, onOpen }: { sche
   if (schemes.length === 0) return <EmptyState text="暂无已保存方案。" />
   return (
     <div className="data-table-wrap">
-      <table className="data-table">
+      <table className="data-table excel-scheme-table">
         <thead>
           <tr>
             <th>方案名称</th>
@@ -5887,6 +5960,35 @@ function readList<T>(result: ApiResult, key: string): T[] {
 function readObject<T>(result: ApiResult, key: string): T | null {
   const value = readDataField(result.data, key)
   return value && typeof value === 'object' ? (value as T) : null
+}
+
+function filterSensitiveExcelModels(models: ExcelMatchModel[]): ExcelMatchModel[] {
+  return models.flatMap((model): ExcelMatchModel[] => {
+    if (
+      !model
+      || typeof model.name !== 'string'
+      || typeof model.modelName !== 'string'
+      || typeof model.tableName !== 'string'
+      || typeof model.description !== 'string'
+      || typeof model.mapping !== 'string'
+      || !Array.isArray(model.fields)
+      || isSensitiveExcelCatalogValue(model.name, model.modelName, model.tableName, model.description)
+    ) return []
+
+    return [{
+      ...model,
+      fields: model.fields.filter((field) => field
+        && typeof field.name === 'string'
+        && typeof field.modelField === 'string'
+        && typeof field.columnName === 'string'
+        && typeof field.description === 'string'
+        && !isSensitiveExcelCatalogValue(field.name, field.modelField, field.columnName, field.description)),
+    }]
+  })
+}
+
+function isSensitiveExcelCatalogValue(...values: string[]) {
+  return values.some((value) => /(?:access[_-]?token|refresh[_-]?token|authorization|api[_-]?key|secret|password|credential)/i.test(value))
 }
 
 function readDataField(data: unknown, key: string) {

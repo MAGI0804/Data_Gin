@@ -1056,6 +1056,50 @@ button:focus-visible {
   border: 1px solid var(--line);
 }
 
+.excel-mode-switch {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-bottom: 12px;
+}
+
+.excel-mode-switch button {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border-color: var(--line);
+  background: #ffffff;
+}
+
+.excel-mode-switch button.active {
+  border-color: #171717;
+  background: #f5f4f0;
+  color: #171717;
+}
+
+.excel-mode-switch button.active.danger {
+  border-color: #d92d20;
+  color: #d92d20;
+}
+
+.excel-write-summary {
+  display: grid;
+  gap: 12px;
+  margin-top: 20px;
+  border-top: 1px solid var(--line);
+  padding-top: 16px;
+}
+
+.excel-write-summary > div:first-child {
+  display: grid;
+  gap: 3px;
+}
+
+.excel-write-summary > div:first-child span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
 .excel-config-workspace > .panel,
 .excel-config-aside > .panel {
   border: 0;
@@ -1157,6 +1201,42 @@ button:focus-visible {
   border: 1px solid #b5b5b5;
   background: #f7f7f7;
   padding: 12px;
+}
+
+.excel-step-heading > strong {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.excel-step-index {
+  display: inline-grid;
+  width: 22px;
+  height: 22px;
+  place-items: center;
+  border: 1px solid #f5a623;
+  border-radius: 50%;
+  color: #8c5b00;
+  font-size: 12px;
+  font-variant-numeric: tabular-nums;
+}
+
+.excel-scheme-table {
+  min-width: 700px;
+}
+
+.excel-scheme-table th:last-child,
+.excel-scheme-table td:last-child {
+  position: sticky;
+  right: 0;
+  z-index: 2;
+  border-left: 1px solid var(--line);
+  background: #ffffff;
+}
+
+.excel-scheme-table th:last-child {
+  z-index: 3;
+  background: #faf9f6;
 }
 
 .excel-step-fields {
@@ -1750,6 +1830,11 @@ summary {
   .excel-catalog-error {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .excel-mode-switch button {
+    flex: 1 1 150px;
+    justify-content: center;
   }
 
   .modal-backdrop {
