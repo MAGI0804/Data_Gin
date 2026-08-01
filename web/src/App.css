@@ -1717,3 +1717,434 @@ summary {
     margin-inline: 18px;
   }
 }
+
+/* Allblu desktop system: dense industrial administration surfaces. */
+:root {
+  --accent: #f5a623;
+  --surface: #f7f6f2;
+  --success: #218a55;
+  --danger: #d92d20;
+}
+
+button {
+  min-height: 32px;
+  border-color: #dedbd4;
+  font-size: 12px;
+  font-weight: 650;
+  padding: 6px 10px;
+}
+
+button.primary {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #171717;
+}
+
+button.primary:hover {
+  background: #e99b1d;
+}
+
+input,
+select,
+textarea {
+  border-color: #d9d6ce;
+  font-size: 12px;
+  padding: 7px 9px;
+}
+
+input:focus,
+select:focus,
+textarea:focus,
+button:focus-visible {
+  outline-color: var(--accent);
+}
+
+.ops-shell {
+  grid-template-columns: 224px minmax(0, 1fr);
+  background: #ffffff;
+}
+
+.ops-sidebar {
+  gap: 12px;
+  padding: 17px 12px 14px;
+}
+
+.allblu-brand {
+  padding: 0 8px 8px;
+}
+
+.allblu-brand__logo {
+  width: 25px;
+  height: 25px;
+  flex-basis: 25px;
+}
+
+.allblu-brand__name {
+  font-size: 16px;
+  letter-spacing: -0.025em;
+}
+
+.nav-search {
+  display: none;
+}
+
+.module-nav {
+  gap: 10px;
+  border: 0;
+  padding: 4px 0 12px;
+}
+
+.nav-group {
+  gap: 2px;
+}
+
+.nav-group-toggle {
+  min-height: 25px;
+  color: #a09e98;
+  cursor: default;
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  padding: 3px 8px;
+  pointer-events: none;
+}
+
+.nav-group-toggle:hover {
+  border-color: transparent;
+  background: transparent;
+}
+
+.nav-group-toggle svg {
+  display: none;
+}
+
+.nav-group-items {
+  gap: 1px;
+  padding-left: 0;
+}
+
+.nav-item {
+  min-height: 32px;
+  border: 0;
+  border-left: 2px solid transparent;
+  color: #5f5d58;
+  font-size: 12px;
+  font-weight: 600;
+  padding: 6px 8px;
+}
+
+.nav-item:hover {
+  background: #fbfaf7;
+}
+
+.nav-item svg {
+  width: 15px;
+  height: 15px;
+  color: #898780;
+}
+
+.nav-item small {
+  display: none;
+}
+
+.nav-item.active {
+  border-color: var(--accent);
+  background: #fff5e5;
+  color: #171717;
+}
+
+.nav-item.active svg {
+  color: #df8c11;
+}
+
+.sidebar-actions {
+  align-self: stretch;
+  border-top: 1px solid var(--line);
+  margin-top: auto;
+  padding: 12px 4px 0;
+}
+
+.sidebar-actions button {
+  border-color: transparent;
+  color: var(--muted);
+  padding-inline: 5px;
+}
+
+.sidebar-actions button:hover {
+  border-color: var(--line);
+}
+
+.ops-workspace {
+  padding: 0 clamp(20px, 3vw, 40px) 44px;
+}
+
+.workspace-header {
+  min-height: 94px;
+  align-items: center;
+  border-bottom-color: var(--line);
+  margin-bottom: 20px;
+  padding: 17px 0 16px;
+}
+
+.workspace-header h2 {
+  font-size: 20px;
+  font-weight: 720;
+  letter-spacing: -0.025em;
+}
+
+.workspace-header > div:first-child > span {
+  display: block;
+  margin-top: 5px;
+  max-width: 760px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.workspace-session {
+  gap: 9px;
+  font-size: 12px;
+}
+
+.workspace-refresh {
+  min-height: 30px;
+}
+
+.workspace-refresh svg {
+  width: 14px;
+  height: 14px;
+}
+
+.view-stack {
+  gap: 18px;
+}
+
+.overview-grid,
+.overview-grid.compact {
+  gap: 0;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--accent);
+}
+
+.metric {
+  min-height: 78px;
+  border: 0;
+  border-left: 1px solid var(--line);
+  padding: 13px 17px;
+}
+
+.metric:first-child {
+  border-left: 0;
+}
+
+.metric span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.metric strong {
+  margin-top: 7px;
+  color: #171717;
+  font-size: 23px;
+  font-variant-numeric: tabular-nums;
+}
+
+.content-grid,
+.content-grid.two,
+.method-groups {
+  gap: 24px;
+}
+
+.workbench-panel {
+  border: 0;
+  border-top: 1px solid var(--line);
+  padding: 0;
+}
+
+.panel-title {
+  min-height: 48px;
+  border-bottom-color: var(--line);
+  margin-bottom: 0;
+  padding: 13px 0 11px;
+}
+
+.panel-title h3 {
+  font-size: 14px;
+  font-weight: 720;
+}
+
+.panel-title span {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.query-bar {
+  gap: 14px;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--accent);
+  background: #ffffff;
+  padding: 11px 13px;
+}
+
+.query-fields {
+  gap: 10px;
+}
+
+.record-list {
+  gap: 0;
+}
+
+.record-row,
+.method-row {
+  min-height: 54px;
+  gap: 16px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  background: #ffffff;
+  padding: 10px 4px;
+}
+
+.record-row:hover,
+.method-row:hover {
+  background: #fcfbf8;
+}
+
+.record-row strong,
+.method-row strong {
+  font-size: 12px;
+  font-weight: 720;
+}
+
+.record-row span,
+.record-row small,
+.method-row span,
+.method-row small {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.record-actions,
+.table-actions {
+  gap: 6px;
+}
+
+.record-actions button,
+.table-actions button {
+  min-height: 27px;
+  padding: 4px 8px;
+}
+
+.status-pill {
+  min-height: 21px;
+  border-color: #c9c6bf;
+  background: #ffffff;
+  color: #6d6a64;
+  font-size: 10px;
+  font-weight: 700;
+  padding: 2px 7px;
+}
+
+.status-pill.success {
+  border-color: #9ad1ad;
+  background: #f2fbf5;
+  color: var(--success);
+}
+
+.status-pill.warning {
+  border-color: #f1c777;
+  background: #fff8e8;
+  color: #a46100;
+}
+
+.status-pill.danger {
+  border-color: #efb4af;
+  background: #fff5f4;
+  color: var(--danger);
+}
+
+.data-table {
+  min-width: 720px;
+  font-size: 12px;
+}
+
+.data-table th,
+.data-table td {
+  border-bottom-color: var(--line);
+  padding: 10px 9px;
+}
+
+.data-table th {
+  background: #faf9f6;
+  color: #77746e;
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.data-table tbody tr:hover {
+  background: #fcfbf8;
+}
+
+.json-preview {
+  border-color: #dfdcd5;
+  background: #faf9f6;
+  color: #3c3a36;
+  font-size: 11px;
+  padding: 10px;
+}
+
+details {
+  border-color: #e4e1da;
+  background: #fcfbf8;
+  margin-top: 8px;
+  padding: 8px 10px;
+}
+
+summary {
+  color: #55524c;
+  font-size: 11px;
+}
+
+.empty-state {
+  border-color: #d8d5ce;
+  background: #fcfbf8;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+@media (max-width: 840px) {
+  .nav-search {
+    display: grid;
+  }
+
+  .nav-group-toggle {
+    cursor: pointer;
+    pointer-events: auto;
+  }
+
+  .nav-group-toggle svg {
+    display: block;
+  }
+
+  .nav-item small {
+    display: block;
+  }
+
+  .ops-workspace {
+    padding: 0 16px 28px;
+  }
+
+  .workspace-header {
+    min-height: 0;
+    padding: 16px 0;
+  }
+
+  .workspace-refresh {
+    display: none;
+  }
+
+  .overview-grid,
+  .overview-grid.compact {
+    border-left-width: 3px;
+  }
+}

@@ -1356,7 +1356,7 @@ function App() {
             const query = navQuery.trim().toLowerCase()
             const items = group.items.filter((item) => !query || `${item.label} ${item.description}`.toLowerCase().includes(query))
             if (items.length === 0) return null
-            const expanded = Boolean(query) || expandedNavGroup === group.label
+            const expanded = Boolean(query) || window.matchMedia('(min-width: 841px)').matches || expandedNavGroup === group.label
             const panelID = `nav-group-${group.items[0].key}`
             return (
               <section className="nav-group" key={group.label}>
@@ -1399,7 +1399,7 @@ function App() {
       </aside>
 
       <section className="ops-workspace">
-        <ModuleHeader activeNav={activeNav} loading={loading || refreshing} sessionUser={sessionUser} onOpenNavigation={openMobileNavigation} mobileNavTriggerRef={mobileNavTriggerRef} />
+        <ModuleHeader activeNav={activeNav} loading={loading || refreshing} sessionUser={sessionUser} onOpenNavigation={openMobileNavigation} onRefresh={() => void refreshWorkspace(true)} refreshing={refreshing} mobileNavTriggerRef={mobileNavTriggerRef} />
         {workspaceError && <div className="result-banner error" role="alert">{workspaceError} <button type="button" onClick={() => void refreshWorkspace(false)} disabled={refreshing}>重试</button></div>}
         {activeNav === 'overview' && <PushStatusView runs={runs} deliveryLogs={deliveryLogs} monitoring={monitoring} stale={monitoringStale} onLoadSteps={loadStepRuns} />}
         {activeNav === 'runs' && <RunsQueryPage client={client} onLoadSteps={loadStepRuns} />}
@@ -1474,7 +1474,7 @@ function LoginScreen({ onLogin, checking }: { onLogin: (token: string) => void; 
   )
 }
 
-function ModuleHeader({ activeNav, loading, sessionUser, onOpenNavigation, mobileNavTriggerRef }: { activeNav: NavKey; loading: boolean; sessionUser: SessionUser | null; onOpenNavigation: () => void; mobileNavTriggerRef: RefObject<HTMLButtonElement> }) {
+function ModuleHeader({ activeNav, loading, sessionUser, onOpenNavigation, onRefresh, refreshing, mobileNavTriggerRef }: { activeNav: NavKey; loading: boolean; sessionUser: SessionUser | null; onOpenNavigation: () => void; onRefresh: () => void; refreshing: boolean; mobileNavTriggerRef: RefObject<HTMLButtonElement> }) {
   const titles: Record<NavKey, { title: string; subtitle: string }> = {
     overview: { title: '运行总览', subtitle: '只看当前运行与交付健康度，快速定位失败。' },
     runs: { title: '流水线运行', subtitle: '按状态、运行类型和 Trace ID 查询执行记录。' },
@@ -1509,6 +1509,7 @@ function ModuleHeader({ activeNav, loading, sessionUser, onOpenNavigation, mobil
       </div>
       <div className="workspace-session">
         {sessionUser && <span>{sessionUser.nickname || sessionUser.account}</span>}
+        <button className="workspace-refresh" type="button" onClick={onRefresh} disabled={refreshing}><RefreshCcw aria-hidden="true" />{refreshing ? '刷新中' : '刷新'}</button>
         <StatusPill label={loading ? '加载中' : '已就绪'} />
       </div>
     </header>
@@ -5081,7 +5082,7 @@ function SelectFilter({ label, value, onChange, options }: { label: string; valu
   return (
     <label>
       {label}
-      <select value={value} onChange={(event) => onChange(event.currentTarget.value)}>
+      <select name={`filter-${label}`} value={value} onChange={(event) => onChange(event.currentTarget.value)}>
         <option value="all">全部</option>
         {options.map((option) => <option value={option.value} key={option.value}>{option.label}</option>)}
       </select>
@@ -5094,7 +5095,14 @@ function Metric({ label, value }: { label: string; value: ReactNode }) {
 }
 
 function StatusPill({ label }: { label: string }) {
-  return <span className="status-pill">{label}</span>
+  const tone = /失败|错误|无效|停用|风险|超时/i.test(label)
+    ? 'danger'
+    : /成功|已就绪|启用|完成|已接收|已清洗|已交付|正常/i.test(label)
+      ? 'success'
+      : /处理中|排队|加载|待推送/i.test(label)
+        ? 'warning'
+        : 'neutral'
+  return <span className={`status-pill ${tone}`}>{label}</span>
 }
 
 function EmptyState({ text }: { text: string }) {
