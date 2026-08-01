@@ -829,6 +829,7 @@ function App() {
   const [destinations, setDestinations] = useState<DestinationDefinition[]>([])
   const [deliveryTasks, setDeliveryTasks] = useState<DeliveryTask[]>([])
   const [deliveryLogs, setDeliveryLogs] = useState<DeliveryLog[]>([])
+  const [overviewTotals, setOverviewTotals] = useState({ runs: null as number | null, deliveryLogs: null as number | null })
   const [monitoring, setMonitoring] = useState<MonitoringSnapshot>({ statistics: null, weather: null, health: null })
   const [monitoringStale, setMonitoringStale] = useState(false)
   const [orderPushSkipConfig, setOrderPushSkipConfig] = useState<OrderPushSkipConfig>(defaultOrderPushSkipConfig)
@@ -959,10 +960,30 @@ function App() {
       try {
         const get = (path: string) => client(path, { method: 'GET', signal: controller.signal, showResult: false, silentLoading: true })
         if (activeNav === 'overview') {
-          const [runResult, logResult] = await Promise.all([get('/v1/runs?limit=50'), get('/v1/delivery-logs?limit=50')])
+          const startTime = monitoringDayStartTime()
+          const [runResult, logResult] = await Promise.all([
+            get(`/v1/runs?page=1&page_size=100&start_time=${encodeURIComponent(startTime)}`),
+            get(`/v1/delivery-logs?page=1&page_size=100&start_time=${encodeURIComponent(startTime)}`),
+          ])
           if (!controller.signal.aborted) {
-            if (runResult.ok) setRuns(readList<PipelineRun>(runResult, 'runs'))
-            if (logResult.ok) setDeliveryLogs(readList<DeliveryLog>(logResult, 'logs'))
+            const runPage = runResult.ok ? parseMonitoringPage<unknown>(runResult.data, 'runs') : null
+            const parsedRuns = runPage?.list.map(parsePipelineRun) ?? []
+            if (runPage && parsedRuns.every((run): run is PipelineRun => run !== null)) {
+              setRuns(parsedRuns)
+              setOverviewTotals((current) => ({ ...current, runs: runPage.pagination.total }))
+            } else if (runResult.ok) {
+              setRuns(readList<PipelineRun>(runResult, 'runs'))
+              setOverviewTotals((current) => ({ ...current, runs: null }))
+            }
+            const logPage = logResult.ok ? parseMonitoringPage<unknown>(logResult.data, 'logs') : null
+            const parsedLogs = logPage?.list.map(parseDeliveryLog) ?? []
+            if (logPage && parsedLogs.every((log): log is DeliveryLog => log !== null)) {
+              setDeliveryLogs(parsedLogs)
+              setOverviewTotals((current) => ({ ...current, deliveryLogs: logPage.pagination.total }))
+            } else if (logResult.ok) {
+              setDeliveryLogs(readList<DeliveryLog>(logResult, 'logs'))
+              setOverviewTotals((current) => ({ ...current, deliveryLogs: null }))
+            }
           }
         } else if (activeNav === 'step_runs') {
           const runResult = await get('/v1/runs?limit=50')
@@ -1398,7 +1419,7 @@ function App() {
         <ModuleHeader activeNav={activeNav} loading={loading || refreshing} sessionUser={sessionUser} onOpenNavigation={openMobileNavigation} onRefresh={() => void refreshWorkspace(true)} refreshing={refreshing} mobileNavTriggerRef={mobileNavTriggerRef} />
         {sessionValidationError && <div className="result-banner error" role="status" aria-live="polite">{sessionValidationError} <button type="button" onClick={() => setSessionValidationAttempt((attempt) => attempt + 1)}>重试校验</button></div>}
         {workspaceError && <div className="result-banner error" role="alert">{workspaceError} <button type="button" onClick={() => void refreshWorkspace(false)} disabled={refreshing}>重试</button></div>}
-        {activeNav === 'overview' && <PushStatusView runs={runs} deliveryLogs={deliveryLogs} monitoring={monitoring} stale={monitoringStale} onLoadSteps={loadStepRuns} />}
+        {activeNav === 'overview' && <PushStatusView runs={runs} deliveryLogs={deliveryLogs} monitoring={monitoring} stale={monitoringStale} overviewTotals={overviewTotals} onLoadSteps={loadStepRuns} />}
         {activeNav === 'runs' && <RunsQueryPage client={client} pipelines={pipelines} onLoadSteps={loadStepRuns} onPipelineRunCompleted={() => void refreshWorkspace(false)} refreshVersion={workspaceRefreshVersion} />}
         {activeNav === 'delivery_logs' && <DeliveryLogsQueryPage client={client} onRetryLog={retryDeliveryLog} />}
         {activeNav === 'step_runs' && <StepRunsQueryPage runs={runs} stepRuns={stepRuns} selectedRunID={selectedStepRunID} onLoadSteps={loadStepRuns} />}
@@ -1513,34 +1534,55 @@ function ModuleHeader({ activeNav, loading, sessionUser, onOpenNavigation, onRef
   )
 }
 
-function PushStatusView({ runs, deliveryLogs, monitoring, stale, onLoadSteps }: { runs: PipelineRun[]; deliveryLogs: DeliveryLog[]; monitoring: MonitoringSnapshot; stale: boolean; onLoadSteps: (runId: number) => void }) {
-  const deliveryRuns = runs.filter((run) => run.run_type === 'delivery')
+function PushStatusView({ runs, deliveryLogs, monitoring, stale, overviewTotals, onLoadSteps }: { runs: PipelineRun[]; deliveryLogs: DeliveryLog[]; monitoring: MonitoringSnapshot; stale: boolean; overviewTotals: { runs: number | null; deliveryLogs: number | null }; onLoadSteps: (runId: number) => void }) {
   const failedLogs = deliveryLogs.filter((log) => !log.success)
+  const runningRuns = runs.filter((run) => run.status === 'running')
+  const loadedRunTotal = sum(runs, 'success_count') + sum(runs, 'failed_count')
+  const successRate = loadedRunTotal > 0 ? sum(runs, 'success_count') / loadedRunTotal : null
+  const delivered = deliveryLogs.filter((log) => log.success).length
+  const deliveryRate = deliveryLogs.length > 0 ? delivered / deliveryLogs.length : null
+  const healthTotal = delivered + failedLogs.length
   return (
     <div className="view-stack">
       <section className="overview-grid">
-        <Metric label="接收总量" value={monitoring.statistics?.totalCount ?? '-'} />
-        <Metric label="已处理" value={monitoring.statistics?.processedCount ?? '-'} />
-        <Metric label="处理失败" value={monitoring.statistics?.errorCount ?? '-'} />
-        <Metric label="交付失败" value={sum(deliveryRuns, 'failed_count') + failedLogs.length} />
+        <Metric label="今日运行" value={overviewTotals.runs ?? runs.length} />
+        <Metric label="已加载运行成功率" value={successRate === null ? '-' : `${(successRate * 100).toFixed(1)}%`} />
+        <Metric label="待处理运行" value={runningRuns.length} />
+        <Metric label="失败交付记录" value={overviewTotals.deliveryLogs === null ? failedLogs.length : `${failedLogs.length} / ${overviewTotals.deliveryLogs}`} />
       </section>
-      <section className="overview-grid compact" aria-live="polite">
-        <Metric label="天气告警" value={monitoring.weather?.firingAlerts ?? '-'} />
-        <Metric label="天气拉取失败" value={monitoring.weather?.failedFetches ?? '-'} />
-        <Metric label="服务健康" value={monitoring.health?.healthy ? '正常' : '未知'} />
-        <Metric label="运行记录" value={deliveryLogs.length} />
-      </section>
-      {stale && <p className="backfill-note" role="status">部分监控数据暂时不可用，正在保留最近一次成功结果。</p>}
-      <section className="content-grid two">
-        <Panel title="最近推送运行" icon={<Activity />} meta="delivery runs">
-          <RunTable runs={deliveryRuns.length ? deliveryRuns : runs.slice(0, 12)} onLoadSteps={onLoadSteps} />
+      {stale && <p className="backfill-note" role="status">部分统计暂时不可用，已保留最近一次成功数据。</p>}
+      <section className="overview-workspace">
+        <Panel title="最近流水线运行" icon={<Activity />} meta={`今日已加载 ${runs.length} 条`}>
+          <OverviewRunTable runs={runs} onLoadSteps={onLoadSteps} />
         </Panel>
-        <Panel title="最近推送日志" icon={<Send />} meta="delivery logs">
-          <DeliveryLogList logs={deliveryLogs} />
-        </Panel>
+        <aside className="overview-monitoring" aria-label="交付健康度与最近异常">
+          <section className="overview-monitoring-section">
+            <h3>交付健康度</h3>
+            <progress className="overview-health-progress" value={healthTotal ? delivered : 0} max={Math.max(healthTotal, 1)} aria-label="已加载交付成功率" />
+            <div className="overview-health-legend"><span className="success">推送成功 {delivered}</span><span className="danger">推送失败 {failedLogs.length}</span></div>
+            <small>{deliveryRate === null ? '今日暂无已加载交付记录。' : `已加载交付成功率 ${(deliveryRate * 100).toFixed(1)}%`}</small>
+          </section>
+          <section className="overview-monitoring-section">
+            <h3>最近异常</h3>
+            {failedLogs.length === 0 && monitoring.weather?.firingAlerts === 0 ? <EmptyState text="暂无已加载异常。" /> : <div className="overview-anomaly-list">
+              {failedLogs.slice(0, 4).map((log) => <article className="overview-anomaly" key={log.id}><strong>{log.destination_name || log.destination_code || `目标 #${log.destination_id}`} 推送失败</strong><span>{formatDate(log.sent_at)} / HTTP {log.http_status || '-'}</span></article>)}
+              {(monitoring.weather?.firingAlerts ?? 0) > 0 && <article className="overview-anomaly"><strong>天气服务告警</strong><span>当前触发 {monitoring.weather?.firingAlerts} 条告警</span></article>}
+            </div>}
+          </section>
+          <section className="overview-monitoring-section overview-service-summary"><span>服务状态</span><strong>{monitoring.health?.healthy ? '系统正常' : '状态未知'}</strong><small>接收 {monitoring.statistics?.totalCount ?? '-'} / 已处理 {monitoring.statistics?.processedCount ?? '-'} / 处理失败 {monitoring.statistics?.errorCount ?? '-'}</small></section>
+        </aside>
       </section>
     </div>
   )
+}
+
+function OverviewRunTable({ runs, onLoadSteps }: { runs: PipelineRun[]; onLoadSteps: (runId: number) => void }) {
+  if (runs.length === 0) return <EmptyState text="今日暂无运行记录。" />
+  return <div className="data-table-wrap"><table className="data-table overview-run-table"><thead><tr><th>运行任务</th><th>来源</th><th>状态</th><th>处理进度</th><th>开始时间</th><th>操作</th></tr></thead><tbody>{runs.slice(0, 12).map((run) => {
+    const completed = run.success_count + run.failed_count
+    const progress = run.total_count > 0 ? Math.min(100, Math.round(completed / run.total_count * 100)) : run.status === 'success' ? 100 : 0
+    return <tr key={run.id}><td><strong>#{run.id} {run.run_type}</strong><small>{run.trace_id || '-'}</small></td><td>{run.trigger_type || '-'}</td><td><StatusPill label={run.status} /></td><td><div className="overview-run-progress"><span>{completed} / {run.total_count} ({progress}%)</span><progress value={progress} max="100" aria-label={`运行 #${run.id} 处理进度`} /></div></td><td>{formatDate(run.started_at)}</td><td><button type="button" onClick={() => onLoadSteps(run.id)}>步骤</button></td></tr>
+  })}</tbody></table></div>
 }
 
 function MethodsView({ methods, pipelines, client, coreMethods, onToggle, onPipelineRunCompleted }: { methods: MethodDisplay[]; pipelines: PipelineDefinition[]; client: ApiClient; coreMethods: CoreMethod[]; onToggle: (target: ToggleTarget, enabled: boolean) => void; onPipelineRunCompleted: () => void }) {
@@ -2039,7 +2081,7 @@ function RawRecordsQueryPage({ title, origin, client, onFetchSource }: { title: 
       </form>
       <p className="query-contract-note">来源、类型、状态、外部业务键与时间范围均由服务端分页筛选；业务键对应原始记录的外部 ID。</p>
       {error && <div className="result-banner error" role="alert">{error} 已保留最近一次成功数据。</div>}
-      <Panel title={title} icon={<Inbox />} meta={loading && !recordsPage ? '正在加载…' : `共 ${total} 条`}>
+      <Panel title={`${title}（含脱敏内容）`} icon={<Inbox />} meta={loading && !recordsPage ? '正在加载…' : `共 ${total} 条`}>
         {sourceFetchMessage && <div className="result-banner" role="status" aria-live="polite">{sourceFetchMessage}</div>}
         <RawDataList records={records} onRequestSourceFetch={setPendingSourceFetchID} />
         <div className="record-actions raw-record-pagination" role="status" aria-live="polite">
@@ -2129,7 +2171,7 @@ function WarehouseRawRecordsPanel({ client, origin }: { client: ApiClient; origi
   const totalPages = recordsPage?.totalPages ?? 0
   return (
     <>
-      <Panel title={`可重新处理${origin === 'pull' ? '拉取' : '接收'}记录`} icon={<RefreshCcw />} meta={loading && !recordsPage ? '正在加载…' : `共 ${total} 条`}>
+      <Panel title={`可重新处理${origin === 'pull' ? '拉取' : '接收'}记录（仅元数据）`} icon={<RefreshCcw />} meta={loading && !recordsPage ? '正在加载…' : `共 ${total} 条`}>
         <p className="query-contract-note">此列表查询新仓库中 origin={origin} 的脱敏记录。历史列表仍只读；只有本列表中的 ID 可安全重新处理。</p>
         <form className="query-bar" onSubmit={submit}>
           <div className="query-fields">
@@ -2146,21 +2188,20 @@ function WarehouseRawRecordsPanel({ client, origin }: { client: ApiClient; origi
         {message && <div className="result-banner" role="status" aria-live="polite">{message}</div>}
         {error && <div className="result-banner error" role="alert">{error} 已保留最近一次成功数据。</div>}
         {records.length === 0 ? <EmptyState text="暂无可重新处理的原始记录。" /> : (
-          <div className="record-list">
-            {records.map((record) => (
-              <article className="record-row" key={record.id}>
-                <div>
-                  <strong>#{record.id} / {record.sourceCode || '未命名来源'}</strong>
-                  <span>来源 #{record.sourceID || '-'} / 追踪 {record.traceID || '-'} / {record.receivedAt || `创建于 ${record.createdAt || '-'}`}</span>
-                </div>
-                <div className="record-actions">
-                  <StatusPill label={rawRecordStatusLabel(record.status)} />
-                  <button type="button" disabled={retransformingID !== null || record.status === 'cleaning'} onClick={() => setPendingRetransform(record)}>
-                    {retransformingID === record.id ? '处理中…' : '重新处理'}
-                  </button>
-                </div>
-              </article>
-            ))}
+          <div className="data-table-wrap" role="region" aria-label="可重新处理原始记录列表" tabIndex={0}>
+            <table className="data-table">
+              <thead><tr><th scope="col">记录 ID</th><th scope="col">来源</th><th scope="col">追踪 ID</th><th scope="col">接收时间</th><th scope="col">状态</th><th scope="col">操作</th></tr></thead>
+              <tbody>{records.map((record) => (
+                <tr key={record.id}>
+                  <td>#{record.id}</td>
+                  <td><strong>{record.sourceCode || '未命名来源'}</strong><small>来源 #{record.sourceID || '-'}</small></td>
+                  <td>{record.traceID || '-'}</td>
+                  <td>{record.receivedAt || (record.createdAt ? formatUnixTime(record.createdAt) : '-')}</td>
+                  <td><StatusPill label={rawRecordStatusLabel(record.status)} /></td>
+                  <td><button type="button" disabled={retransformingID !== null || record.status === 'cleaning'} onClick={() => setPendingRetransform(record)}>{retransformingID === record.id ? '处理中…' : '重新处理'}</button></td>
+                </tr>
+              ))}</tbody>
+            </table>
           </div>
         )}
         <div className="record-actions raw-record-pagination" role="status" aria-live="polite">
@@ -5917,6 +5958,14 @@ function formatDate(value: string | null) {
     second: '2-digit',
     hour12: false,
   }).format(date).replace(/\//g, '-')
+}
+
+function monitoringDayStartTime() {
+  const now = new Date()
+  const year = now.getFullYear()
+  const month = String(now.getMonth() + 1).padStart(2, '0')
+  const day = String(now.getDate()).padStart(2, '0')
+  return `${year}-${month}-${day}T00:00`
 }
 
 function runDurationLabel(startedAt: string | null, finishedAt: string | null) {

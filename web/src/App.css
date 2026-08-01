@@ -1955,6 +1955,134 @@ button:focus-visible {
   gap: 24px;
 }
 
+.overview-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(280px, 1fr);
+  border-top: 1px solid var(--line);
+}
+
+.overview-workspace > .workbench-panel {
+  border-top: 0;
+  padding-right: 24px;
+}
+
+.overview-monitoring {
+  display: grid;
+  align-content: start;
+  border-left: 1px solid var(--line);
+}
+
+.overview-monitoring-section {
+  display: grid;
+  gap: 12px;
+  border-bottom: 1px solid var(--line);
+  padding: 18px 0 20px 28px;
+}
+
+.overview-monitoring-section h3 {
+  margin: 0;
+  font-size: 16px;
+}
+
+.overview-monitoring-section > small {
+  color: var(--muted);
+  font-size: 12px;
+  line-height: 1.5;
+}
+
+.overview-health-progress,
+.overview-run-progress progress {
+  width: 100%;
+  height: 8px;
+  accent-color: var(--success);
+}
+
+.overview-health-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 18px;
+  font-size: 12px;
+}
+
+.overview-health-legend .success,
+.overview-service-summary strong {
+  color: var(--success);
+}
+
+.overview-health-legend .danger {
+  color: #d92d20;
+}
+
+.overview-anomaly-list {
+  display: grid;
+  gap: 12px;
+}
+
+.overview-anomaly {
+  display: grid;
+  gap: 5px;
+  border-left: 2px solid #d92d20;
+  padding-left: 10px;
+}
+
+.overview-anomaly strong {
+  font-size: 13px;
+}
+
+.overview-anomaly span,
+.overview-service-summary span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.overview-service-summary {
+  border-bottom: 0;
+}
+
+.overview-service-summary strong {
+  font-size: 18px;
+}
+
+.overview-run-progress {
+  display: grid;
+  min-width: 132px;
+  gap: 5px;
+}
+
+.overview-run-progress span {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.overview-run-table td:first-child {
+  max-width: 190px;
+}
+
+.overview-run-table td:first-child strong,
+.overview-run-table td:first-child small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.overview-run-table td:first-child small {
+  color: var(--muted);
+}
+
+.overview-run-table th:last-child,
+.overview-run-table td:last-child {
+  position: sticky;
+  right: 0;
+  z-index: 2;
+  border-left: 1px solid var(--line);
+  background: #ffffff;
+}
+
+.overview-run-table th:last-child {
+  z-index: 3;
+  background: #faf9f6;
+}
+
 .workbench-panel {
   border: 0;
   border-top: 1px solid var(--line);
@@ -2402,6 +2530,23 @@ summary {
 }
 
 @media (max-width: 840px) {
+  .overview-workspace {
+    grid-template-columns: 1fr;
+  }
+
+  .overview-workspace > .workbench-panel {
+    padding-right: 0;
+  }
+
+  .overview-monitoring {
+    border-top: 1px solid var(--line);
+    border-left: 0;
+  }
+
+  .overview-monitoring-section {
+    padding-left: 0;
+  }
+
   .delivery-log-layout {
     grid-template-columns: 1fr;
   }
