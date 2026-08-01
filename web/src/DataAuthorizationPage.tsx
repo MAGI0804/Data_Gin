@@ -1,5 +1,5 @@
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Check, Clipboard, KeyRound, Plus, RefreshCcw, RotateCcw, Search, ShieldCheck, ShieldOff, UserRound } from 'lucide-react'
+import { Check, Clipboard, KeyRound, Plus, RefreshCcw, RotateCcw, Search, UserRound } from 'lucide-react'
 import {
   authorizationExpiryISO,
   buildDataAuthorizationAuditQuery,
@@ -341,8 +341,8 @@ export function DataAuthorizationPage({ client }: { client: ApiClient }) {
           <div className="data-authorization-account-list">
             {accounts.map((account) => (
               <button className={selected?.id === account.id ? 'data-authorization-account active' : 'data-authorization-account'} type="button" key={account.id} onClick={() => setSelectedID(account.id)}>
-                <span><strong>{account.nickname || account.account}</strong><small>{account.account} · {account.email}</small></span>
-                <em>{account.credentialStatus === 'ACTIVE' ? '凭证有效' : '凭证已撤销'}</em>
+                <span><strong>{account.nickname || account.account}</strong><small>{account.account}</small><small>{account.email}</small></span>
+                <em data-active={account.credentialStatus === 'ACTIVE'}>{account.credentialStatus === 'ACTIVE' ? '凭证有效' : '已撤销'}</em>
               </button>
             ))}
           </div>
@@ -352,8 +352,8 @@ export function DataAuthorizationPage({ client }: { client: ApiClient }) {
         <section className="workbench-panel data-authorization-detail">
           {selected ? <>
             <div className="data-authorization-account-heading">
-              <div><span className="eyebrow">ACCOUNT #{selected.id}</span><h3>{selected.nickname || selected.account}</h3><p>{selected.account} · {selected.email}</p></div>
-              <div className="record-actions"><span className="status-pill">{selected.credentialStatus === 'ACTIVE' ? '凭证有效' : '凭证已撤销'}</span><button type="button" onClick={() => setActionDialog({ kind: 'reissue' })}><RotateCcw aria-hidden="true" />重签 Token</button></div>
+              <div><h3>{selected.nickname || selected.account}</h3><p>{selected.account} · {selected.email} <span className={selected.credentialStatus === 'ACTIVE' ? 'data-authorization-live-status' : 'data-authorization-live-status revoked'}>{selected.credentialStatus === 'ACTIVE' ? '凭证有效' : '凭证已撤销'}</span></p></div>
+              <div className="record-actions"><button type="button" onClick={() => setActionDialog({ kind: 'reissue' })}><RotateCcw aria-hidden="true" />重签 Token</button></div>
             </div>
             <dl className="data-authorization-credential"><div><dt>Token 标识</dt><dd><code>{selected.tokenPrefix || '-'}</code></dd></div><div><dt>签发时间</dt><dd>{formatDateTime(selected.issuedAt)}</dd></div><div><dt>权限范围</dt><dd>仅开放接口，不允许登录控制台</dd></div></dl>
             <div className="data-authorization-permissions">
@@ -367,27 +367,29 @@ export function DataAuthorizationPage({ client }: { client: ApiClient }) {
       </section>
 
       <section className="workbench-panel data-authorization-audits">
-        <div className="panel-title"><ShieldCheck aria-hidden="true" /><div><h3>授权审计</h3><span>{appliedAuditFilters.targetUserId ? `目标账号 #${appliedAuditFilters.targetUserId}` : '最近变更'} · ID 游标分页</span></div></div>
-        <form className="query-bar" onSubmit={submitAuditFilters} aria-label="授权审计筛选">
-          <div className="query-fields">
-            <label>目标账号
-              <select value={String(auditFilters.targetUserId)} disabled={auditLoading} onChange={(event) => setAuditFilters((current) => ({ ...current, targetUserId: Number(event.currentTarget.value) || 0 }))}>
-                <option value="0">全部已加载账号</option>
-                {accounts.map((account) => <option value={account.id} key={account.id}>{account.account}</option>)}
-              </select>
-            </label>
-            <label>审计动作
-              <select value={auditFilters.action} disabled={auditLoading} onChange={(event) => setAuditFilters((current) => ({ ...current, action: event.currentTarget.value as DataAuthorizationAuditAction | '' }))}>
-                <option value="">全部动作</option>
-                {dataAuthorizationAuditActions.map((action) => <option value={action} key={action}>{auditActionLabel(action)}</option>)}
-              </select>
-            </label>
-            <label>开始时间<input type="datetime-local" value={auditFilters.startTime} disabled={auditLoading} onChange={(event) => setAuditFilters((current) => ({ ...current, startTime: event.currentTarget.value }))} /></label>
-            <label>结束时间<input type="datetime-local" value={auditFilters.endTime} disabled={auditLoading} onChange={(event) => setAuditFilters((current) => ({ ...current, endTime: event.currentTarget.value }))} /></label>
-          </div>
-          <div className="record-actions"><button type="submit" disabled={auditLoading}>{auditLoading ? '查询中…' : '查询审计'}</button><button type="button" onClick={cancelAuditLoad} disabled={!auditLoading}>取消</button></div>
-        </form>
-        <p className="query-contract-note">服务端按目标账号、动作、时间范围和 <code>beforeId</code> 游标筛选；时间边界包含在查询结果内。</p>
+        <div className="data-authorization-audit-heading"><h3>授权审计</h3><span>{appliedAuditFilters.targetUserId ? `目标账号 #${appliedAuditFilters.targetUserId}` : '最近变更'}</span></div>
+        <details className="data-authorization-audit-filters">
+          <summary>筛选审计记录</summary>
+          <form className="query-bar" onSubmit={submitAuditFilters} aria-label="授权审计筛选">
+            <div className="query-fields">
+              <label>目标账号
+                <select value={String(auditFilters.targetUserId)} disabled={auditLoading} onChange={(event) => setAuditFilters((current) => ({ ...current, targetUserId: Number(event.currentTarget.value) || 0 }))}>
+                  <option value="0">全部已加载账号</option>
+                  {accounts.map((account) => <option value={account.id} key={account.id}>{account.account}</option>)}
+                </select>
+              </label>
+              <label>审计动作
+                <select value={auditFilters.action} disabled={auditLoading} onChange={(event) => setAuditFilters((current) => ({ ...current, action: event.currentTarget.value as DataAuthorizationAuditAction | '' }))}>
+                  <option value="">全部动作</option>
+                  {dataAuthorizationAuditActions.map((action) => <option value={action} key={action}>{auditActionLabel(action)}</option>)}
+                </select>
+              </label>
+              <label>开始时间<input type="datetime-local" value={auditFilters.startTime} disabled={auditLoading} onChange={(event) => setAuditFilters((current) => ({ ...current, startTime: event.currentTarget.value }))} /></label>
+              <label>结束时间<input type="datetime-local" value={auditFilters.endTime} disabled={auditLoading} onChange={(event) => setAuditFilters((current) => ({ ...current, endTime: event.currentTarget.value }))} /></label>
+            </div>
+            <div className="record-actions"><button type="submit" disabled={auditLoading}>{auditLoading ? '查询中…' : '查询审计'}</button><button type="button" onClick={cancelAuditLoad} disabled={!auditLoading}>取消</button></div>
+          </form>
+        </details>
         {audits.length === 0 ? <div className="empty-state">{auditLoading ? '授权审计加载中…' : '暂无匹配的授权变更记录。'}</div> : <div className="data-table-wrap"><table className="data-table"><thead><tr><th>时间</th><th>动作</th><th>账号</th><th>权限</th><th>有效期变更</th><th>原因</th></tr></thead><tbody>{audits.map((audit) => <tr key={audit.id}><td>{formatDateTime(audit.createdAt)}</td><td>{auditActionLabel(audit.action)}</td><td>{audit.targetAccount || `#${audit.targetUserId}`}</td><td>{permissionLabel(audit.permission)}</td><td>{formatAuditExpiry(audit)}</td><td className="data-authorization-reason">{audit.reason}</td></tr>)}</tbody></table></div>}
         {auditPagination.hasMore && <div className="record-actions"><button type="button" disabled={auditLoading} onClick={() => void loadAudits(appliedAuditFilters, { append: true, beforeId: auditPagination.nextBeforeId })}>{auditLoading ? '加载中…' : '加载更早记录'}</button></div>}
       </section>
@@ -422,7 +424,7 @@ export function DataAuthorizationPage({ client }: { client: ApiClient }) {
 
 function PermissionRow({ permission, description, onGrant, onRevoke }: { permission: DataAuthorizationPermission; description: string; onGrant: () => void; onRevoke: () => void }) {
   const active = permission.status === 'ACTIVE'
-  return <article className="data-authorization-permission"><div className="data-authorization-permission-icon">{active ? <ShieldCheck aria-hidden="true" /> : <ShieldOff aria-hidden="true" />}</div><div><div className="data-authorization-permission-title"><strong>{permission.label}</strong><span className={`status-pill ${permission.status.toLowerCase()}`}>{permissionStatusLabel(permission.status)}</span></div><p>{description}</p><small>{permission.scope} · 到期时间：{formatDateTime(permission.expiresAt)}</small></div><div className="record-actions"><button type="button" onClick={onGrant}>{active ? '续期' : '授权'}</button>{permission.status !== 'NOT_GRANTED' && <button className="danger" type="button" onClick={onRevoke}>撤销</button>}</div></article>
+  return <article className="data-authorization-permission"><div className="data-authorization-permission-copy"><div className="data-authorization-permission-title"><strong>{permission.label}</strong><span className={`status-pill ${permission.status.toLowerCase()}`}>{permissionStatusLabel(permission.status)}</span></div><p>{description}</p></div><div className="data-authorization-permission-scope"><span>范围</span><strong>{permission.scope || '-'}</strong></div><div className="data-authorization-permission-expiry"><span>到期时间</span><strong>{formatDateTime(permission.expiresAt)}</strong></div><div className="record-actions"><button type="button" onClick={onGrant}>{active ? '续期' : '授权'}</button>{permission.status !== 'NOT_GRANTED' && <button className="danger" type="button" onClick={onRevoke}>撤销</button>}</div></article>
 }
 
 function Modal({ title, children, onClose, closeDisabled = false }: { title: string; children: React.ReactNode; onClose: () => void; closeDisabled?: boolean }) {
