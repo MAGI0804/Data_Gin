@@ -2,11 +2,14 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 import { buildRawRecordsRequest, buildWarehouseRawRecordsQuery, parseRawRecordsPage } from '../.test-dist/rawRecords.js'
 
-test('builds only the supported server-side raw-record query fields', () => {
+test('builds the supported server-side raw-record query fields', () => {
   assert.deepEqual(buildRawRecordsRequest({
     page: 2,
     pageSize: 20,
     source: ' source-a ',
+    dataType: ' order ',
+    status: ' pending ',
+    businessKey: ' ERP-1 ',
     startTime: '2026-07-01 00:00:00',
     endTime: '2026-07-31 23:59:59',
     origin: 'pull',
@@ -14,6 +17,9 @@ test('builds only the supported server-side raw-record query fields', () => {
     page: 2,
     page_size: 20,
     source: 'source-a',
+    data_type: 'order',
+    status: 'pending',
+    business_key: 'ERP-1',
     start_time: '2026-07-01 00:00:00',
     end_time: '2026-07-31 23:59:59',
     origin: 'pull',
@@ -25,6 +31,9 @@ test('bounds raw-record pagination to the backend contract', () => {
     page: 1,
     page_size: 20,
     source: '',
+    data_type: '',
+    status: '',
+    business_key: '',
     start_time: '',
     end_time: '',
     origin: 'receive',

@@ -87,12 +87,15 @@ type RawIngestRequest struct {
 
 // RawDataListQueryRequest 原始数据列表查询请求
 type RawDataListQueryRequest struct {
-	Page      int    `json:"page" binding:"min=1"`
-	PageSize  int    `json:"page_size" binding:"min=1,max=100"`
-	Source    string `json:"source" binding:"max=100"`
-	StartTime string `json:"start_time" binding:"max=20"`
-	EndTime   string `json:"end_time" binding:"max=20"`
-	Origin    string `json:"origin" binding:"omitempty,oneof=receive pull"`
+	Page        int    `json:"page" binding:"min=1"`
+	PageSize    int    `json:"page_size" binding:"min=1,max=100"`
+	Source      string `json:"source" binding:"max=100"`
+	DataType    string `json:"data_type" binding:"max=50"`
+	Status      string `json:"status" binding:"omitempty,oneof=pending processing processed error"`
+	BusinessKey string `json:"business_key" binding:"max=255"`
+	StartTime   string `json:"start_time" binding:"max=20"`
+	EndTime     string `json:"end_time" binding:"max=20"`
+	Origin      string `json:"origin" binding:"omitempty,oneof=receive pull"`
 }
 
 // RawRecordListQueryRequest is the safe pagination contract for warehouse

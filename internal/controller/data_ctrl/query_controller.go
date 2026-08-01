@@ -239,7 +239,7 @@ func (ctrl *QueryController) GetStatistics(c *gin.Context) {
 
 // GetRawDataList 查询原始数据列表（分页）
 // @Summary 查询原始数据列表
-// @Description 查询原始数据列表，支持分页、source、origin 和创建时间范围筛选
+// @Description 查询原始数据列表，支持分页、source、data_type、status、business_key、origin 和创建时间范围筛选
 // @Tags 数据查询
 // @Accept json
 // @Produce json
@@ -265,7 +265,17 @@ func (ctrl *QueryController) GetRawDataList(c *gin.Context) {
 	}
 
 	// 调用服务查询数据
-	result, err := ctrl.service.GetRawDataList(c.Request.Context(), req.Page, req.PageSize, req.Source, req.StartTime, req.EndTime, req.Origin)
+	result, err := ctrl.service.GetRawDataList(c.Request.Context(), data_svc.RawDataListQuery{
+		Page:        req.Page,
+		PageSize:    req.PageSize,
+		Source:      req.Source,
+		DataType:    req.DataType,
+		Status:      req.Status,
+		BusinessKey: req.BusinessKey,
+		StartTime:   req.StartTime,
+		EndTime:     req.EndTime,
+		Origin:      req.Origin,
+	})
 	if err != nil {
 		c.JSON(500, msg.ErrResponse("查询原始数据列表失败", err))
 		return

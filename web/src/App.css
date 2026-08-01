@@ -2085,6 +2085,86 @@ button:focus-visible {
   background: #fcfbf8;
 }
 
+.raw-record-master-detail {
+  display: grid;
+  grid-template-columns: minmax(0, 1.55fr) minmax(280px, 0.85fr);
+  border: 1px solid var(--line);
+}
+
+.raw-record-table-wrap {
+  max-height: 580px;
+  border-right: 1px solid var(--line);
+}
+
+.raw-record-table tbody tr.is-selected {
+  background: #fff8e8;
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.table-row-select {
+  min-height: 24px;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  font-weight: 700;
+  padding: 0;
+  text-align: left;
+}
+
+.table-row-select:hover,
+.table-row-select:focus-visible {
+  color: #9a6100;
+  outline-offset: 3px;
+}
+
+.raw-record-detail {
+  min-width: 0;
+  background: #fff;
+  padding: 14px;
+}
+
+.raw-record-detail-title {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 12px;
+}
+
+.raw-record-detail-title span,
+.raw-record-detail h3 {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 700;
+}
+
+.raw-record-detail-title strong {
+  display: block;
+  margin-top: 3px;
+  font-size: 13px;
+}
+
+.raw-record-fields {
+  margin-top: 12px;
+}
+
+.raw-record-detail h3 {
+  margin: 16px 0 8px;
+}
+
+@media (max-width: 900px) {
+  .raw-record-master-detail {
+    grid-template-columns: 1fr;
+  }
+
+  .raw-record-table-wrap {
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+}
+
 .json-preview {
   border-color: #dfdcd5;
   background: #faf9f6;

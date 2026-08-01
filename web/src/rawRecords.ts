@@ -4,6 +4,9 @@ export type RawRecordsQuery = {
   page: number
   pageSize: number
   source?: string
+  dataType?: string
+  status?: string
+  businessKey?: string
   startTime?: string
   endTime?: string
   origin: RawRecordOrigin
@@ -34,6 +37,9 @@ export function buildRawRecordsRequest(query: RawRecordsQuery) {
     page: boundedInteger(query.page, 1, 1, Number.MAX_SAFE_INTEGER),
     page_size: boundedInteger(query.pageSize, defaultPageSize, 1, 100),
     source: query.source?.trim() ?? '',
+    data_type: query.dataType?.trim() ?? '',
+    status: query.status?.trim() ?? '',
+    business_key: query.businessKey?.trim() ?? '',
     start_time: query.startTime?.trim() ?? '',
     end_time: query.endTime?.trim() ?? '',
     origin: query.origin,

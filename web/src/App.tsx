@@ -1898,9 +1898,12 @@ function SourcesQueryPage({ client, sources, onFetchSource, onTestSource, onRefr
 
 function RawRecordsQueryPage({ title, origin, client, onFetchSource }: { title: string; origin: RawRecordOrigin; client: ApiClient; onFetchSource: (sourceID: number) => Promise<ApiResult> }) {
   const [source, setSource] = useState('')
+  const [dataType, setDataType] = useState('')
+  const [status, setStatus] = useState('')
+  const [businessKey, setBusinessKey] = useState('')
   const [startTime, setStartTime] = useState('')
   const [endTime, setEndTime] = useState('')
-  const [appliedQuery, setAppliedQuery] = useState({ source: '', startTime: '', endTime: '' })
+  const [appliedQuery, setAppliedQuery] = useState({ source: '', dataType: '', status: '', businessKey: '', startTime: '', endTime: '' })
   const [page, setPage] = useState(1)
   const [recordsPage, setRecordsPage] = useState<RawRecordsPage<RawData> | null>(null)
   const [loading, setLoading] = useState(true)
@@ -1936,7 +1939,14 @@ function RawRecordsQueryPage({ title, origin, client, onFetchSource }: { title: 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     setPage(1)
-    setAppliedQuery({ source, startTime: backendDateTime(startTime), endTime: backendDateTime(endTime) })
+    setAppliedQuery({
+      source,
+      dataType,
+      status,
+      businessKey,
+      startTime: backendDateTime(startTime),
+      endTime: backendDateTime(endTime),
+    })
   }
 
   async function fetchSource() {
@@ -1961,12 +1971,17 @@ function RawRecordsQueryPage({ title, origin, client, onFetchSource }: { title: 
       <form className="query-bar" onSubmit={submit}>
         <div className="query-fields">
           <Field label="来源" name="raw_source" value={source} onChange={setSource} />
+          <Field label="数据类型" name="raw_data_type" value={dataType} onChange={setDataType} />
+          <SelectFilter label="状态" value={status || 'all'} onChange={(next) => setStatus(next === 'all' ? '' : next)} options={[
+            { value: 'pending', label: '待处理' }, { value: 'processing', label: '处理中' }, { value: 'processed', label: '已处理' }, { value: 'error', label: '异常' },
+          ]} />
+          <Field label="业务键" name="raw_business_key" value={businessKey} onChange={setBusinessKey} />
           <Field label="开始时间" name="raw_start_time" type="datetime-local" value={startTime} onChange={setStartTime} />
           <Field label="结束时间" name="raw_end_time" type="datetime-local" value={endTime} onChange={setEndTime} />
         </div>
         <button type="submit" disabled={loading}>{loading ? '查询中…' : '查询'}</button>
       </form>
-      <p className="query-contract-note">已按真实后端能力提供来源、时间范围和分页筛选；类型、状态及业务键筛选需后端增加对应索引后再开放。</p>
+      <p className="query-contract-note">来源、类型、状态、外部业务键与时间范围均由服务端分页筛选；业务键对应原始记录的外部 ID。</p>
       {error && <div className="result-banner error" role="alert">{error} 已保留最近一次成功数据。</div>}
       <Panel title={title} icon={<Inbox />} meta={loading && !recordsPage ? '正在加载…' : `共 ${total} 条`}>
         {sourceFetchMessage && <div className="result-banner" role="status" aria-live="polite">{sourceFetchMessage}</div>}
@@ -4869,22 +4884,36 @@ function rawRecordStatusLabel(status: WarehouseRawRecord['status']) {
 }
 
 function RawDataList({ records, onRequestSourceFetch }: { records: RawData[]; onRequestSourceFetch: (sourceID: number) => void }) {
+  const [selectedID, setSelectedID] = useState<number | null>(null)
   if (records.length === 0) return <EmptyState text="暂无原始数据。" />
+  const selected = records.find((record) => record.id === selectedID) ?? records[0]
   return (
-    <div className="record-list">
-      {records.slice(0, 30).map((record) => (
-        <article className="record-row" key={record.id}>
-          <div>
-            <strong>#{record.id} / {record.data_type || 'raw'}</strong>
-            <span>来源 {record.data_source_id || '-'} / 状态 {record.status || '-'}</span>
-            <details>
-              <summary>查看脱敏原始内容与元数据</summary>
-              <ReadonlyJSON value={redactMonitoringJSON({ raw_content: record.raw_content ?? record.rawContent ?? null, metadata: record.metadata ?? null })} />
-            </details>
-          </div>
-          <div className="record-actions"><small>{rawDataOrigin(record)}</small>{record.data_source_id > 0 && <button type="button" onClick={() => onRequestSourceFetch(record.data_source_id)}>拉取来源</button>}</div>
-        </article>
-      ))}
+    <div className="raw-record-master-detail">
+      <div className="data-table-wrap raw-record-table-wrap">
+        <table className="data-table raw-record-table">
+          <thead><tr><th scope="col">ID</th><th scope="col">类型</th><th scope="col">外部业务键</th><th scope="col">来源</th><th scope="col">状态</th><th scope="col">接入方式</th><th scope="col">操作</th></tr></thead>
+          <tbody>
+            {records.map((record) => {
+              const isSelected = selected.id === record.id
+              return <tr className={isSelected ? 'is-selected' : ''} key={record.id}>
+                <td><button className="table-row-select" type="button" aria-pressed={isSelected} onClick={() => setSelectedID(record.id)}>#{record.id}</button></td>
+                <td>{record.data_type || 'raw'}</td>
+                <td>{record.external_id || '-'}</td>
+                <td>{record.source || `#${record.data_source_id || '-'}`}</td>
+                <td><StatusPill label={record.status || '未知'} /></td>
+                <td>{rawDataOrigin(record)}</td>
+                <td className="table-actions">{record.data_source_id > 0 && <button type="button" onClick={() => onRequestSourceFetch(record.data_source_id)}>拉取来源</button>}</td>
+              </tr>
+            })}
+          </tbody>
+        </table>
+      </div>
+      <section className="raw-record-detail" aria-live="polite" aria-label="原始记录详情">
+        <div className="raw-record-detail-title"><div><span>已选原始记录</span><strong>#{selected.id} / {selected.data_type || 'raw'}</strong></div><StatusPill label={selected.status || '未知'} /></div>
+        <dl className="task-definition-grid raw-record-fields"><div><dt>外部业务键</dt><dd>{selected.external_id || '-'}</dd></div><div><dt>来源</dt><dd>{selected.source || `数据源 #${selected.data_source_id || '-'}`}</dd></div></dl>
+        <h3>脱敏原始内容与元数据</h3>
+        <ReadonlyJSON value={redactMonitoringJSON({ raw_content: selected.raw_content ?? selected.rawContent ?? null, metadata: selected.metadata ?? null })} />
+      </section>
     </div>
   )
 }

@@ -53,6 +53,22 @@ type RawDataListResult struct {
 	TotalPages int               `json:"total_pages"`
 }
 
+// RawDataListQuery contains every optional filter accepted by the paginated
+// raw-data management query. Keeping this as a value object prevents callers
+// from relying on an error-prone positional-parameter contract as filters are
+// extended.
+type RawDataListQuery struct {
+	Page        int
+	PageSize    int
+	Source      string
+	DataType    string
+	Status      string
+	BusinessKey string
+	StartTime   string
+	EndTime     string
+	Origin      string
+}
+
 type ProcessedDataListResult struct {
 	List           []model.ProcessedData `json:"list"`
 	Total          int64                 `json:"total"`
@@ -95,16 +111,30 @@ func (s *QueryService) GetCleanRecordList(ctx context.Context, params data_dao.C
 	return &CleanRecordListResult{List: result.List, Total: result.Total, Page: params.Page, PageSize: params.PageSize, TotalPages: totalPages, AverageQuality: result.AverageQuality}, nil
 }
 
-func (s *QueryService) GetRawDataList(ctx context.Context, page, pageSize int, source, startTime, endTime, origin string) (*RawDataListResult, error) {
-	logger.Info("查询原始数据列表", zap.Int("page", page), zap.Int("page_size", pageSize), zap.String("source", source), zap.String("start_time", startTime), zap.String("end_time", endTime), zap.String("origin", origin))
+func (s *QueryService) GetRawDataList(ctx context.Context, query RawDataListQuery) (*RawDataListResult, error) {
+	// Keep the service safe for future internal callers as well as the HTTP
+	// controller, which already applies the same request defaults.
+	if query.Page <= 0 {
+		query.Page = 1
+	}
+	if query.PageSize <= 0 {
+		query.PageSize = 20
+	}
+	if query.PageSize > 100 {
+		query.PageSize = 100
+	}
+	logger.Info("查询原始数据列表", zap.Int("page", query.Page), zap.Int("page_size", query.PageSize), zap.String("source", query.Source), zap.String("data_type", query.DataType), zap.String("status", query.Status), zap.String("start_time", query.StartTime), zap.String("end_time", query.EndTime), zap.String("origin", query.Origin))
 
 	params := data_dao.RawDataQueryParams{
-		Source:    source,
-		StartTime: startTime,
-		EndTime:   endTime,
-		Origin:    origin,
-		Page:      page,
-		PageSize:  pageSize,
+		Source:      query.Source,
+		DataType:    query.DataType,
+		Status:      query.Status,
+		BusinessKey: query.BusinessKey,
+		StartTime:   query.StartTime,
+		EndTime:     query.EndTime,
+		Origin:      query.Origin,
+		Page:        query.Page,
+		PageSize:    query.PageSize,
 	}
 
 	result, err := s.rawDataDAO.FindWithPagination(ctx, params)
@@ -134,16 +164,16 @@ func (s *QueryService) GetRawDataList(ctx context.Context, page, pageSize int, s
 		})
 	}
 
-	totalPages := int(result.Total) / pageSize
-	if int(result.Total)%pageSize > 0 {
+	totalPages := int(result.Total) / query.PageSize
+	if int(result.Total)%query.PageSize > 0 {
 		totalPages++
 	}
 
 	return &RawDataListResult{
 		List:       list,
 		Total:      result.Total,
-		Page:       page,
-		PageSize:   pageSize,
+		Page:       query.Page,
+		PageSize:   query.PageSize,
 		TotalPages: totalPages,
 	}, nil
 }

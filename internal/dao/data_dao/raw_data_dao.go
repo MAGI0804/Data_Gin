@@ -78,12 +78,20 @@ func (dao *RawDataDAO) FindByDataSource(ctx context.Context, dataSourceID uint, 
 }
 
 type RawDataQueryParams struct {
-	Source    string
-	StartTime string
-	EndTime   string
-	Origin    string
-	Page      int
-	PageSize  int
+	Source      string
+	DataType    string
+	Status      string
+	BusinessKey string
+	StartTime   string
+	EndTime     string
+	Origin      string
+	Page        int
+	PageSize    int
+}
+
+type rawDataQueryCondition struct {
+	query string
+	args  []interface{}
 }
 
 type RawDataWithTotal struct {
@@ -97,17 +105,8 @@ func (dao *RawDataDAO) FindWithPagination(ctx context.Context, params RawDataQue
 
 	query := dao.db.WithContext(ctx).Model(&model.RawData{})
 
-	if params.Source != "" {
-		query = query.Where("source = ?", params.Source)
-	}
-	if params.StartTime != "" {
-		query = query.Where("ingested_at >= ?", params.StartTime)
-	}
-	if params.EndTime != "" {
-		query = query.Where("ingested_at <= ?", params.EndTime)
-	}
-	if condition, args := rawDataOriginCondition(params.Origin); condition != "" {
-		query = query.Where(condition, args...)
+	for _, condition := range rawDataQueryConditions(params) {
+		query = query.Where(condition.query, condition.args...)
 	}
 
 	if err := query.Count(&total).Error; err != nil {
@@ -131,6 +130,32 @@ func (dao *RawDataDAO) FindWithPagination(ctx context.Context, params RawDataQue
 		List:  rawDataList,
 		Total: total,
 	}, nil
+}
+
+func rawDataQueryConditions(params RawDataQueryParams) []rawDataQueryCondition {
+	conditions := make([]rawDataQueryCondition, 0, 7)
+	if params.Source != "" {
+		conditions = append(conditions, rawDataQueryCondition{query: "source = ?", args: []interface{}{params.Source}})
+	}
+	if params.DataType != "" {
+		conditions = append(conditions, rawDataQueryCondition{query: "data_type = ?", args: []interface{}{params.DataType}})
+	}
+	if params.Status != "" {
+		conditions = append(conditions, rawDataQueryCondition{query: "status = ?", args: []interface{}{params.Status}})
+	}
+	if params.BusinessKey != "" {
+		conditions = append(conditions, rawDataQueryCondition{query: "external_id = ?", args: []interface{}{params.BusinessKey}})
+	}
+	if params.StartTime != "" {
+		conditions = append(conditions, rawDataQueryCondition{query: "ingested_at >= ?", args: []interface{}{params.StartTime}})
+	}
+	if params.EndTime != "" {
+		conditions = append(conditions, rawDataQueryCondition{query: "ingested_at <= ?", args: []interface{}{params.EndTime}})
+	}
+	if query, args := rawDataOriginCondition(params.Origin); query != "" {
+		conditions = append(conditions, rawDataQueryCondition{query: query, args: args})
+	}
+	return conditions
 }
 
 // rawDataOriginCondition keeps the query portable across the supported SQL drivers.
