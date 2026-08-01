@@ -8,6 +8,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"gin-biz-web-api/internal/dao/data_dao"
 	"gin-biz-web-api/internal/msg"
 	"gin-biz-web-api/internal/service/data_svc"
 	"gin-biz-web-api/model"
@@ -30,6 +31,32 @@ type excelMatchSchemeRequest struct {
 
 type ExcelMatchJobController struct {
 	service *data_svc.ExcelMatchJobService
+}
+
+type excelMatchJobResponse struct {
+	ID              uint              `json:"id"`
+	SourceFileName  string            `json:"source_file_name"`
+	Operation       string            `json:"operation"`
+	Status          string            `json:"status"`
+	TotalRows       int               `json:"total_rows"`
+	ProcessedRows   int               `json:"processed_rows"`
+	FilteredRows    int               `json:"filtered_rows"`
+	MatchedRows     int               `json:"matched_rows"`
+	UnmatchedRows   int               `json:"unmatched_rows"`
+	StartedAt       *model.TimeNormal `json:"started_at"`
+	FinishedAt      *model.TimeNormal `json:"finished_at"`
+	ExpiresAt       *model.TimeNormal `json:"expires_at"`
+	CanDownload     bool              `json:"can_download"`
+	DownloadMessage string            `json:"download_message"`
+	CreatedAt       int               `json:"created_at"`
+}
+
+type excelMatchJobLogResponse struct {
+	ID        uint   `json:"id"`
+	JobID     uint   `json:"job_id"`
+	Level     string `json:"level"`
+	Message   string `json:"message"`
+	CreatedAt int    `json:"created_at"`
 }
 
 func NewExcelMatchJobController() *ExcelMatchJobController {
@@ -63,8 +90,8 @@ func (ctrl *ExcelMatchJobController) CreateJob(c *gin.Context) {
 	logs, _ := ctrl.service.GetJobLogs(c.Request.Context(), matchJob.ID)
 
 	c.JSON(200, msg.SuccessResponse("Excel 匹配任务已创建", &map[string]any{
-		"job":          matchJob,
-		"logs":         logs,
+		"job":          safeExcelMatchJob(*matchJob),
+		"logs":         safeExcelMatchJobLogs(logs),
 		"downloadPath": "/api/v1/excel-match-jobs/" + strconv.FormatUint(uint64(matchJob.ID), 10) + "/download",
 	}))
 }
@@ -210,6 +237,42 @@ func (ctrl *ExcelMatchJobController) DeleteScheme(c *gin.Context) {
 }
 
 func (ctrl *ExcelMatchJobController) ListJobs(c *gin.Context) {
+	values := c.Request.URL.Query()
+	if !monitoringQueryKeysAllowed(values, "limit", "page", "page_size", "keyword", "status") {
+		c.JSON(400, msg.ErrResponseStr("无效的 Excel 匹配任务查询参数"))
+		return
+	}
+	if monitoringHasAnyKey(values, "page", "page_size", "keyword", "status") {
+		if values.Has("limit") {
+			c.JSON(400, msg.ErrResponseStr("分页查询不支持 limit 参数"))
+			return
+		}
+		page, pageSize, err := parseMonitoringPagination(values)
+		if err != nil {
+			c.JSON(400, msg.ErrResponseStr("无效的 Excel 匹配任务分页参数"))
+			return
+		}
+		keyword, err := parseMonitoringText(values.Get("keyword"), 255)
+		if err != nil {
+			c.JSON(400, msg.ErrResponseStr("无效的 Excel 匹配任务查询参数"))
+			return
+		}
+		status := strings.TrimSpace(values.Get("status"))
+		if !validExcelMatchJobStatus(status) {
+			c.JSON(400, msg.ErrResponseStr("无效的 Excel 匹配任务查询参数"))
+			return
+		}
+		result, err := ctrl.service.ListJobsPage(c.Request.Context(), data_dao.ExcelMatchJobListQuery{Page: page, PageSize: pageSize, Keyword: keyword, Status: status})
+		if err != nil {
+			c.JSON(500, msg.ErrResponse("查询 Excel 匹配任务列表失败", err))
+			return
+		}
+		c.JSON(200, msg.SuccessResponse("查询 Excel 匹配任务列表成功", &map[string]any{
+			"jobs":       safeExcelMatchJobs(result.List),
+			"pagination": monitoringPaginationResponse(page, pageSize, result.Total),
+		}))
+		return
+	}
 	limit, err := strconv.Atoi(c.DefaultQuery("limit", "30"))
 	if err != nil {
 		c.JSON(400, msg.ErrResponse("无效的 Excel 匹配任务数量", err))
@@ -221,7 +284,7 @@ func (ctrl *ExcelMatchJobController) ListJobs(c *gin.Context) {
 		return
 	}
 	c.JSON(200, msg.SuccessResponse("查询 Excel 匹配任务列表成功", &map[string]any{
-		"jobs": jobs,
+		"jobs": safeExcelMatchJobs(jobs),
 	}))
 }
 
@@ -244,10 +307,71 @@ func (ctrl *ExcelMatchJobController) GetJob(c *gin.Context) {
 	}
 
 	c.JSON(200, msg.SuccessResponse("查询 Excel 匹配任务成功", &map[string]any{
-		"job":          matchJob,
-		"logs":         logs,
+		"job":          safeExcelMatchJob(*matchJob),
+		"logs":         safeExcelMatchJobLogs(logs),
 		"downloadPath": "/api/v1/excel-match-jobs/" + strconv.FormatUint(uint64(matchJob.ID), 10) + "/download",
 	}))
+}
+
+func validExcelMatchJobStatus(value string) bool {
+	switch value {
+	case "", "pending", "running", "success", "failed", "expired":
+		return true
+	default:
+		return false
+	}
+}
+
+func safeExcelMatchJob(job model.ExcelMatchJob) excelMatchJobResponse {
+	return excelMatchJobResponse{
+		ID: job.ID, SourceFileName: job.SourceFileName, Operation: excelMatchJobOperation(job.ConfigJSON),
+		Status: job.Status, TotalRows: job.TotalRows, ProcessedRows: job.ProcessedRows, FilteredRows: job.FilteredRows,
+		MatchedRows: job.MatchedRows, UnmatchedRows: job.UnmatchedRows, StartedAt: job.StartedAt, FinishedAt: job.FinishedAt,
+		ExpiresAt: job.ExpiresAt, CanDownload: job.CanDownload, DownloadMessage: job.DownloadMessage, CreatedAt: job.CreatedAt,
+	}
+}
+
+func safeExcelMatchJobs(jobs []model.ExcelMatchJob) []excelMatchJobResponse {
+	result := make([]excelMatchJobResponse, 0, len(jobs))
+	for _, job := range jobs {
+		result = append(result, safeExcelMatchJob(job))
+	}
+	return result
+}
+
+func safeExcelMatchJobLogs(logs []model.ExcelMatchJobLog) []excelMatchJobLogResponse {
+	result := make([]excelMatchJobLogResponse, 0, len(logs))
+	for _, log := range logs {
+		result = append(result, excelMatchJobLogResponse{ID: log.ID, JobID: log.JobID, Level: log.Level, Message: safeExcelMatchJobLogMessage(log.Message), CreatedAt: log.CreatedAt})
+	}
+	return result
+}
+
+func safeExcelMatchJobLogMessage(message string) string {
+	message = strings.TrimSpace(message)
+	if message == "" {
+		return "任务日志已记录"
+	}
+	lower := strings.ToLower(message)
+	for _, marker := range []string{"token", "password", "passwd", "secret", "authorization", "cookie", "apikey", "api_key", "accesskey", "access_key"} {
+		if strings.Contains(lower, marker) {
+			return "任务日志已记录（敏感内容已隐藏）"
+		}
+	}
+	return message
+}
+
+func excelMatchJobOperation(rawConfig string) string {
+	var config struct {
+		Operation string `json:"operation"`
+	}
+	if err := json.Unmarshal([]byte(rawConfig), &config); err != nil {
+		return ""
+	}
+	if operation := strings.TrimSpace(config.Operation); operation != "" {
+		return operation
+	}
+	return "export_match"
 }
 
 func (ctrl *ExcelMatchJobController) Download(c *gin.Context) {

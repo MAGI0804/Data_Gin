@@ -428,6 +428,18 @@ func (s *ExcelMatchJobService) ListJobs(ctx context.Context, limit int) ([]model
 	return jobs, nil
 }
 
+func (s *ExcelMatchJobService) ListJobsPage(ctx context.Context, query data_dao.ExcelMatchJobListQuery) (*data_dao.ExcelMatchJobListPage, error) {
+	result, err := s.jobDAO.ListJobsPage(ctx, query)
+	if err != nil {
+		return nil, err
+	}
+	for i := range result.List {
+		refreshExpiredJob(&result.List[i])
+		s.refreshDownloadState(ctx, &result.List[i])
+	}
+	return result, nil
+}
+
 func (s *ExcelMatchJobService) ListSchemes(ctx context.Context, operation string) ([]ExcelMatchScheme, error) {
 	operation = strings.TrimSpace(operation)
 	if operation != "" && operation != excelOperationExportMatch && operation != excelOperationImportUpdate {

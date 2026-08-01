@@ -20,6 +20,19 @@ type ExcelMatchJobDAO struct {
 	db *gorm.DB
 }
 
+// ExcelMatchJobListQuery contains validated management list filters.
+type ExcelMatchJobListQuery struct {
+	Page     int
+	PageSize int
+	Keyword  string
+	Status   string
+}
+
+type ExcelMatchJobListPage struct {
+	List  []model.ExcelMatchJob
+	Total int64
+}
+
 var ErrExcelMatchCleanupLeaseLost = errors.New("excel match cleanup: lease lost")
 
 var allowedBojunExcelFields = map[string]struct{}{
@@ -70,6 +83,30 @@ func (dao *ExcelMatchJobDAO) ListJobs(ctx context.Context, limit int) ([]model.E
 		Limit(limit).
 		Find(&jobs).Error
 	return jobs, err
+}
+
+func (dao *ExcelMatchJobDAO) ListJobsPage(ctx context.Context, params ExcelMatchJobListQuery) (*ExcelMatchJobListPage, error) {
+	query := dao.applyListFilters(dao.db.WithContext(ctx).Model(&model.ExcelMatchJob{}), params)
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		return nil, err
+	}
+	jobs := make([]model.ExcelMatchJob, 0)
+	offset := (params.Page - 1) * params.PageSize
+	if err := query.Order("id DESC").Offset(offset).Limit(params.PageSize).Find(&jobs).Error; err != nil {
+		return nil, err
+	}
+	return &ExcelMatchJobListPage{List: jobs, Total: total}, nil
+}
+
+func (dao *ExcelMatchJobDAO) applyListFilters(query *gorm.DB, params ExcelMatchJobListQuery) *gorm.DB {
+	if params.Keyword != "" {
+		query = query.Where("source_file_name LIKE ?", "%"+params.Keyword+"%")
+	}
+	if params.Status != "" {
+		query = query.Where("status = ?", params.Status)
+	}
+	return query
 }
 
 func (dao *ExcelMatchJobDAO) CreateLog(ctx context.Context, log *model.ExcelMatchJobLog) error {

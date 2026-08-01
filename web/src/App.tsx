@@ -38,7 +38,7 @@ import { pipelineListPath } from './pipelineRun'
 import { Brand } from './components/Brand'
 import { parseMallWeatherExportContentStatus, submitMallWeatherExportContentDownload } from './mallWeatherExport'
 import { buildRawRecordsRequest, buildWarehouseRawRecordsQuery, parseRawRecordsPage, type RawRecordOrigin, type RawRecordsPage } from './rawRecords'
-import { buildDeliveryLogListQuery, buildDeliveryTaskListQuery, buildDestinationListQuery, buildRunListQuery, buildSourceListQuery, buildTransformRuleListQuery, parseMonitoringPage, type MonitoringPage } from './monitoringRecords'
+import { buildDeliveryLogListQuery, buildDeliveryTaskListQuery, buildDestinationListQuery, buildExcelMatchJobListQuery, buildRunListQuery, buildSourceListQuery, buildTransformRuleListQuery, normalizeMonitoringPageNumber, parseMonitoringPage, type MonitoringPage, type MonitoringPagination } from './monitoringRecords'
 import { validateOrderPushSkipPolicy } from './orderPushPolicy'
 import { runSingleFlight } from './singleFlight'
 import { parseSourceFetchSummary } from './sourceOperations'
@@ -176,20 +176,21 @@ type PipelineRun = {
 type ExcelMatchJob = {
   id: number
   source_file_name: string
-  config_json: string
+  config_json?: string
   status: string
   total_rows: number
   processed_rows: number
   filtered_rows: number
   matched_rows: number
   unmatched_rows: number
-  error_message: string
+  error_message?: string
   started_at: string | null
   finished_at: string | null
   expires_at: string | null
   result_url?: string
   can_download?: boolean
   download_message?: string
+  operation?: string
   created_at: number
 }
 
@@ -3161,11 +3162,14 @@ function ExcelMatchView({
   const [pendingWrite, setPendingWrite] = useState<{ slot: 'import' | 'clear'; file: File; config: unknown; message: string } | null>(null)
   const [jobQuery, setJobQuery] = useState('')
   const [jobStatus, setJobStatus] = useState('all')
-  const [jobOperation, setJobOperation] = useState('all')
+  const [appliedJobHistoryFilters, setAppliedJobHistoryFilters] = useState({ keyword: '', status: '' })
+  const [jobHistoryPage, setJobHistoryPage] = useState(1)
+  const [jobHistoryPagination, setJobHistoryPagination] = useState<MonitoringPagination | null>(null)
+  const [jobHistoryLoading, setJobHistoryLoading] = useState(false)
+  const [jobHistoryError, setJobHistoryError] = useState('')
+  const [jobHistoryReloadVersion, setJobHistoryReloadVersion] = useState(0)
+  const jobHistoryRequestRef = useRef<AbortController | null>(null)
   const focusedJobID = job?.id
-  const filteredJobHistory = useMemo(() => jobHistory.filter((item) => includesQuery([item.id, item.source_file_name, item.error_message], jobQuery)
-    && (jobStatus === 'all' || item.status === jobStatus)
-    && (jobOperation === 'all' || excelJobOperation(item) === jobOperation)), [jobHistory, jobOperation, jobQuery, jobStatus])
   const pendingSchemeNameConflict = pendingSchemeSave
     ? (pendingSchemeSave.operation === 'export_match' ? exportSchemes : importSchemes)
       .find((scheme) => scheme.name === pendingSchemeSave.name.trim()) ?? null
@@ -3177,7 +3181,7 @@ function ExcelMatchView({
     if (nextJob) {
       setJob(nextJob)
       setJobID(String(nextJob.id))
-      setJobHistory((current) => upsertExcelJobHistory(current, nextJob))
+      setJobHistory((current) => replaceExcelJobHistoryItem(current, nextJob))
       if (options.track !== false) {
         setTrackingJobID(isExcelJobActive(nextJob) ? nextJob.id : null)
       }
@@ -3347,21 +3351,50 @@ function ExcelMatchView({
   }, [fetchSchemes, setResult])
 
   const loadJobHistory = useCallback(async () => {
+    jobHistoryRequestRef.current?.abort()
+    const controller = new AbortController()
+    jobHistoryRequestRef.current = controller
+    setJobHistoryLoading(true)
+    setJobHistoryError('')
+    const query = buildExcelMatchJobListQuery({ page: jobHistoryPage, pageSize: 20, ...appliedJobHistoryFilters })
     try {
-      const response = await client('/v1/excel-match-jobs?limit=30', { method: 'GET', showResult: false, silentLoading: true })
-      if (!response.ok) throw new Error(requestErrorMessage(response, '查询 Excel 任务历史失败'))
-      const value = readDataField(response.data, 'jobs')
-      setJobHistory(Array.isArray(value) ? (value as ExcelMatchJob[]) : [])
-    } catch (error) {
-      setResult({ ok: false, status: 0, data: { message: error instanceof Error ? error.message : '查询 Excel 任务历史失败' } })
+      const response = await client(`/v1/excel-match-jobs?${query}`, { method: 'GET', signal: controller.signal, showResult: false, silentLoading: true })
+      if (controller.signal.aborted) return
+      const parsed = response.ok ? parseMonitoringPage<ExcelMatchJob>(response.data, 'jobs') : null
+      if (parsed) {
+        const nextPage = normalizeMonitoringPageNumber(jobHistoryPage, parsed.pagination.totalPages)
+        if (nextPage !== jobHistoryPage) {
+          setJobHistoryPage(nextPage)
+          return
+        }
+        setJobHistory(parsed.list)
+        setJobHistoryPagination(parsed.pagination)
+        return
+      }
+      const legacyItems = readDataField(response.data, 'jobs')
+      if (response.ok && Array.isArray(legacyItems)) {
+        const pageSize = 20
+        if (jobHistoryPage !== 1) {
+          setJobHistoryPage(1)
+          return
+        }
+        setJobHistory(legacyItems.slice(0, pageSize) as ExcelMatchJob[])
+        setJobHistoryPagination({ page: 1, pageSize, total: legacyItems.length, totalPages: legacyItems.length ? 1 : 0 })
+        setJobHistoryError('当前服务暂不支持 Excel 任务分页或筛选，已显示未筛选的兼容数据。')
+        return
+      }
+      setJobHistoryError(response.error?.message || 'Excel 任务历史暂时不可用，请稍后重试。')
+    } finally {
+      if (!controller.signal.aborted) setJobHistoryLoading(false)
     }
-  }, [client, setResult])
+  }, [appliedJobHistoryFilters, client, jobHistoryPage])
 
   useEffect(() => {
     if (!token) return
     if (section === 'jobs') void loadJobHistory()
     if (section === 'schemes' || section === 'write') void loadSchemes()
-  }, [loadJobHistory, loadSchemes, section, token])
+    return () => jobHistoryRequestRef.current?.abort()
+  }, [jobHistoryReloadVersion, loadJobHistory, loadSchemes, section, token])
 
   useEffect(() => {
     if (!token || section !== 'schemes') return
@@ -3869,6 +3902,7 @@ function ExcelMatchView({
     setAutoRefreshText('')
     setResult(null)
     closeExcelDialog()
+    setJobHistoryReloadVersion((version) => version + 1)
     onNavigateToJobs()
   }
 
@@ -3947,25 +3981,34 @@ function ExcelMatchView({
     <div className="view-stack">
       {section === 'jobs' && <>
         <section className="overview-grid">
-          <Metric label="历史任务" value={jobHistory.length} />
+          <Metric label="历史任务" value={jobHistoryPagination?.total ?? jobHistory.length} />
           <Metric label="当前任务" value={job?.id ?? '-'} />
           <Metric label="任务状态" value={job ? excelJobStatusLabel(job.status) : '-'} />
           <Metric label="已处理行" value={job ? `${job.processed_rows}/${job.total_rows}` : '-'} />
           <Metric label="自动跟踪" value={trackingJobID ? `#${trackingJobID}` : '-'} />
         </section>
-        <QueryBar count={filteredJobHistory.length} total={jobHistory.length}>
-          <Field label="任务 ID / 文件名 / 错误" name="excel_job_query" value={jobQuery} onChange={setJobQuery} />
-          <SelectFilter label="状态" value={jobStatus} onChange={setJobStatus} options={uniqueOptions(jobHistory.map((item) => item.status))} />
-          <SelectFilter label="操作" value={jobOperation} onChange={setJobOperation} options={Array.from(new Set(jobHistory.map(excelJobOperation).filter(Boolean))).map((value) => ({ value, label: excelJobOperationLabel(value) }))} />
-        </QueryBar>
-        <Panel title="Excel 任务" icon={<ListChecks />} meta="最多读取最近 30 条，可查询、查看和下载">
+        <form className="query-bar" onSubmit={(event) => {
+          event.preventDefault()
+          setJobHistoryPage(1)
+          setAppliedJobHistoryFilters({ keyword: jobQuery, status: jobStatus === 'all' ? '' : jobStatus })
+          setJobHistoryReloadVersion((version) => version + 1)
+        }}>
+          <div className="query-fields">
+            <Field label="文件名" name="excel_job_query" value={jobQuery} onChange={setJobQuery} />
+            <SelectFilter label="状态" value={jobStatus} onChange={setJobStatus} options={[{ value: 'pending', label: '等待处理' }, { value: 'running', label: '处理中' }, { value: 'success', label: '成功' }, { value: 'failed', label: '失败' }, { value: 'expired', label: '已过期' }]} />
+          </div>
+          <button type="submit" disabled={jobHistoryLoading}>{jobHistoryLoading ? '查询中…' : '查询'}</button>
+        </form>
+        {jobHistoryError && <div className="result-banner error" role="alert">{jobHistoryError}{jobHistoryPagination && !jobHistoryError.includes('兼容数据') ? ' 已保留最近一次成功数据。' : ''} <button type="button" onClick={() => setJobHistoryReloadVersion((version) => version + 1)} disabled={jobHistoryLoading}>重试</button></div>}
+        <Panel title="Excel 任务" icon={<ListChecks />} meta={jobHistoryLoading && !jobHistoryPagination ? '正在加载…' : `共 ${jobHistoryPagination?.total ?? 0} 条，可查询、查看和下载`}>
           <ExcelJobHistoryTable
-            jobs={filteredJobHistory}
-            loading={loading}
+            jobs={jobHistory}
+            loading={jobHistoryLoading}
             downloadingJobID={downloadingJobID}
             onDownload={downloadJob}
             onView={(id) => void refreshJobByID(id)}
           />
+          <MonitoringPaginationControls page={jobHistoryPagination?.page ?? jobHistoryPage} totalPages={jobHistoryPagination?.totalPages ?? 0} loading={jobHistoryLoading} onPrevious={() => setJobHistoryPage((page) => Math.max(1, page - 1))} onNext={() => setJobHistoryPage((page) => page + 1)} />
         </Panel>
         <Panel title="按任务 ID 定位" icon={<Download />} meta="直接查询历史任务并下载结果">
           <button type="button" onClick={() => openExcelDialog('query')}>打开任务定位</button>
@@ -4006,11 +4049,8 @@ function ExcelMatchView({
                 </button>
                 {!canDownloadExcelJob(job) && <span>{job.download_message || '只有匹配导出成功任务会生成可下载结果文件。'}</span>}
               </div>
-              {job.error_message && <div className="login-error" role="alert">任务执行失败，请查看受控服务日志。</div>}
-              <section className="content-grid two">
-                <ReadonlyJSON value={job.config_json || '{}'} />
-                <ExcelJobLogList logs={jobLogs} />
-              </section>
+              {job.status === 'failed' && <div className="login-error" role="alert">任务执行失败，请查看受控服务日志。</div>}
+              <ExcelJobLogList logs={jobLogs} />
             </Panel>
           </div>
         )}
@@ -4675,7 +4715,7 @@ function ExcelJobLogList({ logs }: { logs: ExcelMatchJobLog[] }) {
       {logs.map((log) => (
         <article className="record-row" key={log.id}>
           <div>
-            <strong>任务日志已记录</strong>
+            <strong>{log.message || '任务日志已记录'}</strong>
             <span>{excelLogLevelLabel(log.level)} / {formatUnixTime(log.created_at)}</span>
           </div>
         </article>
@@ -5728,7 +5768,8 @@ function excelJobStatusLabel(value: string) {
 }
 
 function excelJobOperation(job: ExcelMatchJob) {
-  const config = parseMaybeJson(job.config_json)
+  if (job.operation) return job.operation
+  const config = parseMaybeJson(job.config_json ?? '')
   if (config && typeof config === 'object' && typeof (config as JsonRecord).operation === 'string') {
     return String((config as JsonRecord).operation)
   }
@@ -5753,9 +5794,9 @@ function isExcelJobActive(job: ExcelMatchJob | null | undefined) {
   return Boolean(job && !['success', 'failed', 'expired'].includes(job.status))
 }
 
-function upsertExcelJobHistory(jobs: ExcelMatchJob[], nextJob: ExcelMatchJob) {
+function replaceExcelJobHistoryItem(jobs: ExcelMatchJob[], nextJob: ExcelMatchJob) {
   const index = jobs.findIndex((item) => item.id === nextJob.id)
-  if (index === -1) return [nextJob, ...jobs].slice(0, 30)
+  if (index === -1) return jobs
   const nextJobs = [...jobs]
   nextJobs[index] = nextJob
   return nextJobs

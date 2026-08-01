@@ -43,6 +43,13 @@ export type TransformRuleListQuery = ConfigurationListQuery & { ruleType?: strin
 export type DestinationListQuery = ConfigurationListQuery & { destinationType?: string }
 export type DeliveryTaskListQuery = ConfigurationListQuery & { destinationID?: string }
 
+export type ExcelMatchJobListQuery = {
+  page: number
+  pageSize: number
+  keyword?: string
+  status?: string
+}
+
 const runStatuses = ['running', 'success', 'failed', 'partial_success']
 const runTypes = ['fetch', 'ingest', 'transform', 'delivery']
 
@@ -60,6 +67,11 @@ function baseQuery(page: number, pageSize: number) {
   params.set('page', String(boundedPositive(page, 1, 1_000_000)))
   params.set('page_size', String(boundedPositive(pageSize, 20, 100)))
   return params
+}
+
+export function normalizeMonitoringPageNumber(requestedPage: number, totalPages: number) {
+  const page = boundedPositive(requestedPage, 1, 1_000_000)
+  return Number.isInteger(totalPages) && totalPages > 0 ? Math.min(page, totalPages) : 1
 }
 
 export function buildRunListQuery(query: RunListQuery) {
@@ -112,6 +124,13 @@ export function buildDestinationListQuery(query: DestinationListQuery) {
 export function buildDeliveryTaskListQuery(query: DeliveryTaskListQuery) {
   const params = configurationQuery(query)
   if (/^[1-9]\d*$/.test(query.destinationID?.trim() ?? '')) params.set('destination_id', query.destinationID!.trim())
+  return params.toString()
+}
+
+export function buildExcelMatchJobListQuery(query: ExcelMatchJobListQuery) {
+  const params = baseQuery(query.page, query.pageSize)
+  appendText(params, 'keyword', query.keyword, 255)
+  if (['pending', 'running', 'success', 'failed', 'expired'].includes(query.status ?? '')) params.set('status', query.status!)
   return params.toString()
 }
 
