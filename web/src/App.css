@@ -1247,9 +1247,51 @@ button:focus-visible {
   align-items: end;
 }
 
+.excel-jobs-workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(300px, 0.36fr);
+  border-top: 1px solid var(--line);
+}
+
+.excel-jobs-main {
+  display: grid;
+  min-width: 0;
+  padding-right: 24px;
+}
+
+.excel-jobs-main > .workbench-panel:first-child,
+.excel-job-aside > .excel-job-focus-target > .workbench-panel {
+  border-top: 0;
+}
+
+.excel-job-aside {
+  min-width: 0;
+  border-left: 1px solid var(--line);
+  padding-left: 28px;
+}
+
+.excel-job-aside > .empty-state {
+  margin-top: 18px;
+}
+
 .excel-job-detail {
   grid-template-columns: repeat(3, minmax(0, 1fr));
   margin-bottom: 12px;
+}
+
+.excel-job-progress {
+  display: grid;
+  gap: 7px;
+  border-bottom: 1px solid var(--line);
+  color: var(--muted);
+  font-size: 12px;
+  padding: 0 0 14px;
+}
+
+.excel-job-progress progress {
+  width: 100%;
+  height: 7px;
+  accent-color: var(--success);
 }
 
 .excel-detail-actions {
@@ -1267,6 +1309,25 @@ button:focus-visible {
 
 .excel-history-table {
   min-width: 980px;
+}
+
+.excel-history-table th:last-child,
+.excel-history-table td:last-child {
+  position: sticky;
+  right: 0;
+  z-index: 2;
+  border-left: 1px solid var(--line);
+  background: #ffffff;
+}
+
+.excel-history-table th:last-child {
+  z-index: 3;
+  background: #faf9f6;
+}
+
+.excel-history-row--selected,
+.excel-history-row--selected:hover {
+  background: #fff8eb;
 }
 
 .excel-job-log-list {
@@ -2530,6 +2591,20 @@ summary {
 }
 
 @media (max-width: 840px) {
+  .excel-jobs-workspace {
+    grid-template-columns: 1fr;
+  }
+
+  .excel-jobs-main {
+    padding-right: 0;
+  }
+
+  .excel-job-aside {
+    border-top: 1px solid var(--line);
+    border-left: 0;
+    padding-left: 0;
+  }
+
   .overview-workspace {
     grid-template-columns: 1fr;
   }

@@ -3211,6 +3211,9 @@ function ExcelMatchView({
   const [jobHistoryReloadVersion, setJobHistoryReloadVersion] = useState(0)
   const jobHistoryRequestRef = useRef<AbortController | null>(null)
   const focusedJobID = job?.id
+  const selectedJobProgress = job && job.total_rows > 0
+    ? Math.min(100, Math.round(job.processed_rows / job.total_rows * 100))
+    : 0
   const pendingSchemeNameConflict = pendingSchemeSave
     ? (pendingSchemeSave.operation === 'export_match' ? exportSchemes : importSchemes)
       .find((scheme) => scheme.name === pendingSchemeSave.name.trim()) ?? null
@@ -4041,60 +4044,69 @@ function ExcelMatchView({
           <button type="submit" disabled={jobHistoryLoading}>{jobHistoryLoading ? '查询中…' : '查询'}</button>
         </form>
         {jobHistoryError && <div className="result-banner error" role="alert">{jobHistoryError}{jobHistoryPagination && !jobHistoryError.includes('兼容数据') ? ' 已保留最近一次成功数据。' : ''} <button type="button" onClick={() => setJobHistoryReloadVersion((version) => version + 1)} disabled={jobHistoryLoading}>重试</button></div>}
-        <Panel title="Excel 任务" icon={<ListChecks />} meta={jobHistoryLoading && !jobHistoryPagination ? '正在加载…' : `共 ${jobHistoryPagination?.total ?? 0} 条，可查询、查看和下载`}>
-          <ExcelJobHistoryTable
-            jobs={jobHistory}
-            loading={jobHistoryLoading}
-            downloadingJobID={downloadingJobID}
-            onDownload={downloadJob}
-            onView={(id) => void refreshJobByID(id)}
-          />
-          <MonitoringPaginationControls page={jobHistoryPagination?.page ?? jobHistoryPage} totalPages={jobHistoryPagination?.totalPages ?? 0} loading={jobHistoryLoading} onPrevious={() => setJobHistoryPage((page) => Math.max(1, page - 1))} onNext={() => setJobHistoryPage((page) => page + 1)} />
-        </Panel>
-        <Panel title="按任务 ID 定位" icon={<Download />} meta="直接查询历史任务并下载结果">
-          <button type="button" onClick={() => openExcelDialog('query')}>打开任务定位</button>
-        </Panel>
-
-        {job && (
-          <div
-            ref={jobExecutionRef}
-            className="excel-job-focus-target"
-            tabIndex={-1}
-            role="region"
-            aria-label={`Excel 任务 ${job.id} 执行详情`}
-          >
-            <Panel title={`Excel 任务 #${job.id}`} icon={<FileJson />} meta={job.source_file_name || 'job detail'}>
-              {autoRefreshText && <p className="excel-mode-note">{autoRefreshText}</p>}
-              <div className="excel-job-detail">
-                <Metric label="源文件" value={job.source_file_name || '-'} />
-                <Metric label="任务类型" value={excelJobOperationLabel(excelJobOperation(job))} />
-                <Metric label="筛选/命中" value={job.filtered_rows || '-'} />
-                <Metric label="匹配/更新" value={job.matched_rows || '-'} />
-                <Metric label="未匹配" value={job.unmatched_rows || '-'} />
-                <Metric label="结果过期" value={formatDate(job.expires_at)} />
-                <Metric label="开始时间" value={formatDate(job.started_at)} />
-                <Metric label="结束时间" value={formatDate(job.finished_at)} />
-              </div>
-              <div className="excel-detail-actions">
-                <button type="button" onClick={() => void refreshJobByID(job.id)} disabled={loading}>
-                  <RefreshCcw aria-hidden="true" />
-                  刷新状态
-                </button>
-                <button
-                  type="button"
-                  onClick={() => void downloadJob(job.id)}
-                  disabled={loading || downloadingJobID === job.id || !canDownloadExcelJob(job)}
-                >
-                  <Download aria-hidden="true" />
-                  {downloadingJobID === job.id ? '下载中' : '下载结果'}
-                </button>
-                {!canDownloadExcelJob(job) && <span>{job.download_message || '只有匹配导出成功任务会生成可下载结果文件。'}</span>}
-              </div>
-              {job.status === 'failed' && <div className="login-error" role="alert">任务执行失败，请查看受控服务日志。</div>}
-              <ExcelJobLogList logs={jobLogs} />
+        <section className="excel-jobs-workspace">
+          <div className="excel-jobs-main">
+            <Panel title="Excel 任务" icon={<ListChecks />} meta={jobHistoryLoading && !jobHistoryPagination ? '正在加载…' : `共 ${jobHistoryPagination?.total ?? 0} 条，可查询、查看和下载`}>
+              <ExcelJobHistoryTable
+                jobs={jobHistory}
+                loading={jobHistoryLoading}
+                downloadingJobID={downloadingJobID}
+                selectedJobID={job?.id ?? null}
+                onDownload={downloadJob}
+                onView={(id) => void refreshJobByID(id)}
+              />
+              <MonitoringPaginationControls page={jobHistoryPagination?.page ?? jobHistoryPage} totalPages={jobHistoryPagination?.totalPages ?? 0} loading={jobHistoryLoading} onPrevious={() => setJobHistoryPage((page) => Math.max(1, page - 1))} onNext={() => setJobHistoryPage((page) => page + 1)} />
+            </Panel>
+            <Panel title="按任务 ID 定位" icon={<Download />} meta="直接查询历史任务并下载结果">
+              <button type="button" onClick={() => openExcelDialog('query')}>打开任务定位</button>
             </Panel>
           </div>
-        )}
+
+          <aside className="excel-job-aside" aria-label="Excel 任务详情">
+            {job ? (
+              <div
+                ref={jobExecutionRef}
+                className="excel-job-focus-target"
+                tabIndex={-1}
+                role="region"
+                aria-label={`Excel 任务 ${job.id} 执行详情`}
+              >
+                <Panel title={`任务 #${job.id}`} icon={<FileJson />} meta={job.source_file_name || '任务详情'}>
+                  {autoRefreshText && <p className="excel-mode-note">{autoRefreshText}</p>}
+                  <div className="excel-job-progress">
+                    <span>处理进度 {job.processed_rows} / {job.total_rows}（{selectedJobProgress}%）</span>
+                    <progress value={selectedJobProgress} max="100" aria-label={`Excel 任务 #${job.id} 处理进度`} />
+                  </div>
+                  <div className="excel-job-detail">
+                    <Metric label="任务类型" value={excelJobOperationLabel(excelJobOperation(job))} />
+                    <Metric label="匹配/更新" value={job.matched_rows || '-'} />
+                    <Metric label="未匹配" value={job.unmatched_rows || '-'} />
+                    <Metric label="结果过期" value={formatDate(job.expires_at)} />
+                    <Metric label="开始时间" value={formatDate(job.started_at)} />
+                    <Metric label="结束时间" value={formatDate(job.finished_at)} />
+                  </div>
+                  <div className="excel-detail-actions">
+                    <button type="button" onClick={() => void refreshJobByID(job.id)} disabled={loading}>
+                      <RefreshCcw aria-hidden="true" />
+                      刷新状态
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => void downloadJob(job.id)}
+                      disabled={loading || downloadingJobID === job.id || !canDownloadExcelJob(job)}
+                    >
+                      <Download aria-hidden="true" />
+                      {downloadingJobID === job.id ? '下载中' : '下载结果'}
+                    </button>
+                    {!canDownloadExcelJob(job) && <span>{job.download_message || '只有匹配导出成功任务会生成可下载结果文件。'}</span>}
+                  </div>
+                  {job.status === 'failed' && <div className="login-error" role="alert">任务执行失败，请查看受控服务日志。</div>}
+                  <ExcelJobLogList logs={jobLogs} />
+                </Panel>
+              </div>
+            ) : <EmptyState text="选择一个 Excel 任务查看受控进度、日志和下载状态。" />}
+          </aside>
+        </section>
       </>}
 
       {section === 'schemes' && <>
@@ -4570,12 +4582,14 @@ function ExcelJobHistoryTable({
   jobs,
   loading,
   downloadingJobID,
+  selectedJobID,
   onView,
   onDownload,
 }: {
   jobs: ExcelMatchJob[]
   loading: boolean
   downloadingJobID: number | null
+  selectedJobID: number | null
   onView: (id: number) => void
   onDownload: (id: number) => void
 }) {
@@ -4598,7 +4612,7 @@ function ExcelJobHistoryTable({
         </thead>
         <tbody>
           {jobs.map((item) => (
-            <tr key={item.id}>
+            <tr className={item.id === selectedJobID ? 'excel-history-row--selected' : undefined} key={item.id}>
               <td>{item.id}</td>
               <td>{item.source_file_name || '-'}</td>
               <td>{excelJobOperationLabel(excelJobOperation(item))}</td>
