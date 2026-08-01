@@ -36,7 +36,7 @@ export type ApiClientOptions = {
   fetch?: FetchLike
   timeoutMs?: number
   maxGetRetries?: number
-  wait?: (milliseconds: number) => Promise<void>
+  wait?: (milliseconds: number, signal?: AbortSignal) => Promise<void>
 }
 
 type RequestSignal = {
@@ -83,8 +83,25 @@ function getRetryDelay(attempt: number) {
   return Math.min(2_000, 250 * 2 ** attempt)
 }
 
-function defaultWait(milliseconds: number) {
-  return new Promise<void>((resolve) => globalThis.setTimeout(resolve, milliseconds))
+function defaultWait(milliseconds: number, signal?: AbortSignal) {
+  return new Promise<void>((resolve) => {
+    if (milliseconds <= 0 || signal?.aborted) {
+      resolve()
+      return
+    }
+    const finish = () => {
+      globalThis.clearTimeout(timer)
+      signal?.removeEventListener('abort', finish)
+      resolve()
+    }
+    const timer = globalThis.setTimeout(finish, milliseconds)
+    signal?.addEventListener('abort', finish, { once: true })
+    if (signal?.aborted) finish()
+  })
+}
+
+function abortedResponse(): ClientResponse {
+  return { ok: false, status: 0, data: { message: '请求已取消。' }, error: { kind: 'aborted', message: '请求已取消。' } }
 }
 
 function isFormData(body: unknown): body is FormData {
@@ -110,6 +127,25 @@ export function createApiClient(options: ApiClientOptions) {
   const maxGetRetries = options.maxGetRetries ?? 2
   const wait = options.wait ?? defaultWait
   let refreshPromise: Promise<boolean> | null = null
+
+  async function waitForRetry(milliseconds: number, signal: AbortSignal | undefined) {
+    if (signal?.aborted) return false
+    let removeAbortListener: (() => void) | undefined
+    const aborted = signal
+      ? new Promise<void>((resolve) => {
+        const finish = () => resolve()
+        signal.addEventListener('abort', finish, { once: true })
+        removeAbortListener = () => signal.removeEventListener('abort', finish)
+        if (signal.aborted) finish()
+      })
+      : undefined
+    try {
+      await (aborted ? Promise.race([wait(milliseconds, signal), aborted]) : wait(milliseconds, signal))
+    } finally {
+      removeAbortListener?.()
+    }
+    return !signal?.aborted
+  }
 
   async function refreshToken() {
     if (refreshPromise) return refreshPromise
@@ -171,17 +207,17 @@ export function createApiClient(options: ApiClientOptions) {
 
         const retryAfter = retryAfterSeconds(response.headers)
         if (retryable && !replayedAfterRefresh && attempt < maxGetRetries && (status === 0 || status >= 500)) {
-          await wait(getRetryDelay(attempt++))
+          if (!await waitForRetry(getRetryDelay(attempt++), signal)) return abortedResponse()
           continue
         }
         const error = publicFailure(status, retryAfter)
         return { ok: false, status, data: { message: error.message }, error }
       } catch {
-        if (signal?.aborted) return { ok: false, status: 0, data: { message: '请求已取消。' }, error: { kind: 'aborted', message: '请求已取消。' } }
+        if (signal?.aborted) return abortedResponse()
         if (requestSignal.wasTimedOut()) return { ok: false, status: 0, data: { message: '请求超时，请稍后重试。' }, error: { kind: 'timeout', message: '请求超时，请稍后重试。' } }
         const offline = typeof navigator !== 'undefined' && navigator.onLine === false
         if (retryable && !replayedAfterRefresh && attempt < maxGetRetries) {
-          await wait(getRetryDelay(attempt++))
+          if (!await waitForRetry(getRetryDelay(attempt++), signal)) return abortedResponse()
           continue
         }
         const message = offline ? '当前处于离线状态，已保留最近一次数据。' : '网络连接异常，请检查网络后重试。'

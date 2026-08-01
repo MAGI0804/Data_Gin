@@ -223,3 +223,30 @@ test('classifies network and caller cancellation failures', async () => {
   assert.equal(cancelled.error?.kind, 'aborted')
   assert.doesNotMatch(JSON.stringify(cancelled), /secret-token-that-must-not-leak/i)
 })
+
+test('cancels GET retry backoff without issuing a second request', async () => {
+  const controller = new AbortController()
+  let calls = 0
+  let startedBackoff
+  const backoffStarted = new Promise((resolve) => { startedBackoff = resolve })
+  const client = createApiClient(clientOptions({
+    maxGetRetries: 1,
+    fetch: async () => {
+      calls += 1
+      return response(503, { code: 503, data: {} })
+    },
+    wait: async () => {
+      startedBackoff()
+      await new Promise(() => {})
+    },
+  }))
+
+  const pending = client.request('/v1/runs', { method: 'GET', signal: controller.signal })
+  await backoffStarted
+  controller.abort()
+  const result = await pending
+
+  assert.equal(calls, 1)
+  assert.equal(result.ok, false)
+  assert.equal(result.error?.kind, 'aborted')
+})
