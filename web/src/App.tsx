@@ -2221,7 +2221,7 @@ function RulesQueryPage({ client, rules, sources, onRulesChange }: { client: Api
         <SelectFilter label="规则类型" value={ruleType} onChange={setRuleType} options={uniqueOptions(rules.map((rule) => rule.rule_type))} />
       </QueryBar>
       <div className="record-actions"><button type="button" className="primary" onClick={openCreate}>新增规则</button></div>
-      <Panel title="清洗规则" icon={<ListChecks />} meta={`查询命中 ${filtered.length} 条`}><TransformRuleList rules={filtered} onDetail={(rule) => { void openDetail(rule.id) }} /></Panel>
+      <Panel title="清洗规则" icon={<ListChecks />} meta={`查询命中 ${filtered.length} 条`}><TransformRuleList rules={filtered} sources={sources} onDetail={(rule) => { void openDetail(rule.id) }} /></Panel>
       {draft && (
         <Modal title={draft.id ? '清洗规则详情与编辑' : '新增清洗规则'} onClose={() => { if (!saving && !testing) setDraft(null) }}>
           {draft.hasSecret && <div className="result-banner" role="status">配置中的敏感值已隐藏。保留“[已隐藏]”会保留原值；改为新值即可轮换，且不会回显旧值。</div>}
@@ -4634,14 +4634,16 @@ function RunTable({ runs, onLoadSteps, onSelectRun }: { runs: PipelineRun[]; onL
   return (
     <div className="data-table-wrap">
       <table className="data-table">
-        <thead><tr><th>ID</th><th>类型</th><th>状态</th><th>成功/总数</th><th>开始时间</th><th>明细</th></tr></thead>
+        <thead><tr><th>ID / Trace ID</th><th>运行类型</th><th>触发方式</th><th>状态</th><th>成功 / 失败 / 总数</th><th>耗时</th><th>开始时间</th><th>明细</th></tr></thead>
         <tbody>
           {runs.slice(0, 20).map((run) => (
             <tr key={run.id}>
-              <td>{run.id}</td>
+              <td><strong>#{run.id}</strong><small>{run.trace_id || '-'}</small></td>
               <td>{run.run_type}</td>
+              <td>{run.trigger_type || '-'}</td>
               <td>{run.status}</td>
-              <td>{run.success_count}/{run.total_count}</td>
+              <td>{run.success_count} / {run.failed_count} / {run.total_count}</td>
+              <td>{runDurationLabel(run.started_at, run.finished_at)}</td>
               <td>{formatDate(run.started_at)}</td>
               <td>
                 <div className="table-actions">
@@ -4937,41 +4939,30 @@ function SourceList({ sources, onDetail, onFetchSource, onTestSource }: { source
   }
 
   return (
-    <div className="record-list">
-      {sources.map((source) => (
-        <article className="record-row" key={source.id}>
-          <div>
-            <strong>{source.name}</strong>
-            <span>{source.code} / {source.source_type} / {source.auth_type || 'none'}</span>
-	            {source.has_secret && <small>配置包含已隐藏的密钥；保留占位符可保持旧值，替换为新值可轮换。</small>}
-          </div>
-          <div className="record-actions">
-            <StatusPill label={source.enabled ? '启用' : '停用'} />
-            <button type="button" disabled={testingID !== null || fetchingID !== null} onClick={() => onDetail(source)}>详情</button>
-            <button type="button" disabled={testingID === source.id || fetchingID === source.id || !source.enabled} onClick={() => { void test(source.id) }}>{testingID === source.id ? '测试中…' : '测试连接'}</button>
-            <button type="button" disabled={testingID === source.id || fetchingID === source.id || !source.enabled || source.source_type === 'webhook'} onClick={() => { void fetch(source.id) }}>{fetchingID === source.id ? '拉取中…' : '手动拉取'}</button>
-          </div>
-          {messageByID[source.id] && <small className="source-operation-message" role="status" aria-live="polite">{messageByID[source.id]}</small>}
-        </article>
-      ))}
+    <div className="data-table-wrap" role="region" aria-label="数据源列表" tabIndex={0}>
+      <table className="data-table">
+        <thead><tr><th scope="col">ID</th><th scope="col">数据源名称</th><th scope="col">编码</th><th scope="col">类型</th><th scope="col">鉴权方式</th><th scope="col">接收键</th><th scope="col">状态</th><th scope="col">操作</th></tr></thead>
+        <tbody>{sources.map((source) => (
+          <tr key={source.id}>
+            <td>#{source.id}</td><td><strong>{source.name}</strong>{source.has_secret && <small>配置已脱敏</small>}</td><td>{source.code}</td><td>{source.source_type}</td><td>{source.auth_type || 'none'}</td><td>{source.source_query_key || '-'}</td><td><StatusPill label={source.enabled ? '启用' : '停用'} /></td>
+            <td><div className="table-actions"><button type="button" disabled={testingID !== null || fetchingID !== null} onClick={() => onDetail(source)}>详情</button><button type="button" disabled={testingID === source.id || fetchingID === source.id || !source.enabled} onClick={() => { void test(source.id) }}>{testingID === source.id ? '测试中…' : '测试连接'}</button><button type="button" disabled={testingID === source.id || fetchingID === source.id || !source.enabled || source.source_type === 'webhook'} onClick={() => { void fetch(source.id) }}>{fetchingID === source.id ? '拉取中…' : '手动拉取'}</button></div>{messageByID[source.id] && <small className="source-operation-message" role="status" aria-live="polite">{messageByID[source.id]}</small>}</td>
+          </tr>
+        ))}</tbody>
+      </table>
     </div>
   )
 }
 
-function TransformRuleList({ rules, onDetail }: { rules: TransformRule[]; onDetail: (rule: TransformRule) => void }) {
+function TransformRuleList({ rules, sources, onDetail }: { rules: TransformRule[]; sources: SourceDefinition[]; onDetail: (rule: TransformRule) => void }) {
   if (rules.length === 0) return <EmptyState text="暂无处理规则。" />
   return (
-    <div className="record-list">
-      {rules.map((rule) => (
-        <article className="record-row" key={rule.id}>
-          <div>
-            <strong>{rule.name}</strong>
-            <span>{rule.rule_type} / source #{rule.source_id} / 顺序 {rule.order_index}</span>
-            {rule.has_secret && <small>配置包含已隐藏的密钥；保留占位符可保持旧值，替换为新值可轮换。</small>}
-          </div>
-          <div className="record-actions"><StatusPill label={rule.enabled ? '启用' : '停用'} /><button type="button" onClick={() => onDetail(rule)}>详情</button></div>
-        </article>
-      ))}
+    <div className="data-table-wrap" role="region" aria-label="清洗规则列表" tabIndex={0}>
+      <table className="data-table"><thead><tr><th scope="col">规则名称</th><th scope="col">规则类型</th><th scope="col">来源</th><th scope="col">执行顺序</th><th scope="col">状态</th><th scope="col">操作</th></tr></thead>
+        <tbody>{rules.map((rule) => {
+          const source = sources.find((item) => item.id === rule.source_id)
+          return <tr key={rule.id}><td><strong>{rule.name}</strong>{rule.has_secret && <small>配置已脱敏</small>}</td><td>{rule.rule_type}</td><td>{source ? `${source.name} (#${source.id})` : `#${rule.source_id}`}</td><td>{rule.order_index}</td><td><StatusPill label={rule.enabled ? '启用' : '停用'} /></td><td><button type="button" onClick={() => onDetail(rule)}>详情</button></td></tr>
+        })}</tbody>
+      </table>
     </div>
   )
 }
@@ -5017,17 +5008,10 @@ function CleanRecordList({ records }: { records: CleanRecord[] }) {
 function DestinationList({ destinations, testingID, onDetail, onTest }: { destinations: DestinationDefinition[]; testingID: number | null; onDetail: (destination: DestinationDefinition) => void; onTest: (destination: DestinationDefinition) => void }) {
   if (destinations.length === 0) return <EmptyState text="暂无推送目标。" />
   return (
-    <div className="record-list">
-      {destinations.map((destination) => (
-        <article className="record-row" key={destination.id}>
-          <div>
-            <strong>{destination.name}</strong>
-            <span>{destination.code} / {destination.destination_type}</span>
-            {destination.has_secret && <small>配置包含已隐藏密钥；保留占位符可保持旧值，替换为新值可轮换。</small>}
-          </div>
-          <div className="record-actions"><StatusPill label={destination.enabled ? '启用' : '停用'} /><button type="button" onClick={() => onDetail(destination)}>详情</button><button type="button" disabled={testingID !== null} onClick={() => onTest(destination)}>{testingID === destination.id ? '测试中…' : '测试连接'}</button></div>
-        </article>
-      ))}
+    <div className="data-table-wrap" role="region" aria-label="推送目标列表" tabIndex={0}>
+      <table className="data-table"><thead><tr><th scope="col">目标系统</th><th scope="col">目标编码</th><th scope="col">接口类型</th><th scope="col">状态</th><th scope="col">操作</th></tr></thead>
+        <tbody>{destinations.map((destination) => <tr key={destination.id}><td><strong>{destination.name}</strong>{destination.has_secret && <small>配置已脱敏</small>}</td><td>{destination.code}</td><td>{destination.destination_type}</td><td><StatusPill label={destination.enabled ? '启用' : '停用'} /></td><td><div className="table-actions"><button type="button" onClick={() => onDetail(destination)}>详情</button><button type="button" disabled={testingID !== null} onClick={() => onTest(destination)}>{testingID === destination.id ? '测试中…' : '测试连接'}</button></div></td></tr>)}</tbody>
+      </table>
     </div>
   )
 }
@@ -5042,20 +5026,10 @@ function DeliveryTaskList({ tasks, runningID, loadingDetailID, destinations, onD
 }) {
   if (tasks.length === 0) return <EmptyState text="暂无推送任务。" />
   return (
-    <div className="record-list">
-      {tasks.map((task) => (
-        <article className="record-row" key={task.id}>
-          <div>
-            <strong>{task.name}</strong>
-            <span>{`${task.clean_table} -> ${deliveryTaskDestinationLabel(task, destinations)} / ${deliveryTaskTriggerLabel(task.trigger_type)}`}</span>
-          </div>
-          <div className="record-actions">
-            <StatusPill label={task.enabled ? '启用' : '停用'} />
-            <button type="button" disabled={loadingDetailID !== null || runningID !== null} onClick={() => onDetail(task)}>{loadingDetailID === task.id ? '加载中…' : '详情'}</button>
-            <button type="button" disabled={!task.enabled || runningID !== null || loadingDetailID !== null} onClick={() => onRun(task)}>{runningID === task.id ? '推送中…' : '手动运行'}</button>
-          </div>
-        </article>
-      ))}
+    <div className="data-table-wrap" role="region" aria-label="推送任务列表" tabIndex={0}>
+      <table className="data-table"><thead><tr><th scope="col">任务名称</th><th scope="col">触发方式</th><th scope="col">清洗表</th><th scope="col">推送目标</th><th scope="col">状态</th><th scope="col">操作</th></tr></thead>
+        <tbody>{tasks.map((task) => <tr key={task.id}><td><strong>{task.name}</strong></td><td>{deliveryTaskTriggerLabel(task.trigger_type)}{task.trigger_type === 'schedule' && task.cron_expr && <small>{task.cron_expr}</small>}</td><td>{task.clean_table}</td><td>{deliveryTaskDestinationLabel(task, destinations)}</td><td><StatusPill label={task.enabled ? '启用' : '停用'} /></td><td><div className="table-actions"><button type="button" disabled={loadingDetailID !== null || runningID !== null} onClick={() => onDetail(task)}>{loadingDetailID === task.id ? '加载中…' : '详情'}</button><button type="button" disabled={!task.enabled || runningID !== null || loadingDetailID !== null} onClick={() => onRun(task)}>{runningID === task.id ? '推送中…' : '手动运行'}</button></div></td></tr>)}</tbody>
+      </table>
     </div>
   )
 }
@@ -5811,6 +5785,19 @@ function formatDate(value: string | null) {
     second: '2-digit',
     hour12: false,
   }).format(date).replace(/\//g, '-')
+}
+
+function runDurationLabel(startedAt: string | null, finishedAt: string | null) {
+  if (!startedAt || !finishedAt) return '-'
+  const started = Date.parse(startedAt)
+  const finished = Date.parse(finishedAt)
+  const milliseconds = finished - started
+  if (!Number.isFinite(milliseconds) || milliseconds < 0) return '-'
+  const seconds = Math.floor(milliseconds / 1000)
+  if (seconds < 60) return `${seconds} 秒`
+  const minutes = Math.floor(seconds / 60)
+  const remainingSeconds = seconds % 60
+  return `${minutes} 分 ${remainingSeconds} 秒`
 }
 
 function datetimeLocalMinutesAgo(minutes: number) {
