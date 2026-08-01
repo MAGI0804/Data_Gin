@@ -1793,18 +1793,47 @@ function DeliveryLogsQueryPage({ client, onRetryLog }: { client: ApiClient; onRe
 function StepRunsQueryPage({ runs, stepRuns, selectedRunID, onLoadSteps }: { runs: PipelineRun[]; stepRuns: StepRun[]; selectedRunID: number | null; onLoadSteps: (runId: number) => void }) {
   const [runQuery, setRunQuery] = useState('')
   const [stepQuery, setStepQuery] = useState('')
+  const [selectedStepID, setSelectedStepID] = useState<number | null>(null)
   const visibleRuns = runs.filter((run) => includesQuery([run.id, run.trace_id, run.run_type], runQuery))
   const visibleSteps = stepRuns.filter((step) => includesQuery([step.id, step.run_id, step.step_code, step.method_type, step.status, step.error_message], stepQuery))
+  const selectedStep = visibleSteps.find((step) => step.id === selectedStepID) ?? visibleSteps[0] ?? null
+
+  useEffect(() => {
+    setSelectedStepID((current) => visibleSteps.some((step) => step.id === current) ? current : visibleSteps[0]?.id ?? null)
+  }, [visibleSteps])
+
   return (
     <div className="view-stack">
-      <QueryBar count={visibleRuns.length} total={runs.length}>
-        <Field label="先查询运行" name="step_run_query" value={runQuery} onChange={setRunQuery} />
-      </QueryBar>
-      <Panel title="选择运行" icon={<Activity />} meta="点击步骤加载该次运行"><RunTable runs={visibleRuns} onLoadSteps={onLoadSteps} /></Panel>
-      <QueryBar count={visibleSteps.length} total={stepRuns.length}>
-        <Field label="步骤编码 / 类型 / 状态" name="step_query" value={stepQuery} onChange={setStepQuery} />
-      </QueryBar>
-      <Panel title="步骤明细" icon={<BookOpen />} meta={selectedRunID ? `运行 #${selectedRunID} / ${visibleSteps.length} 条` : '请先选择运行'}><StepRunList stepRuns={visibleSteps} /></Panel>
+      <div className="step-runs-layout">
+        <section className="step-runs-column" aria-label="流水线运行">
+          <div className="step-runs-column-heading"><strong>运行</strong><span>{visibleRuns.length} / {runs.length} 条</span></div>
+          <Field label="运行 / Trace ID" name="step_run_query" value={runQuery} onChange={setRunQuery} />
+          {visibleRuns.length === 0 ? <EmptyState text="暂无匹配运行。" /> : <div className="step-runs-list" role="list">{visibleRuns.slice(0, 50).map((run) => {
+            const selected = run.id === selectedRunID
+            return <button className={`step-runs-run ${selected ? 'is-selected' : ''}`} type="button" key={run.id} aria-pressed={selected} onClick={() => onLoadSteps(run.id)}>
+              <span><strong>#{run.id}</strong><small>{run.run_type} · {formatDate(run.started_at)}</small></span><StatusPill label={run.status || '未知'} />
+            </button>
+          })}</div>}
+        </section>
+        <section className="step-runs-column" aria-label="运行步骤">
+          <div className="step-runs-column-heading"><strong>步骤</strong><span>{selectedRunID ? `运行 #${selectedRunID}` : '请选择运行'}</span></div>
+          <Field label="编码 / 类型 / 状态" name="step_query" value={stepQuery} onChange={setStepQuery} />
+          {visibleSteps.length === 0 ? <EmptyState text={selectedRunID ? '当前运行没有匹配步骤。' : '从左侧选择运行后加载步骤。'} /> : <div className="step-runs-list" role="list">{visibleSteps.map((step) => {
+            const selected = step.id === selectedStep?.id
+            return <button className={`step-runs-step ${selected ? 'is-selected' : ''}`} type="button" key={step.id} aria-pressed={selected} onClick={() => setSelectedStepID(step.id)}>
+              <span><strong>{step.step_code || `步骤 #${step.id}`}</strong><small>{step.method_type || '-'} · #{step.id}</small></span><StatusPill label={step.status || '未知'} />
+            </button>
+          })}</div>}
+        </section>
+        <aside className="step-runs-detail" aria-live="polite" aria-label="已选步骤详情">
+          {selectedStep ? <>
+            <div className="step-runs-column-heading"><div><strong>{selectedStep.step_code || `步骤 #${selectedStep.id}`}</strong><span>{selectedStep.method_type || '未声明方法类型'} · 运行 #{selectedStep.run_id}</span></div><StatusPill label={selectedStep.status || '未知'} /></div>
+            {selectedStep.error_message && <p className="step-runs-error" role="alert">{selectedStep.error_message}</p>}
+            <h3>脱敏步骤数据</h3>
+            <ReadonlyJSON value={redactMonitoringJSON({ input: parseJsonText(selectedStep.input_json), output: parseJsonText(selectedStep.output_json), error: selectedStep.error_message || null })} />
+          </> : <EmptyState text="选择步骤后查看安全详情。" />}
+        </aside>
+      </div>
     </div>
   )
 }
@@ -5026,20 +5055,6 @@ function DeliveryTaskList({ tasks, runningID, loadingDetailID, destinations, onD
             <button type="button" disabled={!task.enabled || runningID !== null || loadingDetailID !== null} onClick={() => onRun(task)}>{runningID === task.id ? '推送中…' : '手动运行'}</button>
           </div>
         </article>
-      ))}
-    </div>
-  )
-}
-
-function StepRunList({ stepRuns }: { stepRuns: StepRun[] }) {
-  if (stepRuns.length === 0) return <EmptyState text="选择运行日志中的“查看”后显示步骤日志。" />
-  return (
-    <div className="step-run-list">
-      {stepRuns.map((run) => (
-        <details key={run.id}>
-          <summary>{run.step_code} / {run.method_type} / {run.status}</summary>
-          <ReadonlyJSON value={redactMonitoringJSON({ input: parseJsonText(run.input_json), output: parseJsonText(run.output_json), error: run.error_message })} />
-        </details>
       ))}
     </div>
   )

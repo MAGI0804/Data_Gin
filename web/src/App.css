@@ -2177,6 +2177,123 @@ button:focus-visible {
   margin-top: 12px;
 }
 
+.step-runs-layout {
+  display: grid;
+  grid-template-columns: minmax(230px, 0.72fr) minmax(250px, 0.86fr) minmax(320px, 1.15fr);
+  min-height: 560px;
+  border: 1px solid var(--line);
+}
+
+.step-runs-column,
+.step-runs-detail {
+  display: grid;
+  align-content: start;
+  min-width: 0;
+  gap: 12px;
+  padding: 14px;
+}
+
+.step-runs-column {
+  border-right: 1px solid var(--line);
+}
+
+.step-runs-detail {
+  background: #fbfaf7;
+}
+
+.step-runs-column-heading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 10px;
+  border-bottom: 1px solid var(--line);
+  padding-bottom: 10px;
+}
+
+.step-runs-column-heading strong,
+.step-runs-column-heading span {
+  display: block;
+}
+
+.step-runs-column-heading strong {
+  font-size: 13px;
+}
+
+.step-runs-column-heading span {
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.step-runs-list {
+  display: grid;
+  align-content: start;
+  gap: 0;
+  max-height: 440px;
+  overflow: auto;
+  border-top: 1px solid var(--line);
+}
+
+.step-runs-run,
+.step-runs-step {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  min-width: 0;
+  gap: 10px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  border-radius: 0;
+  background: #fff;
+  color: inherit;
+  padding: 10px 8px;
+  text-align: left;
+}
+
+.step-runs-run:hover,
+.step-runs-step:hover,
+.step-runs-run.is-selected,
+.step-runs-step.is-selected {
+  background: #fff8eb;
+}
+
+.step-runs-run.is-selected,
+.step-runs-step.is-selected {
+  box-shadow: inset 3px 0 0 var(--accent);
+}
+
+.step-runs-run > span,
+.step-runs-step > span {
+  display: grid;
+  min-width: 0;
+  gap: 3px;
+}
+
+.step-runs-run small,
+.step-runs-step small {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.step-runs-detail h3 {
+  margin: 0;
+  color: var(--muted);
+  font-size: 11px;
+}
+
+.step-runs-error {
+  margin: 0;
+  border-left: 3px solid var(--danger);
+  background: #fff5f4;
+  color: var(--danger);
+  font-size: 12px;
+  line-height: 1.5;
+  padding: 8px;
+  overflow-wrap: anywhere;
+}
+
 .raw-record-master-detail {
   display: grid;
   grid-template-columns: minmax(0, 1.55fr) minmax(280px, 0.85fr);
@@ -2292,6 +2409,15 @@ summary {
   .delivery-log-detail {
     border-top: 1px solid var(--line);
     border-left: 0;
+  }
+
+  .step-runs-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .step-runs-column {
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
   }
 
   .nav-search {
