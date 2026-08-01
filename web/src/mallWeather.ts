@@ -21,6 +21,7 @@ export type MallWeatherMall = {
 export const mallWeatherMinutelyForecastMinutes = 120
 export const mallWeatherHourlyForecastHours = 360
 export const mallWeatherDailyForecastDays = 15
+export const mallWeatherGeocodePollMaxAttempts = 24
 
 export type MallWeatherMallList = {
   items: MallWeatherMall[]
@@ -1026,6 +1027,13 @@ export function mallWeatherShouldPollGeocode(
   return Boolean(candidates && candidates.items.length === 0 && !mallWeatherGeocodeRunTerminal(candidates.runStatus))
 }
 
+export function mallWeatherGeocodePollDelayMilliseconds(failureCount: number, isPageVisible: boolean) {
+  if (!Number.isSafeInteger(failureCount) || failureCount < 0) throw new Error('invalid geocode poll failure count')
+  const retryMultiplier = 2 ** Math.min(failureCount, 3)
+  const visibilityMultiplier = isPageVisible ? 1 : 6
+  return Math.min(60_000, 5_000 * retryMultiplier * visibilityMultiplier)
+}
+
 type MallWeatherGeocodeActionRequester = (
   path: string,
   options: { method: 'POST'; body: unknown; showResult: false; silentLoading: true },
@@ -1349,6 +1357,22 @@ export function parseMallWeatherOverview(payload: unknown): MallWeatherOverview 
     alerts: data.alerts.filter(isRecord).map(mallWeatherAlert),
     meta: mallWeatherMeta(data.meta),
   }
+}
+
+export type MallWeatherRealtimePage = {
+  items: MallWeatherRealtime[]
+  meta: MallWeatherMeta
+}
+
+export function parseMallWeatherRealtimePage(payload: unknown): MallWeatherRealtimePage | null {
+  const data = envelopeData(payload)
+  if (!data || !isRecord(data.meta) || !Array.isArray(data.items)) return null
+  const items: MallWeatherRealtime[] = []
+  for (const item of data.items) {
+    if (!isRecord(item)) return null
+    items.push(mallWeatherRealtime(item))
+  }
+  return { items, meta: mallWeatherMeta(data.meta) }
 }
 
 export function mallWeatherOverviewHasHourlyTemperature(
@@ -1783,6 +1807,25 @@ export function mallWeatherOverviewPath(mallID: number, timeZone = '') {
   if (timeZone.trim()) query.set('timeZone', timeZone)
   const suffix = query.toString()
   return `/v1/malls/${mallID}/weather/overview${suffix ? `?${suffix}` : ''}`
+}
+
+// mallWeatherRealtimePath is used only as a bounded management-side fallback
+// when the overview response has no realtime record. Realtime requires a
+// concrete RFC3339 range, unlike the overview endpoint.
+export function mallWeatherRealtimePath(mallID: number, start: Date, end: Date, timeZone: string) {
+  if (!Number.isSafeInteger(mallID) || mallID <= 0) throw new Error('invalid mall id')
+  if (!Number.isFinite(start.getTime()) || !Number.isFinite(end.getTime()) || start >= end || end.getTime() - start.getTime() > 31 * 24 * 60 * 60 * 1000) {
+    throw new Error('invalid weather range')
+  }
+  if (!timeZone.trim()) throw new Error('invalid weather time zone')
+  const query = new URLSearchParams({
+    start: start.toISOString(),
+    end: end.toISOString(),
+    timeZone: timeZone.trim(),
+    latest: 'true',
+    pageSize: '200',
+  })
+  return `/v1/malls/${mallID}/weather/realtime?${query.toString()}`
 }
 
 export function mallWeatherSeriesPath(mallID: number, series: MallWeatherSeries, start: Date, end: Date, cursor = '', timeZone = 'Asia/Shanghai', asOf?: Date) {

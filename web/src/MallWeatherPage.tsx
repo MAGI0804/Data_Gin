@@ -33,6 +33,8 @@ import {
   mallWeatherCandidateConfirmationRequest,
   mallWeatherCoordinateAdjustmentRequest,
   mallWeatherGeocodeConfirmPath,
+  mallWeatherGeocodePollDelayMilliseconds,
+  mallWeatherGeocodePollMaxAttempts,
   mallWeatherGeocodeRunTerminal,
   mallWeatherShouldPollGeocode,
   mallWeatherMallReady,
@@ -45,6 +47,7 @@ import {
   mallWeatherSheetPushRunMatchesResult,
   mergeMallWeatherMalls,
   mallWeatherOverviewPath,
+  mallWeatherRealtimePath,
   mallWeatherRefreshKey,
   mallWeatherRefreshDisposition,
   mallWeatherRefreshPath,
@@ -60,6 +63,7 @@ import {
   parseMallWeatherCreateResult,
   parseMallWeatherGeocodeCandidates,
   parseMallWeatherOverview,
+  parseMallWeatherRealtimePage,
   parseMallWeatherSheetPushDryRun,
   parseMallWeatherSheetPushOptions,
   parseMallWeatherSheetPushResult,
@@ -160,6 +164,7 @@ function MallModulePage({
   const overviewSnapshotRef = useRef<MallWeatherOverview | null>(null)
   const overviewSnapshotMallIDRef = useRef(0)
   const overviewRetryMallIDRef = useRef(0)
+  const realtimeFallbackAttemptedMallIDRef = useRef(0)
   const overviewLastStableRef = useRef<OverviewStableState | null>(null)
   const selectedMallIDRef = useRef(0)
   const alertRequestSequence = useRef(0)
@@ -268,6 +273,7 @@ function MallModulePage({
   const loadOverview = useCallback(async (
     mallID: number,
     externalSignal?: AbortSignal,
+    forceRealtimeFallback = false,
   ): Promise<WeatherOverviewReloadResult> => {
     if (!mallID || externalSignal?.aborted || selectedMallIDRef.current !== mallID) return 'aborted'
     if (overviewRetryMallIDRef.current !== mallID) {
@@ -342,12 +348,39 @@ function MallModulePage({
         setOverviewError(weatherRequestError(response.status, '天气概览加载失败', '当前账号缺少 weather.read 权限'))
         return 'failed'
       }
-      const parsed = parseMallWeatherOverview(response.data)
+      let parsed = parseMallWeatherOverview(response.data)
       if (!parsed) {
         updateOverviewState('error')
         updateOverviewWaitingReason('')
         setOverviewError('天气概览响应格式不正确，请联系管理员')
         return 'failed'
+      }
+      if (parsed.realtime === null && (forceRealtimeFallback || realtimeFallbackAttemptedMallIDRef.current !== mallID)) {
+        realtimeFallbackAttemptedMallIDRef.current = mallID
+        const fallbackEnd = new Date()
+        const fallbackStart = new Date(fallbackEnd.getTime() - 60 * 60 * 1000)
+        const fallbackTimeZone = parsed.meta.timeZone.trim() || 'Asia/Shanghai'
+        try {
+          const fallbackResponse = await client(mallWeatherRealtimePath(mallID, fallbackStart, fallbackEnd, fallbackTimeZone), {
+            method: 'GET', showResult: false, silentLoading: true, signal: controller.signal,
+          })
+          if (controller.signal.aborted || sequence !== overviewRequestSequence.current) {
+            restoreAfterAbort()
+            return 'aborted'
+          }
+          if (fallbackResponse.ok) {
+            const fallback = parseMallWeatherRealtimePage(fallbackResponse.data)
+            const latestRealtime = fallback && fallback.items.length > 0
+              ? fallback.items[fallback.items.length - 1]
+              : undefined
+            if (fallback && latestRealtime) parsed = { ...parsed, realtime: latestRealtime, meta: fallback.meta }
+          }
+        } catch {
+          if (controller.signal.aborted || sequence !== overviewRequestSequence.current) {
+            restoreAfterAbort()
+            return 'aborted'
+          }
+        }
       }
       const readiness = mallWeatherOverviewReadiness(parsed)
       if (readiness !== 'ready') {
@@ -397,6 +430,7 @@ function MallModulePage({
     overviewSnapshotRef.current = null
     overviewSnapshotMallIDRef.current = 0
     overviewRetryMallIDRef.current = 0
+    realtimeFallbackAttemptedMallIDRef.current = 0
     overviewLastStableRef.current = null
     setOverview(null)
     setOverviewMallID(0)
@@ -459,7 +493,7 @@ function MallModulePage({
   }, [malls])
 
   const reloadWeatherData = useCallback(async (mallID: number, signal: AbortSignal) => {
-    const result = await loadOverview(mallID, signal)
+    const result = await loadOverview(mallID, signal, true)
     if (result === 'waiting' && !signal.aborted) {
       setForecastSnapshot(null)
       setWeatherReloadVersion((current) => current + 1)
@@ -1213,6 +1247,9 @@ function MallOnboardingPanel({ mall, client, onMallUpdated, onReloadMall }: {
   const [latitude, setLatitude] = useState('')
   const [reason, setReason] = useState('基于高德候选人工调整商场坐标')
   const [coordinateConfirming, setCoordinateConfirming] = useState(false)
+  const [candidatePollAttempts, setCandidatePollAttempts] = useState(0)
+  const [candidatePollFailures, setCandidatePollFailures] = useState(0)
+  const [candidatePollVisibilityRevision, setCandidatePollVisibilityRevision] = useState(0)
   const candidateRequestSequence = useRef(0)
   const candidateAbort = useRef<AbortController | null>(null)
   const coordinateConfirmationInFlight = useRef({ current: false })
@@ -1221,34 +1258,49 @@ function MallOnboardingPanel({ mall, client, onMallUpdated, onReloadMall }: {
     candidateAbort.current?.abort()
   }, [])
 
-  const loadCandidates = useCallback(async () => {
+  const loadCandidates = useCallback(async (polling = false) => {
     const sequence = ++candidateRequestSequence.current
     candidateAbort.current?.abort()
     const controller = new AbortController()
     candidateAbort.current = controller
+    if (polling) setCandidatePollAttempts((current) => current + 1)
+    else setCandidatePollFailures(0)
     setCandidateState('loading')
     setError('')
-    const response = await client(mallWeatherGeocodeCandidatesPath(mall.id), { method: 'GET', showResult: false, silentLoading: true, signal: controller.signal })
-    if (sequence !== candidateRequestSequence.current) return false
-    if (!response.ok) {
+    try {
+      const response = await client(mallWeatherGeocodeCandidatesPath(mall.id), { method: 'GET', showResult: false, silentLoading: true, signal: controller.signal })
+      if (controller.signal.aborted || sequence !== candidateRequestSequence.current) return false
+      if (!response.ok) {
+        if (polling) setCandidatePollFailures((current) => current + 1)
+        setCandidateState('error')
+        setError(weatherActionError(response.status, '坐标候选加载失败', '当前账号缺少 mall.read 权限'))
+        return false
+      }
+      const parsed = parseMallWeatherGeocodeCandidates(response.data)
+      if (!parsed) {
+        if (polling) setCandidatePollFailures((current) => current + 1)
+        setCandidateState('error')
+        setError('坐标候选响应格式不正确，请联系管理员')
+        return false
+      }
+      if (polling) setCandidatePollFailures(0)
+      setCandidates(parsed)
+      const defaultCandidate = parsed.items.find((candidate) => candidate.selected) || parsed.items[0]
+      setSelectedCandidateID(defaultCandidate?.id || 0)
+      setLongitude(defaultCandidate ? String(defaultCandidate.longitude) : '')
+      setLatitude(defaultCandidate ? String(defaultCandidate.latitude) : '')
+      if (mallWeatherGeocodeRunTerminal(parsed.runStatus)) await onReloadMall(mall.id)
+      setCandidateState('success')
+      return true
+    } catch {
+      if (controller.signal.aborted || sequence !== candidateRequestSequence.current) return false
+      if (polling) setCandidatePollFailures((current) => current + 1)
       setCandidateState('error')
-      setError(weatherActionError(response.status, '坐标候选加载失败', '当前账号缺少 mall.read 权限'))
+      setError('坐标候选加载异常，请检查网络后重试。')
       return false
+    } finally {
+      if (candidateAbort.current === controller) candidateAbort.current = null
     }
-    const parsed = parseMallWeatherGeocodeCandidates(response.data)
-    if (!parsed) {
-      setCandidateState('error')
-      setError('坐标候选响应格式不正确，请联系管理员')
-      return false
-    }
-    setCandidates(parsed)
-    const defaultCandidate = parsed.items.find((candidate) => candidate.selected) || parsed.items[0]
-    setSelectedCandidateID(defaultCandidate?.id || 0)
-    setLongitude(defaultCandidate ? String(defaultCandidate.longitude) : '')
-    setLatitude(defaultCandidate ? String(defaultCandidate.latitude) : '')
-    if (mallWeatherGeocodeRunTerminal(parsed.runStatus)) await onReloadMall(mall.id)
-    setCandidateState('success')
-    return true
   }, [client, mall.id, onReloadMall])
 
   useEffect(() => {
@@ -1257,10 +1309,26 @@ function MallOnboardingPanel({ mall, client, onMallUpdated, onReloadMall }: {
   }, [cancelCandidateRequests, loadCandidates, mall.version])
 
   useEffect(() => {
+    const handleVisibilityChange = () => setCandidatePollVisibilityRevision((current) => current + 1)
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    return () => document.removeEventListener('visibilitychange', handleVisibilityChange)
+  }, [])
+
+  useEffect(() => {
+    setCandidatePollAttempts(0)
+    setCandidatePollFailures(0)
+  }, [mall.id, mall.version])
+
+  useEffect(() => {
     if (!mallWeatherShouldPollGeocode(mall.geocodeStatus, candidates, candidateState === 'loading')) return
-    const timer = window.setTimeout(() => void loadCandidates(), 5000)
+    if (candidatePollAttempts >= mallWeatherGeocodePollMaxAttempts) {
+      setError(`坐标候选自动刷新已在 ${mallWeatherGeocodePollMaxAttempts} 次后停止；请检查地址或任务状态后手动刷新。`)
+      return
+    }
+    const delay = mallWeatherGeocodePollDelayMilliseconds(candidatePollFailures, document.visibilityState !== 'hidden')
+    const timer = window.setTimeout(() => void loadCandidates(true), delay)
     return () => window.clearTimeout(timer)
-  }, [candidateState, candidates, loadCandidates, mall.geocodeStatus])
+  }, [candidatePollAttempts, candidatePollFailures, candidatePollVisibilityRevision, candidateState, candidates, loadCandidates, mall.geocodeStatus])
 
   async function triggerGeocode() {
     setSubmitting(true)
@@ -1288,6 +1356,8 @@ function MallOnboardingPanel({ mall, client, onMallUpdated, onReloadMall }: {
       setError(weatherActionError(outcome.response.status, '坐标解析任务提交失败', '当前账号缺少 mall.write 权限'))
       return
     }
+    setCandidatePollAttempts(0)
+    setCandidatePollFailures(0)
     const candidatesLoaded = await loadCandidates()
     const latestMall = await onReloadMall(mall.id)
     setSubmitting(false)
@@ -1383,7 +1453,7 @@ function MallOnboardingPanel({ mall, client, onMallUpdated, onReloadMall }: {
       <div className="mall-weather-geocode-actions">
         <div><strong>高德地址解析</strong><span>任务状态：{candidates?.runStatus || mall.geocodeStatus || '等待处理'} · 输出坐标系 GCJ-02</span></div>
         <div className="mall-weather-form-actions">
-          <button type="button" onClick={() => void loadCandidates()} disabled={candidateState === 'loading' || submitting}>{candidateState === 'loading' ? '加载中' : '刷新候选'}</button>
+          <button type="button" onClick={() => { setCandidatePollAttempts(0); setCandidatePollFailures(0); void loadCandidates() }} disabled={candidateState === 'loading' || submitting}>{candidateState === 'loading' ? '加载中' : '刷新候选'}</button>
           <button type="button" onClick={() => void triggerGeocode()} disabled={submitting || candidateState === 'loading'}>{submitting ? '处理中' : '重新解析地址'}</button>
         </div>
       </div>

@@ -26,8 +26,11 @@ import {
   mallWeatherOverviewHasHourlyTemperature,
   mallWeatherOverviewReadiness,
   mallWeatherOverviewPath,
+  mallWeatherRealtimePath,
   mallWeatherGeocodeCandidatesPath,
   mallWeatherGeocodeConfirmPath,
+  mallWeatherGeocodePollDelayMilliseconds,
+  mallWeatherGeocodePollMaxAttempts,
   mallWeatherCandidateConfirmationRequest,
   mallWeatherCoordinateAdjustmentRequest,
   mallWeatherGeocodeRunTerminal,
@@ -72,6 +75,7 @@ import {
   parseMallWeatherLifeIndexPage,
   parseMallWeatherMinutelyPage,
   parseMallWeatherOverview,
+  parseMallWeatherRealtimePage,
   parseMallWeatherFetchRuns,
   parseMallWeatherRefreshResult,
   pollMallWeatherFetchRun,
@@ -577,6 +581,39 @@ test('builds encoded weather overview paths and rejects invalid mall ids', () =>
   assert.equal(mallWeatherOverviewPath(7), '/v1/malls/7/weather/overview')
   assert.equal(mallWeatherOverviewPath(7, 'Asia/Shanghai'), '/v1/malls/7/weather/overview?timeZone=Asia%2FShanghai')
   assert.throws(() => mallWeatherOverviewPath(0), /invalid mall id/)
+})
+
+test('builds a bounded RFC3339 realtime fallback path and parses its response', () => {
+  const start = new Date('2026-08-01T00:00:00.000Z')
+  const end = new Date('2026-08-01T01:00:00.000Z')
+  const url = new URL(mallWeatherRealtimePath(7, start, end, 'Asia/Shanghai'), 'https://example.test')
+  assert.equal(url.pathname, '/v1/malls/7/weather/realtime')
+  assert.equal(url.searchParams.get('start'), start.toISOString())
+  assert.equal(url.searchParams.get('end'), end.toISOString())
+  assert.equal(url.searchParams.get('timeZone'), 'Asia/Shanghai')
+  assert.equal(url.searchParams.get('latest'), 'true')
+  assert.equal(url.searchParams.get('pageSize'), '200')
+  assert.throws(() => mallWeatherRealtimePath(0, start, end, 'Asia/Shanghai'), /invalid mall id/)
+  assert.throws(() => mallWeatherRealtimePath(7, end, start, 'Asia/Shanghai'), /invalid weather range/)
+  assert.throws(() => mallWeatherRealtimePath(7, start, end, ''), /invalid weather time zone/)
+
+  const parsed = parseMallWeatherRealtimePage({ code: 0, data: {
+    items: [{ temperatureC: 31.5, qualityStatus: 'VALID', qualityWarnings: [] }],
+    meta: completeWeatherMeta,
+  } })
+  assert.equal(parsed?.items.length, 1)
+  assert.equal(parsed?.items[0].temperatureC, 31.5)
+  assert.equal(parsed?.meta.timeZone, 'Asia/Shanghai')
+  assert.equal(parseMallWeatherRealtimePage({ code: 0, data: { items: [{}] } }), null)
+})
+
+test('backs off and slows bounded geocode polling while the page is hidden', () => {
+  assert.equal(mallWeatherGeocodePollMaxAttempts, 24)
+  assert.equal(mallWeatherGeocodePollDelayMilliseconds(0, true), 5_000)
+  assert.equal(mallWeatherGeocodePollDelayMilliseconds(1, true), 10_000)
+  assert.equal(mallWeatherGeocodePollDelayMilliseconds(0, false), 30_000)
+  assert.equal(mallWeatherGeocodePollDelayMilliseconds(3, false), 60_000)
+  assert.throws(() => mallWeatherGeocodePollDelayMilliseconds(-1, true), /invalid geocode poll failure count/)
 })
 
 test('builds bounded complete-series paths and parses paged forecast contracts', () => {
