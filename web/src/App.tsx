@@ -641,12 +641,6 @@ type DeliveryLog = {
   sent_at: string | null
 }
 
-type DeliveryStore = {
-  key: string
-  name: string
-  aliases: string[]
-}
-
 const navGroups: NavGroup[] = [
   {
     label: '基础信息',
@@ -721,17 +715,6 @@ function navFromHash(): NavKey {
   const value = window.location.hash.replace(/^#\/?/, '') as NavKey
   return navItems.some((item) => item.key === value) ? value : 'overview'
 }
-
-const deliveryStores: DeliveryStore[] = [
-  { key: 'shangsheng', name: '上生新所', aliases: ['ABCN001A001', 'shangsheng', '上生新所', '上升新所'] },
-  { key: 'jialicheng', name: '嘉里城', aliases: ['ABCN001A004', 'jialicheng', 'kerry', '嘉里城'] },
-  { key: 'panlong', name: '蟠龙', aliases: ['ABCN001A005', 'panlong', '蟠龙'] },
-  { key: 'xintiandi', name: '新天地', aliases: ['ABCN001A003', 'xintiandi', '新天地'] },
-  { key: 'qiantan', name: '前滩', aliases: ['ABCN001P012', 'qiantan', '前滩'] },
-  { key: 'hangzhou_henglong', name: '杭州恒隆', aliases: ['ABCN002A001', 'hangzhou_henglong', 'henglong', '杭州恒隆'] },
-]
-
-const otherDeliveryStore: DeliveryStore = { key: 'other', name: '其他目标', aliases: [] }
 
 const builtinMethods: MethodDisplay[] = [
   {
@@ -4645,76 +4628,75 @@ function RunTable({ runs, onLoadSteps, onSelectRun }: { runs: PipelineRun[]; onL
   )
 }
 
-function DeliveryLogList({ logs, onSelectLog, onRetryLog, retryingLogID }: { logs: DeliveryLog[]; onSelectLog?: (log: DeliveryLog) => void; onRetryLog?: (log: DeliveryLog) => void | Promise<void>; retryingLogID?: number | null }) {
-  const [storeFilter, setStoreFilter] = useState('all')
-  const matchedLogs = useMemo(
-	    () => logs.map((log) => ({ log, store: matchDeliveryStore(log) ?? otherDeliveryStore })),
-    [logs],
-  )
-  const visibleLogs = storeFilter === 'all' ? matchedLogs : matchedLogs.filter((item) => item.store.key === storeFilter)
-  const groupedLogs = useMemo(() => {
-    return [...deliveryStores, otherDeliveryStore]
-      .map((store) => ({
-        store,
-        logs: visibleLogs.filter((item) => item.store.key === store.key).map((item) => item.log),
-      }))
-      .filter((group) => group.logs.length > 0)
-  }, [visibleLogs])
+function DeliveryLogList({ logs, onRetryLog, retryingLogID }: { logs: DeliveryLog[]; onRetryLog?: (log: DeliveryLog) => void | Promise<void>; retryingLogID?: number | null }) {
+  const [selectedLogID, setSelectedLogID] = useState<number | null>(null)
 
-  if (matchedLogs.length === 0) return <EmptyState text="暂无推送日志。" />
+  useEffect(() => {
+    setSelectedLogID((current) => logs.some((log) => log.id === current) ? current : logs[0]?.id ?? null)
+  }, [logs])
+
+  if (logs.length === 0) return <EmptyState text="暂无推送日志。" />
+
+  const selectedLog = logs.find((log) => log.id === selectedLogID) ?? logs[0]
   return (
-    <div className="store-log-layout">
-      <div className="log-filter-bar">
-        <label>
-          门店
-          <select value={storeFilter} onChange={(event) => setStoreFilter(event.target.value)}>
-            <option value="all">全部匹配门店</option>
-            {deliveryStores.map((store) => (
-              <option key={store.key} value={store.key}>{store.name}</option>
-            ))}
-			<option value={otherDeliveryStore.key}>{otherDeliveryStore.name}</option>
-          </select>
-        </label>
-        <span>共 {matchedLogs.length} 条，当前显示 {visibleLogs.length} 条</span>
-      </div>
-      {groupedLogs.length === 0 ? <EmptyState text="当前门店暂无推送日志。" /> : (
-        <div className="store-log-groups">
-          {groupedLogs.map((group) => {
-            const successCount = group.logs.filter((log) => log.success).length
-            const failedCount = group.logs.length - successCount
-            return (
-              <section className="store-log-group" key={group.store.key}>
-                <div className="store-log-title">
-                  <div>
-                    <strong>{group.store.name}</strong>
-                    <span>{group.logs.length} 条 / 成功 {successCount} / 失败 {failedCount}</span>
-                  </div>
-                  <StatusPill label={failedCount > 0 ? '存在失败' : '全部成功'} />
-                </div>
-                <div className="record-list">
-                  {group.logs.map((log) => (
-                    <article className="record-row" key={log.id}>
-                      <div>
-                        <strong>#{log.id} / {log.business_key || '-'}</strong>
-                        <span>
-                          {log.success ? '成功' : '失败'} / 来源 {log.source_code || '-'} / HTTP {log.http_status || '-'}
-                          {!log.success && ` / 重试 ${log.retry_count || 0}`}
-                        </span>
-                        <span>{log.error_message || deliveryLogPreview(log)}</span>
-                      </div>
-                      <div className="record-actions">
-                        <small>{formatDate(log.sent_at)}</small>
-                        {!log.success && onRetryLog && <button type="button" disabled={retryingLogID !== null} onClick={() => void onRetryLog(log)}>{retryingLogID === log.id ? '重试中…' : '重试'}</button>}
-                        {onSelectLog && <button type="button" onClick={() => onSelectLog(log)}>详情</button>}
-                      </div>
-                    </article>
-                  ))}
-                </div>
-              </section>
-            )
-          })}
+    <div className="delivery-log-layout">
+      <div className="delivery-log-main">
+        <div className="data-table-wrap" role="region" aria-label="推送日志列表" tabIndex={0}>
+          <table className="data-table delivery-log-table">
+            <thead>
+              <tr>
+                <th scope="col">状态</th>
+                <th scope="col">业务键</th>
+                <th scope="col">推送目标</th>
+                <th scope="col">来源</th>
+                <th scope="col">HTTP</th>
+                <th scope="col">推送时间</th>
+                <th scope="col">重试</th>
+                <th scope="col">操作</th>
+              </tr>
+            </thead>
+            <tbody>
+              {logs.map((log) => (
+                <tr className={log.id === selectedLog.id ? 'delivery-log-row--selected' : undefined} key={log.id}>
+                  <td><StatusPill label={log.success ? '成功' : '失败'} /></td>
+                  <td>{log.business_key || '-'}</td>
+                  <td>{log.destination_name || log.destination_code || `目标 #${log.destination_id}`}</td>
+                  <td>{log.source_code || '-'}</td>
+                  <td>{log.http_status || '-'}</td>
+                  <td>{formatDate(log.sent_at)}</td>
+                  <td>{log.retry_count}</td>
+                  <td>
+                    <div className="table-actions">
+                      <button type="button" aria-pressed={log.id === selectedLog.id} onClick={() => setSelectedLogID(log.id)}>查看</button>
+                      {!log.success && onRetryLog && <button type="button" disabled={retryingLogID !== null} onClick={() => void onRetryLog(log)}>{retryingLogID === log.id ? '重试中…' : '重试'}</button>}
+                    </div>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
         </div>
-      )}
+      </div>
+      <aside className="delivery-log-detail" aria-live="polite" aria-label="已选推送日志详情">
+        <div className="delivery-log-detail-heading">
+          <div>
+            <span>已选日志</span>
+            <strong>#{selectedLog.id}</strong>
+          </div>
+          <StatusPill label={selectedLog.success ? '成功' : '失败'} />
+        </div>
+        <dl className="delivery-log-detail-fields">
+          <div><dt>业务键</dt><dd>{selectedLog.business_key || '-'}</dd></div>
+          <div><dt>推送目标</dt><dd>{selectedLog.destination_name || selectedLog.destination_code || `目标 #${selectedLog.destination_id}`}</dd></div>
+          <div><dt>来源</dt><dd>{selectedLog.source_code || '-'}</dd></div>
+          <div><dt>Trace ID</dt><dd>{selectedLog.trace_id || '-'}</dd></div>
+          <div><dt>HTTP 状态</dt><dd>{selectedLog.http_status || '-'}</dd></div>
+          <div><dt>推送时间</dt><dd>{formatDate(selectedLog.sent_at)}</dd></div>
+          <div><dt>重试次数</dt><dd>{selectedLog.retry_count}</dd></div>
+        </dl>
+        {!selectedLog.success && <p className="delivery-log-protected-note">该记录存在交付异常。请求与响应内容受保护，不在管理端展示。</p>}
+        {!selectedLog.success && onRetryLog && <div className="delivery-log-detail-actions"><button type="button" disabled={retryingLogID !== null} onClick={() => void onRetryLog(selectedLog)}>{retryingLogID === selectedLog.id ? '重试中…' : '重试推送'}</button></div>}
+      </aside>
     </div>
   )
 }
@@ -4738,25 +4720,6 @@ function normalizeOrderPushSkipConfig(config: OrderPushSkipConfig | null): Order
 
 function apiURL(path: string) {
   return buildApiURL(path, defaultApiBaseURL)
-}
-
-function matchDeliveryStore(log: DeliveryLog) {
-  const text = [
-    log.destination_code,
-    log.destination_name,
-    log.source_code,
-    log.business_key,
-    log.response_summary,
-    log.error_message,
-  ].join(' ').toLowerCase()
-
-  return deliveryStores.find((store) => store.aliases.some((alias) => text.includes(alias.toLowerCase()))) ?? null
-}
-
-function deliveryLogPreview(log: DeliveryLog) {
-  const response = compactText(log.response_summary)
-  if (response) return response
-  return `trace: ${log.trace_id || '-'}`
 }
 
 function compactText(value: string) {
