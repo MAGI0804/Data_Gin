@@ -427,9 +427,9 @@ button.danger:hover {
 
 /* 12-data-authorizations：按设计稿收敛为紧凑、扁平的主从工作台。 */
 .data-authorization-page {
-  --authorization-danger: #ef3b35;
-  --authorization-warning: var(--accent, #f79500);
-  --authorization-success: var(--success, #07964d);
+  --authorization-danger: #c82822;
+  --authorization-warning: #a95b00;
+  --authorization-success: #06743c;
   gap: 20px;
 }
 
@@ -466,6 +466,8 @@ button.danger:hover {
 
 .data-authorization-toolbar button.primary {
   min-width: 190px;
+  border-color: var(--authorization-warning);
+  background: var(--authorization-warning);
 }
 
 .data-authorization-layout {
@@ -566,7 +568,7 @@ button.danger:hover {
   display: inline-flex;
   align-items: center;
   gap: 8px;
-  color: #777d85;
+  color: #636a73;
   font-size: 13px;
 }
 
@@ -670,7 +672,7 @@ button.danger:hover {
 .data-authorization-credential dt,
 .data-authorization-permission-scope span,
 .data-authorization-permission-expiry span {
-  color: #777d85;
+  color: #636a73;
   font-size: 13px;
   font-weight: 500;
 }
