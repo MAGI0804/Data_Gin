@@ -416,28 +416,17 @@ func (service *DataAuthorizationService) ReissueToken(ctx context.Context, actor
 }
 
 func (service *DataAuthorizationService) QueryAudits(ctx context.Context, actorUserID uint, request auth_request.DataAuthorizationAuditQueryRequest) (*DataAuthorizationAuditQueryResult, error) {
+	startTime, endTime, err := normalizeDataAuthorizationAuditTimeRange(request.StartTime, request.EndTime)
+	if err != nil {
+		return nil, err
+	}
 	if err := service.authorizeAdmin(ctx, service.db, actorUserID, false); err != nil {
 		return nil, err
 	}
 	pageSize := normalizeDataAuthorizationPageSize(request.PageSize)
-	query := service.db.WithContext(ctx).Model(&model.DataAuthorizationAudit{})
-	if request.BeforeID > 0 {
-		query = query.Where("id < ?", request.BeforeID)
-	}
-	if request.TargetUserID > 0 {
-		query = query.Where("target_user_id = ?", request.TargetUserID)
-	}
-	if p := strings.TrimSpace(request.Permission); p != "" {
-		if !grantableDataPermission(p) && p != "open_api.account" && p != "open_api.credential" {
-			return nil, ErrDataAuthorizationInvalidInput
-		}
-		query = query.Where("permission = ?", p)
-	}
-	if a := strings.TrimSpace(request.Action); a != "" {
-		if !validDataAuthorizationAuditAction(a) {
-			return nil, ErrDataAuthorizationInvalidInput
-		}
-		query = query.Where("action = ?", a)
+	query, err := buildDataAuthorizationAuditQuery(service.db.WithContext(ctx), request, startTime, endTime)
+	if err != nil {
+		return nil, err
 	}
 	var audits []model.DataAuthorizationAudit
 	if err := query.Order("id DESC").Limit(pageSize + 1).Find(&audits).Error; err != nil {
@@ -470,6 +459,35 @@ func (service *DataAuthorizationService) QueryAudits(ctx context.Context, actorU
 		result.Pagination.NextBeforeID = audits[len(audits)-1].ID
 	}
 	return result, nil
+}
+
+func buildDataAuthorizationAuditQuery(query *gorm.DB, request auth_request.DataAuthorizationAuditQueryRequest, startTime, endTime *time.Time) (*gorm.DB, error) {
+	query = query.Model(&model.DataAuthorizationAudit{})
+	if request.BeforeID > 0 {
+		query = query.Where("id < ?", request.BeforeID)
+	}
+	if request.TargetUserID > 0 {
+		query = query.Where("target_user_id = ?", request.TargetUserID)
+	}
+	if p := strings.TrimSpace(request.Permission); p != "" {
+		if !grantableDataPermission(p) && p != "open_api.account" && p != "open_api.credential" {
+			return nil, ErrDataAuthorizationInvalidInput
+		}
+		query = query.Where("permission = ?", p)
+	}
+	if a := strings.TrimSpace(request.Action); a != "" {
+		if !validDataAuthorizationAuditAction(a) {
+			return nil, ErrDataAuthorizationInvalidInput
+		}
+		query = query.Where("action = ?", a)
+	}
+	if startTime != nil {
+		query = query.Where("created_at >= ?", *startTime)
+	}
+	if endTime != nil {
+		query = query.Where("created_at <= ?", *endTime)
+	}
+	return query, nil
 }
 
 type normalizedDataAuthorizationCreate struct {
@@ -723,6 +741,34 @@ func validDataAuthorizationAuditAction(action string) bool {
 		return false
 	}
 }
+
+func normalizeDataAuthorizationAuditTimeRange(start, end string) (*time.Time, *time.Time, error) {
+	parse := func(value string) (*time.Time, error) {
+		value = strings.TrimSpace(value)
+		if value == "" {
+			return nil, nil
+		}
+		parsed, err := time.Parse(time.RFC3339, value)
+		if err != nil {
+			return nil, ErrDataAuthorizationInvalidInput
+		}
+		parsed = parsed.UTC()
+		return &parsed, nil
+	}
+	startTime, err := parse(start)
+	if err != nil {
+		return nil, nil, err
+	}
+	endTime, err := parse(end)
+	if err != nil {
+		return nil, nil, err
+	}
+	if startTime != nil && endTime != nil && startTime.After(*endTime) {
+		return nil, nil, ErrDataAuthorizationInvalidInput
+	}
+	return startTime, endTime, nil
+}
+
 func normalizeDataAuthorizationPageSize(pageSize int) int {
 	if pageSize <= 0 {
 		return 20

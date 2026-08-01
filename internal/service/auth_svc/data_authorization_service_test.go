@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -102,6 +103,51 @@ func TestDataAuthorizationReasonRejectsLogInjection(t *testing.T) {
 		if _, err := normalizeDataAuthorizationReason(reason); err == nil {
 			t.Fatalf("reason %q was accepted", reason)
 		}
+	}
+}
+
+func TestNormalizeDataAuthorizationAuditTimeRange(t *testing.T) {
+	start, end, err := normalizeDataAuthorizationAuditTimeRange("2026-07-30T09:00:00+08:00", "2026-07-30T01:00:00Z")
+	if err != nil || start == nil || end == nil || !start.Equal(*end) {
+		t.Fatalf("normalizeDataAuthorizationAuditTimeRange() = %v, %v, %v", start, end, err)
+	}
+	if start.Location() != time.UTC || end.Location() != time.UTC {
+		t.Fatalf("time range must be normalized to UTC: %v, %v", start.Location(), end.Location())
+	}
+	if start, end, err := normalizeDataAuthorizationAuditTimeRange("", ""); err != nil || start != nil || end != nil {
+		t.Fatalf("empty time range = %v, %v, %v", start, end, err)
+	}
+	for _, values := range [][2]string{{"2026-07-30", ""}, {"2026-07-30T02:00:00Z", "2026-07-30T01:00:00Z"}} {
+		if _, _, err := normalizeDataAuthorizationAuditTimeRange(values[0], values[1]); !errors.Is(err, ErrDataAuthorizationInvalidInput) {
+			t.Fatalf("range %q-%q error = %v, want invalid input", values[0], values[1], err)
+		}
+	}
+}
+
+func TestBuildDataAuthorizationAuditQueryUsesBoundTimeParameters(t *testing.T) {
+	db, err := gorm.Open(mysql.New(mysql.Config{
+		Conn:                      &sql.DB{},
+		SkipInitializeWithVersion: true,
+	}), &gorm.Config{DryRun: true, DisableAutomaticPing: true})
+	if err != nil {
+		t.Fatalf("gorm.Open() error = %v", err)
+	}
+	start := time.Date(2026, 7, 30, 1, 0, 0, 0, time.UTC)
+	end := time.Date(2026, 7, 30, 2, 0, 0, 0, time.UTC)
+	query, err := buildDataAuthorizationAuditQuery(db, auth_request.DataAuthorizationAuditQueryRequest{
+		TargetUserID: 9,
+		Action:       model.DataAuthorizationActionGrant,
+		BeforeID:     41,
+	}, &start, &end)
+	if err != nil {
+		t.Fatalf("buildDataAuthorizationAuditQuery() error = %v", err)
+	}
+	statement := query.Order("id DESC").Limit(31).Find(&[]model.DataAuthorizationAudit{}).Statement
+	if !strings.Contains(statement.SQL.String(), "created_at >= ?") || !strings.Contains(statement.SQL.String(), "created_at <= ?") {
+		t.Fatalf("time predicates are missing from SQL: %q", statement.SQL.String())
+	}
+	if len(statement.Vars) != 5 || statement.Vars[3] != start || statement.Vars[4] != end {
+		t.Fatalf("time predicates must use bound parameters, SQL=%q vars=%#v", statement.SQL.String(), statement.Vars)
 	}
 }
 

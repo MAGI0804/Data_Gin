@@ -2,7 +2,6 @@ import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 're
 import { Check, Clipboard, KeyRound, Plus, RefreshCcw, RotateCcw, Search, ShieldCheck, ShieldOff, UserRound } from 'lucide-react'
 import {
   authorizationExpiryISO,
-  auditOccursWithinLoadedRange,
   buildDataAuthorizationAuditQuery,
   dataAuthorizationAuditActions,
   defaultAuthorizationExpiry,
@@ -77,7 +76,7 @@ export function DataAuthorizationPage({ client }: { client: ApiClient }) {
   const auditRequestSequence = useRef(0)
   const mutationInFlight = useRef(false)
 
-  const selected = useMemo(() => accounts.find((account) => account.id === selectedID) ?? accounts[0] ?? null, [accounts, selectedID])
+  const selected = accounts.find((account) => account.id === selectedID) ?? accounts[0] ?? null
 
   const loadAccounts = useCallback(async (options: { append?: boolean; search?: string } = {}) => {
     const sequence = ++requestSequence.current
@@ -113,7 +112,7 @@ export function DataAuthorizationPage({ client }: { client: ApiClient }) {
     try {
       const response = await client('/v1/data-authorizations/audits/query', {
         method: 'POST',
-        body: buildDataAuthorizationAuditQuery({ targetUserId: filters.targetUserId, action: filters.action, beforeId: append ? options.beforeId : 0, pageSize: 30 }),
+        body: buildDataAuthorizationAuditQuery({ targetUserId: filters.targetUserId, action: filters.action, startTime: filters.startTime, endTime: filters.endTime, beforeId: append ? options.beforeId : 0, pageSize: 30 }),
         showResult: false,
         silentLoading: true,
         signal: controller.signal,
@@ -299,11 +298,6 @@ export function DataAuthorizationPage({ client }: { client: ApiClient }) {
     setNotice('已取消授权审计查询，保留最近一次成功数据。')
   }
 
-  const visibleAudits = useMemo(
-    () => audits.filter((audit) => auditOccursWithinLoadedRange(audit.createdAt, appliedAuditFilters.startTime, appliedAuditFilters.endTime)),
-    [appliedAuditFilters.endTime, appliedAuditFilters.startTime, audits],
-  )
-
   return (
     <div className="view-stack data-authorization-page" aria-busy={loading || mutating}>
       <section className="data-authorization-toolbar">
@@ -372,13 +366,13 @@ export function DataAuthorizationPage({ client }: { client: ApiClient }) {
                 {dataAuthorizationAuditActions.map((action) => <option value={action} key={action}>{auditActionLabel(action)}</option>)}
               </select>
             </label>
-            <label>开始时间（已加载记录）<input type="datetime-local" value={auditFilters.startTime} disabled={auditLoading} onChange={(event) => setAuditFilters((current) => ({ ...current, startTime: event.currentTarget.value }))} /></label>
-            <label>结束时间（已加载记录）<input type="datetime-local" value={auditFilters.endTime} disabled={auditLoading} onChange={(event) => setAuditFilters((current) => ({ ...current, endTime: event.currentTarget.value }))} /></label>
+            <label>开始时间<input type="datetime-local" value={auditFilters.startTime} disabled={auditLoading} onChange={(event) => setAuditFilters((current) => ({ ...current, startTime: event.currentTarget.value }))} /></label>
+            <label>结束时间<input type="datetime-local" value={auditFilters.endTime} disabled={auditLoading} onChange={(event) => setAuditFilters((current) => ({ ...current, endTime: event.currentTarget.value }))} /></label>
           </div>
           <div className="record-actions"><button type="submit" disabled={auditLoading}>{auditLoading ? '查询中…' : '查询审计'}</button><button type="button" onClick={cancelAuditLoad} disabled={!auditLoading}>取消</button></div>
         </form>
-        <p className="query-contract-note">服务端按目标账号、动作和 <code>beforeId</code> 游标筛选；当前接口未提供时间字段，时间范围只筛选本次已加载的记录。</p>
-        {visibleAudits.length === 0 ? <div className="empty-state">{auditLoading ? '授权审计加载中…' : '暂无匹配的授权变更记录。'}</div> : <div className="data-table-wrap"><table className="data-table"><thead><tr><th>时间</th><th>动作</th><th>账号</th><th>权限</th><th>有效期变更</th><th>原因</th></tr></thead><tbody>{visibleAudits.map((audit) => <tr key={audit.id}><td>{formatDateTime(audit.createdAt)}</td><td>{auditActionLabel(audit.action)}</td><td>{audit.targetAccount || `#${audit.targetUserId}`}</td><td>{permissionLabel(audit.permission)}</td><td>{formatAuditExpiry(audit)}</td><td className="data-authorization-reason">{audit.reason}</td></tr>)}</tbody></table></div>}
+        <p className="query-contract-note">服务端按目标账号、动作、时间范围和 <code>beforeId</code> 游标筛选；时间边界包含在查询结果内。</p>
+        {audits.length === 0 ? <div className="empty-state">{auditLoading ? '授权审计加载中…' : '暂无匹配的授权变更记录。'}</div> : <div className="data-table-wrap"><table className="data-table"><thead><tr><th>时间</th><th>动作</th><th>账号</th><th>权限</th><th>有效期变更</th><th>原因</th></tr></thead><tbody>{audits.map((audit) => <tr key={audit.id}><td>{formatDateTime(audit.createdAt)}</td><td>{auditActionLabel(audit.action)}</td><td>{audit.targetAccount || `#${audit.targetUserId}`}</td><td>{permissionLabel(audit.permission)}</td><td>{formatAuditExpiry(audit)}</td><td className="data-authorization-reason">{audit.reason}</td></tr>)}</tbody></table></div>}
         {auditPagination.hasMore && <div className="record-actions"><button type="button" disabled={auditLoading} onClick={() => void loadAudits(appliedAuditFilters, { append: true, beforeId: auditPagination.nextBeforeId })}>{auditLoading ? '加载中…' : '加载更早记录'}</button></div>}
       </section>
 

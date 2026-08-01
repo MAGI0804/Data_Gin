@@ -38,6 +38,8 @@ type DataAuthorizationAuditQueryRequest struct {
 	TargetUserID uint   `json:"targetUserId"`
 	Permission   string `json:"permission"`
 	Action       string `json:"action"`
+	StartTime    string `json:"startTime"`
+	EndTime      string `json:"endTime"`
 	BeforeID     uint   `json:"beforeId"`
 	PageSize     int    `json:"pageSize"`
 }

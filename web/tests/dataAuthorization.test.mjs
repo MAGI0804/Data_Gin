@@ -2,7 +2,6 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import {
   authorizationExpiryISO,
-  auditOccursWithinLoadedRange,
   buildDataAuthorizationAuditQuery,
   dataAuthorizationMessage,
   defaultAuthorizationExpiry,
@@ -41,11 +40,13 @@ test('parses audit pagination and safe messages', () => {
   assert.equal(dataAuthorizationMessage({ msg: 1 }, 'fallback'), 'fallback')
 })
 
-test('builds the exact bounded audit cursor request contract', () => {
-  assert.deepEqual(buildDataAuthorizationAuditQuery({ targetUserId: 9, action: 'REVOKE', beforeId: 41, pageSize: 30 }), {
+test('builds the exact bounded audit cursor request contract with an RFC3339 time range', () => {
+  assert.deepEqual(buildDataAuthorizationAuditQuery({ targetUserId: 9, action: 'REVOKE', startTime: '2026-07-30T09:00:00Z', endTime: '2026-07-30T19:00:00Z', beforeId: 41, pageSize: 30 }), {
     targetUserId: 9,
     permission: '',
     action: 'REVOKE',
+    startTime: '2026-07-30T09:00:00.000Z',
+    endTime: '2026-07-30T19:00:00.000Z',
     beforeId: 41,
     pageSize: 30,
   })
@@ -53,16 +54,11 @@ test('builds the exact bounded audit cursor request contract', () => {
     targetUserId: 0,
     permission: '',
     action: '',
+    startTime: '',
+    endTime: '',
     beforeId: 0,
     pageSize: 100,
   })
-})
-
-test('filters audit time only within records already loaded', () => {
-  assert.equal(auditOccursWithinLoadedRange('2026-07-30T10:00:00Z', '', ''), true)
-  assert.equal(auditOccursWithinLoadedRange('2026-07-30T10:00:00Z', '2026-07-30T09:00', '2026-07-30T19:00'), true)
-  assert.equal(auditOccursWithinLoadedRange('2026-07-30T10:00:00Z', '2026-07-30T19:01', ''), false)
-  assert.equal(auditOccursWithinLoadedRange('not-a-time', '', ''), false)
 })
 
 test('normalizes default and explicit expiry', () => {
