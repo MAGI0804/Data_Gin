@@ -5094,20 +5094,19 @@ function TransformRuleList({ rules, sources, onDetail }: { rules: TransformRule[
 function ProcessedDataList({ records }: { records: ProcessedData[] }) {
   if (records.length === 0) return <EmptyState text="暂无处理后数据。" />
   return (
-    <div className="record-list">
-      {records.slice(0, 30).map((record) => (
-        <article className="record-row" key={record.id}>
-          <div>
-            <strong>#{record.id} / {record.data_type || 'processed'}</strong>
-            <span>raw #{record.raw_data_id} / 质量 {record.quality_score}</span>
-            <details>
-              <summary>查看脱敏处理字段</summary>
-              <ReadonlyJSON value={redactMonitoringJSON(parseJsonText(record.data_fields))} />
-            </details>
-          </div>
-          <small>{record.created_at || '-'}</small>
-        </article>
-      ))}
+    <div className="data-table-wrap" role="region" aria-label="旧处理结果列表" tabIndex={0}>
+      <table className="data-table">
+        <thead><tr><th scope="col">数据类型</th><th scope="col">Raw ID</th><th scope="col">质量分数</th><th scope="col">处理时间</th><th scope="col">操作</th></tr></thead>
+        <tbody>{records.map((record) => (
+          <tr key={record.id}>
+            <td><strong>{record.data_type || 'processed'}</strong><small>记录 #{record.id}</small></td>
+            <td>#{record.raw_data_id}</td>
+            <td>{formatQualityScore(record.quality_score)}</td>
+            <td>{formatUnixTime(record.created_at)}</td>
+            <td><details><summary>查看字段</summary><ReadonlyJSON value={redactMonitoringJSON(parseJsonText(record.data_fields))} /></details></td>
+          </tr>
+        ))}</tbody>
+      </table>
     </div>
   )
 }
@@ -5115,16 +5114,20 @@ function ProcessedDataList({ records }: { records: ProcessedData[] }) {
 function CleanRecordList({ records }: { records: CleanRecord[] }) {
   if (records.length === 0) return <EmptyState text="暂无清洗记录。" />
   return (
-    <div className="record-list">
-      {records.map((record) => (
-        <article className="record-row" key={record.id}>
-          <div>
-            <strong>{record.business_key || `#${record.id}`}</strong>
-            <span>来源 #{record.source_id} / 表 {record.table_name || '-'} / 原始记录 #{record.raw_record_id}</span>
-          </div>
-          <div className="record-actions"><span>质量 {record.quality_score}</span><StatusPill label={cleanRecordStatusLabel(record.status)} /><small>{formatUnixTime(record.created_at)}</small></div>
-        </article>
-      ))}
+    <div className="data-table-wrap" role="region" aria-label="清洗记录列表" tabIndex={0}>
+      <table className="data-table">
+        <thead><tr><th scope="col">业务键</th><th scope="col">逻辑表</th><th scope="col">来源 / 原始记录</th><th scope="col">质量分数</th><th scope="col">状态</th><th scope="col">处理时间</th></tr></thead>
+        <tbody>{records.map((record) => (
+          <tr key={record.id}>
+            <td><strong>{record.business_key || `#${record.id}`}</strong><small>记录 #{record.id}</small></td>
+            <td>{record.table_name || '-'}</td>
+            <td>#{record.source_id} / #{record.raw_record_id}</td>
+            <td>{formatQualityScore(record.quality_score)}</td>
+            <td><StatusPill label={cleanRecordStatusLabel(record.status)} /></td>
+            <td>{formatUnixTime(record.created_at)}</td>
+          </tr>
+        ))}</tbody>
+      </table>
     </div>
   )
 }
@@ -5614,6 +5617,10 @@ function cleanRecordStatusLabel(status: string) {
   if (status === 'invalid') return '无效'
   if (status === 'delivered') return '已交付'
   return status || '-'
+}
+
+function formatQualityScore(value: number) {
+  return Number.isFinite(value) ? `${value.toFixed(1)} / 100` : '-'
 }
 
 function ruleDraftFrom(rule: TransformRule): RuleDraft {
