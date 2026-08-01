@@ -37,7 +37,7 @@ import { PipelineComposerPanel } from './PipelineComposerPanel'
 import { Brand } from './components/Brand'
 import { parseMallWeatherExportContentStatus, submitMallWeatherExportContentDownload } from './mallWeatherExport'
 import { buildRawRecordsRequest, buildWarehouseRawRecordsQuery, parseRawRecordsPage, type RawRecordOrigin, type RawRecordsPage } from './rawRecords'
-import { buildDeliveryLogListQuery, buildRunListQuery, parseMonitoringPage, type MonitoringPage } from './monitoringRecords'
+import { buildDeliveryLogListQuery, buildDeliveryTaskListQuery, buildDestinationListQuery, buildRunListQuery, buildSourceListQuery, buildTransformRuleListQuery, parseMonitoringPage, type MonitoringPage } from './monitoringRecords'
 import { validateOrderPushSkipPolicy } from './orderPushPolicy'
 import { runSingleFlight } from './singleFlight'
 import { parseSourceFetchSummary } from './sourceOperations'
@@ -812,6 +812,7 @@ function App() {
   const mobileNavRef = useRef<HTMLElement>(null)
   const [loading, setLoading] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
+  const [workspaceRefreshVersion, setWorkspaceRefreshVersion] = useState(0)
   const [workspaceError, setWorkspaceError] = useState('')
   const [result, setResult] = useState<ApiResult | null>(null)
   const [runs, setRuns] = useState<PipelineRun[]>([])
@@ -964,32 +965,18 @@ function App() {
         } else if (activeNav === 'step_runs') {
           const runResult = await get('/v1/runs?limit=50')
           if (!controller.signal.aborted && runResult.ok) setRuns(readList<PipelineRun>(runResult, 'runs'))
-        } else if (activeNav === 'sources') {
+        } else if (activeNav === 'rules') {
           const sourceResult = await get('/v1/sources')
           if (!controller.signal.aborted) {
             if (sourceResult.ok) setSources(readList<SourceDefinition>(sourceResult, 'sources'))
-            else setWorkspaceError('数据源列表加载失败，已保留上一次成功数据。')
-          }
-        } else if (activeNav === 'rules') {
-          const [sourceResult, ruleResult] = await Promise.all([get('/v1/sources'), get('/v1/transform-rules')])
-          if (!controller.signal.aborted) {
-            if (sourceResult.ok) setSources(readList<SourceDefinition>(sourceResult, 'sources'))
-            if (ruleResult.ok) setTransformRules(readList<TransformRule>(ruleResult, 'rules'))
-            if (!sourceResult.ok || !ruleResult.ok) setWorkspaceError('规则配置加载不完整，已保留上一次成功数据。')
-          }
-        } else if (activeNav === 'destinations') {
-          const destinationResult = await get('/v1/destinations')
-          if (!controller.signal.aborted) {
-            if (destinationResult.ok) setDestinations(readList<DestinationDefinition>(destinationResult, 'destinations'))
-            else setWorkspaceError('推送目标列表加载失败，已保留上一次成功数据。')
+            if (!sourceResult.ok) setWorkspaceError('规则来源加载失败，已保留上一次成功数据。')
           }
         } else if (activeNav === 'tasks') {
-          const [sourceResult, destinationResult, taskResult] = await Promise.all([get('/v1/sources'), get('/v1/destinations'), get('/v1/delivery-tasks')])
+          const [sourceResult, destinationResult] = await Promise.all([get('/v1/sources'), get('/v1/destinations')])
           if (!controller.signal.aborted) {
             if (sourceResult.ok) setSources(readList<SourceDefinition>(sourceResult, 'sources'))
             if (destinationResult.ok) setDestinations(readList<DestinationDefinition>(destinationResult, 'destinations'))
-            if (taskResult.ok) setDeliveryTasks(readList<DeliveryTask>(taskResult, 'tasks'))
-            if (!sourceResult.ok || !destinationResult.ok || !taskResult.ok) setWorkspaceError('推送任务配置加载不完整，已保留上一次成功数据。')
+            if (!sourceResult.ok || !destinationResult.ok) setWorkspaceError('推送任务关联配置加载不完整，已保留上一次成功数据。')
           }
         } else if (activeNav === 'push_policy') {
           const [sourceResult, ruleResult, destinationResult, taskResult, orderPushSkipResult] = await Promise.all([get('/v1/sources'), get('/v1/transform-rules'), get('/v1/destinations'), get('/v1/delivery-tasks'), get('/v1/order-push-skip-config')])
@@ -1038,6 +1025,7 @@ function App() {
         if (workspaceRequestRef.current === controller) {
           workspaceRequestRef.current = null
           setRefreshing(false)
+          if (!controller.signal.aborted) setWorkspaceRefreshVersion((version) => version + 1)
         }
       }
     },
@@ -1409,16 +1397,16 @@ function App() {
         {activeNav === 'store_info' && <StoreInfoPage actorID={actorID} client={client} downloadFile={downloadFile} />}
         {activeNav === 'mall_weather' && <MallWeatherPage actorID={actorID} client={client} downloadFile={downloadFile} />}
         {activeNav === 'data_authorizations' && <DataAuthorizationPage client={client} />}
-        {activeNav === 'sources' && <SourcesQueryPage client={client} sources={sources} onFetchSource={fetchSource} onTestSource={testSource} onRefresh={() => refreshWorkspace(false)} />}
+        {activeNav === 'sources' && <SourcesQueryPage client={client} onFetchSource={fetchSource} onTestSource={testSource} refreshVersion={workspaceRefreshVersion} />}
         {activeNav === 'methods' && <MethodsView methods={methods} pipelines={pipelines} client={client} coreMethods={coreMethods} onToggle={toggleTarget} onPipelineRunCompleted={() => void refreshWorkspace(false)} />}
         {activeNav === 'receive' && <RawRecordsQueryPage title="接口接收记录" origin="receive" client={client} onFetchSource={fetchSource} />}
         {activeNav === 'pull_records' && <RawRecordsQueryPage title="数据拉取记录" origin="pull" client={client} onFetchSource={fetchSource} />}
         {activeNav === 'backfill' && <BojunBackfillPage loading={loading || refreshing} onPreview={previewBojunOrderBackfill} onConfirm={confirmBojunOrderBackfill} />}
         {activeNav === 'youzan_distribution' && <YouzanDistributionPage task={legacyTasks.find((item) => item.code === 'youzan_distribution_order_fetch')} loading={loading || refreshing} onPreview={previewYouzanDistributionBackfill} onConfirm={confirmYouzanDistributionBackfill} onRun={runLegacyTask} />}
-        {activeNav === 'rules' && <RulesQueryPage client={client} rules={transformRules} sources={sources} onRulesChange={setTransformRules} />}
+        {activeNav === 'rules' && <RulesQueryPage client={client} rules={transformRules} sources={sources} onRulesChange={setTransformRules} refreshVersion={workspaceRefreshVersion} />}
         {activeNav === 'processed' && <ProcessedQueryPage client={client} />}
-        {activeNav === 'destinations' && <DestinationsQueryPage client={client} destinations={destinations} onRefresh={() => refreshWorkspace(false)} />}
-        {activeNav === 'tasks' && <DeliveryTasksQueryPage client={client} tasks={deliveryTasks} sources={sources} destinations={destinations} onRefresh={() => refreshWorkspace(false)} />}
+        {activeNav === 'destinations' && <DestinationsQueryPage client={client} refreshVersion={workspaceRefreshVersion} />}
+        {activeNav === 'tasks' && <DeliveryTasksQueryPage client={client} sources={sources} destinations={destinations} onRefresh={() => refreshWorkspace(false)} refreshVersion={workspaceRefreshVersion} />}
         {activeNav === 'push_policy' && <PushPolicyPage coreMethod={coreMethods.find((item) => item.key === 'mall_push')} config={orderPushSkipConfig} targets={orderPushTargets} onSave={saveOrderPushSkipConfig} onToggle={toggleTarget} />}
         {(activeNav === 'excel_jobs' || activeNav === 'excel_schemes' || activeNav === 'excel_write') && <ExcelMatchView section={activeNav === 'excel_jobs' ? 'jobs' : activeNav === 'excel_schemes' ? 'schemes' : 'write'} client={client} token={token} loading={loading} setLoading={setLoading} setResult={setResult} onNavigateToJobs={() => navigate('excel_jobs')} />}
       </section>
@@ -1647,6 +1635,42 @@ function BojunBackfillResultView({ title, result }: { title: string; result: Boj
   )
 }
 
+function useConfigurationListPage<T>(client: ApiClient, path: string, key: string, query: string, reloadVersion: number) {
+  const [recordsPage, setRecordsPage] = useState<MonitoringPage<T> | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const requestRef = useRef<AbortController | null>(null)
+
+  useEffect(() => {
+    requestRef.current?.abort()
+    const controller = new AbortController()
+    requestRef.current = controller
+    setLoading(true)
+    setError('')
+    void client(`${path}?${query}`, { method: 'GET', signal: controller.signal, showResult: false, silentLoading: true }).then((response) => {
+      if (controller.signal.aborted) return
+      const parsed = response.ok ? parseMonitoringPage<T>(response.data, key) : null
+      if (parsed) {
+        setRecordsPage(parsed)
+        return
+      }
+      const legacyItems = readDataField(response.data, key)
+      if (response.ok && Array.isArray(legacyItems)) {
+        const pageSize = 20
+        setRecordsPage({ list: legacyItems.slice(0, pageSize) as T[], pagination: { page: 1, pageSize, total: legacyItems.length, totalPages: legacyItems.length ? 1 : 0 } })
+        setError('当前服务暂不支持配置列表分页或筛选，已显示未筛选的兼容数据。')
+        return
+      }
+      setError(response.error?.message || '配置列表暂时不可用，请稍后重试。')
+    }).finally(() => {
+      if (!controller.signal.aborted) setLoading(false)
+    })
+    return () => controller.abort()
+  }, [client, key, path, query, reloadVersion])
+
+  return { recordsPage, loading, error }
+}
+
 function RunsQueryPage({ client, pipelines, onLoadSteps, onPipelineRunCompleted }: { client: ApiClient; pipelines: PipelineDefinition[]; onLoadSteps: (runId: number) => void; onPipelineRunCompleted: () => void }) {
   const [traceID, setTraceID] = useState('')
   const [status, setStatus] = useState('all')
@@ -1838,16 +1862,27 @@ function StepRunsQueryPage({ runs, stepRuns, selectedRunID, onLoadSteps }: { run
   )
 }
 
-function SourcesQueryPage({ client, sources, onFetchSource, onTestSource, onRefresh }: { client: ApiClient; sources: SourceDefinition[]; onFetchSource: (sourceID: number) => Promise<ApiResult>; onTestSource: (sourceID: number) => Promise<ApiResult>; onRefresh: () => Promise<void> }) {
+function SourcesQueryPage({ client, onFetchSource, onTestSource, refreshVersion }: { client: ApiClient; onFetchSource: (sourceID: number) => Promise<ApiResult>; onTestSource: (sourceID: number) => Promise<ApiResult>; refreshVersion: number }) {
   const [query, setQuery] = useState('')
   const [status, setStatus] = useState('all')
-  const [sourceType, setSourceType] = useState('all')
+  const [sourceType, setSourceType] = useState('')
+  const [applied, setApplied] = useState({ keyword: '', enabled: '' as '' | 'true' | 'false', sourceType: '' })
+  const [page, setPage] = useState(1)
+  const [reloadVersion, setReloadVersion] = useState(0)
   const [draft, setDraft] = useState<SourceDraft | null>(null)
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState('')
-  const filtered = sources.filter((source) => includesQuery([source.id, source.name, source.code, source.auth_type], query)
-    && (status === 'all' || (status === 'enabled' ? source.enabled : !source.enabled))
-    && (sourceType === 'all' || source.source_type === sourceType))
+  const listQuery = useMemo(() => buildSourceListQuery({ page, pageSize: 20, ...applied }), [applied, page])
+  const { recordsPage, loading, error } = useConfigurationListPage<SourceDefinition>(client, '/v1/sources', 'sources', listQuery, reloadVersion + refreshVersion)
+  const listedSources = recordsPage?.list ?? []
+  const pagination = recordsPage?.pagination
+
+  function submitQuery(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    setPage(1)
+    setApplied({ keyword: query, enabled: status === 'enabled' ? 'true' : status === 'disabled' ? 'false' : '', sourceType })
+    setReloadVersion((version) => version + 1)
+  }
 
   async function openDetail(id: number) {
     setMessage('')
@@ -1876,18 +1911,19 @@ function SourcesQueryPage({ client, sources, onFetchSource, onTestSource, onRefr
     if (!response.ok) { setMessage(response.error?.message || '数据源保存未完成。'); return }
     setDraft(null)
     setMessage('数据源已保存。')
-    await onRefresh()
+    setReloadVersion((version) => version + 1)
   }
   return (
     <div className="view-stack">
       {message && <div className="result-banner" role="status">{message}</div>}
-      <QueryBar count={filtered.length} total={sources.length}>
+      <form className="query-bar" onSubmit={submitQuery}><div className="query-fields">
         <Field label="名称 / 编码 / 鉴权" name="source_query" value={query} onChange={setQuery} />
         <SelectFilter label="状态" value={status} onChange={setStatus} options={[{ value: 'enabled', label: '启用' }, { value: 'disabled', label: '停用' }]} />
-        <SelectFilter label="类型" value={sourceType} onChange={setSourceType} options={uniqueOptions(sources.map((source) => source.source_type))} />
-      </QueryBar>
+        <Field label="类型" name="source_type" value={sourceType} onChange={setSourceType} />
+      </div><button type="submit" disabled={loading}>{loading ? '查询中…' : '查询'}</button></form>
+      {error && <div className="result-banner error" role="alert">{error}{recordsPage ? ' 已保留最近一次成功数据。' : ''}</div>}
       <div className="record-actions"><button type="button" className="primary" onClick={() => setDraft({ id: null, name: '', code: '', sourceType: 'api_poll', enabled: true, authType: 'none', configJSON: '{\n  "url": "",\n  "method": "GET",\n  "records_path": "data"\n}', schemaJSON: '{}', dedupeKeys: '[]', sourceQueryKey: '', hasSecret: false })}>新增数据源</button></div>
-      <Panel title="数据源配置" icon={<Database />} meta={`查询命中 ${filtered.length} 条`}><SourceList sources={filtered} onDetail={(source) => { void openDetail(source.id) }} onFetchSource={onFetchSource} onTestSource={onTestSource} /></Panel>
+      <Panel title="数据源配置" icon={<Database />} meta={loading && !recordsPage ? '正在加载…' : `共 ${pagination?.total ?? 0} 条`}><SourceList sources={listedSources} onDetail={(source) => { void openDetail(source.id) }} onFetchSource={onFetchSource} onTestSource={onTestSource} /><MonitoringPaginationControls page={pagination?.page ?? page} totalPages={pagination?.totalPages ?? 0} loading={loading} onPrevious={() => setPage((current) => Math.max(1, current - 1))} onNext={() => setPage((current) => current + 1)} /></Panel>
       {draft && <Modal title={draft.id ? '数据源详情与编辑' : '新增数据源'} onClose={() => { if (!saving) setDraft(null) }}>
         {draft.hasSecret && <div className="result-banner" role="status">配置中的敏感值已隐藏。保留“[已隐藏]”会保留原值；改为新值即可轮换，且不会回显旧值。</div>}
         <form className="excel-upload-form" onSubmit={save}>
@@ -2130,19 +2166,30 @@ function WarehouseRawRecordsPanel({ client, origin }: { client: ApiClient; origi
   )
 }
 
-function RulesQueryPage({ client, rules, sources, onRulesChange }: { client: ApiClient; rules: TransformRule[]; sources: SourceDefinition[]; onRulesChange: (rules: TransformRule[]) => void }) {
+function RulesQueryPage({ client, rules, sources, onRulesChange, refreshVersion }: { client: ApiClient; rules: TransformRule[]; sources: SourceDefinition[]; onRulesChange: (rules: TransformRule[]) => void; refreshVersion: number }) {
   const [query, setQuery] = useState('')
   const [status, setStatus] = useState('all')
   const [ruleType, setRuleType] = useState('all')
+  const [applied, setApplied] = useState({ keyword: '', enabled: '' as '' | 'true' | 'false', ruleType: '' })
+  const [page, setPage] = useState(1)
+  const [reloadVersion, setReloadVersion] = useState(0)
   const [draft, setDraft] = useState<RuleDraft | null>(null)
   const [rawContent, setRawContent] = useState('{}')
   const [testResult, setTestResult] = useState<unknown>(null)
   const [saving, setSaving] = useState(false)
   const [testing, setTesting] = useState(false)
   const [operationError, setOperationError] = useState('')
-  const filtered = rules.filter((rule) => includesQuery([rule.id, rule.name, rule.source_id, rule.rule_type], query)
-    && (status === 'all' || (status === 'enabled' ? rule.enabled : !rule.enabled))
-    && (ruleType === 'all' || rule.rule_type === ruleType))
+  const listQuery = useMemo(() => buildTransformRuleListQuery({ page, pageSize: 20, ...applied }), [applied, page])
+  const { recordsPage, loading, error } = useConfigurationListPage<TransformRule>(client, '/v1/transform-rules', 'rules', listQuery, reloadVersion + refreshVersion)
+  const listedRules = recordsPage?.list ?? []
+  const pagination = recordsPage?.pagination
+
+  function submitQuery(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    setPage(1)
+    setApplied({ keyword: query, enabled: status === 'enabled' ? 'true' : status === 'disabled' ? 'false' : '', ruleType: ruleType === 'all' ? '' : ruleType })
+    setReloadVersion((version) => version + 1)
+  }
 
   function openCreate() {
     setOperationError('')
@@ -2185,6 +2232,7 @@ function RulesQueryPage({ client, rules, sources, onRulesChange }: { client: Api
     onRulesChange(draft.id ? rules.map((rule) => rule.id === saved.id ? saved : rule) : [...rules, saved].sort((left, right) => left.source_id - right.source_id || left.order_index - right.order_index || right.id - left.id))
     setSaving(false)
     setDraft(null)
+    setReloadVersion((version) => version + 1)
   }
 
   async function runTest(event: FormEvent<HTMLFormElement>) {
@@ -2215,13 +2263,14 @@ function RulesQueryPage({ client, rules, sources, onRulesChange }: { client: Api
   return (
     <div className="view-stack">
       {operationError && <div className="result-banner error" role="alert">{operationError}</div>}
-      <QueryBar count={filtered.length} total={rules.length}>
+      <form className="query-bar" onSubmit={submitQuery}><div className="query-fields">
         <Field label="名称 / 来源 ID / 类型" name="rule_query" value={query} onChange={setQuery} />
         <SelectFilter label="状态" value={status} onChange={setStatus} options={[{ value: 'enabled', label: '启用' }, { value: 'disabled', label: '停用' }]} />
-        <SelectFilter label="规则类型" value={ruleType} onChange={setRuleType} options={uniqueOptions(rules.map((rule) => rule.rule_type))} />
-      </QueryBar>
+        <Field label="规则类型" name="rule_type" value={ruleType} onChange={setRuleType} />
+      </div><button type="submit" disabled={loading}>{loading ? '查询中…' : '查询'}</button></form>
+      {error && <div className="result-banner error" role="alert">{error}{recordsPage ? ' 已保留最近一次成功数据。' : ''}</div>}
       <div className="record-actions"><button type="button" className="primary" onClick={openCreate}>新增规则</button></div>
-      <Panel title="清洗规则" icon={<ListChecks />} meta={`查询命中 ${filtered.length} 条`}><TransformRuleList rules={filtered} sources={sources} onDetail={(rule) => { void openDetail(rule.id) }} /></Panel>
+      <Panel title="清洗规则" icon={<ListChecks />} meta={loading && !recordsPage ? '正在加载…' : `共 ${pagination?.total ?? 0} 条`}><TransformRuleList rules={listedRules} sources={sources} onDetail={(rule) => { void openDetail(rule.id) }} /><MonitoringPaginationControls page={pagination?.page ?? page} totalPages={pagination?.totalPages ?? 0} loading={loading} onPrevious={() => setPage((current) => Math.max(1, current - 1))} onNext={() => setPage((current) => current + 1)} /></Panel>
       {draft && (
         <Modal title={draft.id ? '清洗规则详情与编辑' : '新增清洗规则'} onClose={() => { if (!saving && !testing) setDraft(null) }}>
           {draft.hasSecret && <div className="result-banner" role="status">配置中的敏感值已隐藏。保留“[已隐藏]”会保留原值；改为新值即可轮换，且不会回显旧值。</div>}
@@ -2729,18 +2778,29 @@ function YouzanDistributionBackfillResultView({ title, result }: { title: string
   )
 }
 
-function DestinationsQueryPage({ client, destinations, onRefresh }: { client: ApiClient; destinations: DestinationDefinition[]; onRefresh: () => Promise<void> }) {
+function DestinationsQueryPage({ client, refreshVersion }: { client: ApiClient; refreshVersion: number }) {
   const [query, setQuery] = useState('')
   const [status, setStatus] = useState('all')
-  const [destinationType, setDestinationType] = useState('all')
+  const [destinationType, setDestinationType] = useState('')
+  const [applied, setApplied] = useState({ keyword: '', enabled: '' as '' | 'true' | 'false', destinationType: '' })
+  const [page, setPage] = useState(1)
+  const [reloadVersion, setReloadVersion] = useState(0)
   const [draft, setDraft] = useState<DestinationDraft | null>(null)
   const [saving, setSaving] = useState(false)
   const [testingID, setTestingID] = useState<number | null>(null)
   const [pendingTest, setPendingTest] = useState<DestinationDefinition | null>(null)
   const [message, setMessage] = useState('')
-  const filtered = destinations.filter((destination) => includesQuery([destination.id, destination.name, destination.code, destination.config_json], query)
-    && (status === 'all' || (status === 'enabled' ? destination.enabled : !destination.enabled))
-    && (destinationType === 'all' || destination.destination_type === destinationType))
+  const listQuery = useMemo(() => buildDestinationListQuery({ page, pageSize: 20, ...applied }), [applied, page])
+  const { recordsPage, loading, error } = useConfigurationListPage<DestinationDefinition>(client, '/v1/destinations', 'destinations', listQuery, reloadVersion + refreshVersion)
+  const listedDestinations = recordsPage?.list ?? []
+  const pagination = recordsPage?.pagination
+
+  function submitQuery(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    setPage(1)
+    setApplied({ keyword: query, enabled: status === 'enabled' ? 'true' : status === 'disabled' ? 'false' : '', destinationType })
+    setReloadVersion((version) => version + 1)
+  }
 
   async function openDetail(id: number) {
     setMessage('')
@@ -2761,7 +2821,7 @@ function DestinationsQueryPage({ client, destinations, onRefresh }: { client: Ap
     if (!response.ok) { setMessage(response.error?.message || '推送目标保存未完成。'); return }
     setDraft(null)
     setMessage('推送目标已保存。')
-    await onRefresh()
+    setReloadVersion((version) => version + 1)
   }
 
   async function test(destination: DestinationDefinition) {
@@ -2774,13 +2834,14 @@ function DestinationsQueryPage({ client, destinations, onRefresh }: { client: Ap
   return (
     <div className="view-stack">
       {message && <div className="result-banner" role="status">{message}</div>}
-      <QueryBar count={filtered.length} total={destinations.length}>
+      <form className="query-bar" onSubmit={submitQuery}><div className="query-fields">
         <Field label="名称 / 编码" name="destination_query" value={query} onChange={setQuery} />
         <SelectFilter label="状态" value={status} onChange={setStatus} options={[{ value: 'enabled', label: '启用' }, { value: 'disabled', label: '停用' }]} />
-        <SelectFilter label="类型" value={destinationType} onChange={setDestinationType} options={uniqueOptions(destinations.map((destination) => destination.destination_type))} />
-      </QueryBar>
+        <Field label="类型" name="destination_type" value={destinationType} onChange={setDestinationType} />
+      </div><button type="submit" disabled={loading}>{loading ? '查询中…' : '查询'}</button></form>
+      {error && <div className="result-banner error" role="alert">{error}{recordsPage ? ' 已保留最近一次成功数据。' : ''}</div>}
       <div className="record-actions"><button type="button" className="primary" onClick={() => setDraft({ id: null, name: '', code: '', destinationType: 'http', configJSON: '{\n  "url": "",\n  "method": "POST"\n}', enabled: true, hasSecret: false })}>新增目标</button></div>
-      <Panel title="推送目标" icon={<Send />} meta={`查询命中 ${filtered.length} 条`}><DestinationList destinations={filtered} testingID={testingID} onDetail={(item) => { void openDetail(item.id) }} onTest={setPendingTest} /></Panel>
+      <Panel title="推送目标" icon={<Send />} meta={loading && !recordsPage ? '正在加载…' : `共 ${pagination?.total ?? 0} 条`}><DestinationList destinations={listedDestinations} testingID={testingID} onDetail={(item) => { void openDetail(item.id) }} onTest={setPendingTest} /><MonitoringPaginationControls page={pagination?.page ?? page} totalPages={pagination?.totalPages ?? 0} loading={loading || testingID !== null} onPrevious={() => setPage((current) => Math.max(1, current - 1))} onNext={() => setPage((current) => current + 1)} /></Panel>
       {draft && <Modal title={draft.id ? '推送目标详情与编辑' : '新增推送目标'} onClose={() => { if (!saving) setDraft(null) }}>
         {draft.hasSecret && <div className="result-banner" role="status">配置中的敏感值已隐藏。保留“[已隐藏]”会保留原值；改为新值即可轮换，且不会回显旧值。</div>}
         <form className="excel-upload-form" onSubmit={save}>
@@ -2797,20 +2858,31 @@ function DestinationsQueryPage({ client, destinations, onRefresh }: { client: Ap
   )
 }
 
-function DeliveryTasksQueryPage({ client, tasks, sources, destinations, onRefresh }: { client: ApiClient; tasks: DeliveryTask[]; sources: SourceDefinition[]; destinations: DestinationDefinition[]; onRefresh: () => Promise<void> }) {
+function DeliveryTasksQueryPage({ client, sources, destinations, onRefresh, refreshVersion }: { client: ApiClient; sources: SourceDefinition[]; destinations: DestinationDefinition[]; onRefresh: () => Promise<void>; refreshVersion: number }) {
   const [query, setQuery] = useState('')
   const [status, setStatus] = useState('all')
   const [destinationID, setDestinationID] = useState('all')
+  const [applied, setApplied] = useState({ keyword: '', enabled: '' as '' | 'true' | 'false', destinationID: '' })
+  const [page, setPage] = useState(1)
+  const [reloadVersion, setReloadVersion] = useState(0)
   const [draft, setDraft] = useState<DeliveryTaskDraft | null>(null)
-  const filtered = tasks.filter((task) => includesQuery([task.id, task.name, task.clean_table, task.trigger_type], query)
-    && (status === 'all' || (status === 'enabled' ? task.enabled : !task.enabled))
-    && (destinationID === 'all' || String(task.destination_id) === destinationID))
   const destinationOptions = destinations.map((destination) => ({ value: String(destination.id), label: destination.name || destination.code }))
   const [runningID, setRunningID] = useState<number | null>(null)
   const [pendingRun, setPendingRun] = useState<DeliveryTask | null>(null)
   const [loadingDetailID, setLoadingDetailID] = useState<number | null>(null)
   const [saving, setSaving] = useState(false)
   const [message, setMessage] = useState('')
+  const listQuery = useMemo(() => buildDeliveryTaskListQuery({ page, pageSize: 20, ...applied }), [applied, page])
+  const { recordsPage, loading, error } = useConfigurationListPage<DeliveryTask>(client, '/v1/delivery-tasks', 'tasks', listQuery, reloadVersion + refreshVersion)
+  const listedTasks = recordsPage?.list ?? []
+  const pagination = recordsPage?.pagination
+
+  function submitQuery(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    setPage(1)
+    setApplied({ keyword: query, enabled: status === 'enabled' ? 'true' : status === 'disabled' ? 'false' : '', destinationID: destinationID === 'all' ? '' : destinationID })
+    setReloadVersion((version) => version + 1)
+  }
 
   function openCreate() {
     setMessage('')
@@ -2891,6 +2963,7 @@ function DeliveryTasksQueryPage({ client, tasks, sources, destinations, onRefres
     setDraft(null)
     setMessage('推送任务已保存。')
     await onRefresh()
+    setReloadVersion((version) => version + 1)
   }
 
   async function run(task: DeliveryTask) {
@@ -2900,18 +2973,22 @@ function DeliveryTasksQueryPage({ client, tasks, sources, destinations, onRefres
     const result = response.ok ? readObject<{ total_count: number; success_count: number; failed_count: number; skipped_count: number }>(response, 'result') : null
     setRunningID(null)
     setMessage(result ? `执行完成：总计 ${result.total_count}，成功 ${result.success_count}，失败 ${result.failed_count}，跳过 ${result.skipped_count}。` : response.error?.message || '推送任务未完成。')
-    if (response.ok) await onRefresh()
+    if (response.ok) {
+      await onRefresh()
+      setReloadVersion((version) => version + 1)
+    }
   }
   return (
     <div className="view-stack">
       {message && <div className="result-banner" role="status">{message}</div>}
-      <QueryBar count={filtered.length} total={tasks.length}>
+      <form className="query-bar" onSubmit={submitQuery}><div className="query-fields">
         <Field label="名称 / 表 / 触发方式" name="task_query" value={query} onChange={setQuery} />
         <SelectFilter label="状态" value={status} onChange={setStatus} options={[{ value: 'enabled', label: '启用' }, { value: 'disabled', label: '停用' }]} />
         <SelectFilter label="推送目标" value={destinationID} onChange={setDestinationID} options={destinationOptions} />
-      </QueryBar>
+      </div><button type="submit" disabled={loading || runningID !== null}>{loading ? '查询中…' : '查询'}</button></form>
+      {error && <div className="result-banner error" role="alert">{error}{recordsPage ? ' 已保留最近一次成功数据。' : ''}</div>}
       <div className="record-actions"><button type="button" className="primary" onClick={openCreate}>新增推送任务</button></div>
-      <Panel title="推送任务" icon={<ArrowUpFromLine />} meta={`查询命中 ${filtered.length} 条`}><DeliveryTaskList tasks={filtered} runningID={runningID} loadingDetailID={loadingDetailID} destinations={destinations} onDetail={(task) => { void openDetail(task.id) }} onRun={setPendingRun} /></Panel>
+      <Panel title="推送任务" icon={<ArrowUpFromLine />} meta={loading && !recordsPage ? '正在加载…' : `共 ${pagination?.total ?? 0} 条`}><DeliveryTaskList tasks={listedTasks} runningID={runningID} loadingDetailID={loadingDetailID} destinations={destinations} onDetail={(task) => { void openDetail(task.id) }} onRun={setPendingRun} /><MonitoringPaginationControls page={pagination?.page ?? page} totalPages={pagination?.totalPages ?? 0} loading={loading || runningID !== null || loadingDetailID !== null} onPrevious={() => setPage((current) => Math.max(1, current - 1))} onNext={() => setPage((current) => current + 1)} /></Panel>
       {draft && <Modal title={draft.id ? '推送任务详情与编辑' : '新增推送任务'} onClose={() => { if (!saving) setDraft(null) }}>
         <form className="excel-upload-form" onSubmit={saveDraft}>
           <Field label="任务名称" name="delivery_task_name" value={draft.name} required onChange={(name) => setDraft({ ...draft, name })} />

@@ -31,6 +31,18 @@ export type DeliveryLogListQuery = {
   endTime?: string
 }
 
+export type ConfigurationListQuery = {
+  page: number
+  pageSize: number
+  keyword?: string
+  enabled?: '' | 'true' | 'false'
+}
+
+export type SourceListQuery = ConfigurationListQuery & { sourceType?: string }
+export type TransformRuleListQuery = ConfigurationListQuery & { ruleType?: string; sourceID?: string }
+export type DestinationListQuery = ConfigurationListQuery & { destinationType?: string }
+export type DeliveryTaskListQuery = ConfigurationListQuery & { destinationID?: string }
+
 const runStatuses = ['running', 'success', 'failed', 'partial_success']
 const runTypes = ['fetch', 'ingest', 'transform', 'delivery']
 
@@ -68,6 +80,38 @@ export function buildDeliveryLogListQuery(query: DeliveryLogListQuery) {
   appendText(params, 'business_key', query.businessKey, 255)
   appendText(params, 'start_time', query.startTime, 32)
   appendText(params, 'end_time', query.endTime, 32)
+  return params.toString()
+}
+
+function configurationQuery(query: ConfigurationListQuery) {
+  const params = baseQuery(query.page, query.pageSize)
+  appendText(params, 'keyword', query.keyword, 100)
+  if (query.enabled === 'true' || query.enabled === 'false') params.set('enabled', query.enabled)
+  return params
+}
+
+export function buildSourceListQuery(query: SourceListQuery) {
+  const params = configurationQuery(query)
+  appendText(params, 'source_type', query.sourceType, 50)
+  return params.toString()
+}
+
+export function buildTransformRuleListQuery(query: TransformRuleListQuery) {
+  const params = configurationQuery(query)
+  appendText(params, 'rule_type', query.ruleType, 50)
+  if (/^[1-9]\d*$/.test(query.sourceID?.trim() ?? '')) params.set('source_id', query.sourceID!.trim())
+  return params.toString()
+}
+
+export function buildDestinationListQuery(query: DestinationListQuery) {
+  const params = configurationQuery(query)
+  appendText(params, 'destination_type', query.destinationType, 50)
+  return params.toString()
+}
+
+export function buildDeliveryTaskListQuery(query: DeliveryTaskListQuery) {
+  const params = configurationQuery(query)
+  if (/^[1-9]\d*$/.test(query.destinationID?.trim() ?? '')) params.set('destination_id', query.destinationID!.trim())
   return params.toString()
 }
 
