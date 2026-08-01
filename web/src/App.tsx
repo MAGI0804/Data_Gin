@@ -513,6 +513,8 @@ type DestinationDefinition = {
   config_json: string
   has_secret?: boolean
   enabled: boolean
+  health_score?: number | null
+  last_probe_at?: number | string | null
 }
 
 type DestinationDraft = {
@@ -536,6 +538,8 @@ type DeliveryTask = {
   filter_json: string
   payload_template: string
   enabled: boolean
+  last_run_at?: number | string | null
+  last_run_status?: string | null
 }
 
 type DeliveryTaskDraft = {
@@ -2934,6 +2938,13 @@ function DestinationsQueryPage({ client, refreshVersion }: { client: ApiClient; 
   const { recordsPage, loading, error } = useConfigurationListPage<DestinationDefinition>(client, '/v1/destinations', 'destinations', listQuery, reloadVersion + refreshVersion)
   const listedDestinations = recordsPage?.list ?? []
   const pagination = recordsPage?.pagination
+  const measuredDestinations = listedDestinations.filter((destination) => destinationHealthScore(destination) !== null)
+  const healthyDestinations = measuredDestinations.filter((destination) => (destinationHealthScore(destination) ?? 0) >= 90).length
+  const unhealthyDestinations = measuredDestinations.length - healthyDestinations
+  const latestProbe = listedDestinations
+    .map((destination) => destinationProbeTimestamp(destination.last_probe_at))
+    .filter((value): value is number => value !== null)
+    .sort((left, right) => right - left)[0]
 
   function submitQuery(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -2972,16 +2983,16 @@ function DestinationsQueryPage({ client, refreshVersion }: { client: ApiClient; 
     setMessage(response.ok ? '连通性测试通过；仅发送了无业务载荷的 HEAD 或 GET 请求。' : response.error?.message || '连通性测试未完成。')
   }
   return (
-    <div className="view-stack">
+    <div className="view-stack delivery-destinations-page">
       {message && <div className="result-banner" role="status">{message}</div>}
-      <form className="query-bar" onSubmit={submitQuery}><div className="query-fields">
-        <Field label="名称 / 编码" name="destination_query" value={query} onChange={setQuery} />
-        <SelectFilter label="状态" value={status} onChange={setStatus} options={[{ value: 'enabled', label: '启用' }, { value: 'disabled', label: '停用' }]} />
-        <Field label="类型" name="destination_type" value={destinationType} onChange={setDestinationType} />
-      </div><button type="submit" disabled={loading}>{loading ? '查询中…' : '查询'}</button></form>
+      <form className="query-bar delivery-query-bar" onSubmit={submitQuery}><div className="query-fields">
+        <Field label="名称 / 编码 / 配置" name="destination_query" value={query} onChange={setQuery} />
+        <SelectFilter label="接口类型" value={destinationType || 'all'} onChange={(value) => setDestinationType(value === 'all' ? '' : value)} options={[{ value: 'http', label: 'HTTP' }, { value: 'webhook', label: 'Webhook' }, { value: 'soap', label: 'SOAP' }]} />
+        <SelectFilter label="启用状态" value={status} onChange={setStatus} options={[{ value: 'enabled', label: '启用' }, { value: 'disabled', label: '停用' }]} />
+      </div><span className="delivery-query-count">{listedDestinations.length} / {pagination?.total ?? 0} 条</span><button className="visually-hidden" type="submit" disabled={loading}>{loading ? '查询中…' : '查询'}</button></form>
       {error && <div className="result-banner error" role="alert">{error}{recordsPage ? ' 已保留最近一次成功数据。' : ''}</div>}
-      <div className="record-actions"><button type="button" className="primary" onClick={() => setDraft({ id: null, name: '', code: '', destinationType: 'http', configJSON: '{\n  "url": "",\n  "method": "POST"\n}', enabled: true, hasSecret: false })}>新增目标</button></div>
-      <Panel title="推送目标" icon={<Send />} meta={loading && !recordsPage ? '正在加载…' : `共 ${pagination?.total ?? 0} 条`}><DestinationList destinations={listedDestinations} testingID={testingID} onDetail={(item) => { void openDetail(item.id) }} onTest={setPendingTest} /><MonitoringPaginationControls page={pagination?.page ?? page} totalPages={pagination?.totalPages ?? 0} loading={loading || testingID !== null} onPrevious={() => setPage((current) => Math.max(1, current - 1))} onNext={() => setPage((current) => current + 1)} /></Panel>
+      <section className="delivery-summary" aria-label="推送目标摘要"><Metric label="目标总数" value={pagination?.total ?? 0} /><Metric label="健康" value={measuredDestinations.length ? healthyDestinations : '—'} /><Metric label="异常" value={measuredDestinations.length ? unhealthyDestinations : '—'} /><Metric label="最近探测" value={latestProbe ? formatClockTime(latestProbe) : '未接入'} /></section>
+      <section className="delivery-list-section"><div className="delivery-section-heading"><div><h3>推送目标</h3><span>查询命中 {pagination?.total ?? 0} 条</span></div><button type="button" onClick={() => setDraft({ id: null, name: '', code: '', destinationType: 'http', configJSON: '{\n  "url": "",\n  "method": "POST"\n}', enabled: true, hasSecret: false })}>新增目标</button></div><DestinationList destinations={listedDestinations} testingID={testingID} onDetail={(item) => { void openDetail(item.id) }} onTest={setPendingTest} /><MonitoringPaginationControls page={pagination?.page ?? page} totalPages={pagination?.totalPages ?? 0} loading={loading || testingID !== null} onPrevious={() => setPage((current) => Math.max(1, current - 1))} onNext={() => setPage((current) => current + 1)} /></section>
       {draft && <Modal title={draft.id ? '推送目标详情与编辑' : '新增推送目标'} onClose={() => { if (!saving) setDraft(null) }}>
         {draft.hasSecret && <div className="result-banner" role="status">配置中的敏感值已隐藏。保留“[已隐藏]”会保留原值；改为新值即可轮换，且不会回显旧值。</div>}
         <form className="excel-upload-form" onSubmit={save}>
@@ -3016,6 +3027,8 @@ function DeliveryTasksQueryPage({ client, sources, destinations, onRefresh, refr
   const { recordsPage, loading, error } = useConfigurationListPage<DeliveryTask>(client, '/v1/delivery-tasks', 'tasks', listQuery, reloadVersion + refreshVersion)
   const listedTasks = recordsPage?.list ?? []
   const pagination = recordsPage?.pagination
+  const completedRuns = listedTasks.filter((task) => task.last_run_status)
+  const successfulRuns = completedRuns.filter((task) => /success|completed/i.test(task.last_run_status ?? '')).length
 
   function submitQuery(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -3119,16 +3132,16 @@ function DeliveryTasksQueryPage({ client, sources, destinations, onRefresh, refr
     }
   }
   return (
-    <div className="view-stack">
+    <div className="view-stack delivery-tasks-page">
       {message && <div className="result-banner" role="status">{message}</div>}
-      <form className="query-bar" onSubmit={submitQuery}><div className="query-fields">
+      <form className="query-bar delivery-query-bar" onSubmit={submitQuery}><div className="query-fields">
         <Field label="名称 / 表 / 触发方式" name="task_query" value={query} onChange={setQuery} />
-        <SelectFilter label="状态" value={status} onChange={setStatus} options={[{ value: 'enabled', label: '启用' }, { value: 'disabled', label: '停用' }]} />
+        <SelectFilter label="启用状态" value={status} onChange={setStatus} options={[{ value: 'enabled', label: '启用' }, { value: 'disabled', label: '停用' }]} />
         <SelectFilter label="推送目标" value={destinationID} onChange={setDestinationID} options={destinationOptions} />
-      </div><button type="submit" disabled={loading || runningID !== null}>{loading ? '查询中…' : '查询'}</button></form>
+      </div><span className="delivery-query-count">{listedTasks.length} / {pagination?.total ?? 0} 条</span><button className="visually-hidden" type="submit" disabled={loading || runningID !== null}>{loading ? '查询中…' : '查询'}</button></form>
       {error && <div className="result-banner error" role="alert">{error}{recordsPage ? ' 已保留最近一次成功数据。' : ''}</div>}
-      <div className="record-actions"><button type="button" className="primary" onClick={openCreate}>新增推送任务</button></div>
-      <Panel title="推送任务" icon={<ArrowUpFromLine />} meta={loading && !recordsPage ? '正在加载…' : `共 ${pagination?.total ?? 0} 条`}><DeliveryTaskList tasks={listedTasks} runningID={runningID} loadingDetailID={loadingDetailID} destinations={destinations} onDetail={(task) => { void openDetail(task.id) }} onRun={setPendingRun} /><MonitoringPaginationControls page={pagination?.page ?? page} totalPages={pagination?.totalPages ?? 0} loading={loading || runningID !== null || loadingDetailID !== null} onPrevious={() => setPage((current) => Math.max(1, current - 1))} onNext={() => setPage((current) => current + 1)} /></Panel>
+      <section className="delivery-summary" aria-label="推送任务摘要"><Metric label="启用任务" value={listedTasks.filter((task) => task.enabled).length} /><Metric label="定时触发" value={listedTasks.filter((task) => task.trigger_type === 'schedule').length} /><Metric label="事件触发" value={listedTasks.filter((task) => task.trigger_type === 'event').length} /><Metric label="近 24h 成功率" value={completedRuns.length ? `${(successfulRuns / completedRuns.length * 100).toFixed(1)}%` : '—'} /></section>
+      <section className="delivery-list-section"><div className="delivery-section-heading"><div><h3>推送任务</h3><span>查询命中 {pagination?.total ?? 0} 条</span></div><button type="button" onClick={openCreate}>新增推送任务</button></div><DeliveryTaskList tasks={listedTasks} runningID={runningID} loadingDetailID={loadingDetailID} destinations={destinations} onDetail={(task) => { void openDetail(task.id) }} onRun={setPendingRun} /><MonitoringPaginationControls page={pagination?.page ?? page} totalPages={pagination?.totalPages ?? 0} loading={loading || runningID !== null || loadingDetailID !== null} onPrevious={() => setPage((current) => Math.max(1, current - 1))} onNext={() => setPage((current) => current + 1)} /></section>
       {draft && <Modal title={draft.id ? '推送任务详情与编辑' : '新增推送任务'} onClose={() => { if (!saving) setDraft(null) }}>
         <form className="excel-upload-form" onSubmit={saveDraft}>
           <Field label="任务名称" name="delivery_task_name" value={draft.name} required onChange={(name) => setDraft({ ...draft, name })} />
@@ -3173,9 +3186,12 @@ function PushPolicyPage({ coreMethod, config, targets, onSave, onToggle }: {
   onToggle: (target: ToggleTarget, enabled: boolean) => void
 }) {
   return (
-    <div className="view-stack">
-      {coreMethod && <Panel title="商场推送方法" icon={<Send />} meta="当前推送能力"><CoreMethodList methods={[coreMethod]} onToggle={onToggle} /></Panel>}
-      <Panel title="订单少推送配置" icon={<ListChecks />} meta="按具体目标独立配置"><OrderPushSkipConfigForm config={config} targets={targets} onSave={onSave} /></Panel>
+    <div className="push-policy-page">
+      <div className="push-policy-main">
+        <section className="push-policy-method"><h3>商场推送方法</h3>{coreMethod ? <CoreMethodList methods={[coreMethod]} onToggle={onToggle} /> : <EmptyState text="暂无可用推送方法。" />}</section>
+        <section className="push-policy-config"><div><h3>订单少推送配置</h3><p>按具体目标独立配置，未配置或填 0 的目标不少推</p></div><OrderPushSkipConfigForm config={config} targets={targets} onSave={onSave} /></section>
+      </div>
+      <aside className="push-policy-explainer" aria-label="推送说明"><h3>推送说明</h3><div className="push-policy-flow"><div><span><FileJson aria-hidden="true" /></span><strong>每 100 单</strong></div><i aria-hidden="true" /><div className="skip"><span><X aria-hidden="true" /></span><strong>跳过 5 单</strong></div><i aria-hidden="true" /><div><span><Send aria-hidden="true" /></span><strong>推送 95 单</strong></div></div><p><span aria-hidden="true">!</span>修改后仅影响新产生的订单</p></aside>
     </div>
   )
 }
@@ -3213,29 +3229,24 @@ function OrderPushSkipConfigForm({ config, targets, onSave }: { config: OrderPus
   return (
     <form className="push-skip-form" onSubmit={submit}>
       <fieldset disabled={saving}>
-        <div className="push-skip-summary">
-          <StatusPill label={enabledCount > 0 ? `已启用 ${enabledCount} 个目标` : '未启用'} />
-          <span>只对下方配置的推送目标生效；未配置或填 0 的目标不少推。</span>
-        </div>
+        <div className="push-skip-table-head" aria-hidden="true"><span>推送目标</span><span>目标编码</span><span>循环总单数</span><span>少推单数</span><span>预计推送比例</span></div>
         {targets.length === 0 ? <EmptyState text="后端未返回可配置推送目标。" /> : <div className="push-skip-list">
           {targets.map((target, index) => {
             const value = draft[index] ?? { target_code: target.code, target_name: target.name, cycle: 0, skip: 0 }
             const ratio = value.cycle > 0 ? `${(((value.cycle - value.skip) / value.cycle) * 100).toFixed(1)}%` : '100.0%'
             return (
               <div className="push-skip-row" key={target.code}>
-                <div>
-                  <strong>{target.name}</strong>
-                  <span>{target.code}</span>
-                </div>
-                <Field label="循环总单数" name={`cycle_${index}`} value={String(value.cycle)} type="number" onChange={(raw) => setDraft((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, cycle: Number(raw) } : item))} />
-                <Field label="少推单数" name={`skip_${index}`} value={String(value.skip)} type="number" onChange={(raw) => setDraft((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, skip: Number(raw) } : item))} />
-                <small>预计推送比例：{ratio}</small>
+                <strong>{target.name}</strong>
+                <span>{target.code}</span>
+                <label><span className="visually-hidden">{target.name}循环总单数</span><input name={`cycle_${index}`} value={value.cycle} type="number" min="0" onChange={(event) => setDraft((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, cycle: Number(event.currentTarget.value) } : item))} /></label>
+                <label><span className="visually-hidden">{target.name}少推单数</span><input name={`skip_${index}`} value={value.skip} type="number" min="0" onChange={(event) => setDraft((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, skip: Number(event.currentTarget.value) } : item))} /></label>
+                <small>{ratio.replace('.0%', '%')}</small>
               </div>
             )
           })}
         </div>}
         {error && <div className="result-banner error" role="alert">{error}</div>}
-        <button className="primary" type="submit">{saving ? '保存中…' : '保存配置'}</button>
+        <div className="push-skip-footer"><span>已启用 <strong>{enabledCount}</strong> 个目标</span><button className="primary" type="submit">{saving ? '保存中…' : '保存配置'}</button></div>
       </fieldset>
     </form>
   )
@@ -5395,8 +5406,8 @@ function DestinationList({ destinations, testingID, onDetail, onTest }: { destin
   if (destinations.length === 0) return <EmptyState text="暂无推送目标。" />
   return (
     <div className="data-table-wrap" role="region" aria-label="推送目标列表" tabIndex={0}>
-      <table className="data-table"><thead><tr><th scope="col">目标系统</th><th scope="col">目标编码</th><th scope="col">接口类型</th><th scope="col">状态</th><th scope="col">操作</th></tr></thead>
-        <tbody>{destinations.map((destination) => <tr key={destination.id}><td><strong>{destination.name}</strong>{destination.has_secret && <small>配置已脱敏</small>}</td><td>{destination.code}</td><td>{destination.destination_type}</td><td><StatusPill label={destination.enabled ? '启用' : '停用'} /></td><td><div className="table-actions"><button type="button" onClick={() => onDetail(destination)}>详情</button><button type="button" disabled={testingID !== null} onClick={() => onTest(destination)}>{testingID === destination.id ? '测试中…' : '测试连接'}</button></div></td></tr>)}</tbody>
+      <table className="data-table delivery-destination-table"><thead><tr><th scope="col">目标系统</th><th scope="col">目标编码</th><th scope="col">接口类型</th><th scope="col">启用状态</th><th scope="col">健康度</th><th scope="col">最近探测</th><th scope="col">操作</th></tr></thead>
+        <tbody>{destinations.map((destination) => { const score = destinationHealthScore(destination); return <tr key={destination.id}><td><strong>{destination.name}</strong>{destination.has_secret && <small>配置已脱敏</small>}</td><td>{destination.code}</td><td>{destinationTypeLabel(destination.destination_type)}</td><td><StatusPill label={destination.enabled ? '启用' : '停用'} /></td><td><div className={score !== null && score < 90 ? 'delivery-health is-danger' : 'delivery-health'}><span>{score === null ? '未探测' : `${score >= 90 ? '健康' : '异常'} ${score.toFixed(1)}%`}</span><progress value={score ?? 0} max="100" aria-label={`${destination.name}健康度`} /></div></td><td>{formatOptionalTimestamp(destination.last_probe_at)}</td><td><div className="table-actions"><button type="button" onClick={() => onDetail(destination)}>查看</button><button type="button" disabled={testingID !== null} onClick={() => onTest(destination)}>{testingID === destination.id ? '测试中…' : '探测'}</button></div></td></tr> })}</tbody>
       </table>
     </div>
   )
@@ -5413,8 +5424,8 @@ function DeliveryTaskList({ tasks, runningID, loadingDetailID, destinations, onD
   if (tasks.length === 0) return <EmptyState text="暂无推送任务。" />
   return (
     <div className="data-table-wrap" role="region" aria-label="推送任务列表" tabIndex={0}>
-      <table className="data-table"><thead><tr><th scope="col">任务名称</th><th scope="col">触发方式</th><th scope="col">清洗表</th><th scope="col">推送目标</th><th scope="col">状态</th><th scope="col">操作</th></tr></thead>
-        <tbody>{tasks.map((task) => <tr key={task.id}><td><strong>{task.name}</strong></td><td>{deliveryTaskTriggerLabel(task.trigger_type)}{task.trigger_type === 'schedule' && task.cron_expr && <small>{task.cron_expr}</small>}</td><td>{task.clean_table}</td><td>{deliveryTaskDestinationLabel(task, destinations)}</td><td><StatusPill label={task.enabled ? '启用' : '停用'} /></td><td><div className="table-actions"><button type="button" disabled={loadingDetailID !== null || runningID !== null} onClick={() => onDetail(task)}>{loadingDetailID === task.id ? '加载中…' : '详情'}</button><button type="button" disabled={!task.enabled || runningID !== null || loadingDetailID !== null} onClick={() => onRun(task)}>{runningID === task.id ? '推送中…' : '手动运行'}</button></div></td></tr>)}</tbody>
+      <table className="data-table delivery-task-table"><thead><tr><th scope="col">任务名称</th><th scope="col">触发方式</th><th scope="col">清洗表</th><th scope="col">推送目标</th><th aria-label="关系" /><th scope="col">启用状态</th><th scope="col">最近运行</th><th scope="col">运行结果</th><th scope="col">操作</th></tr></thead>
+        <tbody>{tasks.map((task) => <tr key={task.id}><td><strong>{task.name}</strong></td><td>{task.trigger_type === 'schedule' && task.cron_expr ? `CRON ${task.cron_expr}` : `${deliveryTaskTriggerLabel(task.trigger_type)}触发`}</td><td>{task.clean_table}</td><td>{deliveryTaskDestinationLabel(task, destinations).replace(/ \(#\d+\)$/, '')}</td><td className="delivery-arrow" aria-hidden="true">→</td><td><StatusPill label={task.enabled ? '启用' : '停用'} /></td><td>{formatOptionalTimestamp(task.last_run_at)}</td><td><StatusPill label={deliveryTaskRunStatusLabel(task.last_run_status)} /></td><td><div className="table-actions"><button type="button" disabled={loadingDetailID !== null || runningID !== null} onClick={() => onDetail(task)}>{loadingDetailID === task.id ? '加载中…' : '查看'}</button><button type="button" disabled={!task.enabled || runningID !== null || loadingDetailID !== null} onClick={() => onRun(task)}>{runningID === task.id ? '推送中…' : '运行'}</button></div></td></tr>)}</tbody>
       </table>
     </div>
   )
@@ -5950,6 +5961,48 @@ function deliveryTaskDestinationLabel(task: DeliveryTask, destinations: Destinat
 function deliveryTaskTriggerLabel(value: string) {
   const labels: Record<string, string> = { manual: '手动', schedule: '定时', event: '事件' }
   return labels[value] ?? (value || '-')
+}
+
+function destinationHealthScore(destination: DestinationDefinition) {
+  if (destination.health_score === null || destination.health_score === undefined) return null
+  const value = Number(destination.health_score)
+  return Number.isFinite(value) && value >= 0 && value <= 100 ? value : null
+}
+
+function destinationProbeTimestamp(value: number | string | null | undefined) {
+  if (typeof value === 'number' && Number.isFinite(value) && value > 0) return value > 1_000_000_000_000 ? value : value * 1000
+  if (typeof value !== 'string' || !value.trim()) return null
+  const timestamp = Date.parse(value)
+  return Number.isNaN(timestamp) ? null : timestamp
+}
+
+function formatClockTime(timestamp: number) {
+  return new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Shanghai', hour: '2-digit', minute: '2-digit', second: '2-digit', hour12: false }).format(timestamp)
+}
+
+function formatOptionalTimestamp(value: number | string | null | undefined) {
+  const timestamp = destinationProbeTimestamp(value)
+  if (!timestamp) return '-'
+  const date = new Date(timestamp)
+  const today = new Date()
+  const dateKey = (item: Date) => new Intl.DateTimeFormat('en-CA', { timeZone: 'Asia/Shanghai', year: 'numeric', month: '2-digit', day: '2-digit' }).format(item)
+  if (dateKey(date) === dateKey(today)) return formatClockTime(timestamp)
+  return new Intl.DateTimeFormat('zh-CN', { timeZone: 'Asia/Shanghai', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', hour12: false }).format(date).replace('/', '-')
+}
+
+function destinationTypeLabel(value: string) {
+  const type = value.trim().toLowerCase()
+  if (type === 'http') return 'HTTP POST'
+  if (type === 'webhook') return 'Webhook'
+  return value || '-'
+}
+
+function deliveryTaskRunStatusLabel(value: string | null | undefined) {
+  if (!value) return '未运行'
+  if (/success|completed/i.test(value)) return '成功'
+  if (/fail|error/i.test(value)) return '失败'
+  if (/running|processing/i.test(value)) return '处理中'
+  return value
 }
 
 function readList<T>(result: ApiResult, key: string): T[] {
