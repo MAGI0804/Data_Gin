@@ -4207,18 +4207,20 @@ function ExcelMatchView({
           <Metric label="最大步骤" value="20" />
           <Metric label="筛选规则" value="可选" />
         </section>
-        <Panel title="自定义匹配流程" icon={<Upload />} meta="每一步均可指定任意数据表与字段，后一步可使用前一步追加的列">
-          <div className="excel-action-grid compact-actions">
-          <button type="button" className="excel-action-card" onClick={() => openExcelDialog('export')}>
-            <Upload aria-hidden="true" />
-              <span>新建或编辑匹配方案</span>
-              <small>配置步骤顺序、预览匹配并创建导出任务</small>
-          </button>
-          </div>
-        </Panel>
-        <Panel title="已保存导出方案" icon={<ListChecks />} meta={`${exportSchemes.length} 个方案`}>
-          <ExcelSchemeList schemes={exportSchemes} deletingSchemeID={deletingSchemeID} onDelete={setPendingSchemeDelete} onOpen={(id) => { applyExportScheme(String(id)); openExcelDialog('export') }} />
-        </Panel>
+        <section className="excel-config-workspace">
+          <Panel title="自定义匹配流程" icon={<Upload />} meta="步骤顺序与预览都基于真实导出配置">
+            <div className="excel-config-summary">
+              <strong>{selectedExportSchemeID ? '正在编辑已保存方案' : '新建匹配方案'}</strong>
+              <span>当前包含 {exportSteps.length} 个步骤；打开配置后可调整顺序、筛选和输出字段。</span>
+            </div>
+            <div className="excel-action-grid compact-actions">
+              <button type="button" className="excel-action-card" onClick={() => openExcelDialog('export')}><Upload aria-hidden="true" /><span>打开匹配配置</span><small>预览匹配或创建真实导出任务</small></button>
+            </div>
+          </Panel>
+          <aside className="excel-config-aside" aria-label="已保存导出方案">
+            <Panel title="已保存导出方案" icon={<ListChecks />} meta={`${exportSchemes.length} 个方案`}><ExcelSchemeList schemes={exportSchemes} deletingSchemeID={deletingSchemeID} onDelete={setPendingSchemeDelete} onOpen={(id) => { applyExportScheme(String(id)); openExcelDialog('export') }} /></Panel>
+          </aside>
+        </section>
       </>}
 
       {section === 'write' && <>
@@ -4228,23 +4230,15 @@ function ExcelMatchView({
           <Metric label="写入保护" value="不覆盖" />
           <Metric label="清空保护" value="需确认" />
         </section>
-        <Panel title="数据库回写" icon={<Database />} meta="匹配导入与退回未匹配分开执行">
-          <div className="excel-action-grid compact-actions">
-          <button type="button" className="excel-action-card" onClick={() => openExcelDialog('import')}>
-            <Database aria-hidden="true" />
-            <span>匹配导入</span>
-            <small>默认预检，确认后写入空的 matched_docno</small>
-          </button>
-          <button type="button" className="excel-action-card" onClick={() => openExcelDialog('clear')}>
-            <RefreshCcw aria-hidden="true" />
-            <span>退回未匹配</span>
-            <small>按 Excel 匹配范围清空 matched_docno</small>
-          </button>
-        </div>
-      </Panel>
-        <Panel title="已保存导入方案" icon={<ListChecks />} meta={`${importSchemes.length} 个方案`}>
-          <ExcelSchemeList schemes={importSchemes} deletingSchemeID={deletingSchemeID} onDelete={setPendingSchemeDelete} onOpen={(id) => { applyImportScheme(String(id)); openExcelDialog('import') }} />
-        </Panel>
+        <section className="excel-config-workspace">
+          <Panel title="数据库回写" icon={<Database />} meta="默认只预检；写入与退回均需二次确认">
+            <div className="excel-action-grid compact-actions">
+              <button type="button" className="excel-action-card" onClick={() => openExcelDialog('import')}><Database aria-hidden="true" /><span>匹配导入</span><small>先预检，确认后只填充空字段</small></button>
+              <button type="button" className="excel-action-card" onClick={() => openExcelDialog('clear')}><RefreshCcw aria-hidden="true" /><span>退回未匹配</span><small>先预检，确认后清空 matched_docno</small></button>
+            </div>
+          </Panel>
+          <aside className="excel-config-aside" aria-label="已保存导入方案"><Panel title="已保存导入方案" icon={<ListChecks />} meta={`${importSchemes.length} 个方案`}><ExcelSchemeList schemes={importSchemes} deletingSchemeID={deletingSchemeID} onDelete={setPendingSchemeDelete} onOpen={(id) => { applyImportScheme(String(id)); openExcelDialog('import') }} /></Panel></aside>
+        </section>
       </>}
 
       {excelDialog === 'export' && (
