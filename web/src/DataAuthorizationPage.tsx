@@ -72,6 +72,7 @@ export function DataAuthorizationPage({ client }: { client: ApiClient }) {
   const [oneTimeToken, setOneTimeToken] = useState('')
   const [tokenCopied, setTokenCopied] = useState(false)
   const requestSequence = useRef(0)
+  const accountRequestRef = useRef<AbortController | null>(null)
   const auditRequestRef = useRef<AbortController | null>(null)
   const auditRequestSequence = useRef(0)
   const mutationInFlight = useRef(false)
@@ -79,26 +80,35 @@ export function DataAuthorizationPage({ client }: { client: ApiClient }) {
   const selected = accounts.find((account) => account.id === selectedID) ?? accounts[0] ?? null
 
   const loadAccounts = useCallback(async (options: { append?: boolean; search?: string } = {}) => {
+    accountRequestRef.current?.abort()
+    const controller = new AbortController()
+    accountRequestRef.current = controller
     const sequence = ++requestSequence.current
     setLoading(true)
     setError('')
     const append = options.append === true
-    const response = await client('/v1/data-authorizations/accounts/query', {
-      method: 'POST',
-      body: { keyword: options.search ?? keyword, beforeId: append ? pagination.nextBeforeId : 0, pageSize: 20 },
-      showResult: false,
-      silentLoading: true,
-    })
-    if (sequence !== requestSequence.current) return
-    setLoading(false)
-    if (!response.ok) {
-      setError(response.status === 403 ? '当前登录账号不是可信管理员，无法管理数据授权。' : '开放接口账号加载失败，请稍后重试。')
-      return
+    try {
+      const response = await client('/v1/data-authorizations/accounts/query', {
+        method: 'POST',
+        body: { keyword: options.search ?? keyword, beforeId: append ? pagination.nextBeforeId : 0, pageSize: 20 },
+        showResult: false,
+        silentLoading: true,
+        signal: controller.signal,
+      })
+      if (controller.signal.aborted || sequence !== requestSequence.current) return
+      if (!response.ok) {
+        setError(response.status === 403 ? '当前登录账号不是可信管理员，无法管理数据授权。' : '开放接口账号加载失败，请稍后重试。')
+        return
+      }
+      const parsed = parseDataAuthorizationAccounts(response.data)
+      setAccounts((current) => append ? deduplicateAccounts([...current, ...parsed.accounts]) : parsed.accounts)
+      setPagination(parsed.pagination)
+      if (!append && parsed.accounts.length > 0) setSelectedID((current) => parsed.accounts.some((account) => account.id === current) ? current : parsed.accounts[0].id)
+    } catch {
+      if (!controller.signal.aborted && sequence === requestSequence.current) setError('开放接口账号加载失败，请检查网络后重试。')
+    } finally {
+      if (!controller.signal.aborted && sequence === requestSequence.current) setLoading(false)
     }
-    const parsed = parseDataAuthorizationAccounts(response.data)
-    setAccounts((current) => append ? deduplicateAccounts([...current, ...parsed.accounts]) : parsed.accounts)
-    setPagination(parsed.pagination)
-    if (!append && parsed.accounts.length > 0) setSelectedID((current) => parsed.accounts.some((account) => account.id === current) ? current : parsed.accounts[0].id)
   }, [client, keyword, pagination.nextBeforeId])
 
   const loadAudits = useCallback(async (filters: AuditFilters, options: { append?: boolean; beforeId?: number } = {}) => {
@@ -132,7 +142,13 @@ export function DataAuthorizationPage({ client }: { client: ApiClient }) {
     }
   }, [client])
 
-  useEffect(() => { void loadAccounts({ search: '' }) }, []) // eslint-disable-line react-hooks/exhaustive-deps
+  useEffect(() => {
+    void loadAccounts({ search: '' })
+    return () => {
+      accountRequestRef.current?.abort()
+      requestSequence.current += 1
+    }
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
   useEffect(() => {
     const nextFilters = { ...emptyAuditFilters, targetUserId: selected?.id ?? 0 }
     setAuditFilters(nextFilters)
