@@ -16,6 +16,15 @@ export type TokenInfo = {
   ttl: number
 }
 
+function readPositiveSafeInteger(value: unknown): number | null {
+  if (typeof value === 'number') {
+    return Number.isSafeInteger(value) && value > 0 ? value : null
+  }
+  if (typeof value !== 'string' || !/^[1-9]\d*$/.test(value)) return null
+  const parsed = Number(value)
+  return Number.isSafeInteger(parsed) ? parsed : null
+}
+
 function dataRecord(payload: unknown): JsonRecord | null {
   if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return null
   const data = (payload as JsonRecord).data
@@ -47,9 +56,10 @@ export function readSessionUser(payload: unknown): SessionUser | null {
 
 export function readTokenInfo(payload: unknown): TokenInfo | null {
   const data = dataRecord(payload)
-  if (!data || typeof data.user_id !== 'number' || !Number.isSafeInteger(data.user_id) || data.user_id <= 0 || typeof data.token_type !== 'string' || typeof data.expire_time !== 'number' || !Number.isSafeInteger(data.expire_time) || data.expire_time <= 0 || typeof data.issued_time !== 'number' || !Number.isSafeInteger(data.issued_time) || data.issued_time <= 0 || typeof data.ttl !== 'number' || !Number.isFinite(data.ttl)) return null
+  const userID = data ? readPositiveSafeInteger(data.user_id) : null
+  if (!data || userID === null || typeof data.token_type !== 'string' || typeof data.expire_time !== 'number' || !Number.isSafeInteger(data.expire_time) || data.expire_time <= 0 || typeof data.issued_time !== 'number' || !Number.isSafeInteger(data.issued_time) || data.issued_time <= 0 || typeof data.ttl !== 'number' || !Number.isFinite(data.ttl)) return null
   return {
-    userID: data.user_id,
+    userID,
     tokenType: data.token_type,
     expireTime: data.expire_time,
     issuedTime: data.issued_time,
