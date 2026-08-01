@@ -24,14 +24,52 @@ func NewDeliveryController() *DeliveryController {
 }
 
 func (ctrl *DeliveryController) ListDestinations(c *gin.Context) {
-	destinations, err := ctrl.service.ListDestinations(c.Request.Context())
+	values := c.Request.URL.Query()
+	if !monitoringQueryKeysAllowed(values, "page", "page_size", "keyword", "enabled", "destination_type") {
+		c.JSON(400, msg.ErrResponseStr("无效的推送目标查询参数"))
+		return
+	}
+	if !monitoringHasAnyKey(values, "page", "page_size", "keyword", "enabled", "destination_type") {
+		destinations, err := ctrl.service.ListDestinations(c.Request.Context())
+		if err != nil {
+			c.JSON(500, msg.ErrResponse("查询推送目标失败", err))
+			return
+		}
+		c.JSON(200, msg.SuccessResponse("查询推送目标成功", &map[string]any{
+			"destinations": safeDestinationDefinitions(destinations),
+		}))
+		return
+	}
+	page, pageSize, err := parseMonitoringPagination(values)
+	if err != nil {
+		c.JSON(400, msg.ErrResponseStr("无效的推送目标分页参数"))
+		return
+	}
+	keyword, err := parseMonitoringText(values.Get("keyword"), 100)
+	if err != nil {
+		c.JSON(400, msg.ErrResponseStr("无效的推送目标查询参数"))
+		return
+	}
+	enabled, err := parseMonitoringBool(values.Get("enabled"))
+	if err != nil {
+		c.JSON(400, msg.ErrResponseStr("无效的推送目标查询参数"))
+		return
+	}
+	destinationType, err := parseMonitoringText(values.Get("destination_type"), 50)
+	if err != nil {
+		c.JSON(400, msg.ErrResponseStr("无效的推送目标查询参数"))
+		return
+	}
+	result, err := ctrl.service.ListDestinationsPage(c.Request.Context(), data_dao.DestinationDefinitionListQuery{
+		Page: page, PageSize: pageSize, Keyword: keyword, Enabled: enabled, DestinationType: destinationType,
+	})
 	if err != nil {
 		c.JSON(500, msg.ErrResponse("查询推送目标失败", err))
 		return
 	}
-
 	c.JSON(200, msg.SuccessResponse("查询推送目标成功", &map[string]any{
-		"destinations": safeDestinationDefinitions(destinations),
+		"destinations": safeDestinationDefinitions(result.List),
+		"pagination":   monitoringPaginationResponse(page, pageSize, result.Total),
 	}))
 }
 
@@ -114,14 +152,52 @@ func (ctrl *DeliveryController) TestDestination(c *gin.Context) {
 }
 
 func (ctrl *DeliveryController) ListTasks(c *gin.Context) {
-	tasks, err := ctrl.service.ListDeliveryTasks(c.Request.Context())
+	values := c.Request.URL.Query()
+	if !monitoringQueryKeysAllowed(values, "page", "page_size", "keyword", "enabled", "destination_id") {
+		c.JSON(400, msg.ErrResponseStr("无效的推送任务查询参数"))
+		return
+	}
+	if !monitoringHasAnyKey(values, "page", "page_size", "keyword", "enabled", "destination_id") {
+		tasks, err := ctrl.service.ListDeliveryTasks(c.Request.Context())
+		if err != nil {
+			c.JSON(500, msg.ErrResponse("查询推送任务失败", err))
+			return
+		}
+		c.JSON(200, msg.SuccessResponse("查询推送任务成功", &map[string]any{
+			"tasks": tasks,
+		}))
+		return
+	}
+	page, pageSize, err := parseMonitoringPagination(values)
+	if err != nil {
+		c.JSON(400, msg.ErrResponseStr("无效的推送任务分页参数"))
+		return
+	}
+	keyword, err := parseMonitoringText(values.Get("keyword"), 100)
+	if err != nil {
+		c.JSON(400, msg.ErrResponseStr("无效的推送任务查询参数"))
+		return
+	}
+	enabled, err := parseMonitoringBool(values.Get("enabled"))
+	if err != nil {
+		c.JSON(400, msg.ErrResponseStr("无效的推送任务查询参数"))
+		return
+	}
+	destinationID, err := parseMonitoringUint(values.Get("destination_id"))
+	if err != nil {
+		c.JSON(400, msg.ErrResponseStr("无效的推送任务查询参数"))
+		return
+	}
+	result, err := ctrl.service.ListDeliveryTasksPage(c.Request.Context(), data_dao.DeliveryTaskListQuery{
+		Page: page, PageSize: pageSize, Keyword: keyword, Enabled: enabled, DestinationID: destinationID,
+	})
 	if err != nil {
 		c.JSON(500, msg.ErrResponse("查询推送任务失败", err))
 		return
 	}
-
 	c.JSON(200, msg.SuccessResponse("查询推送任务成功", &map[string]any{
-		"tasks": tasks,
+		"tasks":      result.List,
+		"pagination": monitoringPaginationResponse(page, pageSize, result.Total),
 	}))
 }
 

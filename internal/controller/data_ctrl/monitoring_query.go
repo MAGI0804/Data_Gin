@@ -79,3 +79,47 @@ func monitoringPaginationResponse(page, pageSize int, total int64) monitoringPag
 	totalPages := int((total + int64(pageSize) - 1) / int64(pageSize))
 	return monitoringPagination{Page: page, PageSize: pageSize, Total: total, TotalPages: totalPages}
 }
+
+func parseMonitoringBool(value string) (*bool, error) {
+	switch strings.TrimSpace(value) {
+	case "":
+		return nil, nil
+	case "true":
+		result := true
+		return &result, nil
+	case "false":
+		result := false
+		return &result, nil
+	default:
+		return nil, fmt.Errorf("invalid boolean")
+	}
+}
+
+func parseMonitoringUint(value string) (uint, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return 0, nil
+	}
+	parsed, err := strconv.ParseUint(value, 10, 32)
+	if err != nil || parsed == 0 {
+		return 0, fmt.Errorf("invalid unsigned integer")
+	}
+	return uint(parsed), nil
+}
+
+func parseMonitoringText(value string, maximum int) (string, error) {
+	value = strings.TrimSpace(value)
+	if len(value) > maximum {
+		return "", fmt.Errorf("invalid text")
+	}
+	return value, nil
+}
+
+func monitoringHasAnyKey(values url.Values, keys ...string) bool {
+	for _, key := range keys {
+		if _, ok := values[key]; ok {
+			return true
+		}
+	}
+	return false
+}

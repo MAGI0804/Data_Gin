@@ -17,6 +17,20 @@ type SourceDefinitionDAO struct {
 	db *gorm.DB
 }
 
+// SourceDefinitionListQuery contains validated management list filters.
+type SourceDefinitionListQuery struct {
+	Page       int
+	PageSize   int
+	Keyword    string
+	Enabled    *bool
+	SourceType string
+}
+
+type SourceDefinitionListPage struct {
+	List  []model.SourceDefinition
+	Total int64
+}
+
 func NewSourceDefinitionDAO() *SourceDefinitionDAO {
 	return &SourceDefinitionDAO{db: database.DB}
 }
@@ -55,6 +69,34 @@ func (dao *SourceDefinitionDAO) FindAll(ctx context.Context) ([]model.SourceDefi
 		Find(&sources).
 		Error
 	return sources, err
+}
+
+func (dao *SourceDefinitionDAO) FindPage(ctx context.Context, params SourceDefinitionListQuery) (*SourceDefinitionListPage, error) {
+	query := dao.applyListFilters(dao.db.WithContext(ctx).Model(&model.SourceDefinition{}), params)
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		return nil, err
+	}
+	sources := make([]model.SourceDefinition, 0)
+	offset := (params.Page - 1) * params.PageSize
+	if err := query.Order("id DESC").Offset(offset).Limit(params.PageSize).Find(&sources).Error; err != nil {
+		return nil, err
+	}
+	return &SourceDefinitionListPage{List: sources, Total: total}, nil
+}
+
+func (dao *SourceDefinitionDAO) applyListFilters(query *gorm.DB, params SourceDefinitionListQuery) *gorm.DB {
+	if params.Keyword != "" {
+		keyword := "%" + params.Keyword + "%"
+		query = query.Where("(name LIKE ? OR code LIKE ? OR auth_type LIKE ?)", keyword, keyword, keyword)
+	}
+	if params.Enabled != nil {
+		query = query.Where("enabled = ?", *params.Enabled)
+	}
+	if params.SourceType != "" {
+		query = query.Where("source_type = ?", params.SourceType)
+	}
+	return query
 }
 
 func (dao *SourceDefinitionDAO) Update(ctx context.Context, source *model.SourceDefinition) error {
@@ -211,6 +253,21 @@ type TransformRuleDAO struct {
 	db *gorm.DB
 }
 
+// TransformRuleListQuery contains validated management list filters.
+type TransformRuleListQuery struct {
+	Page     int
+	PageSize int
+	Keyword  string
+	Enabled  *bool
+	RuleType string
+	SourceID uint
+}
+
+type TransformRuleListPage struct {
+	List  []model.TransformRule
+	Total int64
+}
+
 func NewTransformRuleDAO() *TransformRuleDAO {
 	return &TransformRuleDAO{db: database.DB}
 }
@@ -241,6 +298,36 @@ func (dao *TransformRuleDAO) FindAll(ctx context.Context) ([]model.TransformRule
 		Find(&rules).
 		Error
 	return rules, err
+}
+
+func (dao *TransformRuleDAO) FindPage(ctx context.Context, params TransformRuleListQuery) (*TransformRuleListPage, error) {
+	query := dao.applyListFilters(dao.db.WithContext(ctx).Model(&model.TransformRule{}), params)
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		return nil, err
+	}
+	rules := make([]model.TransformRule, 0)
+	offset := (params.Page - 1) * params.PageSize
+	if err := query.Order("source_id ASC, order_index ASC, id DESC").Offset(offset).Limit(params.PageSize).Find(&rules).Error; err != nil {
+		return nil, err
+	}
+	return &TransformRuleListPage{List: rules, Total: total}, nil
+}
+
+func (dao *TransformRuleDAO) applyListFilters(query *gorm.DB, params TransformRuleListQuery) *gorm.DB {
+	if params.Keyword != "" {
+		query = query.Where("name LIKE ?", "%"+params.Keyword+"%")
+	}
+	if params.Enabled != nil {
+		query = query.Where("enabled = ?", *params.Enabled)
+	}
+	if params.RuleType != "" {
+		query = query.Where("rule_type = ?", params.RuleType)
+	}
+	if params.SourceID != 0 {
+		query = query.Where("source_id = ?", params.SourceID)
+	}
+	return query
 }
 
 func (dao *TransformRuleDAO) FindByID(ctx context.Context, id uint) (*model.TransformRule, error) {
@@ -366,6 +453,20 @@ type DestinationDefinitionDAO struct {
 	db *gorm.DB
 }
 
+// DestinationDefinitionListQuery contains validated management list filters.
+type DestinationDefinitionListQuery struct {
+	Page            int
+	PageSize        int
+	Keyword         string
+	Enabled         *bool
+	DestinationType string
+}
+
+type DestinationDefinitionListPage struct {
+	List  []model.DestinationDefinition
+	Total int64
+}
+
 func NewDestinationDefinitionDAO() *DestinationDefinitionDAO {
 	return &DestinationDefinitionDAO{db: database.DB}
 }
@@ -397,6 +498,34 @@ func (dao *DestinationDefinitionDAO) FindAll(ctx context.Context) ([]model.Desti
 	return destinations, err
 }
 
+func (dao *DestinationDefinitionDAO) FindPage(ctx context.Context, params DestinationDefinitionListQuery) (*DestinationDefinitionListPage, error) {
+	query := dao.applyListFilters(dao.db.WithContext(ctx).Model(&model.DestinationDefinition{}), params)
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		return nil, err
+	}
+	destinations := make([]model.DestinationDefinition, 0)
+	offset := (params.Page - 1) * params.PageSize
+	if err := query.Order("id DESC").Offset(offset).Limit(params.PageSize).Find(&destinations).Error; err != nil {
+		return nil, err
+	}
+	return &DestinationDefinitionListPage{List: destinations, Total: total}, nil
+}
+
+func (dao *DestinationDefinitionDAO) applyListFilters(query *gorm.DB, params DestinationDefinitionListQuery) *gorm.DB {
+	if params.Keyword != "" {
+		keyword := "%" + params.Keyword + "%"
+		query = query.Where("(name LIKE ? OR code LIKE ?)", keyword, keyword)
+	}
+	if params.Enabled != nil {
+		query = query.Where("enabled = ?", *params.Enabled)
+	}
+	if params.DestinationType != "" {
+		query = query.Where("destination_type = ?", params.DestinationType)
+	}
+	return query
+}
+
 func (dao *DestinationDefinitionDAO) Update(ctx context.Context, destination *model.DestinationDefinition) error {
 	destination.UpdatedAt = int(time.Now().Unix())
 	return dao.db.WithContext(ctx).Save(destination).Error
@@ -404,6 +533,20 @@ func (dao *DestinationDefinitionDAO) Update(ctx context.Context, destination *mo
 
 type DeliveryTaskDAO struct {
 	db *gorm.DB
+}
+
+// DeliveryTaskListQuery contains validated management list filters.
+type DeliveryTaskListQuery struct {
+	Page          int
+	PageSize      int
+	Keyword       string
+	Enabled       *bool
+	DestinationID uint
+}
+
+type DeliveryTaskListPage struct {
+	List  []model.DeliveryTask
+	Total int64
 }
 
 func NewDeliveryTaskDAO() *DeliveryTaskDAO {
@@ -444,6 +587,34 @@ func (dao *DeliveryTaskDAO) FindAll(ctx context.Context) ([]model.DeliveryTask, 
 		Find(&tasks).
 		Error
 	return tasks, err
+}
+
+func (dao *DeliveryTaskDAO) FindPage(ctx context.Context, params DeliveryTaskListQuery) (*DeliveryTaskListPage, error) {
+	query := dao.applyListFilters(dao.db.WithContext(ctx).Model(&model.DeliveryTask{}), params)
+	var total int64
+	if err := query.Count(&total).Error; err != nil {
+		return nil, err
+	}
+	tasks := make([]model.DeliveryTask, 0)
+	offset := (params.Page - 1) * params.PageSize
+	if err := query.Order("id DESC").Offset(offset).Limit(params.PageSize).Find(&tasks).Error; err != nil {
+		return nil, err
+	}
+	return &DeliveryTaskListPage{List: tasks, Total: total}, nil
+}
+
+func (dao *DeliveryTaskDAO) applyListFilters(query *gorm.DB, params DeliveryTaskListQuery) *gorm.DB {
+	if params.Keyword != "" {
+		keyword := "%" + params.Keyword + "%"
+		query = query.Where("(name LIKE ? OR clean_table LIKE ?)", keyword, keyword)
+	}
+	if params.Enabled != nil {
+		query = query.Where("enabled = ?", *params.Enabled)
+	}
+	if params.DestinationID != 0 {
+		query = query.Where("destination_id = ?", params.DestinationID)
+	}
+	return query
 }
 
 func (dao *DeliveryTaskDAO) Update(ctx context.Context, task *model.DeliveryTask) error {

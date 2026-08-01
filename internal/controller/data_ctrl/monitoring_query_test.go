@@ -46,6 +46,32 @@ func TestMonitoringQueryParsing(t *testing.T) {
 	}
 }
 
+func TestConfigurationListQueryParsing(t *testing.T) {
+	enabled, err := parseMonitoringBool("true")
+	if err != nil || enabled == nil || !*enabled {
+		t.Fatalf("parseMonitoringBool(true) = %v, %v", enabled, err)
+	}
+	if _, err := parseMonitoringBool("enabled"); err == nil {
+		t.Fatal("parseMonitoringBool accepted invalid value")
+	}
+	sourceID, err := parseMonitoringUint("42")
+	if err != nil || sourceID != 42 {
+		t.Fatalf("parseMonitoringUint(42) = %d, %v", sourceID, err)
+	}
+	if _, err := parseMonitoringUint("0"); err == nil {
+		t.Fatal("parseMonitoringUint accepted zero")
+	}
+	if _, err := parseMonitoringText(strings.Repeat("x", 101), 100); err == nil {
+		t.Fatal("parseMonitoringText accepted overlong input")
+	}
+	if !monitoringHasAnyKey(url.Values{"page": {"1"}}, "page", "keyword") {
+		t.Fatal("monitoringHasAnyKey did not find configured key")
+	}
+	if monitoringHasAnyKey(url.Values{"other": {"1"}}, "page", "keyword") {
+		t.Fatal("monitoringHasAnyKey accepted absent keys")
+	}
+}
+
 func TestMonitoringSafeResponsesDoNotExposeSecretsOrRawErrors(t *testing.T) {
 	runs := safePipelineRuns([]model.PipelineRun{{
 		BaseModel: model.BaseModel{ID: 7}, TraceID: "trace-7", RunType: "delivery", Status: "failed", ErrorMessage: "authorization=secret-run-error",

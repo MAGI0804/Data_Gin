@@ -60,6 +60,10 @@ func (s *TransformService) ListTransformRules(ctx context.Context) ([]model.Tran
 	return s.ruleDAO.FindAll(ctx)
 }
 
+func (s *TransformService) ListTransformRulesPage(ctx context.Context, query data_dao.TransformRuleListQuery) (*data_dao.TransformRuleListPage, error) {
+	return s.ruleDAO.FindPage(ctx, query)
+}
+
 func (s *TransformService) GetTransformRule(ctx context.Context, id uint) (*model.TransformRule, error) {
 	return s.ruleDAO.FindByID(ctx, id)
 }

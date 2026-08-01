@@ -5,6 +5,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"gin-biz-web-api/internal/dao/data_dao"
 	"gin-biz-web-api/internal/msg"
 	"gin-biz-web-api/internal/requestbody"
 	"gin-biz-web-api/internal/service/data_svc"
@@ -21,15 +22,69 @@ func NewTransformController() *TransformController {
 }
 
 func (ctrl *TransformController) ListRules(c *gin.Context) {
-	rules, err := ctrl.service.ListTransformRules(c.Request.Context())
+	values := c.Request.URL.Query()
+	if !monitoringQueryKeysAllowed(values, "page", "page_size", "keyword", "enabled", "rule_type", "source_id") {
+		c.JSON(400, msg.ErrResponseStr("无效的清洗规则查询参数"))
+		return
+	}
+	if !monitoringHasAnyKey(values, "page", "page_size", "keyword", "enabled", "rule_type", "source_id") {
+		rules, err := ctrl.service.ListTransformRules(c.Request.Context())
+		if err != nil {
+			c.JSON(500, msg.ErrResponse("查询清洗规则失败", err))
+			return
+		}
+
+		c.JSON(200, msg.SuccessResponse("查询清洗规则成功", &map[string]any{
+			"rules": safeTransformRules(rules),
+		}))
+		return
+	}
+	page, pageSize, err := parseMonitoringPagination(values)
+	if err != nil {
+		c.JSON(400, msg.ErrResponseStr("无效的清洗规则分页参数"))
+		return
+	}
+	keyword, err := parseMonitoringText(values.Get("keyword"), 100)
+	if err != nil {
+		c.JSON(400, msg.ErrResponseStr("无效的清洗规则查询参数"))
+		return
+	}
+	enabled, err := parseMonitoringBool(values.Get("enabled"))
+	if err != nil {
+		c.JSON(400, msg.ErrResponseStr("无效的清洗规则查询参数"))
+		return
+	}
+	ruleType, err := parseMonitoringText(values.Get("rule_type"), 50)
+	if err != nil || !validTransformRuleType(ruleType) {
+		c.JSON(400, msg.ErrResponseStr("无效的清洗规则查询参数"))
+		return
+	}
+	sourceID, err := parseMonitoringUint(values.Get("source_id"))
+	if err != nil {
+		c.JSON(400, msg.ErrResponseStr("无效的清洗规则查询参数"))
+		return
+	}
+
+	result, err := ctrl.service.ListTransformRulesPage(c.Request.Context(), data_dao.TransformRuleListQuery{
+		Page: page, PageSize: pageSize, Keyword: keyword, Enabled: enabled, RuleType: ruleType, SourceID: sourceID,
+	})
 	if err != nil {
 		c.JSON(500, msg.ErrResponse("查询清洗规则失败", err))
 		return
 	}
-
 	c.JSON(200, msg.SuccessResponse("查询清洗规则成功", &map[string]any{
-		"rules": safeTransformRules(rules),
+		"rules":      safeTransformRules(result.List),
+		"pagination": monitoringPaginationResponse(page, pageSize, result.Total),
 	}))
+}
+
+func validTransformRuleType(value string) bool {
+	switch value {
+	case "", "mapping", "http_enrich", "db_enrich", "script", "validator":
+		return true
+	default:
+		return false
+	}
 }
 
 func (ctrl *TransformController) GetRule(c *gin.Context) {

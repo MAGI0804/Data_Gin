@@ -88,6 +88,10 @@ func (s *DeliveryService) ListDestinations(ctx context.Context) ([]model.Destina
 	return s.destinationDAO.FindAll(ctx)
 }
 
+func (s *DeliveryService) ListDestinationsPage(ctx context.Context, query data_dao.DestinationDefinitionListQuery) (*data_dao.DestinationDefinitionListPage, error) {
+	return s.destinationDAO.FindPage(ctx, query)
+}
+
 func (s *DeliveryService) GetDestination(ctx context.Context, id uint) (*model.DestinationDefinition, error) {
 	return s.destinationDAO.FindByID(ctx, id)
 }
@@ -158,6 +162,10 @@ func (s *DeliveryService) CreateDeliveryTask(ctx context.Context, req *requestbo
 
 func (s *DeliveryService) ListDeliveryTasks(ctx context.Context) ([]model.DeliveryTask, error) {
 	return s.taskDAO.FindAll(ctx)
+}
+
+func (s *DeliveryService) ListDeliveryTasksPage(ctx context.Context, query data_dao.DeliveryTaskListQuery) (*data_dao.DeliveryTaskListPage, error) {
+	return s.taskDAO.FindPage(ctx, query)
 }
 
 func (s *DeliveryService) GetDeliveryTask(ctx context.Context, id uint) (*model.DeliveryTask, error) {

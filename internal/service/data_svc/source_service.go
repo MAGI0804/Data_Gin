@@ -68,6 +68,10 @@ func (s *SourceService) ListSourceDefinitions(ctx context.Context) ([]model.Sour
 	return s.sourceDAO.FindAll(ctx)
 }
 
+func (s *SourceService) ListSourceDefinitionsPage(ctx context.Context, query data_dao.SourceDefinitionListQuery) (*data_dao.SourceDefinitionListPage, error) {
+	return s.sourceDAO.FindPage(ctx, query)
+}
+
 func (s *SourceService) GetSourceDefinition(ctx context.Context, id uint) (*model.SourceDefinition, error) {
 	return s.sourceDAO.FindByID(ctx, id)
 }

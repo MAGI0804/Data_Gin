@@ -5,6 +5,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"gin-biz-web-api/internal/dao/data_dao"
 	"gin-biz-web-api/internal/msg"
 	"gin-biz-web-api/internal/requestbody"
 	"gin-biz-web-api/internal/service/data_svc"
@@ -21,14 +22,54 @@ func NewSourceController() *SourceController {
 }
 
 func (ctrl *SourceController) ListSources(c *gin.Context) {
-	sources, err := ctrl.service.ListSourceDefinitions(c.Request.Context())
+	values := c.Request.URL.Query()
+	if !monitoringQueryKeysAllowed(values, "page", "page_size", "keyword", "enabled", "source_type") {
+		c.JSON(400, msg.ErrResponseStr("无效的数据源查询参数"))
+		return
+	}
+	if !monitoringHasAnyKey(values, "page", "page_size", "keyword", "enabled", "source_type") {
+		sources, err := ctrl.service.ListSourceDefinitions(c.Request.Context())
+		if err != nil {
+			c.JSON(500, msg.ErrResponse("查询数据源失败", err))
+			return
+		}
+
+		c.JSON(200, msg.SuccessResponse("查询数据源成功", &map[string]any{
+			"sources": safeSourceDefinitions(sources),
+		}))
+		return
+	}
+	page, pageSize, err := parseMonitoringPagination(values)
+	if err != nil {
+		c.JSON(400, msg.ErrResponseStr("无效的数据源分页参数"))
+		return
+	}
+	keyword, err := parseMonitoringText(values.Get("keyword"), 100)
+	if err != nil {
+		c.JSON(400, msg.ErrResponseStr("无效的数据源查询参数"))
+		return
+	}
+	enabled, err := parseMonitoringBool(values.Get("enabled"))
+	if err != nil {
+		c.JSON(400, msg.ErrResponseStr("无效的数据源查询参数"))
+		return
+	}
+	sourceType, err := parseMonitoringText(values.Get("source_type"), 50)
+	if err != nil {
+		c.JSON(400, msg.ErrResponseStr("无效的数据源查询参数"))
+		return
+	}
+
+	result, err := ctrl.service.ListSourceDefinitionsPage(c.Request.Context(), data_dao.SourceDefinitionListQuery{
+		Page: page, PageSize: pageSize, Keyword: keyword, Enabled: enabled, SourceType: sourceType,
+	})
 	if err != nil {
 		c.JSON(500, msg.ErrResponse("查询数据源失败", err))
 		return
 	}
-
 	c.JSON(200, msg.SuccessResponse("查询数据源成功", &map[string]any{
-		"sources": safeSourceDefinitions(sources),
+		"sources":    safeSourceDefinitions(result.List),
+		"pagination": monitoringPaginationResponse(page, pageSize, result.Total),
 	}))
 }
 

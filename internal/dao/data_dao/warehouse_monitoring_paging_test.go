@@ -46,6 +46,59 @@ func TestMonitoringListFiltersUseBoundParameters(t *testing.T) {
 	if strings.Contains(runStatement.SQL.String(), "trace-1") || len(runStatement.Vars) != 5 {
 		t.Fatalf("run filter SQL did not bind inputs: %s; vars=%v", runStatement.SQL.String(), runStatement.Vars)
 	}
+
+	enabled := true
+	sourceDAO := &SourceDefinitionDAO{db: db}
+	sourceStatement := sourceDAO.applyListFilters(db.Model(&model.SourceDefinition{}), SourceDefinitionListQuery{
+		Keyword: "source-a", Enabled: &enabled, SourceType: "api_poll",
+	}).Find(&[]model.SourceDefinition{}).Statement
+	for _, fragment := range []string{"name LIKE ?", "code LIKE ?", "auth_type LIKE ?", "enabled = ?", "source_type = ?"} {
+		if !strings.Contains(sourceStatement.SQL.String(), fragment) {
+			t.Fatalf("source filter SQL missing %q: %s", fragment, sourceStatement.SQL.String())
+		}
+	}
+	if strings.Contains(sourceStatement.SQL.String(), "source-a") || len(sourceStatement.Vars) != 5 {
+		t.Fatalf("source filter SQL did not bind inputs: %s; vars=%v", sourceStatement.SQL.String(), sourceStatement.Vars)
+	}
+
+	ruleDAO := &TransformRuleDAO{db: db}
+	ruleStatement := ruleDAO.applyListFilters(db.Model(&model.TransformRule{}), TransformRuleListQuery{
+		Keyword: "rule-a", Enabled: &enabled, RuleType: "mapping", SourceID: 7,
+	}).Find(&[]model.TransformRule{}).Statement
+	for _, fragment := range []string{"name LIKE ?", "enabled = ?", "rule_type = ?", "source_id = ?"} {
+		if !strings.Contains(ruleStatement.SQL.String(), fragment) {
+			t.Fatalf("rule filter SQL missing %q: %s", fragment, ruleStatement.SQL.String())
+		}
+	}
+	if strings.Contains(ruleStatement.SQL.String(), "rule-a") || len(ruleStatement.Vars) != 4 {
+		t.Fatalf("rule filter SQL did not bind inputs: %s; vars=%v", ruleStatement.SQL.String(), ruleStatement.Vars)
+	}
+
+	destinationDAO := &DestinationDefinitionDAO{db: db}
+	destinationStatement := destinationDAO.applyListFilters(db.Model(&model.DestinationDefinition{}), DestinationDefinitionListQuery{
+		Keyword: "target-a", Enabled: &enabled, DestinationType: "http",
+	}).Find(&[]model.DestinationDefinition{}).Statement
+	for _, fragment := range []string{"name LIKE ?", "code LIKE ?", "enabled = ?", "destination_type = ?"} {
+		if !strings.Contains(destinationStatement.SQL.String(), fragment) {
+			t.Fatalf("destination filter SQL missing %q: %s", fragment, destinationStatement.SQL.String())
+		}
+	}
+	if strings.Contains(destinationStatement.SQL.String(), "target-a") || len(destinationStatement.Vars) != 4 {
+		t.Fatalf("destination filter SQL did not bind inputs: %s; vars=%v", destinationStatement.SQL.String(), destinationStatement.Vars)
+	}
+
+	taskDAO := &DeliveryTaskDAO{db: db}
+	taskStatement := taskDAO.applyListFilters(db.Model(&model.DeliveryTask{}), DeliveryTaskListQuery{
+		Keyword: "task-a", Enabled: &enabled, DestinationID: 9,
+	}).Find(&[]model.DeliveryTask{}).Statement
+	for _, fragment := range []string{"name LIKE ?", "clean_table LIKE ?", "enabled = ?", "destination_id = ?"} {
+		if !strings.Contains(taskStatement.SQL.String(), fragment) {
+			t.Fatalf("task filter SQL missing %q: %s", fragment, taskStatement.SQL.String())
+		}
+	}
+	if strings.Contains(taskStatement.SQL.String(), "task-a") || len(taskStatement.Vars) != 4 {
+		t.Fatalf("task filter SQL did not bind inputs: %s; vars=%v", taskStatement.SQL.String(), taskStatement.Vars)
+	}
 }
 
 func monitoringDryRunDB(t *testing.T) *gorm.DB {
