@@ -3009,3 +3009,369 @@ summary {
     border-left-width: 3px;
   }
 }
+
+/* 前五张设计稿共用的桌面控制台视觉骨架。 */
+:root {
+  --ink: #1f2329;
+  --muted: #68707c;
+  --line: #e3e7ed;
+  --surface: #f7f8fa;
+  --accent: #ff9d0a;
+  --success: #07954c;
+  --danger: #f04438;
+}
+
+body {
+  background: #ffffff;
+}
+
+button {
+  min-height: 38px;
+  border-color: #cfd5dd;
+  border-radius: 4px;
+  color: #24272c;
+  font-weight: 650;
+  padding: 7px 13px;
+}
+
+button:hover {
+  border-color: #9fa8b5;
+  background: #f8fafc;
+}
+
+button.primary {
+  border-color: var(--accent);
+  background: var(--accent);
+  color: #ffffff;
+}
+
+button.primary:hover {
+  border-color: #eb8e00;
+  background: #eb8e00;
+}
+
+input,
+select,
+textarea {
+  min-height: 40px;
+  border-color: #c6ccd5;
+  border-radius: 4px;
+  color: #24272c;
+}
+
+input:focus,
+select:focus,
+textarea:focus,
+button:focus-visible {
+  outline-color: var(--accent);
+}
+
+.ops-shell {
+  grid-template-columns: 252px minmax(0, 1fr);
+}
+
+.ops-sidebar {
+  border-right-color: #e1e5ea;
+  padding: 24px 16px;
+}
+
+.ops-sidebar > .allblu-brand {
+  margin: 0 10px 22px;
+}
+
+.ops-sidebar .allblu-brand__logo {
+  width: 42px;
+  height: 42px;
+  flex-basis: 42px;
+}
+
+.ops-sidebar .allblu-brand__name {
+  font-size: 28px;
+  font-weight: 750;
+}
+
+.ops-sidebar .nav-search,
+.ops-sidebar .sidebar-actions {
+  display: none;
+}
+
+.module-nav {
+  gap: 15px;
+  border: 0;
+  padding: 0;
+}
+
+.nav-group {
+  gap: 5px;
+}
+
+.nav-group-toggle {
+  min-height: 24px;
+  cursor: default;
+  pointer-events: none;
+  color: #717985;
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0;
+  padding: 0 10px;
+}
+
+.nav-group-toggle svg {
+  display: none;
+}
+
+.nav-group-items {
+  gap: 2px;
+  padding-left: 0;
+}
+
+.nav-item {
+  min-height: 43px;
+  border: 0;
+  border-left: 4px solid transparent;
+  border-radius: 0;
+  padding: 8px 12px 8px 14px;
+}
+
+.nav-item svg {
+  width: 20px;
+  height: 20px;
+}
+
+.nav-item strong {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.nav-item small {
+  display: none;
+}
+
+.nav-item.active,
+.nav-item.active:hover {
+  border-color: var(--accent);
+  background: #fff7e9;
+  color: #f08d00;
+}
+
+.ops-workspace {
+  padding: 0 clamp(26px, 3.7vw, 54px) 36px;
+}
+
+.workspace-header {
+  min-height: 128px;
+  align-items: center;
+  border-bottom-color: #e0e4e9;
+  margin-bottom: 32px;
+  padding: 28px 0 24px;
+}
+
+.workspace-header h2 {
+  color: #111418;
+  font-size: 30px;
+  font-weight: 750;
+  letter-spacing: -0.025em;
+}
+
+.workspace-header > div:first-child > span {
+  display: block;
+  margin-top: 8px;
+  color: #747b86;
+  font-size: 15px;
+}
+
+.workspace-session {
+  gap: 20px;
+  color: #414750;
+  font-size: 14px;
+}
+
+.workspace-date,
+.workspace-health {
+  display: inline-flex;
+  align-items: center;
+  gap: 9px;
+  white-space: nowrap;
+}
+
+.workspace-date svg {
+  width: 20px;
+  height: 20px;
+}
+
+.workspace-user {
+  display: none;
+}
+
+.workspace-refresh {
+  min-width: 112px;
+}
+
+.workspace-session .workspace-health {
+  color: var(--success);
+  font-weight: 650;
+}
+
+.workspace-health i {
+  display: none;
+}
+
+.workspace-health::before {
+  width: 10px;
+  height: 10px;
+  flex: 0 0 10px;
+  border-radius: 999px;
+  background: currentColor;
+  content: '';
+}
+
+.workspace-session .workspace-health.is-loading {
+  color: #df8a00;
+}
+
+.overview-grid {
+  gap: 0;
+  border: 1px solid var(--line);
+  border-left: 3px solid var(--accent);
+}
+
+.metric {
+  min-height: 148px;
+  border: 0;
+  border-right: 1px solid var(--line);
+  padding: 27px clamp(18px, 2vw, 48px);
+}
+
+.metric:last-child {
+  border-right: 0;
+}
+
+.metric span {
+  color: #4c535d;
+  font-size: 15px;
+  font-weight: 500;
+}
+
+.metric strong {
+  margin-top: 17px;
+  color: #111418;
+  font-size: 45px;
+  font-weight: 500;
+  letter-spacing: 0.03em;
+}
+
+.metric:last-child strong {
+  color: var(--danger);
+}
+
+.overview-workspace,
+.delivery-log-layout,
+.step-runs-layout {
+  border-color: var(--line);
+}
+
+.panel-title {
+  min-height: 58px;
+  padding: 17px 0 13px;
+}
+
+.panel-title h3,
+.overview-monitoring-section h3 {
+  color: #1b1f24;
+  font-size: 19px;
+  font-weight: 700;
+}
+
+.query-bar {
+  border-color: var(--line);
+  border-left-color: var(--accent);
+  padding: 15px 18px;
+}
+
+.query-fields {
+  gap: 16px;
+}
+
+.status-pill {
+  min-height: 28px;
+  border-radius: 3px;
+  font-size: 12px;
+  padding: 3px 8px;
+}
+
+.data-table {
+  font-size: 14px;
+}
+
+.data-table th,
+.data-table td {
+  border-bottom-color: var(--line);
+  padding: 14px 11px;
+}
+
+.data-table th {
+  background: #ffffff;
+  color: #424952;
+  font-size: 14px;
+  font-weight: 650;
+}
+
+.data-table tbody tr:hover {
+  background: #fffaf1;
+}
+
+.overview-monitoring-section {
+  gap: 15px;
+  padding: 25px 0 26px 30px;
+}
+
+.step-runs-layout {
+  min-height: 650px;
+}
+
+.step-runs-column,
+.step-runs-workspace {
+  padding: 22px;
+}
+
+.step-runs-run,
+.step-runs-step {
+  min-height: 82px;
+  padding: 14px 12px;
+}
+
+@media (max-width: 840px) {
+  .ops-shell {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .ops-sidebar .nav-search,
+  .ops-sidebar .sidebar-actions {
+    display: grid;
+  }
+
+  .nav-group-toggle {
+    cursor: pointer;
+    pointer-events: auto;
+  }
+
+  .nav-group-toggle svg,
+  .nav-item small {
+    display: block;
+  }
+
+  .workspace-date,
+  .workspace-health {
+    font-size: 12px;
+  }
+
+  .metric {
+    min-height: 106px;
+    padding: 18px;
+  }
+
+  .metric strong {
+    margin-top: 9px;
+    font-size: 30px;
+  }
+}

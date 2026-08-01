@@ -6,6 +6,7 @@ import {
   ArrowUpFromLine,
   BookOpen,
   Building2,
+  CalendarDays,
   CheckCircle2,
   ChevronDown,
   CloudSun,
@@ -1524,9 +1525,10 @@ function ModuleHeader({ activeNav, loading, sessionUser, onOpenNavigation, onRef
         <span>{titles[activeNav].subtitle}</span>
       </div>
       <div className="workspace-session">
-        {sessionUser && <span>{sessionUser.nickname || sessionUser.account}</span>}
-        <button className="workspace-refresh" type="button" onClick={onRefresh} disabled={refreshing}><RefreshCcw aria-hidden="true" />{refreshing ? '刷新中' : '刷新'}</button>
-        <StatusPill label={loading ? '加载中' : '已就绪'} />
+        {activeNav !== 'store_info' && <span className="workspace-date"><CalendarDays aria-hidden="true" />{new Intl.DateTimeFormat('zh-CN', { year: 'numeric', month: 'long', day: 'numeric', timeZone: 'Asia/Shanghai' }).format(new Date())}</span>}
+        {sessionUser && <span className="workspace-user">{sessionUser.nickname || sessionUser.account}</span>}
+        <button className="workspace-refresh" type="button" onClick={onRefresh} disabled={refreshing}><RefreshCcw aria-hidden="true" />{refreshing ? '刷新中' : '刷新数据'}</button>
+        <span className={loading ? 'workspace-health is-loading' : 'workspace-health'}><i aria-hidden="true" />{loading ? '数据加载中' : '系统正常'}</span>
       </div>
     </header>
   )
@@ -5497,14 +5499,23 @@ function Metric({ label, value }: { label: string; value: ReactNode }) {
 }
 
 function StatusPill({ label }: { label: string }) {
-  const tone = /失败|错误|无效|停用|风险|超时/i.test(label)
+  const displayLabel = ({
+    success: '已完成',
+    running: '运行中',
+    failed: '失败',
+    partial_success: '部分成功',
+    pending: '待处理',
+    enabled: '已启用',
+    disabled: '已停用',
+  } as Record<string, string>)[label.toLowerCase()] ?? label
+  const tone = /失败|错误|无效|停用|风险|超时/i.test(displayLabel)
     ? 'danger'
-    : /成功|已就绪|启用|完成|已接收|已清洗|已交付|正常/i.test(label)
+    : /成功|已就绪|启用|完成|已接收|已清洗|已交付|正常/i.test(displayLabel)
       ? 'success'
-      : /处理中|排队|加载|待推送/i.test(label)
+      : /处理中|运行中|排队|加载|待处理|待推送/i.test(displayLabel)
         ? 'warning'
         : 'neutral'
-  return <span className={`status-pill ${tone}`}>{label}</span>
+  return <span className={`status-pill ${tone}`}>{displayLabel}</span>
 }
 
 function EmptyState({ text }: { text: string }) {
