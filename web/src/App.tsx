@@ -26,6 +26,7 @@ import {
   X,
 } from 'lucide-react'
 import './App.css'
+import './DataWorkspacePages.css'
 import { apiURL as buildApiURL } from './apiURL'
 import { clearStoredToken, loadStoredSessionUser, loadStoredToken, saveStoredSessionUser, saveStoredToken, saveStoredTokenExpiry, storedTokenExpiresAt, tokenActorID, type StoredSessionUser } from './authStorage'
 import { createApiClient, type ApiRequestOptions, type ClientResponse, type HTTPMethod } from './api/client'
@@ -2352,8 +2353,12 @@ function RulesQueryPage({ client, rules, sources, onRulesChange, refreshVersion 
 
   function submitQuery(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
+    applyQuery(query, status, ruleType)
+  }
+
+  function applyQuery(nextQuery: string, nextStatus: string, nextRuleType: string) {
     setPage(1)
-    setApplied({ keyword: query, enabled: status === 'enabled' ? 'true' : status === 'disabled' ? 'false' : '', ruleType: ruleType === 'all' ? '' : ruleType })
+    setApplied({ keyword: nextQuery, enabled: nextStatus === 'enabled' ? 'true' : nextStatus === 'disabled' ? 'false' : '', ruleType: nextRuleType === 'all' ? '' : nextRuleType })
     setReloadVersion((version) => version + 1)
   }
 
@@ -2427,16 +2432,23 @@ function RulesQueryPage({ client, rules, sources, onRulesChange, refreshVersion 
 
   const testable = draft?.ruleType === 'mapping'
   return (
-    <div className="view-stack">
+    <div className="view-stack design-data-page design-rules-page">
       {operationError && <div className="result-banner error" role="alert">{operationError}</div>}
-      <form className="query-bar" onSubmit={submitQuery}><div className="query-fields">
-        <Field label="名称 / 来源 ID / 类型" name="rule_query" value={query} onChange={setQuery} />
-        <SelectFilter label="状态" value={status} onChange={setStatus} options={[{ value: 'enabled', label: '启用' }, { value: 'disabled', label: '停用' }]} />
-        <Field label="规则类型" name="rule_type" value={ruleType} onChange={setRuleType} />
-      </div><button type="submit" disabled={loading}>{loading ? '查询中…' : '查询'}</button></form>
+      <form className="query-bar design-filter-bar design-rules-filter" onSubmit={submitQuery}>
+        <div className="query-fields">
+          <label>名称 / 来源 ID / 配置<span className="design-search-control"><Search aria-hidden="true" /><input name="rule_query" type="search" value={query} onChange={(event) => setQuery(event.currentTarget.value)} placeholder="搜索规则" /></span></label>
+          <SelectFilter label="状态" value={status} onChange={(nextStatus) => { setStatus(nextStatus); applyQuery(query, nextStatus, ruleType) }} options={[{ value: 'enabled', label: '启用' }, { value: 'disabled', label: '停用' }]} />
+          <SelectFilter label="规则类型" value={ruleType} onChange={(nextRuleType) => { setRuleType(nextRuleType); applyQuery(query, status, nextRuleType) }} options={[{ value: 'mapping', label: 'mapping' }, { value: 'validator', label: 'validator' }, { value: 'http_enrich', label: 'http_enrich' }, { value: 'db_enrich', label: 'db_enrich' }, { value: 'script', label: 'script' }]} />
+        </div>
+        <div className="design-filter-count"><strong>{listedRules.length}</strong><span>/ {pagination?.total ?? 0} 条</span></div>
+        <button className="sr-only" type="submit" disabled={loading}>{loading ? '查询中…' : '查询规则'}</button>
+      </form>
       {error && <div className="result-banner error" role="alert">{error}{recordsPage ? ' 已保留最近一次成功数据。' : ''}</div>}
-      <div className="record-actions"><button type="button" className="primary" onClick={openCreate}>新增规则</button></div>
-      <Panel title="清洗规则" icon={<ListChecks />} meta={loading && !recordsPage ? '正在加载…' : `共 ${pagination?.total ?? 0} 条`}><TransformRuleList rules={listedRules} sources={sources} onDetail={(rule) => { void openDetail(rule.id) }} /><MonitoringPaginationControls page={pagination?.page ?? page} totalPages={pagination?.totalPages ?? 0} loading={loading} onPrevious={() => setPage((current) => Math.max(1, current - 1))} onNext={() => setPage((current) => current + 1)} /></Panel>
+      <section className="design-table-section">
+        <div className="design-section-heading"><div><h3>清洗规则</h3><span>{loading && !recordsPage ? '正在加载…' : `查询命中 ${pagination?.total ?? 0} 条`}</span></div><button type="button" className="primary" onClick={openCreate}>新增规则</button></div>
+        <TransformRuleList rules={listedRules} sources={sources} onDetail={(rule) => { void openDetail(rule.id) }} />
+        <MonitoringPaginationControls page={pagination?.page ?? page} totalPages={pagination?.totalPages ?? 0} loading={loading} onPrevious={() => setPage((current) => Math.max(1, current - 1))} onNext={() => setPage((current) => current + 1)} />
+      </section>
       {draft && (
         <Modal title={draft.id ? '清洗规则详情与编辑' : '新增清洗规则'} onClose={() => { if (!saving && !testing) setDraft(null) }}>
           {draft.hasSecret && <div className="result-banner" role="status">配置中的敏感值已隐藏。保留“[已隐藏]”会保留原值；改为新值即可轮换，且不会回显旧值。</div>}
@@ -5357,10 +5369,10 @@ function TransformRuleList({ rules, sources, onDetail }: { rules: TransformRule[
   if (rules.length === 0) return <EmptyState text="暂无处理规则。" />
   return (
     <div className="data-table-wrap" role="region" aria-label="清洗规则列表" tabIndex={0}>
-      <table className="data-table"><thead><tr><th scope="col">规则名称</th><th scope="col">规则类型</th><th scope="col">来源</th><th scope="col">执行顺序</th><th scope="col">状态</th><th scope="col">操作</th></tr></thead>
+      <table className="data-table design-rules-table"><thead><tr><th scope="col">规则名称</th><th scope="col">规则类型</th><th scope="col">来源</th><th scope="col">执行顺序</th><th scope="col">状态</th><th scope="col">操作</th></tr></thead>
         <tbody>{rules.map((rule) => {
           const source = sources.find((item) => item.id === rule.source_id)
-          return <tr key={rule.id}><td><strong>{rule.name}</strong>{rule.has_secret && <small>配置已脱敏</small>}</td><td>{rule.rule_type}</td><td>{source ? `${source.name} (#${source.id})` : `#${rule.source_id}`}</td><td>{rule.order_index}</td><td><StatusPill label={rule.enabled ? '启用' : '停用'} /></td><td><button type="button" onClick={() => onDetail(rule)}>详情</button></td></tr>
+          return <tr key={rule.id}><td><strong>{rule.name}</strong>{rule.has_secret && <small>配置已脱敏</small>}</td><td>{rule.rule_type}</td><td>{source ? source.name : `#${rule.source_id}`}</td><td>{rule.order_index}</td><td><StatusPill label={rule.enabled ? '启用' : '停用'} /></td><td><button className="design-table-link" type="button" onClick={() => onDetail(rule)}>查看</button></td></tr>
         })}</tbody>
       </table>
     </div>
