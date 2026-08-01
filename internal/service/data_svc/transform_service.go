@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	transformconnector "gin-biz-web-api/connector/transform"
+	"gin-biz-web-api/internal/configsecret"
 	"gin-biz-web-api/internal/dao/data_dao"
 	"gin-biz-web-api/internal/requestbody"
 	"gin-biz-web-api/model"
@@ -28,8 +29,9 @@ func NewTransformService() *TransformService {
 }
 
 func (s *TransformService) CreateTransformRule(ctx context.Context, req *requestbody.TransformRuleCreateRequest) (*model.TransformRule, error) {
-	if !json.Valid([]byte(req.ConfigJSON)) {
-		return nil, fmt.Errorf("config_json must be valid json")
+	configJSON, err := configsecret.NewJSON(req.ConfigJSON, "")
+	if err != nil {
+		return nil, err
 	}
 
 	enabled := true
@@ -42,11 +44,11 @@ func (s *TransformService) CreateTransformRule(ctx context.Context, req *request
 		Name:       req.Name,
 		RuleType:   req.RuleType,
 		OrderIndex: req.OrderIndex,
-		ConfigJSON: req.ConfigJSON,
+		ConfigJSON: configJSON,
 		Enabled:    enabled,
 	}
 
-	_, err := s.ruleDAO.Create(ctx, rule)
+	_, err = s.ruleDAO.Create(ctx, rule)
 	if err != nil {
 		return nil, err
 	}
@@ -63,11 +65,11 @@ func (s *TransformService) GetTransformRule(ctx context.Context, id uint) (*mode
 }
 
 func (s *TransformService) UpdateTransformRule(ctx context.Context, id uint, req *requestbody.TransformRuleUpdateRequest) (*model.TransformRule, error) {
-	if !json.Valid([]byte(req.ConfigJSON)) {
-		return nil, fmt.Errorf("config_json must be valid json")
-	}
-
 	rule, err := s.ruleDAO.FindByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	configJSON, err := configsecret.MergeJSON(rule.ConfigJSON, req.ConfigJSON)
 	if err != nil {
 		return nil, err
 	}
@@ -81,7 +83,7 @@ func (s *TransformService) UpdateTransformRule(ctx context.Context, id uint, req
 	rule.Name = req.Name
 	rule.RuleType = req.RuleType
 	rule.OrderIndex = req.OrderIndex
-	rule.ConfigJSON = req.ConfigJSON
+	rule.ConfigJSON = configJSON
 	rule.Enabled = enabled
 
 	if err := s.ruleDAO.Update(ctx, rule); err != nil {

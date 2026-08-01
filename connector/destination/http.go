@@ -27,6 +27,9 @@ func (publisher HTTPPublisher) Test(ctx context.Context, cfg Config) error {
 	if method == "" {
 		method = http.MethodHead
 	}
+	if method != http.MethodHead && method != http.MethodGet {
+		return fmt.Errorf("http destination test method must be HEAD or GET")
+	}
 
 	timeout := time.Duration(IntValue(cfg, "timeout_seconds", 30)) * time.Second
 	reqCtx, cancel := context.WithTimeout(ctx, timeout)

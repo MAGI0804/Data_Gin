@@ -23,7 +23,7 @@ type ErrResponseST struct {
 	Code int             `json:"code"`
 	Msg  any             `json:"msg"`
 	Data *map[string]any `json:"data"`
-	Err  any             `json:err`
+	Err  any             `json:"err"`
 }
 
 var trans ut.Translator
@@ -94,26 +94,25 @@ func SuccessResponseStr(msg string) *Response {
 	}
 }
 
-func ErrResponse(msg string, errors error) *ErrResponseST {
+func ErrResponse(msg string, responseErr error) *ErrResponseST {
 	err := initTranslator("zh")
 	if err != nil {
 		panic(err)
 	}
-	B := errors.Error()
-	if errors, ok := err.(validator.ValidationErrors); ok {
-		B := remove(errors.Translate(trans))
+	if validationErrors, ok := responseErr.(validator.ValidationErrors); ok {
+		translated := remove(validationErrors.Translate(trans))
 		return &ErrResponseST{
 			Code: 201,
 			Msg:  msg,
 			Data: &map[string]any{},
-			Err:  B,
+			Err:  translated,
 		}
 	}
 	return &ErrResponseST{
 		Code: 201,
 		Msg:  msg,
 		Data: &map[string]any{},
-		Err:  B,
+		Err:  "",
 	}
 }
 

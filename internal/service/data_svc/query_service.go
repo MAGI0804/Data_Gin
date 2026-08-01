@@ -14,6 +14,7 @@ import (
 type QueryService struct {
 	rawDataDAO       *data_dao.RawDataDAO
 	processedDataDAO *data_dao.ProcessedDataDAO
+	cleanRecordDAO   *data_dao.CleanRecordDAO
 	statisticsDAO    *data_dao.StatisticsDAO
 }
 
@@ -21,26 +22,27 @@ func NewQueryService() *QueryService {
 	return &QueryService{
 		rawDataDAO:       data_dao.NewRawDataDAO(),
 		processedDataDAO: data_dao.NewProcessedDataDAO(),
+		cleanRecordDAO:   data_dao.NewCleanRecordDAO(),
 		statisticsDAO:    data_dao.NewStatisticsDAO(),
 	}
 }
 
 type RawDataResponse struct {
 	ID           uint                   `json:"id"`
-	DataSourceID uint                  `json:"data_source_id"`
+	DataSourceID uint                   `json:"data_source_id"`
 	ExternalID   string                 `json:"external_id"`
 	DataType     string                 `json:"data_type"`
 	RawContent   map[string]interface{} `json:"raw_content"`
 	Metadata     map[string]interface{} `json:"metadata"`
 	Status       string                 `json:"status"`
 	ErrorMessage string                 `json:"error_message"`
-	ProcessedAt  int                   `json:"processed_at"`
+	ProcessedAt  int                    `json:"processed_at"`
 	Remark       string                 `json:"remark"`
 	Source       string                 `json:"source"`
 	ClientIP     string                 `json:"client_ip"`
-	IngestedAt   interface{}           `json:"ingested_at"`
-	CreatedAt    interface{}           `json:"created_at"`
-	UpdatedAt    interface{}           `json:"updated_at"`
+	IngestedAt   interface{}            `json:"ingested_at"`
+	CreatedAt    interface{}            `json:"created_at"`
+	UpdatedAt    interface{}            `json:"updated_at"`
 }
 
 type RawDataListResult struct {
@@ -51,13 +53,56 @@ type RawDataListResult struct {
 	TotalPages int               `json:"total_pages"`
 }
 
-func (s *QueryService) GetRawDataList(ctx context.Context, page, pageSize int, source, startTime, endTime string) (*RawDataListResult, error) {
-	logger.Info("查询原始数据列表", zap.Int("page", page), zap.Int("page_size", pageSize), zap.String("source", source), zap.String("start_time", startTime), zap.String("end_time", endTime))
+type ProcessedDataListResult struct {
+	List           []model.ProcessedData `json:"list"`
+	Total          int64                 `json:"total"`
+	Page           int                   `json:"page"`
+	PageSize       int                   `json:"page_size"`
+	TotalPages     int                   `json:"total_pages"`
+	AverageQuality float64               `json:"avg_quality"`
+}
+
+type CleanRecordListResult struct {
+	List           []model.CleanRecord `json:"list"`
+	Total          int64               `json:"total"`
+	Page           int                 `json:"page"`
+	PageSize       int                 `json:"page_size"`
+	TotalPages     int                 `json:"total_pages"`
+	AverageQuality float64             `json:"avg_quality"`
+}
+
+func (s *QueryService) GetProcessedDataList(ctx context.Context, page, pageSize int, dataType string, minQuality, maxQuality *float64, createdFrom, createdTo int64) (*ProcessedDataListResult, error) {
+	result, err := s.processedDataDAO.FindWithPagination(ctx, data_dao.ProcessedDataListQuery{Page: page, PageSize: pageSize, DataType: dataType, MinQuality: minQuality, MaxQuality: maxQuality, CreatedFrom: createdFrom, CreatedTo: createdTo})
+	if err != nil {
+		return nil, err
+	}
+	totalPages := int(result.Total) / pageSize
+	if int(result.Total)%pageSize > 0 {
+		totalPages++
+	}
+	return &ProcessedDataListResult{List: result.List, Total: result.Total, Page: page, PageSize: pageSize, TotalPages: totalPages, AverageQuality: result.AverageQuality}, nil
+}
+
+func (s *QueryService) GetCleanRecordList(ctx context.Context, params data_dao.CleanRecordListQuery) (*CleanRecordListResult, error) {
+	result, err := s.cleanRecordDAO.FindWithPagination(ctx, params)
+	if err != nil {
+		return nil, err
+	}
+	totalPages := int(result.Total) / params.PageSize
+	if int(result.Total)%params.PageSize > 0 {
+		totalPages++
+	}
+	return &CleanRecordListResult{List: result.List, Total: result.Total, Page: params.Page, PageSize: params.PageSize, TotalPages: totalPages, AverageQuality: result.AverageQuality}, nil
+}
+
+func (s *QueryService) GetRawDataList(ctx context.Context, page, pageSize int, source, startTime, endTime, origin string) (*RawDataListResult, error) {
+	logger.Info("查询原始数据列表", zap.Int("page", page), zap.Int("page_size", pageSize), zap.String("source", source), zap.String("start_time", startTime), zap.String("end_time", endTime), zap.String("origin", origin))
 
 	params := data_dao.RawDataQueryParams{
 		Source:    source,
 		StartTime: startTime,
 		EndTime:   endTime,
+		Origin:    origin,
 		Page:      page,
 		PageSize:  pageSize,
 	}

@@ -41,6 +41,35 @@ type ProcessedDataQueryRequest struct {
 	Limit    int    `form:"limit" binding:"min=1,max=1000"`
 }
 
+// ProcessedDataListQueryRequest is the paginated query contract for legacy
+// processed_data records. Business-key filtering belongs to clean_records and
+// is intentionally not accepted here.
+type ProcessedDataListQueryRequest struct {
+	Page        int      `form:"page" binding:"min=1"`
+	PageSize    int      `form:"page_size" binding:"min=1,max=100"`
+	DataType    string   `form:"data_type" binding:"max=50"`
+	MinQuality  *float64 `form:"min_quality" binding:"omitempty,min=0,max=100"`
+	MaxQuality  *float64 `form:"max_quality" binding:"omitempty,min=0,max=100"`
+	CreatedFrom int64    `form:"created_from" binding:"min=0"`
+	CreatedTo   int64    `form:"created_to" binding:"min=0"`
+}
+
+// CleanRecordListQueryRequest is the paginated query contract for clean_records.
+// It is deliberately separate from legacy processed_data because only clean
+// records have a business key, source and delivery status.
+type CleanRecordListQueryRequest struct {
+	Page        int      `form:"page" binding:"min=1"`
+	PageSize    int      `form:"page_size" binding:"min=1,max=100"`
+	SourceID    uint     `form:"source_id" binding:"min=0"`
+	TableName   string   `form:"table_name" binding:"max=100"`
+	BusinessKey string   `form:"business_key" binding:"max=255"`
+	Status      string   `form:"status" binding:"omitempty,oneof=ready invalid delivered"`
+	MinQuality  *float64 `form:"min_quality" binding:"omitempty,min=0,max=100"`
+	MaxQuality  *float64 `form:"max_quality" binding:"omitempty,min=0,max=100"`
+	CreatedFrom int64    `form:"created_from" binding:"min=0"`
+	CreatedTo   int64    `form:"created_to" binding:"min=0"`
+}
+
 // StatisticsQueryRequest 统计数据查询请求
 type StatisticsQueryRequest struct {
 	StartDate string `form:"start_date" binding:"max=10"`
@@ -63,4 +92,19 @@ type RawDataListQueryRequest struct {
 	Source    string `json:"source" binding:"max=100"`
 	StartTime string `json:"start_time" binding:"max=20"`
 	EndTime   string `json:"end_time" binding:"max=20"`
+	Origin    string `json:"origin" binding:"omitempty,oneof=receive pull"`
+}
+
+// RawRecordListQueryRequest is the safe pagination contract for warehouse
+// raw_records. It deliberately accepts only metadata that is safe to list;
+// raw content, request headers and processing errors are never query fields.
+type RawRecordListQueryRequest struct {
+	Page      int    `form:"page" binding:"omitempty,min=1,max=1000000"`
+	PageSize  int    `form:"page_size" binding:"omitempty,min=1,max=100"`
+	Source    string `form:"source" binding:"max=100"`
+	Status    string `form:"status" binding:"omitempty,oneof=received queued cleaning cleaned failed"`
+	TraceID   string `form:"trace_id" binding:"max=64"`
+	StartTime string `form:"start_time" binding:"max=19"`
+	EndTime   string `form:"end_time" binding:"max=19"`
+	Origin    string `form:"origin" binding:"omitempty,oneof=receive pull"`
 }

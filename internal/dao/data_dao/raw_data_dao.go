@@ -81,6 +81,7 @@ type RawDataQueryParams struct {
 	Source    string
 	StartTime string
 	EndTime   string
+	Origin    string
 	Page      int
 	PageSize  int
 }
@@ -105,6 +106,9 @@ func (dao *RawDataDAO) FindWithPagination(ctx context.Context, params RawDataQue
 	if params.EndTime != "" {
 		query = query.Where("ingested_at <= ?", params.EndTime)
 	}
+	if condition, args := rawDataOriginCondition(params.Origin); condition != "" {
+		query = query.Where(condition, args...)
+	}
 
 	if err := query.Count(&total).Error; err != nil {
 		return nil, err
@@ -127,4 +131,19 @@ func (dao *RawDataDAO) FindWithPagination(ctx context.Context, params RawDataQue
 		List:  rawDataList,
 		Total: total,
 	}, nil
+}
+
+// rawDataOriginCondition keeps the query portable across the supported SQL drivers.
+// New source fetches persist metadata.format=fetch; records without that marker are
+// administrator-received records, including older ingestion formats.
+func rawDataOriginCondition(origin string) (string, []interface{}) {
+	const fetchedFormat = "%\"format\":\"fetch\"%"
+	switch origin {
+	case "pull":
+		return "metadata LIKE ?", []interface{}{fetchedFormat}
+	case "receive":
+		return "(metadata IS NULL OR metadata NOT LIKE ?)", []interface{}{fetchedFormat}
+	default:
+		return "", nil
+	}
 }

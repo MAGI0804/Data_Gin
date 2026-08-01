@@ -13,11 +13,162 @@
 }
 
 .mall-weather-create-form,
-.mall-weather-manual-coordinate {
+.mall-weather-manual-coordinate,
+.mall-weather-capacity-form {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
   align-items: end;
   gap: 12px;
+}
+
+.mall-weather-capacity-panel {
+  display: grid;
+  gap: 12px;
+}
+
+.mall-weather-export-profiles,
+.mall-weather-profile-form,
+.mall-weather-profile-datasets,
+.mall-weather-profile-dataset,
+.mall-weather-profile-details {
+  display: grid;
+  gap: 12px;
+}
+
+.mall-weather-profile-filter,
+.mall-weather-inline-actions {
+  display: flex;
+  align-items: end;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.mall-weather-profile-filter label {
+  min-width: 160px;
+}
+
+.mall-weather-profile-form {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  padding-top: 16px;
+  border-top: 1px solid var(--line, #e6e3dc);
+}
+
+.mall-weather-profile-form > .mall-weather-section-title,
+.mall-weather-profile-datasets,
+.mall-weather-form-actions,
+.mall-weather-profile-details {
+  grid-column: 1 / -1;
+}
+
+.mall-weather-profile-nested {
+  padding: 12px 0 0;
+  border: 0;
+}
+
+.mall-weather-profile-dataset {
+  grid-template-columns: repeat(4, minmax(0, 1fr)) auto;
+  align-items: end;
+  padding: 12px 0;
+  border-top: 1px solid var(--line, #e6e3dc);
+}
+
+.mall-weather-checkbox {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 40px;
+}
+
+.mall-weather-checkbox input {
+  width: auto;
+}
+
+.mall-import-panel,
+.mall-import-result {
+  display: grid;
+  gap: 12px;
+}
+
+.mall-import-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 1px;
+  border: 1px solid var(--line);
+  background: var(--line);
+}
+
+.mall-import-summary .mall-weather-meta-item {
+  background: #ffffff;
+}
+
+.mall-import-actions,
+.mall-import-confirm {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.mall-import-confirm {
+  border-left: 3px solid var(--accent);
+  background: var(--surface);
+  padding: 10px 12px;
+  font-size: 12px;
+}
+
+.mall-import-confirm span {
+  flex: 1 1 260px;
+}
+
+.mall-import-errors,
+.mall-import-result-rows {
+  display: grid;
+  gap: 1px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.mall-import-errors {
+  border-left: 3px solid #d92d20;
+  background: #fff3f2;
+  color: #8d1f17;
+  padding: 9px 12px 9px 28px;
+  font-size: 12px;
+}
+
+.mall-import-result-rows {
+  border: 1px solid var(--line);
+}
+
+.mall-import-result-rows li {
+  display: grid;
+  grid-template-columns: minmax(84px, auto) minmax(110px, auto) minmax(0, 1fr) minmax(180px, 1.5fr);
+  gap: 8px 12px;
+  align-items: baseline;
+  padding: 9px 10px;
+  border-bottom: 1px solid var(--line);
+  font-size: 12px;
+}
+
+.mall-import-result-rows li:last-child {
+  border-bottom: 0;
+}
+
+.mall-import-result-rows li[data-status='FAILED'] strong,
+.mall-import-result-rows li[data-status='FAILED'] span:last-child {
+  color: #d92d20;
+}
+
+@media (max-width: 700px) {
+  .mall-import-summary {
+    grid-template-columns: 1fr;
+  }
+
+  .mall-import-result-rows li {
+    grid-template-columns: 1fr;
+    gap: 4px;
+  }
 }
 
 .mall-weather-push-panel {
@@ -941,7 +1092,8 @@
 }
 
 @media (max-width: 1024px) {
-  .mall-weather-create-form {
+  .mall-weather-create-form,
+  .mall-weather-capacity-form {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
@@ -965,6 +1117,9 @@
   .store-info-toolbar-fields,
   .mall-weather-refresh-form,
   .mall-weather-create-form,
+  .mall-weather-capacity-form,
+  .mall-weather-profile-form,
+  .mall-weather-profile-dataset,
   .mall-weather-manual-coordinate,
   .mall-weather-push-controls,
   .mall-weather-meta,
@@ -974,12 +1129,22 @@
   }
 
   .mall-weather-selector-actions,
+  .mall-weather-inline-actions,
   .mall-weather-actions-row,
   .mall-weather-unavailable,
   .store-info-toolbar-actions,
   .store-info-maintenance-heading {
     align-items: stretch;
     flex-direction: column;
+  }
+
+  .mall-weather-profile-filter {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .mall-weather-profile-filter label {
+    min-width: 0;
   }
 
   .mall-weather-export-compact {

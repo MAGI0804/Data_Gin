@@ -48,6 +48,8 @@ func apiData(api *gin.RouterGroup) {
 	rawRecordsGroup.Use(middleware.AuthJWT())
 	{
 		transformCtrl := data_ctrl.NewTransformController()
+		rawRecordCtrl := data_ctrl.NewRawRecordController()
+		rawRecordsGroup.GET("", rawRecordCtrl.List)
 		rawRecordsGroup.POST("/:id/retransform", transformCtrl.RetransformRawRecord)
 	}
 
@@ -201,6 +203,8 @@ func apiData(api *gin.RouterGroup) {
 		dataGroup.GET("/raw", dataCtrl.QueryController.GetRawData)
 		dataGroup.POST("/raw/list", dataCtrl.QueryController.GetRawDataList)
 		dataGroup.GET("/processed", dataCtrl.QueryController.GetProcessedData)
+		dataGroup.GET("/processed/list", dataCtrl.QueryController.GetProcessedDataList)
+		dataGroup.GET("/clean-records/list", dataCtrl.QueryController.GetCleanRecordList)
 		dataGroup.GET("/statistics", dataCtrl.QueryController.GetStatistics)
 	}
 }

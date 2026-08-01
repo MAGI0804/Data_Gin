@@ -3,16 +3,27 @@ package data_svc
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
 	destinationconnector "gin-biz-web-api/connector/destination"
+	"gin-biz-web-api/internal/configsecret"
 	"gin-biz-web-api/internal/dao/data_dao"
 	"gin-biz-web-api/internal/requestbody"
 	"gin-biz-web-api/internal/service/config_svc"
+	weatherdomain "gin-biz-web-api/internal/weather"
 	"gin-biz-web-api/model"
 	"gin-biz-web-api/pkg/app"
+	projectredis "gin-biz-web-api/pkg/redis"
 )
+
+const (
+	deliveryTaskLockTTL            = 31 * time.Minute
+	deliveryTaskLockReleaseTimeout = 3 * time.Second
+)
+
+var ErrDeliveryTaskBusy = errors.New("delivery task is already running")
 
 type DeliveryService struct {
 	destinationDAO *data_dao.DestinationDefinitionDAO
@@ -22,6 +33,7 @@ type DeliveryService struct {
 	pipelineRunDAO *data_dao.PipelineRunDAO
 	skipPolicy     orderPushSkipConfigGetter
 	publishers     map[string]destinationconnector.Publisher
+	taskLocker     weatherdomain.TaskLocker
 }
 
 type DeliveryLogRetryResult struct {
@@ -48,8 +60,9 @@ func NewDeliveryService() *DeliveryService {
 }
 
 func (s *DeliveryService) CreateDestination(ctx context.Context, req *requestbody.DestinationCreateRequest) (*model.DestinationDefinition, error) {
-	if !json.Valid([]byte(req.ConfigJSON)) {
-		return nil, fmt.Errorf("config_json must be valid json")
+	configJSON, err := configsecret.NewJSON(req.ConfigJSON, "")
+	if err != nil {
+		return nil, err
 	}
 
 	enabled := true
@@ -61,10 +74,10 @@ func (s *DeliveryService) CreateDestination(ctx context.Context, req *requestbod
 		Name:            req.Name,
 		Code:            req.Code,
 		DestinationType: req.DestinationType,
-		ConfigJSON:      req.ConfigJSON,
+		ConfigJSON:      configJSON,
 		Enabled:         enabled,
 	}
-	_, err := s.destinationDAO.Create(ctx, destination)
+	_, err = s.destinationDAO.Create(ctx, destination)
 	if err != nil {
 		return nil, err
 	}
@@ -80,11 +93,11 @@ func (s *DeliveryService) GetDestination(ctx context.Context, id uint) (*model.D
 }
 
 func (s *DeliveryService) UpdateDestination(ctx context.Context, id uint, req *requestbody.DestinationUpdateRequest) (*model.DestinationDefinition, error) {
-	if !json.Valid([]byte(req.ConfigJSON)) {
-		return nil, fmt.Errorf("config_json must be valid json")
-	}
-
 	destination, err := s.destinationDAO.FindByID(ctx, id)
+	if err != nil {
+		return nil, err
+	}
+	configJSON, err := configsecret.MergeJSON(destination.ConfigJSON, req.ConfigJSON)
 	if err != nil {
 		return nil, err
 	}
@@ -97,7 +110,7 @@ func (s *DeliveryService) UpdateDestination(ctx context.Context, id uint, req *r
 	destination.Name = req.Name
 	destination.Code = req.Code
 	destination.DestinationType = req.DestinationType
-	destination.ConfigJSON = req.ConfigJSON
+	destination.ConfigJSON = configJSON
 	destination.Enabled = enabled
 
 	if err := s.destinationDAO.Update(ctx, destination); err != nil {
@@ -182,6 +195,10 @@ func (s *DeliveryService) ListDeliveryLogs(ctx context.Context, limit int) ([]mo
 	return s.logDAO.FindRecent(ctx, limit)
 }
 
+func (s *DeliveryService) ListDeliveryLogsPage(ctx context.Context, query data_dao.DeliveryLogListQuery) (*data_dao.DeliveryLogListPage, error) {
+	return s.logDAO.FindPage(ctx, query)
+}
+
 func (s *DeliveryService) RetryDeliveryLog(ctx context.Context, id uint) (*DeliveryLogRetryResult, error) {
 	log, err := s.logDAO.FindByID(ctx, id)
 	if err != nil {
@@ -230,6 +247,16 @@ type DeliveryRunResult struct {
 }
 
 func (s *DeliveryService) RunDeliveryTask(ctx context.Context, taskID uint) (*DeliveryRunResult, error) {
+	lock, err := s.acquireDeliveryTaskLock(ctx, taskID)
+	if err != nil {
+		return nil, err
+	}
+	defer func() {
+		releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), deliveryTaskLockReleaseTimeout)
+		defer cancel()
+		_ = lock.Release(releaseCtx)
+	}()
+
 	task, err := s.taskDAO.FindByID(ctx, taskID)
 	if err != nil {
 		return nil, err
@@ -316,6 +343,33 @@ func (s *DeliveryService) RunDeliveryTask(ctx context.Context, taskID uint) (*De
 		FailedCount:  failedCount,
 		SkippedCount: skippedCount,
 	}, nil
+}
+
+func (s *DeliveryService) acquireDeliveryTaskLock(ctx context.Context, taskID uint) (weatherdomain.TaskLock, error) {
+	locker := s.taskLocker
+	if locker == nil {
+		redisInstance := projectredis.Instance()
+		if redisInstance == nil || redisInstance.Client == nil {
+			return nil, fmt.Errorf("delivery task lock is unavailable")
+		}
+		var err error
+		locker, err = weatherdomain.NewRedisTaskLocker(
+			redisInstance.Client,
+			projectredis.GenNamespace("lock:delivery_task:"),
+			deliveryTaskLockTTL,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("create delivery task lock: %w", err)
+		}
+	}
+	lock, acquired, err := locker.Acquire(ctx, fmt.Sprintf("task:%d", taskID))
+	if err != nil {
+		return nil, fmt.Errorf("acquire delivery task lock: %w", err)
+	}
+	if !acquired || lock == nil {
+		return nil, ErrDeliveryTaskBusy
+	}
+	return lock, nil
 }
 
 func (s *DeliveryService) publishCleanRecord(

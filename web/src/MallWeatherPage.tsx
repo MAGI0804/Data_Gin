@@ -3,8 +3,13 @@ import { CloudRain, Download, MapPin, RefreshCcw, Thermometer, Wind } from 'luci
 import './MallWeatherPage.css'
 import { MallWeatherChart } from './MallWeatherChart'
 import { MallWeatherExportPanel } from './MallWeatherExportPanel'
+import { MallWeatherExportProfilePanel } from './MallWeatherExportProfilePanel'
 import { MallWeatherForecastPanel, type MallWeatherForecastDataSnapshot } from './MallWeatherForecastPanel'
 import { MallDetailsFields, MallWeatherMallEditor } from './MallWeatherMallEditor'
+import { runSingleFlight } from './singleFlight'
+import { mallWeatherCapacityPlanPath, parseMallWeatherCapacityPlan, type MallWeatherCapacityPlan, type MallWeatherCapacityPlanInput } from './mallWeatherCapacityPlan'
+import { parseMallWeatherMetricsSummary, type MallWeatherMetricsSummary } from './monitoring'
+import { mallImportRequestWithinLimit, parseMallImportCSV, parseMallImportResult, type MallImportResult, type MallImportRow } from './mallImport'
 import {
   createMallWeatherDatasetCsv,
   downloadMallWeatherBytes,
@@ -37,6 +42,7 @@ import {
   mallWeatherSheetPushRequest,
   mallWeatherSheetPushRequestMatchesOption,
   mallWeatherSheetPushResultMatchesRequest,
+  mallWeatherSheetPushRunMatchesResult,
   mergeMallWeatherMalls,
   mallWeatherOverviewPath,
   mallWeatherRefreshKey,
@@ -57,6 +63,7 @@ import {
   parseMallWeatherSheetPushDryRun,
   parseMallWeatherSheetPushOptions,
   parseMallWeatherSheetPushResult,
+  pollMallWeatherSheetPushRun,
   submitMallWeatherGeocodeConfirmation,
   submitMallWeatherGeocodeTrigger,
   type MallWeatherCreateInput,
@@ -73,6 +80,7 @@ import {
   type MallWeatherFetchRun,
   type MallWeatherSheetPushDryRun,
   type MallWeatherSheetPushOption,
+  type MallWeatherSheetPushRun,
 } from './mallWeather'
 
 type MallWeatherApiResult = {
@@ -142,7 +150,11 @@ function MallModulePage({
   const [query, setQuery] = useState('')
   const [city, setCity] = useState('')
   const [showCreate, setShowCreate] = useState(false)
+  const [showImport, setShowImport] = useState(false)
   const mallRequestSequence = useRef(0)
+  const mallController = useRef<AbortController | null>(null)
+  const mallDetailRequestSequence = useRef(0)
+  const mallDetailController = useRef<AbortController | null>(null)
   const overviewRequestSequence = useRef(0)
   const overviewController = useRef<AbortController | null>(null)
   const overviewSnapshotRef = useRef<MallWeatherOverview | null>(null)
@@ -177,59 +189,80 @@ function MallModulePage({
 
   const loadMalls = useCallback(async (afterID = 0) => {
     const sequence = ++mallRequestSequence.current
+    mallController.current?.abort()
+    const controller = new AbortController()
+    mallController.current = controller
     setMallState('loading')
     setMallError('')
     const search = new URLSearchParams({ limit: '50' })
     if (afterID > 0) search.set('afterId', String(afterID))
-    const response = await client(`/v1/malls?${search.toString()}`, { method: 'GET', showResult: false, silentLoading: true })
-    if (sequence !== mallRequestSequence.current) return
-    if (!response.ok) {
-      setMallState('error')
-      setMallError(weatherRequestError(response.status, '商场列表加载失败', '当前账号缺少 mall.read 权限'))
-      return
-    }
-    const parsed = parseMallWeatherMallList(response.data)
-    if (!parsed) {
-      setMallState('error')
-      setMallError('商场列表响应格式不正确，请联系管理员')
-      return
-    }
-    if (parsed.items.length === 50 && parsed.nextAfterId <= afterID) {
-      setMallState('error')
-      setMallError('商场列表游标无效，请联系管理员')
-      return
-    }
-    let nextItems = parsed.items
-    const selectedID = selectedMallIDRef.current
-    if (afterID === 0 && selectedID > 0 && !nextItems.some((mall) => mall.id === selectedID)) {
-      const selectedResponse = await client(`/v1/malls/${selectedID}`, { method: 'GET', showResult: false, silentLoading: true })
-      if (sequence !== mallRequestSequence.current) return
-      const selected = selectedResponse.ok ? parseMallWeatherMall(selectedResponse.data) : null
-      if (selected) nextItems = mergeMallWeatherMalls(nextItems, [selected])
-    }
-    setMalls((current) => {
-      if (afterID > 0) return mergeMallWeatherMalls(current, nextItems)
-      const liveSelected = current.find((mall) => mall.id === selectedMallIDRef.current)
-      const base = liveSelected && !nextItems.some((mall) => mall.id === liveSelected.id) ? [...nextItems, liveSelected] : nextItems
-      const baseByID = new Map(base.map((mall) => [mall.id, mall]))
-      const fresherCurrent = current.filter((mall) => {
-        const incoming = baseByID.get(mall.id)
-        return Boolean(incoming && mall.version > incoming.version)
+    try {
+      const response = await client(`/v1/malls?${search.toString()}`, { method: 'GET', showResult: false, silentLoading: true, signal: controller.signal })
+      if (controller.signal.aborted || sequence !== mallRequestSequence.current) return
+      if (!response.ok) {
+        setMallState('error')
+        setMallError(weatherRequestError(response.status, '商场列表加载失败', '当前账号缺少 mall.read 权限'))
+        return
+      }
+      const parsed = parseMallWeatherMallList(response.data)
+      if (!parsed) {
+        setMallState('error')
+        setMallError('商场列表响应格式不正确，请联系管理员')
+        return
+      }
+      if (parsed.items.length === 50 && parsed.nextAfterId <= afterID) {
+        setMallState('error')
+        setMallError('商场列表游标无效，请联系管理员')
+        return
+      }
+      let nextItems = parsed.items
+      const selectedID = selectedMallIDRef.current
+      if (afterID === 0 && selectedID > 0 && !nextItems.some((mall) => mall.id === selectedID)) {
+        const selectedResponse = await client(`/v1/malls/${selectedID}`, { method: 'GET', showResult: false, silentLoading: true, signal: controller.signal })
+        if (controller.signal.aborted || sequence !== mallRequestSequence.current) return
+        const selected = selectedResponse.ok ? parseMallWeatherMall(selectedResponse.data) : null
+        if (selected) nextItems = mergeMallWeatherMalls(nextItems, [selected])
+      }
+      setMalls((current) => {
+        if (afterID > 0) return mergeMallWeatherMalls(current, nextItems)
+        const liveSelected = current.find((mall) => mall.id === selectedMallIDRef.current)
+        const base = liveSelected && !nextItems.some((mall) => mall.id === liveSelected.id) ? [...nextItems, liveSelected] : nextItems
+        const baseByID = new Map(base.map((mall) => [mall.id, mall]))
+        const fresherCurrent = current.filter((mall) => {
+          const incoming = baseByID.get(mall.id)
+          return Boolean(incoming && mall.version > incoming.version)
+        })
+        return mergeMallWeatherMalls(base, fresherCurrent)
       })
-      return mergeMallWeatherMalls(base, fresherCurrent)
-    })
-    setNextAfterID(parsed.items.length === 50 ? parsed.nextAfterId : 0)
-    setMallState('success')
-    if (afterID === 0) setSelectedMallID((current) => current !== selectedID ? current : nextItems.some((mall) => mall.id === current) ? current : nextItems[0]?.id || 0)
+      setNextAfterID(parsed.items.length === 50 ? parsed.nextAfterId : 0)
+      setMallState('success')
+      if (afterID === 0) setSelectedMallID((current) => current !== selectedID ? current : nextItems.some((mall) => mall.id === current) ? current : nextItems[0]?.id || 0)
+    } catch {
+      if (controller.signal.aborted || sequence !== mallRequestSequence.current) return
+      setMallState('error')
+      setMallError('商场列表加载异常，请检查网络后重试')
+    } finally {
+      if (mallController.current === controller) mallController.current = null
+    }
   }, [client])
 
   const loadMall = useCallback(async (mallID: number) => {
-    const response = await client(`/v1/malls/${mallID}`, { method: 'GET', showResult: false, silentLoading: true })
-    if (!response.ok) return null
-    const parsed = parseMallWeatherMall(response.data)
-    if (!parsed) return null
-    setMalls((current) => mergeMallWeatherMalls(current, [parsed]))
-    return parsed
+    const sequence = ++mallDetailRequestSequence.current
+    mallDetailController.current?.abort()
+    const controller = new AbortController()
+    mallDetailController.current = controller
+    try {
+      const response = await client(`/v1/malls/${mallID}`, { method: 'GET', showResult: false, silentLoading: true, signal: controller.signal })
+      if (controller.signal.aborted || sequence !== mallDetailRequestSequence.current || !response.ok) return null
+      const parsed = parseMallWeatherMall(response.data)
+      if (!parsed) return null
+      setMalls((current) => mergeMallWeatherMalls(current, [parsed]))
+      return parsed
+    } catch {
+      return null
+    } finally {
+      if (mallDetailController.current === controller) mallDetailController.current = null
+    }
   }, [client])
 
   const loadOverview = useCallback(async (
@@ -374,6 +407,10 @@ function MallModulePage({
   }, [loadOverview, malls, selectedMallID, updateOverviewState, updateOverviewWaitingReason, view])
 
   useEffect(() => () => {
+    mallRequestSequence.current++
+    mallController.current?.abort()
+    mallDetailRequestSequence.current++
+    mallDetailController.current?.abort()
     overviewController.current?.abort()
     overviewRequestSequence.current++
   }, [])
@@ -568,6 +605,7 @@ function MallModulePage({
             <button className="primary" type="button" onClick={() => setShowCreate((current) => !current)} aria-expanded={showCreate} aria-controls="mall-weather-create-panel">
               {showCreate ? '返回店铺资料' : '新增店铺'}
             </button>
+            <button type="button" onClick={() => setShowImport((current) => !current)}>批量导入 CSV</button>
           </div>
         </section>
 
@@ -578,6 +616,7 @@ function MallModulePage({
         {showCreate && (actorID
           ? <MallCreatePanel actorID={actorID} client={client} onCreated={handleMallCreated} onCancel={() => setShowCreate(false)} />
           : <RequestError message="无法识别当前登录账号，请退出后重新登录再新增店铺。" onRetry={() => window.location.reload()} />)}
+        {showImport && <MallImportPanel client={client} onImported={() => void loadMalls()} />}
 
         {!showCreate && selectedMall && (actorID
           ? <div className="store-info-detail-layout">
@@ -664,6 +703,10 @@ function MallModulePage({
           {nextAfterID > 0 && <button type="button" onClick={() => void loadMalls(nextAfterID)} disabled={mallState === 'loading'}>加载更多</button>}
         </div>
       </section>
+
+      <MallWeatherCapacityPlanPanel client={client} />
+      <MallWeatherOperationalMetricsPanel client={client} />
+      <MallWeatherExportProfilePanel client={client} />
 
       {mallState === 'error' && <RequestError message={mallError} onRetry={() => void loadMalls()} />}
       {mallState === 'loading' && malls.length === 0 && <LoadingState label="正在加载商场" />}
@@ -764,6 +807,294 @@ function MallWeatherDataNavigation() {
 
 const emptyMallCreateInput: MallWeatherCreateInput = {
   mallCode: '', nameCn: '', province: '', city: '', district: '', address: '',
+}
+
+const defaultMallWeatherCapacityInput: MallWeatherCapacityPlanInput = {
+  mallCount: '', providerQps: '', hourlySteps: '360', dailySteps: '15', lifeIndexDays: '15', alertsPerMall: '0', feishuBatchRows: '200',
+}
+
+function MallWeatherCapacityPlanPanel({ client }: { client: MallWeatherApiClient }) {
+  const [form, setForm] = useState(defaultMallWeatherCapacityInput)
+  const [plan, setPlan] = useState<MallWeatherCapacityPlan | null>(null)
+  const [submitting, setSubmitting] = useState(false)
+  const [error, setError] = useState('')
+  const controllerRef = useRef<AbortController | null>(null)
+
+  useEffect(() => () => controllerRef.current?.abort(), [])
+
+  function change(field: keyof MallWeatherCapacityPlanInput, value: string) {
+    setForm((current) => ({ ...current, [field]: value }))
+    setError('')
+  }
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    let path: string
+    try {
+      path = mallWeatherCapacityPlanPath(form)
+    } catch {
+      setError('请输入有效的目标商场数、供应商 QPS 和各数据集范围。')
+      return
+    }
+    controllerRef.current?.abort()
+    const controller = new AbortController()
+    controllerRef.current = controller
+    setSubmitting(true)
+    setError('')
+    const response = await client(path, { method: 'GET', showResult: false, silentLoading: true, signal: controller.signal })
+    if (controller.signal.aborted) return
+    setSubmitting(false)
+    if (!response.ok) {
+      setError(weatherRequestError(response.status, '容量规划计算失败', '当前账号缺少 weather.config.manage 权限'))
+      return
+    }
+    const parsed = parseMallWeatherCapacityPlan(response.data)
+    if (!parsed) {
+      setError('容量规划响应格式不正确，请联系管理员。')
+      return
+    }
+    setPlan(parsed)
+  }
+
+  return <section className="workbench-panel mall-weather-capacity-panel" aria-busy={submitting}>
+    <div className="mall-weather-section-title"><div><strong>天气容量规划</strong><span>按规划目标测算供应商调用、数据库写入和飞书批次；不会修改任何配置。</span></div></div>
+    <form className="mall-weather-capacity-form" onSubmit={submit}>
+      <label><span>目标商场数 *</span><input name="capacityMallCount" inputMode="numeric" type="number" min="1" max="100000" value={form.mallCount} onChange={(event) => change('mallCount', event.currentTarget.value)} required disabled={submitting} /></label>
+      <label><span>供应商 QPS *</span><input name="capacityProviderQps" inputMode="decimal" type="number" min="0" max="10000" step="any" value={form.providerQps} onChange={(event) => change('providerQps', event.currentTarget.value)} required disabled={submitting} /></label>
+      <label><span>逐小时预报步数</span><input name="capacityHourlySteps" inputMode="numeric" type="number" min="1" max="360" value={form.hourlySteps} onChange={(event) => change('hourlySteps', event.currentTarget.value)} required disabled={submitting} /></label>
+      <label><span>逐日预报天数</span><input name="capacityDailySteps" inputMode="numeric" type="number" min="1" max="15" value={form.dailySteps} onChange={(event) => change('dailySteps', event.currentTarget.value)} required disabled={submitting} /></label>
+      <label><span>生活指数天数</span><input name="capacityLifeIndexDays" inputMode="numeric" type="number" min="1" max="15" value={form.lifeIndexDays} onChange={(event) => change('lifeIndexDays', event.currentTarget.value)} required disabled={submitting} /></label>
+      <label><span>每商场预警数</span><input name="capacityAlertsPerMall" inputMode="numeric" type="number" min="0" max="256" value={form.alertsPerMall} onChange={(event) => change('alertsPerMall', event.currentTarget.value)} required disabled={submitting} /></label>
+      <label><span>飞书每批行数</span><input name="capacityFeishuBatchRows" inputMode="numeric" type="number" min="1" max="500" value={form.feishuBatchRows} onChange={(event) => change('feishuBatchRows', event.currentTarget.value)} required disabled={submitting} /></label>
+      <div className="mall-weather-form-actions"><button className="primary" type="submit" disabled={submitting}>{submitting ? '计算中' : '计算容量'}</button></div>
+    </form>
+    {plan && <>
+      <div className="mall-weather-meta" aria-live="polite">
+        <MetaItem label="每日供应商请求" value={String(plan.providerRequests)} />
+        <MetaItem label="预计耗时" value={`${plan.providerDrainSeconds.toFixed(1)} 秒`} />
+        <MetaItem label="一小时最低 QPS" value={plan.minimumQpsForOneHourDrain.toFixed(2)} />
+        <MetaItem label="数据库总行数" value={String(plan.totalDatabaseRows)} />
+        <MetaItem label="数据库批次" value={String(plan.totalDatabaseBatches)} />
+        <MetaItem label="飞书批次" value={String(plan.totalFeishuBatches)} />
+        <MetaItem label="飞书每批行数" value={String(plan.feishuBatchRows)} />
+        <MetaItem label="规划商场数" value={String(plan.mallCount)} />
+      </div>
+      <div className="data-table-wrap"><table className="data-table"><caption>各天气数据集容量明细</caption><thead><tr><th>数据集</th><th>行数</th><th>数据库批次</th><th>飞书批次</th></tr></thead><tbody>{plan.datasets.map((dataset) => <tr key={dataset.kind}><td>{dataset.kind}</td><td>{dataset.rows}</td><td>{dataset.databaseBatches}</td><td>{dataset.feishuBatches}</td></tr>)}</tbody></table></div>
+    </>}
+    {error && <p className="mall-weather-action-message error" role="alert">{error}</p>}
+  </section>
+}
+
+function MallWeatherOperationalMetricsPanel({ client }: { client: MallWeatherApiClient }) {
+  const [metrics, setMetrics] = useState<MallWeatherMetricsSummary | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const controllerRef = useRef<AbortController | null>(null)
+  const requestSequence = useRef(0)
+
+  const loadMetrics = useCallback(async () => {
+    controllerRef.current?.abort()
+    const controller = new AbortController()
+    controllerRef.current = controller
+    const sequence = ++requestSequence.current
+    setLoading(true)
+    setError('')
+    try {
+      const response = await client('/v1/mall-weather/metrics', {
+        method: 'GET', showResult: false, silentLoading: true, signal: controller.signal,
+      })
+      if (controller.signal.aborted || sequence !== requestSequence.current) return
+      if (!response.ok) {
+        setError(weatherMetricsRequestError(response.status))
+        return
+      }
+      const parsed = parseMallWeatherMetricsSummary(response.data)
+      if (!parsed) {
+        setError('天气运维指标响应格式不正确，请稍后重试。')
+        return
+      }
+      setMetrics(parsed)
+    } catch {
+      if (!controller.signal.aborted && sequence === requestSequence.current) setError('天气运维指标加载异常，请检查网络后重试。')
+    } finally {
+      if (!controller.signal.aborted && sequence === requestSequence.current) setLoading(false)
+    }
+  }, [client])
+
+  useEffect(() => {
+    void loadMetrics()
+    return () => controllerRef.current?.abort()
+  }, [loadMetrics])
+
+  return <section className="workbench-panel mall-weather-capacity-panel" aria-busy={loading} aria-label="天气运维指标">
+    <div className="mall-weather-section-title">
+      <div><strong>天气运维指标</strong><span>仅展示聚合运行指标与告警数量，不展示第三方响应、标签或敏感配置。</span></div>
+      <button type="button" onClick={() => void loadMetrics()} disabled={loading}>{loading ? '加载中' : '刷新指标'}</button>
+    </div>
+    {loading && !metrics && <LoadingState label="正在加载天气运维指标" />}
+    {metrics && <>
+      <div className="mall-weather-meta" aria-live="polite">
+        <MetaItem label="运维告警" value={String(metrics.totalAlerts)} />
+        <MetaItem label="严重告警" value={String(metrics.criticalAlerts)} />
+        <MetaItem label="警告告警" value={String(metrics.warningAlerts)} />
+        <MetaItem label="触发中告警" value={String(metrics.firingAlerts)} />
+        <MetaItem label="采集次数" value={metricInteger(metrics.fetchTotal)} />
+        <MetaItem label="供应商限流" value={metricInteger(metrics.providerRateLimited)} />
+        <MetaItem label="供应商鉴权失败" value={metricInteger(metrics.providerAuthFailures)} />
+        <MetaItem label="采集失败" value={metricInteger(metrics.failedFetches)} />
+        <MetaItem label="最大数据时效" value={metricDuration(metrics.maxDataAgeSeconds)} />
+        <MetaItem label="最大队列等待" value={metricDuration(metrics.maxQueueLagSeconds)} />
+      </div>
+      {error && <p className="mall-weather-action-message" role="status">指标刷新失败，仍显示最近一次成功数据。</p>}
+    </>}
+    {!loading && !metrics && !error && <EmptyState title="暂无天气运维指标" detail="尚未采集到可展示的聚合运行数据。" />}
+    {error && <RequestError message={error} onRetry={() => void loadMetrics()} />}
+  </section>
+}
+
+function metricInteger(value: number | null) {
+  return value === null ? '—' : new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 0 }).format(value)
+}
+
+function metricDuration(value: number | null) {
+  return value === null ? '—' : `${new Intl.NumberFormat('zh-CN', { maximumFractionDigits: 1 }).format(value)} 秒`
+}
+
+function weatherMetricsRequestError(status: number) {
+  if (status === 0) return '无法连接服务，请检查网络后重试。'
+  if (status === 403) return '当前账号缺少天气运维指标查看权限。'
+  if (status === 429) return '请求过于频繁，请稍后重试。'
+  return '天气运维指标暂时不可用，请稍后重试。'
+}
+
+function MallImportPanel({ client, onImported }: { client: MallWeatherApiClient; onImported: () => void }) {
+  const [rows, setRows] = useState<MallImportRow[]>([])
+  const [result, setResult] = useState<MallImportResult | null>(null)
+  const [error, setError] = useState('')
+  const [submitting, setSubmitting] = useState(false)
+  const [confirming, setConfirming] = useState(false)
+  const [canRetryOriginal, setCanRetryOriginal] = useState(false)
+  const requestKeyRef = useRef(mallWeatherCreateKey())
+  const fileInputRef = useRef<HTMLInputElement>(null)
+  const fileSequenceRef = useRef(0)
+  const items = rows.flatMap((row) => row.item ? [row.item] : [])
+  const invalidRows = rows.filter((row) => row.error)
+  const validForSubmit = items.length > 0 && invalidRows.length === 0
+
+  async function submit() {
+    if (!validForSubmit) {
+      setError('请先修正 CSV 中的错误行。')
+      return
+    }
+    if (!mallImportRequestWithinLimit(items)) {
+      setError('转换后的导入请求超过 1 MiB 服务端限制，请减少导入行数或缩短字段内容。')
+      return
+    }
+    setSubmitting(true)
+    setError('')
+    setCanRetryOriginal(false)
+    const response = await client('/v1/malls/import', {
+      method: 'POST', body: { items }, headers: { 'Idempotency-Key': requestKeyRef.current }, showResult: false, silentLoading: true,
+    })
+    setSubmitting(false)
+    if (!response.ok) {
+      setConfirming(false)
+      setCanRetryOriginal(response.status === 0 || response.status === 409 || response.status >= 500)
+      setError(importSubmissionError(response.status))
+      return
+    }
+    const parsed = parseMallImportResult(response.data, items.length)
+    if (!parsed) {
+      setConfirming(false)
+      setCanRetryOriginal(true)
+      setError('导入响应格式不正确；已保留原请求，请使用“重试原请求”确认结果。')
+      return
+    }
+    setResult(parsed)
+    setConfirming(false)
+    onImported()
+  }
+
+  function chooseFile(file: File) {
+    const sequence = ++fileSequenceRef.current
+    void file.text().then((text) => {
+      if (sequence !== fileSequenceRef.current) return
+      try {
+        const parsed = parseMallImportCSV(text)
+        requestKeyRef.current = mallWeatherCreateKey()
+        setRows(parsed)
+        setResult(null)
+        setError('')
+        setConfirming(false)
+        setCanRetryOriginal(false)
+      } catch (cause) {
+        setError(`${cause instanceof Error ? cause.message : 'CSV 解析失败'}；当前已解析内容和重试键未改变。`)
+      }
+    }).catch(() => {
+      if (sequence === fileSequenceRef.current) setError('读取 CSV 文件失败；当前已解析内容和重试键未改变。')
+    })
+  }
+
+  function abandon() {
+    fileSequenceRef.current++
+    requestKeyRef.current = mallWeatherCreateKey()
+    if (fileInputRef.current) fileInputRef.current.value = ''
+    setRows([])
+    setResult(null)
+    setError('')
+    setConfirming(false)
+    setCanRetryOriginal(false)
+  }
+
+  return <section className="workbench-panel mall-import-panel" aria-busy={submitting}>
+    <div className="mall-weather-section-title"><div><strong>批量导入店铺</strong><span>仅支持 UTF-8 CSV，表头固定为 mallCode,nameCn,province,city,district,address；每次 1–200 行。</span></div></div>
+    <label>CSV 文件<input ref={fileInputRef} type="file" accept=".csv,text/csv" disabled={submitting} onChange={(event) => {
+      const file = event.currentTarget.files?.[0]
+      if (file) chooseFile(file)
+    }} /></label>
+    {rows.length > 0 && <div className="mall-import-summary" role="status" aria-live="polite"><MetaItem label="已解析" value={`${rows.length} 行`} /><MetaItem label="可提交" value={`${items.length} 行`} /><MetaItem label="待修正" value={`${invalidRows.length} 行`} /></div>}
+    {invalidRows.length > 0 && <ul className="mall-import-errors" role="alert">{invalidRows.map((row) => <li key={row.row}>CSV 第 {row.row} 行：{row.error}</li>)}</ul>}
+    {validForSubmit && !result && <div className="mall-import-actions">
+      {!confirming
+        ? <button className="primary" type="button" disabled={submitting} onClick={() => { setError(''); setConfirming(true) }}>提交导入</button>
+        : <div className="mall-import-confirm" role="status"><span>将逐行创建 {items.length} 个店铺。成功店铺仍需确认坐标后才能启用天气。</span><button type="button" disabled={submitting} onClick={() => setConfirming(false)}>返回检查</button><button className="primary" type="button" disabled={submitting} onClick={() => void submit()}>{submitting ? '导入中…' : '确认并提交'}</button></div>}
+      {canRetryOriginal && <button type="button" disabled={submitting} onClick={() => void submit()}>重试原请求</button>}
+      <button type="button" disabled={submitting} onClick={abandon}>放弃本次导入</button>
+    </div>}
+    {result && <MallImportResultPanel result={result} rows={rows} onAbandon={abandon} />}
+    {error && <p className="mall-weather-action-message error" role="alert">{error}</p>}
+  </section>
+}
+
+function MallImportResultPanel({ result, rows, onAbandon }: { result: MallImportResult; rows: MallImportRow[]; onAbandon: () => void }) {
+  return <div className="mall-import-result" aria-live="polite">
+    <div className="mall-import-summary"><MetaItem label="已创建" value={`${result.created} 行`} /><MetaItem label="幂等重放" value={`${result.replayed} 行`} /><MetaItem label="失败" value={`${result.failed} 行`} /></div>
+    <ul className="mall-import-result-rows">
+      {result.rows.map((row) => <li key={row.row} data-status={row.status}>
+        <strong>{row.status === 'CREATED' ? '已创建' : row.status === 'REPLAYED' ? '已确认创建' : '未创建'}</strong>
+        <span>CSV 第 {rows[row.row - 1]?.row ?? row.row + 1} 行</span>
+        {row.mallCode && <span>{row.mallCode}</span>}
+        {row.reviewStatus && <span>后续：{row.reviewStatus === 'PENDING_GEOCODE' ? '等待确认坐标' : row.reviewStatus}</span>}
+        {row.errorCode && <span>{mallImportErrorCodeLabel(row.errorCode)}</span>}
+      </li>)}
+    </ul>
+    <button type="button" onClick={onAbandon}>开始下一次导入</button>
+  </div>
+}
+
+function importSubmissionError(status: number) {
+  if (status === 0) return '导入结果暂不确定；已保留原请求，请点击“重试原请求”确认。'
+  if (status === 409) return '导入请求正在处理或发生冲突；已保留原请求，请点击“重试原请求”确认。'
+  if (status === 403) return '当前账号缺少 mall.write 权限。'
+  if (status === 413) return '导入文件或请求内容超过服务端限制。'
+  if (status === 422) return '导入内容校验失败，请检查 CSV 后重新选择有效文件。'
+  return weatherActionError(status, '批量导入失败', '当前账号缺少 mall.write 权限')
+}
+
+function mallImportErrorCodeLabel(code: 'INVALID_INPUT' | 'CONFLICT' | 'UNAVAILABLE') {
+  if (code === 'INVALID_INPUT') return '字段校验未通过'
+  if (code === 'CONFLICT') return '商场编码或幂等状态冲突'
+  return '服务暂不可用，可稍后重新提交本文件'
 }
 
 function pendingCreateInput(pending: MallWeatherPendingCreate | null): MallWeatherCreateInput {
@@ -881,8 +1212,10 @@ function MallOnboardingPanel({ mall, client, onMallUpdated, onReloadMall }: {
   const [longitude, setLongitude] = useState('')
   const [latitude, setLatitude] = useState('')
   const [reason, setReason] = useState('基于高德候选人工调整商场坐标')
+  const [coordinateConfirming, setCoordinateConfirming] = useState(false)
   const candidateRequestSequence = useRef(0)
   const candidateAbort = useRef<AbortController | null>(null)
+  const coordinateConfirmationInFlight = useRef({ current: false })
   const cancelCandidateRequests = useCallback(() => {
     candidateRequestSequence.current++
     candidateAbort.current?.abort()
@@ -1018,6 +1351,23 @@ function MallOnboardingPanel({ mall, client, onMallUpdated, onReloadMall }: {
     onMallUpdated(updated)
   }
 
+  function requestCoordinateConfirmation() {
+    const expectedMallVersion = candidates?.mallVersion || 0
+    const selectedCandidate = candidates?.items.find((candidate) => candidate.id === selectedCandidateID)
+    if (!selectedCandidate) {
+      setError('请先选择一个高德解析候选，再确认或修改坐标。')
+      return
+    }
+    try {
+      mallWeatherCandidateConfirmationRequest(selectedCandidate, longitude, latitude, reason, expectedMallVersion)
+    } catch {
+      setError('请填写有效的高德 GCJ-02 经纬度和 500 字以内的单行修改原因。')
+      return
+    }
+    setError('')
+    setCoordinateConfirming(true)
+  }
+
   return (
     <section className="workbench-panel mall-weather-onboarding-panel">
       <div className="mall-weather-section-title">
@@ -1047,13 +1397,21 @@ function MallOnboardingPanel({ mall, client, onMallUpdated, onReloadMall }: {
       </div>}
       {candidateState === 'success' && candidates?.items.length === 0 && <p className="mall-weather-action-message">高德暂未返回候选。请确认地址完整、AMAP_WEB_SERVICE_KEY 已配置且天气 Worker 已启用，然后重新解析地址。</p>}
 
-      {selectedCandidateID > 0 && <form className="mall-weather-manual-coordinate" onSubmit={(event) => { event.preventDefault(); void confirmCoordinate() }}>
+      {selectedCandidateID > 0 && <form className="mall-weather-manual-coordinate" onSubmit={(event) => { event.preventDefault(); requestCoordinateConfirmation() }}>
         <div className="mall-weather-section-title"><div><strong>确认或修改高德坐标</strong><span>默认带入所选高德候选；如位置有偏差，可修改后再确认</span></div><span>GCJ-02</span></div>
         <label><span>高德经度</span><input name="longitude" inputMode="decimal" value={longitude} onChange={(event) => setLongitude(event.currentTarget.value)} required disabled={submitting || candidateState === 'loading'} /></label>
         <label><span>高德纬度</span><input name="latitude" inputMode="decimal" value={latitude} onChange={(event) => setLatitude(event.currentTarget.value)} required disabled={submitting || candidateState === 'loading'} /></label>
         <label className="mall-weather-form-wide"><span>修改原因</span><input name="reason" value={reason} onChange={(event) => setReason(event.currentTarget.value)} maxLength={500} disabled={submitting || candidateState === 'loading'} /></label>
         <button className="primary mall-weather-form-wide" type="submit" disabled={submitting || candidateState === 'loading'}>{submitting ? '确认中' : '确认高德坐标并启用天气'}</button>
       </form>}
+      {coordinateConfirming && <div className="mall-weather-delete-confirm" role="alertdialog" aria-modal="true" aria-label="确认高德坐标并启用天气">
+        <strong>确认高德坐标并启用天气？</strong>
+        <p>将使用当前 GCJ-02 坐标启用天气服务，并创建首次采集任务。</p>
+        <div className="mall-weather-form-actions">
+          <button className="primary" type="button" disabled={submitting} onClick={() => { setCoordinateConfirming(false); void runSingleFlight(coordinateConfirmationInFlight.current, confirmCoordinate) }}>{submitting ? '确认中' : '确认启用天气'}</button>
+          <button type="button" disabled={submitting} onClick={() => setCoordinateConfirming(false)}>返回修改</button>
+        </div>
+      </div>}
       {error && <p className="mall-weather-action-message error" role="alert">{error}</p>}
     </section>
   )
@@ -1126,9 +1484,12 @@ function MallWeatherSheetPushPanel({ actorID, mall, client }: {
   const [pending, setPending] = useState<MallWeatherPendingSheetPush | null>(restored)
   const [checking, setChecking] = useState(false)
   const [submitting, setSubmitting] = useState(false)
+  const [monitoring, setMonitoring] = useState(false)
+  const [run, setRun] = useState<MallWeatherSheetPushRun | null>(null)
   const [error, setError] = useState('')
   const [message, setMessage] = useState('')
   const optionRequestSequence = useRef(0)
+  const pollController = useRef<AbortController | null>(null)
 
   const loadOptions = useCallback(async (signal?: AbortSignal) => {
     const sequence = ++optionRequestSequence.current
@@ -1158,6 +1519,8 @@ function MallWeatherSheetPushPanel({ actorID, mall, client }: {
     void loadOptions(controller.signal)
     return () => controller.abort()
   }, [loadOptions])
+
+  useEffect(() => () => pollController.current?.abort(), [])
 
   const selectedOption = options.find((option) => option.destinationId === selectedDestinationID)
   const pendingMatchesOption = Boolean(selectedOption && pending && mallWeatherSheetPushRequestMatchesOption(pending.body, selectedOption, mall.id))
@@ -1255,7 +1618,40 @@ function MallWeatherSheetPushPanel({ actorID, mall, client }: {
     setSubmitting(false)
     setPending(null)
     clearMallWeatherPendingSheetPush(actorID, mall.id, window.sessionStorage)
-    setMessage(`推送任务 #${result.runId} 已创建，预计 ${result.estimatedRows} 行，状态 ${result.status}。`)
+    setRun({
+      runId: result.runId, traceId: result.traceId, status: result.status === 'RUNNING' ? 'RUNNING' : 'PENDING',
+      destinationId: result.destinationId, profileId: result.profileId, profileVersion: result.profileVersion,
+      totalCount: result.estimatedRows, successCount: 0, failedCount: 0,
+    })
+    setMonitoring(true)
+    setMessage(`推送任务 #${result.runId} 已创建，正在查询真实执行状态。`)
+    pollController.current?.abort()
+    const controller = new AbortController()
+    pollController.current = controller
+    const pollResult = await pollMallWeatherSheetPushRun(client, result.runId, {
+      signal: controller.signal,
+      isPageVisible: () => document.visibilityState === 'visible',
+    })
+    if (controller.signal.aborted) return
+    setMonitoring(false)
+    if (pollResult.kind === 'timed_out') {
+      setError('推送任务仍在处理中，60 秒内未到达终止状态。已停止轮询，可稍后刷新页面确认。')
+      return
+    }
+    if (pollResult.kind === 'query_error') {
+      setError(weatherPushError(pollResult.status, '推送运行状态查询失败'))
+      return
+    }
+    if (pollResult.kind !== 'terminal' || !mallWeatherSheetPushRunMatchesResult(pollResult.run, result)) {
+      setError('推送运行记录与创建结果不一致，已停止轮询；请刷新页面后确认。')
+      return
+    }
+    setRun(pollResult.run)
+    if (pollResult.run.status === 'FAILED') {
+      setError(`推送任务 #${pollResult.run.runId} 失败：成功 ${pollResult.run.successCount} 行，失败 ${pollResult.run.failedCount} 行。`)
+      return
+    }
+    setMessage(`推送任务 #${pollResult.run.runId} ${pollResult.run.status === 'SUCCESS' ? '已完成' : '部分完成'}：成功 ${pollResult.run.successCount} 行，失败 ${pollResult.run.failedCount} 行。`)
   }
 
   function abandonPending() {
@@ -1273,11 +1669,11 @@ function MallWeatherSheetPushPanel({ actorID, mall, client }: {
       {optionState === 'error' && <RequestError message={error} onRetry={() => void loadOptions()} />}
       {optionState === 'success' && options.length === 0 && <EmptyState title="没有可用推送目标" detail="请先启用 feishu_sheet 推送目标，并关联已启用的天气导出 Profile。" />}
       {optionState === 'success' && options.length > 0 && <div className="mall-weather-push-controls">
-        <label><span>已有推送目标</span><select name="weatherSheetPushTarget" value={selectedDestinationID} onChange={(event) => changeOption(event.currentTarget.value)} disabled={checking || submitting}>
+        <label><span>已有推送目标</span><select name="weatherSheetPushTarget" value={selectedDestinationID} onChange={(event) => changeOption(event.currentTarget.value)} disabled={checking || submitting || monitoring}>
           {options.map((option) => <option value={option.destinationId} key={option.destinationId}>{option.name} · {option.code} · {option.profileCode} v{option.profileVersion}</option>)}
         </select></label>
-        <button type="button" onClick={() => void checkBinding()} disabled={checking || submitting}>{checking ? '验证中' : '验证绑定'}</button>
-        <button className="primary" type="button" onClick={() => void submitPush()} disabled={checking || submitting || !dryRun?.canExecute || Boolean(pending && !pendingMatchesOption)}>{submitting ? '提交中' : pending ? '重试原请求' : '绑定并发起推送'}</button>
+        <button type="button" onClick={() => void checkBinding()} disabled={checking || submitting || monitoring}>{checking ? '验证中' : '验证绑定'}</button>
+        <button className="primary" type="button" onClick={() => void submitPush()} disabled={checking || submitting || monitoring || !dryRun?.canExecute || Boolean(pending && !pendingMatchesOption)}>{submitting ? '提交中' : pending ? '重试原请求' : '绑定并发起推送'}</button>
       </div>}
       {pending && <div className="mall-weather-pending-push" role="status">
         <span>存在结果待确认的原请求：商场 #{pending.body.filters.mallIds[0]}，目标 #{pending.body.destinationId}，Profile #{pending.body.profileId} v{pending.body.expectedProfileVersion}。{pendingMatchesOption ? ' 重试前仍需重新验证绑定。' : ' 当前选择与原请求不一致。'}</span>
@@ -1296,6 +1692,12 @@ function MallWeatherSheetPushPanel({ actorID, mall, client }: {
           <span>预计 {dataset.estimatedRows} 行 / {dataset.estimatedCells} 单元格 · 可执行：{dataset.canExecute ? '是' : '否'}</span>
           {dataset.warnings.length > 0 && <ul className="mall-weather-push-warnings">{dataset.warnings.map((warning, warningIndex) => <li key={`${warningIndex}:${warning}`}>{warning}</li>)}</ul>}
         </section>)}
+      </div>}
+      {run && <div className="mall-weather-push-summary" aria-live="polite">
+        <MetaItem label="运行状态" value={monitoring ? `${run.status}（查询中）` : run.status} />
+        <MetaItem label="成功行数" value={String(run.successCount)} />
+        <MetaItem label="失败行数" value={String(run.failedCount)} />
+        <MetaItem label="总行数" value={String(run.totalCount)} />
       </div>}
       {message && <p className="mall-weather-action-message" role="status">{message}</p>}
       {error && optionState !== 'error' && <p className="mall-weather-action-message error" role="alert">{error}</p>}

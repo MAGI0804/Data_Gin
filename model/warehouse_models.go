@@ -26,17 +26,17 @@ type RawRecord struct {
 	BaseModel
 
 	SourceID     uint        `gorm:"column:source_id;default:0;index" json:"source_id"`
-	SourceCode   string      `gorm:"column:source_code;size:100;index" json:"source_code"`
+	SourceCode   string      `gorm:"column:source_code;size:100;index;index:idx_raw_records_source_status_received,priority:1" json:"source_code"`
 	ExternalID   string      `gorm:"column:external_id;size:255;index" json:"external_id"`
 	DedupeHash   string      `gorm:"column:dedupe_hash;size:64;index" json:"dedupe_hash"`
 	RawContent   string      `gorm:"column:raw_content;type:json;not null" json:"raw_content"`
 	HeadersJSON  string      `gorm:"column:headers_json;type:json" json:"headers_json"`
 	QueryJSON    string      `gorm:"column:query_json;type:json" json:"query_json"`
 	MetadataJSON string      `gorm:"column:metadata_json;type:json" json:"metadata_json"`
-	Status       string      `gorm:"column:status;type:enum('received','queued','cleaning','cleaned','failed');default:'received';index" json:"status"`
+	Status       string      `gorm:"column:status;type:enum('received','queued','cleaning','cleaned','failed');default:'received';index;index:idx_raw_records_source_status_received,priority:2;index:idx_raw_records_status_received,priority:1" json:"status"`
 	ErrorMessage string      `gorm:"column:error_message;type:text" json:"error_message"`
 	TraceID      string      `gorm:"column:trace_id;size:64;index" json:"trace_id"`
-	ReceivedAt   *TimeNormal `gorm:"column:received_at" json:"received_at"`
+	ReceivedAt   *TimeNormal `gorm:"column:received_at;index:idx_raw_records_source_status_received,priority:3;index:idx_raw_records_status_received,priority:2;index:idx_raw_records_received_at" json:"received_at"`
 
 	CommonTimestampsField
 }
@@ -152,7 +152,7 @@ type PipelineRun struct {
 	TotalCount    int         `gorm:"column:total_count;default:0" json:"total_count"`
 	SuccessCount  int         `gorm:"column:success_count;default:0" json:"success_count"`
 	FailedCount   int         `gorm:"column:failed_count;default:0" json:"failed_count"`
-	StartedAt     *TimeNormal `gorm:"column:started_at" json:"started_at"`
+	StartedAt     *TimeNormal `gorm:"column:started_at;index:idx_pipeline_runs_started_at" json:"started_at"`
 	FinishedAt    *TimeNormal `gorm:"column:finished_at" json:"finished_at"`
 	ErrorMessage  string      `gorm:"column:error_message;type:text" json:"error_message"`
 
@@ -194,7 +194,7 @@ type DeliveryLog struct {
 	RetryCount      int         `gorm:"column:retry_count;default:0" json:"retry_count"`
 	StartedAt       *TimeNormal `gorm:"column:started_at" json:"started_at,omitempty"`
 	FinishedAt      *TimeNormal `gorm:"column:finished_at" json:"finished_at,omitempty"`
-	SentAt          *TimeNormal `gorm:"column:sent_at" json:"sent_at"`
+	SentAt          *TimeNormal `gorm:"column:sent_at;index:idx_delivery_logs_sent_at" json:"sent_at"`
 
 	CommonTimestampsField
 }

@@ -1,4 +1,4 @@
-import { FormEvent, ReactNode, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { FormEvent, ReactNode, type RefObject, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import {
   Activity,
   ArrowDownToLine,
@@ -25,15 +25,27 @@ import {
   X,
 } from 'lucide-react'
 import './App.css'
-import { effectiveApiStatus } from './apiResponse'
 import { apiURL as buildApiURL } from './apiURL'
-import { clearStoredToken, loadStoredToken, saveStoredToken, storedTokenExpiresAt, tokenActorID } from './authStorage'
+import { clearStoredToken, loadStoredSessionUser, loadStoredToken, saveStoredSessionUser, saveStoredToken, saveStoredTokenExpiry, storedTokenExpiresAt, tokenActorID, type StoredSessionUser } from './authStorage'
+import { createApiClient, type ApiRequestOptions, type ClientResponse, type HTTPMethod } from './api/client'
+import { readSessionUser, readTokenInfo, type SessionUser } from './api/auth'
+import { parseDataStatisticsSummary, parseHealthSummary, parseMallWeatherMetricsSummary, redactMonitoringJSON, type DataStatisticsSummary, type HealthSummary, type MallWeatherMetricsSummary } from './monitoring'
 import { MallWeatherPage, StoreInfoPage } from './MallWeatherPage'
 import { DataAuthorizationPage } from './DataAuthorizationPage'
+import { PipelineRunPanel } from './PipelineRunPanel'
+import { PipelineComposerPanel } from './PipelineComposerPanel'
+import { Brand } from './components/Brand'
 import { parseMallWeatherExportContentStatus, submitMallWeatherExportContentDownload } from './mallWeatherExport'
+import { buildRawRecordsRequest, buildWarehouseRawRecordsQuery, parseRawRecordsPage, type RawRecordOrigin, type RawRecordsPage } from './rawRecords'
+import { buildDeliveryLogListQuery, buildRunListQuery, parseMonitoringPage, type MonitoringPage } from './monitoringRecords'
+import { validateOrderPushSkipPolicy } from './orderPushPolicy'
+import { runSingleFlight } from './singleFlight'
+import { parseSourceFetchSummary } from './sourceOperations'
+import { buildCleanRecordsQuery, buildProcessedRecordsQuery, parseProcessedRecordsPage, type ProcessedRecordsPage } from './processedRecords'
 import {
   buildExcelExportConfig,
   cloneExcelMatchSteps,
+  excelMatchSchemePath,
   excelFieldSelectOptions,
   excelModelSelectOptions,
   migrateExcelMatchSteps,
@@ -46,22 +58,16 @@ import {
 
 const defaultApiBaseURL = import.meta.env.VITE_API_BASE_URL ?? ''
 
-type ApiResult = {
-  ok: boolean
-  status: number
-  data: unknown
-}
+type ApiResult = ClientResponse
 
-type ApiClientOptions = {
-  method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'
-  body?: unknown
-  headers?: Record<string, string>
+type ApiClientOptions = Omit<ApiRequestOptions, 'method'> & {
+  method?: HTTPMethod
   showResult?: boolean
   silentLoading?: boolean
-  signal?: AbortSignal
 }
 
 type ApiClient = (path: string, options?: ApiClientOptions) => Promise<ApiResult>
+type MonitoringSnapshot = { statistics: DataStatisticsSummary | null; weather: MallWeatherMetricsSummary | null; health: HealthSummary | null }
 type FileDownloadClient = (path: string, fileName: string, signal: AbortSignal) => Promise<ApiResult>
 type NavKey = 'overview' | 'runs' | 'delivery_logs' | 'step_runs' | 'store_info' | 'mall_weather' | 'data_authorizations' | 'sources' | 'receive' | 'pull_records' | 'backfill' | 'youzan_distribution' | 'rules' | 'processed' | 'methods' | 'destinations' | 'tasks' | 'push_policy' | 'excel_jobs' | 'excel_schemes' | 'excel_write'
 type NavItem = { key: NavKey; label: string; description: string; icon: ReactNode }
@@ -162,7 +168,6 @@ type PipelineRun = {
   failed_count: number
   source_id: number
   destination_id: number
-  error_message: string
   started_at: string | null
   finished_at: string | null
 }
@@ -267,6 +272,13 @@ type ExcelMatchScheme = {
   updated_at: number
 }
 
+type PendingSchemeSave = {
+  operation: 'export_match' | 'import_update'
+  config: unknown
+  name: string
+  overwriteConfirmed: boolean
+}
+
 type ExcelMatchPreviewStats = {
   TotalRows?: number
   ProcessedRows?: number
@@ -302,6 +314,7 @@ const bojunMatchFieldOptions = [
 ]
 
 const excelChunkSize = 4 * 1024 * 1024
+const excelJobPollMaxAttempts = 60
 
 const excelMatchFilterOperatorOptions = [
   { value: 'eq', label: '等于' },
@@ -398,9 +411,24 @@ type SourceDefinition = {
   enabled: boolean
   auth_type: string
   config_json: string
+	 has_secret?: boolean
   schema_json: string
   dedupe_keys: string
   source_query_key: string
+}
+
+type SourceDraft = {
+  id: number | null
+  name: string
+  code: string
+  sourceType: string
+  enabled: boolean
+  authType: string
+  configJSON: string
+  schemaJSON: string
+  dedupeKeys: string
+  sourceQueryKey: string
+  hasSecret: boolean
 }
 
 type RawData = {
@@ -418,12 +446,33 @@ type RawData = {
   updated_at: number
 }
 
+type WarehouseRawRecord = {
+  id: number
+  sourceID: number
+  sourceCode: string
+  status: 'received' | 'queued' | 'cleaning' | 'cleaned' | 'failed'
+  traceID: string
+  receivedAt: string
+  createdAt: number
+}
+
 type ProcessedData = {
   id: number
   raw_data_id: number
   data_type: string
   data_fields: string
   quality_score: number
+  created_at: number
+}
+
+type CleanRecord = {
+  id: number
+  raw_record_id: number
+  source_id: number
+  table_name: string
+  business_key: string
+  quality_score: number
+  status: string
   created_at: number
 }
 
@@ -434,7 +483,19 @@ type TransformRule = {
   rule_type: string
   order_index: number
   config_json: string
+	 has_secret?: boolean
   enabled: boolean
+}
+
+type RuleDraft = {
+  id: number | null
+  sourceID: string
+  name: string
+  ruleType: string
+  orderIndex: string
+  configJSON: string
+  enabled: boolean
+  hasSecret: boolean
 }
 
 type DestinationDefinition = {
@@ -443,7 +504,18 @@ type DestinationDefinition = {
   code: string
   destination_type: string
   config_json: string
+  has_secret?: boolean
   enabled: boolean
+}
+
+type DestinationDraft = {
+  id: number | null
+  name: string
+  code: string
+  destinationType: string
+  configJSON: string
+  enabled: boolean
+  hasSecret: boolean
 }
 
 type DeliveryTask = {
@@ -456,6 +528,19 @@ type DeliveryTask = {
   cron_expr: string
   filter_json: string
   payload_template: string
+  enabled: boolean
+}
+
+type DeliveryTaskDraft = {
+  id: number | null
+  name: string
+  sourceID: string
+  cleanTable: string
+  destinationID: string
+  triggerType: string
+  cronExpr: string
+  filterJSON: string
+  payloadTemplate: string
   enabled: boolean
 }
 
@@ -486,6 +571,12 @@ type LegacyTask = {
   output_table: string
   target_system: string
   description: string
+}
+
+type LegacyTaskRunResult = {
+  id: string
+  queue: string
+  type: string
 }
 
 type YouzanDistributionBackfillSample = {
@@ -542,8 +633,7 @@ type DeliveryLog = {
   destination_id: number
   clean_record_id: number
   business_key: string
-  request_body: string
-  response_body: string
+  response_summary: string
   http_status: number
   success: boolean
   error_message: string
@@ -720,64 +810,100 @@ const builtinMethods: MethodDisplay[] = [
 
 function App() {
   const [token, setToken] = useState(() => loadStoredToken(window.localStorage))
+  const tokenRef = useRef(token)
   const actorID = useMemo(() => tokenActorID(token), [token])
-  const [authenticated, setAuthenticated] = useState(() => Boolean(token))
+  const [sessionState, setSessionState] = useState<'checking' | 'authenticated' | 'anonymous'>(() => token ? 'checking' : 'anonymous')
+  const [sessionUser, setSessionUser] = useState<SessionUser | null>(() => {
+    const user = loadStoredSessionUser(window.localStorage)
+    return user ? { ...user, email: '', consoleManaged: true } : null
+  })
+  const [sessionExpiresAt, setSessionExpiresAt] = useState(() => storedTokenExpiresAt(window.localStorage))
   const [activeNav, setActiveNav] = useState<NavKey>(navFromHash)
   const [expandedNavGroup, setExpandedNavGroup] = useState(() => navGroupFor(navFromHash())?.label ?? navGroups[0].label)
   const [navQuery, setNavQuery] = useState('')
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
+  const mobileNavTriggerRef = useRef<HTMLButtonElement>(null)
+  const mobileNavRef = useRef<HTMLElement>(null)
   const [loading, setLoading] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
+  const [workspaceError, setWorkspaceError] = useState('')
   const [result, setResult] = useState<ApiResult | null>(null)
   const [runs, setRuns] = useState<PipelineRun[]>([])
   const [stepRuns, setStepRuns] = useState<StepRun[]>([])
+  const [selectedStepRunID, setSelectedStepRunID] = useState<number | null>(null)
+  const stepRequestRef = useRef<AbortController | null>(null)
+  const workspaceRequestRef = useRef<AbortController | null>(null)
   const [methods, setMethods] = useState<MethodDisplay[]>(builtinMethods)
+  const [pipelines, setPipelines] = useState<PipelineDefinition[]>([])
   const [sources, setSources] = useState<SourceDefinition[]>([])
-  const [rawData, setRawData] = useState<RawData[]>([])
-  const [processedData, setProcessedData] = useState<ProcessedData[]>([])
   const [transformRules, setTransformRules] = useState<TransformRule[]>([])
   const [destinations, setDestinations] = useState<DestinationDefinition[]>([])
   const [deliveryTasks, setDeliveryTasks] = useState<DeliveryTask[]>([])
   const [deliveryLogs, setDeliveryLogs] = useState<DeliveryLog[]>([])
+  const [monitoring, setMonitoring] = useState<MonitoringSnapshot>({ statistics: null, weather: null, health: null })
+  const [monitoringStale, setMonitoringStale] = useState(false)
   const [orderPushSkipConfig, setOrderPushSkipConfig] = useState<OrderPushSkipConfig>(defaultOrderPushSkipConfig)
   const [orderPushTargets, setOrderPushTargets] = useState<OrderPushTargetOption[]>([])
   const [legacyTasks, setLegacyTasks] = useState<LegacyTask[]>([])
   const [legacyRules, setLegacyRules] = useState<LegacyTransformRule[]>([])
 
+  const clearSession = useCallback(() => {
+    clearStoredToken(window.localStorage)
+    tokenRef.current = ''
+    setToken('')
+    setSessionUser(null)
+    setSessionExpiresAt(null)
+    setSessionState('anonymous')
+    setResult(null)
+  }, [])
+
+  const updateSessionToken = useCallback((nextToken: string) => {
+    const expiresAt = saveStoredToken(nextToken, window.localStorage)
+    tokenRef.current = nextToken
+    setToken(nextToken)
+    setSessionExpiresAt(expiresAt)
+  }, [])
+
+  const apiClient = useMemo(
+    () => createApiClient({
+      baseURL: defaultApiBaseURL,
+      getToken: () => tokenRef.current,
+      onTokenRefreshed: updateSessionToken,
+      onUnauthorized: clearSession,
+    }),
+    [clearSession, updateSessionToken],
+  )
+
   const client = useCallback<ApiClient>(
     async (path, options = {}) => {
-      const method = options.method ?? 'POST'
       if (!options.silentLoading) setLoading(true)
       try {
-        const response = await fetch(apiURL(path), {
-          method,
-          signal: options.signal,
-          headers: {
-            'Content-Type': 'application/json',
-            ...options.headers,
-            ...(token ? { token, Authorization: `Bearer ${token}` } : {}),
-          },
-          body: method === 'GET' || options.body === undefined ? undefined : JSON.stringify(options.body),
-        })
-        const data = await response.json().catch(() => ({}))
-        const effectiveStatus = effectiveApiStatus(response.status, data)
-        const nextResult = { ok: response.ok && isSuccessPayload(data), status: effectiveStatus, data }
-        if (effectiveStatus === 401) {
-          clearStoredToken(window.localStorage)
-          setToken('')
-          setAuthenticated(false)
+        if (!options.method) {
+          const nextResult: ApiResult = {
+            ok: false,
+            status: 0,
+            data: { message: '请求方法未指定。' },
+            error: { kind: 'client', message: '请求方法未指定。' },
+          }
+          if (options.showResult !== false) setResult(nextResult)
+          return nextResult
         }
-        if (options.showResult !== false) setResult(nextResult)
-        return nextResult
-      } catch (error) {
-        const nextResult = { ok: false, status: 0, data: error instanceof Error ? error.message : String(error) }
+        const requestOptions: ApiRequestOptions = {
+          method: options.method,
+          body: options.body,
+          headers: options.headers,
+          signal: options.signal,
+          retry: options.retry,
+          timeoutMs: options.timeoutMs,
+        }
+        const nextResult = await apiClient.request(path, requestOptions)
         if (options.showResult !== false) setResult(nextResult)
         return nextResult
       } finally {
         if (!options.silentLoading) setLoading(false)
       }
     },
-    [token],
+    [apiClient],
   )
 
   const downloadFile = useCallback<FileDownloadClient>(
@@ -809,9 +935,9 @@ function App() {
     [client, token],
   )
 
-  const loadConfiguredMethods = useCallback(async (pipelines: PipelineDefinition[]) => {
+  const loadConfiguredMethods = useCallback(async (pipelines: PipelineDefinition[], signal: AbortSignal) => {
     const details = await Promise.all(
-      pipelines.map((pipeline) => client(`/v1/pipelines/${pipeline.id}`, { method: 'GET', showResult: false, silentLoading: true })),
+      pipelines.map((pipeline) => client(`/v1/pipelines/${pipeline.id}`, { method: 'GET', signal, showResult: false, silentLoading: true })),
     )
     return details.flatMap((detailResult, index) => {
       const detail = readObject<PipelineDetail>(detailResult, 'pipeline')
@@ -832,91 +958,225 @@ function App() {
     })
   }, [client])
 
-  const refreshAll = useCallback(
+  const refreshWorkspace = useCallback(
     async (showResult = false) => {
       if (!token) return
+      workspaceRequestRef.current?.abort()
+      const controller = new AbortController()
+      workspaceRequestRef.current = controller
       setRefreshing(true)
+      setWorkspaceError('')
       try {
-        const [pipelineResult, runResult, sourceResult, rawResult, processedResult, ruleResult, destinationResult, taskResult, logResult, orderPushSkipResult, legacyTaskResult, legacyRuleResult] = await Promise.all([
-          client('/v1/pipelines', { method: 'GET', showResult: false, silentLoading: true }),
-          client('/v1/runs?limit=50', { method: 'GET', showResult: false, silentLoading: true }),
-          client('/v1/sources', { method: 'GET', showResult: false, silentLoading: true }),
-          client('/v1/data/raw?limit=50', { method: 'GET', showResult: false, silentLoading: true }),
-          client('/v1/data/processed?limit=50', { method: 'GET', showResult: false, silentLoading: true }),
-          client('/v1/transform-rules', { method: 'GET', showResult: false, silentLoading: true }),
-          client('/v1/destinations', { method: 'GET', showResult: false, silentLoading: true }),
-          client('/v1/delivery-tasks', { method: 'GET', showResult: false, silentLoading: true }),
-          client('/v1/delivery-logs?limit=50', { method: 'GET', showResult: false, silentLoading: true }),
-          client('/v1/order-push-skip-config', { method: 'GET', showResult: false, silentLoading: true }),
-          client('/v1/legacy-tasks', { method: 'GET', showResult: false, silentLoading: true }),
-          client('/v1/legacy-transform-rules', { method: 'GET', showResult: false, silentLoading: true }),
-        ])
-
-        if (runResult.ok) setRuns(readList<PipelineRun>(runResult, 'runs'))
-        const nextSources = sourceResult.ok ? readList<SourceDefinition>(sourceResult, 'sources') : []
-        const nextRules = ruleResult.ok ? readList<TransformRule>(ruleResult, 'rules') : []
-        const nextDestinations = destinationResult.ok ? readList<DestinationDefinition>(destinationResult, 'destinations') : []
-        const nextTasks = taskResult.ok ? readList<DeliveryTask>(taskResult, 'tasks') : []
-        const nextLegacyTasks = legacyTaskResult.ok ? readList<LegacyTask>(legacyTaskResult, 'tasks') : []
-        const nextLegacyRules = legacyRuleResult.ok ? readList<LegacyTransformRule>(legacyRuleResult, 'rules') : []
-        if (sourceResult.ok) setSources(nextSources)
-        if (rawResult.ok) setRawData(readList<RawData>(rawResult, 'data'))
-        if (processedResult.ok) setProcessedData(readList<ProcessedData>(processedResult, 'data'))
-        if (ruleResult.ok) setTransformRules(nextRules)
-        if (destinationResult.ok) setDestinations(nextDestinations)
-        if (taskResult.ok) setDeliveryTasks(nextTasks)
-        if (logResult.ok) setDeliveryLogs(readList<DeliveryLog>(logResult, 'logs'))
-        if (orderPushSkipResult.ok) {
-          setOrderPushSkipConfig(normalizeOrderPushSkipConfig(readObject<OrderPushSkipConfig>(orderPushSkipResult, 'config')))
-          setOrderPushTargets(readList<OrderPushTargetOption>(orderPushSkipResult, 'targets'))
+        const get = (path: string) => client(path, { method: 'GET', signal: controller.signal, showResult: false, silentLoading: true })
+        if (activeNav === 'overview') {
+          const [runResult, logResult] = await Promise.all([get('/v1/runs?limit=50'), get('/v1/delivery-logs?limit=50')])
+          if (!controller.signal.aborted) {
+            if (runResult.ok) setRuns(readList<PipelineRun>(runResult, 'runs'))
+            if (logResult.ok) setDeliveryLogs(readList<DeliveryLog>(logResult, 'logs'))
+          }
+        } else if (activeNav === 'step_runs') {
+          const runResult = await get('/v1/runs?limit=50')
+          if (!controller.signal.aborted && runResult.ok) setRuns(readList<PipelineRun>(runResult, 'runs'))
+        } else if (activeNav === 'sources') {
+          const sourceResult = await get('/v1/sources')
+          if (!controller.signal.aborted) {
+            if (sourceResult.ok) setSources(readList<SourceDefinition>(sourceResult, 'sources'))
+            else setWorkspaceError('数据源列表加载失败，已保留上一次成功数据。')
+          }
+        } else if (activeNav === 'rules') {
+          const [sourceResult, ruleResult] = await Promise.all([get('/v1/sources'), get('/v1/transform-rules')])
+          if (!controller.signal.aborted) {
+            if (sourceResult.ok) setSources(readList<SourceDefinition>(sourceResult, 'sources'))
+            if (ruleResult.ok) setTransformRules(readList<TransformRule>(ruleResult, 'rules'))
+            if (!sourceResult.ok || !ruleResult.ok) setWorkspaceError('规则配置加载不完整，已保留上一次成功数据。')
+          }
+        } else if (activeNav === 'destinations') {
+          const destinationResult = await get('/v1/destinations')
+          if (!controller.signal.aborted) {
+            if (destinationResult.ok) setDestinations(readList<DestinationDefinition>(destinationResult, 'destinations'))
+            else setWorkspaceError('推送目标列表加载失败，已保留上一次成功数据。')
+          }
+        } else if (activeNav === 'tasks') {
+          const [sourceResult, destinationResult, taskResult] = await Promise.all([get('/v1/sources'), get('/v1/destinations'), get('/v1/delivery-tasks')])
+          if (!controller.signal.aborted) {
+            if (sourceResult.ok) setSources(readList<SourceDefinition>(sourceResult, 'sources'))
+            if (destinationResult.ok) setDestinations(readList<DestinationDefinition>(destinationResult, 'destinations'))
+            if (taskResult.ok) setDeliveryTasks(readList<DeliveryTask>(taskResult, 'tasks'))
+            if (!sourceResult.ok || !destinationResult.ok || !taskResult.ok) setWorkspaceError('推送任务配置加载不完整，已保留上一次成功数据。')
+          }
+        } else if (activeNav === 'push_policy') {
+          const [sourceResult, ruleResult, destinationResult, taskResult, orderPushSkipResult] = await Promise.all([get('/v1/sources'), get('/v1/transform-rules'), get('/v1/destinations'), get('/v1/delivery-tasks'), get('/v1/order-push-skip-config')])
+          if (!controller.signal.aborted) {
+            if (sourceResult.ok) setSources(readList<SourceDefinition>(sourceResult, 'sources'))
+            if (ruleResult.ok) setTransformRules(readList<TransformRule>(ruleResult, 'rules'))
+            if (destinationResult.ok) setDestinations(readList<DestinationDefinition>(destinationResult, 'destinations'))
+            if (taskResult.ok) setDeliveryTasks(readList<DeliveryTask>(taskResult, 'tasks'))
+            if (orderPushSkipResult.ok) {
+              setOrderPushSkipConfig(normalizeOrderPushSkipConfig(readObject<OrderPushSkipConfig>(orderPushSkipResult, 'config')))
+              setOrderPushTargets(readList<OrderPushTargetOption>(orderPushSkipResult, 'targets'))
+            }
+            if (!sourceResult.ok || !ruleResult.ok || !destinationResult.ok || !taskResult.ok || !orderPushSkipResult.ok) setWorkspaceError('推送策略配置加载不完整，已保留上一次成功数据。')
+          }
+        } else if (activeNav === 'youzan_distribution') {
+          const legacyTaskResult = await get('/v1/legacy-tasks')
+          if (!controller.signal.aborted && legacyTaskResult.ok) setLegacyTasks(readList<LegacyTask>(legacyTaskResult, 'tasks'))
+        } else if (activeNav === 'methods') {
+          const [pipelineResult, sourceResult, ruleResult, destinationResult, taskResult, legacyTaskResult, legacyRuleResult] = await Promise.all([
+            get('/v1/pipelines'), get('/v1/sources'), get('/v1/transform-rules'), get('/v1/destinations'), get('/v1/delivery-tasks'), get('/v1/legacy-tasks'), get('/v1/legacy-transform-rules'),
+          ])
+          if (!controller.signal.aborted) {
+            const nextSources = sourceResult.ok ? readList<SourceDefinition>(sourceResult, 'sources') : []
+            const nextRules = ruleResult.ok ? readList<TransformRule>(ruleResult, 'rules') : []
+            const nextDestinations = destinationResult.ok ? readList<DestinationDefinition>(destinationResult, 'destinations') : []
+            const nextTasks = taskResult.ok ? readList<DeliveryTask>(taskResult, 'tasks') : []
+            const nextLegacyTasks = legacyTaskResult.ok ? readList<LegacyTask>(legacyTaskResult, 'tasks') : []
+            const nextLegacyRules = legacyRuleResult.ok ? readList<LegacyTransformRule>(legacyRuleResult, 'rules') : []
+            if (sourceResult.ok) setSources(nextSources)
+            if (ruleResult.ok) setTransformRules(nextRules)
+            if (destinationResult.ok) setDestinations(nextDestinations)
+            if (taskResult.ok) setDeliveryTasks(nextTasks)
+            if (legacyTaskResult.ok) setLegacyTasks(nextLegacyTasks)
+            if (legacyRuleResult.ok) setLegacyRules(nextLegacyRules)
+            const nextPipelines = pipelineResult.ok ? readList<PipelineDefinition>(pipelineResult, 'pipelines') : []
+            if (pipelineResult.ok) setPipelines(nextPipelines)
+            const configuredMethods = pipelineResult.ok ? await loadConfiguredMethods(nextPipelines, controller.signal) : []
+            if (!controller.signal.aborted) {
+              if (!pipelineResult.ok || !sourceResult.ok || !ruleResult.ok || !destinationResult.ok || !taskResult.ok || !legacyTaskResult.ok || !legacyRuleResult.ok) setWorkspaceError('方法目录加载不完整，已保留上一次成功数据。')
+              setMethods([...buildConfiguredMethodDisplays(nextSources, nextRules, nextDestinations, nextTasks), ...buildLegacyMethodDisplays(nextLegacyTasks, nextLegacyRules), ...configuredMethods, ...builtinMethods])
+            }
+          }
         }
-        if (legacyTaskResult.ok) setLegacyTasks(nextLegacyTasks)
-        if (legacyRuleResult.ok) setLegacyRules(nextLegacyRules)
-        if (pipelineResult.ok) {
-          const pipelines = readList<PipelineDefinition>(pipelineResult, 'pipelines')
-          const configuredMethods = await loadConfiguredMethods(pipelines)
-          setMethods([...buildConfiguredMethodDisplays(nextSources, nextRules, nextDestinations, nextTasks), ...buildLegacyMethodDisplays(nextLegacyTasks, nextLegacyRules), ...configuredMethods, ...builtinMethods])
-        }
-        if (showResult) setResult({ ok: true, status: 200, data: { refreshed_at: new Date().toISOString() } })
+        if (!controller.signal.aborted && showResult) setResult({ ok: true, status: 200, data: { refreshed_at: new Date().toISOString() } })
       } finally {
-        setRefreshing(false)
+        if (workspaceRequestRef.current === controller) {
+          workspaceRequestRef.current = null
+          setRefreshing(false)
+        }
       }
     },
-    [client, loadConfiguredMethods, token],
+    [activeNav, client, loadConfiguredMethods, token],
   )
 
   useEffect(() => {
-    if (authenticated) void refreshAll(false)
-  }, [authenticated, refreshAll])
+    if (sessionState === 'authenticated') void refreshWorkspace(false)
+    return () => workspaceRequestRef.current?.abort()
+  }, [refreshWorkspace, sessionState])
 
   useEffect(() => {
     if (!token) return
-    const expiresAt = storedTokenExpiresAt(window.localStorage)
-
-    const expireSession = () => {
-      clearStoredToken(window.localStorage)
-      setToken('')
-      setAuthenticated(false)
-      setResult(null)
-    }
-
-    if (expiresAt === null || expiresAt <= Date.now()) {
-      expireSession()
+    if (sessionExpiresAt === null || sessionExpiresAt <= Date.now()) {
+      clearSession()
       return
     }
 
     let timer = 0
-    const scheduleExpiry = () => {
-      const remaining = expiresAt - Date.now()
+    const scheduleRefresh = () => {
+      const remaining = sessionExpiresAt - Date.now()
       if (remaining <= 0) {
-        expireSession()
+        clearSession()
         return
       }
-      timer = window.setTimeout(scheduleExpiry, Math.min(remaining, 2_147_000_000))
+      const refreshDelay = Math.max(0, remaining - 60_000)
+      timer = window.setTimeout(() => {
+        void apiClient.refresh().then((refreshed) => {
+          if (!refreshed) clearSession()
+        })
+      }, Math.min(refreshDelay, 2_147_000_000))
     }
-    scheduleExpiry()
+    scheduleRefresh()
     return () => window.clearTimeout(timer)
-  }, [token])
+  }, [apiClient, clearSession, sessionExpiresAt, token])
+
+  useEffect(() => {
+    if (!token) return
+    let current = true
+    const controller = new AbortController()
+    setSessionState('checking')
+    void Promise.all([
+      apiClient.request('/auth/me', { method: 'GET', signal: controller.signal }),
+      apiClient.request('/auth/token/info', { method: 'GET', signal: controller.signal }),
+    ]).then(([profileResponse, tokenInfoResponse]) => {
+      if (!current) return
+      const user = profileResponse.ok ? readSessionUser(profileResponse.data) : null
+      const tokenInfo = tokenInfoResponse.ok ? readTokenInfo(tokenInfoResponse.data) : null
+      if (!user || !tokenInfo || tokenInfo.userID !== user.id) {
+        if (profileResponse.error?.kind === 'unauthorized' || tokenInfoResponse.error?.kind === 'unauthorized') clearSession()
+        else setSessionState('anonymous')
+        return
+      }
+      const storedUser: StoredSessionUser = { id: user.id, account: user.account, nickname: user.nickname }
+      saveStoredSessionUser(storedUser, window.localStorage)
+      saveStoredTokenExpiry(tokenInfo.expireTime * 1000, window.localStorage)
+      setSessionUser(user)
+      setSessionExpiresAt(tokenInfo.expireTime * 1000)
+      setSessionState('authenticated')
+    })
+    return () => {
+      current = false
+      controller.abort()
+    }
+  }, [apiClient, clearSession, token])
+
+  useEffect(() => {
+    if (!mobileNavOpen) return
+    const previousOverflow = document.body.style.overflow
+    const navigation = mobileNavRef.current
+    document.body.style.overflow = 'hidden'
+    const focusableSelector = 'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+    const closeNavigation = () => setMobileNavOpen(false)
+    const handleKeydown = (event: KeyboardEvent) => {
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        closeNavigation()
+        return
+      }
+      if (event.key !== 'Tab') return
+      const items = Array.from(navigation?.querySelectorAll<HTMLElement>(focusableSelector) ?? []).filter((item) => !item.hasAttribute('hidden'))
+      if (items.length === 0) return
+      const first = items[0]
+      const last = items[items.length - 1]
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault()
+        last.focus()
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault()
+        first.focus()
+      }
+    }
+    window.addEventListener('keydown', handleKeydown)
+    const firstFocusable = navigation?.querySelector<HTMLElement>(focusableSelector)
+    const mobileNavTrigger = mobileNavTriggerRef.current
+    firstFocusable?.focus()
+    return () => {
+      document.body.style.overflow = previousOverflow
+      window.removeEventListener('keydown', handleKeydown)
+      if (window.matchMedia('(max-width: 840px)').matches) {
+        mobileNavTrigger?.focus()
+      } else {
+        const desktopNavigationTarget = navigation?.querySelector<HTMLElement>('.nav-item.active')
+          ?? navigation?.querySelector<HTMLElement>(focusableSelector)
+        desktopNavigationTarget?.focus()
+      }
+    }
+  }, [mobileNavOpen])
+
+  useLayoutEffect(() => {
+    const mobileViewport = window.matchMedia('(max-width: 840px)')
+    const syncMobileNavigationAccessibility = () => {
+      const navigation = mobileNavRef.current
+      if (!navigation) return
+      const shouldHideNavigation = mobileViewport.matches && !mobileNavOpen
+      if (shouldHideNavigation && navigation.contains(document.activeElement)) mobileNavTriggerRef.current?.focus()
+      navigation.toggleAttribute('inert', shouldHideNavigation)
+      if (shouldHideNavigation) navigation.setAttribute('aria-hidden', 'true')
+      else navigation.removeAttribute('aria-hidden')
+      if (!mobileViewport.matches) setMobileNavOpen(false)
+    }
+
+    syncMobileNavigationAccessibility()
+    mobileViewport.addEventListener('change', syncMobileNavigationAccessibility)
+    return () => mobileViewport.removeEventListener('change', syncMobileNavigationAccessibility)
+  }, [mobileNavOpen])
 
   useEffect(() => {
     const handleHashChange = () => {
@@ -928,38 +1188,76 @@ function App() {
     return () => window.removeEventListener('hashchange', handleHashChange)
   }, [])
 
+  useEffect(() => () => stepRequestRef.current?.abort(), [])
+
+  useEffect(() => {
+    if (sessionState !== 'authenticated' || activeNav !== 'overview') return
+    const controller = new AbortController()
+    void Promise.all([
+      client('/v1/data/statistics', { method: 'GET', signal: controller.signal, showResult: false, silentLoading: true }),
+      client('/v1/mall-weather/metrics', { method: 'GET', signal: controller.signal, showResult: false, silentLoading: true }),
+      client('/health', { method: 'GET', signal: controller.signal, showResult: false, silentLoading: true }),
+    ]).then(([statisticsResponse, weatherResponse, healthResponse]) => {
+      if (controller.signal.aborted) return
+      const nextStatistics = statisticsResponse.ok ? parseDataStatisticsSummary(statisticsResponse.data) : null
+      const nextWeather = weatherResponse.ok ? parseMallWeatherMetricsSummary(weatherResponse.data) : null
+      const nextHealth = healthResponse.ok ? parseHealthSummary(healthResponse.data) : null
+      setMonitoring((current) => ({
+        statistics: nextStatistics ?? current.statistics,
+        weather: nextWeather ?? current.weather,
+        health: nextHealth ?? current.health,
+      }))
+      setMonitoringStale(!nextStatistics || !nextWeather || !nextHealth)
+    })
+    return () => controller.abort()
+  }, [activeNav, client, sessionState])
+
   function navigate(key: NavKey) {
     window.location.hash = key
     setActiveNav(key)
     setMobileNavOpen(false)
   }
 
+  function openMobileNavigation() {
+    setMobileNavOpen(true)
+  }
+
   function handleLogin(nextToken: string) {
-    saveStoredToken(nextToken, window.localStorage)
-    setToken(nextToken)
-    setAuthenticated(true)
+    updateSessionToken(nextToken)
+    setSessionState('checking')
   }
 
   function handleLogout() {
-    clearStoredToken(window.localStorage)
-    setToken('')
-    setAuthenticated(false)
-    setResult(null)
+    clearSession()
   }
 
   async function loadStepRuns(runId: number) {
-    const response = await client(`/v1/pipeline-runs/${runId}/steps`, { method: 'GET' })
-    if (response.ok) setStepRuns(readList<StepRun>(response, 'step_runs'))
+    stepRequestRef.current?.abort()
+    const controller = new AbortController()
+    stepRequestRef.current = controller
+    setSelectedStepRunID(runId)
+    const response = await client(`/v1/pipeline-runs/${runId}/steps`, { method: 'GET', signal: controller.signal })
+    if (!controller.signal.aborted && response.ok) setStepRuns(readList<StepRun>(response, 'step_runs'))
   }
 
   async function toggleTarget(target: ToggleTarget, enabled: boolean) {
     const response = await updateTargetEnabled(client, target, enabled, { sources, transformRules, destinations, deliveryTasks })
-    if (response.ok) await refreshAll(false)
+    if (response.ok) await refreshWorkspace(false)
   }
 
   async function retryDeliveryLog(logId: number) {
     const response = await client(`/v1/delivery-logs/${logId}/retry`, { method: 'POST' })
-    if (response.ok) await refreshAll(false)
+    if (response.ok) await refreshWorkspace(false)
+  }
+
+  async function fetchSource(sourceID: number) {
+    const response = await client(`/v1/sources/${sourceID}/fetch`, { method: 'POST' })
+    if (response.ok) await refreshWorkspace(false)
+    return response
+  }
+
+  async function testSource(sourceID: number) {
+    return client(`/v1/sources/${sourceID}/test`, { method: 'POST' })
   }
 
   async function saveOrderPushSkipConfig(config: OrderPushSkipConfig) {
@@ -969,8 +1267,9 @@ function App() {
     })
     if (response.ok) {
       setOrderPushSkipConfig(normalizeOrderPushSkipConfig(readObject<OrderPushSkipConfig>(response, 'config')) ?? config)
-      await refreshAll(false)
+      await refreshWorkspace(false)
     }
+    return response
   }
 
   async function previewBojunOrderBackfill(payload: { start_time: string; end_time: string }) {
@@ -987,7 +1286,7 @@ function App() {
       body: payload,
     })
     if (response.ok) {
-      await refreshAll(false)
+      await refreshWorkspace(false)
       return readObject<BojunOrderBackfillResult>(response, 'result')
     }
     return null
@@ -1009,21 +1308,27 @@ function App() {
     return response.ok ? readObject<YouzanDistributionBackfillResult>(response, 'result') : null
   }
 
-  const receivedData = useMemo(() => rawData.filter((item) => !isPulledOrigin(rawDataOrigin(item))), [rawData])
-  const pulledData = useMemo(() => rawData.filter((item) => isPulledOrigin(rawDataOrigin(item))), [rawData])
+  async function runLegacyTask(code: string, payload: YouzanDistributionBackfillPayload) {
+    const response = await client(`/v1/legacy-tasks/${encodeURIComponent(code)}/run`, {
+      method: 'POST',
+      body: payload,
+    })
+    if (response.ok) await refreshWorkspace(false)
+    return response
+  }
+
   const coreMethods = useMemo(
     () => buildCoreMethods({ sources, transformRules, destinations, deliveryTasks, legacyTasks, legacyRules }),
     [deliveryTasks, destinations, legacyRules, legacyTasks, sources, transformRules],
   )
 
-  if (!authenticated) return <LoginScreen onLogin={handleLogin} />
+  if (sessionState !== 'authenticated') return <LoginScreen onLogin={handleLogin} checking={sessionState === 'checking'} />
 
   return (
     <main className={activeNav === 'mall_weather' || activeNav === 'store_info' ? 'ops-shell mall-weather-shell' : 'ops-shell'}>
-      <aside className={mobileNavOpen ? 'ops-sidebar mobile-open' : 'ops-sidebar'} aria-label="主导航">
-        <div className="brand">
-          <img className="brand-logo" src="/logo.jpg" alt="系统 Logo" />
-        </div>
+      {mobileNavOpen && <button className="mobile-nav-backdrop" type="button" aria-label="关闭导航抽屉" onClick={() => setMobileNavOpen(false)} />}
+      <aside ref={mobileNavRef} className={mobileNavOpen ? 'ops-sidebar mobile-open' : 'ops-sidebar'} aria-label="主导航">
+        <Brand />
         <button
           className="mobile-nav-toggle"
           type="button"
@@ -1031,8 +1336,8 @@ function App() {
           aria-controls="primary-navigation"
           onClick={() => setMobileNavOpen((open) => !open)}
         >
-          {mobileNavOpen ? <X aria-hidden="true" /> : <Menu aria-hidden="true" />}
-          {mobileNavOpen ? '收起菜单' : '展开菜单'}
+          <X aria-hidden="true" />
+          关闭菜单
         </button>
         <label className="nav-search">
           <span>查找页面</span>
@@ -1082,7 +1387,7 @@ function App() {
           })}
         </nav>
         <div className="sidebar-actions">
-          <button type="button" onClick={() => refreshAll(true)} disabled={refreshing}>
+          <button type="button" onClick={() => void refreshWorkspace(true)} disabled={refreshing}>
             <RefreshCcw aria-hidden="true" />
             刷新
           </button>
@@ -1094,26 +1399,27 @@ function App() {
       </aside>
 
       <section className="ops-workspace">
-        <ModuleHeader activeNav={activeNav} loading={loading || refreshing} />
-        {activeNav === 'overview' && <PushStatusView runs={runs} deliveryLogs={deliveryLogs} onLoadSteps={loadStepRuns} />}
-        {activeNav === 'runs' && <RunsQueryPage runs={runs} onLoadSteps={loadStepRuns} />}
-        {activeNav === 'delivery_logs' && <DeliveryLogsQueryPage logs={deliveryLogs} onRetryLog={retryDeliveryLog} />}
-        {activeNav === 'step_runs' && <StepRunsQueryPage runs={runs} stepRuns={stepRuns} onLoadSteps={loadStepRuns} />}
+        <ModuleHeader activeNav={activeNav} loading={loading || refreshing} sessionUser={sessionUser} onOpenNavigation={openMobileNavigation} mobileNavTriggerRef={mobileNavTriggerRef} />
+        {workspaceError && <div className="result-banner error" role="alert">{workspaceError} <button type="button" onClick={() => void refreshWorkspace(false)} disabled={refreshing}>重试</button></div>}
+        {activeNav === 'overview' && <PushStatusView runs={runs} deliveryLogs={deliveryLogs} monitoring={monitoring} stale={monitoringStale} onLoadSteps={loadStepRuns} />}
+        {activeNav === 'runs' && <RunsQueryPage client={client} onLoadSteps={loadStepRuns} />}
+        {activeNav === 'delivery_logs' && <DeliveryLogsQueryPage client={client} onRetryLog={retryDeliveryLog} />}
+        {activeNav === 'step_runs' && <StepRunsQueryPage runs={runs} stepRuns={stepRuns} selectedRunID={selectedStepRunID} onLoadSteps={loadStepRuns} />}
         {activeNav === 'store_info' && <StoreInfoPage actorID={actorID} client={client} downloadFile={downloadFile} />}
         {activeNav === 'mall_weather' && <MallWeatherPage actorID={actorID} client={client} downloadFile={downloadFile} />}
         {activeNav === 'data_authorizations' && <DataAuthorizationPage client={client} />}
-        {activeNav === 'sources' && <SourcesQueryPage sources={sources} />}
-        {activeNav === 'methods' && <MethodsView methods={methods} coreMethods={coreMethods} onToggle={toggleTarget} />}
-        {activeNav === 'receive' && <RawRecordsQueryPage title="接口接收记录" records={receivedData} />}
-        {activeNav === 'pull_records' && <RawRecordsQueryPage title="数据拉取记录" records={pulledData} />}
+        {activeNav === 'sources' && <SourcesQueryPage client={client} sources={sources} onFetchSource={fetchSource} onTestSource={testSource} onRefresh={() => refreshWorkspace(false)} />}
+        {activeNav === 'methods' && <MethodsView methods={methods} pipelines={pipelines} client={client} coreMethods={coreMethods} onToggle={toggleTarget} onPipelineRunCompleted={() => void refreshWorkspace(false)} />}
+        {activeNav === 'receive' && <RawRecordsQueryPage title="接口接收记录" origin="receive" client={client} />}
+        {activeNav === 'pull_records' && <RawRecordsQueryPage title="数据拉取记录" origin="pull" client={client} />}
         {activeNav === 'backfill' && <BojunBackfillPage loading={loading || refreshing} onPreview={previewBojunOrderBackfill} onConfirm={confirmBojunOrderBackfill} />}
-        {activeNav === 'youzan_distribution' && <YouzanDistributionPage task={legacyTasks.find((item) => item.code === 'youzan_distribution_order_fetch')} loading={loading || refreshing} onPreview={previewYouzanDistributionBackfill} onConfirm={confirmYouzanDistributionBackfill} />}
-        {activeNav === 'rules' && <RulesQueryPage rules={transformRules} />}
-        {activeNav === 'processed' && <ProcessedQueryPage records={processedData} />}
-        {activeNav === 'destinations' && <DestinationsQueryPage destinations={destinations} />}
-        {activeNav === 'tasks' && <DeliveryTasksQueryPage tasks={deliveryTasks} destinations={destinations} />}
+        {activeNav === 'youzan_distribution' && <YouzanDistributionPage task={legacyTasks.find((item) => item.code === 'youzan_distribution_order_fetch')} loading={loading || refreshing} onPreview={previewYouzanDistributionBackfill} onConfirm={confirmYouzanDistributionBackfill} onRun={runLegacyTask} />}
+        {activeNav === 'rules' && <RulesQueryPage client={client} rules={transformRules} sources={sources} onRulesChange={setTransformRules} />}
+        {activeNav === 'processed' && <ProcessedQueryPage client={client} />}
+        {activeNav === 'destinations' && <DestinationsQueryPage client={client} destinations={destinations} onRefresh={() => refreshWorkspace(false)} />}
+        {activeNav === 'tasks' && <DeliveryTasksQueryPage client={client} tasks={deliveryTasks} sources={sources} destinations={destinations} onRefresh={() => refreshWorkspace(false)} />}
         {activeNav === 'push_policy' && <PushPolicyPage coreMethod={coreMethods.find((item) => item.key === 'mall_push')} config={orderPushSkipConfig} targets={orderPushTargets} onSave={saveOrderPushSkipConfig} onToggle={toggleTarget} />}
-        {(activeNav === 'excel_jobs' || activeNav === 'excel_schemes' || activeNav === 'excel_write') && <ExcelMatchView section={activeNav === 'excel_jobs' ? 'jobs' : activeNav === 'excel_schemes' ? 'schemes' : 'write'} token={token} loading={loading} setLoading={setLoading} setResult={setResult} onNavigateToJobs={() => navigate('excel_jobs')} />}
+        {(activeNav === 'excel_jobs' || activeNav === 'excel_schemes' || activeNav === 'excel_write') && <ExcelMatchView section={activeNav === 'excel_jobs' ? 'jobs' : activeNav === 'excel_schemes' ? 'schemes' : 'write'} client={client} token={token} loading={loading} setLoading={setLoading} setResult={setResult} onNavigateToJobs={() => navigate('excel_jobs')} />}
       </section>
 
       <ResultPanel result={result} onClose={() => setResult(null)} />
@@ -1121,7 +1427,7 @@ function App() {
   )
 }
 
-function LoginScreen({ onLogin }: { onLogin: (token: string) => void }) {
+function LoginScreen({ onLogin, checking }: { onLogin: (token: string) => void; checking: boolean }) {
   const [error, setError] = useState('')
   const [submitting, setSubmitting] = useState(false)
 
@@ -1139,7 +1445,7 @@ function LoginScreen({ onLogin }: { onLogin: (token: string) => void }) {
       const data: unknown = await response.json().catch(() => ({}))
       const token = readToken(data)
       if (!response.ok || !token) {
-        setError(readMessage(data) || '登录失败，请检查管理员账号和密码。')
+        setError(loginFailureMessage(response.status))
         return
       }
       onLogin(token)
@@ -1154,22 +1460,21 @@ function LoginScreen({ onLogin }: { onLogin: (token: string) => void }) {
     <main className="login-shell">
       <section className="login-panel">
         <div className="login-title">
-          <img className="brand-logo large" src="/logo.jpg" alt="系统 Logo" />
-          <h1 className="sr-only">登录</h1>
+          <Brand size="large" />
         </div>
         <form className="login-form" onSubmit={submit}>
-          <p className="login-guidance">内部控制台仅允许管理员登录；开放接口账号由管理员在“数据授权”中创建，无需登录本页面。</p>
-          <Field label="管理员账号" name="username" defaultValue="admin" required autoComplete="username" />
+          <h1>管理员登录</h1>
+          <Field label="管理员账号" name="username" required autoComplete="username" />
           <Field label="管理员密码" name="password" type="password" required autoComplete="current-password" />
           {error && <div className="login-error" role="alert" aria-live="polite">{error}</div>}
-          <button className="primary" type="submit" disabled={submitting}>{submitting ? '正在登录…' : '管理员登录'}</button>
+          <button className="primary" type="submit" disabled={submitting || checking}>{submitting || checking ? '正在验证会话…' : '管理员登录'}</button>
         </form>
       </section>
     </main>
   )
 }
 
-function ModuleHeader({ activeNav, loading }: { activeNav: NavKey; loading: boolean }) {
+function ModuleHeader({ activeNav, loading, sessionUser, onOpenNavigation, mobileNavTriggerRef }: { activeNav: NavKey; loading: boolean; sessionUser: SessionUser | null; onOpenNavigation: () => void; mobileNavTriggerRef: RefObject<HTMLButtonElement> }) {
   const titles: Record<NavKey, { title: string; subtitle: string }> = {
     overview: { title: '运行总览', subtitle: '只看当前运行与交付健康度，快速定位失败。' },
     runs: { title: '流水线运行', subtitle: '按状态、运行类型和 Trace ID 查询执行记录。' },
@@ -1196,25 +1501,38 @@ function ModuleHeader({ activeNav, loading }: { activeNav: NavKey; loading: bool
   return (
     <header className="workspace-header">
       <div>
+        <button ref={mobileNavTriggerRef} className="workspace-menu-button" type="button" aria-label="打开主导航" onClick={onOpenNavigation}>
+          <Menu aria-hidden="true" />
+        </button>
         <h2>{titles[activeNav].title}</h2>
         <span>{titles[activeNav].subtitle}</span>
       </div>
-      <StatusPill label={loading ? '加载中' : '已就绪'} />
+      <div className="workspace-session">
+        {sessionUser && <span>{sessionUser.nickname || sessionUser.account}</span>}
+        <StatusPill label={loading ? '加载中' : '已就绪'} />
+      </div>
     </header>
   )
 }
 
-function PushStatusView({ runs, deliveryLogs, onLoadSteps }: { runs: PipelineRun[]; deliveryLogs: DeliveryLog[]; onLoadSteps: (runId: number) => void }) {
+function PushStatusView({ runs, deliveryLogs, monitoring, stale, onLoadSteps }: { runs: PipelineRun[]; deliveryLogs: DeliveryLog[]; monitoring: MonitoringSnapshot; stale: boolean; onLoadSteps: (runId: number) => void }) {
   const deliveryRuns = runs.filter((run) => run.run_type === 'delivery')
   const failedLogs = deliveryLogs.filter((log) => !log.success)
   return (
     <div className="view-stack">
       <section className="overview-grid">
-        <Metric label="推送运行" value={deliveryRuns.length} />
-        <Metric label="成功记录" value={sum(deliveryRuns, 'success_count')} />
-        <Metric label="失败记录" value={sum(deliveryRuns, 'failed_count') + failedLogs.length} />
-        <Metric label="最近日志" value={deliveryLogs.length} />
+        <Metric label="接收总量" value={monitoring.statistics?.totalCount ?? '-'} />
+        <Metric label="已处理" value={monitoring.statistics?.processedCount ?? '-'} />
+        <Metric label="处理失败" value={monitoring.statistics?.errorCount ?? '-'} />
+        <Metric label="交付失败" value={sum(deliveryRuns, 'failed_count') + failedLogs.length} />
       </section>
+      <section className="overview-grid compact" aria-live="polite">
+        <Metric label="天气告警" value={monitoring.weather?.firingAlerts ?? '-'} />
+        <Metric label="天气拉取失败" value={monitoring.weather?.failedFetches ?? '-'} />
+        <Metric label="服务健康" value={monitoring.health?.healthy ? '正常' : '未知'} />
+        <Metric label="运行记录" value={deliveryLogs.length} />
+      </section>
+      {stale && <p className="backfill-note" role="status">部分监控数据暂时不可用，正在保留最近一次成功结果。</p>}
       <section className="content-grid two">
         <Panel title="最近推送运行" icon={<Activity />} meta="delivery runs">
           <RunTable runs={deliveryRuns.length ? deliveryRuns : runs.slice(0, 12)} onLoadSteps={onLoadSteps} />
@@ -1227,7 +1545,7 @@ function PushStatusView({ runs, deliveryLogs, onLoadSteps }: { runs: PipelineRun
   )
 }
 
-function MethodsView({ methods, coreMethods, onToggle }: { methods: MethodDisplay[]; coreMethods: CoreMethod[]; onToggle: (target: ToggleTarget, enabled: boolean) => void }) {
+function MethodsView({ methods, pipelines, client, coreMethods, onToggle, onPipelineRunCompleted }: { methods: MethodDisplay[]; pipelines: PipelineDefinition[]; client: ApiClient; coreMethods: CoreMethod[]; onToggle: (target: ToggleTarget, enabled: boolean) => void; onPipelineRunCompleted: () => void }) {
   const [query, setQuery] = useState('')
   const [category, setCategory] = useState('all')
   const [status, setStatus] = useState('all')
@@ -1246,6 +1564,8 @@ function MethodsView({ methods, coreMethods, onToggle }: { methods: MethodDispla
       <Panel title="当前已有核心方法" icon={<Wrench />} meta="可开启的真实配置会显示操作按钮">
         <CoreMethodList methods={coreMethods} onToggle={onToggle} />
       </Panel>
+      <PipelineRunPanel pipelines={pipelines} client={client} onRunCompleted={onPipelineRunCompleted} />
+      <PipelineComposerPanel pipelines={pipelines} client={client} onRefresh={onPipelineRunCompleted} />
       <QueryBar count={filtered.length} total={methods.length}>
         <Field label="名称 / 编码 / 负责人" name="method_query" value={query} onChange={setQuery} />
         <SelectFilter label="分类" value={category} onChange={setCategory} options={uniqueOptions(methods.map((method) => method.category))} />
@@ -1326,46 +1646,149 @@ function BojunBackfillResultView({ title, result }: { title: string; result: Boj
   )
 }
 
-function RunsQueryPage({ runs, onLoadSteps }: { runs: PipelineRun[]; onLoadSteps: (runId: number) => void }) {
-  const [query, setQuery] = useState('')
+function RunsQueryPage({ client, onLoadSteps }: { client: ApiClient; onLoadSteps: (runId: number) => void }) {
+  const [traceID, setTraceID] = useState('')
   const [status, setStatus] = useState('all')
   const [runType, setRunType] = useState('all')
-  const filtered = useMemo(() => runs.filter((run) => {
-    const matchesQuery = includesQuery([run.id, run.trace_id, run.trigger_type, run.error_message], query)
-    return matchesQuery && (status === 'all' || run.status === status) && (runType === 'all' || run.run_type === runType)
-  }), [query, runType, runs, status])
+  const [startTime, setStartTime] = useState('')
+  const [endTime, setEndTime] = useState('')
+  const [applied, setApplied] = useState({ traceID: '', status: '', runType: '', startTime: '', endTime: '' })
+  const [page, setPage] = useState(1)
+  const [recordsPage, setRecordsPage] = useState<MonitoringPage<PipelineRun> | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const requestRef = useRef<AbortController | null>(null)
+
+  useEffect(() => {
+    requestRef.current?.abort()
+    const controller = new AbortController()
+    requestRef.current = controller
+    setLoading(true)
+    setError('')
+    const query = buildRunListQuery({ page, pageSize: 20, ...applied })
+    void client(`/v1/runs?${query}`, { method: 'GET', signal: controller.signal, showResult: false, silentLoading: true }).then((response) => {
+      if (controller.signal.aborted) return
+      const parsed = response.ok ? parseMonitoringPage<unknown>(response.data, 'runs') : null
+      const runs = parsed?.list.map(parsePipelineRun) ?? []
+      if (parsed && runs.every((run): run is PipelineRun => run !== null)) {
+        setRecordsPage({ ...parsed, list: runs })
+        return
+      }
+      setError(response.error?.message || '运行记录查询暂时不可用，请稍后重试。')
+    }).finally(() => { if (!controller.signal.aborted) setLoading(false) })
+    return () => controller.abort()
+  }, [applied, client, page])
+
+  function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    setPage(1)
+    setApplied({ traceID, status: status === 'all' ? '' : status, runType: runType === 'all' ? '' : runType, startTime, endTime })
+  }
+
+  const runs = recordsPage?.list ?? []
+  const pagination = recordsPage?.pagination
   return (
     <div className="view-stack">
-      <QueryBar count={filtered.length} total={runs.length}>
-        <Field label="ID / Trace / 错误" name="run_query" value={query} onChange={setQuery} />
-        <SelectFilter label="状态" value={status} onChange={setStatus} options={uniqueOptions(runs.map((run) => run.status))} />
-        <SelectFilter label="运行类型" value={runType} onChange={setRunType} options={uniqueOptions(runs.map((run) => run.run_type))} />
-      </QueryBar>
-      <Panel title="运行记录" icon={<Activity />} meta={`查询命中 ${filtered.length} 条`}><RunTable runs={filtered} onLoadSteps={onLoadSteps} /></Panel>
+      <form className="query-bar" onSubmit={submit}>
+        <div className="query-fields">
+          <Field label="Trace ID" name="run_trace_id" value={traceID} onChange={setTraceID} />
+          <SelectFilter label="状态" value={status} onChange={setStatus} options={[{ value: 'running', label: '运行中' }, { value: 'success', label: '成功' }, { value: 'failed', label: '失败' }, { value: 'partial_success', label: '部分成功' }]} />
+          <SelectFilter label="运行类型" value={runType} onChange={setRunType} options={[{ value: 'fetch', label: '拉取' }, { value: 'ingest', label: '接收' }, { value: 'transform', label: '清洗' }, { value: 'delivery', label: '推送' }]} />
+          <Field label="开始时间" name="run_start_time" type="datetime-local" value={startTime} onChange={setStartTime} />
+          <Field label="结束时间" name="run_end_time" type="datetime-local" value={endTime} onChange={setEndTime} />
+        </div>
+        <button type="submit" disabled={loading}>{loading ? '查询中…' : '查询'}</button>
+      </form>
+      {error && <div className="result-banner error" role="alert">{error} 已保留最近一次成功数据。</div>}
+      <Panel title="运行记录" icon={<Activity />} meta={loading && !recordsPage ? '正在加载…' : `共 ${pagination?.total ?? 0} 条`}>
+        <RunTable runs={runs} onLoadSteps={onLoadSteps} />
+        <MonitoringPaginationControls page={pagination?.page ?? page} totalPages={pagination?.totalPages ?? 0} loading={loading} onPrevious={() => setPage((current) => Math.max(1, current - 1))} onNext={() => setPage((current) => current + 1)} />
+      </Panel>
     </div>
   )
 }
 
-function DeliveryLogsQueryPage({ logs, onRetryLog }: { logs: DeliveryLog[]; onRetryLog: (logId: number) => void }) {
-  const [query, setQuery] = useState('')
+function DeliveryLogsQueryPage({ client, onRetryLog }: { client: ApiClient; onRetryLog: (logId: number) => Promise<void> }) {
+  const [destination, setDestination] = useState('')
+  const [source, setSource] = useState('')
   const [status, setStatus] = useState('all')
-  const filtered = useMemo(() => logs.filter((log) => {
-    const matchesQuery = includesQuery([log.id, log.trace_id, log.business_key, log.source_code, log.destination_code, log.destination_name, log.error_message], query)
-    const matchesStatus = status === 'all' || (status === 'success' ? log.success : !log.success)
-    return matchesQuery && matchesStatus
-  }), [logs, query, status])
+  const [businessKey, setBusinessKey] = useState('')
+  const [startTime, setStartTime] = useState('')
+  const [endTime, setEndTime] = useState('')
+  const [applied, setApplied] = useState({ destination: '', source: '', success: '' as '' | 'true' | 'false', businessKey: '', startTime: '', endTime: '' })
+  const [page, setPage] = useState(1)
+  const [recordsPage, setRecordsPage] = useState<MonitoringPage<DeliveryLog> | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const [retryingLogID, setRetryingLogID] = useState<number | null>(null)
+  const [pendingRetryLog, setPendingRetryLog] = useState<DeliveryLog | null>(null)
+  const [reloadVersion, setReloadVersion] = useState(0)
+  const requestRef = useRef<AbortController | null>(null)
+
+  useEffect(() => {
+    requestRef.current?.abort()
+    const controller = new AbortController()
+    requestRef.current = controller
+    setLoading(true)
+    setError('')
+    const query = buildDeliveryLogListQuery({ page, pageSize: 20, ...applied })
+    void client(`/v1/delivery-logs?${query}`, { method: 'GET', signal: controller.signal, showResult: false, silentLoading: true }).then((response) => {
+      if (controller.signal.aborted) return
+      const parsed = response.ok ? parseMonitoringPage<unknown>(response.data, 'logs') : null
+      const logs = parsed?.list.map(parseDeliveryLog) ?? []
+      if (parsed && logs.every((log): log is DeliveryLog => log !== null)) {
+        setRecordsPage({ ...parsed, list: logs })
+        return
+      }
+      setError(response.error?.message || '推送日志查询暂时不可用，请稍后重试。')
+    }).finally(() => { if (!controller.signal.aborted) setLoading(false) })
+    return () => controller.abort()
+  }, [applied, client, page, reloadVersion])
+
+  function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    setPage(1)
+    setApplied({ destination, source, success: status === 'success' ? 'true' : status === 'failed' ? 'false' : '', businessKey, startTime, endTime })
+  }
+
+  async function retryPendingLog() {
+    if (!pendingRetryLog || retryingLogID !== null) return
+    setRetryingLogID(pendingRetryLog.id)
+    try {
+      await onRetryLog(pendingRetryLog.id)
+    } finally {
+      setRetryingLogID(null)
+      setPendingRetryLog(null)
+      setReloadVersion((version) => version + 1)
+    }
+  }
+
+  const logs = recordsPage?.list ?? []
+  const pagination = recordsPage?.pagination
+
   return (
     <div className="view-stack">
-      <QueryBar count={filtered.length} total={logs.length}>
-        <Field label="业务键 / Trace / 来源 / 目标" name="delivery_query" value={query} onChange={setQuery} />
+      <form className="query-bar" onSubmit={submit}>
+        <div className="query-fields">
+        <Field label="推送目标编码" name="delivery_destination" value={destination} onChange={setDestination} />
+        <Field label="来源编码" name="delivery_source" value={source} onChange={setSource} />
         <SelectFilter label="交付状态" value={status} onChange={setStatus} options={[{ value: 'success', label: '成功' }, { value: 'failed', label: '失败' }]} />
-      </QueryBar>
-      <Panel title="推送日志" icon={<Send />} meta={`查询命中 ${filtered.length} 条`}><DeliveryLogList logs={filtered} onRetryLog={onRetryLog} /></Panel>
+        <Field label="业务键" name="delivery_business_key" value={businessKey} onChange={setBusinessKey} />
+        <Field label="开始时间" name="delivery_start_time" type="datetime-local" value={startTime} onChange={setStartTime} />
+        <Field label="结束时间" name="delivery_end_time" type="datetime-local" value={endTime} onChange={setEndTime} />
+        </div>
+        <button type="submit" disabled={loading || retryingLogID !== null}>{loading ? '查询中…' : '查询'}</button>
+      </form>
+      {error && <div className="result-banner error" role="alert">{error} 已保留最近一次成功数据。</div>}
+      <Panel title="推送日志" icon={<Send />} meta={loading && !recordsPage ? '正在加载…' : `共 ${pagination?.total ?? 0} 条`}><DeliveryLogList logs={logs} retryingLogID={retryingLogID} onRetryLog={(log) => {
+        if (!log.success && retryingLogID === null) setPendingRetryLog(log)
+      }} /><MonitoringPaginationControls page={pagination?.page ?? page} totalPages={pagination?.totalPages ?? 0} loading={loading || retryingLogID !== null} onPrevious={() => setPage((current) => Math.max(1, current - 1))} onNext={() => setPage((current) => current + 1)} /></Panel>
+      {pendingRetryLog && <Modal title="确认重试推送日志" closeDisabled={retryingLogID !== null} onClose={() => { if (retryingLogID === null) setPendingRetryLog(null) }} footer={<><button type="button" disabled={retryingLogID !== null} onClick={() => setPendingRetryLog(null)}>取消</button><button className="primary" type="button" disabled={retryingLogID !== null} onClick={() => void retryPendingLog()}>{retryingLogID === pendingRetryLog.id ? '重试中…' : '确认重试'}</button></>}><p>确认重试失败日志 #{pendingRetryLog.id}？这会再次向原推送目标发起交付请求。</p></Modal>}
     </div>
   )
 }
 
-function StepRunsQueryPage({ runs, stepRuns, onLoadSteps }: { runs: PipelineRun[]; stepRuns: StepRun[]; onLoadSteps: (runId: number) => void }) {
+function StepRunsQueryPage({ runs, stepRuns, selectedRunID, onLoadSteps }: { runs: PipelineRun[]; stepRuns: StepRun[]; selectedRunID: number | null; onLoadSteps: (runId: number) => void }) {
   const [runQuery, setRunQuery] = useState('')
   const [stepQuery, setStepQuery] = useState('')
   const visibleRuns = runs.filter((run) => includesQuery([run.id, run.trace_id, run.run_type], runQuery))
@@ -1379,80 +1802,577 @@ function StepRunsQueryPage({ runs, stepRuns, onLoadSteps }: { runs: PipelineRun[
       <QueryBar count={visibleSteps.length} total={stepRuns.length}>
         <Field label="步骤编码 / 类型 / 状态" name="step_query" value={stepQuery} onChange={setStepQuery} />
       </QueryBar>
-      <Panel title="步骤明细" icon={<BookOpen />} meta={`当前 ${visibleSteps.length} 条`}><StepRunList stepRuns={visibleSteps} /></Panel>
+      <Panel title="步骤明细" icon={<BookOpen />} meta={selectedRunID ? `运行 #${selectedRunID} / ${visibleSteps.length} 条` : '请先选择运行'}><StepRunList stepRuns={visibleSteps} /></Panel>
     </div>
   )
 }
 
-function SourcesQueryPage({ sources }: { sources: SourceDefinition[] }) {
+function SourcesQueryPage({ client, sources, onFetchSource, onTestSource, onRefresh }: { client: ApiClient; sources: SourceDefinition[]; onFetchSource: (sourceID: number) => Promise<ApiResult>; onTestSource: (sourceID: number) => Promise<ApiResult>; onRefresh: () => Promise<void> }) {
   const [query, setQuery] = useState('')
   const [status, setStatus] = useState('all')
   const [sourceType, setSourceType] = useState('all')
+  const [draft, setDraft] = useState<SourceDraft | null>(null)
+  const [saving, setSaving] = useState(false)
+  const [message, setMessage] = useState('')
   const filtered = sources.filter((source) => includesQuery([source.id, source.name, source.code, source.auth_type], query)
     && (status === 'all' || (status === 'enabled' ? source.enabled : !source.enabled))
     && (sourceType === 'all' || source.source_type === sourceType))
+
+  async function openDetail(id: number) {
+    setMessage('')
+    const response = await client(`/v1/sources/${id}`, { method: 'GET', showResult: false, silentLoading: true })
+    const source = response.ok ? readObject<SourceDefinition>(response, 'source') : null
+    if (!source) { setMessage(response.error?.message || '数据源详情暂时不可用。'); return }
+    setDraft(sourceDraftFrom(source))
+  }
+
+  async function save(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!draft || saving) return
+    if (!draft.name.trim() || !draft.code.trim()) { setMessage('请填写数据源名称和编码。'); return }
+    try {
+      const config = JSON.parse(draft.configJSON) as unknown
+      const schema = JSON.parse(draft.schemaJSON) as unknown
+      const dedupe = JSON.parse(draft.dedupeKeys) as unknown
+      if (!config || Array.isArray(config) || typeof config !== 'object' || !schema || Array.isArray(schema) || typeof schema !== 'object' || !Array.isArray(dedupe)) throw new Error('shape')
+    } catch { setMessage('配置和 Schema 必须为 JSON 对象，去重键必须为 JSON 数组。'); return }
+    setSaving(true)
+    const response = await client(draft.id ? `/v1/sources/${draft.id}` : '/v1/sources', {
+      method: draft.id ? 'PUT' : 'POST', showResult: false, silentLoading: true,
+      body: { name: draft.name.trim(), code: draft.code.trim(), source_type: draft.sourceType, enabled: draft.enabled, auth_type: draft.authType.trim() || 'none', config_json: draft.configJSON, schema_json: draft.schemaJSON, dedupe_keys: draft.dedupeKeys, source_query_key: draft.sourceQueryKey.trim() },
+    })
+    setSaving(false)
+    if (!response.ok) { setMessage(response.error?.message || '数据源保存未完成。'); return }
+    setDraft(null)
+    setMessage('数据源已保存。')
+    await onRefresh()
+  }
   return (
     <div className="view-stack">
+      {message && <div className="result-banner" role="status">{message}</div>}
       <QueryBar count={filtered.length} total={sources.length}>
         <Field label="名称 / 编码 / 鉴权" name="source_query" value={query} onChange={setQuery} />
         <SelectFilter label="状态" value={status} onChange={setStatus} options={[{ value: 'enabled', label: '启用' }, { value: 'disabled', label: '停用' }]} />
         <SelectFilter label="类型" value={sourceType} onChange={setSourceType} options={uniqueOptions(sources.map((source) => source.source_type))} />
       </QueryBar>
-      <Panel title="数据源配置" icon={<Database />} meta={`查询命中 ${filtered.length} 条`}><SourceList sources={filtered} /></Panel>
+      <div className="record-actions"><button type="button" className="primary" onClick={() => setDraft({ id: null, name: '', code: '', sourceType: 'api_poll', enabled: true, authType: 'none', configJSON: '{\n  "url": "",\n  "method": "GET",\n  "records_path": "data"\n}', schemaJSON: '{}', dedupeKeys: '[]', sourceQueryKey: '', hasSecret: false })}>新增数据源</button></div>
+      <Panel title="数据源配置" icon={<Database />} meta={`查询命中 ${filtered.length} 条`}><SourceList sources={filtered} onDetail={(source) => { void openDetail(source.id) }} onFetchSource={onFetchSource} onTestSource={onTestSource} /></Panel>
+      {draft && <Modal title={draft.id ? '数据源详情与编辑' : '新增数据源'} onClose={() => { if (!saving) setDraft(null) }}>
+        {draft.hasSecret && <div className="result-banner" role="status">配置中的敏感值已隐藏。保留“[已隐藏]”会保留原值；改为新值即可轮换，且不会回显旧值。</div>}
+        <form className="excel-upload-form" onSubmit={save}>
+          <Field label="数据源名称" name="source_name" value={draft.name} required onChange={(name) => setDraft({ ...draft, name })} />
+          <Field label="数据源编码" name="source_code" value={draft.code} required onChange={(code) => setDraft({ ...draft, code })} />
+          <label>数据源类型<select value={draft.sourceType} disabled={saving} onChange={(event) => setDraft({ ...draft, sourceType: event.currentTarget.value })}><option value="api_poll">API 轮询</option><option value="database">数据库</option><option value="webhook">Webhook</option></select></label>
+          <Field label="鉴权类型" name="source_auth_type" value={draft.authType} onChange={(authType) => setDraft({ ...draft, authType })} />
+          <label className="checkbox-label"><input type="checkbox" checked={draft.enabled} disabled={saving} onChange={(event) => setDraft({ ...draft, enabled: event.currentTarget.checked })} />启用数据源</label>
+          <Field label="来源查询键" name="source_query_key" value={draft.sourceQueryKey} onChange={(sourceQueryKey) => setDraft({ ...draft, sourceQueryKey })} />
+          <label>连接配置 JSON<textarea rows={10} value={draft.configJSON} disabled={saving} onChange={(event) => setDraft({ ...draft, configJSON: event.currentTarget.value })} /></label>
+          <label>Schema JSON<textarea rows={5} value={draft.schemaJSON} disabled={saving} onChange={(event) => setDraft({ ...draft, schemaJSON: event.currentTarget.value })} /></label>
+          <label>去重键 JSON 数组<textarea rows={4} value={draft.dedupeKeys} disabled={saving} onChange={(event) => setDraft({ ...draft, dedupeKeys: event.currentTarget.value })} /></label>
+          <p className="query-contract-note">API 测试会发起真实连通性请求；Webhook 不支持主动拉取。Schema 与去重键目前由服务端保存，未参与拉取校验。</p>
+          <div className="excel-form-actions"><button className="primary" type="submit" disabled={saving}>{saving ? '保存中…' : '保存数据源'}</button></div>
+        </form>
+      </Modal>}
     </div>
   )
 }
 
-function RawRecordsQueryPage({ title, records }: { title: string; records: RawData[] }) {
-  const [query, setQuery] = useState('')
-  const [status, setStatus] = useState('all')
-  const [origin, setOrigin] = useState('all')
-  const filtered = records.filter((record) => includesQuery([record.id, record.external_id, record.data_type, record.remark, record.source, JSON.stringify(record.raw_content ?? record.rawContent ?? '')], query)
-    && (status === 'all' || record.status === status)
-    && (origin === 'all' || rawDataOrigin(record) === origin))
+function RawRecordsQueryPage({ title, origin, client }: { title: string; origin: RawRecordOrigin; client: ApiClient }) {
+  const [source, setSource] = useState('')
+  const [startTime, setStartTime] = useState('')
+  const [endTime, setEndTime] = useState('')
+  const [appliedQuery, setAppliedQuery] = useState({ source: '', startTime: '', endTime: '' })
+  const [page, setPage] = useState(1)
+  const [recordsPage, setRecordsPage] = useState<RawRecordsPage<RawData> | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const requestRef = useRef<AbortController | null>(null)
+
+  useEffect(() => {
+    requestRef.current?.abort()
+    const controller = new AbortController()
+    requestRef.current = controller
+    setLoading(true)
+    setError('')
+    const body = buildRawRecordsRequest({ page, pageSize: 20, origin, ...appliedQuery })
+    void client('/v1/data/raw/list', {
+      method: 'POST', body, signal: controller.signal, showResult: false, silentLoading: true,
+    }).then((response) => {
+      if (controller.signal.aborted) return
+      const nextPage = response.ok ? parseRawRecordsPage<RawData>(response.data) : null
+      if (nextPage) {
+        setRecordsPage(nextPage)
+        return
+      }
+      setError(response.error?.message || '记录查询暂时不可用，请稍后重试。')
+    }).finally(() => {
+      if (!controller.signal.aborted) setLoading(false)
+    })
+    return () => controller.abort()
+  }, [appliedQuery, client, origin, page])
+
+  function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    setPage(1)
+    setAppliedQuery({ source, startTime: backendDateTime(startTime), endTime: backendDateTime(endTime) })
+  }
+
+  const records = recordsPage?.list ?? []
+  const total = recordsPage?.total ?? 0
+  const totalPages = recordsPage?.totalPages ?? 0
   return (
     <div className="view-stack">
-      <QueryBar count={filtered.length} total={records.length}>
-        <Field label="ID / 外部编号 / 内容" name="raw_query" value={query} onChange={setQuery} />
-        <SelectFilter label="状态" value={status} onChange={setStatus} options={uniqueOptions(records.map((record) => record.status))} />
-        <SelectFilter label="来源" value={origin} onChange={setOrigin} options={uniqueOptions(records.map(rawDataOrigin))} />
-      </QueryBar>
-      <Panel title={title} icon={<Inbox />} meta={`查询命中 ${filtered.length} 条`}><RawDataList records={filtered} /></Panel>
+      <form className="query-bar" onSubmit={submit}>
+        <div className="query-fields">
+          <Field label="来源" name="raw_source" value={source} onChange={setSource} />
+          <Field label="开始时间" name="raw_start_time" type="datetime-local" value={startTime} onChange={setStartTime} />
+          <Field label="结束时间" name="raw_end_time" type="datetime-local" value={endTime} onChange={setEndTime} />
+        </div>
+        <button type="submit" disabled={loading}>{loading ? '查询中…' : '查询'}</button>
+      </form>
+      <p className="query-contract-note">已按真实后端能力提供来源、时间范围和分页筛选；类型、状态及业务键筛选需后端增加对应索引后再开放。</p>
+      {error && <div className="result-banner error" role="alert">{error} 已保留最近一次成功数据。</div>}
+      <Panel title={title} icon={<Inbox />} meta={loading && !recordsPage ? '正在加载…' : `共 ${total} 条`}>
+        <RawDataList records={records} />
+        <div className="record-actions raw-record-pagination" role="status" aria-live="polite">
+          <span>第 {recordsPage?.page ?? page} / {Math.max(totalPages, 1)} 页</span>
+          <button type="button" onClick={() => setPage((current) => Math.max(1, current - 1))} disabled={loading || page <= 1}>上一页</button>
+          <button type="button" onClick={() => setPage((current) => current + 1)} disabled={loading || totalPages === 0 || page >= totalPages}>下一页</button>
+        </div>
+      </Panel>
+      {origin === 'receive' && <WarehouseRawRecordsPanel client={client} />}
     </div>
   )
 }
 
-function RulesQueryPage({ rules }: { rules: TransformRule[] }) {
+function WarehouseRawRecordsPanel({ client }: { client: ApiClient }) {
+  const [source, setSource] = useState('')
+  const [status, setStatus] = useState('')
+  const [traceID, setTraceID] = useState('')
+  const [startTime, setStartTime] = useState('')
+  const [endTime, setEndTime] = useState('')
+  const [appliedQuery, setAppliedQuery] = useState({ source: '', status: '', traceID: '', startTime: '', endTime: '' })
+  const [page, setPage] = useState(1)
+  const [recordsPage, setRecordsPage] = useState<RawRecordsPage<WarehouseRawRecord> | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const [message, setMessage] = useState('')
+  const [pendingRetransform, setPendingRetransform] = useState<WarehouseRawRecord | null>(null)
+  const [retransformingID, setRetransformingID] = useState<number | null>(null)
+  const [reloadVersion, setReloadVersion] = useState(0)
+  const requestRef = useRef<AbortController | null>(null)
+
+  useEffect(() => {
+    requestRef.current?.abort()
+    const controller = new AbortController()
+    requestRef.current = controller
+    setLoading(true)
+    setError('')
+    const query = buildWarehouseRawRecordsQuery({ page, pageSize: 20, origin: 'receive', ...appliedQuery })
+    void client(`/v1/raw-records?${query}`, {
+      method: 'GET', signal: controller.signal, showResult: false, silentLoading: true,
+    }).then((response) => {
+      if (controller.signal.aborted) return
+      const parsed = response.ok ? parseRawRecordsPage<unknown>(response.data) : null
+      const records = parsed?.list.map(parseWarehouseRawRecord) ?? []
+      if (parsed && records.every((record): record is WarehouseRawRecord => record !== null)) {
+        setRecordsPage({ ...parsed, list: records })
+        return
+      }
+      setError(response.error?.message || '可重新处理记录查询暂时不可用，请稍后重试。')
+    }).finally(() => {
+      if (!controller.signal.aborted) setLoading(false)
+    })
+    return () => controller.abort()
+  }, [appliedQuery, client, page, reloadVersion])
+
+  function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    setPage(1)
+    setAppliedQuery({ source, status, traceID, startTime: backendDateTime(startTime), endTime: backendDateTime(endTime) })
+  }
+
+  async function retransform() {
+    const record = pendingRetransform
+    if (!record || retransformingID !== null) return
+    setRetransformingID(record.id)
+    setError('')
+    const response = await client(`/v1/raw-records/${record.id}/retransform`, {
+      method: 'POST', retry: false, showResult: false, silentLoading: true,
+    })
+    setRetransformingID(null)
+    if (!response.ok) {
+      setError(response.error?.message || '重新处理未完成，请稍后重试。')
+      return
+    }
+    const result = parseRetransformResult(response.data)
+    if (!result) {
+      setError('重新处理已提交，但未收到可验证的结果摘要。')
+      return
+    }
+    setPendingRetransform(null)
+    setMessage(`重新处理完成：追踪 ${result.traceID || '-'}，清洗记录 #${result.cleanRecordID}。`)
+    setReloadVersion((version) => version + 1)
+  }
+
+  const records = recordsPage?.list ?? []
+  const total = recordsPage?.total ?? 0
+  const totalPages = recordsPage?.totalPages ?? 0
+  return (
+    <>
+      <Panel title="可重新处理原始记录" icon={<RefreshCcw />} meta={loading && !recordsPage ? '正在加载…' : `共 ${total} 条`}>
+        <p className="query-contract-note">此列表仅展示新仓库的脱敏原始记录。历史“接口接收记录”仍只读；只有本列表中的 ID 可安全重新处理。</p>
+        <form className="query-bar" onSubmit={submit}>
+          <div className="query-fields">
+            <Field label="来源" name="warehouse_raw_source" value={source} onChange={setSource} />
+            <SelectFilter label="状态" value={status || 'all'} onChange={(next) => setStatus(next === 'all' ? '' : next)} options={[
+              { value: 'received', label: '已接收' }, { value: 'queued', label: '排队中' }, { value: 'cleaning', label: '处理中' }, { value: 'cleaned', label: '已清洗' }, { value: 'failed', label: '失败' },
+            ]} />
+            <Field label="追踪 ID" name="warehouse_raw_trace_id" value={traceID} onChange={setTraceID} />
+            <Field label="开始时间" name="warehouse_raw_start_time" type="datetime-local" value={startTime} onChange={setStartTime} />
+            <Field label="结束时间" name="warehouse_raw_end_time" type="datetime-local" value={endTime} onChange={setEndTime} />
+          </div>
+          <button type="submit" disabled={loading || retransformingID !== null}>{loading ? '查询中…' : '查询'}</button>
+        </form>
+        {message && <div className="result-banner" role="status" aria-live="polite">{message}</div>}
+        {error && <div className="result-banner error" role="alert">{error} 已保留最近一次成功数据。</div>}
+        {records.length === 0 ? <EmptyState text="暂无可重新处理的原始记录。" /> : (
+          <div className="record-list">
+            {records.map((record) => (
+              <article className="record-row" key={record.id}>
+                <div>
+                  <strong>#{record.id} / {record.sourceCode || '未命名来源'}</strong>
+                  <span>来源 #{record.sourceID || '-'} / 追踪 {record.traceID || '-'} / {record.receivedAt || `创建于 ${record.createdAt || '-'}`}</span>
+                </div>
+                <div className="record-actions">
+                  <StatusPill label={rawRecordStatusLabel(record.status)} />
+                  <button type="button" disabled={retransformingID !== null || record.status === 'cleaning'} onClick={() => setPendingRetransform(record)}>
+                    {retransformingID === record.id ? '处理中…' : '重新处理'}
+                  </button>
+                </div>
+              </article>
+            ))}
+          </div>
+        )}
+        <div className="record-actions raw-record-pagination" role="status" aria-live="polite">
+          <span>第 {recordsPage?.page ?? page} / {Math.max(totalPages, 1)} 页</span>
+          <button type="button" onClick={() => setPage((current) => Math.max(1, current - 1))} disabled={loading || retransformingID !== null || page <= 1}>上一页</button>
+          <button type="button" onClick={() => setPage((current) => current + 1)} disabled={loading || retransformingID !== null || totalPages === 0 || page >= totalPages}>下一页</button>
+        </div>
+      </Panel>
+      {pendingRetransform && <Modal title="确认重新处理原始记录" closeDisabled={retransformingID !== null} onClose={() => { if (retransformingID === null) setPendingRetransform(null) }} footer={<><button type="button" disabled={retransformingID !== null} onClick={() => setPendingRetransform(null)}>取消</button><button className="primary" type="button" disabled={retransformingID !== null} onClick={() => void retransform()}>{retransformingID === pendingRetransform.id ? '处理中…' : '确认重新处理'}</button></>}><p>确认重新处理仓库原始记录 #{pendingRetransform.id}？系统会创建新的清洗记录；原始内容不会在管理端展示。</p></Modal>}
+    </>
+  )
+}
+
+function RulesQueryPage({ client, rules, sources, onRulesChange }: { client: ApiClient; rules: TransformRule[]; sources: SourceDefinition[]; onRulesChange: (rules: TransformRule[]) => void }) {
   const [query, setQuery] = useState('')
   const [status, setStatus] = useState('all')
   const [ruleType, setRuleType] = useState('all')
-  const filtered = rules.filter((rule) => includesQuery([rule.id, rule.name, rule.source_id, rule.config_json], query)
+  const [draft, setDraft] = useState<RuleDraft | null>(null)
+  const [rawContent, setRawContent] = useState('{}')
+  const [testResult, setTestResult] = useState<unknown>(null)
+  const [saving, setSaving] = useState(false)
+  const [testing, setTesting] = useState(false)
+  const [operationError, setOperationError] = useState('')
+  const filtered = rules.filter((rule) => includesQuery([rule.id, rule.name, rule.source_id, rule.rule_type], query)
     && (status === 'all' || (status === 'enabled' ? rule.enabled : !rule.enabled))
     && (ruleType === 'all' || rule.rule_type === ruleType))
+
+  function openCreate() {
+    setOperationError('')
+    setDraft({ id: null, sourceID: sources[0]?.id ? String(sources[0].id) : '', name: '', ruleType: 'mapping', orderIndex: '0', configJSON: '{\n  "table_name": "",\n  "business_key_field": "",\n  "fields": []\n}', enabled: true, hasSecret: false })
+  }
+
+  async function openDetail(ruleID: number) {
+    setOperationError('')
+    const response = await client(`/v1/transform-rules/${ruleID}`, { method: 'GET', showResult: false, silentLoading: true })
+    const rule = response.ok ? readObject<TransformRule>(response, 'rule') : null
+    if (!rule) {
+      setOperationError(response.error?.message || '规则详情暂时不可用，请稍后重试。')
+      return
+    }
+    setDraft(ruleDraftFrom(rule))
+  }
+
+  async function saveDraft(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!draft || saving) return
+    const sourceID = Number(draft.sourceID)
+    const orderIndex = Number(draft.orderIndex)
+    if (!Number.isInteger(sourceID) || sourceID <= 0 || !draft.name.trim() || !Number.isInteger(orderIndex)) {
+      setOperationError('请填写来源、名称和有效的顺序号。')
+      return
+    }
+    try { JSON.parse(draft.configJSON) } catch { setOperationError('配置必须是有效 JSON。'); return }
+    setSaving(true)
+    setOperationError('')
+    const response = await client(draft.id ? `/v1/transform-rules/${draft.id}` : '/v1/transform-rules', {
+      method: draft.id ? 'PUT' : 'POST', showResult: false, silentLoading: true,
+      body: { source_id: sourceID, name: draft.name.trim(), rule_type: draft.ruleType, order_index: orderIndex, config_json: draft.configJSON, enabled: draft.enabled },
+    })
+    const saved = response.ok ? readObject<TransformRule>(response, 'rule') : null
+    if (!saved) {
+      setOperationError(response.error?.message || '规则保存未完成，请稍后重试。')
+      setSaving(false)
+      return
+    }
+    onRulesChange(draft.id ? rules.map((rule) => rule.id === saved.id ? saved : rule) : [...rules, saved].sort((left, right) => left.source_id - right.source_id || left.order_index - right.order_index || right.id - left.id))
+    setSaving(false)
+    setDraft(null)
+  }
+
+  async function runTest(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!draft || draft.ruleType !== 'mapping' || testing) return
+    let parsedContent: Record<string, unknown>
+    try {
+      parsedContent = JSON.parse(rawContent) as Record<string, unknown>
+      JSON.parse(draft.configJSON)
+    } catch {
+      setOperationError('测试内容和规则配置都必须是有效 JSON。')
+      return
+    }
+    if (!parsedContent || Array.isArray(parsedContent) || typeof parsedContent !== 'object') {
+      setOperationError('测试原始内容必须是 JSON 对象。')
+      return
+    }
+    setTesting(true)
+    setOperationError('')
+    const response = await client('/v1/transform-rules/test', { method: 'POST', body: { raw_content: parsedContent, config_json: draft.configJSON }, showResult: false, silentLoading: true })
+    const cleanContent = response.ok ? readObject<unknown>(response, 'clean_content') : null
+    if (cleanContent === null) setOperationError(response.error?.message || '规则测试未完成，请稍后重试。')
+    else setTestResult(redactMonitoringJSON(cleanContent))
+    setTesting(false)
+  }
+
+  const testable = draft?.ruleType === 'mapping'
   return (
     <div className="view-stack">
+      {operationError && <div className="result-banner error" role="alert">{operationError}</div>}
       <QueryBar count={filtered.length} total={rules.length}>
-        <Field label="名称 / 来源 ID / 配置" name="rule_query" value={query} onChange={setQuery} />
+        <Field label="名称 / 来源 ID / 类型" name="rule_query" value={query} onChange={setQuery} />
         <SelectFilter label="状态" value={status} onChange={setStatus} options={[{ value: 'enabled', label: '启用' }, { value: 'disabled', label: '停用' }]} />
         <SelectFilter label="规则类型" value={ruleType} onChange={setRuleType} options={uniqueOptions(rules.map((rule) => rule.rule_type))} />
       </QueryBar>
-      <Panel title="清洗规则" icon={<ListChecks />} meta={`查询命中 ${filtered.length} 条`}><TransformRuleList rules={filtered} /></Panel>
+      <div className="record-actions"><button type="button" className="primary" onClick={openCreate}>新增规则</button></div>
+      <Panel title="清洗规则" icon={<ListChecks />} meta={`查询命中 ${filtered.length} 条`}><TransformRuleList rules={filtered} onDetail={(rule) => { void openDetail(rule.id) }} /></Panel>
+      {draft && (
+        <Modal title={draft.id ? '清洗规则详情与编辑' : '新增清洗规则'} onClose={() => { if (!saving && !testing) setDraft(null) }}>
+          {draft.hasSecret && <div className="result-banner" role="status">配置中的敏感值已隐藏。保留“[已隐藏]”会保留原值；改为新值即可轮换，且不会回显旧值。</div>}
+          <form className="excel-upload-form" onSubmit={saveDraft}>
+            <label>来源
+              <select value={draft.sourceID} disabled={saving} required onChange={(event) => setDraft({ ...draft, sourceID: event.currentTarget.value })}>
+                <option value="">选择数据源</option>
+                {sources.map((source) => <option value={source.id} key={source.id}>#{source.id} {source.name}</option>)}
+              </select>
+            </label>
+            <Field label="规则名称" name="rule_name" value={draft.name} required onChange={(name) => setDraft({ ...draft, name })} />
+            <label>规则类型
+              <select value={draft.ruleType} disabled={saving} onChange={(event) => setDraft({ ...draft, ruleType: event.currentTarget.value })}>
+                {['mapping', 'http_enrich', 'db_enrich', 'script', 'validator'].map((type) => <option key={type} value={type}>{type}</option>)}
+              </select>
+            </label>
+            <Field label="执行顺序" name="rule_order" type="number" value={draft.orderIndex} required onChange={(orderIndex) => setDraft({ ...draft, orderIndex })} />
+            <label className="checkbox-label"><input type="checkbox" checked={draft.enabled} disabled={saving} onChange={(event) => setDraft({ ...draft, enabled: event.currentTarget.checked })} />启用规则</label>
+            <label>规则配置 JSON<textarea value={draft.configJSON} disabled={saving} rows={12} onChange={(event) => setDraft({ ...draft, configJSON: event.currentTarget.value })} /></label>
+            <div className="excel-form-actions"><button className="primary" type="submit" disabled={saving}>{saving ? '保存中…' : '保存规则'}</button></div>
+          </form>
+          <hr />
+          <form className="excel-upload-form" onSubmit={runTest}>
+            <h4>Mapping 规则测试</h4>
+            <p className="query-contract-note">测试只使用当前草稿，不会保存配置；仅 mapping 类型有真实后端执行能力。</p>
+            <label>测试原始内容 JSON<textarea value={rawContent} disabled={!testable || testing} rows={8} onChange={(event) => setRawContent(event.currentTarget.value)} /></label>
+            <div className="excel-form-actions"><button type="submit" disabled={!testable || testing}>{testing ? '测试中…' : '执行测试'}</button></div>
+            {testResult !== null && <ReadonlyJSON value={testResult} />}
+          </form>
+        </Modal>
+      )}
     </div>
   )
 }
 
-function ProcessedQueryPage({ records }: { records: ProcessedData[] }) {
-  const [query, setQuery] = useState('')
-  const [quality, setQuality] = useState('all')
-  const filtered = records.filter((record) => includesQuery([record.id, record.raw_data_id, record.data_type, record.data_fields], query)
-    && (quality === 'all' || (quality === 'good' ? record.quality_score >= 80 : record.quality_score < 80)))
+function ProcessedQueryPage({ client }: { client: ApiClient }) {
+  const [view, setView] = useState<'legacy' | 'clean'>('legacy')
+  const [statistics, setStatistics] = useState<DataStatisticsSummary | null>(null)
+  const [statisticsLoading, setStatisticsLoading] = useState(true)
+  const [statisticsError, setStatisticsError] = useState('')
+  const [statisticsRequest, setStatisticsRequest] = useState(0)
+
+  useEffect(() => {
+    const controller = new AbortController()
+    setStatisticsLoading(true)
+    setStatisticsError('')
+    void client('/v1/data/statistics', { method: 'GET', signal: controller.signal, showResult: false, silentLoading: true }).then((response) => {
+      if (controller.signal.aborted) return
+      const parsed = response.ok ? parseDataStatisticsSummary(response.data) : null
+      if (!parsed) {
+        setStatisticsError('处理统计暂时不可用，记录列表仍可继续查询。')
+        setStatisticsLoading(false)
+        return
+      }
+      setStatistics(parsed)
+      setStatisticsLoading(false)
+    }).catch(() => {
+      if (controller.signal.aborted) return
+      setStatisticsError('处理统计暂时不可用，记录列表仍可继续查询。')
+      setStatisticsLoading(false)
+    })
+    return () => controller.abort()
+  }, [client, statisticsRequest])
+
   return (
     <div className="view-stack">
-      <QueryBar count={filtered.length} total={records.length}>
-        <Field label="ID / Raw ID / 类型 / 内容" name="processed_query" value={query} onChange={setQuery} />
-        <SelectFilter label="质量" value={quality} onChange={setQuality} options={[{ value: 'good', label: '80 分及以上' }, { value: 'low', label: '低于 80 分' }]} />
-      </QueryBar>
-      <Panel title="处理结果" icon={<CheckCircle2 />} meta={`查询命中 ${filtered.length} 条`}><ProcessedDataList records={filtered} /></Panel>
+      {statistics && <section className="overview-grid compact" aria-label="处理统计">
+        <Metric label="接收总量" value={statistics.totalCount} />
+        <Metric label="已处理" value={statistics.processedCount} />
+        <Metric label="处理失败" value={statistics.errorCount} />
+        <Metric label="平均质量分" value={statistics.averageQualityScore === null ? '-' : statistics.averageQualityScore.toFixed(1)} />
+      </section>}
+      {statisticsLoading && !statistics && <p className="query-contract-note" role="status">正在加载处理统计…</p>}
+      {statisticsError && <div className="result-banner error" role="alert">{statisticsError} {statistics && '当前展示的是上一次成功数据。'} <button type="button" onClick={() => setStatisticsRequest((current) => current + 1)} disabled={statisticsLoading}>重试统计</button></div>}
+      <div className="tab-actions" role="tablist" aria-label="处理结果数据视图">
+        <button type="button" role="tab" aria-selected={view === 'legacy'} className={view === 'legacy' ? 'active' : ''} onClick={() => setView('legacy')}>旧处理结果</button>
+        <button type="button" role="tab" aria-selected={view === 'clean'} className={view === 'clean' ? 'active' : ''} onClick={() => setView('clean')}>清洗记录</button>
+      </div>
+      {view === 'legacy' ? <LegacyProcessedQueryPanel client={client} /> : <CleanRecordsQueryPanel client={client} />}
+    </div>
+  )
+}
+
+function LegacyProcessedQueryPanel({ client }: { client: ApiClient }) {
+  const [dataType, setDataType] = useState('')
+  const [minQuality, setMinQuality] = useState('')
+  const [maxQuality, setMaxQuality] = useState('')
+  const [createdFrom, setCreatedFrom] = useState('')
+  const [createdTo, setCreatedTo] = useState('')
+  const [appliedQuery, setAppliedQuery] = useState({ dataType: '', minQuality: '', maxQuality: '', createdFrom: '', createdTo: '' })
+  const [page, setPage] = useState(1)
+  const [recordsPage, setRecordsPage] = useState<ProcessedRecordsPage<ProcessedData> | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const requestRef = useRef<AbortController | null>(null)
+
+  useEffect(() => {
+    requestRef.current?.abort()
+    const controller = new AbortController()
+    requestRef.current = controller
+    setLoading(true)
+    setError('')
+    const query = buildProcessedRecordsQuery({ page, pageSize: 20, ...appliedQuery })
+    void client(`/v1/data/processed/list?${query}`, { method: 'GET', signal: controller.signal, showResult: false, silentLoading: true }).then((response) => {
+      if (controller.signal.aborted) return
+      const nextPage = response.ok ? parseProcessedRecordsPage<ProcessedData>(response.data) : null
+      if (nextPage) {
+        setRecordsPage(nextPage)
+        return
+      }
+      setError(response.error?.message || '处理结果查询暂时不可用，请稍后重试。')
+    }).finally(() => { if (!controller.signal.aborted) setLoading(false) })
+    return () => controller.abort()
+  }, [appliedQuery, client, page])
+
+  function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    setPage(1)
+    setAppliedQuery({ dataType, minQuality, maxQuality, createdFrom: unixTimestamp(createdFrom), createdTo: unixTimestamp(createdTo) })
+  }
+
+  const records = recordsPage?.list ?? []
+  const totalPages = recordsPage?.totalPages ?? 0
+  return (
+    <div className="view-stack">
+      <form className="query-bar" onSubmit={submit}>
+        <div className="query-fields">
+          <Field label="数据类型" name="processed_type" value={dataType} onChange={setDataType} />
+          <Field label="最低质量分" name="processed_min_quality" type="number" value={minQuality} onChange={setMinQuality} />
+          <Field label="最高质量分" name="processed_max_quality" type="number" value={maxQuality} onChange={setMaxQuality} />
+          <Field label="开始时间" name="processed_from" type="datetime-local" value={createdFrom} onChange={setCreatedFrom} />
+          <Field label="结束时间" name="processed_to" type="datetime-local" value={createdTo} onChange={setCreatedTo} />
+        </div>
+        <button type="submit" disabled={loading}>{loading ? '查询中…' : '查询'}</button>
+      </form>
+      <p className="query-contract-note">旧处理结果支持类型、质量和时间范围筛选；业务键属于 clean records，待独立查询接口接入后提供。</p>
+      {error && <div className="result-banner error" role="alert">{error} 已保留最近一次成功数据。</div>}
+      <Panel title="处理结果" icon={<CheckCircle2 />} meta={loading && !recordsPage ? '正在加载…' : `共 ${recordsPage?.total ?? 0} 条 / 平均质量 ${recordsPage?.averageQuality.toFixed(1) ?? '-'}`}>
+        <ProcessedDataList records={records} />
+        <div className="record-actions raw-record-pagination" role="status" aria-live="polite">
+          <span>第 {recordsPage?.page ?? page} / {Math.max(totalPages, 1)} 页</span>
+          <button type="button" onClick={() => setPage((current) => Math.max(1, current - 1))} disabled={loading || page <= 1}>上一页</button>
+          <button type="button" onClick={() => setPage((current) => current + 1)} disabled={loading || totalPages === 0 || page >= totalPages}>下一页</button>
+        </div>
+      </Panel>
+    </div>
+  )
+}
+
+function CleanRecordsQueryPanel({ client }: { client: ApiClient }) {
+  const [sourceID, setSourceID] = useState('')
+  const [tableName, setTableName] = useState('')
+  const [businessKey, setBusinessKey] = useState('')
+  const [status, setStatus] = useState('')
+  const [minQuality, setMinQuality] = useState('')
+  const [maxQuality, setMaxQuality] = useState('')
+  const [createdFrom, setCreatedFrom] = useState('')
+  const [createdTo, setCreatedTo] = useState('')
+  const [appliedQuery, setAppliedQuery] = useState({ sourceID: '', tableName: '', businessKey: '', status: '', minQuality: '', maxQuality: '', createdFrom: '', createdTo: '' })
+  const [page, setPage] = useState(1)
+  const [recordsPage, setRecordsPage] = useState<ProcessedRecordsPage<CleanRecord> | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const requestRef = useRef<AbortController | null>(null)
+
+  useEffect(() => {
+    requestRef.current?.abort()
+    const controller = new AbortController()
+    requestRef.current = controller
+    setLoading(true)
+    setError('')
+    const query = buildCleanRecordsQuery({ page, pageSize: 20, ...appliedQuery })
+    void client(`/v1/data/clean-records/list?${query}`, { method: 'GET', signal: controller.signal, showResult: false, silentLoading: true }).then((response) => {
+      if (controller.signal.aborted) return
+      const nextPage = response.ok ? parseProcessedRecordsPage<CleanRecord>(response.data) : null
+      if (nextPage) {
+        setRecordsPage(nextPage)
+        return
+      }
+      setError(response.error?.message || '清洗记录查询暂时不可用，请稍后重试。')
+    }).finally(() => { if (!controller.signal.aborted) setLoading(false) })
+    return () => controller.abort()
+  }, [appliedQuery, client, page])
+
+  function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    setPage(1)
+    setAppliedQuery({ sourceID, tableName, businessKey, status, minQuality, maxQuality, createdFrom: unixTimestamp(createdFrom), createdTo: unixTimestamp(createdTo) })
+  }
+
+  const records = recordsPage?.list ?? []
+  const totalPages = recordsPage?.totalPages ?? 0
+  return (
+    <div className="view-stack">
+      <form className="query-bar" onSubmit={submit}>
+        <div className="query-fields">
+          <Field label="来源 ID" name="clean_source_id" type="number" value={sourceID} onChange={setSourceID} />
+          <Field label="逻辑表名" name="clean_table_name" value={tableName} onChange={setTableName} />
+          <Field label="业务键" name="clean_business_key" value={businessKey} onChange={setBusinessKey} />
+          <SelectFilter label="状态" value={status} onChange={setStatus} options={[{ value: 'ready', label: '待推送' }, { value: 'invalid', label: '无效' }, { value: 'delivered', label: '已交付' }]} />
+          <Field label="最低质量分" name="clean_min_quality" type="number" value={minQuality} onChange={setMinQuality} />
+          <Field label="最高质量分" name="clean_max_quality" type="number" value={maxQuality} onChange={setMaxQuality} />
+          <Field label="开始时间" name="clean_from" type="datetime-local" value={createdFrom} onChange={setCreatedFrom} />
+          <Field label="结束时间" name="clean_to" type="datetime-local" value={createdTo} onChange={setCreatedTo} />
+        </div>
+        <button type="submit" disabled={loading}>{loading ? '查询中…' : '查询'}</button>
+      </form>
+      {error && <div className="result-banner error" role="alert">{error} 已保留最近一次成功数据。</div>}
+      <Panel title="清洗记录" icon={<CheckCircle2 />} meta={loading && !recordsPage ? '正在加载…' : `共 ${recordsPage?.total ?? 0} 条 / 平均质量 ${recordsPage?.averageQuality.toFixed(1) ?? '-'}`}>
+        <CleanRecordList records={records} />
+        <div className="record-actions raw-record-pagination" role="status" aria-live="polite">
+          <span>第 {recordsPage?.page ?? page} / {Math.max(totalPages, 1)} 页</span>
+          <button type="button" onClick={() => setPage((current) => Math.max(1, current - 1))} disabled={loading || page <= 1}>上一页</button>
+          <button type="button" onClick={() => setPage((current) => current + 1)} disabled={loading || totalPages === 0 || page >= totalPages}>下一页</button>
+        </div>
+      </Panel>
     </div>
   )
 }
@@ -1462,49 +2382,85 @@ function BojunBackfillPage({ loading, onPreview, onConfirm }: {
   onPreview: (payload: { start_time: string; end_time: string }) => Promise<BojunOrderBackfillResult | null>
   onConfirm: (payload: { start_time: string; end_time: string }) => Promise<BojunOrderBackfillResult | null>
 }) {
+  const previewVersionRef = useRef(0)
   const [payload, setPayload] = useState<{ start_time: string; end_time: string } | null>(null)
   const [preview, setPreview] = useState<BojunOrderBackfillResult | null>(null)
   const [confirmed, setConfirmed] = useState<BojunOrderBackfillResult | null>(null)
+  const [confirmingWrite, setConfirmingWrite] = useState(false)
+  const [writing, setWriting] = useState(false)
+  function invalidatePreview() {
+    previewVersionRef.current += 1
+    setPayload(null)
+    setPreview(null)
+    setConfirmed(null)
+    setConfirmingWrite(false)
+  }
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
     const form = new FormData(event.currentTarget)
     const nextPayload = { start_time: formValue(form, 'start_time'), end_time: formValue(form, 'end_time') }
-    setConfirmed(null)
+    const requestVersion = previewVersionRef.current + 1
+    invalidatePreview()
     const result = await onPreview(nextPayload)
+    if (previewVersionRef.current !== requestVersion) return
     setPayload(result ? nextPayload : null)
     setPreview(result)
   }
-  async function confirm() {
-    if (!payload || !preview || !window.confirm(`确认写入 ${preview.writable_count} 条伯俊订单？`)) return
-    setConfirmed(await onConfirm(payload))
+  async function confirmWrite() {
+    if (!payload || !preview || writing) return
+    setWriting(true)
+    try {
+      setConfirmed(await onConfirm(payload))
+      setConfirmingWrite(false)
+    } finally {
+      setWriting(false)
+    }
   }
   return (
     <div className="view-stack">
       <Panel title="伯俊订单补拉" icon={<Download />} meta="预览不写库，确认后按 docno 判重">
         <form className="bojun-backfill-form" onSubmit={submit}>
-          <Field label="开始时间" name="start_time" type="datetime-local" defaultValue={datetimeLocalMinutesAgo(60)} required />
-          <Field label="结束时间" name="end_time" type="datetime-local" defaultValue={datetimeLocalMinutesAgo(0)} required />
+          <Field label="开始时间" name="start_time" type="datetime-local" defaultValue={datetimeLocalMinutesAgo(60)} onChange={invalidatePreview} required />
+          <Field label="结束时间" name="end_time" type="datetime-local" defaultValue={datetimeLocalMinutesAgo(0)} onChange={invalidatePreview} required />
           <button className="primary" type="submit" disabled={loading}>预览补拉</button>
-          <button type="button" disabled={loading || !preview || preview.writable_count === 0} onClick={confirm}>确认写入</button>
+          <button type="button" disabled={loading || writing || !preview || preview.writable_count === 0} onClick={() => setConfirmingWrite(true)}>确认写入</button>
         </form>
         {preview && <BojunBackfillResultView title="预览结果" result={preview} />}
         {confirmed && <BojunBackfillResultView title="写入结果" result={confirmed} />}
       </Panel>
+      {confirmingWrite && preview && <Modal title="确认写入伯俊订单" closeDisabled={loading || writing} onClose={() => { if (!loading && !writing) setConfirmingWrite(false) }} footer={<><button type="button" disabled={loading || writing} onClick={() => setConfirmingWrite(false)}>取消</button><button className="primary" type="button" disabled={loading || writing} onClick={() => void confirmWrite()}>{writing ? '写入中…' : '确认写入'}</button></>}><p>确认写入 {preview.writable_count} 条伯俊订单？系统会按 docno 判重，已有订单不会覆盖。</p></Modal>}
     </div>
   )
 }
 
-function YouzanDistributionPage({ task, loading, onPreview, onConfirm }: {
+function YouzanDistributionPage({ task, loading, onPreview, onConfirm, onRun }: {
   task?: LegacyTask
   loading: boolean
   onPreview: (payload: YouzanDistributionBackfillPayload) => Promise<YouzanDistributionBackfillResult | null>
   onConfirm: (payload: YouzanDistributionBackfillPayload) => Promise<YouzanDistributionBackfillResult | null>
+  onRun: (code: string, payload: YouzanDistributionBackfillPayload) => Promise<ApiResult>
 }) {
+  const previewVersionRef = useRef(0)
   const [showBackfill, setShowBackfill] = useState(false)
   const [timeFilter, setTimeFilter] = useState<YouzanDistributionTimeFilter>('created')
   const [payload, setPayload] = useState<YouzanDistributionBackfillPayload | null>(null)
   const [preview, setPreview] = useState<YouzanDistributionBackfillResult | null>(null)
   const [confirmed, setConfirmed] = useState<YouzanDistributionBackfillResult | null>(null)
+  const [showManualRun, setShowManualRun] = useState(false)
+  const [manualRunPayload, setManualRunPayload] = useState<YouzanDistributionBackfillPayload | null>(null)
+  const [manualRunResult, setManualRunResult] = useState<LegacyTaskRunResult | null>(null)
+  const [manualRunError, setManualRunError] = useState('')
+  const [runningManualTask, setRunningManualTask] = useState(false)
+  const [confirmingBackfill, setConfirmingBackfill] = useState(false)
+  const [writingBackfill, setWritingBackfill] = useState(false)
+
+  function invalidateBackfillPreview() {
+    previewVersionRef.current += 1
+    setPayload(null)
+    setPreview(null)
+    setConfirmed(null)
+    setConfirmingBackfill(false)
+  }
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -1514,30 +2470,66 @@ function YouzanDistributionPage({ task, loading, onPreview, onConfirm }: {
       start_time: backendDateTime(formValue(form, 'start_time')),
       end_time: backendDateTime(formValue(form, 'end_time')),
     }
-    setConfirmed(null)
+    const requestVersion = previewVersionRef.current + 1
+    invalidateBackfillPreview()
     const result = await onPreview(nextPayload)
+    if (previewVersionRef.current !== requestVersion) return
     setPayload(result ? nextPayload : null)
     setPreview(result)
   }
 
-  async function confirm() {
-    if (!payload || !preview || !window.confirm(`确认写入 ${preview.writable_count} 条有赞分销订单？`)) return
-    setConfirmed(await onConfirm(payload))
+  async function confirmBackfill() {
+    if (!payload || !preview || writingBackfill) return
+    setWritingBackfill(true)
+    try {
+      setConfirmed(await onConfirm(payload))
+      setConfirmingBackfill(false)
+    } finally {
+      setWritingBackfill(false)
+    }
   }
 
   function changeTimeFilter(value: string) {
     if (value !== 'created' && value !== 'success') return
     setTimeFilter(value)
-    setPayload(null)
-    setPreview(null)
-    setConfirmed(null)
+    invalidateBackfillPreview()
   }
 
   function openBackfill() {
-    setPayload(null)
-    setPreview(null)
-    setConfirmed(null)
+    invalidateBackfillPreview()
     setShowBackfill(true)
+  }
+
+  function openManualRun() {
+    setManualRunPayload(null)
+    setManualRunResult(null)
+    setManualRunError('')
+    setShowManualRun(true)
+  }
+
+  function prepareManualRun(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const form = new FormData(event.currentTarget)
+    setManualRunPayload({
+      time_filter: formValue(form, 'time_filter') === 'success' ? 'success' : 'created',
+      start_time: backendDateTime(formValue(form, 'start_time')),
+      end_time: backendDateTime(formValue(form, 'end_time')),
+    })
+  }
+
+  async function confirmManualRun() {
+    if (!task || !manualRunPayload || runningManualTask) return
+    setRunningManualTask(true)
+    setManualRunError('')
+    const response = await onRun(task.code, manualRunPayload)
+    if (response.ok) {
+      const result = readObject<LegacyTaskRunResult>(response, 'result')
+      if (result?.id && result.queue && result.type) setManualRunResult(result)
+      else setManualRunError('任务已提交，但未收到完整的队列任务信息。请在任务系统中核对执行状态。')
+    } else {
+      setManualRunError(response.error?.message || '任务投递失败，请稍后重试。')
+    }
+    setRunningManualTask(false)
   }
 
   return (
@@ -1555,6 +2547,7 @@ function YouzanDistributionPage({ task, loading, onPreview, onConfirm }: {
             </dl>
             <div className="task-page-actions">
               <button className="primary" type="button" onClick={openBackfill} disabled={loading}>发起补拉</button>
+              <button type="button" onClick={openManualRun} disabled={loading}>运行计划任务</button>
             </div>
           </>
         )}
@@ -1567,8 +2560,8 @@ function YouzanDistributionPage({ task, loading, onPreview, onConfirm }: {
       )}
 
       {showBackfill && (
-        <Modal title="补拉有赞分销订单" onClose={() => { if (!loading) setShowBackfill(false) }}>
-          <form className="youzan-backfill-form" onSubmit={submit}>
+        <Modal title={confirmingBackfill ? '确认写入有赞分销订单' : '补拉有赞分销订单'} focusKey={confirmingBackfill ? 'confirm' : 'form'} closeDisabled={loading || writingBackfill} onClose={() => { if (!loading && !writingBackfill) setShowBackfill(false) }}>
+          {confirmingBackfill && preview ? <div className="view-stack"><p>确认写入 {preview.writable_count} 条有赞分销订单？系统会按 tid 判重，已有订单不会覆盖。</p><div className="excel-form-actions"><button type="button" disabled={loading || writingBackfill} onClick={() => setConfirmingBackfill(false)}>返回预览</button><button className="primary" type="button" disabled={loading || writingBackfill} onClick={() => void confirmBackfill()}>{writingBackfill ? '写入中…' : '确认写入'}</button></div></div> : <><form className="youzan-backfill-form" onSubmit={submit}>
             <label>
               时间筛选方式
               <select name="time_filter" value={timeFilter} onChange={(event) => changeTimeFilter(event.currentTarget.value)}>
@@ -1576,14 +2569,49 @@ function YouzanDistributionPage({ task, loading, onPreview, onConfirm }: {
                 <option value="success">订单完成时间</option>
               </select>
             </label>
-            <Field label={timeFilter === 'created' ? '下单开始时间' : '完成开始时间'} name="start_time" type="datetime-local" defaultValue={previousDayDateTimeLocal(false)} required />
-            <Field label={timeFilter === 'created' ? '下单结束时间' : '完成结束时间'} name="end_time" type="datetime-local" defaultValue={previousDayDateTimeLocal(true)} required />
+            <Field label={timeFilter === 'created' ? '下单开始时间' : '完成开始时间'} name="start_time" type="datetime-local" defaultValue={previousDayDateTimeLocal(false)} onChange={invalidateBackfillPreview} required />
+            <Field label={timeFilter === 'created' ? '下单结束时间' : '完成结束时间'} name="end_time" type="datetime-local" defaultValue={previousDayDateTimeLocal(true)} onChange={invalidateBackfillPreview} required />
             <button className="primary" type="submit" disabled={loading}>{loading ? '预览中' : '预览补拉'}</button>
-            <button type="button" disabled={loading || !preview || preview.writable_count === 0} onClick={confirm}>确认写入</button>
+            <button type="button" disabled={loading || writingBackfill || !preview || preview.writable_count === 0} onClick={() => setConfirmingBackfill(true)}>确认写入</button>
           </form>
           <p className="backfill-note">当前按{youzanDistributionTimeFilterLabel(timeFilter)}筛选。预览会真实拉取、解密并判重，但不写数据库；确认后重新拉取相同筛选方式和时间范围并写入，已有 tid 不覆盖。</p>
           {preview && <YouzanDistributionBackfillResultView title="预览结果" result={preview} />}
-          {confirmed && <YouzanDistributionBackfillResultView title="写入结果" result={confirmed} />}
+          {confirmed && <YouzanDistributionBackfillResultView title="写入结果" result={confirmed} />}</>}
+        </Modal>
+      )}
+
+      {showManualRun && task && (
+        <Modal title="运行有赞分销计划任务" onClose={() => { if (!runningManualTask) setShowManualRun(false) }}>
+          {!manualRunPayload ? (
+            <form className="youzan-backfill-form" onSubmit={prepareManualRun}>
+              <p className="backfill-note">此操作会投递异步任务，不直接写入本页。请确认任务编码和时间范围后再继续。</p>
+              <label>任务编码<input name="task_code" value={task.code} readOnly /></label>
+              <label>
+                时间筛选方式
+                <select name="time_filter" defaultValue="created">
+                  <option value="created">下单时间</option>
+                  <option value="success">订单完成时间</option>
+                </select>
+              </label>
+              <Field label="开始时间" name="start_time" type="datetime-local" defaultValue={previousDayDateTimeLocal(false)} required />
+              <Field label="结束时间" name="end_time" type="datetime-local" defaultValue={previousDayDateTimeLocal(true)} required />
+              <button className="primary" type="submit">继续确认</button>
+            </form>
+          ) : (
+            <div className="view-stack">
+              <dl className="task-definition-grid">
+                <div><dt>任务编码</dt><dd><code>{task.code}</code></dd></div>
+                <div><dt>筛选方式</dt><dd>{youzanDistributionTimeFilterLabel(manualRunPayload.time_filter)}</dd></div>
+                <div className="wide"><dt>执行时间范围</dt><dd>{manualRunPayload.start_time} ~ {manualRunPayload.end_time}</dd></div>
+              </dl>
+              {!manualRunResult && <div className="excel-form-actions">
+                <button type="button" onClick={() => setManualRunPayload(null)} disabled={runningManualTask}>返回修改</button>
+                <button className="primary" type="button" onClick={() => void confirmManualRun()} disabled={runningManualTask}>{runningManualTask ? '投递中…' : '确认投递任务'}</button>
+              </div>}
+              {manualRunError && <div className="result-banner error" role="alert">{manualRunError}</div>}
+              {manualRunResult && <div className="result-banner" role="status">已投递：任务 ID {manualRunResult.id}，队列 {manualRunResult.queue}，类型 {manualRunResult.type}。</div>}
+            </div>
+          )}
         </Modal>
       )}
     </div>
@@ -1636,41 +2664,221 @@ function YouzanDistributionBackfillResultView({ title, result }: { title: string
   )
 }
 
-function DestinationsQueryPage({ destinations }: { destinations: DestinationDefinition[] }) {
+function DestinationsQueryPage({ client, destinations, onRefresh }: { client: ApiClient; destinations: DestinationDefinition[]; onRefresh: () => Promise<void> }) {
   const [query, setQuery] = useState('')
   const [status, setStatus] = useState('all')
   const [destinationType, setDestinationType] = useState('all')
+  const [draft, setDraft] = useState<DestinationDraft | null>(null)
+  const [saving, setSaving] = useState(false)
+  const [testingID, setTestingID] = useState<number | null>(null)
+  const [pendingTest, setPendingTest] = useState<DestinationDefinition | null>(null)
+  const [message, setMessage] = useState('')
   const filtered = destinations.filter((destination) => includesQuery([destination.id, destination.name, destination.code, destination.config_json], query)
     && (status === 'all' || (status === 'enabled' ? destination.enabled : !destination.enabled))
     && (destinationType === 'all' || destination.destination_type === destinationType))
+
+  async function openDetail(id: number) {
+    setMessage('')
+    const response = await client(`/v1/destinations/${id}`, { method: 'GET', showResult: false, silentLoading: true })
+    const destination = response.ok ? readObject<DestinationDefinition>(response, 'destination') : null
+    if (!destination) { setMessage(response.error?.message || '推送目标详情暂时不可用。'); return }
+    setDraft(destinationDraftFrom(destination))
+  }
+
+  async function save(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!draft || saving) return
+    if (!draft.name.trim() || !draft.code.trim()) { setMessage('请填写目标名称和编码。'); return }
+    try { JSON.parse(draft.configJSON) } catch { setMessage('配置必须是有效 JSON。'); return }
+    setSaving(true)
+    const response = await client(draft.id ? `/v1/destinations/${draft.id}` : '/v1/destinations', { method: draft.id ? 'PUT' : 'POST', showResult: false, silentLoading: true, body: { name: draft.name.trim(), code: draft.code.trim(), destination_type: draft.destinationType, config_json: draft.configJSON, enabled: draft.enabled } })
+    setSaving(false)
+    if (!response.ok) { setMessage(response.error?.message || '推送目标保存未完成。'); return }
+    setDraft(null)
+    setMessage('推送目标已保存。')
+    await onRefresh()
+  }
+
+  async function test(destination: DestinationDefinition) {
+    if (testingID !== null) return
+    setTestingID(destination.id)
+    const response = await client(`/v1/destinations/${destination.id}/test`, { method: 'POST', showResult: false, silentLoading: true })
+    setTestingID(null)
+    setMessage(response.ok ? '连通性测试通过；仅发送了无业务载荷的 HEAD 或 GET 请求。' : response.error?.message || '连通性测试未完成。')
+  }
   return (
     <div className="view-stack">
+      {message && <div className="result-banner" role="status">{message}</div>}
       <QueryBar count={filtered.length} total={destinations.length}>
-        <Field label="名称 / 编码 / 配置" name="destination_query" value={query} onChange={setQuery} />
+        <Field label="名称 / 编码" name="destination_query" value={query} onChange={setQuery} />
         <SelectFilter label="状态" value={status} onChange={setStatus} options={[{ value: 'enabled', label: '启用' }, { value: 'disabled', label: '停用' }]} />
         <SelectFilter label="类型" value={destinationType} onChange={setDestinationType} options={uniqueOptions(destinations.map((destination) => destination.destination_type))} />
       </QueryBar>
-      <Panel title="推送目标" icon={<Send />} meta={`查询命中 ${filtered.length} 条`}><DestinationList destinations={filtered} /></Panel>
+      <div className="record-actions"><button type="button" className="primary" onClick={() => setDraft({ id: null, name: '', code: '', destinationType: 'http', configJSON: '{\n  "url": "",\n  "method": "POST"\n}', enabled: true, hasSecret: false })}>新增目标</button></div>
+      <Panel title="推送目标" icon={<Send />} meta={`查询命中 ${filtered.length} 条`}><DestinationList destinations={filtered} testingID={testingID} onDetail={(item) => { void openDetail(item.id) }} onTest={setPendingTest} /></Panel>
+      {draft && <Modal title={draft.id ? '推送目标详情与编辑' : '新增推送目标'} onClose={() => { if (!saving) setDraft(null) }}>
+        {draft.hasSecret && <div className="result-banner" role="status">配置中的敏感值已隐藏。保留“[已隐藏]”会保留原值；改为新值即可轮换，且不会回显旧值。</div>}
+        <form className="excel-upload-form" onSubmit={save}>
+          <Field label="目标名称" name="destination_name" value={draft.name} required onChange={(name) => setDraft({ ...draft, name })} />
+          <Field label="目标编码" name="destination_code" value={draft.code} required onChange={(code) => setDraft({ ...draft, code })} />
+          <label>目标类型<select value={draft.destinationType} disabled={saving} onChange={(event) => setDraft({ ...draft, destinationType: event.currentTarget.value })}><option value="http">http</option><option value="soap">soap</option></select></label>
+          <label className="checkbox-label"><input type="checkbox" checked={draft.enabled} disabled={saving} onChange={(event) => setDraft({ ...draft, enabled: event.currentTarget.checked })} />启用目标</label>
+          <label>配置 JSON<textarea rows={10} value={draft.configJSON} disabled={saving} onChange={(event) => setDraft({ ...draft, configJSON: event.currentTarget.value })} /></label>
+          <div className="excel-form-actions"><button className="primary" type="submit" disabled={saving}>{saving ? '保存中…' : '保存目标'}</button></div>
+        </form>
+      </Modal>}
+      {pendingTest && <Modal title="确认测试推送目标" onClose={() => { if (testingID === null) setPendingTest(null) }} footer={<><button type="button" disabled={testingID !== null} onClick={() => setPendingTest(null)}>取消</button><button className="primary" type="button" disabled={testingID !== null} onClick={() => { const target = pendingTest; setPendingTest(null); void test(target) }}>{testingID === pendingTest.id ? '测试中…' : '确认测试'}</button></>}><p>将向“{pendingTest.name}”配置的目标地址发起真实连通性请求。系统仅允许无业务载荷的 HEAD 或 GET；请确认目标的 GET 接口无副作用。确认继续？</p></Modal>}
     </div>
   )
 }
 
-function DeliveryTasksQueryPage({ tasks, destinations }: { tasks: DeliveryTask[]; destinations: DestinationDefinition[] }) {
+function DeliveryTasksQueryPage({ client, tasks, sources, destinations, onRefresh }: { client: ApiClient; tasks: DeliveryTask[]; sources: SourceDefinition[]; destinations: DestinationDefinition[]; onRefresh: () => Promise<void> }) {
   const [query, setQuery] = useState('')
   const [status, setStatus] = useState('all')
   const [destinationID, setDestinationID] = useState('all')
+  const [draft, setDraft] = useState<DeliveryTaskDraft | null>(null)
   const filtered = tasks.filter((task) => includesQuery([task.id, task.name, task.clean_table, task.trigger_type], query)
     && (status === 'all' || (status === 'enabled' ? task.enabled : !task.enabled))
     && (destinationID === 'all' || String(task.destination_id) === destinationID))
   const destinationOptions = destinations.map((destination) => ({ value: String(destination.id), label: destination.name || destination.code }))
+  const [runningID, setRunningID] = useState<number | null>(null)
+  const [pendingRun, setPendingRun] = useState<DeliveryTask | null>(null)
+  const [loadingDetailID, setLoadingDetailID] = useState<number | null>(null)
+  const [saving, setSaving] = useState(false)
+  const [message, setMessage] = useState('')
+
+  function openCreate() {
+    setMessage('')
+    setDraft({
+      id: null,
+      name: '',
+      sourceID: sources[0]?.id ? String(sources[0].id) : '',
+      cleanTable: '',
+      destinationID: destinations[0]?.id ? String(destinations[0].id) : '',
+      triggerType: 'manual',
+      cronExpr: '',
+      filterJSON: '{}',
+      payloadTemplate: '',
+      enabled: true,
+    })
+  }
+
+  async function openDetail(id: number) {
+    if (loadingDetailID !== null) return
+    setMessage('')
+    setLoadingDetailID(id)
+    const response = await client(`/v1/delivery-tasks/${id}`, { method: 'GET', showResult: false, silentLoading: true })
+    setLoadingDetailID(null)
+    const task = response.ok ? readObject<DeliveryTask>(response, 'task') : null
+    if (!task) {
+      setMessage(response.error?.message || '推送任务详情暂时不可用，请稍后重试。')
+      return
+    }
+    setDraft(deliveryTaskDraftFrom(task))
+  }
+
+  async function saveDraft(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    if (!draft || saving) return
+    const sourceID = Number(draft.sourceID)
+    const nextDestinationID = Number(draft.destinationID)
+    if (!draft.name.trim() || !draft.cleanTable.trim() || !Number.isInteger(sourceID) || sourceID <= 0 || !Number.isInteger(nextDestinationID) || nextDestinationID <= 0) {
+      setMessage('请填写任务名称、来源、清洗表和推送目标。')
+      return
+    }
+    if (draft.triggerType === 'schedule' && !draft.cronExpr.trim()) {
+      setMessage('定时触发任务必须填写 Cron 表达式。')
+      return
+    }
+    try {
+      const filter = JSON.parse(draft.filterJSON) as unknown
+      if (!filter || Array.isArray(filter) || typeof filter !== 'object') {
+        setMessage('筛选条件必须是 JSON 对象。')
+        return
+      }
+    } catch {
+      setMessage('筛选条件必须是有效 JSON。')
+      return
+    }
+    setSaving(true)
+    setMessage('')
+    const response = await client(draft.id ? `/v1/delivery-tasks/${draft.id}` : '/v1/delivery-tasks', {
+      method: draft.id ? 'PUT' : 'POST',
+      showResult: false,
+      silentLoading: true,
+      body: {
+        name: draft.name.trim(),
+        source_id: sourceID,
+        clean_table: draft.cleanTable.trim(),
+        destination_id: nextDestinationID,
+        trigger_type: draft.triggerType,
+        cron_expr: draft.cronExpr.trim(),
+        filter_json: draft.filterJSON,
+        payload_template: draft.payloadTemplate,
+        enabled: draft.enabled,
+      },
+    })
+    setSaving(false)
+    if (!response.ok || !readObject<DeliveryTask>(response, 'task')) {
+      setMessage(response.error?.message || '推送任务保存未完成，请稍后重试。')
+      return
+    }
+    setDraft(null)
+    setMessage('推送任务已保存。')
+    await onRefresh()
+  }
+
+  async function run(task: DeliveryTask) {
+    if (runningID !== null) return
+    setRunningID(task.id)
+    const response = await client(`/v1/delivery-tasks/${task.id}/run`, { method: 'POST', showResult: false, silentLoading: true })
+    const result = response.ok ? readObject<{ total_count: number; success_count: number; failed_count: number; skipped_count: number }>(response, 'result') : null
+    setRunningID(null)
+    setMessage(result ? `执行完成：总计 ${result.total_count}，成功 ${result.success_count}，失败 ${result.failed_count}，跳过 ${result.skipped_count}。` : response.error?.message || '推送任务未完成。')
+    if (response.ok) await onRefresh()
+  }
   return (
     <div className="view-stack">
+      {message && <div className="result-banner" role="status">{message}</div>}
       <QueryBar count={filtered.length} total={tasks.length}>
         <Field label="名称 / 表 / 触发方式" name="task_query" value={query} onChange={setQuery} />
         <SelectFilter label="状态" value={status} onChange={setStatus} options={[{ value: 'enabled', label: '启用' }, { value: 'disabled', label: '停用' }]} />
         <SelectFilter label="推送目标" value={destinationID} onChange={setDestinationID} options={destinationOptions} />
       </QueryBar>
-      <Panel title="推送任务" icon={<ArrowUpFromLine />} meta={`查询命中 ${filtered.length} 条`}><DeliveryTaskList tasks={filtered} /></Panel>
+      <div className="record-actions"><button type="button" className="primary" onClick={openCreate}>新增推送任务</button></div>
+      <Panel title="推送任务" icon={<ArrowUpFromLine />} meta={`查询命中 ${filtered.length} 条`}><DeliveryTaskList tasks={filtered} runningID={runningID} loadingDetailID={loadingDetailID} destinations={destinations} onDetail={(task) => { void openDetail(task.id) }} onRun={setPendingRun} /></Panel>
+      {draft && <Modal title={draft.id ? '推送任务详情与编辑' : '新增推送任务'} onClose={() => { if (!saving) setDraft(null) }}>
+        <form className="excel-upload-form" onSubmit={saveDraft}>
+          <Field label="任务名称" name="delivery_task_name" value={draft.name} required onChange={(name) => setDraft({ ...draft, name })} />
+          <label>来源
+            <select value={draft.sourceID} required disabled={saving} onChange={(event) => setDraft({ ...draft, sourceID: event.currentTarget.value })}>
+              <option value="">选择数据源</option>
+              {sources.map((source) => <option value={source.id} key={source.id}>#{source.id} {source.name || source.code}{source.enabled ? '' : '（已停用）'}</option>)}
+            </select>
+          </label>
+          <Field label="清洗结果表" name="delivery_clean_table" value={draft.cleanTable} required onChange={(cleanTable) => setDraft({ ...draft, cleanTable })} />
+          <label>推送目标
+            <select value={draft.destinationID} required disabled={saving} onChange={(event) => setDraft({ ...draft, destinationID: event.currentTarget.value })}>
+              <option value="">选择推送目标</option>
+              {destinations.map((destination) => <option value={destination.id} key={destination.id}>#{destination.id} {destination.name || destination.code}{destination.enabled ? '' : '（已停用）'}</option>)}
+            </select>
+          </label>
+          <label>触发方式
+            <select value={draft.triggerType} disabled={saving} onChange={(event) => setDraft({ ...draft, triggerType: event.currentTarget.value })}>
+              <option value="manual">手动</option>
+              <option value="schedule">定时</option>
+              <option value="event">事件</option>
+            </select>
+          </label>
+          <Field label="Cron 表达式" name="delivery_task_cron" value={draft.cronExpr} required={draft.triggerType === 'schedule'} onChange={(cronExpr) => setDraft({ ...draft, cronExpr })} />
+          <label className="checkbox-label"><input type="checkbox" checked={draft.enabled} disabled={saving} onChange={(event) => setDraft({ ...draft, enabled: event.currentTarget.checked })} />启用任务</label>
+          <label>筛选条件 JSON<textarea rows={8} value={draft.filterJSON} disabled={saving} onChange={(event) => setDraft({ ...draft, filterJSON: event.currentTarget.value })} /></label>
+          <label>推送载荷模板<textarea rows={8} value={draft.payloadTemplate} disabled={saving} onChange={(event) => setDraft({ ...draft, payloadTemplate: event.currentTarget.value })} /></label>
+          <p className="query-contract-note">完整保存会覆盖任务配置；筛选条件仅接受 JSON 对象。手动运行请从列表单独确认执行。</p>
+          <div className="excel-form-actions"><button className="primary" type="submit" disabled={saving}>{saving ? '保存中…' : '保存任务'}</button></div>
+        </form>
+      </Modal>}
+      {pendingRun && <Modal title="确认执行推送任务" onClose={() => { if (runningID === null) setPendingRun(null) }} footer={<><button type="button" disabled={runningID !== null} onClick={() => setPendingRun(null)}>取消</button><button className="primary" type="button" disabled={runningID !== null} onClick={() => { const task = pendingRun; setPendingRun(null); void run(task) }}>{runningID === pendingRun.id ? '执行中…' : '确认执行'}</button></>}><p>将执行“{pendingRun.name}”，最多向 {destinations.find((item) => item.id === pendingRun.destination_id)?.name || `目标 #${pendingRun.destination_id}`} 推送 100 条 ready 记录；成功记录将标记为已交付。</p></Modal>}
     </div>
   )
 }
@@ -1679,7 +2887,7 @@ function PushPolicyPage({ coreMethod, config, targets, onSave, onToggle }: {
   coreMethod?: CoreMethod
   config: OrderPushSkipConfig
   targets: OrderPushTargetOption[]
-  onSave: (config: OrderPushSkipConfig) => void
+  onSave: (config: OrderPushSkipConfig) => Promise<ApiResult>
   onToggle: (target: ToggleTarget, enabled: boolean) => void
 }) {
   return (
@@ -1690,50 +2898,70 @@ function PushPolicyPage({ coreMethod, config, targets, onSave, onToggle }: {
   )
 }
 
-function OrderPushSkipConfigForm({ config, targets, onSave }: { config: OrderPushSkipConfig; targets: OrderPushTargetOption[]; onSave: (config: OrderPushSkipConfig) => void }) {
-  const enabledCount = config.targets.filter((target) => target.cycle > 0 && target.skip > 0).length
+function OrderPushSkipConfigForm({ config, targets, onSave }: { config: OrderPushSkipConfig; targets: OrderPushTargetOption[]; onSave: (config: OrderPushSkipConfig) => Promise<ApiResult> }) {
+  const [draft, setDraft] = useState(() => targets.map((target) => orderPushTargetConfig(config, target.code)))
+  const [error, setError] = useState('')
+  const [saving, setSaving] = useState(false)
+  const saveInFlightRef = useRef(false)
+  const enabledCount = draft.filter((target) => target.cycle > 0 && target.skip > 0).length
 
-  function submit(event: FormEvent<HTMLFormElement>) {
+  useEffect(() => setDraft(targets.map((target) => orderPushTargetConfig(config, target.code))), [config, targets])
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
-    const form = new FormData(event.currentTarget)
-    onSave({
-      targets: targets.map((target, index) => ({
-        target_code: target.code,
-        target_name: target.name,
-        cycle: Number(formValue(form, `cycle_${index}`) || 0),
-        skip: Number(formValue(form, `skip_${index}`) || 0),
-      })),
-    })
+    const validationError = validateOrderPushSkipPolicy(draft)
+    if (validationError) {
+      setError(validationError)
+      return
+    }
+    setError('')
+    const responsePromise = runSingleFlight(saveInFlightRef, () => onSave({ targets: draft }))
+    if (!responsePromise) return
+    setSaving(true)
+    try {
+      const response = await responsePromise
+      if (!response.ok) setError(response.error?.message || '配置保存未完成，请稍后重试。')
+    } catch {
+      setError('配置保存未完成，请稍后重试。')
+    } finally {
+      setSaving(false)
+    }
   }
 
   return (
-    <form className="push-skip-form" key={JSON.stringify(config.targets)} onSubmit={submit}>
-      <div className="push-skip-summary">
-        <StatusPill label={enabledCount > 0 ? `已启用 ${enabledCount} 个目标` : '未启用'} />
-        <span>只对下方配置的推送目标生效；未配置或填 0 的目标不少推。</span>
-      </div>
-      {targets.length === 0 ? <EmptyState text="后端未返回可配置推送目标。" /> : <div className="push-skip-list">
-        {targets.map((target, index) => {
-          const value = orderPushTargetConfig(config, target.code)
-          return (
-            <div className="push-skip-row" key={target.code}>
-              <div>
-                <strong>{target.name}</strong>
-                <span>{target.code}</span>
+    <form className="push-skip-form" onSubmit={submit}>
+      <fieldset disabled={saving}>
+        <div className="push-skip-summary">
+          <StatusPill label={enabledCount > 0 ? `已启用 ${enabledCount} 个目标` : '未启用'} />
+          <span>只对下方配置的推送目标生效；未配置或填 0 的目标不少推。</span>
+        </div>
+        {targets.length === 0 ? <EmptyState text="后端未返回可配置推送目标。" /> : <div className="push-skip-list">
+          {targets.map((target, index) => {
+            const value = draft[index] ?? { target_code: target.code, target_name: target.name, cycle: 0, skip: 0 }
+            const ratio = value.cycle > 0 ? `${(((value.cycle - value.skip) / value.cycle) * 100).toFixed(1)}%` : '100.0%'
+            return (
+              <div className="push-skip-row" key={target.code}>
+                <div>
+                  <strong>{target.name}</strong>
+                  <span>{target.code}</span>
+                </div>
+                <Field label="循环总单数" name={`cycle_${index}`} value={String(value.cycle)} type="number" onChange={(raw) => setDraft((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, cycle: Number(raw) } : item))} />
+                <Field label="少推单数" name={`skip_${index}`} value={String(value.skip)} type="number" onChange={(raw) => setDraft((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, skip: Number(raw) } : item))} />
+                <small>预计推送比例：{ratio}</small>
               </div>
-              <Field label="循环总单数" name={`cycle_${index}`} defaultValue={String(value.cycle || 0)} type="number" />
-              <Field label="少推单数" name={`skip_${index}`} defaultValue={String(value.skip || 0)} type="number" />
-            </div>
-          )
-        })}
-      </div>}
-      <button className="primary" type="submit">保存配置</button>
+            )
+          })}
+        </div>}
+        {error && <div className="result-banner error" role="alert">{error}</div>}
+        <button className="primary" type="submit">{saving ? '保存中…' : '保存配置'}</button>
+      </fieldset>
     </form>
   )
 }
 
 function ExcelMatchView({
   section,
+  client,
   token,
   loading,
   setLoading,
@@ -1741,6 +2969,7 @@ function ExcelMatchView({
   onNavigateToJobs,
 }: {
   section: 'jobs' | 'schemes' | 'write'
+  client: ApiClient
   token: string
   loading: boolean
   setLoading: (value: boolean) => void
@@ -1775,6 +3004,12 @@ function ExcelMatchView({
   const [importFormKey, setImportFormKey] = useState(0)
   const [selectedExportSchemeID, setSelectedExportSchemeID] = useState('')
   const [selectedImportSchemeID, setSelectedImportSchemeID] = useState('')
+  const [pendingSchemeDelete, setPendingSchemeDelete] = useState<ExcelMatchScheme | null>(null)
+  const [pendingSchemeSave, setPendingSchemeSave] = useState<PendingSchemeSave | null>(null)
+  const [schemeSaveError, setSchemeSaveError] = useState('')
+  const schemeSaveInFlightRef = useRef(false)
+  const [deletingSchemeID, setDeletingSchemeID] = useState<number | null>(null)
+  const [pendingWrite, setPendingWrite] = useState<{ slot: 'import' | 'clear'; file: File; config: unknown; message: string } | null>(null)
   const [jobQuery, setJobQuery] = useState('')
   const [jobStatus, setJobStatus] = useState('all')
   const [jobOperation, setJobOperation] = useState('all')
@@ -1782,6 +3017,11 @@ function ExcelMatchView({
   const filteredJobHistory = useMemo(() => jobHistory.filter((item) => includesQuery([item.id, item.source_file_name, item.error_message], jobQuery)
     && (jobStatus === 'all' || item.status === jobStatus)
     && (jobOperation === 'all' || excelJobOperation(item) === jobOperation)), [jobHistory, jobOperation, jobQuery, jobStatus])
+  const pendingSchemeNameConflict = pendingSchemeSave
+    ? (pendingSchemeSave.operation === 'export_match' ? exportSchemes : importSchemes)
+      .find((scheme) => scheme.name === pendingSchemeSave.name.trim()) ?? null
+    : null
+  const requestErrorMessage = (response: ApiResult, fallback: string) => response.error?.message || fallback
 
   const applyJobResult = useCallback((result: ApiResult, options: { track?: boolean } = {}) => {
     const nextJob = readObject<ExcelMatchJob>(result, 'job')
@@ -1812,11 +3052,17 @@ function ExcelMatchView({
   }
 
   function openExcelDialog(mode: ExcelDialogMode) {
+    setPendingWrite(null)
+    setPendingSchemeSave(null)
+    setSchemeSaveError('')
     resetExcelDialogFiles()
     setExcelDialog(mode)
   }
 
   function closeExcelDialog() {
+    setPendingWrite(null)
+    setPendingSchemeSave(null)
+    setSchemeSaveError('')
     setExcelDialog(null)
     resetExcelDialogFiles()
   }
@@ -1917,38 +3163,26 @@ function ExcelMatchView({
   }
 
   const fetchSchemes = useCallback(async (operation: 'export_match' | 'import_update') => {
-    const response = await fetch(apiURL(`/v1/excel-match-jobs/schemes?operation=${operation}`), {
-      method: 'GET',
-      headers: token ? { token } : undefined,
-    })
-    const data = await response.json().catch(() => ({}))
-    if (!response.ok || !isSuccessPayload(data)) {
-      throw new Error(readMessage(data) || '查询 Excel 方案失败')
-    }
-    const value = readDataField(data, 'schemes')
+    const response = await client(`/v1/excel-match-jobs/schemes?operation=${operation}`, { method: 'GET', showResult: false, silentLoading: true })
+    if (!response.ok) throw new Error(requestErrorMessage(response, '查询 Excel 方案失败'))
+    const value = readDataField(response.data, 'schemes')
     return Array.isArray(value) ? (value as ExcelMatchScheme[]) : []
-  }, [token])
+  }, [client])
 
   const loadExcelModels = useCallback(async () => {
     setExcelModelsLoading(true)
     setExcelModelsError('')
     try {
-      const response = await fetch(apiURL('/v1/excel-match-jobs/models'), {
-        method: 'GET',
-        headers: token ? { token } : undefined,
-      })
-      const data = await response.json().catch(() => ({}))
-      if (!response.ok || !isSuccessPayload(data)) {
-        throw new Error(readMessage(data) || '查询模型与字段目录失败')
-      }
-      const value = readDataField(data, 'models')
+      const response = await client('/v1/excel-match-jobs/models', { method: 'GET', showResult: false, silentLoading: true })
+      if (!response.ok) throw new Error(requestErrorMessage(response, '查询模型与字段目录失败'))
+      const value = readDataField(response.data, 'models')
       setExcelModels(Array.isArray(value) ? (value as ExcelMatchModel[]) : [])
     } catch (error) {
-      setExcelModelsError(error instanceof Error ? error.message : String(error))
+      setExcelModelsError(error instanceof Error ? error.message : '查询模型与字段目录失败')
     } finally {
       setExcelModelsLoading(false)
     }
-  }, [token])
+  }, [client])
 
   const loadSchemes = useCallback(async () => {
     try {
@@ -1965,20 +3199,14 @@ function ExcelMatchView({
 
   const loadJobHistory = useCallback(async () => {
     try {
-      const response = await fetch(apiURL('/v1/excel-match-jobs?limit=30'), {
-        method: 'GET',
-        headers: token ? { token } : undefined,
-      })
-      const data = await response.json().catch(() => ({}))
-      if (!response.ok || !isSuccessPayload(data)) {
-        throw new Error(readMessage(data) || '查询 Excel 任务历史失败')
-      }
-      const value = readDataField(data, 'jobs')
+      const response = await client('/v1/excel-match-jobs?limit=30', { method: 'GET', showResult: false, silentLoading: true })
+      if (!response.ok) throw new Error(requestErrorMessage(response, '查询 Excel 任务历史失败'))
+      const value = readDataField(response.data, 'jobs')
       setJobHistory(Array.isArray(value) ? (value as ExcelMatchJob[]) : [])
     } catch (error) {
-      setResult({ ok: false, status: 0, data: error instanceof Error ? error.message : String(error) })
+      setResult({ ok: false, status: 0, data: { message: error instanceof Error ? error.message : '查询 Excel 任务历史失败' } })
     }
-  }, [setResult, token])
+  }, [client, setResult])
 
   useEffect(() => {
     if (!token) return
@@ -1992,6 +3220,7 @@ function ExcelMatchView({
   }, [loadExcelModels, section, token])
 
   useEffect(() => {
+    setPendingWrite(null)
     setExcelDialog(null)
     setSelectedExportFileName('')
     setSelectedImportFileName('')
@@ -2016,59 +3245,135 @@ function ExcelMatchView({
     return () => window.cancelAnimationFrame(animationFrame)
   }, [focusedJobID, section])
 
-  const refreshJobByID = useCallback(async (id: number, options: { silent?: boolean; track?: boolean } = {}) => {
+  const refreshJobByID = useCallback(async (id: number, options: { silent?: boolean; track?: boolean; signal?: AbortSignal } = {}) => {
     if (!options.silent) setLoading(true)
     try {
-      const response = await fetch(apiURL(`/v1/excel-match-jobs/${id}`), {
-        method: 'GET',
-        headers: token ? { token } : undefined,
-      })
-      const data = await response.json().catch(() => ({}))
-      const nextResult = { ok: response.ok && isSuccessPayload(data), status: response.status, data }
-      if (!options.silent) setResult(nextResult)
+      const nextResult = await client(`/v1/excel-match-jobs/${id}`, { method: 'GET', signal: options.signal, showResult: false, silentLoading: true })
+      if (!options.silent && !nextResult.ok) setResult(nextResult)
       if (nextResult.ok) {
         applyJobResult(nextResult, { track: options.track })
         if (!options.silent) await loadJobHistory()
         return readObject<ExcelMatchJob>(nextResult, 'job')
       }
       if (options.silent) {
-        setAutoRefreshText(`自动刷新失败：${readMessage(data) || response.status}`)
+        setAutoRefreshText(`自动刷新失败：${requestErrorMessage(nextResult, '请稍后重试。')}`)
       }
-    } catch (error) {
+    } catch {
+      if (options.signal?.aborted) return null
       if (!options.silent) {
-        setResult({ ok: false, status: 0, data: error instanceof Error ? error.message : String(error) })
+        setResult({ ok: false, status: 0, data: { message: '查询 Excel 任务失败，请稍后重试。' } })
       } else {
-        setAutoRefreshText(`自动刷新失败：${error instanceof Error ? error.message : String(error)}`)
+        setAutoRefreshText('自动刷新失败，请稍后重试。')
       }
     } finally {
       if (!options.silent) setLoading(false)
     }
     return null
-  }, [applyJobResult, loadJobHistory, setLoading, setResult, token])
+  }, [applyJobResult, client, loadJobHistory, setLoading, setResult])
 
   useEffect(() => {
     if (!token || !trackingJobID) return
 
     let cancelled = false
-    const refreshTrackedJob = async () => {
-      const nextJob = await refreshJobByID(trackingJobID, { silent: true })
-      if (cancelled || !nextJob) return
+    let attempts = 0
+    let consecutiveFailures = 0
+    let timer: number | null = null
+    let inFlight = false
+    const pollingState = { resumeWhenVisible: false }
+    const controller = new AbortController()
+    const isPageVisible = () => document.visibilityState !== 'hidden'
 
-      setAutoRefreshText(`自动刷新中：任务 #${nextJob.id}，${excelJobStatusLabel(nextJob.status)}，${new Date().toLocaleTimeString()}`)
-      if (!isExcelJobActive(nextJob)) {
-        setTrackingJobID(null)
-        void loadJobHistory()
+    const clearScheduledRefresh = () => {
+      if (timer !== null) {
+        window.clearTimeout(timer)
+        timer = null
+      }
+    }
+
+    const stopPolling = (message: string) => {
+      clearScheduledRefresh()
+      setAutoRefreshText(message)
+      setTrackingJobID(null)
+    }
+
+    const scheduleRefresh = (delayMilliseconds: number) => {
+      clearScheduledRefresh()
+      if (cancelled || document.visibilityState === 'hidden') return
+      if (inFlight) return
+      timer = window.setTimeout(() => {
+        timer = null
+        void refreshTrackedJob()
+      }, delayMilliseconds)
+    }
+
+    const refreshTrackedJob = async () => {
+      if (cancelled || document.visibilityState === 'hidden') return
+      if (inFlight) {
+        pollingState.resumeWhenVisible = true
+        return
+      }
+      if (attempts >= excelJobPollMaxAttempts) {
+        stopPolling(`自动刷新已在 ${excelJobPollMaxAttempts} 次后停止，请手动查询任务状态。`)
+        return
+      }
+
+      attempts += 1
+      inFlight = true
+      let nextDelay: number | null = null
+      try {
+        const nextJob = await refreshJobByID(trackingJobID, { silent: true, signal: controller.signal })
+        if (cancelled || controller.signal.aborted) return
+        if (!nextJob) {
+          consecutiveFailures += 1
+          const delayMilliseconds = Math.min(30_000, 2_000 * 2 ** Math.min(consecutiveFailures, 4))
+          if (attempts >= excelJobPollMaxAttempts) {
+            stopPolling(`自动刷新已在 ${excelJobPollMaxAttempts} 次后停止，请手动查询任务状态。`)
+            return
+          }
+          setAutoRefreshText(`自动刷新失败，将在 ${Math.ceil(delayMilliseconds / 1000)} 秒后重试。`)
+          nextDelay = delayMilliseconds
+          return
+        }
+
+        consecutiveFailures = 0
+        setAutoRefreshText(`自动刷新中：任务 #${nextJob.id}，${excelJobStatusLabel(nextJob.status)}，${new Date().toLocaleTimeString()}`)
+        if (!isExcelJobActive(nextJob)) {
+          setTrackingJobID(null)
+          void loadJobHistory()
+          return
+        }
+        nextDelay = 2_000
+      } finally {
+        inFlight = false
+        if (pollingState.resumeWhenVisible && !cancelled && !controller.signal.aborted && isPageVisible()) {
+          pollingState.resumeWhenVisible = false
+          scheduleRefresh(0)
+        } else if (nextDelay !== null) {
+          scheduleRefresh(nextDelay)
+        }
       }
     }
 
     void refreshTrackedJob()
-    const timer = window.setInterval(() => {
-      void refreshTrackedJob()
-    }, 2000)
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        clearScheduledRefresh()
+        setAutoRefreshText('页面已隐藏，任务自动刷新已暂停。')
+        return
+      }
+      if (inFlight) {
+        pollingState.resumeWhenVisible = true
+        return
+      }
+      scheduleRefresh(0)
+    }
+    document.addEventListener('visibilitychange', handleVisibilityChange)
 
     return () => {
       cancelled = true
-      window.clearInterval(timer)
+      clearScheduledRefresh()
+      controller.abort()
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
     }
   }, [loadJobHistory, refreshJobByID, token, trackingJobID])
 
@@ -2081,16 +3386,15 @@ function ExcelMatchView({
     const totalChunks = Math.ceil(file.size / excelChunkSize)
     setUploadProgress(`准备上传 ${file.name}，共 ${totalChunks} 个分片`)
 
-    const createResponse = await fetch(apiURL('/v1/excel-match-jobs/uploads'), {
+    const createResult = await client('/v1/excel-match-jobs/uploads', {
       method: 'POST',
-      headers: token ? { token, 'Content-Type': 'application/json' } : { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ fileName: file.name, totalChunks }),
+      body: { fileName: file.name, totalChunks },
+      showResult: false,
+      silentLoading: true,
+      retry: false,
     })
-    const createData = await createResponse.json().catch(() => ({}))
-    if (!createResponse.ok || !isSuccessPayload(createData)) {
-      throw new Error(readMessage(createData) || '创建分片上传会话失败')
-    }
-    const session = readObjectFromData<ExcelUploadSession>(createData, 'upload')
+    if (!createResult.ok) throw new Error(requestErrorMessage(createResult, '创建分片上传会话失败'))
+    const session = readObject<ExcelUploadSession>(createResult, 'upload')
     if (!session?.uploadId) throw new Error('上传会话返回缺少 uploadId')
 
     for (let index = 0; index < totalChunks; index++) {
@@ -2101,27 +3405,26 @@ function ExcelMatchView({
       chunkForm.append('totalChunks', String(totalChunks))
       chunkForm.append('chunk', file.slice(start, end), `${file.name}.part${index}`)
       setUploadProgress(`上传分片 ${index + 1}/${totalChunks}`)
-      const chunkResponse = await fetch(apiURL(`/v1/excel-match-jobs/uploads/${session.uploadId}/chunks`), {
+      const chunkResult = await client(`/v1/excel-match-jobs/uploads/${encodeURIComponent(session.uploadId)}/chunks`, {
         method: 'POST',
-        headers: token ? { token } : undefined,
         body: chunkForm,
+        showResult: false,
+        silentLoading: true,
+        retry: false,
+        timeoutMs: 120_000,
       })
-      const chunkData = await chunkResponse.json().catch(() => ({}))
-      if (!chunkResponse.ok || !isSuccessPayload(chunkData)) {
-        throw new Error(readMessage(chunkData) || `上传分片 ${index + 1} 失败`)
-      }
+      if (!chunkResult.ok) throw new Error(requestErrorMessage(chunkResult, `上传分片 ${index + 1} 失败`))
     }
 
     setUploadProgress('合并 Excel 分片')
-    const completeResponse = await fetch(apiURL(`/v1/excel-match-jobs/uploads/${session.uploadId}/complete`), {
+    const completeResult = await client(`/v1/excel-match-jobs/uploads/${encodeURIComponent(session.uploadId)}/complete`, {
       method: 'POST',
-      headers: token ? { token, 'Content-Type': 'application/json' } : { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ totalChunks }),
+      body: { totalChunks },
+      showResult: false,
+      silentLoading: true,
+      retry: false,
     })
-    const completeData = await completeResponse.json().catch(() => ({}))
-    if (!completeResponse.ok || !isSuccessPayload(completeData)) {
-      throw new Error(readMessage(completeData) || '合并 Excel 分片失败')
-    }
+    if (!completeResult.ok) throw new Error(requestErrorMessage(completeResult, '合并 Excel 分片失败'))
 
     const nextRef = {
       uploadId: session.uploadId,
@@ -2135,33 +3438,38 @@ function ExcelMatchView({
     return session.uploadId
   }
 
-  async function saveScheme(formElement: HTMLFormElement, operation: 'export_match' | 'import_update', mode: 'current' | 'new') {
+  function beginSchemeSave(formElement: HTMLFormElement, operation: 'export_match' | 'import_update', mode: 'current' | 'new') {
     const selectedSchemeID = operation === 'export_match' ? selectedExportSchemeID : selectedImportSchemeID
     const schemes = operation === 'export_match' ? exportSchemes : importSchemes
     const selectedScheme = schemes.find((item) => String(item.id) === selectedSchemeID)
-    let name = selectedScheme?.name ?? ''
-    if (mode === 'new' || !name) {
-      const prompted = window.prompt('请输入方案名称', name)
-      if (!prompted?.trim()) return
-      name = prompted.trim()
-    }
     const form = new FormData(formElement)
     const config = operation === 'export_match'
       ? buildExportConfig(form)
       : buildImportConfig(form, false)
 
+    if (mode === 'current' && selectedScheme?.name) {
+      void persistScheme(operation, config, selectedScheme.name)
+      return
+    }
+    setSchemeSaveError('')
+    setPendingSchemeSave({ operation, config, name: '', overwriteConfirmed: false })
+  }
+
+  async function persistScheme(operation: 'export_match' | 'import_update', config: unknown, name: string) {
+    if (schemeSaveInFlightRef.current) return false
+    schemeSaveInFlightRef.current = true
     setLoading(true)
     try {
-      const response = await fetch(apiURL('/v1/excel-match-jobs/schemes'), {
+      const nextResult = await client('/v1/excel-match-jobs/schemes', {
         method: 'POST',
-        headers: token ? { token, 'Content-Type': 'application/json' } : { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: name.trim(), operation, config }),
+        body: { name: name.trim(), operation, config },
+        showResult: false,
+        silentLoading: true,
+        retry: false,
       })
-      const data = await response.json().catch(() => ({}))
-      const nextResult = { ok: response.ok && isSuccessPayload(data), status: response.status, data }
-      setResult(nextResult)
+      setResult({ ok: nextResult.ok, status: nextResult.status, data: { message: nextResult.ok ? 'Excel 方案已保存。' : requestErrorMessage(nextResult, '保存 Excel 方案失败。') }, error: nextResult.error })
       if (nextResult.ok) {
-        const savedScheme = readObjectFromData<ExcelMatchScheme>(data, 'scheme')
+        const savedScheme = readObject<ExcelMatchScheme>(nextResult, 'scheme')
         if (savedScheme?.id) {
           if (operation === 'export_match') {
             setSelectedExportSchemeID(String(savedScheme.id))
@@ -2171,10 +3479,58 @@ function ExcelMatchView({
         }
         await loadSchemes()
       }
-    } catch (error) {
-      setResult({ ok: false, status: 0, data: error instanceof Error ? error.message : String(error) })
+      return nextResult.ok
+    } catch {
+      setResult({ ok: false, status: 0, data: { message: '保存 Excel 方案失败，请稍后重试。' } })
+      return false
     } finally {
+      schemeSaveInFlightRef.current = false
       setLoading(false)
+    }
+  }
+
+  async function confirmPendingSchemeSave() {
+    if (!pendingSchemeSave || loading) return
+    const name = pendingSchemeSave.name.trim()
+    if (name.length < 1 || name.length > 100) {
+      setSchemeSaveError('方案名称应为 1 至 100 个字符。')
+      return
+    }
+    if (pendingSchemeNameConflict && !pendingSchemeSave.overwriteConfirmed) {
+      setSchemeSaveError('存在同类型同名方案；请确认覆盖后再保存。')
+      return
+    }
+    const saved = await persistScheme(pendingSchemeSave.operation, pendingSchemeSave.config, name)
+    if (saved) {
+      setPendingSchemeSave(null)
+      setSchemeSaveError('')
+    }
+  }
+
+  async function deleteScheme(scheme: ExcelMatchScheme) {
+    setDeletingSchemeID(scheme.id)
+    try {
+      const nextResult = await client(excelMatchSchemePath(scheme.id), {
+        method: 'DELETE',
+        showResult: false,
+        silentLoading: true,
+        retry: false,
+      })
+      setResult({ ok: nextResult.ok, status: nextResult.status, data: { message: nextResult.ok ? 'Excel 方案已删除。' : requestErrorMessage(nextResult, '删除 Excel 方案失败。') }, error: nextResult.error })
+      if (!nextResult.ok) return
+
+      if (scheme.operation === 'export_match' && selectedExportSchemeID === String(scheme.id)) {
+        applyExportScheme('')
+      }
+      if (scheme.operation === 'import_update' && selectedImportSchemeID === String(scheme.id)) {
+        applyImportScheme('')
+      }
+      await loadSchemes()
+      setPendingSchemeDelete(null)
+    } catch {
+      setResult({ ok: false, status: 0, data: { message: '删除 Excel 方案失败，请稍后重试。' } })
+    } finally {
+      setDeletingSchemeID(null)
     }
   }
 
@@ -2230,20 +3586,21 @@ function ExcelMatchView({
     try {
       const uploadId = await ensureExcelUpload('export', file)
       const payload = buildConfigPayload(uploadId, buildExportConfig(form))
-      const response = await fetch(apiURL('/v1/excel-match-jobs'), {
+      const nextResult = await client('/v1/excel-match-jobs', {
         method: 'POST',
-        headers: token ? { token } : undefined,
         body: payload,
+        showResult: false,
+        silentLoading: true,
+        retry: false,
+        timeoutMs: 120_000,
       })
-      const data = await response.json().catch(() => ({}))
-      const nextResult = { ok: response.ok && isSuccessPayload(data), status: response.status, data }
       if (nextResult.ok) {
         showCreatedJob(nextResult)
       } else {
         setResult(nextResult)
       }
-    } catch (error) {
-      setResult({ ok: false, status: 0, data: error instanceof Error ? error.message : String(error) })
+    } catch {
+      setResult({ ok: false, status: 0, data: { message: '创建 Excel 导出任务失败，请稍后重试。' } })
     } finally {
       setLoading(false)
     }
@@ -2261,22 +3618,50 @@ function ExcelMatchView({
     try {
       const uploadId = await ensureExcelUpload('export', file)
       const payload = buildConfigPayload(uploadId, buildExportConfig(form))
-      const response = await fetch(apiURL('/v1/excel-match-jobs/preview'), {
+      const nextResult = await client('/v1/excel-match-jobs/preview', {
         method: 'POST',
-        headers: token ? { token } : undefined,
         body: payload,
+        showResult: false,
+        silentLoading: true,
+        retry: false,
+        timeoutMs: 120_000,
       })
-      const data = await response.json().catch(() => ({}))
-      const nextResult = { ok: response.ok && isSuccessPayload(data), status: response.status, data }
-      setResult(nextResult)
+      setResult({ ok: nextResult.ok, status: nextResult.status, data: { message: nextResult.ok ? 'Excel 匹配预览已更新。' : requestErrorMessage(nextResult, '预览 Excel 匹配失败。') }, error: nextResult.error })
       if (nextResult.ok) {
         setPreviewResult(readObject<ExcelMatchPreviewResult>(nextResult, 'preview'))
       }
-    } catch (error) {
-      setResult({ ok: false, status: 0, data: error instanceof Error ? error.message : String(error) })
+    } catch {
+      setResult({ ok: false, status: 0, data: { message: '预览 Excel 匹配失败，请稍后重试。' } })
     } finally {
       setLoading(false)
     }
+  }
+
+  async function createExcelWriteJob(slot: 'import' | 'clear', file: File, config: unknown) {
+    setLoading(true)
+    try {
+      const uploadId = await ensureExcelUpload(slot, file)
+      const nextResult = await client('/v1/excel-match-jobs', {
+        method: 'POST',
+        body: buildConfigPayload(uploadId, config),
+        showResult: false,
+        silentLoading: true,
+        retry: false,
+        timeoutMs: 120_000,
+      })
+      if (nextResult.ok) showCreatedJob(nextResult)
+      else setResult(nextResult)
+    } catch {
+      setResult({ ok: false, status: 0, data: { message: '创建 Excel 写入任务失败，请稍后重试。' } })
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  async function confirmPendingWrite() {
+    if (!pendingWrite || loading) return
+    await createExcelWriteJob(pendingWrite.slot, pendingWrite.file, pendingWrite.config)
+    setPendingWrite(null)
   }
 
   async function createImportJob(event: FormEvent<HTMLFormElement>) {
@@ -2293,31 +3678,12 @@ function ExcelMatchView({
     const confirmMessage = writeField === 'completed_at'
       ? '确认写入数据库？本次只会填充为空的订单完成时间，不会覆盖已有 completed_at。'
       : '确认写入数据库？本次只会填充空的 matched_docno，不会覆盖已有匹配单号。'
-    if (confirmWrite && !window.confirm(confirmMessage)) {
+    const config = buildImportConfig(form, confirmWrite)
+    if (confirmWrite) {
+      setPendingWrite({ slot: 'import', file, config, message: confirmMessage })
       return
     }
-
-    setLoading(true)
-    try {
-      const uploadId = await ensureExcelUpload('import', file)
-      const payload = buildConfigPayload(uploadId, buildImportConfig(form, confirmWrite))
-      const response = await fetch(apiURL('/v1/excel-match-jobs'), {
-        method: 'POST',
-        headers: token ? { token } : undefined,
-        body: payload,
-      })
-      const data = await response.json().catch(() => ({}))
-      const nextResult = { ok: response.ok && isSuccessPayload(data), status: response.status, data }
-      if (nextResult.ok) {
-        showCreatedJob(nextResult)
-      } else {
-        setResult(nextResult)
-      }
-    } catch (error) {
-      setResult({ ok: false, status: 0, data: error instanceof Error ? error.message : String(error) })
-    } finally {
-      setLoading(false)
-    }
+    await createExcelWriteJob('import', file, config)
   }
 
   async function createClearMatchedJob(event: FormEvent<HTMLFormElement>) {
@@ -2330,41 +3696,22 @@ function ExcelMatchView({
     }
 
     const confirmWrite = form.get('confirmWrite') === 'on'
-    if (confirmWrite && !window.confirm('确认清空命中行的 matched_docno？该操作用于退回未匹配状态。')) {
+    const config = {
+      operation: 'clear_matched_docno',
+      sheetName: formValue(form, 'sheetName').trim() || 'Sheet1',
+      tableName: formValue(form, 'tableName').trim(),
+      dbMatchField: formValue(form, 'dbMatchField').trim(),
+      matchExcelColumn: formValue(form, 'matchExcelColumn').trim(),
+      dbWriteField: 'matched_docno',
+      batchSize: Number(formValue(form, 'batchSize') || 1000),
+      dryRun: !confirmWrite,
+      confirmWrite,
+    }
+    if (confirmWrite) {
+      setPendingWrite({ slot: 'clear', file, config, message: '确认清空命中行的 matched_docno？该操作会将这些订单退回未匹配状态。' })
       return
     }
-
-    setLoading(true)
-    try {
-      const uploadId = await ensureExcelUpload('clear', file)
-      const payload = buildConfigPayload(uploadId, {
-        operation: 'clear_matched_docno',
-        sheetName: formValue(form, 'sheetName').trim() || 'Sheet1',
-        tableName: formValue(form, 'tableName').trim(),
-        dbMatchField: formValue(form, 'dbMatchField').trim(),
-        matchExcelColumn: formValue(form, 'matchExcelColumn').trim(),
-        dbWriteField: 'matched_docno',
-        batchSize: Number(formValue(form, 'batchSize') || 1000),
-        dryRun: !confirmWrite,
-        confirmWrite,
-      })
-      const response = await fetch(apiURL('/v1/excel-match-jobs'), {
-        method: 'POST',
-        headers: token ? { token } : undefined,
-        body: payload,
-      })
-      const data = await response.json().catch(() => ({}))
-      const nextResult = { ok: response.ok && isSuccessPayload(data), status: response.status, data }
-      if (nextResult.ok) {
-        showCreatedJob(nextResult)
-      } else {
-        setResult(nextResult)
-      }
-    } catch (error) {
-      setResult({ ok: false, status: 0, data: error instanceof Error ? error.message : String(error) })
-    } finally {
-      setLoading(false)
-    }
+    await createExcelWriteJob('clear', file, config)
   }
 
   function showCreatedJob(result: ApiResult) {
@@ -2408,6 +3755,43 @@ function ExcelMatchView({
     } finally {
       setDownloadingJobID(null)
     }
+  }
+
+  function renderPendingSchemeSave() {
+    if (!pendingSchemeSave) return null
+    return (
+      <form className="view-stack" onSubmit={(event) => { event.preventDefault(); void confirmPendingSchemeSave() }}>
+        <p>将保存当前表单的配置快照；取消后可继续编辑，已填写内容不会丢失。</p>
+        <label>
+          方案名称
+          <input
+            value={pendingSchemeSave.name}
+            maxLength={100}
+            data-autofocus
+            onChange={(event) => {
+              const name = event.currentTarget.value
+              setPendingSchemeSave((current) => current ? { ...current, name, overwriteConfirmed: false } : current)
+              setSchemeSaveError('')
+            }}
+          />
+        </label>
+        {pendingSchemeNameConflict && (
+          <label className="checkbox-label">
+            <input
+              type="checkbox"
+              checked={pendingSchemeSave.overwriteConfirmed}
+              onChange={(event) => setPendingSchemeSave((current) => current ? { ...current, overwriteConfirmed: event.currentTarget.checked } : current)}
+            />
+            覆盖同类型的“{pendingSchemeNameConflict.name}”方案
+          </label>
+        )}
+        {schemeSaveError && <p className="result-banner error" role="alert">{schemeSaveError}</p>}
+        <div className="excel-form-actions">
+          <button type="button" disabled={loading} onClick={() => { setPendingSchemeSave(null); setSchemeSaveError('') }}>返回编辑</button>
+          <button className="primary" type="submit" disabled={loading}>{loading ? '保存中…' : '保存方案'}</button>
+        </div>
+      </form>
+    )
   }
 
   return (
@@ -2473,7 +3857,7 @@ function ExcelMatchView({
                 </button>
                 {!canDownloadExcelJob(job) && <span>{job.download_message || '只有匹配导出成功任务会生成可下载结果文件。'}</span>}
               </div>
-              {job.error_message && <div className="login-error">{job.error_message}</div>}
+              {job.error_message && <div className="login-error" role="alert">任务执行失败，请查看受控服务日志。</div>}
               <section className="content-grid two">
                 <ReadonlyJSON value={job.config_json || '{}'} />
                 <ExcelJobLogList logs={jobLogs} />
@@ -2500,7 +3884,7 @@ function ExcelMatchView({
           </div>
         </Panel>
         <Panel title="已保存导出方案" icon={<ListChecks />} meta={`${exportSchemes.length} 个方案`}>
-          <ExcelSchemeList schemes={exportSchemes} onOpen={(id) => { applyExportScheme(String(id)); openExcelDialog('export') }} />
+          <ExcelSchemeList schemes={exportSchemes} deletingSchemeID={deletingSchemeID} onDelete={setPendingSchemeDelete} onOpen={(id) => { applyExportScheme(String(id)); openExcelDialog('export') }} />
         </Panel>
       </>}
 
@@ -2526,15 +3910,17 @@ function ExcelMatchView({
         </div>
       </Panel>
         <Panel title="已保存导入方案" icon={<ListChecks />} meta={`${importSchemes.length} 个方案`}>
-          <ExcelSchemeList schemes={importSchemes} onOpen={(id) => { applyImportScheme(String(id)); openExcelDialog('import') }} />
+          <ExcelSchemeList schemes={importSchemes} deletingSchemeID={deletingSchemeID} onDelete={setPendingSchemeDelete} onOpen={(id) => { applyImportScheme(String(id)); openExcelDialog('import') }} />
         </Panel>
       </>}
 
       {excelDialog === 'export' && (
         <Modal
-          title="匹配导出参数"
-          onClose={closeExcelDialog}
-          footer={(
+          title={pendingSchemeSave ? '保存 Excel 匹配方案' : '匹配导出参数'}
+          focusKey={pendingSchemeSave ? 'scheme-save' : 'form'}
+          closeDisabled={loading || schemeSaveInFlightRef.current}
+          onClose={() => { if (!loading && !schemeSaveInFlightRef.current) closeExcelDialog() }}
+          footer={pendingSchemeSave ? undefined : (
             <div className="excel-modal-footer-content">
               {uploadProgress && <p className="excel-mode-note modal-footer-status" role="status" aria-live="polite">{uploadProgress}</p>}
               <div className="excel-form-actions">
@@ -2558,7 +3944,8 @@ function ExcelMatchView({
             </div>
           )}
         >
-          <form id="excel-export-job-form" className="excel-upload-form" onSubmit={createExportJob} key={exportFormKey}>
+          {renderPendingSchemeSave()}
+          <form id="excel-export-job-form" className="excel-upload-form" onSubmit={createExportJob} key={exportFormKey} hidden={pendingSchemeSave !== null}>
             <label>
               已保存方案
               <select value={selectedExportSchemeID} onChange={(event) => applyExportScheme(event.currentTarget.value)}>
@@ -2571,7 +3958,7 @@ function ExcelMatchView({
               disabled={!selectedExportSchemeID || loading}
               onClick={(event) => {
                 const form = event.currentTarget.form
-                if (form?.reportValidity()) void saveScheme(form, 'export_match', 'current')
+                if (form?.reportValidity()) beginSchemeSave(form, 'export_match', 'current')
               }}
             >
               保存到当前方案
@@ -2581,7 +3968,7 @@ function ExcelMatchView({
               disabled={loading}
               onClick={(event) => {
                 const form = event.currentTarget.form
-                if (form?.reportValidity()) void saveScheme(form, 'export_match', 'new')
+                if (form?.reportValidity()) beginSchemeSave(form, 'export_match', 'new')
               }}
             >
               另存为新方案
@@ -2743,8 +4130,10 @@ function ExcelMatchView({
       )}
 
       {excelDialog === 'import' && (
-        <Modal title="匹配导入参数" onClose={closeExcelDialog}>
-          <form className="excel-upload-form" onSubmit={createImportJob} key={importFormKey}>
+        <Modal title={pendingSchemeSave ? '保存 Excel 匹配方案' : pendingWrite?.slot === 'import' ? '确认写入数据库' : '匹配导入参数'} focusKey={pendingSchemeSave ? 'scheme-save' : pendingWrite?.slot === 'import' ? 'confirm' : 'form'} closeDisabled={loading || schemeSaveInFlightRef.current} onClose={() => { if (!loading && !schemeSaveInFlightRef.current) { setPendingWrite(null); closeExcelDialog() } }}>
+          {pendingWrite?.slot === 'import' && <div className="view-stack"><p>{pendingWrite.message}</p><div className="excel-form-actions"><button type="button" disabled={loading} onClick={() => setPendingWrite(null)}>返回修改</button><button className="primary" type="button" disabled={loading} onClick={() => void confirmPendingWrite()}>{loading ? '创建任务中…' : '确认写入'}</button></div></div>}
+          {renderPendingSchemeSave()}
+          <form className="excel-upload-form" onSubmit={createImportJob} key={importFormKey} hidden={pendingWrite?.slot === 'import' || pendingSchemeSave !== null}>
             <label>
               已保存方案
               <select value={selectedImportSchemeID} onChange={(event) => applyImportScheme(event.currentTarget.value)}>
@@ -2757,7 +4146,7 @@ function ExcelMatchView({
               disabled={!selectedImportSchemeID || loading}
               onClick={(event) => {
                 const form = event.currentTarget.form
-                if (form) void saveScheme(form, 'import_update', 'current')
+                if (form?.reportValidity()) beginSchemeSave(form, 'import_update', 'current')
               }}
             >
               保存到当前方案
@@ -2767,7 +4156,7 @@ function ExcelMatchView({
               disabled={loading}
               onClick={(event) => {
                 const form = event.currentTarget.form
-                if (form) void saveScheme(form, 'import_update', 'new')
+                if (form?.reportValidity()) beginSchemeSave(form, 'import_update', 'new')
               }}
             >
               另存为新方案
@@ -2827,8 +4216,9 @@ function ExcelMatchView({
       )}
 
       {excelDialog === 'clear' && (
-        <Modal title="退回未匹配参数" onClose={closeExcelDialog}>
-          <form className="excel-upload-form" onSubmit={createClearMatchedJob}>
+        <Modal title={pendingWrite?.slot === 'clear' ? '确认退回未匹配' : '退回未匹配参数'} focusKey={pendingWrite?.slot === 'clear' ? 'confirm' : 'form'} closeDisabled={loading} onClose={() => { if (!loading) { setPendingWrite(null); closeExcelDialog() } }}>
+          {pendingWrite?.slot === 'clear' && <div className="view-stack"><p>{pendingWrite.message}</p><div className="excel-form-actions"><button type="button" disabled={loading} onClick={() => setPendingWrite(null)}>返回修改</button><button className="danger" type="button" disabled={loading} onClick={() => void confirmPendingWrite()}>{loading ? '创建任务中…' : '确认退回'}</button></div></div>}
+          <form className="excel-upload-form" onSubmit={createClearMatchedJob} hidden={pendingWrite?.slot === 'clear'}>
             <label className="file-input-label">
               Excel 文件
               <input
@@ -2893,11 +4283,23 @@ function ExcelMatchView({
           </div>
         </Modal>
       )}
+
+      {pendingSchemeDelete && (
+        <Modal title="删除 Excel 匹配方案" onClose={() => { if (deletingSchemeID === null) setPendingSchemeDelete(null) }}>
+          <p>确认删除方案“{pendingSchemeDelete.name}”？删除后不能恢复，已创建的任务不会受影响。</p>
+          <div className="excel-form-actions">
+            <button type="button" onClick={() => setPendingSchemeDelete(null)} disabled={deletingSchemeID !== null}>取消</button>
+            <button type="button" className="danger" onClick={() => void deleteScheme(pendingSchemeDelete)} disabled={deletingSchemeID !== null}>
+              {deletingSchemeID === pendingSchemeDelete.id ? '删除中…' : '确认删除'}
+            </button>
+          </div>
+        </Modal>
+      )}
     </div>
   )
 }
 
-function ExcelSchemeList({ schemes, onOpen }: { schemes: ExcelMatchScheme[]; onOpen: (id: number) => void }) {
+function ExcelSchemeList({ schemes, deletingSchemeID, onDelete, onOpen }: { schemes: ExcelMatchScheme[]; deletingSchemeID: number | null; onDelete: (scheme: ExcelMatchScheme) => void; onOpen: (id: number) => void }) {
   if (schemes.length === 0) return <EmptyState text="暂无已保存方案。" />
   return (
     <div className="data-table-wrap">
@@ -2918,7 +4320,14 @@ function ExcelSchemeList({ schemes, onOpen }: { schemes: ExcelMatchScheme[]; onO
               <td>{excelJobOperationLabel(scheme.operation)}</td>
               <td>{scheme.operation === 'export_match' ? (scheme.config.steps?.length || 1) : '-'}</td>
               <td>{formatUnixTime(scheme.updated_at)}</td>
-              <td><button type="button" onClick={() => onOpen(scheme.id)}>打开配置</button></td>
+              <td>
+                <div className="table-actions">
+                  <button type="button" onClick={() => onOpen(scheme.id)} disabled={deletingSchemeID !== null}>打开配置</button>
+                  <button type="button" className="danger" onClick={() => onDelete(scheme)} disabled={deletingSchemeID !== null}>
+                    {deletingSchemeID === scheme.id ? '删除中…' : '删除'}
+                  </button>
+                </div>
+              </td>
             </tr>
           ))}
         </tbody>
@@ -2991,26 +4400,64 @@ function ExcelJobHistoryTable({
   )
 }
 
-function Modal({ title, onClose, children, footer }: { title: string; onClose: () => void; children: ReactNode; footer?: ReactNode }) {
+function Modal({ title, onClose, children, footer, closeDisabled = false, focusKey }: { title: string; onClose: () => void; children: ReactNode; footer?: ReactNode; closeDisabled?: boolean; focusKey?: string }) {
+  const panelRef = useRef<HTMLElement>(null)
+  const returnFocusRef = useRef<HTMLElement | null>(document.activeElement instanceof HTMLElement ? document.activeElement : null)
+  const titleID = useMemo(() => `modal-title-${Math.random().toString(36).slice(2)}`, [])
+  const onCloseRef = useRef(onClose)
+  const closeDisabledRef = useRef(closeDisabled)
+  onCloseRef.current = onClose
+  closeDisabledRef.current = closeDisabled
+
   useEffect(() => {
     const previousOverflow = document.body.style.overflow
+    const returnFocus = returnFocusRef.current
+    const focusableSelector = 'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
     const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') onClose()
+      if (event.key === 'Escape') {
+        event.preventDefault()
+        if (!closeDisabledRef.current) onCloseRef.current()
+        return
+      }
+      if (event.key !== 'Tab') return
+      const focusable = Array.from(panelRef.current?.querySelectorAll<HTMLElement>(focusableSelector) ?? []).filter((element) => !element.closest('[hidden], [aria-hidden="true"]'))
+      if (focusable.length === 0) {
+        event.preventDefault()
+        panelRef.current?.focus()
+        return
+      }
+      const first = focusable[0]
+      const last = focusable[focusable.length - 1]
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault()
+        last.focus()
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault()
+        first.focus()
+      }
     }
     document.body.style.overflow = 'hidden'
     window.addEventListener('keydown', handleKeyDown)
     return () => {
       document.body.style.overflow = previousOverflow
       window.removeEventListener('keydown', handleKeyDown)
+      returnFocus?.focus()
     }
-  }, [onClose])
+  }, [])
+
+  useEffect(() => {
+    const focusableSelector = 'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
+    const initialFocus = panelRef.current?.querySelector<HTMLElement>('[data-autofocus]')
+      ?? Array.from(panelRef.current?.querySelectorAll<HTMLElement>(focusableSelector) ?? []).find((element) => !element.closest('[hidden], [aria-hidden="true"]'))
+    initialFocus?.focus()
+  }, [focusKey])
 
   return (
     <div className="modal-backdrop" role="presentation">
-      <section className="modal-panel" role="dialog" aria-modal="true" aria-label={title}>
+      <section ref={panelRef} className="modal-panel" role="dialog" aria-modal="true" aria-labelledby={titleID} tabIndex={-1}>
         <div className="modal-title">
-          <h3>{title}</h3>
-          <button type="button" onClick={onClose}>关闭</button>
+          <h3 id={titleID}>{title}</h3>
+          <button type="button" onClick={onClose} disabled={closeDisabled} aria-label={`关闭${title}`}>关闭</button>
         </div>
         <div className="modal-body">{children}</div>
         {footer && <div className="modal-footer">{footer}</div>}
@@ -3079,9 +4526,8 @@ function ExcelJobLogList({ logs }: { logs: ExcelMatchJobLog[] }) {
       {logs.map((log) => (
         <article className="record-row" key={log.id}>
           <div>
-            <strong>{log.message}</strong>
+            <strong>任务日志已记录</strong>
             <span>{excelLogLevelLabel(log.level)} / {formatUnixTime(log.created_at)}</span>
-            <span>{compactText(log.detail_json || '{}')}</span>
           </div>
         </article>
       ))}
@@ -3146,7 +4592,7 @@ function RunTable({ runs, onLoadSteps, onSelectRun }: { runs: PipelineRun[]; onL
   )
 }
 
-function DeliveryLogList({ logs, onSelectLog, onRetryLog }: { logs: DeliveryLog[]; onSelectLog?: (log: DeliveryLog) => void; onRetryLog?: (logId: number) => void }) {
+function DeliveryLogList({ logs, onSelectLog, onRetryLog, retryingLogID }: { logs: DeliveryLog[]; onSelectLog?: (log: DeliveryLog) => void; onRetryLog?: (log: DeliveryLog) => void | Promise<void>; retryingLogID?: number | null }) {
   const [storeFilter, setStoreFilter] = useState('all')
   const matchedLogs = useMemo(
 	    () => logs.map((log) => ({ log, store: matchDeliveryStore(log) ?? otherDeliveryStore })),
@@ -3193,7 +4639,7 @@ function DeliveryLogList({ logs, onSelectLog, onRetryLog }: { logs: DeliveryLog[
                   <StatusPill label={failedCount > 0 ? '存在失败' : '全部成功'} />
                 </div>
                 <div className="record-list">
-                  {group.logs.slice(0, 8).map((log) => (
+                  {group.logs.map((log) => (
                     <article className="record-row" key={log.id}>
                       <div>
                         <strong>#{log.id} / {log.business_key || '-'}</strong>
@@ -3205,7 +4651,7 @@ function DeliveryLogList({ logs, onSelectLog, onRetryLog }: { logs: DeliveryLog[
                       </div>
                       <div className="record-actions">
                         <small>{formatDate(log.sent_at)}</small>
-                        {!log.success && onRetryLog && <button type="button" onClick={() => onRetryLog(log.id)}>重试</button>}
+                        {!log.success && onRetryLog && <button type="button" disabled={retryingLogID !== null} onClick={() => void onRetryLog(log)}>{retryingLogID === log.id ? '重试中…' : '重试'}</button>}
                         {onSelectLog && <button type="button" onClick={() => onSelectLog(log)}>详情</button>}
                       </div>
                     </article>
@@ -3247,8 +4693,7 @@ function matchDeliveryStore(log: DeliveryLog) {
     log.destination_name,
     log.source_code,
     log.business_key,
-    log.request_body,
-    log.response_body,
+    log.response_summary,
     log.error_message,
   ].join(' ').toLowerCase()
 
@@ -3256,10 +4701,8 @@ function matchDeliveryStore(log: DeliveryLog) {
 }
 
 function deliveryLogPreview(log: DeliveryLog) {
-  const response = compactText(log.response_body)
+  const response = compactText(log.response_summary)
   if (response) return response
-  const request = compactText(log.request_body)
-  if (request) return `请求 ${request}`
   return `trace: ${log.trace_id || '-'}`
 }
 
@@ -3267,6 +4710,124 @@ function compactText(value: string) {
   const text = (value || '').replace(/\s+/g, ' ').trim()
   if (text.length <= 120) return text
   return `${text.slice(0, 120)}...`
+}
+
+function MonitoringPaginationControls({ page, totalPages, loading, onPrevious, onNext }: { page: number; totalPages: number; loading: boolean; onPrevious: () => void; onNext: () => void }) {
+  return <div className="record-actions raw-record-pagination" role="status" aria-live="polite">
+    <span>第 {page} / {Math.max(totalPages, 1)} 页</span>
+    <button type="button" onClick={onPrevious} disabled={loading || page <= 1}>上一页</button>
+    <button type="button" onClick={onNext} disabled={loading || totalPages === 0 || page >= totalPages}>下一页</button>
+  </div>
+}
+
+function publicText(value: unknown, maximumLength: number) {
+  if (typeof value !== 'string') return ''
+  const text = value.trim()
+  return text.length <= maximumLength ? text : ''
+}
+
+function publicDateTime(value: unknown) {
+  return value === null ? null : publicText(value, 32) || null
+}
+
+function publicNonNegativeInteger(value: unknown) {
+  const number = Number(value)
+  return Number.isSafeInteger(number) && number >= 0 ? number : -1
+}
+
+function parsePipelineRun(value: unknown): PipelineRun | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const run = value as Record<string, unknown>
+  const id = publicNonNegativeInteger(run.id)
+  const sourceID = publicNonNegativeInteger(run.source_id)
+  const destinationID = publicNonNegativeInteger(run.destination_id)
+  const totalCount = publicNonNegativeInteger(run.total_count)
+  const successCount = publicNonNegativeInteger(run.success_count)
+  const failedCount = publicNonNegativeInteger(run.failed_count)
+  const status = publicText(run.status, 24)
+  const runType = publicText(run.run_type, 32)
+  if (id <= 0 || sourceID < 0 || destinationID < 0 || totalCount < 0 || successCount < 0 || failedCount < 0
+    || !['running', 'success', 'failed', 'partial_success'].includes(status)
+    || !['fetch', 'ingest', 'transform', 'delivery'].includes(runType)) return null
+  return {
+    id,
+    trace_id: publicText(run.trace_id, 64),
+    run_type: runType,
+    trigger_type: publicText(run.trigger_type, 50),
+    status,
+    total_count: totalCount,
+    success_count: successCount,
+    failed_count: failedCount,
+    source_id: sourceID,
+    destination_id: destinationID,
+    started_at: publicDateTime(run.started_at),
+    finished_at: publicDateTime(run.finished_at),
+  }
+}
+
+function parseDeliveryLog(value: unknown): DeliveryLog | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const log = value as Record<string, unknown>
+  const id = publicNonNegativeInteger(log.id)
+  const runID = publicNonNegativeInteger(log.run_id)
+  const destinationID = publicNonNegativeInteger(log.destination_id)
+  const cleanRecordID = publicNonNegativeInteger(log.clean_record_id)
+  const retryCount = publicNonNegativeInteger(log.retry_count)
+  const httpStatus = publicNonNegativeInteger(log.http_status)
+  if (id <= 0 || runID < 0 || destinationID < 0 || cleanRecordID < 0 || retryCount < 0 || httpStatus < 0 || typeof log.success !== 'boolean') return null
+  return {
+    id,
+    trace_id: publicText(log.trace_id, 64),
+    run_id: runID,
+    source_code: publicText(log.source_code, 100),
+    destination_code: publicText(log.destination_code, 100),
+    destination_name: publicText(log.destination_name, 100),
+    destination_id: destinationID,
+    clean_record_id: cleanRecordID,
+    business_key: publicText(log.business_key, 255),
+    response_summary: publicText(log.response_summary, 240),
+    http_status: httpStatus,
+    success: log.success,
+    error_message: publicText(log.error_message, 240),
+    retry_count: retryCount,
+    sent_at: publicDateTime(log.sent_at),
+  }
+}
+
+function parseWarehouseRawRecord(value: unknown): WarehouseRawRecord | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const record = value as Record<string, unknown>
+  const id = Number(record.id)
+  const sourceID = Number(record.source_id)
+  const createdAt = Number(record.created_at)
+  const status = publicText(record.status, 16)
+  if (!Number.isInteger(id) || id <= 0 || !Number.isInteger(sourceID) || sourceID < 0
+    || !Number.isInteger(createdAt) || createdAt < 0
+    || !['received', 'queued', 'cleaning', 'cleaned', 'failed'].includes(status)) return null
+  return {
+    id,
+    sourceID,
+    sourceCode: publicText(record.source_code, 100),
+    status: status as WarehouseRawRecord['status'],
+    traceID: publicText(record.trace_id, 64),
+    receivedAt: publicText(record.received_at, 32),
+    createdAt,
+  }
+}
+
+function parseRetransformResult(payload: unknown): { traceID: string; cleanRecordID: number } | null {
+  if (!payload || typeof payload !== 'object') return null
+  const data = (payload as { data?: unknown }).data
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return null
+  const result = (data as { result?: unknown }).result
+  if (!result || typeof result !== 'object' || Array.isArray(result)) return null
+  const cleanRecordID = Number((result as Record<string, unknown>).clean_record_id)
+  if (!Number.isInteger(cleanRecordID) || cleanRecordID <= 0) return null
+  return { traceID: publicText((result as Record<string, unknown>).trace_id, 64), cleanRecordID }
+}
+
+function rawRecordStatusLabel(status: WarehouseRawRecord['status']) {
+  return ({ received: '已接收', queued: '排队中', cleaning: '处理中', cleaned: '已清洗', failed: '失败' } as const)[status]
 }
 
 function RawDataList({ records }: { records: RawData[] }) {
@@ -3286,8 +4847,32 @@ function RawDataList({ records }: { records: RawData[] }) {
   )
 }
 
-function SourceList({ sources }: { sources: SourceDefinition[] }) {
+function SourceList({ sources, onDetail, onFetchSource, onTestSource }: { sources: SourceDefinition[]; onDetail: (source: SourceDefinition) => void; onFetchSource: (sourceID: number) => Promise<ApiResult>; onTestSource: (sourceID: number) => Promise<ApiResult> }) {
+  const [fetchingID, setFetchingID] = useState<number | null>(null)
+  const [testingID, setTestingID] = useState<number | null>(null)
+  const [messageByID, setMessageByID] = useState<Record<number, string>>({})
   if (sources.length === 0) return <EmptyState text="暂无数据源配置。" />
+
+  async function fetch(sourceID: number) {
+    setFetchingID(sourceID)
+    const response = await onFetchSource(sourceID)
+    const summary = response.ok ? parseSourceFetchSummary(response.data) : null
+    setMessageByID((current) => ({
+      ...current,
+      [sourceID]: summary
+        ? `拉取完成：成功 ${summary.successCount}/${summary.totalCount}，失败 ${summary.failedCount}；追踪 ${summary.traceID}`
+        : response.error?.message || '拉取完成，但未收到可验证的结果摘要。',
+    }))
+    setFetchingID(null)
+  }
+
+  async function test(sourceID: number) {
+    setTestingID(sourceID)
+    const response = await onTestSource(sourceID)
+    setMessageByID((current) => ({ ...current, [sourceID]: response.ok ? '连接测试通过。' : response.error?.message || '连接测试未完成，请稍后重试。' }))
+    setTestingID(null)
+  }
+
   return (
     <div className="record-list">
       {sources.map((source) => (
@@ -3295,15 +4880,22 @@ function SourceList({ sources }: { sources: SourceDefinition[] }) {
           <div>
             <strong>{source.name}</strong>
             <span>{source.code} / {source.source_type} / {source.auth_type || 'none'}</span>
+	            {source.has_secret && <small>配置包含已隐藏的密钥；保留占位符可保持旧值，替换为新值可轮换。</small>}
           </div>
-          <StatusPill label={source.enabled ? '启用' : '停用'} />
+          <div className="record-actions">
+            <StatusPill label={source.enabled ? '启用' : '停用'} />
+            <button type="button" disabled={testingID !== null || fetchingID !== null} onClick={() => onDetail(source)}>详情</button>
+            <button type="button" disabled={testingID === source.id || fetchingID === source.id || !source.enabled} onClick={() => { void test(source.id) }}>{testingID === source.id ? '测试中…' : '测试连接'}</button>
+            <button type="button" disabled={testingID === source.id || fetchingID === source.id || !source.enabled || source.source_type === 'webhook'} onClick={() => { void fetch(source.id) }}>{fetchingID === source.id ? '拉取中…' : '手动拉取'}</button>
+          </div>
+          {messageByID[source.id] && <small className="source-operation-message" role="status" aria-live="polite">{messageByID[source.id]}</small>}
         </article>
       ))}
     </div>
   )
 }
 
-function TransformRuleList({ rules }: { rules: TransformRule[] }) {
+function TransformRuleList({ rules, onDetail }: { rules: TransformRule[]; onDetail: (rule: TransformRule) => void }) {
   if (rules.length === 0) return <EmptyState text="暂无处理规则。" />
   return (
     <div className="record-list">
@@ -3312,8 +4904,9 @@ function TransformRuleList({ rules }: { rules: TransformRule[] }) {
           <div>
             <strong>{rule.name}</strong>
             <span>{rule.rule_type} / source #{rule.source_id} / 顺序 {rule.order_index}</span>
+            {rule.has_secret && <small>配置包含已隐藏的密钥；保留占位符可保持旧值，替换为新值可轮换。</small>}
           </div>
-          <StatusPill label={rule.enabled ? '启用' : '停用'} />
+          <div className="record-actions"><StatusPill label={rule.enabled ? '启用' : '停用'} /><button type="button" onClick={() => onDetail(rule)}>详情</button></div>
         </article>
       ))}
     </div>
@@ -3337,7 +4930,24 @@ function ProcessedDataList({ records }: { records: ProcessedData[] }) {
   )
 }
 
-function DestinationList({ destinations }: { destinations: DestinationDefinition[] }) {
+function CleanRecordList({ records }: { records: CleanRecord[] }) {
+  if (records.length === 0) return <EmptyState text="暂无清洗记录。" />
+  return (
+    <div className="record-list">
+      {records.map((record) => (
+        <article className="record-row" key={record.id}>
+          <div>
+            <strong>{record.business_key || `#${record.id}`}</strong>
+            <span>来源 #{record.source_id} / 表 {record.table_name || '-'} / 原始记录 #{record.raw_record_id}</span>
+          </div>
+          <div className="record-actions"><span>质量 {record.quality_score}</span><StatusPill label={cleanRecordStatusLabel(record.status)} /><small>{formatUnixTime(record.created_at)}</small></div>
+        </article>
+      ))}
+    </div>
+  )
+}
+
+function DestinationList({ destinations, testingID, onDetail, onTest }: { destinations: DestinationDefinition[]; testingID: number | null; onDetail: (destination: DestinationDefinition) => void; onTest: (destination: DestinationDefinition) => void }) {
   if (destinations.length === 0) return <EmptyState text="暂无推送目标。" />
   return (
     <div className="record-list">
@@ -3346,15 +4956,23 @@ function DestinationList({ destinations }: { destinations: DestinationDefinition
           <div>
             <strong>{destination.name}</strong>
             <span>{destination.code} / {destination.destination_type}</span>
+            {destination.has_secret && <small>配置包含已隐藏密钥；保留占位符可保持旧值，替换为新值可轮换。</small>}
           </div>
-          <StatusPill label={destination.enabled ? '启用' : '停用'} />
+          <div className="record-actions"><StatusPill label={destination.enabled ? '启用' : '停用'} /><button type="button" onClick={() => onDetail(destination)}>详情</button><button type="button" disabled={testingID !== null} onClick={() => onTest(destination)}>{testingID === destination.id ? '测试中…' : '测试连接'}</button></div>
         </article>
       ))}
     </div>
   )
 }
 
-function DeliveryTaskList({ tasks }: { tasks: DeliveryTask[] }) {
+function DeliveryTaskList({ tasks, runningID, loadingDetailID, destinations, onDetail, onRun }: {
+  tasks: DeliveryTask[]
+  runningID: number | null
+  loadingDetailID: number | null
+  destinations: DestinationDefinition[]
+  onDetail: (task: DeliveryTask) => void
+  onRun: (task: DeliveryTask) => void
+}) {
   if (tasks.length === 0) return <EmptyState text="暂无推送任务。" />
   return (
     <div className="record-list">
@@ -3362,9 +4980,13 @@ function DeliveryTaskList({ tasks }: { tasks: DeliveryTask[] }) {
         <article className="record-row" key={task.id}>
           <div>
             <strong>{task.name}</strong>
-            <span>{`${task.clean_table} -> destination #${task.destination_id} / ${task.trigger_type}`}</span>
+            <span>{`${task.clean_table} -> ${deliveryTaskDestinationLabel(task, destinations)} / ${deliveryTaskTriggerLabel(task.trigger_type)}`}</span>
           </div>
-          <StatusPill label={task.enabled ? '启用' : '停用'} />
+          <div className="record-actions">
+            <StatusPill label={task.enabled ? '启用' : '停用'} />
+            <button type="button" disabled={loadingDetailID !== null || runningID !== null} onClick={() => onDetail(task)}>{loadingDetailID === task.id ? '加载中…' : '详情'}</button>
+            <button type="button" disabled={!task.enabled || runningID !== null || loadingDetailID !== null} onClick={() => onRun(task)}>{runningID === task.id ? '推送中…' : '手动运行'}</button>
+          </div>
         </article>
       ))}
     </div>
@@ -3378,7 +5000,7 @@ function StepRunList({ stepRuns }: { stepRuns: StepRun[] }) {
       {stepRuns.map((run) => (
         <details key={run.id}>
           <summary>{run.step_code} / {run.method_type} / {run.status}</summary>
-          <ReadonlyJSON value={{ input: parseJsonText(run.input_json), output: parseJsonText(run.output_json), error: run.error_message }} />
+          <ReadonlyJSON value={redactMonitoringJSON({ input: parseJsonText(run.input_json), output: parseJsonText(run.output_json), error: run.error_message })} />
         </details>
       ))}
     </div>
@@ -3393,7 +5015,7 @@ function ResultPanel({ result, onClose }: { result: ApiResult | null; onClose: (
         <PanelTitle icon={<FileJson />} title="接口结果" meta={String(result.status)} />
         <button type="button" onClick={onClose} aria-label="关闭接口结果"><X aria-hidden="true" /></button>
       </div>
-      <ReadonlyJSON value={result.data} />
+      <ReadonlyJSON value={redactMonitoringJSON(result.data)} />
     </aside>
   )
 }
@@ -3820,17 +5442,66 @@ function methodTypeLabel(type: MethodType) {
 
 function rawDataOrigin(record: RawData) {
   const metadata = parseMaybeJson(record.metadata)
+  if (metadata && typeof metadata === 'object' && (metadata as JsonRecord).format === 'fetch') return 'fetch'
+  if (metadata && typeof metadata === 'object' && typeof (metadata as JsonRecord).format === 'string') return String((metadata as JsonRecord).format)
   if (record.source) return record.source
   if (record.remark) return record.remark
   if (metadata && typeof metadata === 'object' && typeof (metadata as JsonRecord).source === 'string') return String((metadata as JsonRecord).source)
   if (metadata && typeof metadata === 'object' && typeof (metadata as JsonRecord).remark === 'string') return String((metadata as JsonRecord).remark)
-  if (metadata && typeof metadata === 'object' && (metadata as JsonRecord).format === 'fetch') return 'fetch'
-  if (metadata && typeof metadata === 'object' && typeof (metadata as JsonRecord).format === 'string') return String((metadata as JsonRecord).format)
   return 'ingest'
 }
 
-function isPulledOrigin(origin: string) {
-  return origin === 'fetch' || origin === 'bojun_order' || origin === 'youzan_order' || origin === 'youzan_refund'
+function cleanRecordStatusLabel(status: string) {
+  if (status === 'ready') return '待推送'
+  if (status === 'invalid') return '无效'
+  if (status === 'delivered') return '已交付'
+  return status || '-'
+}
+
+function ruleDraftFrom(rule: TransformRule): RuleDraft {
+  return {
+    id: rule.id,
+    sourceID: String(rule.source_id),
+    name: rule.name,
+    ruleType: rule.rule_type,
+    orderIndex: String(rule.order_index),
+    configJSON: rule.config_json || '{}',
+    enabled: rule.enabled,
+    hasSecret: Boolean(rule.has_secret),
+  }
+}
+
+function destinationDraftFrom(destination: DestinationDefinition): DestinationDraft {
+  return { id: destination.id, name: destination.name, code: destination.code, destinationType: destination.destination_type, configJSON: destination.config_json || '{}', enabled: destination.enabled, hasSecret: Boolean(destination.has_secret) }
+}
+
+function sourceDraftFrom(source: SourceDefinition): SourceDraft {
+  return { id: source.id, name: source.name, code: source.code, sourceType: source.source_type, enabled: source.enabled, authType: source.auth_type, configJSON: jsonText(source.config_json || '{}'), schemaJSON: jsonText(source.schema_json || '{}'), dedupeKeys: jsonText(source.dedupe_keys || '[]'), sourceQueryKey: source.source_query_key, hasSecret: Boolean(source.has_secret) }
+}
+
+function deliveryTaskDraftFrom(task: DeliveryTask): DeliveryTaskDraft {
+  return {
+    id: task.id,
+    name: task.name,
+    sourceID: String(task.source_id),
+    cleanTable: task.clean_table,
+    destinationID: String(task.destination_id),
+    triggerType: task.trigger_type,
+    cronExpr: task.cron_expr,
+    filterJSON: jsonText(task.filter_json || '{}'),
+    payloadTemplate: task.payload_template,
+    enabled: task.enabled,
+  }
+}
+
+function deliveryTaskDestinationLabel(task: DeliveryTask, destinations: DestinationDefinition[]) {
+  const destination = destinations.find((item) => item.id === task.destination_id)
+  return destination ? `${destination.name || destination.code} (#${destination.id})` : `目标 #${task.destination_id}`
+}
+
+function deliveryTaskTriggerLabel(value: string) {
+  const labels: Record<string, string> = { manual: '手动', schedule: '定时', event: '事件' }
+  return labels[value] ?? (value || '-')
 }
 
 function readList<T>(result: ApiResult, key: string): T[] {
@@ -3840,11 +5511,6 @@ function readList<T>(result: ApiResult, key: string): T[] {
 
 function readObject<T>(result: ApiResult, key: string): T | null {
   const value = readDataField(result.data, key)
-  return value && typeof value === 'object' ? (value as T) : null
-}
-
-function readObjectFromData<T>(data: unknown, key: string): T | null {
-  const value = readDataField(data, key)
   return value && typeof value === 'object' ? (value as T) : null
 }
 
@@ -3859,16 +5525,11 @@ function readToken(data: unknown) {
   return typeof value === 'string' ? value : ''
 }
 
-function readMessage(data: unknown) {
-  if (!data || typeof data !== 'object') return ''
-  const envelope = data as { msg?: unknown }
-  return typeof envelope.msg === 'string' ? envelope.msg : ''
-}
-
-function isSuccessPayload(data: unknown) {
-  if (!data || typeof data !== 'object') return false
-  const envelope = data as { code?: unknown }
-  return envelope.code === 0 || envelope.code === 200
+function loginFailureMessage(status: number) {
+  if (status === 401) return '账号或密码不正确，请重试。'
+  if (status === 429) return '登录尝试过于频繁，请稍后再试。'
+  if (status >= 500) return '登录服务暂时不可用，请稍后再试。'
+  return '登录请求未完成，请检查账号和密码后重试。'
 }
 
 function formValue(form: FormData, key: string) {
@@ -4124,6 +5785,12 @@ function previousDayDateTimeLocal(endOfDay: boolean) {
 function backendDateTime(value: string) {
   const normalized = value.trim().replace('T', ' ')
   return /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/.test(normalized) ? `${normalized}:00` : normalized
+}
+
+function unixTimestamp(value: string) {
+  if (!value) return ''
+  const timestamp = Date.parse(value)
+  return Number.isFinite(timestamp) ? String(Math.floor(timestamp / 1000)) : ''
 }
 
 function groupBy<T>(items: T[], keyFn: (item: T) => string) {

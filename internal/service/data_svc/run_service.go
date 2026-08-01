@@ -20,3 +20,7 @@ func NewRunService() *RunService {
 func (s *RunService) ListPipelineRuns(ctx context.Context, limit int) ([]model.PipelineRun, error) {
 	return s.pipelineRunDAO.FindRecent(ctx, limit)
 }
+
+func (s *RunService) ListPipelineRunsPage(ctx context.Context, query data_dao.PipelineRunListQuery) (*data_dao.PipelineRunListPage, error) {
+	return s.pipelineRunDAO.FindPage(ctx, query)
+}

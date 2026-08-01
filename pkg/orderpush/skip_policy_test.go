@@ -41,3 +41,9 @@ func TestSkipConfigRejectsDuplicateTargets(t *testing.T) {
 		t.Fatal("Normalize returned nil error, want duplicate target error")
 	}
 }
+
+func TestSkipPolicyRejectsSkipWithoutCycle(t *testing.T) {
+	if _, err := (SkipPolicy{Cycle: 0, Skip: 1}).Normalized(); err == nil {
+		t.Fatal("Normalize returned nil error, want validation error")
+	}
+}
