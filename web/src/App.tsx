@@ -397,12 +397,17 @@ type BojunOrderBackfillResult = {
 type StepRun = {
   id: number
   run_id: number
+  pipeline_id: number
+  step_id: number
   step_code: string
   method_type: string
   status: string
   input_json: string
   output_json: string
+  generated_config_json: string
   error_message: string
+  started_at: string | null
+  finished_at: string | null
 }
 
 type SourceDefinition = {
@@ -818,9 +823,7 @@ function App() {
   const [workspaceError, setWorkspaceError] = useState('')
   const [result, setResult] = useState<ApiResult | null>(null)
   const [runs, setRuns] = useState<PipelineRun[]>([])
-  const [stepRuns, setStepRuns] = useState<StepRun[]>([])
-  const [selectedStepRunID, setSelectedStepRunID] = useState<number | null>(null)
-  const stepRequestRef = useRef<AbortController | null>(null)
+  const [stepRunFocusID, setStepRunFocusID] = useState<number | null>(null)
   const workspaceRequestRef = useRef<AbortController | null>(null)
   const [methods, setMethods] = useState<MethodDisplay[]>(builtinMethods)
   const [pipelines, setPipelines] = useState<PipelineDefinition[]>([])
@@ -1205,8 +1208,6 @@ function App() {
     return () => window.removeEventListener('hashchange', handleHashChange)
   }, [])
 
-  useEffect(() => () => stepRequestRef.current?.abort(), [])
-
   useEffect(() => {
     if (sessionState !== 'authenticated' || activeNav !== 'overview') return
     const controller = new AbortController()
@@ -1248,13 +1249,9 @@ function App() {
     clearSession()
   }
 
-  async function loadStepRuns(runId: number) {
-    stepRequestRef.current?.abort()
-    const controller = new AbortController()
-    stepRequestRef.current = controller
-    setSelectedStepRunID(runId)
-    const response = await client(`/v1/pipeline-runs/${runId}/steps`, { method: 'GET', signal: controller.signal })
-    if (!controller.signal.aborted && response.ok) setStepRuns(readList<StepRun>(response, 'step_runs'))
+  function openStepRuns(runID: number) {
+    setStepRunFocusID(runID)
+    navigate('step_runs')
   }
 
   async function toggleTarget(target: ToggleTarget, enabled: boolean) {
@@ -1419,10 +1416,10 @@ function App() {
         <ModuleHeader activeNav={activeNav} loading={loading || refreshing} sessionUser={sessionUser} onOpenNavigation={openMobileNavigation} onRefresh={() => void refreshWorkspace(true)} refreshing={refreshing} mobileNavTriggerRef={mobileNavTriggerRef} />
         {sessionValidationError && <div className="result-banner error" role="status" aria-live="polite">{sessionValidationError} <button type="button" onClick={() => setSessionValidationAttempt((attempt) => attempt + 1)}>重试校验</button></div>}
         {workspaceError && <div className="result-banner error" role="alert">{workspaceError} <button type="button" onClick={() => void refreshWorkspace(false)} disabled={refreshing}>重试</button></div>}
-        {activeNav === 'overview' && <PushStatusView runs={runs} deliveryLogs={deliveryLogs} monitoring={monitoring} stale={monitoringStale} overviewTotals={overviewTotals} onLoadSteps={loadStepRuns} />}
-        {activeNav === 'runs' && <RunsQueryPage client={client} pipelines={pipelines} onLoadSteps={loadStepRuns} onPipelineRunCompleted={() => void refreshWorkspace(false)} refreshVersion={workspaceRefreshVersion} />}
+        {activeNav === 'overview' && <PushStatusView runs={runs} deliveryLogs={deliveryLogs} monitoring={monitoring} stale={monitoringStale} overviewTotals={overviewTotals} onLoadSteps={openStepRuns} />}
+        {activeNav === 'runs' && <RunsQueryPage client={client} pipelines={pipelines} onLoadSteps={openStepRuns} onPipelineRunCompleted={() => void refreshWorkspace(false)} refreshVersion={workspaceRefreshVersion} />}
         {activeNav === 'delivery_logs' && <DeliveryLogsQueryPage client={client} onRetryLog={retryDeliveryLog} />}
-        {activeNav === 'step_runs' && <StepRunsQueryPage runs={runs} stepRuns={stepRuns} selectedRunID={selectedStepRunID} onLoadSteps={loadStepRuns} />}
+        {activeNav === 'step_runs' && <StepRunsQueryPage client={client} focusRunID={stepRunFocusID} />}
         {activeNav === 'store_info' && <StoreInfoPage actorID={actorID} client={client} downloadFile={downloadFile} />}
         {activeNav === 'mall_weather' && <MallWeatherPage actorID={actorID} client={client} downloadFile={downloadFile} />}
         {activeNav === 'data_authorizations' && <DataAuthorizationPage client={client} />}
@@ -1864,10 +1861,90 @@ function DeliveryLogsQueryPage({ client, onRetryLog }: { client: ApiClient; onRe
   )
 }
 
-function StepRunsQueryPage({ runs, stepRuns, selectedRunID, onLoadSteps }: { runs: PipelineRun[]; stepRuns: StepRun[]; selectedRunID: number | null; onLoadSteps: (runId: number) => void }) {
+function StepRunsQueryPage({ client, focusRunID }: { client: ApiClient; focusRunID: number | null }) {
   const [runQuery, setRunQuery] = useState('')
+  const [status, setStatus] = useState('all')
+  const [runType, setRunType] = useState('all')
+  const [startTime, setStartTime] = useState('')
+  const [endTime, setEndTime] = useState('')
+  const [applied, setApplied] = useState({ traceID: '', status: '', runType: '', startTime: '', endTime: '' })
+  const [page, setPage] = useState(1)
+  const [recordsPage, setRecordsPage] = useState<MonitoringPage<PipelineRun> | null>(null)
+  const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
+  const [selectedRunID, setSelectedRunID] = useState<number | null>(null)
+  const [stepRuns, setStepRuns] = useState<StepRun[]>([])
+  const [stepLoading, setStepLoading] = useState(false)
+  const [stepError, setStepError] = useState('')
   const [stepQuery, setStepQuery] = useState('')
   const [selectedStepID, setSelectedStepID] = useState<number | null>(null)
+  const requestRef = useRef<AbortController | null>(null)
+  const stepRequestRef = useRef<AbortController | null>(null)
+
+  useEffect(() => {
+    requestRef.current?.abort()
+    const controller = new AbortController()
+    requestRef.current = controller
+    setLoading(true)
+    setError('')
+    const query = buildRunListQuery({ page, pageSize: 20, ...applied })
+    void client(`/v1/runs?${query}`, { method: 'GET', signal: controller.signal, showResult: false, silentLoading: true }).then((response) => {
+      if (controller.signal.aborted) return
+      const parsed = response.ok ? parseMonitoringPage<unknown>(response.data, 'runs') : null
+      const runs = parsed?.list.map(parsePipelineRun) ?? []
+      if (parsed && runs.every((run): run is PipelineRun => run !== null)) {
+        setRecordsPage({ ...parsed, list: runs })
+        return
+      }
+      setError(response.error?.message || '步骤运行查询暂时不可用，请稍后重试。')
+    }).finally(() => {
+      if (!controller.signal.aborted) setLoading(false)
+    })
+    return () => controller.abort()
+  }, [applied, client, page])
+
+  useEffect(() => () => stepRequestRef.current?.abort(), [])
+
+  function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    setPage(1)
+    setApplied({ traceID: runQuery, status: status === 'all' ? '' : status, runType: runType === 'all' ? '' : runType, startTime, endTime })
+  }
+
+  const selectRun = useCallback(async (runID: number) => {
+    stepRequestRef.current?.abort()
+    const controller = new AbortController()
+    stepRequestRef.current = controller
+    setSelectedRunID(runID)
+    setStepRuns([])
+    setSelectedStepID(null)
+    setStepError('')
+    setStepLoading(true)
+    const response = await client(`/v1/pipeline-runs/${runID}/steps`, { method: 'GET', signal: controller.signal, showResult: false, silentLoading: true })
+    if (controller.signal.aborted) return
+    if (!response.ok) {
+      setStepError(response.error?.message || '步骤详情暂时不可用，请稍后重试。')
+      setStepLoading(false)
+      return
+    }
+    const rawStepRuns = readList<unknown>(response, 'step_runs')
+    const parsedStepRuns = rawStepRuns.map(parseStepRun)
+    if (!parsedStepRuns.every((step): step is StepRun => step !== null)) {
+      setStepError('步骤详情返回格式无效，已拒绝展示。')
+      setStepLoading(false)
+      return
+    }
+    setStepRuns(parsedStepRuns)
+    setStepLoading(false)
+  }, [client])
+
+  useEffect(() => {
+    if (!focusRunID || selectedRunID === focusRunID || !recordsPage?.list.some((run) => run.id === focusRunID)) return
+    void selectRun(focusRunID)
+  }, [focusRunID, recordsPage, selectRun, selectedRunID])
+
+  const runs = recordsPage?.list ?? []
+  const pagination = recordsPage?.pagination
   const visibleRuns = runs.filter((run) => includesQuery([run.id, run.trace_id, run.run_type], runQuery))
   const visibleSteps = stepRuns.filter((step) => includesQuery([step.id, step.run_id, step.step_code, step.method_type, step.status, step.error_message], stepQuery))
   const selectedStep = visibleSteps.find((step) => step.id === selectedStepID) ?? visibleSteps[0] ?? null
@@ -1878,35 +1955,49 @@ function StepRunsQueryPage({ runs, stepRuns, selectedRunID, onLoadSteps }: { run
 
   return (
     <div className="view-stack">
+      <form className="query-bar" onSubmit={submit}>
+        <div className="query-fields">
+          <Field label="运行 / Trace ID" name="step_run_query" value={runQuery} onChange={setRunQuery} />
+          <SelectFilter label="状态" value={status} onChange={setStatus} options={[{ value: 'running', label: '运行中' }, { value: 'success', label: '成功' }, { value: 'failed', label: '失败' }, { value: 'partial_success', label: '部分成功' }]} />
+          <SelectFilter label="运行类型" value={runType} onChange={setRunType} options={[{ value: 'fetch', label: '拉取' }, { value: 'ingest', label: '接收' }, { value: 'transform', label: '清洗' }, { value: 'delivery', label: '推送' }]} />
+          <Field label="开始时间" name="step_run_start_time" type="datetime-local" value={startTime} onChange={setStartTime} />
+          <Field label="结束时间" name="step_run_end_time" type="datetime-local" value={endTime} onChange={setEndTime} />
+        </div>
+        <button type="submit" disabled={loading}>{loading ? '查询中…' : '查询'}</button>
+      </form>
+      {error && <div className="result-banner error" role="alert">{error}{recordsPage ? ' 已保留最近一次成功数据。' : ''}</div>}
       <div className="step-runs-layout">
         <section className="step-runs-column" aria-label="流水线运行">
-          <div className="step-runs-column-heading"><strong>运行</strong><span>{visibleRuns.length} / {runs.length} 条</span></div>
-          <Field label="运行 / Trace ID" name="step_run_query" value={runQuery} onChange={setRunQuery} />
-          {visibleRuns.length === 0 ? <EmptyState text="暂无匹配运行。" /> : <div className="step-runs-list" role="list">{visibleRuns.slice(0, 50).map((run) => {
+          <div className="step-runs-column-heading"><strong>选择运行</strong><span>{loading && !recordsPage ? '正在加载…' : `共 ${pagination?.total ?? 0} 条`}</span></div>
+          {visibleRuns.length === 0 ? <EmptyState text={loading ? '正在加载运行记录…' : '暂无匹配运行。'} /> : <div className="step-runs-list" role="list">{visibleRuns.map((run) => {
             const selected = run.id === selectedRunID
-            return <button className={`step-runs-run ${selected ? 'is-selected' : ''}`} type="button" key={run.id} aria-pressed={selected} onClick={() => onLoadSteps(run.id)}>
-              <span><strong>#{run.id}</strong><small>{run.run_type} · {formatDate(run.started_at)}</small></span><StatusPill label={run.status || '未知'} />
+            return <button className={`step-runs-run ${selected ? 'is-selected' : ''}`} type="button" key={run.id} aria-pressed={selected} onClick={() => void selectRun(run.id)}>
+              <span><strong>#{run.id}</strong><small>{run.trace_id || '-'} · {formatDate(run.started_at)}</small></span><StatusPill label={pipelineRunStatusLabel(run.status)} />
             </button>
           })}</div>}
+          <MonitoringPaginationControls page={pagination?.page ?? page} totalPages={pagination?.totalPages ?? 0} loading={loading} onPrevious={() => setPage((current) => Math.max(1, current - 1))} onNext={() => setPage((current) => current + 1)} />
         </section>
-        <section className="step-runs-column" aria-label="运行步骤">
-          <div className="step-runs-column-heading"><strong>步骤</strong><span>{selectedRunID ? `运行 #${selectedRunID}` : '请选择运行'}</span></div>
+        <section className="step-runs-workspace" aria-label="运行步骤与详情">
+          <div className="step-runs-column-heading"><strong>步骤时间线</strong><span>{selectedRunID ? `运行 #${selectedRunID}` : '请选择运行'}</span></div>
           <Field label="编码 / 类型 / 状态" name="step_query" value={stepQuery} onChange={setStepQuery} />
-          {visibleSteps.length === 0 ? <EmptyState text={selectedRunID ? '当前运行没有匹配步骤。' : '从左侧选择运行后加载步骤。'} /> : <div className="step-runs-list" role="list">{visibleSteps.map((step) => {
+          {stepError && <div className="result-banner error" role="alert">{stepError}</div>}
+          {visibleSteps.length === 0 ? <EmptyState text={stepLoading ? '正在加载步骤详情…' : selectedRunID ? '当前运行没有匹配步骤。' : '从左侧选择运行后加载步骤。'} /> : <div className="step-runs-list step-runs-timeline" role="list">{visibleSteps.map((step) => {
             const selected = step.id === selectedStep?.id
             return <button className={`step-runs-step ${selected ? 'is-selected' : ''}`} type="button" key={step.id} aria-pressed={selected} onClick={() => setSelectedStepID(step.id)}>
-              <span><strong>{step.step_code || `步骤 #${step.id}`}</strong><small>{step.method_type || '-'} · #{step.id}</small></span><StatusPill label={step.status || '未知'} />
+              <span><strong>{step.step_code || `步骤 #${step.id}`}</strong><small>{step.method_type || '-'} · {formatDate(step.started_at)} · {runDurationLabel(step.started_at, step.finished_at)}</small></span><StatusPill label={stepRunStatusLabel(step.status)} />
             </button>
           })}</div>}
+          <aside className="step-runs-detail" aria-live="polite" aria-label="已选步骤详情">
+            {selectedStep ? <>
+              <div className="step-runs-column-heading"><div><strong>{selectedStep.step_code || `步骤 #${selectedStep.id}`}</strong><span>{selectedStep.method_type || '未声明方法类型'} · 运行 #{selectedStep.run_id}</span></div><StatusPill label={stepRunStatusLabel(selectedStep.status)} /></div>
+              {selectedStep.error_message && <p className="step-runs-error" role="alert">该步骤执行失败，错误详情已受保护。</p>}
+              <div className="step-runs-json-grid">
+                <CopyableRedactedJSON label="输入（脱敏）" value={parseJsonText(selectedStep.input_json)} />
+                <CopyableRedactedJSON label="输出（脱敏）" value={parseJsonText(selectedStep.output_json)} />
+              </div>
+            </> : <EmptyState text="选择步骤后查看安全详情。" />}
+          </aside>
         </section>
-        <aside className="step-runs-detail" aria-live="polite" aria-label="已选步骤详情">
-          {selectedStep ? <>
-            <div className="step-runs-column-heading"><div><strong>{selectedStep.step_code || `步骤 #${selectedStep.id}`}</strong><span>{selectedStep.method_type || '未声明方法类型'} · 运行 #{selectedStep.run_id}</span></div><StatusPill label={selectedStep.status || '未知'} /></div>
-            {selectedStep.error_message && <p className="step-runs-error" role="alert">{selectedStep.error_message}</p>}
-            <h3>脱敏步骤数据</h3>
-            <ReadonlyJSON value={redactMonitoringJSON({ input: parseJsonText(selectedStep.input_json), output: parseJsonText(selectedStep.output_json), error: selectedStep.error_message || null })} />
-          </> : <EmptyState text="选择步骤后查看安全详情。" />}
-        </aside>
       </div>
     </div>
   )
@@ -4991,6 +5082,52 @@ function parsePipelineRun(value: unknown): PipelineRun | null {
   }
 }
 
+function parseStepRun(value: unknown): StepRun | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const step = value as Record<string, unknown>
+  const id = publicNonNegativeInteger(step.id)
+  const runID = publicNonNegativeInteger(step.run_id)
+  const pipelineID = publicNonNegativeInteger(step.pipeline_id)
+  const stepID = publicNonNegativeInteger(step.step_id)
+  const status = publicText(step.status, 24)
+  if (id <= 0 || runID <= 0 || pipelineID < 0 || stepID < 0 || !['running', 'success', 'failed', 'skipped'].includes(status)) return null
+  return {
+    id,
+    run_id: runID,
+    pipeline_id: pipelineID,
+    step_id: stepID,
+    step_code: publicText(step.step_code, 100),
+    method_type: publicText(step.method_type, 50),
+    status,
+    input_json: publicText(step.input_json, 4096),
+    output_json: publicText(step.output_json, 4096),
+    generated_config_json: publicText(step.generated_config_json, 4096),
+    error_message: publicText(step.error_message, 240),
+    started_at: publicDateTime(step.started_at),
+    finished_at: publicDateTime(step.finished_at),
+  }
+}
+
+function pipelineRunStatusLabel(status: string) {
+  const labels: Record<string, string> = {
+    running: '运行中',
+    success: '已完成',
+    failed: '失败',
+    partial_success: '部分成功',
+  }
+  return labels[status] ?? '未知'
+}
+
+function stepRunStatusLabel(status: string) {
+  const labels: Record<string, string> = {
+    running: '运行中',
+    success: '已完成',
+    failed: '失败',
+    skipped: '已跳过',
+  }
+  return labels[status] ?? '未知'
+}
+
 function parseDeliveryLog(value: unknown): DeliveryLog | null {
   if (!value || typeof value !== 'object' || Array.isArray(value)) return null
   const log = value as Record<string, unknown>
@@ -5370,6 +5507,30 @@ function ExcelCatalogExplanation({ title, detail }: { title: string; detail: str
       <small>{detail}</small>
     </span>
   )
+}
+
+function CopyableRedactedJSON({ label, value }: { label: string; value: unknown }) {
+  const [message, setMessage] = useState('')
+  const redacted = redactMonitoringJSON(value)
+
+  async function copy() {
+    if (!navigator.clipboard?.writeText) {
+      setMessage('当前浏览器不支持复制，请手动选择内容。')
+      return
+    }
+    try {
+      await navigator.clipboard.writeText(jsonText(redacted))
+      setMessage('已复制脱敏内容。')
+    } catch {
+      setMessage('复制失败，请手动选择内容。')
+    }
+  }
+
+  return <section>
+    <div className="step-runs-json-heading"><h3>{label}</h3><button type="button" onClick={() => void copy()}>复制</button></div>
+    {message && <small role="status" aria-live="polite">{message}</small>}
+    <ReadonlyJSON value={redacted} />
+  </section>
 }
 
 function ReadonlyJSON({ value }: { value: unknown }) {
