@@ -1402,7 +1402,7 @@ function App() {
         <ModuleHeader activeNav={activeNav} loading={loading || refreshing} sessionUser={sessionUser} onOpenNavigation={openMobileNavigation} onRefresh={() => void refreshWorkspace(true)} refreshing={refreshing} mobileNavTriggerRef={mobileNavTriggerRef} />
         {workspaceError && <div className="result-banner error" role="alert">{workspaceError} <button type="button" onClick={() => void refreshWorkspace(false)} disabled={refreshing}>重试</button></div>}
         {activeNav === 'overview' && <PushStatusView runs={runs} deliveryLogs={deliveryLogs} monitoring={monitoring} stale={monitoringStale} onLoadSteps={loadStepRuns} />}
-        {activeNav === 'runs' && <RunsQueryPage client={client} onLoadSteps={loadStepRuns} />}
+        {activeNav === 'runs' && <RunsQueryPage client={client} pipelines={pipelines} onLoadSteps={loadStepRuns} onPipelineRunCompleted={() => void refreshWorkspace(false)} />}
         {activeNav === 'delivery_logs' && <DeliveryLogsQueryPage client={client} onRetryLog={retryDeliveryLog} />}
         {activeNav === 'step_runs' && <StepRunsQueryPage runs={runs} stepRuns={stepRuns} selectedRunID={selectedStepRunID} onLoadSteps={loadStepRuns} />}
         {activeNav === 'store_info' && <StoreInfoPage actorID={actorID} client={client} downloadFile={downloadFile} />}
@@ -1565,7 +1565,6 @@ function MethodsView({ methods, pipelines, client, coreMethods, onToggle, onPipe
       <Panel title="当前已有核心方法" icon={<Wrench />} meta="可开启的真实配置会显示操作按钮">
         <CoreMethodList methods={coreMethods} onToggle={onToggle} />
       </Panel>
-      <PipelineRunPanel pipelines={pipelines} client={client} onRunCompleted={onPipelineRunCompleted} />
       <PipelineComposerPanel pipelines={pipelines} client={client} onRefresh={onPipelineRunCompleted} />
       <QueryBar count={filtered.length} total={methods.length}>
         <Field label="名称 / 编码 / 负责人" name="method_query" value={query} onChange={setQuery} />
@@ -1647,7 +1646,7 @@ function BojunBackfillResultView({ title, result }: { title: string; result: Boj
   )
 }
 
-function RunsQueryPage({ client, onLoadSteps }: { client: ApiClient; onLoadSteps: (runId: number) => void }) {
+function RunsQueryPage({ client, pipelines, onLoadSteps, onPipelineRunCompleted }: { client: ApiClient; pipelines: PipelineDefinition[]; onLoadSteps: (runId: number) => void; onPipelineRunCompleted: () => void }) {
   const [traceID, setTraceID] = useState('')
   const [status, setStatus] = useState('all')
   const [runType, setRunType] = useState('all')
@@ -1690,6 +1689,7 @@ function RunsQueryPage({ client, onLoadSteps }: { client: ApiClient; onLoadSteps
   const pagination = recordsPage?.pagination
   return (
     <div className="view-stack">
+      <PipelineRunPanel pipelines={pipelines} client={client} onRunCompleted={onPipelineRunCompleted} />
       <form className="query-bar" onSubmit={submit}>
         <div className="query-fields">
           <Field label="Trace ID" name="run_trace_id" value={traceID} onChange={setTraceID} />
