@@ -34,6 +34,7 @@ import { MallWeatherPage, StoreInfoPage } from './MallWeatherPage'
 import { DataAuthorizationPage } from './DataAuthorizationPage'
 import { PipelineRunPanel } from './PipelineRunPanel'
 import { PipelineComposerPanel } from './PipelineComposerPanel'
+import { pipelineListPath } from './pipelineRun'
 import { Brand } from './components/Brand'
 import { parseMallWeatherExportContentStatus, submitMallWeatherExportContentDownload } from './mallWeatherExport'
 import { buildRawRecordsRequest, buildWarehouseRawRecordsQuery, parseRawRecordsPage, type RawRecordOrigin, type RawRecordsPage } from './rawRecords'
@@ -965,6 +966,12 @@ function App() {
         } else if (activeNav === 'step_runs') {
           const runResult = await get('/v1/runs?limit=50')
           if (!controller.signal.aborted && runResult.ok) setRuns(readList<PipelineRun>(runResult, 'runs'))
+        } else if (activeNav === 'runs') {
+          const pipelineResult = await get(pipelineListPath())
+          if (!controller.signal.aborted) {
+            if (pipelineResult.ok) setPipelines(readList<PipelineDefinition>(pipelineResult, 'pipelines'))
+            if (!pipelineResult.ok) setWorkspaceError('可执行流水线加载失败，已保留上一次成功数据。')
+          }
         } else if (activeNav === 'rules') {
           const sourceResult = await get('/v1/sources')
           if (!controller.signal.aborted) {
@@ -1391,7 +1398,7 @@ function App() {
         {sessionValidationError && <div className="result-banner error" role="status" aria-live="polite">{sessionValidationError} <button type="button" onClick={() => setSessionValidationAttempt((attempt) => attempt + 1)}>重试校验</button></div>}
         {workspaceError && <div className="result-banner error" role="alert">{workspaceError} <button type="button" onClick={() => void refreshWorkspace(false)} disabled={refreshing}>重试</button></div>}
         {activeNav === 'overview' && <PushStatusView runs={runs} deliveryLogs={deliveryLogs} monitoring={monitoring} stale={monitoringStale} onLoadSteps={loadStepRuns} />}
-        {activeNav === 'runs' && <RunsQueryPage client={client} pipelines={pipelines} onLoadSteps={loadStepRuns} onPipelineRunCompleted={() => void refreshWorkspace(false)} />}
+        {activeNav === 'runs' && <RunsQueryPage client={client} pipelines={pipelines} onLoadSteps={loadStepRuns} onPipelineRunCompleted={() => void refreshWorkspace(false)} refreshVersion={workspaceRefreshVersion} />}
         {activeNav === 'delivery_logs' && <DeliveryLogsQueryPage client={client} onRetryLog={retryDeliveryLog} />}
         {activeNav === 'step_runs' && <StepRunsQueryPage runs={runs} stepRuns={stepRuns} selectedRunID={selectedStepRunID} onLoadSteps={loadStepRuns} />}
         {activeNav === 'store_info' && <StoreInfoPage actorID={actorID} client={client} downloadFile={downloadFile} />}
@@ -1671,7 +1678,7 @@ function useConfigurationListPage<T>(client: ApiClient, path: string, key: strin
   return { recordsPage, loading, error }
 }
 
-function RunsQueryPage({ client, pipelines, onLoadSteps, onPipelineRunCompleted }: { client: ApiClient; pipelines: PipelineDefinition[]; onLoadSteps: (runId: number) => void; onPipelineRunCompleted: () => void }) {
+function RunsQueryPage({ client, pipelines, onLoadSteps, onPipelineRunCompleted, refreshVersion }: { client: ApiClient; pipelines: PipelineDefinition[]; onLoadSteps: (runId: number) => void; onPipelineRunCompleted: () => void; refreshVersion: number }) {
   const [traceID, setTraceID] = useState('')
   const [status, setStatus] = useState('all')
   const [runType, setRunType] = useState('all')
@@ -1702,7 +1709,7 @@ function RunsQueryPage({ client, pipelines, onLoadSteps, onPipelineRunCompleted 
       setError(response.error?.message || '运行记录查询暂时不可用，请稍后重试。')
     }).finally(() => { if (!controller.signal.aborted) setLoading(false) })
     return () => controller.abort()
-  }, [applied, client, page])
+  }, [applied, client, page, refreshVersion])
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()

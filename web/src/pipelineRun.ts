@@ -5,6 +5,10 @@ export type PipelineRunResult = {
   failedCount: number
 }
 
+export function pipelineListPath() {
+  return '/v1/pipelines'
+}
+
 export function pipelineRunPath(pipelineID: number) {
   if (!Number.isSafeInteger(pipelineID) || pipelineID < 1) throw new Error('invalid pipeline id')
   return `/v1/pipelines/${pipelineID}/run`

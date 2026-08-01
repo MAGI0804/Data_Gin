@@ -1,6 +1,10 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { parsePipelineRunResult, pipelineRunPath } from '../.test-dist/pipelineRun.js'
+import { parsePipelineRunResult, pipelineListPath, pipelineRunPath } from '../.test-dist/pipelineRun.js'
+
+test('uses the authenticated pipeline list route', () => {
+  assert.equal(pipelineListPath(), '/v1/pipelines')
+})
 
 test('builds only valid pipeline run paths', () => {
   assert.equal(pipelineRunPath(17), '/v1/pipelines/17/run')
