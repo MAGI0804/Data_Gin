@@ -28,7 +28,7 @@ import './App.css'
 import { apiURL as buildApiURL } from './apiURL'
 import { clearStoredToken, loadStoredSessionUser, loadStoredToken, saveStoredSessionUser, saveStoredToken, saveStoredTokenExpiry, storedTokenExpiresAt, tokenActorID, type StoredSessionUser } from './authStorage'
 import { createApiClient, type ApiRequestOptions, type ClientResponse, type HTTPMethod } from './api/client'
-import { readSessionUser, readTokenInfo, type SessionUser } from './api/auth'
+import { verifySessionResponses, type SessionUser } from './api/auth'
 import { parseDataStatisticsSummary, parseHealthSummary, parseMallWeatherMetricsSummary, redactMonitoringJSON, type DataStatisticsSummary, type HealthSummary, type MallWeatherMetricsSummary } from './monitoring'
 import { MallWeatherPage, StoreInfoPage } from './MallWeatherPage'
 import { DataAuthorizationPage } from './DataAuthorizationPage'
@@ -813,11 +813,14 @@ function App() {
   const tokenRef = useRef(token)
   const actorID = useMemo(() => tokenActorID(token), [token])
   const [sessionState, setSessionState] = useState<'checking' | 'authenticated' | 'anonymous'>(() => token ? 'checking' : 'anonymous')
+  const authenticatedSessionRef = useRef(sessionState === 'authenticated')
   const [sessionUser, setSessionUser] = useState<SessionUser | null>(() => {
     const user = loadStoredSessionUser(window.localStorage)
     return user ? { ...user, email: '', consoleManaged: true } : null
   })
   const [sessionExpiresAt, setSessionExpiresAt] = useState(() => storedTokenExpiresAt(window.localStorage))
+  const [sessionValidationError, setSessionValidationError] = useState('')
+  const [sessionValidationAttempt, setSessionValidationAttempt] = useState(0)
   const [activeNav, setActiveNav] = useState<NavKey>(navFromHash)
   const [expandedNavGroup, setExpandedNavGroup] = useState(() => navGroupFor(navFromHash())?.label ?? navGroups[0].label)
   const [navQuery, setNavQuery] = useState('')
@@ -853,6 +856,7 @@ function App() {
     setToken('')
     setSessionUser(null)
     setSessionExpiresAt(null)
+    setSessionValidationError('')
     setSessionState('anonymous')
     setResult(null)
   }, [])
@@ -1088,34 +1092,47 @@ function App() {
   }, [apiClient, clearSession, sessionExpiresAt, token])
 
   useEffect(() => {
+    authenticatedSessionRef.current = sessionState === 'authenticated'
+  }, [sessionState])
+
+  useEffect(() => {
     if (!token) return
     let current = true
     const controller = new AbortController()
-    setSessionState('checking')
+    const preserveAuthenticatedSession = authenticatedSessionRef.current
+    if (!preserveAuthenticatedSession) setSessionState('checking')
     void Promise.all([
       apiClient.request('/auth/me', { method: 'GET', signal: controller.signal }),
       apiClient.request('/auth/token/info', { method: 'GET', signal: controller.signal }),
     ]).then(([profileResponse, tokenInfoResponse]) => {
       if (!current) return
-      const user = profileResponse.ok ? readSessionUser(profileResponse.data) : null
-      const tokenInfo = tokenInfoResponse.ok ? readTokenInfo(tokenInfoResponse.data) : null
-      if (!user || !tokenInfo || tokenInfo.userID !== user.id) {
-        if (profileResponse.error?.kind === 'unauthorized' || tokenInfoResponse.error?.kind === 'unauthorized') clearSession()
-        else setSessionState('anonymous')
+      const verification = verifySessionResponses(profileResponse, tokenInfoResponse)
+      if (verification.kind !== 'valid') {
+        if (verification.kind === 'unauthorized' || verification.kind === 'invalid') {
+          clearSession()
+          return
+        }
+        if (preserveAuthenticatedSession) {
+          setSessionValidationError('会话校验暂不可用，当前数据可能已过期。')
+        } else {
+          clearSession()
+        }
         return
       }
+      const { user, tokenInfo } = verification
       const storedUser: StoredSessionUser = { id: user.id, account: user.account, nickname: user.nickname }
       saveStoredSessionUser(storedUser, window.localStorage)
       saveStoredTokenExpiry(tokenInfo.expireTime * 1000, window.localStorage)
       setSessionUser(user)
       setSessionExpiresAt(tokenInfo.expireTime * 1000)
+      setSessionValidationError('')
       setSessionState('authenticated')
     })
     return () => {
       current = false
       controller.abort()
     }
-  }, [apiClient, clearSession, token])
+  }, [apiClient, clearSession, sessionValidationAttempt, token])
 
   useEffect(() => {
     if (!mobileNavOpen) return
@@ -1400,6 +1417,7 @@ function App() {
 
       <section className="ops-workspace">
         <ModuleHeader activeNav={activeNav} loading={loading || refreshing} sessionUser={sessionUser} onOpenNavigation={openMobileNavigation} onRefresh={() => void refreshWorkspace(true)} refreshing={refreshing} mobileNavTriggerRef={mobileNavTriggerRef} />
+        {sessionValidationError && <div className="result-banner error" role="status" aria-live="polite">{sessionValidationError} <button type="button" onClick={() => setSessionValidationAttempt((attempt) => attempt + 1)}>重试校验</button></div>}
         {workspaceError && <div className="result-banner error" role="alert">{workspaceError} <button type="button" onClick={() => void refreshWorkspace(false)} disabled={refreshing}>重试</button></div>}
         {activeNav === 'overview' && <PushStatusView runs={runs} deliveryLogs={deliveryLogs} monitoring={monitoring} stale={monitoringStale} onLoadSteps={loadStepRuns} />}
         {activeNav === 'runs' && <RunsQueryPage client={client} pipelines={pipelines} onLoadSteps={loadStepRuns} onPipelineRunCompleted={() => void refreshWorkspace(false)} />}

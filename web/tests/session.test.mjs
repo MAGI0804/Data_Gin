@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { isSuccessfulPayload, readEnvelopeToken, readSessionUser, readTokenInfo } from '../.test-dist/api/auth.js'
+import { isSuccessfulPayload, readEnvelopeToken, readSessionUser, readTokenInfo, verifySessionResponses } from '../.test-dist/api/auth.js'
 
 test('accepts both supported successful API envelope codes', () => {
   assert.equal(isSuccessfulPayload({ code: 0, data: {} }), true)
@@ -62,4 +62,27 @@ test('parses the string user ID returned by the token-info endpoint', () => {
     code: 0,
     data: { user_id: '7x', token_type: 'r', expire_time: 2_000_000_000, issued_time: 1_999_000_000, ttl: 10_000 },
   }), null)
+})
+
+const validProfileResponse = {
+  ok: true,
+  data: { code: 200, data: { id: 7, account: 'operator', nickname: '运营人员', email: 'ops@example.test', consoleManaged: true } },
+}
+
+const validTokenInfoResponse = {
+  ok: true,
+  data: { code: 200, data: { user_id: 7, token_type: 'refreshable', expire_time: 2_000_000_000, issued_time: 1_999_000_000, ttl: 10_000 } },
+}
+
+test('classifies only a complete matching session as valid', () => {
+  const verification = verifySessionResponses(validProfileResponse, validTokenInfoResponse)
+  assert.equal(verification.kind, 'valid')
+  if (verification.kind === 'valid') assert.equal(verification.user.id, verification.tokenInfo.userID)
+})
+
+test('keeps temporary session validation failures distinct from invalid credentials', () => {
+  assert.equal(verifySessionResponses({ ok: false, data: null, error: { kind: 'offline' } }, validTokenInfoResponse).kind, 'transient')
+  assert.equal(verifySessionResponses(validProfileResponse, { ok: false, data: null, error: { kind: 'rate_limited' } }).kind, 'transient')
+  assert.equal(verifySessionResponses({ ok: false, data: null, error: { kind: 'unauthorized' } }, validTokenInfoResponse).kind, 'unauthorized')
+  assert.equal(verifySessionResponses(validProfileResponse, { ...validTokenInfoResponse, data: { code: 200, data: { user_id: 8, token_type: 'refreshable', expire_time: 2_000_000_000, issued_time: 1_999_000_000, ttl: 10_000 } } }).kind, 'invalid')
 })

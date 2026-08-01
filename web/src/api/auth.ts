@@ -16,6 +16,16 @@ export type TokenInfo = {
   ttl: number
 }
 
+export type SessionVerificationResponse = {
+  ok: boolean
+  data: unknown
+  error?: { kind: string }
+}
+
+export type SessionVerification =
+  | { kind: 'valid'; user: SessionUser; tokenInfo: TokenInfo }
+  | { kind: 'unauthorized' | 'invalid' | 'transient' }
+
 function readPositiveSafeInteger(value: unknown): number | null {
   if (typeof value === 'number') {
     return Number.isSafeInteger(value) && value > 0 ? value : null
@@ -65,4 +75,19 @@ export function readTokenInfo(payload: unknown): TokenInfo | null {
     issuedTime: data.issued_time,
     ttl: data.ttl,
   }
+}
+
+export function verifySessionResponses(
+  profileResponse: SessionVerificationResponse,
+  tokenInfoResponse: SessionVerificationResponse,
+): SessionVerification {
+  if (profileResponse.error?.kind === 'unauthorized' || tokenInfoResponse.error?.kind === 'unauthorized') {
+    return { kind: 'unauthorized' }
+  }
+  if (!profileResponse.ok || !tokenInfoResponse.ok) return { kind: 'transient' }
+
+  const user = readSessionUser(profileResponse.data)
+  const tokenInfo = readTokenInfo(tokenInfoResponse.data)
+  if (!user || !tokenInfo || tokenInfo.userID !== user.id) return { kind: 'invalid' }
+  return { kind: 'valid', user, tokenInfo }
 }
