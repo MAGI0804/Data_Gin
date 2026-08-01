@@ -1410,8 +1410,8 @@ function App() {
         {activeNav === 'data_authorizations' && <DataAuthorizationPage client={client} />}
         {activeNav === 'sources' && <SourcesQueryPage client={client} sources={sources} onFetchSource={fetchSource} onTestSource={testSource} onRefresh={() => refreshWorkspace(false)} />}
         {activeNav === 'methods' && <MethodsView methods={methods} pipelines={pipelines} client={client} coreMethods={coreMethods} onToggle={toggleTarget} onPipelineRunCompleted={() => void refreshWorkspace(false)} />}
-        {activeNav === 'receive' && <RawRecordsQueryPage title="接口接收记录" origin="receive" client={client} />}
-        {activeNav === 'pull_records' && <RawRecordsQueryPage title="数据拉取记录" origin="pull" client={client} />}
+        {activeNav === 'receive' && <RawRecordsQueryPage title="接口接收记录" origin="receive" client={client} onFetchSource={fetchSource} />}
+        {activeNav === 'pull_records' && <RawRecordsQueryPage title="数据拉取记录" origin="pull" client={client} onFetchSource={fetchSource} />}
         {activeNav === 'backfill' && <BojunBackfillPage loading={loading || refreshing} onPreview={previewBojunOrderBackfill} onConfirm={confirmBojunOrderBackfill} />}
         {activeNav === 'youzan_distribution' && <YouzanDistributionPage task={legacyTasks.find((item) => item.code === 'youzan_distribution_order_fetch')} loading={loading || refreshing} onPreview={previewYouzanDistributionBackfill} onConfirm={confirmYouzanDistributionBackfill} onRun={runLegacyTask} />}
         {activeNav === 'rules' && <RulesQueryPage client={client} rules={transformRules} sources={sources} onRulesChange={setTransformRules} />}
@@ -1877,7 +1877,7 @@ function SourcesQueryPage({ client, sources, onFetchSource, onTestSource, onRefr
   )
 }
 
-function RawRecordsQueryPage({ title, origin, client }: { title: string; origin: RawRecordOrigin; client: ApiClient }) {
+function RawRecordsQueryPage({ title, origin, client, onFetchSource }: { title: string; origin: RawRecordOrigin; client: ApiClient; onFetchSource: (sourceID: number) => Promise<ApiResult> }) {
   const [source, setSource] = useState('')
   const [startTime, setStartTime] = useState('')
   const [endTime, setEndTime] = useState('')
@@ -1886,6 +1886,9 @@ function RawRecordsQueryPage({ title, origin, client }: { title: string; origin:
   const [recordsPage, setRecordsPage] = useState<RawRecordsPage<RawData> | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState('')
+  const [pendingSourceFetchID, setPendingSourceFetchID] = useState<number | null>(null)
+  const [fetchingSourceID, setFetchingSourceID] = useState<number | null>(null)
+  const [sourceFetchMessage, setSourceFetchMessage] = useState('')
   const requestRef = useRef<AbortController | null>(null)
 
   useEffect(() => {
@@ -1917,6 +1920,20 @@ function RawRecordsQueryPage({ title, origin, client }: { title: string; origin:
     setAppliedQuery({ source, startTime: backendDateTime(startTime), endTime: backendDateTime(endTime) })
   }
 
+  async function fetchSource() {
+    const sourceID = pendingSourceFetchID
+    if (!sourceID || fetchingSourceID !== null) return
+    setFetchingSourceID(sourceID)
+    setSourceFetchMessage('')
+    const response = await onFetchSource(sourceID)
+    const summary = response.ok ? parseSourceFetchSummary(response.data) : null
+    setSourceFetchMessage(summary
+      ? `数据源 #${sourceID} 拉取完成：成功 ${summary.successCount}/${summary.totalCount}，失败 ${summary.failedCount}。`
+      : response.error?.message || '数据源拉取未完成，请稍后重试。')
+    setFetchingSourceID(null)
+    setPendingSourceFetchID(null)
+  }
+
   const records = recordsPage?.list ?? []
   const total = recordsPage?.total ?? 0
   const totalPages = recordsPage?.totalPages ?? 0
@@ -1933,19 +1950,21 @@ function RawRecordsQueryPage({ title, origin, client }: { title: string; origin:
       <p className="query-contract-note">已按真实后端能力提供来源、时间范围和分页筛选；类型、状态及业务键筛选需后端增加对应索引后再开放。</p>
       {error && <div className="result-banner error" role="alert">{error} 已保留最近一次成功数据。</div>}
       <Panel title={title} icon={<Inbox />} meta={loading && !recordsPage ? '正在加载…' : `共 ${total} 条`}>
-        <RawDataList records={records} />
+        {sourceFetchMessage && <div className="result-banner" role="status" aria-live="polite">{sourceFetchMessage}</div>}
+        <RawDataList records={records} onRequestSourceFetch={setPendingSourceFetchID} />
         <div className="record-actions raw-record-pagination" role="status" aria-live="polite">
           <span>第 {recordsPage?.page ?? page} / {Math.max(totalPages, 1)} 页</span>
           <button type="button" onClick={() => setPage((current) => Math.max(1, current - 1))} disabled={loading || page <= 1}>上一页</button>
           <button type="button" onClick={() => setPage((current) => current + 1)} disabled={loading || totalPages === 0 || page >= totalPages}>下一页</button>
         </div>
       </Panel>
-      {origin === 'receive' && <WarehouseRawRecordsPanel client={client} />}
+      <WarehouseRawRecordsPanel client={client} origin={origin} />
+      {pendingSourceFetchID !== null && <Modal title="确认拉取数据源" closeDisabled={fetchingSourceID !== null} onClose={() => { if (fetchingSourceID === null) setPendingSourceFetchID(null) }} footer={<><button type="button" disabled={fetchingSourceID !== null} onClick={() => setPendingSourceFetchID(null)}>取消</button><button className="primary" type="button" disabled={fetchingSourceID !== null} onClick={() => void fetchSource()}>{fetchingSourceID === pendingSourceFetchID ? '拉取中…' : '确认拉取'}</button></>}><p>确认立即拉取数据源 #{pendingSourceFetchID}？该操作会向已配置的来源发起真实请求。</p></Modal>}
     </div>
   )
 }
 
-function WarehouseRawRecordsPanel({ client }: { client: ApiClient }) {
+function WarehouseRawRecordsPanel({ client, origin }: { client: ApiClient; origin: RawRecordOrigin }) {
   const [source, setSource] = useState('')
   const [status, setStatus] = useState('')
   const [traceID, setTraceID] = useState('')
@@ -1968,7 +1987,7 @@ function WarehouseRawRecordsPanel({ client }: { client: ApiClient }) {
     requestRef.current = controller
     setLoading(true)
     setError('')
-    const query = buildWarehouseRawRecordsQuery({ page, pageSize: 20, origin: 'receive', ...appliedQuery })
+    const query = buildWarehouseRawRecordsQuery({ page, pageSize: 20, origin, ...appliedQuery })
     void client(`/v1/raw-records?${query}`, {
       method: 'GET', signal: controller.signal, showResult: false, silentLoading: true,
     }).then((response) => {
@@ -1984,7 +2003,7 @@ function WarehouseRawRecordsPanel({ client }: { client: ApiClient }) {
       if (!controller.signal.aborted) setLoading(false)
     })
     return () => controller.abort()
-  }, [appliedQuery, client, page, reloadVersion])
+  }, [appliedQuery, client, origin, page, reloadVersion])
 
   function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -2020,8 +2039,8 @@ function WarehouseRawRecordsPanel({ client }: { client: ApiClient }) {
   const totalPages = recordsPage?.totalPages ?? 0
   return (
     <>
-      <Panel title="可重新处理原始记录" icon={<RefreshCcw />} meta={loading && !recordsPage ? '正在加载…' : `共 ${total} 条`}>
-        <p className="query-contract-note">此列表仅展示新仓库的脱敏原始记录。历史“接口接收记录”仍只读；只有本列表中的 ID 可安全重新处理。</p>
+      <Panel title={`可重新处理${origin === 'pull' ? '拉取' : '接收'}记录`} icon={<RefreshCcw />} meta={loading && !recordsPage ? '正在加载…' : `共 ${total} 条`}>
+        <p className="query-contract-note">此列表查询新仓库中 origin={origin} 的脱敏记录。历史列表仍只读；只有本列表中的 ID 可安全重新处理。</p>
         <form className="query-bar" onSubmit={submit}>
           <div className="query-fields">
             <Field label="来源" name="warehouse_raw_source" value={source} onChange={setSource} />
@@ -4830,7 +4849,7 @@ function rawRecordStatusLabel(status: WarehouseRawRecord['status']) {
   return ({ received: '已接收', queued: '排队中', cleaning: '处理中', cleaned: '已清洗', failed: '失败' } as const)[status]
 }
 
-function RawDataList({ records }: { records: RawData[] }) {
+function RawDataList({ records, onRequestSourceFetch }: { records: RawData[]; onRequestSourceFetch: (sourceID: number) => void }) {
   if (records.length === 0) return <EmptyState text="暂无原始数据。" />
   return (
     <div className="record-list">
@@ -4839,8 +4858,12 @@ function RawDataList({ records }: { records: RawData[] }) {
           <div>
             <strong>#{record.id} / {record.data_type || 'raw'}</strong>
             <span>来源 {record.data_source_id || '-'} / 状态 {record.status || '-'}</span>
+            <details>
+              <summary>查看脱敏原始内容与元数据</summary>
+              <ReadonlyJSON value={redactMonitoringJSON({ raw_content: record.raw_content ?? record.rawContent ?? null, metadata: record.metadata ?? null })} />
+            </details>
           </div>
-          <small>{rawDataOrigin(record)}</small>
+          <div className="record-actions"><small>{rawDataOrigin(record)}</small>{record.data_source_id > 0 && <button type="button" onClick={() => onRequestSourceFetch(record.data_source_id)}>拉取来源</button>}</div>
         </article>
       ))}
     </div>
@@ -4922,6 +4945,10 @@ function ProcessedDataList({ records }: { records: ProcessedData[] }) {
           <div>
             <strong>#{record.id} / {record.data_type || 'processed'}</strong>
             <span>raw #{record.raw_data_id} / 质量 {record.quality_score}</span>
+            <details>
+              <summary>查看脱敏处理字段</summary>
+              <ReadonlyJSON value={redactMonitoringJSON(parseJsonText(record.data_fields))} />
+            </details>
           </div>
           <small>{record.created_at || '-'}</small>
         </article>

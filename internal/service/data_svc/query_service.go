@@ -28,21 +28,21 @@ func NewQueryService() *QueryService {
 }
 
 type RawDataResponse struct {
-	ID           uint                   `json:"id"`
-	DataSourceID uint                   `json:"data_source_id"`
-	ExternalID   string                 `json:"external_id"`
-	DataType     string                 `json:"data_type"`
-	RawContent   map[string]interface{} `json:"raw_content"`
-	Metadata     map[string]interface{} `json:"metadata"`
-	Status       string                 `json:"status"`
-	ErrorMessage string                 `json:"error_message"`
-	ProcessedAt  int                    `json:"processed_at"`
-	Remark       string                 `json:"remark"`
-	Source       string                 `json:"source"`
-	ClientIP     string                 `json:"client_ip"`
-	IngestedAt   interface{}            `json:"ingested_at"`
-	CreatedAt    interface{}            `json:"created_at"`
-	UpdatedAt    interface{}            `json:"updated_at"`
+	ID           uint        `json:"id"`
+	DataSourceID uint        `json:"data_source_id"`
+	ExternalID   string      `json:"external_id"`
+	DataType     string      `json:"data_type"`
+	RawContent   interface{} `json:"raw_content"`
+	Metadata     interface{} `json:"metadata"`
+	Status       string      `json:"status"`
+	ErrorMessage string      `json:"error_message"`
+	ProcessedAt  int         `json:"processed_at"`
+	Remark       string      `json:"remark"`
+	Source       string      `json:"source"`
+	ClientIP     string      `json:"client_ip"`
+	IngestedAt   interface{} `json:"ingested_at"`
+	CreatedAt    interface{} `json:"created_at"`
+	UpdatedAt    interface{} `json:"updated_at"`
 }
 
 type RawDataListResult struct {
@@ -115,23 +115,13 @@ func (s *QueryService) GetRawDataList(ctx context.Context, page, pageSize int, s
 
 	list := make([]RawDataResponse, 0, len(result.List))
 	for _, item := range result.List {
-		var rawContent map[string]interface{}
-		if item.RawContent != "" {
-			json.Unmarshal([]byte(item.RawContent), &rawContent)
-		}
-
-		var metadata map[string]interface{}
-		if item.Metadata != "" {
-			json.Unmarshal([]byte(item.Metadata), &metadata)
-		}
-
 		list = append(list, RawDataResponse{
 			ID:           item.ID,
 			DataSourceID: item.DataSourceID,
 			ExternalID:   item.ExternalID,
 			DataType:     item.DataType,
-			RawContent:   rawContent,
-			Metadata:     metadata,
+			RawContent:   decodeRawJSON(item.RawContent),
+			Metadata:     decodeRawJSON(item.Metadata),
 			Status:       item.Status,
 			ErrorMessage: item.ErrorMessage,
 			ProcessedAt:  item.ProcessedAt,
@@ -156,6 +146,21 @@ func (s *QueryService) GetRawDataList(ctx context.Context, page, pageSize int, s
 		PageSize:   pageSize,
 		TotalPages: totalPages,
 	}, nil
+}
+
+// decodeRawJSON keeps every valid JSON value shape for the management read
+// model. Raw ingestion accepts arbitrary JSON, so decoding only into a map
+// would silently discard arrays and scalar values before the UI can display a
+// redacted preview.
+func decodeRawJSON(value string) interface{} {
+	if value == "" {
+		return nil
+	}
+	var decoded interface{}
+	if err := json.Unmarshal([]byte(value), &decoded); err != nil {
+		return nil
+	}
+	return decoded
 }
 
 // GetRawData 查询原始数据
