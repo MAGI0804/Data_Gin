@@ -805,6 +805,54 @@ button:focus-visible {
   padding: 12px;
 }
 
+.query-bar-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 10px;
+  white-space: nowrap;
+}
+
+.query-bar-actions > span {
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.query-bar-actions > span strong {
+  color: var(--success, #138a47);
+  font-size: 15px;
+}
+
+.raw-record-summary {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  border-top: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
+}
+
+.raw-record-summary .metric {
+  min-height: 72px;
+}
+
+.raw-record-query-bar {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+
+.raw-record-advanced-filter {
+  grid-column: 1 / -1;
+  margin: 0;
+}
+
+.raw-record-advanced-filter[open] {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.raw-record-advanced-filter summary {
+  grid-column: 1 / -1;
+}
+
 .query-fields {
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
@@ -1013,6 +1061,74 @@ button:focus-visible {
   color: #666666;
   font-size: 12px;
   line-height: 1.5;
+}
+
+.backfill-warning {
+  display: flex;
+  align-items: center;
+  gap: 18px;
+  margin-top: 20px;
+  border-top: 2px solid var(--accent);
+  background: #fffaf1;
+  color: #3f3f46;
+  font-size: 12px;
+  line-height: 1.5;
+  padding: 14px 16px;
+}
+
+.backfill-warning svg {
+  width: 24px;
+  height: 24px;
+  flex: 0 0 auto;
+  color: #e98b00;
+}
+
+.backfill-warning span + span {
+  border-left: 1px solid var(--line);
+  padding-left: 18px;
+}
+
+.backfill-warning.compact {
+  align-items: flex-start;
+  gap: 10px;
+  margin-top: 14px;
+}
+
+.youzan-operations-grid {
+  display: grid;
+  grid-template-columns: minmax(360px, 0.9fr) minmax(0, 1.4fr);
+  border-top: 1px solid var(--line);
+}
+
+.youzan-operations-grid > .workbench-panel {
+  border-top: 0;
+  padding: 0 22px 22px 0;
+}
+
+.youzan-operations-grid > .workbench-panel + .workbench-panel {
+  border-left: 1px solid var(--line);
+  padding-right: 0;
+  padding-left: 22px;
+}
+
+.youzan-operations-grid .youzan-backfill-form {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.youzan-operations-grid .youzan-backfill-form > label:first-child {
+  grid-column: 1 / -1;
+}
+
+.youzan-operations-grid .youzan-backfill-form > button {
+  width: 100%;
+}
+
+.youzan-operations-grid .overview-grid.compact {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.youzan-operations-grid .overview-grid.compact .metric:nth-child(4) {
+  border-left: 0;
 }
 
 .backfill-result {
@@ -2648,13 +2764,13 @@ button:focus-visible {
 
 .raw-record-master-detail {
   display: grid;
-  grid-template-columns: minmax(0, 1.55fr) minmax(280px, 0.85fr);
+  grid-template-columns: 1fr;
   border: 1px solid var(--line);
 }
 
 .raw-record-table-wrap {
   max-height: 580px;
-  border-right: 1px solid var(--line);
+  border-bottom: 1px solid var(--line);
 }
 
 .raw-record-table tbody tr.is-selected {
@@ -2683,6 +2799,13 @@ button:focus-visible {
   min-width: 0;
   background: #fff;
   padding: 14px;
+}
+
+.raw-record-table td:first-child small {
+  display: block;
+  margin-top: 3px;
+  color: var(--muted);
+  font-size: 10px;
 }
 
 .raw-record-detail-title {
@@ -2723,6 +2846,45 @@ button:focus-visible {
   .raw-record-table-wrap {
     border-right: 0;
     border-bottom: 1px solid var(--line);
+  }
+}
+
+@media (max-width: 1180px) {
+  .youzan-operations-grid {
+    grid-template-columns: 1fr;
+  }
+
+  .youzan-operations-grid > .workbench-panel,
+  .youzan-operations-grid > .workbench-panel + .workbench-panel {
+    border-left: 0;
+    padding: 0 0 22px;
+  }
+
+  .backfill-warning {
+    align-items: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .backfill-warning span + span {
+    border-left: 0;
+    padding-left: 0;
+  }
+}
+
+@media (max-width: 840px) {
+  .query-bar-actions {
+    justify-content: flex-start;
+    flex-wrap: wrap;
+  }
+
+  .raw-record-summary,
+  .raw-record-advanced-filter[open],
+  .youzan-operations-grid .youzan-backfill-form {
+    grid-template-columns: 1fr;
+  }
+
+  .youzan-operations-grid .youzan-backfill-form > label:first-child {
+    grid-column: auto;
   }
 }
 

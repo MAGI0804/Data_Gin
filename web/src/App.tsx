@@ -1,6 +1,7 @@
 import { FormEvent, ReactNode, type RefObject, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import {
   Activity,
+  AlertTriangle,
   ArrowDownToLine,
   ArrowUpFromLine,
   BookOpen,
@@ -2025,6 +2026,15 @@ function SourcesQueryPage({ client, onFetchSource, onTestSource, refreshVersion 
     setReloadVersion((version) => version + 1)
   }
 
+  function resetQuery() {
+    setQuery('')
+    setStatus('all')
+    setSourceType('')
+    setPage(1)
+    setApplied({ keyword: '', enabled: '', sourceType: '' })
+    setReloadVersion((version) => version + 1)
+  }
+
   async function openDetail(id: number) {
     setMessage('')
     const response = await client(`/v1/sources/${id}`, { method: 'GET', showResult: false, silentLoading: true })
@@ -2057,11 +2067,11 @@ function SourcesQueryPage({ client, onFetchSource, onTestSource, refreshVersion 
   return (
     <div className="view-stack">
       {message && <div className="result-banner" role="status">{message}</div>}
-      <form className="query-bar" onSubmit={submitQuery}><div className="query-fields">
+      <form className="query-bar source-query-bar" onSubmit={submitQuery}><div className="query-fields">
         <Field label="名称 / 编码 / 鉴权" name="source_query" value={query} onChange={setQuery} />
         <SelectFilter label="状态" value={status} onChange={setStatus} options={[{ value: 'enabled', label: '启用' }, { value: 'disabled', label: '停用' }]} />
-        <Field label="类型" name="source_type" value={sourceType} onChange={setSourceType} />
-      </div><button type="submit" disabled={loading}>{loading ? '查询中…' : '查询'}</button></form>
+        <SelectFilter label="类型" value={sourceType || 'all'} onChange={(value) => setSourceType(value === 'all' ? '' : value)} options={[{ value: 'api_poll', label: 'API' }, { value: 'webhook', label: 'Webhook' }, { value: 'database', label: '数据库' }, { value: 'file', label: '文件' }]} />
+      </div><div className="query-bar-actions"><span>查询命中 <strong>{pagination?.total ?? 0}</strong> 条</span><button type="button" onClick={resetQuery} disabled={loading}>重置筛选</button><button className="primary" type="submit" disabled={loading}>{loading ? '查询中…' : '查询'}</button></div></form>
       {error && <div className="result-banner error" role="alert">{error}{recordsPage ? ' 已保留最近一次成功数据。' : ''}</div>}
       <div className="record-actions"><button type="button" className="primary" onClick={() => setDraft({ id: null, name: '', code: '', sourceType: 'api_poll', enabled: true, authType: 'none', configJSON: '{\n  "url": "",\n  "method": "GET",\n  "records_path": "data"\n}', schemaJSON: '{}', dedupeKeys: '[]', sourceQueryKey: '', hasSecret: false })}>新增数据源</button></div>
       <Panel title="数据源配置" icon={<Database />} meta={loading && !recordsPage ? '正在加载…' : `共 ${pagination?.total ?? 0} 条`}><SourceList sources={listedSources} onDetail={(source) => { void openDetail(source.id) }} onFetchSource={onFetchSource} onTestSource={onTestSource} /><MonitoringPaginationControls page={pagination?.page ?? page} totalPages={pagination?.totalPages ?? 0} loading={loading} onPrevious={() => setPage((current) => Math.max(1, current - 1))} onNext={() => setPage((current) => current + 1)} /></Panel>
@@ -2138,6 +2148,17 @@ function RawRecordsQueryPage({ title, origin, client, onFetchSource }: { title: 
     })
   }
 
+  function resetQuery() {
+    setSource('')
+    setDataType('')
+    setStatus('')
+    setBusinessKey('')
+    setStartTime('')
+    setEndTime('')
+    setPage(1)
+    setAppliedQuery({ source: '', dataType: '', status: '', businessKey: '', startTime: '', endTime: '' })
+  }
+
   async function fetchSource() {
     const sourceID = pendingSourceFetchID
     if (!sourceID || fetchingSourceID !== null) return
@@ -2157,24 +2178,29 @@ function RawRecordsQueryPage({ title, origin, client, onFetchSource }: { title: 
   const totalPages = recordsPage?.totalPages ?? 0
   return (
     <div className="view-stack">
-      <form className="query-bar" onSubmit={submit}>
+      {origin === 'pull' && <section className="raw-record-summary" aria-label="拉取记录摘要">
+        <Metric label="当前结果" value={total} />
+        <Metric label="当前页" value={records.length} />
+        <Metric label="总页数" value={Math.max(totalPages, 1)} />
+      </section>}
+      <form className="query-bar raw-record-query-bar" onSubmit={submit}>
         <div className="query-fields">
-          <Field label="来源" name="raw_source" value={source} onChange={setSource} />
-          <Field label="数据类型" name="raw_data_type" value={dataType} onChange={setDataType} />
+          <Field label="ID / 外部编号 / 内容" name="raw_business_key" value={businessKey} onChange={setBusinessKey} />
           <SelectFilter label="状态" value={status || 'all'} onChange={(next) => setStatus(next === 'all' ? '' : next)} options={[
             { value: 'pending', label: '待处理' }, { value: 'processing', label: '处理中' }, { value: 'processed', label: '已处理' }, { value: 'error', label: '异常' },
           ]} />
-          <Field label="业务键" name="raw_business_key" value={businessKey} onChange={setBusinessKey} />
-          <Field label="开始时间" name="raw_start_time" type="datetime-local" value={startTime} onChange={setStartTime} />
-          <Field label="结束时间" name="raw_end_time" type="datetime-local" value={endTime} onChange={setEndTime} />
+          <Field label="来源" name="raw_source" value={source} onChange={setSource} />
+          {origin === 'pull' && <Field label="开始时间" name="raw_start_time" type="datetime-local" value={startTime} onChange={setStartTime} />}
+          {origin === 'pull' && <Field label="结束时间" name="raw_end_time" type="datetime-local" value={endTime} onChange={setEndTime} />}
         </div>
-        <button type="submit" disabled={loading}>{loading ? '查询中…' : '查询'}</button>
+        <div className="query-bar-actions"><span>查询命中 <strong>{total}</strong> 条</span><button type="button" onClick={resetQuery} disabled={loading}>重置</button><button className="primary" type="submit" disabled={loading}>{loading ? '查询中…' : '查询'}</button></div>
+        <details className="raw-record-advanced-filter"><summary>更多筛选</summary><Field label="数据类型" name="raw_data_type" value={dataType} onChange={setDataType} />{origin === 'receive' && <><Field label="开始时间" name="raw_start_time" type="datetime-local" value={startTime} onChange={setStartTime} /><Field label="结束时间" name="raw_end_time" type="datetime-local" value={endTime} onChange={setEndTime} /></>}</details>
       </form>
       <p className="query-contract-note">来源、类型、状态、外部业务键与时间范围均由服务端分页筛选；业务键对应原始记录的外部 ID。</p>
       {error && <div className="result-banner error" role="alert">{error} 已保留最近一次成功数据。</div>}
       <Panel title={`${title}（含脱敏内容）`} icon={<Inbox />} meta={loading && !recordsPage ? '正在加载…' : `共 ${total} 条`}>
         {sourceFetchMessage && <div className="result-banner" role="status" aria-live="polite">{sourceFetchMessage}</div>}
-        <RawDataList records={records} onRequestSourceFetch={setPendingSourceFetchID} />
+        <RawDataList origin={origin} records={records} onRequestSourceFetch={setPendingSourceFetchID} />
         <div className="record-actions raw-record-pagination" role="status" aria-live="polite">
           <span>第 {recordsPage?.page ?? page} / {Math.max(totalPages, 1)} 页</span>
           <button type="button" onClick={() => setPage((current) => Math.max(1, current - 1))} disabled={loading || page <= 1}>上一页</button>
@@ -2679,6 +2705,7 @@ function BojunBackfillPage({ loading, onPreview, onConfirm }: {
           <button className="primary" type="submit" disabled={loading}>预览补拉</button>
           <button type="button" disabled={loading || writing || !preview || preview.writable_count === 0} onClick={() => setConfirmingWrite(true)}>确认写入</button>
         </form>
+        <aside className="backfill-warning" aria-label="写入提示"><AlertTriangle aria-hidden="true" /><strong>写入前请确认</strong><span>预览会真实请求伯俊接口，但不会写入数据库。</span><span>确认后将重新拉取相同时间范围。</span><span>已有 docno 不覆盖，请核对可写入数量。</span></aside>
         {preview && <BojunBackfillResultView title="预览结果" result={preview} />}
         {confirmed && <BojunBackfillResultView title="写入结果" result={confirmed} />}
       </Panel>
@@ -2695,7 +2722,6 @@ function YouzanDistributionPage({ task, loading, onPreview, onConfirm, onRun }: 
   onRun: (code: string, payload: YouzanDistributionBackfillPayload) => Promise<ApiResult>
 }) {
   const previewVersionRef = useRef(0)
-  const [showBackfill, setShowBackfill] = useState(false)
   const [timeFilter, setTimeFilter] = useState<YouzanDistributionTimeFilter>('created')
   const [payload, setPayload] = useState<YouzanDistributionBackfillPayload | null>(null)
   const [preview, setPreview] = useState<YouzanDistributionBackfillResult | null>(null)
@@ -2749,11 +2775,6 @@ function YouzanDistributionPage({ task, loading, onPreview, onConfirm, onRun }: 
     invalidateBackfillPreview()
   }
 
-  function openBackfill() {
-    invalidateBackfillPreview()
-    setShowBackfill(true)
-  }
-
   function openManualRun() {
     setManualRunPayload(null)
     setManualRunResult(null)
@@ -2800,22 +2821,15 @@ function YouzanDistributionPage({ task, loading, onPreview, onConfirm, onRun }: 
               <div className="wide"><dt>昵称处理</dt><dd>所有非空 fans_nickname 必须先批量解密；解密失败时本页订单不写入。</dd></div>
             </dl>
             <div className="task-page-actions">
-              <button className="primary" type="button" onClick={openBackfill} disabled={loading}>发起补拉</button>
               <button type="button" onClick={openManualRun} disabled={loading}>运行计划任务</button>
             </div>
           </>
         )}
       </Panel>
 
-      {confirmed && (
-        <Panel title="最近写入结果" icon={<CheckCircle2 />} meta={`${youzanDistributionTimeFilterLabel(confirmed.time_filter)} / ${confirmed.start_time} ~ ${confirmed.end_time}`}>
-          <YouzanDistributionBackfillResultView title="写入结果" result={confirmed} />
-        </Panel>
-      )}
-
-      {showBackfill && (
-        <Modal title={confirmingBackfill ? '确认写入有赞分销订单' : '补拉有赞分销订单'} focusKey={confirmingBackfill ? 'confirm' : 'form'} closeDisabled={loading || writingBackfill} onClose={() => { if (!loading && !writingBackfill) setShowBackfill(false) }}>
-          {confirmingBackfill && preview ? <div className="view-stack"><p>确认写入 {preview.writable_count} 条有赞分销订单？系统会按 tid 判重，已有订单不会覆盖。</p><div className="excel-form-actions"><button type="button" disabled={loading || writingBackfill} onClick={() => setConfirmingBackfill(false)}>返回预览</button><button className="primary" type="button" disabled={loading || writingBackfill} onClick={() => void confirmBackfill()}>{writingBackfill ? '写入中…' : '确认写入'}</button></div></div> : <><form className="youzan-backfill-form" onSubmit={submit}>
+      <section className="youzan-operations-grid">
+        <Panel title="时间范围补拉" icon={<Download />} meta="按时间筛选并预览">
+          <form className="youzan-backfill-form" onSubmit={submit}>
             <label>
               时间筛选方式
               <select name="time_filter" value={timeFilter} onChange={(event) => changeTimeFilter(event.currentTarget.value)}>
@@ -2828,11 +2842,15 @@ function YouzanDistributionPage({ task, loading, onPreview, onConfirm, onRun }: 
             <button className="primary" type="submit" disabled={loading}>{loading ? '预览中' : '预览补拉'}</button>
             <button type="button" disabled={loading || writingBackfill || !preview || preview.writable_count === 0} onClick={() => setConfirmingBackfill(true)}>确认写入</button>
           </form>
-          <p className="backfill-note">当前按{youzanDistributionTimeFilterLabel(timeFilter)}筛选。预览会真实拉取、解密并判重，但不写数据库；确认后重新拉取相同筛选方式和时间范围并写入，已有 tid 不覆盖。</p>
+          <aside className="backfill-warning compact" aria-label="补拉提示"><AlertTriangle aria-hidden="true" /><span>预览会真实拉取、解密并判重，但不写数据库；已有 tid 不覆盖。</span></aside>
           {preview && <YouzanDistributionBackfillResultView title="预览结果" result={preview} />}
-          {confirmed && <YouzanDistributionBackfillResultView title="写入结果" result={confirmed} />}</>}
-        </Modal>
-      )}
+        </Panel>
+        <Panel title="补拉结果" icon={<CheckCircle2 />} meta={confirmed ? `${youzanDistributionTimeFilterLabel(confirmed.time_filter)} / ${confirmed.start_time} ~ ${confirmed.end_time}` : '等待本次写入'}>
+          {confirmed ? <YouzanDistributionBackfillResultView title="写入结果" result={confirmed} /> : <EmptyState text="当前接口未提供补拉历史列表；完成写入后，这里会保留本次结果。" />}
+        </Panel>
+      </section>
+
+      {confirmingBackfill && preview && <Modal title="确认写入有赞分销订单" focusKey="confirm" closeDisabled={loading || writingBackfill} onClose={() => { if (!loading && !writingBackfill) setConfirmingBackfill(false) }} footer={<><button type="button" disabled={loading || writingBackfill} onClick={() => setConfirmingBackfill(false)}>返回预览</button><button className="primary" type="button" disabled={loading || writingBackfill} onClick={() => void confirmBackfill()}>{writingBackfill ? '写入中…' : '确认写入'}</button></>}><p>确认写入 {preview.writable_count} 条有赞分销订单？系统会按 tid 判重，已有订单不会覆盖。</p></Modal>}
 
       {showManualRun && task && (
         <Modal title="运行有赞分销计划任务" onClose={() => { if (!runningManualTask) setShowManualRun(false) }}>
@@ -5260,7 +5278,7 @@ function rawRecordStatusLabel(status: WarehouseRawRecord['status']) {
   return ({ received: '已接收', queued: '排队中', cleaning: '处理中', cleaned: '已清洗', failed: '失败' } as const)[status]
 }
 
-function RawDataList({ records, onRequestSourceFetch }: { records: RawData[]; onRequestSourceFetch: (sourceID: number) => void }) {
+function RawDataList({ origin, records, onRequestSourceFetch }: { origin: RawRecordOrigin; records: RawData[]; onRequestSourceFetch: (sourceID: number) => void }) {
   const [selectedID, setSelectedID] = useState<number | null>(null)
   if (records.length === 0) return <EmptyState text="暂无原始数据。" />
   const selected = records.find((record) => record.id === selectedID) ?? records[0]
@@ -5268,26 +5286,25 @@ function RawDataList({ records, onRequestSourceFetch }: { records: RawData[]; on
     <div className="raw-record-master-detail">
       <div className="data-table-wrap raw-record-table-wrap">
         <table className="data-table raw-record-table">
-          <thead><tr><th scope="col">ID</th><th scope="col">类型</th><th scope="col">外部业务键</th><th scope="col">来源</th><th scope="col">状态</th><th scope="col">接入方式</th><th scope="col">操作</th></tr></thead>
+          <thead><tr><th scope="col">ID / 外部编号</th><th scope="col">数据类型</th><th scope="col">来源</th><th scope="col">{origin === 'pull' ? '拉取时间' : '接收时间'}</th><th scope="col">状态</th><th scope="col">操作</th></tr></thead>
           <tbody>
             {records.map((record) => {
               const isSelected = selected.id === record.id
               return <tr className={isSelected ? 'is-selected' : ''} key={record.id}>
-                <td><button className="table-row-select" type="button" aria-pressed={isSelected} onClick={() => setSelectedID(record.id)}>#{record.id}</button></td>
+                <td><button className="table-row-select" type="button" aria-pressed={isSelected} onClick={() => setSelectedID(record.id)}>#{record.id}</button><small>{record.external_id || '-'}</small></td>
                 <td>{record.data_type || 'raw'}</td>
-                <td>{record.external_id || '-'}</td>
                 <td>{record.source || `#${record.data_source_id || '-'}`}</td>
+                <td>{formatUnixTime(record.created_at)}</td>
                 <td><StatusPill label={record.status || '未知'} /></td>
-                <td>{rawDataOrigin(record)}</td>
-                <td className="table-actions">{record.data_source_id > 0 && <button type="button" onClick={() => onRequestSourceFetch(record.data_source_id)}>拉取来源</button>}</td>
+                <td className="table-actions"><button type="button" onClick={() => setSelectedID(record.id)}>查看</button>{origin === 'pull' && record.data_source_id > 0 && <button type="button" onClick={() => onRequestSourceFetch(record.data_source_id)}>重新拉取</button>}</td>
               </tr>
             })}
           </tbody>
         </table>
       </div>
       <section className="raw-record-detail" aria-live="polite" aria-label="原始记录详情">
-        <div className="raw-record-detail-title"><div><span>已选原始记录</span><strong>#{selected.id} / {selected.data_type || 'raw'}</strong></div><StatusPill label={selected.status || '未知'} /></div>
-        <dl className="task-definition-grid raw-record-fields"><div><dt>外部业务键</dt><dd>{selected.external_id || '-'}</dd></div><div><dt>来源</dt><dd>{selected.source || `数据源 #${selected.data_source_id || '-'}`}</dd></div></dl>
+        <div className="raw-record-detail-title"><div><span>{origin === 'pull' ? '拉取详情' : '原始记录'} #{selected.id}</span><strong>{selected.external_id || selected.data_type || 'raw'}</strong></div><StatusPill label={selected.status || '未知'} /></div>
+        <dl className="task-definition-grid raw-record-fields"><div><dt>来源</dt><dd>{selected.source || `数据源 #${selected.data_source_id || '-'}`}</dd></div><div><dt>接入方式</dt><dd>{rawDataOrigin(selected)}</dd></div><div><dt>记录时间</dt><dd>{formatUnixTime(selected.created_at)}</dd></div><div><dt>数据类型</dt><dd>{selected.data_type || '-'}</dd></div></dl>
         <h3>脱敏原始内容与元数据</h3>
         <ReadonlyJSON value={redactMonitoringJSON({ raw_content: selected.raw_content ?? selected.rawContent ?? null, metadata: selected.metadata ?? null })} />
       </section>
