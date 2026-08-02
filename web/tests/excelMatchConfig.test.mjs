@@ -8,7 +8,6 @@ import {
   excelModelSelectOptions,
   migrateExcelMatchSteps,
   selectExcelMatchStepModel,
-  shouldConfirmExcelWrite,
 } from '../.test-dist/excelMatchConfig.js'
 
 test('excelMatchSchemePath only builds a positive scheme resource path', () => {
@@ -243,11 +242,4 @@ test('catalog selectors preserve missing legacy table and field values as curren
     label: '当前配置：legacy_field（模型中不存在）',
     currentOnly: true,
   })
-})
-
-test('Excel write confirmation requires the execute submitter and an explicit checkbox', () => {
-  assert.equal(shouldConfirmExcelWrite('preview', true), false)
-  assert.equal(shouldConfirmExcelWrite('execute', false), false)
-  assert.equal(shouldConfirmExcelWrite('execute', true), true)
-  assert.equal(shouldConfirmExcelWrite('', true), false)
 })

@@ -55,7 +55,6 @@ import {
   excelModelSelectOptions,
   migrateExcelMatchSteps,
   selectExcelMatchStepModel,
-  shouldConfirmExcelWrite,
   type ExcelMatchFilterConfig,
   type ExcelMatchModel,
   type ExcelMatchModelField,
@@ -1263,7 +1262,6 @@ function App() {
   async function toggleTarget(target: ToggleTarget, enabled: boolean) {
     const response = await updateTargetEnabled(client, target, enabled, { sources, transformRules, destinations, deliveryTasks })
     if (response.ok) await refreshWorkspace(false)
-    return response
   }
 
   async function retryDeliveryLog(logId: number) {
@@ -3280,10 +3278,10 @@ function ExcelMatchView({
   setResult: (value: ApiResult | null) => void
   onNavigateToJobs: () => void
 }) {
-  const pendingJobFocusIDRef = useRef<number | null>(null)
-  const jobExecutionRef = useRef<HTMLDivElement>(null)
   const [jobID, setJobID] = useState('')
   const [job, setJob] = useState<ExcelMatchJob | null>(null)
+  const [jobDetailOpen, setJobDetailOpen] = useState(false)
+  const jobDetailTriggerRef = useRef<HTMLButtonElement | null>(null)
   const [jobHistory, setJobHistory] = useState<ExcelMatchJob[]>([])
   const [jobLogs, setJobLogs] = useState<ExcelMatchJobLog[]>([])
   const [trackingJobID, setTrackingJobID] = useState<number | null>(null)
@@ -3315,8 +3313,6 @@ function ExcelMatchView({
   const [deletingSchemeID, setDeletingSchemeID] = useState<number | null>(null)
   const [pendingWrite, setPendingWrite] = useState<{ slot: 'import' | 'clear'; file: File; config: unknown; message: string } | null>(null)
   const [writeMode, setWriteMode] = useState<'import' | 'clear'>('import')
-  const [importWriteConfirmed, setImportWriteConfirmed] = useState(false)
-  const [clearWriteConfirmed, setClearWriteConfirmed] = useState(false)
   const [latestWriteJob, setLatestWriteJob] = useState<ExcelMatchJob | null>(null)
   const [jobQuery, setJobQuery] = useState('')
   const [jobStatus, setJobStatus] = useState('all')
@@ -3328,7 +3324,6 @@ function ExcelMatchView({
   const [jobHistoryError, setJobHistoryError] = useState('')
   const [jobHistoryReloadVersion, setJobHistoryReloadVersion] = useState(0)
   const jobHistoryRequestRef = useRef<AbortController | null>(null)
-  const focusedJobID = job?.id
   const selectedJobProgress = job && job.total_rows > 0
     ? Math.min(100, Math.round(job.processed_rows / job.total_rows * 100))
     : 0
@@ -3577,22 +3572,8 @@ function ExcelMatchView({
     setPreviewResult(null)
     setUploadRefs({})
     setUploadProgress('')
+    if (section !== 'jobs') setJobDetailOpen(false)
   }, [section])
-
-  useEffect(() => {
-    if (section !== 'jobs' || !focusedJobID || pendingJobFocusIDRef.current !== focusedJobID) return
-
-    const animationFrame = window.requestAnimationFrame(() => {
-      const target = jobExecutionRef.current
-      if (!target || pendingJobFocusIDRef.current !== focusedJobID) return
-      pendingJobFocusIDRef.current = null
-      const reduceMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches
-      target.scrollIntoView({ block: 'start', behavior: reduceMotion ? 'auto' : 'smooth' })
-      target.focus({ preventScroll: true })
-    })
-
-    return () => window.cancelAnimationFrame(animationFrame)
-  }, [focusedJobID, section])
 
   const refreshJobByID = useCallback(async (id: number, options: { silent?: boolean; track?: boolean; signal?: AbortSignal } = {}) => {
     if (!options.silent) setLoading(true)
@@ -3619,6 +3600,16 @@ function ExcelMatchView({
     }
     return null
   }, [applyJobResult, client, loadJobHistory, setLoading, setResult])
+
+  async function openJobDetail(id: number, trigger: HTMLButtonElement) {
+    jobDetailTriggerRef.current = trigger
+    const nextJob = await refreshJobByID(id)
+    if (nextJob) {
+      setJobDetailOpen(true)
+    } else {
+      trigger.focus()
+    }
+  }
 
   useEffect(() => {
     if (!token || !trackingJobID) return
@@ -4022,8 +4013,7 @@ function ExcelMatchView({
       return
     }
 
-    const submitter = event.nativeEvent instanceof SubmitEvent ? event.nativeEvent.submitter : null
-    const confirmWrite = shouldConfirmExcelWrite(submitter instanceof HTMLButtonElement ? submitter.value : '', form.get('confirmWrite') === 'on')
+    const confirmWrite = form.get('confirmWrite') === 'on'
     const writeField = formValue(form, 'dbWriteField').trim()
     const confirmMessage = writeField === 'completed_at'
       ? '确认写入数据库？本次只会填充为空的订单完成时间，不会覆盖已有 completed_at。'
@@ -4045,8 +4035,7 @@ function ExcelMatchView({
       return
     }
 
-    const submitter = event.nativeEvent instanceof SubmitEvent ? event.nativeEvent.submitter : null
-    const confirmWrite = shouldConfirmExcelWrite(submitter instanceof HTMLButtonElement ? submitter.value : '', form.get('confirmWrite') === 'on')
+    const confirmWrite = form.get('confirmWrite') === 'on'
     const config = {
       operation: 'clear_matched_docno',
       sheetName: formValue(form, 'sheetName').trim() || 'Sheet1',
@@ -4067,7 +4056,7 @@ function ExcelMatchView({
 
   function showCreatedJob(result: ApiResult) {
     const createdJob = applyJobResult(result)
-    if (createdJob) pendingJobFocusIDRef.current = createdJob.id
+    if (createdJob) setJobDetailOpen(true)
     setAutoRefreshText('')
     setResult(null)
     closeExcelDialog()
@@ -4079,7 +4068,6 @@ function ExcelMatchView({
     const createdJob = applyJobResult(result)
     if (createdJob) {
       setLatestWriteJob(createdJob)
-      pendingJobFocusIDRef.current = createdJob.id
     }
     setAutoRefreshText('')
     setResult(null)
@@ -4092,7 +4080,11 @@ function ExcelMatchView({
       setResult({ ok: false, status: 0, data: '请输入任务 ID' })
       return
     }
-    await refreshJobByID(id)
+    const nextJob = await refreshJobByID(id)
+    if (nextJob) {
+      closeExcelDialog()
+      setJobDetailOpen(true)
+    }
   }
 
   async function downloadJob(targetID?: number) {
@@ -4191,24 +4183,25 @@ function ExcelMatchView({
   }
 
   function renderImportWriteForm() {
-    return <form className="excel-upload-form excel-write-form" onSubmit={createImportJob} key={importFormKey}>
-      <details className="excel-write-scheme-actions"><summary>方案操作</summary><div><label>已保存方案<select value={selectedImportSchemeID} onChange={(event) => applyImportScheme(event.currentTarget.value)}><option value="">选择方案</option>{importSchemes.map((scheme) => <option value={scheme.id} key={scheme.id}>{scheme.name}</option>)}</select></label><button type="button" disabled={!selectedImportSchemeID || loading} onClick={(event) => { const form = event.currentTarget.form; if (form?.reportValidity()) beginSchemeSave(form, 'import_update', 'current') }}>保存当前方案</button><button type="button" disabled={loading} onClick={(event) => { const form = event.currentTarget.form; if (form?.reportValidity()) beginSchemeSave(form, 'import_update', 'new') }}>另存为新方案</button></div></details>
-      <label className="file-input-label">Excel 文件<input name="file" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={(event) => { setSelectedImportFileName(event.currentTarget.files?.[0]?.name ?? ''); setImportWriteConfirmed(false); clearUploadRef('import') }} /><span>{selectedImportFileName || '请选择需要导入更新的 .xlsx 文件'}</span></label>
+    return <form className="excel-upload-form" onSubmit={createImportJob} key={importFormKey}>
+      <label>已保存方案<select value={selectedImportSchemeID} onChange={(event) => applyImportScheme(event.currentTarget.value)}><option value="">选择方案</option>{importSchemes.map((scheme) => <option value={scheme.id} key={scheme.id}>{scheme.name}</option>)}</select></label>
+      <button type="button" disabled={!selectedImportSchemeID || loading} onClick={(event) => { const form = event.currentTarget.form; if (form?.reportValidity()) beginSchemeSave(form, 'import_update', 'current') }}>保存到当前方案</button><button type="button" disabled={loading} onClick={(event) => { const form = event.currentTarget.form; if (form?.reportValidity()) beginSchemeSave(form, 'import_update', 'new') }}>另存为新方案</button>
+      <label className="file-input-label">Excel 文件<input name="file" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={(event) => { setSelectedImportFileName(event.currentTarget.files?.[0]?.name ?? ''); clearUploadRef('import') }} /><span>{selectedImportFileName || '请选择需要导入更新的 .xlsx 文件'}</span></label>
       <Field label="Sheet 页名称" name="sheetName" defaultValue={importDefaults.sheetName} /><label>匹配表名<select name="tableName" defaultValue={importDefaults.tableName}><option value="bojun_retail_orders">伯俊零售单 bojun_retail_orders</option></select></label><label>数据库匹配字段<select name="dbMatchField" defaultValue={importDefaults.dbMatchField}>{bojunMatchFieldOptions.map((option) => <option value={option.value} key={option.value}>{option.label}</option>)}</select></label><Field label="Excel 匹配列名" name="matchExcelColumn" defaultValue={importDefaults.matchExcelColumn} /><label>写入字段<select name="dbWriteField" defaultValue={importDefaults.dbWriteField}><option value="matched_docno">匹配单号 matched_docno</option><option value="completed_at">订单完成时间 completed_at</option></select></label><Field label="Excel 写入值列名" name="writeExcelColumn" defaultValue={importDefaults.writeExcelColumn} /><Field label="批量更新大小" name="batchSize" defaultValue={importDefaults.batchSize} />
-      <div className="excel-write-confirm"><label className="checkbox-label"><input name="confirmWrite" type="checkbox" checked={importWriteConfirmed} onChange={(event) => setImportWriteConfirmed(event.currentTarget.checked)} />确认写入数据库</label><p>未确认时仅预检匹配数量，不写入数据库</p></div>{uploadProgress && <p className="excel-mode-note" role="status" aria-live="polite">{uploadProgress}</p>}<div className="excel-form-actions"><button type="submit" name="writeIntent" value="preview" disabled={loading}>预检匹配</button><button className="primary" type="submit" name="writeIntent" value="execute" disabled={loading}><Upload aria-hidden="true" />{importWriteConfirmed ? '创建写入任务' : '创建预检任务'}</button></div>
+      <label className="checkbox-label"><input name="confirmWrite" type="checkbox" />确认写入数据库</label><p className="excel-mode-note">不勾选时只预检匹配数量，不写库；匹配单号只填充空值；订单完成时间只填充为空的 completed_at。</p>{uploadProgress && <p className="excel-mode-note" role="status" aria-live="polite">{uploadProgress}</p>}<div className="excel-form-actions"><button className="primary" type="submit" disabled={loading}><Upload aria-hidden="true" />创建预检/导入任务</button></div>
     </form>
   }
 
   function renderClearWriteForm() {
-    return <form className="excel-upload-form excel-write-form" onSubmit={createClearMatchedJob}>
-      <label className="file-input-label">Excel 文件<input name="file" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={(event) => { setSelectedClearFileName(event.currentTarget.files?.[0]?.name ?? ''); setClearWriteConfirmed(false); clearUploadRef('clear') }} /><span>{selectedClearFileName || '请选择需要退回的 .xlsx 文件'}</span></label>
+    return <form className="excel-upload-form" onSubmit={createClearMatchedJob}>
+      <label className="file-input-label">Excel 文件<input name="file" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={(event) => { setSelectedClearFileName(event.currentTarget.files?.[0]?.name ?? ''); clearUploadRef('clear') }} /><span>{selectedClearFileName || '请选择需要退回的 .xlsx 文件'}</span></label>
       <Field label="Sheet 页名称" name="sheetName" defaultValue="Sheet1" /><label>匹配表名<select name="tableName" defaultValue="bojun_retail_orders"><option value="bojun_retail_orders">伯俊零售单 bojun_retail_orders</option></select></label><label>数据库匹配字段<select name="dbMatchField" defaultValue="docno">{bojunMatchFieldOptions.map((option) => <option value={option.value} key={option.value}>{option.label}</option>)}</select></label><Field label="Excel 匹配列名" name="matchExcelColumn" defaultValue="外部订单编号" /><Field label="批量处理大小" name="batchSize" defaultValue="1000" />
-      <div className="excel-write-confirm"><label className="checkbox-label"><input name="confirmWrite" type="checkbox" checked={clearWriteConfirmed} onChange={(event) => setClearWriteConfirmed(event.currentTarget.checked)} />确认清空 matched_docno</label><p>未确认时仅预检命中数量，不修改数据库</p></div>{uploadProgress && <p className="excel-mode-note" role="status" aria-live="polite">{uploadProgress}</p>}<div className="excel-form-actions"><button type="submit" name="writeIntent" value="preview" disabled={loading}>预检匹配</button><button className="primary" type="submit" name="writeIntent" value="execute" disabled={loading}><RefreshCcw aria-hidden="true" />{clearWriteConfirmed ? '创建清空任务' : '创建预检任务'}</button></div>
+      <label className="checkbox-label"><input name="confirmWrite" type="checkbox" />确认清空 matched_docno</label><p className="excel-mode-note">不勾选时只预检会命中的行；勾选后会把命中行的 matched_docno 清空，用于退回未匹配状态。</p>{uploadProgress && <p className="excel-mode-note" role="status" aria-live="polite">{uploadProgress}</p>}<div className="excel-form-actions"><button type="submit" disabled={loading}><RefreshCcw aria-hidden="true" />创建预检/退回任务</button></div>
     </form>
   }
 
   return (
-    <div className={`view-stack excel-design-page excel-${section}-page`}>
+    <div className={section === 'write' ? 'view-stack' : `view-stack excel-design-page excel-${section}-page`}>
       {section === 'jobs' && <>
         <section className="overview-grid">
           <Metric label="历史任务" value={jobHistoryPagination?.total ?? jobHistory.length} />
@@ -4240,53 +4233,14 @@ function ExcelMatchView({
                 downloadingJobID={downloadingJobID}
                 selectedJobID={job?.id ?? null}
                 onDownload={downloadJob}
-                onView={(id) => void refreshJobByID(id)}
+                onView={(id, trigger) => void openJobDetail(id, trigger)}
               />
               <MonitoringPaginationControls page={jobHistoryPagination?.page ?? jobHistoryPage} totalPages={jobHistoryPagination?.totalPages ?? 0} loading={jobHistoryLoading} onPrevious={() => setJobHistoryPage((page) => Math.max(1, page - 1))} onNext={() => setJobHistoryPage((page) => page + 1)} />
             </Panel>
           </div>
 
-          <aside className="excel-job-aside" aria-label="Excel 任务详情">
-            {job ? (
-              <div
-                ref={jobExecutionRef}
-                className="excel-job-focus-target"
-                tabIndex={-1}
-                role="region"
-                aria-label={`Excel 任务 ${job.id} 执行详情`}
-              >
-                <section className="excel-job-detail-panel"><h3>任务 #{job.id}</h3>
-                  {autoRefreshText && <p className="excel-mode-note">{autoRefreshText}</p>}
-                  <dl className="excel-job-detail-meta"><div><dt>源文件</dt><dd>{job.source_file_name || '-'}</dd></div><div><dt>类型</dt><dd>{excelJobOperationLabel(excelJobOperation(job))}</dd></div></dl>
-                  <div className="excel-job-detail-counts"><Metric label="匹配行" value={job.matched_rows.toLocaleString('en-US')} /><Metric label="未匹配行" value={job.unmatched_rows.toLocaleString('en-US')} /></div>
-                  <div className="excel-job-progress">
-                    <strong>处理进度</strong><span>{job.processed_rows.toLocaleString('en-US')} / {job.total_rows.toLocaleString('en-US')}（{selectedJobProgress}%）</span>
-                    <progress value={selectedJobProgress} max="100" aria-label={`Excel 任务 #${job.id} 处理进度`} />
-                  </div>
-                  <dl className="excel-job-expiry"><dt>过期时间</dt><dd>{formatDate(job.expires_at)}</dd></dl>
-                  <div className="excel-job-log-heading">实时日志</div><ExcelJobLogList logs={jobLogs} />
-                  <div className="excel-job-action-heading">操作</div>
-                  <div className="excel-detail-actions">
-                    <button type="button" onClick={() => void refreshJobByID(job.id)} disabled={loading}>
-                      <RefreshCcw aria-hidden="true" />
-                      刷新状态
-                    </button>
-                    <button
-                      type="button"
-                      onClick={() => void downloadJob(job.id)}
-                      disabled={loading || downloadingJobID === job.id || !canDownloadExcelJob(job)}
-                    >
-                      <Download aria-hidden="true" />
-                      {downloadingJobID === job.id ? '下载中' : '下载结果'}
-                    </button>
-                    {!canDownloadExcelJob(job) && <span>{job.download_message || '任务完成并生成结果后可下载。'}</span>}
-                  </div>
-                  {job.status === 'failed' && <div className="login-error" role="alert">任务执行失败，请查看受控服务日志。</div>}
-                </section>
-              </div>
-            ) : <EmptyState text="选择一个 Excel 任务查看受控进度、日志和下载状态。" />}
-          </aside>
         </section>
+        {jobDetailOpen && job && <Modal className="excel-job-detail-modal" title={`任务 #${job.id}`} focusKey={`excel-job-${job.id}`} returnFocus={jobDetailTriggerRef.current} onClose={() => setJobDetailOpen(false)}><ExcelJobDetailContent job={job} logs={jobLogs} progress={selectedJobProgress} autoRefreshText={autoRefreshText} loading={loading} downloading={downloadingJobID === job.id} onRefresh={() => void refreshJobByID(job.id)} onDownload={() => void downloadJob(job.id)} /></Modal>}
       </>}
 
       {section === 'schemes' && <>
@@ -4317,15 +4271,15 @@ function ExcelMatchView({
           <Metric label="写入保护" value="不覆盖" />
           <Metric label="清空保护" value="需确认" />
         </section>
-        <section className="excel-config-workspace excel-write-workspace">
+        <section className="excel-config-workspace">
           <Panel title="数据库回写" icon={<Database />} meta="默认只预检；写入与退回均需二次确认">
-            <div className="excel-mode-switch" role="group" aria-label="数据库回写模式"><button type="button" className={writeMode === 'import' ? 'active' : undefined} onClick={() => { setWriteMode('import'); setImportWriteConfirmed(false); setClearWriteConfirmed(false) }}><Database aria-hidden="true" />匹配导入</button><button type="button" className={writeMode === 'clear' ? 'active danger' : 'danger'} onClick={() => { setWriteMode('clear'); setImportWriteConfirmed(false); setClearWriteConfirmed(false) }}><RefreshCcw aria-hidden="true" />退回未匹配</button></div>
+            <div className="excel-mode-switch" role="group" aria-label="数据库回写模式"><button type="button" className={writeMode === 'import' ? 'active' : undefined} onClick={() => setWriteMode('import')}><Database aria-hidden="true" />匹配导入</button><button type="button" className={writeMode === 'clear' ? 'active danger' : 'danger'} onClick={() => setWriteMode('clear')}><RefreshCcw aria-hidden="true" />退回未匹配</button></div>
             <p className="excel-mode-note">{writeMode === 'import' ? '先预检，确认后只填充空字段。' : '先预检，确认后清空命中行的 matched_docno。'}</p>
             {writeMode === 'import' ? renderImportWriteForm() : renderClearWriteForm()}
+            {latestWriteJob && <section className="excel-write-summary" aria-labelledby="excel-write-summary-title"><div><strong id="excel-write-summary-title">最近预检/写入任务</strong><span>以下数据来自服务端安全任务摘要；不覆盖与错误计数未返回。</span></div><div className="excel-job-detail"><Metric label="任务 ID" value={latestWriteJob.id} /><Metric label="状态" value={excelJobStatusLabel(latestWriteJob.status)} /><Metric label="总行数" value={latestWriteJob.total_rows} /><Metric label="已处理" value={latestWriteJob.processed_rows} /><Metric label="预计命中" value={latestWriteJob.matched_rows} /><Metric label="未匹配" value={latestWriteJob.unmatched_rows} /></div><div className="excel-detail-actions"><span>不覆盖/错误：服务端未返回独立计数。</span><button type="button" onClick={onNavigateToJobs}>查看任务详情</button></div></section>}
           </Panel>
           <aside className="excel-config-aside" aria-label="已保存导入方案"><Panel title="已保存导入方案" icon={<ListChecks />} meta={`${importSchemes.length} 个方案`}><ExcelSchemeList schemes={importSchemes} deletingSchemeID={deletingSchemeID} onDelete={setPendingSchemeDelete} onOpen={(id) => { setWriteMode('import'); applyImportScheme(String(id)) }} /></Panel></aside>
         </section>
-        <section className="excel-write-preview-summary" aria-labelledby="excel-write-preview-summary-title"><div><h3 id="excel-write-preview-summary-title">预检摘要</h3><span>（上次预检结果）</span></div><div><Metric label="扫描行" value={latestWriteJob ? latestWriteJob.total_rows.toLocaleString('en-US') : '—'} /><Metric label="预计命中" value={latestWriteJob ? latestWriteJob.matched_rows.toLocaleString('en-US') : '—'} /><Metric label="不覆盖" value="—" /><Metric label="错误" value="—" /></div>{latestWriteJob && <button type="button" onClick={onNavigateToJobs}>查看任务详情</button>}</section>
       </>}
 
       {pendingSchemeSave && <Modal title="保存 Excel 匹配方案" focusKey="scheme-save" closeDisabled={loading || schemeSaveInFlightRef.current} onClose={() => { if (!loading && !schemeSaveInFlightRef.current) { setPendingSchemeSave(null); setSchemeSaveError('') } }}>{renderPendingSchemeSave()}</Modal>}
@@ -4764,7 +4718,7 @@ function ExcelJobHistoryTable({
   loading: boolean
   downloadingJobID: number | null
   selectedJobID: number | null
-  onView: (id: number) => void
+  onView: (id: number, trigger: HTMLButtonElement) => void
   onDownload: (id: number) => void
 }) {
   if (jobs.length === 0) return <EmptyState text="暂无 Excel 任务历史。" />
@@ -4795,7 +4749,7 @@ function ExcelJobHistoryTable({
               <td>{formatUnixTime(item.created_at)}</td>
               <td>
                 <div className="table-actions">
-                  <button type="button" onClick={() => onView(item.id)} disabled={loading}>
+                  <button type="button" onClick={(event) => onView(item.id, event.currentTarget)} disabled={loading}>
                     查看
                   </button>
                   <button
@@ -4816,9 +4770,41 @@ function ExcelJobHistoryTable({
   )
 }
 
-function Modal({ title, onClose, children, footer, closeDisabled = false, focusKey }: { title: string; onClose: () => void; children: ReactNode; footer?: ReactNode; closeDisabled?: boolean; focusKey?: string }) {
+function ExcelJobDetailContent({ job, logs, progress, autoRefreshText, loading, downloading, onRefresh, onDownload }: {
+  job: ExcelMatchJob
+  logs: ExcelMatchJobLog[]
+  progress: number
+  autoRefreshText: string
+  loading: boolean
+  downloading: boolean
+  onRefresh: () => void
+  onDownload: () => void
+}) {
+  return (
+    <section className="excel-job-detail-panel" aria-label={`Excel 任务 ${job.id} 执行详情`}>
+      {autoRefreshText && <p className="excel-mode-note" role="status">{autoRefreshText}</p>}
+      <dl className="excel-job-detail-meta"><div><dt>源文件</dt><dd>{job.source_file_name || '-'}</dd></div><div><dt>类型</dt><dd>{excelJobOperationLabel(excelJobOperation(job))}</dd></div></dl>
+      <div className="excel-job-detail-counts"><Metric label="匹配行" value={job.matched_rows.toLocaleString('en-US')} /><Metric label="未匹配行" value={job.unmatched_rows.toLocaleString('en-US')} /></div>
+      <div className="excel-job-progress">
+        <strong>处理进度</strong><span>{job.processed_rows.toLocaleString('en-US')} / {job.total_rows.toLocaleString('en-US')}（{progress}%）</span>
+        <progress value={progress} max="100" aria-label={`Excel 任务 #${job.id} 处理进度`} />
+      </div>
+      <dl className="excel-job-expiry"><dt>过期时间</dt><dd>{formatDate(job.expires_at)}</dd></dl>
+      <div className="excel-job-log-heading">实时日志</div><ExcelJobLogList logs={logs} />
+      <div className="excel-job-action-heading">操作</div>
+      <div className="excel-detail-actions">
+        <button type="button" onClick={onRefresh} disabled={loading}><RefreshCcw aria-hidden="true" />刷新状态</button>
+        <button type="button" onClick={onDownload} disabled={loading || downloading || !canDownloadExcelJob(job)}><Download aria-hidden="true" />{downloading ? '下载中' : '下载结果'}</button>
+        {!canDownloadExcelJob(job) && <span>{job.download_message || '任务完成并生成结果后可下载。'}</span>}
+      </div>
+      {job.status === 'failed' && <div className="login-error" role="alert">任务执行失败，请查看受控服务日志。</div>}
+    </section>
+  )
+}
+
+function Modal({ title, onClose, children, footer, closeDisabled = false, focusKey, className = '', returnFocus }: { title: string; onClose: () => void; children: ReactNode; footer?: ReactNode; closeDisabled?: boolean; focusKey?: string; className?: string; returnFocus?: HTMLElement | null }) {
   const panelRef = useRef<HTMLElement>(null)
-  const returnFocusRef = useRef<HTMLElement | null>(document.activeElement instanceof HTMLElement ? document.activeElement : null)
+  const returnFocusRef = useRef<HTMLElement | null>(returnFocus ?? (document.activeElement instanceof HTMLElement ? document.activeElement : null))
   const titleID = useMemo(() => `modal-title-${Math.random().toString(36).slice(2)}`, [])
   const onCloseRef = useRef(onClose)
   const closeDisabledRef = useRef(closeDisabled)
@@ -4870,7 +4856,7 @@ function Modal({ title, onClose, children, footer, closeDisabled = false, focusK
 
   return (
     <div className="modal-backdrop" role="presentation">
-      <section ref={panelRef} className="modal-panel" role="dialog" aria-modal="true" aria-labelledby={titleID} tabIndex={-1}>
+      <section ref={panelRef} className={`modal-panel ${className}`.trim()} role="dialog" aria-modal="true" aria-labelledby={titleID} tabIndex={-1}>
         <div className="modal-title">
           <h3 id={titleID}>{title}</h3>
           <button type="button" onClick={onClose} disabled={closeDisabled} aria-label={`关闭${title}`}>关闭</button>
