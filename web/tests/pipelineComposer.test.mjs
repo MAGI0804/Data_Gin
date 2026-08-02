@@ -46,6 +46,59 @@ test('parses only complete safe pipeline detail and generated-config envelopes',
   assert.equal(parseStageGeneratedConfig({ code: 200, data: { config: { id: 8 } } }), null)
 })
 
+test('keeps unbounded pipeline descriptions returned from the backend', () => {
+  const description = '流水线说明'.repeat(1000)
+  const payload = {
+    code: 200,
+    data: {
+      pipeline: {
+        pipeline: { id: 1, name: '订单流水线', code: 'orders', description, enabled: true },
+        stages: [],
+        steps: [],
+      },
+    },
+  }
+  assert.equal(parsePipelineDetail(payload)?.pipeline.description, description)
+})
+
+test('assigns legacy stage-zero steps to the backend default stages and keeps them visible', () => {
+  const stages = [
+    { id: 3, stage_type: 'fetch', name: '数据获取' },
+    { id: 4, stage_type: 'process', name: '数据处理' },
+    { id: 5, stage_type: 'push', name: '数据推送' },
+    { id: 6, stage_type: 'log', name: '日志记录' },
+  ].map((stage, index) => ({
+    stage: { ...stage, pipeline_id: 1, order_index: index + 1, enabled: true },
+    steps: [],
+    generated_config: null,
+  }))
+  const steps = [
+    ['request', 3],
+    ['mapping', 4],
+    ['delivery', 5],
+    ['log', 6],
+  ].map(([methodType], index) => ({
+    ...step,
+    step: { ...step.step, id: 20 + index, stage_id: 0, method_type: methodType },
+  }))
+  stages[0].steps = [steps[2], steps[2]]
+  stages[1].steps = [steps[0]]
+  const payload = {
+    code: 200,
+    data: {
+      pipeline: {
+        pipeline: { id: 1, name: '历史流水线', code: 'legacy', description: '', enabled: true },
+        stages,
+        steps,
+      },
+    },
+  }
+
+  const detail = parsePipelineDetail(payload)
+  assert.deepEqual(detail?.steps.map((item) => item.step.stage_id), [3, 4, 5, 6])
+  assert.deepEqual(detail?.stages.map((stage) => stage.steps.map((item) => item.step.id)), [[20], [21], [22], [23]])
+})
+
 test('limits step method choices and accepts only complete parameter/output arrays', () => {
   assert.deepEqual(stageMethodTypes('push'), ['template', 'delivery', 'request', 'shanghai_mall_push'])
   assert.deepEqual(parseStepConfigList(JSON.stringify([param]), 'params'), [param])

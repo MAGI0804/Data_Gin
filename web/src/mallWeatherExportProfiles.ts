@@ -173,8 +173,12 @@ function parseProfile(value: unknown): MallWeatherExportProfile | null {
     !trimmedString(value.name, 255) || !positiveSafeInteger(value.version) || typeof value.enabled !== 'boolean' ||
     !trimmedString(value.timeZone, 128) || (value.unitSystem !== 'metric' && value.unitSystem !== 'imperial') ||
     !validFormat(value.dateFormat) || !validFormat(value.dateTimeFormat) || !validFileName(value.fileNameTemplate) || !isRecord(value.filters) ||
-    !Array.isArray(value.datasets) || value.datasets.length < 1 || value.datasets.length > 8 || !positiveSafeInteger(value.createdBy) ||
-    !positiveSafeInteger(value.updatedBy) || !rfc3339OrNull(value.createdAt) || !rfc3339OrNull(value.updatedAt)) return null
+    !Array.isArray(value.datasets) || value.datasets.length < 1 || value.datasets.length > 8 ||
+    !rfc3339OrNull(value.createdAt) || !rfc3339OrNull(value.updatedAt)) return null
+  const allowSystemActor = mallWeatherExportProfileReadOnly(value.code)
+  const createdBy = profileActorID(value.createdBy, allowSystemActor)
+  const updatedBy = profileActorID(value.updatedBy, allowSystemActor)
+  if (createdBy === null || updatedBy === null) return null
   const filters = parseFilters(value.filters)
   if (!filters) return null
   const datasets: MallWeatherExportProfileDataset[] = []
@@ -189,7 +193,7 @@ function parseProfile(value: unknown): MallWeatherExportProfile | null {
   return {
     id: value.id, code: value.code, name: value.name, version: value.version, enabled: value.enabled, timeZone: value.timeZone,
     unitSystem, dateFormat, dateTimeFormat, fileNameTemplate,
-    filters, datasets, createdBy: value.createdBy, updatedBy: value.updatedBy, createdAt: value.createdAt, updatedAt: value.updatedAt,
+    filters, datasets, createdBy, updatedBy, createdAt: value.createdAt, updatedAt: value.updatedAt,
   }
 }
 
@@ -258,6 +262,10 @@ function envelopeData(payload: unknown): Record<string, unknown> | null {
 
 function isRecord(value: unknown): value is Record<string, unknown> { return Boolean(value) && typeof value === 'object' && !Array.isArray(value) }
 function positiveSafeInteger(value: unknown): value is number { return typeof value === 'number' && Number.isSafeInteger(value) && value > 0 }
+function profileActorID(value: unknown, allowZero: boolean): number | null {
+  if (typeof value !== 'number' || !Number.isSafeInteger(value)) return null
+  return value > 0 || (allowZero && value === 0) ? value : null
+}
 function finiteNumber(value: unknown): value is number { return typeof value === 'number' && Number.isFinite(value) }
 function trimmedString(value: unknown, limit: number): value is string { return typeof value === 'string' && value === value.trim() && value.length > 0 && Array.from(value).length <= limit }
 function rfc3339OrNull(value: unknown): value is string { return typeof value === 'string' && value.length <= 64 && Number.isFinite(Date.parse(value)) && /(?:Z|[+-]\d{2}:\d{2})$/.test(value) }
