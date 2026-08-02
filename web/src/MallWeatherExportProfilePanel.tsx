@@ -186,7 +186,7 @@ export function MallWeatherExportProfilePanel({ client }: { client: ProfileApiCl
     </div>
 
     <form className="mall-weather-profile-filter" onSubmit={(event) => { event.preventDefault(); void loadProfiles() }}>
-      <label><span>启用状态</span><select value={enabledFilter} onChange={(event) => setEnabledFilter(event.currentTarget.value as '' | 'true' | 'false')} disabled={loading || saving}><option value="">全部</option><option value="true">已启用</option><option value="false">已停用</option></select></label>
+      <label><span>启用状态</span><select name="mallWeatherProfileEnabledFilter" value={enabledFilter} onChange={(event) => setEnabledFilter(event.currentTarget.value as '' | 'true' | 'false')} disabled={loading || saving}><option value="">全部</option><option value="true">已启用</option><option value="false">已停用</option></select></label>
       <button type="submit" disabled={loading || saving}>查询</button>
     </form>
 

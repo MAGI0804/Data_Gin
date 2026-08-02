@@ -1,6 +1,7 @@
 import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { CloudRain, Download, MapPin, RefreshCcw, Thermometer, Wind } from 'lucide-react'
+import { AlertTriangle, Clock3, CloudRain, CloudSun, Database, Download, MapPin, RefreshCcw, Thermometer } from 'lucide-react'
 import './MallWeatherPage.css'
+import './MallWeatherDesign.css'
 import { MallWeatherChart } from './MallWeatherChart'
 import { MallWeatherExportPanel } from './MallWeatherExportPanel'
 import { MallWeatherExportProfilePanel } from './MallWeatherExportProfilePanel'
@@ -693,19 +694,8 @@ function MallModulePage({
   return (
     <div className="view-stack mall-weather-page mall-weather-single-page">
       <section className="workbench-panel mall-weather-selector" aria-label="选择天气商场">
+        <strong className="mall-weather-selector-title">筛选商场</strong>
         <div className="mall-weather-selector-fields">
-          <label>
-            <span>筛选商场</span>
-            <input
-              name="mallWeatherQuery"
-              type="search"
-              autoComplete="off"
-              value={query}
-              onChange={(event) => setQuery(event.currentTarget.value)}
-              placeholder="名称、编码、城市或地址"
-            />
-            <small>{query.trim() ? `找到 ${visibleMalls.length} 个商场` : `共 ${malls.length} 个商场`}</small>
-          </label>
           <label>
             <span>选择商场</span>
             <select
@@ -729,6 +719,18 @@ function MallModulePage({
                 ? `${selectedMall.mallCode} · ${selectedMall.city || '城市待完善'}`
                 : '选择商场后查看全部天气数据'}</small>
           </label>
+          <label className="mall-weather-query-field">
+            <span className="sr-only">搜索商场</span>
+            <input
+              name="mallWeatherQuery"
+              type="search"
+              autoComplete="off"
+              value={query}
+              onChange={(event) => setQuery(event.currentTarget.value)}
+              placeholder="名称、编码、城市或地址"
+            />
+            <small>{query.trim() ? `找到 ${visibleMalls.length} 个商场` : `共 ${malls.length} 个商场`}</small>
+          </label>
         </div>
         <div className="mall-weather-selector-actions">
           <button type="button" onClick={() => void loadMalls()} disabled={mallState === 'loading'}>
@@ -737,10 +739,6 @@ function MallModulePage({
           {nextAfterID > 0 && <button type="button" onClick={() => void loadMalls(nextAfterID)} disabled={mallState === 'loading'}>加载更多</button>}
         </div>
       </section>
-
-      <MallWeatherCapacityPlanPanel client={client} />
-      <MallWeatherOperationalMetricsPanel client={client} />
-      <MallWeatherExportProfilePanel client={client} />
 
       {mallState === 'error' && <RequestError message={mallError} onRetry={() => void loadMalls()} />}
       {mallState === 'loading' && malls.length === 0 && <LoadingState label="正在加载商场" />}
@@ -751,58 +749,58 @@ function MallModulePage({
       </section>}
 
       {selectedMallReady && selectedMall && <>
-        <div className="mall-weather-actions-row">
-          {actorID
-            ? <ManualRefreshPanel
+        <div className="mall-weather-design-toolbar">
+          <div className="mall-weather-actions-row">
+            {actorID
+              ? <ManualRefreshPanel
+                actorID={actorID}
+                mall={selectedMall}
+                client={client}
+                onWeatherUpdated={(signal) => reloadWeatherData(selectedMall.id, signal)}
+                key={`refresh-${actorID}:${selectedMall.id}`}
+              />
+              : <RequestError message="无法识别当前登录账号，请退出后重新登录再提交天气刷新。" onRetry={() => window.location.reload()} />}
+            {actorID && <MallWeatherExportPanel
               actorID={actorID}
-              mall={selectedMall}
+              mallID={selectedMall.id}
+              mallCode={selectedMall.mallCode}
+              mallName={selectedMall.nameCn}
+              csvData={csvZipData}
+              csvReady={csvZipReady}
+              csvLoading={csvZipLoading}
+              csvStatus={csvZipStatus}
               client={client}
-              onWeatherUpdated={(signal) => reloadWeatherData(selectedMall.id, signal)}
-              key={`refresh-${actorID}:${selectedMall.id}`}
+              downloadFile={downloadFile}
+              compact
+              key={`weather-export-${actorID}:${selectedMall.id}`}
+            />}
+          </div>
+          <MallWeatherDataNavigation />
+        </div>
+        <div className="mall-weather-design-dashboard" id="mall-weather-overview" tabIndex={-1}>
+          {!selectedOverview && overviewState !== 'error' && overviewState !== 'waiting' && <LoadingState label={`正在加载${selectedMall.nameCn}天气`} />}
+          {selectedOverview && <>
+            <WeatherRealtime mall={selectedMall} overview={selectedOverview} />
+            <WeatherOverviewDetails
+              mall={selectedMall}
+              overview={selectedOverview}
+              alerts={selectedAlerts}
+              refreshing={overviewState === 'loading'}
+              onRefresh={() => void loadOverview(selectedMall.id)}
+              onAlertsRetry={() => void loadAlerts(selectedMall.id, selectedMall.timeZone)}
             />
-            : <RequestError message="无法识别当前登录账号，请退出后重新登录再提交天气刷新。" onRetry={() => window.location.reload()} />}
-          {actorID && <MallWeatherExportPanel
-            actorID={actorID}
-            mallID={selectedMall.id}
-            mallCode={selectedMall.mallCode}
-            mallName={selectedMall.nameCn}
-            csvData={csvZipData}
-            csvReady={csvZipReady}
-            csvLoading={csvZipLoading}
-            csvStatus={csvZipStatus}
-            client={client}
-            downloadFile={downloadFile}
-            compact
-            key={`weather-export-${actorID}:${selectedMall.id}`}
+          </>}
+          {overviewState === 'error' && <RequestError message={overviewError} onRetry={() => { setOverviewRetryCount(0); void loadOverview(selectedMall.id) }} />}
+          {overviewState === 'waiting' && overviewRetryCount < 30 && <LoadingState label={overviewWaitingReason === 'waiting-empty'
+            ? `首次天气采集中，正在等待实况与未来逐小时数据（${overviewRetryCount + 1}/30）`
+            : `实况已加载，未来逐小时温度正在同步（${overviewRetryCount + 1}/30）`} />}
+          {overviewState === 'waiting' && overviewRetryCount >= 30 && <RequestError
+            message={overviewWaitingReason === 'waiting-empty'
+              ? '首次采集长时间未生成数据，请确认 MALL_WEATHER_ENABLED=true 且 weather 队列消费进程正在运行。'
+              : '实况已加载，但未来逐小时温度长时间不可用。请确认天气业务事务已提交，并检查最近采集记录。'}
+            onRetry={() => { setOverviewRetryCount(0); void loadOverview(selectedMall.id) }}
           />}
         </div>
-        <MallWeatherDataNavigation />
-        <div id="mall-weather-overview" tabIndex={-1}>
-          {!selectedOverview && overviewState !== 'error' && overviewState !== 'waiting' &&
-            <LoadingState label={`正在加载${selectedMall.nameCn}天气`} />}
-          {selectedOverview && <WeatherRealtime mall={selectedMall} overview={selectedOverview} />}
-          {overviewState === 'error' &&
-            <RequestError message={overviewError} onRetry={() => { setOverviewRetryCount(0); void loadOverview(selectedMall.id) }} />}
-          {overviewState === 'waiting' && overviewRetryCount < 30 &&
-            <LoadingState label={overviewWaitingReason === 'waiting-empty'
-              ? `首次天气采集中，正在等待实况与未来逐小时数据（${overviewRetryCount + 1}/30）`
-              : `实况已加载，未来逐小时温度正在同步（${overviewRetryCount + 1}/30）`} />}
-          {overviewState === 'waiting' && overviewRetryCount >= 30 &&
-            <RequestError
-              message={overviewWaitingReason === 'waiting-empty'
-                ? '首次采集长时间未生成数据，请确认 MALL_WEATHER_ENABLED=true 且 weather 队列消费进程正在运行。'
-                : '实况已加载，但未来逐小时温度长时间不可用。请确认天气业务事务已提交，并检查最近采集记录。'}
-              onRetry={() => { setOverviewRetryCount(0); void loadOverview(selectedMall.id) }}
-            />}
-        </div>
-        {selectedOverview && <WeatherOverviewDetails
-          mall={selectedMall}
-          overview={selectedOverview}
-          alerts={selectedAlerts}
-          refreshing={overviewState === 'loading'}
-          onRefresh={() => void loadOverview(selectedMall.id)}
-          onAlertsRetry={() => void loadAlerts(selectedMall.id, selectedMall.timeZone)}
-        />}
         <MallWeatherForecastPanel
           mallID={selectedMall.id}
           mallCode={selectedMall.mallCode}
@@ -815,6 +813,14 @@ function MallModulePage({
         {actorID && <section id="mall-weather-push" tabIndex={-1}>
           <MallWeatherSheetPushPanel actorID={actorID} mall={selectedMall} client={client} key={`push-${actorID}:${selectedMall.id}`} />
         </section>}
+        <details className="mall-weather-advanced-tools">
+          <summary>天气服务高级配置与运营工具</summary>
+          <div className="view-stack">
+            <MallWeatherCapacityPlanPanel client={client} />
+            <MallWeatherOperationalMetricsPanel client={client} />
+            <MallWeatherExportProfilePanel client={client} />
+          </div>
+        </details>
       </>}
     </div>
   )
@@ -829,10 +835,10 @@ function MallWeatherDataNavigation() {
 
   return (
     <nav className="mall-weather-data-nav" aria-label="天气数据快速入口">
-      <strong>天气数据</strong>
-      {mallWeatherDataNavigationItems.map((item) => (
+      <strong><Database aria-hidden="true" />天气数据</strong>
+      {mallWeatherDataNavigationItems.filter((item) => ['mall-weather-overview', 'mall-weather-minutely', 'mall-weather-hourly', 'mall-weather-alerts'].includes(item.targetID)).map((item) => (
         <button type="button" aria-controls={item.targetID} onClick={() => navigateTo(item.targetID)} key={item.targetID}>
-          {item.label}
+          {item.targetID === 'mall-weather-overview' ? '实况' : item.targetID === 'mall-weather-minutely' ? '降水' : item.targetID === 'mall-weather-hourly' ? '小时' : '预警'}
         </button>
       ))}
     </nav>
@@ -1920,7 +1926,7 @@ function ManualRefreshPanel({ actorID, mall, client, onWeatherUpdated }: {
     setReason(value)
   }
 
-  return (
+  const refreshPanel = (
     <section className="workbench-panel mall-weather-refresh-panel">
       <div className="mall-weather-section-title"><div><strong>手工刷新</strong><span>提交异步采集任务，不阻塞等待供应商</span></div><RefreshCcw aria-hidden="true" /></div>
       <form className="mall-weather-refresh-form" onSubmit={submit} aria-busy={submitting || monitoring}>
@@ -1941,6 +1947,13 @@ function ManualRefreshPanel({ actorID, mall, client, onWeatherUpdated }: {
       {message && <p className="mall-weather-action-message" role="status">{message}</p>}
       {error && <p className="mall-weather-action-message error" role="alert">{error}</p>}
     </section>
+  )
+
+  return (
+    <details className="mall-weather-refresh-compact">
+      <summary><RefreshCcw aria-hidden="true" />综合天气刷新</summary>
+      <div className="mall-weather-refresh-popover">{refreshPanel}</div>
+    </details>
   )
 }
 
@@ -1967,33 +1980,28 @@ function WeatherRealtime({ mall, overview }: { mall: MallWeatherMall; overview: 
 
   return (
     <article className="workbench-panel mall-weather-realtime" aria-label="当前实况天气">
-      <div className="mall-weather-section-title">
-        <div><strong>当前实况</strong><span>{mall.nameCn} · {realtime?.snapshotAtLocal || '暂无快照时间'}</span></div>
-        <button type="button" onClick={downloadCsv} aria-label={`下载${mall.nameCn}当前实况 CSV`}><Download aria-hidden="true" />下载 CSV</button>
-      </div>
+      <header className="mall-weather-realtime-heading">
+        <strong>当前实况</strong>
+        <div><b>{mall.nameCn}</b><span>{realtime?.snapshotAtLocal || '暂无快照时间'}</span></div>
+      </header>
       {downloadError && <p className="mall-weather-action-message error" role="alert">{downloadError}</p>}
       {realtime ? (
         <>
-          <div className="mall-weather-temperature"><strong>{mallWeatherMetric(realtime.temperatureC, '°C')}</strong><span>{mallWeatherSkyconLabel(realtime.skycon)}</span></div>
-          <div className="mall-weather-metrics">
-            <MetaItem label="体感" value={mallWeatherMetric(realtime.apparentTemperatureC, '°C')} />
-            <MetaItem label="湿度" value={mallWeatherMetric(realtime.humidityPct, '%', 0)} />
-            <MetaItem label="风速" value={mallWeatherMetric(realtime.windSpeedKph, ' km/h')} />
-            <MetaItem label="风向" value={mallWeatherMetric(realtime.windDirectionDeg, '°', 0)} />
-            <MetaItem label="气压" value={mallWeatherMetric(realtime.pressurePa, ' Pa', 0)} />
-            <MetaItem label="云量" value={weatherRatioPercent(realtime.cloudrateRatio)} />
-            <MetaItem label="短波辐射" value={mallWeatherMetric(realtime.dswrfWM2, ' W/m²')} />
-            <MetaItem label="能见度" value={mallWeatherMetric(realtime.visibilityKm, ' km')} />
-            <MetaItem label="本地降水" value={mallWeatherMetric(realtime.localPrecipitationMmH, ' mm/h')} />
-            <MetaItem label="本地降水状态" value={[realtime.localPrecipitationStatus, realtime.localPrecipitationSource].filter(Boolean).join(' · ') || '暂无'} />
-            <MetaItem label="最近降水" value={realtime.nearestPrecipitationDistanceKm === undefined && realtime.nearestPrecipitationMmH === undefined
-              ? realtime.nearestPrecipitationStatus || '暂无'
-              : `${mallWeatherMetric(realtime.nearestPrecipitationDistanceKm, ' km')} · ${mallWeatherMetric(realtime.nearestPrecipitationMmH, ' mm/h')}`} />
-            <MetaItem label="质量" value={`${realtime.qualityStatus || '未知'}${realtime.qualityWarnings.length ? ` · ${realtime.qualityWarnings.length} 项告警` : ''}`} />
-            <MetaItem label="舒适度" value={[realtime.comfortIndex, realtime.comfortDescription].filter((value) => value !== undefined && value !== '').join(' · ') || '暂无'} />
-            <MetaItem label="紫外线" value={[realtime.ultravioletIndex, realtime.ultravioletDescription].filter((value) => value !== undefined && value !== '').join(' · ') || '暂无'} />
+          <div className="mall-weather-realtime-body">
+            <div className="mall-weather-sky-summary">
+              <CloudSun aria-hidden="true" />
+              <div className="mall-weather-temperature"><strong>{mallWeatherMetric(realtime.temperatureC, '°C')}</strong><span>{mallWeatherSkyconLabel(realtime.skycon).replace(/（.*）/, '')}</span></div>
+            </div>
+            <dl className="mall-weather-current-metrics">
+              <div><dt>体感</dt><dd>{mallWeatherMetric(realtime.apparentTemperatureC, '°C')}</dd></div>
+              <div><dt>湿度</dt><dd>{mallWeatherMetric(realtime.humidityPct, '%', 0)}</dd></div>
+              <div><dt>风速</dt><dd>{mallWeatherMetric(realtime.windSpeedKph, ' km/h')}</dd></div>
+              <div><dt>能见度</dt><dd>{mallWeatherMetric(realtime.visibilityKm, ' km')}</dd></div>
+              <div><dt>本地降水</dt><dd>{mallWeatherMetric(realtime.localPrecipitationMmH, ' mm/h')}</dd></div>
+              <div><dt>质量</dt><dd className={realtime.qualityWarnings.length === 0 ? 'success' : 'warning'}>{realtime.qualityWarnings.length === 0 ? '正常' : `${realtime.qualityWarnings.length} 项告警`}</dd></div>
+            </dl>
           </div>
-          <p className="mall-weather-caption">供应商时间 {realtime.providerServerTimeLocal || '—'} · 采集时间 {realtime.fetchedAtLocal || '—'}</p>
+          <details className="mall-weather-realtime-advanced"><summary>实况数据操作</summary><button type="button" onClick={downloadCsv} aria-label={`下载${mall.nameCn}当前实况 CSV`}><Download aria-hidden="true" />下载当前实况 CSV</button></details>
         </>
       ) : <EmptyState title="暂无实况" detail="最近一次采集尚未产生可用实况。" />}
     </article>
@@ -2025,41 +2033,43 @@ function WeatherOverviewDetails({ mall, overview, alerts, refreshing, onRefresh,
     }
   }
 
+  const primaryAlert = alerts.items[0]
+
   return (
-    <div className="view-stack">
-      <section className="workbench-panel" aria-label="空气质量">
-        <div className="mall-weather-section-title"><div><strong>空气质量</strong><span>{realtime?.aqiDescriptionChn || '中国 AQI 标准'}</span></div><Wind aria-hidden="true" /></div>
+    <div className="mall-weather-overview-details">
+      <section className="workbench-panel mall-weather-air-quality" aria-label="空气质量">
+        <strong className="mall-weather-card-title">空气质量</strong>
         <div className="mall-weather-aqi"><strong>{mallWeatherMetric(realtime?.aqiChn, '', 0)}</strong><span>AQI</span></div>
-        <div className="mall-weather-metrics compact">
-          <MetaItem label="PM2.5" value={mallWeatherMetric(realtime?.pm25UgM3, ' μg/m³')} />
-          <MetaItem label="PM10" value={mallWeatherMetric(realtime?.pm10UgM3, ' μg/m³')} />
-          <MetaItem label="O₃" value={mallWeatherMetric(realtime?.o3UgM3, ' μg/m³')} />
-          <MetaItem label="NO₂" value={mallWeatherMetric(realtime?.no2UgM3, ' μg/m³')} />
-          <MetaItem label="SO₂" value={mallWeatherMetric(realtime?.so2UgM3, ' μg/m³')} />
-          <MetaItem label="CO" value={mallWeatherMetric(realtime?.coMgM3, ' mg/m³')} />
-          <MetaItem label="美国 AQI" value={`${mallWeatherMetric(realtime?.aqiUsa, '', 0)}${realtime?.aqiDescriptionUsa ? ` · ${realtime.aqiDescriptionUsa}` : ''}`} />
-        </div>
+        <b className="mall-weather-aqi-grade">{realtime?.aqiDescriptionChn || '暂无评级'}</b>
+        <dl className="mall-weather-air-metrics">
+          <div><dt>PM2.5</dt><dd>{mallWeatherMetric(realtime?.pm25UgM3, '')}</dd></div>
+          <div><dt>PM10</dt><dd>{mallWeatherMetric(realtime?.pm10UgM3, '')}</dd></div>
+          <div><dt>O₃</dt><dd>{mallWeatherMetric(realtime?.o3UgM3, '')}</dd></div>
+        </dl>
       </section>
 
-      <section className="workbench-panel mall-weather-summary">
-        <div className="mall-weather-summary-heading">
-          <div>
-            <span className="eyebrow">{mall.mallCode} · {mall.city}</span>
-            <h3>{mall.nameCn}</h3>
-            <p><MapPin aria-hidden="true" />代表点：{representativePoint} · {coverageRadius}</p>
-          </div>
-          <button type="button" onClick={onRefresh} disabled={refreshing}><RefreshCcw aria-hidden="true" />{refreshing ? '加载中' : '重新加载'}</button>
-        </div>
-        <div className="mall-weather-meta" aria-label="天气数据口径">
-          <MetaItem label="供应商" value={`${meta.provider || '彩云天气'} ${meta.apiVersion}`.trim()} />
-          <MetaItem label="新鲜度" value={mallWeatherFreshnessLabel(meta.freshnessStatus)} />
-          <MetaItem label="坐标" value={meta.longitude === 0 && meta.latitude === 0 ? '坐标未提供' : `${meta.longitude.toFixed(4)}, ${meta.latitude.toFixed(4)} ${meta.coordinateSystem}`} />
-          <MetaItem label="时区 / 单位" value={`${meta.timeZone || 'Asia/Shanghai'} · ${meta.unit || 'metric:v2'}`} />
-        </div>
-        <p className="mall-weather-resolution">实况与未来两小时降水为商场中心点 1 km 级数据；常规小时预报为商场中心点所在 9～13 km 预报网格。预警按行政区域发布。</p>
+      <section className="workbench-panel mall-weather-design-alert" id="mall-weather-alerts" tabIndex={-1} aria-busy={alerts.loading}>
+        <strong className="mall-weather-card-title">气象预警</strong>
+        {alerts.loading && <LoadingState label="正在加载全部气象预警" />}
+        {alerts.error && <RequestError message={alerts.error} onRetry={onAlertsRetry} />}
+        {alerts.ready && (primaryAlert
+          ? <article>
+            <AlertTriangle aria-hidden="true" />
+            <strong>{primaryAlert.title}</strong>
+            <span>{primaryAlert.source || '预警发布机构'}</span>
+            <time>{primaryAlert.publishedAtLocal || '发布时间未知'}</time>
+            {primaryAlert.description && <p>{primaryAlert.description}</p>}
+          </article>
+          : <EmptyState title="当前无有效预警" detail="当前查询窗口没有返回有效气象预警。" />)}
+        <details className="mall-weather-alert-actions">
+          <summary>预警数据操作{alerts.items.length > 1 ? `（${alerts.items.length} 条）` : ''}</summary>
+          <button type="button" onClick={downloadAlertsCsv} disabled={alerts.loading || Boolean(alerts.error)} aria-label={`下载${mall.nameCn}气象预警 CSV`}><Download aria-hidden="true" />下载预警 CSV</button>
+          {alerts.items.slice(1).map((alert) => <p key={alert.alertId || alert.title}><strong>{alert.title}</strong><span>{alert.publishedAtLocal || '发布时间未知'}</span></p>)}
+        </details>
+        {alertDownloadError && <p className="mall-weather-action-message error" role="alert">{alertDownloadError}</p>}
       </section>
 
-      <section className="content-grid two">
+      <section className="content-grid two mall-weather-design-charts">
         <MallWeatherChart
           title="未来 120 分钟降水"
           detail="1 km 级"
@@ -2076,36 +2086,16 @@ function WeatherOverviewDetails({ mall, overview, alerts, refreshing, onRefresh,
         />
       </section>
 
-      <section className="workbench-panel" id="mall-weather-alerts" tabIndex={-1} aria-busy={alerts.loading}>
-        <div className="mall-weather-section-title">
-          <div><strong>气象预警</strong><span>行政区域口径 · 自动读取全部游标页</span></div>
-          <button type="button" onClick={downloadAlertsCsv} disabled={alerts.loading || Boolean(alerts.error)} aria-label={`下载${mall.nameCn}气象预警 CSV`}>
-            <Download aria-hidden="true" />下载 CSV
-          </button>
+      <section className="workbench-panel mall-weather-summary">
+        <div className="mall-weather-meta" aria-label="天气数据口径">
+          <div className="mall-weather-source-item"><CloudSun aria-hidden="true" /><span>供应商<strong>{`${meta.provider || '彩云天气'} ${meta.apiVersion}`.trim()}</strong></span></div>
+          <div className="mall-weather-source-item"><Clock3 aria-hidden="true" /><span>新鲜度<strong>{mallWeatherFreshnessLabel(meta.freshnessStatus)}</strong></span></div>
+          <div className="mall-weather-source-item"><MapPin aria-hidden="true" /><span>坐标<strong>{meta.longitude === 0 && meta.latitude === 0 ? '坐标未提供' : `${meta.longitude.toFixed(4)}, ${meta.latitude.toFixed(4)} ${meta.coordinateSystem}`}</strong></span></div>
         </div>
-        {alertDownloadError && <p className="mall-weather-action-message error" role="alert">{alertDownloadError}</p>}
-        {alerts.loading && <LoadingState label="正在加载全部气象预警" />}
-        {alerts.error && <RequestError message={alerts.error} onRetry={onAlertsRetry} />}
-        {alerts.ready && (alerts.items.length === 0
-          ? <EmptyState title="当前无有效预警" detail="当前 31 天查询窗口没有返回有效气象预警。" />
-          : <div className="mall-weather-alerts">
-            {alerts.items.map((alert) => (
-              <article key={alert.alertId || alert.title}>
-                <div><strong>{alert.title}</strong><span>{[alert.alertTypeName, alert.alertLevelName].filter(Boolean).join(' · ') || alert.status}</span></div>
-                {alert.description && <p>{alert.description}</p>}
-                <small>{alert.source || '预警发布机构'} · {alert.publishedAtLocal || '发布时间未知'}</small>
-                <small>{[alert.code, alert.location, alert.adcode].filter(Boolean).join(' · ') || '区域信息未提供'}</small>
-                <small>首次发现 {alert.firstSeenAtLocal || '—'} · 最近发现 {alert.lastSeenAtLocal || '—'}</small>
-              </article>
-            ))}
-          </div>)}
+        <details className="mall-weather-resolution"><summary>查看天气数据口径</summary><p>代表点：{representativePoint} · {coverageRadius}。实况与未来两小时降水为商场中心点 1 km 级数据；常规小时预报为商场中心点所在 9～13 km 预报网格，预警按行政区域发布。</p><button type="button" onClick={onRefresh} disabled={refreshing}><RefreshCcw aria-hidden="true" />{refreshing ? '加载中' : '重新加载'}</button></details>
       </section>
     </div>
   )
-}
-
-function weatherRatioPercent(value: number | undefined) {
-  return mallWeatherMetric(value === undefined ? undefined : value * 100, '%', 0)
 }
 
 function MetaItem({ label, value }: { label: string; value: string }) {

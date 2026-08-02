@@ -47,6 +47,8 @@ export function MallWeatherChart({
   const selectedPoint = points[selectedPosition]
   const selectedItem = selectedPoint ? series[selectedPoint.index] : undefined
   const activeItem = activePoint ? series[activePoint.index] : undefined
+  const labelStep = Math.max(1, Math.ceil(points.length / 6))
+  const labeledPoints = points.filter((_, index) => points.length <= 8 || index % labelStep === 0 || index === points.length - 1)
 
   const selectNearestPoint = (event: PointerEvent<SVGSVGElement>) => {
     const bounds = event.currentTarget.getBoundingClientRect()
@@ -116,6 +118,14 @@ export function MallWeatherChart({
               {segments.map((segment, index) => segment.includes(' ')
                 ? <polyline points={segment} key={`${segment}-${index}`} />
                 : <ChartPoint point={segment} key={`${segment}-${index}`} />)}
+              {points.length > 1 && points.map((point) => <circle className="mall-weather-chart-point" cx={point.x} cy={point.y} r="4" key={`point-${point.index}`} />)}
+              {labeledPoints.map((point) => {
+                const item = series[point.index]
+                return <g className="mall-weather-chart-label" key={`label-${point.index}`} aria-hidden="true">
+                  <text className="value" x={point.x} y={Math.max(12, point.y - 9)} textAnchor={point.x === 0 ? 'start' : point.x === chartWidth ? 'end' : 'middle'}>{chartValueLabel(item?.value)}</text>
+                  <text className="time" x={point.x} y={chartViewBoxHeight - 2} textAnchor={point.x === 0 ? 'start' : point.x === chartWidth ? 'end' : 'middle'}>{chartTimeLabel(item?.time || '')}</text>
+                </g>
+              })}
               {activePoint && (
                 <g className="mall-weather-chart-active" aria-hidden="true">
                   <line x1={activePoint.x} x2={activePoint.x} y1="0" y2={chartHeight} />
@@ -166,4 +176,15 @@ export function MallWeatherChart({
 function ChartPoint({ point }: { point: string }) {
   const [cx = '0', cy = '0'] = point.split(',')
   return <circle cx={cx} cy={cy} r="4" />
+}
+
+function chartTimeLabel(value: string) {
+  const clock = value.match(/(?:T|\s)(\d{2}:\d{2})/)
+  if (clock?.[1]) return clock[1]
+  return value.length > 8 ? value.slice(0, 8) : value
+}
+
+function chartValueLabel(value: number | undefined) {
+  if (typeof value !== 'number' || !Number.isFinite(value)) return '—'
+  return Number.isInteger(value) ? String(value) : value.toFixed(1)
 }

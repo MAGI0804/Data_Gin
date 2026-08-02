@@ -503,7 +503,7 @@ export function MallWeatherExportPanel({
 
   return (
     <details className="mall-weather-export-compact">
-      <summary aria-label={`下载${mallName}全部天气数据`}><Download aria-hidden="true" />下载全部</summary>
+      <summary aria-label={`导出六类数据：${mallName}`}><Download aria-hidden="true" />导出六类数据</summary>
       <div className="mall-weather-export-popover">{exportPanel}</div>
     </details>
   )

@@ -273,7 +273,7 @@ function ForecastDataset<T>({ id, title, state, empty, notice = '', defaultOpen 
       <div className="mall-weather-form-actions">
         <button
           type="button"
-          aria-label={`下载${title} CSV`}
+          aria-label={`下载 CSV：${title}`}
           disabled={downloadDisabled}
           onClick={onDownload}
         >
