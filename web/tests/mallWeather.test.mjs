@@ -183,6 +183,41 @@ test('parses valid malls and preserves the list cursor', () => {
   assert.equal(parseMallWeatherMallList({ code: 0, data: { items: [], nextAfterId: 'bad' } }), null)
 })
 
+test('keeps legacy mall rows visible while normalizing optional weather configuration', () => {
+  const result = parseMallWeatherMallList({
+    code: 0,
+    data: {
+      items: [
+        { id: 7, version: 3, mallCode: ' SH-001 ', nameCn: ' 示例商场 ', province: '', city: '', address: '', longitude: 121.47, latitude: 31.23, coordinateSystem: 'wgs84', geocodeStatus: 'CONFIRMED', weatherEnabled: true, detailProfile: '', coverageRadiusM: 0, timeZone: '', status: 'ACTIVE' },
+        { id: 0, version: 1, mallCode: 'BAD', nameCn: '损坏记录' },
+      ],
+    },
+  })
+
+  assert.deepEqual(result, {
+    nextAfterId: 0,
+    items: [{
+      id: 7,
+      mallCode: 'SH-001',
+      nameCn: '示例商场',
+      province: '',
+      city: '',
+      district: '',
+      address: '',
+      longitude: 121.47,
+      latitude: 31.23,
+      coordinateSystem: 'WGS84',
+      geocodeStatus: 'confirmed',
+      weatherEnabled: true,
+      detailProfile: 'full',
+      coverageRadiusM: 1000,
+      timeZone: 'Asia/Shanghai',
+      status: 'active',
+      version: 3,
+    }],
+  })
+})
+
 test('builds a normalized mall onboarding request and stable operation paths', () => {
   assert.deepEqual(mallWeatherCreateRequest({
     mallCode: ' sh-002 ', nameCn: ' 新商场 ', province: ' 上海市 ', city: ' 上海市 ', district: ' 浦东新区 ', address: ' 世纪大道 1 号 ',
@@ -410,10 +445,10 @@ test('recognizes only active confirmed weather-enabled malls as queryable', () =
   assert.equal(mallWeatherMallReady({ ...mall, weatherEnabled: false }), false)
   assert.equal(mallWeatherMallReady({ ...mall, longitude: undefined }), false)
   assert.equal(mallWeatherMallReady({ ...mall, coordinateSystem: 'WGS84' }), false)
-  assert.equal(parseMallWeatherMallList({ code: 0, data: { items: [{ ...mall, weatherProvider: undefined }] } }), null)
-  assert.equal(parseMallWeatherMallList({ code: 0, data: { items: [{ ...mall, timeZone: undefined }] } }), null)
-  assert.equal(parseMallWeatherMallList({ code: 0, data: { items: [{ ...mall, timeZone: ' ' }] } }), null)
-  assert.equal(parseMallWeatherMallList({ code: 0, data: { items: [{ ...mall, coordinateSystem: 'WGS84' }] } }), null)
+  assert.equal(parseMallWeatherMallList({ code: 0, data: { items: [{ ...mall, weatherProvider: undefined }] } })?.items[0].mallCode, 'SH-001')
+  assert.equal(parseMallWeatherMallList({ code: 0, data: { items: [{ ...mall, timeZone: undefined }] } })?.items[0].timeZone, 'Asia/Shanghai')
+  assert.equal(parseMallWeatherMallList({ code: 0, data: { items: [{ ...mall, timeZone: ' ' }] } })?.items[0].timeZone, 'Asia/Shanghai')
+  assert.equal(mallWeatherMallReady(parseMallWeatherMallList({ code: 0, data: { items: [{ ...mall, coordinateSystem: 'WGS84' }] } })?.items[0]), false)
   assert.deepEqual(mallWeatherCoordinateAdjustmentRequest(mall, '121.4701', '31.2301', ' 调整高德坐标 '), {
     manualCoordinate: { longitude: 121.4701, latitude: 31.2301, coordinateSystem: 'GCJ02', reason: '调整高德坐标' },
     expectedMallVersion: 1, weatherEnabled: true,

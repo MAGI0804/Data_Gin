@@ -604,37 +604,37 @@ function isMallWeatherSheetPushStatus(value: unknown): value is MallWeatherSheet
 
 function mallWeatherMall(value: unknown): MallWeatherMall | null {
   if (!isRecord(value) || !positiveSafeInteger(value.id) || !positiveSafeInteger(value.version) ||
-    typeof value.mallCode !== 'string' || typeof value.nameCn !== 'string' || typeof value.province !== 'string' ||
-    typeof value.city !== 'string' || typeof value.address !== 'string' || typeof value.geocodeStatus !== 'string' ||
-    typeof value.weatherEnabled !== 'boolean' || typeof value.weatherProvider !== 'string' ||
-    typeof value.detailProfile !== 'string' || typeof value.timeZone !== 'string' || typeof value.status !== 'string' ||
-    !value.mallCode.trim() || !value.nameCn.trim() || !value.province.trim() || !value.city.trim() || !value.address.trim() ||
-    !value.geocodeStatus.trim() || !value.weatherProvider.trim() || !['full', 'standard', 'economy'].includes(value.detailProfile) ||
-    !value.timeZone.trim() || !value.status.trim()) return null
-  const hasLongitude = value.longitude !== undefined
-  const hasLatitude = value.latitude !== undefined
-  if (hasLongitude !== hasLatitude || hasLongitude && (!validCoordinateValue(value.longitude, -180, 180) ||
-    !validCoordinateValue(value.latitude, -90, 90) || typeof value.coordinateSystem !== 'string' ||
-    value.coordinateSystem.trim().toUpperCase() !== 'GCJ02')) return null
-  const coverageRadiusM = numberValue(value, 'coverageRadiusM')
-  if (coverageRadiusM === undefined || !Number.isSafeInteger(coverageRadiusM) || coverageRadiusM < 100 || coverageRadiusM > 10000) return null
+    typeof value.mallCode !== 'string' || typeof value.nameCn !== 'string' || !value.mallCode.trim() || !value.nameCn.trim()) return null
+  const longitude = numberValue(value, 'longitude')
+  const latitude = numberValue(value, 'latitude')
+  const coordinates = longitude !== undefined && latitude !== undefined &&
+    validCoordinateValue(longitude, -180, 180) && validCoordinateValue(latitude, -90, 90)
+    ? { longitude, latitude }
+    : {}
+  const detailProfile = typeof value.detailProfile === 'string' && ['full', 'standard', 'economy'].includes(value.detailProfile.trim().toLowerCase())
+    ? value.detailProfile.trim().toLowerCase()
+    : 'full'
+  const configuredCoverageRadiusM = numberValue(value, 'coverageRadiusM')
+  const coverageRadiusM = configuredCoverageRadiusM !== undefined && Number.isSafeInteger(configuredCoverageRadiusM) &&
+    configuredCoverageRadiusM >= 100 && configuredCoverageRadiusM <= 10000
+    ? configuredCoverageRadiusM
+    : 1000
   return {
     id: value.id,
-    mallCode: value.mallCode,
-    nameCn: value.nameCn,
+    mallCode: value.mallCode.trim(),
+    nameCn: value.nameCn.trim(),
     province: textValue(value, 'province'),
     city: textValue(value, 'city'),
     district: textValue(value, 'district'),
     address: textValue(value, 'address'),
-    ...(typeof value.longitude === 'number' ? { longitude: value.longitude } : {}),
-    ...(typeof value.latitude === 'number' ? { latitude: value.latitude } : {}),
-    coordinateSystem: hasLongitude ? 'GCJ02' : '',
-    geocodeStatus: textValue(value, 'geocodeStatus'),
+    ...coordinates,
+    coordinateSystem: 'longitude' in coordinates ? textValue(value, 'coordinateSystem').trim().toUpperCase() : '',
+    geocodeStatus: textValue(value, 'geocodeStatus').trim().toLowerCase() || 'pending',
     weatherEnabled: value.weatherEnabled === true,
-    detailProfile: textValue(value, 'detailProfile'),
+    detailProfile,
     coverageRadiusM,
-    timeZone: textValue(value, 'timeZone'),
-    status: textValue(value, 'status'),
+    timeZone: textValue(value, 'timeZone').trim() || 'Asia/Shanghai',
+    status: textValue(value, 'status').trim().toLowerCase() || 'draft',
     version: value.version,
   }
 }
@@ -836,9 +836,9 @@ export function parseMallWeatherMallList(payload: unknown): MallWeatherMallList 
   const items: MallWeatherMall[] = []
   for (const item of data.items) {
     const mall = mallWeatherMall(item)
-    if (!mall) return null
-    items.push(mall)
+    if (mall) items.push(mall)
   }
+  if (data.items.length > 0 && items.length === 0) return null
   const nextAfterId = data.nextAfterId === undefined ? 0 : numberValue(data, 'nextAfterId')
   if (nextAfterId === undefined || !Number.isSafeInteger(nextAfterId) || nextAfterId < 0) return null
   return { items, nextAfterId }

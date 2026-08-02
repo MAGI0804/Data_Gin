@@ -1220,3 +1220,128 @@
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 }
+
+/* 店铺信息设计稿：左侧资料摘要，右侧资料与服务坐标维护。 */
+.store-info-page {
+  gap: 0;
+}
+
+.store-info-page .store-info-toolbar {
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  padding: 0 0 34px;
+}
+
+.store-info-toolbar-fields {
+  gap: 28px;
+}
+
+.store-info-toolbar-fields label > span {
+  color: #333941;
+  font-size: 15px;
+}
+
+.store-info-toolbar-actions {
+  gap: 16px;
+}
+
+.store-info-detail-layout {
+  grid-template-columns: minmax(290px, 340px) minmax(0, 1fr);
+  gap: 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.store-info-summary {
+  position: static;
+  gap: 22px;
+  border-top: 0;
+  border-right: 1px solid var(--line);
+  padding: 34px 48px 36px 0;
+}
+
+.store-info-summary-heading {
+  padding-bottom: 20px;
+}
+
+.store-info-summary-heading span,
+.store-info-summary-heading small,
+.store-info-summary dt {
+  color: #646d78;
+  font-size: 14px;
+}
+
+.store-info-summary-heading strong {
+  margin: 10px 0 12px;
+  color: #15191e;
+  font-size: 25px;
+  font-weight: 700;
+}
+
+.store-info-summary dl {
+  gap: 0;
+  background: transparent;
+}
+
+.store-info-summary dl > div {
+  grid-template-columns: minmax(84px, 1fr) auto;
+  align-items: center;
+  gap: 12px;
+  border-bottom: 1px solid var(--line);
+  padding: 16px 0;
+}
+
+.store-info-summary dd {
+  color: #252b33;
+  font-size: 15px;
+  font-weight: 600;
+  text-align: right;
+}
+
+.store-info-summary dl > div:nth-last-child(-n + 2) dd {
+  color: var(--success);
+}
+
+.store-info-maintenance {
+  gap: 24px;
+  padding: 32px 0 38px 44px;
+}
+
+.store-info-maintenance-heading {
+  align-items: baseline;
+  border-left: 0;
+  border-bottom: 1px solid var(--line);
+  background: transparent;
+  padding: 0 0 20px;
+}
+
+.store-info-maintenance-heading strong {
+  color: #171b21;
+  font-size: 20px;
+}
+
+.store-info-maintenance-heading span {
+  color: #727a85;
+  font-size: 13px;
+}
+
+.store-info-maintenance .workbench-panel {
+  border-top: 1px solid var(--line);
+  padding-top: 22px;
+}
+
+@media (max-width: 840px) {
+  .store-info-page .store-info-toolbar,
+  .store-info-summary,
+  .store-info-maintenance {
+    padding: 18px 0;
+  }
+
+  .store-info-detail-layout {
+    grid-template-columns: 1fr;
+  }
+
+  .store-info-summary {
+    border-right: 0;
+    border-bottom: 1px solid var(--line);
+  }
+}
