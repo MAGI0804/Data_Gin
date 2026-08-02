@@ -94,7 +94,7 @@
 }
 
 .design-section-heading span {
-  color: #777d85;
+  color: #5f6670;
   font-size: 14px;
 }
 
@@ -391,5 +391,217 @@
     align-items: flex-start;
     flex-direction: column;
     gap: 4px;
+  }
+}
+
+.overview-grid.design-method-summary {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  min-height: 138px;
+  border: 0;
+  border-bottom: 1px solid var(--line);
+  border-left: 0;
+}
+
+.design-method-summary .metric {
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  min-height: 104px;
+  padding: 20px;
+}
+
+.design-method-summary .metric span {
+  color: #30363d;
+  font-size: 16px;
+  font-weight: 500;
+}
+
+.design-method-summary .metric strong {
+  margin-top: 10px;
+  font-size: 38px;
+  font-weight: 500;
+}
+
+.design-core-methods {
+  border-bottom: 1px solid var(--line);
+  padding: 28px 12px 0;
+}
+
+.design-core-method-list {
+  gap: 0;
+}
+
+.design-core-method-list .method-row {
+  grid-template-columns: minmax(210px, 1fr) minmax(180px, 0.7fr) minmax(260px, 1.5fr) auto;
+  min-height: 64px;
+  gap: 24px;
+  border: 0;
+  border-top: 1px solid var(--line);
+  background: #ffffff;
+  padding: 14px 0;
+}
+
+.design-core-method-list .method-row:first-child {
+  border-top: 0;
+}
+
+.design-core-method-list .method-row > strong {
+  font-size: 16px;
+}
+
+.design-core-method-list .method-row > span,
+.design-core-method-list .method-row > small {
+  color: #30363d;
+  font-size: 14px;
+}
+
+.design-core-actions {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 8px;
+}
+
+.design-core-actions details {
+  position: relative;
+}
+
+.design-core-actions summary.design-core-status {
+  cursor: pointer;
+  list-style: none;
+}
+
+.design-core-actions summary.design-core-status::-webkit-details-marker {
+  display: none;
+}
+
+.design-core-status {
+  display: inline-flex;
+  align-items: center;
+  min-height: 30px;
+  border: 1px solid #c82822;
+  border-radius: 3px;
+  background: #ffffff;
+  color: #9f1f1a;
+  font-size: 13px;
+  padding: 4px 11px;
+}
+
+.design-core-status.enabled {
+  border-color: #13834a;
+  color: #06743c;
+}
+
+.design-core-actions details > div {
+  position: absolute;
+  z-index: 10;
+  top: calc(100% + 6px);
+  right: 0;
+  display: flex;
+  gap: 6px;
+  border: 1px solid var(--line);
+  background: #ffffff;
+  box-shadow: 0 8px 22px rgba(15, 23, 42, 0.12);
+  padding: 8px;
+}
+
+.design-method-filter {
+  min-height: 118px;
+  padding-top: 24px;
+  padding-bottom: 24px;
+}
+
+.design-search-control.trailing svg {
+  right: 13px;
+  left: auto;
+}
+
+.design-search-control.trailing input {
+  padding-right: 42px;
+  padding-left: 12px;
+}
+
+.design-method-catalog {
+  padding-top: 24px;
+}
+
+.design-method-table th:first-child,
+.design-method-table td:first-child {
+  width: 22%;
+}
+
+.design-method-table th:nth-child(2),
+.design-method-table td:nth-child(2) {
+  width: 20%;
+}
+
+.design-method-table th:nth-child(3),
+.design-method-table td:nth-child(3) {
+  width: 18%;
+}
+
+.design-method-table th:nth-child(4),
+.design-method-table td:nth-child(4),
+.design-method-table th:nth-child(5),
+.design-method-table td:nth-child(5),
+.design-method-table th:last-child,
+.design-method-table td:last-child {
+  width: 13%;
+}
+
+.design-method-table td:first-child small {
+  display: none;
+}
+
+.design-method-table code {
+  color: #a95b00;
+  font-family: inherit;
+  font-size: 14px;
+}
+
+.design-method-status {
+  min-height: 32px;
+  border-color: #c82822;
+  border-radius: 3px;
+  background: #ffffff;
+  color: #9f1f1a;
+  padding: 5px 12px;
+}
+
+.design-method-status.enabled {
+  border-color: #13834a;
+  color: #06743c;
+}
+
+.design-method-advanced {
+  margin: 12px;
+  border: 1px solid var(--line);
+  background: #ffffff;
+}
+
+.design-method-advanced > summary {
+  cursor: pointer;
+  color: #4f5761;
+  font-size: 13px;
+  padding: 12px;
+}
+
+.design-method-advanced > .workbench-panel {
+  border-top: 1px solid var(--line);
+  padding: 20px;
+}
+
+@media (max-width: 840px) {
+  .overview-grid.design-method-summary {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .design-core-method-list .method-row {
+    grid-template-columns: 1fr;
+    gap: 7px;
+  }
+
+  .design-core-actions {
+    justify-content: flex-start;
   }
 }

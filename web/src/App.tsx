@@ -1591,46 +1591,32 @@ function MethodsView({ methods, pipelines, client, coreMethods, onToggle, onPipe
   const filtered = methods.filter((method) => includesQuery([method.name, method.code, method.description, method.owner], query)
     && (category === 'all' || method.category === category)
     && (status === 'all' || (status === 'enabled' ? method.enabled : !method.enabled)))
-  const groups = groupBy(filtered, (method) => method.category)
+  const featuredCoreMethods = coreMethods.filter((method) => ['youzan_fetch', 'qimai_process', 'mall_push'].includes(method.key))
   return (
-    <div className="view-stack">
-      <section className="overview-grid">
+    <div className="view-stack design-data-page design-methods-page">
+      <section className="overview-grid design-method-summary">
         <Metric label="已配置方法" value={methods.filter((item) => item.kind === 'configured').length} />
         <Metric label="内置方法" value={methods.filter((item) => item.kind === 'builtin').length} />
         <Metric label="启用方法" value={methods.filter((item) => item.enabled).length} />
         <Metric label="方法类型" value={new Set(methods.map((item) => item.method_type)).size} />
       </section>
-      <Panel title="当前已有核心方法" icon={<Wrench />} meta="可开启的真实配置会显示操作按钮">
-        <CoreMethodList methods={coreMethods} onToggle={onToggle} />
-      </Panel>
-      <PipelineComposerPanel pipelines={pipelines} client={client} onRefresh={onPipelineRunCompleted} />
-      <QueryBar count={filtered.length} total={methods.length}>
-        <Field label="名称 / 编码 / 负责人" name="method_query" value={query} onChange={setQuery} />
-        <SelectFilter label="分类" value={category} onChange={setCategory} options={uniqueOptions(methods.map((method) => method.category))} />
-        <SelectFilter label="状态" value={status} onChange={setStatus} options={[{ value: 'enabled', label: '启用' }, { value: 'disabled', label: '停用' }]} />
-      </QueryBar>
-      <section className="method-groups">
-        {Object.entries(groups).map(([category, items]) => (
-          <Panel title={category} icon={<Wrench />} meta={`${items.length} 个方法`} key={category}>
-            <div className="method-list">
-              {items.map((method) => (
-                <article className="method-row" key={method.key}>
-                  <div>
-                    <strong>{method.name}</strong>
-                    <span>{method.description}</span>
-                  </div>
-                  <div className="method-meta">
-                    <StatusPill label={method.kind === 'builtin' ? '内置' : '已配置'} />
-                    <code>{method.code}</code>
-                    <small>{method.owner}</small>
-                    {method.toggle && <ToggleButton enabled={method.enabled} target={method.toggle} onToggle={onToggle} />}
-                  </div>
-                </article>
-              ))}
-            </div>
-          </Panel>
-        ))}
+      <section className="design-core-methods">
+        <div className="design-section-heading"><div><h3>当前已有核心方法</h3><span>{featuredCoreMethods.length} 项核心能力</span></div></div>
+        <CoreMethodList methods={featuredCoreMethods} onToggle={onToggle} />
       </section>
+      <section className="query-bar design-filter-bar design-method-filter" aria-label="查询条件">
+        <div className="query-fields">
+          <label>名称 / 编码 / 负责人<span className="design-search-control trailing"><input name="method_query" type="search" value={query} onChange={(event) => setQuery(event.currentTarget.value)} placeholder="搜索方法名称、编码或负责人" /><Search aria-hidden="true" /></span></label>
+          <SelectFilter label="分类" value={category} onChange={setCategory} options={uniqueOptions(methods.map((method) => method.category))} />
+          <SelectFilter label="状态" value={status} onChange={setStatus} options={[{ value: 'enabled', label: '启用' }, { value: 'disabled', label: '停用' }]} />
+        </div>
+        <div className="design-filter-count"><strong>{filtered.length}</strong><span>/ {methods.length} 条</span></div>
+      </section>
+      <section className="design-table-section design-method-catalog">
+        <div className="design-section-heading"><div><h3>方法目录</h3><span>展示当前可用方法与配置来源</span></div></div>
+        <MethodCatalogTable methods={filtered} onToggle={onToggle} />
+      </section>
+      <details className="design-method-advanced"><summary>流水线方法高级配置</summary><PipelineComposerPanel pipelines={pipelines} client={client} onRefresh={onPipelineRunCompleted} /></details>
     </div>
   )
 }
@@ -4969,23 +4955,27 @@ function ExcelJobLogList({ logs }: { logs: ExcelMatchJobLog[] }) {
 
 function CoreMethodList({ methods, onToggle }: { methods: CoreMethod[]; onToggle?: (target: ToggleTarget, enabled: boolean) => void }) {
   return (
-    <div className="method-list">
+    <div className="method-list design-core-method-list">
       {methods.map((method) => (
         <article className="method-row" key={method.key}>
-          <div>
-            <strong>{method.title}</strong>
-            <span>{method.description}</span>
+          <strong>{method.title}</strong>
+          <span>{method.category}</span>
+          <small>{method.status}</small>
+          <div className="design-core-actions">
+            {onToggle && method.refs.length > 0
+              ? <details><summary className={method.enabled ? 'design-core-status enabled' : 'design-core-status'}>{method.enabled ? '已开启' : '已关闭'}</summary><div>{method.refs.map((target) => <ToggleButton enabled={method.enabled} key={`${target.type}-${target.id}`} target={target} onToggle={onToggle} />)}</div></details>
+              : <span className={method.enabled ? 'design-core-status enabled' : 'design-core-status'}>{method.enabled ? '已开启' : '已关闭'}</span>}
           </div>
-          <div className="method-meta">
-            <StatusPill label={method.enabled ? '已开启' : '已关闭'} />
-            <code>{method.category}</code>
-            <small>{method.status}</small>
-            {onToggle && method.refs.map((target) => <ToggleButton enabled={method.enabled} key={`${target.type}-${target.id}`} target={target} onToggle={onToggle} />)}
-          </div>
+          <span className="sr-only">{method.description}</span>
         </article>
       ))}
     </div>
   )
+}
+
+function MethodCatalogTable({ methods, onToggle }: { methods: MethodDisplay[]; onToggle: (target: ToggleTarget, enabled: boolean) => void }) {
+  if (methods.length === 0) return <EmptyState text="暂无匹配的方法。" />
+  return <div className="data-table-wrap" role="region" aria-label="方法目录列表" tabIndex={0}><table className="data-table design-method-table"><thead><tr><th scope="col">方法名称</th><th scope="col">编码</th><th scope="col">分类</th><th scope="col">负责人</th><th scope="col">类型</th><th scope="col">状态</th></tr></thead><tbody>{methods.map((method) => <tr key={method.key}><td><strong>{method.name}</strong><small>{method.description}</small></td><td><code>{method.code}</code></td><td>{method.category}</td><td>{method.owner}</td><td>{method.kind === 'builtin' ? '内置' : '配置'}</td><td>{method.toggle ? <button className={method.enabled ? 'design-method-status enabled' : 'design-method-status'} type="button" onClick={() => onToggle(method.toggle!, !method.enabled)}>{method.enabled ? '启用' : '停用'}</button> : <StatusPill label={method.enabled ? '启用' : '停用'} />}</td></tr>)}</tbody></table></div>
 }
 
 function ToggleButton({ enabled, target, onToggle }: { enabled: boolean; target: ToggleTarget; onToggle: (target: ToggleTarget, enabled: boolean) => void }) {
@@ -5481,15 +5471,6 @@ function PanelTitle({ icon, title, meta }: { icon: ReactNode; title: string; met
         <span>{meta}</span>
       </div>
     </div>
-  )
-}
-
-function QueryBar({ count, total, children }: { count: number; total: number; children: ReactNode }) {
-  return (
-    <section className="query-bar" aria-label="查询条件">
-      <div className="query-fields">{children}</div>
-      <div className="query-count"><strong>{count}</strong><span>/ {total} 条</span></div>
-    </section>
   )
 }
 
@@ -6320,15 +6301,6 @@ function unixTimestamp(value: string) {
   if (!value) return ''
   const timestamp = Date.parse(value)
   return Number.isFinite(timestamp) ? String(Math.floor(timestamp / 1000)) : ''
-}
-
-function groupBy<T>(items: T[], keyFn: (item: T) => string) {
-  return items.reduce<Record<string, T[]>>((groups, item) => {
-    const key = keyFn(item)
-    groups[key] = groups[key] ?? []
-    groups[key].push(item)
-    return groups
-  }, {})
 }
 
 function includesQuery(values: Array<string | number | null | undefined>, query: string) {
