@@ -200,3 +200,7 @@ export function buildExcelExportConfig(input: ExcelExportConfigInput) {
     batchSize: input.batchSize,
   }
 }
+
+export function shouldConfirmExcelWrite(submitterValue: string, confirmChecked: boolean) {
+  return submitterValue === 'execute' && confirmChecked
+}
