@@ -12,7 +12,11 @@ import {
   loadMallWeatherPendingRefresh,
   loadMallWeatherPendingSheetPush,
   mallWeatherChartPoints,
+  mallWeatherChartScale,
   mallWeatherChartSegments,
+  mallWeatherChartTimeDomain,
+  mallWeatherChartValuesByTime,
+  mallWeatherClampedChartIndex,
   mallWeatherNearestChartPoint,
   mallWeatherCreateKey,
   mallWeatherCreateRequest,
@@ -1388,15 +1392,48 @@ test('formats weather statuses, conditions, metrics, and chart points', () => {
     x: point.x.toFixed(1),
     y: point.y.toFixed(1),
   })), [
-    { index: 0, x: '0.0', y: '40.0' },
-    { index: 2, x: '66.7', y: '0.0' },
+    { index: 0, x: '0.0', y: '30.0' },
+    { index: 2, x: '66.7', y: '10.0' },
     { index: 3, x: '100.0', y: '20.0' },
   ])
   assert.equal(mallWeatherNearestChartPoint(points, 70)?.index, 2)
   assert.equal(mallWeatherNearestChartPoint(points, 95)?.index, 3)
   assert.equal(mallWeatherNearestChartPoint(points, Number.NaN), undefined)
-  assert.deepEqual(mallWeatherChartPoints([5, 5], 100, 40).map((point) => point.y), [40, 40])
+  assert.deepEqual(mallWeatherChartPoints([5, 5], 100, 40).map((point) => point.y), [20, 20])
   assert.deepEqual(mallWeatherChartPoints([1], 0, 40), [])
-  assert.deepEqual(mallWeatherChartSegments([1, undefined, 3, 2], 100, 40), ['0.0,40.0', '66.7,0.0 100.0,20.0'])
+  assert.deepEqual(mallWeatherChartSegments([1, undefined, 3, 2], 100, 40), ['0.0,30.0', '66.7,10.0 100.0,20.0'])
   assert.deepEqual(mallWeatherChartSegments([], 100, 40), [])
+  assert.deepEqual(mallWeatherChartScale([1, 3, 2]), {
+    minimum: 0,
+    maximum: 4,
+    ticks: [0, 1, 2, 3, 4],
+  })
+  assert.deepEqual(mallWeatherChartScale([0.2, 0.6], { floorZero: true }), {
+    minimum: 0,
+    maximum: 0.8,
+    ticks: [0, 0.2, 0.4, 0.6, 0.8],
+  })
+  assert.deepEqual(mallWeatherChartScale([10, 11], { floorZero: true }), {
+    minimum: 0,
+    maximum: 15,
+    ticks: [0, 5, 10, 15],
+  })
+  assert.deepEqual(mallWeatherChartScale([60, 80], { floorZero: true }), {
+    minimum: 0,
+    maximum: 100,
+    ticks: [0, 25, 50, 75, 100],
+  })
+  assert.equal(mallWeatherChartScale([undefined, Number.NaN]), undefined)
+  const timeDomain = mallWeatherChartTimeDomain([
+    [{ time: '2026-08-02 10:00' }, { time: '2026-08-02 11:00' }],
+    [{ time: '2026-08-02 10:00' }, { time: '2026-08-02 12:00' }],
+  ])
+  assert.deepEqual(timeDomain, ['2026-08-02 10:00', '2026-08-02 11:00', '2026-08-02 12:00'])
+  assert.deepEqual(mallWeatherChartValuesByTime([
+    { time: '2026-08-02 10:00', value: 28 },
+    { time: '2026-08-02 12:00', value: 30 },
+  ], timeDomain), [28, undefined, 30])
+  assert.equal(mallWeatherClampedChartIndex(100, 24), 23)
+  assert.equal(mallWeatherClampedChartIndex(12, 24), 12)
+  assert.equal(mallWeatherClampedChartIndex(0, 0), null)
 })

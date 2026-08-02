@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import {
+  createMallWeatherChartCsv,
   createMallWeatherCsvZip,
   createMallWeatherDatasetCsv,
   downloadMallWeatherBytes,
@@ -9,6 +10,7 @@ import {
   mallWeatherCsvFileName,
   mallWeatherCsvKinds,
   mallWeatherCsvZipFileName,
+  mallWeatherChartCsvFileName,
 } from '../.test-dist/mallWeatherCsv.js'
 
 const decoder = new TextDecoder()
@@ -119,6 +121,44 @@ test('creates Chinese mall-scoped CSV with BOM, CRLF and stable values', () => {
   assert.match(lines[1], /"\[\{""code"":""W1"",""path"":""temperature""\}\]"$/)
   assert.equal(lines.at(-1), '')
   assert.equal(text.replaceAll('\r\n', '').includes('\n'), false)
+})
+
+test('creates chart-scoped CSV aligned by time with only visible series', () => {
+  const text = decodeCsv(createMallWeatherChartCsv([
+    { id: 'temperature', name: '温度', unit: '°C', data: [{ time: '2026-08-02 10:00', value: 28 }, { time: '2026-08-02 11:00', value: 29 }] },
+    { id: 'apparent', name: '体感温度', unit: '°C', data: [{ time: '2026-08-02 11:00', value: 31 }] },
+  ], mall))
+  assert.equal(text, [
+    '商场编码,商场名称,时间,温度（°C）,体感温度（°C）',
+    'SH-001,上海测试商场,2026-08-02 10:00,28,',
+    'SH-001,上海测试商场,2026-08-02 11:00,29,31',
+    '',
+  ].join('\r\n'))
+  assert.equal(mallWeatherChartCsvFileName('hourly_temperature', ' SH/001 '), 'SH_001_hourly_temperature.csv')
+  assert.throws(() => mallWeatherChartCsvFileName('../bad', 'SH-001'), /invalid mall weather chart id/)
+})
+
+test('exports all 34 official life-index series and limits output by total cells', () => {
+  const lifeSeries = Array.from({ length: 34 }, (_, index) => ({
+    id: `life_${index + 1}`,
+    name: `生活指数${index + 1}`,
+    unit: '级',
+    data: [{ time: '2026-08-02', value: index + 1 }],
+  }))
+  const text = decodeCsv(createMallWeatherChartCsv(lifeSeries, mall))
+  const lines = text.split('\r\n')
+  assert.equal(lines[0].split(',').length, 37)
+  assert.equal(lines[1].split(',').length, 37)
+  assert.match(lines[0], /生活指数34（级）$/)
+  assert.match(lines[1], /,34$/)
+
+  const oversized = Array.from({ length: 500 }, (_, index) => ({
+    id: `series_${index}`,
+    name: `序列${index}`,
+    unit: '',
+    data: Array.from({ length: 500 }, (_, pointIndex) => ({ time: String(pointIndex), value: pointIndex })),
+  }))
+  assert.throws(() => createMallWeatherChartCsv(oversized, mall), /too large/)
 })
 
 test('applies RFC4180 escaping, empty values and spreadsheet formula protection', () => {

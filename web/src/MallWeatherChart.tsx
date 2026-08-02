@@ -1,22 +1,37 @@
-import { type KeyboardEvent, type PointerEvent, type ReactNode, useId, useState } from 'react'
+import { Download } from 'lucide-react'
+import { type KeyboardEvent, type PointerEvent, type ReactNode, useEffect, useId, useMemo, useRef, useState } from 'react'
 import {
   mallWeatherChartPoints,
+  mallWeatherChartScale,
   mallWeatherChartSegments,
+  mallWeatherChartTimeDomain,
+  mallWeatherChartValuesByTime,
+  mallWeatherClampedChartIndex,
   mallWeatherMetric,
   mallWeatherNearestChartPoint,
 } from './mallWeather'
 
-const chartWidth = 640
-const chartHeight = 140
-const chartViewBoxHeight = 160
+const chartHeight = 260
+const plot = { left: 52, right: 18, top: 18, bottom: 38 }
+const plotHeight = chartHeight - plot.top - plot.bottom
+
+export type MallWeatherChartSeries = {
+  id: string
+  name: string
+  color: string
+  dash?: string
+  data: Array<{ time: string; value?: number }>
+}
 
 type MallWeatherChartProps = {
   title: string
   detail: string
   unit: string
-  icon: ReactNode
-  series: Array<{ time: string; value?: number }>
-  showDetails?: boolean
+  icon?: ReactNode
+  series: MallWeatherChartSeries[]
+  onDownload: (series: MallWeatherChartSeries[]) => void
+  downloadDisabled?: boolean
+  floorZero?: boolean
 }
 
 export function MallWeatherChart({
@@ -25,166 +40,232 @@ export function MallWeatherChart({
   unit,
   icon,
   series,
-  showDetails = true,
+  onDownload,
+  downloadDisabled = false,
+  floorZero = false,
 }: MallWeatherChartProps) {
   const tooltipID = useId()
+  const visualRef = useRef<HTMLDivElement>(null)
   const [activeIndex, setActiveIndex] = useState<number | null>(null)
-  const values = series.map((item) => item.value)
-  const points = mallWeatherChartPoints(values, chartWidth, chartHeight)
-  const segments = mallWeatherChartSegments(values, chartWidth, chartHeight)
-  const available = series.filter(
-    (item): item is { time: string; value: number } =>
-      typeof item.value === 'number' && Number.isFinite(item.value),
-  )
-  const minimum = available.length ? Math.min(...available.map((item) => item.value)) : undefined
-  const maximum = available.length ? Math.max(...available.map((item) => item.value)) : undefined
-  const startTime = available[0]?.time || '未知'
-  const endTime = available[available.length - 1]?.time || '未知'
-  const description = `${startTime} 至 ${endTime}，最低 ${mallWeatherMetric(minimum, unit)}，最高 ${mallWeatherMetric(maximum, unit)}`
-  const activePosition = points.findIndex((point) => point.index === activeIndex)
-  const activePoint = activePosition >= 0 ? points[activePosition] : undefined
-  const selectedPosition = activePosition >= 0 ? activePosition : 0
-  const selectedPoint = points[selectedPosition]
-  const selectedItem = selectedPoint ? series[selectedPoint.index] : undefined
-  const activeItem = activePoint ? series[activePoint.index] : undefined
-  const labelStep = Math.max(1, Math.ceil(points.length / 6))
-  const labeledPoints = points.filter((_, index) => points.length <= 8 || index % labelStep === 0 || index === points.length - 1)
+  const [chartWidth, setChartWidth] = useState(720)
+  const plotWidth = chartWidth - plot.left - plot.right
+  const { timeDomain, normalizedSeries, scale } = useMemo(() => {
+    const domain = mallWeatherChartTimeDomain(series.map((item) => item.data))
+    const normalized = series.map((item) => {
+      const values = mallWeatherChartValuesByTime(item.data, domain)
+      return { ...item, data: domain.map((time, index) => ({ time, value: values[index] })) }
+    })
+    return {
+      timeDomain: domain,
+      normalizedSeries: normalized,
+      scale: mallWeatherChartScale(normalized.flatMap((item) => item.data.map((point) => point.value)), { floorZero, tickCount: 5 }),
+    }
+  }, [floorZero, series])
+  const itemCount = timeDomain.length
+  const plottedSeries = useMemo(() => normalizedSeries.map((item) => {
+    const values = item.data.map((point) => point.value)
+    return {
+      ...item,
+      points: scale ? mallWeatherChartPoints(values, plotWidth, plotHeight, scale) : [],
+      segments: scale ? mallWeatherChartSegments(values, plotWidth, plotHeight, scale) : [],
+    }
+  }), [normalizedSeries, plotWidth, scale])
+  const axisPoints = useMemo(() => mallWeatherChartPoints(
+    Array.from({ length: itemCount }, () => 0),
+    plotWidth,
+    plotHeight,
+    { minimum: 0, maximum: 1 },
+  ), [itemCount, plotWidth])
+  const selectedPosition = mallWeatherClampedChartIndex(activeIndex, itemCount) ?? 0
+  const activeAxisPoint = activeIndex === null ? undefined : axisPoints[selectedPosition]
+  const selectedTime = timeDomain[selectedPosition] || ''
+  const selectedValues = normalizedSeries
+    .map((item) => ({ id: item.id, name: item.name, color: item.color, value: item.data[selectedPosition]?.value }))
+  const selectedY = plottedSeries
+    .flatMap((item) => item.points.filter((point) => point.index === selectedPosition).map((point) => point.y))
+    .sort((a, b) => a - b)[0] ?? plotHeight / 2
+  const xTickIndexes = sampleIndexes(itemCount, Math.max(3, Math.min(6, Math.floor(plotWidth / 88))))
+  const showDateInTimeTicks = chartDatePart(timeDomain[0] || '') !== chartDatePart(timeDomain[itemCount - 1] || '')
+  const hasData = Boolean(scale && plottedSeries.some((item) => item.points.length > 0))
+
+  useEffect(() => {
+    setActiveIndex((current) => mallWeatherClampedChartIndex(current, itemCount))
+  }, [itemCount])
+
+  useEffect(() => {
+    const element = visualRef.current
+    if (!element) return
+    const updateWidth = (width: number) => {
+      const nextWidth = Math.max(260, Math.round(width))
+      setChartWidth((current) => current === nextWidth ? current : nextWidth)
+    }
+    updateWidth(element.clientWidth)
+    if (typeof ResizeObserver === 'undefined') return
+    const observer = new ResizeObserver((entries) => updateWidth(entries[0]?.contentRect.width ?? element.clientWidth))
+    observer.observe(element)
+    return () => observer.disconnect()
+  }, [hasData])
 
   const selectNearestPoint = (event: PointerEvent<SVGSVGElement>) => {
     const bounds = event.currentTarget.getBoundingClientRect()
     if (bounds.width <= 0) return
-    const pointerX = Math.max(0, Math.min(chartWidth, (event.clientX - bounds.left) / bounds.width * chartWidth))
-    const nearest = mallWeatherNearestChartPoint(points, pointerX)
+    const pointerX = (event.clientX - bounds.left) / bounds.width * chartWidth - plot.left
+    const nearest = mallWeatherNearestChartPoint(axisPoints, Math.max(0, Math.min(plotWidth, pointerX)))
     if (nearest) setActiveIndex(nearest.index)
   }
 
   const selectPointByKeyboard = (event: KeyboardEvent<SVGSVGElement>) => {
     let nextPosition = selectedPosition
     if (event.key === 'ArrowLeft' || event.key === 'ArrowDown') nextPosition = Math.max(0, selectedPosition - 1)
-    else if (event.key === 'ArrowRight' || event.key === 'ArrowUp') nextPosition = Math.min(points.length - 1, selectedPosition + 1)
+    else if (event.key === 'ArrowRight' || event.key === 'ArrowUp') nextPosition = Math.min(itemCount - 1, selectedPosition + 1)
     else if (event.key === 'Home') nextPosition = 0
-    else if (event.key === 'End') nextPosition = points.length - 1
+    else if (event.key === 'End') nextPosition = itemCount - 1
     else if (event.key === 'Escape') {
       setActiveIndex(null)
       return
     } else return
     event.preventDefault()
-    setActiveIndex(points[nextPosition]?.index ?? null)
+    setActiveIndex(nextPosition)
   }
 
-  const tooltipHorizontal = activePoint && activePoint.x <= chartWidth * 0.15
+  const tooltipHorizontal = activeAxisPoint && activeAxisPoint.x <= plotWidth * 0.15
     ? 'start'
-    : activePoint && activePoint.x >= chartWidth * 0.85 ? 'end' : 'center'
-  const tooltipVertical = activePoint && activePoint.y < chartViewBoxHeight * 0.3 ? 'below' : 'above'
+    : activeAxisPoint && activeAxisPoint.x >= plotWidth * 0.85 ? 'end' : 'center'
+  const tooltipVertical = selectedY < plotHeight * 0.35 ? 'below' : 'above'
 
   return (
     <article className="workbench-panel mall-weather-chart-panel">
-      <div className="mall-weather-section-title">
-        <div><strong>{title}</strong><span>{detail} · {unit}</span></div>
-        {icon}
+      <header className="mall-weather-chart-heading">
+        <div className="mall-weather-chart-title">
+          {icon && <span className="mall-weather-chart-icon">{icon}</span>}
+          <div><strong>{title}</strong><span>{detail} · {unit}</span></div>
+        </div>
+        <button
+          type="button"
+          className="mall-weather-chart-download"
+          aria-label={`下载数据：${title}`}
+          disabled={downloadDisabled}
+          onClick={() => onDownload(series)}
+        >
+          <Download aria-hidden="true" />下载数据
+        </button>
+      </header>
+      <div className="mall-weather-chart-legend" aria-label="曲线图例">
+        {series.map((item) => (
+          <span key={item.id}>
+            <svg viewBox="0 0 20 6" aria-hidden="true">
+              <line x1="0" y1="3" x2="20" y2="3" stroke={item.color} strokeWidth="2" strokeDasharray={item.dash} />
+            </svg>
+            {item.name}
+          </span>
+        ))}
       </div>
-      {segments.length === 0 ? (
+      {!hasData ? (
         <div className="empty-state" role="status">
           <strong>暂无趋势数据</strong>
           <span>当前时间窗口没有可绘制的数据。</span>
         </div>
       ) : (
-        <>
-          <div className="mall-weather-chart-visual">
-            <svg
-              viewBox={`0 0 ${chartWidth} ${chartViewBoxHeight}`}
-              role="slider"
-              tabIndex={0}
-              aria-label={`${title}时间点`}
-              aria-orientation="horizontal"
-              aria-valuemin={0}
-              aria-valuemax={Math.max(points.length - 1, 0)}
-              aria-valuenow={selectedPosition}
-              aria-valuetext={selectedItem ? `${selectedItem.time || '时间未知'}，${mallWeatherMetric(selectedItem.value, unit)}` : '暂无数据'}
-              aria-describedby={activePoint ? tooltipID : undefined}
-              preserveAspectRatio="none"
-              onFocus={() => setActiveIndex((current) => points.some((point) => point.index === current) ? current : points[0]?.index ?? null)}
-              onBlur={() => setActiveIndex(null)}
-              onKeyDown={selectPointByKeyboard}
-              onPointerMove={selectNearestPoint}
-              onPointerLeave={(event) => {
-                if (!event.currentTarget.matches(':focus')) setActiveIndex(null)
-              }}
-            >
-              <title>{title}</title>
-              <desc>{description}。鼠标悬停或使用方向键可查看对应时间点。</desc>
-              <path d={`M0 ${chartHeight} H${chartWidth}`} />
-              <path d={`M0 ${chartHeight / 2} H${chartWidth}`} />
-              {segments.map((segment, index) => segment.includes(' ')
-                ? <polyline points={segment} key={`${segment}-${index}`} />
-                : <ChartPoint point={segment} key={`${segment}-${index}`} />)}
-              {points.length > 1 && points.map((point) => <circle className="mall-weather-chart-point" cx={point.x} cy={point.y} r="4" key={`point-${point.index}`} />)}
-              {labeledPoints.map((point) => {
-                const item = series[point.index]
-                return <g className="mall-weather-chart-label" key={`label-${point.index}`} aria-hidden="true">
-                  <text className="value" x={point.x} y={Math.max(12, point.y - 9)} textAnchor={point.x === 0 ? 'start' : point.x === chartWidth ? 'end' : 'middle'}>{chartValueLabel(item?.value)}</text>
-                  <text className="time" x={point.x} y={chartViewBoxHeight - 2} textAnchor={point.x === 0 ? 'start' : point.x === chartWidth ? 'end' : 'middle'}>{chartTimeLabel(item?.time || '')}</text>
+        <div className="mall-weather-chart-visual" ref={visualRef}>
+          <svg
+            viewBox={`0 0 ${chartWidth} ${chartHeight}`}
+            role="slider"
+            tabIndex={0}
+            aria-label={`${title}时间点`}
+            aria-orientation="horizontal"
+            aria-valuemin={0}
+            aria-valuemax={Math.max(itemCount - 1, 0)}
+            aria-valuenow={selectedPosition}
+            aria-valuetext={`${selectedTime || '时间未知'}，${selectedValues.map((item) => `${item.name} ${mallWeatherMetric(item.value, unit)}`).join('，') || '暂无数据'}`}
+            style={{ aspectRatio: `${chartWidth} / ${chartHeight}` }}
+            onFocus={() => setActiveIndex((current) => current ?? 0)}
+            onBlur={() => setActiveIndex(null)}
+            onKeyDown={selectPointByKeyboard}
+            onPointerMove={selectNearestPoint}
+            onPointerLeave={(event) => {
+              if (!event.currentTarget.matches(':focus')) setActiveIndex(null)
+            }}
+          >
+            <title>{title}</title>
+            <desc>使用鼠标悬停或方向键查看各时间点，默认隐藏数据点以保持曲线清晰。</desc>
+            <g className="mall-weather-chart-plot" transform={`translate(${plot.left} ${plot.top})`}>
+              {scale?.ticks.map((tick) => {
+                const y = plotHeight - (tick - scale.minimum) / (scale.maximum - scale.minimum) * plotHeight
+                return <g className="mall-weather-chart-y-tick" key={tick}>
+                  <line x1="0" x2={plotWidth} y1={y} y2={y} />
+                  <text x="-10" y={y + 4} textAnchor="end">{chartAxisLabel(tick)}</text>
                 </g>
               })}
-              {activePoint && (
+              {xTickIndexes.map((index) => {
+                const x = itemCount <= 1 ? 0 : index / (itemCount - 1) * plotWidth
+                return <text className="mall-weather-chart-x-tick" x={x} y={plotHeight + 25} textAnchor={index === 0 ? 'start' : index === itemCount - 1 ? 'end' : 'middle'} key={index}>
+                  {chartTimeLabel(timeDomain[index] || '', showDateInTimeTicks)}
+                </text>
+              })}
+              {plottedSeries.map((item) => (
+                <g className="mall-weather-chart-series" key={item.id}>
+                  {item.segments.map((segment, index) => segment.includes(' ')
+                    ? <polyline points={segment} style={{ stroke: item.color, strokeDasharray: item.dash }} key={index} />
+                    : <ChartPoint point={segment} color={item.color} key={index} />)}
+                </g>
+              ))}
+              {activeAxisPoint && (
                 <g className="mall-weather-chart-active" aria-hidden="true">
-                  <line x1={activePoint.x} x2={activePoint.x} y1="0" y2={chartHeight} />
-                  <circle cx={activePoint.x} cy={activePoint.y} r="6" />
+                  <line x1={activeAxisPoint.x} x2={activeAxisPoint.x} y1="0" y2={plotHeight} />
+                  {plottedSeries.map((item) => {
+                    const point = item.points.find((candidate) => candidate.index === selectedPosition)
+                    return point ? <circle cx={point.x} cy={point.y} r="4" style={{ stroke: item.color }} key={item.id} /> : null
+                  })}
                 </g>
               )}
-            </svg>
-            {activePoint && activeItem && (
-              <div
-                className={`mall-weather-chart-tooltip ${tooltipHorizontal} ${tooltipVertical}`}
-                id={tooltipID}
-                role="tooltip"
-                style={{
-                  left: `${activePoint.x / chartWidth * 100}%`,
-                  top: `${activePoint.y / chartViewBoxHeight * 100}%`,
-                }}
-              >
-                <strong>{activeItem.time || '时间未知'}</strong>
-                <span>{mallWeatherMetric(activeItem.value, unit)}</span>
-              </div>
-            )}
-          </div>
-          <p className="mall-weather-chart-summary">{description}</p>
-          {showDetails && (
-            <details className="mall-weather-chart-data">
-              <summary>查看趋势明细（{series.length} 条）</summary>
-              <div className="data-table-wrap">
-                <table className="data-table">
-                  <thead><tr><th scope="col">时间</th><th scope="col">数值</th></tr></thead>
-                  <tbody>
-                    {series.map((item, index) => (
-                      <tr key={`${item.time}-${index}`}>
-                        <td>{item.time || '未知'}</td>
-                        <td>{mallWeatherMetric(item.value, unit)}</td>
-                      </tr>
-                    ))}
-                  </tbody>
-                </table>
-              </div>
-            </details>
+            </g>
+          </svg>
+          {activeAxisPoint && (
+            <div
+              className={`mall-weather-chart-tooltip ${tooltipHorizontal} ${tooltipVertical}`}
+              id={tooltipID}
+              role="tooltip"
+              style={{
+                left: `${(plot.left + activeAxisPoint.x) / chartWidth * 100}%`,
+                top: `${(plot.top + selectedY) / chartHeight * 100}%`,
+              }}
+            >
+              <strong>{selectedTime || '时间未知'}</strong>
+              {selectedValues.map((item) => <span key={item.id}><i style={{ backgroundColor: item.color }} />{item.name} {mallWeatherMetric(item.value, unit)}</span>)}
+            </div>
           )}
-        </>
+        </div>
       )}
     </article>
   )
 }
 
-function ChartPoint({ point }: { point: string }) {
+function ChartPoint({ point, color }: { point: string; color: string }) {
   const [cx = '0', cy = '0'] = point.split(',')
-  return <circle cx={cx} cy={cy} r="4" />
+  return <circle className="mall-weather-chart-single-point" cx={cx} cy={cy} r="3" style={{ stroke: color }} />
 }
 
-function chartTimeLabel(value: string) {
+function sampleIndexes(length: number, maximum: number) {
+  if (length <= 0) return []
+  if (length <= maximum) return Array.from({ length }, (_, index) => index)
+  const indexes = Array.from({ length: maximum }, (_, index) => Math.round(index * (length - 1) / (maximum - 1)))
+  return [...new Set(indexes)]
+}
+
+function chartTimeLabel(value: string, includeDate: boolean) {
   const clock = value.match(/(?:T|\s)(\d{2}:\d{2})/)
-  if (clock?.[1]) return clock[1]
-  return value.length > 8 ? value.slice(0, 8) : value
+  const date = value.match(/\d{4}-(\d{2})-(\d{2})/)
+  if (clock?.[1]) return includeDate && date ? `${date[1]}-${date[2]} ${clock[1]}` : clock[1]
+  if (date) return `${date[1]}-${date[2]}`
+  return value.length > 10 ? value.slice(0, 10) : value
 }
 
-function chartValueLabel(value: number | undefined) {
-  if (typeof value !== 'number' || !Number.isFinite(value)) return '—'
-  return Number.isInteger(value) ? String(value) : value.toFixed(1)
+function chartDatePart(value: string) {
+  return value.match(/\d{4}-\d{2}-\d{2}/)?.[0] || ''
+}
+
+function chartAxisLabel(value: number) {
+  if (Math.abs(value) >= 1000) return Intl.NumberFormat('zh-CN', { notation: 'compact', maximumFractionDigits: 1 }).format(value)
+  if (Number.isInteger(value)) return String(value)
+  return value.toFixed(Math.abs(value) < 1 ? 2 : 1).replace(/0+$/, '').replace(/\.$/, '')
 }
