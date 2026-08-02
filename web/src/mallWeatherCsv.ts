@@ -39,6 +39,13 @@ export type MallWeatherCsvMallContext = {
   mallName: string
 }
 
+export type MallWeatherChartCsvSeries = {
+  id: string
+  name: string
+  unit: string
+  data: ReadonlyArray<{ time: string; value?: number }>
+}
+
 export const mallWeatherCsvEntryNames: Readonly<Record<MallWeatherCsvKind, string>> = {
   realtime: 'realtime.csv',
   minutely: 'minutely.csv',
@@ -56,6 +63,7 @@ const ZIP_DOS_TIME = 0
 const ZIP_DOS_DATE = 0x0021
 const MAX_UINT16 = 0xffff
 const MAX_UINT32 = 0xffffffff
+const MAX_CHART_CSV_CELLS = 250_000
 const textEncoder = new TextEncoder()
 
 type CsvHeaderMap<Kind extends MallWeatherCsvKind> = Record<keyof MallWeatherCsvRowByKind[Kind], string>
@@ -304,6 +312,49 @@ export function createMallWeatherDatasetCsv<Kind extends MallWeatherCsvKind>(
   return concatenateBytes([UTF8_BOM, textEncoder.encode(csvText)])
 }
 
+export function createMallWeatherChartCsv(
+  series: readonly MallWeatherChartCsvSeries[],
+  mall: MallWeatherCsvMallContext,
+): Uint8Array {
+  const normalizedMall = normalizeMallContext(mall)
+  if (!Array.isArray(series) || series.length === 0) throw new Error('invalid mall weather chart CSV series')
+  let pointCount = 0
+  const normalizedSeries = series.map((item) => {
+    const id = typeof item.id === 'string' ? item.id.trim() : ''
+    const name = typeof item.name === 'string' ? item.name.trim() : ''
+    const unit = typeof item.unit === 'string' ? item.unit.trim() : ''
+    if (!/^[A-Za-z0-9_-]{1,64}$/.test(id) || !name || Array.from(name).length > 64 || Array.from(unit).length > 24 || !Array.isArray(item.data)) {
+      throw new Error('invalid mall weather chart CSV series')
+    }
+    const values = new Map<string, number | undefined>()
+    for (const point of item.data) {
+      pointCount += 1
+      if (pointCount > MAX_CHART_CSV_CELLS) throw new Error('mall weather chart CSV is too large')
+      const time = typeof point?.time === 'string' ? point.time.trim() : ''
+      if (!time || Array.from(time).length > 64 || containsDisallowedControl(time, false) ||
+        (point.value !== undefined && (typeof point.value !== 'number' || !Number.isFinite(point.value)))) {
+        throw new Error('invalid mall weather chart CSV point')
+      }
+      values.set(time, point.value)
+    }
+    return { id, name, unit, values }
+  })
+  const times = [...new Set(normalizedSeries.flatMap((item) => [...item.values.keys()]))].sort()
+  const cellCount = (times.length + 1) * (normalizedSeries.length + 3)
+  if (cellCount > MAX_CHART_CSV_CELLS) throw new Error('mall weather chart CSV is too large')
+  const records: string[][] = [
+    ['商场编码', '商场名称', '时间', ...normalizedSeries.map((item) => protectSpreadsheetText(`${item.name}${item.unit ? `（${item.unit}）` : ''}`))],
+    ...times.map((time) => [
+      protectSpreadsheetText(normalizedMall.mallCode),
+      protectSpreadsheetText(normalizedMall.mallName),
+      protectSpreadsheetText(time),
+      ...normalizedSeries.map((item) => formatCsvValue(item.values.get(time))),
+    ]),
+  ]
+  const csvText = `${records.map((record) => record.map(escapeCsvCell).join(',')).join('\r\n')}\r\n`
+  return concatenateBytes([UTF8_BOM, textEncoder.encode(csvText)])
+}
+
 export function createMallWeatherCsvZip(
   data: MallWeatherCsvZipData,
   mall: MallWeatherCsvMallContext,
@@ -321,6 +372,12 @@ export function createMallWeatherCsvZip(
 export function mallWeatherCsvFileName(kind: MallWeatherCsvKind, mallCode: string): string {
   if (!mallWeatherCsvKinds.includes(kind)) throw new Error('invalid mall weather CSV kind')
   return `${safeMallCodeFileStem(mallCode)}_${mallWeatherCsvEntryNames[kind]}`
+}
+
+export function mallWeatherChartCsvFileName(chartID: string, mallCode: string): string {
+  const safeChartID = typeof chartID === 'string' ? chartID.trim() : ''
+  if (!/^[a-z0-9_]{1,64}$/.test(safeChartID)) throw new Error('invalid mall weather chart id')
+  return `${safeMallCodeFileStem(mallCode)}_${safeChartID}.csv`
 }
 
 export function mallWeatherCsvZipFileName(mallCode: string): string {

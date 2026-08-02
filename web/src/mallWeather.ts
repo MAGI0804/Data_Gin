@@ -2191,12 +2191,76 @@ export type MallWeatherChartPoint = {
   y: number
 }
 
-export function mallWeatherChartPoints(values: Array<number | undefined>, width: number, height: number) {
+export type MallWeatherChartScale = {
+  minimum: number
+  maximum: number
+  ticks: number[]
+}
+
+export function mallWeatherChartTimeDomain(
+  series: ReadonlyArray<ReadonlyArray<{ time: string }>>,
+) {
+  return [...new Set(series.flatMap((items) => items.map((item) => item.time).filter(Boolean)))].sort()
+}
+
+export function mallWeatherChartValuesByTime(
+  data: ReadonlyArray<{ time: string; value?: number }>,
+  timeDomain: readonly string[],
+) {
+  const valuesByTime = new Map(data.map((point) => [point.time, point.value]))
+  return timeDomain.map((time) => valuesByTime.get(time))
+}
+
+export function mallWeatherClampedChartIndex(index: number | null, itemCount: number) {
+  if (index === null || !Number.isSafeInteger(itemCount) || itemCount <= 0) return null
+  return Math.min(Math.max(0, index), itemCount - 1)
+}
+
+export function mallWeatherChartScale(
+  values: Array<number | undefined>,
+  options: { floorZero?: boolean; tickCount?: number } = {},
+): MallWeatherChartScale | undefined {
   const finiteValues = values.filter((value): value is number => typeof value === 'number' && Number.isFinite(value))
-  if (finiteValues.length === 0 || width <= 0 || height <= 0) return []
-  const minimum = Math.min(...finiteValues)
-  const maximum = Math.max(...finiteValues)
-  const range = maximum - minimum || 1
+  if (finiteValues.length === 0) return undefined
+
+  const tickCount = Math.max(2, Math.min(8, options.tickCount ?? 5))
+  const dataMinimum = Math.min(...finiteValues)
+  const dataMaximum = Math.max(...finiteValues)
+  const dataRange = dataMaximum - dataMinimum
+  const padding = dataRange > 0
+    ? dataRange * 0.1
+    : Math.max(Math.abs(dataMinimum) * 0.05, 1)
+  let lower = dataMinimum - padding
+  const upper = dataMaximum + padding
+  if (options.floorZero && dataMinimum >= 0) lower = 0
+
+  const rawStep = Math.max((upper - lower) / (tickCount - 1), Number.EPSILON)
+  const magnitude = 10 ** Math.floor(Math.log10(rawStep))
+  const normalized = rawStep / magnitude
+  const factor = [1, 2, 2.5, 5, 10].find((candidate) => candidate >= normalized) ?? 10
+  const step = factor * magnitude
+  let minimum = Math.floor(lower / step) * step
+  let maximum = Math.ceil(upper / step) * step
+  if (options.floorZero && dataMinimum >= 0) minimum = Math.max(0, minimum)
+  if (minimum === maximum) maximum = minimum + step
+
+  const precision = Math.max(0, -Math.floor(Math.log10(step)) + 2)
+  const ticks: number[] = []
+  for (let value = minimum; value <= maximum + step / 2; value += step) {
+    ticks.push(Number(value.toFixed(precision)))
+  }
+  return { minimum, maximum, ticks }
+}
+
+export function mallWeatherChartPoints(
+  values: Array<number | undefined>,
+  width: number,
+  height: number,
+  scale?: Pick<MallWeatherChartScale, 'minimum' | 'maximum'>,
+) {
+  const chartScale = scale ?? mallWeatherChartScale(values)
+  if (!chartScale || width <= 0 || height <= 0) return []
+  const range = chartScale.maximum - chartScale.minimum || 1
   const denominator = Math.max(values.length - 1, 1)
 
   return values.flatMap((value, index): MallWeatherChartPoint[] => {
@@ -2204,7 +2268,7 @@ export function mallWeatherChartPoints(values: Array<number | undefined>, width:
     return [{
       index,
       x: index / denominator * width,
-      y: height - (value - minimum) / range * height,
+      y: height - (value - chartScale.minimum) / range * height,
     }]
   })
 }
@@ -2215,8 +2279,13 @@ export function mallWeatherNearestChartPoint(points: MallWeatherChartPoint[], ta
     Math.abs(point.x - targetX) < Math.abs(nearest.x - targetX) ? point : nearest)
 }
 
-export function mallWeatherChartSegments(values: Array<number | undefined>, width: number, height: number) {
-  const points = mallWeatherChartPoints(values, width, height)
+export function mallWeatherChartSegments(
+  values: Array<number | undefined>,
+  width: number,
+  height: number,
+  scale?: Pick<MallWeatherChartScale, 'minimum' | 'maximum'>,
+) {
+  const points = mallWeatherChartPoints(values, width, height, scale)
   if (points.length === 0) return []
   const pointsByIndex = new Map(points.map((point) => [point.index, point]))
 

@@ -1,14 +1,12 @@
 import { type Dispatch, type ReactNode, type SetStateAction, useCallback, useEffect, useRef, useState } from 'react'
-import { Download, RefreshCcw, Thermometer } from 'lucide-react'
-import { MallWeatherChart } from './MallWeatherChart'
-import { createMallWeatherDatasetCsv, downloadMallWeatherBytes, mallWeatherCsvFileName } from './mallWeatherCsv'
+import { CloudRain, Droplets, RefreshCcw, Sparkles, Thermometer, Wind } from 'lucide-react'
+import { MallWeatherChart, type MallWeatherChartSeries } from './MallWeatherChart'
+import { createMallWeatherChartCsv, downloadMallWeatherBytes, mallWeatherChartCsvFileName } from './mallWeatherCsv'
 import {
   mallWeatherDailyForecastDays,
   mallWeatherFreshnessLabel,
   mallWeatherHourlyForecastHours,
-  mallWeatherMetric,
   mallWeatherMinutelyForecastMinutes,
-  mallWeatherSkyconLabel,
   loadMallWeatherForecastDatasets,
   type MallWeatherDaily,
   type MallWeatherHourly,
@@ -48,8 +46,6 @@ type MallWeatherForecastPanelProps = {
   client: QueryClient
   onDatasetsChange: (snapshot: MallWeatherForecastDataSnapshot) => void
 }
-
-type ForecastDatasetKind = 'minutely' | 'hourly' | 'daily' | 'life_indices'
 
 const emptyState = <T,>(): QueryState<T> => ({ loading: true, error: '', items: [], meta: null })
 
@@ -164,18 +160,23 @@ export function MallWeatherForecastPanel({
     onDatasetsChangeRef.current(snapshot)
   }, [currentMallData, daily.items, datasetError, hourly.items, life.items, loading, mallID, minutely.items])
 
-  const downloadCsv = useCallback((kind: ForecastDatasetKind, createBytes: () => Uint8Array) => {
+  const downloadChartCsv = useCallback((chartID: string, unit: string, series: MallWeatherChartSeries[]) => {
     setCsvError('')
     try {
-      const bytes = createBytes()
       downloadMallWeatherBytes(
-        bytes,
-        mallWeatherCsvFileName(kind, mallCode),
+        createMallWeatherChartCsv(series.map((item) => ({ ...item, unit })), { mallCode, mallName }),
+        mallWeatherChartCsvFileName(chartID, mallCode),
       )
     } catch {
       setCsvError('CSV 文件生成失败，请重新查询数据后重试。')
     }
-  }, [mallCode])
+  }, [mallCode, mallName])
+
+  const minutelyDownloadDisabled = !currentMallData || minutely.loading || Boolean(minutely.error)
+  const hourlyDownloadDisabled = !currentMallData || hourly.loading || Boolean(hourly.error)
+  const dailyDownloadDisabled = !currentMallData || daily.loading || Boolean(daily.error)
+  const lifeDownloadDisabled = !currentMallData || life.loading || Boolean(life.error)
+  const lifeSeries = buildLifeIndexSeries(life.items)
 
   return (
     <section className="workbench-panel mall-weather-forecast-panel" aria-busy={loading}>
@@ -194,102 +195,97 @@ export function MallWeatherForecastPanel({
         title={`中心点未来 ${mallWeatherMinutelyForecastMinutes} 分钟降水（约 1 km 分辨率）`}
         state={minutely}
         empty={`未来 ${mallWeatherMinutelyForecastMinutes} 分钟窗口没有分钟级降水预报`}
-        onDownload={() => downloadCsv('minutely', () => createMallWeatherDatasetCsv('minutely', minutely.items, { mallCode, mallName }))}
-        downloadDisabled={!currentMallData || minutely.loading || Boolean(minutely.error)}
-        defaultOpen
       >
-        <table className="data-table"><caption className="mall-weather-table-caption">商场中心点未来 {mallWeatherMinutelyForecastMinutes} 分钟约 1 km 分辨率降水明细</caption><thead><tr><th scope="col">时间</th><th scope="col">分钟偏移</th><th scope="col">降水强度</th><th scope="col">概率</th><th scope="col">描述 / 关键点</th><th scope="col">数据源</th><th scope="col">质量</th></tr></thead><tbody>
-          {minutely.items.map((item, index) => <tr key={`${item.forecastMinuteUtc}-${index}`}><td>{item.forecastMinuteLocal}</td><td>+{item.minuteOffset} 分钟</td><td>{mallWeatherMetric(item.precipitationMmH, ' mm/h')}</td><td>{mallWeatherMetric(item.probabilityPct, '%', 0)}</td><td>{[item.description, item.forecastKeypoint].filter(Boolean).join(' / ') || '—'}</td><td>{item.datasource || '—'}</td><td>{qualityLabel(item.qualityStatus, item.qualityWarnings.length)}</td></tr>)}
-        </tbody></table>
+        <div className="mall-weather-forecast-charts">
+          <MallWeatherChart title="分钟级降水强度" detail={`未来 ${mallWeatherMinutelyForecastMinutes} 分钟`} unit="mm/h" icon={<CloudRain aria-hidden="true" />} floorZero
+            series={[chartSeries('降水强度', '#0F9F78', minutely.items, 'forecastMinuteLocal', 'precipitationMmH')]}
+            onDownload={(series) => downloadChartCsv('minutely_precipitation', 'mm/h', series)} downloadDisabled={minutelyDownloadDisabled} />
+          <MallWeatherChart title="分钟级降水概率" detail={`未来 ${mallWeatherMinutelyForecastMinutes} 分钟`} unit="%" icon={<Droplets aria-hidden="true" />} floorZero
+            series={[chartSeries('降水概率', '#1D4ED8', minutely.items, 'forecastMinuteLocal', 'probabilityPct')]}
+            onDownload={(series) => downloadChartCsv('minutely_probability', '%', series)} downloadDisabled={minutelyDownloadDisabled} />
+        </div>
       </ForecastDataset>
-      {hourly.items.length > 0 && (
-        <MallWeatherChart
-          title={`未来 ${hourly.items.length} 小时温度趋势`}
-          detail="9～13 km 预报网格 · 自动读取全部游标页"
-          unit="°C"
-          icon={<Thermometer aria-hidden="true" />}
-          series={hourly.items.map((item) => ({ time: item.forecastTimeLocal, value: item.temperatureC }))}
-          showDetails={false}
-        />
-      )}
       <ForecastDataset
         id="mall-weather-hourly"
         title={`未来逐小时预报（目标 ${mallWeatherHourlyForecastHours} 小时）`}
         state={hourly}
         empty={`未来 ${mallWeatherHourlyForecastHours} 小时窗口没有小时预报`}
-        defaultOpen
         notice={!hourly.loading && !hourly.error && hourly.items.length > 0 && hourly.items.length < mallWeatherHourlyForecastHours
           ? `当前服务端可用 ${hourly.items.length} / ${mallWeatherHourlyForecastHours} 条连续逐小时数据，已展示全部可用内容。`
           : ''}
-        onDownload={() => downloadCsv('hourly', () => createMallWeatherDatasetCsv('hourly', hourly.items, { mallCode, mallName }))}
-        downloadDisabled={!currentMallData || hourly.loading || Boolean(hourly.error)}
       >
-        <table className="data-table"><caption className="mall-weather-table-caption">当前可用 {hourly.items.length} 条未来逐小时天气明细，目标最多 {mallWeatherHourlyForecastHours} 小时（常规变量为 9～13 km 预报网格）</caption><thead><tr><th scope="col">时间</th><th scope="col">天气</th><th scope="col">温度 / 体感</th><th scope="col">湿度 / 云量</th><th scope="col">气压 / 辐射</th><th scope="col">降水 / 概率</th><th scope="col">风速 / 风向</th><th scope="col">能见度</th><th scope="col">PM2.5 / 中美 AQI</th><th scope="col">描述</th><th scope="col">质量</th></tr></thead><tbody>
-          {hourly.items.map((item, index) => <tr key={`${item.forecastTimeLocal}-${index}`}><td>{item.forecastTimeLocal}</td><td>{mallWeatherSkyconLabel(item.skycon)}</td><td>{mallWeatherMetric(item.temperatureC, '°C')} / {mallWeatherMetric(item.apparentTemperatureC, '°C')}</td><td>{mallWeatherMetric(item.humidityPct, '%', 0)} / {ratioPercent(item.cloudrateRatio)}</td><td>{mallWeatherMetric(item.pressurePa, ' Pa', 0)} / {mallWeatherMetric(item.dswrfWM2, ' W/m²')}</td><td>{mallWeatherMetric(item.precipitationMmH, ' mm/h')} / {mallWeatherMetric(item.precipitationProbabilityPct, '%', 0)}</td><td>{mallWeatherMetric(item.windSpeedKph, ' km/h')} / {mallWeatherMetric(item.windDirectionDeg, '°', 0)}</td><td>{mallWeatherMetric(item.visibilityKm, ' km')}</td><td>{mallWeatherMetric(item.pm25UgM3, ' μg/m³')} / {mallWeatherMetric(item.aqiChn, '', 0)} / {mallWeatherMetric(item.aqiUsa, '', 0)}</td><td>{item.hourlyDescription || item.forecastKeypoint || '—'}</td><td>{qualityLabel(item.qualityStatus, item.qualityWarnings.length)}</td></tr>)}
-        </tbody></table>
+        <div className="mall-weather-forecast-charts">
+          <MallWeatherChart title="温度趋势" detail="逐小时预报" unit="°C" icon={<Thermometer aria-hidden="true" />}
+            series={[
+              chartSeries('温度', '#B45309', hourly.items, 'forecastTimeLocal', 'temperatureC'),
+              chartSeries('体感温度', '#B91C1C', hourly.items, 'forecastTimeLocal', 'apparentTemperatureC', '6 4'),
+            ]} onDownload={(series) => downloadChartCsv('hourly_temperature', '°C', series)} downloadDisabled={hourlyDownloadDisabled} />
+          <MallWeatherChart title="降水趋势" detail="逐小时预报" unit="mm/h" icon={<CloudRain aria-hidden="true" />} floorZero
+            series={[chartSeries('降水强度', '#0F9F78', hourly.items, 'forecastTimeLocal', 'precipitationMmH')]}
+            onDownload={(series) => downloadChartCsv('hourly_precipitation', 'mm/h', series)} downloadDisabled={hourlyDownloadDisabled} />
+          <MallWeatherChart title="湿度与降水概率" detail="逐小时预报" unit="%" icon={<Droplets aria-hidden="true" />} floorZero
+            series={[
+              chartSeries('相对湿度', '#1D4ED8', hourly.items, 'forecastTimeLocal', 'humidityPct'),
+              chartSeries('降水概率', '#6D28D9', hourly.items, 'forecastTimeLocal', 'precipitationProbabilityPct', '6 4'),
+            ]} onDownload={(series) => downloadChartCsv('hourly_humidity_probability', '%', series)} downloadDisabled={hourlyDownloadDisabled} />
+          <MallWeatherChart title="风速趋势" detail="逐小时预报" unit="km/h" icon={<Wind aria-hidden="true" />} floorZero
+            series={[chartSeries('风速', '#475569', hourly.items, 'forecastTimeLocal', 'windSpeedKph')]}
+            onDownload={(series) => downloadChartCsv('hourly_wind_speed', 'km/h', series)} downloadDisabled={hourlyDownloadDisabled} />
+        </div>
       </ForecastDataset>
       <ForecastDataset
         id="mall-weather-daily"
         title={`${mallWeatherDailyForecastDays} 日逐日预报`}
         state={daily}
         empty={`当前 ${mallWeatherDailyForecastDays} 天窗口没有逐日预报`}
-        onDownload={() => downloadCsv('daily', () => createMallWeatherDatasetCsv('daily', daily.items, { mallCode, mallName }))}
-        downloadDisabled={!currentMallData || daily.loading || Boolean(daily.error)}
       >
-        <table className="data-table"><caption className="mall-weather-table-caption">未来 {mallWeatherDailyForecastDays} 个本地日逐日全部综合天气字段（9～13 km 预报网格）</caption><thead><tr><th scope="col">日期</th><th scope="col">全天 / 白天 / 夜间天气</th><th scope="col">全天温度 最低 / 最高 / 平均</th><th scope="col">白天温度 最低 / 最高 / 平均</th><th scope="col">夜间温度 最低 / 最高 / 平均</th><th scope="col">全天降水 最低 / 最高 / 平均 / 概率</th><th scope="col">白天降水 最低 / 最高 / 平均 / 概率</th><th scope="col">夜间降水 最低 / 最高 / 平均 / 概率</th><th scope="col">全天风 最低 / 最高 / 平均</th><th scope="col">白天风 最低 / 最高 / 平均</th><th scope="col">夜间风 最低 / 最高 / 平均</th><th scope="col">湿度 最低 / 最高 / 平均</th><th scope="col">云量 最低 / 最高 / 平均</th><th scope="col">气压 最低 / 最高 / 平均</th><th scope="col">能见度 最低 / 最高 / 平均</th><th scope="col">辐射 最低 / 最高 / 平均</th><th scope="col">PM2.5 最低 / 最高 / 平均</th><th scope="col">中国 AQI 最低 / 最高 / 平均</th><th scope="col">美国 AQI 最低 / 最高 / 平均</th><th scope="col">日出 / 日落</th><th scope="col">质量</th></tr></thead><tbody>
-          {daily.items.map((item, index) => <tr key={`${item.forecastDateLocal}-${index}`}><td>{item.forecastDateLocal}</td><td>{mallWeatherSkyconLabel(item.skycon)} / {mallWeatherSkyconLabel(item.daySkycon)} / {mallWeatherSkyconLabel(item.nightSkycon)}</td><td>{rangeMetric(item.temperatureMinC, item.temperatureMaxC, item.temperatureAvgC, '°C')}</td><td>{rangeMetric(item.dayTemperatureMinC, item.dayTemperatureMaxC, item.dayTemperatureAvgC, '°C')}</td><td>{rangeMetric(item.nightTemperatureMinC, item.nightTemperatureMaxC, item.nightTemperatureAvgC, '°C')}</td><td>{precipitationMetric(item.precipitationMinMmH, item.precipitationMaxMmH, item.precipitationAvgMmH, item.precipitationProbabilityPct)}</td><td>{precipitationMetric(item.dayPrecipitationMinMmH, item.dayPrecipitationMaxMmH, item.dayPrecipitationAvgMmH, item.dayPrecipitationProbabilityPct)}</td><td>{precipitationMetric(item.nightPrecipitationMinMmH, item.nightPrecipitationMaxMmH, item.nightPrecipitationAvgMmH, item.nightPrecipitationProbabilityPct)}</td><td>{windRangeMetric(item.windMinSpeedKph, item.windMinDirectionDeg, item.windMaxSpeedKph, item.windMaxDirectionDeg, item.windAvgSpeedKph, item.windAvgDirectionDeg)}</td><td>{windRangeMetric(item.dayWindMinSpeedKph, item.dayWindMinDirectionDeg, item.dayWindMaxSpeedKph, item.dayWindMaxDirectionDeg, item.dayWindAvgSpeedKph, item.dayWindAvgDirectionDeg)}</td><td>{windRangeMetric(item.nightWindMinSpeedKph, item.nightWindMinDirectionDeg, item.nightWindMaxSpeedKph, item.nightWindMaxDirectionDeg, item.nightWindAvgSpeedKph, item.nightWindAvgDirectionDeg)}</td><td>{rangeMetric(item.humidityMinPct, item.humidityMaxPct, item.humidityAvgPct, '%', 0)}</td><td>{ratioRangeMetric(item.cloudrateMinRatio, item.cloudrateMaxRatio, item.cloudrateAvgRatio)}</td><td>{rangeMetric(item.pressureMinPa, item.pressureMaxPa, item.pressureAvgPa, ' Pa', 0)}</td><td>{rangeMetric(item.visibilityMinKm, item.visibilityMaxKm, item.visibilityAvgKm, ' km')}</td><td>{rangeMetric(item.dswrfMinWM2, item.dswrfMaxWM2, item.dswrfAvgWM2, ' W/m²')}</td><td>{rangeMetric(item.pm25MinUgM3, item.pm25MaxUgM3, item.pm25AvgUgM3, ' μg/m³')}</td><td>{rangeMetric(item.aqiMinChn, item.aqiMaxChn, item.aqiAvgChn, '', 0)}</td><td>{rangeMetric(item.aqiMinUsa, item.aqiMaxUsa, item.aqiAvgUsa, '', 0)}</td><td>{item.sunriseLocalTime || '—'} / {item.sunsetLocalTime || '—'}</td><td>{qualityLabel(item.qualityStatus, item.qualityWarnings.length)}</td></tr>)}
-        </tbody></table>
+        <div className="mall-weather-forecast-charts">
+          <MallWeatherChart title="每日温度区间" detail={`未来 ${mallWeatherDailyForecastDays} 日`} unit="°C" icon={<Thermometer aria-hidden="true" />}
+            series={dailyRangeSeries(daily.items, 'temperatureMinC', 'temperatureAvgC', 'temperatureMaxC', ['#1D4ED8', '#B45309', '#B91C1C'])}
+            onDownload={(series) => downloadChartCsv('daily_temperature', '°C', series)} downloadDisabled={dailyDownloadDisabled} />
+          <MallWeatherChart title="每日降水区间" detail={`未来 ${mallWeatherDailyForecastDays} 日`} unit="mm/h" icon={<CloudRain aria-hidden="true" />} floorZero
+            series={dailyRangeSeries(daily.items, 'precipitationMinMmH', 'precipitationAvgMmH', 'precipitationMaxMmH', ['#15803D', '#047857', '#065F46'])}
+            onDownload={(series) => downloadChartCsv('daily_precipitation', 'mm/h', series)} downloadDisabled={dailyDownloadDisabled} />
+          <MallWeatherChart title="每日湿度区间" detail={`未来 ${mallWeatherDailyForecastDays} 日`} unit="%" icon={<Droplets aria-hidden="true" />} floorZero
+            series={dailyRangeSeries(daily.items, 'humidityMinPct', 'humidityAvgPct', 'humidityMaxPct', ['#1D4ED8', '#0E7490', '#1E3A8A'])}
+            onDownload={(series) => downloadChartCsv('daily_humidity', '%', series)} downloadDisabled={dailyDownloadDisabled} />
+          <MallWeatherChart title="每日风速区间" detail={`未来 ${mallWeatherDailyForecastDays} 日`} unit="km/h" icon={<Wind aria-hidden="true" />} floorZero
+            series={dailyRangeSeries(daily.items, 'windMinSpeedKph', 'windAvgSpeedKph', 'windMaxSpeedKph', ['#475569', '#334155', '#111827'])}
+            onDownload={(series) => downloadChartCsv('daily_wind_speed', 'km/h', series)} downloadDisabled={dailyDownloadDisabled} />
+        </div>
       </ForecastDataset>
       <ForecastDataset
         id="mall-weather-life-indices"
         title={`${mallWeatherDailyForecastDays} 日生活指数`}
         state={life}
         empty={`当前 ${mallWeatherDailyForecastDays} 天窗口没有生活指数`}
-        onDownload={() => downloadCsv('life_indices', () => createMallWeatherDatasetCsv('life_indices', life.items, { mallCode, mallName }))}
-        downloadDisabled={!currentMallData || life.loading || Boolean(life.error)}
       >
-        <table className="data-table mall-weather-life-table"><caption className="mall-weather-table-caption">未来 {mallWeatherDailyForecastDays} 个本地日全部生活指数明细</caption><thead><tr><th scope="col">日期</th><th scope="col">指数</th><th scope="col">等级</th><th scope="col">建议</th><th scope="col">来源</th><th scope="col">质量</th></tr></thead><tbody>
-          {life.items.map((item, index) => <tr key={`${item.forecastDateLocal}-${item.sourceApi}-${item.indexType}-${index}`}><td>{item.forecastDateLocal}</td><td>{item.indexName || item.indexCode}{item.isUnknownType ? '（未知类型）' : ''}</td><td>{item.level ?? '—'}</td><td>{item.shortDescription || item.detail || '—'}</td><td>{item.sourceApi}</td><td>{qualityLabel(item.qualityStatus, item.qualityWarnings.length)}</td></tr>)}
-        </tbody></table>
+        <div className="mall-weather-forecast-charts single">
+          <MallWeatherChart title="生活指数等级趋势" detail="按日期对比全部指数" unit="级" icon={<Sparkles aria-hidden="true" />} floorZero
+            series={lifeSeries} onDownload={(series) => downloadChartCsv('life_indices', '级', series)} downloadDisabled={lifeDownloadDisabled} />
+        </div>
       </ForecastDataset>
     </section>
   )
 }
 
-function ForecastDataset<T>({ id, title, state, empty, notice = '', defaultOpen = false, onDownload, downloadDisabled = false, children }: {
+function ForecastDataset<T>({ id, title, state, empty, notice = '', children }: {
   id?: string
   title: string
   state: QueryState<T>
   empty: string
   notice?: string
-  defaultOpen?: boolean
-  onDownload: () => void
-  downloadDisabled?: boolean
   children: ReactNode
 }) {
   return (
-    <details id={id} className="mall-weather-forecast-dataset" tabIndex={-1} open={defaultOpen}>
-      <summary>{title}（{state.items.length} 条）{state.meta ? ` · ${mallWeatherFreshnessLabel(state.meta.freshnessStatus)}` : ''}</summary>
-      <div className="mall-weather-form-actions">
-        <button
-          type="button"
-          aria-label={`下载 CSV：${title}`}
-          disabled={downloadDisabled}
-          onClick={onDownload}
-        >
-          <Download aria-hidden="true" />下载 CSV
-        </button>
-      </div>
+    <section id={id} className="mall-weather-forecast-dataset" tabIndex={-1}>
+      <header><strong>{title}</strong><span>{state.items.length} 条{state.meta ? ` · ${mallWeatherFreshnessLabel(state.meta.freshnessStatus)}` : ''}</span></header>
       {state.loading && state.items.length === 0 && <p role="status">正在加载全部分页…</p>}
       {state.error && <p className="mall-weather-action-message error" role="alert">{state.error}</p>}
       {!state.loading && !state.error && state.items.length === 0 && <p role="status">{empty}</p>}
       {notice && <p className="mall-weather-action-message" role="status">{notice}</p>}
-      {state.items.length > 0 && (
-        <div className="data-table-wrap" role="region" aria-label={`${title}数据表，可横向滚动`} tabIndex={0}>
-          {children}
-        </div>
-      )}
-    </details>
+      {state.items.length > 0 && children}
+    </section>
   )
 }
 
@@ -315,27 +311,57 @@ async function settleDataset<T>(
   }
 }
 
-function qualityLabel(status: string, warningCount: number) {
-  return `${status || '未知'}${warningCount > 0 ? ` · ${warningCount} 项告警` : ''}`
+function chartSeries<T>(
+  name: string,
+  color: string,
+  items: T[],
+  timeKey: keyof T,
+  valueKey: keyof T,
+  dash?: string,
+): MallWeatherChartSeries {
+  return {
+    id: String(valueKey),
+    name,
+    color,
+    dash,
+    data: items.map((item) => ({
+      time: String(item[timeKey] ?? ''),
+      value: typeof item[valueKey] === 'number' ? item[valueKey] as number : undefined,
+    })),
+  }
 }
 
-function rangeMetric(minimum: number | undefined, maximum: number | undefined, average: number | undefined, unit: string, digits = 1) {
-  return `${mallWeatherMetric(minimum, unit, digits)} / ${mallWeatherMetric(maximum, unit, digits)} / ${mallWeatherMetric(average, unit, digits)}`
+function dailyRangeSeries(
+  items: MallWeatherDaily[],
+  minimumKey: keyof MallWeatherDaily,
+  averageKey: keyof MallWeatherDaily,
+  maximumKey: keyof MallWeatherDaily,
+  colors: [string, string, string],
+): MallWeatherChartSeries[] {
+  return [
+    chartSeries('最低', colors[0], items, 'forecastDateLocal', minimumKey, '6 4'),
+    chartSeries('平均', colors[1], items, 'forecastDateLocal', averageKey),
+    chartSeries('最高', colors[2], items, 'forecastDateLocal', maximumKey, '2 3'),
+  ]
 }
 
-function ratioPercent(value: number | undefined) {
-  return mallWeatherMetric(value === undefined ? undefined : value * 100, '%', 0)
-}
-
-function ratioRangeMetric(minimum: number | undefined, maximum: number | undefined, average: number | undefined) {
-  return `${ratioPercent(minimum)} / ${ratioPercent(maximum)} / ${ratioPercent(average)}`
-}
-
-function precipitationMetric(minimum: number | undefined, maximum: number | undefined, average: number | undefined, probability: number | undefined) {
-  return `${rangeMetric(minimum, maximum, average, ' mm/h')} / ${mallWeatherMetric(probability, '%', 0)}`
-}
-
-function windRangeMetric(minSpeed: number | undefined, minDirection: number | undefined, maxSpeed: number | undefined, maxDirection: number | undefined, avgSpeed: number | undefined, avgDirection: number | undefined) {
-  const wind = (speed: number | undefined, direction: number | undefined) => `${mallWeatherMetric(speed, ' km/h')} @ ${mallWeatherMetric(direction, '°', 0)}`
-  return `${wind(minSpeed, minDirection)} / ${wind(maxSpeed, maxDirection)} / ${wind(avgSpeed, avgDirection)}`
+function buildLifeIndexSeries(items: MallWeatherLifeIndex[]): MallWeatherChartSeries[] {
+  const dates = [...new Set(items.map((item) => item.forecastDateLocal))].sort()
+  const groups = new Map<string, MallWeatherLifeIndex[]>()
+  for (const item of items) {
+    const key = item.indexCode || String(item.indexType)
+    groups.set(key, [...(groups.get(key) ?? []), item])
+  }
+  const colors = ['#B45309', '#047857', '#1D4ED8', '#B91C1C', '#6D28D9', '#0E7490', '#475569', '#9A3412', '#BE185D', '#3F6212', '#4338CA', '#713F12']
+  const dashPatterns = [undefined, '6 4', '2 3', '8 3 2 3']
+  return [...groups.entries()].map(([code, group], index) => {
+    const byDate = new Map(group.map((item) => [item.forecastDateLocal, item]))
+    return {
+      id: code,
+      name: group[0]?.indexName || code,
+      color: colors[index % colors.length],
+      dash: dashPatterns[Math.floor(index / colors.length) % dashPatterns.length],
+      data: dates.map((date) => ({ time: date, value: byDate.get(date)?.level })),
+    }
+  })
 }

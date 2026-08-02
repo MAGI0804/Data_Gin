@@ -2,7 +2,7 @@ import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } fro
 import { AlertTriangle, Clock3, CloudRain, CloudSun, Database, Download, MapPin, RefreshCcw, Thermometer } from 'lucide-react'
 import './MallWeatherPage.css'
 import './MallWeatherDesign.css'
-import { MallWeatherChart } from './MallWeatherChart'
+import { MallWeatherChart, type MallWeatherChartSeries } from './MallWeatherChart'
 import { MallWeatherExportPanel } from './MallWeatherExportPanel'
 import { MallWeatherExportProfilePanel } from './MallWeatherExportProfilePanel'
 import { MallWeatherForecastPanel, type MallWeatherForecastDataSnapshot } from './MallWeatherForecastPanel'
@@ -12,8 +12,10 @@ import { mallWeatherCapacityPlanPath, parseMallWeatherCapacityPlan, type MallWea
 import { parseMallWeatherMetricsSummary, type MallWeatherMetricsSummary } from './monitoring'
 import { mallImportRequestWithinLimit, parseMallImportCSV, parseMallImportResult, type MallImportResult, type MallImportRow } from './mallImport'
 import {
+  createMallWeatherChartCsv,
   createMallWeatherDatasetCsv,
   downloadMallWeatherBytes,
+  mallWeatherChartCsvFileName,
   mallWeatherCsvFileName,
   type MallWeatherCsvZipData,
 } from './mallWeatherCsv'
@@ -1981,8 +1983,8 @@ function WeatherRealtime({ mall, overview }: { mall: MallWeatherMall; overview: 
   return (
     <article className="workbench-panel mall-weather-realtime" aria-label="当前实况天气">
       <header className="mall-weather-realtime-heading">
-        <strong>当前实况</strong>
-        <div><b>{mall.nameCn}</b><span>{realtime?.snapshotAtLocal || '暂无快照时间'}</span></div>
+        <div><strong>当前实况</strong><span>{realtime?.snapshotAtLocal || '暂无快照时间'}</span></div>
+        <button type="button" onClick={downloadCsv} disabled={!realtime} aria-label={`下载数据：${mall.nameCn}当前实况 CSV`}><Download aria-hidden="true" />下载数据</button>
       </header>
       {downloadError && <p className="mall-weather-action-message error" role="alert">{downloadError}</p>}
       {realtime ? (
@@ -2001,7 +2003,6 @@ function WeatherRealtime({ mall, overview }: { mall: MallWeatherMall; overview: 
               <div><dt>质量</dt><dd className={realtime.qualityWarnings.length === 0 ? 'success' : 'warning'}>{realtime.qualityWarnings.length === 0 ? '正常' : `${realtime.qualityWarnings.length} 项告警`}</dd></div>
             </dl>
           </div>
-          <details className="mall-weather-realtime-advanced"><summary>实况数据操作</summary><button type="button" onClick={downloadCsv} aria-label={`下载${mall.nameCn}当前实况 CSV`}><Download aria-hidden="true" />下载当前实况 CSV</button></details>
         </>
       ) : <EmptyState title="暂无实况" detail="最近一次采集尚未产生可用实况。" />}
     </article>
@@ -2018,6 +2019,7 @@ function WeatherOverviewDetails({ mall, overview, alerts, refreshing, onRefresh,
 }) {
   const { realtime, meta } = overview
   const [alertDownloadError, setAlertDownloadError] = useState('')
+  const [chartDownloadError, setChartDownloadError] = useState('')
   const representativePoint = ['MALL_CENTER', 'CENTER', 'center'].includes(meta.representativePoint) ? '商场中心点' : meta.representativePoint || '口径缺失'
   const coverageRadius = meta.coverageRadiusM > 0 ? `业务半径 ${meta.coverageRadiusM} m` : '业务半径口径缺失'
 
@@ -2030,6 +2032,18 @@ function WeatherOverviewDetails({ mall, overview, alerts, refreshing, onRefresh,
       )
     } catch {
       setAlertDownloadError('气象预警 CSV 文件生成失败，请重新查询后重试。')
+    }
+  }
+
+  function downloadChartCsv(chartID: string, unit: string, series: MallWeatherChartSeries[]) {
+    setChartDownloadError('')
+    try {
+      downloadMallWeatherBytes(
+        createMallWeatherChartCsv(series.map((item) => ({ ...item, unit })), { mallCode: mall.mallCode, mallName: mall.nameCn }),
+        mallWeatherChartCsvFileName(chartID, mall.mallCode),
+      )
+    } catch {
+      setChartDownloadError('曲线数据 CSV 文件生成失败，请重新加载后重试。')
     }
   }
 
@@ -2049,7 +2063,10 @@ function WeatherOverviewDetails({ mall, overview, alerts, refreshing, onRefresh,
       </section>
 
       <section className="workbench-panel mall-weather-design-alert" id="mall-weather-alerts" tabIndex={-1} aria-busy={alerts.loading}>
-        <strong className="mall-weather-card-title">气象预警</strong>
+        <header className="mall-weather-card-heading">
+          <strong className="mall-weather-card-title">气象预警</strong>
+          <button type="button" onClick={downloadAlertsCsv} disabled={alerts.loading || Boolean(alerts.error)} aria-label={`下载数据：${mall.nameCn}气象预警 CSV`}><Download aria-hidden="true" />下载数据</button>
+        </header>
         {alerts.loading && <LoadingState label="正在加载全部气象预警" />}
         {alerts.error && <RequestError message={alerts.error} onRetry={onAlertsRetry} />}
         {alerts.ready && (primaryAlert
@@ -2061,11 +2078,6 @@ function WeatherOverviewDetails({ mall, overview, alerts, refreshing, onRefresh,
             {primaryAlert.description && <p>{primaryAlert.description}</p>}
           </article>
           : <EmptyState title="当前无有效预警" detail="当前查询窗口没有返回有效气象预警。" />)}
-        <details className="mall-weather-alert-actions">
-          <summary>预警数据操作{alerts.items.length > 1 ? `（${alerts.items.length} 条）` : ''}</summary>
-          <button type="button" onClick={downloadAlertsCsv} disabled={alerts.loading || Boolean(alerts.error)} aria-label={`下载${mall.nameCn}气象预警 CSV`}><Download aria-hidden="true" />下载预警 CSV</button>
-          {alerts.items.slice(1).map((alert) => <p key={alert.alertId || alert.title}><strong>{alert.title}</strong><span>{alert.publishedAtLocal || '发布时间未知'}</span></p>)}
-        </details>
         {alertDownloadError && <p className="mall-weather-action-message error" role="alert">{alertDownloadError}</p>}
       </section>
 
@@ -2075,16 +2087,23 @@ function WeatherOverviewDetails({ mall, overview, alerts, refreshing, onRefresh,
           detail="1 km 级"
           unit="mm/h"
           icon={<CloudRain aria-hidden="true" />}
-          series={overview.minutely.map((item) => ({ time: item.forecastMinuteLocal, value: item.precipitationMmH }))}
+          series={[{ id: 'precipitationMmH', name: '降水强度', color: '#0F9F78', data: overview.minutely.map((item) => ({ time: item.forecastMinuteLocal, value: item.precipitationMmH })) }]}
+          floorZero
+          onDownload={(series) => downloadChartCsv('overview_minutely_precipitation', 'mm/h', series)}
         />
         <MallWeatherChart
           title="未来 24 小时温度"
           detail="9～13 km 预报网格"
           unit="°C"
           icon={<Thermometer aria-hidden="true" />}
-          series={overview.hourly.map((item) => ({ time: item.forecastTimeLocal, value: item.temperatureC }))}
+          series={[
+            { id: 'temperatureC', name: '温度', color: '#B45309', data: overview.hourly.map((item) => ({ time: item.forecastTimeLocal, value: item.temperatureC })) },
+            { id: 'apparentTemperatureC', name: '体感温度', color: '#B91C1C', dash: '6 4', data: overview.hourly.map((item) => ({ time: item.forecastTimeLocal, value: item.apparentTemperatureC })) },
+          ]}
+          onDownload={(series) => downloadChartCsv('overview_hourly_temperature', '°C', series)}
         />
       </section>
+      {chartDownloadError && <p className="mall-weather-action-message error mall-weather-chart-download-error" role="alert">{chartDownloadError}</p>}
 
       <section className="workbench-panel mall-weather-summary">
         <div className="mall-weather-meta" aria-label="天气数据口径">
