@@ -1,0 +1,1051 @@
+.visually-hidden {
+  position: absolute !important;
+  width: 1px !important;
+  height: 1px !important;
+  overflow: hidden !important;
+  clip: rect(0 0 0 0) !important;
+  clip-path: inset(50%) !important;
+  white-space: nowrap !important;
+}
+
+.excel-job-row-progress progress {
+  width: 100%;
+  height: 6px;
+  overflow: hidden;
+  border: 0;
+  border-radius: 999px !important;
+  background: #e1e1e1;
+  accent-color: #08a653;
+}
+
+.excel-job-row-progress progress::-webkit-progress-bar {
+  border-radius: 999px;
+  background: #e1e1e1;
+}
+
+.excel-job-row-progress progress::-webkit-progress-value {
+  border-radius: 999px;
+  background: #08a653;
+}
+
+.excel-design-page {
+  gap: 0;
+  margin: -20px -28px 0;
+  color: #171717;
+}
+
+.excel-design-page > .overview-grid {
+  gap: 0;
+  margin: 0;
+  border: 0;
+  border-bottom: 1px solid #dedede;
+  border-left: 3px solid #ff8911;
+  background: #fff;
+}
+
+.excel-jobs-page > .overview-grid {
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+}
+
+.excel-schemes-page > .overview-grid,
+.excel-write-page > .overview-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.excel-write-page > .overview-grid {
+  border-left: 0;
+}
+
+.excel-design-page > .overview-grid .metric {
+  position: relative;
+  display: grid;
+  align-content: center;
+  min-height: 138px;
+  border: 0;
+  background: #fff;
+  padding: 22px 26px;
+  text-align: center;
+}
+
+.excel-design-page > .overview-grid .metric + .metric::before {
+  position: absolute;
+  top: 25px;
+  bottom: 25px;
+  left: 0;
+  width: 1px;
+  background: #d9d9d9;
+  content: '';
+}
+
+.excel-design-page > .overview-grid .metric span {
+  color: #444;
+  font-size: 15px;
+  font-weight: 500;
+}
+
+.excel-design-page > .overview-grid .metric strong,
+.excel-design-page > .overview-grid .metric:last-child strong {
+  margin-top: 14px;
+  color: #111;
+  font-size: clamp(27px, 2.4vw, 36px);
+  font-weight: 500;
+  line-height: 1;
+}
+
+.excel-jobs-page > .overview-grid .metric:nth-child(3) strong,
+.excel-write-preview-summary .metric:nth-child(2) strong {
+  color: #069d46;
+}
+
+.excel-job-query {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  min-height: 82px;
+  border: 0;
+  background: #fff;
+  padding: 24px 26px 12px;
+}
+
+.excel-job-query .query-fields {
+  grid-template-columns: minmax(250px, 1.35fr) minmax(150px, 0.75fr) minmax(150px, 0.75fr);
+  gap: 26px;
+  max-width: 700px;
+}
+
+.excel-job-query label {
+  grid-template-columns: auto minmax(120px, 1fr);
+  align-items: center;
+  gap: 10px;
+  color: #333;
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.excel-job-query label:first-child > span {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+}
+
+.excel-job-query input,
+.excel-job-query select {
+  min-height: 40px;
+  border: 1px solid #d4d4d4;
+  border-radius: 3px !important;
+  background: #fff;
+}
+
+.excel-job-query-actions button {
+  min-height: 34px;
+  border: 0;
+  background: transparent;
+  color: #1687e8;
+  font-size: 12px;
+}
+
+.excel-jobs-workspace {
+  grid-template-columns: minmax(0, 1fr) 342px;
+  min-height: 620px;
+  border-top: 0;
+  background: #fff;
+}
+
+.excel-jobs-main {
+  min-width: 0;
+  padding: 0 24px 24px 26px;
+}
+
+.excel-jobs-main > .workbench-panel {
+  border: 0;
+}
+
+.excel-jobs-main .panel-title {
+  min-height: 50px;
+  border-bottom: 1px solid #dedede;
+  padding: 12px 0;
+}
+
+.excel-jobs-main .panel-title > svg,
+.excel-jobs-main .panel-title span,
+.excel-scheme-workspace .panel-title > svg,
+.excel-write-workspace .panel-title > svg {
+  display: none;
+}
+
+.excel-jobs-main .panel-title h3,
+.excel-scheme-workspace .panel-title h3,
+.excel-write-workspace .panel-title h3 {
+  font-size: 18px;
+  font-weight: 650;
+}
+
+.excel-history-table {
+  min-width: 850px;
+  table-layout: fixed;
+  font-size: 12px;
+}
+
+.excel-history-table th,
+.excel-history-table td {
+  height: 60px;
+  border-bottom: 1px solid #dedede;
+  background: #fff;
+  padding: 9px 7px;
+  vertical-align: middle;
+}
+
+.excel-history-table th {
+  height: 43px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.excel-history-table th:nth-child(1) { width: 7%; }
+.excel-history-table th:nth-child(2) { width: 19%; }
+.excel-history-table th:nth-child(3) { width: 10%; }
+.excel-history-table th:nth-child(4) { width: 10%; }
+.excel-history-table th:nth-child(5) { width: 20%; }
+.excel-history-table th:nth-child(6) { width: 13%; }
+.excel-history-table th:nth-child(7) { width: 13%; }
+.excel-history-table th:nth-child(8) { width: 10%; }
+
+.excel-history-table .status-pill {
+  min-width: 48px;
+  border-radius: 2px !important;
+  background: #fff;
+  padding: 3px 5px;
+  text-align: center;
+}
+
+.excel-history-table th:last-child,
+.excel-history-table td:last-child {
+  position: static;
+  border-left: 0;
+  background: #fff;
+}
+
+.excel-history-table .table-actions {
+  flex-wrap: nowrap;
+  gap: 4px;
+}
+
+.excel-history-table .table-actions button {
+  min-height: 27px;
+  border: 1px solid #d2d2d2;
+  border-radius: 2px !important;
+  background: #fff;
+  font-size: 11px;
+  padding: 4px 7px;
+}
+
+.excel-job-row-progress {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  align-items: center;
+  gap: 4px 8px;
+}
+
+.excel-job-row-progress progress {
+  grid-column: 1 / -1;
+  height: 4px;
+}
+
+.excel-job-match-count {
+  color: #069d46;
+}
+
+.excel-job-unmatched-count {
+  color: #ed2024;
+}
+
+.excel-jobs-main .raw-record-pagination {
+  min-height: 62px;
+  justify-content: flex-end;
+  border-top: 0;
+  padding: 14px 0 0;
+}
+
+.excel-job-aside {
+  border-left: 1px solid #dedede;
+  padding: 0;
+}
+
+.excel-job-focus-target {
+  min-height: 100%;
+}
+
+.excel-job-detail-panel {
+  padding: 27px 27px 24px;
+}
+
+.excel-job-detail-panel > h3 {
+  margin: 0 0 25px;
+  font-size: 18px;
+  font-weight: 700;
+}
+
+.excel-job-detail-meta,
+.excel-job-expiry {
+  display: grid;
+  gap: 14px;
+  margin: 0;
+  padding-bottom: 20px;
+  border-bottom: 1px solid #dedede;
+}
+
+.excel-job-detail-meta > div,
+.excel-job-expiry {
+  display: grid;
+  gap: 6px;
+}
+
+.excel-job-detail-meta dt,
+.excel-job-expiry dt {
+  color: #555;
+  font-size: 12px;
+}
+
+.excel-job-detail-meta dd,
+.excel-job-expiry dd {
+  margin: 0;
+  font-size: 13px;
+}
+
+.excel-job-detail-counts {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  margin: 0;
+}
+
+.excel-job-detail-counts .metric {
+  min-height: 76px;
+  border: 0;
+  padding: 16px 0;
+}
+
+.excel-job-detail-counts .metric span {
+  font-size: 12px;
+}
+
+.excel-job-detail-counts .metric strong {
+  margin-top: 7px;
+  font-size: 21px;
+}
+
+.excel-job-detail-counts .metric:first-child strong { color: #069d46; }
+.excel-job-detail-counts .metric:last-child strong { color: #ed2024; }
+
+.excel-job-progress {
+  gap: 6px;
+  border-bottom: 0;
+  padding: 16px 0;
+}
+
+.excel-job-progress strong,
+.excel-job-log-heading,
+.excel-job-action-heading {
+  color: #252525;
+  font-size: 13px;
+  font-weight: 650;
+}
+
+.excel-job-expiry {
+  padding: 0 0 18px;
+}
+
+.excel-job-log-heading,
+.excel-job-action-heading {
+  padding: 18px 0 12px;
+  border-bottom: 1px solid #dedede;
+}
+
+.excel-job-log-list {
+  position: relative;
+  gap: 0;
+  max-height: 250px;
+  padding: 9px 0 0 20px;
+}
+
+.excel-job-log-list::before {
+  position: absolute;
+  top: 18px;
+  bottom: 18px;
+  left: 5px;
+  width: 1px;
+  background: #dedede;
+  content: '';
+}
+
+.excel-job-log-list .record-row {
+  position: relative;
+  min-height: 58px;
+  border: 0;
+  padding: 7px 0;
+}
+
+.excel-job-log-list .record-row::before {
+  position: absolute;
+  top: 14px;
+  left: -20px;
+  width: 9px;
+  height: 9px;
+  border-radius: 50% !important;
+  background: #069d46;
+  content: '';
+}
+
+.excel-job-log-list .record-row strong {
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.excel-job-log-list .record-row span {
+  color: #666;
+  font-size: 11px;
+}
+
+.excel-job-detail-panel .excel-detail-actions {
+  display: grid;
+  grid-template-columns: 1fr 1.05fr;
+  margin: 18px 0 0;
+}
+
+.excel-job-detail-panel .excel-detail-actions button {
+  min-height: 42px;
+  border-radius: 2px !important;
+}
+
+.excel-job-detail-panel .excel-detail-actions button:nth-child(2) {
+  border-color: #171717;
+  background: #171717;
+  color: #fff;
+}
+
+.excel-job-detail-panel .excel-detail-actions > span {
+  grid-column: 1 / -1;
+}
+
+.excel-scheme-workspace,
+.excel-write-workspace {
+  align-items: stretch;
+  border: 0;
+  border-top: 0;
+  background: #fff;
+}
+
+.excel-scheme-workspace {
+  grid-template-columns: minmax(0, 2.7fr) minmax(320px, 1fr);
+}
+
+.excel-write-workspace {
+  grid-template-columns: minmax(0, 1.15fr) minmax(430px, 1fr);
+}
+
+.excel-scheme-workspace > .workbench-panel,
+.excel-write-workspace > .workbench-panel {
+  padding: 24px 18px 30px 26px;
+}
+
+.excel-scheme-workspace > .workbench-panel > .panel-title,
+.excel-scheme-workspace > .workbench-panel > .excel-config-summary,
+.excel-write-workspace > .workbench-panel > .panel-title {
+  display: none;
+}
+
+.excel-scheme-workspace .excel-config-aside,
+.excel-write-workspace .excel-config-aside {
+  border-left: 1px solid #dedede;
+}
+
+.excel-scheme-workspace .excel-config-aside > .workbench-panel,
+.excel-write-workspace .excel-config-aside > .workbench-panel {
+  padding: 27px 22px;
+}
+
+.excel-scheme-workspace .excel-config-aside .panel-title,
+.excel-write-workspace .excel-config-aside .panel-title {
+  min-height: 52px;
+  padding: 0 0 18px;
+}
+
+.excel-scheme-form {
+  display: block;
+}
+
+.excel-scheme-toolbar {
+  display: grid;
+  grid-template-columns: minmax(190px, 1fr) minmax(100px, 0.4fr) auto;
+  align-items: end;
+  gap: 16px;
+  margin-bottom: 22px;
+}
+
+.excel-scheme-toolbar .file-input-label {
+  position: relative;
+  display: grid;
+  grid-column: auto;
+  grid-template-columns: auto minmax(150px, 1fr);
+  align-items: center;
+  gap: 11px;
+  border: 0;
+  background: transparent;
+  padding: 0;
+}
+
+.excel-scheme-toolbar .file-input-label span {
+  min-height: 40px;
+  display: flex;
+  align-items: center;
+  border: 1px solid #d4d4d4;
+  border-radius: 3px !important;
+  background: #fff;
+  color: #333;
+  padding: 8px 12px;
+}
+
+.excel-scheme-toolbar .file-input-label input[type='file'],
+.excel-write-form .file-input-label input[type='file'] {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.excel-scheme-toolbar .file-input-label span,
+.excel-write-form .file-input-label span {
+  cursor: pointer;
+}
+
+.excel-scheme-toolbar .file-input-label:focus-within span,
+.excel-write-form .file-input-label:focus-within span {
+  outline: 2px solid #1687e8;
+  outline-offset: 2px;
+}
+
+.excel-scheme-toolbar input,
+.excel-scheme-toolbar select {
+  min-height: 40px;
+  border-radius: 3px !important;
+}
+
+.excel-scheme-toolbar-actions {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+}
+
+.excel-scheme-toolbar-actions button {
+  min-height: 40px;
+  border-radius: 3px !important;
+  white-space: nowrap;
+}
+
+.excel-scheme-toolbar-actions .primary,
+.excel-write-form .excel-form-actions .primary {
+  border-color: #171717;
+  background: #171717;
+  color: #fff;
+}
+
+.excel-scheme-form .excel-step-editor {
+  position: relative;
+  gap: 22px;
+  border: 0;
+  padding: 0 0 0 34px;
+}
+
+.excel-scheme-form .excel-step-editor::before {
+  position: absolute;
+  top: 47px;
+  bottom: 27px;
+  left: 12px;
+  width: 1px;
+  background: #ff8911;
+  content: '';
+}
+
+.excel-scheme-form .excel-step-editor-title {
+  margin-left: -34px;
+}
+
+.excel-scheme-form .excel-step-editor-title strong {
+  font-size: 18px;
+  font-weight: 650;
+}
+
+.excel-scheme-form .excel-step-card {
+  position: relative;
+  gap: 14px;
+  border: 1px solid #dedede;
+  border-radius: 5px !important;
+  background: #fff;
+  padding: 14px 16px;
+}
+
+.excel-scheme-form .excel-step-index {
+  position: absolute;
+  top: 7px;
+  left: -36px;
+  width: 29px;
+  height: 29px;
+  border-color: #ff8911;
+  border-radius: 50% !important;
+  background: #fff;
+  color: #ff8911;
+  font-size: 15px;
+}
+
+.excel-scheme-form .excel-step-heading > strong {
+  position: relative;
+  gap: 12px;
+  font-size: 17px;
+  font-weight: 650;
+}
+
+.excel-scheme-form .excel-step-heading > strong > small {
+  color: #666;
+  font-size: 11px;
+  font-weight: 400;
+}
+
+.excel-step-complete,
+.excel-step-incomplete {
+  color: #069d46;
+  font-size: 12px;
+  white-space: nowrap;
+}
+
+.excel-step-complete::before,
+.excel-step-incomplete::before {
+  display: inline-block;
+  width: 9px;
+  height: 9px;
+  margin-right: 6px;
+  border-radius: 50% !important;
+  background: currentColor;
+  content: '';
+}
+
+.excel-step-incomplete {
+  color: #df8a00;
+}
+
+.excel-scheme-form .excel-step-heading .table-actions button {
+  min-height: 28px;
+  border: 0;
+  background: transparent;
+  font-size: 11px;
+  padding: 3px 5px;
+}
+
+.excel-scheme-form .excel-step-heading .table-actions button.danger {
+  color: #ed2024;
+}
+
+.excel-scheme-form .excel-step-fields {
+  grid-template-columns: repeat(4, minmax(120px, 1fr));
+  gap: 12px;
+}
+
+.excel-scheme-form .excel-step-fields label,
+.excel-scheme-form .excel-step-filter-row label {
+  font-size: 11px;
+}
+
+.excel-scheme-form .excel-step-fields input,
+.excel-scheme-form .excel-step-fields select,
+.excel-scheme-form .excel-step-filter-row input,
+.excel-scheme-form .excel-step-filter-row select {
+  min-height: 36px;
+  border-radius: 3px !important;
+  font-size: 12px;
+}
+
+.excel-scheme-form .excel-catalog-explanation {
+  display: none;
+}
+
+.excel-step-name-input {
+  width: min(300px, 100%);
+  border: 0;
+  background: transparent;
+  color: #171717;
+  font: inherit;
+  font-weight: 650;
+  padding: 1px 3px;
+}
+
+.excel-step-name-input:focus {
+  outline: 2px solid #1687e8;
+  outline-offset: 2px;
+}
+
+.excel-scheme-form .excel-step-filter-editor {
+  border-top: 1px solid #ededed;
+}
+
+.excel-scheme-form .excel-step-filter-row {
+  grid-template-columns: minmax(130px, 1fr) 90px minmax(110px, 1fr) auto;
+  border: 0;
+  background: #fff;
+  padding: 0;
+}
+
+.excel-scheme-form .excel-step-filter-heading button,
+.excel-scheme-form .excel-step-filter-empty {
+  border: 1px dashed #c9c9c9;
+  border-radius: 3px !important;
+  background: #fff;
+}
+
+.excel-scheme-advanced,
+.excel-write-scheme-actions {
+  margin-top: 18px;
+  border: 1px solid #dedede;
+  padding: 11px 13px;
+}
+
+.excel-scheme-advanced > div,
+.excel-write-scheme-actions > div {
+  display: grid;
+  grid-template-columns: minmax(180px, 1fr) auto auto;
+  align-items: end;
+  gap: 10px;
+  padding-top: 12px;
+}
+
+.excel-scheme-advanced label:nth-last-child(2) {
+  grid-column: 1 / -1;
+}
+
+.excel-scheme-table {
+  min-width: 0;
+  table-layout: fixed;
+  font-size: 11px;
+}
+
+.excel-scheme-table th,
+.excel-scheme-table td {
+  height: 58px;
+  border-bottom: 1px solid #dedede;
+  background: #fff;
+  padding: 8px 5px;
+}
+
+.excel-scheme-table th:nth-child(1) { width: 33%; }
+.excel-scheme-table th:nth-child(2) { width: 15%; }
+.excel-scheme-table th:nth-child(3) { width: 32%; }
+.excel-scheme-table th:nth-child(4) { width: 20%; }
+
+.excel-scheme-table th:last-child,
+.excel-scheme-table td:last-child {
+  position: static;
+  border-left: 0;
+  background: #fff;
+}
+
+.excel-scheme-table .table-actions {
+  display: grid;
+  gap: 2px;
+}
+
+.excel-scheme-table .table-actions button {
+  min-height: 22px;
+  border: 0;
+  background: transparent;
+  color: #1687e8;
+  font-size: 10px;
+  padding: 2px;
+}
+
+.excel-scheme-table .table-actions button.danger {
+  color: #888;
+}
+
+.excel-write-page > .overview-grid .metric {
+  min-height: 114px;
+}
+
+.excel-write-workspace > .workbench-panel {
+  padding-right: 34px;
+}
+
+.excel-write-workspace > .workbench-panel::before {
+  display: block;
+  margin-bottom: 17px;
+  font-size: 20px;
+  font-weight: 650;
+  content: '数据库回写';
+}
+
+.excel-write-page .excel-mode-switch {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0;
+  max-width: 375px;
+  margin-bottom: 18px;
+}
+
+.excel-write-page .excel-mode-switch button {
+  justify-content: center;
+  min-height: 38px;
+  border: 1px solid #d4d4d4;
+  border-radius: 3px !important;
+  background: #fff;
+}
+
+.excel-write-page .excel-mode-switch button + button {
+  margin-left: -1px;
+}
+
+.excel-write-page .excel-mode-switch button.active {
+  position: relative;
+  z-index: 1;
+  border-color: #ff8911;
+  background: #fff;
+  color: #ff8911;
+}
+
+.excel-write-workspace > .workbench-panel > .excel-mode-note {
+  display: none;
+}
+
+.excel-write-form {
+  display: grid;
+  grid-template-columns: 1fr;
+  gap: 8px;
+}
+
+.excel-write-form > label {
+  display: grid;
+  grid-template-columns: 160px minmax(0, 1fr);
+  align-items: center;
+  gap: 15px;
+  min-width: 0;
+  color: #444;
+  font-size: 13px;
+}
+
+.excel-write-form > label input,
+.excel-write-form > label select,
+.excel-write-form .file-input-label span {
+  min-height: 38px;
+  border: 1px solid #d4d4d4;
+  border-radius: 3px !important;
+  background: #fff;
+  color: #444;
+  font-size: 13px;
+}
+
+.excel-write-form .file-input-label {
+  position: relative;
+  border: 0;
+  background: transparent;
+  padding: 0;
+}
+
+.excel-write-form .file-input-label span {
+  display: flex;
+  align-items: center;
+  padding: 8px 10px;
+}
+
+.excel-write-scheme-actions {
+  order: 20;
+  margin-top: 8px;
+}
+
+.excel-write-confirm {
+  display: grid;
+  gap: 3px;
+  margin: 7px 0 3px;
+}
+
+.excel-write-confirm label {
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.excel-write-confirm p {
+  margin: 0 0 0 26px;
+  color: #777;
+  font-size: 11px;
+}
+
+.excel-write-form .excel-form-actions {
+  justify-content: flex-end;
+  margin-top: 8px;
+}
+
+.excel-write-form .excel-form-actions button {
+  min-width: 122px;
+  min-height: 38px;
+  border-radius: 3px !important;
+}
+
+.excel-write-preview-summary {
+  position: relative;
+  display: grid;
+  gap: 12px;
+  border-top: 1px solid #dedede;
+  background: #fff;
+  padding: 27px 28px 20px;
+}
+
+.excel-write-preview-summary > div:first-child {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.excel-write-preview-summary h3 {
+  margin: 0;
+  font-size: 18px;
+}
+
+.excel-write-preview-summary > div:first-child span {
+  color: #777;
+  font-size: 12px;
+}
+
+.excel-write-preview-summary > div:nth-child(2) {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.excel-write-preview-summary .metric {
+  position: relative;
+  min-height: 92px;
+  border: 0;
+  background: #fff;
+  text-align: center;
+}
+
+.excel-write-preview-summary .metric + .metric::before {
+  position: absolute;
+  top: 15px;
+  bottom: 15px;
+  left: 0;
+  width: 1px;
+  background: #dedede;
+  content: '';
+}
+
+.excel-write-preview-summary .metric strong {
+  margin-top: 12px;
+  font-size: 29px;
+  font-weight: 500;
+}
+
+.excel-write-preview-summary .metric:nth-child(3) strong { color: #ff8911; }
+.excel-write-preview-summary .metric:nth-child(4) strong { color: #ed2024; }
+
+.excel-write-preview-summary > button {
+  position: absolute;
+  top: 20px;
+  right: 28px;
+  border: 0;
+  background: transparent;
+  color: #1687e8;
+}
+
+@media (max-width: 1180px) {
+  .excel-design-page {
+    margin: 0;
+  }
+
+  .excel-jobs-workspace,
+  .excel-scheme-workspace,
+  .excel-write-workspace {
+    grid-template-columns: 1fr;
+  }
+
+  .excel-job-aside,
+  .excel-scheme-workspace .excel-config-aside,
+  .excel-write-workspace .excel-config-aside {
+    border-top: 1px solid #dedede;
+    border-left: 0;
+  }
+
+  .excel-scheme-toolbar {
+    grid-template-columns: 1fr 180px;
+  }
+
+  .excel-scheme-toolbar-actions {
+    grid-column: 1 / -1;
+  }
+}
+
+@media (max-width: 840px) {
+  .excel-jobs-page > .overview-grid,
+  .excel-schemes-page > .overview-grid,
+  .excel-write-page > .overview-grid,
+  .excel-write-preview-summary > div:nth-child(2) {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .excel-design-page > .overview-grid .metric {
+    min-height: 110px;
+    border-right: 1px solid #dedede;
+    border-bottom: 1px solid #dedede;
+    padding: 18px;
+  }
+
+  .excel-design-page > .overview-grid .metric:nth-child(2n) {
+    border-right: 0;
+  }
+
+  .excel-design-page > .overview-grid .metric + .metric::before {
+    display: none;
+  }
+
+  .excel-job-query {
+    grid-template-columns: 1fr;
+  }
+
+  .excel-job-query .query-fields,
+  .excel-scheme-toolbar,
+  .excel-scheme-form .excel-step-fields,
+  .excel-scheme-form .excel-step-filter-row,
+  .excel-scheme-advanced > div,
+  .excel-write-scheme-actions > div {
+    grid-template-columns: 1fr;
+  }
+
+  .excel-job-query label,
+  .excel-write-form > label {
+    grid-template-columns: 1fr;
+  }
+
+  .excel-scheme-toolbar-actions {
+    flex-wrap: wrap;
+  }
+
+  .excel-scheme-form .excel-step-heading {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .excel-scheme-form .excel-step-heading .table-actions {
+    justify-content: flex-start;
+  }
+}
+
+@media (max-width: 520px) {
+  .excel-jobs-page > .overview-grid,
+  .excel-schemes-page > .overview-grid,
+  .excel-write-page > .overview-grid,
+  .excel-write-preview-summary > div:nth-child(2) {
+    grid-template-columns: 1fr;
+  }
+
+  .excel-design-page > .overview-grid .metric {
+    border-right: 0;
+  }
+}
