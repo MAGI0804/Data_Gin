@@ -2485,7 +2485,7 @@ function RulesQueryPage({ client, rules, sources, onRulesChange, refreshVersion 
 }
 
 function ProcessedQueryPage({ client }: { client: ApiClient }) {
-  const [view, setView] = useState<'legacy' | 'clean'>('legacy')
+  const [view, setView] = useState<'legacy' | 'clean'>('clean')
   const [statistics, setStatistics] = useState<DataStatisticsSummary | null>(null)
   const [statisticsLoading, setStatisticsLoading] = useState(true)
   const [statisticsError, setStatisticsError] = useState('')
@@ -2514,20 +2514,16 @@ function ProcessedQueryPage({ client }: { client: ApiClient }) {
   }, [client, statisticsRequest])
 
   return (
-    <div className="view-stack">
-      {statistics && <section className="overview-grid compact" aria-label="处理统计">
-        <Metric label="接收总量" value={statistics.totalCount} />
-        <Metric label="已处理" value={statistics.processedCount} />
-        <Metric label="处理失败" value={statistics.errorCount} />
-        <Metric label="平均质量分" value={statistics.averageQualityScore === null ? '-' : statistics.averageQualityScore.toFixed(1)} />
-      </section>}
+    <div className="view-stack design-data-page design-processed-page">
       {statisticsLoading && !statistics && <p className="query-contract-note" role="status">正在加载处理统计…</p>}
       {statisticsError && <div className="result-banner error" role="alert">{statisticsError} {statistics && '当前展示的是上一次成功数据。'} <button type="button" onClick={() => setStatisticsRequest((current) => current + 1)} disabled={statisticsLoading}>重试统计</button></div>}
-      <div className="tab-actions" role="tablist" aria-label="处理结果数据视图">
+      {view === 'legacy'
+        ? <LegacyProcessedQueryPanel client={client} />
+        : <CleanRecordsQueryPanel client={client} statistics={statistics} statisticsLoading={statisticsLoading} />}
+      <div className="tab-actions design-view-switch" role="tablist" aria-label="处理结果数据视图">
         <button type="button" role="tab" aria-selected={view === 'legacy'} className={view === 'legacy' ? 'active' : ''} onClick={() => setView('legacy')}>旧处理结果</button>
         <button type="button" role="tab" aria-selected={view === 'clean'} className={view === 'clean' ? 'active' : ''} onClick={() => setView('clean')}>清洗记录</button>
       </div>
-      {view === 'legacy' ? <LegacyProcessedQueryPanel client={client} /> : <CleanRecordsQueryPanel client={client} />}
     </div>
   )
 }
@@ -2598,13 +2594,14 @@ function LegacyProcessedQueryPanel({ client }: { client: ApiClient }) {
   )
 }
 
-function CleanRecordsQueryPanel({ client }: { client: ApiClient }) {
+function CleanRecordsQueryPanel({ client, statistics, statisticsLoading }: { client: ApiClient; statistics: DataStatisticsSummary | null; statisticsLoading: boolean }) {
   const [sourceID, setSourceID] = useState('')
   const [tableName, setTableName] = useState('')
   const [businessKey, setBusinessKey] = useState('')
   const [status, setStatus] = useState('')
   const [minQuality, setMinQuality] = useState('')
   const [maxQuality, setMaxQuality] = useState('')
+  const [qualityBand, setQualityBand] = useState('all')
   const [createdFrom, setCreatedFrom] = useState('')
   const [createdTo, setCreatedTo] = useState('')
   const [appliedQuery, setAppliedQuery] = useState({ sourceID: '', tableName: '', businessKey: '', status: '', minQuality: '', maxQuality: '', createdFrom: '', createdTo: '' })
@@ -2642,29 +2639,32 @@ function CleanRecordsQueryPanel({ client }: { client: ApiClient }) {
   const records = recordsPage?.list ?? []
   const totalPages = recordsPage?.totalPages ?? 0
   return (
-    <div className="view-stack">
-      <form className="query-bar" onSubmit={submit}>
+    <div className="view-stack design-clean-records">
+      <form className="query-bar design-filter-bar design-processed-filter" onSubmit={submit}>
         <div className="query-fields">
-          <Field label="来源 ID" name="clean_source_id" type="number" value={sourceID} onChange={setSourceID} />
-          <Field label="逻辑表名" name="clean_table_name" value={tableName} onChange={setTableName} />
-          <Field label="业务键" name="clean_business_key" value={businessKey} onChange={setBusinessKey} />
-          <SelectFilter label="状态" value={status} onChange={setStatus} options={[{ value: 'ready', label: '待推送' }, { value: 'invalid', label: '无效' }, { value: 'delivered', label: '已交付' }]} />
-          <Field label="最低质量分" name="clean_min_quality" type="number" value={minQuality} onChange={setMinQuality} />
-          <Field label="最高质量分" name="clean_max_quality" type="number" value={maxQuality} onChange={setMaxQuality} />
-          <Field label="开始时间" name="clean_from" type="datetime-local" value={createdFrom} onChange={setCreatedFrom} />
-          <Field label="结束时间" name="clean_to" type="datetime-local" value={createdTo} onChange={setCreatedTo} />
+          <label>业务键 / Raw ID / 内容<span className="design-search-control"><Search aria-hidden="true" /><input name="clean_business_key" type="search" value={businessKey} onChange={(event) => setBusinessKey(event.currentTarget.value)} placeholder="输入业务键" /></span></label>
+          <label>数据类型<input name="clean_table_name" value={tableName} onChange={(event) => setTableName(event.currentTarget.value)} placeholder="全部" /></label>
+          <label>质量<select name="clean_quality_band" value={qualityBand} onChange={(event) => { const next = event.currentTarget.value; setQualityBand(next); setMinQuality(next === 'high' ? '80' : ''); setMaxQuality(next === 'review' ? '79.99' : '') }}><option value="all">全部</option><option value="high">80 分及以上</option><option value="review">待复核（低于 80 分）</option></select></label>
         </div>
-        <button type="submit" disabled={loading}>{loading ? '查询中…' : '查询'}</button>
+        <div className="design-filter-count"><strong>{records.length}</strong><span>/ {recordsPage?.total ?? 0} 条</span></div>
+        <button className="sr-only" type="submit" disabled={loading}>{loading ? '查询中…' : '查询处理结果'}</button>
+        <details className="design-advanced-filters"><summary>更多筛选</summary><div><Field label="来源 ID" name="clean_source_id" type="number" value={sourceID} onChange={setSourceID} /><SelectFilter label="处理状态" value={status || 'all'} onChange={(next) => setStatus(next === 'all' ? '' : next)} options={[{ value: 'ready', label: '待推送' }, { value: 'invalid', label: '无效' }, { value: 'delivered', label: '已交付' }]} /><Field label="开始时间" name="clean_from" type="datetime-local" value={createdFrom} onChange={setCreatedFrom} /><Field label="结束时间" name="clean_to" type="datetime-local" value={createdTo} onChange={setCreatedTo} /></div></details>
       </form>
+      <section className="overview-grid compact design-processed-summary" aria-label="处理统计" aria-busy={statisticsLoading}>
+        <Metric label="平均质量" value={statistics?.averageQualityScore === null || statistics?.averageQualityScore === undefined ? '-' : statistics.averageQualityScore.toFixed(1)} />
+        <Metric label="已处理" value={statistics?.processedCount ?? '-'} />
+        <Metric label="处理失败" value={statistics?.errorCount ?? '-'} />
+      </section>
       {error && <div className="result-banner error" role="alert">{error} 已保留最近一次成功数据。</div>}
-      <Panel title="清洗记录" icon={<CheckCircle2 />} meta={loading && !recordsPage ? '正在加载…' : `共 ${recordsPage?.total ?? 0} 条 / 平均质量 ${recordsPage?.averageQuality.toFixed(1) ?? '-'}`}>
+      <section className="design-table-section">
+        <div className="design-section-heading"><div><h3>处理结果</h3><span>{loading && !recordsPage ? '正在加载…' : `查询命中 ${recordsPage?.total ?? 0} 条`}</span></div></div>
         <CleanRecordList records={records} />
         <div className="record-actions raw-record-pagination" role="status" aria-live="polite">
           <span>第 {recordsPage?.page ?? page} / {Math.max(totalPages, 1)} 页</span>
           <button type="button" onClick={() => setPage((current) => Math.max(1, current - 1))} disabled={loading || page <= 1}>上一页</button>
           <button type="button" onClick={() => setPage((current) => current + 1)} disabled={loading || totalPages === 0 || page >= totalPages}>下一页</button>
         </div>
-      </Panel>
+      </section>
     </div>
   )
 }
@@ -5403,16 +5403,17 @@ function CleanRecordList({ records }: { records: CleanRecord[] }) {
   if (records.length === 0) return <EmptyState text="暂无清洗记录。" />
   return (
     <div className="data-table-wrap" role="region" aria-label="清洗记录列表" tabIndex={0}>
-      <table className="data-table">
-        <thead><tr><th scope="col">业务键</th><th scope="col">逻辑表</th><th scope="col">来源 / 原始记录</th><th scope="col">质量分数</th><th scope="col">状态</th><th scope="col">处理时间</th></tr></thead>
+      <table className="data-table design-processed-table">
+        <thead><tr><th scope="col">业务键</th><th scope="col">数据类型</th><th scope="col">Raw ID</th><th scope="col">质量分数</th><th scope="col">状态</th><th scope="col">处理时间</th><th scope="col">操作</th></tr></thead>
         <tbody>{records.map((record) => (
           <tr key={record.id}>
-            <td><strong>{record.business_key || `#${record.id}`}</strong><small>记录 #{record.id}</small></td>
+            <td><strong>{record.business_key || `#${record.id}`}</strong></td>
             <td>{record.table_name || '-'}</td>
-            <td>#{record.source_id} / #{record.raw_record_id}</td>
-            <td>{formatQualityScore(record.quality_score)}</td>
-            <td><StatusPill label={cleanRecordStatusLabel(record.status)} /></td>
+            <td>#{record.raw_record_id}<small>来源 #{record.source_id}</small></td>
+            <td><div className={record.quality_score >= 80 ? 'design-quality-score' : 'design-quality-score review'}><strong>{Math.round(record.quality_score)}</strong><progress value={Math.max(0, Math.min(100, record.quality_score))} max="100" aria-label={`质量分 ${formatQualityScore(record.quality_score)}`} /></div></td>
+            <td><StatusPill label={record.quality_score >= 80 ? '高质量' : '待复核'} /><small>{cleanRecordStatusLabel(record.status)}</small></td>
             <td>{formatUnixTime(record.created_at)}</td>
+            <td><details className="design-row-details"><summary className="design-table-link">查看</summary><dl><div><dt>记录 ID</dt><dd>#{record.id}</dd></div><div><dt>业务状态</dt><dd>{cleanRecordStatusLabel(record.status)}</dd></div></dl></details></td>
           </tr>
         ))}</tbody>
       </table>
