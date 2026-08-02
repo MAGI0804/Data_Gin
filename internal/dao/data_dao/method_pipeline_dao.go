@@ -127,6 +127,22 @@ func (dao *MethodStepDAO) Update(ctx context.Context, step *model.MethodStep) er
 	return dao.db.WithContext(ctx).Save(step).Error
 }
 
+func (dao *MethodStepDAO) UpdateLegacy(ctx context.Context, step *model.MethodStep) (bool, error) {
+	step.UpdatedAt = int(time.Now().Unix())
+	result := dao.db.WithContext(ctx).
+		Model(&model.MethodStep{}).
+		Where("id = ? AND pipeline_id = ? AND stage_id = 0", step.ID, step.PipelineID).
+		Updates(map[string]interface{}{
+			"stage_id": step.StageID, "code": step.Code, "name": step.Name, "method_type": step.MethodType,
+			"order_index": step.OrderIndex, "enabled": step.Enabled, "timeout_seconds": step.TimeoutSeconds,
+			"generated_config_json": step.GeneratedConfigJSON, "updated_at": step.UpdatedAt,
+		})
+	if result.Error != nil {
+		return false, result.Error
+	}
+	return result.RowsAffected == 1, nil
+}
+
 type MethodParamDAO struct {
 	db *gorm.DB
 }

@@ -71,6 +71,9 @@ func TestDefaultStageTypeForMethod(t *testing.T) {
 	if got := defaultStageTypeForMethod("bojun_signed_request"); got != "fetch" {
 		t.Fatalf("bojun signed request stage = %s", got)
 	}
+	if got := defaultStageTypeForMethod("extract"); got != "fetch" {
+		t.Fatalf("extract stage = %s", got)
+	}
 	if got := defaultStageTypeForMethod("delivery"); got != "push" {
 		t.Fatalf("delivery stage = %s", got)
 	}
@@ -79,6 +82,21 @@ func TestDefaultStageTypeForMethod(t *testing.T) {
 	}
 	if got := defaultStageTypeForMethod("mapping"); got != "process" {
 		t.Fatalf("mapping stage = %s", got)
+	}
+	if got := defaultStageTypeForMethod("log"); got != "log" {
+		t.Fatalf("log stage = %s", got)
+	}
+	if got := defaultStageTypeForMethod("unknown"); got != "process" {
+		t.Fatalf("unknown method stage = %s", got)
+	}
+}
+
+func TestSameJSONValueIgnoresObjectKeyOrder(t *testing.T) {
+	if !sameJSONValue(`{"stage_id":3,"steps":[{"code":"fetch"}]}`, `{"steps":[{"code":"fetch"}],"stage_id":3}`) {
+		t.Fatal("sameJSONValue() = false for semantically equal JSON")
+	}
+	if sameJSONValue(`{"steps":[]}`, `{"steps":[1]}`) {
+		t.Fatal("sameJSONValue() = true for different JSON")
 	}
 }
 

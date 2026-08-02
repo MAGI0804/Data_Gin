@@ -77,6 +77,65 @@ test('FormData requests preserve multipart boundaries and authentication headers
   assert.equal(received.headers.Authorization, 'Bearer secret-token-that-must-not-leak')
 })
 
+test('rejects bare JSON success responses by default', async () => {
+  const client = createApiClient(clientOptions({
+    fetch: async () => response(200, { status: 'ok', service: 'gin-biz-web-api' }),
+  }))
+
+  const result = await client.request('/health', { method: 'GET' })
+
+  assert.equal(result.ok, false)
+  assert.equal(result.status, 200)
+  assert.equal(result.error?.kind, 'client')
+})
+
+test('accepts bare JSON objects only when explicitly enabled', async () => {
+  const health = { status: 'ok', service: 'gin-biz-web-api' }
+  const client = createApiClient(clientOptions({
+    fetch: async () => response(200, health),
+  }))
+
+  const result = await client.request('/health', {
+    method: 'GET',
+    acceptBareJSONSuccess: true,
+  })
+
+  assert.equal(result.ok, true)
+  assert.equal(result.status, 200)
+  assert.deepEqual(result.data, health)
+})
+
+test('does not accept HTTP errors when bare JSON success is enabled', async () => {
+  const client = createApiClient(clientOptions({
+    fetch: async () => response(503, { status: 'unavailable' }),
+  }))
+
+  const result = await client.request('/health', {
+    method: 'GET',
+    retry: false,
+    acceptBareJSONSuccess: true,
+  })
+
+  assert.equal(result.ok, false)
+  assert.equal(result.status, 503)
+  assert.equal(result.error?.kind, 'server')
+})
+
+test('does not treat error envelopes as bare JSON success', async () => {
+  const client = createApiClient(clientOptions({
+    fetch: async () => response(200, { code: 500, message: 'internal error' }),
+  }))
+
+  const result = await client.request('/health', {
+    method: 'GET',
+    acceptBareJSONSuccess: true,
+  })
+
+  assert.equal(result.ok, false)
+  assert.equal(result.status, 200)
+  assert.equal(result.error?.kind, 'client')
+})
+
 test('concurrent unauthorized GETs use one refresh and replay once', async () => {
   let token = 'expired-token'
   let refreshes = 0

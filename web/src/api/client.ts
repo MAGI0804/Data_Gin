@@ -24,6 +24,7 @@ export type ApiRequestOptions = {
   signal?: AbortSignal
   retry?: boolean
   timeoutMs?: number
+  acceptBareJSONSuccess?: boolean
 }
 
 type FetchLike = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>
@@ -108,6 +109,13 @@ function isFormData(body: unknown): body is FormData {
   return typeof FormData !== 'undefined' && body instanceof FormData
 }
 
+function isBareJSONObject(payload: unknown) {
+  return payload !== null
+    && typeof payload === 'object'
+    && !Array.isArray(payload)
+    && !Object.prototype.hasOwnProperty.call(payload, 'code')
+}
+
 function withoutContentType(headers: Record<string, string> | undefined) {
   if (!headers) return undefined
   return Object.fromEntries(Object.entries(headers).filter(([name]) => name.toLowerCase() !== 'content-type'))
@@ -177,7 +185,7 @@ export function createApiClient(options: ApiClientOptions) {
   }
 
   async function request(path: string, requestOptions: ApiRequestOptions): Promise<ClientResponse> {
-    const { method, body, headers, signal, retry = true } = requestOptions
+    const { method, body, headers, signal, retry = true, acceptBareJSONSuccess = false } = requestOptions
     const retryable = method === 'GET' && retry
     let attempt = 0
     let replayedAfterRefresh = false
@@ -195,7 +203,8 @@ export function createApiClient(options: ApiClientOptions) {
         })
         const payload: unknown = await response.json().catch(() => null)
         const status = effectiveApiStatus(response.status, payload)
-        if (response.ok && status < 400 && isSuccessfulPayload(payload)) return { ok: true, status, data: payload }
+        const successfulPayload = isSuccessfulPayload(payload) || (acceptBareJSONSuccess && isBareJSONObject(payload))
+        if (response.ok && status < 400 && successfulPayload) return { ok: true, status, data: payload }
 
         if (status === 401) {
           if (retryable && !replayedAfterRefresh) {

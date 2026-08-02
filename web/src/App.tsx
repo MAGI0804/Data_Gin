@@ -892,6 +892,7 @@ function App() {
           signal: options.signal,
           retry: options.retry,
           timeoutMs: options.timeoutMs,
+          acceptBareJSONSuccess: options.acceptBareJSONSuccess,
         }
         const nextResult = await apiClient.request(path, requestOptions)
         if (options.showResult !== false) setResult(nextResult)
@@ -1217,7 +1218,7 @@ function App() {
     void Promise.all([
       client('/v1/data/statistics', { method: 'GET', signal: controller.signal, showResult: false, silentLoading: true }),
       client('/v1/mall-weather/metrics', { method: 'GET', signal: controller.signal, showResult: false, silentLoading: true }),
-      client('/health', { method: 'GET', signal: controller.signal, showResult: false, silentLoading: true }),
+      client('/health', { method: 'GET', signal: controller.signal, showResult: false, silentLoading: true, acceptBareJSONSuccess: true }),
     ]).then(([statisticsResponse, weatherResponse, healthResponse]) => {
       if (controller.signal.aborted) return
       const nextStatistics = statisticsResponse.ok ? parseDataStatisticsSummary(statisticsResponse.data) : null

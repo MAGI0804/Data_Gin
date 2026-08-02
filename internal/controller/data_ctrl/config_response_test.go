@@ -3,6 +3,7 @@ package data_ctrl
 import (
 	"strings"
 	"testing"
+	"unicode/utf8"
 )
 
 func TestRedactConfigJSON(t *testing.T) {
@@ -31,3 +32,34 @@ func TestRedactConfigJSONRedactsDataSourceDSNAndURLCredentials(t *testing.T) {
 }
 
 func containsSensitiveValue(value, secret string) bool { return strings.Contains(value, secret) }
+
+func TestSafeDeliveryLogTextKeepsFrontendLengthLimit(t *testing.T) {
+	tests := []struct {
+		name  string
+		value string
+		want  string
+	}{
+		{name: "ASCII at limit", value: strings.Repeat("a", 240), want: strings.Repeat("a", 240)},
+		{name: "ASCII over limit", value: strings.Repeat("a", 241), want: strings.Repeat("a", 239) + "…"},
+		{name: "Chinese over limit", value: strings.Repeat("数", 241), want: strings.Repeat("数", 239) + "…"},
+		{name: "emoji at limit", value: strings.Repeat("😀", 120), want: strings.Repeat("😀", 120)},
+		{name: "emoji over limit", value: strings.Repeat("😀", 121), want: strings.Repeat("😀", 119) + "…"},
+		{name: "mixed BMP and non-BMP boundary", value: strings.Repeat("数", 237) + "😀ab", want: strings.Repeat("数", 237) + "😀…"},
+		{name: "invalid UTF-8", value: strings.Repeat("a", 238) + string([]byte{0xff}) + "😀", want: strings.Repeat("a", 238) + "�…"},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			got := safeDeliveryLogText(test.value)
+			if got != test.want {
+				t.Fatalf("safeDeliveryLogText() = %q, want %q", got, test.want)
+			}
+			if !utf8.ValidString(got) {
+				t.Fatalf("safeDeliveryLogText() returned invalid UTF-8: %q", got)
+			}
+			if length := deliveryLogTextLength(got); length > 240 {
+				t.Fatalf("safeDeliveryLogText() UTF-16 length = %d, want <= 240", length)
+			}
+		})
+	}
+}

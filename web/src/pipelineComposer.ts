@@ -139,7 +139,7 @@ function parsePipeline(value: unknown): PipelineSummary | null {
   const id = positiveID(value.id)
   const name = stringField(value.name, 100)
   const code = stringField(value.code, 100)
-  const description = stringField(value.description) ?? ''
+  const description = typeof value.description === 'string' ? value.description : ''
   const enabled = boolField(value.enabled)
   return id !== null && name !== null && code !== null && enabled !== null ? { id, name, code, description, enabled } : null
 }
@@ -178,7 +178,7 @@ function parseStepDetail(value: unknown): PipelineStepDetail | null {
   const raw = value.step
   const id = positiveID(raw.id)
   const pipelineID = positiveID(raw.pipeline_id)
-  const stageID = positiveID(raw.stage_id)
+  const stageID = finiteInteger(raw.stage_id)
   const code = stringField(raw.code, 100)
   const name = stringField(raw.name, 100)
   const methodType = stringField(raw.method_type, 50)
@@ -187,8 +187,21 @@ function parseStepDetail(value: unknown): PipelineStepDetail | null {
   const timeoutSeconds = finiteInteger(raw.timeout_seconds)
   const params = value.params.map(parseParam)
   const outputs = value.outputs.map(parseOutput)
-  if (id === null || pipelineID === null || stageID === null || code === null || name === null || methodType === null || orderIndex === null || enabled === null || timeoutSeconds === null || params.some((item) => item === null) || outputs.some((item) => item === null)) return null
+  if (id === null || pipelineID === null || stageID === null || stageID < 0 || code === null || name === null || methodType === null || orderIndex === null || enabled === null || timeoutSeconds === null || params.some((item) => item === null) || outputs.some((item) => item === null)) return null
   return { step: { id, pipeline_id: pipelineID, stage_id: stageID, code, name, method_type: methodType, order_index: orderIndex, enabled, timeout_seconds: timeoutSeconds }, params: params as MethodParam[], outputs: outputs as MethodOutput[] }
+}
+
+function defaultStageTypeForMethod(methodType: string): StageType {
+  if (['request', 'extract', 'bojun_signed_request'].includes(methodType)) return 'fetch'
+  if (['delivery', 'shanghai_mall_push'].includes(methodType)) return 'push'
+  if (methodType === 'log') return 'log'
+  return 'process'
+}
+
+function assignLegacyStepStage(detail: PipelineStepDetail, stages: PipelineStageDetail[]): PipelineStepDetail | null {
+  if (detail.step.stage_id > 0) return detail
+  const target = stages.find((stage) => stage.stage.stage_type === defaultStageTypeForMethod(detail.step.method_type))
+  return target ? { ...detail, step: { ...detail.step, stage_id: target.stage.id } } : null
 }
 
 function parseStageConfigDTO(value: unknown): StageGeneratedConfig | null {
@@ -226,7 +239,16 @@ export function parsePipelineDetail(payload: unknown): PipelineDetail | null {
   const pipeline = parsePipeline(payload.data.pipeline.pipeline)
   const stages = Array.isArray(payload.data.pipeline.stages) ? payload.data.pipeline.stages.map(parseStageDetail) : null
   const steps = Array.isArray(payload.data.pipeline.steps) ? payload.data.pipeline.steps.map(parseStepDetail) : null
-  return pipeline && stages && steps && !stages.some((item) => item === null) && !steps.some((item) => item === null) ? { pipeline, stages: stages as PipelineStageDetail[], steps: steps as PipelineStepDetail[] } : null
+  if (!pipeline || !stages || !steps || stages.some((item) => item === null) || steps.some((item) => item === null)) return null
+
+  const parsedStages = stages as PipelineStageDetail[]
+  const parsedSteps = steps as PipelineStepDetail[]
+  const normalizedSteps = parsedSteps.map((step) => assignLegacyStepStage(step, parsedStages))
+  if (normalizedSteps.some((item) => item === null)) return null
+
+  const topLevelSteps = normalizedSteps as PipelineStepDetail[]
+  const normalizedStages = parsedStages.map((stage) => ({ ...stage, steps: topLevelSteps.filter((step) => step.step.stage_id === stage.stage.id) }))
+  return { pipeline, stages: normalizedStages, steps: topLevelSteps }
 }
 
 export function parsePipelineWriteResult(payload: unknown): PipelineSummary | null {

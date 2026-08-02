@@ -2,6 +2,7 @@ package data_ctrl
 
 import (
 	"strings"
+	"unicode/utf16"
 
 	"gin-biz-web-api/internal/configsecret"
 	"gin-biz-web-api/model"
@@ -138,7 +139,7 @@ func safePipelineRuns(runs []model.PipelineRun) []pipelineRunResponse {
 }
 
 func safeDeliveryLogText(value string) string {
-	value = strings.TrimSpace(value)
+	value = strings.ToValidUTF8(strings.TrimSpace(value), "�")
 	if value == "" {
 		return ""
 	}
@@ -146,10 +147,30 @@ func safeDeliveryLogText(value string) string {
 	if strings.Contains(lowerValue, "token") || strings.Contains(lowerValue, "secret") || strings.Contains(lowerValue, "password") || strings.Contains(lowerValue, "authorization") || strings.Contains(lowerValue, "api_key") || strings.Contains(lowerValue, "private_key") {
 		return "第三方响应包含敏感信息，详情已隐藏。"
 	}
-	if len(value) > 240 {
-		return value[:240] + "…"
+	const maximumLength = 240
+	if deliveryLogTextLength(value) > maximumLength {
+		var result strings.Builder
+		length := 0
+		for _, character := range value {
+			characterLength := utf16.RuneLen(character)
+			if length+characterLength > maximumLength-1 {
+				break
+			}
+			result.WriteRune(character)
+			length += characterLength
+		}
+		result.WriteRune('…')
+		return result.String()
 	}
 	return value
+}
+
+func deliveryLogTextLength(value string) int {
+	length := 0
+	for _, character := range value {
+		length += utf16.RuneLen(character)
+	}
+	return length
 }
 
 func redactConfigJSON(config string) (string, bool) {

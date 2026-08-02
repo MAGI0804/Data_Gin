@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"reflect"
 	"strings"
 	"time"
 
@@ -224,10 +225,22 @@ func (s *PipelineService) UpdateStepInPipeline(ctx context.Context, pipelineID, 
 	if current.PipelineID != pipelineID {
 		return nil, fmt.Errorf("step %d does not belong to pipeline %d", current.ID, pipelineID)
 	}
-	if req.StageID != 0 && req.StageID != current.StageID {
+	if current.StageID != 0 && req.StageID != 0 && req.StageID != current.StageID {
 		return nil, fmt.Errorf("moving a step between stages is not supported")
 	}
-	return s.UpdateStep(ctx, stepID, req)
+	if current.StageID != 0 {
+		return s.UpdateStep(ctx, stepID, req)
+	}
+	defaultStage, err := s.findDefaultStageForMethod(ctx, pipelineID, req.MethodType)
+	if err != nil {
+		return nil, err
+	}
+	if req.StageID != 0 && req.StageID != defaultStage.ID {
+		return nil, fmt.Errorf("legacy step %d can only move to default stage %d", current.ID, defaultStage.ID)
+	}
+	normalizedRequest := *req
+	normalizedRequest.StageID = defaultStage.ID
+	return s.updateLegacyStep(ctx, current, defaultStage, &normalizedRequest)
 }
 
 func (s *PipelineService) UpdateStepInStage(ctx context.Context, stageID, stepID uint, req *requestbody.MethodStepUpdateRequest) (*MethodStepDetail, error) {
@@ -239,13 +252,53 @@ func (s *PipelineService) UpdateStepInStage(ctx context.Context, stageID, stepID
 	if err != nil {
 		return nil, err
 	}
-	if current.PipelineID != stage.PipelineID || current.StageID != stage.ID {
+	if current.PipelineID != stage.PipelineID || (current.StageID != 0 && current.StageID != stage.ID) {
 		return nil, fmt.Errorf("step %d does not belong to stage %d", current.ID, stage.ID)
 	}
 	if req.StageID != 0 && req.StageID != stage.ID {
 		return nil, fmt.Errorf("moving a step between stages is not supported")
 	}
-	return s.UpdateStep(ctx, stepID, req)
+	if current.StageID == 0 && stage.StageType != defaultStageTypeForMethod(req.MethodType) {
+		return nil, fmt.Errorf("legacy step %d belongs to default stage type %q", current.ID, defaultStageTypeForMethod(req.MethodType))
+	}
+	normalizedRequest := *req
+	normalizedRequest.StageID = stage.ID
+	if current.StageID == 0 {
+		return s.updateLegacyStep(ctx, current, stage, &normalizedRequest)
+	}
+	return s.UpdateStep(ctx, stepID, &normalizedRequest)
+}
+
+func (s *PipelineService) updateLegacyStep(ctx context.Context, current *model.MethodStep, stage *model.PipelineStage, req *requestbody.MethodStepUpdateRequest) (*MethodStepDetail, error) {
+	if current.StageID != 0 || current.PipelineID != stage.PipelineID {
+		return nil, fmt.Errorf("legacy step %d does not belong to stage %d", current.ID, stage.ID)
+	}
+	if stage.StageType != defaultStageTypeForMethod(req.MethodType) {
+		return nil, fmt.Errorf("legacy step %d belongs to default stage type %q", current.ID, defaultStageTypeForMethod(req.MethodType))
+	}
+	if err := validateStageMethodType(stage.StageType, req.MethodType); err != nil {
+		return nil, err
+	}
+	step, params, outputs, err := s.buildStepModel(current.PipelineID, stage.ID, (*requestbody.MethodStepCreateRequest)(req))
+	if err != nil {
+		return nil, err
+	}
+	step.ID = current.ID
+	step.CreatedAt = current.CreatedAt
+	updated, err := s.stepDAO.UpdateLegacy(ctx, step)
+	if err != nil {
+		return nil, err
+	}
+	if !updated {
+		return nil, fmt.Errorf("legacy step %d update conflict", current.ID)
+	}
+	if err := s.paramDAO.ReplaceByStepID(ctx, step.ID, params); err != nil {
+		return nil, err
+	}
+	if err := s.outputDAO.ReplaceByStepID(ctx, step.ID, outputs); err != nil {
+		return nil, err
+	}
+	return s.GetStep(ctx, step.ID)
 }
 
 func (s *PipelineService) buildStepModel(pipelineID, stageID uint, req *requestbody.MethodStepCreateRequest) (*model.MethodStep, []model.MethodParam, []model.MethodOutput, error) {
@@ -369,6 +422,10 @@ func (s *PipelineService) GetPipelineSteps(ctx context.Context, pipelineID uint)
 	if err != nil {
 		return nil, err
 	}
+	steps, err = s.normalizeLegacyStepStages(ctx, pipelineID, steps)
+	if err != nil {
+		return nil, err
+	}
 	return s.hydrateStepDetails(ctx, steps)
 }
 
@@ -377,7 +434,11 @@ func (s *PipelineService) GetStep(ctx context.Context, stepID uint) (*MethodStep
 	if err != nil {
 		return nil, err
 	}
-	details, err := s.hydrateStepDetails(ctx, []model.MethodStep{*step})
+	steps, err := s.normalizeLegacyStepStages(ctx, step.PipelineID, []model.MethodStep{*step})
+	if err != nil {
+		return nil, err
+	}
+	details, err := s.hydrateStepDetails(ctx, steps)
 	if err != nil {
 		return nil, err
 	}
@@ -444,19 +505,7 @@ func (s *PipelineService) PreviewPipelineJSON(ctx context.Context, pipelineID ui
 }
 
 func (s *PipelineService) GenerateStageConfig(ctx context.Context, stageID uint) (*model.StageGeneratedConfig, error) {
-	stage, err := s.stageDAO.FindByID(ctx, stageID)
-	if err != nil {
-		return nil, err
-	}
-	steps, err := s.GetStageSteps(ctx, stageID)
-	if err != nil {
-		return nil, err
-	}
-	configMap, err := buildStageGeneratedConfigMap(*stage, steps)
-	if err != nil {
-		return nil, err
-	}
-	configJSON, err := json.Marshal(configMap)
+	stage, configJSON, err := s.buildCurrentStageConfigJSON(ctx, stageID)
 	if err != nil {
 		return nil, err
 	}
@@ -468,7 +517,7 @@ func (s *PipelineService) GenerateStageConfig(ctx context.Context, stageID uint)
 		PipelineID:          stage.PipelineID,
 		StageID:             stage.ID,
 		StageType:           stage.StageType,
-		GeneratedConfigJSON: string(configJSON),
+		GeneratedConfigJSON: configJSON,
 		TargetRefType:       targetRefTypeForStage(stage.StageType),
 		Version:             version,
 	}
@@ -476,8 +525,29 @@ func (s *PipelineService) GenerateStageConfig(ctx context.Context, stageID uint)
 	return cfg, err
 }
 
+func (s *PipelineService) buildCurrentStageConfigJSON(ctx context.Context, stageID uint) (*model.PipelineStage, string, error) {
+	stage, err := s.stageDAO.FindByID(ctx, stageID)
+	if err != nil {
+		return nil, "", err
+	}
+	steps, err := s.GetStageSteps(ctx, stageID)
+	if err != nil {
+		return nil, "", err
+	}
+	configMap, err := buildStageGeneratedConfigMap(*stage, steps)
+	if err != nil {
+		return nil, "", err
+	}
+	configJSON, err := json.Marshal(configMap)
+	if err != nil {
+		return nil, "", err
+	}
+	return stage, string(configJSON), nil
+}
+
 func (s *PipelineService) PublishStageConfig(ctx context.Context, stageID uint) (*model.StageGeneratedConfig, error) {
 	cfg, err := s.stageConfigDAO.FindLatestByStageID(ctx, stageID)
+	hasSnapshot := err == nil
 	if err != nil {
 		cfg, err = s.GenerateStageConfig(ctx, stageID)
 		if err != nil {
@@ -490,6 +560,15 @@ func (s *PipelineService) PublishStageConfig(ctx context.Context, stageID uint) 
 	if cfg.TargetRefID != 0 || cfg.StageType == "log" {
 		return cfg, nil
 	}
+	if hasSnapshot {
+		_, currentConfigJSON, err := s.buildCurrentStageConfigJSON(ctx, stageID)
+		if err != nil {
+			return nil, err
+		}
+		if !sameJSONValue(cfg.GeneratedConfigJSON, currentConfigJSON) {
+			return nil, fmt.Errorf("stage config %d is stale; regenerate before publishing", cfg.ID)
+		}
+	}
 	targetRefType, targetRefID, err := s.publishStageConfigSnapshot(ctx, cfg)
 	if err != nil {
 		return nil, err
@@ -500,6 +579,18 @@ func (s *PipelineService) PublishStageConfig(ctx context.Context, stageID uint) 
 		return nil, err
 	}
 	return cfg, nil
+}
+
+func sameJSONValue(left, right string) bool {
+	var leftValue interface{}
+	if err := json.Unmarshal([]byte(left), &leftValue); err != nil {
+		return false
+	}
+	var rightValue interface{}
+	if err := json.Unmarshal([]byte(right), &rightValue); err != nil {
+		return false
+	}
+	return reflect.DeepEqual(leftValue, rightValue)
 }
 
 func (s *PipelineService) publishStageConfigSnapshot(ctx context.Context, cfg *model.StageGeneratedConfig) (string, uint, error) {
@@ -527,11 +618,21 @@ func (s *PipelineService) publishStageConfigSnapshot(ctx context.Context, cfg *m
 }
 
 func (s *PipelineService) GetStageSteps(ctx context.Context, stageID uint) ([]MethodStepDetail, error) {
-	steps, err := s.stepDAO.FindByStageID(ctx, stageID)
+	stage, err := s.stageDAO.FindByID(ctx, stageID)
 	if err != nil {
 		return nil, err
 	}
-	return s.hydrateStepDetails(ctx, steps)
+	steps, err := s.GetPipelineSteps(ctx, stage.PipelineID)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]MethodStepDetail, 0, len(steps))
+	for _, step := range steps {
+		if step.Step.StageID == stage.ID {
+			result = append(result, step)
+		}
+	}
+	return result, nil
 }
 
 type PipelineRunResult struct {
@@ -1023,15 +1124,69 @@ func (s *PipelineService) ensureDefaultStages(ctx context.Context, pipelineID ui
 	if err != nil {
 		return err
 	}
-	if len(stages) > 0 {
-		return nil
+	existingStageTypes := make(map[string]bool, len(stages))
+	for _, stage := range stages {
+		existingStageTypes[stage.StageType] = true
 	}
 	for _, stage := range defaultPipelineStages(pipelineID) {
-		if _, err := s.stageDAO.Create(ctx, &stage); err != nil {
-			return err
+		if existingStageTypes[stage.StageType] {
+			continue
 		}
+		if _, err := s.stageDAO.Create(ctx, &stage); err != nil {
+			currentStages, findErr := s.stageDAO.FindByPipelineID(ctx, pipelineID)
+			if findErr != nil || !containsStageType(currentStages, stage.StageType) {
+				return err
+			}
+		}
+		existingStageTypes[stage.StageType] = true
 	}
 	return nil
+}
+
+func containsStageType(stages []model.PipelineStage, stageType string) bool {
+	for _, stage := range stages {
+		if stage.StageType == stageType {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *PipelineService) normalizeLegacyStepStages(ctx context.Context, pipelineID uint, steps []model.MethodStep) ([]model.MethodStep, error) {
+	hasLegacyStep := false
+	for _, step := range steps {
+		if step.StageID == 0 {
+			hasLegacyStep = true
+			break
+		}
+	}
+	if !hasLegacyStep {
+		return steps, nil
+	}
+	if err := s.ensureDefaultStages(ctx, pipelineID); err != nil {
+		return nil, err
+	}
+	stages, err := s.stageDAO.FindByPipelineID(ctx, pipelineID)
+	if err != nil {
+		return nil, err
+	}
+	defaultStageIDs := make(map[string]uint, len(stages))
+	for _, stage := range stages {
+		defaultStageIDs[stage.StageType] = stage.ID
+	}
+	normalized := append([]model.MethodStep(nil), steps...)
+	for index := range normalized {
+		if normalized[index].StageID != 0 {
+			continue
+		}
+		stageType := defaultStageTypeForMethod(normalized[index].MethodType)
+		stageID := defaultStageIDs[stageType]
+		if stageID == 0 {
+			return nil, fmt.Errorf("default stage %q not found for pipeline %d", stageType, pipelineID)
+		}
+		normalized[index].StageID = stageID
+	}
+	return normalized, nil
 }
 
 func (s *PipelineService) findDefaultStageForMethod(ctx context.Context, pipelineID uint, methodType string) (*model.PipelineStage, error) {

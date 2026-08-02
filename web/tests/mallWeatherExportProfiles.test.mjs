@@ -36,6 +36,16 @@ test('builds the exact bounded Profile list query and parses paged DTOs', () => 
   assert.equal(parseMallWeatherExportProfilePage({ code: 0, data: { items: [{ ...profile, datasets: [] }], pagination: { pageSize: 50 } } }), null)
 })
 
+test('accepts zero actor IDs only for fixed system Profiles', () => {
+  const fixedProfile = { ...profile, code: 'mall_weather_excel_fixed_v1', createdBy: 0, updatedBy: 0 }
+  const page = parseMallWeatherExportProfilePage({ code: 0, data: { items: [fixedProfile], pagination: { pageSize: 50 } } })
+
+  assert.equal(page?.items[0].createdBy, 0)
+  assert.equal(page?.items[0].updatedBy, 0)
+  assert.equal(parseMallWeatherExportProfile({ code: 0, data: { ...profile, createdBy: 0, updatedBy: 0 } }), null)
+  assert.equal(parseMallWeatherExportProfile({ code: 0, data: { ...fixedProfile, createdBy: -1 } }), null)
+})
+
 test('builds complete create and optimistic update requests without unsafe fields', () => {
   const create = mallWeatherExportProfileSaveRequest({ ...emptyMallWeatherExportProfileForm(), code: 'north_weather', name: '北区天气', mallIds: '2,1', cities: 'Shanghai', start: '2026-01-02T03:04:05Z', end: '2026-01-03T03:04:05Z' })
   assert.deepEqual(create.filters, { mallIds: [1, 2], cities: ['shanghai'], mallStatuses: ['active'], qualityStatuses: [], start: '2026-01-02T03:04:05Z', end: '2026-01-03T03:04:05Z' })
