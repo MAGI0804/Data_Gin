@@ -48,6 +48,7 @@ export type ExcelMatchJobListQuery = {
   pageSize: number
   keyword?: string
   status?: string
+  operation?: string
 }
 
 const runStatuses = ['running', 'success', 'failed', 'partial_success']
@@ -131,6 +132,8 @@ export function buildExcelMatchJobListQuery(query: ExcelMatchJobListQuery) {
   const params = baseQuery(query.page, query.pageSize)
   appendText(params, 'keyword', query.keyword, 255)
   if (['pending', 'running', 'success', 'failed', 'expired'].includes(query.status ?? '')) params.set('status', query.status!)
+  const operation = query.operation?.trim() ?? ''
+  if (operation === 'match' || operation === 'write') params.set('operation', operation)
   return params.toString()
 }
 

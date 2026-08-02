@@ -20,8 +20,10 @@ test('builds only supported server-side configuration filters', () => {
 })
 
 test('builds bounded Excel job pagination and filters', () => {
-  assert.equal(buildExcelMatchJobListQuery({ page: 3, pageSize: 20, keyword: ' orders August ', status: 'failed' }), 'page=3&page_size=20&keyword=orders+August&status=failed')
-  assert.equal(buildExcelMatchJobListQuery({ page: 0, pageSize: 101, keyword: ' x ', status: 'unknown' }), 'page=1&page_size=20&keyword=x')
+  assert.equal(buildExcelMatchJobListQuery({ page: 3, pageSize: 20, keyword: ' orders August ', status: 'failed', operation: 'write' }), 'page=3&page_size=20&keyword=orders+August&status=failed&operation=write')
+  assert.equal(buildExcelMatchJobListQuery({ page: 2, pageSize: 20, operation: ' match ' }), 'page=2&page_size=20&operation=match')
+  assert.equal(buildExcelMatchJobListQuery({ page: 0, pageSize: 101, keyword: ' x ', status: 'unknown', operation: 'all' }), 'page=1&page_size=20&keyword=x')
+  assert.equal(buildExcelMatchJobListQuery({ page: 1, pageSize: 20, operation: 'export_match' }), 'page=1&page_size=20')
 })
 
 test('normalizes an out-of-range paginated result page', () => {

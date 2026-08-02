@@ -238,11 +238,11 @@ func (ctrl *ExcelMatchJobController) DeleteScheme(c *gin.Context) {
 
 func (ctrl *ExcelMatchJobController) ListJobs(c *gin.Context) {
 	values := c.Request.URL.Query()
-	if !monitoringQueryKeysAllowed(values, "limit", "page", "page_size", "keyword", "status") {
+	if !monitoringQueryKeysAllowed(values, "limit", "page", "page_size", "keyword", "status", "operation") {
 		c.JSON(400, msg.ErrResponseStr("无效的 Excel 匹配任务查询参数"))
 		return
 	}
-	if monitoringHasAnyKey(values, "page", "page_size", "keyword", "status") {
+	if monitoringHasAnyKey(values, "page", "page_size", "keyword", "status", "operation") {
 		if values.Has("limit") {
 			c.JSON(400, msg.ErrResponseStr("分页查询不支持 limit 参数"))
 			return
@@ -262,7 +262,17 @@ func (ctrl *ExcelMatchJobController) ListJobs(c *gin.Context) {
 			c.JSON(400, msg.ErrResponseStr("无效的 Excel 匹配任务查询参数"))
 			return
 		}
-		result, err := ctrl.service.ListJobsPage(c.Request.Context(), data_dao.ExcelMatchJobListQuery{Page: page, PageSize: pageSize, Keyword: keyword, Status: status})
+		operation := strings.TrimSpace(values.Get("operation"))
+		if !validExcelMatchJobOperation(operation) {
+			c.JSON(400, msg.ErrResponseStr("无效的 Excel 匹配任务查询参数"))
+			return
+		}
+		if operation == "all" {
+			operation = ""
+		}
+		result, err := ctrl.service.ListJobsPage(c.Request.Context(), data_dao.ExcelMatchJobListQuery{
+			Page: page, PageSize: pageSize, Keyword: keyword, Status: status, Operation: operation,
+		})
 		if err != nil {
 			c.JSON(500, msg.ErrResponse("查询 Excel 匹配任务列表失败", err))
 			return
@@ -316,6 +326,15 @@ func (ctrl *ExcelMatchJobController) GetJob(c *gin.Context) {
 func validExcelMatchJobStatus(value string) bool {
 	switch value {
 	case "", "pending", "running", "success", "failed", "expired":
+		return true
+	default:
+		return false
+	}
+}
+
+func validExcelMatchJobOperation(value string) bool {
+	switch value {
+	case "", "all", "match", "write":
 		return true
 	default:
 		return false

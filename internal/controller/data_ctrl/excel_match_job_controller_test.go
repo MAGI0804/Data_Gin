@@ -71,3 +71,16 @@ func TestExcelMatchJobQueryStatusValidation(t *testing.T) {
 		}
 	}
 }
+
+func TestExcelMatchJobQueryOperationValidation(t *testing.T) {
+	for _, operation := range []string{"", "all", "match", "write"} {
+		if !validExcelMatchJobOperation(operation) {
+			t.Fatalf("validExcelMatchJobOperation(%q) = false", operation)
+		}
+	}
+	for _, operation := range []string{"export_match", "import_update", "deleted", "write OR 1=1"} {
+		if validExcelMatchJobOperation(operation) {
+			t.Fatalf("validExcelMatchJobOperation(%q) = true", operation)
+		}
+	}
+}

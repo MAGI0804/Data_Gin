@@ -92,7 +92,7 @@
 }
 
 .excel-job-query {
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr);
   align-items: end;
   min-height: 82px;
   border: 0;
@@ -101,9 +101,9 @@
 }
 
 .excel-job-query .query-fields {
-  grid-template-columns: minmax(250px, 1.35fr) minmax(150px, 0.75fr) minmax(150px, 0.75fr);
+  grid-template-columns: minmax(320px, 1.5fr) minmax(150px, 0.75fr) minmax(150px, 0.75fr);
   gap: 26px;
-  max-width: 700px;
+  max-width: 780px;
 }
 
 .excel-job-query label {
@@ -115,12 +115,25 @@
   font-weight: 500;
 }
 
-.excel-job-query label:first-child > span {
+.excel-job-search-control {
+  position: relative;
+  display: block;
+}
+
+.excel-job-search-control > svg {
   position: absolute;
-  width: 1px;
-  height: 1px;
-  overflow: hidden;
-  clip: rect(0 0 0 0);
+  top: 50%;
+  left: 12px;
+  width: 16px;
+  height: 16px;
+  color: #777;
+  pointer-events: none;
+  transform: translateY(-50%);
+}
+
+.excel-job-search-control > input {
+  width: 100%;
+  padding-left: 36px;
 }
 
 .excel-job-query input,
@@ -129,14 +142,6 @@
   border: 1px solid #d4d4d4;
   border-radius: 3px !important;
   background: #fff;
-}
-
-.excel-job-query-actions button {
-  min-height: 34px;
-  border: 0;
-  background: transparent;
-  color: #0868bd;
-  font-size: 12px;
 }
 
 .excel-jobs-workspace {

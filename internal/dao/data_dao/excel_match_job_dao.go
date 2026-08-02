@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -22,10 +23,11 @@ type ExcelMatchJobDAO struct {
 
 // ExcelMatchJobListQuery contains validated management list filters.
 type ExcelMatchJobListQuery struct {
-	Page     int
-	PageSize int
-	Keyword  string
-	Status   string
+	Page      int
+	PageSize  int
+	Keyword   string
+	Status    string
+	Operation string
 }
 
 type ExcelMatchJobListPage struct {
@@ -101,10 +103,34 @@ func (dao *ExcelMatchJobDAO) ListJobsPage(ctx context.Context, params ExcelMatch
 
 func (dao *ExcelMatchJobDAO) applyListFilters(query *gorm.DB, params ExcelMatchJobListQuery) *gorm.DB {
 	if params.Keyword != "" {
-		query = query.Where("source_file_name LIKE ?", "%"+params.Keyword+"%")
+		pattern := "%" + params.Keyword + "%"
+		if jobID, err := strconv.ParseUint(params.Keyword, 10, 64); err == nil && jobID > 0 {
+			query = query.Where(
+				"id = ? OR source_file_name LIKE ? OR error_message LIKE ?",
+				jobID, pattern, pattern,
+			)
+		} else {
+			query = query.Where(
+				"source_file_name LIKE ? OR error_message LIKE ?",
+				pattern, pattern,
+			)
+		}
 	}
 	if params.Status != "" {
 		query = query.Where("status = ?", params.Status)
+	}
+	const operationSQL = "JSON_UNQUOTE(JSON_EXTRACT(config_json, '$.operation'))"
+	switch params.Operation {
+	case "match":
+		query = query.Where(
+			"COALESCE(NULLIF("+operationSQL+", ''), ?) = ?",
+			"export_match", "export_match",
+		)
+	case "write":
+		query = query.Where(
+			operationSQL+" IN ?",
+			[]string{"import_update", "clear_matched_docno"},
+		)
 	}
 	return query
 }

@@ -1439,7 +1439,7 @@ function App() {
         {activeNav === 'destinations' && <DestinationsQueryPage client={client} refreshVersion={workspaceRefreshVersion} />}
         {activeNav === 'tasks' && <DeliveryTasksQueryPage client={client} sources={sources} destinations={destinations} onRefresh={() => refreshWorkspace(false)} refreshVersion={workspaceRefreshVersion} />}
         {activeNav === 'push_policy' && <PushPolicyPage coreMethod={coreMethods.find((item) => item.key === 'mall_push')} config={orderPushSkipConfig} targets={orderPushTargets} onSave={saveOrderPushSkipConfig} onToggle={toggleTarget} />}
-        {(activeNav === 'excel_jobs' || activeNav === 'excel_schemes' || activeNav === 'excel_write') && <ExcelMatchView section={activeNav === 'excel_jobs' ? 'jobs' : activeNav === 'excel_schemes' ? 'schemes' : 'write'} client={client} token={token} loading={loading} setLoading={setLoading} setResult={setResult} onNavigateToJobs={() => navigate('excel_jobs')} />}
+        {(activeNav === 'excel_jobs' || activeNav === 'excel_schemes' || activeNav === 'excel_write') && <ExcelMatchView section={activeNav === 'excel_jobs' ? 'jobs' : activeNav === 'excel_schemes' ? 'schemes' : 'write'} client={client} token={token} loading={loading} refreshVersion={workspaceRefreshVersion} setLoading={setLoading} setResult={setResult} onNavigateToJobs={() => navigate('excel_jobs')} />}
       </section>
 
       <ResultPanel result={result} onClose={() => setResult(null)} />
@@ -3266,6 +3266,7 @@ function ExcelMatchView({
   client,
   token,
   loading,
+  refreshVersion,
   setLoading,
   setResult,
   onNavigateToJobs,
@@ -3274,6 +3275,7 @@ function ExcelMatchView({
   client: ApiClient
   token: string
   loading: boolean
+  refreshVersion: number
   setLoading: (value: boolean) => void
   setResult: (value: ApiResult | null) => void
   onNavigateToJobs: () => void
@@ -3317,7 +3319,7 @@ function ExcelMatchView({
   const [jobQuery, setJobQuery] = useState('')
   const [jobStatus, setJobStatus] = useState('all')
   const [jobOperation, setJobOperation] = useState('all')
-  const [appliedJobHistoryFilters, setAppliedJobHistoryFilters] = useState({ keyword: '', status: '' })
+  const [appliedJobHistoryFilters, setAppliedJobHistoryFilters] = useState({ keyword: '', status: '', operation: '' })
   const [jobHistoryPage, setJobHistoryPage] = useState(1)
   const [jobHistoryPagination, setJobHistoryPagination] = useState<MonitoringPagination | null>(null)
   const [jobHistoryLoading, setJobHistoryLoading] = useState(false)
@@ -3327,11 +3329,6 @@ function ExcelMatchView({
   const selectedJobProgress = job && job.total_rows > 0
     ? Math.min(100, Math.round(job.processed_rows / job.total_rows * 100))
     : 0
-  const visibleJobHistory = jobHistory.filter((item) => {
-    if (jobOperation === 'all') return true
-    const operation = excelJobOperation(item)
-    return jobOperation === 'match' ? operation === 'export_match' : operation !== 'export_match'
-  })
   const pendingSchemeNameConflict = pendingSchemeSave
     ? (pendingSchemeSave.operation === 'export_match' ? exportSchemes : importSchemes)
       .find((scheme) => scheme.name === pendingSchemeSave.name.trim()) ?? null
@@ -3364,14 +3361,6 @@ function ExcelMatchView({
     setPreviewResult(null)
     setUploadRefs({})
     setUploadProgress('')
-  }
-
-  function openExcelDialog(mode: ExcelDialogMode) {
-    setPendingWrite(null)
-    setPendingSchemeSave(null)
-    setSchemeSaveError('')
-    resetExcelDialogFiles()
-    setExcelDialog(mode)
   }
 
   function closeExcelDialog() {
@@ -3556,7 +3545,7 @@ function ExcelMatchView({
     if (section === 'jobs') void loadJobHistory()
     if (section === 'schemes' || section === 'write') void loadSchemes()
     return () => jobHistoryRequestRef.current?.abort()
-  }, [jobHistoryReloadVersion, loadJobHistory, loadSchemes, section, token])
+  }, [jobHistoryReloadVersion, loadJobHistory, loadSchemes, refreshVersion, section, token])
 
   useEffect(() => {
     if (!token || section !== 'schemes') return
@@ -4213,22 +4202,22 @@ function ExcelMatchView({
         <form className="query-bar excel-job-query" onSubmit={(event) => {
           event.preventDefault()
           setJobHistoryPage(1)
-          setAppliedJobHistoryFilters({ keyword: jobQuery, status: jobStatus === 'all' ? '' : jobStatus })
+          setAppliedJobHistoryFilters({ keyword: jobQuery, status: jobStatus === 'all' ? '' : jobStatus, operation: jobOperation === 'all' ? '' : jobOperation })
           setJobHistoryReloadVersion((version) => version + 1)
         }}>
           <div className="query-fields">
-            <Field label="任务 ID / 文件名 / 错误" name="excel_job_query" value={jobQuery} onChange={setJobQuery} />
-            <SelectFilter label="状态" value={jobStatus} onChange={setJobStatus} options={[{ value: 'pending', label: '等待处理' }, { value: 'running', label: '处理中' }, { value: 'success', label: '成功' }, { value: 'failed', label: '失败' }, { value: 'expired', label: '已过期' }]} />
-            <SelectFilter label="操作" value={jobOperation} onChange={setJobOperation} options={[{ value: 'match', label: '匹配任务' }, { value: 'write', label: '导入任务' }]} />
+            <label className="excel-job-search"><span className="visually-hidden">任务 ID、文件名或错误</span><span className="excel-job-search-control"><Search aria-hidden="true" /><input name="excel_job_query" type="search" value={jobQuery} placeholder="任务 ID / 文件名 / 错误" onChange={(event) => setJobQuery(event.currentTarget.value)} /></span></label>
+            <SelectFilter label="状态" value={jobStatus} onChange={(value) => { setJobStatus(value); setJobHistoryPage(1); setAppliedJobHistoryFilters({ keyword: jobQuery, status: value === 'all' ? '' : value, operation: jobOperation === 'all' ? '' : jobOperation }) }} options={[{ value: 'pending', label: '等待处理' }, { value: 'running', label: '处理中' }, { value: 'success', label: '成功' }, { value: 'failed', label: '失败' }, { value: 'expired', label: '已过期' }]} />
+            <SelectFilter label="操作" value={jobOperation} onChange={(value) => { setJobOperation(value); setJobHistoryPage(1); setAppliedJobHistoryFilters({ keyword: jobQuery, status: jobStatus === 'all' ? '' : jobStatus, operation: value === 'all' ? '' : value }) }} options={[{ value: 'match', label: '匹配任务' }, { value: 'write', label: '导入任务' }]} />
           </div>
-          <div className="excel-job-query-actions"><button type="button" onClick={() => openExcelDialog('query')}>按 ID 定位</button><button className="visually-hidden" type="submit" disabled={jobHistoryLoading}>{jobHistoryLoading ? '查询中…' : '查询'}</button></div>
+          <button className="visually-hidden" type="submit" tabIndex={-1} disabled={jobHistoryLoading}>{jobHistoryLoading ? '查询中…' : '查询'}</button>
         </form>
         {jobHistoryError && <div className="result-banner error" role="alert">{jobHistoryError}{jobHistoryPagination && !jobHistoryError.includes('兼容数据') ? ' 已保留最近一次成功数据。' : ''} <button type="button" onClick={() => setJobHistoryReloadVersion((version) => version + 1)} disabled={jobHistoryLoading}>重试</button></div>}
         <section className="excel-jobs-workspace">
           <div className="excel-jobs-main">
             <Panel title="Excel 任务" icon={<ListChecks />} meta={jobHistoryLoading && !jobHistoryPagination ? '正在加载…' : `共 ${jobHistoryPagination?.total ?? 0} 条`}>
               <ExcelJobHistoryTable
-                jobs={visibleJobHistory}
+                jobs={jobHistory}
                 loading={jobHistoryLoading}
                 downloadingJobID={downloadingJobID}
                 selectedJobID={job?.id ?? null}
