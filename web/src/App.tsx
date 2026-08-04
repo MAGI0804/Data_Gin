@@ -4186,7 +4186,7 @@ function ExcelMatchView({
           ))}
           <div className="excel-step-filter-editor">
             <div className="excel-step-filter-heading">
-              <div><strong>空值填充</strong><span>目标列为空时，从同一行来源列填充；仅支持原始 Excel 列，不覆盖已有值。</span></div>
+              <div><strong>空值填充</strong><span>所有匹配步骤完成后，目标列为空时从同一行来源列填充；可引用原始列或追加输出列，不覆盖已有值。</span></div>
               <button type="button" onClick={addExportEmptyCellFill}>添加填充规则</button>
             </div>
             {exportEmptyCellFills.length === 0 && <p className="excel-step-filter-empty">未设置空值填充规则。</p>}

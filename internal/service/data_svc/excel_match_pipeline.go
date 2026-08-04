@@ -80,17 +80,17 @@ func prepareExcelMatchPipeline(headers []string, config ExcelMatchConfig) (excel
 		layout.headers = append(layout.headers, step.OutputColumnName)
 	}
 	for _, fill := range config.EmptyCellFills {
-		_, targetExists := originalColumns[fill.TargetColumn]
+		targetIndex, targetExists := layout.columnIndexes[fill.TargetColumn]
 		if !targetExists {
-			return layout, fmt.Errorf("空值填充目标列不是原始Excel列: %s", fill.TargetColumn)
+			return layout, fmt.Errorf("空值填充目标列不存在: %s", fill.TargetColumn)
 		}
-		_, sourceExists := originalColumns[fill.SourceColumn]
+		sourceIndex, sourceExists := layout.columnIndexes[fill.SourceColumn]
 		if !sourceExists {
-			return layout, fmt.Errorf("空值填充来源列不是原始Excel列: %s", fill.SourceColumn)
+			return layout, fmt.Errorf("空值填充来源列不存在: %s", fill.SourceColumn)
 		}
 		layout.emptyCellFills = append(layout.emptyCellFills, excelEmptyCellFillIndexes{
-			targetIndex: layout.columnIndexes[fill.TargetColumn],
-			sourceIndex: layout.columnIndexes[fill.SourceColumn],
+			targetIndex: targetIndex,
+			sourceIndex: sourceIndex,
 		})
 	}
 	formatByColumn := excelExportColumnFormatMap(config.ExportColumnFormats)
@@ -104,7 +104,6 @@ func prepareExcelMatchPipeline(headers []string, config ExcelMatchConfig) (excel
 }
 
 func runExcelMatchSteps(ctx context.Context, config ExcelMatchConfig, lookup ExcelMatchLookup, layout excelMatchPipelineLayout, state *excelMatchPipelineState, rows []*excelMatchPipelineRow) error {
-	fillExcelEmptyCells(layout.emptyCellFills, rows)
 	for stepIndex, step := range config.Steps {
 		keys := make([]string, 0, len(rows))
 		seen := make(map[string]struct{}, len(rows))
@@ -183,17 +182,19 @@ func runExcelMatchSteps(ctx context.Context, config ExcelMatchConfig, lookup Exc
 			row.stepResults = append(row.stepResults, result)
 		}
 	}
+	fillExcelEmptyCells(layout.emptyCellFills, rows)
 	return nil
 }
 
 func fillExcelEmptyCells(fills []excelEmptyCellFillIndexes, rows []*excelMatchPipelineRow) {
-	for _, fill := range fills {
-		for _, row := range rows {
+	for _, row := range rows {
+		sourceValues := append([]string(nil), row.values...)
+		for _, fill := range fills {
 			if fill.targetIndex >= len(row.values) || fill.sourceIndex >= len(row.values) {
 				continue
 			}
 			if strings.TrimSpace(row.values[fill.targetIndex]) == "" {
-				row.values[fill.targetIndex] = row.values[fill.sourceIndex]
+				row.values[fill.targetIndex] = sourceValues[fill.sourceIndex]
 			}
 		}
 	}

@@ -454,19 +454,19 @@ func TestProcessExcelMatchFileUsesPreviousStepOutputAsNextStepInput(t *testing.T
 	}
 }
 
-func TestProcessExcelMatchFileFillsEmptyTargetCellsFromSameRow(t *testing.T) {
+func TestProcessExcelMatchFileFillsEmptyTargetCellsFromCompletedMatchSteps(t *testing.T) {
 	dir := t.TempDir()
 	inputPath := filepath.Join(dir, "source.xlsx")
 	outputPath := filepath.Join(dir, "result.xlsx")
 
 	f := excelize.NewFile()
-	if err := f.SetSheetRow("Sheet1", "A1", &[]interface{}{"订单号", "备用订单号", "目标门店", "来源门店"}); err != nil {
+	if err := f.SetSheetRow("Sheet1", "A1", &[]interface{}{"订单号"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := f.SetSheetRow("Sheet1", "A2", &[]interface{}{"", "B001", "", "杭州恒隆"}); err != nil {
+	if err := f.SetSheetRow("Sheet1", "A2", &[]interface{}{"B001"}); err != nil {
 		t.Fatal(err)
 	}
-	if err := f.SetSheetRow("Sheet1", "A3", &[]interface{}{"B002", "备用值", "上海前滩", "杭州恒隆"}); err != nil {
+	if err := f.SetSheetRow("Sheet1", "A3", &[]interface{}{"B002"}); err != nil {
 		t.Fatal(err)
 	}
 	if err := f.SaveAs(inputPath); err != nil {
@@ -475,23 +475,24 @@ func TestProcessExcelMatchFileFillsEmptyTargetCellsFromSameRow(t *testing.T) {
 
 	cfg, err := normalizeExcelMatchConfig(ExcelMatchConfig{
 		Operation: "export_match",
-		Steps: []ExcelMatchStep{{
-			Name: "匹配订单", TableName: "bojun_retail_orders", MatchExcelColumn: "订单号", DBMatchField: "docno", DBValueField: "docno", OutputColumnName: "伯俊订单号",
-		}},
-		EmptyCellFills: []ExcelEmptyCellFill{
-			{TargetColumn: "订单号", SourceColumn: "备用订单号"},
-			{TargetColumn: "目标门店", SourceColumn: "来源门店"},
+		Steps: []ExcelMatchStep{
+			{Name: "匹配店铺编码", TableName: "bojun_retail_orders", MatchExcelColumn: "订单号", DBMatchField: "docno", DBValueField: "c_store_code", OutputColumnName: "匹配店铺编码"},
+			{Name: "匹配实际店铺", TableName: "store_mappings", MatchExcelColumn: "订单号", DBMatchField: "order_no", DBValueField: "store_code", OutputColumnName: "实际店铺编码"},
 		},
+		EmptyCellFills: []ExcelEmptyCellFill{{TargetColumn: "实际店铺编码", SourceColumn: "匹配店铺编码"}},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	lookup := &fakeExcelMatchLookup{value: map[string]string{"B001": "伯俊B001", "B002": "伯俊B002"}}
+	lookup := &fakeExcelMatchLookup{stepValues: map[string]map[string]string{
+		"匹配店铺编码": {"B001": "S001", "B002": "S002"},
+		"实际店铺编码": {"B001": "", "B002": "系统编码"},
+	}}
 	if _, err := processExcelMatchFile(context.Background(), inputPath, outputPath, cfg, lookup); err != nil {
 		t.Fatalf("processExcelMatchFile returned error: %v", err)
 	}
-	if !reflect.DeepEqual(lookup.keys, []string{"B001", "B002"}) {
-		t.Fatalf("lookup keys = %#v, want filled and existing order numbers", lookup.keys)
+	if !reflect.DeepEqual(lookup.keys, []string{"B001", "B002", "B001", "B002"}) {
+		t.Fatalf("lookup keys = %#v, want match keys from both completed steps", lookup.keys)
 	}
 
 	out, err := excelize.OpenFile(outputPath)
@@ -504,9 +505,9 @@ func TestProcessExcelMatchFileFillsEmptyTargetCellsFromSameRow(t *testing.T) {
 		t.Fatal(err)
 	}
 	want := [][]string{
-		{"订单号", "备用订单号", "目标门店", "来源门店", "伯俊订单号"},
-		{"B001", "B001", "杭州恒隆", "杭州恒隆", "伯俊B001"},
-		{"B002", "备用值", "上海前滩", "杭州恒隆", "伯俊B002"},
+		{"订单号", "匹配店铺编码", "实际店铺编码"},
+		{"B001", "S001", "S001"},
+		{"B002", "S002", "系统编码"},
 	}
 	if !reflect.DeepEqual(rows, want) {
 		t.Fatalf("result rows = %#v, want %#v", rows, want)
