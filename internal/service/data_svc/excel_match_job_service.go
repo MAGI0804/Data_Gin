@@ -148,6 +148,13 @@ type ExcelExportColumnFormat struct {
 	Format string `json:"format"`
 }
 
+// ExcelEmptyCellFill copies a value from SourceColumn into TargetColumn when
+// the target cell in the same row is empty.
+type ExcelEmptyCellFill struct {
+	TargetColumn string `json:"targetColumn"`
+	SourceColumn string `json:"sourceColumn"`
+}
+
 type ExcelMatchStep struct {
 	Name             string             `json:"name"`
 	Filters          []ExcelMatchFilter `json:"filters,omitempty"`
@@ -175,6 +182,7 @@ type ExcelMatchConfig struct {
 	WriteExcelColumn    string                    `json:"writeExcelColumn"`
 	OutputColumnName    string                    `json:"outputColumnName"`
 	Steps               []ExcelMatchStep          `json:"steps,omitempty"`
+	EmptyCellFills      []ExcelEmptyCellFill      `json:"emptyCellFills,omitempty"`
 	ExportColumnFormats []ExcelExportColumnFormat `json:"exportColumnFormats"`
 	BatchSize           int                       `json:"batchSize"`
 	DryRun              bool                      `json:"dryRun"`
@@ -1048,8 +1056,36 @@ func normalizeExcelExportConfig(config ExcelMatchConfig) (ExcelMatchConfig, erro
 		})
 	}
 	config.ExportColumnFormats = normalizedFormats
+	config.EmptyCellFills, err = normalizeExcelEmptyCellFills(config.EmptyCellFills)
+	if err != nil {
+		return config, err
+	}
 
 	return config, nil
+}
+
+func normalizeExcelEmptyCellFills(fills []ExcelEmptyCellFill) ([]ExcelEmptyCellFill, error) {
+	normalized := make([]ExcelEmptyCellFill, 0, len(fills))
+	seenTargets := make(map[string]struct{}, len(fills))
+	for _, fill := range fills {
+		fill.TargetColumn = strings.TrimSpace(fill.TargetColumn)
+		fill.SourceColumn = strings.TrimSpace(fill.SourceColumn)
+		if fill.TargetColumn == "" && fill.SourceColumn == "" {
+			continue
+		}
+		if fill.TargetColumn == "" || fill.SourceColumn == "" {
+			return nil, errors.New("空值填充的目标列和来源列不能为空")
+		}
+		if fill.TargetColumn == fill.SourceColumn {
+			return nil, fmt.Errorf("空值填充的目标列和来源列不能相同: %s", fill.TargetColumn)
+		}
+		if _, exists := seenTargets[fill.TargetColumn]; exists {
+			return nil, fmt.Errorf("空值填充目标列重复: %s", fill.TargetColumn)
+		}
+		seenTargets[fill.TargetColumn] = struct{}{}
+		normalized = append(normalized, fill)
+	}
+	return normalized, nil
 }
 
 func normalizeExcelMatchFilters(filters []ExcelMatchFilter, scope string) ([]ExcelMatchFilter, error) {

@@ -454,6 +454,85 @@ func TestProcessExcelMatchFileUsesPreviousStepOutputAsNextStepInput(t *testing.T
 	}
 }
 
+func TestProcessExcelMatchFileFillsEmptyTargetCellsFromSameRow(t *testing.T) {
+	dir := t.TempDir()
+	inputPath := filepath.Join(dir, "source.xlsx")
+	outputPath := filepath.Join(dir, "result.xlsx")
+
+	f := excelize.NewFile()
+	if err := f.SetSheetRow("Sheet1", "A1", &[]interface{}{"订单号", "备用订单号", "目标门店", "来源门店"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.SetSheetRow("Sheet1", "A2", &[]interface{}{"", "B001", "", "杭州恒隆"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.SetSheetRow("Sheet1", "A3", &[]interface{}{"B002", "备用值", "上海前滩", "杭州恒隆"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := f.SaveAs(inputPath); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := normalizeExcelMatchConfig(ExcelMatchConfig{
+		Operation: "export_match",
+		Steps: []ExcelMatchStep{{
+			Name: "匹配订单", TableName: "bojun_retail_orders", MatchExcelColumn: "订单号", DBMatchField: "docno", DBValueField: "docno", OutputColumnName: "伯俊订单号",
+		}},
+		EmptyCellFills: []ExcelEmptyCellFill{
+			{TargetColumn: "订单号", SourceColumn: "备用订单号"},
+			{TargetColumn: "目标门店", SourceColumn: "来源门店"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	lookup := &fakeExcelMatchLookup{value: map[string]string{"B001": "伯俊B001", "B002": "伯俊B002"}}
+	if _, err := processExcelMatchFile(context.Background(), inputPath, outputPath, cfg, lookup); err != nil {
+		t.Fatalf("processExcelMatchFile returned error: %v", err)
+	}
+	if !reflect.DeepEqual(lookup.keys, []string{"B001", "B002"}) {
+		t.Fatalf("lookup keys = %#v, want filled and existing order numbers", lookup.keys)
+	}
+
+	out, err := excelize.OpenFile(outputPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer func() { _ = out.Close() }()
+	rows, err := out.GetRows("Result_1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := [][]string{
+		{"订单号", "备用订单号", "目标门店", "来源门店", "伯俊订单号"},
+		{"B001", "B001", "杭州恒隆", "杭州恒隆", "伯俊B001"},
+		{"B002", "备用值", "上海前滩", "杭州恒隆", "伯俊B002"},
+	}
+	if !reflect.DeepEqual(rows, want) {
+		t.Fatalf("result rows = %#v, want %#v", rows, want)
+	}
+}
+
+func TestNormalizeExcelMatchConfigRejectsInvalidEmptyCellFills(t *testing.T) {
+	base := ExcelMatchConfig{
+		Operation: "export_match",
+		Steps: []ExcelMatchStep{{
+			Name: "匹配订单", TableName: "bojun_retail_orders", MatchExcelColumn: "订单号", DBMatchField: "docno", DBValueField: "docno", OutputColumnName: "伯俊订单号",
+		}},
+	}
+	for _, fills := range [][]ExcelEmptyCellFill{
+		{{TargetColumn: "目标列"}},
+		{{TargetColumn: "目标列", SourceColumn: "目标列"}},
+		{{TargetColumn: "目标列", SourceColumn: "来源列"}, {TargetColumn: "目标列", SourceColumn: "备用来源列"}},
+	} {
+		config := base
+		config.EmptyCellFills = fills
+		if _, err := normalizeExcelMatchConfig(config); err == nil {
+			t.Fatalf("normalizeExcelMatchConfig(%#v) returned nil error", fills)
+		}
+	}
+}
+
 func TestProcessExcelMatchFileMatchesOrderItemsWithoutReusingSKUAcrossBatches(t *testing.T) {
 	dir := t.TempDir()
 	inputPath := filepath.Join(dir, "source.xlsx")

@@ -21,7 +21,13 @@ type excelMatchPipelineLayout struct {
 	headers          []string
 	columnIndexes    map[string]int
 	stepInputIndexes []int
+	emptyCellFills   []excelEmptyCellFillIndexes
 	columnFormats    []string
+}
+
+type excelEmptyCellFillIndexes struct {
+	targetIndex int
+	sourceIndex int
 }
 
 type excelMatchPipelineState struct {
@@ -73,6 +79,20 @@ func prepareExcelMatchPipeline(headers []string, config ExcelMatchConfig) (excel
 		layout.columnIndexes[step.OutputColumnName] = len(layout.headers)
 		layout.headers = append(layout.headers, step.OutputColumnName)
 	}
+	for _, fill := range config.EmptyCellFills {
+		_, targetExists := originalColumns[fill.TargetColumn]
+		if !targetExists {
+			return layout, fmt.Errorf("空值填充目标列不是原始Excel列: %s", fill.TargetColumn)
+		}
+		_, sourceExists := originalColumns[fill.SourceColumn]
+		if !sourceExists {
+			return layout, fmt.Errorf("空值填充来源列不是原始Excel列: %s", fill.SourceColumn)
+		}
+		layout.emptyCellFills = append(layout.emptyCellFills, excelEmptyCellFillIndexes{
+			targetIndex: layout.columnIndexes[fill.TargetColumn],
+			sourceIndex: layout.columnIndexes[fill.SourceColumn],
+		})
+	}
 	formatByColumn := excelExportColumnFormatMap(config.ExportColumnFormats)
 	for column := range formatByColumn {
 		if _, ok := layout.columnIndexes[column]; !ok {
@@ -84,6 +104,7 @@ func prepareExcelMatchPipeline(headers []string, config ExcelMatchConfig) (excel
 }
 
 func runExcelMatchSteps(ctx context.Context, config ExcelMatchConfig, lookup ExcelMatchLookup, layout excelMatchPipelineLayout, state *excelMatchPipelineState, rows []*excelMatchPipelineRow) error {
+	fillExcelEmptyCells(layout.emptyCellFills, rows)
 	for stepIndex, step := range config.Steps {
 		keys := make([]string, 0, len(rows))
 		seen := make(map[string]struct{}, len(rows))
@@ -163,6 +184,19 @@ func runExcelMatchSteps(ctx context.Context, config ExcelMatchConfig, lookup Exc
 		}
 	}
 	return nil
+}
+
+func fillExcelEmptyCells(fills []excelEmptyCellFillIndexes, rows []*excelMatchPipelineRow) {
+	for _, fill := range fills {
+		for _, row := range rows {
+			if fill.targetIndex >= len(row.values) || fill.sourceIndex >= len(row.values) {
+				continue
+			}
+			if strings.TrimSpace(row.values[fill.targetIndex]) == "" {
+				row.values[fill.targetIndex] = row.values[fill.sourceIndex]
+			}
+		}
+	}
 }
 
 func updateExcelMatchFinalStats(stats *ExcelMatchJobStats, rows []*excelMatchPipelineRow) {
