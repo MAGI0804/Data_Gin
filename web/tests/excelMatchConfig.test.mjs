@@ -3,6 +3,7 @@ import test from 'node:test'
 
 import {
   buildExcelExportConfig,
+  cloneExcelEmptyCellFills,
   excelMatchSchemePath,
   excelFieldSelectOptions,
   excelModelSelectOptions,
@@ -106,6 +107,7 @@ test('buildExcelExportConfig emits step filters without a top-level filter', () 
         { column: ' ', op: 'eq', value: '' },
       ],
     }],
+    emptyCellFills: [],
     exportColumnFormats: [],
     batchSize: 1000,
   })
@@ -134,6 +136,7 @@ test('buildExcelExportConfig emits trimmed order item SKU matching fields', () =
       priceExcelColumn: ' 销售价格 ',
       qtyExcelColumn: ' 销售数量 ',
     }],
+    emptyCellFills: [],
     exportColumnFormats: [],
     batchSize: 1000,
   })
@@ -151,6 +154,30 @@ test('buildExcelExportConfig emits trimmed order item SKU matching fields', () =
     priceExcelColumn: '销售价格',
     qtyExcelColumn: '销售数量',
   })
+})
+
+test('buildExcelExportConfig trims and keeps empty cell fill rules', () => {
+  const config = buildExcelExportConfig({
+    sheetName: 'Sheet1',
+    steps: [fallbackStep],
+    emptyCellFills: [
+      { targetColumn: ' 订单号 ', sourceColumn: ' 原订单号 ' },
+      { targetColumn: '', sourceColumn: '' },
+    ],
+    exportColumnFormats: [],
+    batchSize: 1000,
+  })
+
+  assert.deepEqual(config.emptyCellFills, [{ targetColumn: '订单号', sourceColumn: '原订单号' }])
+})
+
+test('cloneExcelEmptyCellFills creates independent defaults for legacy schemes', () => {
+  const source = [{ targetColumn: '订单号', sourceColumn: '原订单号' }]
+  const cloned = cloneExcelEmptyCellFills(source)
+
+  cloned[0].targetColumn = '新订单号'
+  assert.deepEqual(source, [{ targetColumn: '订单号', sourceColumn: '原订单号' }])
+  assert.deepEqual(cloneExcelEmptyCellFills(undefined), [])
 })
 
 const modelCatalog = [{

@@ -4,6 +4,11 @@ export type ExcelMatchFilterConfig = {
   value: string
 }
 
+export type ExcelEmptyCellFillConfig = {
+  targetColumn: string
+  sourceColumn: string
+}
+
 export type ExcelMatchMode = 'field' | 'order_item_sku'
 
 export type ExcelMatchStepConfig = {
@@ -53,6 +58,7 @@ type ExcelMatchSchemeSource = {
   tableName?: string
   outputColumnName?: string
   steps?: Array<Partial<ExcelMatchStepConfig>>
+  emptyCellFills?: Array<Partial<ExcelEmptyCellFillConfig>>
 }
 
 function normalizeMatchMode(value: unknown): ExcelMatchMode {
@@ -62,6 +68,7 @@ function normalizeMatchMode(value: unknown): ExcelMatchMode {
 type ExcelExportConfigInput = {
   sheetName: string
   steps: ExcelMatchStepConfig[]
+  emptyCellFills: ExcelEmptyCellFillConfig[]
   exportColumnFormats: Array<{ column: string; format: string }>
   batchSize: number
 }
@@ -79,6 +86,14 @@ export function cloneExcelMatchSteps(steps: ExcelMatchStepConfig[]) {
   return steps.map((step) => ({
     ...step,
     filters: cloneFilters(step.filters),
+  }))
+}
+
+export function cloneExcelEmptyCellFills(fills: Array<Partial<ExcelEmptyCellFillConfig>> | undefined): ExcelEmptyCellFillConfig[] {
+  if (!Array.isArray(fills)) return []
+  return fills.map((fill) => ({
+    targetColumn: fill.targetColumn ?? '',
+    sourceColumn: fill.sourceColumn ?? '',
   }))
 }
 
@@ -196,6 +211,12 @@ export function buildExcelExportConfig(input: ExcelExportConfigInput) {
       priceExcelColumn: step.priceExcelColumn.trim(),
       qtyExcelColumn: step.qtyExcelColumn.trim(),
     })),
+    emptyCellFills: cloneExcelEmptyCellFills(input.emptyCellFills)
+      .map((fill) => ({
+        targetColumn: fill.targetColumn.trim(),
+        sourceColumn: fill.sourceColumn.trim(),
+      }))
+      .filter((fill) => fill.targetColumn || fill.sourceColumn),
     exportColumnFormats: input.exportColumnFormats,
     batchSize: input.batchSize,
   }

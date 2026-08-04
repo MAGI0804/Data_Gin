@@ -49,6 +49,7 @@ import { parseSourceFetchSummary } from './sourceOperations'
 import { buildCleanRecordsQuery, buildProcessedRecordsQuery, parseProcessedRecordsPage, type ProcessedRecordsPage } from './processedRecords'
 import {
   buildExcelExportConfig,
+  cloneExcelEmptyCellFills,
   cloneExcelMatchSteps,
   excelMatchSchemePath,
   excelFieldSelectOptions,
@@ -56,6 +57,7 @@ import {
   migrateExcelMatchSteps,
   selectExcelMatchStepModel,
   type ExcelMatchFilterConfig,
+  type ExcelEmptyCellFillConfig,
   type ExcelMatchModel,
   type ExcelMatchModelField,
   type ExcelMatchStepConfig,
@@ -235,6 +237,7 @@ type ExcelExportColumnFormat = {
 type ExcelExportSchemeConfig = {
   sheetName: string
   steps: ExcelMatchStepConfig[]
+  emptyCellFills: ExcelEmptyCellFillConfig[]
   exportColumnFormats: string
   batchSize: string
 }
@@ -262,6 +265,7 @@ type ExcelMatchSchemeConfig = {
   writeExcelColumn?: string
   outputColumnName?: string
   steps?: ExcelMatchStepConfig[]
+  emptyCellFills?: Array<Partial<ExcelEmptyCellFillConfig>>
   exportColumnFormats?: ExcelExportColumnFormat[]
   batchSize?: number
   dryRun?: boolean
@@ -348,6 +352,7 @@ const defaultExcelExportScheme: ExcelExportSchemeConfig = {
     priceExcelColumn: '',
     qtyExcelColumn: '',
   }],
+  emptyCellFills: [],
   exportColumnFormats: '',
   batchSize: '1000',
 }
@@ -3300,6 +3305,7 @@ function ExcelMatchView({
   const [importSchemes, setImportSchemes] = useState<ExcelMatchScheme[]>([])
   const [exportDefaults, setExportDefaults] = useState<ExcelExportSchemeConfig>(defaultExcelExportScheme)
   const [exportSteps, setExportSteps] = useState<ExcelMatchStepConfig[]>(cloneExcelMatchSteps(defaultExcelExportScheme.steps))
+  const [exportEmptyCellFills, setExportEmptyCellFills] = useState<ExcelEmptyCellFillConfig[]>(cloneExcelEmptyCellFills(defaultExcelExportScheme.emptyCellFills))
   const [excelModels, setExcelModels] = useState<ExcelMatchModel[]>([])
   const [excelModelsLoading, setExcelModelsLoading] = useState(false)
   const [excelModelsError, setExcelModelsError] = useState('')
@@ -3375,6 +3381,7 @@ function ExcelMatchView({
     return buildExcelExportConfig({
       sheetName: formValue(form, 'sheetName').trim() || 'Sheet1',
       steps: exportSteps,
+      emptyCellFills: exportEmptyCellFills,
       exportColumnFormats: parseExportColumnFormats(formValue(form, 'exportColumnFormats')),
       batchSize: Number(formValue(form, 'batchSize') || 1000),
     })
@@ -3409,6 +3416,18 @@ function ExcelMatchView({
     setExportSteps((current) => current.map((step, currentStepIndex) => currentStepIndex === stepIndex
       ? { ...step, filters: step.filters.filter((_, currentFilterIndex) => currentFilterIndex !== filterIndex) }
       : step))
+  }
+
+  function addExportEmptyCellFill() {
+    setExportEmptyCellFills((current) => [...current, { targetColumn: '', sourceColumn: '' }])
+  }
+
+  function updateExportEmptyCellFill(index: number, key: keyof ExcelEmptyCellFillConfig, value: string) {
+    setExportEmptyCellFills((current) => current.map((fill, fillIndex) => fillIndex === index ? { ...fill, [key]: value } : fill))
+  }
+
+  function removeExportEmptyCellFill(index: number) {
+    setExportEmptyCellFills((current) => current.filter((_, fillIndex) => fillIndex !== index))
   }
 
   function addExportStep() {
@@ -3868,6 +3887,7 @@ function ExcelMatchView({
     if (!schemeID) {
       setExportDefaults(defaultExcelExportScheme)
       setExportSteps(cloneExcelMatchSteps(defaultExcelExportScheme.steps))
+      setExportEmptyCellFills(cloneExcelEmptyCellFills(defaultExcelExportScheme.emptyCellFills))
       setExportFormKey((value) => value + 1)
       setPreviewResult(null)
       setSelectedExportFileName('')
@@ -3879,6 +3899,7 @@ function ExcelMatchView({
     const defaults = exportSchemeDefaults(scheme.config)
     setExportDefaults(defaults)
     setExportSteps(cloneExcelMatchSteps(defaults.steps))
+    setExportEmptyCellFills(cloneExcelEmptyCellFills(defaults.emptyCellFills))
     setExportFormKey((value) => value + 1)
     setPreviewResult(null)
     setSelectedExportFileName('')
@@ -4163,6 +4184,18 @@ function ExcelMatchView({
               <div className="excel-step-filter-editor"><div className="excel-step-filter-heading"><div><strong>本步骤筛选</strong><span>{step.matchMode === 'order_item_sku' ? '多条条件需要同时满足，订单商品 SKU 模式仅可引用原始 Excel 列。' : '多条条件需要同时满足，可引用原始列或前序步骤追加列。'}</span></div><button type="button" onClick={() => addExportStepFilter(index)}>添加条件</button></div>{step.filters.length === 0 && <p className="excel-step-filter-empty">未设置条件，本步骤处理全部 Excel 行。</p>}{step.filters.map((filter, filterIndex) => { const valueNotRequired = filter.op === 'empty' || filter.op === 'not_empty'; return <div className="excel-step-filter-row" key={`${exportFormKey}-${index}-${filterIndex}`}><Field label={`条件 ${filterIndex + 1} · Excel 列`} name={`step_filter_column_${index}_${filterIndex}`} value={filter.column} onChange={(value) => updateExportStepFilter(index, filterIndex, 'column', value)} required /><label>运算符<select name={`step_filter_op_${index}_${filterIndex}`} value={filter.op} onChange={(event) => updateExportStepFilter(index, filterIndex, 'op', event.currentTarget.value)}>{excelMatchFilterOperatorOptions.map((option) => <option key={option.value} value={option.value}>{option.label}</option>)}</select></label>{valueNotRequired ? <label>筛选值<input value="此运算无需填写" readOnly disabled /></label> : <Field label="筛选值" name={`step_filter_value_${index}_${filterIndex}`} value={filter.value} onChange={(value) => updateExportStepFilter(index, filterIndex, 'value', value)} required />}<button type="button" onClick={() => removeExportStepFilter(index, filterIndex)} aria-label={`删除步骤 ${index + 1} 的条件 ${filterIndex + 1}`}>删除条件</button></div> })}</div>
             </article>
           ))}
+          <div className="excel-step-filter-editor">
+            <div className="excel-step-filter-heading">
+              <div><strong>空值填充</strong><span>目标列为空时，从同一行来源列填充；仅支持原始 Excel 列，不覆盖已有值。</span></div>
+              <button type="button" onClick={addExportEmptyCellFill}>添加填充规则</button>
+            </div>
+            {exportEmptyCellFills.length === 0 && <p className="excel-step-filter-empty">未设置空值填充规则。</p>}
+            {exportEmptyCellFills.map((fill, index) => <div className="excel-step-filter-row" key={`${exportFormKey}-empty-cell-fill-${index}`}>
+              <Field label="目标列（为空时）" name={`empty_cell_fill_target_${index}`} value={fill.targetColumn} onChange={(value) => updateExportEmptyCellFill(index, 'targetColumn', value)} required />
+              <Field label="来源列（同一行）" name={`empty_cell_fill_source_${index}`} value={fill.sourceColumn} onChange={(value) => updateExportEmptyCellFill(index, 'sourceColumn', value)} required />
+              <button type="button" onClick={() => removeExportEmptyCellFill(index)} aria-label={`删除空值填充规则 ${index + 1}`}>删除规则</button>
+            </div>)}
+          </div>
         </div>
         <details className="excel-scheme-advanced"><summary>方案与高级设置</summary><div><label>已保存方案<select value={selectedExportSchemeID} onChange={(event) => applyExportScheme(event.currentTarget.value)}><option value="">选择方案</option>{exportSchemes.map((scheme) => <option value={scheme.id} key={scheme.id}>{scheme.name}</option>)}</select></label><button type="button" disabled={!selectedExportSchemeID || loading} onClick={(event) => { const form = event.currentTarget.form; if (form?.reportValidity()) beginSchemeSave(form, 'export_match', 'current') }}>保存到当前方案</button><button type="button" disabled={loading} onClick={(event) => { const form = event.currentTarget.form; if (form?.reportValidity()) beginSchemeSave(form, 'export_match', 'new') }}>另存为新方案</button><label>导出列内容格式<textarea name="exportColumnFormats" defaultValue={exportDefaults.exportColumnFormats} rows={4} placeholder={'每行一个：列名=格式\n例如：金额=number\n下单时间=date'} /><small>支持 text、number、integer、bool、date。</small></label><Field label="批量查询大小" name="batchSize" defaultValue={exportDefaults.batchSize} /></div></details>
         {previewResult && <ExcelMatchPreviewPanel preview={previewResult} />}
@@ -6050,6 +6083,7 @@ function exportSchemeDefaults(config: ExcelMatchSchemeConfig): ExcelExportScheme
   return {
     sheetName: config.sheetName || defaultExcelExportScheme.sheetName,
     steps,
+    emptyCellFills: cloneExcelEmptyCellFills(config.emptyCellFills),
     exportColumnFormats: exportColumnFormatsText(config.exportColumnFormats) || defaultExcelExportScheme.exportColumnFormats,
     batchSize: config.batchSize ? String(config.batchSize) : defaultExcelExportScheme.batchSize,
   }
