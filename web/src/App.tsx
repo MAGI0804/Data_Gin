@@ -13,6 +13,7 @@ import {
   Database,
   Download,
   FileJson,
+  FileSpreadsheet,
   Inbox,
   ListChecks,
   LogOut,
@@ -21,6 +22,7 @@ import {
   Search,
   ScrollText,
   Send,
+  Settings2,
   Upload,
 	Users,
   Wrench,
@@ -41,6 +43,8 @@ import { PipelineRunPanel } from './PipelineRunPanel'
 import { PipelineComposerPanel } from './PipelineComposerPanel'
 import { pipelineListPath } from './pipelineRun'
 import { Brand } from './components/Brand'
+import { ReportCenter } from './reportCenter/ReportCenter'
+import type { ReportCenterSection } from './reportCenter/types'
 import { parseMallWeatherExportContentStatus, submitMallWeatherExportContentDownload } from './mallWeatherExport'
 import { buildRawRecordsRequest, buildWarehouseRawRecordsQuery, parseRawRecordsPage, type RawRecordOrigin, type RawRecordsPage } from './rawRecords'
 import { buildDeliveryLogListQuery, buildDeliveryTaskListQuery, buildDestinationListQuery, buildExcelMatchJobListQuery, buildRunListQuery, buildSourceListQuery, buildTransformRuleListQuery, normalizeMonitoringPageNumber, parseMonitoringPage, type MonitoringPage, type MonitoringPagination } from './monitoringRecords'
@@ -77,7 +81,7 @@ type ApiClientOptions = Omit<ApiRequestOptions, 'method'> & {
 type ApiClient = (path: string, options?: ApiClientOptions) => Promise<ApiResult>
 type MonitoringSnapshot = { statistics: DataStatisticsSummary | null; weather: MallWeatherMetricsSummary | null; health: HealthSummary | null }
 type FileDownloadClient = (path: string, fileName: string, signal: AbortSignal) => Promise<ApiResult>
-type NavKey = 'overview' | 'runs' | 'delivery_logs' | 'step_runs' | 'store_info' | 'mall_weather' | 'access_management' | 'data_authorizations' | 'sources' | 'receive' | 'pull_records' | 'backfill' | 'youzan_distribution' | 'rules' | 'processed' | 'methods' | 'destinations' | 'tasks' | 'push_policy' | 'excel_jobs' | 'excel_schemes' | 'excel_write'
+type NavKey = 'overview' | 'runs' | 'delivery_logs' | 'step_runs' | 'store_info' | 'mall_weather' | 'access_management' | 'data_authorizations' | 'sources' | 'receive' | 'pull_records' | 'backfill' | 'youzan_distribution' | 'rules' | 'processed' | 'methods' | 'destinations' | 'tasks' | 'push_policy' | 'excel_jobs' | 'excel_schemes' | 'excel_write' | 'report_catalog' | 'report_configuration' | 'report_query' | 'report_exports'
 type NavItem = { key: NavKey; label: string; description: string; icon: ReactNode }
 type NavGroup = { label: string; items: NavItem[] }
 type MethodKind = 'configured' | 'builtin'
@@ -688,6 +692,15 @@ const navGroups: NavGroup[] = [
     label: '数据服务',
     items: [
       { key: 'mall_weather', label: '商场天气', description: '实况、趋势与预警', icon: <CloudSun aria-hidden="true" /> },
+    ],
+  },
+  {
+    label: '报表中心',
+    items: [
+      { key: 'report_catalog', label: '报表目录', description: '报表定义与发布状态', icon: <FileSpreadsheet aria-hidden="true" /> },
+      { key: 'report_configuration', label: '报表配置', description: '过程、形参与字段契约', icon: <Settings2 aria-hidden="true" /> },
+      { key: 'report_query', label: '报表查询', description: '参数查询与结果预览', icon: <Search aria-hidden="true" /> },
+      { key: 'report_exports', label: '导出中心', description: 'Excel 与结果清理状态', icon: <Download aria-hidden="true" /> },
     ],
   },
   {
@@ -1353,6 +1366,10 @@ function App() {
 	...group,
 	items: group.items.filter((item) => {
 	  if (item.key === 'access_management') return Boolean(sessionUser?.permissions.some((permission) => permission.startsWith('system.')))
+	  if (item.key === 'report_catalog') return Boolean(sessionUser?.permissions.includes('report.read'))
+	  if (item.key === 'report_configuration') return Boolean(sessionUser?.permissions.includes('report.read') && sessionUser.permissions.includes('report.manage'))
+	  if (item.key === 'report_query') return Boolean(sessionUser?.permissions.includes('report.read') && sessionUser.permissions.includes('report.execute'))
+	  if (item.key === 'report_exports') return Boolean(sessionUser?.permissions.includes('report.read') && sessionUser.permissions.includes('report.export'))
 	  const required = navPermission(item.key)
 	  return !required || sessionUser?.permissions.includes(required) || sessionUser?.permissions.includes(required.replace(/\.read$/, '.manage'))
 	}),
@@ -1442,6 +1459,7 @@ function App() {
         {activeNav === 'step_runs' && <StepRunsQueryPage client={client} focusRunID={stepRunFocusID} />}
         {activeNav === 'store_info' && <StoreInfoPage actorID={actorID} client={client} downloadFile={downloadFile} />}
         {activeNav === 'mall_weather' && <MallWeatherPage actorID={actorID} client={client} downloadFile={downloadFile} />}
+        {reportCenterSection(activeNav) && <ReportCenter client={client} permissions={sessionUser?.permissions ?? []} section={reportCenterSection(activeNav)!} onNavigate={(section) => navigate(reportCenterNavKey(section))} />}
         {activeNav === 'access_management' && <AccessManagementPage client={client} permissions={sessionUser?.permissions ?? []} />}
         {activeNav === 'data_authorizations' && <DataAuthorizationPage client={client} />}
         {activeNav === 'sources' && <SourcesQueryPage client={client} onFetchSource={fetchSource} onTestSource={testSource} refreshVersion={workspaceRefreshVersion} />}
@@ -1596,6 +1614,10 @@ function ModuleHeader({ activeNav, loading, sessionUser, onOpenNavigation, onRef
     step_runs: { title: '步骤运行', subtitle: '选择一次流水线运行并查看每个步骤的输入输出。' },
     store_info: { title: '店铺信息', subtitle: '统一维护店铺资料、地址与天气服务坐标。' },
     mall_weather: { title: '商场天气', subtitle: '查看商场中心点实况、未来降水、小时趋势和气象预警。' },
+		report_catalog: { title: '报表目录', subtitle: '查看报表定义、发布状态与当前版本。' },
+		report_configuration: { title: '报表配置', subtitle: '维护 MySQL 中的过程、形参、字段和权限契约。' },
+		report_query: { title: '报表查询', subtitle: '选择已发布报表，提交参数并预览结果。' },
+		report_exports: { title: '导出中心', subtitle: '查看 Excel 生成、下载和结果清理状态。' },
 	access_management: { title: '账号与权限', subtitle: '管理控制台账号、角色权限矩阵、开放 API 和变更审计。' },
     data_authorizations: { title: '数据授权', subtitle: '由管理员开通开放接口账号，并管理权限有效期、凭证与审计。' },
     sources: { title: '数据源', subtitle: '查询数据接入配置、类型和启用状态。' },
@@ -6142,9 +6164,25 @@ function navPermission(key: NavKey) {
 	store_info: 'mall.read', mall_weather: 'weather.read', sources: 'source.read', receive: 'data.read', pull_records: 'data.read',
 	backfill: 'data.manage', youzan_distribution: 'data.manage', rules: 'pipeline.read', processed: 'data.read', methods: 'pipeline.read',
 	destinations: 'delivery.read', tasks: 'delivery.read', push_policy: 'delivery.read', runs: 'pipeline.read', step_runs: 'pipeline.read',
-	delivery_logs: 'delivery.read', excel_jobs: 'excel.read', excel_schemes: 'excel.read', excel_write: 'excel.manage',
+		delivery_logs: 'delivery.read', excel_jobs: 'excel.read', excel_schemes: 'excel.read', excel_write: 'excel.manage',
+		report_catalog: 'report.read', report_configuration: 'report.manage', report_query: 'report.execute', report_exports: 'report.export',
   }
   return permissions[key]
+}
+
+function reportCenterSection(key: NavKey): ReportCenterSection | null {
+  if (key === 'report_catalog') return 'catalog'
+  if (key === 'report_configuration') return 'configuration'
+  if (key === 'report_query') return 'query'
+  if (key === 'report_exports') return 'exports'
+  return null
+}
+
+function reportCenterNavKey(section: ReportCenterSection): NavKey {
+  if (section === 'configuration') return 'report_configuration'
+  if (section === 'query') return 'report_query'
+  if (section === 'exports') return 'report_exports'
+  return 'report_catalog'
 }
 
 function formValue(form: FormData, key: string) {

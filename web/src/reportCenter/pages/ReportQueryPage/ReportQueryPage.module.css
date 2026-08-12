@@ -1,0 +1,4 @@
+.selector { display: grid; gap: var(--space-1); min-width: min(100%, 380px); color: var(--color-text-secondary); font-size: 12px; font-weight: 650; }
+.selector select { min-height: var(--control-height); border: 1px solid var(--color-border-strong); background: var(--color-canvas); padding-inline: var(--space-3); }
+.parameterPlaceholder { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); min-height: 72px; border-left: 3px solid var(--color-brand); background: var(--color-brand-soft); padding: var(--space-4); color: var(--color-text-secondary); }
+@media (max-width: 479px) { .parameterPlaceholder { align-items: stretch; flex-direction: column; } }
