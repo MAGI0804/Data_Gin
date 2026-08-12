@@ -17,7 +17,7 @@ func TestMallDAOListOpenWeatherMallsUsesBoundedPublicQuery(t *testing.T) {
 		t.Fatalf("register SQL capture callback: %v", err)
 	}
 
-	rows, err := NewMallDAO(db).ListOpenWeatherMallsAfterID(t.Context(), 7, 51)
+	rows, err := NewMallDAO(db).ListOpenWeatherMallsAfterID(t.Context(), 17, 7, 51)
 	if err != nil {
 		t.Fatalf("ListOpenWeatherMallsAfterID() error=%v", err)
 	}
@@ -35,6 +35,8 @@ func TestMallDAOListOpenWeatherMallsUsesBoundedPublicQuery(t *testing.T) {
 		"id > ?",
 		"ORDER BY id ASC",
 		"LIMIT 51",
+		"scope_user",
+		"user_mall_scopes",
 	} {
 		if !strings.Contains(statement, fragment) {
 			t.Fatalf("statement missing %q: %s", fragment, statement)
@@ -59,10 +61,10 @@ func TestMallDAOCountOpenWeatherMallsUsesSamePublicFilters(t *testing.T) {
 	}); err != nil {
 		t.Fatalf("register SQL capture callback: %v", err)
 	}
-	if _, err := NewMallDAO(db).CountOpenWeatherMalls(t.Context()); err != nil {
+	if _, err := NewMallDAO(db).CountOpenWeatherMalls(t.Context(), 17); err != nil {
 		t.Fatalf("CountOpenWeatherMalls() error=%v", err)
 	}
-	for _, fragment := range []string{"SELECT count(*)", "status = ?", "geocode_status = ?", "weather_enabled = ?", "weather_longitude BETWEEN ? AND ?", "weather_latitude BETWEEN ? AND ?"} {
+	for _, fragment := range []string{"SELECT count(*)", "status = ?", "geocode_status = ?", "weather_enabled = ?", "weather_longitude BETWEEN ? AND ?", "weather_latitude BETWEEN ? AND ?", "scope_user", "user_mall_scopes"} {
 		if !strings.Contains(statement, fragment) {
 			t.Fatalf("statement missing %q: %s", fragment, statement)
 		}

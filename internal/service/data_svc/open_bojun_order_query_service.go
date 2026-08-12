@@ -17,6 +17,7 @@ import (
 
 	"gin-biz-web-api/internal/dao/data_dao"
 	"gin-biz-web-api/internal/requestbody"
+	"gin-biz-web-api/internal/service/auth_svc"
 	"gin-biz-web-api/model"
 	"gin-biz-web-api/pkg/database"
 )
@@ -41,6 +42,7 @@ var (
 type OpenBojunOrderQueryService struct {
 	orders      openBojunOrderReader
 	permissions openBojunOrderPermissionReader
+	mallScope   *auth_svc.MallScopeService
 	now         func() time.Time
 }
 
@@ -101,11 +103,13 @@ type openBojunOrderCursor struct {
 }
 
 func NewOpenBojunOrderQueryService() *OpenBojunOrderQueryService {
-	return newOpenBojunOrderQueryService(
+	service := newOpenBojunOrderQueryService(
 		data_dao.NewBojunRetailOrderDAO(database.DB),
 		data_dao.NewMallWeatherPermissionDAO(database.DB),
 		time.Now,
 	)
+	service.mallScope = auth_svc.NewMallScopeService(database.DB)
+	return service
 }
 
 func newOpenBojunOrderQueryService(
@@ -133,6 +137,15 @@ func (service *OpenBojunOrderQueryService) Query(
 	query, page, pageSize, err := normalizeOpenBojunOrderQuery(request)
 	if err != nil {
 		return nil, err
+	}
+	if service.mallScope != nil {
+		query.StoreCodes, err = service.mallScope.ConstrainMallCodes(ctx, actorUserID, query.StoreCodes)
+		if err != nil {
+			if errors.Is(err, auth_svc.ErrMallScopeForbidden) {
+				return nil, ErrOpenBojunOrderForbidden
+			}
+			return nil, fmt.Errorf("open bojun order query: constrain mall scope: %w", err)
+		}
 	}
 
 	queryCtx, cancel := context.WithTimeout(ctx, openBojunOrderQueryTimeout)

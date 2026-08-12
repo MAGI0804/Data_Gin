@@ -214,6 +214,9 @@ func (service *AccessAccountService) SetStatus(ctx context.Context, actorID, tar
 	}
 	_, err := service.mutateAccount(ctx, actorID, targetID, key, "access.account.status", request, func(tx *gorm.DB, user *model.User) error {
 		if request.Status == model.AccountStatusDisabled {
+			if err := lockSuperAdminGuard(tx); err != nil {
+				return err
+			}
 			var count int64
 			if err := tx.Table("user_roles").Joins("JOIN roles ON roles.id = user_roles.role_id").Joins("JOIN users ON users.id = user_roles.user_id").Where("roles.is_super = ? AND roles.status = ? AND users.status = ? AND users.id <> ?", true, model.RoleStatusActive, model.AccountStatusActive, targetID).Count(&count).Error; err != nil {
 				return err
@@ -275,6 +278,9 @@ func (service *AccessAccountService) ReplaceRoles(ctx context.Context, actorID, 
 }
 
 func ensureSuperAdminRemains(tx *gorm.DB, targetID uint, replacementRoleIDs []uint) error {
+	if err := lockSuperAdminGuard(tx); err != nil {
+		return err
+	}
 	var currentlySuper int64
 	if err := tx.Table("user_roles").Joins("JOIN roles ON roles.id = user_roles.role_id").Where("user_roles.user_id = ? AND roles.is_super = ?", targetID, true).Count(&currentlySuper).Error; err != nil {
 		return err
@@ -297,6 +303,14 @@ func ensureSuperAdminRemains(tx *gorm.DB, targetID uint, replacementRoleIDs []ui
 	}
 	if otherActiveSuper == 0 {
 		return ErrAccessAccountConflict
+	}
+	return nil
+}
+
+func lockSuperAdminGuard(tx *gorm.DB) error {
+	var role model.Role
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("code = ? AND is_super = ?", model.RoleCodeSuperAdmin, true).First(&role).Error; err != nil {
+		return fmt.Errorf("access account: lock super admin guard: %w", err)
 	}
 	return nil
 }

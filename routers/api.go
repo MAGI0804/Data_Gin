@@ -152,11 +152,6 @@ func apiExample(api *gin.RouterGroup) {
 		exampleGroup.GET("/show-captcha", captchaCtrl.ShowCaptcha)               // 显示图像验证码
 		exampleGroup.POST("/verify-captcha-code", captchaCtrl.VerifyCaptchaCode) // 验证图像验证码
 
-		emailCtrl := new(example_ctrl.EmailController)
-		exampleGroup.POST("/send-email", emailCtrl.SendEmail)                       // 发送邮件
-		exampleGroup.POST("/send-mailer", emailCtrl.SendMailer)                     // 使用 email 驱动发送邮件
-		exampleGroup.POST("/send-email-verify-code", emailCtrl.SendEmailVerifyCode) // 发送邮件验证码
-
 		uploadCtrl := new(example_ctrl.UploadController)
 		exampleGroup.POST("/upload-file", uploadCtrl.UploadFile)     // 上传文件
 		exampleGroup.POST("/upload-avatar", uploadCtrl.UploadAvatar) // 上传用户头像

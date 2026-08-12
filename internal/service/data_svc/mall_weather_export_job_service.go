@@ -17,6 +17,7 @@ import (
 
 	"gin-biz-web-api/internal/dao/data_dao"
 	"gin-biz-web-api/internal/requestbody"
+	"gin-biz-web-api/internal/service/auth_svc"
 	"gin-biz-web-api/job"
 	"gin-biz-web-api/model"
 	"gin-biz-web-api/pkg/database"
@@ -175,6 +176,7 @@ type MallWeatherExportJobService struct {
 	downloadTTL time.Duration
 	statTimeout time.Duration
 	now         func() time.Time
+	mallScope   *auth_svc.MallScopeService
 }
 
 func NewMallWeatherExportJobService() *MallWeatherExportJobService {
@@ -191,6 +193,7 @@ func NewMallWeatherExportJobService() *MallWeatherExportJobService {
 		downloadTTL: defaultMallWeatherExportDownloadTTL,
 		statTimeout: defaultMallWeatherExportStatTimeout,
 		now:         time.Now,
+		mallScope:   auth_svc.NewMallScopeService(database.DB),
 	}
 }
 
@@ -562,6 +565,15 @@ func (service *MallWeatherExportJobService) Create(
 		effectiveFilters, err = normalizeMallWeatherExportFilters(*request.Filters)
 		if err != nil {
 			return nil, false, fmt.Errorf("%w: invalid filters", ErrMallWeatherExportInvalid)
+		}
+	}
+	if service.mallScope != nil {
+		effectiveFilters.MallIDs, err = service.mallScope.ConstrainMallIDs(ctx, actorUserID, effectiveFilters.MallIDs)
+		if err != nil {
+			if errors.Is(err, auth_svc.ErrMallScopeForbidden) {
+				return nil, false, ErrMallForbidden
+			}
+			return nil, false, fmt.Errorf("mall weather export: constrain mall scope: %w", err)
 		}
 	}
 	limits, err := service.loadLimits(ctx)

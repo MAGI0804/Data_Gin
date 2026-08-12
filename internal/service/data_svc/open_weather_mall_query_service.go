@@ -30,8 +30,8 @@ var (
 )
 
 type openWeatherMallReader interface {
-	ListOpenWeatherMallsAfterID(context.Context, uint, int) ([]model.Mall, error)
-	CountOpenWeatherMalls(context.Context) (int64, error)
+	ListOpenWeatherMallsAfterID(context.Context, uint, uint, int) ([]model.Mall, error)
+	CountOpenWeatherMalls(context.Context, uint) (int64, error)
 }
 
 type openWeatherMallPermissionReader interface {
@@ -111,11 +111,11 @@ func (service *OpenWeatherMallQueryService) Query(
 
 	queryCtx, cancel := context.WithTimeout(ctx, openWeatherMallQueryTimeout)
 	defer cancel()
-	totalItems, err := service.malls.CountOpenWeatherMalls(queryCtx)
+	totalItems, err := service.malls.CountOpenWeatherMalls(queryCtx, actorUserID)
 	if err != nil {
 		return nil, fmt.Errorf("open weather mall query: count malls: %w", err)
 	}
-	rows, err := service.malls.ListOpenWeatherMallsAfterID(queryCtx, afterID, pageSize+1)
+	rows, err := service.malls.ListOpenWeatherMallsAfterID(queryCtx, actorUserID, afterID, pageSize+1)
 	if err != nil {
 		return nil, fmt.Errorf("open weather mall query: list malls: %w", err)
 	}

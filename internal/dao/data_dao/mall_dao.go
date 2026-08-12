@@ -21,6 +21,7 @@ var (
 const maxMallPageSize = 200
 
 type MallListFilter struct {
+	ActorUserID    uint
 	AfterID        uint
 	Limit          int
 	City           string
@@ -90,6 +91,9 @@ func (dao *MallDAO) FindByCode(ctx context.Context, code string) (*model.Mall, e
 
 func (dao *MallDAO) List(ctx context.Context, filter MallListFilter) ([]model.Mall, error) {
 	query := dao.db.WithContext(ctx).Model(&model.Mall{})
+	if filter.ActorUserID > 0 {
+		query = applyMallScopeQuery(query, dao.db.WithContext(ctx), filter.ActorUserID, "malls.id")
+	}
 	if filter.AfterID > 0 {
 		query = query.Where("id > ?", filter.AfterID)
 	}
@@ -127,7 +131,7 @@ func (dao *MallDAO) ListEnabledWeatherAfterID(ctx context.Context, afterID uint,
 
 // ListOpenWeatherMallsAfterID returns only the public identity fields for malls
 // whose stored weather coordinates are immediately usable by open queries.
-func (dao *MallDAO) ListOpenWeatherMallsAfterID(ctx context.Context, afterID uint, limit int) ([]model.Mall, error) {
+func (dao *MallDAO) ListOpenWeatherMallsAfterID(ctx context.Context, actorUserID, afterID uint, limit int) ([]model.Mall, error) {
 	var malls []model.Mall
 	query, err := dao.openWeatherMallsQuery(ctx)
 	if err != nil {
@@ -140,6 +144,7 @@ func (dao *MallDAO) ListOpenWeatherMallsAfterID(ctx context.Context, afterID uin
 			"address_raw", "address_standardized", "weather_longitude", "weather_latitude",
 			"weather_coordinate_system", "timezone",
 		})
+	query = applyMallScopeQuery(query, dao.db.WithContext(ctx), actorUserID, "malls.id")
 	if afterID > 0 {
 		query = query.Where("id > ?", afterID)
 	}
@@ -149,16 +154,31 @@ func (dao *MallDAO) ListOpenWeatherMallsAfterID(ctx context.Context, afterID uin
 	return malls, nil
 }
 
-func (dao *MallDAO) CountOpenWeatherMalls(ctx context.Context) (int64, error) {
+func (dao *MallDAO) CountOpenWeatherMalls(ctx context.Context, actorUserID uint) (int64, error) {
 	query, err := dao.openWeatherMallsQuery(ctx)
 	if err != nil {
 		return 0, err
 	}
+	query = applyMallScopeQuery(query.Model(&model.Mall{}), dao.db.WithContext(ctx), actorUserID, "malls.id")
 	var total int64
-	if err := query.Model(&model.Mall{}).Count(&total).Error; err != nil {
+	if err := query.Count(&total).Error; err != nil {
 		return 0, fmt.Errorf("mall: count open weather malls: %w", err)
 	}
 	return total, nil
+}
+
+func applyMallScopeQuery(query, db *gorm.DB, actorUserID uint, mallIDColumn string) *gorm.DB {
+	if actorUserID == 0 {
+		return query.Where("1 = 0")
+	}
+	return query.Where(
+		"EXISTS (?)",
+		db.Table("users AS scope_user").Select("1").
+			Where("scope_user.id = ? AND scope_user.status = ?", actorUserID, model.AccountStatusActive).
+			Where("scope_user.mall_scope_mode = ? OR (scope_user.mall_scope_mode = ? AND "+mallIDColumn+" IN (?))",
+				model.MallScopeAll, model.MallScopeSelected,
+				db.Model(&model.UserMallScope{}).Select("mall_id").Where("user_id = ?", actorUserID)),
+	)
 }
 
 func (dao *MallDAO) openWeatherMallsQuery(ctx context.Context) (*gorm.DB, error) {

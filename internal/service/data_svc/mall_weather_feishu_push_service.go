@@ -12,6 +12,7 @@ import (
 	"gin-biz-web-api/global"
 	"gin-biz-web-api/internal/dao/data_dao"
 	"gin-biz-web-api/internal/requestbody"
+	"gin-biz-web-api/internal/service/auth_svc"
 	"gin-biz-web-api/job"
 	"gin-biz-web-api/model"
 	"gin-biz-web-api/pkg/config"
@@ -69,6 +70,7 @@ type MallWeatherFeishuPushService struct {
 	newSheets     mallWeatherFeishuSheetsFactory
 	feishuEnabled func() bool
 	now           func() time.Time
+	mallScope     *auth_svc.MallScopeService
 }
 
 func NewMallWeatherFeishuPushService() *MallWeatherFeishuPushService {
@@ -99,6 +101,7 @@ func NewMallWeatherFeishuPushService() *MallWeatherFeishuPushService {
 	if err != nil {
 		panic(err)
 	}
+	service.mallScope = auth_svc.NewMallScopeService(database.DB)
 	return service
 }
 
@@ -246,6 +249,15 @@ func (service *MallWeatherFeishuPushService) prepare(
 		filters, err = normalizeMallWeatherExportFilters(*request.Filters)
 		if err != nil {
 			return nil, ErrMallWeatherFeishuInvalid
+		}
+	}
+	if service.mallScope != nil {
+		filters.MallIDs, err = service.mallScope.ConstrainMallIDs(ctx, actorUserID, filters.MallIDs)
+		if err != nil {
+			if errors.Is(err, auth_svc.ErrMallScopeForbidden) {
+				return nil, ErrMallForbidden
+			}
+			return nil, fmt.Errorf("mall weather feishu push: constrain mall scope: %w", err)
 		}
 	}
 	limits, err := loadMallWeatherExportLimits(ctx, service.limits)

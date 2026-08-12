@@ -8,7 +8,6 @@ import (
 	"gin-biz-web-api/pkg/config"
 	"gin-biz-web-api/pkg/email"
 	"gin-biz-web-api/pkg/helper/strx"
-	"gin-biz-web-api/pkg/logger"
 )
 
 type VerifyCode struct {
@@ -42,19 +41,17 @@ func (v *VerifyCode) GenerateVerifyCode(key string) string {
 	// code := strx.StrRandomNumber(config.GetInt("cfg.verify_code.length"))
 	code := strx.StrRandomOptionalString(config.GetInt("cfg.verify_code.length"), strx.Numeric)
 
-	logger.DebugJSON("VerifyCode", "生成的验证码", map[string]string{key: code})
-
 	// 将 key 和 code 进行保存，方便后续验证
-	v.Driver.Set(key, code)
+	if !v.Driver.Set(key, code) {
+		return ""
+	}
 
 	return code
 }
 
 // CheckVerifyCode 检查验证码是否正确
 func (v *VerifyCode) CheckVerifyCode(key, answer string) bool {
-	logger.DebugJSON("VerifyCode", "检查验证码", map[string]string{key: answer})
-
-	return v.Driver.Verify(key, answer, false)
+	return v.Driver.Verify(key, answer, true)
 }
 
 // SendEmailVerifyCode 发送邮件验证码
@@ -62,6 +59,9 @@ func (v *VerifyCode) SendEmailVerifyCode(mail string) error {
 
 	// 生成验证码
 	code := v.GenerateVerifyCode(mail)
+	if code == "" {
+		return fmt.Errorf("verify code storage unavailable")
+	}
 	// 验证码的有效期
 	expire := config.GetInt64("cfg.verify_code.expire_time")
 
@@ -70,7 +70,6 @@ func (v *VerifyCode) SendEmailVerifyCode(mail string) error {
 	// 发送邮件
 	err := email.NewMailer().SendMail([]string{mail}, "Email 验证码", content)
 	if err != nil {
-		logger.ErrorJSON("VerifyCode", "发送邮件验证码", err)
 		return err
 	}
 

@@ -20,13 +20,14 @@ type fakeOpenWeatherMallReader struct {
 	counts  int
 }
 
-func (reader *fakeOpenWeatherMallReader) CountOpenWeatherMalls(context.Context) (int64, error) {
+func (reader *fakeOpenWeatherMallReader) CountOpenWeatherMalls(context.Context, uint) (int64, error) {
 	reader.counts++
 	return int64(len(reader.malls)), nil
 }
 
 func (reader *fakeOpenWeatherMallReader) ListOpenWeatherMallsAfterID(
 	_ context.Context,
+	_ uint,
 	afterID uint,
 	limit int,
 ) ([]model.Mall, error) {

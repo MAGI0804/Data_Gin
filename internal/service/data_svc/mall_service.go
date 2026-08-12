@@ -317,6 +317,7 @@ func (service *MallService) List(ctx context.Context, actorUserID uint, request 
 		return nil, fmt.Errorf("%w: invalid geocode status filter", ErrMallInvalidInput)
 	}
 	rows, err := service.malls.List(ctx, data_dao.MallListFilter{
+		ActorUserID:    actorUserID,
 		AfterID:        request.AfterID,
 		Limit:          request.Limit,
 		City:           request.City,
@@ -324,10 +325,6 @@ func (service *MallService) List(ctx context.Context, actorUserID uint, request 
 		GeocodeStatus:  request.GeocodeStatus,
 		WeatherEnabled: request.WeatherEnabled,
 	})
-	if err != nil {
-		return nil, err
-	}
-	rows, err = service.filterMallRows(ctx, actorUserID, rows)
 	if err != nil {
 		return nil, err
 	}
@@ -455,23 +452,6 @@ func (service *MallService) requireMallScope(ctx context.Context, actorUserID, m
 		return fmt.Errorf("mall service: check mall scope: %w", err)
 	}
 	return nil
-}
-
-func (service *MallService) filterMallRows(ctx context.Context, actorUserID uint, rows []model.Mall) ([]model.Mall, error) {
-	if service.mallScope == nil {
-		return rows, nil
-	}
-	filtered := make([]model.Mall, 0, len(rows))
-	for i := range rows {
-		allowed, err := service.mallScope.CanAccess(ctx, actorUserID, rows[i].ID)
-		if err != nil {
-			return nil, fmt.Errorf("mall service: filter mall scope: %w", err)
-		}
-		if allowed {
-			filtered = append(filtered, rows[i])
-		}
-	}
-	return filtered, nil
 }
 
 func (service *MallService) authorize(ctx context.Context, actorUserID uint, permission string) error {
