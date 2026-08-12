@@ -269,6 +269,13 @@ type ReportExport struct {
 	TruncatedCellCount int64      `gorm:"column:truncated_cell_count;not null;default:0" json:"truncatedCellCount"`
 	Attempt            int        `gorm:"column:attempt;not null;default:0" json:"attempt"`
 	CancelRequested    bool       `gorm:"column:cancel_requested;not null;default:false" json:"cancelRequested"`
+	WorkerID           string     `gorm:"column:worker_id;size:128" json:"-"`
+	LeaseToken         string     `gorm:"column:lease_token;type:char(36);index" json:"-"`
+	LeaseExpiresAt     *time.Time `gorm:"column:lease_expires_at;type:datetime(3);index" json:"-"`
+	HeartbeatAt        *time.Time `gorm:"column:heartbeat_at;type:datetime(3)" json:"heartbeatAt"`
+	ProcessedRows      int64      `gorm:"column:processed_rows;not null;default:0" json:"processedRows"`
+	CurrentSheet       string     `gorm:"column:current_sheet;size:255" json:"currentSheet"`
+	CheckpointJSON     JSONText   `gorm:"column:checkpoint_json;type:json" json:"-"`
 	StartedAt          *time.Time `gorm:"column:started_at;type:datetime(3)" json:"startedAt"`
 	ReadyAt            *time.Time `gorm:"column:ready_at;type:datetime(3)" json:"readyAt"`
 	ExpiresAt          *time.Time `gorm:"column:expires_at;type:datetime(3);index" json:"expiresAt"`

@@ -36,3 +36,9 @@ func TestReportCenterMigrationModelsAreUnique(t *testing.T) {
 		seen[modelType] = struct{}{}
 	}
 }
+
+func TestReportCenterMigrationVersionIncludesExportLease(t *testing.T) {
+	if schemaMigrationVersion != "2026-08-12-report-center-v6" {
+		t.Fatalf("schemaMigrationVersion = %q", schemaMigrationVersion)
+	}
+}
