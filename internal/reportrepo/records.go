@@ -167,3 +167,48 @@ func replaceCollections(
 	}
 	return nil
 }
+
+func validateDraftReferences(ctx context.Context, tx *gorm.DB, datasourceID uint, grants []model.ReportGrant) error {
+	var datasourceCount int64
+	if err := tx.WithContext(ctx).Model(&model.ReportDatasource{}).
+		Where("id = ? AND enabled = ?", datasourceID, true).Count(&datasourceCount).Error; err != nil {
+		return fmt.Errorf("report draft: validate datasource: %w", err)
+	}
+	if datasourceCount != 1 {
+		return invalidDraft("datasource does not exist or is disabled")
+	}
+
+	userIDs := make([]uint, 0, len(grants))
+	roleIDs := make([]uint, 0, len(grants))
+	for _, grant := range grants {
+		switch grant.SubjectType {
+		case "USER":
+			userIDs = append(userIDs, grant.SubjectID)
+		case "ROLE":
+			roleIDs = append(roleIDs, grant.SubjectID)
+		default:
+			return invalidDraft("grant subject type is invalid")
+		}
+	}
+	if len(userIDs) > 0 {
+		var userCount int64
+		if err := tx.WithContext(ctx).Model(&model.User{}).
+			Where("id IN ? AND status = ?", userIDs, model.AccountStatusActive).Count(&userCount).Error; err != nil {
+			return fmt.Errorf("report draft: validate grant users: %w", err)
+		}
+		if userCount != int64(len(userIDs)) {
+			return invalidDraft("grant user does not exist or is disabled")
+		}
+	}
+	if len(roleIDs) > 0 {
+		var roleCount int64
+		if err := tx.WithContext(ctx).Model(&model.Role{}).
+			Where("id IN ? AND status = ?", roleIDs, model.RoleStatusActive).Count(&roleCount).Error; err != nil {
+			return fmt.Errorf("report draft: validate grant roles: %w", err)
+		}
+		if roleCount != int64(len(roleIDs)) {
+			return invalidDraft("grant role does not exist or is disabled")
+		}
+	}
+	return nil
+}

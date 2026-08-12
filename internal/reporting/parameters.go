@@ -52,6 +52,13 @@ func ValidateParameterDefinitions(definitions []ParameterDefinition) error {
 		if definition.Sensitive && len(bytes.TrimSpace(definition.DefaultValue)) > 0 {
 			return contractError("sensitive parameter %q cannot define a plaintext default", definition.Code)
 		}
+		if definition.LogicalType == LogicalTypeMultiEnum {
+			if definition.Cardinality != CardinalityMultiple || definition.CollectionEncoding != CollectionEncodingJSONCLOB {
+				return contractError("multi enum parameter %q must use MULTIPLE JSON_CLOB encoding", definition.Code)
+			}
+		} else if definition.Cardinality != "" && definition.Cardinality != CardinalitySingle {
+			return contractError("parameter %q must use SINGLE cardinality", definition.Code)
+		}
 		if _, err := parseValidationRules(definition); err != nil {
 			return err
 		}
@@ -60,6 +67,8 @@ func ValidateParameterDefinitions(definitions []ParameterDefinition) error {
 			if err := decodeStrictJSON(definition.AllowedValues, &allowed); err != nil || len(allowed) == 0 {
 				return contractError("parameter %q has invalid allowed values", definition.Code)
 			}
+		} else if definition.LogicalType == LogicalTypeEnum || definition.LogicalType == LogicalTypeMultiEnum {
+			return contractError("enum parameter %q requires allowed values", definition.Code)
 		}
 		if len(bytes.TrimSpace(definition.DefaultValue)) > 0 {
 			if _, _, err := normalizeValue(definition, definition.DefaultValue, true); err != nil {

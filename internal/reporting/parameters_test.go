@@ -69,6 +69,24 @@ func TestCompileCallTemplateRejectsInvalidContracts(t *testing.T) {
 	}
 }
 
+func TestValidateParameterDefinitionsRejectsUnusableEnumContracts(t *testing.T) {
+	tests := []struct {
+		name       string
+		definition ParameterDefinition
+	}{
+		{name: "enum without allowed values", definition: ParameterDefinition{Code: "status", ProcedureArgName: "P_STATUS", Position: 1, LogicalType: LogicalTypeEnum, Cardinality: CardinalitySingle}},
+		{name: "multi enum with single cardinality", definition: ParameterDefinition{Code: "orgs", ProcedureArgName: "P_ORGS", Position: 1, LogicalType: LogicalTypeMultiEnum, Cardinality: CardinalitySingle, AllowedValues: json.RawMessage(`["A"]`)}},
+		{name: "string with multiple cardinality", definition: ParameterDefinition{Code: "name", ProcedureArgName: "P_NAME", Position: 1, LogicalType: LogicalTypeString, Cardinality: CardinalityMultiple, CollectionEncoding: CollectionEncodingJSONCLOB}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if err := ValidateParameterDefinitions([]ParameterDefinition{test.definition}); !errors.Is(err, ErrInvalidParameterContract) {
+				t.Fatalf("ValidateParameterDefinitions() error = %v, want ErrInvalidParameterContract", err)
+			}
+		})
+	}
+}
+
 func TestNormalizeParameters(t *testing.T) {
 	definitions := []ParameterDefinition{
 		{

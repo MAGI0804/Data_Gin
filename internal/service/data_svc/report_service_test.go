@@ -1,0 +1,271 @@
+package data_svc
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/google/uuid"
+
+	"gin-biz-web-api/internal/reportrepo"
+	"gin-biz-web-api/internal/requestbody"
+	"gin-biz-web-api/model"
+)
+
+func TestReportDraftServiceCreateNormalizesContractAndHidesSensitiveFields(t *testing.T) {
+	store := &fakeReportDraftStore{}
+	service := NewReportDraftServiceWithStore(store)
+	request := validReportDraftRequest()
+	request.Parameters[0].Sensitive = true
+
+	result, err := service.Create(t.Context(), 17, request)
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	if store.created == nil || store.created.Definition.OwnerUserID != 17 || store.created.Definition.Code != "sales-report" {
+		t.Fatalf("created draft = %#v", store.created)
+	}
+	if store.created.Version.ProcedureOwner != "REPORT_OWNER" || store.created.Version.ResultRunIDColumn != "RUN_ID" {
+		t.Fatalf("normalized version = %#v", store.created.Version)
+	}
+	if result.Parameters[0].DefaultValue != nil {
+		t.Fatal("sensitive parameter default leaked in DTO")
+	}
+	encoded, err := json.Marshal(result)
+	if err != nil {
+		t.Fatalf("marshal DTO: %v", err)
+	}
+	for _, forbidden := range []string{"compiledSpec", "contractHash", "ownerUserId", "currentDraftVersionId"} {
+		if strings.Contains(string(encoded), forbidden) {
+			t.Fatalf("DTO leaked %q: %s", forbidden, encoded)
+		}
+	}
+}
+
+func TestReportDraftServiceRejectsInvalidContractsBeforeStore(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func(*requestbody.ReportDraftSaveRequest)
+	}{
+		{name: "expected version on create", mutate: func(request *requestbody.ReportDraftSaveRequest) {
+			value := uint64(1)
+			request.ExpectedLockVersion = &value
+		}},
+		{name: "malformed placeholder", mutate: func(request *requestbody.ReportDraftSaveRequest) { request.CallTemplate = "BEGIN {{missing}}; END;" }},
+		{name: "invalid identifier", mutate: func(request *requestbody.ReportDraftSaveRequest) { request.Result.TableName = "RESULT;DROP" }},
+		{name: "duplicate excel header", mutate: func(request *requestbody.ReportDraftSaveRequest) {
+			request.Columns = append(request.Columns, request.Columns[0])
+			request.Columns[1].FieldID = uuid.NewString()
+			request.Columns[1].LogicalCode = "other"
+		}},
+		{name: "required nullable", mutate: func(request *requestbody.ReportDraftSaveRequest) {
+			request.Parameters[0].Required = true
+			request.Parameters[0].Nullable = true
+		}},
+		{name: "unknown logical type", mutate: func(request *requestbody.ReportDraftSaveRequest) { request.Parameters[0].LogicalType = "shell" }},
+		{name: "invalid result precision", mutate: func(request *requestbody.ReportDraftSaveRequest) {
+			precision := 39
+			request.Columns[0].Precision = &precision
+		}},
+		{name: "invalid grant actions", mutate: func(request *requestbody.ReportDraftSaveRequest) {
+			request.Grants[0].Actions = json.RawMessage(`["QUERY","QUERY"]`)
+		}},
+		{name: "unsupported grant action", mutate: func(request *requestbody.ReportDraftSaveRequest) {
+			request.Grants[0].Actions = json.RawMessage(`["ADMIN"]`)
+		}},
+		{name: "sensitive plaintext default", mutate: func(request *requestbody.ReportDraftSaveRequest) {
+			request.Parameters[0].Sensitive = true
+			request.Parameters[0].DefaultValue = json.RawMessage(`"private"`)
+		}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			store := &fakeReportDraftStore{}
+			service := NewReportDraftServiceWithStore(store)
+			request := validReportDraftRequest()
+			test.mutate(&request)
+			if _, err := service.Create(t.Context(), 17, request); !errors.Is(err, ErrReportInvalid) {
+				t.Fatalf("Create() error = %v, want ErrReportInvalid", err)
+			}
+			if store.createCalls != 0 {
+				t.Fatalf("store create calls = %d", store.createCalls)
+			}
+		})
+	}
+}
+
+func TestReportDraftServiceAcceptsEnumParameterContracts(t *testing.T) {
+	request := validReportDraftRequest()
+	request.Parameters = append(request.Parameters, requestbody.ReportParameterRequest{
+		Code: "region", Label: "区域", DisplayOrder: 2, ControlType: "SELECT", LogicalType: "enum",
+		Cardinality: "SINGLE", ProcedureArgName: "p_region", Position: 2, OracleType: "VARCHAR2",
+		Required: true, NullPolicy: "TYPED_NULL", AllowedValues: json.RawMessage(`["NORTH","SOUTH"]`),
+	})
+	request.CallTemplate = "BEGIN REPORT_OWNER.PKG_SALES.BUILD_REPORT(P_RUN_ID => {{runId}}, P_REGION => {{region}}); END;"
+
+	store := &fakeReportDraftStore{}
+	if _, err := NewReportDraftServiceWithStore(store).Create(t.Context(), 17, request); err != nil {
+		t.Fatalf("Create() enum contract error = %v", err)
+	}
+}
+
+func TestReportDraftServiceUpdateRequiresLockAndMapsMissingBeforeConflict(t *testing.T) {
+	request := validReportDraftRequest()
+	store := &fakeReportDraftStore{findErr: reportrepo.ErrDraftNotFound}
+	service := NewReportDraftServiceWithStore(store)
+	if _, err := service.Update(t.Context(), 17, 8, request); !errors.Is(err, ErrReportInvalid) {
+		t.Fatalf("Update() without lock error = %v", err)
+	}
+	lockVersion := uint64(3)
+	request.ExpectedLockVersion = &lockVersion
+	if _, err := service.Update(t.Context(), 17, 8, request); !errors.Is(err, ErrReportNotFound) {
+		t.Fatalf("Update() missing error = %v", err)
+	}
+	if store.updateCalls != 0 {
+		t.Fatalf("update calls = %d", store.updateCalls)
+	}
+
+	store.findErr = nil
+	store.found = draftFromValidRequestForTest(t, request)
+	store.updateErr = reportrepo.ErrDraftVersionConflict
+	if _, err := service.Update(t.Context(), 17, 8, request); !errors.Is(err, ErrReportConflict) {
+		t.Fatalf("Update() conflict error = %v", err)
+	}
+}
+
+func TestReportDraftServiceReturnsPersistedCreateAndUpdateState(t *testing.T) {
+	persistedAt := time.Date(2026, 8, 12, 10, 0, 0, 0, time.UTC)
+	store := &fakeReportDraftStore{}
+	service := NewReportDraftServiceWithStore(store)
+	created, err := service.Create(t.Context(), 17, validReportDraftRequest())
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	if created.CreatedAt.IsZero() || created.UpdatedAt.IsZero() {
+		t.Fatalf("Create() did not return persisted timestamps: %#v", created)
+	}
+	store.found.Definition.CreatedAt = persistedAt
+	store.found.Definition.UpdatedAt = persistedAt
+	store.found.Definition.Status = model.ReportDefinitionStatusActive
+	store.found.LockVersion = 1
+	lockVersion := uint64(1)
+	request := validReportDraftRequest()
+	request.ExpectedLockVersion = &lockVersion
+
+	updated, err := service.Update(t.Context(), 17, created.ID, request)
+	if err != nil {
+		t.Fatalf("Update() error = %v", err)
+	}
+	if updated.Status != model.ReportDefinitionStatusActive || !updated.CreatedAt.Equal(persistedAt) || !updated.UpdatedAt.Equal(persistedAt) {
+		t.Fatalf("Update() persisted state = %#v", updated)
+	}
+}
+
+func TestReportDraftServiceListUsesBoundedOwnerScopedQuery(t *testing.T) {
+	store := &fakeReportDraftStore{page: reportrepo.DraftPage{
+		Items:   []reportrepo.DraftSummary{{Definition: model.ReportDefinition{BaseModel: model.BaseModel{ID: 9}, Code: "sales", OwnerUserID: 17}, LockVersion: 4}},
+		HasMore: true, NextAfterID: 9,
+	}}
+	service := NewReportDraftServiceWithStore(store)
+	result, err := service.List(t.Context(), 17, 2, 20, " finance ", " sales ")
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	if store.listOwner != 17 || store.listQuery.AfterID != 2 || store.listQuery.Limit != 20 || store.listQuery.Category != "finance" || store.listQuery.Search != "sales" {
+		t.Fatalf("list scope/query = owner %d, %#v", store.listOwner, store.listQuery)
+	}
+	if len(result.Items) != 1 || result.Items[0].LockVersion != 4 || !result.HasMore || result.NextAfterID != 9 {
+		t.Fatalf("List() = %#v", result)
+	}
+	if _, err := service.List(t.Context(), 17, 0, 101, "", ""); !errors.Is(err, ErrReportInvalid) {
+		t.Fatalf("List() invalid limit error = %v", err)
+	}
+}
+
+func validReportDraftRequest() requestbody.ReportDraftSaveRequest {
+	return requestbody.ReportDraftSaveRequest{
+		Code: " Sales-Report ", Name: "销售报表", Category: "finance", DatasourceID: 3,
+		Procedure:    requestbody.ReportProcedureRequest{Owner: "report_owner", Package: "pkg_sales", Name: "build_report"},
+		Result:       requestbody.ReportResultRequest{TableOwner: "report_owner", TableName: "sales_result", RunIDColumn: "run_id", RowIDColumn: "row_no"},
+		CallTemplate: "BEGIN REPORT_OWNER.PKG_SALES.BUILD_REPORT(P_RUN_ID => {{runId}}); END;",
+		Parameters: []requestbody.ReportParameterRequest{{
+			Code: "runId", Label: "运行编号", DisplayOrder: 1, ControlType: "TEXT", LogicalType: "string",
+			Cardinality: "SINGLE", ProcedureArgName: "p_run_id", Position: 1, OracleType: "VARCHAR2",
+			Required: true, Nullable: false, SystemInjected: true, NullPolicy: "TYPED_NULL",
+		}},
+		Columns: []requestbody.ReportColumnRequest{{
+			FieldID: uuid.NewString(), LogicalCode: "orderNo", DatabaseColumn: "order_no", SourceOracleType: "VARCHAR2",
+			ValueType: "string", PreviewHeader: "订单号", ExcelHeader: "订单号", PreviewVisible: true,
+			ExportVisible: true, ExportAllowed: true, DisplayOrder: 1, ExportOrder: 1, ExcelWidth: 18,
+		}},
+		Grants: []requestbody.ReportGrantRequest{{SubjectType: "ROLE", SubjectID: 2, Actions: json.RawMessage(`["QUERY","EXPORT"]`)}},
+	}
+}
+
+func draftFromValidRequestForTest(t *testing.T, request requestbody.ReportDraftSaveRequest) *reportrepo.Draft {
+	t.Helper()
+	draft, err := reportDraftFromRequest(17, request)
+	if err != nil {
+		t.Fatalf("reportDraftFromRequest() error = %v", err)
+	}
+	draft.Definition.ID = 8
+	draft.LockVersion = 3
+	return draft
+}
+
+type fakeReportDraftStore struct {
+	created     *reportrepo.Draft
+	found       *reportrepo.Draft
+	page        reportrepo.DraftPage
+	findErr     error
+	updateErr   error
+	createCalls int
+	updateCalls int
+	listOwner   uint
+	listQuery   reportrepo.DraftListQuery
+}
+
+func (store *fakeReportDraftStore) CreateDraft(_ context.Context, _ uint, draft *reportrepo.Draft) error {
+	store.createCalls++
+	store.created = draft
+	draft.Definition.ID = 11
+	persistedAt := time.Date(2026, 8, 12, 9, 0, 0, 0, time.UTC)
+	draft.Definition.CreatedAt = persistedAt
+	draft.Definition.UpdatedAt = persistedAt
+	draft.LockVersion = 1
+	store.found = draft
+	return nil
+}
+
+func (store *fakeReportDraftStore) FindDraftByID(_ context.Context, _, _ uint) (*reportrepo.Draft, error) {
+	if store.findErr != nil {
+		return nil, store.findErr
+	}
+	if store.found == nil {
+		store.found = &reportrepo.Draft{}
+	}
+	return store.found, nil
+}
+
+func (store *fakeReportDraftStore) ListDrafts(_ context.Context, owner uint, query reportrepo.DraftListQuery) (reportrepo.DraftPage, error) {
+	store.listOwner = owner
+	store.listQuery = query
+	return store.page, nil
+}
+
+func (store *fakeReportDraftStore) UpdateDraft(_ context.Context, _, _ uint, _ uint64, draft *reportrepo.Draft) error {
+	store.updateCalls++
+	if store.updateErr == nil {
+		if store.found != nil {
+			draft.Definition.Status = store.found.Definition.Status
+			draft.Definition.CreatedAt = store.found.Definition.CreatedAt
+			draft.Definition.UpdatedAt = store.found.Definition.UpdatedAt
+		}
+		draft.LockVersion = 4
+		store.found = draft
+	}
+	return store.updateErr
+}

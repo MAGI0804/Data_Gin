@@ -85,6 +85,9 @@ func (repository *Repository) CreateDraft(ctx context.Context, ownerUserID uint,
 		if draft.Definition.OwnerUserID != ownerUserID {
 			return invalidDraft("definition owner does not match owner scope")
 		}
+		if err := validateDraftReferences(ctx, tx, draft.Definition.DatasourceID, draft.Grants); err != nil {
+			return err
+		}
 		definitionRecord := newDefinitionRecord(draft.Definition)
 		if err := tx.WithContext(ctx).Create(&definitionRecord).Error; err != nil {
 			return fmt.Errorf("report draft: create definition: %w", err)
@@ -242,6 +245,9 @@ func (repository *Repository) UpdateDraft(
 		if draft.Definition.OwnerUserID != 0 && draft.Definition.OwnerUserID != ownerUserID {
 			return invalidDraft("definition owner cannot be changed")
 		}
+		if err := validateDraftReferences(ctx, tx, draft.Definition.DatasourceID, draft.Grants); err != nil {
+			return err
+		}
 
 		nextVersion := draft.Version
 		nextVersion.ID = 0
@@ -275,7 +281,11 @@ func (repository *Repository) UpdateDraft(
 		}
 
 		draft.Definition.ID = definitionID
+		draft.Definition.OwnerUserID = ownerUserID
+		draft.Definition.Status = current.Status
+		draft.Definition.CreatedAt = current.CreatedAt
 		draft.Definition.CurrentDraftVersionID = nextRecord.ID
+		draft.Definition.CurrentPublishedVersionID = current.CurrentPublishedVersionID
 		draft.Version.ID = nextRecord.ID
 		draft.Version.DefinitionID = definitionID
 		draft.Version.VersionNumber = expectedLockVersion + 1
@@ -316,6 +326,9 @@ func (repository *Repository) SaveDraftCollections(
 		}
 		if version.VersionNumber != expectedLockVersion {
 			return ErrDraftVersionConflict
+		}
+		if err := validateDraftReferences(ctx, tx, definition.DatasourceID, grants); err != nil {
+			return err
 		}
 		nextVersion := version.ReportVersion
 		nextVersion.ID = 0

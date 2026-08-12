@@ -21,6 +21,7 @@ func apiData(api *gin.RouterGroup) {
 	registerMallWeatherSheetPushOptionRoutes(api, data_ctrl.NewMallWeatherSheetPushOptionController())
 	registerMallWeatherCapacityPlanRoutes(api, data_ctrl.NewMallWeatherCapacityPlanController())
 	registerMallWeatherMetricsRoutes(api, data_ctrl.NewMallWeatherMetricsController())
+	registerReportRoutes(api, data_ctrl.NewReportController())
 
 	sourceGroup := api.Group("/v1/sources")
 	sourceGroup.Use(middleware.AuthJWT())
@@ -289,6 +290,15 @@ func registerMallWeatherRefreshRoutes(api *gin.RouterGroup, refreshCtrl *data_ct
 	weatherGroup := api.Group("/v1/malls")
 	weatherGroup.Use(middleware.AuthJWT(), middleware.RequirePermission(model.PermissionWeatherRefresh))
 	weatherGroup.POST("/:id/weather-refresh", middleware.RequireMallScope("id"), middleware.RequireMallWeatherEnabled(), refreshCtrl.Refresh)
+}
+
+func registerReportRoutes(api *gin.RouterGroup, reportCtrl *data_ctrl.ReportController) {
+	reportGroup := api.Group("/v1/reports")
+	reportGroup.Use(middleware.AuthJWT())
+	reportGroup.POST("", middleware.RequirePermission(model.PermissionReportManage), reportCtrl.Create)
+	reportGroup.GET("", middleware.RequirePermission(model.PermissionReportRead), reportCtrl.List)
+	reportGroup.GET("/:id", middleware.RequirePermission(model.PermissionReportRead), reportCtrl.Get)
+	reportGroup.PUT("/:id", middleware.RequirePermission(model.PermissionReportManage), reportCtrl.Update)
 }
 
 func registerMallWeatherExportProfileRoutes(
