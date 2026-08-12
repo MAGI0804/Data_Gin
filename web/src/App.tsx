@@ -1433,7 +1433,7 @@ function App() {
       </aside>
 
       <section className="ops-workspace">
-        <ModuleHeader activeNav={activeNav} loading={loading || refreshing} sessionUser={sessionUser} onOpenNavigation={openMobileNavigation} onRefresh={() => void refreshWorkspace(true)} refreshing={refreshing} mobileNavTriggerRef={mobileNavTriggerRef} />
+		<ModuleHeader activeNav={activeNav} loading={loading || refreshing} sessionUser={sessionUser} onOpenNavigation={openMobileNavigation} onRefresh={() => void refreshWorkspace(true)} onLogout={handleLogout} refreshing={refreshing} mobileNavTriggerRef={mobileNavTriggerRef} />
         {sessionValidationError && <div className="result-banner error" role="status" aria-live="polite">{sessionValidationError} <button type="button" onClick={() => setSessionValidationAttempt((attempt) => attempt + 1)}>重试校验</button></div>}
         {workspaceError && <div className="result-banner error" role="alert">{workspaceError} <button type="button" onClick={() => void refreshWorkspace(false)} disabled={refreshing}>重试</button></div>}
         {activeNav === 'overview' && <PushStatusView runs={runs} deliveryLogs={deliveryLogs} monitoring={monitoring} stale={monitoringStale} overviewTotals={overviewTotals} onLoadSteps={openStepRuns} />}
@@ -1588,7 +1588,7 @@ function LoginScreen({ onLogin, checking }: { onLogin: (token: string) => void; 
   )
 }
 
-function ModuleHeader({ activeNav, loading, sessionUser, onOpenNavigation, onRefresh, refreshing, mobileNavTriggerRef }: { activeNav: NavKey; loading: boolean; sessionUser: SessionUser | null; onOpenNavigation: () => void; onRefresh: () => void; refreshing: boolean; mobileNavTriggerRef: RefObject<HTMLButtonElement> }) {
+function ModuleHeader({ activeNav, loading, sessionUser, onOpenNavigation, onRefresh, onLogout, refreshing, mobileNavTriggerRef }: { activeNav: NavKey; loading: boolean; sessionUser: SessionUser | null; onOpenNavigation: () => void; onRefresh: () => void; onLogout: () => void; refreshing: boolean; mobileNavTriggerRef: RefObject<HTMLButtonElement> }) {
   const titles: Record<NavKey, { title: string; subtitle: string }> = {
     overview: { title: '运行总览', subtitle: '只看当前运行与交付健康度，快速定位失败。' },
     runs: { title: '流水线运行', subtitle: '按状态、运行类型和 Trace ID 查询执行记录。' },
@@ -1626,6 +1626,7 @@ function ModuleHeader({ activeNav, loading, sessionUser, onOpenNavigation, onRef
         {activeNav !== 'store_info' && <span className="workspace-date"><CalendarDays aria-hidden="true" />{new Intl.DateTimeFormat('zh-CN', { year: 'numeric', month: 'long', day: 'numeric', timeZone: 'Asia/Shanghai' }).format(new Date())}</span>}
         {sessionUser && <span className="workspace-user">{sessionUser.nickname || sessionUser.account}</span>}
         <button className="workspace-refresh" type="button" onClick={onRefresh} disabled={refreshing}><RefreshCcw aria-hidden="true" />{refreshing ? '刷新中' : '刷新数据'}</button>
+        <button className="workspace-logout" type="button" onClick={onLogout}><LogOut aria-hidden="true" />退出登录</button>
         <span className={loading ? 'workspace-health is-loading' : 'workspace-health'}><i aria-hidden="true" />{loading ? '数据加载中' : '系统正常'}</span>
       </div>
     </header>

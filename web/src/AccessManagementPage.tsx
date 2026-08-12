@@ -1,6 +1,7 @@
 import { FormEvent, useCallback, useEffect, useMemo, useState } from 'react'
 import { KeyRound, Plus, RefreshCcw, ShieldCheck } from 'lucide-react'
 import { DataAuthorizationPage } from './DataAuthorizationPage'
+import { parseAccessAccounts, type AccessAccount as Account } from './accessManagement'
 import './AccessManagementPage.css'
 
 type ApiResult = { ok: boolean; status: number; data: unknown }
@@ -8,7 +9,6 @@ type ApiClient = (path: string, options?: { method?: 'GET' | 'POST' | 'PUT' | 'P
 type Tab = 'accounts' | 'roles' | 'open-api' | 'audits'
 type Role = { id: number; code: string; name: string; description: string; status: string; isSystem: boolean; isSuper: boolean; permissions: string[] }
 type Permission = { code: string; name: string; module: string; description: string; riskLevel: string }
-type Account = { id: number; account: string; phone: string; nickname: string; status: string; mallScopeMode: string; roles: Array<{ code: string; name: string }>; mallIds: number[] }
 type Audit = { id: number; actorUserId: number; action: string; targetType: string; targetId: number; reason: string; createdAt: string }
 
 const headers = () => ({ 'Idempotency-Key': `access:${globalThis.crypto.randomUUID()}` })
@@ -75,7 +75,7 @@ function AccountPanel({ client, canManage }: { client: ApiClient; canManage: boo
       client('/v1/access/roles', { method: 'GET', showResult: false, silentLoading: true }),
     ])
     if (accountResponse.ok) {
-      const next = list<Account>(accountResponse.data, 'accounts')
+      const next = parseAccessAccounts(accountResponse.data)
       setAccounts(next)
       setSelectedID((current) => next.some((item) => item.id === current) ? current : next[0]?.id ?? 0)
     } else setMessage('控制台账号加载失败。')

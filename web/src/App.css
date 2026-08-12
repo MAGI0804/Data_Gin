@@ -3249,8 +3249,13 @@ button:focus-visible {
   display: none;
 }
 
-.workspace-refresh {
+.workspace-refresh,
+.workspace-logout {
   min-width: 112px;
+}
+
+.workspace-logout {
+  color: var(--danger);
 }
 
 .workspace-session .workspace-health {

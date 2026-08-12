@@ -67,9 +67,11 @@ test('removes token state at or after its expiry time', () => {
 test('clearStoredToken removes both the token and expiry metadata', () => {
   const storage = new MemoryStorage()
   saveStoredToken('token', storage, 1_900_000_000_000)
+  storage.setItem('warehouse-session-user', '{"id":1}')
 
   clearStoredToken(storage)
 
   assert.equal(loadStoredToken(storage, 1_900_000_000_001), '')
   assert.equal(storedTokenExpiresAt(storage), null)
+  assert.equal(storage.getItem('warehouse-session-user'), null)
 })
