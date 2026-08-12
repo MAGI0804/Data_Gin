@@ -3,6 +3,7 @@ package routers
 import (
 	"gin-biz-web-api/internal/controller/auth_ctrl"
 	"gin-biz-web-api/internal/middleware"
+	"gin-biz-web-api/model"
 
 	"github.com/gin-gonic/gin"
 )
@@ -13,6 +14,7 @@ func registerDataAuthorizationRoutes(api *gin.RouterGroup) {
 	group.Use(
 		middleware.LimitOpenAPIIP("data-authorization-admin", "300-M"),
 		middleware.AuthInternalBearerJWT(),
+		middleware.RequirePermission(model.PermissionSystemAccountManage),
 		middleware.LimitOpenAPIUserRoute("data-authorization-admin", "60-M"),
 	)
 	group.POST("/accounts/query", controller.QueryAccounts)

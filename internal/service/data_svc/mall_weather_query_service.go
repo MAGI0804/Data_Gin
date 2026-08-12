@@ -13,6 +13,7 @@ import (
 	"gin-biz-web-api/connector/caiyun"
 	"gin-biz-web-api/internal/dao/data_dao"
 	"gin-biz-web-api/internal/requestbody"
+	"gin-biz-web-api/internal/service/auth_svc"
 	weatherdomain "gin-biz-web-api/internal/weather"
 	"gin-biz-web-api/model"
 	"gin-biz-web-api/pkg/database"
@@ -66,6 +67,7 @@ type MallWeatherQueryService struct {
 	weather     mallWeatherQueryDAO
 	permissions mallPermissionChecker
 	now         func() time.Time
+	mallScope   *auth_svc.MallScopeService
 }
 
 type MallWeatherWarningDTO struct {
@@ -256,6 +258,7 @@ func NewMallWeatherQueryService() *MallWeatherQueryService {
 	return &MallWeatherQueryService{
 		malls: data_dao.NewMallDAO(database.DB), weather: data_dao.NewMallWeatherDAO(database.DB),
 		permissions: data_dao.NewMallWeatherPermissionDAO(database.DB), now: time.Now,
+		mallScope: auth_svc.NewMallScopeService(database.DB),
 	}
 }
 
@@ -281,6 +284,9 @@ func (service *MallWeatherQueryService) Hourly(
 		return nil, fmt.Errorf("%w: invalid request", ErrMallWeatherInvalidQuery)
 	}
 	if err := service.authorize(ctx, actorUserID); err != nil {
+		return nil, err
+	}
+	if err := service.requireMallScope(ctx, actorUserID, mallID); err != nil {
 		return nil, err
 	}
 	mall, err := service.malls.FindByID(ctx, mallID)
@@ -375,6 +381,9 @@ func (service *MallWeatherQueryService) Overview(ctx context.Context, actorUserI
 	if err := service.authorize(ctx, actorUserID); err != nil {
 		return nil, err
 	}
+	if err := service.requireMallScope(ctx, actorUserID, mallID); err != nil {
+		return nil, err
+	}
 	mall, err := service.malls.FindByID(ctx, mallID)
 	if err != nil {
 		return nil, err
@@ -461,6 +470,19 @@ func (service *MallWeatherQueryService) authorize(ctx context.Context, actorUser
 	}
 	if !allowed {
 		return ErrMallForbidden
+	}
+	return nil
+}
+
+func (service *MallWeatherQueryService) requireMallScope(ctx context.Context, actorUserID, mallID uint) error {
+	if service.mallScope == nil {
+		return nil
+	}
+	if err := service.mallScope.Require(ctx, actorUserID, mallID); err != nil {
+		if errors.Is(err, auth_svc.ErrMallScopeForbidden) {
+			return ErrMallForbidden
+		}
+		return fmt.Errorf("mall weather query: check mall scope: %w", err)
 	}
 	return nil
 }

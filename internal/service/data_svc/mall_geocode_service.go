@@ -63,6 +63,9 @@ func (service *MallService) TriggerGeocode(ctx context.Context, actorUserID, mal
 	if err := service.authorize(ctx, actorUserID, PermissionMallWrite); err != nil {
 		return nil, err
 	}
+	if err := service.requireMallScope(ctx, actorUserID, mallID); err != nil {
+		return nil, err
+	}
 	if mallID == 0 || expectedVersion == 0 {
 		return nil, fmt.Errorf("%w: mall id and expectedMallVersion are required", ErrMallInvalidInput)
 	}
@@ -113,6 +116,9 @@ func (service *MallService) ListGeocodeCandidates(ctx context.Context, actorUser
 	if err := service.authorize(ctx, actorUserID, PermissionMallRead); err != nil {
 		return nil, err
 	}
+	if err := service.requireMallScope(ctx, actorUserID, mallID); err != nil {
+		return nil, err
+	}
 	if mallID == 0 {
 		return nil, fmt.Errorf("%w: mall id is required", ErrMallInvalidInput)
 	}
@@ -153,6 +159,9 @@ func (service *MallService) ListGeocodeCandidates(ctx context.Context, actorUser
 
 func (service *MallService) ConfirmGeocode(ctx context.Context, actorUserID, mallID uint, request requestbody.MallGeocodeConfirmRequest) (*MallDTO, error) {
 	if err := service.authorize(ctx, actorUserID, PermissionMallGeocodeConfirm); err != nil {
+		return nil, err
+	}
+	if err := service.requireMallScope(ctx, actorUserID, mallID); err != nil {
 		return nil, err
 	}
 	if mallID == 0 || request.ExpectedMallVersion == 0 {

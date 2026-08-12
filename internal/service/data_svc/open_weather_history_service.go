@@ -24,6 +24,9 @@ func (service *MallWeatherQueryService) HistoryDay(
 	if err := service.authorize(ctx, actorUserID); err != nil {
 		return nil, err
 	}
+	if err := service.requireMallScope(ctx, actorUserID, mallID); err != nil {
+		return nil, err
+	}
 	mall, err := service.malls.FindByID(ctx, mallID)
 	if err != nil {
 		return nil, err
@@ -65,6 +68,9 @@ func (service *MallWeatherQueryService) HistoryRange(
 		return nil, fmt.Errorf("%w: invalid request", ErrMallWeatherInvalidQuery)
 	}
 	if err := service.authorize(ctx, actorUserID); err != nil {
+		return nil, err
+	}
+	if err := service.requireMallScope(ctx, actorUserID, mallID); err != nil {
 		return nil, err
 	}
 	mall, err := service.malls.FindByID(ctx, mallID)

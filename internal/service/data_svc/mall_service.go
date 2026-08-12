@@ -17,6 +17,7 @@ import (
 	"gin-biz-web-api/global"
 	"gin-biz-web-api/internal/dao/data_dao"
 	"gin-biz-web-api/internal/requestbody"
+	"gin-biz-web-api/internal/service/auth_svc"
 	"gin-biz-web-api/job"
 	"gin-biz-web-api/model"
 	"gin-biz-web-api/pkg/config"
@@ -65,6 +66,7 @@ type MallService struct {
 	defaultCoverageRadius int
 	weatherFeatureEnabled func() bool
 	now                   func() time.Time
+	mallScope             *auth_svc.MallScopeService
 }
 
 type MallCreateResult struct {
@@ -134,6 +136,7 @@ func NewMallService() *MallService {
 		defaultCoverageRadius: config.GetInt("cfg.mall_weather.coverage_radius_m", 1000),
 		weatherFeatureEnabled: func() bool { return global.MallWeatherEnabledAtStartup },
 		now:                   time.Now,
+		mallScope:             auth_svc.NewMallScopeService(database.DB),
 	}
 }
 
@@ -286,6 +289,9 @@ func (service *MallService) Get(ctx context.Context, actorUserID, mallID uint) (
 	if err := service.authorize(ctx, actorUserID, PermissionMallRead); err != nil {
 		return nil, err
 	}
+	if err := service.requireMallScope(ctx, actorUserID, mallID); err != nil {
+		return nil, err
+	}
 	mall, err := service.malls.FindByID(ctx, mallID)
 	if err != nil {
 		return nil, err
@@ -321,6 +327,10 @@ func (service *MallService) List(ctx context.Context, actorUserID uint, request 
 	if err != nil {
 		return nil, err
 	}
+	rows, err = service.filterMallRows(ctx, actorUserID, rows)
+	if err != nil {
+		return nil, err
+	}
 	result := &MallListResult{Items: make([]MallDTO, 0, len(rows))}
 	for index := range rows {
 		dto, err := mallDTO(&rows[index])
@@ -337,6 +347,9 @@ func (service *MallService) List(ctx context.Context, actorUserID uint, request 
 
 func (service *MallService) Update(ctx context.Context, actorUserID, mallID uint, request requestbody.MallPatchRequest) (*MallDTO, error) {
 	if err := service.authorize(ctx, actorUserID, PermissionMallWrite); err != nil {
+		return nil, err
+	}
+	if err := service.requireMallScope(ctx, actorUserID, mallID); err != nil {
 		return nil, err
 	}
 	if request.ExpectedMallVersion == 0 {
@@ -419,6 +432,9 @@ func (service *MallService) Delete(ctx context.Context, actorUserID, mallID uint
 	if err := service.authorize(ctx, actorUserID, PermissionMallWrite); err != nil {
 		return err
 	}
+	if err := service.requireMallScope(ctx, actorUserID, mallID); err != nil {
+		return err
+	}
 	if mallID == 0 || expectedVersion == 0 {
 		return fmt.Errorf("%w: mall id and expected version are required", ErrMallInvalidInput)
 	}
@@ -426,6 +442,36 @@ func (service *MallService) Delete(ctx context.Context, actorUserID, mallID uint
 		return err
 	}
 	return service.malls.DeleteWithVersion(ctx, mallID, expectedVersion)
+}
+
+func (service *MallService) requireMallScope(ctx context.Context, actorUserID, mallID uint) error {
+	if service.mallScope == nil {
+		return nil // injected unit services retain their existing isolated tests
+	}
+	if err := service.mallScope.Require(ctx, actorUserID, mallID); err != nil {
+		if errors.Is(err, auth_svc.ErrMallScopeForbidden) {
+			return ErrMallForbidden
+		}
+		return fmt.Errorf("mall service: check mall scope: %w", err)
+	}
+	return nil
+}
+
+func (service *MallService) filterMallRows(ctx context.Context, actorUserID uint, rows []model.Mall) ([]model.Mall, error) {
+	if service.mallScope == nil {
+		return rows, nil
+	}
+	filtered := make([]model.Mall, 0, len(rows))
+	for i := range rows {
+		allowed, err := service.mallScope.CanAccess(ctx, actorUserID, rows[i].ID)
+		if err != nil {
+			return nil, fmt.Errorf("mall service: filter mall scope: %w", err)
+		}
+		if allowed {
+			filtered = append(filtered, rows[i])
+		}
+	}
+	return filtered, nil
 }
 
 func (service *MallService) authorize(ctx context.Context, actorUserID uint, permission string) error {

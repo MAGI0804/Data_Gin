@@ -41,6 +41,9 @@ func (service *MallWeatherQueryService) Minutely(
 	if err := service.authorize(ctx, actorUserID); err != nil {
 		return nil, err
 	}
+	if err := service.requireMallScope(ctx, actorUserID, mallID); err != nil {
+		return nil, err
+	}
 	mall, err := service.malls.FindByID(ctx, mallID)
 	if err != nil {
 		return nil, err

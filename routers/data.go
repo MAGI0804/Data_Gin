@@ -3,6 +3,7 @@ package routers
 import (
 	"gin-biz-web-api/internal/controller/data_ctrl"
 	"gin-biz-web-api/internal/middleware"
+	"gin-biz-web-api/model"
 
 	"github.com/gin-gonic/gin"
 )
@@ -25,23 +26,23 @@ func apiData(api *gin.RouterGroup) {
 	sourceGroup.Use(middleware.AuthJWT())
 	{
 		sourceCtrl := data_ctrl.NewSourceController()
-		sourceGroup.GET("", sourceCtrl.ListSources)
-		sourceGroup.GET("/:id", sourceCtrl.GetSource)
-		sourceGroup.POST("", sourceCtrl.CreateSource)
-		sourceGroup.PUT("/:id", sourceCtrl.UpdateSource)
-		sourceGroup.POST("/:id/test", sourceCtrl.TestSource)
-		sourceGroup.POST("/:id/fetch", sourceCtrl.FetchSource)
+		sourceGroup.GET("", middleware.RequirePermission(model.PermissionSourceRead), sourceCtrl.ListSources)
+		sourceGroup.GET("/:id", middleware.RequirePermission(model.PermissionSourceRead), sourceCtrl.GetSource)
+		sourceGroup.POST("", middleware.RequirePermission(model.PermissionSourceManage), sourceCtrl.CreateSource)
+		sourceGroup.PUT("/:id", middleware.RequirePermission(model.PermissionSourceManage), sourceCtrl.UpdateSource)
+		sourceGroup.POST("/:id/test", middleware.RequirePermission(model.PermissionSourceManage), sourceCtrl.TestSource)
+		sourceGroup.POST("/:id/fetch", middleware.RequirePermission(model.PermissionSourceManage), sourceCtrl.FetchSource)
 	}
 
 	transformGroup := api.Group("/v1/transform-rules")
 	transformGroup.Use(middleware.AuthJWT())
 	{
 		transformCtrl := data_ctrl.NewTransformController()
-		transformGroup.GET("", transformCtrl.ListRules)
-		transformGroup.GET("/:id", transformCtrl.GetRule)
-		transformGroup.POST("", transformCtrl.CreateRule)
-		transformGroup.PUT("/:id", transformCtrl.UpdateRule)
-		transformGroup.POST("/test", transformCtrl.TestRule)
+		transformGroup.GET("", middleware.RequirePermission(model.PermissionPipelineRead), transformCtrl.ListRules)
+		transformGroup.GET("/:id", middleware.RequirePermission(model.PermissionPipelineRead), transformCtrl.GetRule)
+		transformGroup.POST("", middleware.RequirePermission(model.PermissionPipelineManage), transformCtrl.CreateRule)
+		transformGroup.PUT("/:id", middleware.RequirePermission(model.PermissionPipelineManage), transformCtrl.UpdateRule)
+		transformGroup.POST("/test", middleware.RequirePermission(model.PermissionPipelineManage), transformCtrl.TestRule)
 	}
 
 	rawRecordsGroup := api.Group("/v1/raw-records")
@@ -49,74 +50,74 @@ func apiData(api *gin.RouterGroup) {
 	{
 		transformCtrl := data_ctrl.NewTransformController()
 		rawRecordCtrl := data_ctrl.NewRawRecordController()
-		rawRecordsGroup.GET("", rawRecordCtrl.List)
-		rawRecordsGroup.POST("/:id/retransform", transformCtrl.RetransformRawRecord)
+		rawRecordsGroup.GET("", middleware.RequirePermission(model.PermissionDataRead), rawRecordCtrl.List)
+		rawRecordsGroup.POST("/:id/retransform", middleware.RequirePermission(model.PermissionDataManage), transformCtrl.RetransformRawRecord)
 	}
 
 	destinationGroup := api.Group("/v1/destinations")
 	destinationGroup.Use(middleware.AuthJWT())
 	{
 		deliveryCtrl := data_ctrl.NewDeliveryController()
-		destinationGroup.GET("", deliveryCtrl.ListDestinations)
-		destinationGroup.GET("/:id", deliveryCtrl.GetDestination)
-		destinationGroup.POST("", deliveryCtrl.CreateDestination)
-		destinationGroup.PUT("/:id", deliveryCtrl.UpdateDestination)
-		destinationGroup.POST("/:id/test", deliveryCtrl.TestDestination)
+		destinationGroup.GET("", middleware.RequirePermission(model.PermissionDeliveryRead), deliveryCtrl.ListDestinations)
+		destinationGroup.GET("/:id", middleware.RequirePermission(model.PermissionDeliveryRead), deliveryCtrl.GetDestination)
+		destinationGroup.POST("", middleware.RequirePermission(model.PermissionDeliveryManage), deliveryCtrl.CreateDestination)
+		destinationGroup.PUT("/:id", middleware.RequirePermission(model.PermissionDeliveryManage), deliveryCtrl.UpdateDestination)
+		destinationGroup.POST("/:id/test", middleware.RequirePermission(model.PermissionDeliveryManage), deliveryCtrl.TestDestination)
 	}
 
 	deliveryTaskGroup := api.Group("/v1/delivery-tasks")
 	deliveryTaskGroup.Use(middleware.AuthJWT())
 	{
 		deliveryCtrl := data_ctrl.NewDeliveryController()
-		deliveryTaskGroup.GET("", deliveryCtrl.ListTasks)
-		deliveryTaskGroup.GET("/:id", deliveryCtrl.GetTask)
-		deliveryTaskGroup.POST("", deliveryCtrl.CreateTask)
-		deliveryTaskGroup.PUT("/:id", deliveryCtrl.UpdateTask)
-		deliveryTaskGroup.POST("/:id/run", deliveryCtrl.RunTask)
+		deliveryTaskGroup.GET("", middleware.RequirePermission(model.PermissionDeliveryRead), deliveryCtrl.ListTasks)
+		deliveryTaskGroup.GET("/:id", middleware.RequirePermission(model.PermissionDeliveryRead), deliveryCtrl.GetTask)
+		deliveryTaskGroup.POST("", middleware.RequirePermission(model.PermissionDeliveryManage), deliveryCtrl.CreateTask)
+		deliveryTaskGroup.PUT("/:id", middleware.RequirePermission(model.PermissionDeliveryManage), deliveryCtrl.UpdateTask)
+		deliveryTaskGroup.POST("/:id/run", middleware.RequirePermission(model.PermissionDeliveryManage), deliveryCtrl.RunTask)
 	}
 
 	deliveryLogGroup := api.Group("/v1/delivery-logs")
 	deliveryLogGroup.Use(middleware.AuthJWT())
 	{
 		deliveryCtrl := data_ctrl.NewDeliveryController()
-		deliveryLogGroup.GET("", deliveryCtrl.ListLogs)
-		deliveryLogGroup.POST("/:id/retry", deliveryCtrl.RetryLog)
+		deliveryLogGroup.GET("", middleware.RequirePermission(model.PermissionDeliveryRead), deliveryCtrl.ListLogs)
+		deliveryLogGroup.POST("/:id/retry", middleware.RequirePermission(model.PermissionDeliveryManage), deliveryCtrl.RetryLog)
 	}
 
 	orderPushConfigGroup := api.Group("/v1/order-push-skip-config")
 	orderPushConfigGroup.Use(middleware.AuthJWT())
 	{
 		orderPushConfigCtrl := data_ctrl.NewOrderPushConfigController()
-		orderPushConfigGroup.GET("", orderPushConfigCtrl.GetSkipPolicy)
-		orderPushConfigGroup.PUT("", orderPushConfigCtrl.SaveSkipPolicy)
+		orderPushConfigGroup.GET("", middleware.RequirePermission(model.PermissionDeliveryRead), orderPushConfigCtrl.GetSkipPolicy)
+		orderPushConfigGroup.PUT("", middleware.RequirePermission(model.PermissionDeliveryManage), orderPushConfigCtrl.SaveSkipPolicy)
 	}
 
 	runGroup := api.Group("/v1/runs")
 	runGroup.Use(middleware.AuthJWT())
 	{
 		runCtrl := data_ctrl.NewRunController()
-		runGroup.GET("", runCtrl.ListRuns)
+		runGroup.GET("", middleware.RequirePermission(model.PermissionPipelineRead), runCtrl.ListRuns)
 	}
 
 	pipelineGroup := api.Group("/v1/pipelines")
 	pipelineGroup.Use(middleware.AuthJWT())
 	{
 		pipelineCtrl := data_ctrl.NewPipelineController()
-		pipelineGroup.GET("", pipelineCtrl.ListPipelines)
-		pipelineGroup.GET("/:id", pipelineCtrl.GetPipeline)
-		pipelineGroup.POST("", pipelineCtrl.CreatePipeline)
-		pipelineGroup.PUT("/:id", pipelineCtrl.UpdatePipeline)
-		pipelineGroup.GET("/:id/stages", pipelineCtrl.ListStages)
-		pipelineGroup.POST("/:id/stages", pipelineCtrl.CreateStage)
-		pipelineGroup.GET("/:id/steps", pipelineCtrl.ListSteps)
-		pipelineGroup.POST("/:id/steps", pipelineCtrl.CreateStep)
-		pipelineGroup.PUT("/:id/steps/:step_id", pipelineCtrl.UpdateStep)
-		pipelineGroup.GET("/:id/preview-json", pipelineCtrl.PreviewJSON)
-		pipelineGroup.POST("/:id/run", pipelineCtrl.RunPipeline)
+		pipelineGroup.GET("", middleware.RequirePermission(model.PermissionPipelineRead), pipelineCtrl.ListPipelines)
+		pipelineGroup.GET("/:id", middleware.RequirePermission(model.PermissionPipelineRead), pipelineCtrl.GetPipeline)
+		pipelineGroup.POST("", middleware.RequirePermission(model.PermissionPipelineManage), pipelineCtrl.CreatePipeline)
+		pipelineGroup.PUT("/:id", middleware.RequirePermission(model.PermissionPipelineManage), pipelineCtrl.UpdatePipeline)
+		pipelineGroup.GET("/:id/stages", middleware.RequirePermission(model.PermissionPipelineRead), pipelineCtrl.ListStages)
+		pipelineGroup.POST("/:id/stages", middleware.RequirePermission(model.PermissionPipelineManage), pipelineCtrl.CreateStage)
+		pipelineGroup.GET("/:id/steps", middleware.RequirePermission(model.PermissionPipelineRead), pipelineCtrl.ListSteps)
+		pipelineGroup.POST("/:id/steps", middleware.RequirePermission(model.PermissionPipelineManage), pipelineCtrl.CreateStep)
+		pipelineGroup.PUT("/:id/steps/:step_id", middleware.RequirePermission(model.PermissionPipelineManage), pipelineCtrl.UpdateStep)
+		pipelineGroup.GET("/:id/preview-json", middleware.RequirePermission(model.PermissionPipelineRead), pipelineCtrl.PreviewJSON)
+		pipelineGroup.POST("/:id/run", middleware.RequirePermission(model.PermissionPipelineExecute), pipelineCtrl.RunPipeline)
 	}
 
 	pipelineStageGroup := api.Group("/v1/pipeline-stages")
-	pipelineStageGroup.Use(middleware.AuthJWT())
+	pipelineStageGroup.Use(middleware.AuthJWT(), middleware.RequirePermission(model.PermissionPipelineManage))
 	{
 		pipelineCtrl := data_ctrl.NewPipelineController()
 		pipelineStageGroup.PUT("/:stage_id", pipelineCtrl.UpdateStage)
@@ -127,7 +128,7 @@ func apiData(api *gin.RouterGroup) {
 	}
 
 	stepRunGroup := api.Group("/v1/pipeline-runs")
-	stepRunGroup.Use(middleware.AuthJWT())
+	stepRunGroup.Use(middleware.AuthJWT(), middleware.RequirePermission(model.PermissionPipelineRead))
 	{
 		pipelineCtrl := data_ctrl.NewPipelineController()
 		stepRunGroup.GET("/:id/steps", pipelineCtrl.ListStepRuns)
@@ -137,23 +138,23 @@ func apiData(api *gin.RouterGroup) {
 	excelMatchJobGroup.Use(middleware.AuthJWT())
 	{
 		excelMatchJobCtrl := data_ctrl.NewExcelMatchJobController()
-		excelMatchJobGroup.GET("", excelMatchJobCtrl.ListJobs)
-		excelMatchJobGroup.POST("", excelMatchJobCtrl.CreateJob)
-		excelMatchJobGroup.GET("/models", excelMatchJobCtrl.ListModels)
-		excelMatchJobGroup.POST("/preview", excelMatchJobCtrl.Preview)
-		excelMatchJobGroup.POST("/uploads", excelMatchJobCtrl.CreateUploadSession)
-		excelMatchJobGroup.POST("/uploads/:upload_id/chunks", excelMatchJobCtrl.UploadChunk)
-		excelMatchJobGroup.POST("/uploads/:upload_id/complete", excelMatchJobCtrl.CompleteUpload)
-		excelMatchJobGroup.GET("/schemes", excelMatchJobCtrl.ListSchemes)
-		excelMatchJobGroup.POST("/schemes", excelMatchJobCtrl.SaveScheme)
-		excelMatchJobGroup.DELETE("/schemes/:scheme_id", excelMatchJobCtrl.DeleteScheme)
-		excelMatchJobGroup.GET("/:id", excelMatchJobCtrl.GetJob)
-		excelMatchJobGroup.GET("/:id/download", excelMatchJobCtrl.Download)
-		excelMatchJobGroup.POST("/:id/download", excelMatchJobCtrl.Download)
+		excelMatchJobGroup.GET("", middleware.RequirePermission(model.PermissionExcelRead), excelMatchJobCtrl.ListJobs)
+		excelMatchJobGroup.POST("", middleware.RequirePermission(model.PermissionExcelExecute), excelMatchJobCtrl.CreateJob)
+		excelMatchJobGroup.GET("/models", middleware.RequirePermission(model.PermissionExcelRead), excelMatchJobCtrl.ListModels)
+		excelMatchJobGroup.POST("/preview", middleware.RequirePermission(model.PermissionExcelExecute), excelMatchJobCtrl.Preview)
+		excelMatchJobGroup.POST("/uploads", middleware.RequirePermission(model.PermissionExcelExecute), excelMatchJobCtrl.CreateUploadSession)
+		excelMatchJobGroup.POST("/uploads/:upload_id/chunks", middleware.RequirePermission(model.PermissionExcelExecute), excelMatchJobCtrl.UploadChunk)
+		excelMatchJobGroup.POST("/uploads/:upload_id/complete", middleware.RequirePermission(model.PermissionExcelExecute), excelMatchJobCtrl.CompleteUpload)
+		excelMatchJobGroup.GET("/schemes", middleware.RequirePermission(model.PermissionExcelRead), excelMatchJobCtrl.ListSchemes)
+		excelMatchJobGroup.POST("/schemes", middleware.RequirePermission(model.PermissionExcelManage), excelMatchJobCtrl.SaveScheme)
+		excelMatchJobGroup.DELETE("/schemes/:scheme_id", middleware.RequirePermission(model.PermissionExcelManage), excelMatchJobCtrl.DeleteScheme)
+		excelMatchJobGroup.GET("/:id", middleware.RequirePermission(model.PermissionExcelRead), excelMatchJobCtrl.GetJob)
+		excelMatchJobGroup.GET("/:id/download", middleware.RequirePermission(model.PermissionExcelRead), excelMatchJobCtrl.Download)
+		excelMatchJobGroup.POST("/:id/download", middleware.RequirePermission(model.PermissionExcelRead), excelMatchJobCtrl.Download)
 	}
 
 	legacyTaskGroup := api.Group("/v1/legacy-tasks")
-	legacyTaskGroup.Use(middleware.AuthJWT())
+	legacyTaskGroup.Use(middleware.AuthJWT(), middleware.RequirePermission(model.PermissionPipelineExecute))
 	{
 		legacyTaskCtrl := data_ctrl.NewLegacyTaskController()
 		legacyTaskGroup.GET("", legacyTaskCtrl.List)
@@ -161,7 +162,7 @@ func apiData(api *gin.RouterGroup) {
 	}
 
 	bojunOrderBackfillGroup := api.Group("/v1/bojun-order-backfill")
-	bojunOrderBackfillGroup.Use(middleware.AuthJWT())
+	bojunOrderBackfillGroup.Use(middleware.AuthJWT(), middleware.RequirePermission(model.PermissionDataManage))
 	{
 		bojunOrderBackfillCtrl := data_ctrl.NewBojunOrderBackfillController()
 		bojunOrderBackfillGroup.POST("/preview", bojunOrderBackfillCtrl.Preview)
@@ -169,7 +170,7 @@ func apiData(api *gin.RouterGroup) {
 	}
 
 	youzanDistributionOrderBackfillGroup := api.Group("/v1/youzan-distribution-order-backfill")
-	youzanDistributionOrderBackfillGroup.Use(middleware.AuthJWT())
+	youzanDistributionOrderBackfillGroup.Use(middleware.AuthJWT(), middleware.RequirePermission(model.PermissionDataManage))
 	{
 		youzanDistributionOrderBackfillCtrl := data_ctrl.NewYouzanDistributionOrderBackfillController()
 		youzanDistributionOrderBackfillGroup.POST("/preview", youzanDistributionOrderBackfillCtrl.Preview)
@@ -177,7 +178,7 @@ func apiData(api *gin.RouterGroup) {
 	}
 
 	legacyTransformRuleGroup := api.Group("/v1/legacy-transform-rules")
-	legacyTransformRuleGroup.Use(middleware.AuthJWT())
+	legacyTransformRuleGroup.Use(middleware.AuthJWT(), middleware.RequirePermission(model.PermissionPipelineRead))
 	{
 		legacyTaskCtrl := data_ctrl.NewLegacyTaskController()
 		legacyTransformRuleGroup.GET("", legacyTaskCtrl.ListTransformRules)
@@ -189,23 +190,23 @@ func apiData(api *gin.RouterGroup) {
 		dataCtrl := data_ctrl.NewDataController()
 
 		// 数据采集
-		dataGroup.POST("/collect/:source_id", dataCtrl.CollectController.ManualCollect)
-		dataGroup.GET("/collect/status/:job_id", dataCtrl.CollectController.CollectStatus)
+		dataGroup.POST("/collect/:source_id", middleware.RequirePermission(model.PermissionDataManage), dataCtrl.CollectController.ManualCollect)
+		dataGroup.GET("/collect/status/:job_id", middleware.RequirePermission(model.PermissionDataRead), dataCtrl.CollectController.CollectStatus)
 		// 任务创建
-		dataGroup.POST("/task/create/:source_id", dataCtrl.CollectController.CreateTask)
+		dataGroup.POST("/task/create/:source_id", middleware.RequirePermission(model.PermissionDataManage), dataCtrl.CollectController.CreateTask)
 
 		// 数据接收
-		dataGroup.POST("/ingest", dataCtrl.IngestController.IngestData)
-		dataGroup.POST("/ingest/batch", dataCtrl.IngestController.IngestBatchData)
-		dataGroup.POST("/ingest/raw", dataCtrl.IngestController.RawIngestData) // 接收原始格式数据
+		dataGroup.POST("/ingest", middleware.RequirePermission(model.PermissionDataManage), dataCtrl.IngestController.IngestData)
+		dataGroup.POST("/ingest/batch", middleware.RequirePermission(model.PermissionDataManage), dataCtrl.IngestController.IngestBatchData)
+		dataGroup.POST("/ingest/raw", middleware.RequirePermission(model.PermissionDataManage), dataCtrl.IngestController.RawIngestData) // 接收原始格式数据
 
 		// 数据查询
-		dataGroup.GET("/raw", dataCtrl.QueryController.GetRawData)
-		dataGroup.POST("/raw/list", dataCtrl.QueryController.GetRawDataList)
-		dataGroup.GET("/processed", dataCtrl.QueryController.GetProcessedData)
-		dataGroup.GET("/processed/list", dataCtrl.QueryController.GetProcessedDataList)
-		dataGroup.GET("/clean-records/list", dataCtrl.QueryController.GetCleanRecordList)
-		dataGroup.GET("/statistics", dataCtrl.QueryController.GetStatistics)
+		dataGroup.GET("/raw", middleware.RequirePermission(model.PermissionDataRead), dataCtrl.QueryController.GetRawData)
+		dataGroup.POST("/raw/list", middleware.RequirePermission(model.PermissionDataRead), dataCtrl.QueryController.GetRawDataList)
+		dataGroup.GET("/processed", middleware.RequirePermission(model.PermissionDataRead), dataCtrl.QueryController.GetProcessedData)
+		dataGroup.GET("/processed/list", middleware.RequirePermission(model.PermissionDataRead), dataCtrl.QueryController.GetProcessedDataList)
+		dataGroup.GET("/clean-records/list", middleware.RequirePermission(model.PermissionDataRead), dataCtrl.QueryController.GetCleanRecordList)
+		dataGroup.GET("/statistics", middleware.RequirePermission(model.PermissionDataRead), dataCtrl.QueryController.GetStatistics)
 	}
 }
 
@@ -222,6 +223,7 @@ func registerOpenBojunOrderRoutes(
 	bojunGroup.Use(
 		middleware.LimitOpenAPIIP("bojun", openBojunPreAuthIPRateLimit),
 		middleware.AuthOpenToken(),
+		middleware.RequirePermission(model.PermissionBojunOrderRead),
 		middleware.LimitOpenAPIUserRoute("bojun", openBojunUserRouteRateLimit),
 	)
 	bojunGroup.POST("/orders/query", controller.Query)
@@ -241,6 +243,7 @@ func registerOpenWeatherRoutes(
 	weatherGroup.Use(
 		middleware.LimitOpenAPIIP("weather", openWeatherPreAuthIPRateLimit),
 		middleware.AuthOpenToken(),
+		middleware.RequirePermission(model.PermissionWeatherRead),
 		middleware.LimitOpenAPIUserRoute("weather", openWeatherUserRouteRateLimit),
 	)
 	{
@@ -268,23 +271,24 @@ func registerOpenWeatherRoutes(
 
 func registerMallWeatherRoutes(api *gin.RouterGroup, weatherCtrl *data_ctrl.MallWeatherController) {
 	weatherGroup := api.Group("/v1/malls")
-	weatherGroup.Use(middleware.AuthJWT())
+	weatherGroup.Use(middleware.AuthJWT(), middleware.RequirePermission(model.PermissionWeatherRead))
 	{
-		weatherGroup.GET("/:id/weather/overview", weatherCtrl.Overview)
-		weatherGroup.GET("/:id/weather/realtime", weatherCtrl.Realtime)
-		weatherGroup.GET("/:id/weather/minutely", weatherCtrl.Minutely)
-		weatherGroup.GET("/:id/weather/hourly", weatherCtrl.Hourly)
-		weatherGroup.GET("/:id/weather/daily", weatherCtrl.Daily)
-		weatherGroup.GET("/:id/weather/alerts", weatherCtrl.Alerts)
-		weatherGroup.GET("/:id/weather/life-indices", weatherCtrl.LifeIndices)
-		weatherGroup.GET("/:id/weather/fetch-runs", weatherCtrl.FetchRuns)
+		scope := middleware.RequireMallScope("id")
+		weatherGroup.GET("/:id/weather/overview", scope, weatherCtrl.Overview)
+		weatherGroup.GET("/:id/weather/realtime", scope, weatherCtrl.Realtime)
+		weatherGroup.GET("/:id/weather/minutely", scope, weatherCtrl.Minutely)
+		weatherGroup.GET("/:id/weather/hourly", scope, weatherCtrl.Hourly)
+		weatherGroup.GET("/:id/weather/daily", scope, weatherCtrl.Daily)
+		weatherGroup.GET("/:id/weather/alerts", scope, weatherCtrl.Alerts)
+		weatherGroup.GET("/:id/weather/life-indices", scope, weatherCtrl.LifeIndices)
+		weatherGroup.GET("/:id/weather/fetch-runs", scope, weatherCtrl.FetchRuns)
 	}
 }
 
 func registerMallWeatherRefreshRoutes(api *gin.RouterGroup, refreshCtrl *data_ctrl.MallWeatherRefreshController) {
 	weatherGroup := api.Group("/v1/malls")
-	weatherGroup.Use(middleware.AuthJWT())
-	weatherGroup.POST("/:id/weather-refresh", middleware.RequireMallWeatherEnabled(), refreshCtrl.Refresh)
+	weatherGroup.Use(middleware.AuthJWT(), middleware.RequirePermission(model.PermissionWeatherRefresh))
+	weatherGroup.POST("/:id/weather-refresh", middleware.RequireMallScope("id"), middleware.RequireMallWeatherEnabled(), refreshCtrl.Refresh)
 }
 
 func registerMallWeatherExportProfileRoutes(
@@ -293,8 +297,8 @@ func registerMallWeatherExportProfileRoutes(
 ) {
 	profileGroup := api.Group("/v1/weather-export-profiles")
 	profileGroup.Use(middleware.AuthJWT())
-	profileGroup.POST("", profileCtrl.Save)
-	profileGroup.GET("", profileCtrl.List)
+	profileGroup.POST("", middleware.RequirePermission(model.PermissionWeatherConfigManage), profileCtrl.Save)
+	profileGroup.GET("", middleware.RequirePermission(model.PermissionWeatherExport), profileCtrl.List)
 }
 
 func registerMallWeatherExportJobRoutes(
@@ -302,7 +306,7 @@ func registerMallWeatherExportJobRoutes(
 	exportCtrl *data_ctrl.MallWeatherExportJobController,
 ) {
 	exportGroup := api.Group("/v1/weather-exports")
-	exportGroup.Use(middleware.AuthJWT())
+	exportGroup.Use(middleware.AuthJWT(), middleware.RequirePermission(model.PermissionWeatherExport))
 	exportGroup.POST("", middleware.RequireMallWeatherEnabled(), exportCtrl.Create)
 	exportGroup.GET("/:job_id", exportCtrl.Get)
 	exportGroup.GET("/:job_id/download", exportCtrl.Download)
@@ -316,7 +320,7 @@ func registerMallWeatherFeishuPushRoutes(
 	pushCtrl *data_ctrl.MallWeatherFeishuPushController,
 ) {
 	pushGroup := api.Group("/v1/weather-sheet-pushes")
-	pushGroup.Use(middleware.AuthJWT())
+	pushGroup.Use(middleware.AuthJWT(), middleware.RequirePermission(model.PermissionWeatherFeishuPush))
 	pushGroup.POST("", middleware.RequireMallWeatherEnabled(), pushCtrl.Create)
 	pushGroup.GET("/:run_id", pushCtrl.Get)
 	pushGroup.POST("/dry-run", pushCtrl.DryRun)
@@ -327,7 +331,7 @@ func registerMallWeatherSheetPushOptionRoutes(
 	optionCtrl *data_ctrl.MallWeatherSheetPushOptionController,
 ) {
 	optionGroup := api.Group("/v1/weather-sheet-push-options")
-	optionGroup.Use(middleware.AuthJWT())
+	optionGroup.Use(middleware.AuthJWT(), middleware.RequirePermission(model.PermissionWeatherConfigManage))
 	optionGroup.GET("", optionCtrl.List)
 }
 
@@ -336,7 +340,7 @@ func registerMallWeatherMetricsRoutes(
 	metricsCtrl *data_ctrl.MallWeatherMetricsController,
 ) {
 	metricsGroup := api.Group("/v1/mall-weather")
-	metricsGroup.Use(middleware.AuthJWT())
+	metricsGroup.Use(middleware.AuthJWT(), middleware.RequirePermission(model.PermissionWeatherRead))
 	metricsGroup.GET("/metrics", metricsCtrl.Snapshot)
 }
 
@@ -345,7 +349,7 @@ func registerMallWeatherCapacityPlanRoutes(
 	capacityCtrl *data_ctrl.MallWeatherCapacityPlanController,
 ) {
 	capacityGroup := api.Group("/v1/mall-weather")
-	capacityGroup.Use(middleware.AuthJWT())
+	capacityGroup.Use(middleware.AuthJWT(), middleware.RequirePermission(model.PermissionWeatherConfigManage))
 	capacityGroup.GET("/capacity-plan", capacityCtrl.Show)
 }
 
@@ -354,14 +358,14 @@ func registerMallRoutes(api *gin.RouterGroup, mallCtrl *data_ctrl.MallController
 	mallGroup.Use(middleware.AuthJWT())
 	{
 		weatherWriteEnabled := middleware.RequireMallWeatherEnabled()
-		mallGroup.POST("", weatherWriteEnabled, mallCtrl.Create)
-		mallGroup.POST("/import", weatherWriteEnabled, mallCtrl.Import)
-		mallGroup.GET("", mallCtrl.List)
-		mallGroup.GET("/:id", mallCtrl.Get)
-		mallGroup.PATCH("/:id", mallCtrl.Update)
-		mallGroup.DELETE("/:id", mallCtrl.Delete)
-		mallGroup.POST("/:id/geocode", weatherWriteEnabled, mallCtrl.TriggerGeocode)
-		mallGroup.GET("/:id/geocode-candidates", mallCtrl.ListGeocodeCandidates)
-		mallGroup.POST("/:id/geocode-confirm", mallCtrl.ConfirmGeocode)
+		mallGroup.POST("", middleware.RequirePermission(model.PermissionMallWrite), weatherWriteEnabled, mallCtrl.Create)
+		mallGroup.POST("/import", middleware.RequirePermission(model.PermissionMallWrite), weatherWriteEnabled, mallCtrl.Import)
+		mallGroup.GET("", middleware.RequirePermission(model.PermissionMallRead), mallCtrl.List)
+		mallGroup.GET("/:id", middleware.RequirePermission(model.PermissionMallRead), middleware.RequireMallScope("id"), mallCtrl.Get)
+		mallGroup.PATCH("/:id", middleware.RequirePermission(model.PermissionMallWrite), middleware.RequireMallScope("id"), mallCtrl.Update)
+		mallGroup.DELETE("/:id", middleware.RequirePermission(model.PermissionMallWrite), middleware.RequireMallScope("id"), mallCtrl.Delete)
+		mallGroup.POST("/:id/geocode", middleware.RequirePermission(model.PermissionMallWrite), middleware.RequireMallScope("id"), weatherWriteEnabled, mallCtrl.TriggerGeocode)
+		mallGroup.GET("/:id/geocode-candidates", middleware.RequirePermission(model.PermissionMallRead), middleware.RequireMallScope("id"), mallCtrl.ListGeocodeCandidates)
+		mallGroup.POST("/:id/geocode-confirm", middleware.RequirePermission(model.PermissionMallGeocodeConfirm), middleware.RequireMallScope("id"), mallCtrl.ConfirmGeocode)
 	}
 }
