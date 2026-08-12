@@ -2,8 +2,11 @@ package reportrepo
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
+
+	"github.com/google/uuid"
 
 	"gin-biz-web-api/model"
 
@@ -218,4 +221,53 @@ func validateReferenceCount(reference string, actual int64, expected int) error 
 		return invalidDraft(reference + " does not exist or is disabled")
 	}
 	return nil
+}
+
+type reportDraftAuditDetail struct {
+	VersionNumber  uint64 `json:"versionNumber"`
+	Code           string `json:"code,omitempty"`
+	DatasourceID   uint   `json:"datasourceId,omitempty"`
+	ParameterCount int    `json:"parameterCount"`
+	ColumnCount    int    `json:"columnCount"`
+	GrantCount     int    `json:"grantCount"`
+}
+
+func newDraftAudit(action string, actor, definitionID uint, versionNumber uint64, draft *Draft) model.ReportAudit {
+	detail := reportDraftAuditDetail{VersionNumber: versionNumber}
+	if draft != nil {
+		detail.Code = draft.Definition.Code
+		detail.DatasourceID = draft.Definition.DatasourceID
+		detail.ParameterCount = len(draft.Parameters)
+		detail.ColumnCount = len(draft.Columns)
+		detail.GrantCount = len(draft.Grants)
+	}
+	return buildReportAudit(action, actor, definitionID, detail)
+}
+
+func newCollectionAudit(actor, definitionID uint, versionNumber uint64, parameters []model.ReportParameter, columns []model.ReportColumn, grants []model.ReportGrant) model.ReportAudit {
+	return buildReportAudit("REPORT_DRAFT_COLLECTIONS_UPDATE", actor, definitionID, reportDraftAuditDetail{
+		VersionNumber: versionNumber, ParameterCount: len(parameters), ColumnCount: len(columns), GrantCount: len(grants),
+	})
+}
+
+func buildReportAudit(action string, actor, definitionID uint, detail reportDraftAuditDetail) model.ReportAudit {
+	encoded, err := json.Marshal(detail)
+	if err != nil {
+		encoded = []byte(`{}`)
+	}
+	return model.ReportAudit{
+		ActorUserID: actor, Action: action, TargetType: "REPORT_DEFINITION", TargetID: definitionID,
+		RequestID: uuid.NewString(), DetailJSON: model.JSONText(encoded),
+	}
+}
+
+func createReportAudit(ctx context.Context, tx *gorm.DB, audit model.ReportAudit) error {
+	if err := tx.WithContext(ctx).Create(&audit).Error; err != nil {
+		return fmt.Errorf("report draft: create audit: %w", err)
+	}
+	return nil
+}
+
+func finalizeReportMutation(ctx context.Context, tx *gorm.DB, audit model.ReportAudit, writeAudit reportAuditWriter) error {
+	return writeAudit(ctx, tx, audit)
 }

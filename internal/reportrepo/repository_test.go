@@ -3,6 +3,7 @@ package reportrepo
 import (
 	"context"
 	"database/sql"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -177,6 +178,49 @@ func TestRepositoryReferenceValidationStopsDraftWrites(t *testing.T) {
 				t.Fatalf("reference validation calls = %d, want 1", referenceCalls)
 			}
 		})
+	}
+}
+
+func TestDraftAuditContainsOnlySafeMetadata(t *testing.T) {
+	draft := validDraft()
+	draft.Parameters = []model.ReportParameter{{
+		ParameterCode: "secret", Position: 1, Sensitive: true,
+		DefaultValueJSON: model.JSONText(`"must-not-appear"`),
+	}}
+	draft.Columns = []model.ReportColumn{{LogicalCode: "orderNo", FieldID: "field-1"}}
+	draft.Grants = []model.ReportGrant{{SubjectType: "ROLE", SubjectID: 2}}
+
+	audit := newDraftAudit("REPORT_DRAFT_UPDATE", 8, 7, 4, draft)
+	if audit.ActorUserID != 8 || audit.TargetID != 7 || audit.TargetType != "REPORT_DEFINITION" || audit.Action != "REPORT_DRAFT_UPDATE" {
+		t.Fatalf("audit identity = %#v", audit)
+	}
+	if len(audit.RequestID) != 36 {
+		t.Fatalf("audit request id = %q", audit.RequestID)
+	}
+	if strings.Contains(string(audit.DetailJSON), "must-not-appear") || strings.Contains(string(audit.DetailJSON), "default") {
+		t.Fatalf("audit leaked configuration: %s", audit.DetailJSON)
+	}
+	var detail reportDraftAuditDetail
+	if err := json.Unmarshal([]byte(audit.DetailJSON), &detail); err != nil {
+		t.Fatalf("decode audit detail: %v", err)
+	}
+	if detail.VersionNumber != 4 || detail.ParameterCount != 1 || detail.ColumnCount != 1 || detail.GrantCount != 1 {
+		t.Fatalf("audit detail = %#v", detail)
+	}
+}
+
+func TestFinalizeReportMutationPropagatesAuditFailure(t *testing.T) {
+	auditError := errors.New("audit unavailable")
+	auditCalls := 0
+	err := finalizeReportMutation(context.Background(), newDryRunDB(t), model.ReportAudit{}, func(context.Context, *gorm.DB, model.ReportAudit) error {
+		auditCalls++
+		return auditError
+	})
+	if !errors.Is(err, auditError) {
+		t.Fatalf("finalizeReportMutation() error = %v, want audit error", err)
+	}
+	if auditCalls != 1 {
+		t.Fatalf("audit calls = %d, want 1", auditCalls)
 	}
 }
 

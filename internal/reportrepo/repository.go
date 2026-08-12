@@ -57,6 +57,7 @@ type transactionRunner func(context.Context, *gorm.DB, func(*gorm.DB) error) err
 type draftReferenceValidator func(context.Context, *gorm.DB, uint, []model.ReportGrant) error
 type draftDefinitionLocker func(context.Context, *gorm.DB, uint, uint) (*definitionRecord, error)
 type draftVersionLocker func(context.Context, *gorm.DB, uint, uint) (*versionRecord, error)
+type reportAuditWriter func(context.Context, *gorm.DB, model.ReportAudit) error
 
 type Repository struct {
 	db                 *gorm.DB
@@ -64,6 +65,7 @@ type Repository struct {
 	validateReferences draftReferenceValidator
 	lockDefinition     draftDefinitionLocker
 	lockVersion        draftVersionLocker
+	writeAudit         reportAuditWriter
 }
 
 func New(databases ...*gorm.DB) *Repository {
@@ -73,7 +75,7 @@ func New(databases ...*gorm.DB) *Repository {
 	}
 	return &Repository{
 		db: db, transact: runTransaction, validateReferences: validateDraftReferences,
-		lockDefinition: lockDraftDefinition, lockVersion: lockDraftVersion,
+		lockDefinition: lockDraftDefinition, lockVersion: lockDraftVersion, writeAudit: createReportAudit,
 	}
 }
 
@@ -123,6 +125,9 @@ func (repository *Repository) CreateDraft(ctx context.Context, ownerUserID uint,
 		}
 		if err := replaceCollections(ctx, tx, ownerUserID, definitionRecord.ID, versionRecord.ID,
 			draft.Parameters, draft.Columns, draft.Grants); err != nil {
+			return err
+		}
+		if err := finalizeReportMutation(ctx, tx, newDraftAudit("REPORT_DRAFT_CREATE", ownerUserID, definitionRecord.ID, versionRecord.VersionNumber, draft), repository.writeAudit); err != nil {
 			return err
 		}
 		draft.Definition.CurrentDraftVersionID = versionRecord.ID
@@ -288,6 +293,9 @@ func (repository *Repository) UpdateDraft(
 			draft.Parameters, draft.Columns, draft.Grants); err != nil {
 			return err
 		}
+		if err := finalizeReportMutation(ctx, tx, newDraftAudit("REPORT_DRAFT_UPDATE", ownerUserID, definitionID, nextRecord.VersionNumber, draft), repository.writeAudit); err != nil {
+			return err
+		}
 
 		draft.Definition.ID = definitionID
 		draft.Definition.OwnerUserID = ownerUserID
@@ -358,7 +366,10 @@ func (repository *Repository) SaveDraftCollections(
 		if result.RowsAffected != 1 {
 			return ErrDraftVersionConflict
 		}
-		return replaceCollections(ctx, tx, ownerUserID, definitionID, nextRecord.ID, parameters, columns, grants)
+		if err := replaceCollections(ctx, tx, ownerUserID, definitionID, nextRecord.ID, parameters, columns, grants); err != nil {
+			return err
+		}
+		return finalizeReportMutation(ctx, tx, newCollectionAudit(ownerUserID, definitionID, nextRecord.VersionNumber, parameters, columns, grants), repository.writeAudit)
 	})
 	if err != nil {
 		return 0, err
@@ -368,7 +379,7 @@ func (repository *Repository) SaveDraftCollections(
 
 func (repository *Repository) validate(ctx context.Context, ownerUserID uint) error {
 	if repository == nil || repository.db == nil || repository.transact == nil || repository.validateReferences == nil ||
-		repository.lockDefinition == nil || repository.lockVersion == nil || ctx == nil || ownerUserID == 0 {
+		repository.lockDefinition == nil || repository.lockVersion == nil || repository.writeAudit == nil || ctx == nil || ownerUserID == 0 {
 		return invalidDraft("repository, context and owner scope are required")
 	}
 	return nil
