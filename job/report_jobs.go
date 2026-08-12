@@ -11,12 +11,13 @@ import (
 )
 
 const (
-	TypeReportRun       = "report:run"
-	TypeReportExport    = "report:export"
-	ReportQueueName     = "report"
-	ReportRunTimeout    = 35 * time.Minute
-	ReportExportTimeout = 6 * time.Hour
-	ReportRunMaxRetry   = 3
+	TypeReportRun         = "report:run"
+	TypeReportExport      = "report:export"
+	ReportQueueName       = "report"
+	ReportExportQueueName = "report_export"
+	ReportRunTimeout      = 35 * time.Minute
+	ReportExportTimeout   = 6 * time.Hour
+	ReportRunMaxRetry     = 3
 )
 
 type ReportRunTaskPayload struct {
@@ -69,7 +70,7 @@ func NewReportExportTask(payload []byte) (*asynq.Task, error) {
 	if _, err := DecodeReportExportTaskPayload(payload); err != nil {
 		return nil, err
 	}
-	return asynq.NewTask(TypeReportExport, append([]byte(nil), payload...), asynq.Queue(ReportQueueName)), nil
+	return asynq.NewTask(TypeReportExport, append([]byte(nil), payload...), asynq.Queue(ReportExportQueueName)), nil
 }
 
 func ReportOutboxTaskDefinitions(maxRetry int) []OutboxTaskDefinition {
@@ -80,5 +81,5 @@ func ReportOutboxTaskDefinitions(maxRetry int) []OutboxTaskDefinition {
 // export worker is enabled, so rolling deployments never publish tasks to an
 // instance without a handler.
 func ReportExportOutboxTaskDefinitions(maxRetry int) []OutboxTaskDefinition {
-	return []OutboxTaskDefinition{{TaskType: TypeReportExport, Queue: ReportQueueName, MaxRetry: maxRetry, Timeout: ReportExportTimeout, Build: NewReportExportTask}}
+	return []OutboxTaskDefinition{{TaskType: TypeReportExport, Queue: ReportExportQueueName, MaxRetry: maxRetry, Timeout: ReportExportTimeout, Build: NewReportExportTask}}
 }

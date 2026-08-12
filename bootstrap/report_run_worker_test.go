@@ -40,8 +40,11 @@ func TestReportWorkerQueuesAreEnabledAtomically(t *testing.T) {
 	if _, exists := disabled[job.ReportQueueName]; exists {
 		t.Fatalf("disabled queues contain report: %#v", disabled)
 	}
+	if _, exists := disabled[job.ReportExportQueueName]; exists {
+		t.Fatalf("disabled queues contain report export: %#v", disabled)
+	}
 	enabled := reportWorkerQueues(configured, true, 2)
-	if enabled[job.ReportQueueName] != 2 || configured[job.ReportQueueName] != 99 {
+	if enabled[job.ReportQueueName] != 2 || enabled[job.ReportExportQueueName] != 2 || configured[job.ReportQueueName] != 99 {
 		t.Fatalf("enabled=%#v configured=%#v", enabled, configured)
 	}
 }

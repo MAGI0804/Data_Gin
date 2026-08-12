@@ -56,6 +56,8 @@ func setupQueueJob() {
 	if reportWorkerEnabled {
 		reportProcessor := data_svc.NewReportRunProcessor()
 		mux.HandleFunc(job.TypeReportRun, newReportRunHandler(reportProcessor))
+		reportExportProcessor := data_svc.NewReportExportProcessor()
+		mux.HandleFunc(job.TypeReportExport, newReportExportHandler(reportExportProcessor))
 	}
 	if cleanupTask, err := job.NewExcelMatchCleanupTask(); err != nil {
 		console.Warning("Failed to create initial Excel match cleanup task: %v", err)
@@ -144,10 +146,14 @@ type reportRunProcessor interface {
 	Process(context.Context, uint, bool) error
 }
 
+type reportExportProcessor interface {
+	Process(context.Context, uint, bool) error
+}
+
 func reportWorkerQueues(configured map[string]int, enabled bool, weight int) map[string]int {
-	queues := make(map[string]int, len(configured)+1)
+	queues := make(map[string]int, len(configured)+2)
 	for name, value := range configured {
-		if name != job.ReportQueueName {
+		if name != job.ReportQueueName && name != job.ReportExportQueueName {
 			queues[name] = value
 		}
 	}
@@ -156,6 +162,7 @@ func reportWorkerQueues(configured map[string]int, enabled bool, weight int) map
 			weight = 2
 		}
 		queues[job.ReportQueueName] = weight
+		queues[job.ReportExportQueueName] = weight
 	}
 	return queues
 }
@@ -174,6 +181,28 @@ func newReportRunHandler(processor reportRunProcessor) asynq.HandlerFunc {
 		}
 		if err := processor.Process(ctx, payload.RunID, mallWeatherExportRetryAllowed(ctx)); err != nil {
 			if errors.Is(err, data_svc.ErrReportRunProcessNonRetryable) {
+				return fmt.Errorf("%w: %v", asynq.SkipRetry, err)
+			}
+			return err
+		}
+		return nil
+	}
+}
+
+func newReportExportHandler(processor reportExportProcessor) asynq.HandlerFunc {
+	return func(ctx context.Context, task *asynq.Task) error {
+		if processor == nil {
+			return fmt.Errorf("report export handler: processor is not configured")
+		}
+		if task == nil || task.Type() != job.TypeReportExport {
+			return fmt.Errorf("%w: invalid report export task", asynq.SkipRetry)
+		}
+		payload, err := job.DecodeReportExportTaskPayload(task.Payload())
+		if err != nil {
+			return fmt.Errorf("%w: %v", asynq.SkipRetry, err)
+		}
+		if err := processor.Process(ctx, payload.ExportID, mallWeatherExportRetryAllowed(ctx)); err != nil {
+			if errors.Is(err, data_svc.ErrReportExportProcessNonRetryable) {
 				return fmt.Errorf("%w: %v", asynq.SkipRetry, err)
 			}
 			return err

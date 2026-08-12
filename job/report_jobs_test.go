@@ -70,7 +70,7 @@ func TestOutboxRegistryResolvesReportExport(t *testing.T) {
 	}
 	task, options, err := registry.Resolve(model.AsyncJobOutbox{
 		TaskKey: "report:export:export-uuid", TaskType: TypeReportExport,
-		QueueName: ReportQueueName, PayloadJSON: model.JSONText(`{"export_id":41}`),
+		QueueName: ReportExportQueueName, PayloadJSON: model.JSONText(`{"export_id":41}`),
 	})
 	if err != nil || task.Type() != TypeReportExport || options.Timeout != ReportExportTimeout || options.MaxRetry != ReportRunMaxRetry {
 		t.Fatalf("Resolve() task=%#v options=%#v error=%v", task, options, err)

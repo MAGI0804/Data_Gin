@@ -72,9 +72,9 @@ func (repository *Repository) CreateOrGetExport(ctx context.Context, actor, runI
 
 func validReportExportOutbox(outbox model.AsyncJobOutbox, exportUUID string) bool {
 	return outbox.ID == 0 && outbox.TaskKey == "report:export:"+exportUUID && outbox.TaskType == "report:export" &&
-		outbox.QueueName == "report" && !outbox.AvailableAt.IsZero() && outbox.PublishedAt == nil && string(outbox.PayloadJSON) == `{"export_id":0}`
+		outbox.QueueName == "report_export" && !outbox.AvailableAt.IsZero() && outbox.PublishedAt == nil && string(outbox.PayloadJSON) == `{"export_id":0}`
 }
 
 func NewReportExportOutbox(exportUUID string, now time.Time) model.AsyncJobOutbox {
-	return model.AsyncJobOutbox{TaskKey: "report:export:" + exportUUID, TaskType: "report:export", PayloadJSON: model.JSONText(`{"export_id":0}`), QueueName: "report", AvailableAt: now.UTC()}
+	return model.AsyncJobOutbox{TaskKey: "report:export:" + exportUUID, TaskType: "report:export", PayloadJSON: model.JSONText(`{"export_id":0}`), QueueName: "report_export", AvailableAt: now.UTC()}
 }

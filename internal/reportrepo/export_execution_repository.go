@@ -397,6 +397,26 @@ func (repository *Repository) MarkResultPurged(ctx context.Context, exportID uin
 	})
 }
 
+func (repository *Repository) ConfirmResultPurged(ctx context.Context, exportID uint) (bool, error) {
+	if repository == nil || repository.db == nil || ctx == nil || exportID == 0 {
+		return false, fmt.Errorf("report result purge: invalid confirmation")
+	}
+	var export model.ReportExport
+	if err := repository.db.WithContext(ctx).Select("run_id", "purged_at").First(&export, exportID).Error; errors.Is(err, gorm.ErrRecordNotFound) {
+		return false, nil
+	} else if err != nil {
+		return false, fmt.Errorf("report result purge: confirm export: %w", err)
+	}
+	if export.PurgedAt == nil {
+		return false, nil
+	}
+	var run model.ReportRun
+	if err := repository.db.WithContext(ctx).Select("status", "result_purged_at").First(&run, export.RunID).Error; err != nil {
+		return false, fmt.Errorf("report result purge: confirm run: %w", err)
+	}
+	return run.Status == model.ReportRunStatusResultPurged && run.ResultPurgedAt != nil, nil
+}
+
 func (repository *Repository) ReleaseResultPurge(ctx context.Context, exportID uint, leaseToken string, now time.Time) error {
 	if repository == nil || repository.db == nil || ctx == nil || exportID == 0 || uuid.Validate(leaseToken) != nil || now.IsZero() {
 		return fmt.Errorf("report result purge: invalid release")
