@@ -1,12 +1,16 @@
 package reportrepo
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
+	"strings"
 	"time"
 
+	"gin-biz-web-api/internal/reportquery"
 	"gin-biz-web-api/model"
 
 	"github.com/google/uuid"
@@ -24,7 +28,7 @@ type CreateExportCommand struct {
 	Outbox model.AsyncJobOutbox
 }
 
-func (repository *Repository) CreateOrGetExport(ctx context.Context, actor, runID uint, command *CreateExportCommand) (bool, error) {
+func (repository *Repository) CreateOrGetExport(ctx context.Context, actor, runID uint, input reportquery.Input, command *CreateExportCommand) (bool, error) {
 	if repository == nil || repository.db == nil || repository.writeAudit == nil || ctx == nil || actor == 0 || runID == 0 || command == nil ||
 		uuid.Validate(command.Export.ExportUUID) != nil || command.Export.RunID != runID || command.Export.CreatedBy != actor ||
 		command.Export.Status != model.ReportExportStatusPending || !validReportExportOutbox(command.Outbox, command.Export.ExportUUID) {
@@ -47,14 +51,31 @@ func (repository *Repository) CreateOrGetExport(ctx context.Context, actor, runI
 		} else if err != nil {
 			return fmt.Errorf("report export: authorize report: %w", err)
 		}
+		columns, err := FrozenExportQueryColumns(run.PresentationSnapshotJSON)
+		if err != nil {
+			return ErrReportExportRunNotReady
+		}
+		query, err := reportquery.Normalize(input, columns)
+		if err != nil {
+			return ErrReportExportRunNotReady
+		}
+		filtersJSON, sortJSON, err := reportquery.Encode(query)
+		if err != nil {
+			return fmt.Errorf("report export: encode frozen query: %w", err)
+		}
 		var existing model.ReportExport
 		if err := tx.Where("run_id = ?", runID).First(&existing).Error; err == nil {
+			if string(existing.FrozenFiltersJSON) != string(filtersJSON) || string(existing.FrozenSortJSON) != string(sortJSON) {
+				return ErrReportExportRunNotReady
+			}
 			command.Export = existing
 			return nil
 		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
 			return fmt.Errorf("report export: find existing: %w", err)
 		}
 		command.Export.FrozenColumnsJSON = run.PresentationSnapshotJSON
+		command.Export.FrozenFiltersJSON = model.JSONText(filtersJSON)
+		command.Export.FrozenSortJSON = model.JSONText(sortJSON)
 		if err := tx.Create(&command.Export).Error; err != nil {
 			return fmt.Errorf("report export: create job: %w", err)
 		}
@@ -73,6 +94,62 @@ func (repository *Repository) CreateOrGetExport(ctx context.Context, actor, runI
 		return nil
 	})
 	return created, err
+}
+
+type frozenExportQueryColumn struct {
+	FieldID           string          `json:"fieldId"`
+	LogicalCode       string          `json:"logicalCode"`
+	DatabaseColumn    string          `json:"databaseColumn"`
+	ValueType         string          `json:"valueType"`
+	SourceOracleType  string          `json:"sourceOracleType"`
+	Precision         *int            `json:"precision,omitempty"`
+	Scale             *int            `json:"scale,omitempty"`
+	Nullable          bool            `json:"nullable"`
+	PreviewHeader     string          `json:"previewHeader"`
+	ExcelHeader       string          `json:"excelHeader"`
+	DisplayOrder      int             `json:"displayOrder"`
+	ExportOrder       int             `json:"exportOrder"`
+	PreviewVisible    bool            `json:"previewVisible"`
+	ExportVisible     bool            `json:"exportVisible"`
+	Filterable        bool            `json:"filterable"`
+	Sortable          bool            `json:"sortable"`
+	ExportAllowed     bool            `json:"exportAllowed"`
+	AllowedOperators  json.RawMessage `json:"allowedOperators,omitempty"`
+	Format            json.RawMessage `json:"format,omitempty"`
+	DictionaryVersion json.RawMessage `json:"dictionaryVersion,omitempty"`
+	MaskingPolicy     json.RawMessage `json:"maskingPolicy,omitempty"`
+	ExcelWidth        float64         `json:"excelWidth"`
+	NullDisplay       string          `json:"nullDisplay"`
+}
+
+func FrozenExportQueryColumns(raw model.JSONText) ([]reportquery.Column, error) {
+	columns, err := decodeFrozenExportQueryColumns(raw)
+	if err != nil {
+		return nil, err
+	}
+	result := make([]reportquery.Column, 0, len(columns))
+	for _, column := range columns {
+		var operators []string
+		if len(bytes.TrimSpace(column.AllowedOperators)) > 0 && json.Unmarshal(column.AllowedOperators, &operators) != nil {
+			return nil, fmt.Errorf("report export: invalid frozen operators")
+		}
+		masked := len(bytes.TrimSpace(column.MaskingPolicy)) > 0 && !bytes.Equal(bytes.TrimSpace(column.MaskingPolicy), []byte("{}")) && !bytes.Equal(bytes.TrimSpace(column.MaskingPolicy), []byte("null"))
+		result = append(result, reportquery.Column{FieldID: column.FieldID, LogicalCode: column.LogicalCode, DatabaseColumn: column.DatabaseColumn, ValueType: column.ValueType, SourceOracleType: column.SourceOracleType, Nullable: column.Nullable, Filterable: column.PreviewVisible && column.Filterable && !masked, Sortable: column.PreviewVisible && column.Sortable && !masked, AllowedOperators: operators})
+	}
+	return result, nil
+}
+
+func decodeFrozenExportQueryColumns(raw model.JSONText) ([]frozenExportQueryColumn, error) {
+	var columns []frozenExportQueryColumn
+	decoder := json.NewDecoder(strings.NewReader(string(raw)))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&columns); err != nil {
+		return nil, err
+	}
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		return nil, fmt.Errorf("report export: frozen columns contain trailing data")
+	}
+	return columns, nil
 }
 
 func validReportExportOutbox(outbox model.AsyncJobOutbox, exportUUID string) bool {

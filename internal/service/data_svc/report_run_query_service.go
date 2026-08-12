@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"gin-biz-web-api/internal/reportoracle"
+	"gin-biz-web-api/internal/reportquery"
 	"gin-biz-web-api/internal/reportrepo"
 	"gin-biz-web-api/internal/reportsecret"
 	"gin-biz-web-api/model"
@@ -37,7 +38,7 @@ type reportRunQueryStore interface {
 }
 
 type reportResultPageReader interface {
-	Read(context.Context, reportrepo.RunResultContract, string, []string, *int64, int) (reportoracle.ResultPage, error)
+	Read(context.Context, reportrepo.RunResultContract, string, []string, reportquery.Query, *reportoracle.ResultCursor, int) (reportoracle.ResultPage, error)
 }
 
 type ReportRunViewDTO struct {
@@ -60,12 +61,15 @@ type ReportRunViewDTO struct {
 }
 
 type ReportResultColumnDTO struct {
-	FieldID     string `json:"fieldId"`
-	Code        string `json:"code"`
-	Header      string `json:"header"`
-	ValueType   string `json:"valueType"`
-	Nullable    bool   `json:"nullable"`
-	NullDisplay string `json:"nullDisplay,omitempty"`
+	FieldID          string   `json:"fieldId"`
+	Code             string   `json:"code"`
+	Header           string   `json:"header"`
+	ValueType        string   `json:"valueType"`
+	Nullable         bool     `json:"nullable"`
+	NullDisplay      string   `json:"nullDisplay,omitempty"`
+	Filterable       bool     `json:"filterable"`
+	Sortable         bool     `json:"sortable"`
+	AllowedOperators []string `json:"allowedOperators"`
 }
 
 type ReportResultRowDTO struct {
@@ -135,6 +139,10 @@ func (service *ReportRunQueryService) Cancel(ctx context.Context, actor, runID u
 }
 
 func (service *ReportRunQueryService) ReadResults(ctx context.Context, actor, runID uint, cursor string, limit int) (*ReportResultPageDTO, error) {
+	return service.QueryResults(ctx, actor, runID, reportquery.Input{}, cursor, limit)
+}
+
+func (service *ReportRunQueryService) QueryResults(ctx context.Context, actor, runID uint, input reportquery.Input, cursor string, limit int) (*ReportResultPageDTO, error) {
 	if service == nil || ctx == nil || actor == 0 || runID == 0 || limit < 1 || limit > 1000 || len(cursor) > maxReportResultCursorLength {
 		return nil, ErrReportRunQueryInvalid
 	}
@@ -142,17 +150,29 @@ func (service *ReportRunQueryService) ReadResults(ctx context.Context, actor, ru
 	if err != nil {
 		return nil, classifyReportRunQueryError(err)
 	}
-	columns, err := frozenPreviewColumns(contract.Run.PresentationSnapshotJSON)
-	if err != nil || len(columns) == 0 {
+	allColumns, err := frozenResultColumns(contract.Run.PresentationSnapshotJSON)
+	if err != nil {
 		return nil, ErrReportRunQueryConflict
 	}
-	var after *int64
+	columns := previewColumns(allColumns)
+	if len(columns) == 0 {
+		return nil, ErrReportRunQueryConflict
+	}
+	query, err := reportquery.Normalize(input, reportQueryColumns(allColumns))
+	if err != nil {
+		return nil, ErrReportRunQueryInvalid
+	}
+	fingerprint, err := reportquery.Fingerprint(query)
+	if err != nil {
+		return nil, ErrReportRunResultTemporary
+	}
+	var after *reportoracle.ResultCursor
 	if strings.TrimSpace(cursor) != "" {
-		decoded, decodeErr := service.decodeCursor(cursor, contract.Run, limit)
+		decoded, decodeErr := service.decodeCursor(cursor, contract.Run, limit, fingerprint)
 		if decodeErr != nil {
 			return nil, ErrReportRunQueryInvalid
 		}
-		after = &decoded.AfterRowID
+		after = &reportoracle.ResultCursor{RowID: decoded.AfterRowID, SortValue: decoded.SortValue}
 	}
 	password, err := service.credential.Decrypt(contract.Datasource.CredentialKeyVersion, contract.Datasource.PasswordCiphertext)
 	if err != nil {
@@ -162,7 +182,7 @@ func (service *ReportRunQueryService) ReadResults(ctx context.Context, actor, ru
 	for index := range columns {
 		databaseColumns[index] = columns[index].DatabaseColumn
 	}
-	page, err := service.reader.Read(ctx, *contract, password, databaseColumns, after, limit)
+	page, err := service.reader.Read(ctx, *contract, password, databaseColumns, query, after, limit)
 	if err != nil {
 		return nil, ErrReportRunResultTemporary
 	}
@@ -170,8 +190,14 @@ func (service *ReportRunQueryService) ReadResults(ctx context.Context, actor, ru
 		Run: reportRunView(contract.Run, service.now()), Columns: make([]ReportResultColumnDTO, len(columns)),
 		Rows: make([]ReportResultRowDTO, 0, len(page.Rows)), Pagination: ReportResultPaginationDTO{PageSize: limit, HasMore: page.HasNext},
 	}
+	queryColumnsByID := make(map[string]reportquery.Column, len(allColumns))
+	for _, column := range reportQueryColumns(allColumns) {
+		queryColumnsByID[column.FieldID] = column
+	}
 	for index, column := range columns {
-		result.Columns[index] = ReportResultColumnDTO{FieldID: column.FieldID, Code: column.LogicalCode, Header: column.PreviewHeader, ValueType: column.ValueType, Nullable: column.Nullable, NullDisplay: column.NullDisplay}
+		operators, _ := frozenAllowedOperators(column.AllowedOperators)
+		capability := queryColumnsByID[column.FieldID]
+		result.Columns[index] = ReportResultColumnDTO{FieldID: column.FieldID, Code: column.LogicalCode, Header: column.PreviewHeader, ValueType: column.ValueType, Nullable: column.Nullable, NullDisplay: column.NullDisplay, Filterable: capability.Filterable, Sortable: capability.Sortable, AllowedOperators: operators}
 	}
 	for _, row := range page.Rows {
 		if len(row.Values) != len(columns) {
@@ -184,7 +210,12 @@ func (service *ReportRunQueryService) ReadResults(ctx context.Context, actor, ru
 		result.Rows = append(result.Rows, ReportResultRowDTO{Key: strconv.FormatInt(row.RowID, 10), Values: values})
 	}
 	if page.HasNext {
-		result.Pagination.NextCursor, err = service.encodeCursor(reportResultCursor{Version: 1, RunUUID: contract.Run.RunUUID, ContractHash: contract.Run.ContractHash, PageSize: limit, AfterRowID: page.NextRowID})
+		cursor := reportResultCursor{Version: 2, RunUUID: contract.Run.RunUUID, ContractHash: contract.Run.ContractHash, PageSize: limit, QueryFingerprint: fingerprint, AfterRowID: page.NextRowID}
+		if len(query.Sort) == 1 {
+			last := page.Rows[len(page.Rows)-1]
+			cursor.SortValue = last.SortValue
+		}
+		result.Pagination.NextCursor, err = service.encodeCursor(cursor)
 		if err != nil {
 			return nil, ErrReportRunResultTemporary
 		}
@@ -218,7 +249,7 @@ type frozenResultColumn struct {
 	NullDisplay       string          `json:"nullDisplay"`
 }
 
-func frozenPreviewColumns(raw model.JSONText) ([]frozenResultColumn, error) {
+func frozenResultColumns(raw model.JSONText) ([]frozenResultColumn, error) {
 	var columns []frozenResultColumn
 	decoder := json.NewDecoder(bytes.NewReader([]byte(raw)))
 	decoder.DisallowUnknownFields()
@@ -228,13 +259,73 @@ func frozenPreviewColumns(raw model.JSONText) ([]frozenResultColumn, error) {
 	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
 		return nil, fmt.Errorf("presentation snapshot contains trailing data")
 	}
-	visible := columns[:0]
 	for _, column := range columns {
-		if column.PreviewVisible && column.FieldID != "" && column.LogicalCode != "" && column.DatabaseColumn != "" {
+		if column.FieldID == "" || column.LogicalCode == "" || column.DatabaseColumn == "" {
+			return nil, fmt.Errorf("presentation snapshot contains invalid column")
+		}
+		if _, err := frozenAllowedOperators(column.AllowedOperators); err != nil {
+			return nil, err
+		}
+	}
+	return columns, nil
+}
+
+func frozenPreviewColumns(raw model.JSONText) ([]frozenResultColumn, error) {
+	columns, err := frozenResultColumns(raw)
+	if err != nil {
+		return nil, err
+	}
+	return previewColumns(columns), nil
+}
+
+func previewColumns(columns []frozenResultColumn) []frozenResultColumn {
+	visible := make([]frozenResultColumn, 0, len(columns))
+	for _, column := range columns {
+		if column.PreviewVisible {
 			visible = append(visible, column)
 		}
 	}
-	return visible, nil
+	return visible
+}
+
+func frozenAllowedOperators(raw json.RawMessage) ([]string, error) {
+	if len(bytes.TrimSpace(raw)) == 0 {
+		return []string{}, nil
+	}
+	var operators []string
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&operators); err != nil {
+		return nil, err
+	}
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		return nil, fmt.Errorf("allowed operators contain trailing data")
+	}
+	allowed := map[string]struct{}{"EQ": {}, "NE": {}, "GT": {}, "GTE": {}, "LT": {}, "LTE": {}, "IN": {}, "NOT_IN": {}, "IS_NULL": {}, "IS_NOT_NULL": {}, "CONTAINS": {}, "STARTS_WITH": {}, "BETWEEN": {}}
+	seen := make(map[string]struct{}, len(operators))
+	result := make([]string, 0, len(operators))
+	for _, operator := range operators {
+		operator = strings.ToUpper(strings.TrimSpace(operator))
+		if _, ok := allowed[operator]; !ok {
+			return nil, fmt.Errorf("unsupported result operator")
+		}
+		if _, duplicate := seen[operator]; duplicate {
+			continue
+		}
+		seen[operator] = struct{}{}
+		result = append(result, operator)
+	}
+	return result, nil
+}
+
+func reportQueryColumns(columns []frozenResultColumn) []reportquery.Column {
+	result := make([]reportquery.Column, 0, len(columns))
+	for _, column := range columns {
+		operators, _ := frozenAllowedOperators(column.AllowedOperators)
+		masked := len(bytes.TrimSpace(column.MaskingPolicy)) > 0 && !bytes.Equal(bytes.TrimSpace(column.MaskingPolicy), []byte("{}")) && !bytes.Equal(bytes.TrimSpace(column.MaskingPolicy), []byte("null"))
+		result = append(result, reportquery.Column{FieldID: column.FieldID, LogicalCode: column.LogicalCode, DatabaseColumn: column.DatabaseColumn, ValueType: column.ValueType, SourceOracleType: column.SourceOracleType, Nullable: column.Nullable, Filterable: column.PreviewVisible && column.Filterable && !masked, Sortable: column.PreviewVisible && column.Sortable && !masked, AllowedOperators: operators})
+	}
+	return result
 }
 
 func reportRunView(run model.ReportRun, now time.Time) ReportRunViewDTO {
@@ -270,11 +361,13 @@ func reportResultValue(value interface{}, column frozenResultColumn) interface{}
 }
 
 type reportResultCursor struct {
-	Version      int    `json:"v"`
-	RunUUID      string `json:"runUuid"`
-	ContractHash string `json:"contractHash"`
-	PageSize     int    `json:"pageSize"`
-	AfterRowID   int64  `json:"afterRowId"`
+	Version          int                `json:"v"`
+	RunUUID          string             `json:"runUuid"`
+	ContractHash     string             `json:"contractHash"`
+	PageSize         int                `json:"pageSize"`
+	AfterRowID       int64              `json:"afterRowId"`
+	QueryFingerprint string             `json:"queryFingerprint"`
+	SortValue        *reportquery.Value `json:"sortValue,omitempty"`
 }
 
 func (service *ReportRunQueryService) encodeCursor(cursor reportResultCursor) (string, error) {
@@ -287,7 +380,7 @@ func (service *ReportRunQueryService) encodeCursor(cursor reportResultCursor) (s
 	return base64.RawURLEncoding.EncodeToString(payload) + "." + base64.RawURLEncoding.EncodeToString(mac.Sum(nil)), nil
 }
 
-func (service *ReportRunQueryService) decodeCursor(value string, run model.ReportRun, limit int) (reportResultCursor, error) {
+func (service *ReportRunQueryService) decodeCursor(value string, run model.ReportRun, limit int, fingerprint string) (reportResultCursor, error) {
 	parts := strings.Split(value, ".")
 	if len(parts) != 2 {
 		return reportResultCursor{}, ErrReportRunQueryInvalid
@@ -308,7 +401,7 @@ func (service *ReportRunQueryService) decodeCursor(value string, run model.Repor
 	var cursor reportResultCursor
 	decoder := json.NewDecoder(bytes.NewReader(payload))
 	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&cursor); err != nil || cursor.Version != 1 || cursor.RunUUID != run.RunUUID || cursor.ContractHash != run.ContractHash || cursor.PageSize != limit {
+	if err := decoder.Decode(&cursor); err != nil || cursor.Version != 2 || cursor.RunUUID != run.RunUUID || cursor.ContractHash != run.ContractHash || cursor.PageSize != limit || cursor.QueryFingerprint != fingerprint {
 		return reportResultCursor{}, ErrReportRunQueryInvalid
 	}
 	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
@@ -330,7 +423,7 @@ func classifyReportRunQueryError(err error) error {
 
 type oracleReportResultPageReader struct{}
 
-func (oracleReportResultPageReader) Read(ctx context.Context, contract reportrepo.RunResultContract, password string, columns []string, after *int64, limit int) (reportoracle.ResultPage, error) {
+func (oracleReportResultPageReader) Read(ctx context.Context, contract reportrepo.RunResultContract, password string, columns []string, query reportquery.Query, after *reportoracle.ResultCursor, limit int) (reportoracle.ResultPage, error) {
 	adapter, err := reportoracle.Open(ctx, oracleConfigFromDatasource(contract.Datasource, password))
 	if err != nil {
 		return reportoracle.ResultPage{}, err
@@ -344,7 +437,7 @@ func (oracleReportResultPageReader) Read(ctx context.Context, contract reportrep
 	if err != nil {
 		return reportoracle.ResultPage{}, err
 	}
-	plan, err := reportoracle.BuildResultPagePlan(snapshot, columns)
+	plan, err := reportoracle.BuildResultQueryPlan(snapshot, columns, query)
 	if err != nil {
 		return reportoracle.ResultPage{}, err
 	}

@@ -180,7 +180,15 @@ export type ReportResultColumn = {
   valueType: string
   nullable: boolean
   nullDisplay: string
+	filterable: boolean
+	sortable: boolean
+	allowedOperators: ReportFilterOperator[]
 }
+
+export type ReportFilterOperator = 'EQ' | 'NE' | 'GT' | 'GTE' | 'LT' | 'LTE' | 'IN' | 'NOT_IN' | 'IS_NULL' | 'IS_NOT_NULL' | 'CONTAINS' | 'STARTS_WITH' | 'BETWEEN'
+export type ReportResultFilter = { field: string; operator: ReportFilterOperator; value?: unknown }
+export type ReportResultSort = { field: string; direction: 'ASC' | 'DESC' }
+export type ReportResultQuery = { filters: ReportResultFilter[]; sort: ReportResultSort[] }
 
 export type ReportResultRow = { key: string; values: Record<string, unknown> }
 

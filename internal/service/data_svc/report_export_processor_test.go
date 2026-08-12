@@ -91,7 +91,7 @@ type fakeReportExportOracleSession struct {
 	purgeCalls  int
 }
 
-func (session *fakeReportExportOracleSession) Read(_ context.Context, _ []string, _ *int64, _ int) (reportoracle.ResultPage, error) {
+func (session *fakeReportExportOracleSession) Read(_ context.Context, _ []string, _ *reportoracle.ResultCursor, _ int) (reportoracle.ResultPage, error) {
 	page := session.pages[session.readCalls]
 	session.readCalls++
 	return page, nil

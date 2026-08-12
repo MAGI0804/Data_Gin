@@ -322,6 +322,7 @@ func registerReportRunRoutes(api *gin.RouterGroup, runCtrl *data_ctrl.ReportRunC
 	runGroup.Use(middleware.AuthJWT())
 	runGroup.GET("/:id", middleware.RequirePermission(model.PermissionReportRead), runCtrl.Get)
 	runGroup.GET("/:id/results", middleware.RequirePermission(model.PermissionReportRead), runCtrl.Results)
+	runGroup.POST("/:id/results/query", middleware.RequirePermission(model.PermissionReportRead), runCtrl.QueryResults)
 	runGroup.POST("/:id/cancel", middleware.RequirePermission(model.PermissionReportExecute), runCtrl.Cancel)
 }
 

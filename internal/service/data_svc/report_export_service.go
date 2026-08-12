@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"time"
 
+	"gin-biz-web-api/internal/reportquery"
 	"gin-biz-web-api/internal/reportrepo"
 	"gin-biz-web-api/model"
 
@@ -19,7 +20,7 @@ var (
 )
 
 type reportExportStore interface {
-	CreateOrGetExport(context.Context, uint, uint, *reportrepo.CreateExportCommand) (bool, error)
+	CreateOrGetExport(context.Context, uint, uint, reportquery.Input, *reportrepo.CreateExportCommand) (bool, error)
 }
 
 type ReportExportDTO struct {
@@ -46,7 +47,7 @@ func NewReportExportServiceWithStore(store reportExportStore) *ReportExportServi
 	return &ReportExportService{store: store, now: func() time.Time { return time.Now().UTC() }}
 }
 
-func (service *ReportExportService) Create(ctx context.Context, actor, runID uint) (*ReportExportDTO, bool, error) {
+func (service *ReportExportService) Create(ctx context.Context, actor, runID uint, query reportquery.Input) (*ReportExportDTO, bool, error) {
 	if service == nil || ctx == nil || actor == 0 || runID == 0 {
 		return nil, false, ErrReportExportInvalid
 	}
@@ -56,7 +57,7 @@ func (service *ReportExportService) Create(ctx context.Context, actor, runID uin
 		ExportUUID: exportUUID, RunID: runID, Status: model.ReportExportStatusPending,
 		FrozenFiltersJSON: model.JSONText(`{}`), FrozenSortJSON: model.JSONText(`[]`), FrozenColumnsJSON: model.JSONText(`[]`), CreatedBy: actor,
 	}, Outbox: reportrepo.NewReportExportOutbox(exportUUID, now)}
-	created, err := service.store.CreateOrGetExport(ctx, actor, runID, command)
+	created, err := service.store.CreateOrGetExport(ctx, actor, runID, query, command)
 	if err != nil {
 		switch {
 		case errors.Is(err, reportrepo.ErrReportRunAccessNotFound):

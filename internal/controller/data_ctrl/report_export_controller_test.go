@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"gin-biz-web-api/constant"
+	"gin-biz-web-api/internal/reportquery"
 	"gin-biz-web-api/internal/service/data_svc"
 	"gin-biz-web-api/model"
 
@@ -42,7 +43,7 @@ type fakeReportExportControllerService struct {
 	exportID uint
 }
 
-func (service *fakeReportExportControllerService) Create(_ context.Context, actor, runID uint) (*data_svc.ReportExportDTO, bool, error) {
+func (service *fakeReportExportControllerService) Create(_ context.Context, actor, runID uint, _ reportquery.Input) (*data_svc.ReportExportDTO, bool, error) {
 	service.actor, service.runID = actor, runID
 	return &data_svc.ReportExportDTO{ID: 41, RunID: runID, Status: model.ReportExportStatusPending}, false, nil
 }

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"gin-biz-web-api/internal/reportoracle"
+	"gin-biz-web-api/internal/reportquery"
 	"gin-biz-web-api/internal/reportrepo"
 	"gin-biz-web-api/model"
 )
@@ -67,11 +68,11 @@ func TestReportResultCursorSupportsAnyOracleIntegerRowID(t *testing.T) {
 	service := newTestReportRunQueryService(&fakeReportRunQueryStore{}, &fakeReportResultReader{})
 	run := resultQueryRun(time.Date(2026, 8, 12, 12, 0, 0, 0, time.UTC))
 	for _, rowID := range []int64{-9, 0, 9} {
-		encoded, err := service.encodeCursor(reportResultCursor{Version: 1, RunUUID: run.RunUUID, ContractHash: run.ContractHash, PageSize: 20, AfterRowID: rowID})
+		encoded, err := service.encodeCursor(reportResultCursor{Version: 2, RunUUID: run.RunUUID, ContractHash: run.ContractHash, PageSize: 20, QueryFingerprint: "empty", AfterRowID: rowID})
 		if err != nil {
 			t.Fatalf("encode cursor %d: %v", rowID, err)
 		}
-		decoded, err := service.decodeCursor(encoded, run, 20)
+		decoded, err := service.decodeCursor(encoded, run, 20, "empty")
 		if err != nil || decoded.AfterRowID != rowID {
 			t.Fatalf("decode cursor %d = %#v, %v", rowID, decoded, err)
 		}
@@ -112,12 +113,12 @@ func (store *fakeReportRunQueryStore) LoadResultContractForActor(_ context.Conte
 
 type fakeReportResultReader struct {
 	columns []string
-	after   *int64
+	after   *reportoracle.ResultCursor
 	page    reportoracle.ResultPage
 	err     error
 }
 
-func (reader *fakeReportResultReader) Read(_ context.Context, _ reportrepo.RunResultContract, password string, columns []string, after *int64, _ int) (reportoracle.ResultPage, error) {
+func (reader *fakeReportResultReader) Read(_ context.Context, _ reportrepo.RunResultContract, password string, columns []string, _ reportquery.Query, after *reportoracle.ResultCursor, _ int) (reportoracle.ResultPage, error) {
 	if password != "password" {
 		return reportoracle.ResultPage{}, errors.New("unexpected password")
 	}

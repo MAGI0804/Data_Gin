@@ -1,6 +1,10 @@
 package requestbody
 
-import "encoding/json"
+import (
+	"encoding/json"
+
+	"gin-biz-web-api/internal/reportquery"
+)
 
 // ReportDraftSaveRequest is the complete mutable report contract. Updates
 // replace the draft atomically and require ExpectedLockVersion.
@@ -100,6 +104,18 @@ type ReportPublishRequest struct {
 type ReportRunCreateRequest struct {
 	Parameters   map[string]json.RawMessage `json:"parameters"`
 	RefreshNonce string                     `json:"refreshNonce,omitempty"`
+}
+
+type ReportResultQueryRequest struct {
+	Filters []reportquery.FilterInput `json:"filters"`
+	Sort    []reportquery.SortInput   `json:"sort"`
+	Cursor  string                    `json:"cursor,omitempty"`
+	Limit   int                       `json:"limit,omitempty"`
+}
+
+type ReportExportCreateRequest struct {
+	Filters []reportquery.FilterInput `json:"filters"`
+	Sort    []reportquery.SortInput   `json:"sort"`
 }
 
 type ReportDatasourceSaveRequest struct {

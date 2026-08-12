@@ -6,6 +6,8 @@ import (
 	"net/http"
 
 	"gin-biz-web-api/internal/service/data_svc"
+	"gin-biz-web-api/internal/requestbody"
+	"gin-biz-web-api/internal/reportquery"
 	"gin-biz-web-api/pkg/auth"
 	"gin-biz-web-api/pkg/errcode"
 	"gin-biz-web-api/pkg/responses"
@@ -14,7 +16,7 @@ import (
 )
 
 type ReportExportServiceAPI interface {
-	Create(context.Context, uint, uint) (*data_svc.ReportExportDTO, bool, error)
+	Create(context.Context, uint, uint, reportquery.Input) (*data_svc.ReportExportDTO, bool, error)
 }
 
 type ReportExportQueryServiceAPI interface {
@@ -44,7 +46,14 @@ func (controller *ReportExportController) Create(c *gin.Context) {
 		writeReportExportError(c, data_svc.ErrReportExportInvalid)
 		return
 	}
-	result, replayed, err := controller.create.Create(c.Request.Context(), auth.CurrentUserID(c), runID)
+	var request requestbody.ReportExportCreateRequest
+	if c.Request.ContentLength != 0 {
+		if err := decodeMallJSON(c, &request); err != nil {
+			writeReportExportError(c, data_svc.ErrReportExportInvalid)
+			return
+		}
+	}
+	result, replayed, err := controller.create.Create(c.Request.Context(), auth.CurrentUserID(c), runID, reportquery.Input{Filters: request.Filters, Sort: request.Sort})
 	if err != nil {
 		writeReportExportError(c, err)
 		return

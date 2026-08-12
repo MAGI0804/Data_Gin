@@ -71,12 +71,13 @@ test('run, result and export parsers preserve cursor and large numeric strings',
 
   const page = parseReportResultPage({ data: {
     run: runPayload,
-    columns: [{ fieldId: 'amount-id', code: 'amount', header: '金额', valueType: 'decimal' }],
+    columns: [{ fieldId: 'amount-id', code: 'amount', header: '金额', valueType: 'decimal', filterable: true, sortable: true, allowedOperators: ['EQ', 'BETWEEN'] }],
     rows: [{ key: '1', values: { amount: '9999999999999999.01' } }],
     pagination: { pageSize: 100, hasMore: true, nextCursor: 'signed.cursor' },
   } })
   assert.equal(page.rows[0].values.amount, '9999999999999999.01')
   assert.equal(page.pagination.nextCursor, 'signed.cursor')
+	assert.deepEqual(page.columns[0].allowedOperators, ['EQ', 'BETWEEN'])
 
   const reportExport = parseReportExport({ data: { id: 41, runId: 31, exportUuid: 'export-uuid', status: 'READY', exportedRows: 1, canDownload: true } })
   assert.equal(reportExport.status, 'READY')

@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"gin-biz-web-api/internal/reportquery"
 	"gin-biz-web-api/internal/service/data_svc"
 	"gin-biz-web-api/model"
 )
@@ -98,4 +99,8 @@ func (service *fakeReportRunQueryService) ReadResults(_ context.Context, actor, 
 	service.actor, service.runID, service.cursor, service.limit = actor, runID, cursor, limit
 	service.resultCalls++
 	return service.page, service.err
+}
+
+func (service *fakeReportRunQueryService) QueryResults(ctx context.Context, actor, runID uint, _ reportquery.Input, cursor string, limit int) (*data_svc.ReportResultPageDTO, error) {
+	return service.ReadResults(ctx, actor, runID, cursor, limit)
 }

@@ -83,7 +83,7 @@ type fakeReportExportPager struct {
 	calls int
 }
 
-func (pager *fakeReportExportPager) Read(_ context.Context, _ []string, _ *int64, _ int) (reportoracle.ResultPage, error) {
+func (pager *fakeReportExportPager) Read(_ context.Context, _ []string, _ *reportoracle.ResultCursor, _ int) (reportoracle.ResultPage, error) {
 	page := pager.pages[pager.calls]
 	pager.calls++
 	return page, nil

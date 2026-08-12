@@ -1,5 +1,5 @@
 import type { ClientResponse, HTTPMethod } from '../api/client'
-import type { ReportCatalogPage, ReportCatalogQuery, ReportColumn, ReportDatasource, ReportDatasourceInput, ReportDatasourceTest, ReportDefinitionStatus, ReportDraft, ReportExport, ReportGrant, ReportParameter, ReportResultPage, ReportRun, ReportRunContract, ReportRunStatus, ReportSummary } from './types'
+import type { ReportCatalogPage, ReportCatalogQuery, ReportColumn, ReportDatasource, ReportDatasourceInput, ReportDatasourceTest, ReportDefinitionStatus, ReportDraft, ReportExport, ReportFilterOperator, ReportGrant, ReportParameter, ReportResultPage, ReportResultQuery, ReportRun, ReportRunContract, ReportRunStatus, ReportSummary } from './types'
 
 type JsonRecord = Record<string, unknown>
 
@@ -150,8 +150,12 @@ export async function getReportResults(client: ReportCenterClient, runId: number
   return requestAndParse(client, `/v1/report-runs/${runId}/results?${query}`, { method: 'GET', signal }, parseReportResultPage, '报表结果加载失败。')
 }
 
-export async function createReportExport(client: ReportCenterClient, runId: number): Promise<ReportAPIResult<ReportExport>> {
-  return requestAndParse(client, `/v1/report-runs/${runId}/export`, { method: 'POST' }, parseReportExport, '正式导出创建失败。')
+export async function queryReportResults(client: ReportCenterClient, runId: number, query: ReportResultQuery, cursor = '', limit = 100, signal?: AbortSignal): Promise<ReportAPIResult<ReportResultPage>> {
+	return requestAndParse(client, `/v1/report-runs/${runId}/results/query`, { method: 'POST', body: { ...query, cursor, limit }, signal }, parseReportResultPage, '报表结果加载失败。')
+}
+
+export async function createReportExport(client: ReportCenterClient, runId: number, query: ReportResultQuery): Promise<ReportAPIResult<ReportExport>> {
+	return requestAndParse(client, `/v1/report-runs/${runId}/export`, { method: 'POST', body: query }, parseReportExport, '正式导出创建失败。')
 }
 
 export async function getReportExport(client: ReportCenterClient, exportId: number, signal?: AbortSignal): Promise<ReportAPIResult<ReportExport>> {
@@ -241,7 +245,8 @@ export function parseReportResultPage(payload: unknown): ReportResultPage {
     const fieldId = publicString(value.fieldId, 64)
     const code = publicString(value.code, 64)
     if (!fieldId || !code) return []
-    return [{ fieldId, code, header: publicString(value.header, 128) || code, valueType: publicString(value.valueType, 32), nullable: value.nullable === true, nullDisplay: publicString(value.nullDisplay, 32) }]
+		const allowedOperators = firstArray(value.allowedOperators).map(reportFilterOperator)
+		return [{ fieldId, code, header: publicString(value.header, 128) || code, valueType: publicString(value.valueType, 32), nullable: value.nullable === true, nullDisplay: publicString(value.nullDisplay, 32), filterable: value.filterable === true, sortable: value.sortable === true, allowedOperators }]
   })
   const rawRows = firstArray(data.rows)
   const rows = rawRows.flatMap((value) => {
@@ -262,6 +267,12 @@ export function parseReportResultPage(payload: unknown): ReportResultPage {
       nextCursor,
     },
   }
+}
+
+function reportFilterOperator(value: unknown): ReportFilterOperator {
+	const operator = publicString(value, 32) as ReportFilterOperator
+	if (!['EQ','NE','GT','GTE','LT','LTE','IN','NOT_IN','IS_NULL','IS_NOT_NULL','CONTAINS','STARTS_WITH','BETWEEN'].includes(operator)) throw new Error('invalid report filter operator')
+	return operator
 }
 
 export function parseReportExport(payload: unknown): ReportExport {

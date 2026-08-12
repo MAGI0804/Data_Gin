@@ -10,6 +10,8 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"gin-biz-web-api/internal/service/data_svc"
+	"gin-biz-web-api/internal/requestbody"
+	"gin-biz-web-api/internal/reportquery"
 	"gin-biz-web-api/pkg/auth"
 	"gin-biz-web-api/pkg/errcode"
 	"gin-biz-web-api/pkg/responses"
@@ -19,6 +21,7 @@ type ReportRunQueryServiceAPI interface {
 	Get(context.Context, uint, uint) (*data_svc.ReportRunViewDTO, error)
 	Cancel(context.Context, uint, uint) (*data_svc.ReportRunViewDTO, error)
 	ReadResults(context.Context, uint, uint, string, int) (*data_svc.ReportResultPageDTO, error)
+	QueryResults(context.Context, uint, uint, reportquery.Input, string, int) (*data_svc.ReportResultPageDTO, error)
 }
 
 type ReportRunController struct {
@@ -84,6 +87,27 @@ func (controller *ReportRunController) Results(c *gin.Context) {
 		limit = int(parsed)
 	}
 	result, err := controller.service.ReadResults(c.Request.Context(), auth.CurrentUserID(c), runID, strings.TrimSpace(c.Query("cursor")), limit)
+	if err != nil {
+		writeReportRunQueryError(c, err)
+		return
+	}
+	responses.New(c).ToResponseWithStatus(http.StatusOK, result)
+}
+
+func (controller *ReportRunController) QueryResults(c *gin.Context) {
+	runID, err := parseReportUint(c.Param("id"), "run id")
+	if err != nil {
+		writeReportRunQueryError(c, data_svc.ErrReportRunQueryInvalid)
+		return
+	}
+	var request requestbody.ReportResultQueryRequest
+	if err := decodeMallJSON(c, &request); err != nil {
+		writeReportRunQueryError(c, data_svc.ErrReportRunQueryInvalid)
+		return
+	}
+	limit := request.Limit
+	if limit == 0 { limit = 100 }
+	result, err := controller.service.QueryResults(c.Request.Context(), auth.CurrentUserID(c), runID, reportquery.Input{Filters: request.Filters, Sort: request.Sort}, strings.TrimSpace(request.Cursor), limit)
 	if err != nil {
 		writeReportRunQueryError(c, err)
 		return

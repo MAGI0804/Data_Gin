@@ -1,13 +1,14 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
-import { ChevronLeft, ChevronRight, Download, Play, Square } from 'lucide-react'
+import { ChevronDown, ChevronLeft, ChevronRight, Download, Filter, Play, Plus, Square, Trash2 } from 'lucide-react'
 import { DataTable, FeedbackState, FilterToolbar, PageCanvas, PageHeader, Section, StatusTag, type StatusTagTone } from '../../../ui'
-import { cancelReportRun, createReportExport, createReportRun, getReportExport, getReportExportDownload, getReportResults, getReportRun, getReportRunContract, type ReportCenterClient } from '../../api'
-import type { ReportExport, ReportParameter, ReportResultPage, ReportRun, ReportRunContract } from '../../types'
+import { cancelReportRun, createReportExport, createReportRun, getReportExport, getReportExportDownload, queryReportResults, getReportRun, getReportRunContract, type ReportCenterClient } from '../../api'
+import type { ReportExport, ReportFilterOperator, ReportParameter, ReportResultFilter, ReportResultPage, ReportResultQuery, ReportRun, ReportRunContract } from '../../types'
 import { useReportCatalog } from '../../useReportCatalog'
 import styles from './ReportQueryPage.module.css'
 
 const terminalRunStatuses = new Set(['SUCCEEDED', 'FAILED', 'CANCELLED'])
 const terminalExportStatuses = new Set(['READY', 'FAILED', 'CANCELLED', 'EXPIRED'])
+const emptyResultQuery: ReportResultQuery = { filters: [], sort: [] }
 
 export function ReportQueryPage({ client }: { client: ReportCenterClient }) {
   const query = useMemo(() => ({ limit: 100 }), [])
@@ -23,6 +24,9 @@ export function ReportQueryPage({ client }: { client: ReportCenterClient }) {
   const [cursorIndex, setCursorIndex] = useState(0)
   const [operation, setOperation] = useState<{ busy: boolean; error: string }>({ busy: false, error: '' })
   const [reportExport, setReportExport] = useState<ReportExport | null>(null)
+	const [resultQuery, setResultQuery] = useState<ReportResultQuery>(emptyResultQuery)
+	const [appliedQuery, setAppliedQuery] = useState<ReportResultQuery>(emptyResultQuery)
+	const [filtersOpen, setFiltersOpen] = useState(false)
   const pollAbortRef = useRef<AbortController | null>(null)
 
   useEffect(() => () => pollAbortRef.current?.abort(), [])
@@ -33,6 +37,8 @@ export function ReportQueryPage({ client }: { client: ReportCenterClient }) {
     setRun(null)
     setResult(null)
     setReportExport(null)
+		setResultQuery(emptyResultQuery)
+		setAppliedQuery(emptyResultQuery)
     setCursorHistory([''])
     setCursorIndex(0)
     setOperation({ busy: false, error: '' })
@@ -88,7 +94,7 @@ export function ReportQueryPage({ client }: { client: ReportCenterClient }) {
       setRun(response.data)
       if (terminalRunStatuses.has(response.data.status)) {
         setOperation({ busy: false, error: response.data.errorMessage })
-        if (response.data.resultAvailable) await loadResults(runId, '', 0, controller.signal)
+				if (response.data.resultAvailable) await loadResults(runId, emptyResultQuery, '', 0, controller.signal)
         return
       }
       await wait(1500, controller.signal)
@@ -101,9 +107,9 @@ export function ReportQueryPage({ client }: { client: ReportCenterClient }) {
     await pollRun(run.id)
   }
 
-  async function loadResults(runId: number, cursor: string, pageIndex: number, signal?: AbortSignal) {
+	async function loadResults(runId: number, query: ReportResultQuery, cursor: string, pageIndex: number, signal?: AbortSignal) {
     setOperation((current) => ({ ...current, busy: true, error: '' }))
-    const response = await getReportResults(client, runId, cursor, 100, signal)
+		const response = await queryReportResults(client, runId, query, cursor, 100, signal)
     if (!response.ok) {
       if (!signal?.aborted) setOperation({ busy: false, error: response.error })
       return
@@ -119,14 +125,23 @@ export function ReportQueryPage({ client }: { client: ReportCenterClient }) {
     const nextIndex = cursorIndex + 1
     const nextHistory = [...cursorHistory.slice(0, nextIndex), result.pagination.nextCursor]
     setCursorHistory(nextHistory)
-    await loadResults(run.id, result.pagination.nextCursor, nextIndex)
+		await loadResults(run.id, appliedQuery, result.pagination.nextCursor, nextIndex)
   }
 
   async function previousPage() {
     if (!run || cursorIndex === 0) return
     const previousIndex = cursorIndex - 1
-    await loadResults(run.id, cursorHistory[previousIndex], previousIndex)
+		await loadResults(run.id, appliedQuery, cursorHistory[previousIndex], previousIndex)
   }
+
+	async function applyResultQuery() {
+		if (!run?.resultAvailable || operation.busy || reportExport) return
+		const normalized = normalizeResultQuery(resultQuery)
+		setAppliedQuery(normalized)
+		setCursorHistory([''])
+		setCursorIndex(0)
+		await loadResults(run.id, normalized, '', 0)
+	}
 
   async function cancelRun() {
     if (!run?.canCancel) return
@@ -141,7 +156,7 @@ export function ReportQueryPage({ client }: { client: ReportCenterClient }) {
   async function startExport() {
     if (!run?.resultAvailable || reportExport) return
     setOperation({ busy: true, error: '' })
-    const response = await createReportExport(client, run.id)
+		const response = await createReportExport(client, run.id, appliedQuery)
     if (!response.ok) {
       setOperation({ busy: false, error: response.error })
       return
@@ -194,6 +209,7 @@ export function ReportQueryPage({ client }: { client: ReportCenterClient }) {
       {run ? <div className={styles.statusBar} role="status"><span><strong>{runLabel(run.status)}</strong><small>运行 #{run.id} · {run.rowCount.toLocaleString('zh-CN')} 行</small></span><span>{run.errorMessage || (run.resultExpiresAt ? `结果保留至 ${formatDate(run.resultExpiresAt)}` : '正在等待 Oracle 结果')}</span></div> : null}
       {operation.error ? <FeedbackState kind="error" title="操作未完成" description={operation.error} action={run && !terminalRunStatuses.has(run.status) ? <button className="ui-control-radius" type="button" onClick={() => void resumeRun()}>恢复状态查询</button> : undefined} /> : null}
       <Section title="结果预览" description="使用签名 Cursor 进行 Oracle Keyset 分页，不会重新执行存储过程。" actions={run?.resultAvailable ? <div className={styles.resultActions}>{reportExport ? <StatusTag tone={exportTone(reportExport)}>{exportLabel(reportExport.status)}</StatusTag> : null}<button className="ui-control-radius" type="button" onClick={() => void startExport()} disabled={operation.busy || Boolean(reportExport)}><Download aria-hidden="true" />生成正式 Excel</button>{reportExport?.canDownload ? <button className="primary ui-control-radius" type="button" onClick={() => void downloadExport()}>下载文件</button> : null}</div> : undefined} flush>
+		{result ? <ResultQueryToolbar page={result} query={resultQuery} open={filtersOpen} disabled={operation.busy || Boolean(reportExport)} onToggle={() => setFiltersOpen((value) => !value)} onChange={setResultQuery} onApply={() => void applyResultQuery()} /> : null}
         {operation.busy && !result ? <FeedbackState kind="loading" title={reportExport ? '正在生成并校验正式 Excel' : '正在执行报表'} description={reportExport ? exportProgress(reportExport) : 'Oracle 存储过程只会执行一次，请稍候。'} /> : null}
         {!run && !loading ? <FeedbackState kind="empty" title={published.length === 0 ? '暂无已发布报表' : '尚未执行报表'} description={published.length === 0 ? '发布版本可用后会出现在上方选择器。' : '填写参数并运行后，结果将在这里分页展示。'} /> : null}
         {loading ? <FeedbackState kind="loading" title="正在读取可用报表" /> : error ? <FeedbackState kind="error" title="可用报表加载失败" description={error} action={<button className="ui-control-radius" type="button" onClick={reload}>重试</button>} /> : null}
@@ -218,6 +234,39 @@ function ParameterField({ parameter, value, disabled, onChange }: { parameter: R
 function ResultTable({ page }: { page: ReportResultPage }) {
   return <DataTable scrollLabel="报表查询结果"><thead><tr>{page.columns.map((column) => <th key={column.fieldId} scope="col">{column.header}</th>)}</tr></thead><tbody>{page.rows.map((row) => <tr key={row.key}>{page.columns.map((column) => <td key={column.fieldId}>{displayCell(row.values[column.code], column.nullDisplay)}</td>)}</tr>)}</tbody></DataTable>
 }
+
+function ResultQueryToolbar({ page, query, open, disabled, onToggle, onChange, onApply }: { page: ReportResultPage; query: ReportResultQuery; open: boolean; disabled: boolean; onToggle: () => void; onChange: (query: ReportResultQuery) => void; onApply: () => void }) {
+	const filterable = page.columns.filter((column) => column.filterable && column.allowedOperators.length > 0)
+	const sortable = page.columns.filter((column) => column.sortable)
+	return <div className={styles.queryToolbar}>
+		<div className={styles.querySummary}><button className="ui-control-radius" type="button" onClick={onToggle} aria-expanded={open}><Filter aria-hidden="true" />结果筛选<ChevronDown aria-hidden="true" className={open ? styles.expandedIcon : undefined} /></button><span>{query.filters.length} 个条件 · {query.sort.length ? '已排序' : '默认顺序'}{disabled ? ' · 导出条件已冻结' : ''}</span></div>
+		{open ? <div className={styles.queryEditor}>
+			{query.filters.map((filter, index) => <ResultFilterField key={`${filter.field}-${index}`} columns={filterable} filter={filter} disabled={disabled} onChange={(next) => onChange({ ...query, filters: replaceAt(query.filters, index, next) })} onDelete={() => onChange({ ...query, filters: query.filters.filter((_, itemIndex) => itemIndex !== index) })} />)}
+			<div className={styles.queryControls}><button className="ui-control-radius" type="button" disabled={disabled || filterable.length === 0 || query.filters.length >= 8} onClick={() => { const column = filterable[0]; if (column) onChange({ ...query, filters: [...query.filters, { field: column.fieldId, operator: column.allowedOperators[0] ?? 'EQ', value: '' }] }) }}><Plus aria-hidden="true" />添加条件</button><label>排序字段<select className="ui-control-radius" value={query.sort[0]?.field ?? ''} disabled={disabled} onChange={(event) => onChange({ ...query, sort: event.currentTarget.value ? [{ field: event.currentTarget.value, direction: query.sort[0]?.direction ?? 'ASC' }] : [] })}><option value="">默认 ROW_NO</option>{sortable.map((column) => <option key={column.fieldId} value={column.fieldId}>{column.header}</option>)}</select></label><label>方向<select className="ui-control-radius" value={query.sort[0]?.direction ?? 'ASC'} disabled={disabled || query.sort.length === 0} onChange={(event) => onChange({ ...query, sort: query.sort.length ? [{ ...query.sort[0], direction: event.currentTarget.value as 'ASC' | 'DESC' }] : [] })}><option value="ASC">升序</option><option value="DESC">降序</option></select></label><button className="primary ui-control-radius" type="button" disabled={disabled} onClick={onApply}>应用筛选</button></div>
+		</div> : null}
+	</div>
+}
+
+function ResultFilterField({ columns, filter, disabled, onChange, onDelete }: { columns: ReportResultPage['columns']; filter: ReportResultFilter; disabled: boolean; onChange: (filter: ReportResultFilter) => void; onDelete: () => void }) {
+	const column = columns.find((item) => item.fieldId === filter.field) ?? columns[0]
+	if (!column) return null
+	const operator = column.allowedOperators.includes(filter.operator) ? filter.operator : column.allowedOperators[0]
+	const noValue = operator === 'IS_NULL' || operator === 'IS_NOT_NULL'
+	return <div className={styles.filterRow}><label>字段<select className="ui-control-radius" value={column.fieldId} disabled={disabled} onChange={(event) => { const next = columns.find((item) => item.fieldId === event.currentTarget.value); if (next) onChange({ field: next.fieldId, operator: next.allowedOperators[0] ?? 'EQ', value: '' }) }}>{columns.map((item) => <option key={item.fieldId} value={item.fieldId}>{item.header}</option>)}</select></label><label>条件<select className="ui-control-radius" value={operator} disabled={disabled} onChange={(event) => onChange({ field: column.fieldId, operator: event.currentTarget.value as ReportFilterOperator, value: '' })}>{column.allowedOperators.map((item) => <option key={item} value={item}>{operatorLabel(item)}</option>)}</select></label>{noValue ? <span className={styles.noValue}>无需填写值</span> : <label>值<input className="ui-control-radius" disabled={disabled} value={filterValue(filter.value)} placeholder={operator === 'IN' || operator === 'NOT_IN' || operator === 'BETWEEN' ? '多个值用英文逗号分隔' : '请输入筛选值'} onChange={(event) => onChange({ ...filter, field: column.fieldId, operator, value: event.currentTarget.value })} /></label>}<button className="ui-control-radius" type="button" aria-label={`删除 ${column.header} 条件`} disabled={disabled} onClick={onDelete}><Trash2 aria-hidden="true" /></button></div>
+}
+
+function normalizeResultQuery(query: ReportResultQuery): ReportResultQuery {
+	return { sort: query.sort, filters: query.filters.map((filter) => {
+		if (filter.operator === 'IS_NULL' || filter.operator === 'IS_NOT_NULL') return { field: filter.field, operator: filter.operator }
+		const text = String(filter.value ?? '').trim()
+		if (filter.operator === 'IN' || filter.operator === 'NOT_IN' || filter.operator === 'BETWEEN') return { ...filter, value: text.split(',').map((item) => item.trim()).filter(Boolean) }
+		return { ...filter, value: typedFilterValue(text) }
+	}) }
+}
+function typedFilterValue(value: string): unknown { if (/^-?\d+(?:\.\d+)?$/.test(value)) return value; if (value === 'true') return true; if (value === 'false') return false; return value }
+function filterValue(value: unknown) { return Array.isArray(value) ? value.join(',') : String(value ?? '') }
+function replaceAt<T>(items: T[], index: number, value: T) { return items.map((item, itemIndex) => itemIndex === index ? value : item) }
+function operatorLabel(operator: ReportFilterOperator) { return ({ EQ: '等于', NE: '不等于', GT: '大于', GTE: '大于等于', LT: '小于', LTE: '小于等于', IN: '属于集合', NOT_IN: '不属于集合', IS_NULL: '为空', IS_NOT_NULL: '不为空', CONTAINS: '包含', STARTS_WITH: '开头为', BETWEEN: '区间' })[operator] }
 
 function visibleParameters(parameters: ReportParameter[]) { return parameters.filter((parameter) => !parameter.systemInjected) }
 function initialParameterValues(parameters: ReportParameter[]) { return visibleParameters(parameters).reduce<Record<string, unknown>>((result, parameter) => ({ ...result, [parameter.code]: parameter.defaultValue ?? (parameter.controlType === 'MULTI_SELECT' ? [] : '') }), {}) }

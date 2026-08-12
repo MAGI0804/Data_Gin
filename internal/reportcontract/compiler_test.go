@@ -173,6 +173,7 @@ func validContract() (
 	[]reportoracle.ResultColumn,
 ) {
 	zero := int64(0)
+	eighteen := int64(18)
 	version := model.ReportVersion{
 		DatasourceID:   3,
 		ProcedureOwner: "report", PackageName: "pkg", ProcedureName: "sales",
@@ -198,7 +199,7 @@ func validContract() (
 	}
 	result := []reportoracle.ResultColumn{
 		{Name: "RUN_ID", Position: 1, DataType: "VARCHAR2", Nullable: false},
-		{Name: "ROW_NO", Position: 2, DataType: "NUMBER", DataScale: &zero, Nullable: false},
+		{Name: "ROW_NO", Position: 2, DataType: "NUMBER", DataPrecision: &eighteen, DataScale: &zero, Nullable: false},
 		{Name: "STORE_CODE", Position: 3, DataType: "VARCHAR2", Nullable: false},
 		{Name: "AMOUNT", Position: 4, DataType: "NUMBER", Nullable: true},
 	}

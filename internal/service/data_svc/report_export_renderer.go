@@ -9,6 +9,7 @@ import (
 	"io"
 	"math"
 	"os"
+	"reflect"
 	"sort"
 	"strconv"
 	"strings"
@@ -33,7 +34,7 @@ const (
 )
 
 type reportExportPageReader interface {
-	Read(context.Context, []string, *int64, int) (reportoracle.ResultPage, error)
+	Read(context.Context, []string, *reportoracle.ResultCursor, int) (reportoracle.ResultPage, error)
 }
 
 type ReportExportRenderRequest struct {
@@ -202,7 +203,7 @@ func (renderer *ReportExportRenderer) Render(
 		return result, err
 	}
 
-	var after *int64
+	var after *reportoracle.ResultCursor
 	for {
 		if err := ctx.Err(); err != nil {
 			return result, err
@@ -219,13 +220,9 @@ func (renderer *ReportExportRenderer) Render(
 				return result, fmt.Errorf("report export renderer: page column order changed")
 			}
 		}
-		previous := int64(0)
-		if after != nil {
-			previous = *after
-		}
-		for rowIndex, row := range page.Rows {
-			if len(row.Values) != len(request.Columns) || (after != nil || rowIndex > 0) && row.RowID <= previous {
-				return result, fmt.Errorf("report export renderer: invalid or non-advancing result row")
+		for _, row := range page.Rows {
+			if len(row.Values) != len(request.Columns) {
+				return result, fmt.Errorf("report export renderer: invalid result row")
 			}
 			if rowsInSheet == reportExcelMaxDataRows {
 				if err := openSheet(); err != nil {
@@ -252,7 +249,6 @@ func (renderer *ReportExportRenderer) Render(
 			}
 			rowsInSheet++
 			result.ProcessedRows++
-			previous = row.RowID
 			if onProgress != nil && result.ProcessedRows%reportExportProgressRows == 0 {
 				if err := onProgress(ReportExportRenderProgress{ProcessedRows: result.ProcessedRows, CurrentSheet: currentSheet, SheetCount: result.SheetCount, AfterRowID: row.RowID}); err != nil {
 					return result, fmt.Errorf("report export renderer: update progress: %w", err)
@@ -260,10 +256,15 @@ func (renderer *ReportExportRenderer) Render(
 			}
 		}
 		if len(page.Rows) > 0 {
-			if page.NextRowID != previous {
+			last := page.Rows[len(page.Rows)-1]
+			if page.NextRowID != last.RowID {
 				return result, fmt.Errorf("report export renderer: page cursor mismatch")
 			}
-			next := page.NextRowID
+			next := reportoracle.ResultCursor{RowID: page.NextRowID}
+			next.SortValue = last.SortValue
+			if after != nil && after.RowID == next.RowID && reflect.DeepEqual(after.SortValue, next.SortValue) {
+				return result, fmt.Errorf("report export renderer: non-advancing result cursor")
+			}
 			after = &next
 		}
 		if page.HasNext && len(page.Rows) == 0 {

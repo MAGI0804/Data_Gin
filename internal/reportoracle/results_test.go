@@ -1,13 +1,54 @@
 package reportoracle
 
 import (
+	"encoding/json"
 	"errors"
 	"strconv"
 	"strings"
 	"testing"
 
+	"gin-biz-web-api/internal/reportquery"
+
 	"github.com/godror/godror"
 )
+
+func TestBuildResultQueryPlanUsesBoundFiltersAndStableSort(t *testing.T) {
+	contract := testSnapshotContract()
+	query := reportquery.Query{
+		Filters: []reportquery.Filter{{Field: "store-id", Column: "STORE_CODE", OracleType: "VARCHAR2", Operator: "EQ", Values: []reportquery.Value{{Kind: "string", Text: "S001' OR 1=1 --"}}}},
+		Sort:    []reportquery.Sort{{Field: "amount-id", Column: "AMOUNT", Direction: "DESC", Kind: "decimal"}},
+	}
+	plan, err := BuildResultQueryPlan(contract, []string{"STORE_CODE"}, query)
+	if err != nil {
+		t.Fatalf("BuildResultQueryPlan() error = %v", err)
+	}
+	for _, required := range []string{"STORE_CODE = :2", "ORDER BY AMOUNT DESC NULLS LAST, ROW_NO ASC", "FETCH NEXT :3 ROWS ONLY", "FETCH NEXT :10 ROWS ONLY"} {
+		if !strings.Contains(plan.initialStatement+plan.nextStatement, required) {
+			t.Fatalf("plan does not contain %q: %s / %s", required, plan.initialStatement, plan.nextStatement)
+		}
+	}
+	if strings.Contains(plan.initialStatement, "OR 1=1") {
+		t.Fatal("filter value was interpolated into SQL")
+	}
+	if len(plan.initialArguments) != 1 || plan.initialArguments[0] != "S001' OR 1=1 --" {
+		t.Fatalf("initial arguments = %#v", plan.initialArguments)
+	}
+}
+
+func TestBuildResultQueryPlanRejectsContractExternalColumn(t *testing.T) {
+	query := reportquery.Query{Filters: []reportquery.Filter{{Field: "secret-id", Column: "SECRET_VALUE", OracleType: "VARCHAR2", Operator: "EQ", Values: []reportquery.Value{{Kind: "string", Text: "x"}}}}}
+	if _, err := BuildResultQueryPlan(testSnapshotContract(), []string{"STORE_CODE"}, query); !errors.Is(err, ErrInvalidConfiguration) {
+		t.Fatalf("error = %v", err)
+	}
+}
+
+func TestCompiledQueryRoundTrip(t *testing.T) {
+	columns := []reportquery.Column{{FieldID: "store-id", LogicalCode: "store", DatabaseColumn: "STORE_CODE", ValueType: "string", SourceOracleType: "VARCHAR2", Filterable: true, AllowedOperators: []string{"EQ"}}}
+	query, err := reportquery.Normalize(reportquery.Input{Filters: []reportquery.FilterInput{{Field: "store-id", Operator: "EQ", Value: json.RawMessage(`"S001"`)}}}, columns)
+	if err != nil || reportquery.ValidateCompiled(query, columns) != nil {
+		t.Fatalf("query=%#v err=%v", query, err)
+	}
+}
 
 func TestBuildResultPagePlan(t *testing.T) {
 	contract := testSnapshotContract()
@@ -31,7 +72,7 @@ func TestBuildResultPagePlan(t *testing.T) {
 
 func TestBuildPurgePlanIsScopedAndBounded(t *testing.T) {
 	contract := ResultSnapshotContract{
-		table: ResultTableRef{Owner: "REPORT", Name: "RESULT_ROWS"}, runIDColumn: "RUN_ID", rowIDColumn: "ROW_NO",
+		table: ResultTableRef{Owner: "REPORT", Name: "RESULT_ROWS"}, runIDColumn: "RUN_ID", rowIDColumn: "ROW_NO", columns: map[string]struct{}{"VALUE": {}},
 	}
 	plan, err := BuildPurgePlan(contract)
 	if err != nil {
@@ -85,14 +126,16 @@ func TestResultPlanRejectsUnvalidatedContract(t *testing.T) {
 
 func TestResultPlanSupportsConfiguredMaximumColumns(t *testing.T) {
 	columns := make([]string, maxResultColumns)
+	contract := testSnapshotContract()
 	for index := range columns {
 		columns[index] = "VALUE_" + strconv.Itoa(index)
+		contract.columns[columns[index]] = struct{}{}
 	}
-	if _, err := BuildResultPagePlan(testSnapshotContract(), columns); err != nil {
+	if _, err := BuildResultPagePlan(contract, columns); err != nil {
 		t.Fatalf("BuildResultPagePlan() error = %v", err)
 	}
 	columns = append(columns, "TOO_MANY")
-	if _, err := BuildResultPagePlan(testSnapshotContract(), columns); !errors.Is(err, ErrInvalidConfiguration) {
+	if _, err := BuildResultPagePlan(contract, columns); !errors.Is(err, ErrInvalidConfiguration) {
 		t.Fatalf("BuildResultPagePlan() error = %v, want ErrInvalidConfiguration", err)
 	}
 }
@@ -126,5 +169,6 @@ func testSnapshotContract() ResultSnapshotContract {
 	return ResultSnapshotContract{
 		table:       ResultTableRef{Owner: "REPORT_OWNER", Name: "SALES_RESULT"},
 		runIDColumn: "RUN_ID", rowIDColumn: "ROW_NO",
+		columns: map[string]struct{}{"STORE_CODE": {}, "AMOUNT": {}},
 	}
 }

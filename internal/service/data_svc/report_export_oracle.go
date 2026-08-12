@@ -5,13 +5,15 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strings"
 
 	"gin-biz-web-api/internal/reportoracle"
+	"gin-biz-web-api/internal/reportquery"
 	"gin-biz-web-api/internal/reportrepo"
 )
 
 type reportExportOracleSession interface {
-	Read(context.Context, []string, *int64, int) (reportoracle.ResultPage, error)
+	Read(context.Context, []string, *reportoracle.ResultCursor, int) (reportoracle.ResultPage, error)
 	Purge(context.Context, int) (int64, error)
 	Close() error
 }
@@ -45,15 +47,26 @@ func (oracleReportExportSessionFactory) Open(ctx context.Context, runtime report
 	for index := range columns {
 		databaseColumns[index] = columns[index].DatabaseColumn
 	}
+	queryColumns, err := reportrepo.FrozenExportQueryColumns(runtime.Export.FrozenColumnsJSON)
+	if err != nil {
+		return closeOnError(err)
+	}
 	ref := reportoracle.ResultSnapshotRef{
 		Table:       reportoracle.ResultTableRef{Owner: runtime.Version.ResultTableOwner, Name: runtime.Version.ResultTableName},
-		RunIDColumn: runtime.Version.ResultRunIDColumn, RowIDColumn: runtime.Version.ResultRowIDColumn, Columns: databaseColumns,
+		RunIDColumn: runtime.Version.ResultRunIDColumn, RowIDColumn: runtime.Version.ResultRowIDColumn, Columns: queryDatabaseColumns(queryColumns, databaseColumns),
 	}
 	contract, err := adapter.InspectResultSnapshotContract(ctx, ref)
 	if err != nil {
 		return closeOnError(err)
 	}
-	pagePlan, err := reportoracle.BuildResultPagePlan(contract, databaseColumns)
+	query, err := reportquery.Decode([]byte(runtime.Export.FrozenFiltersJSON), []byte(runtime.Export.FrozenSortJSON))
+	if err != nil {
+		return closeOnError(err)
+	}
+	if err := reportquery.ValidateCompiled(query, queryColumns); err != nil {
+		return closeOnError(err)
+	}
+	pagePlan, err := reportoracle.BuildResultQueryPlan(contract, databaseColumns, query)
 	if err != nil {
 		return closeOnError(err)
 	}
@@ -64,7 +77,23 @@ func (oracleReportExportSessionFactory) Open(ctx context.Context, runtime report
 	return &oracleReportExportSession{adapter: adapter, pagePlan: pagePlan, purgePlan: purgePlan, runUUID: runtime.Run.RunUUID}, nil
 }
 
-func (session *oracleReportExportSession) Read(ctx context.Context, columns []string, after *int64, limit int) (reportoracle.ResultPage, error) {
+func queryDatabaseColumns(columns []reportquery.Column, output []string) []string {
+	result := append([]string(nil), output...)
+	seen := make(map[string]struct{}, len(result))
+	for _, column := range result {
+		seen[strings.ToUpper(column)] = struct{}{}
+	}
+	for _, column := range columns {
+		key := strings.ToUpper(column.DatabaseColumn)
+		if _, ok := seen[key]; !ok && (column.Filterable || column.Sortable) {
+			result = append(result, column.DatabaseColumn)
+			seen[key] = struct{}{}
+		}
+	}
+	return result
+}
+
+func (session *oracleReportExportSession) Read(ctx context.Context, columns []string, after *reportoracle.ResultCursor, limit int) (reportoracle.ResultPage, error) {
 	if session == nil || session.adapter == nil || ctx == nil {
 		return reportoracle.ResultPage{}, fmt.Errorf("report export oracle: invalid read session")
 	}

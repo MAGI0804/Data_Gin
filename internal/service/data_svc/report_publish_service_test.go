@@ -232,5 +232,6 @@ func publicationProcedure() []reportoracle.ProcedureArgument {
 
 func publicationResultColumns() []reportoracle.ResultColumn {
 	zero := int64(0)
-	return []reportoracle.ResultColumn{{Name: "RUN_ID", Position: 1, DataType: "VARCHAR2", DataLength: 64}, {Name: "ROW_NO", Position: 2, DataType: "NUMBER", DataLength: 22, DataScale: &zero}, {Name: "ORDER_NO", Position: 3, DataType: "VARCHAR2", DataLength: 128}}
+	eighteen := int64(18)
+	return []reportoracle.ResultColumn{{Name: "RUN_ID", Position: 1, DataType: "VARCHAR2", DataLength: 64}, {Name: "ROW_NO", Position: 2, DataType: "NUMBER", DataLength: 22, DataPrecision: &eighteen, DataScale: &zero}, {Name: "ORDER_NO", Position: 3, DataType: "VARCHAR2", DataLength: 128}}
 }
