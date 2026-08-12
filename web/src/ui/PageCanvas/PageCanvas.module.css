@@ -7,6 +7,10 @@
   background: var(--color-canvas);
 }
 
+.canvas :where(button, input, select, textarea) {
+  border-radius: var(--radius-control);
+}
+
 @media (max-width: 479px) {
   .canvas {
     min-width: 0;

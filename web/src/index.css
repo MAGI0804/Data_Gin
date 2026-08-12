@@ -34,20 +34,6 @@ body {
   box-sizing: border-box;
 }
 
-/* Temporary compatibility guard for pages that have not moved to CSS Modules.
-   Scoped primitives opt back into their tokenized radii below. */
-#root > main * {
-  border-radius: var(--radius-none) !important;
-}
-
-#root > main :where(.ui-control-radius) {
-  border-radius: var(--radius-control) !important;
-}
-
-#root > main :where(.ui-pill-radius) {
-  border-radius: var(--radius-pill) !important;
-}
-
 button,
 input,
 select,

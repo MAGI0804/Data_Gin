@@ -30,7 +30,7 @@
 .mall-weather-single-page .mall-weather-selector select,
 .mall-weather-single-page .mall-weather-selector input {
   min-height: 42px;
-  border-radius: 3px;
+  border-radius: 2px;
 }
 
 .mall-weather-single-page .mall-weather-selector label small {
@@ -43,7 +43,7 @@
 
 .mall-weather-single-page .mall-weather-selector-actions button {
   min-height: 42px;
-  border-radius: 3px;
+  border-radius: 2px;
   padding-inline: 18px;
 }
 
@@ -512,7 +512,7 @@
   height: 30px;
   flex: 0 0 auto;
   place-items: center;
-  border-radius: 6px;
+  border-radius: 2px;
   background: #f3f4f6;
   color: #4b5563;
 }
@@ -626,7 +626,7 @@
   max-height: 220px;
   overflow: auto;
   border-color: #d2d7de;
-  border-radius: 4px;
+  border-radius: 2px;
   box-shadow: 0 8px 24px rgba(31, 35, 41, 0.12);
   padding: 8px 10px;
   white-space: normal;

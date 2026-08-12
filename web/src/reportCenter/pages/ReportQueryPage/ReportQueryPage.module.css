@@ -15,10 +15,6 @@
 .statusBar strong { color: var(--color-text); }
 .statusBar small { color: var(--color-text-secondary); }
 .resultActions { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; }
-.tableRegion { min-width: 0; overflow-x: auto; outline-offset: -2px; }
-.table { width: 100%; min-width: 720px; border-collapse: collapse; table-layout: auto; }
-.table th { height: 40px; padding: 0 var(--space-3); border-block: 1px solid var(--color-border); background: var(--color-surface-subtle); color: var(--color-text-secondary); font-size: 12px; font-weight: 650; text-align: left; white-space: nowrap; }
-.table td { height: var(--table-row-height); max-width: 360px; padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--color-border); color: var(--color-text); font-size: 13px; overflow-wrap: anywhere; }
 .pagination { display: flex; gap: var(--space-3); align-items: center; justify-content: space-between; padding-block: var(--space-4); color: var(--color-text-secondary); font-size: 13px; }
 .pagination > div { display: flex; gap: var(--space-2); }
 @media (max-width: 1023px) { .parameterForm { grid-template-columns: repeat(2, minmax(180px, 1fr)); } }

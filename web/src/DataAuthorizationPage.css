@@ -260,7 +260,7 @@ button.danger:hover {
 
 .data-authorization-reason {
   max-width: 360px;
-  white-space: normal !important;
+  white-space: normal;
   overflow-wrap: anywhere;
 }
 
@@ -436,7 +436,7 @@ button.danger:hover {
 .data-authorization-toolbar {
   min-height: 98px;
   border-color: var(--line, #e1e3e6);
-  border-radius: 3px;
+  border-radius: 2px;
   padding: 20px;
 }
 
@@ -474,7 +474,7 @@ button.danger:hover {
   grid-template-columns: 328px minmax(0, 1fr);
   gap: 0;
   border: 1px solid var(--line, #e1e3e6);
-  border-radius: 3px;
+  border-radius: 2px;
 }
 
 .data-authorization-account-panel,
@@ -520,7 +520,7 @@ button.danger:hover {
 .data-authorization-search label {
   min-height: 42px;
   border-color: #cfd3d8;
-  border-radius: 3px;
+  border-radius: 2px;
   padding-inline: 10px;
 }
 
@@ -706,7 +706,7 @@ button.danger:hover {
 
 .data-authorization-permission-title .status-pill {
   min-height: 25px;
-  border-radius: 3px;
+  border-radius: 2px;
   background: #f2fbf6;
   font-size: 12px;
   padding: 3px 10px;
@@ -750,7 +750,7 @@ button.danger:hover {
 
 .data-authorization-audits {
   border: 1px solid var(--line, #e1e3e6);
-  border-radius: 3px;
+  border-radius: 2px;
   padding: 0;
 }
 

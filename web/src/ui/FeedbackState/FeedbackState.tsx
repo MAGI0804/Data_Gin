@@ -30,7 +30,7 @@ export function FeedbackState({
       {...props}
     >
       <div className={styles.marker} aria-hidden="true">
-        {icon ?? <span className={`${styles.fallbackMarker} ui-pill-radius`} />}
+        {icon ?? <span className={styles.fallbackMarker} />}
       </div>
       <div className={styles.copy}>
         <strong className={styles.title}>{title}</strong>

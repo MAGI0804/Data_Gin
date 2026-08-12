@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
 import { ChevronLeft, ChevronRight, Download, Play, Square } from 'lucide-react'
-import { FeedbackState, FilterToolbar, PageCanvas, PageHeader, Section, StatusTag, type StatusTagTone } from '../../../ui'
+import { DataTable, FeedbackState, FilterToolbar, PageCanvas, PageHeader, Section, StatusTag, type StatusTagTone } from '../../../ui'
 import { cancelReportRun, createReportExport, createReportRun, getReportExport, getReportExportDownload, getReportResults, getReportRun, getReportRunContract, type ReportCenterClient } from '../../api'
 import type { ReportExport, ReportParameter, ReportResultPage, ReportRun, ReportRunContract } from '../../types'
 import { useReportCatalog } from '../../useReportCatalog'
@@ -216,7 +216,7 @@ function ParameterField({ parameter, value, disabled, onChange }: { parameter: R
 }
 
 function ResultTable({ page }: { page: ReportResultPage }) {
-  return <div className={styles.tableRegion} role="region" aria-label="报表查询结果" tabIndex={0}><table className={styles.table}><thead><tr>{page.columns.map((column) => <th key={column.fieldId} scope="col">{column.header}</th>)}</tr></thead><tbody>{page.rows.map((row) => <tr key={row.key}>{page.columns.map((column) => <td key={column.fieldId}>{displayCell(row.values[column.code], column.nullDisplay)}</td>)}</tr>)}</tbody></table></div>
+  return <DataTable scrollLabel="报表查询结果"><thead><tr>{page.columns.map((column) => <th key={column.fieldId} scope="col">{column.header}</th>)}</tr></thead><tbody>{page.rows.map((row) => <tr key={row.key}>{page.columns.map((column) => <td key={column.fieldId}>{displayCell(row.values[column.code], column.nullDisplay)}</td>)}</tr>)}</tbody></DataTable>
 }
 
 function visibleParameters(parameters: ReportParameter[]) { return parameters.filter((parameter) => !parameter.systemInjected) }

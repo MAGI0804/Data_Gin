@@ -1,11 +1,11 @@
 .visually-hidden {
-  position: absolute !important;
-  width: 1px !important;
-  height: 1px !important;
-  overflow: hidden !important;
-  clip: rect(0 0 0 0) !important;
-  clip-path: inset(50%) !important;
-  white-space: nowrap !important;
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  white-space: nowrap;
 }
 
 .excel-job-row-progress progress {
@@ -13,7 +13,7 @@
   height: 6px;
   overflow: hidden;
   border: 0;
-  border-radius: 999px !important;
+  border-radius: 999px;
   background: #e1e1e1;
   accent-color: #08a653;
 }
@@ -30,7 +30,7 @@
 
 .excel-design-page {
   gap: 0;
-  margin: -20px -28px 0;
+  margin: 0;
   color: #171717;
 }
 
@@ -140,7 +140,7 @@
 .excel-job-query select {
   min-height: 40px;
   border: 1px solid #d4d4d4;
-  border-radius: 3px !important;
+  border-radius: 2px;
   background: #fff;
 }
 
@@ -210,7 +210,7 @@
 
 .excel-history-table .status-pill {
   min-width: 48px;
-  border-radius: 2px !important;
+  border-radius: 2px;
   background: #fff;
   padding: 3px 5px;
   text-align: center;
@@ -231,7 +231,7 @@
 .excel-history-table .table-actions button {
   min-height: 27px;
   border: 1px solid #d2d2d2;
-  border-radius: 2px !important;
+  border-radius: 2px;
   background: #fff;
   font-size: 11px;
   padding: 4px 7px;
@@ -291,7 +291,7 @@
   min-width: 64px;
   min-height: 34px;
   border: 1px solid #d2d2d2;
-  border-radius: 3px;
+  border-radius: 2px;
   background: #fff;
 }
 
@@ -424,7 +424,7 @@
   left: -20px;
   width: 9px;
   height: 9px;
-  border-radius: 50% !important;
+  border-radius: 50%;
   background: #069d46;
   content: '';
 }
@@ -447,7 +447,7 @@
 
 .excel-job-detail-panel .excel-detail-actions button {
   min-height: 42px;
-  border-radius: 2px !important;
+  border-radius: 2px;
 }
 
 .excel-job-detail-panel .excel-detail-actions button:nth-child(2) {
@@ -522,7 +522,7 @@
   display: flex;
   align-items: center;
   border: 1px solid #d4d4d4;
-  border-radius: 3px !important;
+  border-radius: 2px;
   background: #fff;
   color: #333;
   padding: 8px 12px;
@@ -532,7 +532,7 @@
   position: absolute;
   width: 1px;
   height: 1px;
-  margin: -1px;
+  margin: 0;
   overflow: hidden;
   clip: rect(0 0 0 0);
   clip-path: inset(50%);
@@ -551,7 +551,7 @@
 .excel-scheme-toolbar input,
 .excel-scheme-toolbar select {
   min-height: 40px;
-  border-radius: 3px !important;
+  border-radius: 2px;
 }
 
 .excel-scheme-toolbar-actions {
@@ -562,7 +562,7 @@
 
 .excel-scheme-toolbar-actions button {
   min-height: 40px;
-  border-radius: 3px !important;
+  border-radius: 2px;
   white-space: nowrap;
 }
 
@@ -602,7 +602,7 @@
   position: relative;
   gap: 14px;
   border: 1px solid #dedede;
-  border-radius: 5px !important;
+  border-radius: 2px;
   background: #fff;
   padding: 14px 16px;
 }
@@ -614,7 +614,7 @@
   width: 29px;
   height: 29px;
   border-color: #ff8911;
-  border-radius: 50% !important;
+  border-radius: 50%;
   background: #fff;
   color: #ff8911;
   font-size: 15px;
@@ -646,7 +646,7 @@
   width: 9px;
   height: 9px;
   margin-right: 6px;
-  border-radius: 50% !important;
+  border-radius: 50%;
   background: currentColor;
   content: '';
 }
@@ -682,7 +682,7 @@
 .excel-scheme-form .excel-step-filter-row input,
 .excel-scheme-form .excel-step-filter-row select {
   min-height: 36px;
-  border-radius: 3px !important;
+  border-radius: 2px;
   font-size: 12px;
 }
 
@@ -719,7 +719,7 @@
 .excel-scheme-form .excel-step-filter-heading button,
 .excel-scheme-form .excel-step-filter-empty {
   border: 1px dashed #c9c9c9;
-  border-radius: 3px !important;
+  border-radius: 2px;
   background: #fff;
 }
 

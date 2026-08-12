@@ -17,7 +17,6 @@ import {
   Inbox,
   ListChecks,
   LogOut,
-  Menu,
   RefreshCcw,
   Search,
   ScrollText,
@@ -45,6 +44,7 @@ import { pipelineListPath } from './pipelineRun'
 import { Brand } from './components/Brand'
 import { ReportCenter } from './reportCenter/ReportCenter'
 import type { ReportCenterSection } from './reportCenter/types'
+import { AppShell, WorkspaceHeader } from './ui'
 import { parseMallWeatherExportContentStatus, submitMallWeatherExportContentDownload } from './mallWeatherExport'
 import { buildRawRecordsRequest, buildWarehouseRawRecordsQuery, parseRawRecordsPage, type RawRecordOrigin, type RawRecordsPage } from './rawRecords'
 import { buildDeliveryLogListQuery, buildDeliveryTaskListQuery, buildDestinationListQuery, buildExcelMatchJobListQuery, buildRunListQuery, buildSourceListQuery, buildTransformRuleListQuery, normalizeMonitoringPageNumber, parseMonitoringPage, type MonitoringPage, type MonitoringPagination } from './monitoringRecords'
@@ -1375,91 +1375,99 @@ function App() {
 	}),
   })).filter((group) => group.items.length > 0)
 
-  return (
-    <main className={activeNav === 'mall_weather' || activeNav === 'store_info' ? 'ops-shell mall-weather-shell' : 'ops-shell'}>
-      {mobileNavOpen && <button className="mobile-nav-backdrop" type="button" aria-label="关闭导航抽屉" onClick={() => setMobileNavOpen(false)} />}
-      <aside ref={mobileNavRef} className={mobileNavOpen ? 'ops-sidebar mobile-open' : 'ops-sidebar'} aria-label="主导航">
-        <Brand />
-        <button
-          className="mobile-nav-toggle"
-          type="button"
-          aria-expanded={mobileNavOpen}
-          aria-controls="primary-navigation"
-          onClick={() => setMobileNavOpen((open) => !open)}
-        >
-          <X aria-hidden="true" />
-          关闭菜单
-        </button>
-        <label className="nav-search">
-          <span>查找页面</span>
-          <div>
-            <Search aria-hidden="true" />
-            <input
-              name="moduleNavigationSearch"
-              value={navQuery}
-              onChange={(event) => setNavQuery(event.currentTarget.value)}
-              placeholder="输入页面名称或用途"
-            />
-          </div>
-        </label>
-        <nav className="module-nav" id="primary-navigation">
-          {visibleNavGroups.map((group) => {
-            const query = navQuery.trim().toLowerCase()
-            const items = group.items.filter((item) => !query || `${item.label} ${item.description}`.toLowerCase().includes(query))
-            if (items.length === 0) return null
-            const expanded = Boolean(query) || window.matchMedia('(min-width: 841px)').matches || expandedNavGroup === group.label
-            const panelID = `nav-group-${group.items[0].key}`
-            return (
-              <section className="nav-group" key={group.label}>
-                <h2>
-                  <button
-                    className="nav-group-toggle"
-                    type="button"
-                    aria-expanded={expanded}
-                    aria-controls={panelID}
-                    onClick={() => setExpandedNavGroup((current) => current === group.label ? '' : group.label)}
-                  >
-                    <span>{group.label}</span>
-                    <ChevronDown aria-hidden="true" />
+  const reportSection = reportCenterSection(activeNav)
+  const shellNavigation = <>
+    <Brand />
+    <button
+      className="mobile-nav-toggle"
+      type="button"
+      aria-expanded={mobileNavOpen}
+      aria-controls="primary-navigation"
+      onClick={() => setMobileNavOpen((open) => !open)}
+    >
+      <X aria-hidden="true" />
+      关闭菜单
+    </button>
+    <label className="nav-search">
+      <span>查找页面</span>
+      <div>
+        <Search aria-hidden="true" />
+        <input
+          name="moduleNavigationSearch"
+          value={navQuery}
+          onChange={(event) => setNavQuery(event.currentTarget.value)}
+          placeholder="输入页面名称或用途"
+        />
+      </div>
+    </label>
+    <nav className="module-nav" id="primary-navigation">
+      {visibleNavGroups.map((group) => {
+        const query = navQuery.trim().toLowerCase()
+        const items = group.items.filter((item) => !query || `${item.label} ${item.description}`.toLowerCase().includes(query))
+        if (items.length === 0) return null
+        const expanded = Boolean(query) || window.matchMedia('(min-width: 841px)').matches || expandedNavGroup === group.label
+        const panelID = `nav-group-${group.items[0].key}`
+        return (
+          <section className="nav-group" key={group.label}>
+            <h2>
+              <button
+                className="nav-group-toggle"
+                type="button"
+                aria-expanded={expanded}
+                aria-controls={panelID}
+                onClick={() => setExpandedNavGroup((current) => current === group.label ? '' : group.label)}
+              >
+                <span>{group.label}</span>
+                <ChevronDown aria-hidden="true" />
+              </button>
+            </h2>
+            {expanded && (
+              <div className="nav-group-items" id={panelID}>
+                {items.map((item) => (
+                  <button className={item.key === activeNav ? 'nav-item active' : 'nav-item'} key={item.key} type="button" onClick={() => navigate(item.key)}>
+                    {item.icon}
+                    <span><strong>{item.label}</strong><small>{item.description}</small></span>
                   </button>
-                </h2>
-                {expanded && (
-                  <div className="nav-group-items" id={panelID}>
-                    {items.map((item) => (
-                      <button className={item.key === activeNav ? 'nav-item active' : 'nav-item'} key={item.key} type="button" onClick={() => navigate(item.key)}>
-                        {item.icon}
-                        <span><strong>{item.label}</strong><small>{item.description}</small></span>
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </section>
-            )
-          })}
-        </nav>
-        <div className="sidebar-actions">
-          <button type="button" onClick={() => void refreshWorkspace(true)} disabled={refreshing}>
-            <RefreshCcw aria-hidden="true" />
-            刷新
-          </button>
-          <button type="button" onClick={handleLogout}>
-            <LogOut aria-hidden="true" />
-            退出
-          </button>
-        </div>
-      </aside>
+                ))}
+              </div>
+            )}
+          </section>
+        )
+      })}
+    </nav>
+    <div className="sidebar-actions">
+      <button type="button" onClick={() => void refreshWorkspace(true)} disabled={refreshing}>
+        <RefreshCcw aria-hidden="true" />
+        刷新
+      </button>
+      <button type="button" onClick={handleLogout}>
+        <LogOut aria-hidden="true" />
+        退出
+      </button>
+    </div>
+  </>
 
-      <section className="ops-workspace">
-		<ModuleHeader activeNav={activeNav} loading={loading || refreshing} sessionUser={sessionUser} onOpenNavigation={openMobileNavigation} onRefresh={() => void refreshWorkspace(true)} onLogout={handleLogout} refreshing={refreshing} mobileNavTriggerRef={mobileNavTriggerRef} />
-        {sessionValidationError && <div className="result-banner error" role="status" aria-live="polite">{sessionValidationError} <button type="button" onClick={() => setSessionValidationAttempt((attempt) => attempt + 1)}>重试校验</button></div>}
-        {workspaceError && <div className="result-banner error" role="alert">{workspaceError} <button type="button" onClick={() => void refreshWorkspace(false)} disabled={refreshing}>重试</button></div>}
+  return (
+    <AppShell
+      className={activeNav === 'mall_weather' || activeNav === 'store_info' ? 'mall-weather-shell' : undefined}
+      navigation={shellNavigation}
+      navigationClassName="ops-sidebar"
+      navigationRef={mobileNavRef}
+      navigationOpen={mobileNavOpen}
+      onDismissNavigation={() => setMobileNavOpen(false)}
+      flushWorkspace={Boolean(reportSection)}
+      workspaceClassName="ops-workspace"
+      header={<ModuleHeader compact={Boolean(reportSection)} activeNav={activeNav} loading={loading || refreshing} sessionUser={sessionUser} onOpenNavigation={openMobileNavigation} onRefresh={() => void refreshWorkspace(true)} onLogout={handleLogout} refreshing={refreshing} mobileNavTriggerRef={mobileNavTriggerRef} />}
+      notices={<>{sessionValidationError && <div className="result-banner error" role="status" aria-live="polite">{sessionValidationError} <button type="button" onClick={() => setSessionValidationAttempt((attempt) => attempt + 1)}>重试校验</button></div>}{workspaceError && <div className="result-banner error" role="alert">{workspaceError} <button type="button" onClick={() => void refreshWorkspace(false)} disabled={refreshing}>重试</button></div>}</>}
+      overlay={<ResultPanel result={result} onClose={() => setResult(null)} />}
+    >
         {activeNav === 'overview' && <PushStatusView runs={runs} deliveryLogs={deliveryLogs} monitoring={monitoring} stale={monitoringStale} overviewTotals={overviewTotals} onLoadSteps={openStepRuns} />}
         {activeNav === 'runs' && <RunsQueryPage client={client} pipelines={pipelines} onLoadSteps={openStepRuns} onPipelineRunCompleted={() => void refreshWorkspace(false)} refreshVersion={workspaceRefreshVersion} />}
         {activeNav === 'delivery_logs' && <DeliveryLogsQueryPage client={client} onRetryLog={retryDeliveryLog} />}
         {activeNav === 'step_runs' && <StepRunsQueryPage client={client} focusRunID={stepRunFocusID} />}
         {activeNav === 'store_info' && <StoreInfoPage actorID={actorID} client={client} downloadFile={downloadFile} />}
         {activeNav === 'mall_weather' && <MallWeatherPage actorID={actorID} client={client} downloadFile={downloadFile} />}
-        {reportCenterSection(activeNav) && <ReportCenter client={client} permissions={sessionUser?.permissions ?? []} section={reportCenterSection(activeNav)!} onNavigate={(section) => navigate(reportCenterNavKey(section))} />}
+        {reportSection && <ReportCenter client={client} permissions={sessionUser?.permissions ?? []} section={reportSection} onNavigate={(section) => navigate(reportCenterNavKey(section))} />}
         {activeNav === 'access_management' && <AccessManagementPage client={client} permissions={sessionUser?.permissions ?? []} />}
         {activeNav === 'data_authorizations' && <DataAuthorizationPage client={client} />}
         {activeNav === 'sources' && <SourcesQueryPage client={client} onFetchSource={fetchSource} onTestSource={testSource} refreshVersion={workspaceRefreshVersion} />}
@@ -1474,10 +1482,7 @@ function App() {
         {activeNav === 'tasks' && <DeliveryTasksQueryPage client={client} sources={sources} destinations={destinations} onRefresh={() => refreshWorkspace(false)} refreshVersion={workspaceRefreshVersion} />}
         {activeNav === 'push_policy' && <PushPolicyPage coreMethod={coreMethods.find((item) => item.key === 'mall_push')} config={orderPushSkipConfig} targets={orderPushTargets} onSave={saveOrderPushSkipConfig} onToggle={toggleTarget} />}
         {(activeNav === 'excel_jobs' || activeNav === 'excel_schemes' || activeNav === 'excel_write') && <ExcelMatchView section={activeNav === 'excel_jobs' ? 'jobs' : activeNav === 'excel_schemes' ? 'schemes' : 'write'} client={client} token={token} loading={loading} refreshVersion={workspaceRefreshVersion} setLoading={setLoading} setResult={setResult} onNavigateToJobs={() => navigate('excel_jobs')} />}
-      </section>
-
-      <ResultPanel result={result} onClose={() => setResult(null)} />
-    </main>
+    </AppShell>
   )
 }
 
@@ -1606,7 +1611,7 @@ function LoginScreen({ onLogin, checking }: { onLogin: (token: string) => void; 
   )
 }
 
-function ModuleHeader({ activeNav, loading, sessionUser, onOpenNavigation, onRefresh, onLogout, refreshing, mobileNavTriggerRef }: { activeNav: NavKey; loading: boolean; sessionUser: SessionUser | null; onOpenNavigation: () => void; onRefresh: () => void; onLogout: () => void; refreshing: boolean; mobileNavTriggerRef: RefObject<HTMLButtonElement> }) {
+function ModuleHeader({ activeNav, compact, loading, sessionUser, onOpenNavigation, onRefresh, onLogout, refreshing, mobileNavTriggerRef }: { activeNav: NavKey; compact: boolean; loading: boolean; sessionUser: SessionUser | null; onOpenNavigation: () => void; onRefresh: () => void; onLogout: () => void; refreshing: boolean; mobileNavTriggerRef: RefObject<HTMLButtonElement> }) {
   const titles: Record<NavKey, { title: string; subtitle: string }> = {
     overview: { title: '运行总览', subtitle: '只看当前运行与交付健康度，快速定位失败。' },
     runs: { title: '流水线运行', subtitle: '按状态、运行类型和 Trace ID 查询执行记录。' },
@@ -1636,22 +1641,20 @@ function ModuleHeader({ activeNav, loading, sessionUser, onOpenNavigation, onRef
     excel_write: { title: 'Excel 写入', subtitle: '执行导入更新与退回未匹配操作。' },
   }
   return (
-    <header className="workspace-header">
-      <div>
-        <button ref={mobileNavTriggerRef} className="workspace-menu-button" type="button" aria-label="打开主导航" onClick={onOpenNavigation}>
-          <Menu aria-hidden="true" />
-        </button>
-        <h2>{titles[activeNav].title}</h2>
-        <span>{titles[activeNav].subtitle}</span>
-      </div>
-      <div className="workspace-session">
+    <WorkspaceHeader
+      title={compact ? undefined : titles[activeNav].title}
+      description={compact ? undefined : titles[activeNav].subtitle}
+      context={compact ? 'REPORT CENTER' : undefined}
+      menuButtonRef={mobileNavTriggerRef}
+      onOpenNavigation={onOpenNavigation}
+      actions={<div className="workspace-session">
         {activeNav !== 'store_info' && <span className="workspace-date"><CalendarDays aria-hidden="true" />{new Intl.DateTimeFormat('zh-CN', { year: 'numeric', month: 'long', day: 'numeric', timeZone: 'Asia/Shanghai' }).format(new Date())}</span>}
         {sessionUser && <span className="workspace-user">{sessionUser.nickname || sessionUser.account}</span>}
         <button className="workspace-refresh" type="button" onClick={onRefresh} disabled={refreshing}><RefreshCcw aria-hidden="true" />{refreshing ? '刷新中' : '刷新数据'}</button>
         <button className="workspace-logout" type="button" onClick={onLogout}><LogOut aria-hidden="true" />退出登录</button>
         <span className={loading ? 'workspace-health is-loading' : 'workspace-health'}><i aria-hidden="true" />{loading ? '数据加载中' : '系统正常'}</span>
-      </div>
-    </header>
+      </div>}
+    />
   )
 }
 

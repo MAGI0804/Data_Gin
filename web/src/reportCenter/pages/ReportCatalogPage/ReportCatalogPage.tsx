@@ -1,6 +1,6 @@
 import { useMemo, useState } from 'react'
 import { FileText, Plus, RefreshCcw, Search } from 'lucide-react'
-import { FeedbackState, FilterToolbar, PageCanvas, PageHeader, Section, StatusTag, type StatusTagTone } from '../../../ui'
+import { DataTable, FeedbackState, FilterToolbar, PageCanvas, PageHeader, Section, StatusTag, type StatusTagTone } from '../../../ui'
 import type { ReportCenterClient } from '../../api'
 import { ReportConfigDrawer } from '../../components/ReportConfigDrawer/ReportConfigDrawer'
 import type { ReportSummary } from '../../types'
@@ -35,7 +35,7 @@ export function ReportCatalogPage({ client, canManage }: { client: ReportCenterC
 }
 
 function ReportTable({ reports, onEdit }: { reports: ReportSummary[]; onEdit?: (report: ReportSummary) => void }) {
-  return <div className={styles.tableRegion} role="region" aria-label="报表目录列表" tabIndex={0}><table className={styles.table}><thead><tr><th scope="col">报表</th><th scope="col">分类</th><th scope="col">数据源</th><th scope="col">版本</th><th scope="col">状态</th><th scope="col">更新时间</th><th scope="col">操作</th></tr></thead><tbody>{reports.map((report) => <tr key={report.id}><td><span className={styles.reportName}><FileText aria-hidden="true" /><span><strong>{report.name}</strong><code>{report.code}</code></span></span></td><td>{report.category || '未分类'}</td><td>{report.datasourceId ? `#${report.datasourceId}` : '-'}</td><td>{report.currentPublishedVersionId ? `已发布 #${report.currentPublishedVersionId}` : report.lockVersion ? `草稿 v${report.lockVersion}` : report.currentDraftVersionId ? `草稿 #${report.currentDraftVersionId}` : '-'}</td><td><StatusTag tone={statusTone(report.status)}>{statusLabel(report.status)}</StatusTag></td><td>{formatDate(report.updatedAt)}</td><td><button className="ui-control-radius" type="button" onClick={() => onEdit?.(report)} disabled={!onEdit}>编辑配置</button></td></tr>)}</tbody></table></div>
+  return <DataTable minWidth={900} scrollLabel="报表目录列表"><thead><tr><th scope="col">报表</th><th scope="col">分类</th><th scope="col">数据源</th><th scope="col">版本</th><th scope="col">状态</th><th scope="col">更新时间</th><th scope="col">操作</th></tr></thead><tbody>{reports.map((report) => <tr key={report.id}><td><span className={styles.reportName}><FileText aria-hidden="true" /><span><strong>{report.name}</strong><code>{report.code}</code></span></span></td><td>{report.category || '未分类'}</td><td>{report.datasourceId ? `#${report.datasourceId}` : '-'}</td><td>{report.currentPublishedVersionId ? `已发布 #${report.currentPublishedVersionId}` : report.lockVersion ? `草稿 v${report.lockVersion}` : report.currentDraftVersionId ? `草稿 #${report.currentDraftVersionId}` : '-'}</td><td><StatusTag tone={statusTone(report.status)}>{statusLabel(report.status)}</StatusTag></td><td>{formatDate(report.updatedAt)}</td><td><button type="button" onClick={() => onEdit?.(report)} disabled={!onEdit}>编辑配置</button></td></tr>)}</tbody></DataTable>
 }
 
 function statusTone(status: ReportSummary['status']): StatusTagTone { return status === 'ACTIVE' ? 'success' : status === 'DISABLED' ? 'danger' : 'warning' }
