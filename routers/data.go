@@ -22,6 +22,7 @@ func apiData(api *gin.RouterGroup) {
 	registerMallWeatherCapacityPlanRoutes(api, data_ctrl.NewMallWeatherCapacityPlanController())
 	registerMallWeatherMetricsRoutes(api, data_ctrl.NewMallWeatherMetricsController())
 	registerReportRoutes(api, data_ctrl.NewReportController())
+	registerReportRunRoutes(api, data_ctrl.NewReportRunController())
 
 	sourceGroup := api.Group("/v1/sources")
 	sourceGroup.Use(middleware.AuthJWT())
@@ -301,6 +302,14 @@ func registerReportRoutes(api *gin.RouterGroup, reportCtrl *data_ctrl.ReportCont
 	reportGroup.PUT("/:id", middleware.RequirePermission(model.PermissionReportManage), reportCtrl.Update)
 	reportGroup.POST("/:id/publish", middleware.RequirePermission(model.PermissionReportManage), reportCtrl.Publish)
 	reportGroup.POST("/:id/runs", middleware.RequirePermission(model.PermissionReportExecute), reportCtrl.CreateRun)
+}
+
+func registerReportRunRoutes(api *gin.RouterGroup, runCtrl *data_ctrl.ReportRunController) {
+	runGroup := api.Group("/v1/report-runs")
+	runGroup.Use(middleware.AuthJWT())
+	runGroup.GET("/:id", middleware.RequirePermission(model.PermissionReportRead), runCtrl.Get)
+	runGroup.GET("/:id/results", middleware.RequirePermission(model.PermissionReportRead), runCtrl.Results)
+	runGroup.POST("/:id/cancel", middleware.RequirePermission(model.PermissionReportExecute), runCtrl.Cancel)
 }
 
 func registerMallWeatherExportProfileRoutes(

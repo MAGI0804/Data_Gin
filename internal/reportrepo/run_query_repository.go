@@ -1,0 +1,128 @@
+package reportrepo
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"time"
+
+	"gin-biz-web-api/model"
+
+	"github.com/google/uuid"
+	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
+)
+
+var (
+	ErrReportRunAccessNotFound = errors.New("report run query: not found")
+	ErrReportRunStateConflict  = errors.New("report run query: state conflict")
+	ErrReportResultUnavailable = errors.New("report run query: result unavailable")
+)
+
+type RunResultContract struct {
+	Run        model.ReportRun
+	Version    model.ReportVersion
+	Datasource model.ReportDatasource
+}
+
+func (repository *Repository) FindRunForActor(ctx context.Context, actor, runID uint) (*model.ReportRun, error) {
+	if repository == nil || repository.db == nil || ctx == nil || actor == 0 || runID == 0 {
+		return nil, fmt.Errorf("report run query: invalid request")
+	}
+	var run model.ReportRun
+	err := buildActorRunQuery(repository.db.WithContext(ctx), actor, runID).First(&run).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, ErrReportRunAccessNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("report run query: find run: %w", err)
+	}
+	return &run, nil
+}
+
+func buildActorRunQuery(db *gorm.DB, actor, runID uint) *gorm.DB {
+	return db.Where("id = ? AND requested_by = ?", runID, actor)
+}
+
+func (repository *Repository) RequestRunCancellation(ctx context.Context, actor, runID uint, now time.Time) (*model.ReportRun, error) {
+	if repository == nil || repository.db == nil || ctx == nil || actor == 0 || runID == 0 || now.IsZero() {
+		return nil, fmt.Errorf("report run cancellation: invalid request")
+	}
+	now = now.UTC().Truncate(time.Millisecond)
+	var run model.ReportRun
+	err := repository.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := buildActorRunQuery(tx.Clauses(clause.Locking{Strength: "UPDATE"}), actor, runID).First(&run).Error; errors.Is(err, gorm.ErrRecordNotFound) {
+			return ErrReportRunAccessNotFound
+		} else if err != nil {
+			return fmt.Errorf("report run cancellation: lock run: %w", err)
+		}
+		updates := map[string]interface{}{}
+		switch run.Status {
+		case model.ReportRunStatusQueued:
+			updates = terminalRunUpdates(model.ReportRunStatusCancelled, "CANCELLED", "报表运行已取消", now)
+			updates["cancel_requested"] = true
+			run.Status, run.CancelRequested, run.FinishedAt = model.ReportRunStatusCancelled, true, &now
+		case model.ReportRunStatusRunning:
+			if run.CancelRequested {
+				return nil
+			}
+			updates = map[string]interface{}{"cancel_requested": true, "updated_at": now}
+			run.CancelRequested = true
+		case model.ReportRunStatusCancelled:
+			return nil
+		default:
+			return ErrReportRunStateConflict
+		}
+		if result := buildActorRunQuery(tx.Model(&model.ReportRun{}), actor, runID).Updates(updates); result.Error != nil {
+			return fmt.Errorf("report run cancellation: update run: %w", result.Error)
+		} else if result.RowsAffected != 1 {
+			return ErrReportRunAccessNotFound
+		}
+		detail, err := json.Marshal(map[string]interface{}{"runId": runID, "status": run.Status})
+		if err != nil {
+			return fmt.Errorf("report run cancellation: encode audit: %w", err)
+		}
+		if err := repository.writeAudit(ctx, tx, model.ReportAudit{
+			ActorUserID: actor, Action: "REPORT_RUN_CANCEL_REQUEST", TargetType: "REPORT_RUN", TargetID: runID,
+			RequestID: uuid.NewString(), DetailJSON: model.JSONText(detail),
+		}); err != nil {
+			return err
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &run, nil
+}
+
+func (repository *Repository) LoadResultContractForActor(ctx context.Context, actor, runID uint, now time.Time) (*RunResultContract, error) {
+	if repository == nil || repository.db == nil || ctx == nil || actor == 0 || runID == 0 || now.IsZero() {
+		return nil, fmt.Errorf("report result query: invalid request")
+	}
+	var contract RunResultContract
+	err := buildActorRunQuery(repository.db.WithContext(ctx), actor, runID).First(&contract.Run).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, ErrReportRunAccessNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("report result query: find run: %w", err)
+	}
+	if contract.Run.Status != model.ReportRunStatusSucceeded || contract.Run.ResultPurgedAt != nil ||
+		contract.Run.ResultExpiresAt == nil || !now.UTC().Before(contract.Run.ResultExpiresAt.UTC()) {
+		return nil, ErrReportResultUnavailable
+	}
+	if err := repository.db.WithContext(ctx).Where("id = ? AND definition_id = ?", contract.Run.VersionID, contract.Run.DefinitionID).First(&contract.Version).Error; err != nil {
+		return nil, fmt.Errorf("report result query: load version: %w", err)
+	}
+	if contract.Version.ContractHash != contract.Run.ContractHash ||
+		contract.Version.ProcedureSignatureHash != contract.Run.ProcedureSignatureHash ||
+		contract.Version.ResultSchemaHash != contract.Run.ResultSchemaHash || contract.Version.DatasourceID == 0 {
+		return nil, ErrReportResultUnavailable
+	}
+	if err := repository.db.WithContext(ctx).Where("id = ? AND enabled = ? AND driver = ?", contract.Version.DatasourceID, true, model.ReportDatasourceDriverOracle).First(&contract.Datasource).Error; err != nil {
+		return nil, fmt.Errorf("report result query: load datasource: %w", err)
+	}
+	return &contract, nil
+}
