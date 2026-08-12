@@ -50,3 +50,29 @@ func TestOutboxRegistryResolvesReportRun(t *testing.T) {
 		t.Fatalf("report timeout = %v", options.Timeout)
 	}
 }
+
+func TestReportExportTaskAcceptsOnlyExportID(t *testing.T) {
+	valid, err := NewReportExportTask([]byte(`{"export_id":41}`))
+	if err != nil || valid.Type() != TypeReportExport {
+		t.Fatalf("NewReportExportTask() task=%#v error=%v", valid, err)
+	}
+	for _, payload := range []string{`{"export_id":0}`, `{"export_id":41,"password":"secret"}`, `{"export_id":41}{}`} {
+		if _, err := NewReportExportTask([]byte(payload)); err == nil {
+			t.Fatalf("NewReportExportTask() accepted %s", payload)
+		}
+	}
+}
+
+func TestOutboxRegistryResolvesReportExport(t *testing.T) {
+	registry, err := NewOutboxTaskRegistry(ReportExportOutboxTaskDefinitions(ReportRunMaxRetry)...)
+	if err != nil {
+		t.Fatalf("NewOutboxTaskRegistry() error = %v", err)
+	}
+	task, options, err := registry.Resolve(model.AsyncJobOutbox{
+		TaskKey: "report:export:export-uuid", TaskType: TypeReportExport,
+		QueueName: ReportQueueName, PayloadJSON: model.JSONText(`{"export_id":41}`),
+	})
+	if err != nil || task.Type() != TypeReportExport || options.Timeout != ReportExportTimeout || options.MaxRetry != ReportRunMaxRetry {
+		t.Fatalf("Resolve() task=%#v options=%#v error=%v", task, options, err)
+	}
+}
