@@ -23,7 +23,7 @@ import (
 	"go.uber.org/zap"
 )
 
-const schemaMigrationVersion = "2026-08-12-access-v1"
+const schemaMigrationVersion = "2026-08-12-report-center-v1"
 const schemaMigrationLockName = "data_gin_schema_migration_v1"
 
 type schemaMigrationRecord struct {
@@ -236,6 +236,7 @@ func autoMigrateTables() error {
 		&model.YouzanDistributionOrder{},
 	}
 	models = append(models, mallWeatherMigrationModels()...)
+	models = append(models, reportCenterMigrationModels()...)
 	err := db.AutoMigrate(models...)
 
 	if err != nil {
@@ -267,6 +268,20 @@ func autoMigrateTables() error {
 	}
 	console.Success("账号权限种子同步完成")
 	return nil
+}
+
+func reportCenterMigrationModels() []interface{} {
+	return []interface{}{
+		&model.ReportDatasource{},
+		&model.ReportDefinition{},
+		&model.ReportVersion{},
+		&model.ReportParameter{},
+		&model.ReportColumn{},
+		&model.ReportGrant{},
+		&model.ReportRun{},
+		&model.ReportExport{},
+		&model.ReportAudit{},
+	}
 }
 
 func mallWeatherMigrationModels() []interface{} {
