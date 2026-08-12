@@ -215,6 +215,8 @@ func normalizeConsoleAdmin(user *model.User) bool {
 	user.MallScopeMode = model.MallScopeAll
 	if user.AuthVersion == 0 {
 		user.AuthVersion = 1
+	} else if changed {
+		user.AuthVersion++
 	}
 	return changed
 }

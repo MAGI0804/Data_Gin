@@ -132,4 +132,9 @@ func TestNormalizeConsoleAdminBackfillsLegacyAccessState(t *testing.T) {
 	if normalizeConsoleAdmin(user) {
 		t.Fatal("normalizeConsoleAdmin() is not idempotent")
 	}
+
+	user.MallScopeMode = model.MallScopeSelected
+	if !normalizeConsoleAdmin(user) || user.AuthVersion != 2 {
+		t.Fatalf("normalizeConsoleAdmin() did not invalidate an existing session: %+v", user)
+	}
 }
