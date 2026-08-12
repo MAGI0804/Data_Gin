@@ -1455,9 +1455,9 @@ function App() {
       navigationRef={mobileNavRef}
       navigationOpen={mobileNavOpen}
       onDismissNavigation={() => setMobileNavOpen(false)}
-      flushWorkspace={Boolean(reportSection)}
+      flushWorkspace={Boolean(reportSection) || activeNav === 'access_management'}
       workspaceClassName="ops-workspace"
-      header={<ModuleHeader compact={Boolean(reportSection)} activeNav={activeNav} loading={loading || refreshing} sessionUser={sessionUser} onOpenNavigation={openMobileNavigation} onRefresh={() => void refreshWorkspace(true)} onLogout={handleLogout} refreshing={refreshing} mobileNavTriggerRef={mobileNavTriggerRef} />}
+      header={<ModuleHeader compact={Boolean(reportSection) || activeNav === 'access_management'} activeNav={activeNav} loading={loading || refreshing} sessionUser={sessionUser} onOpenNavigation={openMobileNavigation} onRefresh={() => void refreshWorkspace(true)} onLogout={handleLogout} refreshing={refreshing} mobileNavTriggerRef={mobileNavTriggerRef} />}
       notices={<>{sessionValidationError && <div className="result-banner error" role="status" aria-live="polite">{sessionValidationError} <button type="button" onClick={() => setSessionValidationAttempt((attempt) => attempt + 1)}>重试校验</button></div>}{workspaceError && <div className="result-banner error" role="alert">{workspaceError} <button type="button" onClick={() => void refreshWorkspace(false)} disabled={refreshing}>重试</button></div>}</>}
       overlay={<ResultPanel result={result} onClose={() => setResult(null)} />}
     >
@@ -1644,7 +1644,7 @@ function ModuleHeader({ activeNav, compact, loading, sessionUser, onOpenNavigati
     <WorkspaceHeader
       title={compact ? undefined : titles[activeNav].title}
       description={compact ? undefined : titles[activeNav].subtitle}
-      context={compact ? 'REPORT CENTER' : undefined}
+      context={compact ? activeNav === 'access_management' ? 'ACCESS CONTROL' : 'REPORT CENTER' : undefined}
       menuButtonRef={mobileNavTriggerRef}
       onOpenNavigation={onOpenNavigation}
       actions={<div className="workspace-session">
