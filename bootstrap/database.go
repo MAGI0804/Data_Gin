@@ -2,7 +2,11 @@ package bootstrap
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
+	"os"
+	"strings"
 	"time"
 
 	// GORM 的 MySQL 数据库驱动导入
@@ -19,10 +23,103 @@ import (
 	"go.uber.org/zap"
 )
 
+const schemaMigrationVersion = "2026-08-12-access-v1"
+const schemaMigrationLockName = "data_gin_schema_migration_v1"
+
+type schemaMigrationRecord struct {
+	Version   string    `gorm:"column:version;primaryKey;size:64"`
+	AppliedAt time.Time `gorm:"column:applied_at;not null"`
+}
+
+func (schemaMigrationRecord) TableName() string { return "app_schema_versions" }
+
 // setupDB 初始化数据库和 ORM
 func setupDB() {
 	setupDBConnection()
-	autoMigrateTables()
+	if autoMigrateOnStartup() {
+		if err := ApplySchemaMigrations(); err != nil {
+			console.Exit("database schema migration failed: %v", err)
+		}
+	}
+}
+
+func autoMigrateOnStartup() bool {
+	value := strings.TrimSpace(strings.ToLower(os.Getenv("AUTO_MIGRATE_ON_STARTUP")))
+	return value == "1" || value == "true" || value == "yes"
+}
+
+// ApplySchemaMigrations runs schema and access-control migrations explicitly.
+// The HTTP server skips this expensive path by default so it can become ready quickly.
+func ApplySchemaMigrations() (resultErr error) {
+	db := database.DB
+	if db == nil {
+		return fmt.Errorf("database connection is unavailable")
+	}
+	if database.SQLDB == nil {
+		return fmt.Errorf("database SQL connection is unavailable")
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := database.SQLDB.PingContext(ctx); err != nil {
+		return fmt.Errorf("database ping failed: %w", err)
+	}
+	conn, err := database.SQLDB.Conn(ctx)
+	if err != nil {
+		return fmt.Errorf("acquire schema migration connection: %w", err)
+	}
+	defer conn.Close()
+	locked, err := acquireSchemaMigrationLock(ctx, conn)
+	if err != nil {
+		return err
+	}
+	if !locked {
+		return fmt.Errorf("another schema migration is running")
+	}
+	defer func() {
+		releaseCtx, releaseCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer releaseCancel()
+		if releaseErr := releaseSchemaMigrationLock(releaseCtx, conn); releaseErr != nil {
+			resultErr = errors.Join(resultErr, releaseErr)
+		}
+	}()
+	if err := db.AutoMigrate(&schemaMigrationRecord{}); err != nil {
+		return fmt.Errorf("prepare schema migration marker: %w", err)
+	}
+	var count int64
+	if err := db.Model(&schemaMigrationRecord{}).Where("version = ?", schemaMigrationVersion).Count(&count).Error; err != nil {
+		return fmt.Errorf("read schema migration marker: %w", err)
+	}
+	if count == 1 {
+		console.Info("database schema is current: %s", schemaMigrationVersion)
+		return nil
+	}
+	if err := autoMigrateTables(); err != nil {
+		return err
+	}
+	marker := schemaMigrationRecord{Version: schemaMigrationVersion, AppliedAt: time.Now().UTC()}
+	if err := db.Create(&marker).Error; err != nil {
+		return fmt.Errorf("write schema migration marker: %w", err)
+	}
+	return nil
+}
+
+func acquireSchemaMigrationLock(ctx context.Context, conn *sql.Conn) (bool, error) {
+	var locked sql.NullInt64
+	if err := conn.QueryRowContext(ctx, "SELECT GET_LOCK(?, 60)", schemaMigrationLockName).Scan(&locked); err != nil {
+		return false, fmt.Errorf("acquire schema migration lock: %w", err)
+	}
+	return locked.Valid && locked.Int64 == 1, nil
+}
+
+func releaseSchemaMigrationLock(ctx context.Context, conn *sql.Conn) error {
+	var released sql.NullInt64
+	if err := conn.QueryRowContext(ctx, "SELECT RELEASE_LOCK(?)", schemaMigrationLockName).Scan(&released); err != nil {
+		return fmt.Errorf("release schema migration lock: %w", err)
+	}
+	if !released.Valid || released.Int64 != 1 {
+		return fmt.Errorf("schema migration lock was not released")
+	}
+	return nil
 }
 
 func setupDBConnection() {
@@ -78,7 +175,7 @@ func setupDBMySQL() {
 }
 
 // autoMigrateTables 自动迁移数据存储相关表
-func autoMigrateTables() {
+func autoMigrateTables() error {
 	console.Info("auto migrating data storage tables...")
 
 	// 获取默认数据库连接
@@ -86,15 +183,15 @@ func autoMigrateTables() {
 
 	// 检查数据库连接是否成功
 	if db == nil {
-		console.Warning("Database connection not available, skipping auto migration")
-		return
+		return fmt.Errorf("database connection is unavailable")
 	}
 
-	prepareMethodPipelineIndexes(db)
+	if err := prepareMethodPipelineIndexes(db); err != nil {
+		return err
+	}
 	if err := prepareMallWeatherVersionIndexes(db); err != nil {
 		logger.Error("修复商场天气版本索引失败", zap.Error(err))
-		console.Warning("修复商场天气版本索引失败: %v", err)
-		return
+		return fmt.Errorf("repair mall weather version indexes: %w", err)
 	}
 
 	// 迁移数据存储相关表
@@ -143,13 +240,11 @@ func autoMigrateTables() {
 
 	if err != nil {
 		logger.Error("数据表自动迁移失败", zap.Error(err))
-		console.Warning("数据表自动迁移失败: %v", err)
-		return
+		return fmt.Errorf("auto migrate tables: %w", err)
 	}
 	if err := verifyMallWeatherVersionIndexes(db); err != nil {
 		logger.Error("校验商场天气版本索引失败", zap.Error(err))
-		console.Warning("校验商场天气版本索引失败: %v", err)
-		return
+		return fmt.Errorf("verify mall weather version indexes: %w", err)
 	}
 
 	console.Success("数据表自动迁移完成")
@@ -159,8 +254,7 @@ func autoMigrateTables() {
 	synchronized, err := auth_svc.SyncExistingConsoleAdminPermissions(ctx, db)
 	if err != nil {
 		logger.Error("同步 admin 天气权限失败", zap.Error(err))
-		console.Exit("同步 admin 天气权限失败: %v", err)
-		return
+		return fmt.Errorf("sync admin permissions: %w", err)
 	}
 	if synchronized {
 		console.Success("admin 天气权限同步完成")
@@ -169,10 +263,10 @@ func autoMigrateTables() {
 	}
 	if err := auth_svc.SyncAccessControlSeeds(ctx, db); err != nil {
 		logger.Error("同步账号权限种子失败", zap.Error(err))
-		console.Exit("同步账号权限种子失败: %v", err)
-		return
+		return fmt.Errorf("sync access control seeds: %w", err)
 	}
 	console.Success("账号权限种子同步完成")
+	return nil
 }
 
 func mallWeatherMigrationModels() []interface{} {
@@ -204,18 +298,19 @@ func mallWeatherMigrationModels() []interface{} {
 	}
 }
 
-func prepareMethodPipelineIndexes(db *gorm.DB) {
+func prepareMethodPipelineIndexes(db *gorm.DB) error {
 	if !db.Migrator().HasTable(&model.MethodStep{}) {
-		return
+		return nil
 	}
 
 	const indexName = "idx_pipeline_step_code"
 	if !db.Migrator().HasIndex(&model.MethodStep{}, indexName) {
-		return
+		return nil
 	}
 
 	if err := db.Migrator().DropIndex(&model.MethodStep{}, indexName); err != nil {
 		logger.Error("删除旧方法步骤唯一索引失败", zap.String("index", indexName), zap.Error(err))
-		console.Warning("删除旧方法步骤唯一索引失败: %v", err)
+		return fmt.Errorf("drop legacy method step index %s: %w", indexName, err)
 	}
+	return nil
 }

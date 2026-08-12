@@ -1,4 +1,28 @@
 services:
+  migrate:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    env_file:
+      - .env
+    command: ["./main", "migrate", "schema"]
+    volumes:
+      - ./etc/config.yaml:/app/etc/config.yaml:ro
+    environment:
+      - TZ=Asia/Shanghai
+      - ENV=${ENV:-docker}
+      - DEBUG=${DEBUG:-false}
+      - DB_HOST=${DB_HOST:?set DB_HOST}
+      - DB_PORT=${DB_PORT:-3306}
+      - DB_DATABASE=${DB_DATABASE:?set DB_DATABASE}
+      - DB_USERNAME=${DB_USERNAME:?set DB_USERNAME}
+      - DB_PASSWORD=${DB_PASSWORD:?set DB_PASSWORD}
+    restart: "no"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - gin-network
+
   app:
     build:
       context: .
@@ -31,7 +55,17 @@ services:
       - REDIS_USERNAME=${REDIS_USERNAME:-}
       - REDIS_PASSWORD=${REDIS_PASSWORD:-}
       - DATA_WAREHOUSE_EXCEL_TEMP_DIR=${DATA_WAREHOUSE_EXCEL_TEMP_DIR:-/data/data-warehouse-excel}
+      - AUTO_MIGRATE_ON_STARTUP=${AUTO_MIGRATE_ON_STARTUP:-false}
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:8501/health"]
+      interval: 3s
+      timeout: 2s
+      retries: 20
+      start_period: 5s
     restart: unless-stopped
+    depends_on:
+      migrate:
+        condition: service_completed_successfully
     extra_hosts:
       - "host.docker.internal:host-gateway"
     networks:
@@ -43,7 +77,8 @@ services:
       dockerfile: Dockerfile.web
     container_name: gin-biz-web
     depends_on:
-      - app
+      app:
+        condition: service_healthy
     ports:
       - "${HTTP_PORT:-80}:80"
       - "${HTTPS_PORT:-443}:443"

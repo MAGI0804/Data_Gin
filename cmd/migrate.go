@@ -60,7 +60,18 @@ var migrateQueryIndexesCmd = &cobra.Command{
 	},
 }
 
+var migrateSchemaCmd = &cobra.Command{
+	Use:     "schema",
+	Short:   "迁移完整服务表结构与账号权限种子",
+	Example: "go run main.go migrate schema",
+	Args:    cobra.NoArgs,
+	RunE: func(cmd *cobra.Command, args []string) error {
+		return bootstrap.ApplySchemaMigrations()
+	},
+}
+
 func init() {
 	MigrateCmd.AddCommand(migrateDataTablesCmd)
 	MigrateCmd.AddCommand(migrateQueryIndexesCmd)
+	MigrateCmd.AddCommand(migrateSchemaCmd)
 }
