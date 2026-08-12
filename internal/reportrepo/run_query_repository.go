@@ -121,7 +121,7 @@ func (repository *Repository) LoadResultContractForActor(ctx context.Context, ac
 		contract.Version.ResultSchemaHash != contract.Run.ResultSchemaHash || contract.Version.DatasourceID == 0 {
 		return nil, ErrReportResultUnavailable
 	}
-	if err := repository.db.WithContext(ctx).Where("id = ? AND enabled = ? AND driver = ?", contract.Version.DatasourceID, true, model.ReportDatasourceDriverOracle).First(&contract.Datasource).Error; err != nil {
+	if err := repository.db.WithContext(ctx).Where("id = ? AND driver = ?", contract.Version.DatasourceID, model.ReportDatasourceDriverOracle).First(&contract.Datasource).Error; err != nil {
 		return nil, fmt.Errorf("report result query: load datasource: %w", err)
 	}
 	return &contract, nil

@@ -486,12 +486,10 @@ func (repository *Repository) LoadRuntimeContract(ctx context.Context, runID uin
 	if err := repository.db.WithContext(ctx).Where("id = ? AND definition_id = ? AND status = ?", runtime.Run.VersionID, runtime.Run.DefinitionID, model.ReportVersionStatusPublished).First(&runtime.Version).Error; err != nil {
 		return nil, fmt.Errorf("report execution: load published version: %w", err)
 	}
-	if runtime.Version.DatasourceID == 0 || runtime.Version.DatasourceID != runtime.Definition.DatasourceID ||
-		runtime.Version.ContractHash != runtime.Run.ContractHash || runtime.Version.ProcedureSignatureHash != runtime.Run.ProcedureSignatureHash ||
-		runtime.Version.ResultSchemaHash != runtime.Run.ResultSchemaHash {
+	if !runtimeContractMatches(runtime.Run, runtime.Version) {
 		return nil, fmt.Errorf("report execution: immutable contract hash mismatch")
 	}
-	if err := repository.db.WithContext(ctx).Where("id = ? AND enabled = ? AND driver = ?", runtime.Version.DatasourceID, true, model.ReportDatasourceDriverOracle).First(&runtime.Datasource).Error; err != nil {
+	if err := repository.db.WithContext(ctx).Where("id = ? AND driver = ?", runtime.Version.DatasourceID, model.ReportDatasourceDriverOracle).First(&runtime.Datasource).Error; err != nil {
 		return nil, fmt.Errorf("report execution: load Oracle datasource: %w", err)
 	}
 	if err := repository.db.WithContext(ctx).Where("version_id = ?", runtime.Version.ID).Order("position ASC, id ASC").Find(&runtime.Parameters).Error; err != nil {
@@ -501,6 +499,11 @@ func (repository *Repository) LoadRuntimeContract(ctx context.Context, runID uin
 		return nil, fmt.Errorf("report execution: load columns: %w", err)
 	}
 	return &runtime, nil
+}
+
+func runtimeContractMatches(run model.ReportRun, version model.ReportVersion) bool {
+	return version.DatasourceID != 0 && version.ContractHash == run.ContractHash &&
+		version.ProcedureSignatureHash == run.ProcedureSignatureHash && version.ResultSchemaHash == run.ResultSchemaHash
 }
 
 func (repository *Repository) MarkReconciliationSucceeded(ctx context.Context, runID uint, leaseToken string, rowCount int64, finishedAt, expiresAt time.Time) error {

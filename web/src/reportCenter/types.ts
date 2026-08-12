@@ -27,6 +27,46 @@ export type ReportCatalogQuery = {
   limit?: number
 }
 
+export type ReportDatasourceTestStatus = 'SUCCESS' | 'FAILED' | 'NOT_TESTED'
+
+export type ReportDatasource = {
+  id: number
+  code: string
+  name: string
+  driver: 'ORACLE'
+  host: string
+  port: number
+  serviceName: string
+  sid: string
+  username: string
+  hasPassword: boolean
+  sessionTimezone: string
+  connectTimeoutSeconds: number
+  queryTimeoutSeconds: number
+  maxOpenConnections: number
+  maxIdleConnections: number
+  prefetchRows: number
+  arraySize: number
+  enabled: boolean
+  lastTestStatus: ReportDatasourceTestStatus
+  lastTestError: string
+  lastTestedAt: string | null
+}
+
+export type ReportDatasourceInput = Omit<ReportDatasource,
+  'id' | 'driver' | 'hasPassword' | 'lastTestStatus' | 'lastTestError' | 'lastTestedAt'
+> & {
+  password: string
+}
+
+export type ReportDatasourceTest = {
+  status: Exclude<ReportDatasourceTestStatus, 'NOT_TESTED'>
+  testedAt: string
+  latencyMs: number
+  errorCode: string
+  message: string
+}
+
 export type ReportCenterSection = 'catalog' | 'configuration' | 'query' | 'exports'
 
 export type ReportParameter = {

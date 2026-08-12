@@ -211,5 +211,6 @@ func runTestRepository(t *testing.T) (*Repository, *transactionDriverState) {
 			authority:  runAuthority{Source: "USER", Grants: []model.ReportGrant{{SubjectType: "USER", SubjectID: 17, ActionsJSON: model.JSONText(`["QUERY"]`)}}},
 		}, nil
 	}
+	repository.validateRunSource = func(context.Context, *gorm.DB, uint) error { return nil }
 	return repository, transactionState
 }

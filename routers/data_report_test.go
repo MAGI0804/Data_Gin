@@ -13,6 +13,7 @@ func TestRegisterReportRoutesUsesExpectedMethodsAndPaths(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	registerReportRoutes(router.Group("/api"), &data_ctrl.ReportController{})
+	registerReportDatasourceRoutes(router.Group("/api"), &data_ctrl.ReportDatasourceController{})
 	registerReportRunRoutes(router.Group("/api"), &data_ctrl.ReportRunController{})
 	registerReportExportRoutes(router.Group("/api"), &data_ctrl.ReportExportController{})
 	routes := make(map[string]struct{})
@@ -27,6 +28,11 @@ func TestRegisterReportRoutesUsesExpectedMethodsAndPaths(t *testing.T) {
 		http.MethodPost + " /api/v1/reports/:id/publish",
 		http.MethodGet + " /api/v1/reports/:id/run-contract",
 		http.MethodPost + " /api/v1/reports/:id/runs",
+		http.MethodGet + " /api/v1/report-datasources",
+		http.MethodGet + " /api/v1/report-datasources/:id",
+		http.MethodPost + " /api/v1/report-datasources",
+		http.MethodPut + " /api/v1/report-datasources/:id",
+		http.MethodPost + " /api/v1/report-datasources/:id/test",
 		http.MethodGet + " /api/v1/report-runs/:id",
 		http.MethodGet + " /api/v1/report-runs/:id/results",
 		http.MethodPost + " /api/v1/report-runs/:id/cancel",

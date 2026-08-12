@@ -44,16 +44,23 @@ type CreateRunCommand struct {
 }
 
 func (repository *Repository) FindPublishedReport(ctx context.Context, actor, definitionID uint, action string) (*PublishedReport, error) {
-	if repository == nil || repository.db == nil || repository.loadPublished == nil || ctx == nil || actor == 0 || definitionID == 0 || !validReportAction(action) {
+	if repository == nil || repository.db == nil || repository.loadPublished == nil || repository.validateRunSource == nil || ctx == nil || actor == 0 || definitionID == 0 || !validReportAction(action) {
 		return nil, invalidRun("repository, actor, report and action are required")
 	}
-	return repository.loadPublished(ctx, repository.db, actor, definitionID, action, false)
+	published, err := repository.loadPublished(ctx, repository.db, actor, definitionID, action, false)
+	if err != nil {
+		return nil, err
+	}
+	if err := repository.validateRunSource(ctx, repository.db, published.Version.DatasourceID); err != nil {
+		return nil, err
+	}
+	return published, nil
 }
 
 func (repository *Repository) CreateRun(ctx context.Context, actor, definitionID uint, command *CreateRunCommand) error {
 	if repository == nil || repository.db == nil || ctx == nil || actor == 0 || definitionID == 0 || command == nil ||
 		repository.transact == nil || repository.loadPublished == nil || repository.createReportRun == nil ||
-		repository.createRunOutbox == nil || repository.writeAudit == nil ||
+		repository.createRunOutbox == nil || repository.writeAudit == nil || repository.validateRunSource == nil ||
 		!validNewRun(command.Run, actor, definitionID) || !validRunOutbox(command.Outbox, command.Run.RunUUID) {
 		return invalidRun("repository, actor, report, run and outbox are required")
 	}
@@ -62,6 +69,9 @@ func (repository *Repository) CreateRun(ctx context.Context, actor, definitionID
 	err := repository.transact(ctx, repository.db, func(tx *gorm.DB) error {
 		published, err := repository.loadPublished(ctx, tx, actor, definitionID, ReportActionQuery, true)
 		if err != nil {
+			return err
+		}
+		if err := repository.validateRunSource(ctx, tx, published.Version.DatasourceID); err != nil {
 			return err
 		}
 		if published.Version.ID != command.Run.VersionID || published.Version.ContractHash != command.Run.ContractHash ||
@@ -240,6 +250,18 @@ func loadPublishedReport(ctx context.Context, db *gorm.DB, actor, definitionID u
 	}
 	published.authority = authority
 	return published, nil
+}
+
+func requireEnabledOracleDatasource(ctx context.Context, db *gorm.DB, datasourceID uint) error {
+	var datasource model.ReportDatasource
+	if err := db.WithContext(ctx).Clauses(clause.Locking{Strength: "SHARE"}).
+		Where("id = ? AND enabled = ? AND driver = ?", datasourceID, true, model.ReportDatasourceDriverOracle).
+		Select("id").First(&datasource).Error; errors.Is(err, gorm.ErrRecordNotFound) {
+		return ErrPublishedReportNotFound
+	} else if err != nil {
+		return fmt.Errorf("report run: validate datasource: %w", err)
+	}
+	return nil
 }
 
 func actorCanRunReport(ctx context.Context, db *gorm.DB, actor, owner uint, action string, grants []model.ReportGrant) (runAuthority, bool, error) {

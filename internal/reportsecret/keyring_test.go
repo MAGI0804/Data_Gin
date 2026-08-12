@@ -64,6 +64,21 @@ func TestEnvironmentKeyringLoadsConfiguredKeys(t *testing.T) {
 	}
 }
 
+func TestEnvironmentKeyringEncryptsWithConfiguredCurrentVersion(t *testing.T) {
+	key := base64.StdEncoding.EncodeToString([]byte("0123456789abcdef0123456789abcdef"))
+	t.Setenv("TEST_REPORT_KEYS", `{"key-v2":"`+key+`"}`)
+	t.Setenv("TEST_REPORT_KEY_VERSION", "key-v2")
+	environment := EnvironmentKeyring{Variable: "TEST_REPORT_KEYS", VersionVariable: "TEST_REPORT_KEY_VERSION"}
+	version, ciphertext, err := environment.Encrypt("oracle-password")
+	if err != nil {
+		t.Fatalf("Encrypt() error = %v", err)
+	}
+	plaintext, err := environment.Decrypt(version, ciphertext)
+	if err != nil || version != "key-v2" || plaintext != "oracle-password" || strings.Contains(ciphertext, plaintext) {
+		t.Fatalf("Encrypt()/Decrypt() = version %q, plaintext %q, ciphertext %q, err %v", version, plaintext, ciphertext, err)
+	}
+}
+
 func TestScopedCiphertextCannotCrossPurposeBoundary(t *testing.T) {
 	key := base64.StdEncoding.EncodeToString([]byte("0123456789abcdef0123456789abcdef"))
 	keyring, err := ParseKeyring(`{"key-v1":"` + key + `"}`)

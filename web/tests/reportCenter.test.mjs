@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { parseReportCatalogPage, parseReportDraft, parseReportExport, parseReportResultPage, parseReportRun, parseReportRunContract } from '../.test-dist/reportCenter/api.js'
+import { parseReportCatalogPage, parseReportDatasource, parseReportDatasources, parseReportDatasourceTest, parseReportDraft, parseReportExport, parseReportResultPage, parseReportRun, parseReportRunContract } from '../.test-dist/reportCenter/api.js'
 
 test('parseReportCatalogPage reads the standard API envelope', () => {
   const page = parseReportCatalogPage({
@@ -102,4 +102,40 @@ test('parseReportDraft preserves parameter, field and excel mappings', () => {
   assert.equal(draft.columns[0].databaseColumn, 'AMOUNT')
   assert.equal(draft.columns[0].excelHeader, '含税金额')
   assert.deepEqual(draft.grants[0].actions, ['QUERY', 'EXPORT'])
+})
+
+test('Oracle datasource parser exposes only the public management contract', () => {
+  const datasource = parseReportDatasource({ data: {
+    id: 7, code: 'report_oracle', name: '经营报表库', driver: 'ORACLE', host: 'oracle.internal', port: 1521,
+    serviceName: 'REPORT', sid: '', username: 'report_user', hasPassword: true, enabled: true,
+    sessionTimezone: 'Asia/Shanghai', connectTimeoutSeconds: 5, queryTimeoutSeconds: 300,
+    maxOpenConnections: 10, maxIdleConnections: 2, prefetchRows: 1000, arraySize: 1000,
+    lastTestStatus: 'SUCCESS', lastTestedAt: '2026-08-13T08:00:00Z',
+  } })
+  assert.equal(datasource.id, 7)
+  assert.equal(datasource.serviceName, 'REPORT')
+  assert.equal(datasource.hasPassword, true)
+  assert.equal(Object.hasOwn(datasource, 'password'), false)
+  assert.equal(Object.hasOwn(datasource, 'passwordCiphertext'), false)
+  assert.equal(Object.hasOwn(datasource, 'credentialKeyVersion'), false)
+  assert.equal(Object.hasOwn(datasource, 'sessionInitJSON'), false)
+  for (const forbidden of ['password', 'passwordCiphertext', 'credentialKeyVersion', 'sessionInitJSON', 'dsn']) {
+    assert.throws(() => parseReportDatasource({ data: {
+      id: 7, code: 'report_oracle', name: '经营报表库', driver: 'ORACLE', host: 'oracle.internal', port: 1521,
+      serviceName: 'REPORT', sid: '', username: 'report_user', hasPassword: true, enabled: true, [forbidden]: 'must-not-pass',
+    } }))
+  }
+})
+
+test('Oracle datasource parser enforces a single Service Name or SID', () => {
+  const base = { id: 7, code: 'report_oracle', name: '经营报表库', driver: 'ORACLE', host: 'oracle.internal', port: 1521, username: 'report_user', hasPassword: true, enabled: true }
+  assert.throws(() => parseReportDatasource({ data: { ...base, serviceName: '', sid: '' } }))
+  assert.throws(() => parseReportDatasource({ data: { ...base, serviceName: 'REPORT', sid: 'ORCL' } }))
+  assert.deepEqual(parseReportDatasources({ data: { items: [{ ...base, serviceName: '', sid: 'ORCL' }] } }).map((item) => item.id), [7])
+})
+
+test('Oracle datasource test parser accepts only safe stable fields', () => {
+  const result = parseReportDatasourceTest({ data: { status: 'FAILED', testedAt: '2026-08-13T08:00:00Z', latencyMs: 12, errorCode: 'AUTHENTICATION_FAILED', message: 'Oracle 用户名或密码无效', rawError: 'password=secret' } })
+  assert.equal(result.errorCode, 'AUTHENTICATION_FAILED')
+  assert.equal(Object.hasOwn(result, 'rawError'), false)
 })

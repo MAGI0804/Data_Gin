@@ -10,6 +10,20 @@ import (
 	"gorm.io/gorm"
 )
 
+func TestRuntimeContractDoesNotDependOnMutableDefinitionDatasource(t *testing.T) {
+	runtime := RuntimeContract{
+		Definition: model.ReportDefinition{DatasourceID: 99},
+		Version:    model.ReportVersion{DatasourceID: 7, ContractHash: "contract", ProcedureSignatureHash: "procedure", ResultSchemaHash: "result"},
+		Run:        model.ReportRun{ContractHash: "contract", ProcedureSignatureHash: "procedure", ResultSchemaHash: "result"},
+	}
+	if runtime.Version.DatasourceID == runtime.Definition.DatasourceID {
+		t.Fatal("test fixture must model a definition rebound after run creation")
+	}
+	if !runtimeContractMatches(runtime.Run, runtime.Version) {
+		t.Fatal("immutable run/version contract was rejected because the mutable definition changed")
+	}
+}
+
 func TestClassifyRunStartProtectsOracleExecutionFromBlindTakeover(t *testing.T) {
 	now := time.Date(2026, 8, 12, 12, 0, 0, 0, time.UTC)
 	activeLease := now.Add(time.Minute)

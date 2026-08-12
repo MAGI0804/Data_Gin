@@ -22,6 +22,7 @@ func apiData(api *gin.RouterGroup) {
 	registerMallWeatherCapacityPlanRoutes(api, data_ctrl.NewMallWeatherCapacityPlanController())
 	registerMallWeatherMetricsRoutes(api, data_ctrl.NewMallWeatherMetricsController())
 	registerReportRoutes(api, data_ctrl.NewReportController())
+	registerReportDatasourceRoutes(api, data_ctrl.NewReportDatasourceController())
 	registerReportRunRoutes(api, data_ctrl.NewReportRunController())
 	registerReportExportRoutes(api, data_ctrl.NewReportExportController())
 
@@ -211,6 +212,16 @@ func apiData(api *gin.RouterGroup) {
 		dataGroup.GET("/clean-records/list", middleware.RequirePermission(model.PermissionDataRead), dataCtrl.QueryController.GetCleanRecordList)
 		dataGroup.GET("/statistics", middleware.RequirePermission(model.PermissionDataRead), dataCtrl.QueryController.GetStatistics)
 	}
+}
+
+func registerReportDatasourceRoutes(api *gin.RouterGroup, controller *data_ctrl.ReportDatasourceController) {
+	group := api.Group("/v1/report-datasources")
+	group.Use(middleware.AuthJWT())
+	group.GET("", middleware.RequirePermission(model.PermissionReportManage), controller.List)
+	group.GET("/:id", middleware.RequirePermission(model.PermissionReportManage), controller.Get)
+	group.POST("", middleware.RequirePermission(model.PermissionReportManage), controller.Create)
+	group.PUT("/:id", middleware.RequirePermission(model.PermissionReportManage), controller.Update)
+	group.POST("/:id/test", middleware.RequirePermission(model.PermissionReportManage), controller.Test)
 }
 
 const (

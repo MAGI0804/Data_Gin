@@ -101,3 +101,22 @@ type ReportRunCreateRequest struct {
 	Parameters   map[string]json.RawMessage `json:"parameters"`
 	RefreshNonce string                     `json:"refreshNonce,omitempty"`
 }
+
+type ReportDatasourceSaveRequest struct {
+	Code                  string `json:"code"`
+	Name                  string `json:"name"`
+	Host                  string `json:"host"`
+	Port                  int    `json:"port"`
+	ServiceName           string `json:"serviceName,omitempty"`
+	SID                   string `json:"sid,omitempty"`
+	Username              string `json:"username"`
+	Password              string `json:"password,omitempty"`
+	SessionTimezone       string `json:"sessionTimezone,omitempty"`
+	ConnectTimeoutSeconds int    `json:"connectTimeoutSeconds"`
+	QueryTimeoutSeconds   int    `json:"queryTimeoutSeconds"`
+	MaxOpenConnections    int    `json:"maxOpenConnections"`
+	MaxIdleConnections    int    `json:"maxIdleConnections"`
+	PrefetchRows          int    `json:"prefetchRows"`
+	ArraySize             int    `json:"arraySize"`
+	Enabled               bool   `json:"enabled"`
+}

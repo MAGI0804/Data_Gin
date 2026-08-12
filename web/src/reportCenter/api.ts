@@ -1,5 +1,5 @@
 import type { ClientResponse, HTTPMethod } from '../api/client'
-import type { ReportCatalogPage, ReportCatalogQuery, ReportColumn, ReportDefinitionStatus, ReportDraft, ReportExport, ReportGrant, ReportParameter, ReportResultPage, ReportRun, ReportRunContract, ReportRunStatus, ReportSummary } from './types'
+import type { ReportCatalogPage, ReportCatalogQuery, ReportColumn, ReportDatasource, ReportDatasourceInput, ReportDatasourceTest, ReportDefinitionStatus, ReportDraft, ReportExport, ReportGrant, ReportParameter, ReportResultPage, ReportRun, ReportRunContract, ReportRunStatus, ReportSummary } from './types'
 
 type JsonRecord = Record<string, unknown>
 
@@ -48,6 +48,74 @@ export function parseReportCatalogPage(payload: unknown): ReportCatalogPage {
 
 export async function getReportRunContract(client: ReportCenterClient, reportId: number, signal?: AbortSignal): Promise<ReportAPIResult<ReportRunContract>> {
   return requestAndParse(client, `/v1/reports/${reportId}/run-contract`, { method: 'GET', signal }, parseReportRunContract, '报表运行参数加载失败。')
+}
+
+export async function getReportDatasources(client: ReportCenterClient, signal?: AbortSignal): Promise<ReportAPIResult<ReportDatasource[]>> {
+  return requestAndParse(client, '/v1/report-datasources', { method: 'GET', signal }, parseReportDatasources, 'Oracle 数据源加载失败。')
+}
+
+export async function createReportDatasource(client: ReportCenterClient, input: ReportDatasourceInput): Promise<ReportAPIResult<ReportDatasource>> {
+  return requestAndParse(client, '/v1/report-datasources', { method: 'POST', body: serializeReportDatasource(input) }, parseReportDatasource, 'Oracle 数据源创建失败。')
+}
+
+export async function updateReportDatasource(client: ReportCenterClient, datasourceId: number, input: ReportDatasourceInput): Promise<ReportAPIResult<ReportDatasource>> {
+  return requestAndParse(client, `/v1/report-datasources/${datasourceId}`, { method: 'PUT', body: serializeReportDatasource(input) }, parseReportDatasource, 'Oracle 数据源更新失败。')
+}
+
+export async function testReportDatasource(client: ReportCenterClient, datasourceId: number): Promise<ReportAPIResult<ReportDatasourceTest>> {
+  return requestAndParse(client, `/v1/report-datasources/${datasourceId}/test`, { method: 'POST' }, parseReportDatasourceTest, 'Oracle 连接测试失败。')
+}
+
+export function parseReportDatasources(payload: unknown): ReportDatasource[] {
+  const data = unwrapData(payload)
+  const rawItems = firstArray(data.items)
+  const items = rawItems.flatMap((value) => {
+    try { return [parseReportDatasource(value)] } catch { return [] }
+  })
+  if (items.length !== rawItems.length) throw new Error('invalid report datasource list')
+  return items
+}
+
+export function parseReportDatasource(payload: unknown): ReportDatasource {
+  const data = unwrapData(payload)
+  for (const forbidden of ['password', 'passwordCiphertext', 'credentialKeyVersion', 'sessionInitJSON', 'dsn']) {
+    if (Object.prototype.hasOwnProperty.call(data, forbidden)) throw new Error('sensitive report datasource field')
+  }
+  const id = positiveInteger(data.id)
+  const code = publicString(data.code, 64)
+  const name = publicString(data.name, 128)
+  const host = publicString(data.host, 255)
+  const port = positiveInteger(data.port)
+  const serviceName = publicString(data.serviceName, 128)
+  const sid = publicString(data.sid, 128)
+  const username = publicString(data.username, 128)
+  if (!id || !code || !name || data.driver !== 'ORACLE' || !host || !port || port > 65535 || !username || (Boolean(serviceName) === Boolean(sid)) || typeof data.enabled !== 'boolean' || typeof data.hasPassword !== 'boolean') {
+    throw new Error('invalid report datasource')
+  }
+  return {
+    id, code, name, driver: 'ORACLE', host, port, serviceName, sid, username,
+    hasPassword: data.hasPassword,
+    sessionTimezone: publicString(data.sessionTimezone, 64) || 'Asia/Shanghai',
+    connectTimeoutSeconds: positiveInteger(data.connectTimeoutSeconds) ?? 5,
+    queryTimeoutSeconds: positiveInteger(data.queryTimeoutSeconds) ?? 300,
+    maxOpenConnections: positiveInteger(data.maxOpenConnections) ?? 10,
+    maxIdleConnections: nonNegativeInteger(data.maxIdleConnections),
+    prefetchRows: positiveInteger(data.prefetchRows) ?? 1000,
+    arraySize: positiveInteger(data.arraySize) ?? 1000,
+    enabled: data.enabled,
+    lastTestStatus: data.lastTestStatus === 'SUCCESS' || data.lastTestStatus === 'FAILED' ? data.lastTestStatus : 'NOT_TESTED',
+    lastTestError: publicString(data.lastTestError, 300),
+    lastTestedAt: publicDate(data.lastTestedAt),
+  }
+}
+
+export function parseReportDatasourceTest(payload: unknown): ReportDatasourceTest {
+  const data = unwrapData(payload)
+  const status = data.status === 'SUCCESS' || data.status === 'FAILED' ? data.status : null
+  const testedAt = publicDate(data.testedAt)
+  const message = publicString(data.message, 300)
+  if (!status || !testedAt || !message) throw new Error('invalid report datasource test')
+  return { status, testedAt, latencyMs: nonNegativeInteger(data.latencyMs), errorCode: publicString(data.errorCode, 100), message }
 }
 
 export async function getReportDraft(client: ReportCenterClient, reportId: number, signal?: AbortSignal): Promise<ReportAPIResult<ReportDraft>> {
@@ -293,6 +361,27 @@ function serializeReportDraft(draft: ReportDraft, creating: boolean) {
     parameters: draft.parameters.map((parameter) => ({ ...parameter, defaultValue: parameter.sensitive ? undefined : parameter.defaultValue, allowedValues: parameter.allowedValues.length ? parameter.allowedValues : undefined, validation: Object.keys(parameter.validation).length ? parameter.validation : undefined, normalizer: Object.keys(parameter.normalizer).length ? parameter.normalizer : undefined, valueSource: Object.keys(parameter.valueSource).length ? parameter.valueSource : undefined, nullPolicy: parameter.nullPolicy || 'TYPED_NULL' })),
     columns: draft.columns,
     grants: draft.grants,
+  }
+}
+
+function serializeReportDatasource(input: ReportDatasourceInput) {
+  return {
+    code: input.code,
+    name: input.name,
+    host: input.host,
+    port: input.port,
+    serviceName: input.serviceName,
+    sid: input.sid,
+    username: input.username,
+    password: input.password || undefined,
+    sessionTimezone: input.sessionTimezone,
+    connectTimeoutSeconds: input.connectTimeoutSeconds,
+    queryTimeoutSeconds: input.queryTimeoutSeconds,
+    maxOpenConnections: input.maxOpenConnections,
+    maxIdleConnections: input.maxIdleConnections,
+    prefetchRows: input.prefetchRows,
+    arraySize: input.arraySize,
+    enabled: input.enabled,
   }
 }
 

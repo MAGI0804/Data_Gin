@@ -1,0 +1,24 @@
+.root { display: grid; min-width: 0; }
+.toolbar { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); padding-block: var(--space-3); border-bottom: 1px solid var(--color-border); }
+.toolbar > div { display: grid; gap: var(--space-1); }
+.toolbar span, .muted { color: var(--color-text-secondary); font-size: 13px; }
+.toolbar button, .actions, .actions button, .identity { display: inline-flex; align-items: center; gap: var(--space-2); }
+.toolbar svg, .actions svg, .identity > svg { width: 16px; height: 16px; }
+.identity > svg { color: var(--color-brand-active); }
+.identity strong, .identity code, td small { display: block; }
+.identity code, td code, .mono { font-family: var(--font-mono); }
+td small { margin-top: var(--space-1); color: var(--color-text-secondary); }
+.actions { flex-wrap: wrap; }
+.actions button { border: 0; background: transparent; padding: var(--space-1); color: var(--color-brand-active); }
+.actions button:disabled { color: var(--color-text-secondary); }
+.testStatus { display: grid; justify-items: start; gap: var(--space-1); }
+.notice { margin: 0; border-left: 3px solid var(--color-brand); background: var(--color-brand-soft); padding: var(--space-2) var(--space-3); color: var(--color-text-secondary); font-size: 13px; }
+.form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-4); }
+.field { display: grid; align-content: start; gap: var(--space-2); color: var(--color-text-secondary); font-size: 13px; font-weight: 650; }
+.field input, .field select { width: 100%; min-width: 0; min-height: var(--control-height); border: 1px solid var(--color-border-strong); border-radius: var(--radius-control); background: var(--color-canvas); color: var(--color-text); padding: var(--space-2) var(--space-3); }
+.field small { color: var(--color-text-secondary); font-size: 12px; font-weight: 400; line-height: 1.5; }
+.switch { display: inline-flex; grid-column: 1 / -1; align-items: center; gap: var(--space-2); min-height: var(--control-height); color: var(--color-text); font-size: 13px; }
+.switch input { width: 16px; height: 16px; accent-color: var(--color-brand); }
+.error { display: flex; align-items: flex-start; gap: var(--space-2); margin-top: var(--space-4); border-left: 3px solid var(--color-danger); background: var(--color-danger-soft); padding: var(--space-3); color: var(--color-danger); font-size: 13px; }
+.error svg { flex: 0 0 auto; width: 16px; height: 16px; }
+@media (max-width: 767px) { .toolbar { align-items: flex-start; flex-direction: column; } .form { grid-template-columns: 1fr; } .switch { grid-column: auto; } }

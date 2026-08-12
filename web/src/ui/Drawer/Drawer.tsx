@@ -2,7 +2,7 @@ import { useEffect, useId, useRef, type HTMLAttributes, type ReactNode } from 'r
 import { createPortal } from 'react-dom'
 import { X } from 'lucide-react'
 import styles from './Drawer.module.css'
-import { isolateModalLayer } from '../modalIsolation'
+import { isolateModalLayer, isTopModalLayer } from '../modalIsolation'
 
 const focusableSelector = [
   'a[href]',
@@ -79,7 +79,7 @@ export function Drawer({
 
     function handleKeyDown(event: KeyboardEvent) {
       const currentPanel = panelRef.current
-      if (!currentPanel) return
+      if (!currentPanel || !isTopModalLayer(layerRef.current)) return
 
       if (event.key === 'Escape' && !closeDisabledRef.current) {
         event.preventDefault()

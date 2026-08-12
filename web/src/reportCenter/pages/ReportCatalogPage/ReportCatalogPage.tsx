@@ -5,6 +5,7 @@ import type { ReportCenterClient } from '../../api'
 import { ReportConfigDrawer } from '../../components/ReportConfigDrawer/ReportConfigDrawer'
 import type { ReportSummary } from '../../types'
 import { useReportCatalog } from '../../useReportCatalog'
+import { useReportDatasources } from '../../useReportDatasources'
 import styles from './ReportCatalogPage.module.css'
 
 export function ReportCatalogPage({ client, canManage }: { client: ReportCenterClient; canManage: boolean }) {
@@ -13,6 +14,7 @@ export function ReportCatalogPage({ client, canManage }: { client: ReportCenterC
   const [drawerState, setDrawerState] = useState<{ open: boolean; report: ReportSummary | null }>({ open: false, report: null })
   const query = useMemo(() => ({ search, limit: 50 }), [search])
   const { items, loading, error, reload } = useReportCatalog(client, query)
+  const datasources = useReportDatasources(client, canManage)
 
   return (
     <PageCanvas>
@@ -29,7 +31,7 @@ export function ReportCatalogPage({ client, canManage }: { client: ReportCenterC
         {!loading && !error && items.length === 0 ? <FeedbackState kind="empty" title="暂无报表" description="后端尚未返回可查看的报表定义。" action={canManage ? <button className="ui-control-radius" type="button" onClick={() => setDrawerState({ open: true, report: null })}>创建第一份报表</button> : null} /> : null}
         {items.length > 0 ? <ReportTable reports={items} onEdit={canManage ? (report) => setDrawerState({ open: true, report }) : undefined} /> : null}
       </Section>
-      {drawerState.open ? <ReportConfigDrawer client={client} report={drawerState.report} onSaved={reload} onClose={() => setDrawerState({ open: false, report: null })} /> : null}
+      {drawerState.open ? <ReportConfigDrawer client={client} report={drawerState.report} datasources={datasources.items} datasourcesLoading={datasources.loading} datasourcesError={datasources.error} onSaved={reload} onClose={() => setDrawerState({ open: false, report: null })} /> : null}
     </PageCanvas>
   )
 }

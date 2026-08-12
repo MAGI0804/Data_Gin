@@ -22,7 +22,32 @@ type Keyring struct {
 }
 
 type EnvironmentKeyring struct {
-	Variable string
+	Variable        string
+	VersionVariable string
+}
+
+func (environment EnvironmentKeyring) Encrypt(plaintext string) (string, string, error) {
+	variable := strings.TrimSpace(environment.Variable)
+	if variable == "" {
+		variable = "REPORT_CREDENTIAL_KEYS_JSON"
+	}
+	versionVariable := strings.TrimSpace(environment.VersionVariable)
+	if versionVariable == "" {
+		versionVariable = "REPORT_CREDENTIAL_KEY_VERSION"
+	}
+	version := strings.TrimSpace(os.Getenv(versionVariable))
+	if version == "" {
+		return "", "", credentialError("credential key version is unavailable")
+	}
+	keyring, err := ParseKeyring(os.Getenv(variable))
+	if err != nil {
+		return "", "", fmt.Errorf("load report credential keyring: %w", err)
+	}
+	ciphertext, err := keyring.Encrypt(version, plaintext)
+	if err != nil {
+		return "", "", err
+	}
+	return version, ciphertext, nil
 }
 
 func (environment EnvironmentKeyring) Decrypt(version, ciphertext string) (string, error) {

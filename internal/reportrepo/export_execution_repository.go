@@ -210,7 +210,7 @@ func (repository *Repository) LoadExportRuntime(ctx context.Context, exportID ui
 		runtime.Version.ResultSchemaHash != runtime.Run.ResultSchemaHash || runtime.Version.DatasourceID == 0 {
 		return nil, fmt.Errorf("report export execution: immutable contract mismatch")
 	}
-	if err := repository.db.WithContext(ctx).Where("id = ? AND enabled = ? AND driver = ?", runtime.Version.DatasourceID, true, model.ReportDatasourceDriverOracle).First(&runtime.Datasource).Error; err != nil {
+	if err := repository.db.WithContext(ctx).Where("id = ? AND driver = ?", runtime.Version.DatasourceID, model.ReportDatasourceDriverOracle).First(&runtime.Datasource).Error; err != nil {
 		return nil, fmt.Errorf("report export execution: load datasource: %w", err)
 	}
 	return runtime, nil
@@ -302,7 +302,7 @@ func (repository *Repository) ClaimResultPurge(ctx context.Context, exportID uin
 		if err := tx.Where("id = ? AND definition_id = ?", runtime.Run.VersionID, runtime.Run.DefinitionID).First(&runtime.Version).Error; err != nil {
 			return fmt.Errorf("report result purge: load version: %w", err)
 		}
-		if err := tx.Where("id = ? AND enabled = ? AND driver = ?", runtime.Version.DatasourceID, true, model.ReportDatasourceDriverOracle).First(&runtime.Datasource).Error; err != nil {
+		if err := tx.Where("id = ? AND driver = ?", runtime.Version.DatasourceID, model.ReportDatasourceDriverOracle).First(&runtime.Datasource).Error; err != nil {
 			return fmt.Errorf("report result purge: load datasource: %w", err)
 		}
 		if runtime.Run.Status == model.ReportRunStatusSucceeded {
