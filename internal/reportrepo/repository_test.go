@@ -109,6 +109,77 @@ func TestValidateCollectionsRejectsDuplicateStableKeys(t *testing.T) {
 	}
 }
 
+func TestValidateReferenceCountRejectsMissingOrDisabledReferences(t *testing.T) {
+	tests := []struct {
+		name      string
+		reference string
+		actual    int64
+		expected  int
+		wantError bool
+	}{
+		{name: "enabled datasource", reference: "datasource", actual: 1, expected: 1},
+		{name: "missing or disabled datasource", reference: "datasource", actual: 0, expected: 1, wantError: true},
+		{name: "all active users", reference: "grant user", actual: 2, expected: 2},
+		{name: "one missing or disabled user", reference: "grant user", actual: 1, expected: 2, wantError: true},
+		{name: "all active roles", reference: "grant role", actual: 2, expected: 2},
+		{name: "one missing or disabled role", reference: "grant role", actual: 1, expected: 2, wantError: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			err := validateReferenceCount(test.reference, test.actual, test.expected)
+			if test.wantError && !errors.Is(err, ErrInvalidDraft) {
+				t.Fatalf("validateReferenceCount() error = %v, want ErrInvalidDraft", err)
+			}
+			if !test.wantError && err != nil {
+				t.Fatalf("validateReferenceCount() error = %v", err)
+			}
+		})
+	}
+}
+
+func TestRepositoryReferenceValidationStopsDraftWrites(t *testing.T) {
+	referenceError := invalidDraft("datasource or grant subject is unavailable")
+	tests := []struct {
+		name string
+		run  func(*Repository) error
+	}{
+		{name: "create", run: func(repository *Repository) error {
+			return repository.CreateDraft(context.Background(), 8, validDraft())
+		}},
+		{name: "update", run: func(repository *Repository) error {
+			return repository.UpdateDraft(context.Background(), 8, 7, 1, validDraft())
+		}},
+		{name: "save collections", run: func(repository *Repository) error {
+			_, err := repository.SaveDraftCollections(context.Background(), 8, 7, 1, nil, nil, nil)
+			return err
+		}},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			referenceCalls := 0
+			repository := New(newDryRunDB(t))
+			repository.transact = func(_ context.Context, db *gorm.DB, operation func(*gorm.DB) error) error { return operation(db) }
+			repository.lockDefinition = func(context.Context, *gorm.DB, uint, uint) (*definitionRecord, error) {
+				return &definitionRecord{ReportDefinition: model.ReportDefinition{BaseModel: model.BaseModel{ID: 7}, DatasourceID: 3, CurrentDraftVersionID: 11}}, nil
+			}
+			repository.lockVersion = func(context.Context, *gorm.DB, uint, uint) (*versionRecord, error) {
+				return &versionRecord{ReportVersion: model.ReportVersion{BaseModel: model.BaseModel{ID: 11}, DefinitionID: 7, VersionNumber: 1, Status: model.ReportVersionStatusDraft}}, nil
+			}
+			repository.validateReferences = func(context.Context, *gorm.DB, uint, []model.ReportGrant) error {
+				referenceCalls++
+				return referenceError
+			}
+
+			if err := test.run(repository); !errors.Is(err, ErrInvalidDraft) {
+				t.Fatalf("operation error = %v, want ErrInvalidDraft", err)
+			}
+			if referenceCalls != 1 {
+				t.Fatalf("reference validation calls = %d, want 1", referenceCalls)
+			}
+		})
+	}
+}
+
 func TestListDraftsUsesBoundedKeysetQuery(t *testing.T) {
 	db := newDryRunDB(t)
 	statement := buildDraftListQuery(db.Session(&gorm.Session{DryRun: true}), 5,

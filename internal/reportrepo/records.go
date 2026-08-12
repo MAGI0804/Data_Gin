@@ -174,8 +174,8 @@ func validateDraftReferences(ctx context.Context, tx *gorm.DB, datasourceID uint
 		Where("id = ? AND enabled = ?", datasourceID, true).Count(&datasourceCount).Error; err != nil {
 		return fmt.Errorf("report draft: validate datasource: %w", err)
 	}
-	if datasourceCount != 1 {
-		return invalidDraft("datasource does not exist or is disabled")
+	if err := validateReferenceCount("datasource", datasourceCount, 1); err != nil {
+		return err
 	}
 
 	userIDs := make([]uint, 0, len(grants))
@@ -196,8 +196,8 @@ func validateDraftReferences(ctx context.Context, tx *gorm.DB, datasourceID uint
 			Where("id IN ? AND status = ?", userIDs, model.AccountStatusActive).Count(&userCount).Error; err != nil {
 			return fmt.Errorf("report draft: validate grant users: %w", err)
 		}
-		if userCount != int64(len(userIDs)) {
-			return invalidDraft("grant user does not exist or is disabled")
+		if err := validateReferenceCount("grant user", userCount, len(userIDs)); err != nil {
+			return err
 		}
 	}
 	if len(roleIDs) > 0 {
@@ -206,9 +206,16 @@ func validateDraftReferences(ctx context.Context, tx *gorm.DB, datasourceID uint
 			Where("id IN ? AND status = ?", roleIDs, model.RoleStatusActive).Count(&roleCount).Error; err != nil {
 			return fmt.Errorf("report draft: validate grant roles: %w", err)
 		}
-		if roleCount != int64(len(roleIDs)) {
-			return invalidDraft("grant role does not exist or is disabled")
+		if err := validateReferenceCount("grant role", roleCount, len(roleIDs)); err != nil {
+			return err
 		}
+	}
+	return nil
+}
+
+func validateReferenceCount(reference string, actual int64, expected int) error {
+	if actual != int64(expected) {
+		return invalidDraft(reference + " does not exist or is disabled")
 	}
 	return nil
 }

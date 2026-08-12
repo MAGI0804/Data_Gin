@@ -54,10 +54,16 @@ type DraftPage struct {
 }
 
 type transactionRunner func(context.Context, *gorm.DB, func(*gorm.DB) error) error
+type draftReferenceValidator func(context.Context, *gorm.DB, uint, []model.ReportGrant) error
+type draftDefinitionLocker func(context.Context, *gorm.DB, uint, uint) (*definitionRecord, error)
+type draftVersionLocker func(context.Context, *gorm.DB, uint, uint) (*versionRecord, error)
 
 type Repository struct {
-	db       *gorm.DB
-	transact transactionRunner
+	db                 *gorm.DB
+	transact           transactionRunner
+	validateReferences draftReferenceValidator
+	lockDefinition     draftDefinitionLocker
+	lockVersion        draftVersionLocker
 }
 
 func New(databases ...*gorm.DB) *Repository {
@@ -65,7 +71,10 @@ func New(databases ...*gorm.DB) *Repository {
 	if len(databases) > 0 && databases[0] != nil {
 		db = databases[0]
 	}
-	return &Repository{db: db, transact: runTransaction}
+	return &Repository{
+		db: db, transact: runTransaction, validateReferences: validateDraftReferences,
+		lockDefinition: lockDraftDefinition, lockVersion: lockDraftVersion,
+	}
 }
 
 func runTransaction(ctx context.Context, db *gorm.DB, operation func(*gorm.DB) error) error {
@@ -85,7 +94,7 @@ func (repository *Repository) CreateDraft(ctx context.Context, ownerUserID uint,
 		if draft.Definition.OwnerUserID != ownerUserID {
 			return invalidDraft("definition owner does not match owner scope")
 		}
-		if err := validateDraftReferences(ctx, tx, draft.Definition.DatasourceID, draft.Grants); err != nil {
+		if err := repository.validateReferences(ctx, tx, draft.Definition.DatasourceID, draft.Grants); err != nil {
 			return err
 		}
 		definitionRecord := newDefinitionRecord(draft.Definition)
@@ -231,11 +240,11 @@ func (repository *Repository) UpdateDraft(
 	}
 
 	err := repository.transact(ctx, repository.db, func(tx *gorm.DB) error {
-		current, err := lockDraftDefinition(ctx, tx, ownerUserID, definitionID)
+		current, err := repository.lockDefinition(ctx, tx, ownerUserID, definitionID)
 		if err != nil {
 			return err
 		}
-		version, err := lockDraftVersion(ctx, tx, definitionID, current.CurrentDraftVersionID)
+		version, err := repository.lockVersion(ctx, tx, definitionID, current.CurrentDraftVersionID)
 		if err != nil {
 			return err
 		}
@@ -245,7 +254,7 @@ func (repository *Repository) UpdateDraft(
 		if draft.Definition.OwnerUserID != 0 && draft.Definition.OwnerUserID != ownerUserID {
 			return invalidDraft("definition owner cannot be changed")
 		}
-		if err := validateDraftReferences(ctx, tx, draft.Definition.DatasourceID, draft.Grants); err != nil {
+		if err := repository.validateReferences(ctx, tx, draft.Definition.DatasourceID, draft.Grants); err != nil {
 			return err
 		}
 
@@ -316,18 +325,18 @@ func (repository *Repository) SaveDraftCollections(
 
 	nextLockVersion := expectedLockVersion + 1
 	err := repository.transact(ctx, repository.db, func(tx *gorm.DB) error {
-		definition, err := lockDraftDefinition(ctx, tx, ownerUserID, definitionID)
+		definition, err := repository.lockDefinition(ctx, tx, ownerUserID, definitionID)
 		if err != nil {
 			return err
 		}
-		version, err := lockDraftVersion(ctx, tx, definitionID, definition.CurrentDraftVersionID)
+		version, err := repository.lockVersion(ctx, tx, definitionID, definition.CurrentDraftVersionID)
 		if err != nil {
 			return err
 		}
 		if version.VersionNumber != expectedLockVersion {
 			return ErrDraftVersionConflict
 		}
-		if err := validateDraftReferences(ctx, tx, definition.DatasourceID, grants); err != nil {
+		if err := repository.validateReferences(ctx, tx, definition.DatasourceID, grants); err != nil {
 			return err
 		}
 		nextVersion := version.ReportVersion
@@ -358,7 +367,8 @@ func (repository *Repository) SaveDraftCollections(
 }
 
 func (repository *Repository) validate(ctx context.Context, ownerUserID uint) error {
-	if repository == nil || repository.db == nil || repository.transact == nil || ctx == nil || ownerUserID == 0 {
+	if repository == nil || repository.db == nil || repository.transact == nil || repository.validateReferences == nil ||
+		repository.lockDefinition == nil || repository.lockVersion == nil || ctx == nil || ownerUserID == 0 {
 		return invalidDraft("repository, context and owner scope are required")
 	}
 	return nil
