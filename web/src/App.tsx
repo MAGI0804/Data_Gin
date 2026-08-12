@@ -44,6 +44,7 @@ import { Brand } from './components/Brand'
 import { ReportCenter } from './reportCenter/ReportCenter'
 import type { ReportCenterSection } from './reportCenter/types'
 import { AppShell, WorkspaceHeader } from './ui'
+import { RunOverviewPage } from './monitoringPages/RunOverviewPage/RunOverviewPage'
 import { parseMallWeatherExportContentStatus, submitMallWeatherExportContentDownload } from './mallWeatherExport'
 import { buildRawRecordsRequest, buildWarehouseRawRecordsQuery, parseRawRecordsPage, type RawRecordOrigin, type RawRecordsPage } from './rawRecords'
 import { buildDeliveryLogListQuery, buildDeliveryTaskListQuery, buildDestinationListQuery, buildExcelMatchJobListQuery, buildRunListQuery, buildSourceListQuery, buildTransformRuleListQuery, normalizeMonitoringPageNumber, parseMonitoringPage, type MonitoringPage, type MonitoringPagination } from './monitoringRecords'
@@ -1454,13 +1455,13 @@ function App() {
       navigationRef={mobileNavRef}
       navigationOpen={mobileNavOpen}
       onDismissNavigation={() => setMobileNavOpen(false)}
-      flushWorkspace={Boolean(reportSection) || activeNav === 'access_management'}
+      flushWorkspace={Boolean(reportSection) || activeNav === 'access_management' || activeNav === 'overview'}
       workspaceClassName="ops-workspace"
-      header={<ModuleHeader compact={Boolean(reportSection) || activeNav === 'access_management'} activeNav={activeNav} loading={loading || refreshing} sessionUser={sessionUser} onOpenNavigation={openMobileNavigation} onRefresh={() => void refreshWorkspace(true)} onLogout={handleLogout} refreshing={refreshing} mobileNavTriggerRef={mobileNavTriggerRef} />}
+      header={<ModuleHeader compact={Boolean(reportSection) || activeNav === 'access_management' || activeNav === 'overview'} activeNav={activeNav} loading={loading || refreshing} sessionUser={sessionUser} onOpenNavigation={openMobileNavigation} onRefresh={() => void refreshWorkspace(true)} onLogout={handleLogout} refreshing={refreshing} mobileNavTriggerRef={mobileNavTriggerRef} />}
       notices={<>{sessionValidationError && <div className="result-banner error" role="status" aria-live="polite">{sessionValidationError} <button type="button" onClick={() => setSessionValidationAttempt((attempt) => attempt + 1)}>重试校验</button></div>}{workspaceError && <div className="result-banner error" role="alert">{workspaceError} <button type="button" onClick={() => void refreshWorkspace(false)} disabled={refreshing}>重试</button></div>}</>}
       overlay={<ResultPanel result={result} onClose={() => setResult(null)} />}
     >
-        {activeNav === 'overview' && <PushStatusView runs={runs} deliveryLogs={deliveryLogs} monitoring={monitoring} stale={monitoringStale} overviewTotals={overviewTotals} onLoadSteps={openStepRuns} />}
+        {activeNav === 'overview' && <RunOverviewPage runs={runs} deliveryLogs={deliveryLogs} monitoring={monitoring} stale={monitoringStale} overviewTotals={overviewTotals} onLoadSteps={openStepRuns} />}
         {activeNav === 'runs' && <RunsQueryPage client={client} pipelines={pipelines} onLoadSteps={openStepRuns} onPipelineRunCompleted={() => void refreshWorkspace(false)} refreshVersion={workspaceRefreshVersion} />}
         {activeNav === 'delivery_logs' && <DeliveryLogsQueryPage client={client} onRetryLog={retryDeliveryLog} />}
         {activeNav === 'step_runs' && <StepRunsQueryPage client={client} focusRunID={stepRunFocusID} />}
@@ -1641,7 +1642,7 @@ function ModuleHeader({ activeNav, compact, loading, sessionUser, onOpenNavigati
     <WorkspaceHeader
       title={compact ? undefined : titles[activeNav].title}
       description={compact ? undefined : titles[activeNav].subtitle}
-      context={compact ? activeNav === 'access_management' ? 'ACCESS CONTROL' : 'REPORT CENTER' : undefined}
+      context={compact ? activeNav === 'access_management' ? 'ACCESS CONTROL' : activeNav === 'overview' ? 'OPERATIONS' : 'REPORT CENTER' : undefined}
       menuButtonRef={mobileNavTriggerRef}
       onOpenNavigation={onOpenNavigation}
       actions={<div className="workspace-session">
@@ -1653,57 +1654,6 @@ function ModuleHeader({ activeNav, compact, loading, sessionUser, onOpenNavigati
       </div>}
     />
   )
-}
-
-function PushStatusView({ runs, deliveryLogs, monitoring, stale, overviewTotals, onLoadSteps }: { runs: PipelineRun[]; deliveryLogs: DeliveryLog[]; monitoring: MonitoringSnapshot; stale: boolean; overviewTotals: { runs: number | null; deliveryLogs: number | null }; onLoadSteps: (runId: number) => void }) {
-  const failedLogs = deliveryLogs.filter((log) => !log.success)
-  const runningRuns = runs.filter((run) => run.status === 'running')
-  const loadedRunTotal = sum(runs, 'success_count') + sum(runs, 'failed_count')
-  const successRate = loadedRunTotal > 0 ? sum(runs, 'success_count') / loadedRunTotal : null
-  const delivered = deliveryLogs.filter((log) => log.success).length
-  const deliveryRate = deliveryLogs.length > 0 ? delivered / deliveryLogs.length : null
-  const healthTotal = delivered + failedLogs.length
-  return (
-    <div className="view-stack">
-      <section className="overview-grid">
-        <Metric label="今日运行" value={overviewTotals.runs ?? runs.length} />
-        <Metric label="已加载运行成功率" value={successRate === null ? '-' : `${(successRate * 100).toFixed(1)}%`} />
-        <Metric label="待处理运行" value={runningRuns.length} />
-        <Metric label="失败交付记录" value={overviewTotals.deliveryLogs === null ? failedLogs.length : `${failedLogs.length} / ${overviewTotals.deliveryLogs}`} />
-      </section>
-      {stale && <p className="backfill-note" role="status">部分统计暂时不可用，已保留最近一次成功数据。</p>}
-      <section className="overview-workspace">
-        <Panel title="最近流水线运行" icon={<Activity />} meta={`今日已加载 ${runs.length} 条`}>
-          <OverviewRunTable runs={runs} onLoadSteps={onLoadSteps} />
-        </Panel>
-        <aside className="overview-monitoring" aria-label="交付健康度与最近异常">
-          <section className="overview-monitoring-section">
-            <h3>交付健康度</h3>
-            <progress className="overview-health-progress" value={healthTotal ? delivered : 0} max={Math.max(healthTotal, 1)} aria-label="已加载交付成功率" />
-            <div className="overview-health-legend"><span className="success">推送成功 {delivered}</span><span className="danger">推送失败 {failedLogs.length}</span></div>
-            <small>{deliveryRate === null ? '今日暂无已加载交付记录。' : `已加载交付成功率 ${(deliveryRate * 100).toFixed(1)}%`}</small>
-          </section>
-          <section className="overview-monitoring-section">
-            <h3>最近异常</h3>
-            {failedLogs.length === 0 && monitoring.weather?.firingAlerts === 0 ? <EmptyState text="暂无已加载异常。" /> : <div className="overview-anomaly-list">
-              {failedLogs.slice(0, 4).map((log) => <article className="overview-anomaly" key={log.id}><strong>{log.destination_name || log.destination_code || `目标 #${log.destination_id}`} 推送失败</strong><span>{formatDate(log.sent_at)} / HTTP {log.http_status || '-'}</span></article>)}
-              {(monitoring.weather?.firingAlerts ?? 0) > 0 && <article className="overview-anomaly"><strong>天气服务告警</strong><span>当前触发 {monitoring.weather?.firingAlerts} 条告警</span></article>}
-            </div>}
-          </section>
-          <section className="overview-monitoring-section overview-service-summary"><span>服务状态</span><strong>{monitoring.health?.healthy ? '系统正常' : '状态未知'}</strong><small>接收 {monitoring.statistics?.totalCount ?? '-'} / 已处理 {monitoring.statistics?.processedCount ?? '-'} / 处理失败 {monitoring.statistics?.errorCount ?? '-'}</small></section>
-        </aside>
-      </section>
-    </div>
-  )
-}
-
-function OverviewRunTable({ runs, onLoadSteps }: { runs: PipelineRun[]; onLoadSteps: (runId: number) => void }) {
-  if (runs.length === 0) return <EmptyState text="今日暂无运行记录。" />
-  return <div className="data-table-wrap"><table className="data-table overview-run-table"><thead><tr><th>运行任务</th><th>来源</th><th>状态</th><th>处理进度</th><th>开始时间</th><th>操作</th></tr></thead><tbody>{runs.slice(0, 12).map((run) => {
-    const completed = run.success_count + run.failed_count
-    const progress = run.total_count > 0 ? Math.min(100, Math.round(completed / run.total_count * 100)) : run.status === 'success' ? 100 : 0
-    return <tr key={run.id}><td><strong>#{run.id} {run.run_type}</strong><small>{run.trace_id || '-'}</small></td><td>{run.trigger_type || '-'}</td><td><StatusPill label={run.status} /></td><td><div className="overview-run-progress"><span>{completed} / {run.total_count} ({progress}%)</span><progress value={progress} max="100" aria-label={`运行 #${run.id} 处理进度`} /></div></td><td>{formatDate(run.started_at)}</td><td><button type="button" onClick={() => onLoadSteps(run.id)}>步骤</button></td></tr>
-  })}</tbody></table></div>
 }
 
 function MethodsView({ methods, pipelines, client, coreMethods, onToggle, onPipelineRunCompleted }: { methods: MethodDisplay[]; pipelines: PipelineDefinition[]; client: ApiClient; coreMethods: CoreMethod[]; onToggle: (target: ToggleTarget, enabled: boolean) => void; onPipelineRunCompleted: () => void }) {
@@ -6478,10 +6428,5 @@ function includesQuery(values: Array<string | number | null | undefined>, query:
 function uniqueOptions(values: string[]) {
   return Array.from(new Set(values.filter(Boolean))).sort().map((value) => ({ value, label: value }))
 }
-
-function sum(items: PipelineRun[], key: 'success_count' | 'failed_count') {
-  return items.reduce((total, item) => total + (Number(item[key]) || 0), 0)
-}
-
 
 export default App

@@ -1,0 +1,170 @@
+.page {
+  min-width: 0;
+}
+
+.stale {
+  border-bottom: 1px solid var(--color-border);
+  padding: var(--space-3) 0;
+  color: var(--color-warning);
+  font-size: 13px;
+}
+
+.workspace {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(280px, 1fr);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.runs {
+  min-width: 0;
+  padding-inline-end: var(--space-6);
+}
+
+.monitoring {
+  min-width: 0;
+  border-inline-start: 1px solid var(--color-border);
+}
+
+.monitoringSection {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-6) 0 var(--space-6) var(--space-6);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.monitoringSection:last-child {
+  border-bottom: 0;
+}
+
+.monitoringSection small {
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.sectionHeading {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+.sectionHeading svg {
+  width: 16px;
+  height: 16px;
+  color: var(--color-brand);
+}
+
+.sectionHeading h2 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 650;
+}
+
+.healthProgress,
+.runProgress progress {
+  width: 100%;
+  height: 8px;
+  accent-color: var(--color-success);
+}
+
+.healthLegend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-4);
+  font-size: 12px;
+}
+
+.success {
+  color: var(--color-success);
+}
+
+.danger {
+  color: var(--color-danger);
+}
+
+.muted {
+  color: var(--color-text-secondary);
+}
+
+.anomalyList {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.anomaly {
+  display: grid;
+  gap: var(--space-1);
+  padding-inline-start: var(--space-3);
+  border-inline-start: 2px solid var(--color-danger);
+}
+
+.anomaly strong {
+  font-size: 13px;
+}
+
+.anomaly span {
+  color: var(--color-text-secondary);
+  font-size: 12px;
+}
+
+.compactFeedback {
+  min-height: 96px;
+}
+
+.table td:first-child {
+  max-width: 190px;
+}
+
+.table td:first-child strong,
+.table td:first-child small {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.table td:first-child small {
+  color: var(--color-text-secondary);
+}
+
+.table th:last-child,
+.table td:last-child {
+  position: sticky;
+  right: 0;
+  z-index: 2;
+  border-inline-start: 1px solid var(--color-border);
+  background: var(--color-canvas);
+}
+
+.table th:last-child {
+  z-index: 3;
+}
+
+.runProgress {
+  display: grid;
+  min-width: 132px;
+  gap: var(--space-1);
+}
+
+.runProgress span {
+  color: var(--color-text-secondary);
+  font-size: 11px;
+}
+
+@media (max-width: 840px) {
+  .workspace {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .runs {
+    padding-inline-end: 0;
+  }
+
+  .monitoring {
+    border-top: 1px solid var(--color-border);
+    border-inline-start: 0;
+  }
+
+  .monitoringSection {
+    padding-inline-start: 0;
+  }
+}
