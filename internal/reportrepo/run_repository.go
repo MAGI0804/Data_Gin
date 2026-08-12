@@ -24,7 +24,10 @@ var (
 	ErrInvalidRun              = errors.New("report run: invalid input")
 )
 
-const ReportActionQuery = "QUERY"
+const (
+	ReportActionQuery  = "QUERY"
+	ReportActionExport = "EXPORT"
+)
 
 type PublishedReport struct {
 	Definition model.ReportDefinition
@@ -325,7 +328,9 @@ func validRunOutbox(outbox model.AsyncJobOutbox, runUUID string) bool {
 		payloadValid && payload.RunID == 0
 }
 
-func validReportAction(action string) bool { return action == ReportActionQuery }
+func validReportAction(action string) bool {
+	return action == ReportActionQuery || action == ReportActionExport
+}
 
 func invalidRun(message string) error { return fmt.Errorf("%w: %s", ErrInvalidRun, message) }
 

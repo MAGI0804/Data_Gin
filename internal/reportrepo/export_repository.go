@@ -42,6 +42,11 @@ func (repository *Repository) CreateOrGetExport(ctx context.Context, actor, runI
 		if run.Status != model.ReportRunStatusSucceeded || run.ResultPurgedAt != nil || run.ResultExpiresAt == nil || !requestedAt.Before(run.ResultExpiresAt.UTC()) {
 			return ErrReportExportRunNotReady
 		}
+		if _, err := loadPublishedReport(ctx, tx, actor, run.DefinitionID, ReportActionExport, false); errors.Is(err, ErrReportActionDenied) {
+			return ErrReportExportRunNotReady
+		} else if err != nil {
+			return fmt.Errorf("report export: authorize report: %w", err)
+		}
 		var existing model.ReportExport
 		if err := tx.Where("run_id = ?", runID).First(&existing).Error; err == nil {
 			command.Export = existing

@@ -14,6 +14,7 @@ func TestRegisterReportRoutesUsesExpectedMethodsAndPaths(t *testing.T) {
 	router := gin.New()
 	registerReportRoutes(router.Group("/api"), &data_ctrl.ReportController{})
 	registerReportRunRoutes(router.Group("/api"), &data_ctrl.ReportRunController{})
+	registerReportExportRoutes(router.Group("/api"), &data_ctrl.ReportExportController{})
 	routes := make(map[string]struct{})
 	for _, route := range router.Routes() {
 		routes[route.Method+" "+route.Path] = struct{}{}
@@ -28,6 +29,9 @@ func TestRegisterReportRoutesUsesExpectedMethodsAndPaths(t *testing.T) {
 		http.MethodGet + " /api/v1/report-runs/:id",
 		http.MethodGet + " /api/v1/report-runs/:id/results",
 		http.MethodPost + " /api/v1/report-runs/:id/cancel",
+		http.MethodPost + " /api/v1/report-runs/:id/export",
+		http.MethodGet + " /api/v1/report-exports/:id",
+		http.MethodGet + " /api/v1/report-exports/:id/download",
 	} {
 		if _, exists := routes[expected]; !exists {
 			t.Fatalf("missing route %q: %#v", expected, routes)
