@@ -32,6 +32,17 @@ type ResultSnapshotContract struct {
 	rowIDColumn string
 }
 
+func ValidateResultSnapshotContract(contract ResultSnapshotContract, ref ResultSnapshotRef) error {
+	table, runIDColumn, rowIDColumn, _, err := normalizeSnapshotRef(ref)
+	if err != nil {
+		return err
+	}
+	if contract.table != table || contract.runIDColumn != runIDColumn || contract.rowIDColumn != rowIDColumn {
+		return configurationError("result snapshot contract does not match report version")
+	}
+	return nil
+}
+
 type ResultPagePlan struct {
 	initialStatement string
 	nextStatement    string
@@ -70,6 +81,24 @@ func (adapter *Adapter) InspectResultSnapshotContract(
 	if err != nil {
 		return ResultSnapshotContract{}, err
 	}
+	var uniqueIndexes int
+	if err := adapter.db.QueryRowContext(ctx, uniqueResultKeySQL,
+		normalizedTable.Owner, normalizedTable.Name, runIDColumn, rowIDColumn,
+	).Scan(&uniqueIndexes); err != nil {
+		return ResultSnapshotContract{}, fmt.Errorf("inspect oracle result key: %w", err)
+	}
+	return CompileResultSnapshotContract(ref, columns, uniqueIndexes > 0)
+}
+
+func CompileResultSnapshotContract(
+	ref ResultSnapshotRef,
+	columns []ResultColumn,
+	hasUniqueKey bool,
+) (ResultSnapshotContract, error) {
+	normalizedTable, runIDColumn, rowIDColumn, _, err := normalizeSnapshotRef(ref)
+	if err != nil {
+		return ResultSnapshotContract{}, err
+	}
 	byName := make(map[string]ResultColumn, len(columns))
 	for _, column := range columns {
 		byName[strings.ToUpper(column.Name)] = column
@@ -85,13 +114,7 @@ func (adapter *Adapter) InspectResultSnapshotContract(
 	if strings.ToUpper(rowColumn.DataType) != "NUMBER" || rowColumn.DataScale == nil || *rowColumn.DataScale != 0 {
 		return ResultSnapshotContract{}, configurationError("result row id column must be NUMBER with scale 0")
 	}
-	var uniqueIndexes int
-	if err := adapter.db.QueryRowContext(ctx, uniqueResultKeySQL,
-		normalizedTable.Owner, normalizedTable.Name, runIDColumn, rowIDColumn,
-	).Scan(&uniqueIndexes); err != nil {
-		return ResultSnapshotContract{}, fmt.Errorf("inspect oracle result key: %w", err)
-	}
-	if uniqueIndexes == 0 {
+	if !hasUniqueKey {
 		return ResultSnapshotContract{}, configurationError("result key columns require a two-column unique index")
 	}
 	return ResultSnapshotContract{table: normalizedTable, runIDColumn: runIDColumn, rowIDColumn: rowIDColumn}, nil

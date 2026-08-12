@@ -32,7 +32,52 @@ const (
 	CardinalityRange    = "RANGE"
 
 	CollectionEncodingJSONCLOB = "JSON_CLOB"
+	NullPolicyTypedNull        = "TYPED_NULL"
 )
+
+// ValidateParameterDefinitions compiles the complete parameter schema,
+// including defaults and validation rules, without requiring runtime input.
+func ValidateParameterDefinitions(definitions []ParameterDefinition) error {
+	if _, err := indexDefinitions(definitions); err != nil {
+		return err
+	}
+	for _, definition := range definitions {
+		if definition.Cardinality != "" && definition.Cardinality != CardinalitySingle &&
+			definition.Cardinality != CardinalityMultiple {
+			return contractError("parameter %q has unsupported cardinality %q", definition.Code, definition.Cardinality)
+		}
+		if definition.NullPolicy != "" && definition.NullPolicy != NullPolicyTypedNull {
+			return contractError("parameter %q has unsupported null policy %q", definition.Code, definition.NullPolicy)
+		}
+		if definition.Sensitive && len(bytes.TrimSpace(definition.DefaultValue)) > 0 {
+			return contractError("sensitive parameter %q cannot define a plaintext default", definition.Code)
+		}
+		if _, err := parseValidationRules(definition); err != nil {
+			return err
+		}
+		if len(bytes.TrimSpace(definition.AllowedValues)) > 0 {
+			var allowed []string
+			if err := decodeStrictJSON(definition.AllowedValues, &allowed); err != nil || len(allowed) == 0 {
+				return contractError("parameter %q has invalid allowed values", definition.Code)
+			}
+		}
+		if len(bytes.TrimSpace(definition.DefaultValue)) > 0 {
+			if _, _, err := normalizeValue(definition, definition.DefaultValue, true); err != nil {
+				return contractError("parameter %q has invalid default value: %v", definition.Code, err)
+			}
+		}
+	}
+	return nil
+}
+
+func decodeStrictJSON(raw []byte, target interface{}) error {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(target); err != nil {
+		return err
+	}
+	return requireJSONEOF(decoder)
+}
 
 var (
 	parameterCodePattern = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_]*$`)
