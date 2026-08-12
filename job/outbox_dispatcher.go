@@ -12,13 +12,11 @@ import (
 )
 
 const (
-	defaultOutboxPollInterval = time.Second
-	defaultOutboxLockTimeout  = time.Minute
-	defaultOutboxBatchSize    = 100
-	defaultOutboxRetryBase    = 5 * time.Second
-	defaultOutboxRetryMax     = 5 * time.Minute
-	defaultWeatherTaskTimeout = 5 * time.Minute
-
+	defaultOutboxPollInterval  = time.Second
+	defaultOutboxLockTimeout   = time.Minute
+	defaultOutboxBatchSize     = 100
+	defaultOutboxRetryBase     = 5 * time.Second
+	defaultOutboxRetryMax      = 5 * time.Minute
 	safeInvalidOutboxTaskError = "invalid outbox task"
 	safeQueuePublishError      = "queue publish failed"
 )
@@ -30,7 +28,7 @@ var (
 )
 
 type OutboxStore interface {
-	ClaimBatch(ctx context.Context, workerID string, now time.Time, lockTimeout time.Duration, limit int) ([]model.AsyncJobOutbox, error)
+	ClaimBatch(ctx context.Context, workerID string, taskTypes []string, now time.Time, lockTimeout time.Duration, limit int) ([]model.AsyncJobOutbox, error)
 	MarkPublished(ctx context.Context, id uint, publishedAt time.Time) error
 	MarkFailed(ctx context.Context, id uint, availableAt time.Time, safeError string) error
 }
@@ -42,21 +40,21 @@ type TaskPublishOptions struct {
 	Timeout  time.Duration
 }
 
-type MallWeatherTaskPublisher interface {
+type TaskPublisher interface {
 	Publish(ctx context.Context, task *asynq.Task, options TaskPublishOptions) error
 }
 
-type AsynqMallWeatherTaskPublisher struct {
+type AsynqTaskPublisher struct {
 	client *asynq.Client
 }
 
-func NewAsynqMallWeatherTaskPublisher(client *asynq.Client) *AsynqMallWeatherTaskPublisher {
-	return &AsynqMallWeatherTaskPublisher{client: client}
+func NewAsynqTaskPublisher(client *asynq.Client) *AsynqTaskPublisher {
+	return &AsynqTaskPublisher{client: client}
 }
 
-func (publisher *AsynqMallWeatherTaskPublisher) Publish(ctx context.Context, task *asynq.Task, options TaskPublishOptions) error {
+func (publisher *AsynqTaskPublisher) Publish(ctx context.Context, task *asynq.Task, options TaskPublishOptions) error {
 	if publisher == nil || publisher.client == nil {
-		return fmt.Errorf("mall weather publisher: client is required")
+		return fmt.Errorf("outbox publisher: client is required")
 	}
 	optionsList := []asynq.Option{
 		asynq.TaskID(options.TaskID),
@@ -70,6 +68,78 @@ func (publisher *AsynqMallWeatherTaskPublisher) Publish(ctx context.Context, tas
 	return err
 }
 
+type OutboxTaskDefinition struct {
+	TaskType string
+	Queue    string
+	MaxRetry int
+	Timeout  time.Duration
+	Build    func([]byte) (*asynq.Task, error)
+}
+
+type OutboxTaskRegistry struct {
+	definitions map[string]OutboxTaskDefinition
+	taskTypes   []string
+}
+
+func NewOutboxTaskRegistry(definitions ...OutboxTaskDefinition) (*OutboxTaskRegistry, error) {
+	registry := &OutboxTaskRegistry{definitions: make(map[string]OutboxTaskDefinition, len(definitions))}
+	for _, definition := range definitions {
+		if definition.TaskType == "" || definition.Queue == "" || definition.MaxRetry < 0 || definition.Build == nil {
+			return nil, fmt.Errorf("outbox task registry: invalid task definition")
+		}
+		if _, exists := registry.definitions[definition.TaskType]; exists {
+			return nil, fmt.Errorf("outbox task registry: duplicate task type %q", definition.TaskType)
+		}
+		registry.definitions[definition.TaskType] = definition
+		registry.taskTypes = append(registry.taskTypes, definition.TaskType)
+	}
+	if len(registry.taskTypes) == 0 {
+		return nil, fmt.Errorf("outbox task registry: at least one task definition is required")
+	}
+	return registry, nil
+}
+
+func (registry *OutboxTaskRegistry) TaskTypes() []string {
+	if registry == nil {
+		return nil
+	}
+	return append([]string(nil), registry.taskTypes...)
+}
+
+func (registry *OutboxTaskRegistry) Resolve(row model.AsyncJobOutbox) (*asynq.Task, TaskPublishOptions, error) {
+	if registry == nil || row.TaskKey == "" {
+		return nil, TaskPublishOptions{}, ErrInvalidOutboxTask
+	}
+	definition, exists := registry.definitions[row.TaskType]
+	if !exists || row.QueueName != definition.Queue {
+		return nil, TaskPublishOptions{}, ErrInvalidOutboxTask
+	}
+	task, err := definition.Build([]byte(row.PayloadJSON))
+	if err != nil || task == nil || task.Type() != definition.TaskType {
+		return nil, TaskPublishOptions{}, ErrInvalidOutboxTask
+	}
+	return task, TaskPublishOptions{
+		TaskID: row.TaskKey, Queue: definition.Queue, MaxRetry: definition.MaxRetry, Timeout: definition.Timeout,
+	}, nil
+}
+
+func MallWeatherOutboxTaskDefinitions(maxRetry int, fetchTimeout time.Duration) []OutboxTaskDefinition {
+	definitions := make([]OutboxTaskDefinition, 0, len(MallWeatherTaskTypes()))
+	for _, taskType := range MallWeatherTaskTypes() {
+		currentTaskType := taskType
+		queue, _ := ExpectedMallWeatherQueue(currentTaskType)
+		timeout := time.Duration(0)
+		if IsMallWeatherFetchTaskType(currentTaskType) {
+			timeout = fetchTimeout
+		}
+		definitions = append(definitions, OutboxTaskDefinition{
+			TaskType: currentTaskType, Queue: queue, MaxRetry: maxRetry, Timeout: timeout,
+			Build: func(payload []byte) (*asynq.Task, error) { return NewMallWeatherTask(currentTaskType, payload) },
+		})
+	}
+	return definitions
+}
+
 type OutboxDispatcherConfig struct {
 	WorkerID     string
 	PollInterval time.Duration
@@ -77,8 +147,6 @@ type OutboxDispatcherConfig struct {
 	BatchSize    int
 	RetryBase    time.Duration
 	RetryMax     time.Duration
-	MaxRetry     int
-	TaskTimeout  time.Duration
 	Now          func() time.Time
 	OnPublished  func(model.AsyncJobOutbox, time.Time)
 	OnCycleError func(error)
@@ -86,26 +154,29 @@ type OutboxDispatcherConfig struct {
 
 type OutboxDispatcher struct {
 	store        OutboxStore
-	publisher    MallWeatherTaskPublisher
+	publisher    TaskPublisher
+	registry     *OutboxTaskRegistry
+	taskTypes    []string
 	workerID     string
 	pollInterval time.Duration
 	lockTimeout  time.Duration
 	batchSize    int
 	retryBase    time.Duration
 	retryMax     time.Duration
-	maxRetry     int
-	taskTimeout  time.Duration
 	now          func() time.Time
 	onPublished  func(model.AsyncJobOutbox, time.Time)
 	onCycleError func(error)
 }
 
-func NewOutboxDispatcher(store OutboxStore, publisher MallWeatherTaskPublisher, cfg OutboxDispatcherConfig) (*OutboxDispatcher, error) {
+func NewOutboxDispatcher(store OutboxStore, publisher TaskPublisher, registry *OutboxTaskRegistry, cfg OutboxDispatcherConfig) (*OutboxDispatcher, error) {
 	if store == nil {
 		return nil, fmt.Errorf("outbox dispatcher: store is required")
 	}
 	if publisher == nil {
 		return nil, fmt.Errorf("outbox dispatcher: publisher is required")
+	}
+	if registry == nil || len(registry.TaskTypes()) == 0 {
+		return nil, fmt.Errorf("outbox dispatcher: task registry is required")
 	}
 	if cfg.WorkerID == "" {
 		return nil, fmt.Errorf("outbox dispatcher: worker id is required")
@@ -128,12 +199,6 @@ func NewOutboxDispatcher(store OutboxStore, publisher MallWeatherTaskPublisher, 
 	if cfg.RetryMax < cfg.RetryBase {
 		return nil, fmt.Errorf("outbox dispatcher: retry max must not be less than retry base")
 	}
-	if cfg.MaxRetry < 0 {
-		return nil, fmt.Errorf("outbox dispatcher: max retry must not be negative")
-	}
-	if cfg.TaskTimeout <= 0 {
-		cfg.TaskTimeout = defaultWeatherTaskTimeout
-	}
 	if cfg.Now == nil {
 		cfg.Now = time.Now
 	}
@@ -141,14 +206,14 @@ func NewOutboxDispatcher(store OutboxStore, publisher MallWeatherTaskPublisher, 
 	return &OutboxDispatcher{
 		store:        store,
 		publisher:    publisher,
+		registry:     registry,
+		taskTypes:    registry.TaskTypes(),
 		workerID:     cfg.WorkerID,
 		pollInterval: cfg.PollInterval,
 		lockTimeout:  cfg.LockTimeout,
 		batchSize:    cfg.BatchSize,
 		retryBase:    cfg.RetryBase,
 		retryMax:     cfg.RetryMax,
-		maxRetry:     cfg.MaxRetry,
-		taskTimeout:  cfg.TaskTimeout,
 		now:          cfg.Now,
 		onPublished:  cfg.OnPublished,
 		onCycleError: cfg.OnCycleError,
@@ -182,7 +247,7 @@ func (dispatcher *OutboxDispatcher) DispatchOnce(ctx context.Context) error {
 		return err
 	}
 	now := dispatcher.now().UTC()
-	rows, err := dispatcher.store.ClaimBatch(ctx, dispatcher.workerID, now, dispatcher.lockTimeout, dispatcher.batchSize)
+	rows, err := dispatcher.store.ClaimBatch(ctx, dispatcher.workerID, dispatcher.taskTypes, now, dispatcher.lockTimeout, dispatcher.batchSize)
 	if err != nil {
 		return fmt.Errorf("outbox dispatcher: claim batch: %w", err)
 	}
@@ -201,23 +266,9 @@ func (dispatcher *OutboxDispatcher) DispatchOnce(ctx context.Context) error {
 }
 
 func (dispatcher *OutboxDispatcher) dispatchRow(ctx context.Context, row model.AsyncJobOutbox) error {
-	expectedQueue, ok := ExpectedMallWeatherQueue(row.TaskType)
-	if !ok || row.TaskKey == "" || row.QueueName != expectedQueue {
-		return dispatcher.failRow(ctx, row, safeInvalidOutboxTaskError, ErrInvalidOutboxTask)
-	}
-
-	task, err := NewMallWeatherTask(row.TaskType, []byte(row.PayloadJSON))
+	task, publishOptions, err := dispatcher.registry.Resolve(row)
 	if err != nil {
 		return dispatcher.failRow(ctx, row, safeInvalidOutboxTaskError, ErrInvalidOutboxTask)
-	}
-
-	publishOptions := TaskPublishOptions{
-		TaskID:   row.TaskKey,
-		Queue:    row.QueueName,
-		MaxRetry: dispatcher.maxRetry,
-	}
-	if IsMallWeatherFetchTaskType(row.TaskType) {
-		publishOptions.Timeout = dispatcher.taskTimeout
 	}
 	err = dispatcher.publisher.Publish(ctx, task, publishOptions)
 	if err != nil && !errors.Is(err, asynq.ErrTaskIDConflict) {

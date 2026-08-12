@@ -23,7 +23,7 @@ const mallWeatherExportDownloadWriteTimeout = 16 * time.Minute
 
 // RunServer 启动服务
 func RunServer() {
-	defer stopMallWeatherOutboxDispatcher()
+	defer stopOutboxDispatcher()
 
 	console.Info("run server ...")
 

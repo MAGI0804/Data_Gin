@@ -47,6 +47,13 @@ func init() {
 				// project2 中 asynq.NewTask(taskType, taskPayload, asynq.Queue("project2"))
 				"queues": cast.ToStringMapInt(config.Get("QueueJob.ConfigOpt.Queues", defaultQueues)),
 			},
+			"outbox": map[string]interface{}{
+				"poll_interval_ms":     config.Get("QueueJob.Outbox.PollIntervalMS", 1000),
+				"lock_timeout_seconds": config.Get("QueueJob.Outbox.LockTimeoutSeconds", 60),
+				"batch_size":           config.Get("QueueJob.Outbox.BatchSize", 100),
+				"retry_base_seconds":   config.Get("QueueJob.Outbox.RetryBaseSeconds", 5),
+				"retry_max_seconds":    config.Get("QueueJob.Outbox.RetryMaxSeconds", 300),
+			},
 		}
 	})
 

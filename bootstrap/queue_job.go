@@ -98,7 +98,7 @@ func setupQueueJob() {
 		}
 	}(mux, server)
 
-	startMallWeatherOutboxDispatcher()
+	startOutboxDispatcher(false)
 
 }
 

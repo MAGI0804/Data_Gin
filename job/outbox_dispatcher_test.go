@@ -36,14 +36,24 @@ type failedOutboxRow struct {
 	safeError   string
 }
 
-func (store *fakeOutboxStore) ClaimBatch(_ context.Context, _ string, _ time.Time, _ time.Duration, _ int) ([]model.AsyncJobOutbox, error) {
+func (store *fakeOutboxStore) ClaimBatch(_ context.Context, _ string, taskTypes []string, _ time.Time, _ time.Duration, _ int) ([]model.AsyncJobOutbox, error) {
 	store.mu.Lock()
 	defer store.mu.Unlock()
 	store.claimCalls++
 	if store.firstClaimReady != nil {
 		store.claimReadyOnce.Do(func() { close(store.firstClaimReady) })
 	}
-	return append([]model.AsyncJobOutbox(nil), store.rows...), store.claimErr
+	allowed := make(map[string]struct{}, len(taskTypes))
+	for _, taskType := range taskTypes {
+		allowed[taskType] = struct{}{}
+	}
+	rows := make([]model.AsyncJobOutbox, 0, len(store.rows))
+	for _, row := range store.rows {
+		if _, exists := allowed[row.TaskType]; exists {
+			rows = append(rows, row)
+		}
+	}
+	return rows, store.claimErr
 }
 
 func (store *fakeOutboxStore) MarkPublished(_ context.Context, id uint, publishedAt time.Time) error {
@@ -226,6 +236,22 @@ func TestOutboxDispatcherRejectsUnsafePayloadBeforePublish(t *testing.T) {
 	}
 }
 
+func TestOutboxDispatcherLeavesUnregisteredTasksForAnotherDispatcher(t *testing.T) {
+	now := time.Date(2026, 7, 17, 10, 0, 0, 0, time.UTC)
+	store := &fakeOutboxStore{rows: []model.AsyncJobOutbox{{
+		BaseModel: model.BaseModel{ID: 8}, TaskKey: "report:run:uuid", TaskType: TypeReportRun,
+		QueueName: ReportQueueName, PayloadJSON: model.JSONText(`{"run_id":31}`),
+	}}}
+	publisher := &fakeMallWeatherPublisher{}
+	dispatcher := newTestOutboxDispatcher(t, store, publisher, now)
+	if err := dispatcher.DispatchOnce(t.Context()); err != nil {
+		t.Fatalf("DispatchOnce() error = %v", err)
+	}
+	if len(publisher.calls) != 0 || len(store.failed) != 0 || len(store.published) != 0 {
+		t.Fatalf("unregistered row was touched: calls=%#v failed=%#v published=%#v", publisher.calls, store.failed, store.published)
+	}
+}
+
 func TestOutboxDispatcherRunStopsOnCancellation(t *testing.T) {
 	now := time.Date(2026, 7, 17, 10, 0, 0, 0, time.UTC)
 	firstClaimReady := make(chan struct{})
@@ -271,17 +297,19 @@ func TestOutboxBackoffIsBounded(t *testing.T) {
 	}
 }
 
-func newTestOutboxDispatcher(t *testing.T, store OutboxStore, publisher MallWeatherTaskPublisher, now time.Time) *OutboxDispatcher {
+func newTestOutboxDispatcher(t *testing.T, store OutboxStore, publisher TaskPublisher, now time.Time) *OutboxDispatcher {
 	t.Helper()
-	dispatcher, err := NewOutboxDispatcher(store, publisher, OutboxDispatcherConfig{
+	registry, err := NewOutboxTaskRegistry(MallWeatherOutboxTaskDefinitions(2, 5*time.Minute)...)
+	if err != nil {
+		t.Fatalf("NewOutboxTaskRegistry() error = %v", err)
+	}
+	dispatcher, err := NewOutboxDispatcher(store, publisher, registry, OutboxDispatcherConfig{
 		WorkerID:     "test-dispatcher",
 		PollInterval: time.Second,
 		LockTimeout:  time.Minute,
 		BatchSize:    10,
 		RetryBase:    time.Second,
 		RetryMax:     10 * time.Second,
-		MaxRetry:     2,
-		TaskTimeout:  5 * time.Minute,
 		Now:          func() time.Time { return now },
 	})
 	if err != nil {

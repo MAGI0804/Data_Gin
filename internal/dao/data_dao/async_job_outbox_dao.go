@@ -58,9 +58,9 @@ func (dao *AsyncJobOutboxDAO) CreateBatchIgnoreTaskConflicts(ctx context.Context
 
 // ClaimBatch atomically claims ready unpublished tasks. MySQL 8 SKIP LOCKED
 // lets multiple dispatchers make progress without processing the same row.
-func (dao *AsyncJobOutboxDAO) ClaimBatch(ctx context.Context, workerID string, now time.Time, lockTimeout time.Duration, limit int) ([]model.AsyncJobOutbox, error) {
-	if workerID == "" {
-		return nil, fmt.Errorf("outbox: worker id is required")
+func (dao *AsyncJobOutboxDAO) ClaimBatch(ctx context.Context, workerID string, taskTypes []string, now time.Time, lockTimeout time.Duration, limit int) ([]model.AsyncJobOutbox, error) {
+	if workerID == "" || len(taskTypes) == 0 {
+		return nil, fmt.Errorf("outbox: worker id and task types are required")
 	}
 	limit = normalizeOutboxClaimSize(limit)
 	if lockTimeout <= 0 {
@@ -70,13 +70,7 @@ func (dao *AsyncJobOutboxDAO) ClaimBatch(ctx context.Context, workerID string, n
 	var claimed []model.AsyncJobOutbox
 
 	err := dao.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE", Options: "SKIP LOCKED"}).
-			Where("published_at IS NULL").
-			Where("available_at <= ?", now.UTC()).
-			Where("(locked_at IS NULL OR locked_at < ?)", lockExpiredAt.UTC()).
-			Order("id ASC").
-			Limit(limit).
-			Find(&claimed).Error; err != nil {
+		if err := buildOutboxClaimQuery(tx, taskTypes, now, lockExpiredAt, limit).Find(&claimed).Error; err != nil {
 			return fmt.Errorf("outbox: select claim batch: %w", err)
 		}
 		if len(claimed) == 0 {
@@ -107,6 +101,16 @@ func (dao *AsyncJobOutboxDAO) ClaimBatch(ctx context.Context, workerID string, n
 		return nil, err
 	}
 	return claimed, nil
+}
+
+func buildOutboxClaimQuery(db *gorm.DB, taskTypes []string, now, lockExpiredAt time.Time, limit int) *gorm.DB {
+	return db.Clauses(clause.Locking{Strength: "UPDATE", Options: "SKIP LOCKED"}).
+		Where("published_at IS NULL").
+		Where("task_type IN ?", taskTypes).
+		Where("available_at <= ?", now.UTC()).
+		Where("(locked_at IS NULL OR locked_at < ?)", lockExpiredAt.UTC()).
+		Order("id ASC").
+		Limit(limit)
 }
 
 func (dao *AsyncJobOutboxDAO) MarkPublished(ctx context.Context, id uint, publishedAt time.Time) error {
