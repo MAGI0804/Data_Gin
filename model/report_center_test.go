@@ -20,6 +20,7 @@ func TestReportCenterTableNames(t *testing.T) {
 		{name: "grants", got: (ReportGrant{}).TableName(), want: "report_grants"},
 		{name: "runs", got: (ReportRun{}).TableName(), want: "report_runs"},
 		{name: "exports", got: (ReportExport{}).TableName(), want: "report_exports"},
+		{name: "result read leases", got: (ReportResultReadLease{}).TableName(), want: "report_result_read_leases"},
 		{name: "audits", got: (ReportAudit{}).TableName(), want: "report_audits"},
 	}
 

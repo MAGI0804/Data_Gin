@@ -106,9 +106,12 @@ func (store *fakeReportRunQueryStore) RequestRunCancellation(_ context.Context, 
 	copy := store.run
 	return &copy, store.err
 }
-func (store *fakeReportRunQueryStore) LoadResultContractForActor(_ context.Context, actor, _ uint, _ time.Time) (*reportrepo.RunResultContract, error) {
+func (store *fakeReportRunQueryStore) AcquireResultReadLease(ctx context.Context, actor, runID uint, now time.Time) (*reportrepo.RunResultContract, string, error) {
 	store.actor = actor
-	return store.contract, store.err
+	return store.contract, "11111111-1111-4111-8111-111111111111", store.err
+}
+func (store *fakeReportRunQueryStore) ReleaseResultReadLease(context.Context, string) error {
+	return nil
 }
 
 type fakeReportResultReader struct {

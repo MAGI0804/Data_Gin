@@ -284,6 +284,7 @@ func reportCenterMigrationModels() []interface{} {
 		&model.ReportGrant{},
 		&model.ReportRun{},
 		&model.ReportExport{},
+		&model.ReportResultReadLease{},
 		&model.ReportAudit{},
 	}
 }

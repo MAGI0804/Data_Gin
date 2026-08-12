@@ -34,7 +34,8 @@ const maxReportResultCursorLength = 1024
 type reportRunQueryStore interface {
 	FindRunForActor(context.Context, uint, uint) (*model.ReportRun, error)
 	RequestRunCancellation(context.Context, uint, uint, time.Time) (*model.ReportRun, error)
-	LoadResultContractForActor(context.Context, uint, uint, time.Time) (*reportrepo.RunResultContract, error)
+	AcquireResultReadLease(context.Context, uint, uint, time.Time) (*reportrepo.RunResultContract, string, error)
+	ReleaseResultReadLease(context.Context, string) error
 }
 
 type reportResultPageReader interface {
@@ -146,10 +147,15 @@ func (service *ReportRunQueryService) QueryResults(ctx context.Context, actor, r
 	if service == nil || ctx == nil || actor == 0 || runID == 0 || limit < 1 || limit > 1000 || len(cursor) > maxReportResultCursorLength {
 		return nil, ErrReportRunQueryInvalid
 	}
-	contract, err := service.store.LoadResultContractForActor(ctx, actor, runID, service.now())
+	contract, leaseToken, err := service.store.AcquireResultReadLease(ctx, actor, runID, service.now())
 	if err != nil {
 		return nil, classifyReportRunQueryError(err)
 	}
+	defer func() {
+		releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+		defer cancel()
+		_ = service.store.ReleaseResultReadLease(releaseCtx, leaseToken)
+	}()
 	allColumns, err := frozenResultColumns(contract.Run.PresentationSnapshotJSON)
 	if err != nil {
 		return nil, ErrReportRunQueryConflict

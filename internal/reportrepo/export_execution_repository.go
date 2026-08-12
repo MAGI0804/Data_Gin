@@ -299,6 +299,16 @@ func (repository *Repository) ClaimResultPurge(ctx context.Context, exportID uin
 		if runtime.Run.ResultPurgedAt != nil || (runtime.Run.Status != model.ReportRunStatusSucceeded && runtime.Run.Status != model.ReportRunStatusResultPurging) {
 			return ErrReportResultPurgeConflict
 		}
+		if err := tx.Where("run_id = ? AND expires_at <= ?", runtime.Run.ID, now).Delete(&model.ReportResultReadLease{}).Error; err != nil {
+			return fmt.Errorf("report result purge: delete expired read leases: %w", err)
+		}
+		var activeReaders int64
+		if err := tx.Model(&model.ReportResultReadLease{}).Where("run_id = ? AND expires_at > ?", runtime.Run.ID, now).Count(&activeReaders).Error; err != nil {
+			return fmt.Errorf("report result purge: count active readers: %w", err)
+		}
+		if activeReaders > 0 {
+			return ErrReportResultPurgeConflict
+		}
 		if err := tx.Where("id = ? AND definition_id = ?", runtime.Run.VersionID, runtime.Run.DefinitionID).First(&runtime.Version).Error; err != nil {
 			return fmt.Errorf("report result purge: load version: %w", err)
 		}

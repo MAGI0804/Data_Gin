@@ -291,6 +291,16 @@ type ReportExport struct {
 
 func (ReportExport) TableName() string { return "report_exports" }
 
+type ReportResultReadLease struct {
+	BaseModel
+	RunID      uint      `gorm:"column:run_id;not null;index:idx_report_result_read_lease,priority:1" json:"-"`
+	LeaseToken string    `gorm:"column:lease_token;type:char(36);not null;uniqueIndex" json:"-"`
+	ExpiresAt  time.Time `gorm:"column:expires_at;type:datetime(3);not null;index:idx_report_result_read_lease,priority:2" json:"-"`
+	CreatedAt  time.Time `gorm:"column:created_at;type:datetime(3);not null;autoCreateTime" json:"-"`
+}
+
+func (ReportResultReadLease) TableName() string { return "report_result_read_leases" }
+
 type ReportAudit struct {
 	BaseModel
 	ActorUserID uint      `gorm:"column:actor_user_id;not null;index:idx_report_audit_actor_created,priority:1" json:"actorUserId"`

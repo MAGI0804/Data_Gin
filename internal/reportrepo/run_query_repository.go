@@ -26,6 +26,54 @@ type RunResultContract struct {
 	Datasource model.ReportDatasource
 }
 
+func (repository *Repository) AcquireResultReadLease(ctx context.Context, actor, runID uint, now time.Time) (*RunResultContract, string, error) {
+	if repository == nil || repository.db == nil || ctx == nil || actor == 0 || runID == 0 || now.IsZero() {
+		return nil, "", fmt.Errorf("report result read lease: invalid request")
+	}
+	now = now.UTC().Truncate(time.Millisecond)
+	token := uuid.NewString()
+	var contract *RunResultContract
+	err := repository.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var run model.ReportRun
+		if err := buildActorRunQuery(tx.Clauses(clause.Locking{Strength: "UPDATE"}), actor, runID).First(&run).Error; errors.Is(err, gorm.ErrRecordNotFound) {
+			return ErrReportRunAccessNotFound
+		} else if err != nil {
+			return fmt.Errorf("report result read lease: lock run: %w", err)
+		}
+		if run.Status != model.ReportRunStatusSucceeded || run.ResultPurgedAt != nil || run.ResultExpiresAt == nil || !now.Before(run.ResultExpiresAt.UTC()) {
+			return ErrReportResultUnavailable
+		}
+		loaded, err := repository.loadResultContract(ctx, tx, run, now)
+		if err != nil {
+			return err
+		}
+		if err := tx.Where("run_id = ? AND expires_at <= ?", runID, now).Delete(&model.ReportResultReadLease{}).Error; err != nil {
+			return fmt.Errorf("report result read lease: delete expired: %w", err)
+		}
+		leaseTTL := time.Duration(loaded.Datasource.QueryTimeoutSeconds)*time.Second + 30*time.Second
+		if leaseTTL < 2*time.Minute {
+			leaseTTL = 2 * time.Minute
+		}
+		lease := model.ReportResultReadLease{RunID: runID, LeaseToken: token, ExpiresAt: now.Add(leaseTTL)}
+		if err := tx.Create(&lease).Error; err != nil {
+			return fmt.Errorf("report result read lease: create: %w", err)
+		}
+		contract = loaded
+		return nil
+	})
+	return contract, token, err
+}
+
+func (repository *Repository) ReleaseResultReadLease(ctx context.Context, token string) error {
+	if repository == nil || repository.db == nil || ctx == nil || uuid.Validate(token) != nil {
+		return fmt.Errorf("report result read lease: invalid release")
+	}
+	if err := repository.db.WithContext(ctx).Where("lease_token = ?", token).Delete(&model.ReportResultReadLease{}).Error; err != nil {
+		return fmt.Errorf("report result read lease: release: %w", err)
+	}
+	return nil
+}
+
 func (repository *Repository) FindRunForActor(ctx context.Context, actor, runID uint) (*model.ReportRun, error) {
 	if repository == nil || repository.db == nil || ctx == nil || actor == 0 || runID == 0 {
 		return nil, fmt.Errorf("report run query: invalid request")
@@ -97,23 +145,9 @@ func (repository *Repository) RequestRunCancellation(ctx context.Context, actor,
 	return &run, nil
 }
 
-func (repository *Repository) LoadResultContractForActor(ctx context.Context, actor, runID uint, now time.Time) (*RunResultContract, error) {
-	if repository == nil || repository.db == nil || ctx == nil || actor == 0 || runID == 0 || now.IsZero() {
-		return nil, fmt.Errorf("report result query: invalid request")
-	}
-	var contract RunResultContract
-	err := buildActorRunQuery(repository.db.WithContext(ctx), actor, runID).First(&contract.Run).Error
-	if errors.Is(err, gorm.ErrRecordNotFound) {
-		return nil, ErrReportRunAccessNotFound
-	}
-	if err != nil {
-		return nil, fmt.Errorf("report result query: find run: %w", err)
-	}
-	if contract.Run.Status != model.ReportRunStatusSucceeded || contract.Run.ResultPurgedAt != nil ||
-		contract.Run.ResultExpiresAt == nil || !now.UTC().Before(contract.Run.ResultExpiresAt.UTC()) {
-		return nil, ErrReportResultUnavailable
-	}
-	if err := repository.db.WithContext(ctx).Where("id = ? AND definition_id = ?", contract.Run.VersionID, contract.Run.DefinitionID).First(&contract.Version).Error; err != nil {
+func (repository *Repository) loadResultContract(ctx context.Context, db *gorm.DB, run model.ReportRun, now time.Time) (*RunResultContract, error) {
+	contract := RunResultContract{Run: run}
+	if err := db.Where("id = ? AND definition_id = ?", contract.Run.VersionID, contract.Run.DefinitionID).First(&contract.Version).Error; err != nil {
 		return nil, fmt.Errorf("report result query: load version: %w", err)
 	}
 	if contract.Version.ContractHash != contract.Run.ContractHash ||
@@ -121,7 +155,7 @@ func (repository *Repository) LoadResultContractForActor(ctx context.Context, ac
 		contract.Version.ResultSchemaHash != contract.Run.ResultSchemaHash || contract.Version.DatasourceID == 0 {
 		return nil, ErrReportResultUnavailable
 	}
-	if err := repository.db.WithContext(ctx).Where("id = ? AND driver = ?", contract.Version.DatasourceID, model.ReportDatasourceDriverOracle).First(&contract.Datasource).Error; err != nil {
+	if err := db.Where("id = ? AND driver = ?", contract.Version.DatasourceID, model.ReportDatasourceDriverOracle).First(&contract.Datasource).Error; err != nil {
 		return nil, fmt.Errorf("report result query: load datasource: %w", err)
 	}
 	return &contract, nil
