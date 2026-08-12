@@ -145,6 +145,19 @@ func TestReportControllerCreateRunUsesActorParametersAndStrictJSON(t *testing.T)
 	}
 }
 
+func TestReportControllerGetRunContractUsesActorAndReport(t *testing.T) {
+	runService := &fakeReportRunService{contract: &data_svc.ReportRunContractDTO{DefinitionID: 9, VersionID: 23}}
+	controller := NewReportControllerWithAllServices(&fakeReportControllerService{}, nil, runService)
+	router := reportControllerRouter()
+	router.GET("/reports/:id/run-contract", controller.GetRunContract)
+
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/reports/9/run-contract", nil))
+	if recorder.Code != http.StatusOK || runService.actor != 17 || runService.reportID != 9 || runService.contractCalls != 1 {
+		t.Fatalf("contract response = %d %s service=%#v", recorder.Code, recorder.Body, runService)
+	}
+}
+
 func TestReportControllerCreateRunMapsDeniedAndInvalid(t *testing.T) {
 	for _, test := range []struct {
 		name       string
@@ -203,12 +216,20 @@ type fakeReportPublishService struct {
 }
 
 type fakeReportRunService struct {
-	actor    uint
-	reportID uint
-	calls    int
-	request  requestbody.ReportRunCreateRequest
-	result   *data_svc.ReportRunDTO
-	err      error
+	actor         uint
+	reportID      uint
+	calls         int
+	request       requestbody.ReportRunCreateRequest
+	result        *data_svc.ReportRunDTO
+	contract      *data_svc.ReportRunContractDTO
+	contractCalls int
+	err           error
+}
+
+func (service *fakeReportRunService) Contract(_ context.Context, actor, reportID uint) (*data_svc.ReportRunContractDTO, error) {
+	service.actor, service.reportID = actor, reportID
+	service.contractCalls++
+	return service.contract, service.err
 }
 
 func (service *fakeReportRunService) Create(_ context.Context, actor, reportID uint, request requestbody.ReportRunCreateRequest) (*data_svc.ReportRunDTO, error) {

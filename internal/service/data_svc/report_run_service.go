@@ -52,6 +52,18 @@ type ReportRunDTO struct {
 	CreatedAt    time.Time `json:"createdAt"`
 }
 
+// ReportRunContractDTO is the immutable, published input contract used by the
+// query screen. It deliberately omits procedure and result-table metadata so
+// clients can render inputs without learning Oracle implementation details.
+type ReportRunContractDTO struct {
+	DefinitionID uint                 `json:"definitionId"`
+	VersionID    uint                 `json:"versionId"`
+	Code         string               `json:"code"`
+	Name         string               `json:"name"`
+	Description  string               `json:"description"`
+	Parameters   []ReportParameterDTO `json:"parameters"`
+}
+
 func NewReportRunService() *ReportRunService {
 	return NewReportRunServiceWithDependencies(reportrepo.New(), reportsecret.EnvironmentParameterCipher{})
 }
@@ -61,6 +73,39 @@ func NewReportRunServiceWithDependencies(store reportRunStore, cipher reportPara
 		panic("report run service: dependencies are required")
 	}
 	return &ReportRunService{store: store, cipher: cipher, now: func() time.Time { return time.Now().UTC() }}
+}
+
+func (service *ReportRunService) Contract(ctx context.Context, actor, definitionID uint) (*ReportRunContractDTO, error) {
+	if service == nil || service.store == nil || ctx == nil || actor == 0 || definitionID == 0 {
+		return nil, fmt.Errorf("%w: actor and report are required", ErrReportRunInvalid)
+	}
+	published, err := service.store.FindPublishedReport(ctx, actor, definitionID, reportrepo.ReportActionQuery)
+	if err != nil {
+		return nil, classifyReportRunStoreError(err)
+	}
+	parameters := make([]ReportParameterDTO, 0, len(published.Parameters))
+	for _, parameter := range published.Parameters {
+		item := ReportParameterDTO{
+			Code: parameter.ParameterCode, Label: parameter.Label, DisplayOrder: parameter.DisplayOrder,
+			ControlType: parameter.ControlType, LogicalType: parameter.LogicalType, Cardinality: parameter.Cardinality,
+			ProcedureArgName: parameter.ProcedureArgName, Position: parameter.Position, OracleType: parameter.OracleType,
+			Precision: parameter.PrecisionValue, Scale: parameter.ScaleValue, MaxLength: parameter.MaxLength,
+			Required: parameter.Required, Nullable: parameter.Nullable, SystemInjected: parameter.SystemInjected,
+			Sensitive: parameter.Sensitive, AllowedValues: cloneJSON([]byte(parameter.AllowedValuesJSON)),
+			Validation: cloneJSON([]byte(parameter.ValidationJSON)), Normalizer: cloneJSON([]byte(parameter.NormalizerJSON)),
+			ValueSource: cloneJSON([]byte(parameter.ValueSourceJSON)), Timezone: parameter.Timezone,
+			NullPolicy: parameter.NullPolicy, CollectionEncoding: parameter.CollectionEncoding, ErrorMessage: parameter.ErrorMessage,
+		}
+		if !parameter.Sensitive {
+			item.DefaultValue = cloneJSON([]byte(parameter.DefaultValueJSON))
+		}
+		parameters = append(parameters, item)
+	}
+	return &ReportRunContractDTO{
+		DefinitionID: published.Definition.ID, VersionID: published.Version.ID,
+		Code: published.Definition.Code, Name: published.Definition.Name,
+		Description: published.Definition.Description, Parameters: parameters,
+	}, nil
 }
 
 func (service *ReportRunService) Create(ctx context.Context, actor, definitionID uint, request requestbody.ReportRunCreateRequest) (*ReportRunDTO, error) {

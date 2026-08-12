@@ -38,6 +38,29 @@ func TestReportRunServiceCreatesNormalizedEncryptedQueuedRun(t *testing.T) {
 	}
 }
 
+func TestReportRunServiceReturnsPublishedInputContractWithoutSensitiveDefault(t *testing.T) {
+	published := publishedRunFixture()
+	published.Definition.Code = "sales_report"
+	published.Definition.Name = "销售报表"
+	published.Definition.Description = "按门店查询销售"
+	published.Parameters[1].Label = "门店"
+	published.Parameters[1].ControlType = "SELECT"
+	published.Parameters[1].DefaultValueJSON = model.JSONText(`"S001"`)
+	published.Parameters[2].DefaultValueJSON = model.JSONText(`"private"`)
+	service := NewReportRunServiceWithDependencies(&fakeReportRunStore{published: published}, &fakeReportParameterCipher{})
+
+	contract, err := service.Contract(t.Context(), 17, 9)
+	if err != nil {
+		t.Fatalf("Contract() error = %v", err)
+	}
+	if contract.DefinitionID != 9 || contract.VersionID != 23 || contract.Code != "sales_report" || len(contract.Parameters) != 3 {
+		t.Fatalf("contract = %#v", contract)
+	}
+	if string(contract.Parameters[1].DefaultValue) != `"S001"` || contract.Parameters[2].DefaultValue != nil {
+		t.Fatalf("parameter defaults leaked or missing: %#v", contract.Parameters)
+	}
+}
+
 func TestReportRunServiceRejectsSystemParameterAndInvalidAllowedValue(t *testing.T) {
 	for _, parameters := range []map[string]json.RawMessage{
 		{"runId": json.RawMessage(`"client-controlled"`), "storeCode": json.RawMessage(`"S001"`), "secret": json.RawMessage(`"value"`)},

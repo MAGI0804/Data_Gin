@@ -25,6 +25,7 @@ func TestRegisterReportRoutesUsesExpectedMethodsAndPaths(t *testing.T) {
 		http.MethodGet + " /api/v1/reports/:id",
 		http.MethodPut + " /api/v1/reports/:id",
 		http.MethodPost + " /api/v1/reports/:id/publish",
+		http.MethodGet + " /api/v1/reports/:id/run-contract",
 		http.MethodPost + " /api/v1/reports/:id/runs",
 		http.MethodGet + " /api/v1/report-runs/:id",
 		http.MethodGet + " /api/v1/report-runs/:id/results",

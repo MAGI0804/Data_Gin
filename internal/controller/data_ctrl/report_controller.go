@@ -37,6 +37,7 @@ type ReportPublishServiceAPI interface {
 }
 
 type ReportRunServiceAPI interface {
+	Contract(context.Context, uint, uint) (*data_svc.ReportRunContractDTO, error)
 	Create(context.Context, uint, uint, requestbody.ReportRunCreateRequest) (*data_svc.ReportRunDTO, error)
 }
 
@@ -85,6 +86,24 @@ func (controller *ReportController) CreateRun(c *gin.Context) {
 		return
 	}
 	responses.New(c).ToResponseWithStatus(http.StatusAccepted, result)
+}
+
+func (controller *ReportController) GetRunContract(c *gin.Context) {
+	if controller.runService == nil {
+		writeReportError(c, errors.New("report run service is unavailable"))
+		return
+	}
+	reportID, err := parseReportUint(c.Param("id"), "report id")
+	if err != nil {
+		writeReportError(c, err)
+		return
+	}
+	result, err := controller.runService.Contract(c.Request.Context(), auth.CurrentUserID(c), reportID)
+	if err != nil {
+		writeReportError(c, err)
+		return
+	}
+	responses.New(c).ToResponseWithStatus(http.StatusOK, result)
 }
 
 func (controller *ReportController) Create(c *gin.Context) {
