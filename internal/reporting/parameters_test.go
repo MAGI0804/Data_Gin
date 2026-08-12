@@ -153,6 +153,28 @@ func TestNormalizeParameters(t *testing.T) {
 	}
 }
 
+func TestNormalizeParametersFingerprintExcludesSystemValues(t *testing.T) {
+	definitions := []ParameterDefinition{
+		{Code: "runId", ProcedureArgName: "P_RUN_ID", Position: 1, LogicalType: LogicalTypeString, Required: true, SystemInjected: true},
+		{Code: "store", ProcedureArgName: "P_STORE", Position: 2, LogicalType: LogicalTypeString, Required: true},
+	}
+	values := map[string]json.RawMessage{"store": json.RawMessage(`"S001"`)}
+	first, err := NormalizeParameters(definitions, values, map[string]interface{}{"runId": "run-1"})
+	if err != nil {
+		t.Fatalf("first NormalizeParameters() error = %v", err)
+	}
+	second, err := NormalizeParameters(definitions, values, map[string]interface{}{"runId": "run-2"})
+	if err != nil {
+		t.Fatalf("second NormalizeParameters() error = %v", err)
+	}
+	if first.Fingerprint != second.Fingerprint {
+		t.Fatalf("business fingerprint changed with run id: %q != %q", first.Fingerprint, second.Fingerprint)
+	}
+	if first.DatabaseValues["runId"] == second.DatabaseValues["runId"] {
+		t.Fatalf("database run ids were not independently normalized: %#v %#v", first.DatabaseValues, second.DatabaseValues)
+	}
+}
+
 func TestNormalizeParametersRejectsClientSystemParameterAndUnknownParameter(t *testing.T) {
 	definitions := []ParameterDefinition{
 		{Code: "runId", ProcedureArgName: "P_RUN_ID", Position: 1, LogicalType: LogicalTypeString, SystemInjected: true},

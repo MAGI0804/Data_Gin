@@ -43,10 +43,11 @@ func TestReportCenterModelsDoNotMarshalSecrets(t *testing.T) {
 	}
 
 	runJSON, err := json.Marshal(ReportRun{
-		RefreshNonce:              "refresh-secret",
-		NormalizedParametersJSON:  JSONText(`{"customer":"secret"}`),
-		SensitiveParametersCipher: "encrypted-parameters",
-		WorkerID:                  "worker-internal",
+		RefreshNonce:                  "refresh-secret",
+		NormalizedParametersJSON:      JSONText(`{"customer":"secret"}`),
+		SensitiveParametersCipher:     "encrypted-parameters",
+		SensitiveParametersKeyVersion: "parameter-key-v1",
+		WorkerID:                      "worker-internal",
 	})
 	if err != nil {
 		t.Fatalf("marshal report run: %v", err)
@@ -68,6 +69,7 @@ func TestReportCenterModelsDoNotMarshalSecrets(t *testing.T) {
 		"refresh-secret",
 		"secret",
 		"encrypted-parameters",
+		"parameter-key-v1",
 		"worker-internal",
 		"private/object.xlsx",
 		"123",

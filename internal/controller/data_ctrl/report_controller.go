@@ -29,15 +29,24 @@ type ReportDraftServiceAPI interface {
 type ReportController struct {
 	service        ReportDraftServiceAPI
 	publishService ReportPublishServiceAPI
+	runService     ReportRunServiceAPI
 }
 
 type ReportPublishServiceAPI interface {
 	Publish(context.Context, uint, uint, uint64) (*data_svc.ReportPublicationDTO, error)
 }
 
+type ReportRunServiceAPI interface {
+	Create(context.Context, uint, uint, requestbody.ReportRunCreateRequest) (*data_svc.ReportRunDTO, error)
+}
+
 func NewReportController() *ReportController {
 	repository := reportrepo.New()
-	return NewReportControllerWithServices(data_svc.NewReportDraftServiceWithStore(repository), data_svc.NewReportPublishService(repository, reportsecret.EnvironmentKeyring{}, data_svc.OpenReportOracle))
+	return NewReportControllerWithAllServices(
+		data_svc.NewReportDraftServiceWithStore(repository),
+		data_svc.NewReportPublishService(repository, reportsecret.EnvironmentKeyring{}, data_svc.OpenReportOracle),
+		data_svc.NewReportRunServiceWithDependencies(repository, reportsecret.EnvironmentParameterCipher{}),
+	)
 }
 
 func NewReportControllerWithService(service ReportDraftServiceAPI) *ReportController {
@@ -45,10 +54,37 @@ func NewReportControllerWithService(service ReportDraftServiceAPI) *ReportContro
 }
 
 func NewReportControllerWithServices(service ReportDraftServiceAPI, publishService ReportPublishServiceAPI) *ReportController {
+	return NewReportControllerWithAllServices(service, publishService, nil)
+}
+
+func NewReportControllerWithAllServices(service ReportDraftServiceAPI, publishService ReportPublishServiceAPI, runService ReportRunServiceAPI) *ReportController {
 	if service == nil {
 		panic("report controller: nil service")
 	}
-	return &ReportController{service: service, publishService: publishService}
+	return &ReportController{service: service, publishService: publishService, runService: runService}
+}
+
+func (controller *ReportController) CreateRun(c *gin.Context) {
+	if controller.runService == nil {
+		writeReportError(c, errors.New("report run service is unavailable"))
+		return
+	}
+	reportID, err := parseReportUint(c.Param("id"), "report id")
+	if err != nil {
+		writeReportError(c, err)
+		return
+	}
+	var request requestbody.ReportRunCreateRequest
+	if err := decodeMallJSON(c, &request); err != nil {
+		writeReportError(c, fmt.Errorf("%w: invalid run request", data_svc.ErrReportRunInvalid))
+		return
+	}
+	result, err := controller.runService.Create(c.Request.Context(), auth.CurrentUserID(c), reportID, request)
+	if err != nil {
+		writeReportError(c, err)
+		return
+	}
+	responses.New(c).ToResponseWithStatus(http.StatusAccepted, result)
 }
 
 func (controller *ReportController) Create(c *gin.Context) {
@@ -181,6 +217,10 @@ func classifyReportError(err error) (*errcode.Error, string) {
 		return errcode.UnprocessableEntity, "报表草稿参数校验失败"
 	case errors.Is(err, data_svc.ErrReportPublicationInvalid):
 		return errcode.UnprocessableEntity, "Oracle过程或结果表与报表配置不一致"
+	case errors.Is(err, data_svc.ErrReportRunInvalid):
+		return errcode.UnprocessableEntity, "报表查询参数校验失败"
+	case errors.Is(err, data_svc.ErrReportRunDenied):
+		return errcode.Forbidden, "没有该报表的查询权限"
 	default:
 		return errcode.InternalServerError, "报表配置服务暂时不可用"
 	}

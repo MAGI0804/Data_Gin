@@ -96,3 +96,8 @@ type ReportGrantRequest struct {
 type ReportPublishRequest struct {
 	ExpectedLockVersion uint64 `json:"expectedLockVersion"`
 }
+
+type ReportRunCreateRequest struct {
+	Parameters   map[string]json.RawMessage `json:"parameters"`
+	RefreshNonce string                     `json:"refreshNonce,omitempty"`
+}

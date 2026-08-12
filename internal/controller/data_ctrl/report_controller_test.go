@@ -120,6 +120,56 @@ func TestReportControllerPublishUsesActorAndLockVersion(t *testing.T) {
 	}
 }
 
+func TestReportControllerCreateRunUsesActorParametersAndStrictJSON(t *testing.T) {
+	draftService := &fakeReportControllerService{}
+	runService := &fakeReportRunService{result: &data_svc.ReportRunDTO{ID: 31}}
+	controller := NewReportControllerWithAllServices(draftService, nil, runService)
+	router := reportControllerRouter()
+	router.POST("/reports/:id/runs", controller.CreateRun)
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/reports/9/runs", strings.NewReader(`{"parameters":{"storeCode":"S001"},"refreshNonce":"refresh-1"}`))
+	request.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusAccepted || runService.actor != 17 || runService.reportID != 9 ||
+		string(runService.request.Parameters["storeCode"]) != `"S001"` || runService.request.RefreshNonce != "refresh-1" {
+		t.Fatalf("create run response = %d %s service=%#v", recorder.Code, recorder.Body, runService)
+	}
+
+	recorder = httptest.NewRecorder()
+	request = httptest.NewRequest(http.MethodPost, "/reports/9/runs", strings.NewReader(`{"parameters":{},"unknown":true}`))
+	request.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusUnprocessableEntity || runService.calls != 1 {
+		t.Fatalf("invalid run response = %d %s calls=%d", recorder.Code, recorder.Body, runService.calls)
+	}
+}
+
+func TestReportControllerCreateRunMapsDeniedAndInvalid(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		err        error
+		wantStatus int
+	}{
+		{name: "denied", err: data_svc.ErrReportRunDenied, wantStatus: http.StatusForbidden},
+		{name: "invalid", err: data_svc.ErrReportRunInvalid, wantStatus: http.StatusUnprocessableEntity},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			runService := &fakeReportRunService{err: test.err}
+			controller := NewReportControllerWithAllServices(&fakeReportControllerService{}, nil, runService)
+			router := reportControllerRouter()
+			router.POST("/reports/:id/runs", controller.CreateRun)
+			recorder := httptest.NewRecorder()
+			request := httptest.NewRequest(http.MethodPost, "/reports/9/runs", strings.NewReader(`{"parameters":{}}`))
+			request.Header.Set("Content-Type", "application/json")
+			router.ServeHTTP(recorder, request)
+			if recorder.Code != test.wantStatus {
+				t.Fatalf("status = %d body=%s", recorder.Code, recorder.Body)
+			}
+		})
+	}
+}
+
 func reportControllerRouter() *gin.Engine {
 	router := gin.New()
 	router.Use(func(c *gin.Context) {
@@ -150,6 +200,21 @@ type fakeReportPublishService struct {
 	lockVersion uint64
 	calls       int
 	result      *data_svc.ReportPublicationDTO
+}
+
+type fakeReportRunService struct {
+	actor    uint
+	reportID uint
+	calls    int
+	request  requestbody.ReportRunCreateRequest
+	result   *data_svc.ReportRunDTO
+	err      error
+}
+
+func (service *fakeReportRunService) Create(_ context.Context, actor, reportID uint, request requestbody.ReportRunCreateRequest) (*data_svc.ReportRunDTO, error) {
+	service.actor, service.reportID, service.request = actor, reportID, request
+	service.calls++
+	return service.result, service.err
 }
 
 func (service *fakeReportPublishService) Publish(_ context.Context, actor, reportID uint, lockVersion uint64) (*data_svc.ReportPublicationDTO, error) {

@@ -57,6 +57,10 @@ func ParseKeyring(raw string) (*Keyring, error) {
 }
 
 func (keyring *Keyring) Encrypt(version, plaintext string) (string, error) {
+	return keyring.EncryptScoped(version, "report-datasource", plaintext)
+}
+
+func (keyring *Keyring) EncryptScoped(version, purpose, plaintext string) (string, error) {
 	aead, err := keyring.aead(version)
 	if err != nil {
 		return "", err
@@ -68,11 +72,15 @@ func (keyring *Keyring) Encrypt(version, plaintext string) (string, error) {
 	if _, err := io.ReadFull(rand.Reader, nonce); err != nil {
 		return "", fmt.Errorf("encrypt report credential: generate nonce: %w", err)
 	}
-	sealed := aead.Seal(nonce, nonce, []byte(plaintext), credentialAAD(version))
+	sealed := aead.Seal(nonce, nonce, []byte(plaintext), scopedAAD(purpose, version))
 	return credentialPrefix + base64.RawStdEncoding.EncodeToString(sealed), nil
 }
 
 func (keyring *Keyring) Decrypt(version, ciphertext string) (string, error) {
+	return keyring.DecryptScoped(version, "report-datasource", ciphertext)
+}
+
+func (keyring *Keyring) DecryptScoped(version, purpose, ciphertext string) (string, error) {
 	aead, err := keyring.aead(version)
 	if err != nil {
 		return "", err
@@ -86,7 +94,7 @@ func (keyring *Keyring) Decrypt(version, ciphertext string) (string, error) {
 		return "", credentialError("ciphertext format is invalid")
 	}
 	nonce, encrypted := sealed[:aead.NonceSize()], sealed[aead.NonceSize():]
-	plaintext, err := aead.Open(nil, nonce, encrypted, credentialAAD(version))
+	plaintext, err := aead.Open(nil, nonce, encrypted, scopedAAD(purpose, version))
 	if err != nil {
 		return "", credentialError("ciphertext authentication failed")
 	}
@@ -117,7 +125,15 @@ func (keyring *Keyring) aead(version string) (cipher.AEAD, error) {
 }
 
 func credentialAAD(version string) []byte {
-	return []byte("Data_Gin/report-datasource/" + strings.TrimSpace(version))
+	return scopedAAD("report-datasource", version)
+}
+
+func scopedAAD(purpose, version string) []byte {
+	purpose = strings.TrimSpace(purpose)
+	if purpose == "" {
+		purpose = "invalid"
+	}
+	return []byte("Data_Gin/" + purpose + "/" + strings.TrimSpace(version))
 }
 
 func credentialError(message string) error {

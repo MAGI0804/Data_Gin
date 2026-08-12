@@ -259,7 +259,9 @@ func NormalizeParameters(
 			return NormalizedParameters{}, err
 		}
 		databaseValues[definition.Code] = dbValue
-		fingerprintValues[definition.Code] = value
+		if !definition.SystemInjected {
+			fingerprintValues[definition.Code] = value
+		}
 		if definition.Sensitive {
 			sensitiveValues[definition.Code] = value
 		} else {

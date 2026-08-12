@@ -212,31 +212,32 @@ func (ReportGrant) TableName() string { return "report_grants" }
 // its immutable parameter, permission and presentation snapshots.
 type ReportRun struct {
 	BaseModel
-	RunUUID                   string     `gorm:"column:run_uuid;type:char(36);not null;uniqueIndex" json:"runUuid"`
-	DefinitionID              uint       `gorm:"column:definition_id;not null;index" json:"definitionId"`
-	VersionID                 uint       `gorm:"column:version_id;not null;index" json:"versionId"`
-	RequestedBy               uint       `gorm:"column:requested_by;not null;index" json:"requestedBy"`
-	Status                    string     `gorm:"column:status;size:32;not null;default:'QUEUED';index" json:"status"`
-	ExecutionFingerprint      string     `gorm:"column:execution_fingerprint;type:char(64);not null;index" json:"executionFingerprint"`
-	RefreshNonce              string     `gorm:"column:refresh_nonce;size:64" json:"-"`
-	NormalizedParametersJSON  JSONText   `gorm:"column:normalized_parameters_json;type:json;not null" json:"-"`
-	SensitiveParametersCipher string     `gorm:"column:sensitive_parameters_cipher;type:longtext" json:"-"`
-	PermissionSnapshotJSON    JSONText   `gorm:"column:permission_snapshot_json;type:json;not null" json:"permissionSnapshot"`
-	PresentationSnapshotJSON  JSONText   `gorm:"column:presentation_snapshot_json;type:json;not null" json:"presentationSnapshot"`
-	ContractHash              string     `gorm:"column:contract_hash;type:char(64);not null" json:"contractHash"`
-	ProcedureSignatureHash    string     `gorm:"column:procedure_signature_hash;type:char(64);not null" json:"procedureSignatureHash"`
-	ResultSchemaHash          string     `gorm:"column:result_schema_hash;type:char(64);not null" json:"resultSchemaHash"`
-	RowCount                  int64      `gorm:"column:row_count;not null;default:0" json:"rowCount"`
-	CancelRequested           bool       `gorm:"column:cancel_requested;not null;default:false;index" json:"cancelRequested"`
-	Attempt                   int        `gorm:"column:attempt;not null;default:0" json:"attempt"`
-	WorkerID                  string     `gorm:"column:worker_id;size:128" json:"-"`
-	LeaseExpiresAt            *time.Time `gorm:"column:lease_expires_at;type:datetime(3);index" json:"-"`
-	HeartbeatAt               *time.Time `gorm:"column:heartbeat_at;type:datetime(3)" json:"heartbeatAt"`
-	StartedAt                 *time.Time `gorm:"column:started_at;type:datetime(3)" json:"startedAt"`
-	FinishedAt                *time.Time `gorm:"column:finished_at;type:datetime(3)" json:"finishedAt"`
-	ResultPurgedAt            *time.Time `gorm:"column:result_purged_at;type:datetime(3)" json:"resultPurgedAt"`
-	ErrorCode                 string     `gorm:"column:error_code;size:64" json:"errorCode"`
-	ErrorMessageSafe          string     `gorm:"column:error_message_safe;type:text" json:"errorMessage"`
+	RunUUID                       string     `gorm:"column:run_uuid;type:char(36);not null;uniqueIndex" json:"runUuid"`
+	DefinitionID                  uint       `gorm:"column:definition_id;not null;index" json:"definitionId"`
+	VersionID                     uint       `gorm:"column:version_id;not null;index" json:"versionId"`
+	RequestedBy                   uint       `gorm:"column:requested_by;not null;index" json:"requestedBy"`
+	Status                        string     `gorm:"column:status;size:32;not null;default:'QUEUED';index" json:"status"`
+	ExecutionFingerprint          string     `gorm:"column:execution_fingerprint;type:char(64);not null;index" json:"executionFingerprint"`
+	RefreshNonce                  string     `gorm:"column:refresh_nonce;size:64" json:"-"`
+	NormalizedParametersJSON      JSONText   `gorm:"column:normalized_parameters_json;type:json;not null" json:"-"`
+	SensitiveParametersCipher     string     `gorm:"column:sensitive_parameters_cipher;type:longtext" json:"-"`
+	SensitiveParametersKeyVersion string     `gorm:"column:sensitive_parameters_key_version;size:64" json:"-"`
+	PermissionSnapshotJSON        JSONText   `gorm:"column:permission_snapshot_json;type:json;not null" json:"permissionSnapshot"`
+	PresentationSnapshotJSON      JSONText   `gorm:"column:presentation_snapshot_json;type:json;not null" json:"presentationSnapshot"`
+	ContractHash                  string     `gorm:"column:contract_hash;type:char(64);not null" json:"contractHash"`
+	ProcedureSignatureHash        string     `gorm:"column:procedure_signature_hash;type:char(64);not null" json:"procedureSignatureHash"`
+	ResultSchemaHash              string     `gorm:"column:result_schema_hash;type:char(64);not null" json:"resultSchemaHash"`
+	RowCount                      int64      `gorm:"column:row_count;not null;default:0" json:"rowCount"`
+	CancelRequested               bool       `gorm:"column:cancel_requested;not null;default:false;index" json:"cancelRequested"`
+	Attempt                       int        `gorm:"column:attempt;not null;default:0" json:"attempt"`
+	WorkerID                      string     `gorm:"column:worker_id;size:128" json:"-"`
+	LeaseExpiresAt                *time.Time `gorm:"column:lease_expires_at;type:datetime(3);index" json:"-"`
+	HeartbeatAt                   *time.Time `gorm:"column:heartbeat_at;type:datetime(3)" json:"heartbeatAt"`
+	StartedAt                     *time.Time `gorm:"column:started_at;type:datetime(3)" json:"startedAt"`
+	FinishedAt                    *time.Time `gorm:"column:finished_at;type:datetime(3)" json:"finishedAt"`
+	ResultPurgedAt                *time.Time `gorm:"column:result_purged_at;type:datetime(3)" json:"resultPurgedAt"`
+	ErrorCode                     string     `gorm:"column:error_code;size:64" json:"errorCode"`
+	ErrorMessageSafe              string     `gorm:"column:error_message_safe;type:text" json:"errorMessage"`
 	WeatherTimestamps
 }
 
