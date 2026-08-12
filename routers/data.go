@@ -299,6 +299,7 @@ func registerReportRoutes(api *gin.RouterGroup, reportCtrl *data_ctrl.ReportCont
 	reportGroup.GET("", middleware.RequirePermission(model.PermissionReportRead), reportCtrl.List)
 	reportGroup.GET("/:id", middleware.RequirePermission(model.PermissionReportRead), reportCtrl.Get)
 	reportGroup.PUT("/:id", middleware.RequirePermission(model.PermissionReportManage), reportCtrl.Update)
+	reportGroup.POST("/:id/publish", middleware.RequirePermission(model.PermissionReportManage), reportCtrl.Publish)
 }
 
 func registerMallWeatherExportProfileRoutes(

@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"os"
 	"strings"
 )
 
@@ -18,6 +19,22 @@ const credentialPrefix = "v1:"
 
 type Keyring struct {
 	keys map[string][]byte
+}
+
+type EnvironmentKeyring struct {
+	Variable string
+}
+
+func (environment EnvironmentKeyring) Decrypt(version, ciphertext string) (string, error) {
+	variable := strings.TrimSpace(environment.Variable)
+	if variable == "" {
+		variable = "REPORT_CREDENTIAL_KEYS_JSON"
+	}
+	keyring, err := ParseKeyring(os.Getenv(variable))
+	if err != nil {
+		return "", fmt.Errorf("load report credential keyring: %w", err)
+	}
+	return keyring.Decrypt(version, ciphertext)
 }
 
 func ParseKeyring(raw string) (*Keyring, error) {

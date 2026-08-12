@@ -2,6 +2,7 @@ package reportoracle
 
 import (
 	"errors"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -65,6 +66,20 @@ func TestResultPlanRejectsUnvalidatedContract(t *testing.T) {
 	}
 	if _, err := BuildPurgePlan(ResultSnapshotContract{}); !errors.Is(err, ErrInvalidConfiguration) {
 		t.Fatalf("BuildPurgePlan() error = %v, want ErrInvalidConfiguration", err)
+	}
+}
+
+func TestResultPlanSupportsConfiguredMaximumColumns(t *testing.T) {
+	columns := make([]string, maxResultColumns)
+	for index := range columns {
+		columns[index] = "VALUE_" + strconv.Itoa(index)
+	}
+	if _, err := BuildResultPagePlan(testSnapshotContract(), columns); err != nil {
+		t.Fatalf("BuildResultPagePlan() error = %v", err)
+	}
+	columns = append(columns, "TOO_MANY")
+	if _, err := BuildResultPagePlan(testSnapshotContract(), columns); !errors.Is(err, ErrInvalidConfiguration) {
+		t.Fatalf("BuildResultPagePlan() error = %v, want ErrInvalidConfiguration", err)
 	}
 }
 

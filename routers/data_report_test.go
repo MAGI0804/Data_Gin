@@ -22,6 +22,7 @@ func TestRegisterReportRoutesUsesExpectedMethodsAndPaths(t *testing.T) {
 		http.MethodGet + " /api/v1/reports",
 		http.MethodGet + " /api/v1/reports/:id",
 		http.MethodPut + " /api/v1/reports/:id",
+		http.MethodPost + " /api/v1/reports/:id/publish",
 	} {
 		if _, exists := routes[expected]; !exists {
 			t.Fatalf("missing route %q: %#v", expected, routes)

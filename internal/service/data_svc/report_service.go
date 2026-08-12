@@ -319,7 +319,7 @@ func reportDraftFromRequest(actor uint, request requestbody.ReportDraftSaveReque
 			CreatedBy: actor, UpdatedBy: actor,
 		},
 		Version: model.ReportVersion{
-			Status: model.ReportVersionStatusDraft, ProcedureOwner: procedure.Owner, PackageName: procedure.Package,
+			Status: model.ReportVersionStatusDraft, DatasourceID: request.DatasourceID, ProcedureOwner: procedure.Owner, PackageName: procedure.Package,
 			ProcedureName: procedure.Name, ProcedureOverload: procedure.Overload,
 			ResultTableOwner: resultRef.Owner, ResultTableName: resultRef.Name,
 			ResultRunIDColumn: runIDColumn, ResultRowIDColumn: rowIDColumn,

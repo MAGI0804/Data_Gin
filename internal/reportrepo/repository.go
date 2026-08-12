@@ -2,9 +2,11 @@ package reportrepo
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"gin-biz-web-api/model"
 	"gin-biz-web-api/pkg/database"
@@ -14,9 +16,10 @@ import (
 )
 
 var (
-	ErrDraftNotFound        = errors.New("report draft: not found")
-	ErrDraftVersionConflict = errors.New("report draft: version conflict")
-	ErrInvalidDraft         = errors.New("report draft: invalid input")
+	ErrDraftNotFound         = errors.New("report draft: not found")
+	ErrDatasourceUnavailable = errors.New("report draft: datasource unavailable")
+	ErrDraftVersionConflict  = errors.New("report draft: version conflict")
+	ErrInvalidDraft          = errors.New("report draft: invalid input")
 )
 
 const maxDraftPageSize = 100
@@ -53,11 +56,28 @@ type DraftPage struct {
 	NextAfterID uint
 }
 
+type Publication struct {
+	CompiledSpecJSON       model.JSONText
+	ContractHash           string
+	ParameterSchemaHash    string
+	ProcedureSignatureHash string
+	ResultSchemaHash       string
+	PermissionHash         string
+	ExportSchemaHash       string
+	SchemaProbeToken       string
+	SchemaValidatedAt      time.Time
+}
+
 type transactionRunner func(context.Context, *gorm.DB, func(*gorm.DB) error) error
 type draftReferenceValidator func(context.Context, *gorm.DB, uint, []model.ReportGrant) error
 type draftDefinitionLocker func(context.Context, *gorm.DB, uint, uint) (*definitionRecord, error)
 type draftVersionLocker func(context.Context, *gorm.DB, uint, uint) (*versionRecord, error)
 type reportAuditWriter func(context.Context, *gorm.DB, model.ReportAudit) error
+type draftCollectionsLoader func(context.Context, *gorm.DB, uint, uint, uint, *Draft) error
+type publishedVersionWriter func(context.Context, *gorm.DB, uint, uint, uint64, map[string]interface{}) error
+type draftVersionCreator func(context.Context, *gorm.DB, *versionRecord) error
+type versionCollectionsCopier func(context.Context, *gorm.DB, uint, []model.ReportParameter, []model.ReportColumn) error
+type publishedDefinitionSwitcher func(context.Context, *gorm.DB, uint, uint, uint, uint, uint) error
 
 type Repository struct {
 	db                 *gorm.DB
@@ -66,6 +86,11 @@ type Repository struct {
 	lockDefinition     draftDefinitionLocker
 	lockVersion        draftVersionLocker
 	writeAudit         reportAuditWriter
+	loadCollections    draftCollectionsLoader
+	publishVersion     publishedVersionWriter
+	createVersion      draftVersionCreator
+	copyCollections    versionCollectionsCopier
+	switchDefinition   publishedDefinitionSwitcher
 }
 
 func New(databases ...*gorm.DB) *Repository {
@@ -76,6 +101,8 @@ func New(databases ...*gorm.DB) *Repository {
 	return &Repository{
 		db: db, transact: runTransaction, validateReferences: validateDraftReferences,
 		lockDefinition: lockDraftDefinition, lockVersion: lockDraftVersion, writeAudit: createReportAudit,
+		loadCollections: loadCollections, publishVersion: writePublishedVersion, createVersion: createDraftVersion,
+		copyCollections: replaceVersionCollections, switchDefinition: switchPublishedDefinition,
 	}
 }
 
@@ -179,6 +206,152 @@ func (repository *Repository) FindDraftByID(ctx context.Context, ownerUserID, de
 		return nil, err
 	}
 	return draft, nil
+}
+
+func (repository *Repository) FindDatasource(ctx context.Context, datasourceID uint) (*model.ReportDatasource, error) {
+	if repository == nil || repository.db == nil || ctx == nil || datasourceID == 0 {
+		return nil, invalidDraft("repository, context and datasource id are required")
+	}
+	var datasource model.ReportDatasource
+	err := repository.db.WithContext(ctx).Where("id = ? AND enabled = ? AND driver = ?", datasourceID, true, model.ReportDatasourceDriverOracle).First(&datasource).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, ErrDatasourceUnavailable
+	}
+	if err != nil {
+		return nil, fmt.Errorf("report draft: find datasource: %w", err)
+	}
+	return &datasource, nil
+}
+
+func (repository *Repository) PublishDraft(ctx context.Context, ownerUserID, definitionID uint, expectedLockVersion uint64, publication Publication) (*Draft, error) {
+	if err := repository.validate(ctx, ownerUserID); err != nil {
+		return nil, err
+	}
+	if definitionID == 0 || expectedLockVersion == 0 || !validPublication(publication) {
+		return nil, invalidDraft("definition, lock version and publication are required")
+	}
+	var published Draft
+	var publishedAt time.Time
+	var nextDraftVersionID uint
+	err := repository.transact(ctx, repository.db, func(tx *gorm.DB) error {
+		definition, err := repository.lockDefinition(ctx, tx, ownerUserID, definitionID)
+		if err != nil {
+			return err
+		}
+		current, err := repository.lockVersion(ctx, tx, definitionID, definition.CurrentDraftVersionID)
+		if err != nil {
+			return err
+		}
+		if current.VersionNumber != expectedLockVersion {
+			return ErrDraftVersionConflict
+		}
+		published = Draft{Definition: definition.ReportDefinition, Version: current.ReportVersion, LockVersion: current.VersionNumber}
+		if err := repository.loadCollections(ctx, tx, ownerUserID, definitionID, current.ID, &published); err != nil {
+			return err
+		}
+		if current.DatasourceID == 0 || current.DatasourceID != definition.DatasourceID {
+			return invalidDraft("draft datasource snapshot is inconsistent")
+		}
+		if err := repository.validateReferences(ctx, tx, current.DatasourceID, published.Grants); err != nil {
+			return err
+		}
+		publishedAt = time.Now().UTC()
+		publishedUpdates := map[string]interface{}{
+			"status": model.ReportVersionStatusPublished, "compiled_spec_json": publication.CompiledSpecJSON,
+			"contract_hash": publication.ContractHash, "parameter_schema_hash": publication.ParameterSchemaHash,
+			"procedure_signature_hash": publication.ProcedureSignatureHash, "result_schema_hash": publication.ResultSchemaHash,
+			"permission_hash": publication.PermissionHash, "export_schema_hash": publication.ExportSchemaHash,
+			"schema_probe_token": publication.SchemaProbeToken, "schema_validated_at": publication.SchemaValidatedAt,
+			"published_by": ownerUserID, "published_at": publishedAt,
+		}
+		if err := repository.publishVersion(ctx, tx, current.ID, definitionID, expectedLockVersion, publishedUpdates); err != nil {
+			return err
+		}
+
+		next := nextDraftAfterPublication(current.ReportVersion, ownerUserID)
+		nextRecord := newVersionRecord(next)
+		if err := repository.createVersion(ctx, tx, &nextRecord); err != nil {
+			return err
+		}
+		nextDraftVersionID = nextRecord.ID
+		if err := repository.copyCollections(ctx, tx, nextRecord.ID, published.Parameters, published.Columns); err != nil {
+			return err
+		}
+		if err := repository.switchDefinition(ctx, tx, ownerUserID, definitionID, current.ID, nextRecord.ID, ownerUserID); err != nil {
+			return err
+		}
+		return repository.writeAudit(ctx, tx, buildReportAudit("REPORT_PUBLISH", ownerUserID, definitionID, reportDraftAuditDetail{VersionNumber: expectedLockVersion, Code: definition.Code, DatasourceID: current.DatasourceID, ParameterCount: len(published.Parameters), ColumnCount: len(published.Columns), GrantCount: len(published.Grants)}))
+	})
+	if err != nil {
+		return nil, err
+	}
+	published.Version.Status = model.ReportVersionStatusPublished
+	published.Version.CompiledSpecJSON = publication.CompiledSpecJSON
+	published.Version.ContractHash = publication.ContractHash
+	published.Version.ParameterSchemaHash = publication.ParameterSchemaHash
+	published.Version.ProcedureSignatureHash = publication.ProcedureSignatureHash
+	published.Version.ResultSchemaHash = publication.ResultSchemaHash
+	published.Version.PermissionHash = publication.PermissionHash
+	published.Version.ExportSchemaHash = publication.ExportSchemaHash
+	published.Version.SchemaProbeToken = publication.SchemaProbeToken
+	published.Version.SchemaValidatedAt = &publication.SchemaValidatedAt
+	published.Version.PublishedBy = ownerUserID
+	published.Version.PublishedAt = &publishedAt
+	published.Definition.Status = model.ReportDefinitionStatusActive
+	published.Definition.CurrentPublishedVersionID = published.Version.ID
+	published.Definition.CurrentDraftVersionID = nextDraftVersionID
+	return &published, nil
+}
+
+func nextDraftAfterPublication(current model.ReportVersion, actor uint) model.ReportVersion {
+	current.ID = 0
+	current.VersionNumber++
+	current.Status = model.ReportVersionStatusDraft
+	current.CompiledSpecJSON = ""
+	current.ContractHash, current.ParameterSchemaHash, current.ProcedureSignatureHash = "", "", ""
+	current.ResultSchemaHash, current.PermissionHash, current.ExportSchemaHash = "", "", ""
+	current.SchemaProbeToken, current.PublishedBy, current.PublishedAt, current.SchemaValidatedAt = "", 0, nil, nil
+	current.CreatedBy = actor
+	current.WeatherTimestamps = model.WeatherTimestamps{}
+	return current
+}
+
+func writePublishedVersion(ctx context.Context, tx *gorm.DB, versionID, definitionID uint, expectedVersion uint64, updates map[string]interface{}) error {
+	result := tx.WithContext(ctx).Model(&versionRecord{}).
+		Where("id = ? AND definition_id = ? AND status = ? AND version_number = ?", versionID, definitionID, model.ReportVersionStatusDraft, expectedVersion).
+		Updates(updates)
+	if result.Error != nil {
+		return fmt.Errorf("report draft: publish version: %w", result.Error)
+	}
+	if result.RowsAffected != 1 {
+		return ErrDraftVersionConflict
+	}
+	return nil
+}
+
+func createDraftVersion(ctx context.Context, tx *gorm.DB, version *versionRecord) error {
+	if err := tx.WithContext(ctx).Create(version).Error; err != nil {
+		return fmt.Errorf("report draft: create post-publication draft: %w", err)
+	}
+	return nil
+}
+
+func switchPublishedDefinition(ctx context.Context, tx *gorm.DB, ownerUserID, definitionID, publishedVersionID, draftVersionID, updatedBy uint) error {
+	result := definitionScope(tx.WithContext(ctx), ownerUserID).Where("id = ? AND current_draft_version_id = ?", definitionID, publishedVersionID).
+		Updates(map[string]interface{}{"status": model.ReportDefinitionStatusActive, "current_published_version_id": publishedVersionID, "current_draft_version_id": draftVersionID, "updated_by": updatedBy})
+	if result.Error != nil {
+		return fmt.Errorf("report draft: switch published version: %w", result.Error)
+	}
+	if result.RowsAffected != 1 {
+		return ErrDraftVersionConflict
+	}
+	return nil
+}
+
+func validPublication(value Publication) bool {
+	return json.Valid([]byte(value.CompiledSpecJSON)) && len(value.ContractHash) == 64 && len(value.ParameterSchemaHash) == 64 &&
+		len(value.ProcedureSignatureHash) == 64 && len(value.ResultSchemaHash) == 64 && len(value.PermissionHash) == 64 &&
+		len(value.ExportSchemaHash) == 64 && len(value.SchemaProbeToken) == 36 && !value.SchemaValidatedAt.IsZero()
 }
 
 func (repository *Repository) ListDrafts(ctx context.Context, ownerUserID uint, query DraftListQuery) (DraftPage, error) {
@@ -379,7 +552,9 @@ func (repository *Repository) SaveDraftCollections(
 
 func (repository *Repository) validate(ctx context.Context, ownerUserID uint) error {
 	if repository == nil || repository.db == nil || repository.transact == nil || repository.validateReferences == nil ||
-		repository.lockDefinition == nil || repository.lockVersion == nil || repository.writeAudit == nil || ctx == nil || ownerUserID == 0 {
+		repository.lockDefinition == nil || repository.lockVersion == nil || repository.writeAudit == nil || repository.loadCollections == nil ||
+		repository.publishVersion == nil || repository.createVersion == nil || repository.copyCollections == nil || repository.switchDefinition == nil ||
+		ctx == nil || ownerUserID == 0 {
 		return invalidDraft("repository, context and owner scope are required")
 	}
 	return nil

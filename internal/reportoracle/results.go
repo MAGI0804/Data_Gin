@@ -13,6 +13,7 @@ import (
 const (
 	defaultResultPageSize = 100
 	maxResultPageSize     = 1000
+	maxResultColumns      = 512
 	defaultPurgeBatchSize = 5000
 	maxPurgeBatchSize     = 20000
 )
@@ -270,7 +271,7 @@ func normalizeSnapshotRef(ref ResultSnapshotRef) (ResultTableRef, string, string
 	if runIDColumn == rowIDColumn {
 		return ResultTableRef{}, "", "", nil, configurationError("result key columns must be distinct")
 	}
-	if len(ref.Columns) == 0 || len(ref.Columns) > 256 {
+	if len(ref.Columns) == 0 || len(ref.Columns) > maxResultColumns {
 		return ResultTableRef{}, "", "", nil, configurationError("result columns are invalid")
 	}
 	columns := make([]string, len(ref.Columns))

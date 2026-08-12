@@ -158,6 +158,7 @@ func validContract() (
 ) {
 	zero := int64(0)
 	version := model.ReportVersion{
+		DatasourceID:   3,
 		ProcedureOwner: "report", PackageName: "pkg", ProcedureName: "sales",
 		ResultTableOwner: "report", ResultTableName: "sales_result",
 		ResultRunIDColumn: "run_id", ResultRowIDColumn: "row_no",

@@ -48,6 +48,7 @@ func TestReportControllerErrorContract(t *testing.T) {
 		{name: "not found", err: data_svc.ErrReportNotFound, wantStatus: http.StatusNotFound},
 		{name: "conflict", err: data_svc.ErrReportConflict, wantStatus: http.StatusConflict},
 		{name: "invalid", err: data_svc.ErrReportInvalid, wantStatus: http.StatusUnprocessableEntity},
+		{name: "publication invalid", err: data_svc.ErrReportPublicationInvalid, wantStatus: http.StatusUnprocessableEntity},
 		{name: "internal", err: errors.New("database password=secret"), wantStatus: http.StatusInternalServerError},
 	}
 	for _, test := range tests {
@@ -95,6 +96,30 @@ func TestReportControllerListAndUpdateParseBoundaries(t *testing.T) {
 	}
 }
 
+func TestReportControllerPublishUsesActorAndLockVersion(t *testing.T) {
+	service := &fakeReportControllerService{}
+	publishService := &fakeReportPublishService{result: &data_svc.ReportPublicationDTO{DefinitionID: 7}}
+	controller := NewReportControllerWithServices(service, publishService)
+	router := reportControllerRouter()
+	router.POST("/reports/:id/publish", controller.Publish)
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/reports/7/publish", strings.NewReader(`{"expectedLockVersion":3}`))
+	request.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK || publishService.actor != 17 || publishService.reportID != 7 || publishService.lockVersion != 3 {
+		t.Fatalf("publish response = %d %s service=%#v", recorder.Code, recorder.Body, publishService)
+	}
+
+	recorder = httptest.NewRecorder()
+	request = httptest.NewRequest(http.MethodPost, "/reports/7/publish", strings.NewReader(`{"expectedLockVersion":0}`))
+	request.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusUnprocessableEntity || publishService.calls != 1 {
+		t.Fatalf("invalid publish response = %d %s calls=%d", recorder.Code, recorder.Body, publishService.calls)
+	}
+}
+
 func reportControllerRouter() *gin.Engine {
 	router := gin.New()
 	router.Use(func(c *gin.Context) {
@@ -117,6 +142,20 @@ type fakeReportControllerService struct {
 	listResult   *data_svc.ReportDraftListDTO
 	updateResult *data_svc.ReportDraftDTO
 	getErr       error
+}
+
+type fakeReportPublishService struct {
+	actor       uint
+	reportID    uint
+	lockVersion uint64
+	calls       int
+	result      *data_svc.ReportPublicationDTO
+}
+
+func (service *fakeReportPublishService) Publish(_ context.Context, actor, reportID uint, lockVersion uint64) (*data_svc.ReportPublicationDTO, error) {
+	service.actor, service.reportID, service.lockVersion = actor, reportID, lockVersion
+	service.calls++
+	return service.result, nil
 }
 
 func (service *fakeReportControllerService) Create(_ context.Context, actor uint, _ requestbody.ReportDraftSaveRequest) (*data_svc.ReportDraftDTO, error) {

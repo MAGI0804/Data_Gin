@@ -92,3 +92,7 @@ type ReportGrantRequest struct {
 	SubjectID   uint            `json:"subjectId"`
 	Actions     json.RawMessage `json:"actions"`
 }
+
+type ReportPublishRequest struct {
+	ExpectedLockVersion uint64 `json:"expectedLockVersion"`
+}

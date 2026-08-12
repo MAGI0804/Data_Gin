@@ -46,3 +46,20 @@ func TestParseKeyringRejectsInvalidConfiguration(t *testing.T) {
 		}
 	}
 }
+
+func TestEnvironmentKeyringLoadsConfiguredKeys(t *testing.T) {
+	key := base64.StdEncoding.EncodeToString([]byte("0123456789abcdef0123456789abcdef"))
+	keyring, err := ParseKeyring(`{"key-v1":"` + key + `"}`)
+	if err != nil {
+		t.Fatalf("ParseKeyring() error = %v", err)
+	}
+	ciphertext, err := keyring.Encrypt("key-v1", "password")
+	if err != nil {
+		t.Fatalf("Encrypt() error = %v", err)
+	}
+	t.Setenv("TEST_REPORT_KEYS", `{"key-v1":"`+key+`"}`)
+	plaintext, err := (EnvironmentKeyring{Variable: "TEST_REPORT_KEYS"}).Decrypt("key-v1", ciphertext)
+	if err != nil || plaintext != "password" {
+		t.Fatalf("Decrypt() = %q, %v", plaintext, err)
+	}
+}

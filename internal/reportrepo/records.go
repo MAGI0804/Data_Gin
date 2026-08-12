@@ -171,10 +171,38 @@ func replaceCollections(
 	return nil
 }
 
+func replaceVersionCollections(ctx context.Context, tx *gorm.DB, versionID uint, parameters []model.ReportParameter, columns []model.ReportColumn) error {
+	parameterRows := make([]parameterRecord, 0, len(parameters))
+	for _, parameter := range parameters {
+		parameter.ID = 0
+		parameter.VersionID = versionID
+		parameter.WeatherTimestamps = model.WeatherTimestamps{}
+		parameterRows = append(parameterRows, parameterRecord{ReportParameter: parameter})
+	}
+	if len(parameterRows) > 0 {
+		if err := tx.WithContext(ctx).Create(&parameterRows).Error; err != nil {
+			return fmt.Errorf("report draft: copy parameters: %w", err)
+		}
+	}
+	columnRows := make([]columnRecord, 0, len(columns))
+	for _, column := range columns {
+		column.ID = 0
+		column.VersionID = versionID
+		column.WeatherTimestamps = model.WeatherTimestamps{}
+		columnRows = append(columnRows, columnRecord{ReportColumn: column})
+	}
+	if len(columnRows) > 0 {
+		if err := tx.WithContext(ctx).Create(&columnRows).Error; err != nil {
+			return fmt.Errorf("report draft: copy columns: %w", err)
+		}
+	}
+	return nil
+}
+
 func validateDraftReferences(ctx context.Context, tx *gorm.DB, datasourceID uint, grants []model.ReportGrant) error {
 	var datasourceCount int64
 	if err := tx.WithContext(ctx).Model(&model.ReportDatasource{}).
-		Where("id = ? AND enabled = ?", datasourceID, true).Count(&datasourceCount).Error; err != nil {
+		Where("id = ? AND enabled = ? AND driver = ?", datasourceID, true, model.ReportDatasourceDriverOracle).Count(&datasourceCount).Error; err != nil {
 		return fmt.Errorf("report draft: validate datasource: %w", err)
 	}
 	if err := validateReferenceCount("datasource", datasourceCount, 1); err != nil {

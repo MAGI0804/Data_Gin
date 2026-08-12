@@ -37,6 +37,9 @@ func validateDraftContent(draft *Draft) error {
 	if draft.Definition.DatasourceID == 0 || draft.Definition.OwnerUserID == 0 {
 		return invalidDraft("datasource and owner are required")
 	}
+	if draft.Version.DatasourceID == 0 || draft.Version.DatasourceID != draft.Definition.DatasourceID {
+		return invalidDraft("draft version datasource must match definition")
+	}
 	if draft.Definition.Status != "" && draft.Definition.Status != model.ReportDefinitionStatusDraft &&
 		draft.Definition.Status != model.ReportDefinitionStatusActive {
 		return invalidDraft("disabled definitions cannot save drafts")

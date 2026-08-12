@@ -10,6 +10,8 @@ import (
 
 	"github.com/gin-gonic/gin"
 
+	"gin-biz-web-api/internal/reportrepo"
+	"gin-biz-web-api/internal/reportsecret"
 	"gin-biz-web-api/internal/requestbody"
 	"gin-biz-web-api/internal/service/data_svc"
 	"gin-biz-web-api/pkg/auth"
@@ -25,18 +27,28 @@ type ReportDraftServiceAPI interface {
 }
 
 type ReportController struct {
-	service ReportDraftServiceAPI
+	service        ReportDraftServiceAPI
+	publishService ReportPublishServiceAPI
+}
+
+type ReportPublishServiceAPI interface {
+	Publish(context.Context, uint, uint, uint64) (*data_svc.ReportPublicationDTO, error)
 }
 
 func NewReportController() *ReportController {
-	return NewReportControllerWithService(data_svc.NewReportDraftService())
+	repository := reportrepo.New()
+	return NewReportControllerWithServices(data_svc.NewReportDraftServiceWithStore(repository), data_svc.NewReportPublishService(repository, reportsecret.EnvironmentKeyring{}, data_svc.OpenReportOracle))
 }
 
 func NewReportControllerWithService(service ReportDraftServiceAPI) *ReportController {
+	return NewReportControllerWithServices(service, nil)
+}
+
+func NewReportControllerWithServices(service ReportDraftServiceAPI, publishService ReportPublishServiceAPI) *ReportController {
 	if service == nil {
 		panic("report controller: nil service")
 	}
-	return &ReportController{service: service}
+	return &ReportController{service: service, publishService: publishService}
 }
 
 func (controller *ReportController) Create(c *gin.Context) {
@@ -103,6 +115,29 @@ func (controller *ReportController) Update(c *gin.Context) {
 	responses.New(c).ToResponseWithStatus(http.StatusOK, result)
 }
 
+func (controller *ReportController) Publish(c *gin.Context) {
+	if controller.publishService == nil {
+		writeReportError(c, errors.New("report publication service is unavailable"))
+		return
+	}
+	reportID, err := parseReportUint(c.Param("id"), "report id")
+	if err != nil {
+		writeReportError(c, err)
+		return
+	}
+	var request requestbody.ReportPublishRequest
+	if err := decodeMallJSON(c, &request); err != nil || request.ExpectedLockVersion == 0 {
+		writeReportError(c, fmt.Errorf("%w: invalid publication request", data_svc.ErrReportInvalid))
+		return
+	}
+	result, err := controller.publishService.Publish(c.Request.Context(), auth.CurrentUserID(c), reportID, request.ExpectedLockVersion)
+	if err != nil {
+		writeReportError(c, err)
+		return
+	}
+	responses.New(c).ToResponseWithStatus(http.StatusOK, result)
+}
+
 func parseReportListQuery(c *gin.Context) (uint, int, error) {
 	var afterID uint
 	var limit int
@@ -144,6 +179,8 @@ func classifyReportError(err error) (*errcode.Error, string) {
 		return errcode.Conflict, "报表草稿已被修改或编码已存在，请刷新后重试"
 	case errors.Is(err, data_svc.ErrReportInvalid):
 		return errcode.UnprocessableEntity, "报表草稿参数校验失败"
+	case errors.Is(err, data_svc.ErrReportPublicationInvalid):
+		return errcode.UnprocessableEntity, "Oracle过程或结果表与报表配置不一致"
 	default:
 		return errcode.InternalServerError, "报表配置服务暂时不可用"
 	}

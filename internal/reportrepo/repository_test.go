@@ -3,10 +3,15 @@ package reportrepo
 import (
 	"context"
 	"database/sql"
+	"database/sql/driver"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"gin-biz-web-api/model"
 
@@ -164,7 +169,7 @@ func TestRepositoryReferenceValidationStopsDraftWrites(t *testing.T) {
 				return &definitionRecord{ReportDefinition: model.ReportDefinition{BaseModel: model.BaseModel{ID: 7}, DatasourceID: 3, CurrentDraftVersionID: 11}}, nil
 			}
 			repository.lockVersion = func(context.Context, *gorm.DB, uint, uint) (*versionRecord, error) {
-				return &versionRecord{ReportVersion: model.ReportVersion{BaseModel: model.BaseModel{ID: 11}, DefinitionID: 7, VersionNumber: 1, Status: model.ReportVersionStatusDraft}}, nil
+				return &versionRecord{ReportVersion: model.ReportVersion{BaseModel: model.BaseModel{ID: 11}, DefinitionID: 7, DatasourceID: 3, VersionNumber: 1, Status: model.ReportVersionStatusDraft}}, nil
 			}
 			repository.validateReferences = func(context.Context, *gorm.DB, uint, []model.ReportGrant) error {
 				referenceCalls++
@@ -224,6 +229,282 @@ func TestFinalizeReportMutationPropagatesAuditFailure(t *testing.T) {
 	}
 }
 
+func TestValidPublicationRequiresCompleteImmutableContract(t *testing.T) {
+	publication := Publication{
+		CompiledSpecJSON: model.JSONText(`{"version":{}}`),
+		ContractHash:     strings.Repeat("a", 64), ParameterSchemaHash: strings.Repeat("b", 64),
+		ProcedureSignatureHash: strings.Repeat("c", 64), ResultSchemaHash: strings.Repeat("d", 64),
+		PermissionHash: strings.Repeat("e", 64), ExportSchemaHash: strings.Repeat("f", 64),
+		SchemaProbeToken: "11111111-1111-4111-8111-111111111111", SchemaValidatedAt: time.Now().UTC(),
+	}
+	if !validPublication(publication) {
+		t.Fatal("complete publication rejected")
+	}
+	publication.ContractHash = "short"
+	if validPublication(publication) {
+		t.Fatal("incomplete publication accepted")
+	}
+}
+
+func TestPublishDraftRejectsInvalidContractBeforeTransaction(t *testing.T) {
+	repository := New(newDryRunDB(t))
+	transactionCalls := 0
+	repository.transact = func(context.Context, *gorm.DB, func(*gorm.DB) error) error {
+		transactionCalls++
+		return nil
+	}
+	if _, err := repository.PublishDraft(context.Background(), 8, 7, 1, Publication{}); !errors.Is(err, ErrInvalidDraft) {
+		t.Fatalf("PublishDraft() error = %v, want ErrInvalidDraft", err)
+	}
+	if transactionCalls != 0 {
+		t.Fatalf("transaction calls = %d, want 0", transactionCalls)
+	}
+}
+
+func TestPublishDraftFreezesContractAndCreatesCleanNextDraft(t *testing.T) {
+	db, transactionState := newTransactionDB(t)
+	repository := New(db)
+	repository.lockDefinition = func(context.Context, *gorm.DB, uint, uint) (*definitionRecord, error) {
+		return &definitionRecord{ReportDefinition: model.ReportDefinition{BaseModel: model.BaseModel{ID: 7}, Code: "orders", DatasourceID: 3, OwnerUserID: 8, CurrentDraftVersionID: 11}}, nil
+	}
+	repository.lockVersion = func(context.Context, *gorm.DB, uint, uint) (*versionRecord, error) {
+		return &versionRecord{ReportVersion: model.ReportVersion{BaseModel: model.BaseModel{ID: 11}, DefinitionID: 7, DatasourceID: 3, VersionNumber: 4, Status: model.ReportVersionStatusDraft, ContractHash: "old", CompiledSpecJSON: model.JSONText(`{"old":true}`), SchemaProbeToken: "old", PublishedBy: 99}}, nil
+	}
+	repository.loadCollections = func(_ context.Context, _ *gorm.DB, _, _, _ uint, draft *Draft) error {
+		draft.Parameters = []model.ReportParameter{{BaseModel: model.BaseModel{ID: 21}, VersionID: 11, ParameterCode: "runId"}}
+		draft.Columns = []model.ReportColumn{{BaseModel: model.BaseModel{ID: 31}, VersionID: 11, FieldID: "field-1"}}
+		draft.Grants = []model.ReportGrant{{DefinitionID: 7, SubjectType: "ROLE", SubjectID: 2}}
+		return nil
+	}
+	repository.validateReferences = func(_ context.Context, _ *gorm.DB, datasourceID uint, grants []model.ReportGrant) error {
+		if datasourceID != 3 || len(grants) != 1 {
+			t.Fatalf("reference validation datasource=%d grants=%#v", datasourceID, grants)
+		}
+		return nil
+	}
+	publication := validPublicationFixture()
+	var publishedUpdates map[string]interface{}
+	repository.publishVersion = func(_ context.Context, _ *gorm.DB, versionID, definitionID uint, versionNumber uint64, updates map[string]interface{}) error {
+		if versionID != 11 || definitionID != 7 || versionNumber != 4 {
+			t.Fatalf("publish identity = %d/%d/%d", versionID, definitionID, versionNumber)
+		}
+		publishedUpdates = updates
+		return nil
+	}
+	var next model.ReportVersion
+	repository.createVersion = func(_ context.Context, _ *gorm.DB, record *versionRecord) error {
+		next = record.ReportVersion
+		record.ID = 12
+		return nil
+	}
+	repository.copyCollections = func(_ context.Context, _ *gorm.DB, versionID uint, parameters []model.ReportParameter, columns []model.ReportColumn) error {
+		if versionID != 12 || len(parameters) != 1 || len(columns) != 1 {
+			t.Fatalf("copied version=%d parameters=%#v columns=%#v", versionID, parameters, columns)
+		}
+		return nil
+	}
+	repository.switchDefinition = func(_ context.Context, _ *gorm.DB, ownerID, definitionID, publishedID, draftID, updatedBy uint) error {
+		if ownerID != 8 || definitionID != 7 || publishedID != 11 || draftID != 12 || updatedBy != 8 {
+			t.Fatalf("definition switch = %d/%d/%d/%d/%d", ownerID, definitionID, publishedID, draftID, updatedBy)
+		}
+		return nil
+	}
+	repository.writeAudit = func(_ context.Context, _ *gorm.DB, audit model.ReportAudit) error {
+		if audit.Action != "REPORT_PUBLISH" || audit.TargetID != 7 {
+			t.Fatalf("audit = %#v", audit)
+		}
+		return nil
+	}
+
+	published, err := repository.PublishDraft(t.Context(), 8, 7, 4, publication)
+	if err != nil {
+		t.Fatalf("PublishDraft() error = %v", err)
+	}
+	for key, want := range map[string]interface{}{
+		"compiled_spec_json": publication.CompiledSpecJSON, "contract_hash": publication.ContractHash,
+		"parameter_schema_hash": publication.ParameterSchemaHash, "procedure_signature_hash": publication.ProcedureSignatureHash,
+		"result_schema_hash": publication.ResultSchemaHash, "permission_hash": publication.PermissionHash,
+		"export_schema_hash": publication.ExportSchemaHash, "schema_probe_token": publication.SchemaProbeToken,
+	} {
+		if got := publishedUpdates[key]; got != want {
+			t.Fatalf("published update %s = %#v, want %#v", key, got, want)
+		}
+	}
+	if next.ID != 0 || next.DefinitionID != 7 || next.DatasourceID != 3 || next.VersionNumber != 5 || next.Status != model.ReportVersionStatusDraft ||
+		next.CompiledSpecJSON != "" || next.ContractHash != "" || next.ParameterSchemaHash != "" || next.ProcedureSignatureHash != "" ||
+		next.ResultSchemaHash != "" || next.PermissionHash != "" || next.ExportSchemaHash != "" || next.SchemaProbeToken != "" ||
+		next.PublishedBy != 0 || next.PublishedAt != nil || next.SchemaValidatedAt != nil || next.CreatedBy != 8 {
+		t.Fatalf("next draft = %#v", next)
+	}
+	if published.Version.Status != model.ReportVersionStatusPublished || published.Definition.CurrentPublishedVersionID != 11 || published.Definition.CurrentDraftVersionID != 12 || published.Version.PublishedAt == nil ||
+		published.Version.ContractHash != publication.ContractHash || published.Version.ParameterSchemaHash != publication.ParameterSchemaHash ||
+		published.Version.ProcedureSignatureHash != publication.ProcedureSignatureHash || published.Version.ResultSchemaHash != publication.ResultSchemaHash ||
+		published.Version.PermissionHash != publication.PermissionHash || published.Version.ExportSchemaHash != publication.ExportSchemaHash ||
+		published.Version.SchemaProbeToken != publication.SchemaProbeToken || published.Version.SchemaValidatedAt == nil {
+		t.Fatalf("published = %#v", published)
+	}
+	if transactionState.begins != 1 || transactionState.commits != 1 || transactionState.rollbacks != 0 {
+		t.Fatalf("transaction state = %#v", transactionState)
+	}
+}
+
+func TestPublishDraftStopsAtEveryAtomicBoundary(t *testing.T) {
+	steps := []string{"reference validation", "publish version", "create draft", "copy collections", "switch definition", "write audit"}
+	for _, failedStep := range steps {
+		t.Run(failedStep, func(t *testing.T) {
+			injected := errors.New("injected failure")
+			repository, transactionState := publicationTestRepository(t)
+			calls := make([]string, 0, len(steps))
+			repository.validateReferences = func(context.Context, *gorm.DB, uint, []model.ReportGrant) error {
+				calls = append(calls, steps[0])
+				if failedStep == steps[0] {
+					return injected
+				}
+				return nil
+			}
+			repository.publishVersion = func(context.Context, *gorm.DB, uint, uint, uint64, map[string]interface{}) error {
+				calls = append(calls, steps[1])
+				if failedStep == steps[1] {
+					return injected
+				}
+				return nil
+			}
+			repository.createVersion = func(_ context.Context, _ *gorm.DB, version *versionRecord) error {
+				calls = append(calls, steps[2])
+				if failedStep == steps[2] {
+					return injected
+				}
+				version.ID = 12
+				return nil
+			}
+			repository.copyCollections = func(context.Context, *gorm.DB, uint, []model.ReportParameter, []model.ReportColumn) error {
+				calls = append(calls, steps[3])
+				if failedStep == steps[3] {
+					return injected
+				}
+				return nil
+			}
+			repository.switchDefinition = func(context.Context, *gorm.DB, uint, uint, uint, uint, uint) error {
+				calls = append(calls, steps[4])
+				if failedStep == steps[4] {
+					return injected
+				}
+				return nil
+			}
+			repository.writeAudit = func(context.Context, *gorm.DB, model.ReportAudit) error {
+				calls = append(calls, steps[5])
+				if failedStep == steps[5] {
+					return injected
+				}
+				return nil
+			}
+			if _, err := repository.PublishDraft(t.Context(), 8, 7, 4, validPublicationFixture()); !errors.Is(err, injected) {
+				t.Fatalf("PublishDraft() error = %v, want injected failure", err)
+			}
+			if calls[len(calls)-1] != failedStep {
+				t.Fatalf("calls = %#v", calls)
+			}
+			if transactionState.begins != 1 || transactionState.rollbacks != 1 || transactionState.commits != 0 {
+				t.Fatalf("transaction state = %#v", transactionState)
+			}
+		})
+	}
+}
+
+func publicationTestRepository(t *testing.T) (*Repository, *transactionDriverState) {
+	t.Helper()
+	db, transactionState := newTransactionDB(t)
+	repository := New(db)
+	repository.lockDefinition = func(context.Context, *gorm.DB, uint, uint) (*definitionRecord, error) {
+		return &definitionRecord{ReportDefinition: model.ReportDefinition{BaseModel: model.BaseModel{ID: 7}, Code: "orders", DatasourceID: 3, OwnerUserID: 8, CurrentDraftVersionID: 11}}, nil
+	}
+	repository.lockVersion = func(context.Context, *gorm.DB, uint, uint) (*versionRecord, error) {
+		return &versionRecord{ReportVersion: model.ReportVersion{BaseModel: model.BaseModel{ID: 11}, DefinitionID: 7, DatasourceID: 3, VersionNumber: 4, Status: model.ReportVersionStatusDraft}}, nil
+	}
+	repository.loadCollections = func(_ context.Context, _ *gorm.DB, _, _, _ uint, draft *Draft) error {
+		draft.Parameters = []model.ReportParameter{{ParameterCode: "runId"}}
+		draft.Columns = []model.ReportColumn{{FieldID: "field-1"}}
+		draft.Grants = []model.ReportGrant{{SubjectType: "ROLE", SubjectID: 2}}
+		return nil
+	}
+	return repository, transactionState
+}
+
+func validPublicationFixture() Publication {
+	return Publication{
+		CompiledSpecJSON: model.JSONText(`{"version":{}}`), ContractHash: strings.Repeat("a", 64),
+		ParameterSchemaHash: strings.Repeat("b", 64), ProcedureSignatureHash: strings.Repeat("c", 64),
+		ResultSchemaHash: strings.Repeat("d", 64), PermissionHash: strings.Repeat("e", 64), ExportSchemaHash: strings.Repeat("f", 64),
+		SchemaProbeToken: "11111111-1111-4111-8111-111111111111", SchemaValidatedAt: time.Now().UTC(),
+	}
+}
+
+var (
+	reportTransactionDriverOnce sync.Once
+	reportTransactionStates     sync.Map
+	reportTransactionSequence   atomic.Uint64
+)
+
+type transactionDriver struct{}
+
+type transactionConnection struct {
+	state *transactionDriverState
+}
+
+type transactionDriverState struct {
+	begins    int
+	commits   int
+	rollbacks int
+}
+
+type transactionHandle struct {
+	state *transactionDriverState
+}
+
+func (transactionDriver) Open(name string) (driver.Conn, error) {
+	value, ok := reportTransactionStates.Load(name)
+	if !ok {
+		return nil, errors.New("report transaction test: state not found")
+	}
+	return &transactionConnection{state: value.(*transactionDriverState)}, nil
+}
+
+func (connection *transactionConnection) Prepare(string) (driver.Stmt, error) {
+	return nil, errors.New("report transaction test: prepare is unsupported")
+}
+func (connection *transactionConnection) Close() error { return nil }
+func (connection *transactionConnection) Begin() (driver.Tx, error) {
+	connection.state.begins++
+	return &transactionHandle{state: connection.state}, nil
+}
+func (transaction *transactionHandle) Commit() error {
+	transaction.state.commits++
+	return nil
+}
+func (transaction *transactionHandle) Rollback() error {
+	transaction.state.rollbacks++
+	return nil
+}
+
+func newTransactionDB(t *testing.T) (*gorm.DB, *transactionDriverState) {
+	t.Helper()
+	reportTransactionDriverOnce.Do(func() { sql.Register("report_transaction_test", transactionDriver{}) })
+	name := fmt.Sprintf("transaction-%d", reportTransactionSequence.Add(1))
+	state := &transactionDriverState{}
+	reportTransactionStates.Store(name, state)
+	t.Cleanup(func() { reportTransactionStates.Delete(name) })
+	sqlDB, err := sql.Open("report_transaction_test", name)
+	if err != nil {
+		t.Fatalf("open transaction test database: %v", err)
+	}
+	t.Cleanup(func() { _ = sqlDB.Close() })
+	db, err := gorm.Open(mysql.New(mysql.Config{Conn: sqlDB, SkipInitializeWithVersion: true}), &gorm.Config{DisableAutomaticPing: true, SkipDefaultTransaction: true})
+	if err != nil {
+		t.Fatalf("open transaction test GORM database: %v", err)
+	}
+	return db, state
+}
+
 func TestListDraftsUsesBoundedKeysetQuery(t *testing.T) {
 	db := newDryRunDB(t)
 	statement := buildDraftListQuery(db.Session(&gorm.Session{DryRun: true}), 5,
@@ -246,11 +527,12 @@ func TestNewVersionRecordPreservesResultIdentityContract(t *testing.T) {
 	record := newVersionRecord(model.ReportVersion{
 		BaseModel:         model.BaseModel{ID: 99},
 		DefinitionID:      7,
+		DatasourceID:      3,
 		VersionNumber:     4,
 		ResultRunIDColumn: "EXECUTION_ID",
 		ResultRowIDColumn: "RESULT_NO",
 	})
-	if record.ID != 0 || record.DefinitionID != 7 || record.VersionNumber != 4 ||
+	if record.ID != 0 || record.DefinitionID != 7 || record.DatasourceID != 3 || record.VersionNumber != 4 ||
 		record.ResultRunIDColumn != "EXECUTION_ID" || record.ResultRowIDColumn != "RESULT_NO" {
 		t.Fatalf("newVersionRecord() = %#v", record.ReportVersion)
 	}
@@ -286,7 +568,7 @@ func validDraft() *Draft {
 			Code: "orders", Name: "订单报表", DatasourceID: 3, OwnerUserID: 8,
 			Status: model.ReportDefinitionStatusDraft, CreatedBy: 8, UpdatedBy: 8,
 		},
-		Version: model.ReportVersion{Status: model.ReportVersionStatusDraft, VersionNumber: 1, CreatedBy: 8},
+		Version: model.ReportVersion{Status: model.ReportVersionStatusDraft, DatasourceID: 3, VersionNumber: 1, CreatedBy: 8},
 	}
 }
 

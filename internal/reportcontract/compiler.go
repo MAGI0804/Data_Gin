@@ -42,6 +42,7 @@ type contractSpec struct {
 }
 
 type versionSpec struct {
+	DatasourceID      uint   `json:"datasourceId"`
 	ProcedureOwner    string `json:"procedureOwner"`
 	PackageName       string `json:"packageName,omitempty"`
 	ProcedureName     string `json:"procedureName"`
@@ -123,6 +124,9 @@ func Compile(
 	resultColumns []reportoracle.ResultColumn,
 	snapshotContract reportoracle.ResultSnapshotContract,
 ) (Compiled, error) {
+	if version.DatasourceID == 0 {
+		return Compiled{}, contractError("datasource id is required")
+	}
 	if err := validateProcedureSequences(procedureArguments); err != nil {
 		return Compiled{}, err
 	}
@@ -161,6 +165,7 @@ func Compile(
 	}
 	spec := contractSpec{
 		Version: versionSpec{
+			DatasourceID:      version.DatasourceID,
 			ProcedureOwner:    strings.ToUpper(strings.TrimSpace(version.ProcedureOwner)),
 			PackageName:       strings.ToUpper(strings.TrimSpace(version.PackageName)),
 			ProcedureName:     strings.ToUpper(strings.TrimSpace(version.ProcedureName)),

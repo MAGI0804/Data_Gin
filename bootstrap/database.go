@@ -23,7 +23,7 @@ import (
 	"go.uber.org/zap"
 )
 
-const schemaMigrationVersion = "2026-08-12-report-center-v2"
+const schemaMigrationVersion = "2026-08-12-report-center-v3"
 const schemaMigrationLockName = "data_gin_schema_migration_v1"
 
 type schemaMigrationRecord struct {
@@ -192,6 +192,10 @@ func autoMigrateTables() error {
 	if err := prepareMallWeatherVersionIndexes(db); err != nil {
 		logger.Error("修复商场天气版本索引失败", zap.Error(err))
 		return fmt.Errorf("repair mall weather version indexes: %w", err)
+	}
+	if err := prepareReportVersionDatasourceSnapshot(db); err != nil {
+		logger.Error("回填报表版本数据源快照失败", zap.Error(err))
+		return fmt.Errorf("prepare report version datasource snapshot: %w", err)
 	}
 
 	// 迁移数据存储相关表

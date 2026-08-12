@@ -90,7 +90,10 @@ func (ReportDefinition) TableName() string { return "report_definitions" }
 // procedure and result table. Rows with status PUBLISHED are immutable.
 type ReportVersion struct {
 	BaseModel
-	DefinitionID           uint       `gorm:"column:definition_id;not null;uniqueIndex:uk_report_version_number,priority:1;index" json:"definitionId"`
+	DefinitionID uint `gorm:"column:definition_id;not null;uniqueIndex:uk_report_version_number,priority:1;index" json:"definitionId"`
+	// DatasourceID stays nullable at the database layer during the rolling
+	// expand phase. Application writes and publication validation require it.
+	DatasourceID           uint       `gorm:"column:datasource_id;index" json:"datasourceId"`
 	VersionNumber          uint64     `gorm:"column:version_number;not null;uniqueIndex:uk_report_version_number,priority:2" json:"versionNumber"`
 	Status                 string     `gorm:"column:status;size:16;not null;default:'DRAFT';index" json:"status"`
 	ProcedureOwner         string     `gorm:"column:procedure_owner;size:128;not null" json:"procedureOwner"`

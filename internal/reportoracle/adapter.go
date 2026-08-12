@@ -24,6 +24,7 @@ var (
 
 	ErrInvalidConfiguration = errors.New("invalid oracle report configuration")
 	ErrUnsupportedBinding   = errors.New("unsupported oracle report binding")
+	ErrMetadataMismatch     = errors.New("oracle report metadata mismatch")
 )
 
 type Config struct {
@@ -198,7 +199,7 @@ func (adapter *Adapter) InspectProcedure(ctx context.Context, ref ProcedureRef) 
 		return nil, fmt.Errorf("iterate oracle procedure arguments: %w", err)
 	}
 	if len(arguments) == 0 {
-		return nil, fmt.Errorf("inspect oracle procedure arguments: no matching procedure")
+		return nil, fmt.Errorf("%w: no matching procedure", ErrMetadataMismatch)
 	}
 	return arguments, nil
 }
@@ -237,7 +238,7 @@ func (adapter *Adapter) InspectResultTable(ctx context.Context, ref ResultTableR
 		return nil, fmt.Errorf("iterate oracle result columns: %w", err)
 	}
 	if len(columns) == 0 {
-		return nil, fmt.Errorf("inspect oracle result table: no matching table")
+		return nil, fmt.Errorf("%w: no matching result table", ErrMetadataMismatch)
 	}
 	return columns, nil
 }
