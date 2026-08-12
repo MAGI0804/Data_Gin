@@ -1,8 +1,11 @@
 package auth_svc
 
 import (
+	"encoding/json"
 	"strings"
 	"testing"
+
+	"gin-biz-web-api/model"
 )
 
 func TestValidAccessWriteRejectsMissingOrUnsafeMetadata(t *testing.T) {
@@ -17,6 +20,18 @@ func TestValidAccessWriteRejectsMissingOrUnsafeMetadata(t *testing.T) {
 		if validAccessWrite(test.key, test.reason) {
 			t.Fatalf("unsafe write metadata accepted: %#v", test)
 		}
+	}
+}
+
+func TestAccountDTOUsesEmptyArraysForAllMallScope(t *testing.T) {
+	dto := buildAccessAccountDTO(&model.User{BaseModel: &model.BaseModel{ID: 1}, MallScopeMode: model.MallScopeAll}, nil, nil)
+	payload, err := json.Marshal(dto)
+	if err != nil {
+		t.Fatalf("json.Marshal() error = %v", err)
+	}
+	serialized := string(payload)
+	if !strings.Contains(serialized, `"roles":[]`) || !strings.Contains(serialized, `"mallIds":[]`) {
+		t.Fatalf("account DTO arrays serialized as null: %s", serialized)
 	}
 }
 

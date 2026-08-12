@@ -489,11 +489,11 @@ func (service *AccessAccountService) accountDTO(ctx context.Context, user *model
 }
 
 func accountDTOWithDB(ctx context.Context, db *gorm.DB, user *model.User) (AccessAccountDTO, error) {
-	var roles []ConsoleRoleDTO
+	roles := make([]ConsoleRoleDTO, 0)
 	if err := db.WithContext(ctx).Table("roles").Select("roles.code, roles.name").Joins("JOIN user_roles ON user_roles.role_id = roles.id").Where("user_roles.user_id = ?", user.ID).Scan(&roles).Error; err != nil {
 		return AccessAccountDTO{}, err
 	}
-	var mallIDs []uint
+	mallIDs := make([]uint, 0)
 	if user.MallScopeMode == model.MallScopeSelected {
 		if err := db.WithContext(ctx).Model(&model.UserMallScope{}).Where("user_id = ?", user.ID).Pluck("mall_id", &mallIDs).Error; err != nil {
 			return AccessAccountDTO{}, err
@@ -501,11 +501,21 @@ func accountDTOWithDB(ctx context.Context, db *gorm.DB, user *model.User) (Acces
 	}
 	sort.Slice(roles, func(i, j int) bool { return roles[i].Code < roles[j].Code })
 	sort.Slice(mallIDs, func(i, j int) bool { return mallIDs[i] < mallIDs[j] })
+	return buildAccessAccountDTO(user, roles, mallIDs), nil
+}
+
+func buildAccessAccountDTO(user *model.User, roles []ConsoleRoleDTO, mallIDs []uint) AccessAccountDTO {
+	if roles == nil {
+		roles = make([]ConsoleRoleDTO, 0)
+	}
+	if mallIDs == nil {
+		mallIDs = make([]uint, 0)
+	}
 	phone := ""
 	if user.Phone != nil {
 		phone = maskPhone(*user.Phone)
 	}
-	return AccessAccountDTO{ID: user.ID, Account: user.Account, Phone: phone, Nickname: user.Nickname, Status: user.Status, MallScopeMode: user.MallScopeMode, Roles: roles, MallIDs: mallIDs, LastLoginAt: user.LastLoginAt}, nil
+	return AccessAccountDTO{ID: user.ID, Account: user.Account, Phone: phone, Nickname: user.Nickname, Status: user.Status, MallScopeMode: user.MallScopeMode, Roles: roles, MallIDs: mallIDs, LastLoginAt: user.LastLoginAt}
 }
 
 func validAccessWrite(key, reason string) bool {

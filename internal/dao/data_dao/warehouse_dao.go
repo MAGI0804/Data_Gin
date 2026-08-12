@@ -393,21 +393,24 @@ func (dao *CleanRecordDAO) FindReadyBySourceAndTable(ctx context.Context, source
 }
 
 func (dao *CleanRecordDAO) FindWithPagination(ctx context.Context, params CleanRecordListQuery) (*CleanRecordWithTotal, error) {
-	query := dao.applyListFilters(dao.db.WithContext(ctx).Model(&model.CleanRecord{}), params)
 	var total int64
-	if err := query.Count(&total).Error; err != nil {
+	if err := dao.listQuery(ctx, params).Count(&total).Error; err != nil {
 		return nil, err
 	}
 	var average struct{ Value float64 }
-	if err := query.Select("COALESCE(AVG(quality_score), 0) AS value").Scan(&average).Error; err != nil {
+	if err := dao.listQuery(ctx, params).Select("COALESCE(AVG(quality_score), 0) AS value").Find(&average).Error; err != nil {
 		return nil, err
 	}
 	var list []model.CleanRecord
 	offset := (params.Page - 1) * params.PageSize
-	if err := query.Order("created_at DESC").Offset(offset).Limit(params.PageSize).Find(&list).Error; err != nil {
+	if err := dao.listQuery(ctx, params).Order("created_at DESC").Offset(offset).Limit(params.PageSize).Find(&list).Error; err != nil {
 		return nil, err
 	}
 	return &CleanRecordWithTotal{List: list, Total: total, AverageQuality: average.Value}, nil
+}
+
+func (dao *CleanRecordDAO) listQuery(ctx context.Context, params CleanRecordListQuery) *gorm.DB {
+	return dao.applyListFilters(dao.db.WithContext(ctx).Model(&model.CleanRecord{}), params)
 }
 
 func (dao *CleanRecordDAO) applyListFilters(query *gorm.DB, params CleanRecordListQuery) *gorm.DB {

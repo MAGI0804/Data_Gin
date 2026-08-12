@@ -81,21 +81,24 @@ func (dao *ProcessedDataDAO) FindByDataType(ctx context.Context, dataType string
 }
 
 func (dao *ProcessedDataDAO) FindWithPagination(ctx context.Context, params ProcessedDataListQuery) (*ProcessedDataWithTotal, error) {
-	query := dao.applyListFilters(dao.db.WithContext(ctx).Model(&model.ProcessedData{}), params)
 	var total int64
-	if err := query.Count(&total).Error; err != nil {
+	if err := dao.listQuery(ctx, params).Count(&total).Error; err != nil {
 		return nil, err
 	}
 	var average struct{ Value float64 }
-	if err := query.Select("COALESCE(AVG(quality_score), 0) AS value").Scan(&average).Error; err != nil {
+	if err := dao.listQuery(ctx, params).Select("COALESCE(AVG(quality_score), 0) AS value").Find(&average).Error; err != nil {
 		return nil, err
 	}
 	var list []model.ProcessedData
 	offset := (params.Page - 1) * params.PageSize
-	if err := query.Order("created_at DESC").Offset(offset).Limit(params.PageSize).Find(&list).Error; err != nil {
+	if err := dao.listQuery(ctx, params).Order("created_at DESC").Offset(offset).Limit(params.PageSize).Find(&list).Error; err != nil {
 		return nil, err
 	}
 	return &ProcessedDataWithTotal{List: list, Total: total, AverageQuality: average.Value}, nil
+}
+
+func (dao *ProcessedDataDAO) listQuery(ctx context.Context, params ProcessedDataListQuery) *gorm.DB {
+	return dao.applyListFilters(dao.db.WithContext(ctx).Model(&model.ProcessedData{}), params)
 }
 
 func (dao *ProcessedDataDAO) applyListFilters(query *gorm.DB, params ProcessedDataListQuery) *gorm.DB {
