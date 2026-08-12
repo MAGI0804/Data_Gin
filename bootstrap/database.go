@@ -99,7 +99,13 @@ func autoMigrateTables() {
 
 	// 迁移数据存储相关表
 	models := []interface{}{
-		&model.User{},                  // 用户表
+		&model.User{}, // 用户表
+		&model.Permission{},
+		&model.Role{},
+		&model.RolePermission{},
+		&model.UserRole{},
+		&model.UserMallScope{},
+		&model.AuthAudit{},
 		&model.DataSource{},            // 数据源配置表
 		&model.RawData{},               // 原始数据表
 		&model.ProcessedData{},         // 处理结果表
@@ -161,6 +167,12 @@ func autoMigrateTables() {
 	} else {
 		console.Info("admin 尚未完成控制台身份初始化，首次控制台登录时将同步天气权限")
 	}
+	if err := auth_svc.SyncAccessControlSeeds(ctx, db); err != nil {
+		logger.Error("同步账号权限种子失败", zap.Error(err))
+		console.Exit("同步账号权限种子失败: %v", err)
+		return
+	}
+	console.Success("账号权限种子同步完成")
 }
 
 func mallWeatherMigrationModels() []interface{} {

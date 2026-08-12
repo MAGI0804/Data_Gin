@@ -7,11 +7,13 @@ import (
 )
 
 func TestUserConsoleManagedIsNotSerialized(t *testing.T) {
-	payload, err := json.Marshal(User{ConsoleManaged: true})
+	payload, err := json.Marshal(User{ConsoleManaged: true, Phone: "13800138000", Email: "secret@example.com", Password: "secret"})
 	if err != nil {
 		t.Fatalf("json.Marshal() error = %v", err)
 	}
-	if strings.Contains(string(payload), "console_managed") || strings.Contains(string(payload), "ConsoleManaged") {
-		t.Fatalf("console-managed marker leaked in JSON: %s", payload)
+	for _, forbidden := range []string{"console_managed", "ConsoleManaged", "13800138000", "secret@example.com", "secret"} {
+		if strings.Contains(string(payload), forbidden) {
+			t.Fatalf("private user field leaked through JSON: %s", payload)
+		}
 	}
 }

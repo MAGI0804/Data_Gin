@@ -96,12 +96,27 @@ func (s *ConsoleLoginService) ensureAdminUser(ctx context.Context) (*model.User,
 		if err := grantConsoleAdminPermissions(ctx, tx, user.ID); err != nil {
 			return err
 		}
+		if err := grantConsoleSuperAdminRole(ctx, tx, user.ID); err != nil {
+			return err
+		}
 		return nil
 	})
 	if err != nil {
 		return nil, fmt.Errorf("ensure console admin: %w", err)
 	}
 	return user, nil
+}
+
+func grantConsoleSuperAdminRole(ctx context.Context, db *gorm.DB, userID uint) error {
+	var role model.Role
+	if err := db.WithContext(ctx).Where("code = ? AND is_super = ?", model.RoleCodeSuperAdmin, true).First(&role).Error; err != nil {
+		return fmt.Errorf("grant console super admin role: find role: %w", err)
+	}
+	assignment := model.UserRole{UserID: userID, RoleID: role.ID, CreatedBy: userID}
+	if err := db.WithContext(ctx).Clauses(clause.OnConflict{DoNothing: true}).Create(&assignment).Error; err != nil {
+		return fmt.Errorf("grant console super admin role: create assignment: %w", err)
+	}
+	return nil
 }
 
 func ensureAdminUserRecord(ctx context.Context, db *gorm.DB) (*model.User, error) {
