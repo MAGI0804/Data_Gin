@@ -114,13 +114,14 @@ func NewConfig(env string, configs ...string) {
 
 // WatchConfigurationChange 热重载配置文件
 func WatchConfigurationChange() {
-	go func() {
-		vp.WatchConfig()
-		vp.OnConfigChange(func(e fsnotify.Event) {
-			LoadConfig()
+	current := vp
+	go func(config *viper.Viper) {
+		config.WatchConfig()
+		config.OnConfigChange(func(e fsnotify.Event) {
+			loadConfig(config)
 			console.Warning("Reload configuration file [ %v ] operation [ %v ]", e.Name, e.Op)
 		})
-	}()
+	}(current)
 }
 
 // FetchConfigFile 根据环境变量获取对应的配置文件
@@ -135,10 +136,14 @@ func FetchConfigFile(env string) string {
 
 // LoadConfig 将配置文件中的内容读取后，覆写预定义配置信息
 func LoadConfig() {
+	loadConfig(vp)
+}
+
+func loadConfig(config *viper.Viper) {
 	for name, fn := range CfgFuncS {
 		// 设置键值：viper 支持在多个地方设置，读取顺序为：
 		// 1. 调用 `viper.Set()` 显示设置的、2. 命令行选项、3. 环境变量、4. 配置文件、5. 默认值
-		vp.Set(name, fn())
+		config.Set(name, fn())
 	}
 }
 
