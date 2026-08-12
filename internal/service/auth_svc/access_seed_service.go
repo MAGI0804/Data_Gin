@@ -46,6 +46,10 @@ var accessPermissionSeeds = []permissionSeed{
 	{model.PermissionExcelRead, "查看 Excel 任务", "Excel", "查看 Excel 任务和方案", "LOW", false, 600},
 	{model.PermissionExcelManage, "管理 Excel 方案", "Excel", "创建和删除 Excel 方案", "MEDIUM", false, 610},
 	{model.PermissionExcelExecute, "执行 Excel 任务", "Excel", "上传并执行 Excel 匹配或回写", "HIGH", false, 620},
+	{model.PermissionReportRead, "查看报表", "报表中心", "查看已授权报表、查询结果和导出任务", "LOW", false, 700},
+	{model.PermissionReportManage, "管理报表", "报表中心", "维护数据源、过程形参、字段表头、权限和发布版本", "HIGH", false, 710},
+	{model.PermissionReportExecute, "运行报表", "报表中心", "使用已发布契约执行报表存储过程", "MEDIUM", false, 720},
+	{model.PermissionReportExport, "导出报表", "报表中心", "生成并下载已授权报表 Excel", "HIGH", false, 730},
 }
 
 var roleSeeds = []model.Role{
@@ -97,7 +101,7 @@ func SyncAccessControlSeeds(ctx context.Context, db *gorm.DB) error {
 }
 
 func syncSystemRolePermissions(tx *gorm.DB, roles map[string]model.Role, permissions []model.Permission) error {
-	readOnly := map[string]struct{}{model.PermissionMallRead: {}, model.PermissionWeatherRead: {}, model.PermissionSourceRead: {}, model.PermissionPipelineRead: {}, model.PermissionDeliveryRead: {}, model.PermissionDataRead: {}, model.PermissionExcelRead: {}}
+	readOnly := map[string]struct{}{model.PermissionMallRead: {}, model.PermissionWeatherRead: {}, model.PermissionSourceRead: {}, model.PermissionPipelineRead: {}, model.PermissionDeliveryRead: {}, model.PermissionDataRead: {}, model.PermissionExcelRead: {}, model.PermissionReportRead: {}}
 	for _, roleCode := range []string{model.RoleCodeSuperAdmin, model.RoleCodeAdmin, model.RoleCodeOperator, model.RoleCodeViewer} {
 		role := roles[roleCode]
 		if err := tx.Where("role_id = ?", role.ID).Delete(&model.RolePermission{}).Error; err != nil {

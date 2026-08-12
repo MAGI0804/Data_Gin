@@ -39,6 +39,10 @@ const (
 	PermissionExcelRead           = "excel.read"
 	PermissionExcelManage         = "excel.manage"
 	PermissionExcelExecute        = "excel.execute"
+	PermissionReportRead          = "report.read"
+	PermissionReportManage        = "report.manage"
+	PermissionReportExecute       = "report.execute"
+	PermissionReportExport        = "report.export"
 )
 
 type Permission struct {

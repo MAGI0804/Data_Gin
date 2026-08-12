@@ -28,6 +28,16 @@ func TestPermissionCatalogIsUniqueAndComplete(t *testing.T) {
 			t.Fatalf("missing existing permission %q", required)
 		}
 	}
+	for _, required := range []string{
+		model.PermissionReportRead,
+		model.PermissionReportManage,
+		model.PermissionReportExecute,
+		model.PermissionReportExport,
+	} {
+		if _, exists := seen[required]; !exists {
+			t.Fatalf("missing report permission %q", required)
+		}
+	}
 }
 
 func TestPermissionCodesReturnsSortedDefensiveCopy(t *testing.T) {
