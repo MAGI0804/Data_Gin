@@ -77,3 +77,16 @@ func TestReportCenterModelsDoNotMarshalSecrets(t *testing.T) {
 		}
 	}
 }
+
+func TestReportVersionCarriesResultSnapshotKeyColumns(t *testing.T) {
+	version := ReportVersion{ResultRunIDColumn: "RUN_ID", ResultRowIDColumn: "ROW_NO"}
+	encoded, err := json.Marshal(version)
+	if err != nil {
+		t.Fatalf("marshal report version: %v", err)
+	}
+	text := string(encoded)
+	if !strings.Contains(text, `"resultRunIdColumn":"RUN_ID"`) ||
+		!strings.Contains(text, `"resultRowIdColumn":"ROW_NO"`) {
+		t.Fatalf("report version omitted result snapshot key columns: %s", text)
+	}
+}
