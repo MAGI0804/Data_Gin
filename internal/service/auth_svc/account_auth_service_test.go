@@ -25,6 +25,7 @@ type fakeAccountAuthRepository struct {
 	password      string
 	accountLookup string
 	phoneLookup   string
+	normalizedID  uint
 }
 
 func (r *fakeAccountAuthRepository) FindActiveConsoleByAccount(_ context.Context, account string) (*consoleAccount, error) {
@@ -51,6 +52,10 @@ func (r *fakeAccountAuthRepository) UpdatePassword(_ context.Context, _ uint, pa
 }
 func (r *fakeAccountAuthRepository) LoadProfile(context.Context, uint) (*consoleProfile, error) {
 	return r.profile, r.findErr
+}
+func (r *fakeAccountAuthRepository) NormalizeConsoleAdminAccess(_ context.Context, userID uint) error {
+	r.normalizedID = userID
+	return r.updateErr
 }
 
 type fakePhoneCodes struct {
@@ -106,6 +111,9 @@ func TestAccountAuthServicePasswordLoginWorksWithoutPhoneCodeProvider(t *testing
 	}
 	if tokens.userID != "7" || tokens.authVersion != 9 {
 		t.Fatalf("token args = %q/%d", tokens.userID, tokens.authVersion)
+	}
+	if repository.normalizedID != 7 {
+		t.Fatalf("normalized user id = %d", repository.normalizedID)
 	}
 	if !repository.loginAt.Equal(now) {
 		t.Fatalf("last login = %v, want %v", repository.loginAt, now)

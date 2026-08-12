@@ -9,6 +9,7 @@ import (
 	"strings"
 	"time"
 
+	"gin-biz-web-api/constant"
 	"gin-biz-web-api/model"
 	"gin-biz-web-api/pkg/database"
 	"gin-biz-web-api/pkg/jwt"
@@ -16,6 +17,7 @@ import (
 
 	"golang.org/x/crypto/bcrypt"
 	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 var (
@@ -63,6 +65,10 @@ type accountAuthRepository interface {
 	RecordLogin(ctx context.Context, userID uint, at time.Time) (*consoleAccount, error)
 	UpdatePassword(ctx context.Context, userID uint, passwordHash string, at time.Time) error
 	LoadProfile(ctx context.Context, userID uint) (*consoleProfile, error)
+}
+
+type consoleAdminAccessNormalizer interface {
+	NormalizeConsoleAdminAccess(ctx context.Context, userID uint) error
 }
 
 type AccountAuthService struct {
@@ -260,6 +266,11 @@ func (s *AccountAuthService) Profile(ctx context.Context, userID uint) (*Console
 }
 
 func (s *AccountAuthService) completeLogin(ctx context.Context, userID uint) (*ConsoleSessionDTO, error) {
+	if normalizer, ok := s.repository.(consoleAdminAccessNormalizer); ok {
+		if err := normalizer.NormalizeConsoleAdminAccess(ctx, userID); err != nil {
+			return nil, fmt.Errorf("account auth: normalize console admin: %w", err)
+		}
+	}
 	user, err := s.repository.RecordLogin(ctx, userID, s.now().UTC())
 	if err != nil {
 		return nil, normalizeCredentialLookupError(err)
@@ -315,6 +326,29 @@ func maskPhone(phone string) string {
 }
 
 type gormAccountAuthRepository struct{ db *gorm.DB }
+
+func (r *gormAccountAuthRepository) NormalizeConsoleAdminAccess(ctx context.Context, userID uint) error {
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var user model.User
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&user, userID).Error; err != nil {
+			return err
+		}
+		if user.Account != constant.ConsoleAdmin {
+			return nil
+		}
+		if !isLegacyConsoleAdmin(&user) {
+			return fmt.Errorf("reserved admin identity is not console managed")
+		}
+		if !normalizeConsoleAdmin(&user) {
+			return nil
+		}
+		if user.CommonTimestampsField == nil {
+			user.CommonTimestampsField = &model.CommonTimestampsField{}
+		}
+		user.UpdatedAt = int(time.Now().Unix())
+		return tx.Save(&user).Error
+	})
+}
 
 func (r *gormAccountAuthRepository) base(ctx context.Context) *gorm.DB {
 	return r.db.WithContext(ctx).Table("users").Where("account_type = ? AND status = ?", model.AccountTypeConsole, model.AccountStatusActive)
