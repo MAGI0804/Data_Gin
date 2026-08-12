@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { parseReportCatalogPage, parseReportExport, parseReportResultPage, parseReportRun, parseReportRunContract } from '../.test-dist/reportCenter/api.js'
+import { parseReportCatalogPage, parseReportDraft, parseReportExport, parseReportResultPage, parseReportRun, parseReportRunContract } from '../.test-dist/reportCenter/api.js'
 
 test('parseReportCatalogPage reads the standard API envelope', () => {
   const page = parseReportCatalogPage({
@@ -86,4 +86,20 @@ test('run, result and export parsers preserve cursor and large numeric strings',
 test('parseReportResultPage rejects a missing signed cursor', () => {
   const run = { id: 31, runUuid: 'run-uuid', definitionId: 9, versionId: 23, status: 'SUCCEEDED', resultAvailable: true }
   assert.throws(() => parseReportResultPage({ data: { run, columns: [], rows: [], pagination: { pageSize: 100, hasMore: true } } }))
+})
+
+test('parseReportDraft preserves parameter, field and excel mappings', () => {
+  const draft = parseReportDraft({ data: {
+    id: 9, code: 'sales_report', name: '销售报表', datasourceId: 3, status: 'DRAFT', lockVersion: 4,
+    procedure: { owner: 'BI', package: 'REPORT_PKG', name: 'SALES' },
+    result: { tableOwner: 'BI', tableName: 'REPORT_RESULT', runIdColumn: 'RUN_ID', rowIdColumn: 'ROW_NO' },
+    callTemplate: 'BEGIN BI.REPORT_PKG.SALES({{runId}}, {{storeCode}}); END;',
+    parameters: [{ code: 'runId', label: '运行编号', displayOrder: 0, controlType: 'TEXT', logicalType: 'string', procedureArgName: 'P_RUN_ID', position: 1, oracleType: 'VARCHAR2', required: true, systemInjected: true, nullPolicy: 'TYPED_NULL' }],
+    columns: [{ fieldId: '11111111-1111-4111-8111-111111111111', logicalCode: 'amount', databaseColumn: 'AMOUNT', sourceOracleType: 'NUMBER', valueType: 'decimal', previewHeader: '金额', excelHeader: '含税金额', previewVisible: true, exportVisible: true, exportAllowed: true }],
+    grants: [{ subjectType: 'ROLE', subjectId: 7, actions: ['QUERY', 'EXPORT'] }],
+  } })
+  assert.equal(draft.parameters[0].systemInjected, true)
+  assert.equal(draft.columns[0].databaseColumn, 'AMOUNT')
+  assert.equal(draft.columns[0].excelHeader, '含税金额')
+  assert.deepEqual(draft.grants[0].actions, ['QUERY', 'EXPORT'])
 })

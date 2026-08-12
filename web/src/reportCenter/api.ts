@@ -1,5 +1,5 @@
 import type { ClientResponse, HTTPMethod } from '../api/client'
-import type { ReportCatalogPage, ReportCatalogQuery, ReportDefinitionStatus, ReportExport, ReportParameter, ReportResultPage, ReportRun, ReportRunContract, ReportRunStatus, ReportSummary } from './types'
+import type { ReportCatalogPage, ReportCatalogQuery, ReportColumn, ReportDefinitionStatus, ReportDraft, ReportExport, ReportGrant, ReportParameter, ReportResultPage, ReportRun, ReportRunContract, ReportRunStatus, ReportSummary } from './types'
 
 type JsonRecord = Record<string, unknown>
 
@@ -50,6 +50,20 @@ export async function getReportRunContract(client: ReportCenterClient, reportId:
   return requestAndParse(client, `/v1/reports/${reportId}/run-contract`, { method: 'GET', signal }, parseReportRunContract, '报表运行参数加载失败。')
 }
 
+export async function getReportDraft(client: ReportCenterClient, reportId: number, signal?: AbortSignal): Promise<ReportAPIResult<ReportDraft>> {
+  return requestAndParse(client, `/v1/reports/${reportId}`, { method: 'GET', signal }, parseReportDraft, '报表草稿加载失败。')
+}
+
+export async function saveReportDraft(client: ReportCenterClient, draft: ReportDraft): Promise<ReportAPIResult<ReportDraft>> {
+  const creating = draft.id === 0
+  const body = serializeReportDraft(draft, creating)
+  return requestAndParse(client, creating ? '/v1/reports' : `/v1/reports/${draft.id}`, { method: creating ? 'POST' : 'PUT', body }, parseReportDraft, '报表草稿保存失败。')
+}
+
+export async function publishReportDraft(client: ReportCenterClient, reportId: number, expectedLockVersion: number): Promise<ReportAPIResult<{ definitionId: number; versionId: number; status: string }>> {
+  return requestAndParse(client, `/v1/reports/${reportId}/publish`, { method: 'POST', body: { expectedLockVersion } }, parsePublication, '报表发布与 Oracle 契约核验失败。')
+}
+
 export async function createReportRun(client: ReportCenterClient, reportId: number, parameters: Record<string, unknown>): Promise<ReportAPIResult<ReportRun>> {
   return requestAndParse(client, `/v1/reports/${reportId}/runs`, { method: 'POST', body: { parameters } }, parseReportRun, '报表运行创建失败。')
 }
@@ -98,6 +112,29 @@ export function parseReportRunContract(payload: unknown): ReportRunContract {
     name: publicString(data.name, 128),
     description: publicString(data.description, 500),
     parameters: parameters.sort((left, right) => left.displayOrder - right.displayOrder || left.position - right.position),
+  }
+}
+
+export function parseReportDraft(payload: unknown): ReportDraft {
+  const data = unwrapData(payload)
+  const id = positiveInteger(data.id)
+  const datasourceId = positiveInteger(data.datasourceId)
+  const procedure = isRecord(data.procedure) ? data.procedure : {}
+  const result = isRecord(data.result) ? data.result : {}
+  const rawParameters = firstArray(data.parameters)
+  const parameters = rawParameters.flatMap((value) => { const item = parseReportParameter(value); return item ? [item] : [] })
+  const rawColumns = firstArray(data.columns)
+  const columns = rawColumns.flatMap((value) => { const item = parseReportColumn(value); return item ? [item] : [] })
+  const rawGrants = firstArray(data.grants)
+  const grants = rawGrants.flatMap((value) => { const item = parseReportGrant(value); return item ? [item] : [] })
+  if (!id || !datasourceId || parameters.length !== rawParameters.length || columns.length !== rawColumns.length || grants.length !== rawGrants.length) throw new Error('invalid report draft')
+  return {
+    id, datasourceId, code: publicString(data.code, 64), name: publicString(data.name, 128), category: publicString(data.category, 64), description: publicString(data.description, 500),
+    status: reportStatus(data.status), lockVersion: positiveInteger(data.lockVersion) ?? 0,
+    procedure: { owner: publicString(procedure.owner, 128), package: publicString(procedure.package, 128), name: publicString(procedure.name, 128), overload: publicString(procedure.overload, 32) },
+    result: { tableOwner: publicString(result.tableOwner, 128), tableName: publicString(result.tableName, 128), runIdColumn: publicString(result.runIdColumn, 128), rowIdColumn: publicString(result.rowIdColumn, 128) },
+    callTemplate: typeof data.callTemplate === 'string' ? data.callTemplate.slice(0, 65536) : '', parameters, columns, grants,
+    createdAt: publicDate(data.createdAt), updatedAt: publicDate(data.updatedAt),
   }
 }
 
@@ -219,9 +256,52 @@ function parseReportParameter(value: unknown): ReportParameter | null {
     defaultValue: value.defaultValue,
     allowedValues,
     validation: isRecord(value.validation) ? value.validation : {},
+    normalizer: isRecord(value.normalizer) ? value.normalizer : {},
+    valueSource: isRecord(value.valueSource) ? value.valueSource : {},
     timezone: publicString(value.timezone, 64),
+    nullPolicy: publicString(value.nullPolicy, 32) || 'TYPED_NULL',
     errorMessage: publicString(value.errorMessage, 300),
+    collectionEncoding: publicString(value.collectionEncoding, 32),
   }
+}
+
+function parseReportColumn(value: unknown): ReportColumn | null {
+  if (!isRecord(value)) return null
+  const fieldId = publicString(value.fieldId, 36)
+  const logicalCode = publicString(value.logicalCode, 64)
+  const databaseColumn = publicString(value.databaseColumn, 128)
+  if (!fieldId || !logicalCode || !databaseColumn) return null
+  return {
+    fieldId, logicalCode, databaseColumn, sourceOracleType: publicString(value.sourceOracleType, 64), precision: nullableInteger(value.precision), scale: nullableInteger(value.scale), nullable: value.nullable === true,
+    valueType: publicString(value.valueType, 32), previewHeader: publicString(value.previewHeader, 255), excelHeader: publicString(value.excelHeader, 255), displayOrder: nonNegativeInteger(value.displayOrder), exportOrder: nonNegativeInteger(value.exportOrder),
+    previewVisible: value.previewVisible === true, exportVisible: value.exportVisible === true, filterable: value.filterable === true, sortable: value.sortable === true, exportAllowed: value.exportAllowed === true,
+    allowedOperators: value.allowedOperators, format: value.format, dictionaryVersion: value.dictionaryVersion, maskingPolicy: value.maskingPolicy, excelWidth: typeof value.excelWidth === 'number' ? value.excelWidth : 0, nullDisplay: publicString(value.nullDisplay, 64),
+  }
+}
+
+function parseReportGrant(value: unknown): ReportGrant | null {
+  if (!isRecord(value) || (value.subjectType !== 'USER' && value.subjectType !== 'ROLE')) return null
+  const subjectId = positiveInteger(value.subjectId)
+  const actions = Array.isArray(value.actions) ? value.actions.filter((item): item is string => item === 'QUERY' || item === 'EXPORT') : []
+  return subjectId && actions.length ? { subjectType: value.subjectType, subjectId, actions } : null
+}
+
+function serializeReportDraft(draft: ReportDraft, creating: boolean) {
+  return {
+    code: draft.code, name: draft.name, category: draft.category, description: draft.description, datasourceId: draft.datasourceId,
+    ...(creating ? {} : { expectedLockVersion: draft.lockVersion }), procedure: draft.procedure, result: draft.result, callTemplate: draft.callTemplate,
+    parameters: draft.parameters.map((parameter) => ({ ...parameter, defaultValue: parameter.sensitive ? undefined : parameter.defaultValue, allowedValues: parameter.allowedValues.length ? parameter.allowedValues : undefined, validation: Object.keys(parameter.validation).length ? parameter.validation : undefined, normalizer: Object.keys(parameter.normalizer).length ? parameter.normalizer : undefined, valueSource: Object.keys(parameter.valueSource).length ? parameter.valueSource : undefined, nullPolicy: parameter.nullPolicy || 'TYPED_NULL' })),
+    columns: draft.columns,
+    grants: draft.grants,
+  }
+}
+
+function parsePublication(payload: unknown) {
+  const data = unwrapData(payload)
+  const definitionId = positiveInteger(data.definitionId)
+  const versionId = positiveInteger(data.versionId)
+  if (!definitionId || !versionId) throw new Error('invalid publication')
+  return { definitionId, versionId, status: publicString(data.status, 32) }
 }
 
 function parseReportSummary(value: unknown): ReportSummary | null {

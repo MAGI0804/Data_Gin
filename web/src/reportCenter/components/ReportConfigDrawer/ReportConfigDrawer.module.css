@@ -1,13 +1,31 @@
 .layer { position: fixed; inset: 0; z-index: var(--layer-overlay); }
 .backdrop { position: absolute; inset: 0; width: 100%; height: 100%; border: 0; background: rgb(31 35 41 / 38%); }
-.drawer { position: absolute; inset-block: 0; inset-inline-end: 0; display: grid; grid-template-rows: auto minmax(0, 1fr) auto; width: min(560px, 100%); border-left: 1px solid var(--color-border-strong); background: var(--color-canvas); box-shadow: -16px 0 40px rgb(31 35 41 / 12%); }
+.drawer { position: absolute; inset-block: 0; inset-inline-end: 0; display: grid; grid-template-rows: auto auto minmax(0, 1fr) auto; width: min(980px, 100%); border-left: 1px solid var(--color-border-strong); background: var(--color-canvas); box-shadow: -16px 0 40px rgb(31 35 41 / 12%); }
 .header { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-4); padding: var(--space-6); border-bottom: 1px solid var(--color-border); }
 .header span { color: var(--color-brand-active); font-size: 11px; font-weight: 650; letter-spacing: .08em; }
 .header h2 { margin: var(--space-1) 0 0; font-size: 20px; }
-.form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-content: start; gap: var(--space-4); overflow-y: auto; padding: var(--space-6); }
+.tabs { display: flex; min-width: 0; overflow-x: auto; border-bottom: 1px solid var(--color-border); padding-inline: var(--space-6); }
+.tabs button { flex: 0 0 auto; min-height: 42px; padding-inline: var(--space-3); border: 0; border-bottom: 2px solid transparent; background: transparent; color: var(--color-text-secondary); }
+.tabs .active { border-bottom-color: var(--color-brand); color: var(--color-text); }
+.body { min-width: 0; overflow-y: auto; padding: var(--space-6); }
+.form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-content: start; gap: var(--space-4); }
 .form label { display: grid; gap: var(--space-2); color: var(--color-text-secondary); font-size: 13px; font-weight: 650; }
-.form input, .form select, .form textarea { width: 100%; min-width: 0; border: 1px solid var(--color-border-strong); background: var(--color-canvas); color: var(--color-text); padding: var(--space-2) var(--space-3); }
-.wide, .notice { grid-column: 1 / -1; }
-.notice { border-left: 3px solid var(--color-brand); background: var(--color-brand-soft); padding: var(--space-3); color: var(--color-text-secondary); font-size: 13px; line-height: 1.6; }
-.footer { display: flex; justify-content: flex-end; gap: var(--space-2); padding: var(--space-4) var(--space-6); border-top: 1px solid var(--color-border); }
-@media (max-width: 479px) { .header, .form { padding: var(--space-4); } .form { grid-template-columns: 1fr; } .wide, .notice { grid-column: auto; } .footer { padding: var(--space-3) var(--space-4); } }
+.form input, .form select, .form textarea, .row input, .row select, .contractRow input, .contractRow select { width: 100%; min-width: 0; min-height: var(--control-height); border: 1px solid var(--color-border-strong); border-radius: var(--radius-control); background: var(--color-canvas); color: var(--color-text); padding: var(--space-2) var(--space-3); }
+.wide { grid-column: 1 / -1; }
+.mono { font-family: var(--font-mono); }
+.list { display: grid; min-width: 0; }
+.listHeader { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); min-height: 48px; border-bottom: 1px solid var(--color-border); }
+.listHeader button { display: inline-flex; gap: var(--space-1); align-items: center; }
+.listHeader svg, .delete svg { width: 16px; height: 16px; }
+.row, .contractRow { display: grid; grid-template-columns: repeat(4, minmax(110px, 1fr)) auto; gap: var(--space-2); align-items: center; min-width: 0; padding-block: var(--space-3); border-bottom: 1px solid var(--color-border); }
+.contractRow { grid-template-columns: repeat(3, minmax(120px, 1fr)); }
+.row label, .contractRow label { display: inline-flex; gap: var(--space-1); align-items: center; color: var(--color-text-secondary); font-size: 12px; white-space: nowrap; }
+.contractRow .jsonField { display: grid; gap: var(--space-1); white-space: normal; }
+.jsonField input[aria-invalid="true"] { border-color: var(--color-danger); background: var(--color-danger-soft); }
+.row label input, .contractRow label input { width: 16px; min-height: 16px; height: 16px; accent-color: var(--color-brand); }
+.delete { display: grid; width: 38px; height: 38px; place-items: center; padding: 0; color: var(--color-danger); }
+.notice, .error { margin-block-start: var(--space-4); border-left: 3px solid var(--color-brand); background: var(--color-brand-soft); padding: var(--space-3); color: var(--color-text-secondary); font-size: 13px; line-height: 1.6; }
+.error { border-left-color: var(--color-danger); background: var(--color-danger-soft); color: var(--color-danger); }
+.footer { display: flex; gap: var(--space-2); align-items: center; justify-content: flex-end; padding: var(--space-4) var(--space-6); border-top: 1px solid var(--color-border); }
+.footer > span { margin-inline-end: auto; color: var(--color-text-secondary); font-family: var(--font-mono); font-size: 12px; }
+@media (max-width: 767px) { .header, .body { padding: var(--space-4); } .tabs { padding-inline: var(--space-4); } .form, .row, .contractRow { grid-template-columns: 1fr; } .wide { grid-column: auto; } .delete { justify-self: end; } .footer { flex-wrap: wrap; padding: var(--space-3) var(--space-4); } .footer > span { flex-basis: 100%; } }

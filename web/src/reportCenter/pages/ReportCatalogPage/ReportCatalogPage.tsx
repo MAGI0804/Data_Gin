@@ -29,7 +29,7 @@ export function ReportCatalogPage({ client, canManage }: { client: ReportCenterC
         {!loading && !error && items.length === 0 ? <FeedbackState kind="empty" title="暂无报表" description="后端尚未返回可查看的报表定义。" action={canManage ? <button className="ui-control-radius" type="button" onClick={() => setDrawerState({ open: true, report: null })}>创建第一份报表</button> : null} /> : null}
         {items.length > 0 ? <ReportTable reports={items} onEdit={canManage ? (report) => setDrawerState({ open: true, report }) : undefined} /> : null}
       </Section>
-      {drawerState.open ? <ReportConfigDrawer report={drawerState.report} onClose={() => setDrawerState({ open: false, report: null })} /> : null}
+      {drawerState.open ? <ReportConfigDrawer client={client} report={drawerState.report} onSaved={reload} onClose={() => setDrawerState({ open: false, report: null })} /> : null}
     </PageCanvas>
   )
 }

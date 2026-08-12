@@ -49,8 +49,59 @@ export type ReportParameter = {
   defaultValue: unknown
   allowedValues: string[]
   validation: Record<string, unknown>
+  normalizer: Record<string, unknown>
+  valueSource: Record<string, unknown>
   timezone: string
+  nullPolicy: string
   errorMessage: string
+  collectionEncoding?: string
+}
+
+export type ReportColumn = {
+  fieldId: string
+  logicalCode: string
+  databaseColumn: string
+  sourceOracleType: string
+  precision: number | null
+  scale: number | null
+  nullable: boolean
+  valueType: string
+  previewHeader: string
+  excelHeader: string
+  displayOrder: number
+  exportOrder: number
+  previewVisible: boolean
+  exportVisible: boolean
+  filterable: boolean
+  sortable: boolean
+  exportAllowed: boolean
+  allowedOperators: unknown
+  format: unknown
+  dictionaryVersion: unknown
+  maskingPolicy: unknown
+  excelWidth: number
+  nullDisplay: string
+}
+
+export type ReportGrant = { subjectType: 'USER' | 'ROLE'; subjectId: number; actions: string[] }
+
+export type ReportDraft = {
+  id: number
+  code: string
+  name: string
+  category: string
+  description: string
+  datasourceId: number
+  status: ReportDefinitionStatus
+  lockVersion: number
+  procedure: { owner: string; package: string; name: string; overload: string }
+  result: { tableOwner: string; tableName: string; runIdColumn: string; rowIdColumn: string }
+  callTemplate: string
+  parameters: ReportParameter[]
+  columns: ReportColumn[]
+  grants: ReportGrant[]
+  createdAt: string | null
+  updatedAt: string | null
 }
 
 export type ReportRunContract = {

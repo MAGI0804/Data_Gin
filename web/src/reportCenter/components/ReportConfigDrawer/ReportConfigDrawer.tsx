@@ -1,68 +1,90 @@
-import { useEffect, useId, useRef } from 'react'
-import type { ReportSummary } from '../../types'
+import { useEffect, useId, useRef, useState } from 'react'
+import { Plus, Trash2 } from 'lucide-react'
+import { getReportDraft, publishReportDraft, saveReportDraft, type ReportCenterClient } from '../../api'
+import type { ReportColumn, ReportDraft, ReportParameter, ReportSummary } from '../../types'
 import styles from './ReportConfigDrawer.module.css'
 
-export function ReportConfigDrawer({ report, onClose }: { report: ReportSummary | null; onClose: () => void }) {
+type Tab = 'basic' | 'procedure' | 'parameters' | 'fields' | 'excel' | 'permissions'
+const tabs: Array<{ key: Tab; label: string }> = [{ key: 'basic', label: '基本信息' }, { key: 'procedure', label: '存储过程' }, { key: 'parameters', label: '{{形参}}' }, { key: 'fields', label: '结果字段' }, { key: 'excel', label: 'Excel' }, { key: 'permissions', label: '权限' }]
+
+export function ReportConfigDrawer({ client, report, onClose, onSaved }: { client: ReportCenterClient; report: ReportSummary | null; onClose: () => void; onSaved?: () => void }) {
   const panelRef = useRef<HTMLElement>(null)
   const returnFocusRef = useRef<HTMLElement | null>(document.activeElement instanceof HTMLElement ? document.activeElement : null)
-  const onCloseRef = useRef(onClose)
   const titleId = useId()
-  onCloseRef.current = onClose
+  const [tab, setTab] = useState<Tab>('basic')
+  const [draft, setDraft] = useState<ReportDraft>(() => emptyDraft())
+  const [savedFingerprint, setSavedFingerprint] = useState('')
+  const [state, setState] = useState({ loading: Boolean(report), saving: false, error: '', notice: '' })
+
+  useEffect(() => {
+    if (!report) return
+    const controller = new AbortController()
+    void getReportDraft(client, report.id, controller.signal).then((response) => {
+      if (controller.signal.aborted) return
+      if (!response.ok) setState((current) => ({ ...current, loading: false, error: response.error }))
+      else { setDraft(response.data); setSavedFingerprint(draftFingerprint(response.data)); setState((current) => ({ ...current, loading: false })) }
+    })
+    return () => controller.abort()
+  }, [client, report])
 
   useEffect(() => {
     const previousOverflow = document.body.style.overflow
     const returnFocus = returnFocusRef.current
     const selector = 'button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        event.preventDefault()
-        onCloseRef.current()
-        return
-      }
-      if (event.key !== 'Tab') return
-      const focusable = Array.from(panelRef.current?.querySelectorAll<HTMLElement>(selector) ?? [])
-      if (focusable.length === 0) return
-      const first = focusable[0]
-      const last = focusable[focusable.length - 1]
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault()
-        last.focus()
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault()
-        first.focus()
-      }
-    }
-    document.body.style.overflow = 'hidden'
-    window.addEventListener('keydown', handleKeyDown)
-    panelRef.current?.querySelector<HTMLElement>(selector)?.focus()
-    return () => {
-      document.body.style.overflow = previousOverflow
-      window.removeEventListener('keydown', handleKeyDown)
-      returnFocus?.focus()
-    }
-  }, [])
+    const close = (event: KeyboardEvent) => { if (event.key === 'Escape') onClose(); if (event.key !== 'Tab') return; const focusable = Array.from(panelRef.current?.querySelectorAll<HTMLElement>(selector) ?? []); if (!focusable.length) return; const first = focusable[0]; const last = focusable[focusable.length - 1]; if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus() } else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus() } }
+    document.body.style.overflow = 'hidden'; window.addEventListener('keydown', close); panelRef.current?.querySelector<HTMLElement>(selector)?.focus()
+    return () => { document.body.style.overflow = previousOverflow; window.removeEventListener('keydown', close); returnFocus?.focus() }
+  }, [onClose])
 
-  return (
-    <div className={styles.layer}>
-      <button className={styles.backdrop} type="button" aria-label="关闭报表配置侧栏" onClick={onClose} />
-      <section ref={panelRef} className={styles.drawer} role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1}>
-        <header className={styles.header}>
-          <div><span>MYSQL CONFIGURATION</span><h2 id={titleId}>{report ? '编辑报表配置' : '创建报表配置'}</h2></div>
-          <button className="ui-control-radius" type="button" onClick={onClose}>关闭</button>
-        </header>
-        <form className={styles.form} onSubmit={(event) => event.preventDefault()}>
-          <label>报表名称<input className="ui-control-radius" name="name" defaultValue={report?.name ?? ''} readOnly={Boolean(report)} /></label>
-          <label>报表编码<input className="ui-control-radius" name="code" defaultValue={report?.code ?? ''} readOnly={Boolean(report)} /></label>
-          <label>分类<input className="ui-control-radius" name="category" defaultValue={report?.category ?? ''} readOnly={Boolean(report)} /></label>
-          <label>Oracle 数据源<select className="ui-control-radius" name="datasource" disabled><option>数据源接口尚未接入</option></select></label>
-          <label className={styles.wide}>存储过程调用模板<textarea className="ui-control-radius" name="callTemplate" rows={7} disabled placeholder="BEGIN REPORT_PKG.PROCEDURE({{runId}}); END;" /></label>
-          <div className={styles.notice} role="note">本批仅建立配置界面骨架。保存、参数解析和 Oracle 契约探测接口接入后才可提交配置。</div>
-        </form>
-        <footer className={styles.footer}>
-          <button className="ui-control-radius" type="button" onClick={onClose}>取消</button>
-          <button className="ui-control-radius" type="button" disabled>保存接口尚未接入</button>
-        </footer>
-      </section>
-    </div>
-  )
+  async function save() {
+    if (panelRef.current?.querySelector('[aria-invalid="true"]')) { setState((current) => ({ ...current, error: '请先修正标红的 JSON 配置。' })); return }
+    setState((current) => ({ ...current, saving: true, error: '', notice: '' }))
+    const response = await saveReportDraft(client, draft)
+    if (!response.ok) { setState((current) => ({ ...current, saving: false, error: response.error })); return }
+    setDraft(response.data); setSavedFingerprint(draftFingerprint(response.data)); setState((current) => ({ ...current, saving: false, notice: '草稿已保存到 MySQL。' })); onSaved?.()
+  }
+  async function publish() {
+    if (!draft.id || !draft.lockVersion || draftFingerprint(draft) !== savedFingerprint) return
+    if (panelRef.current?.querySelector('[aria-invalid="true"]')) { setState((current) => ({ ...current, error: '请先修正标红的 JSON 配置。' })); return }
+    setState((current) => ({ ...current, saving: true, error: '', notice: '' }))
+    const response = await publishReportDraft(client, draft.id, draft.lockVersion)
+    if (!response.ok) { setState((current) => ({ ...current, saving: false, error: response.error })); return }
+    setState((current) => ({ ...current, saving: false, notice: `Oracle 契约核验通过，已发布版本 #${response.data.versionId}。` })); onSaved?.(); onClose()
+  }
+
+  const dirty = draftFingerprint(draft) !== savedFingerprint
+  return <div className={styles.layer}><button className={styles.backdrop} type="button" aria-label="关闭报表配置侧栏" onClick={onClose} /><section ref={panelRef} className={styles.drawer} role="dialog" aria-modal="true" aria-labelledby={titleId} tabIndex={-1}><header className={styles.header}><div><span>MYSQL CONFIGURATION</span><h2 id={titleId}>{report ? '编辑报表配置' : '创建报表配置'}</h2></div><button className="ui-control-radius" type="button" onClick={onClose}>关闭</button></header><nav className={styles.tabs} aria-label="报表配置步骤">{tabs.map((item) => <button type="button" className={tab === item.key ? styles.active : ''} onClick={() => setTab(item.key)} aria-current={tab === item.key ? 'step' : undefined} key={item.key}>{item.label}</button>)}</nav><div className={styles.body}>{state.loading ? <p>正在读取草稿…</p> : <Editor tab={tab} draft={draft} onChange={setDraft} />}{state.error ? <div className={styles.error} role="alert">{state.error}</div> : null}{state.notice ? <div className={styles.notice} role="status">{state.notice}</div> : null}</div><footer className={styles.footer}><span>版本锁 {draft.lockVersion || '新建'} · {dirty ? '有未保存修改' : '已保存'}</span><button className="ui-control-radius" type="button" onClick={onClose}>取消</button><button className="ui-control-radius" type="button" onClick={() => void save()} disabled={state.loading || state.saving || !dirty}>{state.saving ? '处理中…' : '保存草稿'}</button><button className="primary ui-control-radius" type="button" onClick={() => void publish()} disabled={!draft.id || state.saving || dirty} title={dirty ? '请先保存草稿，再核验并发布' : undefined}>核验并发布</button></footer></section></div>
 }
+
+function Editor({ tab, draft, onChange }: { tab: Tab; draft: ReportDraft; onChange: (draft: ReportDraft) => void }) {
+  const set = <K extends keyof ReportDraft>(key: K, value: ReportDraft[K]) => onChange({ ...draft, [key]: value })
+  if (tab === 'basic') return <div className={styles.form}><Field label="报表名称"><input value={draft.name} onChange={(e) => set('name', e.currentTarget.value)} /></Field><Field label="报表编码"><input value={draft.code} onChange={(e) => set('code', e.currentTarget.value)} /></Field><Field label="分类"><input value={draft.category} onChange={(e) => set('category', e.currentTarget.value)} /></Field><Field label="Oracle 数据源 ID"><input type="number" min="1" value={draft.datasourceId || ''} onChange={(e) => set('datasourceId', Number(e.currentTarget.value))} /></Field><Field label="说明" wide><textarea rows={4} value={draft.description} onChange={(e) => set('description', e.currentTarget.value)} /></Field></div>
+  if (tab === 'procedure') return <div className={styles.form}>{(['owner', 'package', 'name', 'overload'] as const).map((key) => <Field label={({ owner: 'Owner', package: 'Package（可选）', name: 'Procedure', overload: 'Overload（可选）' })[key]} key={key}><input className={styles.mono} value={draft.procedure[key]} onChange={(e) => set('procedure', { ...draft.procedure, [key]: e.currentTarget.value })} /></Field>)}{(['tableOwner', 'tableName', 'runIdColumn', 'rowIdColumn'] as const).map((key) => <Field label={({ tableOwner: '结果表 Owner', tableName: '结果表名', runIdColumn: 'run_id 字段', rowIdColumn: '行游标字段' })[key]} key={key}><input className={styles.mono} value={draft.result[key]} onChange={(e) => set('result', { ...draft.result, [key]: e.currentTarget.value })} /></Field>)}<Field label="调用模板（只允许 {{形参}} 绑定）" wide><textarea className={styles.mono} rows={7} value={draft.callTemplate} onChange={(e) => set('callTemplate', e.currentTarget.value)} /></Field></div>
+  if (tab === 'parameters') return <ListEditor title="参数契约" onAdd={() => set('parameters', [...draft.parameters, newParameter(nextOrder(draft.parameters.map((item) => item.position)))])}>{draft.parameters.map((item, index) => <ParameterRow item={item} key={`${item.code}-${index}`} onChange={(next) => set('parameters', replaceAt(draft.parameters, index, next))} onDelete={() => set('parameters', removeAt(draft.parameters, index))} />)}</ListEditor>
+  if (tab === 'fields' || tab === 'excel') return <ListEditor title={tab === 'fields' ? '稳定逻辑字段 → Oracle 物理字段' : '页面字段 → Excel 表头'} onAdd={() => set('columns', [...draft.columns, newColumn(nextOrder(draft.columns.flatMap((item) => [item.displayOrder, item.exportOrder])))])}>{draft.columns.map((item, index) => <ColumnRow excel={tab === 'excel'} item={item} key={item.fieldId} onChange={(next) => set('columns', replaceAt(draft.columns, index, next))} onDelete={() => set('columns', removeAt(draft.columns, index))} />)}</ListEditor>
+  return <ListEditor title="报表级用户/角色授权" onAdd={() => set('grants', [...draft.grants, { subjectType: 'ROLE', subjectId: 0, actions: ['QUERY'] }])}>{draft.grants.map((grant, index) => <div className={styles.row} key={`${grant.subjectType}-${index}`}><select value={grant.subjectType} onChange={(e) => set('grants', replaceAt(draft.grants, index, { ...grant, subjectType: e.currentTarget.value as 'USER' | 'ROLE' }))}><option value="ROLE">角色</option><option value="USER">用户</option></select><input type="number" min="1" aria-label="主体 ID" value={grant.subjectId || ''} onChange={(e) => set('grants', replaceAt(draft.grants, index, { ...grant, subjectId: Number(e.currentTarget.value) }))} /><label><input type="checkbox" checked={grant.actions.includes('QUERY')} onChange={(e) => set('grants', replaceAt(draft.grants, index, { ...grant, actions: toggle(grant.actions, 'QUERY', e.currentTarget.checked) }))} />查询</label><label><input type="checkbox" checked={grant.actions.includes('EXPORT')} onChange={(e) => set('grants', replaceAt(draft.grants, index, { ...grant, actions: toggle(grant.actions, 'EXPORT', e.currentTarget.checked) }))} />导出</label><Delete onClick={() => set('grants', removeAt(draft.grants, index))} /></div>)}</ListEditor>
+}
+
+function ParameterRow({ item, onChange, onDelete }: { item: ReportParameter; onChange: (item: ReportParameter) => void; onDelete: () => void }) {
+  const setLogicalType = (logicalType: ReportParameter['logicalType']) => onChange({
+    ...item,
+    logicalType,
+    controlType: logicalType === 'boolean' ? 'CHECKBOX' : logicalType === 'date' ? 'DATE' : logicalType === 'datetime' ? 'DATETIME' : logicalType === 'enum' ? 'SELECT' : logicalType === 'multi_enum' ? 'MULTI_SELECT' : logicalType === 'integer' || logicalType === 'decimal' ? 'NUMBER' : logicalType === 'json' ? 'TEXTAREA' : item.controlType,
+    cardinality: logicalType === 'multi_enum' ? 'MULTIPLE' : 'SINGLE',
+    collectionEncoding: logicalType === 'multi_enum' ? 'JSON_CLOB' : '',
+  })
+  return <div className={styles.contractRow}><input aria-label="参数编码" className={styles.mono} value={item.code} onChange={(e) => onChange({ ...item, code: e.currentTarget.value })} placeholder="参数编码" /><input aria-label="显示名称" value={item.label} onChange={(e) => onChange({ ...item, label: e.currentTarget.value })} placeholder="显示名称" /><input aria-label="过程参数名" className={styles.mono} value={item.procedureArgName} onChange={(e) => onChange({ ...item, procedureArgName: e.currentTarget.value })} placeholder="P_PARAM" /><select aria-label="控件类型" value={item.controlType} onChange={(e) => onChange({ ...item, controlType: e.currentTarget.value as ReportParameter['controlType'] })}>{['TEXT','TEXTAREA','NUMBER','CHECKBOX','DATE','DATETIME','SELECT','MULTI_SELECT'].map((value) => <option key={value}>{value}</option>)}</select><select aria-label="业务类型" value={item.logicalType} onChange={(e) => setLogicalType(e.currentTarget.value as ReportParameter['logicalType'])}>{['string','integer','decimal','boolean','date','datetime','enum','multi_enum','json'].map((value) => <option key={value}>{value}</option>)}</select><select aria-label="参数基数" value={item.cardinality} onChange={(e) => onChange({ ...item, cardinality: e.currentTarget.value as ReportParameter['cardinality'], collectionEncoding: e.currentTarget.value === 'MULTIPLE' ? 'JSON_CLOB' : '' })}><option value="SINGLE">单值</option><option value="MULTIPLE">多值</option></select><input aria-label="Oracle 类型" className={styles.mono} value={item.oracleType} onChange={(e) => onChange({ ...item, oracleType: e.currentTarget.value })} placeholder="VARCHAR2" /><input aria-label="允许值" value={item.allowedValues.join(',')} onChange={(e) => onChange({ ...item, allowedValues: e.currentTarget.value.split(',').map((value) => value.trim()).filter(Boolean) })} placeholder="指定允许值，逗号分隔" /><input aria-label="最大长度" type="number" min="1" value={item.maxLength ?? ''} onChange={(e) => onChange({ ...item, maxLength: e.currentTarget.value ? Number(e.currentTarget.value) : null })} placeholder="最大长度" /><input aria-label="时区" value={item.timezone} onChange={(e) => onChange({ ...item, timezone: e.currentTarget.value })} placeholder="Asia/Shanghai" /><JsonInput label="默认值 JSON" value={item.defaultValue} disabled={item.sensitive} onChange={(defaultValue) => onChange({ ...item, defaultValue })} /><JsonInput label="校验规则 JSON" value={item.validation} objectOnly onChange={(validation) => onChange({ ...item, validation: validation as Record<string, unknown> })} /><input aria-label="校验提示" value={item.errorMessage} onChange={(e) => onChange({ ...item, errorMessage: e.currentTarget.value })} placeholder="校验失败提示" /><label><input type="checkbox" checked={item.required} onChange={(e) => onChange({ ...item, required: e.currentTarget.checked, nullable: e.currentTarget.checked ? false : item.nullable })} />必填</label><label><input type="checkbox" checked={item.nullable} disabled={item.required} onChange={(e) => onChange({ ...item, nullable: e.currentTarget.checked })} />可空</label><label><input type="checkbox" checked={item.systemInjected} onChange={(e) => onChange({ ...item, systemInjected: e.currentTarget.checked })} />系统注入</label><label><input type="checkbox" checked={item.sensitive} onChange={(e) => onChange({ ...item, sensitive: e.currentTarget.checked, defaultValue: e.currentTarget.checked ? undefined : item.defaultValue })} />敏感</label><Delete onClick={onDelete} /></div>
+}
+function ColumnRow({ item, excel, onChange, onDelete }: { item: ReportColumn; excel: boolean; onChange: (item: ReportColumn) => void; onDelete: () => void }) { return <div className={styles.contractRow}>{excel ? <><input aria-label="页面表头" value={item.previewHeader} onChange={(e) => onChange({ ...item, previewHeader: e.currentTarget.value })} placeholder="页面表头" /><input aria-label="Excel 表头" value={item.excelHeader} onChange={(e) => onChange({ ...item, excelHeader: e.currentTarget.value })} placeholder="Excel 表头" /><input aria-label="Excel 宽度" type="number" min="0" max="255" value={item.excelWidth} onChange={(e) => onChange({ ...item, excelWidth: Number(e.currentTarget.value) })} /><input aria-label="空值显示" value={item.nullDisplay} onChange={(e) => onChange({ ...item, nullDisplay: e.currentTarget.value })} placeholder="空值显示" /><JsonInput label="格式 JSON" value={item.format} objectOnly onChange={(format) => onChange({ ...item, format })} /><JsonInput label="掩码策略 JSON" value={item.maskingPolicy} objectOnly onChange={(maskingPolicy) => onChange({ ...item, maskingPolicy })} /><label><input type="checkbox" checked={item.previewVisible} onChange={(e) => onChange({ ...item, previewVisible: e.currentTarget.checked })} />预览</label><label><input type="checkbox" checked={item.exportVisible} onChange={(e) => onChange({ ...item, exportVisible: e.currentTarget.checked })} />导出</label><label><input type="checkbox" checked={item.exportAllowed} onChange={(e) => onChange({ ...item, exportAllowed: e.currentTarget.checked })} />允许</label></> : <><input aria-label="逻辑字段" className={styles.mono} value={item.logicalCode} onChange={(e) => onChange({ ...item, logicalCode: e.currentTarget.value })} placeholder="logicalCode" /><input aria-label="Oracle 字段" className={styles.mono} value={item.databaseColumn} onChange={(e) => onChange({ ...item, databaseColumn: e.currentTarget.value })} placeholder="DB_COLUMN" /><input aria-label="Oracle 类型" className={styles.mono} value={item.sourceOracleType} onChange={(e) => onChange({ ...item, sourceOracleType: e.currentTarget.value })} placeholder="VARCHAR2" /><select aria-label="展示类型" value={item.valueType} onChange={(e) => onChange({ ...item, valueType: e.currentTarget.value })}>{['string','integer','decimal','boolean','date','datetime','enum','json'].map((value) => <option key={value}>{value}</option>)}</select><JsonInput label="允许操作符 JSON" value={item.allowedOperators} onChange={(allowedOperators) => onChange({ ...item, allowedOperators })} /><label><input type="checkbox" checked={item.nullable} onChange={(e) => onChange({ ...item, nullable: e.currentTarget.checked })} />可空</label><label><input type="checkbox" checked={item.filterable} onChange={(e) => onChange({ ...item, filterable: e.currentTarget.checked })} />筛选</label><label><input type="checkbox" checked={item.sortable} onChange={(e) => onChange({ ...item, sortable: e.currentTarget.checked })} />排序</label></>}<Delete onClick={onDelete} /></div> }
+function Field({ label, wide, children }: { label: string; wide?: boolean; children: React.ReactNode }) { return <label className={wide ? styles.wide : ''}>{label}{children}</label> }
+function ListEditor({ title, onAdd, children }: { title: string; onAdd: () => void; children: React.ReactNode }) { return <div className={styles.list}><div className={styles.listHeader}><strong>{title}</strong><button type="button" onClick={onAdd}><Plus aria-hidden="true" />新增</button></div>{children}</div> }
+function Delete({ onClick }: { onClick: () => void }) { return <button className={styles.delete} type="button" aria-label="删除此行" onClick={onClick}><Trash2 aria-hidden="true" /></button> }
+function JsonInput({ label, value, disabled, objectOnly, onChange }: { label: string; value: unknown; disabled?: boolean; objectOnly?: boolean; onChange: (value: unknown) => void }) { const serialized = value === undefined ? '' : JSON.stringify(value); const [text, setText] = useState(serialized); const [invalid, setInvalid] = useState(false); useEffect(() => { setText(serialized); setInvalid(false) }, [serialized]); return <label className={styles.jsonField}>{label}<input className={styles.mono} value={text} disabled={disabled} aria-invalid={invalid || undefined} onChange={(event) => setText(event.currentTarget.value)} onBlur={() => { if (!text.trim()) { setInvalid(false); onChange(undefined); return } try { const parsed = JSON.parse(text) as unknown; if (objectOnly && (!parsed || typeof parsed !== 'object' || Array.isArray(parsed))) { setInvalid(true); return } setInvalid(false); onChange(parsed) } catch { setInvalid(true) } }} /></label> }
+function replaceAt<T>(items: T[], index: number, item: T) { return items.map((value, position) => position === index ? item : value) }
+function removeAt<T>(items: T[], index: number) { return items.filter((_, position) => position !== index) }
+function toggle(values: string[], value: string, checked: boolean) { return checked ? [...new Set([...values, value])] : values.filter((item) => item !== value) }
+function emptyDraft(): ReportDraft { return { id: 0, code: '', name: '', category: '', description: '', datasourceId: 0, status: 'DRAFT', lockVersion: 0, procedure: { owner: '', package: '', name: '', overload: '' }, result: { tableOwner: '', tableName: '', runIdColumn: 'RUN_ID', rowIdColumn: 'ROW_NO' }, callTemplate: '', parameters: [newParameter(0, true)], columns: [newColumn(0)], grants: [], createdAt: null, updatedAt: null } }
+function newParameter(index: number, systemInjected = false): ReportParameter { return { code: systemInjected ? 'runId' : `param${index + 1}`, label: systemInjected ? '运行编号' : `参数 ${index + 1}`, displayOrder: index, controlType: 'TEXT', logicalType: 'string', cardinality: 'SINGLE', procedureArgName: systemInjected ? 'P_RUN_ID' : `P_PARAM_${index + 1}`, position: index + 1, oracleType: 'VARCHAR2', precision: null, scale: null, maxLength: 4000, required: true, nullable: false, systemInjected, sensitive: false, defaultValue: undefined, allowedValues: [], validation: {}, normalizer: {}, valueSource: {}, timezone: 'Asia/Shanghai', nullPolicy: 'TYPED_NULL', errorMessage: '', collectionEncoding: '' } }
+function newColumn(index: number): ReportColumn { return { fieldId: crypto.randomUUID(), logicalCode: `field${index + 1}`, databaseColumn: `FIELD_${index + 1}`, sourceOracleType: 'VARCHAR2', precision: null, scale: null, nullable: true, valueType: 'string', previewHeader: `字段 ${index + 1}`, excelHeader: `字段 ${index + 1}`, displayOrder: index, exportOrder: index, previewVisible: true, exportVisible: true, filterable: false, sortable: false, exportAllowed: true, allowedOperators: undefined, format: undefined, dictionaryVersion: undefined, maskingPolicy: undefined, excelWidth: 16, nullDisplay: '-' } }
+function nextOrder(values: number[]) { return values.length ? Math.max(...values) + 1 : 0 }
+function draftFingerprint(draft: ReportDraft) { return JSON.stringify(draft) }
