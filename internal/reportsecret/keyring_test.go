@@ -1,0 +1,48 @@
+package reportsecret
+
+import (
+	"encoding/base64"
+	"errors"
+	"strings"
+	"testing"
+)
+
+func TestKeyringEncryptDecryptAndAuthenticate(t *testing.T) {
+	key := base64.StdEncoding.EncodeToString([]byte("0123456789abcdef0123456789abcdef"))
+	keyring, err := ParseKeyring(`{"key-v1":"` + key + `"}`)
+	if err != nil {
+		t.Fatalf("ParseKeyring() error = %v", err)
+	}
+	ciphertext, err := keyring.Encrypt("key-v1", "oracle-password")
+	if err != nil {
+		t.Fatalf("Encrypt() error = %v", err)
+	}
+	if !strings.HasPrefix(ciphertext, credentialPrefix) || strings.Contains(ciphertext, "oracle-password") {
+		t.Fatalf("ciphertext = %q", ciphertext)
+	}
+	plaintext, err := keyring.Decrypt("key-v1", ciphertext)
+	if err != nil || plaintext != "oracle-password" {
+		t.Fatalf("Decrypt() = %q, %v", plaintext, err)
+	}
+
+	sealed, err := base64.RawStdEncoding.DecodeString(strings.TrimPrefix(ciphertext, credentialPrefix))
+	if err != nil {
+		t.Fatalf("decode ciphertext: %v", err)
+	}
+	sealed[len(sealed)-1] ^= 1
+	tampered := credentialPrefix + base64.RawStdEncoding.EncodeToString(sealed)
+	if _, err := keyring.Decrypt("key-v1", tampered); !errors.Is(err, ErrInvalidCredential) {
+		t.Fatalf("Decrypt(tampered) error = %v", err)
+	}
+	if _, err := keyring.Decrypt("key-v2", ciphertext); !errors.Is(err, ErrInvalidCredential) {
+		t.Fatalf("Decrypt(wrong version) error = %v", err)
+	}
+}
+
+func TestParseKeyringRejectsInvalidConfiguration(t *testing.T) {
+	for _, raw := range []string{"", `{}`, `{"key-v1":"short"}`, `[]`} {
+		if _, err := ParseKeyring(raw); !errors.Is(err, ErrInvalidCredential) {
+			t.Fatalf("ParseKeyring(%q) error = %v", raw, err)
+		}
+	}
+}
