@@ -1,5 +1,5 @@
 import type { ClientResponse, HTTPMethod } from '../api/client'
-import type { ReportCatalogPage, ReportCatalogQuery, ReportColumn, ReportDatasource, ReportDatasourceInput, ReportDatasourceTest, ReportDefinitionStatus, ReportDraft, ReportExport, ReportFilterOperator, ReportGrant, ReportParameter, ReportResultPage, ReportResultQuery, ReportRun, ReportRunContract, ReportRunStatus, ReportSummary } from './types'
+import type { ReportCatalogPage, ReportCatalogQuery, ReportColumn, ReportDatasource, ReportDatasourceInput, ReportDatasourceTest, ReportDefinitionStatus, ReportDraft, ReportExport, ReportExportPage, ReportFilterOperator, ReportGrant, ReportParameter, ReportResultPage, ReportResultQuery, ReportRun, ReportRunContract, ReportRunStatus, ReportSummary } from './types'
 
 type JsonRecord = Record<string, unknown>
 
@@ -162,6 +162,11 @@ export async function getReportExport(client: ReportCenterClient, exportId: numb
   return requestAndParse(client, `/v1/report-exports/${exportId}`, { method: 'GET', signal }, parseReportExport, '导出状态加载失败。')
 }
 
+export async function getReportExports(client: ReportCenterClient, query: { afterId?: number; limit?: number; status?: string }, signal?: AbortSignal): Promise<ReportAPIResult<ReportExportPage>> {
+	const search = new URLSearchParams(); if (query.afterId) search.set('afterId', String(query.afterId)); if (query.limit) search.set('limit', String(query.limit)); if (query.status) search.set('status', query.status)
+	return requestAndParse(client, `/v1/report-exports?${search}`, { method: 'GET', signal }, parseReportExportPage, '导出任务加载失败。')
+}
+
 export async function getReportExportDownload(client: ReportCenterClient, exportId: number): Promise<ReportAPIResult<{ url: string; expiresAt: string | null }>> {
   return requestAndParse(client, `/v1/report-exports/${exportId}/download`, { method: 'GET' }, parseReportExportDownload, '下载地址获取失败。')
 }
@@ -294,7 +299,16 @@ export function parseReportExport(payload: unknown): ReportExport {
     expiresAt: publicDate(data.expiresAt), purgedAt: publicDate(data.purgedAt),
     errorCode: publicString(data.errorCode, 100), errorMessage: publicString(data.errorMessage, 500),
     canDownload: data.canDownload === true,
+		reportName: publicString(data.reportName, 128), purgedRows: nonNegativeInteger(data.purgedRows), purgeStartedAt: publicDate(data.purgeStartedAt),
   }
+}
+
+export function parseReportExportPage(payload: unknown): ReportExportPage {
+	const data = unwrapData(payload); const rawItems = firstArray(data.items); const items = rawItems.map((item) => parseReportExport({ data: item }));
+	const hasMore = data.hasMore === true
+	const nextAfterId = nonNegativeInteger(data.nextAfterId)
+	if (hasMore && nextAfterId < 1) throw new Error('invalid report export cursor')
+	return { items, hasMore, nextAfterId }
 }
 
 async function requestAndParse<T>(client: ReportCenterClient, path: string, options: Parameters<ReportCenterClient>[1], parse: (payload: unknown) => T, fallback: string): Promise<ReportAPIResult<T>> {

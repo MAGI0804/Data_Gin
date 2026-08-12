@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { parseReportCatalogPage, parseReportDatasource, parseReportDatasources, parseReportDatasourceTest, parseReportDraft, parseReportExport, parseReportResultPage, parseReportRun, parseReportRunContract } from '../.test-dist/reportCenter/api.js'
+import { parseReportCatalogPage, parseReportDatasource, parseReportDatasources, parseReportDatasourceTest, parseReportDraft, parseReportExport, parseReportExportPage, parseReportResultPage, parseReportRun, parseReportRunContract } from '../.test-dist/reportCenter/api.js'
 
 test('parseReportCatalogPage reads the standard API envelope', () => {
   const page = parseReportCatalogPage({
@@ -82,6 +82,28 @@ test('run, result and export parsers preserve cursor and large numeric strings',
   const reportExport = parseReportExport({ data: { id: 41, runId: 31, exportUuid: 'export-uuid', status: 'READY', exportedRows: 1, canDownload: true } })
   assert.equal(reportExport.status, 'READY')
   assert.equal(reportExport.canDownload, true)
+})
+
+test('parseReportExportPage preserves archive and purge fields', () => {
+  const page = parseReportExportPage({ data: {
+    items: [{
+      id: 41, runId: 31, exportUuid: 'export-uuid', reportName: '门店销售日报', status: 'READY',
+      exportedRows: 120, purgedRows: 80, purgeStartedAt: '2026-08-13T09:59:00Z',
+      expiresAt: '2026-08-16T10:00:00Z', canDownload: true,
+    }],
+    hasMore: true,
+    nextAfterId: 41,
+  } })
+
+  assert.equal(page.items[0].reportName, '门店销售日报')
+  assert.equal(page.items[0].purgedRows, 80)
+  assert.equal(page.items[0].purgeStartedAt, '2026-08-13T09:59:00Z')
+  assert.equal(page.hasMore, true)
+  assert.equal(page.nextAfterId, 41)
+})
+
+test('parseReportExportPage rejects a missing cursor when more rows exist', () => {
+  assert.throws(() => parseReportExportPage({ data: { items: [], hasMore: true } }))
 })
 
 test('parseReportResultPage rejects a missing signed cursor', () => {

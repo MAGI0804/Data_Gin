@@ -333,6 +333,7 @@ func registerReportExportRoutes(api *gin.RouterGroup, exportCtrl *data_ctrl.Repo
 
 	exportGroup := api.Group("/v1/report-exports")
 	exportGroup.Use(middleware.AuthJWT(), middleware.RequirePermission(model.PermissionReportRead))
+	exportGroup.GET("", middleware.RequirePermission(model.PermissionReportExport), exportCtrl.List)
 	exportGroup.GET("/:id", exportCtrl.Get)
 	exportGroup.GET("/:id/download", middleware.RequirePermission(model.PermissionReportExport), exportCtrl.Download)
 }

@@ -220,4 +220,9 @@ export type ReportExport = {
   errorCode: string
   errorMessage: string
   canDownload: boolean
+	reportName: string
+	purgedRows: number
+	purgeStartedAt: string | null
 }
+
+export type ReportExportPage = { items: ReportExport[]; hasMore: boolean; nextAfterId: number }

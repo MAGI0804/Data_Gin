@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"gin-biz-web-api/internal/reportrepo"
@@ -27,6 +28,7 @@ const (
 
 type reportExportQueryStore interface {
 	FindExportForActor(context.Context, uint, uint) (*model.ReportExport, error)
+	ListExportsForActor(context.Context, uint, reportrepo.ExportListQuery) (*reportrepo.ExportListPage, error)
 }
 
 type reportExportDownloadSigner interface {
@@ -53,6 +55,31 @@ type ReportExportViewDTO struct {
 	ErrorCode          string     `json:"errorCode,omitempty"`
 	ErrorMessage       string     `json:"errorMessage,omitempty"`
 	CanDownload        bool       `json:"canDownload"`
+	ReportName         string     `json:"reportName,omitempty"`
+	PurgedRows         int64      `json:"purgedRows"`
+	PurgeStartedAt     *time.Time `json:"purgeStartedAt,omitempty"`
+}
+
+type ReportExportListDTO struct {
+	Items       []ReportExportViewDTO `json:"items"`
+	HasMore     bool                  `json:"hasMore"`
+	NextAfterID uint                  `json:"nextAfterId,omitempty"`
+}
+
+func (service *ReportExportQueryService) List(ctx context.Context, actor, afterID uint, limit int, status string) (*ReportExportListDTO, error) {
+	status = strings.ToUpper(strings.TrimSpace(status))
+	if service == nil || ctx == nil || actor == 0 || limit < 1 || limit > 100 || status != "" && !validReportExportListStatus(status) {
+		return nil, ErrReportExportQueryInvalid
+	}
+	page, err := service.store.ListExportsForActor(ctx, actor, reportrepo.ExportListQuery{AfterID: afterID, Limit: limit, Status: status})
+	if err != nil {
+		return nil, fmt.Errorf("report export query: list: %w", err)
+	}
+	result := &ReportExportListDTO{Items: make([]ReportExportViewDTO, 0, len(page.Items)), HasMore: page.HasMore, NextAfterID: page.NextAfterID}
+	for _, item := range page.Items {
+		result.Items = append(result.Items, reportExportView(item.Export, item.ReportName, service.now()))
+	}
+	return result, nil
 }
 
 type ReportExportDownloadDTO struct {
@@ -85,14 +112,34 @@ func (service *ReportExportQueryService) Get(ctx context.Context, actor, exportI
 		return nil, err
 	}
 	now := service.now()
-	return &ReportExportViewDTO{
+	result := reportExportView(*row, "", now)
+	return &result, nil
+}
+
+func reportExportView(row model.ReportExport, reportName string, now time.Time) ReportExportViewDTO {
+	return ReportExportViewDTO{
 		ID: row.ID, ExportUUID: row.ExportUUID, RunID: row.RunID, Status: row.Status,
 		ProcessedRows: row.ProcessedRows, ExportedRows: row.ExportedRows, CurrentSheet: row.CurrentSheet,
 		SheetCount: row.SheetCount, TruncatedCellCount: row.TruncatedCellCount, FileSizeBytes: row.FileSizeBytes,
 		CreatedAt: row.CreatedAt, StartedAt: row.StartedAt, ReadyAt: row.ReadyAt, ExpiresAt: row.ExpiresAt,
 		PurgedAt: row.PurgedAt, ErrorCode: row.ErrorCode, ErrorMessage: row.ErrorMessageSafe,
-		CanDownload: row.Status == model.ReportExportStatusReady && row.ExpiresAt != nil && now.Before(row.ExpiresAt.UTC()),
-	}, nil
+		CanDownload: reportExportCanDownload(row, now),
+		ReportName:  reportName, PurgedRows: row.PurgedRows, PurgeStartedAt: row.PurgeStartedAt,
+	}
+}
+
+func reportExportCanDownload(row model.ReportExport, now time.Time) bool {
+	return row.Status == model.ReportExportStatusReady && row.ReadyAt != nil && row.ExpiresAt != nil && now.Before(row.ExpiresAt.UTC()) &&
+		row.ResultObjectKey != "" && row.FileSizeBytes > 0 && row.ResultChecksum != ""
+}
+
+func validReportExportListStatus(status string) bool {
+	switch status {
+	case model.ReportExportStatusPending, model.ReportExportStatusRunning, model.ReportExportStatusReady, model.ReportExportStatusFailed, model.ReportExportStatusCancelled, model.ReportExportStatusExpired:
+		return true
+	default:
+		return false
+	}
 }
 
 func (service *ReportExportQueryService) Download(ctx context.Context, actor, exportID uint) (*ReportExportDownloadDTO, error) {

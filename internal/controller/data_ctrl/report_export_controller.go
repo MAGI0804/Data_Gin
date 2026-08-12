@@ -4,10 +4,12 @@ import (
 	"context"
 	"errors"
 	"net/http"
+	"strconv"
+	"strings"
 
-	"gin-biz-web-api/internal/service/data_svc"
-	"gin-biz-web-api/internal/requestbody"
 	"gin-biz-web-api/internal/reportquery"
+	"gin-biz-web-api/internal/requestbody"
+	"gin-biz-web-api/internal/service/data_svc"
 	"gin-biz-web-api/pkg/auth"
 	"gin-biz-web-api/pkg/errcode"
 	"gin-biz-web-api/pkg/responses"
@@ -20,8 +22,36 @@ type ReportExportServiceAPI interface {
 }
 
 type ReportExportQueryServiceAPI interface {
+	List(context.Context, uint, uint, int, string) (*data_svc.ReportExportListDTO, error)
 	Get(context.Context, uint, uint) (*data_svc.ReportExportViewDTO, error)
 	Download(context.Context, uint, uint) (*data_svc.ReportExportDownloadDTO, error)
+}
+
+func (controller *ReportExportController) List(c *gin.Context) {
+	afterID, limit := uint(0), 50
+	if value := strings.TrimSpace(c.Query("afterId")); value != "" {
+		parsed, err := strconv.ParseUint(value, 10, 64)
+		if err != nil || parsed == 0 {
+			writeReportExportError(c, data_svc.ErrReportExportQueryInvalid)
+			return
+		}
+		afterID = uint(parsed)
+	}
+	if value := strings.TrimSpace(c.Query("limit")); value != "" {
+		parsed, err := strconv.ParseUint(value, 10, 16)
+		if err != nil || parsed == 0 || parsed > 100 {
+			writeReportExportError(c, data_svc.ErrReportExportQueryInvalid)
+			return
+		}
+		limit = int(parsed)
+	}
+	result, err := controller.query.List(c.Request.Context(), auth.CurrentUserID(c), afterID, limit, c.Query("status"))
+	if err != nil {
+		writeReportExportError(c, err)
+		return
+	}
+	c.Header("Cache-Control", "no-store")
+	responses.New(c).ToResponseWithStatus(http.StatusOK, result)
 }
 
 type ReportExportController struct {

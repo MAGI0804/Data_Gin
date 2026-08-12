@@ -27,7 +27,7 @@ export function ReportCenter({ client, permissions, section, onNavigate }: {
   if (!allowed) content = <PageCanvas><FeedbackState kind="error" title="当前账号无权访问此报表模块" description="请从侧栏选择已授权模块，或联系管理员补充报表中心权限。" /></PageCanvas>
   else if (section === 'configuration') content = <ReportConfigurationPage client={client} />
   else if (section === 'query') content = <ReportQueryPage client={client} />
-  else if (section === 'exports') content = <ReportExportsPage />
+  else if (section === 'exports') content = <ReportExportsPage client={client} />
   else content = <ReportCatalogPage client={client} canManage={hasReportPermission(permissions, 'report.manage')} />
 
   return (
