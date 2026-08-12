@@ -111,3 +111,25 @@ func TestIsDuplicateEntry(t *testing.T) {
 		t.Fatal("isDuplicateEntry(1048) = true")
 	}
 }
+
+func TestNormalizeConsoleAdminBackfillsLegacyAccessState(t *testing.T) {
+	user := &model.User{
+		Account:       "admin",
+		Nickname:      "管理员",
+		AccountType:   model.AccountTypeOpenAPI,
+		Status:        model.AccountStatusDisabled,
+		MallScopeMode: model.MallScopeSelected,
+	}
+
+	if !normalizeConsoleAdmin(user) {
+		t.Fatal("normalizeConsoleAdmin() did not report legacy state changes")
+	}
+	if !user.ConsoleManaged || user.AccountType != model.AccountTypeConsole ||
+		user.Status != model.AccountStatusActive || user.MallScopeMode != model.MallScopeAll ||
+		user.AuthVersion != 1 {
+		t.Fatalf("normalizeConsoleAdmin() user = %+v", user)
+	}
+	if normalizeConsoleAdmin(user) {
+		t.Fatal("normalizeConsoleAdmin() is not idempotent")
+	}
+}

@@ -42,7 +42,7 @@ func SyncExistingConsoleAdminPermissions(ctx context.Context, db *gorm.DB) (bool
 		var user model.User
 		err := tx.WithContext(ctx).
 			Clauses(clause.Locking{Strength: "UPDATE"}).
-			Where("account = ? AND console_managed = ?", constant.ConsoleAdmin, true).
+			Where("account = ?", constant.ConsoleAdmin).
 			First(&user).Error
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			return nil
@@ -50,8 +50,20 @@ func SyncExistingConsoleAdminPermissions(ctx context.Context, db *gorm.DB) (bool
 		if err != nil {
 			return fmt.Errorf("find admin: %w", err)
 		}
-		if !isTrustedConsoleAdmin(&user) {
+		if !user.ConsoleManaged && !isLegacyConsoleAdmin(&user) {
+			return nil
+		}
+		if !isLegacyConsoleAdmin(&user) {
 			return fmt.Errorf("reserved admin identity is not console managed")
+		}
+		if normalizeConsoleAdmin(&user) {
+			if user.CommonTimestampsField == nil {
+				user.CommonTimestampsField = &model.CommonTimestampsField{}
+			}
+			user.UpdatedAt = int(time.Now().Unix())
+			if err := tx.WithContext(ctx).Save(&user).Error; err != nil {
+				return fmt.Errorf("normalize admin: %w", err)
+			}
 		}
 		if err := grantConsoleAdminPermissions(ctx, tx, user.ID); err != nil {
 			return err
@@ -129,18 +141,15 @@ func ensureAdminUserRecord(ctx context.Context, db *gorm.DB, password string) (*
 		if !user.ConsoleManaged && !isLegacyConsoleAdmin(&user) {
 			return nil, fmt.Errorf("reserved admin identity is not console managed")
 		}
-		needsSave := !user.ConsoleManaged
-		user.ConsoleManaged = true
+		if !hash.BcryptCheck(password, user.Password) {
+			return nil, fmt.Errorf("invalid console credentials")
+		}
+		needsSave := normalizeConsoleAdmin(&user)
 		if needsSave {
 			if user.CommonTimestampsField == nil {
 				user.CommonTimestampsField = &model.CommonTimestampsField{}
 			}
 			user.UpdatedAt = now
-		}
-		if !hash.BcryptCheck(password, user.Password) {
-			return nil, fmt.Errorf("invalid console credentials")
-		}
-		if needsSave {
 			if err := db.WithContext(ctx).Save(&user).Error; err != nil {
 				return nil, fmt.Errorf("update console admin: %w", err)
 			}
@@ -189,6 +198,25 @@ func ensureAdminUserRecord(ctx context.Context, db *gorm.DB, password string) (*
 	}
 
 	return &user, nil
+}
+
+func normalizeConsoleAdmin(user *model.User) bool {
+	if user == nil {
+		return false
+	}
+	changed := !user.ConsoleManaged ||
+		user.AccountType != model.AccountTypeConsole ||
+		user.Status != model.AccountStatusActive ||
+		user.MallScopeMode != model.MallScopeAll ||
+		user.AuthVersion == 0
+	user.ConsoleManaged = true
+	user.AccountType = model.AccountTypeConsole
+	user.Status = model.AccountStatusActive
+	user.MallScopeMode = model.MallScopeAll
+	if user.AuthVersion == 0 {
+		user.AuthVersion = 1
+	}
+	return changed
 }
 
 func configuredInitialAdminPassword(candidate string) (string, bool) {
