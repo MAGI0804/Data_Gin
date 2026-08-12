@@ -1,14 +1,241 @@
-import { useMemo, useState } from 'react'
-import { Play } from 'lucide-react'
-import { FeedbackState, FilterToolbar, PageCanvas, PageHeader, Section, StatusTag } from '../../../ui'
-import type { ReportCenterClient } from '../../api'
+import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
+import { ChevronLeft, ChevronRight, Download, Play, Square } from 'lucide-react'
+import { FeedbackState, FilterToolbar, PageCanvas, PageHeader, Section, StatusTag, type StatusTagTone } from '../../../ui'
+import { cancelReportRun, createReportExport, createReportRun, getReportExport, getReportExportDownload, getReportResults, getReportRun, getReportRunContract, type ReportCenterClient } from '../../api'
+import type { ReportExport, ReportParameter, ReportResultPage, ReportRun, ReportRunContract } from '../../types'
 import { useReportCatalog } from '../../useReportCatalog'
 import styles from './ReportQueryPage.module.css'
+
+const terminalRunStatuses = new Set(['SUCCEEDED', 'FAILED', 'CANCELLED'])
+const terminalExportStatuses = new Set(['READY', 'FAILED', 'CANCELLED', 'EXPIRED'])
 
 export function ReportQueryPage({ client }: { client: ReportCenterClient }) {
   const query = useMemo(() => ({ limit: 100 }), [])
   const { items, loading, error, reload } = useReportCatalog(client, query)
   const published = items.filter((report) => report.status === 'ACTIVE')
   const [selectedId, setSelectedId] = useState('')
-  return <PageCanvas><PageHeader eyebrow="ORACLE EXECUTION" title="报表查询" description="选择已发布报表并填写运行参数。执行接口未接入前不会创建任务或伪造结果。" /><FilterToolbar summary={<StatusTag tone="warning">执行能力待接入</StatusTag>}><label className={styles.selector}>选择报表<select className="ui-control-radius" value={selectedId} onChange={(event) => setSelectedId(event.currentTarget.value)} disabled={loading || published.length === 0}><option value="">请选择已发布报表</option>{published.map((report) => <option value={report.id} key={report.id}>{report.name}</option>)}</select></label></FilterToolbar><Section title="运行参数" description="参数控件将由已发布的 {{形参}} Schema 动态生成。"><div className={styles.parameterPlaceholder}><span>参数 Schema 接口尚未接入</span><button className="primary ui-control-radius" type="button" disabled><Play aria-hidden="true" />运行报表</button></div></Section><Section title="结果预览" flush>{loading ? <FeedbackState kind="loading" title="正在读取可用报表" /> : error ? <FeedbackState kind="error" title="可用报表加载失败" description={error} action={<button className="ui-control-radius" type="button" onClick={reload}>重试</button>} /> : <FeedbackState kind="empty" title={published.length === 0 ? '暂无已发布报表' : '尚未执行报表'} description={published.length === 0 ? '发布版本可用后会出现在上方选择器。' : '运行接口接入后，结果将在这里分页展示。'} />}</Section></PageCanvas>
+  const [contract, setContract] = useState<ReportRunContract | null>(null)
+  const [values, setValues] = useState<Record<string, unknown>>({})
+  const [contractState, setContractState] = useState<{ loading: boolean; error: string }>({ loading: false, error: '' })
+  const [run, setRun] = useState<ReportRun | null>(null)
+  const [result, setResult] = useState<ReportResultPage | null>(null)
+  const [cursorHistory, setCursorHistory] = useState<string[]>([''])
+  const [cursorIndex, setCursorIndex] = useState(0)
+  const [operation, setOperation] = useState<{ busy: boolean; error: string }>({ busy: false, error: '' })
+  const [reportExport, setReportExport] = useState<ReportExport | null>(null)
+  const pollAbortRef = useRef<AbortController | null>(null)
+
+  useEffect(() => () => pollAbortRef.current?.abort(), [])
+
+  useEffect(() => {
+    pollAbortRef.current?.abort()
+    setContract(null)
+    setRun(null)
+    setResult(null)
+    setReportExport(null)
+    setCursorHistory([''])
+    setCursorIndex(0)
+    setOperation({ busy: false, error: '' })
+    if (!selectedId) return
+    const reportId = Number(selectedId)
+    const controller = new AbortController()
+    setContractState({ loading: true, error: '' })
+    void getReportRunContract(client, reportId, controller.signal).then((response) => {
+      if (controller.signal.aborted) return
+      if (!response.ok) {
+        setContractState({ loading: false, error: response.error })
+        return
+      }
+      setContract(response.data)
+      setValues(initialParameterValues(response.data.parameters))
+      setContractState({ loading: false, error: '' })
+    })
+    return () => controller.abort()
+  }, [client, selectedId])
+
+  async function submitRun(event: FormEvent) {
+    event.preventDefault()
+    if (!contract || operation.busy) return
+    const parameters = visibleParameters(contract.parameters).reduce<Record<string, unknown>>((input, parameter) => {
+      const value = values[parameter.code]
+      if (value !== '' && value !== undefined && !(Array.isArray(value) && value.length === 0)) input[parameter.code] = normalizeInputValue(parameter, value)
+      return input
+    }, {})
+    setOperation({ busy: true, error: '' })
+    const response = await createReportRun(client, contract.definitionId, parameters)
+    if (!response.ok) {
+      setOperation({ busy: false, error: response.error })
+      return
+    }
+    setRun(response.data)
+    setResult(null)
+    setReportExport(null)
+    setCursorHistory([''])
+    setCursorIndex(0)
+    await pollRun(response.data.id)
+  }
+
+  async function pollRun(runId: number) {
+    pollAbortRef.current?.abort()
+    const controller = new AbortController()
+    pollAbortRef.current = controller
+    while (!controller.signal.aborted) {
+      const response = await getReportRun(client, runId, controller.signal)
+      if (!response.ok) {
+        if (!controller.signal.aborted) setOperation({ busy: false, error: response.error })
+        return
+      }
+      setRun(response.data)
+      if (terminalRunStatuses.has(response.data.status)) {
+        setOperation({ busy: false, error: response.data.errorMessage })
+        if (response.data.resultAvailable) await loadResults(runId, '', 0, controller.signal)
+        return
+      }
+      await wait(1500, controller.signal)
+    }
+  }
+
+  async function loadResults(runId: number, cursor: string, pageIndex: number, signal?: AbortSignal) {
+    setOperation((current) => ({ ...current, busy: true, error: '' }))
+    const response = await getReportResults(client, runId, cursor, 100, signal)
+    if (!response.ok) {
+      if (!signal?.aborted) setOperation({ busy: false, error: response.error })
+      return
+    }
+    setResult(response.data)
+    setRun(response.data.run)
+    setCursorIndex(pageIndex)
+    setOperation({ busy: false, error: '' })
+  }
+
+  async function nextPage() {
+    if (!run || !result?.pagination.nextCursor) return
+    const nextIndex = cursorIndex + 1
+    const nextHistory = [...cursorHistory.slice(0, nextIndex), result.pagination.nextCursor]
+    setCursorHistory(nextHistory)
+    await loadResults(run.id, result.pagination.nextCursor, nextIndex)
+  }
+
+  async function previousPage() {
+    if (!run || cursorIndex === 0) return
+    const previousIndex = cursorIndex - 1
+    await loadResults(run.id, cursorHistory[previousIndex], previousIndex)
+  }
+
+  async function cancelRun() {
+    if (!run?.canCancel) return
+    const response = await cancelReportRun(client, run.id)
+    if (!response.ok) setOperation({ busy: false, error: response.error })
+    else {
+      setRun(response.data)
+      if (!terminalRunStatuses.has(response.data.status)) await pollRun(response.data.id)
+    }
+  }
+
+  async function startExport() {
+    if (!run?.resultAvailable || reportExport) return
+    setOperation({ busy: true, error: '' })
+    const response = await createReportExport(client, run.id)
+    if (!response.ok) {
+      setOperation({ busy: false, error: response.error })
+      return
+    }
+    setReportExport(response.data)
+    await pollExport(response.data.id)
+  }
+
+  async function pollExport(exportId: number) {
+    const controller = new AbortController()
+    pollAbortRef.current = controller
+    while (!controller.signal.aborted) {
+      const response = await getReportExport(client, exportId, controller.signal)
+      if (!response.ok) {
+        setOperation({ busy: false, error: response.error })
+        return
+      }
+      setReportExport(response.data)
+      if (terminalExportStatuses.has(response.data.status)) {
+        setOperation({ busy: false, error: response.data.errorMessage })
+        return
+      }
+      await wait(1800, controller.signal)
+    }
+  }
+
+  async function downloadExport() {
+    if (!reportExport?.canDownload) return
+    const response = await getReportExportDownload(client, reportExport.id)
+    if (!response.ok) {
+      setOperation({ busy: false, error: response.error })
+      return
+    }
+    window.location.assign(response.data.url)
+  }
+
+  const frozen = Boolean(run)
+  return (
+    <PageCanvas>
+      <PageHeader eyebrow="ORACLE EXECUTION" title="报表查询" description="参数来自已发布的不可变契约；一次运行生成一个快照，分页和正式导出均复用该 run_id。" actions={run?.canCancel ? <button className="ui-control-radius" type="button" onClick={() => void cancelRun()}><Square aria-hidden="true" />取消运行</button> : undefined} />
+      <FilterToolbar summary={run ? <StatusTag tone={runTone(run)}>{runLabel(run.status)}</StatusTag> : <StatusTag tone="neutral">等待选择报表</StatusTag>}>
+        <label className={styles.selector}>选择报表<select className="ui-control-radius" value={selectedId} onChange={(event) => setSelectedId(event.currentTarget.value)} disabled={loading || frozen || published.length === 0}><option value="">请选择已发布报表</option>{published.map((report) => <option value={report.id} key={report.id}>{report.name}</option>)}</select></label>
+      </FilterToolbar>
+      <Section title="运行参数" description={contract ? `发布版本 #${contract.versionId} · {{形参}} 仅作为 Oracle 绑定变量` : '选择报表后读取已发布参数契约。'}>
+        {contractState.loading ? <FeedbackState kind="loading" title="正在读取已发布参数契约" /> : null}
+        {contractState.error ? <FeedbackState kind="error" title="参数契约加载失败" description={contractState.error} /> : null}
+        {contract ? <form className={styles.parameterForm} onSubmit={(event) => void submitRun(event)}>{visibleParameters(contract.parameters).map((parameter) => <ParameterField disabled={frozen || operation.busy} key={parameter.code} parameter={parameter} value={values[parameter.code]} onChange={(value) => setValues((current) => ({ ...current, [parameter.code]: value }))} />)}<div className={styles.runActions}><span>{frozen ? '本次条件已冻结；如需修改，请重新选择页面后发起新运行。' : `${visibleParameters(contract.parameters).length} 个可填写参数，系统参数不会显示。`}</span><button className="primary ui-control-radius" type="submit" disabled={frozen || operation.busy}><Play aria-hidden="true" />运行报表</button></div></form> : null}
+        {!contract && !contractState.loading && !contractState.error ? <FeedbackState kind="empty" title="尚未选择报表" description="请选择一份已发布且有查询权限的报表。" /> : null}
+      </Section>
+      {run ? <div className={styles.statusBar} role="status"><span><strong>{runLabel(run.status)}</strong><small>运行 #{run.id} · {run.rowCount.toLocaleString('zh-CN')} 行</small></span><span>{run.errorMessage || (run.resultExpiresAt ? `结果保留至 ${formatDate(run.resultExpiresAt)}` : '正在等待 Oracle 结果')}</span></div> : null}
+      {operation.error ? <FeedbackState kind="error" title="操作未完成" description={operation.error} /> : null}
+      <Section title="结果预览" description="使用签名 Cursor 进行 Oracle Keyset 分页，不会重新执行存储过程。" actions={run?.resultAvailable ? <div className={styles.resultActions}>{reportExport ? <StatusTag tone={exportTone(reportExport)}>{exportLabel(reportExport.status)}</StatusTag> : null}<button className="ui-control-radius" type="button" onClick={() => void startExport()} disabled={operation.busy || Boolean(reportExport)}><Download aria-hidden="true" />生成正式 Excel</button>{reportExport?.canDownload ? <button className="primary ui-control-radius" type="button" onClick={() => void downloadExport()}>下载文件</button> : null}</div> : undefined} flush>
+        {operation.busy && !result ? <FeedbackState kind="loading" title={reportExport ? '正在生成并校验正式 Excel' : '正在执行报表'} description={reportExport ? exportProgress(reportExport) : 'Oracle 存储过程只会执行一次，请稍候。'} /> : null}
+        {!run && !loading ? <FeedbackState kind="empty" title={published.length === 0 ? '暂无已发布报表' : '尚未执行报表'} description={published.length === 0 ? '发布版本可用后会出现在上方选择器。' : '填写参数并运行后，结果将在这里分页展示。'} /> : null}
+        {loading ? <FeedbackState kind="loading" title="正在读取可用报表" /> : error ? <FeedbackState kind="error" title="可用报表加载失败" description={error} action={<button className="ui-control-radius" type="button" onClick={reload}>重试</button>} /> : null}
+        {result ? <ResultTable page={result} /> : null}
+        {result ? <div className={styles.pagination}><span>第 {cursorIndex + 1} 页 · 每页 {result.pagination.pageSize} 行</span><div><button className="ui-control-radius" type="button" onClick={() => void previousPage()} disabled={operation.busy || cursorIndex === 0}><ChevronLeft aria-hidden="true" />上一页</button><button className="ui-control-radius" type="button" onClick={() => void nextPage()} disabled={operation.busy || !result.pagination.hasMore}>下一页<ChevronRight aria-hidden="true" /></button></div></div> : null}
+      </Section>
+    </PageCanvas>
+  )
 }
+
+function ParameterField({ parameter, value, disabled, onChange }: { parameter: ReportParameter; value: unknown; disabled: boolean; onChange: (value: unknown) => void }) {
+  const id = `report-parameter-${parameter.code}`
+  const hint = [`{{${parameter.code}}}`, parameter.oracleType, parameter.required ? '必填' : '选填', parameter.sensitive ? '敏感' : ''].filter(Boolean).join(' · ')
+  if (parameter.controlType === 'CHECKBOX') return <label className={styles.checkbox} htmlFor={id}><input id={id} type="checkbox" checked={value === true} disabled={disabled} onChange={(event) => onChange(event.currentTarget.checked)} /><span><strong>{parameter.label}</strong><small>{hint}</small></span></label>
+  if (parameter.controlType === 'SELECT' || parameter.controlType === 'MULTI_SELECT') return <label className={styles.field} htmlFor={id}><span>{parameter.label}{parameter.required ? ' *' : ''}</span><select id={id} className="ui-control-radius" multiple={parameter.controlType === 'MULTI_SELECT'} required={parameter.required} disabled={disabled} value={parameter.controlType === 'MULTI_SELECT' ? toStringArray(value) : String(value ?? '')} onChange={(event) => onChange(parameter.controlType === 'MULTI_SELECT' ? Array.from(event.currentTarget.selectedOptions, (option) => option.value) : event.currentTarget.value)}><option value="" disabled={parameter.required}>请选择</option>{parameter.allowedValues.map((option) => <option value={String(option)} key={String(option)}>{String(option)}</option>)}</select><small>{hint}</small></label>
+  const type = parameter.controlType === 'DATE' ? 'date' : parameter.controlType === 'DATETIME' ? 'datetime-local' : parameter.sensitive ? 'password' : 'text'
+  const rules = parameter.validation
+  const common = { id, className: 'ui-control-radius', required: parameter.required, disabled, value: String(value ?? ''), minLength: safeIntegerRule(rules.minLength), maxLength: parameter.maxLength ?? safeIntegerRule(rules.maxLength), pattern: typeof rules.pattern === 'string' ? rules.pattern : undefined, onChange: (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => onChange(event.currentTarget.value) }
+  return <label className={styles.field} htmlFor={id}><span>{parameter.label}{parameter.required ? ' *' : ''}</span>{parameter.controlType === 'TEXTAREA' ? <textarea {...common} rows={3} /> : <input {...common} type={type} inputMode={parameter.controlType === 'NUMBER' ? 'decimal' : undefined} />}<small>{parameter.errorMessage || hint}</small></label>
+}
+
+function ResultTable({ page }: { page: ReportResultPage }) {
+  return <div className={styles.tableRegion} role="region" aria-label="报表查询结果" tabIndex={0}><table className={styles.table}><thead><tr>{page.columns.map((column) => <th key={column.fieldId} scope="col">{column.header}</th>)}</tr></thead><tbody>{page.rows.map((row) => <tr key={row.key}>{page.columns.map((column) => <td key={column.fieldId}>{displayCell(row.values[column.code], column.nullDisplay)}</td>)}</tr>)}</tbody></table></div>
+}
+
+function visibleParameters(parameters: ReportParameter[]) { return parameters.filter((parameter) => !parameter.systemInjected) }
+function initialParameterValues(parameters: ReportParameter[]) { return visibleParameters(parameters).reduce<Record<string, unknown>>((result, parameter) => ({ ...result, [parameter.code]: parameter.defaultValue ?? (parameter.controlType === 'CHECKBOX' ? false : parameter.controlType === 'MULTI_SELECT' ? [] : '') }), {}) }
+function normalizeInputValue(parameter: ReportParameter, value: unknown) {
+  if (parameter.logicalType === 'integer' && typeof value === 'string' && /^-?\d+$/.test(value)) {
+    const parsed = Number(value)
+    return Number.isSafeInteger(parsed) ? parsed : value
+  }
+  if (parameter.logicalType === 'datetime' && typeof value === 'string') {
+    const parsed = new Date(value)
+    return Number.isNaN(parsed.getTime()) ? value : parsed.toISOString()
+  }
+  if (parameter.logicalType === 'json' && typeof value === 'string') {
+    try { return JSON.parse(value) as unknown } catch { return value }
+  }
+  return value
+}
+function toStringArray(value: unknown) { return Array.isArray(value) ? value.map(String) : [] }
+function displayCell(value: unknown, nullDisplay: string) { if (value === null || value === undefined) return nullDisplay || '-'; if (typeof value === 'object') return JSON.stringify(value); return String(value) }
+function wait(milliseconds: number, signal: AbortSignal) { return new Promise<void>((resolve) => { const finish = () => { window.clearTimeout(timer); signal.removeEventListener('abort', finish); resolve() }; const timer = window.setTimeout(finish, milliseconds); signal.addEventListener('abort', finish, { once: true }) }) }
+function runTone(run: ReportRun): StatusTagTone { return ['SUCCEEDED', 'EXPORTED', 'RESULT_PURGED'].includes(run.status) ? 'success' : run.status === 'FAILED' || run.status === 'CANCELLED' ? 'danger' : run.status === 'UNKNOWN' || run.status === 'RECONCILING' ? 'warning' : 'running' }
+function runLabel(status: ReportRun['status']) { return ({ QUEUED: '等待执行', RUNNING: '正在执行', CANCEL_REQUESTED: '正在取消', SUCCEEDED: '运行成功', FAILED: '运行失败', CANCELLED: '已取消', UNKNOWN: '状态待确认', RECONCILING: '正在对账', EXPORTING: '正在导出', EXPORTED: '已导出', RESULT_PURGING: '正在清理结果', RESULT_PURGED: '结果已清理' })[status] }
+function exportTone(item: ReportExport): StatusTagTone { return item.status === 'READY' ? 'success' : item.status === 'FAILED' || item.status === 'CANCELLED' || item.status === 'EXPIRED' ? 'danger' : 'running' }
+function exportLabel(status: ReportExport['status']) { return ({ PENDING: '等待导出', RUNNING: '生成并上传 Excel', READY: '文件就绪', FAILED: '导出失败', CANCELLED: '导出取消', EXPIRED: '文件已过期' })[status] }
+function exportProgress(item: ReportExport) { return `${exportLabel(item.status)} · 已处理 ${item.processedRows.toLocaleString('zh-CN')} 行${item.currentSheet ? ` · ${item.currentSheet}` : ''}` }
+function formatDate(value: string) { const date = new Date(value); return Number.isNaN(date.getTime()) ? '-' : date.toLocaleString('zh-CN') }
+function safeIntegerRule(value: unknown) { return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : undefined }

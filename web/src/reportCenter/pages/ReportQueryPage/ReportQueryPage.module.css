@@ -1,4 +1,26 @@
 .selector { display: grid; gap: var(--space-1); min-width: min(100%, 380px); color: var(--color-text-secondary); font-size: 12px; font-weight: 650; }
-.selector select { min-height: var(--control-height); border: 1px solid var(--color-border-strong); background: var(--color-canvas); padding-inline: var(--space-3); }
-.parameterPlaceholder { display: flex; align-items: center; justify-content: space-between; gap: var(--space-4); min-height: 72px; border-left: 3px solid var(--color-brand); background: var(--color-brand-soft); padding: var(--space-4); color: var(--color-text-secondary); }
-@media (max-width: 479px) { .parameterPlaceholder { align-items: stretch; flex-direction: column; } }
+.selector select, .field input, .field select, .field textarea { min-height: var(--control-height); border: 1px solid var(--color-border-strong); background: var(--color-canvas); padding-inline: var(--space-3); color: var(--color-text); }
+.field textarea { padding-block: var(--space-2); resize: vertical; }
+.parameterForm { display: grid; grid-template-columns: repeat(3, minmax(180px, 1fr)); gap: var(--space-4) var(--space-6); }
+.field { display: grid; gap: var(--space-1); min-width: 0; color: var(--color-text-secondary); font-size: 12px; font-weight: 650; }
+.field small, .checkbox small { color: var(--color-text-secondary); font-family: var(--font-mono); font-size: 11px; font-weight: 400; overflow-wrap: anywhere; }
+.field select[multiple] { min-height: 112px; padding-block: var(--space-2); }
+.checkbox { display: flex; gap: var(--space-2); align-items: flex-start; min-height: var(--control-height); padding-block: var(--space-2); color: var(--color-text-secondary); font-size: 12px; }
+.checkbox input { width: 16px; height: 16px; margin: 2px 0 0; accent-color: var(--color-brand); }
+.checkbox span { display: grid; gap: var(--space-1); }
+.checkbox strong { color: var(--color-text); }
+.runActions { display: flex; grid-column: 1 / -1; gap: var(--space-4); align-items: center; justify-content: space-between; padding-block-start: var(--space-4); border-top: 1px solid var(--color-border); color: var(--color-text-secondary); font-size: 13px; }
+.statusBar { display: flex; gap: var(--space-4); align-items: center; justify-content: space-between; min-height: 48px; padding: var(--space-2) 0; border-bottom: 1px solid var(--color-border); color: var(--color-text-secondary); font-size: 13px; }
+.statusBar > span:first-child { display: flex; gap: var(--space-3); align-items: baseline; }
+.statusBar strong { color: var(--color-text); }
+.statusBar small { color: var(--color-text-secondary); }
+.resultActions { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; }
+.tableRegion { min-width: 0; overflow-x: auto; outline-offset: -2px; }
+.table { width: 100%; min-width: 720px; border-collapse: collapse; table-layout: auto; }
+.table th { height: 40px; padding: 0 var(--space-3); border-block: 1px solid var(--color-border); background: var(--color-surface-subtle); color: var(--color-text-secondary); font-size: 12px; font-weight: 650; text-align: left; white-space: nowrap; }
+.table td { height: var(--table-row-height); max-width: 360px; padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--color-border); color: var(--color-text); font-size: 13px; overflow-wrap: anywhere; }
+.pagination { display: flex; gap: var(--space-3); align-items: center; justify-content: space-between; padding-block: var(--space-4); color: var(--color-text-secondary); font-size: 13px; }
+.pagination > div { display: flex; gap: var(--space-2); }
+@media (max-width: 1023px) { .parameterForm { grid-template-columns: repeat(2, minmax(180px, 1fr)); } }
+@media (max-width: 767px) { .parameterForm { grid-template-columns: minmax(0, 1fr); } .runActions, .statusBar { align-items: stretch; flex-direction: column; } }
+@media (max-width: 479px) { .selector, .selector select, .field { width: 100%; } .pagination { align-items: stretch; flex-direction: column; } .pagination > div, .pagination button { flex: 1; } }

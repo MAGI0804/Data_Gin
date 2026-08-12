@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { parseReportCatalogPage } from '../.test-dist/reportCenter/api.js'
+import { parseReportCatalogPage, parseReportExport, parseReportResultPage, parseReportRun, parseReportRunContract } from '../.test-dist/reportCenter/api.js'
 
 test('parseReportCatalogPage reads the standard API envelope', () => {
   const page = parseReportCatalogPage({
@@ -46,4 +46,39 @@ test('parseReportCatalogPage drops malformed rows and normalizes unsafe fields',
   assert.equal(page.items[0].status, 'DRAFT')
   assert.equal(page.items[0].datasourceId, 4)
   assert.equal(page.nextAfterId, 9)
+})
+
+test('parseReportRunContract keeps typed published parameters', () => {
+  const contract = parseReportRunContract({ data: {
+    definitionId: 9,
+    versionId: 23,
+    code: 'sales_report',
+    name: '销售报表',
+    parameters: [
+      { code: 'runId', label: '运行编号', systemInjected: true, displayOrder: 1, position: 1, oracleType: 'VARCHAR2' },
+      { code: 'storeCode', label: '门店', controlType: 'SELECT', logicalType: 'enum', required: true, allowedValues: ['S001', 'S002'], displayOrder: 2, position: 2, oracleType: 'VARCHAR2' },
+    ],
+  } })
+  assert.equal(contract.versionId, 23)
+  assert.equal(contract.parameters[1].controlType, 'SELECT')
+  assert.deepEqual(contract.parameters[1].allowedValues, ['S001', 'S002'])
+})
+
+test('run, result and export parsers preserve cursor and large numeric strings', () => {
+  const runPayload = { id: 31, runUuid: 'run-uuid', definitionId: 9, versionId: 23, status: 'SUCCEEDED', rowCount: 1, resultAvailable: true }
+  const run = parseReportRun({ data: runPayload })
+  assert.equal(run.status, 'SUCCEEDED')
+
+  const page = parseReportResultPage({ data: {
+    run: runPayload,
+    columns: [{ fieldId: 'amount-id', code: 'amount', header: '金额', valueType: 'decimal' }],
+    rows: [{ key: '1', values: { amount: '9999999999999999.01' } }],
+    pagination: { pageSize: 100, hasMore: true, nextCursor: 'signed.cursor' },
+  } })
+  assert.equal(page.rows[0].values.amount, '9999999999999999.01')
+  assert.equal(page.pagination.nextCursor, 'signed.cursor')
+
+  const reportExport = parseReportExport({ data: { id: 41, runId: 31, exportUuid: 'export-uuid', status: 'READY', exportedRows: 1, canDownload: true } })
+  assert.equal(reportExport.status, 'READY')
+  assert.equal(reportExport.canDownload, true)
 })
