@@ -1,0 +1,56 @@
+.tag {
+  --tag-color: var(--color-text-secondary);
+  --tag-background: var(--color-surface-subtle);
+
+  display: inline-flex;
+  gap: 6px;
+  align-items: center;
+  width: fit-content;
+  min-height: 24px;
+  padding: 2px var(--space-2);
+  border: 1px solid currentColor;
+  border-radius: var(--radius-pill);
+  color: var(--tag-color);
+  background: var(--tag-background);
+  font-size: 12px;
+  font-weight: 600;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+
+.dot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.neutral {
+  --tag-color: var(--color-text-secondary);
+  --tag-background: var(--color-surface-subtle);
+}
+
+.info {
+  --tag-color: var(--color-info);
+  --tag-background: var(--color-info-soft);
+}
+
+.success {
+  --tag-color: var(--color-success);
+  --tag-background: var(--color-success-soft);
+}
+
+.warning {
+  --tag-color: var(--color-warning);
+  --tag-background: var(--color-warning-soft);
+}
+
+.danger {
+  --tag-color: var(--color-danger);
+  --tag-background: var(--color-danger-soft);
+}
+
+.running {
+  --tag-color: var(--color-brand-active);
+  --tag-background: var(--color-brand-soft);
+}

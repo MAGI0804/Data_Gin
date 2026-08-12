@@ -1,0 +1,14 @@
+.canvas {
+  width: min(100%, var(--content-max-width));
+  min-height: 100%;
+  margin-inline: auto;
+  padding: var(--page-padding-block) var(--page-padding-inline);
+  color: var(--color-text);
+  background: var(--color-canvas);
+}
+
+@media (max-width: 479px) {
+  .canvas {
+    min-width: 0;
+  }
+}

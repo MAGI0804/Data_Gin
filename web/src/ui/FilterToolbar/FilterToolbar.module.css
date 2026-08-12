@@ -1,0 +1,49 @@
+.toolbar {
+  display: flex;
+  gap: var(--space-3);
+  align-items: center;
+  min-width: 0;
+  padding-block: var(--space-4);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.filters {
+  display: flex;
+  flex: 1 1 auto;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+  min-width: 0;
+}
+
+.summary {
+  flex: 0 0 auto;
+  color: var(--color-text-secondary);
+  font-size: 13px;
+  line-height: 1.5;
+  white-space: nowrap;
+}
+
+.actions {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+  justify-content: flex-end;
+}
+
+@media (max-width: 839px) {
+  .toolbar {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .summary {
+    white-space: normal;
+  }
+
+  .actions {
+    justify-content: flex-start;
+  }
+}

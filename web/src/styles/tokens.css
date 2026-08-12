@@ -1,0 +1,61 @@
+:root {
+  --color-brand: #FF9D0A;
+  --color-brand-hover: #e88900;
+  --color-brand-active: #8a4b00;
+  --color-brand-soft: #fff7e9;
+  --color-text: #1f2329;
+  --color-text-secondary: #68707c;
+  --color-text-disabled: #98a0ab;
+  --color-border: #e3e7ed;
+  --color-border-strong: #cbd1d9;
+  --color-workspace: #f7f8fa;
+  --color-canvas: #ffffff;
+  --color-surface-subtle: #f2f4f7;
+  --color-success: #05723b;
+  --color-success-soft: #edf8f2;
+  --color-warning: #884300;
+  --color-warning-soft: #fff7e8;
+  --color-danger: #b42318;
+  --color-danger-soft: #fff1f0;
+  --color-info: #185f9e;
+  --color-info-soft: #eef6fd;
+  --color-focus: #b86800;
+
+  --font-sans: "IBM Plex Sans", "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
+  --font-mono: "IBM Plex Mono", "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-6: 24px;
+  --space-8: 32px;
+
+  --radius-none: 0;
+  --radius-control: 2px;
+  --radius-pill: 999px;
+  --control-height: 40px;
+  --button-height: 38px;
+  --table-row-height: 44px;
+
+  --page-padding-inline: 24px;
+  --page-padding-block: 24px;
+  --content-max-width: 1920px;
+  --layer-sticky: 20;
+  --layer-overlay: 1000;
+  --layer-dialog: 1100;
+}
+
+@media (max-width: 1179px) {
+  :root {
+    --page-padding-inline: 16px;
+    --page-padding-block: 16px;
+  }
+}
+
+@media (max-width: 479px) {
+  :root {
+    --page-padding-inline: 12px;
+    --page-padding-block: 12px;
+  }
+}

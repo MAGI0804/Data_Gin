@@ -1,0 +1,97 @@
+.state {
+  --state-color: var(--color-text-secondary);
+
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: var(--space-3);
+  align-items: center;
+  min-height: 96px;
+  padding: var(--space-6) 0;
+  color: var(--state-color);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.marker {
+  display: grid;
+  width: 24px;
+  height: 24px;
+  place-items: center;
+}
+
+.marker > svg {
+  width: 20px;
+  height: 20px;
+}
+
+.fallbackMarker {
+  display: block;
+  width: 8px;
+  height: 8px;
+  border: 2px solid currentColor;
+  border-radius: 50%;
+}
+
+.copy {
+  min-width: 0;
+}
+
+.title {
+  display: block;
+  margin: 0;
+  color: var(--color-text);
+  font-size: 14px;
+  font-weight: 650;
+  line-height: 1.5;
+}
+
+.description {
+  max-width: 68ch;
+  margin-block-start: var(--space-1);
+  color: var(--color-text-secondary);
+  font-size: 13px;
+  line-height: 1.6;
+}
+
+.action {
+  display: flex;
+  align-items: center;
+}
+
+.loading {
+  --state-color: var(--color-brand-active);
+}
+
+.loading .fallbackMarker {
+  border-right-color: transparent;
+  animation: feedback-spin 0.8s linear infinite;
+}
+
+.error {
+  --state-color: var(--color-danger);
+}
+
+.empty {
+  --state-color: var(--color-text-disabled);
+}
+
+@keyframes feedback-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@media (max-width: 479px) {
+  .state {
+    grid-template-columns: auto minmax(0, 1fr);
+  }
+
+  .action {
+    grid-column: 2;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .loading .fallbackMarker {
+    animation: none;
+  }
+}

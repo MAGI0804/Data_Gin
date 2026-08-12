@@ -1,12 +1,19 @@
+@import './styles/tokens.css';
+
 :root {
-  font-family:
-    "IBM Plex Sans", "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;
-  color: #111111;
-  background: #eeeeee;
+  font-family: var(--font-sans);
+  color: var(--color-text);
+  background: var(--color-workspace);
   font-synthesis: none;
   text-rendering: optimizeLegibility;
   -webkit-font-smoothing: antialiased;
   -moz-osx-font-smoothing: grayscale;
+}
+
+html {
+  min-width: 320px;
+  min-height: 100%;
+  background: var(--color-workspace);
 }
 
 body {
@@ -16,7 +23,60 @@ body {
   min-height: 100dvh;
 }
 
-* {
+#root {
+  min-height: 100vh;
+  min-height: 100dvh;
+}
+
+*,
+*::before,
+*::after {
   box-sizing: border-box;
-  border-radius: 0 !important;
+}
+
+/* Temporary compatibility guard for pages that have not moved to CSS Modules.
+   Scoped primitives opt back into their tokenized radii below. */
+#root > main * {
+  border-radius: var(--radius-none) !important;
+}
+
+#root > main :where(.ui-control-radius) {
+  border-radius: var(--radius-control) !important;
+}
+
+#root > main :where(.ui-pill-radius) {
+  border-radius: var(--radius-pill) !important;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+}
+
+button,
+a,
+input,
+select,
+textarea {
+  outline-color: var(--color-focus);
+  outline-offset: 2px;
+}
+
+img,
+svg {
+  display: block;
+  max-width: 100%;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    scroll-behavior: auto;
+    transition-duration: 0.01ms;
+    animation-duration: 0.01ms;
+    animation-iteration-count: 1;
+  }
 }
