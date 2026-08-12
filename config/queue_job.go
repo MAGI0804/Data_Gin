@@ -54,6 +54,10 @@ func init() {
 				"retry_base_seconds":   config.Get("QueueJob.Outbox.RetryBaseSeconds", 5),
 				"retry_max_seconds":    config.Get("QueueJob.Outbox.RetryMaxSeconds", 300),
 			},
+			"report_worker": map[string]interface{}{
+				"enabled":      config.Get("QueueJob.ReportWorker.Enabled", true),
+				"queue_weight": config.Get("QueueJob.ReportWorker.QueueWeight", 2),
+			},
 		}
 	})
 

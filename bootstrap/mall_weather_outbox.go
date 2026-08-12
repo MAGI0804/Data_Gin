@@ -26,6 +26,12 @@ var outboxLifecycle struct {
 	done   <-chan struct{}
 }
 
+var reportReconciliationLifecycle struct {
+	sync.Mutex
+	cancel context.CancelFunc
+	done   <-chan struct{}
+}
+
 func startOutboxDispatcher(reportWorkerEnabled bool) {
 	if database.DB == nil {
 		console.Warning("Outbox dispatcher was not started: database is unavailable")
@@ -42,7 +48,7 @@ func startOutboxDispatcher(reportWorkerEnabled bool) {
 	}
 	definitions := make([]job.OutboxTaskDefinition, 0)
 	if reportWorkerEnabled {
-		definitions = append(definitions, job.ReportOutboxTaskDefinitions(0)...)
+		definitions = append(definitions, job.ReportOutboxTaskDefinitions(job.ReportRunMaxRetry)...)
 	}
 	if global.MallWeatherEnabledAtStartup {
 		definitions = append(definitions, job.MallWeatherOutboxTaskDefinitions(
@@ -103,10 +109,14 @@ func startOutboxDispatcher(reportWorkerEnabled bool) {
 			logger.Error("Outbox dispatcher stopped", zap.Error(err))
 		}
 	}()
+	if reportWorkerEnabled {
+		startReportRunReconciler(data_svc.NewReportRunReconciler())
+	}
 	console.Success("Outbox dispatcher started successfully")
 }
 
 func stopOutboxDispatcher() {
+	stopReportRunReconciler()
 	outboxLifecycle.Lock()
 	cancel := outboxLifecycle.cancel
 	done := outboxLifecycle.done
@@ -123,5 +133,50 @@ func stopOutboxDispatcher() {
 		console.Info("Outbox dispatcher stopped")
 	case <-time.After(5 * time.Second):
 		console.Warning("Timed out waiting for outbox dispatcher to stop")
+	}
+}
+
+type reportRunReconciler interface {
+	Run(context.Context) error
+}
+
+func startReportRunReconciler(reconciler reportRunReconciler) {
+	if reconciler == nil {
+		return
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan struct{})
+	reportReconciliationLifecycle.Lock()
+	if reportReconciliationLifecycle.cancel != nil {
+		reportReconciliationLifecycle.Unlock()
+		cancel()
+		return
+	}
+	reportReconciliationLifecycle.cancel = cancel
+	reportReconciliationLifecycle.done = done
+	reportReconciliationLifecycle.Unlock()
+	go func() {
+		defer close(done)
+		if err := reconciler.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
+			logger.Error("Report run reconciler stopped", zap.Error(err))
+		}
+	}()
+}
+
+func stopReportRunReconciler() {
+	reportReconciliationLifecycle.Lock()
+	cancel := reportReconciliationLifecycle.cancel
+	done := reportReconciliationLifecycle.done
+	reportReconciliationLifecycle.cancel = nil
+	reportReconciliationLifecycle.done = nil
+	reportReconciliationLifecycle.Unlock()
+	if cancel == nil {
+		return
+	}
+	cancel()
+	select {
+	case <-done:
+	case <-time.After(5 * time.Second):
+		console.Warning("Timed out waiting for report run reconciler to stop")
 	}
 }

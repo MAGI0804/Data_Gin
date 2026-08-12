@@ -60,12 +60,13 @@ func (l GormLogger) Trace(ctx context.Context, begin time.Time, fc func() (strin
 
 	// 获取运行时间
 	elapsed := time.Since(begin)
-	// 获取 sql 请求和受影响的行数
-	sql, rows := fc()
+	// GORM 1.23 hands custom loggers an already interpolated statement. Never
+	// persist it: it may contain credentials, tokens or report parameters.
+	_, rows := fc()
 
 	// 通用字段
 	logFields := []zap.Field{
-		zap.String("sql", sql),
+		zap.String("sql", "[parameterized statement omitted]"),
 		zap.String("took time", strx.StrMicroseconds(elapsed)),
 		zap.Int64("affected rows", rows), // 受影响的行数
 	}

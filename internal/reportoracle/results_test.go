@@ -44,6 +44,17 @@ func TestBuildPurgePlanIsScopedAndBounded(t *testing.T) {
 	}
 }
 
+func TestBuildResultCountPlanIsRunScoped(t *testing.T) {
+	plan, err := BuildResultCountPlan(testSnapshotContract())
+	if err != nil {
+		t.Fatalf("BuildResultCountPlan() error = %v", err)
+	}
+	want := "SELECT COUNT(*) FROM REPORT_OWNER.SALES_RESULT WHERE RUN_ID = :1"
+	if plan.statement != want {
+		t.Fatalf("statement = %q, want %q", plan.statement, want)
+	}
+}
+
 func TestResultPlansRejectUnsafeOrAmbiguousColumns(t *testing.T) {
 	tests := []ResultSnapshotRef{
 		{Table: ResultTableRef{Owner: "REPORT", Name: "ROWS; DROP TABLE X"}, RunIDColumn: "RUN_ID", RowIDColumn: "ROW_NO", Columns: []string{"VALUE"}},
@@ -66,6 +77,9 @@ func TestResultPlanRejectsUnvalidatedContract(t *testing.T) {
 	}
 	if _, err := BuildPurgePlan(ResultSnapshotContract{}); !errors.Is(err, ErrInvalidConfiguration) {
 		t.Fatalf("BuildPurgePlan() error = %v, want ErrInvalidConfiguration", err)
+	}
+	if _, err := BuildResultCountPlan(ResultSnapshotContract{}); !errors.Is(err, ErrInvalidConfiguration) {
+		t.Fatalf("BuildResultCountPlan() error = %v, want ErrInvalidConfiguration", err)
 	}
 }
 

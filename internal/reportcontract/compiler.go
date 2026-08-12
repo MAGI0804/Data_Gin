@@ -32,6 +32,61 @@ type Compiled struct {
 	Hashes   Hashes
 }
 
+// VerifyRuntimeMetadata proves that the live Oracle procedure and result table
+// still match the immutable publication contract. Runtime execution must stop
+// before invoking the procedure when either schema has drifted.
+func VerifyRuntimeMetadata(specJSON []byte, contractHash, procedureHash, resultHash string, procedure []reportoracle.ProcedureArgument, result []reportoracle.ResultColumn) error {
+	if len(bytes.TrimSpace(specJSON)) == 0 {
+		return contractError("stored contract payload is empty")
+	}
+	var spec contractSpec
+	decoder := json.NewDecoder(bytes.NewReader(specJSON))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&spec); err != nil {
+		return contractError("stored contract payload is invalid")
+	}
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		return contractError("stored contract payload contains trailing data")
+	}
+	canonicalSpec, err := json.Marshal(spec)
+	if err != nil {
+		return fmt.Errorf("canonicalize stored report contract: %w", err)
+	}
+	if hashBytes(canonicalSpec) != contractHash {
+		return contractError("stored contract payload hash does not match")
+	}
+	normalizedProcedure := normalizeProcedureArguments(procedure)
+	actualProcedureHash, err := hashJSON(normalizedProcedure)
+	if err != nil {
+		return err
+	}
+	normalizedResult := append([]reportoracle.ResultColumn(nil), result...)
+	sort.Slice(normalizedResult, func(i, j int) bool { return normalizedResult[i].Position < normalizedResult[j].Position })
+	for index := range normalizedResult {
+		normalizedResult[index].Name = strings.ToUpper(strings.TrimSpace(normalizedResult[index].Name))
+		normalizedResult[index].DataType = normalizeOracleType(normalizedResult[index].DataType)
+	}
+	actualResultHash, err := hashJSON(normalizedResult)
+	if err != nil {
+		return err
+	}
+	if actualProcedureHash != procedureHash || actualResultHash != resultHash {
+		return contractError("live Oracle metadata does not match the published contract")
+	}
+	storedProcedureHash, err := hashJSON(spec.Procedure)
+	if err != nil {
+		return err
+	}
+	storedResultHash, err := hashJSON(spec.Result)
+	if err != nil {
+		return err
+	}
+	if storedProcedureHash != procedureHash || storedResultHash != resultHash {
+		return contractError("stored Oracle metadata hashes do not match")
+	}
+	return nil
+}
+
 type contractSpec struct {
 	Version    versionSpec                      `json:"version"`
 	Parameters []parameterSpec                  `json:"parameters"`

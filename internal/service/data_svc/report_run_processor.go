@@ -1,0 +1,430 @@
+package data_svc
+
+import (
+	"bytes"
+	"context"
+	"database/sql"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"time"
+
+	"gin-biz-web-api/internal/reportcontract"
+	"gin-biz-web-api/internal/reporting"
+	"gin-biz-web-api/internal/reportoracle"
+	"gin-biz-web-api/internal/reportrepo"
+	"gin-biz-web-api/internal/reportsecret"
+	"gin-biz-web-api/model"
+
+	"github.com/google/uuid"
+)
+
+const (
+	defaultReportRunLeaseTTL          = 90 * time.Second
+	defaultReportRunHeartbeatInterval = 30 * time.Second
+	defaultReportRunStateTimeout      = 10 * time.Second
+	defaultReportResultRetention      = 72 * time.Hour
+)
+
+var ErrReportRunProcessNonRetryable = errors.New("report run processor: non-retryable")
+
+var errReportRunWorkerTemporary = errors.New("report run processor: temporary failure")
+
+type reportExecutionStore interface {
+	BeginExecution(context.Context, uint, string, string, time.Time, time.Duration) (*reportrepo.RunLease, error)
+	HeartbeatExecution(context.Context, uint, string, time.Time, time.Duration) (reportrepo.RunControl, error)
+	InspectExecution(context.Context, uint, string) (reportrepo.RunControl, error)
+	MarkOracleExecutionStarted(context.Context, uint, string, time.Time) error
+	MarkExecutionSucceeded(context.Context, uint, string, int64, time.Time, time.Time) error
+	ConfirmExecutionSucceeded(context.Context, uint, int64) (bool, error)
+	MarkExecutionFailed(context.Context, uint, string, string, string, time.Time) error
+	MarkExecutionCancelled(context.Context, uint, string, time.Time) error
+	MarkExecutionUnknown(context.Context, uint, string, string, string, time.Time) error
+	ReleaseExecutionForRetry(context.Context, uint, string, time.Time) error
+	LoadRuntimeContract(context.Context, uint, string) (*reportrepo.RuntimeContract, error)
+}
+
+type reportDatasourceCredentialDecryptor interface {
+	Decrypt(version, ciphertext string) (string, error)
+}
+
+type reportRunParameterDecryptor interface {
+	Decrypt(version, ciphertext string) ([]byte, error)
+}
+
+type reportProcedureExecutionRequest struct {
+	Runtime     reportrepo.RuntimeContract
+	Definitions []reporting.ParameterDefinition
+	Values      map[string]interface{}
+}
+
+type reportProcedureExecutor interface {
+	Execute(context.Context, reportProcedureExecutionRequest, string) (int64, error)
+}
+
+type ReportRunProcessor struct {
+	store             reportExecutionStore
+	credential        reportDatasourceCredentialDecryptor
+	parameters        reportRunParameterDecryptor
+	executor          reportProcedureExecutor
+	workerID          string
+	leaseTTL          time.Duration
+	heartbeatInterval time.Duration
+	stateTimeout      time.Duration
+	resultRetention   time.Duration
+	now               func() time.Time
+	reconcileOne      func(context.Context, uint) error
+}
+
+func NewReportRunProcessor() *ReportRunProcessor {
+	return NewReportRunProcessorWithDependencies(
+		reportrepo.New(), reportsecret.EnvironmentKeyring{}, reportsecret.EnvironmentParameterCipher{}, oracleReportProcedureExecutor{},
+	)
+}
+
+func NewReportRunProcessorWithDependencies(
+	store reportExecutionStore,
+	credential reportDatasourceCredentialDecryptor,
+	parameters reportRunParameterDecryptor,
+	executor reportProcedureExecutor,
+) *ReportRunProcessor {
+	if store == nil || credential == nil || parameters == nil || executor == nil {
+		panic("report run processor: dependencies are required")
+	}
+	processor := &ReportRunProcessor{
+		store: store, credential: credential, parameters: parameters, executor: executor,
+		workerID: "report-run-" + uuid.NewString(), leaseTTL: defaultReportRunLeaseTTL,
+		heartbeatInterval: defaultReportRunHeartbeatInterval, stateTimeout: defaultReportRunStateTimeout,
+		resultRetention: defaultReportResultRetention, now: func() time.Time { return time.Now().UTC() },
+	}
+	if reconciliationStore, ok := store.(reportReconciliationStore); ok {
+		reconciler := NewReportRunReconcilerWithDependencies(reconciliationStore, credential, oracleReportReceiptReader{})
+		processor.reconcileOne = reconciler.ReconcileOne
+	}
+	return processor
+}
+
+func (processor *ReportRunProcessor) Process(ctx context.Context, runID uint, retryAllowed bool) error {
+	if processor == nil || processor.store == nil || processor.executor == nil || ctx == nil || runID == 0 {
+		return fmt.Errorf("%w: invalid processor input", ErrReportRunProcessNonRetryable)
+	}
+	leaseToken := uuid.NewString()
+	lease, err := processor.store.BeginExecution(ctx, runID, processor.workerID, leaseToken, processor.now().UTC(), processor.leaseTTL)
+	if err != nil {
+		if errors.Is(err, reportrepo.ErrReportRunNotFound) {
+			return fmt.Errorf("%w: run does not exist", ErrReportRunProcessNonRetryable)
+		}
+		confirmCtx, confirmCancel := processor.stateContext(ctx)
+		control, confirmErr := processor.store.InspectExecution(confirmCtx, runID, leaseToken)
+		confirmCancel()
+		if confirmErr == nil && control == reportrepo.RunControlContinue {
+			lease = &reportrepo.RunLease{Disposition: reportrepo.RunDispositionAcquired, LeaseToken: leaseToken}
+		} else {
+			return errReportRunWorkerTemporary
+		}
+	}
+	switch lease.Disposition {
+	case reportrepo.RunDispositionBusy:
+		return errReportRunWorkerTemporary
+	case reportrepo.RunDispositionTerminal:
+		return nil
+	case reportrepo.RunDispositionReconcile:
+		if processor.reconcileOne == nil {
+			return fmt.Errorf("%w: run requires reconciliation", ErrReportRunProcessNonRetryable)
+		}
+		if err := processor.reconcileOne(ctx, runID); err != nil {
+			return errReportRunWorkerTemporary
+		}
+		return nil
+	case reportrepo.RunDispositionAcquired:
+	default:
+		return fmt.Errorf("%w: unsupported run disposition", ErrReportRunProcessNonRetryable)
+	}
+
+	runCtx, cancel := context.WithCancel(ctx)
+	monitorDone := processor.startMonitor(runCtx, cancel, runID, leaseToken)
+	defer func() {
+		cancel()
+		<-monitorDone
+	}()
+
+	runtime, err := processor.store.LoadRuntimeContract(runCtx, runID, leaseToken)
+	if err != nil {
+		if errors.Is(err, reportrepo.ErrReportRunLeaseLost) {
+			return nil
+		}
+		return processor.finishPreOracleFailure(ctx, runID, leaseToken, retryAllowed, err)
+	}
+	definitions := reportParameterDefinitions(runtime.Parameters)
+	values, err := processor.restoreParameters(runtime.Run, definitions)
+	if err != nil {
+		return processor.finishFailure(ctx, runID, leaseToken, "PARAMETER_SNAPSHOT_INVALID", "报表参数快照不可用", err)
+	}
+	password, err := processor.credential.Decrypt(runtime.Datasource.CredentialKeyVersion, runtime.Datasource.PasswordCiphertext)
+	if err != nil {
+		return processor.finishFailure(ctx, runID, leaseToken, "DATASOURCE_CREDENTIAL_INVALID", "Oracle数据源凭据不可用", err)
+	}
+	stateCtx, stateCancel := processor.stateContext(ctx)
+	control, inspectErr := processor.store.InspectExecution(stateCtx, runID, leaseToken)
+	stateCancel()
+	if inspectErr != nil {
+		return processor.finishPreOracleFailure(ctx, runID, leaseToken, retryAllowed, inspectErr)
+	}
+	if control == reportrepo.RunControlCancelRequested {
+		return processor.finishCancelled(ctx, runID, leaseToken)
+	}
+	if control == reportrepo.RunControlLeaseLost {
+		return nil
+	}
+	stateCtx, stateCancel = processor.stateContext(ctx)
+	err = processor.store.MarkOracleExecutionStarted(stateCtx, runID, leaseToken, processor.now().UTC())
+	stateCancel()
+	if err != nil {
+		if errors.Is(err, reportrepo.ErrReportRunLeaseLost) {
+			return nil
+		}
+		return processor.finishPreOracleFailure(ctx, runID, leaseToken, retryAllowed, err)
+	}
+	rowCount, executeErr := processor.executor.Execute(runCtx, reportProcedureExecutionRequest{
+		Runtime: *runtime, Definitions: definitions, Values: values,
+	}, password)
+	if executeErr != nil {
+		control, inspectErr := processor.inspect(ctx, runID, leaseToken)
+		if errors.Is(executeErr, errOracleCommitOutcomeUnknown) {
+			return processor.finishUnknown(ctx, runID, leaseToken, "ORACLE_COMMIT_OUTCOME_UNKNOWN", "Oracle提交结果需要对账", executeErr)
+		}
+		if inspectErr == nil && control == reportrepo.RunControlCancelRequested {
+			return processor.finishCancelled(ctx, runID, leaseToken)
+		}
+		if errors.Is(executeErr, context.Canceled) && control == reportrepo.RunControlLeaseLost {
+			return nil
+		}
+		return processor.finishFailure(ctx, runID, leaseToken, "ORACLE_EXECUTION_FAILED", "Oracle存储过程执行失败", executeErr)
+	}
+	finishedAt := processor.now().UTC()
+	stateCtx, stateCancel = processor.stateContext(ctx)
+	err = processor.store.MarkExecutionSucceeded(stateCtx, runID, leaseToken, rowCount, finishedAt, finishedAt.Add(processor.resultRetention))
+	stateCancel()
+	if err == nil {
+		return nil
+	}
+	confirmCtx, confirmCancel := processor.stateContext(ctx)
+	confirmed, confirmErr := processor.store.ConfirmExecutionSucceeded(confirmCtx, runID, rowCount)
+	confirmCancel()
+	if confirmErr == nil && confirmed {
+		return nil
+	}
+	unknownErr := processor.finishUnknown(ctx, runID, leaseToken, "MYSQL_SUCCESS_OUTCOME_UNKNOWN", "运行成功状态需要对账", err)
+	if errors.Is(unknownErr, reportrepo.ErrReportRunLeaseLost) {
+		return fmt.Errorf("%w: success state could not be confirmed", ErrReportRunProcessNonRetryable)
+	}
+	return unknownErr
+}
+
+func (processor *ReportRunProcessor) finishPreOracleFailure(ctx context.Context, runID uint, leaseToken string, retryAllowed bool, cause error) error {
+	stateCtx, cancel := processor.stateContext(ctx)
+	defer cancel()
+	if !retryAllowed {
+		if err := processor.store.MarkExecutionFailed(stateCtx, runID, leaseToken, "PRE_ORACLE_RETRIES_EXHAUSTED", "报表运行暂时不可用", processor.now().UTC()); err != nil {
+			if errors.Is(err, reportrepo.ErrReportRunLeaseLost) {
+				return nil
+			}
+			return fmt.Errorf("%w: failure state persistence failed", ErrReportRunProcessNonRetryable)
+		}
+		return fmt.Errorf("%w: 报表运行暂时不可用", ErrReportRunProcessNonRetryable)
+	}
+	if err := processor.store.ReleaseExecutionForRetry(stateCtx, runID, leaseToken, processor.now().UTC()); err != nil {
+		if errors.Is(err, reportrepo.ErrReportRunLeaseLost) {
+			return nil
+		}
+		return errReportRunWorkerTemporary
+	}
+	return errReportRunWorkerTemporary
+}
+
+func (processor *ReportRunProcessor) restoreParameters(run model.ReportRun, definitions []reporting.ParameterDefinition) (map[string]interface{}, error) {
+	publicValues, err := decodeParameterSnapshot([]byte(run.NormalizedParametersJSON))
+	if err != nil {
+		return nil, err
+	}
+	for _, definition := range definitions {
+		if definition.SystemInjected {
+			delete(publicValues, definition.Code)
+		}
+	}
+	if run.SensitiveParametersCipher != "" || run.SensitiveParametersKeyVersion != "" {
+		if run.SensitiveParametersCipher == "" || run.SensitiveParametersKeyVersion == "" {
+			return nil, fmt.Errorf("sensitive parameter snapshot is incomplete")
+		}
+		plaintext, err := processor.parameters.Decrypt(run.SensitiveParametersKeyVersion, run.SensitiveParametersCipher)
+		if err != nil {
+			return nil, err
+		}
+		sensitive, err := decodeParameterSnapshot(plaintext)
+		if err != nil {
+			return nil, err
+		}
+		for code, value := range sensitive {
+			if _, duplicate := publicValues[code]; duplicate {
+				return nil, fmt.Errorf("parameter %q appears in two snapshots", code)
+			}
+			publicValues[code] = value
+		}
+	}
+	normalized, err := reporting.NormalizeParameters(definitions, publicValues, map[string]interface{}{"runId": run.RunUUID})
+	if err != nil {
+		return nil, err
+	}
+	return normalized.DatabaseValues, nil
+}
+
+func decodeParameterSnapshot(raw []byte) (map[string]json.RawMessage, error) {
+	result := make(map[string]json.RawMessage)
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&result); err != nil {
+		return nil, fmt.Errorf("decode report parameter snapshot: %w", err)
+	}
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		return nil, fmt.Errorf("decode report parameter snapshot: trailing data")
+	}
+	return result, nil
+}
+
+func (processor *ReportRunProcessor) startMonitor(ctx context.Context, cancel context.CancelFunc, runID uint, leaseToken string) <-chan struct{} {
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		ticker := time.NewTicker(processor.heartbeatInterval)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case heartbeatAt := <-ticker.C:
+				monitorCtx, monitorCancel := context.WithTimeout(context.WithoutCancel(ctx), processor.stateTimeout)
+				control, err := processor.store.HeartbeatExecution(monitorCtx, runID, leaseToken, heartbeatAt.UTC(), processor.leaseTTL)
+				monitorCancel()
+				if err != nil || control == reportrepo.RunControlCancelRequested || control == reportrepo.RunControlLeaseLost {
+					cancel()
+					return
+				}
+			}
+		}
+	}()
+	return done
+}
+
+func (processor *ReportRunProcessor) inspect(ctx context.Context, runID uint, leaseToken string) (reportrepo.RunControl, error) {
+	stateCtx, cancel := processor.stateContext(ctx)
+	defer cancel()
+	return processor.store.InspectExecution(stateCtx, runID, leaseToken)
+}
+
+func (processor *ReportRunProcessor) finishFailure(ctx context.Context, runID uint, leaseToken, code, safeMessage string, cause error) error {
+	stateCtx, cancel := processor.stateContext(ctx)
+	defer cancel()
+	if err := processor.store.MarkExecutionFailed(stateCtx, runID, leaseToken, code, safeMessage, processor.now().UTC()); err != nil {
+		if errors.Is(err, reportrepo.ErrReportRunLeaseLost) {
+			return nil
+		}
+		return errReportRunWorkerTemporary
+	}
+	return fmt.Errorf("%w: %s", ErrReportRunProcessNonRetryable, safeMessage)
+}
+
+func (processor *ReportRunProcessor) finishCancelled(ctx context.Context, runID uint, leaseToken string) error {
+	stateCtx, cancel := processor.stateContext(ctx)
+	defer cancel()
+	if err := processor.store.MarkExecutionCancelled(stateCtx, runID, leaseToken, processor.now().UTC()); err != nil && !errors.Is(err, reportrepo.ErrReportRunLeaseLost) {
+		return errReportRunWorkerTemporary
+	}
+	return nil
+}
+
+func (processor *ReportRunProcessor) finishUnknown(ctx context.Context, runID uint, leaseToken, code, safeMessage string, cause error) error {
+	stateCtx, cancel := processor.stateContext(ctx)
+	defer cancel()
+	if err := processor.store.MarkExecutionUnknown(stateCtx, runID, leaseToken, code, safeMessage, processor.now().UTC()); err != nil {
+		return fmt.Errorf("%w: state persistence failed", ErrReportRunProcessNonRetryable)
+	}
+	return fmt.Errorf("%w: %s", ErrReportRunProcessNonRetryable, safeMessage)
+}
+
+func (processor *ReportRunProcessor) stateContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(ctx), processor.stateTimeout)
+}
+
+var errOracleCommitOutcomeUnknown = errors.New("oracle report commit outcome unknown")
+
+type oracleReportProcedureExecutor struct{}
+
+func (oracleReportProcedureExecutor) Execute(ctx context.Context, request reportProcedureExecutionRequest, password string) (rowCount int64, resultErr error) {
+	adapter, err := reportoracle.Open(ctx, oracleConfigFromDatasource(request.Runtime.Datasource, password))
+	if err != nil {
+		return 0, err
+	}
+	defer func() { _ = adapter.Close() }()
+	procedureRef := reportoracle.ProcedureRef{Owner: request.Runtime.Version.ProcedureOwner, Package: request.Runtime.Version.PackageName, Name: request.Runtime.Version.ProcedureName, Overload: request.Runtime.Version.ProcedureOverload}
+	procedure, err := adapter.InspectProcedure(ctx, procedureRef)
+	if err != nil {
+		return 0, err
+	}
+	resultRef := reportoracle.ResultTableRef{Owner: request.Runtime.Version.ResultTableOwner, Name: request.Runtime.Version.ResultTableName}
+	resultColumns, err := adapter.InspectResultTable(ctx, resultRef)
+	if err != nil {
+		return 0, err
+	}
+	if err := reportcontract.VerifyRuntimeMetadata([]byte(request.Runtime.Version.CompiledSpecJSON), request.Runtime.Run.ContractHash, request.Runtime.Run.ProcedureSignatureHash, request.Runtime.Run.ResultSchemaHash, procedure, resultColumns); err != nil {
+		return 0, err
+	}
+	configuredColumns := make([]string, 0, len(request.Runtime.Columns))
+	for _, column := range request.Runtime.Columns {
+		configuredColumns = append(configuredColumns, column.DatabaseColumn)
+	}
+	snapshot, err := adapter.InspectResultSnapshotContract(ctx, reportoracle.ResultSnapshotRef{Table: resultRef, RunIDColumn: request.Runtime.Version.ResultRunIDColumn, RowIDColumn: request.Runtime.Version.ResultRowIDColumn, Columns: configuredColumns})
+	if err != nil {
+		return 0, err
+	}
+	plan, err := reportoracle.BuildCallPlan(procedureRef, request.Definitions)
+	if err != nil {
+		return 0, err
+	}
+	tx, err := adapter.BeginTx(ctx, &sql.TxOptions{})
+	if err != nil {
+		return 0, err
+	}
+	if err := adapter.Execute(ctx, tx, plan, request.Values); err != nil {
+		if rollbackErr := tx.Rollback(); rollbackErr != nil && !errors.Is(rollbackErr, sql.ErrTxDone) {
+			return 0, fmt.Errorf("%w: rollback after execution failure: %v", errOracleCommitOutcomeUnknown, rollbackErr)
+		}
+		return 0, err
+	}
+	countPlan, err := reportoracle.BuildResultCountPlan(snapshot)
+	if err != nil {
+		_ = tx.Rollback()
+		return 0, err
+	}
+	rowCount, err = adapter.CountResultRowsTx(ctx, tx, countPlan, request.Runtime.Run.RunUUID)
+	if err != nil {
+		_ = tx.Rollback()
+		return 0, err
+	}
+	receiptPlan, err := reportoracle.BuildRunReceiptPlan(request.Runtime.Version.ResultTableOwner)
+	if err != nil {
+		_ = tx.Rollback()
+		return 0, err
+	}
+	if err := adapter.WriteRunReceipt(ctx, tx, receiptPlan, reportoracle.RunReceipt{
+		RunID: request.Runtime.Run.RunUUID, ReportCode: request.Runtime.Definition.Code,
+		ContractHash: request.Runtime.Run.ContractHash, RowCount: rowCount, CompletedAt: time.Now().UTC(),
+	}); err != nil {
+		_ = tx.Rollback()
+		return 0, err
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("%w: %v", errOracleCommitOutcomeUnknown, err)
+	}
+	return rowCount, nil
+}

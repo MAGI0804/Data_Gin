@@ -34,6 +34,22 @@ func TestCompileProducesStablePublicationContract(t *testing.T) {
 	}
 }
 
+func TestVerifyRuntimeMetadataAcceptsPublishedContractAndRejectsDrift(t *testing.T) {
+	version, parameters, columns, grants, procedure, result := validContract()
+	contract := validSnapshotContract(t, version, result, columns)
+	compiled, err := Compile(version, parameters, columns, grants, procedure, result, contract)
+	if err != nil {
+		t.Fatalf("Compile() error = %v", err)
+	}
+	if err := VerifyRuntimeMetadata(compiled.SpecJSON, compiled.Hashes.Contract, compiled.Hashes.ProcedureSignature, compiled.Hashes.ResultSchema, procedure, result); err != nil {
+		t.Fatalf("VerifyRuntimeMetadata() error = %v", err)
+	}
+	procedure[0].Name = "P_WRONG"
+	if err := VerifyRuntimeMetadata(compiled.SpecJSON, compiled.Hashes.Contract, compiled.Hashes.ProcedureSignature, compiled.Hashes.ResultSchema, procedure, result); !errors.Is(err, ErrInvalidContract) {
+		t.Fatalf("procedure drift error = %v", err)
+	}
+}
+
 func TestCompileRejectsProcedureAndTemplateDrift(t *testing.T) {
 	version, parameters, columns, grants, arguments, result := validContract()
 	arguments[0].Name = "P_WRONG"

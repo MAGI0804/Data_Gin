@@ -231,11 +231,19 @@ type ReportRun struct {
 	CancelRequested               bool       `gorm:"column:cancel_requested;not null;default:false;index" json:"cancelRequested"`
 	Attempt                       int        `gorm:"column:attempt;not null;default:0" json:"attempt"`
 	WorkerID                      string     `gorm:"column:worker_id;size:128" json:"-"`
+	LeaseToken                    string     `gorm:"column:lease_token;type:char(36);index" json:"-"`
 	LeaseExpiresAt                *time.Time `gorm:"column:lease_expires_at;type:datetime(3);index" json:"-"`
 	HeartbeatAt                   *time.Time `gorm:"column:heartbeat_at;type:datetime(3)" json:"heartbeatAt"`
 	StartedAt                     *time.Time `gorm:"column:started_at;type:datetime(3)" json:"startedAt"`
+	OracleStartedAt               *time.Time `gorm:"column:oracle_started_at;type:datetime(3);index" json:"-"`
 	FinishedAt                    *time.Time `gorm:"column:finished_at;type:datetime(3)" json:"finishedAt"`
+	ResultExpiresAt               *time.Time `gorm:"column:result_expires_at;type:datetime(3);index" json:"resultExpiresAt"`
 	ResultPurgedAt                *time.Time `gorm:"column:result_purged_at;type:datetime(3)" json:"resultPurgedAt"`
+	UnknownAt                     *time.Time `gorm:"column:unknown_at;type:datetime(3);index" json:"unknownAt"`
+	UnknownReasonCode             string     `gorm:"column:unknown_reason_code;size:64" json:"unknownReasonCode"`
+	ReconcileAttempts             int        `gorm:"column:reconcile_attempts;not null;default:0" json:"reconcileAttempts"`
+	NextReconcileAt               *time.Time `gorm:"column:next_reconcile_at;type:datetime(3);index" json:"nextReconcileAt"`
+	LastReconciledAt              *time.Time `gorm:"column:last_reconciled_at;type:datetime(3)" json:"lastReconciledAt"`
 	ErrorCode                     string     `gorm:"column:error_code;size:64" json:"errorCode"`
 	ErrorMessageSafe              string     `gorm:"column:error_message_safe;type:text" json:"errorMessage"`
 	WeatherTimestamps

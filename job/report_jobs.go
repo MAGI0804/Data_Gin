@@ -11,9 +11,10 @@ import (
 )
 
 const (
-	TypeReportRun    = "report:run"
-	ReportQueueName  = "report"
-	ReportRunTimeout = 35 * time.Minute
+	TypeReportRun     = "report:run"
+	ReportQueueName   = "report"
+	ReportRunTimeout  = 35 * time.Minute
+	ReportRunMaxRetry = 3
 )
 
 type ReportRunTaskPayload struct {

@@ -34,7 +34,7 @@ func TestReportRunTaskAcceptsOnlyRunID(t *testing.T) {
 }
 
 func TestOutboxRegistryResolvesReportRun(t *testing.T) {
-	registry, err := NewOutboxTaskRegistry(ReportOutboxTaskDefinitions(0)...)
+	registry, err := NewOutboxTaskRegistry(ReportOutboxTaskDefinitions(ReportRunMaxRetry)...)
 	if err != nil {
 		t.Fatalf("NewOutboxTaskRegistry() error = %v", err)
 	}
@@ -43,7 +43,7 @@ func TestOutboxRegistryResolvesReportRun(t *testing.T) {
 		QueueName: ReportQueueName, PayloadJSON: model.JSONText(`{"run_id":31}`),
 	})
 	if err != nil || task.Type() != TypeReportRun || options.TaskID != "report:run:run-uuid" ||
-		options.Queue != ReportQueueName || options.Timeout != ReportRunTimeout || options.MaxRetry != 0 {
+		options.Queue != ReportQueueName || options.Timeout != ReportRunTimeout || options.MaxRetry != ReportRunMaxRetry {
 		t.Fatalf("Resolve() task=%#v options=%#v error=%v", task, options, err)
 	}
 	if options.Timeout != 35*time.Minute {

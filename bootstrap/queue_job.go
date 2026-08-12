@@ -33,13 +33,19 @@ func setupQueueJob() {
 	client := jobPkg.NewAsynqClient(redisAddr, redisUsername, redisPassword, redisDB)
 	global.QueueJobClient = client
 
+	reportWorkerEnabled := config.GetBool("cfg.queue_job.report_worker.enabled")
+	queues := reportWorkerQueues(
+		config.Get("cfg.queue_job.config_opt.queues").(map[string]int),
+		reportWorkerEnabled,
+		config.GetInt("cfg.queue_job.report_worker.queue_weight"),
+	)
 	server := jobPkg.NewAsynqServer(
 		redisAddr,
 		redisUsername,
 		redisPassword,
 		redisDB,
 		config.GetInt("cfg.queue_job.config_opt.concurrency"),
-		config.Get("cfg.queue_job.config_opt.queues").(map[string]int),
+		queues,
 	)
 	global.QueueJobServer = server
 
@@ -47,6 +53,10 @@ func setupQueueJob() {
 	mux.Use(jobLoggingMiddleware)
 
 	addQueueJob(mux)
+	if reportWorkerEnabled {
+		reportProcessor := data_svc.NewReportRunProcessor()
+		mux.HandleFunc(job.TypeReportRun, newReportRunHandler(reportProcessor))
+	}
 	if cleanupTask, err := job.NewExcelMatchCleanupTask(); err != nil {
 		console.Warning("Failed to create initial Excel match cleanup task: %v", err)
 	} else if _, err := client.Enqueue(cleanupTask); err != nil && !errors.Is(err, asynq.ErrDuplicateTask) {
@@ -98,7 +108,7 @@ func setupQueueJob() {
 		}
 	}(mux, server)
 
-	startOutboxDispatcher(false)
+	startOutboxDispatcher(reportWorkerEnabled)
 
 }
 
@@ -128,6 +138,48 @@ type mallWeatherExportCleaner interface {
 
 type excelMatchCleanupRunner interface {
 	CleanupExpiredJobs(context.Context) error
+}
+
+type reportRunProcessor interface {
+	Process(context.Context, uint, bool) error
+}
+
+func reportWorkerQueues(configured map[string]int, enabled bool, weight int) map[string]int {
+	queues := make(map[string]int, len(configured)+1)
+	for name, value := range configured {
+		if name != job.ReportQueueName {
+			queues[name] = value
+		}
+	}
+	if enabled {
+		if weight <= 0 {
+			weight = 2
+		}
+		queues[job.ReportQueueName] = weight
+	}
+	return queues
+}
+
+func newReportRunHandler(processor reportRunProcessor) asynq.HandlerFunc {
+	return func(ctx context.Context, task *asynq.Task) error {
+		if processor == nil {
+			return fmt.Errorf("report run handler: processor is not configured")
+		}
+		if task == nil || task.Type() != job.TypeReportRun {
+			return fmt.Errorf("%w: invalid report run task", asynq.SkipRetry)
+		}
+		payload, err := job.DecodeReportRunTaskPayload(task.Payload())
+		if err != nil {
+			return fmt.Errorf("%w: %v", asynq.SkipRetry, err)
+		}
+		if err := processor.Process(ctx, payload.RunID, mallWeatherExportRetryAllowed(ctx)); err != nil {
+			if errors.Is(err, data_svc.ErrReportRunProcessNonRetryable) {
+				return fmt.Errorf("%w: %v", asynq.SkipRetry, err)
+			}
+			return err
+		}
+		return nil
+	}
 }
 
 func newExcelMatchCleanupHandler(cleaner excelMatchCleanupRunner) asynq.HandlerFunc {

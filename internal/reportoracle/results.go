@@ -70,6 +70,10 @@ type PurgePlan struct {
 	statement string
 }
 
+type ResultCountPlan struct {
+	statement string
+}
+
 func (adapter *Adapter) InspectResultSnapshotContract(
 	ctx context.Context,
 	ref ResultSnapshotRef,
@@ -156,6 +160,44 @@ func BuildPurgePlan(contract ResultSnapshotContract) (PurgePlan, error) {
 		contract.table.Owner, contract.table.Name, contract.table.Owner, contract.table.Name, contract.runIDColumn,
 	)
 	return PurgePlan{statement: statement}, nil
+}
+
+func BuildResultCountPlan(contract ResultSnapshotContract) (ResultCountPlan, error) {
+	if contract.table.Owner == "" || contract.table.Name == "" || contract.runIDColumn == "" {
+		return ResultCountPlan{}, configurationError("result snapshot contract is not validated")
+	}
+	return ResultCountPlan{statement: fmt.Sprintf(
+		"SELECT COUNT(*) FROM %s.%s WHERE %s = :1",
+		contract.table.Owner, contract.table.Name, contract.runIDColumn,
+	)}, nil
+}
+
+func (adapter *Adapter) CountResultRows(ctx context.Context, plan ResultCountPlan, runID string) (int64, error) {
+	if adapter == nil || adapter.db == nil || strings.TrimSpace(plan.statement) == "" || strings.TrimSpace(runID) == "" {
+		return 0, fmt.Errorf("count oracle report result rows: invalid request")
+	}
+	var count int64
+	if err := adapter.db.QueryRowContext(ctx, plan.statement, runID).Scan(&count); err != nil {
+		return 0, fmt.Errorf("count oracle report result rows: %w", err)
+	}
+	if count < 0 {
+		return 0, fmt.Errorf("count oracle report result rows: invalid count")
+	}
+	return count, nil
+}
+
+func (adapter *Adapter) CountResultRowsTx(ctx context.Context, tx *sql.Tx, plan ResultCountPlan, runID string) (int64, error) {
+	if adapter == nil || tx == nil || strings.TrimSpace(plan.statement) == "" || strings.TrimSpace(runID) == "" {
+		return 0, fmt.Errorf("count oracle report result rows: invalid transaction request")
+	}
+	var count int64
+	if err := tx.QueryRowContext(ctx, plan.statement, runID).Scan(&count); err != nil {
+		return 0, fmt.Errorf("count oracle report result rows: %w", err)
+	}
+	if count < 0 {
+		return 0, fmt.Errorf("count oracle report result rows: invalid count")
+	}
+	return count, nil
 }
 
 func (adapter *Adapter) ReadResultPage(
