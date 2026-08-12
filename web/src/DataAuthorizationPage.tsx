@@ -1,5 +1,5 @@
-import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Check, Clipboard, KeyRound, Plus, RefreshCcw, RotateCcw, Search, UserRound } from 'lucide-react'
+import { FormEvent, useCallback, useEffect, useRef, useState } from 'react'
+import { Check, Clipboard, KeyRound, Plus, RefreshCcw, RotateCcw } from 'lucide-react'
 import {
   authorizationExpiryISO,
   buildDataAuthorizationAuditQuery,
@@ -16,7 +16,8 @@ import {
   type DataAuthorizationPermission,
   type DataPermissionCode,
 } from './dataAuthorization'
-import './DataAuthorizationPage.css'
+import { DataTable, Dialog, FeedbackState, FilterToolbar, MasterDetail, Section, StatusTag } from './ui'
+import styles from './DataAuthorizationPage.module.css'
 
 type ApiResult = { ok: boolean; status: number; data: unknown }
 type ApiClient = (path: string, options?: {
@@ -314,167 +315,28 @@ export function DataAuthorizationPage({ client }: { client: ApiClient }) {
     setNotice('已取消授权审计查询，保留最近一次成功数据。')
   }
 
-  return (
-    <div className="view-stack data-authorization-page" aria-busy={loading || mutating}>
-      <section className="data-authorization-toolbar">
-        <div>
-          <span className="eyebrow">ADMIN CONTROLLED ACCESS</span>
-          <strong>账号由管理员创建，开放用户不进入内部控制台。</strong>
-        </div>
-        <div className="record-actions">
-          <button type="button" onClick={() => void loadAccounts({ search: keyword })} disabled={loading}><RefreshCcw aria-hidden="true" />刷新</button>
-          <button className="primary" type="button" onClick={() => setCreateOpen(true)}><Plus aria-hidden="true" />开通开放 API 账号</button>
-        </div>
-      </section>
-
-      {(error || notice) && <div className={error ? 'data-authorization-banner error' : 'data-authorization-banner'} role={error ? 'alert' : 'status'} aria-live="polite">{error || notice}</div>}
-
-      <section className="data-authorization-layout">
-        <aside className="workbench-panel data-authorization-account-panel" aria-label="开放接口账号列表">
-          <div className="panel-title"><UserRound aria-hidden="true" /><div><h3>开放接口账号</h3><span>{accounts.length} 个已加载账号</span></div></div>
-          <form className="data-authorization-search" onSubmit={(event) => { event.preventDefault(); void loadAccounts({ search: keyword }) }}>
-            <label><span className="sr-only">搜索账号</span><Search aria-hidden="true" /><input value={keyword} onChange={(event) => setKeyword(event.currentTarget.value)} placeholder="账号、邮箱或名称" /></label>
-            <button type="submit">查询</button>
-          </form>
-          {loading && accounts.length === 0 && <div className="data-authorization-skeleton" aria-label="账号加载中" />}
-          {!loading && accounts.length === 0 && !error && <div className="empty-state">暂无开放接口账号，请先由管理员开通。</div>}
-          <div className="data-authorization-account-list">
-            {accounts.map((account) => (
-              <button className={selected?.id === account.id ? 'data-authorization-account active' : 'data-authorization-account'} type="button" key={account.id} onClick={() => setSelectedID(account.id)}>
-                <span><strong>{account.nickname || account.account}</strong><small>{account.account}</small></span>
-                <em data-active={account.credentialStatus === 'ACTIVE'}>{account.credentialStatus === 'ACTIVE' ? '凭证有效' : '已撤销'}</em>
-              </button>
-            ))}
-          </div>
-          {pagination.hasMore && <button type="button" onClick={() => void loadAccounts({ append: true })} disabled={loading}>加载更多</button>}
-        </aside>
-
-        <section className="workbench-panel data-authorization-detail">
-          {selected ? <>
-            <div className="data-authorization-account-heading">
-              <div><h3>{selected.nickname || selected.account}</h3><p>{selected.account} <span className={selected.credentialStatus === 'ACTIVE' ? 'data-authorization-live-status' : 'data-authorization-live-status revoked'}>{selected.credentialStatus === 'ACTIVE' ? '凭证有效' : '凭证已撤销'}</span></p></div>
-              <div className="record-actions"><button type="button" onClick={() => setActionDialog({ kind: 'reissue' })}><RotateCcw aria-hidden="true" />重签 Token</button></div>
-            </div>
-            <dl className="data-authorization-credential"><div><dt>Token 标识</dt><dd><code>{selected.tokenPrefix || '-'}</code></dd></div><div><dt>签发时间</dt><dd>{formatDateTime(selected.issuedAt)}</dd></div><div><dt>权限范围</dt><dd>仅开放接口，不允许登录控制台</dd></div></dl>
-            <div className="data-authorization-permissions">
-              {permissionCatalog.map((catalog) => {
-                const permission = selected.permissions.find((item) => item.permission === catalog.permission) ?? fallbackPermission(catalog.permission, catalog.label)
-                return <PermissionRow key={catalog.permission} permission={permission} description={catalog.description} onGrant={() => setActionDialog({ kind: 'grant', permission: catalog.permission })} onRevoke={() => setActionDialog({ kind: 'revoke', permission: catalog.permission })} />
-              })}
-            </div>
-          </> : <div className="empty-state">从左侧选择一个账号查看授权详情。</div>}
-        </section>
-      </section>
-
-      <section className="workbench-panel data-authorization-audits">
-        <div className="data-authorization-audit-heading"><h3>授权审计</h3><span>{appliedAuditFilters.targetUserId ? `目标账号 #${appliedAuditFilters.targetUserId}` : '最近变更'}</span></div>
-        <details className="data-authorization-audit-filters">
-          <summary>筛选审计记录</summary>
-          <form className="query-bar" onSubmit={submitAuditFilters} aria-label="授权审计筛选">
-            <div className="query-fields">
-              <label>目标账号
-                <select value={String(auditFilters.targetUserId)} disabled={auditLoading} onChange={(event) => setAuditFilters((current) => ({ ...current, targetUserId: Number(event.currentTarget.value) || 0 }))}>
-                  <option value="0">全部已加载账号</option>
-                  {accounts.map((account) => <option value={account.id} key={account.id}>{account.account}</option>)}
-                </select>
-              </label>
-              <label>审计动作
-                <select value={auditFilters.action} disabled={auditLoading} onChange={(event) => setAuditFilters((current) => ({ ...current, action: event.currentTarget.value as DataAuthorizationAuditAction | '' }))}>
-                  <option value="">全部动作</option>
-                  {dataAuthorizationAuditActions.map((action) => <option value={action} key={action}>{auditActionLabel(action)}</option>)}
-                </select>
-              </label>
-              <label>开始时间<input type="datetime-local" value={auditFilters.startTime} disabled={auditLoading} onChange={(event) => setAuditFilters((current) => ({ ...current, startTime: event.currentTarget.value }))} /></label>
-              <label>结束时间<input type="datetime-local" value={auditFilters.endTime} disabled={auditLoading} onChange={(event) => setAuditFilters((current) => ({ ...current, endTime: event.currentTarget.value }))} /></label>
-            </div>
-            <div className="record-actions"><button type="submit" disabled={auditLoading}>{auditLoading ? '查询中…' : '查询审计'}</button><button type="button" onClick={cancelAuditLoad} disabled={!auditLoading}>取消</button></div>
-          </form>
-        </details>
-        {audits.length === 0 ? <div className="empty-state">{auditLoading ? '授权审计加载中…' : '暂无匹配的授权变更记录。'}</div> : <div className="data-table-wrap"><table className="data-table"><thead><tr><th>时间</th><th>动作</th><th>账号</th><th>权限</th><th>有效期变更</th><th>原因</th></tr></thead><tbody>{audits.map((audit) => <tr key={audit.id}><td>{formatDateTime(audit.createdAt)}</td><td>{auditActionLabel(audit.action)}</td><td>{audit.targetAccount || `#${audit.targetUserId}`}</td><td>{permissionLabel(audit.permission)}</td><td>{formatAuditExpiry(audit)}</td><td className="data-authorization-reason">{audit.reason}</td></tr>)}</tbody></table></div>}
-        {auditPagination.hasMore && <div className="record-actions"><button type="button" disabled={auditLoading} onClick={() => void loadAudits(appliedAuditFilters, { append: true, beforeId: auditPagination.nextBeforeId })}>{auditLoading ? '加载中…' : '加载更早记录'}</button></div>}
-      </section>
-
-      {createOpen && <Modal title="开通开放 API 账号" closeDisabled={mutating} onClose={() => setCreateOpen(false)}><form className="data-authorization-form" onSubmit={createAccount}>
-        <label>账号<input name="account" required minLength={3} maxLength={40} pattern="[a-z0-9][a-z0-9_\-]{2,39}" placeholder="partner_weather_01" autoFocus /></label>
-        <label>显示名称<input name="nickname" required maxLength={64} placeholder="合作方天气账号" /></label>
-        <fieldset><legend>初始数据权限（可暂不授权）</legend>{permissionCatalog.map((item) => <label className="data-authorization-checkbox" key={item.permission}><input type="checkbox" name={item.permission} /><span><strong>{item.label}</strong><small>{item.description}</small></span></label>)}</fieldset>
-        <label>统一到期时间<input name="expiresAt" type="datetime-local" defaultValue={defaultAuthorizationExpiry()} /></label>
-        <label className="wide">开户原因<textarea name="reason" required maxLength={500} rows={3} placeholder="说明申请方、用途和审批依据" /></label>
-        <p className="data-authorization-warning wide"><KeyRound aria-hidden="true" />账号创建后只展示一次访问 Token，请立即复制并通过安全渠道交付。</p>
-        <div className="data-authorization-form-actions wide"><button type="button" onClick={() => setCreateOpen(false)} disabled={mutating}>取消</button><button className="primary" type="submit" disabled={mutating}>{mutating ? '正在开通…' : '确认开通'}</button></div>
-      </form></Modal>}
-
-      {actionDialog && selected && <Modal title={actionTitle(actionDialog)} closeDisabled={mutating} onClose={() => setActionDialog(null)}><form className="data-authorization-form single" onSubmit={submitAction}>
-        {actionDialog.kind === 'grant' && <label>授权到期时间<input name="expiresAt" type="datetime-local" defaultValue={defaultAuthorizationExpiry()} required autoFocus /></label>}
-        <label>操作原因<textarea name="reason" required maxLength={500} rows={4} autoFocus={actionDialog.kind !== 'grant'} placeholder="填写审批依据或撤销原因" /></label>
-        <div className="data-authorization-form-actions"><button type="button" onClick={() => setActionDialog(null)} disabled={mutating}>取消</button><button className={actionDialog.kind === 'revoke' ? 'danger' : 'primary'} type="submit" disabled={mutating}>{mutating ? '正在提交…' : '继续'}</button></div>
-      </form></Modal>}
-
-      {pendingAction && <Modal title={dangerousActionTitle(pendingAction)} closeDisabled={mutating} onClose={() => { setPendingAction(null); setDangerConfirmed(false) }}><form className="data-authorization-form single" onSubmit={(event) => { event.preventDefault(); if (dangerConfirmed) void submitAuthorizedAction(pendingAction) }}>
-        <p className="data-authorization-warning">{dangerousActionDescription(pendingAction)}</p>
-        <label className="data-authorization-checkbox"><input type="checkbox" checked={dangerConfirmed} disabled={mutating} onChange={(event) => setDangerConfirmed(event.currentTarget.checked)} /><span><strong>我已理解此操作的影响</strong><small>确认后将立即执行，且不能撤回。</small></span></label>
-        <div className="data-authorization-form-actions"><button type="button" onClick={() => { setPendingAction(null); setDangerConfirmed(false) }} disabled={mutating}>取消</button><button className="danger" type="submit" disabled={mutating || !dangerConfirmed}>{mutating ? '正在提交…' : '确认执行'}</button></div>
-      </form></Modal>}
-
-      {oneTimeToken && <Modal title="访问 Token（仅展示一次）" onClose={() => { setOneTimeToken(''); setTokenCopied(false) }}><div className="data-authorization-token" role="status"><p>关闭后无法再次查看。请现在复制，并通过安全渠道交付给接口调用方。</p><code>{oneTimeToken}</code><button className="primary" type="button" onClick={() => void copyToken()}>{tokenCopied ? <Check aria-hidden="true" /> : <Clipboard aria-hidden="true" />}{tokenCopied ? '已复制' : '复制 Token'}</button></div></Modal>}
-    </div>
-  )
+  const content = <div className={styles.page} aria-busy={loading || mutating}>
+    <div className={styles.embeddedHeader}><div><strong>开放 API 数据授权</strong><span>开放用户不进入内部控制台，访问 Token 仅展示一次。</span></div><div className={styles.actions}><button type="button" onClick={() => void loadAccounts({ search: keyword })} disabled={loading}><RefreshCcw aria-hidden="true" />刷新</button><button className={styles.primary} type="button" onClick={() => setCreateOpen(true)}><Plus aria-hidden="true" />开通账号</button></div></div>
+    {(error || notice) && <div className={error ? styles.errorBanner : styles.banner} role={error ? 'alert' : 'status'} aria-live="polite">{error || notice}</div>}
+    <Section title="开放接口账号" description="选择账号后维护天气、订单查询权限和访问凭证。" flush>
+      <MasterDetail className={styles.masterDetail} masterWidth={312} masterLabel="开放接口账号列表" detailLabel="开放接口账号详情" master={<div className={styles.masterPane}><form className={styles.search} onSubmit={(event) => { event.preventDefault(); void loadAccounts({ search: keyword }) }}><label><span>搜索账号</span><input value={keyword} onChange={(event) => setKeyword(event.currentTarget.value)} placeholder="账号、邮箱或名称" /></label><button type="submit" disabled={loading}>查询</button></form>{loading && accounts.length === 0 ? <FeedbackState kind="loading" title="正在加载账号" /> : null}<div className={styles.accountList}>{accounts.map((account) => <button className={selected?.id === account.id ? styles.selectedAccount : undefined} type="button" key={account.id} onClick={() => setSelectedID(account.id)}><span><strong>{account.nickname || account.account}</strong><small>{account.account}</small></span><StatusTag tone={account.credentialStatus === 'ACTIVE' ? 'success' : 'danger'}>{account.credentialStatus === 'ACTIVE' ? '凭证有效' : '已撤销'}</StatusTag></button>)}</div>{!loading && accounts.length === 0 && !error ? <FeedbackState kind="empty" title="暂无开放接口账号" /> : null}{pagination.hasMore ? <button className={styles.loadMore} type="button" onClick={() => void loadAccounts({ append: true })} disabled={loading}>加载更多</button> : null}</div>}
+        detail={<div className={styles.detailPane}>{selected ? <><header className={styles.accountHeading}><div><h3>{selected.nickname || selected.account}</h3><p>{selected.account}</p></div><button type="button" onClick={() => setActionDialog({ kind: 'reissue' })}><RotateCcw aria-hidden="true" />重签 Token</button></header><dl className={styles.credential}><div><dt>Token 标识</dt><dd><code>{selected.tokenPrefix || '-'}</code></dd></div><div><dt>签发时间</dt><dd>{formatDateTime(selected.issuedAt)}</dd></div><div><dt>权限范围</dt><dd>仅开放接口，不允许登录控制台</dd></div></dl><div className={styles.permissions}>{permissionCatalog.map((catalog) => { const permission = selected.permissions.find((item) => item.permission === catalog.permission) ?? fallbackPermission(catalog.permission, catalog.label); return <PermissionRow key={catalog.permission} permission={permission} description={catalog.description} onGrant={() => setActionDialog({ kind: 'grant', permission: catalog.permission })} onRevoke={() => setActionDialog({ kind: 'revoke', permission: catalog.permission })} /> })}</div></> : <FeedbackState kind="empty" title="请选择开放接口账号" description="从左侧账号列表选择后查看授权详情。" />}</div>} />
+    </Section>
+    <Section title="授权审计" description={appliedAuditFilters.targetUserId ? `当前筛选目标账号 #${appliedAuditFilters.targetUserId}` : '最近授权变更'} flush><details className={styles.auditFilters}><summary>筛选审计记录</summary><FilterToolbar><form className={styles.auditForm} onSubmit={submitAuditFilters} aria-label="授权审计筛选"><label>目标账号<select value={String(auditFilters.targetUserId)} disabled={auditLoading} onChange={(event) => setAuditFilters((current) => ({ ...current, targetUserId: Number(event.currentTarget.value) || 0 }))}><option value="0">全部已加载账号</option>{accounts.map((account) => <option value={account.id} key={account.id}>{account.account}</option>)}</select></label><label>审计动作<select value={auditFilters.action} disabled={auditLoading} onChange={(event) => setAuditFilters((current) => ({ ...current, action: event.currentTarget.value as DataAuthorizationAuditAction | '' }))}><option value="">全部动作</option>{dataAuthorizationAuditActions.map((action) => <option value={action} key={action}>{auditActionLabel(action)}</option>)}</select></label><label>开始时间<input type="datetime-local" value={auditFilters.startTime} disabled={auditLoading} onChange={(event) => setAuditFilters((current) => ({ ...current, startTime: event.currentTarget.value }))} /></label><label>结束时间<input type="datetime-local" value={auditFilters.endTime} disabled={auditLoading} onChange={(event) => setAuditFilters((current) => ({ ...current, endTime: event.currentTarget.value }))} /></label><button type="submit" disabled={auditLoading}>{auditLoading ? '查询中…' : '查询审计'}</button><button type="button" onClick={cancelAuditLoad} disabled={!auditLoading}>取消</button></form></FilterToolbar></details>{audits.length === 0 ? <FeedbackState kind={auditLoading ? 'loading' : 'empty'} title={auditLoading ? '授权审计加载中' : '暂无匹配的授权变更记录'} /> : <DataTable scrollLabel="数据授权审计记录"><thead><tr><th scope="col">时间</th><th scope="col">动作</th><th scope="col">账号</th><th scope="col">权限</th><th scope="col">有效期变更</th><th scope="col">原因</th></tr></thead><tbody>{audits.map((audit) => <tr key={audit.id}><td>{formatDateTime(audit.createdAt)}</td><td>{auditActionLabel(audit.action)}</td><td>{audit.targetAccount || `#${audit.targetUserId}`}</td><td>{permissionLabel(audit.permission)}</td><td>{formatAuditExpiry(audit)}</td><td className={styles.reason}>{audit.reason}</td></tr>)}</tbody></DataTable>}{auditPagination.hasMore ? <div className={styles.more}><button type="button" disabled={auditLoading} onClick={() => void loadAudits(appliedAuditFilters, { append: true, beforeId: auditPagination.nextBeforeId })}>{auditLoading ? '加载中…' : '加载更早记录'}</button></div> : null}</Section>
+    <Dialog open={createOpen} title="开通开放 API 账号" closeDisabled={mutating} onClose={() => setCreateOpen(false)}><form className={styles.form} onSubmit={createAccount}><Field label="账号"><input name="account" required minLength={3} maxLength={40} pattern="[a-z0-9][a-z0-9_\-]{2,39}" placeholder="partner_weather_01" autoFocus /></Field><Field label="显示名称"><input name="nickname" required maxLength={64} placeholder="合作方天气账号" /></Field><fieldset><legend>初始数据权限（可暂不授权）</legend>{permissionCatalog.map((item) => <label className={styles.checkbox} key={item.permission}><input type="checkbox" name={item.permission} /><span><strong>{item.label}</strong><small>{item.description}</small></span></label>)}</fieldset><Field label="统一到期时间"><input name="expiresAt" type="datetime-local" defaultValue={defaultAuthorizationExpiry()} /></Field><Field label="开户原因"><textarea name="reason" required maxLength={500} rows={3} placeholder="说明申请方、用途和审批依据" /></Field><p className={styles.warning}><KeyRound aria-hidden="true" />账号创建后只展示一次访问 Token，请立即复制并通过安全渠道交付。</p><div className={styles.formActions}><button type="button" onClick={() => setCreateOpen(false)} disabled={mutating}>取消</button><button className={styles.primary} type="submit" disabled={mutating}>{mutating ? '正在开通…' : '确认开通'}</button></div></form></Dialog>
+    <Dialog open={Boolean(actionDialog && selected)} title={actionDialog ? actionTitle(actionDialog) : '数据授权操作'} closeDisabled={mutating} onClose={() => setActionDialog(null)}><form className={styles.form} onSubmit={submitAction}>{actionDialog?.kind === 'grant' ? <Field label="授权到期时间"><input name="expiresAt" type="datetime-local" defaultValue={defaultAuthorizationExpiry()} required autoFocus /></Field> : null}<Field label="操作原因"><textarea name="reason" required maxLength={500} rows={4} autoFocus={actionDialog?.kind !== 'grant'} placeholder="填写审批依据或撤销原因" /></Field><div className={styles.formActions}><button type="button" onClick={() => setActionDialog(null)} disabled={mutating}>取消</button><button className={actionDialog?.kind === 'revoke' ? styles.danger : styles.primary} type="submit" disabled={mutating}>{mutating ? '正在提交…' : '继续'}</button></div></form></Dialog>
+    <Dialog open={Boolean(pendingAction)} role="alertdialog" title={pendingAction ? dangerousActionTitle(pendingAction) : '确认危险操作'} closeDisabled={mutating} onClose={() => { setPendingAction(null); setDangerConfirmed(false) }}><form className={styles.form} onSubmit={(event) => { event.preventDefault(); if (pendingAction && dangerConfirmed) void submitAuthorizedAction(pendingAction) }}><p className={styles.warning}>{pendingAction ? dangerousActionDescription(pendingAction) : ''}</p><label className={styles.checkbox}><input type="checkbox" checked={dangerConfirmed} disabled={mutating} onChange={(event) => setDangerConfirmed(event.currentTarget.checked)} /><span><strong>我已理解此操作的影响</strong><small>确认后将立即执行，且不能撤回。</small></span></label><div className={styles.formActions}><button type="button" onClick={() => { setPendingAction(null); setDangerConfirmed(false) }} disabled={mutating}>取消</button><button className={styles.danger} type="submit" disabled={mutating || !dangerConfirmed}>{mutating ? '正在提交…' : '确认执行'}</button></div></form></Dialog>
+    <Dialog open={Boolean(oneTimeToken)} title="访问 Token（仅展示一次）" onClose={() => { setOneTimeToken(''); setTokenCopied(false) }}><div className={styles.token} role="status"><p>关闭后无法再次查看。请现在复制，并通过安全渠道交付给接口调用方。</p><code>{oneTimeToken}</code><button className={styles.primary} type="button" onClick={() => void copyToken()}>{tokenCopied ? <Check aria-hidden="true" /> : <Clipboard aria-hidden="true" />}{tokenCopied ? '已复制' : '复制 Token'}</button></div></Dialog>
+  </div>
+  return content
 }
 
 function PermissionRow({ permission, description, onGrant, onRevoke }: { permission: DataAuthorizationPermission; description: string; onGrant: () => void; onRevoke: () => void }) {
   const active = permission.status === 'ACTIVE'
-  return <article className="data-authorization-permission"><div className="data-authorization-permission-copy"><div className="data-authorization-permission-title"><strong>{permission.label}</strong><span className={`status-pill ${permission.status.toLowerCase()}`}>{permissionStatusLabel(permission.status)}</span></div><p>{description}</p></div><div className="data-authorization-permission-scope"><span>范围</span><strong>{permission.scope || '-'}</strong></div><div className="data-authorization-permission-expiry"><span>到期时间</span><strong>{formatDateTime(permission.expiresAt)}</strong></div><div className="record-actions"><button type="button" onClick={onGrant}>{active ? '续期' : '授权'}</button>{permission.status !== 'NOT_GRANTED' && <button className="danger" type="button" onClick={onRevoke}>撤销</button>}</div></article>
+  return <article className={styles.permission}><div className={styles.permissionCopy}><div className={styles.permissionTitle}><strong>{permission.label}</strong><StatusTag tone={active ? 'success' : permission.status === 'EXPIRED' ? 'warning' : 'neutral'}>{permissionStatusLabel(permission.status)}</StatusTag></div><p>{description}</p></div><div><span>范围</span><strong>{permission.scope || '-'}</strong></div><div><span>到期时间</span><strong>{formatDateTime(permission.expiresAt)}</strong></div><div className={styles.actions}><button type="button" onClick={onGrant}>{active ? '续期' : '授权'}</button>{permission.status !== 'NOT_GRANTED' && <button className={styles.danger} type="button" onClick={onRevoke}>撤销</button>}</div></article>
 }
 
-function Modal({ title, children, onClose, closeDisabled = false }: { title: string; children: React.ReactNode; onClose: () => void; closeDisabled?: boolean }) {
-  const panelRef = useRef<HTMLElement>(null)
-  const returnFocusRef = useRef<HTMLElement | null>(document.activeElement instanceof HTMLElement ? document.activeElement : null)
-  const titleID = useMemo(() => `data-authorization-modal-${Math.random().toString(36).slice(2)}`, [])
-  const onCloseRef = useRef(onClose)
-  const closeDisabledRef = useRef(closeDisabled)
-  onCloseRef.current = onClose
-  closeDisabledRef.current = closeDisabled
-
-  useEffect(() => {
-    const previousOverflow = document.body.style.overflow
-    const returnFocus = returnFocusRef.current
-    const focusableSelector = 'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
-    const handleKeyDown = (event: KeyboardEvent) => {
-      if (event.key === 'Escape') {
-        event.preventDefault()
-        if (!closeDisabledRef.current) onCloseRef.current()
-        return
-      }
-      if (event.key !== 'Tab') return
-      const focusable = Array.from(panelRef.current?.querySelectorAll<HTMLElement>(focusableSelector) ?? [])
-      if (focusable.length === 0) {
-        event.preventDefault()
-        panelRef.current?.focus()
-        return
-      }
-      const first = focusable[0]
-      const last = focusable[focusable.length - 1]
-      if (event.shiftKey && document.activeElement === first) {
-        event.preventDefault()
-        last.focus()
-      } else if (!event.shiftKey && document.activeElement === last) {
-        event.preventDefault()
-        first.focus()
-      }
-    }
-    document.body.style.overflow = 'hidden'
-    window.addEventListener('keydown', handleKeyDown)
-    const initialFocus = panelRef.current?.querySelector<HTMLElement>(focusableSelector)
-    initialFocus?.focus()
-    return () => {
-      document.body.style.overflow = previousOverflow
-      window.removeEventListener('keydown', handleKeyDown)
-      returnFocus?.focus()
-    }
-  }, [])
-
-  return <div className="modal-backdrop" role="presentation"><section ref={panelRef} className="modal-panel data-authorization-modal" role="dialog" aria-modal="true" aria-labelledby={titleID} tabIndex={-1}><div className="modal-title"><h3 id={titleID}>{title}</h3><button type="button" onClick={onClose} disabled={closeDisabled} aria-label={`关闭${title}`}>关闭</button></div><div className="modal-body">{children}</div></section></div>
-}
+function Field({ label, children }: { label: string; children: React.ReactNode }) { return <label className={styles.field}><span>{label}</span>{children}</label> }
 
 function responseData(payload: unknown) { return payload && typeof payload === 'object' && !Array.isArray(payload) && (payload as { data?: unknown }).data && typeof (payload as { data?: unknown }).data === 'object' ? (payload as { data: Record<string, unknown> }).data : null }
 function formString(form: FormData, key: string) { const value = form.get(key); return typeof value === 'string' ? value.trim() : '' }

@@ -1,0 +1,57 @@
+.page { min-width: 0; }
+.embeddedHeader { display: flex; gap: var(--space-4); align-items: flex-start; justify-content: space-between; padding-block: var(--space-4); border-bottom: 1px solid var(--color-border); }
+.embeddedHeader > div:first-child { display: grid; gap: var(--space-1); }
+.embeddedHeader strong { font-size: 16px; }
+.embeddedHeader span { color: var(--color-text-secondary); font-size: 13px; }
+.actions { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; }
+.primary { border-color: var(--color-brand-active); color: #fff; background: var(--color-brand-active); }
+.danger { border-color: var(--color-danger); color: var(--color-danger); background: var(--color-canvas); }
+.banner, .errorBanner { margin-block-start: var(--space-3); border-inline-start: 3px solid var(--color-brand-active); background: var(--color-brand-soft); padding: var(--space-2) var(--space-3); font-size: 13px; }
+.errorBanner { border-inline-start-color: var(--color-danger); color: var(--color-danger); background: #fff5f4; }
+.masterDetail { min-height: 480px; }
+.masterPane, .detailPane { min-width: 0; padding-block: var(--space-4); }
+.masterPane { padding-inline-end: var(--space-4); }
+.search { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--space-2); align-items: end; }
+.field, .search label, .auditForm label { display: grid; gap: var(--space-1); min-width: 0; color: var(--color-text-secondary); font-size: 12px; font-weight: 650; }
+.field :is(input, textarea, select), .search input, .auditForm :is(input, select) { width: 100%; border: 1px solid var(--color-border-strong); background: var(--color-canvas); padding-inline: var(--space-3); }
+.field textarea { padding-block: var(--space-2); resize: vertical; }
+.accountList { display: grid; margin-block-start: var(--space-3); border-top: 1px solid var(--color-border); }
+.accountList > button { display: flex; justify-content: space-between; width: 100%; min-height: 64px; gap: var(--space-2); border: 0; border-bottom: 1px solid var(--color-border); border-radius: 0; background: transparent; text-align: left; }
+.accountList > button > span, .accountList strong, .accountList small { display: block; min-width: 0; }
+.accountList small { margin-block-start: var(--space-1); color: var(--color-text-secondary); font-size: 11px; font-weight: 500; }
+.accountList > .selectedAccount { border-inline-start: 3px solid var(--color-brand-active); background: var(--color-brand-soft); padding-inline-start: calc(var(--space-3) - 3px); }
+.loadMore { width: 100%; margin-block-start: var(--space-3); }
+.accountHeading { display: flex; gap: var(--space-4); align-items: flex-start; justify-content: space-between; padding-block-end: var(--space-4); border-bottom: 1px solid var(--color-border); }
+.accountHeading h3 { margin: 0 0 var(--space-1); font-size: 22px; }
+.accountHeading p { margin: 0; color: var(--color-text-secondary); }
+.credential { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); margin: var(--space-4) 0; border-block: 1px solid var(--color-border); }
+.credential > div { min-width: 0; padding: var(--space-3); }
+.credential > div + div { border-inline-start: 1px solid var(--color-border); }
+.credential dt, .permission > div > span { color: var(--color-text-secondary); font-size: 11px; font-weight: 650; }
+.credential dd { margin: var(--space-1) 0 0; overflow-wrap: anywhere; font-size: 12px; }
+.permissions { display: grid; border-top: 1px solid var(--color-border); }
+.permission { display: grid; grid-template-columns: minmax(220px, 1.5fr) minmax(110px, .7fr) minmax(150px, .8fr) auto; gap: var(--space-4); align-items: center; padding-block: var(--space-3); border-bottom: 1px solid var(--color-border); }
+.permission > div { display: grid; gap: var(--space-1); min-width: 0; }
+.permission > div > strong { overflow-wrap: anywhere; font-size: 12px; }
+.permissionCopy p { margin: 0; color: var(--color-text-secondary); font-size: 12px; line-height: 1.5; }
+.permissionTitle { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; }
+.auditFilters { border-bottom: 1px solid var(--color-border); }
+.auditFilters summary { width: fit-content; cursor: pointer; padding-block: var(--space-3); color: var(--color-text-secondary); font-size: 13px; }
+.auditForm { display: flex; flex: 1 1 auto; flex-wrap: wrap; gap: var(--space-2); align-items: end; }
+.auditForm label { min-width: 170px; }
+.reason { max-width: 360px; white-space: normal; overflow-wrap: anywhere; }
+.more { display: flex; justify-content: center; padding-block: var(--space-4); border-top: 1px solid var(--color-border); }
+.form { display: grid; gap: var(--space-3); }
+.form fieldset { display: grid; gap: var(--space-2); margin: 0; border: 1px solid var(--color-border); padding: var(--space-3); }
+.form legend { padding-inline: var(--space-1); font-size: 12px; font-weight: 650; }
+.checkbox { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: var(--space-2); align-items: start; color: var(--color-text); font-size: 13px; font-weight: 500; }
+.checkbox span, .checkbox strong, .checkbox small { display: block; }
+.checkbox small { margin-block-start: var(--space-1); color: var(--color-text-secondary); font-weight: 500; }
+.warning { display: flex; gap: var(--space-2); align-items: flex-start; margin: 0; border-inline-start: 3px solid var(--color-warning); background: var(--color-brand-soft); padding: var(--space-3); color: #713f12; font-size: 12px; }
+.formActions { display: flex; flex-wrap: wrap; gap: var(--space-2); justify-content: flex-end; padding-block-start: var(--space-3); border-top: 1px solid var(--color-border); }
+.token { display: grid; gap: var(--space-3); }
+.token p { margin: 0; color: var(--color-text-secondary); }
+.token code { border: 1px solid var(--color-border-strong); background: var(--color-brand-soft); padding: var(--space-3); overflow-wrap: anywhere; user-select: all; }
+@media (max-width: 1023px) { .permission { grid-template-columns: minmax(0, 1fr) minmax(120px, .5fr); } .permission > :nth-child(3), .permission > :nth-child(4) { grid-column: 2; } }
+@media (max-width: 839px) { .masterDetail { min-height: 0; } .masterPane { padding-inline-end: 0; } }
+@media (max-width: 599px) { .embeddedHeader, .accountHeading { align-items: stretch; flex-direction: column; } .search, .credential, .permission { grid-template-columns: 1fr; } .credential > div + div { border-inline-start: 0; border-top: 1px solid var(--color-border); } .permission > :nth-child(3), .permission > :nth-child(4) { grid-column: auto; } .auditForm, .auditForm label { width: 100%; } }

@@ -36,7 +36,6 @@ import { createApiClient, type ApiRequestOptions, type ClientResponse, type HTTP
 import { verifySessionResponses, type SessionUser } from './api/auth'
 import { parseDataStatisticsSummary, parseHealthSummary, parseMallWeatherMetricsSummary, redactMonitoringJSON, type DataStatisticsSummary, type HealthSummary, type MallWeatherMetricsSummary } from './monitoring'
 import { MallWeatherPage, StoreInfoPage } from './MallWeatherPage'
-import { DataAuthorizationPage } from './DataAuthorizationPage'
 import { AccessManagementPage } from './AccessManagementPage'
 import { PipelineRunPanel } from './PipelineRunPanel'
 import { PipelineComposerPanel } from './PipelineComposerPanel'
@@ -81,7 +80,7 @@ type ApiClientOptions = Omit<ApiRequestOptions, 'method'> & {
 type ApiClient = (path: string, options?: ApiClientOptions) => Promise<ApiResult>
 type MonitoringSnapshot = { statistics: DataStatisticsSummary | null; weather: MallWeatherMetricsSummary | null; health: HealthSummary | null }
 type FileDownloadClient = (path: string, fileName: string, signal: AbortSignal) => Promise<ApiResult>
-type NavKey = 'overview' | 'runs' | 'delivery_logs' | 'step_runs' | 'store_info' | 'mall_weather' | 'access_management' | 'data_authorizations' | 'sources' | 'receive' | 'pull_records' | 'backfill' | 'youzan_distribution' | 'rules' | 'processed' | 'methods' | 'destinations' | 'tasks' | 'push_policy' | 'excel_jobs' | 'excel_schemes' | 'excel_write' | 'report_catalog' | 'report_configuration' | 'report_query' | 'report_exports'
+type NavKey = 'overview' | 'runs' | 'delivery_logs' | 'step_runs' | 'store_info' | 'mall_weather' | 'access_management' | 'sources' | 'receive' | 'pull_records' | 'backfill' | 'youzan_distribution' | 'rules' | 'processed' | 'methods' | 'destinations' | 'tasks' | 'push_policy' | 'excel_jobs' | 'excel_schemes' | 'excel_write' | 'report_catalog' | 'report_configuration' | 'report_query' | 'report_exports'
 type NavItem = { key: NavKey; label: string; description: string; icon: ReactNode }
 type NavGroup = { label: string; items: NavItem[] }
 type MethodKind = 'configured' | 'builtin'
@@ -1469,7 +1468,6 @@ function App() {
         {activeNav === 'mall_weather' && <MallWeatherPage actorID={actorID} client={client} downloadFile={downloadFile} />}
         {reportSection && <ReportCenter client={client} permissions={sessionUser?.permissions ?? []} section={reportSection} onNavigate={(section) => navigate(reportCenterNavKey(section))} />}
         {activeNav === 'access_management' && <AccessManagementPage client={client} permissions={sessionUser?.permissions ?? []} />}
-        {activeNav === 'data_authorizations' && <DataAuthorizationPage client={client} />}
         {activeNav === 'sources' && <SourcesQueryPage client={client} onFetchSource={fetchSource} onTestSource={testSource} refreshVersion={workspaceRefreshVersion} />}
         {activeNav === 'methods' && <MethodsView methods={methods} pipelines={pipelines} client={client} coreMethods={coreMethods} onToggle={toggleTarget} onPipelineRunCompleted={() => void refreshWorkspace(false)} />}
         {activeNav === 'receive' && <RawRecordsQueryPage title="接口接收记录" origin="receive" client={client} onFetchSource={fetchSource} />}
@@ -1624,7 +1622,6 @@ function ModuleHeader({ activeNav, compact, loading, sessionUser, onOpenNavigati
 		report_query: { title: '报表查询', subtitle: '选择已发布报表，提交参数并预览结果。' },
 		report_exports: { title: '导出中心', subtitle: '查看 Excel 生成、下载和结果清理状态。' },
 	access_management: { title: '账号与权限', subtitle: '管理控制台账号、角色权限矩阵、开放 API 和变更审计。' },
-    data_authorizations: { title: '数据授权', subtitle: '由管理员开通开放接口账号，并管理权限有效期、凭证与审计。' },
     sources: { title: '数据源', subtitle: '查询数据接入配置、类型和启用状态。' },
     receive: { title: '接口接收', subtitle: '查询外部系统主动推送进来的原始数据。' },
     pull_records: { title: '拉取记录', subtitle: '查询系统主动从外部接口拉取的数据。' },
