@@ -15,8 +15,12 @@ type UserController struct {
 // --header 'token: eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJ1c2VyX2lkIjoiMjQiLCJleHBpcmVfdGltZSI6MTY1MzEzMDM0MCwiZXhwIjoxNjUzMTMwMzQwLCJpYXQiOjE2NDc5NDYzNDAsImlzcyI6Imdpbi1iaXotd2ViLWFwaSIsIm5iZiI6MTY0Nzk0NjM0MH0.3Rzl8PmE519qWVmNziJ6ovH6Bwq5hnqmelkMUxfYsXc'
 func (ctrl *UserController) Profile(c *gin.Context) {
 	profile := auth.CurrentUser(c)
+	email := ""
+	if profile.Email != nil {
+		email = *profile.Email
+	}
 	responses.New(c).ToResponse(gin.H{
-		"id": profile.ID, "account": profile.Account, "email": profile.Email,
+		"id": profile.ID, "account": profile.Account, "email": email,
 		"nickname": profile.Nickname, "consoleManaged": profile.ConsoleManaged,
 	})
 }

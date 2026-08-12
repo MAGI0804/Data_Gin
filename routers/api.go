@@ -11,6 +11,7 @@ import (
 	"gin-biz-web-api/internal/controller/example_ctrl"
 	"gin-biz-web-api/internal/middleware"
 	"gin-biz-web-api/internal/service/auth_svc"
+	"gin-biz-web-api/model"
 	"gin-biz-web-api/pkg/config"
 	"gin-biz-web-api/pkg/limiter"
 	"gin-biz-web-api/pkg/phonecode"
@@ -134,11 +135,13 @@ func apiAuth(api *gin.RouterGroup) {
 
 		// token数据管理
 		tokenDataCtrl := auth_ctrl.NewTokenDataController()
-		authGroup.POST("/token-data", tokenDataCtrl.CreateTokenData)            // 创建token数据
-		authGroup.GET("/token-data", tokenDataCtrl.GetAllTokenData)             // 获取所有token数据
-		authGroup.GET("/token-data/:id", tokenDataCtrl.GetTokenDataByID)        // 根据ID获取token数据
-		authGroup.POST("/token-data/update/:id", tokenDataCtrl.UpdateTokenData) // 更新token数据
-		authGroup.POST("/token-data/delete/:id", tokenDataCtrl.DeleteTokenData) // 删除token数据
+		tokenDataGroup := authGroup.Group("/token-data")
+		tokenDataGroup.Use(middleware.AuthJWT(), middleware.RequirePermission(model.PermissionSystemAccountManage))
+		tokenDataGroup.POST("", tokenDataCtrl.CreateTokenData)
+		tokenDataGroup.GET("", tokenDataCtrl.GetAllTokenData)
+		tokenDataGroup.GET("/:id", tokenDataCtrl.GetTokenDataByID)
+		tokenDataGroup.POST("/update/:id", tokenDataCtrl.UpdateTokenData)
+		tokenDataGroup.POST("/delete/:id", tokenDataCtrl.DeleteTokenData)
 	}
 }
 

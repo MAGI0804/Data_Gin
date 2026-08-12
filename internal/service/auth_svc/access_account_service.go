@@ -2,14 +2,19 @@ package auth_svc
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"regexp"
 	"sort"
 	"strings"
 	"time"
 	"unicode/utf8"
 
+	"gin-biz-web-api/internal/dao/data_dao"
 	"gin-biz-web-api/internal/requests/auth_request"
 	"gin-biz-web-api/model"
 	"gin-biz-web-api/pkg/database"
@@ -116,17 +121,24 @@ func (service *AccessAccountService) Create(ctx context.Context, actorID uint, k
 	if request.MallScopeMode != model.MallScopeAll && request.MallScopeMode != model.MallScopeSelected || request.MallScopeMode == model.MallScopeSelected && len(request.MallIDs) == 0 {
 		return nil, ErrAccessAccountInvalid
 	}
-	var created model.User
+	var result AccessAccountDTO
 	err := service.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := service.requireActorPermissionTx(ctx, tx, actorID, model.PermissionSystemAccountManage); err != nil {
 			return err
+		}
+		record, replay, err := reserveAccountMutation(ctx, tx, "access.account.create", actorID, key, request)
+		if err != nil {
+			return err
+		}
+		if replay {
+			return decodeAccountReplay(record, &result)
 		}
 		if err := service.validateGrants(ctx, tx, actorID, request.RoleIDs, request.MallScopeMode, request.MallIDs); err != nil {
 			return err
 		}
 		now := service.now().UTC()
 		phone := request.Phone
-		created = model.User{BaseModel: &model.BaseModel{}, CommonTimestampsField: &model.CommonTimestampsField{CreatedAt: int(now.Unix()), UpdatedAt: int(now.Unix())}, Account: request.Account, Phone: &phone, Password: request.Password, Nickname: request.Nickname, ConsoleManaged: true, AccountType: model.AccountTypeConsole, Status: model.AccountStatusActive, AuthVersion: 1, MallScopeMode: request.MallScopeMode, PasswordChangedAt: &now}
+		created := model.User{BaseModel: &model.BaseModel{}, CommonTimestampsField: &model.CommonTimestampsField{CreatedAt: int(now.Unix()), UpdatedAt: int(now.Unix())}, Account: request.Account, Phone: &phone, Password: request.Password, Nickname: request.Nickname, ConsoleManaged: true, AccountType: model.AccountTypeConsole, Status: model.AccountStatusActive, AuthVersion: 1, MallScopeMode: request.MallScopeMode, PasswordChangedAt: &now}
 		if err := tx.Create(&created).Error; err != nil {
 			return ErrAccessAccountConflict
 		}
@@ -136,13 +148,19 @@ func (service *AccessAccountService) Create(ctx context.Context, actorID uint, k
 		if err := replaceAccountMalls(ctx, tx, actorID, created.ID, request.MallScopeMode, request.MallIDs); err != nil {
 			return err
 		}
-		return createAccessAudit(tx, actorID, "ACCOUNT_CREATE", "ACCOUNT", created.ID, request.Reason, key)
+		if err := createAccessAudit(tx, actorID, "ACCOUNT_CREATE", "ACCOUNT", created.ID, request.Reason, key); err != nil {
+			return err
+		}
+		result, err = accountDTOWithDB(ctx, tx, &created)
+		if err != nil {
+			return err
+		}
+		return completeAccountMutation(ctx, tx, record.ID, created.ID, result, http.StatusCreated)
 	})
 	if err != nil {
 		return nil, err
 	}
-	dto, err := service.accountDTO(ctx, &created)
-	return &dto, err
+	return &result, nil
 }
 
 func (service *AccessAccountService) Update(ctx context.Context, actorID, targetID uint, key string, request auth_request.AccessAccountUpdateRequest) (*AccessAccountDTO, error) {
@@ -150,22 +168,43 @@ func (service *AccessAccountService) Update(ctx context.Context, actorID, target
 	if targetID == 0 || !validAccessWrite(key, request.Reason) || !accessPhonePattern.MatchString(request.Phone) || utf8.RuneCountInString(request.Nickname) < 1 || utf8.RuneCountInString(request.Nickname) > 64 {
 		return nil, ErrAccessAccountInvalid
 	}
-	err := service.mutateAccount(ctx, actorID, targetID, func(tx *gorm.DB, user *model.User) error {
+	var result AccessAccountDTO
+	err := service.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := service.requireActorPermissionTx(ctx, tx, actorID, model.PermissionSystemAccountManage); err != nil {
+			return err
+		}
+		record, replay, err := reserveAccountMutation(ctx, tx, "access.account.update", actorID, key, struct {
+			TargetID uint
+			Request  auth_request.AccessAccountUpdateRequest
+		}{targetID, request})
+		if err != nil {
+			return err
+		}
+		if replay {
+			return decodeAccountReplay(record, &result)
+		}
+		user, err := lockConsoleAccount(tx, targetID)
+		if err != nil {
+			return err
+		}
 		phone := request.Phone
 		if err := tx.Model(user).Updates(map[string]interface{}{"phone": &phone, "nickname": request.Nickname, "auth_version": gorm.Expr("auth_version + 1")}).Error; err != nil {
 			return ErrAccessAccountConflict
 		}
-		return createAccessAudit(tx, actorID, "ACCOUNT_UPDATE", "ACCOUNT", targetID, request.Reason, key)
+		user.Phone, user.Nickname = &phone, request.Nickname
+		if err := createAccessAudit(tx, actorID, "ACCOUNT_UPDATE", "ACCOUNT", targetID, request.Reason, key); err != nil {
+			return err
+		}
+		result, err = accountDTOWithDB(ctx, tx, user)
+		if err != nil {
+			return err
+		}
+		return completeAccountMutation(ctx, tx, record.ID, targetID, result, http.StatusOK)
 	})
 	if err != nil {
 		return nil, err
 	}
-	var user model.User
-	if err := service.db.WithContext(ctx).First(&user, targetID).Error; err != nil {
-		return nil, err
-	}
-	dto, err := service.accountDTO(ctx, &user)
-	return &dto, err
+	return &result, nil
 }
 
 func (service *AccessAccountService) SetStatus(ctx context.Context, actorID, targetID uint, key string, request auth_request.AccessAccountStatusRequest) error {
@@ -173,7 +212,7 @@ func (service *AccessAccountService) SetStatus(ctx context.Context, actorID, tar
 	if targetID == 0 || !validAccessWrite(key, request.Reason) || request.Status != model.AccountStatusActive && request.Status != model.AccountStatusDisabled {
 		return ErrAccessAccountInvalid
 	}
-	return service.mutateAccount(ctx, actorID, targetID, func(tx *gorm.DB, user *model.User) error {
+	_, err := service.mutateAccount(ctx, actorID, targetID, key, "access.account.status", request, func(tx *gorm.DB, user *model.User) error {
 		if request.Status == model.AccountStatusDisabled {
 			var count int64
 			if err := tx.Table("user_roles").Joins("JOIN roles ON roles.id = user_roles.role_id").Joins("JOIN users ON users.id = user_roles.user_id").Where("roles.is_super = ? AND roles.status = ? AND users.status = ? AND users.id <> ?", true, model.RoleStatusActive, model.AccountStatusActive, targetID).Count(&count).Error; err != nil {
@@ -192,6 +231,7 @@ func (service *AccessAccountService) SetStatus(ctx context.Context, actorID, tar
 		}
 		return createAccessAudit(tx, actorID, "ACCOUNT_STATUS", "ACCOUNT", targetID, request.Reason, key)
 	})
+	return err
 }
 
 func (service *AccessAccountService) ResetPassword(ctx context.Context, actorID, targetID uint, key string, request auth_request.AccessAccountPasswordResetRequest) error {
@@ -202,20 +242,21 @@ func (service *AccessAccountService) ResetPassword(ctx context.Context, actorID,
 	if err != nil {
 		return err
 	}
-	return service.mutateAccount(ctx, actorID, targetID, func(tx *gorm.DB, user *model.User) error {
+	_, err = service.mutateAccount(ctx, actorID, targetID, key, "access.account.password", request, func(tx *gorm.DB, user *model.User) error {
 		now := service.now().UTC()
 		if err := tx.Model(user).Updates(map[string]interface{}{"password": string(hash), "password_changed_at": now, "auth_version": gorm.Expr("auth_version + 1")}).Error; err != nil {
 			return err
 		}
 		return createAccessAudit(tx, actorID, "PASSWORD_RESET", "ACCOUNT", targetID, request.Reason, key)
 	})
+	return err
 }
 
 func (service *AccessAccountService) ReplaceRoles(ctx context.Context, actorID, targetID uint, key string, request auth_request.AccessAccountRolesRequest) error {
 	if targetID == 0 || !validAccessWrite(key, request.Reason) {
 		return ErrAccessAccountInvalid
 	}
-	return service.mutateAccount(ctx, actorID, targetID, func(tx *gorm.DB, user *model.User) error {
+	_, err := service.mutateAccount(ctx, actorID, targetID, key, "access.account.roles", request, func(tx *gorm.DB, user *model.User) error {
 		if err := service.validateGrants(ctx, tx, actorID, request.RoleIDs, user.MallScopeMode, nil); err != nil {
 			return err
 		}
@@ -230,6 +271,7 @@ func (service *AccessAccountService) ReplaceRoles(ctx context.Context, actorID, 
 		}
 		return createAccessAudit(tx, actorID, "ACCOUNT_ROLES", "ACCOUNT", targetID, request.Reason, key)
 	})
+	return err
 }
 
 func ensureSuperAdminRemains(tx *gorm.DB, targetID uint, replacementRoleIDs []uint) error {
@@ -263,7 +305,7 @@ func (service *AccessAccountService) ReplaceMallScope(ctx context.Context, actor
 	if targetID == 0 || !validAccessWrite(key, request.Reason) || request.MallScopeMode != model.MallScopeAll && request.MallScopeMode != model.MallScopeSelected || request.MallScopeMode == model.MallScopeSelected && len(request.MallIDs) == 0 {
 		return ErrAccessAccountInvalid
 	}
-	return service.mutateAccount(ctx, actorID, targetID, func(tx *gorm.DB, user *model.User) error {
+	_, err := service.mutateAccount(ctx, actorID, targetID, key, "access.account.mall_scope", request, func(tx *gorm.DB, user *model.User) error {
 		if err := service.validateGrants(ctx, tx, actorID, nil, request.MallScopeMode, request.MallIDs); err != nil {
 			return err
 		}
@@ -275,19 +317,49 @@ func (service *AccessAccountService) ReplaceMallScope(ctx context.Context, actor
 		}
 		return createAccessAudit(tx, actorID, "ACCOUNT_MALL_SCOPE", "ACCOUNT", targetID, request.Reason, key)
 	})
+	return err
 }
 
-func (service *AccessAccountService) mutateAccount(ctx context.Context, actorID, targetID uint, mutation func(*gorm.DB, *model.User) error) error {
-	return service.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+func (service *AccessAccountService) mutateAccount(ctx context.Context, actorID, targetID uint, key, scope string, request interface{}, mutation func(*gorm.DB, *model.User) error) (bool, error) {
+	replayed := false
+	err := service.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		if err := service.requireActorPermissionTx(ctx, tx, actorID, model.PermissionSystemAccountManage); err != nil {
 			return err
 		}
-		var user model.User
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ? AND account_type = ?", targetID, model.AccountTypeConsole).First(&user).Error; err != nil {
-			return ErrAccessAccountNotFound
+		record, replay, err := reserveAccountMutation(ctx, tx, scope, actorID, key, struct {
+			TargetID uint
+			Request  interface{}
+		}{targetID, request})
+		if err != nil {
+			return err
 		}
-		return mutation(tx, &user)
+		if replay {
+			replayed = true
+			return nil
+		}
+		user, err := lockConsoleAccount(tx, targetID)
+		if err != nil {
+			return err
+		}
+		if err := mutation(tx, user); err != nil {
+			return err
+		}
+		return completeAccountMutation(ctx, tx, record.ID, targetID, struct {
+			Changed bool `json:"changed"`
+		}{true}, http.StatusOK)
 	})
+	return replayed, err
+}
+
+func lockConsoleAccount(tx *gorm.DB, targetID uint) (*model.User, error) {
+	var user model.User
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ? AND account_type = ?", targetID, model.AccountTypeConsole).First(&user).Error; err != nil {
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			return nil, ErrAccessAccountNotFound
+		}
+		return nil, err
+	}
+	return &user, nil
 }
 
 func (service *AccessAccountService) requireActorPermission(ctx context.Context, actorID uint, code string) error {
@@ -399,13 +471,17 @@ func replaceAccountMalls(ctx context.Context, tx *gorm.DB, actorID, targetID uin
 }
 
 func (service *AccessAccountService) accountDTO(ctx context.Context, user *model.User) (AccessAccountDTO, error) {
+	return accountDTOWithDB(ctx, service.db, user)
+}
+
+func accountDTOWithDB(ctx context.Context, db *gorm.DB, user *model.User) (AccessAccountDTO, error) {
 	var roles []ConsoleRoleDTO
-	if err := service.db.WithContext(ctx).Table("roles").Select("roles.code, roles.name").Joins("JOIN user_roles ON user_roles.role_id = roles.id").Where("user_roles.user_id = ?", user.ID).Scan(&roles).Error; err != nil {
+	if err := db.WithContext(ctx).Table("roles").Select("roles.code, roles.name").Joins("JOIN user_roles ON user_roles.role_id = roles.id").Where("user_roles.user_id = ?", user.ID).Scan(&roles).Error; err != nil {
 		return AccessAccountDTO{}, err
 	}
 	var mallIDs []uint
 	if user.MallScopeMode == model.MallScopeSelected {
-		if err := service.db.WithContext(ctx).Model(&model.UserMallScope{}).Where("user_id = ?", user.ID).Pluck("mall_id", &mallIDs).Error; err != nil {
+		if err := db.WithContext(ctx).Model(&model.UserMallScope{}).Where("user_id = ?", user.ID).Pluck("mall_id", &mallIDs).Error; err != nil {
 			return AccessAccountDTO{}, err
 		}
 	}
@@ -439,6 +515,58 @@ func uniqueIDs(values []uint) []uint {
 }
 
 func createAccessAudit(tx *gorm.DB, actorID uint, action, targetType string, targetID uint, reason, requestID string) error {
-	audit := model.AuthAudit{ActorUserID: actorID, Action: action, TargetType: targetType, TargetID: targetID, BeforeJSON: model.JSONText(`{}`), AfterJSON: model.JSONText(`{}`), Reason: strings.TrimSpace(reason), RequestID: strings.TrimSpace(requestID)}
+	audit := model.AuthAudit{ActorUserID: actorID, Action: action, TargetType: targetType, TargetID: targetID, BeforeJSON: model.JSONText(`{}`), AfterJSON: model.JSONText(`{}`), Reason: strings.TrimSpace(reason), RequestID: accessAccountKeyHash(requestID)}
 	return tx.Create(&audit).Error
+}
+
+func accessAccountKeyHash(key string) string {
+	sum := sha256.Sum256([]byte(strings.TrimSpace(key)))
+	return hex.EncodeToString(sum[:])
+}
+
+func reserveAccountMutation(ctx context.Context, tx *gorm.DB, scope string, actorID uint, key string, payload interface{}) (*model.APIIdempotencyRecord, bool, error) {
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		return nil, false, err
+	}
+	requestSum := sha256.Sum256(raw)
+	record := &model.APIIdempotencyRecord{
+		OperationScope: scope,
+		ActorUserID:    actorID,
+		KeyHash:        accessAccountKeyHash(key),
+		RequestHash:    hex.EncodeToString(requestSum[:]),
+		ResourceType:   "access_account",
+		ResponseJSON:   model.JSONText(`{}`),
+	}
+	dao := data_dao.NewAPIIdempotencyDAO(tx)
+	reserved, err := dao.Reserve(ctx, record)
+	if err != nil {
+		return nil, false, err
+	}
+	if reserved {
+		return record, false, nil
+	}
+	existing, err := dao.FindForUpdate(ctx, scope, actorID, record.KeyHash)
+	if err != nil {
+		return nil, false, err
+	}
+	if existing.RequestHash != record.RequestHash || existing.HTTPStatus == 0 || existing.ResponseJSON == "" {
+		return nil, false, ErrAccessAccountConflict
+	}
+	return existing, true, nil
+}
+
+func decodeAccountReplay(record *model.APIIdempotencyRecord, result *AccessAccountDTO) error {
+	if record == nil || result == nil || json.Unmarshal([]byte(record.ResponseJSON), result) != nil {
+		return ErrAccessAccountConflict
+	}
+	return nil
+}
+
+func completeAccountMutation(ctx context.Context, tx *gorm.DB, recordID, resourceID uint, result interface{}, status int) error {
+	raw, err := json.Marshal(result)
+	if err != nil {
+		return err
+	}
+	return data_dao.NewAPIIdempotencyDAO(tx).Complete(ctx, recordID, resourceID, status, model.JSONText(raw))
 }

@@ -23,11 +23,12 @@ func (svc *RegisterService) CreateUserToken(c *gin.Context, request auth_request
 		return ""
 	}
 
+	email := request.Email
 	user := model.User{
 		BaseModel:             &model.BaseModel{},
 		CommonTimestampsField: &model.CommonTimestampsField{},
 		Account:               request.Account,
-		Email:                 request.Email,
+		Email:                 &email,
 		Password:              request.Password,
 	}
 

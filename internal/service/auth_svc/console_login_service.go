@@ -161,7 +161,6 @@ func ensureAdminUserRecord(ctx context.Context, db *gorm.DB, password string) (*
 	user = model.User{
 		BaseModel:             &model.BaseModel{},
 		Account:               constant.ConsoleAdmin,
-		Email:                 "",
 		Password:              initialPassword,
 		Nickname:              constant.ConsoleAdminName,
 		ConsoleManaged:        true,
@@ -204,9 +203,13 @@ func isTrustedConsoleAdmin(user *model.User) bool {
 }
 
 func isLegacyConsoleAdmin(user *model.User) bool {
+	email := ""
+	if user != nil && user.Email != nil {
+		email = *user.Email
+	}
 	return user != nil &&
 		user.Account == constant.ConsoleAdmin &&
-		(user.Email == "" || user.Email == constant.ConsoleAdminMail) &&
+		(email == "" || email == constant.ConsoleAdminMail) &&
 		user.Nickname == constant.ConsoleAdminName
 }
 

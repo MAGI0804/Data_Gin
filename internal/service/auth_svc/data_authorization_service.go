@@ -239,9 +239,9 @@ func (service *DataAuthorizationService) CreateAccount(ctx context.Context, acto
 }
 
 func createDataAuthorizationUser(ctx context.Context, db *gorm.DB, user *model.User) error {
-	// Phone is nullable and unique. Omitting its string zero value stores NULL,
-	// so multiple API-only accounts can exist without synthetic phone numbers.
-	return db.WithContext(ctx).Omit("Phone").Create(user).Error
+	// API-only accounts have neither an email nor a phone. Both columns are
+	// nullable and unique, so NULL avoids synthetic identities and collisions.
+	return db.WithContext(ctx).Omit("Email", "Phone").Create(user).Error
 }
 
 func (service *DataAuthorizationService) Grant(ctx context.Context, actorUserID, targetUserID uint, idempotencyKey string, request auth_request.DataAuthorizationGrantRequest) (*DataAuthorizationMutationResult, error) {

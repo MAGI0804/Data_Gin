@@ -8,7 +8,8 @@ import (
 
 func TestUserConsoleManagedIsNotSerialized(t *testing.T) {
 	phone := "13800138000"
-	payload, err := json.Marshal(User{ConsoleManaged: true, Phone: &phone, Email: "secret@example.com", Password: "secret"})
+	email := "secret@example.com"
+	payload, err := json.Marshal(User{ConsoleManaged: true, Phone: &phone, Email: &email, Password: "secret"})
 	if err != nil {
 		t.Fatalf("json.Marshal() error = %v", err)
 	}

@@ -68,16 +68,18 @@ func TestSyncExistingConsoleAdminPermissionsRejectsInvalidDatabase(t *testing.T)
 }
 
 func TestIsTrustedConsoleAdmin(t *testing.T) {
+	adminEmail := "admin@warehouse.local"
+	attackerEmail := "attacker@example.com"
 	tests := []struct {
 		name string
 		user *model.User
 		want bool
 	}{
-		{name: "console managed", user: &model.User{Account: "admin", Email: "admin@warehouse.local", Nickname: "管理员", ConsoleManaged: true}, want: true},
+		{name: "console managed", user: &model.User{Account: "admin", Email: &adminEmail, Nickname: "管理员", ConsoleManaged: true}, want: true},
 		{name: "new console managed without email", user: &model.User{Account: "admin", Nickname: "管理员", ConsoleManaged: true}, want: true},
-		{name: "legacy console shape without marker", user: &model.User{Account: "admin", Email: "admin@warehouse.local", Nickname: "管理员"}},
-		{name: "public registration shape", user: &model.User{Account: "admin", Email: "attacker@example.com", ConsoleManaged: true}},
-		{name: "case variant", user: &model.User{Account: "Admin", Email: "admin@warehouse.local", Nickname: "管理员", ConsoleManaged: true}},
+		{name: "legacy console shape without marker", user: &model.User{Account: "admin", Email: &adminEmail, Nickname: "管理员"}},
+		{name: "public registration shape", user: &model.User{Account: "admin", Email: &attackerEmail, ConsoleManaged: true}},
+		{name: "case variant", user: &model.User{Account: "Admin", Email: &adminEmail, Nickname: "管理员", ConsoleManaged: true}},
 		{name: "missing user"},
 	}
 	for _, tt := range tests {
@@ -90,7 +92,8 @@ func TestIsTrustedConsoleAdmin(t *testing.T) {
 }
 
 func TestIsLegacyConsoleAdmin(t *testing.T) {
-	legacy := &model.User{Account: "admin", Email: "admin@warehouse.local", Nickname: "管理员"}
+	email := "admin@warehouse.local"
+	legacy := &model.User{Account: "admin", Email: &email, Nickname: "管理员"}
 	if !isLegacyConsoleAdmin(legacy) {
 		t.Fatal("isLegacyConsoleAdmin() = false")
 	}

@@ -1,6 +1,7 @@
 package auth_svc
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -23,5 +24,13 @@ func TestUniqueIDsDeduplicatesAndDropsZero(t *testing.T) {
 	got := uniqueIDs([]uint{3, 0, 3, 2})
 	if len(got) != 2 || got[0] != 3 || got[1] != 2 {
 		t.Fatalf("uniqueIDs() = %#v", got)
+	}
+}
+
+func TestAccessAccountKeyHashDoesNotExposeIdempotencyKey(t *testing.T) {
+	key := "account-request-123"
+	got := accessAccountKeyHash(key)
+	if len(got) != 64 || strings.Contains(got, key) || got != accessAccountKeyHash(key) {
+		t.Fatalf("accessAccountKeyHash() returned unsafe or unstable value %q", got)
 	}
 }
