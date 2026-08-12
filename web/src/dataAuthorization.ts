@@ -12,7 +12,6 @@ export type DataAuthorizationPermission = {
 export type DataAuthorizationAccount = {
   id: number
   account: string
-  email: string
   nickname: string
   credentialStatus: 'ACTIVE' | 'REVOKED'
   tokenPrefix: string
@@ -109,7 +108,6 @@ export function parseDataAuthorizationAccount(value: unknown): DataAuthorization
   return {
     id,
     account: item.account,
-    email: stringValue(item.email),
     nickname: stringValue(item.nickname),
     credentialStatus,
     tokenPrefix: stringValue(item.tokenPrefix),

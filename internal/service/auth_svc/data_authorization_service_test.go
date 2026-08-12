@@ -45,7 +45,7 @@ func TestNormalizeDataAuthorizationCreateRejectsReservedAndDuplicatePermissions(
 	now := time.Date(2026, 7, 28, 8, 0, 0, 0, time.UTC)
 	service := &DataAuthorizationService{now: func() time.Time { return now }}
 	valid := auth_request.DataAuthorizationAccountCreateRequest{
-		Account: "partner_weather_01", Email: "owner@example.com", Nickname: "合作方账号", Reason: "天气数据接入",
+		Account: "partner_weather_01", Nickname: "合作方账号", Reason: "天气数据接入",
 		Permissions: []auth_request.DataAuthorizationPermissionInput{{Permission: model.PermissionWeatherRead, ExpiresAt: now.Add(30 * 24 * time.Hour).Format(time.RFC3339)}},
 	}
 	if _, grants, err := service.normalizeCreate(valid); err != nil || len(grants) != 1 {
@@ -83,7 +83,6 @@ func TestCreateDataAuthorizationUserOmitsNullablePhone(t *testing.T) {
 		BaseModel:             &model.BaseModel{},
 		CommonTimestampsField: &model.CommonTimestampsField{},
 		Account:               "partner_weather_01",
-		Email:                 "owner@example.com",
 		Nickname:              "合作方账号",
 		Password:              strings.Repeat("x", 60),
 	}

@@ -181,7 +181,7 @@ export function DataAuthorizationPage({ client }: { client: ApiClient }) {
       response = await client('/v1/data-authorizations/accounts/create', {
         method: 'POST',
         headers: { 'Idempotency-Key': newAuthorizationIdempotencyKey('account-create') },
-        body: { account: formString(form, 'account'), email: formString(form, 'email'), nickname: formString(form, 'nickname'), permissions, reason: formString(form, 'reason') },
+        body: { account: formString(form, 'account'), nickname: formString(form, 'nickname'), permissions, reason: formString(form, 'reason') },
         showResult: false,
         silentLoading: true,
       })
@@ -341,7 +341,7 @@ export function DataAuthorizationPage({ client }: { client: ApiClient }) {
           <div className="data-authorization-account-list">
             {accounts.map((account) => (
               <button className={selected?.id === account.id ? 'data-authorization-account active' : 'data-authorization-account'} type="button" key={account.id} onClick={() => setSelectedID(account.id)}>
-                <span><strong>{account.nickname || account.account}</strong><small>{account.account}</small><small>{account.email}</small></span>
+                <span><strong>{account.nickname || account.account}</strong><small>{account.account}</small></span>
                 <em data-active={account.credentialStatus === 'ACTIVE'}>{account.credentialStatus === 'ACTIVE' ? '凭证有效' : '已撤销'}</em>
               </button>
             ))}
@@ -352,7 +352,7 @@ export function DataAuthorizationPage({ client }: { client: ApiClient }) {
         <section className="workbench-panel data-authorization-detail">
           {selected ? <>
             <div className="data-authorization-account-heading">
-              <div><h3>{selected.nickname || selected.account}</h3><p>{selected.account} · {selected.email} <span className={selected.credentialStatus === 'ACTIVE' ? 'data-authorization-live-status' : 'data-authorization-live-status revoked'}>{selected.credentialStatus === 'ACTIVE' ? '凭证有效' : '凭证已撤销'}</span></p></div>
+              <div><h3>{selected.nickname || selected.account}</h3><p>{selected.account} <span className={selected.credentialStatus === 'ACTIVE' ? 'data-authorization-live-status' : 'data-authorization-live-status revoked'}>{selected.credentialStatus === 'ACTIVE' ? '凭证有效' : '凭证已撤销'}</span></p></div>
               <div className="record-actions"><button type="button" onClick={() => setActionDialog({ kind: 'reissue' })}><RotateCcw aria-hidden="true" />重签 Token</button></div>
             </div>
             <dl className="data-authorization-credential"><div><dt>Token 标识</dt><dd><code>{selected.tokenPrefix || '-'}</code></dd></div><div><dt>签发时间</dt><dd>{formatDateTime(selected.issuedAt)}</dd></div><div><dt>权限范围</dt><dd>仅开放接口，不允许登录控制台</dd></div></dl>
@@ -396,7 +396,6 @@ export function DataAuthorizationPage({ client }: { client: ApiClient }) {
 
       {createOpen && <Modal title="开通开放 API 账号" closeDisabled={mutating} onClose={() => setCreateOpen(false)}><form className="data-authorization-form" onSubmit={createAccount}>
         <label>账号<input name="account" required minLength={3} maxLength={40} pattern="[a-z0-9][a-z0-9_\-]{2,39}" placeholder="partner_weather_01" autoFocus /></label>
-        <label>邮箱<input name="email" required type="email" maxLength={80} placeholder="owner@example.com" /></label>
         <label>显示名称<input name="nickname" required maxLength={64} placeholder="合作方天气账号" /></label>
         <fieldset><legend>初始数据权限（可暂不授权）</legend>{permissionCatalog.map((item) => <label className="data-authorization-checkbox" key={item.permission}><input type="checkbox" name={item.permission} /><span><strong>{item.label}</strong><small>{item.description}</small></span></label>)}</fieldset>
         <label>统一到期时间<input name="expiresAt" type="datetime-local" defaultValue={defaultAuthorizationExpiry()} /></label>

@@ -7,7 +7,6 @@ type DataAuthorizationPermissionInput struct {
 
 type DataAuthorizationAccountCreateRequest struct {
 	Account     string                             `json:"account"`
-	Email       string                             `json:"email"`
 	Nickname    string                             `json:"nickname"`
 	Permissions []DataAuthorizationPermissionInput `json:"permissions"`
 	Reason      string                             `json:"reason"`

@@ -10,7 +10,6 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
-	"net/mail"
 	"regexp"
 	"strings"
 	"time"
@@ -57,7 +56,6 @@ type DataAuthorizationPermissionDTO struct {
 type DataAuthorizationAccountDTO struct {
 	ID               uint                             `json:"id"`
 	Account          string                           `json:"account"`
-	Email            string                           `json:"email"`
 	Nickname         string                           `json:"nickname"`
 	CredentialStatus string                           `json:"credentialStatus"`
 	TokenPrefix      string                           `json:"tokenPrefix,omitempty"`
@@ -137,10 +135,11 @@ func (service *DataAuthorizationService) QueryAccounts(ctx context.Context, acto
 	}
 	pageSize := normalizeDataAuthorizationPageSize(request.PageSize)
 	query := service.db.WithContext(ctx).Model(&model.User{}).
-		Select("users.id", "users.account", "users.email", "users.nickname", "users.created_at").
+		Select("users.id", "users.account", "users.nickname", "users.created_at").
 		Joins("JOIN open_api_credentials ON open_api_credentials.user_id = users.id").
 		Where("users.console_managed = ?", false).
-		Group("users.id, users.account, users.email, users.nickname, users.created_at")
+		Where("users.account_type = ?", model.AccountTypeOpenAPI).
+		Group("users.id, users.account, users.nickname, users.created_at")
 	if request.BeforeID > 0 {
 		query = query.Where("users.id < ?", request.BeforeID)
 	}
@@ -150,7 +149,7 @@ func (service *DataAuthorizationService) QueryAccounts(ctx context.Context, acto
 			return nil, ErrDataAuthorizationInvalidInput
 		}
 		like := "%" + strings.NewReplacer("\\", "\\\\", "%", "\\%", "_", "\\_").Replace(keyword) + "%"
-		query = query.Where("(users.account LIKE ? ESCAPE '\\\\' OR users.email LIKE ? ESCAPE '\\\\' OR users.nickname LIKE ? ESCAPE '\\\\')", like, like, like)
+		query = query.Where("(users.account LIKE ? ESCAPE '\\\\' OR users.nickname LIKE ? ESCAPE '\\\\')", like, like)
 	}
 	var users []model.User
 	if err := query.Order("users.id DESC").Limit(pageSize + 1).Find(&users).Error; err != nil {
@@ -201,7 +200,7 @@ func (service *DataAuthorizationService) CreateAccount(ctx context.Context, acto
 			return err
 		}
 		now := service.now().UTC().Truncate(time.Millisecond)
-		user := model.User{BaseModel: &model.BaseModel{}, CommonTimestampsField: &model.CommonTimestampsField{CreatedAt: int(now.Unix()), UpdatedAt: int(now.Unix())}, Account: normalized.Account, Email: normalized.Email, Nickname: normalized.Nickname, Password: password}
+		user := model.User{BaseModel: &model.BaseModel{}, CommonTimestampsField: &model.CommonTimestampsField{CreatedAt: int(now.Unix()), UpdatedAt: int(now.Unix())}, Account: normalized.Account, Nickname: normalized.Nickname, Password: password, AccountType: model.AccountTypeOpenAPI, Status: model.AccountStatusActive, AuthVersion: 1, MallScopeMode: model.MallScopeAll}
 		if err := createDataAuthorizationUser(ctx, tx, &user); err != nil {
 			if isDuplicateEntry(err) {
 				return ErrDataAuthorizationConflict
@@ -492,7 +491,6 @@ func buildDataAuthorizationAuditQuery(query *gorm.DB, request auth_request.DataA
 
 type normalizedDataAuthorizationCreate struct {
 	Account     string                                          `json:"account"`
-	Email       string                                          `json:"email"`
 	Nickname    string                                          `json:"nickname"`
 	Permissions []auth_request.DataAuthorizationPermissionInput `json:"permissions"`
 	Reason      string                                          `json:"reason"`
@@ -504,11 +502,9 @@ type normalizedDataGrant struct {
 
 func (service *DataAuthorizationService) normalizeCreate(request auth_request.DataAuthorizationAccountCreateRequest) (normalizedDataAuthorizationCreate, []normalizedDataGrant, error) {
 	account := strings.ToLower(strings.TrimSpace(request.Account))
-	email := strings.ToLower(strings.TrimSpace(request.Email))
 	nickname := strings.TrimSpace(request.Nickname)
 	reason, err := normalizeDataAuthorizationReason(request.Reason)
-	address, mailErr := mail.ParseAddress(email)
-	if err != nil || !dataAuthorizationAccountPattern.MatchString(account) || constant.IsConsoleAdminAccount(account) || mailErr != nil || address.Address != email || utf8.RuneCountInString(email) > 80 || utf8.RuneCountInString(nickname) < 1 || utf8.RuneCountInString(nickname) > 64 || len(request.Permissions) > len(model.GrantableDataPermissions()) {
+	if err != nil || !dataAuthorizationAccountPattern.MatchString(account) || constant.IsConsoleAdminAccount(account) || utf8.RuneCountInString(nickname) < 1 || utf8.RuneCountInString(nickname) > 64 || len(request.Permissions) > len(model.GrantableDataPermissions()) {
 		return normalizedDataAuthorizationCreate{}, nil, ErrDataAuthorizationInvalidInput
 	}
 	grants := make([]normalizedDataGrant, 0, len(request.Permissions))
@@ -526,7 +522,7 @@ func (service *DataAuthorizationService) normalizeCreate(request auth_request.Da
 		grants = append(grants, normalizedDataGrant{p, expiry})
 		normalizedInputs = append(normalizedInputs, auth_request.DataAuthorizationPermissionInput{Permission: p, ExpiresAt: expiry.Format(time.RFC3339Nano)})
 	}
-	return normalizedDataAuthorizationCreate{account, email, nickname, normalizedInputs, reason}, grants, nil
+	return normalizedDataAuthorizationCreate{account, nickname, normalizedInputs, reason}, grants, nil
 }
 
 func (service *DataAuthorizationService) authorizeAdmin(ctx context.Context, db *gorm.DB, actorUserID uint, lock bool) error {
@@ -538,7 +534,11 @@ func (service *DataAuthorizationService) authorizeAdmin(ctx context.Context, db 
 	if lock {
 		query = query.Clauses(clause.Locking{Strength: "UPDATE"})
 	}
-	if err := query.First(&actor, actorUserID).Error; err != nil || !isTrustedConsoleAdmin(&actor) {
+	if err := query.First(&actor, actorUserID).Error; err != nil {
+		return ErrDataAuthorizationForbidden
+	}
+	allowed, err := NewAuthorizer(db).HasPermission(ctx, actor, model.PermissionSystemAccountManage)
+	if err != nil || !allowed {
 		return ErrDataAuthorizationForbidden
 	}
 	return nil
@@ -591,7 +591,7 @@ func accountDTO(user model.User, credential model.OpenAPICredential, permissions
 		issued := credential.IssuedAt
 		issuedAt = &issued
 	}
-	return DataAuthorizationAccountDTO{ID: user.ID, Account: user.Account, Email: user.Email, Nickname: user.Nickname, CredentialStatus: status, TokenPrefix: credential.TokenPrefix, IssuedAt: issuedAt, Permissions: permissions, CreatedAt: time.Unix(int64(user.CreatedAt), 0).UTC()}
+	return DataAuthorizationAccountDTO{ID: user.ID, Account: user.Account, Nickname: user.Nickname, CredentialStatus: status, TokenPrefix: credential.TokenPrefix, IssuedAt: issuedAt, Permissions: permissions, CreatedAt: time.Unix(int64(user.CreatedAt), 0).UTC()}
 }
 
 func permissionDTOs(values map[string]*time.Time, now time.Time) []DataAuthorizationPermissionDTO {
