@@ -215,7 +215,7 @@ func (s *DeliveryService) RetryDeliveryLog(ctx context.Context, id uint) (*Deliv
 	if log.Success {
 		return nil, fmt.Errorf("delivery log %d is already successful", id)
 	}
-	if log.SourceCode != bojunOrderPushSource {
+	if !isBojunOrderDeliveryLog(log) {
 		return nil, fmt.Errorf("delivery log %d source %q does not support retry", id, log.SourceCode)
 	}
 	if log.CleanRecordID == 0 {
@@ -244,6 +244,13 @@ func (s *DeliveryService) RetryDeliveryLog(ctx context.Context, id uint) (*Deliv
 		result.ErrorMessage = pushResult.Error.Error()
 	}
 	return result, nil
+}
+
+func isBojunOrderDeliveryLog(log *model.DeliveryLog) bool {
+	if log.SourceCode == bojunOrderPushSource {
+		return true
+	}
+	return log.SourceCode == "" && log.DestinationID == 0 && log.DatasetKind == bojunOrderDatasetKind
 }
 
 type DeliveryRunResult struct {

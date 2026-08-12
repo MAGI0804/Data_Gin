@@ -19,7 +19,8 @@ import (
 )
 
 const (
-	bojunOrderPushSource = "bojun_order"
+	bojunOrderPushSource  = "bojun_order"
+	bojunOrderDatasetKind = "retail_order"
 
 	bojunPushTargetHangzhouHenglong = orderpush.TargetBojunHangzhouHenglong
 	bojunHangzhouHenglongStoreCode  = "416201"
@@ -226,25 +227,30 @@ type deliveryLogPayload struct {
 }
 
 func (s *BojunOrderPushService) writeDeliveryLog(ctx context.Context, payload deliveryLogPayload) {
+	log := newBojunOrderDeliveryLog(payload, app.TimeNowInTimezone())
+	_, _ = s.logDAO.Create(ctx, log)
+}
+
+func newBojunOrderDeliveryLog(payload deliveryLogPayload, sentAt time.Time) *model.DeliveryLog {
 	log := &model.DeliveryLog{
 		TraceID:         payload.TraceID,
 		RunID:           payload.RunID,
 		CleanRecordID:   payload.Order.ID,
 		DestinationID:   0,
-		SourceCode:      bojunOrderPushSource,
 		DestinationCode: payload.Target.Code,
 		DestinationName: payload.Target.Name,
 		BusinessKey:     payload.Order.DocNo,
+		DatasetKind:     bojunOrderDatasetKind,
 		RequestBody:     payload.RequestBody,
 		ResponseBody:    payload.ResponseBody,
 		HTTPStatus:      payload.HTTPStatus,
 		Success:         payload.Success,
-		SentAt:          &model.TimeNormal{Time: app.TimeNowInTimezone()},
+		SentAt:          &model.TimeNormal{Time: sentAt},
 	}
 	if payload.DeliveryError != nil {
 		log.ErrorMessage = payload.DeliveryError.Error()
 	}
-	_, _ = s.logDAO.Create(ctx, log)
+	return log
 }
 
 func (s *BojunOrderPushService) writeSkippedLog(ctx context.Context, order *model.BojunRetailOrder, skipErr error) {
@@ -252,10 +258,10 @@ func (s *BojunOrderPushService) writeSkippedLog(ctx context.Context, order *mode
 		TraceID:         uuid.NewString(),
 		CleanRecordID:   order.ID,
 		DestinationID:   0,
-		SourceCode:      bojunOrderPushSource,
 		DestinationCode: "unmatched_store",
 		DestinationName: "未匹配门店",
 		BusinessKey:     order.DocNo,
+		DatasetKind:     bojunOrderDatasetKind,
 		Success:         false,
 		ErrorMessage:    skipErr.Error(),
 		SentAt:          &model.TimeNormal{Time: app.TimeNowInTimezone()},
@@ -272,10 +278,10 @@ func (s *BojunOrderPushService) writePolicySkippedLog(ctx context.Context, order
 		TraceID:         uuid.NewString(),
 		CleanRecordID:   order.ID,
 		DestinationID:   0,
-		SourceCode:      bojunOrderPushSource,
 		DestinationCode: target.Code,
 		DestinationName: target.Name,
 		BusinessKey:     order.DocNo,
+		DatasetKind:     bojunOrderDatasetKind,
 		RequestBody:     requestBody,
 		ResponseBody:    "skipped_by_order_push_policy",
 		Success:         true,

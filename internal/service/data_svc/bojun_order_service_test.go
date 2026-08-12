@@ -203,6 +203,53 @@ func TestBojunOrderPushSkipsByConfiguredPolicy(t *testing.T) {
 	if logCreator.logs[0].ResponseBody != "skipped_by_order_push_policy" || !logCreator.logs[0].Success {
 		t.Fatalf("log = %+v, want successful policy skip log", logCreator.logs[0])
 	}
+	if logCreator.logs[0].SourceCode != "" {
+		t.Fatalf("source_code = %q, want empty", logCreator.logs[0].SourceCode)
+	}
+	if logCreator.logs[0].DatasetKind != bojunOrderDatasetKind {
+		t.Fatalf("dataset_kind = %q, want %q", logCreator.logs[0].DatasetKind, bojunOrderDatasetKind)
+	}
+}
+
+func TestBojunOrderDeliveryLogDoesNotWriteSourceCode(t *testing.T) {
+	log := newBojunOrderDeliveryLog(deliveryLogPayload{
+		TraceID: "trace-1",
+		Target:  bojunOrderPushTarget{Code: "target-1", Name: "目标一"},
+		Order: &model.BojunRetailOrder{
+			BaseModel: model.BaseModel{ID: 8},
+			DocNo:     "B006",
+		},
+		Success: true,
+	}, time.Date(2026, time.August, 12, 12, 0, 0, 0, time.Local))
+
+	if log.SourceCode != "" {
+		t.Fatalf("source_code = %q, want empty", log.SourceCode)
+	}
+	if log.DatasetKind != bojunOrderDatasetKind {
+		t.Fatalf("dataset_kind = %q, want %q", log.DatasetKind, bojunOrderDatasetKind)
+	}
+}
+
+func TestIsBojunOrderDeliveryLog(t *testing.T) {
+	tests := []struct {
+		name string
+		log  model.DeliveryLog
+		want bool
+	}{
+		{name: "historical source marker", log: model.DeliveryLog{SourceCode: bojunOrderPushSource}, want: true},
+		{name: "new internal marker", log: model.DeliveryLog{DatasetKind: bojunOrderDatasetKind}, want: true},
+		{name: "other source", log: model.DeliveryLog{SourceCode: "qimai_order", DatasetKind: bojunOrderDatasetKind}, want: false},
+		{name: "configured destination with internal marker", log: model.DeliveryLog{DestinationID: 9, DatasetKind: bojunOrderDatasetKind}, want: false},
+		{name: "unknown empty source", log: model.DeliveryLog{DestinationCode: string(shanghaimall.TargetQiantan)}, want: false},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := isBojunOrderDeliveryLog(&test.log); got != test.want {
+				t.Fatalf("isBojunOrderDeliveryLog() = %t, want %t", got, test.want)
+			}
+		})
+	}
 }
 
 func TestProcessBojunOrderRecordPreviewDoesNotWrite(t *testing.T) {
