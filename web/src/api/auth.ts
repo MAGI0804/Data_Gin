@@ -4,8 +4,13 @@ export type SessionUser = {
   id: number
   account: string
   nickname: string
-  email: string
-  consoleManaged: boolean
+  phone: string
+  accountType: 'CONSOLE'
+  status: 'ACTIVE'
+  mallScopeMode: 'ALL' | 'SELECTED'
+  roles: Array<{ code: string; name: string }>
+  permissions: string[]
+  mallIds: number[]
 }
 
 export type TokenInfo = {
@@ -54,13 +59,21 @@ export function readEnvelopeToken(payload: unknown) {
 
 export function readSessionUser(payload: unknown): SessionUser | null {
   const data = dataRecord(payload)
-  if (!data || typeof data.id !== 'number' || !Number.isSafeInteger(data.id) || data.id <= 0 || typeof data.account !== 'string' || typeof data.nickname !== 'string' || typeof data.email !== 'string' || typeof data.consoleManaged !== 'boolean') return null
+  const roles = data?.roles
+  const permissions = data?.permissions
+  const mallIds = data?.mallIds
+  if (!data || typeof data.id !== 'number' || !Number.isSafeInteger(data.id) || data.id <= 0 || typeof data.account !== 'string' || typeof data.nickname !== 'string' || typeof data.phone !== 'string' || data.accountType !== 'CONSOLE' || data.status !== 'ACTIVE' || (data.mallScopeMode !== 'ALL' && data.mallScopeMode !== 'SELECTED') || !Array.isArray(roles) || !roles.every((role) => role && typeof role === 'object' && typeof (role as JsonRecord).code === 'string' && typeof (role as JsonRecord).name === 'string') || !Array.isArray(permissions) || !permissions.every((permission) => typeof permission === 'string') || !Array.isArray(mallIds) || !mallIds.every((id) => typeof id === 'number' && Number.isSafeInteger(id) && id > 0)) return null
   return {
     id: data.id,
     account: data.account,
     nickname: data.nickname,
-    email: data.email,
-    consoleManaged: data.consoleManaged,
+    phone: data.phone,
+    accountType: data.accountType,
+    status: data.status,
+    mallScopeMode: data.mallScopeMode,
+    roles: roles.map((role) => ({ code: (role as JsonRecord).code as string, name: (role as JsonRecord).name as string })),
+    permissions: [...permissions] as string[],
+    mallIds: [...mallIds] as number[],
   }
 }
 

@@ -232,6 +232,52 @@ button:focus-visible {
   padding: 8px 10px;
 }
 
+.login-notice {
+  border-left: 3px solid var(--accent);
+  background: var(--surface);
+  color: #3b3b3b;
+  padding: 8px 10px;
+  font-size: 12px;
+}
+
+.login-tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  border-bottom: 1px solid var(--line);
+}
+
+.login-tabs button {
+  border: 0;
+  border-bottom: 2px solid transparent;
+  color: var(--muted);
+}
+
+.login-tabs button.active {
+  border-bottom-color: var(--accent);
+  color: var(--ink);
+}
+
+.login-code-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 8px;
+}
+
+.login-code-row > button {
+  min-width: 112px;
+}
+
+.login-link {
+  min-height: auto;
+  justify-self: start;
+  border: 0;
+  background: transparent;
+  color: #4b5563;
+  padding: 2px 0;
+  font-size: 12px;
+}
+
 .ops-shell {
   display: grid;
   grid-template-columns: 224px minmax(0, 1fr);

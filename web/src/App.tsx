@@ -815,7 +815,7 @@ function App() {
   const authenticatedSessionRef = useRef(sessionState === 'authenticated')
   const [sessionUser, setSessionUser] = useState<SessionUser | null>(() => {
     const user = loadStoredSessionUser(window.localStorage)
-    return user ? { ...user, email: '', consoleManaged: true } : null
+    return user ? { ...user, phone: '', accountType: 'CONSOLE', status: 'ACTIVE', mallScopeMode: 'SELECTED', roles: [], permissions: [], mallIds: [] } : null
   })
   const [sessionExpiresAt, setSessionExpiresAt] = useState(() => storedTokenExpiresAt(window.localStorage))
   const [sessionValidationError, setSessionValidationError] = useState('')
@@ -1454,7 +1454,52 @@ function App() {
 
 function LoginScreen({ onLogin, checking }: { onLogin: (token: string) => void; checking: boolean }) {
   const [error, setError] = useState('')
+  const [notice, setNotice] = useState('')
   const [submitting, setSubmitting] = useState(false)
+  const [sending, setSending] = useState(false)
+  const [mode, setMode] = useState<'password' | 'phone' | 'reset'>('password')
+  const [phone, setPhone] = useState('')
+  const [countdown, setCountdown] = useState(0)
+
+  useEffect(() => {
+    if (countdown <= 0) return
+    const timer = window.setTimeout(() => setCountdown((value) => Math.max(0, value - 1)), 1000)
+    return () => window.clearTimeout(timer)
+  }, [countdown])
+
+  function switchMode(nextMode: 'password' | 'phone' | 'reset') {
+    if (submitting || sending) return
+    setMode(nextMode)
+    setError('')
+    setNotice('')
+  }
+
+  async function sendCode(purpose: 'LOGIN' | 'PASSWORD_RESET') {
+    if (sending || countdown > 0) return
+    if (!/^1[3-9]\d{9}$/.test(phone.trim())) {
+      setError('请输入正确的中国大陆手机号。')
+      return
+    }
+    setSending(true)
+    setError('')
+    setNotice('')
+    try {
+      const response = await fetch(apiURL('/auth/phone-codes'), {
+        method: 'POST', headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ phone: phone.trim(), purpose }),
+      })
+      if (!response.ok) {
+        setError(loginFailureMessage(response.status, 'code'))
+        return
+      }
+      setCountdown(60)
+      setNotice('若该手机号对应可用账号，验证码将发送至手机。')
+    } catch {
+      setError('无法连接认证服务，请检查网络后重试。')
+    } finally {
+      setSending(false)
+    }
+  }
 
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault()
@@ -1462,15 +1507,27 @@ function LoginScreen({ onLogin, checking }: { onLogin: (token: string) => void; 
     setError('')
     const form = new FormData(event.currentTarget)
     try {
-      const response = await fetch(apiURL('/auth/login'), {
+      const path = mode === 'password' ? '/auth/login/password' : mode === 'phone' ? '/auth/login/phone-code' : '/auth/password/reset'
+      const body = mode === 'password'
+        ? { account: formValue(form, 'account'), password: formValue(form, 'password') }
+        : mode === 'phone'
+          ? { phone: phone.trim(), code: formValue(form, 'code') }
+          : { phone: phone.trim(), code: formValue(form, 'code'), password: formValue(form, 'newPassword') }
+      const response = await fetch(apiURL(path), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username: formValue(form, 'username'), password: formValue(form, 'password') }),
+        body: JSON.stringify(body),
       })
       const data: unknown = await response.json().catch(() => ({}))
+      if (mode === 'reset' && response.ok) {
+        setMode('password')
+        setNotice('密码已重置，请使用新密码登录。')
+        setCountdown(0)
+        return
+      }
       const token = readToken(data)
       if (!response.ok || !token) {
-        setError(loginFailureMessage(response.status))
+        setError(loginFailureMessage(response.status, mode))
         return
       }
       onLogin(token)
@@ -1489,10 +1546,31 @@ function LoginScreen({ onLogin, checking }: { onLogin: (token: string) => void; 
         </div>
         <form className="login-form" onSubmit={submit}>
           <h1>管理员登录</h1>
-          <Field label="管理员账号" name="username" required autoComplete="username" />
-          <Field label="管理员密码" name="password" type="password" required autoComplete="current-password" />
+          {mode !== 'reset' && <div className="login-tabs" role="tablist" aria-label="登录方式">
+            <button type="button" role="tab" aria-selected={mode === 'password'} className={mode === 'password' ? 'active' : ''} onClick={() => switchMode('password')}>密码登录</button>
+            <button type="button" role="tab" aria-selected={mode === 'phone'} className={mode === 'phone' ? 'active' : ''} onClick={() => switchMode('phone')}>验证码登录</button>
+          </div>}
+          {mode === 'password' && <>
+            <Field label="账号或手机号" name="account" required autoComplete="username" />
+            <Field label="密码" name="password" type="password" required autoComplete="current-password" />
+            <button className="login-link" type="button" onClick={() => switchMode('reset')}>忘记密码</button>
+          </>}
+          {mode !== 'password' && <>
+            <label>手机号
+              <input name="phone" inputMode="numeric" autoComplete="tel" value={phone} onChange={(event) => setPhone(event.target.value)} required pattern="1[3-9][0-9]{9}" />
+            </label>
+            <div className="login-code-row">
+              <Field label="短信验证码" name="code" required inputMode="numeric" autoComplete="one-time-code" pattern="[0-9]{6}" />
+              <button type="button" disabled={sending || countdown > 0} onClick={() => void sendCode(mode === 'phone' ? 'LOGIN' : 'PASSWORD_RESET')}>{sending ? '发送中…' : countdown > 0 ? `${countdown} 秒后重发` : '发送验证码'}</button>
+            </div>
+          </>}
+          {mode === 'reset' && <>
+            <Field label="新密码" name="newPassword" type="password" required minLength={10} maxLength={72} autoComplete="new-password" />
+            <button className="login-link" type="button" onClick={() => switchMode('password')}>返回密码登录</button>
+          </>}
+          {notice && <div className="login-notice" role="status" aria-live="polite">{notice}</div>}
           {error && <div className="login-error" role="alert" aria-live="polite">{error}</div>}
-          <button className="primary" type="submit" disabled={submitting || checking}>{submitting || checking ? '正在验证会话…' : '管理员登录'}</button>
+          <button className="primary" type="submit" disabled={submitting || checking}>{submitting || checking ? '正在处理…' : mode === 'reset' ? '重置密码' : '登录'}</button>
         </form>
       </section>
     </main>
@@ -5520,11 +5598,11 @@ function EmptyState({ text }: { text: string }) {
   return <div className="empty-state">{text}</div>
 }
 
-function Field({ label, name, defaultValue = '', type = 'text', value, onChange, required = false, autoComplete }: { label: string; name: string; defaultValue?: string; type?: string; value?: string; onChange?: (value: string) => void; required?: boolean; autoComplete?: string }) {
+function Field({ label, name, defaultValue = '', type = 'text', value, onChange, required = false, autoComplete, inputMode, pattern, minLength, maxLength }: { label: string; name: string; defaultValue?: string; type?: string; value?: string; onChange?: (value: string) => void; required?: boolean; autoComplete?: string; inputMode?: 'text' | 'numeric' | 'tel' | 'email' | 'decimal' | 'search' | 'url' | 'none'; pattern?: string; minLength?: number; maxLength?: number }) {
   return (
     <label>
       {label}
-      <input name={name} defaultValue={value === undefined ? defaultValue : undefined} value={value} type={type} required={required} autoComplete={autoComplete} onChange={onChange ? (event) => onChange(event.currentTarget.value) : undefined} />
+      <input name={name} defaultValue={value === undefined ? defaultValue : undefined} value={value} type={type} required={required} autoComplete={autoComplete} inputMode={inputMode} pattern={pattern} minLength={minLength} maxLength={maxLength} onChange={onChange ? (event) => onChange(event.currentTarget.value) : undefined} />
     </label>
   )
 }
@@ -6038,11 +6116,12 @@ function readToken(data: unknown) {
   return typeof value === 'string' ? value : ''
 }
 
-function loginFailureMessage(status: number) {
-  if (status === 401) return '账号或密码不正确，请重试。'
+function loginFailureMessage(status: number, mode: 'password' | 'phone' | 'reset' | 'code' = 'password') {
+  if (status === 401) return mode === 'password' ? '账号或密码不正确，请重试。' : '手机号或验证码无效，请重试。'
   if (status === 429) return '登录尝试过于频繁，请稍后再试。'
+  if (status === 503) return mode === 'code' ? '短信服务暂时不可用，密码登录仍可使用。' : '认证服务暂时不可用，请稍后再试。'
   if (status >= 500) return '登录服务暂时不可用，请稍后再试。'
-  return '登录请求未完成，请检查账号和密码后重试。'
+  return '请求未完成，请检查输入后重试。'
 }
 
 function formValue(form: FormData, key: string) {

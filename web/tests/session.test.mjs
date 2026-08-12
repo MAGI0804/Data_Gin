@@ -19,13 +19,18 @@ test('reads a refresh token only from a valid response envelope', () => {
 test('parses complete authenticated-session details', () => {
   assert.deepEqual(readSessionUser({
     code: 200,
-    data: { id: 7, account: 'operator', nickname: '运营人员', email: 'ops@example.test', consoleManaged: true },
+    data: { id: 7, account: 'operator', nickname: '运营人员', phone: '138****8000', accountType: 'CONSOLE', status: 'ACTIVE', mallScopeMode: 'SELECTED', roles: [{ code: 'operator', name: '运营员' }], permissions: ['mall.read'], mallIds: [2, 9] },
   }), {
     id: 7,
     account: 'operator',
     nickname: '运营人员',
-    email: 'ops@example.test',
-    consoleManaged: true,
+    phone: '138****8000',
+    accountType: 'CONSOLE',
+    status: 'ACTIVE',
+    mallScopeMode: 'SELECTED',
+    roles: [{ code: 'operator', name: '运营员' }],
+    permissions: ['mall.read'],
+    mallIds: [2, 9],
   })
   assert.equal(readSessionUser({ code: 200, data: { id: 0, account: 'operator' } }), null)
 })
@@ -66,7 +71,7 @@ test('parses the string user ID returned by the token-info endpoint', () => {
 
 const validProfileResponse = {
   ok: true,
-  data: { code: 200, data: { id: 7, account: 'operator', nickname: '运营人员', email: 'ops@example.test', consoleManaged: true } },
+  data: { code: 200, data: { id: 7, account: 'operator', nickname: '运营人员', phone: '138****8000', accountType: 'CONSOLE', status: 'ACTIVE', mallScopeMode: 'SELECTED', roles: [], permissions: ['mall.read'], mallIds: [2] } },
 }
 
 const validTokenInfoResponse = {
