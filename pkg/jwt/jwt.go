@@ -47,6 +47,7 @@ type JWTCustomClaims struct {
 	T string `json:"t"` // 令牌类型: "r"(refreshable) 或 "p"(permanent)
 	E int64  `json:"e"` // 过期时间
 	I int64  `json:"i"` // 签发时间
+	V uint64 `json:"v"` // 账号授权版本
 }
 
 // Valid 实现jwt.Claims接口的方法
@@ -169,6 +170,7 @@ func (j *JWT) RefreshToken(c *gin.Context) (string, error) {
 			T: claims.T,
 			E: j.expireAtTime(), // 更新过期时间
 			I: claims.I,         // 保持原有的签名时间
+			V: claims.V,
 		}
 		return j.createToken(newClaims)
 	}
@@ -179,6 +181,13 @@ func (j *JWT) RefreshToken(c *gin.Context) (string, error) {
 
 // GenerateToken 生成 token
 func (j *JWT) GenerateToken(userId string, tokenType string) string {
+	return j.GenerateVersionedToken(userId, tokenType, 0)
+}
+
+// GenerateVersionedToken creates a token bound to the user's current
+// auth_version. Console authentication must use this method so password,
+// status, role, and scope changes can invalidate previously issued tokens.
+func (j *JWT) GenerateVersionedToken(userId string, tokenType string, authVersion uint64) string {
 	// 构造用户 claims 信息（负荷）
 	var expireAtTime int64
 	if tokenType == "p" || tokenType == "permanent" {
@@ -197,6 +206,7 @@ func (j *JWT) GenerateToken(userId string, tokenType string) string {
 		T: tokenType,
 		E: expireAtTime,
 		I: now,
+		V: authVersion,
 	}
 
 	// 根据 claims 生成 token
@@ -217,7 +227,7 @@ func (j *JWT) createToken(claims *JWTCustomClaims) (string, error) {
 
 	// 为了控制长度，我们只保留必要的信息
 	// 并使用更短的格式
-	tokenData := fmt.Sprintf("%s:%s:%d:%d", claims.U, claims.T, claims.E, claims.I)
+	tokenData := fmt.Sprintf("%s:%s:%d:%d:%d", claims.U, claims.T, claims.E, claims.I, claims.V)
 
 	// 生成签名
 	h := hmac.New(sha256.New, j.Key)
@@ -234,26 +244,6 @@ func (j *JWT) createToken(claims *JWTCustomClaims) (string, error) {
 
 	// 使用Base64URL编码
 	token := base64.RawURLEncoding.EncodeToString([]byte(fullToken))
-
-	// 确保token长度不超过50个字符
-	if len(token) > 50 {
-		// 如果超过50个字符，使用更紧凑的格式
-		// 只保留用户ID、过期时间和简短签名
-		compactData := fmt.Sprintf("%s:%d", claims.U, claims.E)
-		h.Reset()
-		h.Write([]byte(compactData))
-		compactSignature := h.Sum(nil)
-		if len(compactSignature) > 4 {
-			compactSignature = compactSignature[:4]
-		}
-		compactToken := fmt.Sprintf("%s:%x", compactData, compactSignature)
-		token = base64.RawURLEncoding.EncodeToString([]byte(compactToken))
-	}
-
-	// 确保token长度不超过50个字符
-	if len(token) > 50 {
-		token = token[:50]
-	}
 
 	return token, nil
 }
@@ -325,12 +315,22 @@ func (j *JWT) parseTokenString(tokenStr string) (*jwtPkg.Token, error) {
 		}
 		// 尝试解析完整格式
 		if len(parts) >= 5 {
-			// 完整格式: 用户ID:令牌类型:过期时间:签发时间:签名
+			// 完整格式: 用户ID:令牌类型:过期时间:签发时间:[授权版本:]签名
 			uid := parts[0]
 			tokenType := parts[1]
 			expireStr := parts[2]
 			issuedStr := parts[3]
-			signature := parts[4]
+			signatureIndex := 4
+			var authVersion uint64
+			if len(parts) >= 6 {
+				parsedVersion, parseErr := strconv.ParseUint(parts[4], 10, 64)
+				if parseErr != nil {
+					return nil, ErrTokenInvalid
+				}
+				authVersion = parsedVersion
+				signatureIndex = 5
+			}
+			signature := parts[signatureIndex]
 
 			expire, err := strconv.ParseInt(expireStr, 10, 64)
 			if err != nil {
@@ -344,6 +344,9 @@ func (j *JWT) parseTokenString(tokenStr string) (*jwtPkg.Token, error) {
 
 			// 验证签名
 			tokenDataWithoutSig := fmt.Sprintf("%s:%s:%d:%d", uid, tokenType, expire, issued)
+			if signatureIndex == 5 {
+				tokenDataWithoutSig = fmt.Sprintf("%s:%d", tokenDataWithoutSig, authVersion)
+			}
 			h := hmac.New(sha256.New, j.Key)
 			h.Write([]byte(tokenDataWithoutSig))
 			expectedSignature := h.Sum(nil)
@@ -359,6 +362,7 @@ func (j *JWT) parseTokenString(tokenStr string) (*jwtPkg.Token, error) {
 					T: tokenType,
 					E: expire,
 					I: issued,
+					V: authVersion,
 				}
 				// 检查是否过期
 				if claims.E < time.Now().Unix() {

@@ -4,6 +4,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
+	"strings"
 	"time"
 
 	"gin-biz-web-api/constant"
@@ -18,7 +20,7 @@ import (
 	"gorm.io/gorm/clause"
 )
 
-const consoleAdminPassword = "youlan123"
+const EnvConsoleAdminInitialPassword = "CONSOLE_ADMIN_INITIAL_PASSWORD"
 
 type ConsoleLoginService struct {
 	db *gorm.DB
@@ -64,16 +66,16 @@ func SyncExistingConsoleAdminPermissions(ctx context.Context, db *gorm.DB) (bool
 }
 
 func (s *ConsoleLoginService) Login(ctx context.Context, username, password string) (string, *model.User, error) {
-	if username != constant.ConsoleAdmin || password != consoleAdminPassword {
+	if username != constant.ConsoleAdmin || strings.TrimSpace(password) == "" {
 		return "", nil, fmt.Errorf("invalid console credentials")
 	}
 
-	user, err := s.ensureAdminUser(ctx)
+	user, err := s.ensureAdminUser(ctx, password)
 	if err != nil {
 		return "", nil, err
 	}
 
-	token := jwt.NewJWT().GenerateToken(user.GetStringID(), "refreshable")
+	token := jwt.NewJWT().GenerateVersionedToken(user.GetStringID(), "refreshable", user.AuthVersion)
 	if token == "" {
 		return "", nil, fmt.Errorf("generate console token failed")
 	}
@@ -81,7 +83,7 @@ func (s *ConsoleLoginService) Login(ctx context.Context, username, password stri
 	return token, user, nil
 }
 
-func (s *ConsoleLoginService) ensureAdminUser(ctx context.Context) (*model.User, error) {
+func (s *ConsoleLoginService) ensureAdminUser(ctx context.Context, password string) (*model.User, error) {
 	if s == nil || s.db == nil || ctx == nil {
 		return nil, fmt.Errorf("ensure console admin: invalid database")
 	}
@@ -89,7 +91,7 @@ func (s *ConsoleLoginService) ensureAdminUser(ctx context.Context) (*model.User,
 	var user *model.User
 	err := s.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var err error
-		user, err = ensureAdminUserRecord(ctx, tx)
+		user, err = ensureAdminUserRecord(ctx, tx, password)
 		if err != nil {
 			return err
 		}
@@ -119,7 +121,7 @@ func grantConsoleSuperAdminRole(ctx context.Context, db *gorm.DB, userID uint) e
 	return nil
 }
 
-func ensureAdminUserRecord(ctx context.Context, db *gorm.DB) (*model.User, error) {
+func ensureAdminUserRecord(ctx context.Context, db *gorm.DB, password string) (*model.User, error) {
 	now := int(time.Now().Unix())
 	user := model.User{}
 	err := db.WithContext(ctx).Where("account = ?", constant.ConsoleAdmin).First(&user).Error
@@ -135,13 +137,8 @@ func ensureAdminUserRecord(ctx context.Context, db *gorm.DB) (*model.User, error
 			}
 			user.UpdatedAt = now
 		}
-		if !hash.BcryptCheck(consoleAdminPassword, user.Password) {
-			if user.CommonTimestampsField == nil {
-				user.CommonTimestampsField = &model.CommonTimestampsField{}
-			}
-			user.Password = consoleAdminPassword
-			user.UpdatedAt = now
-			needsSave = true
+		if !hash.BcryptCheck(password, user.Password) {
+			return nil, fmt.Errorf("invalid console credentials")
 		}
 		if needsSave {
 			if err := db.WithContext(ctx).Save(&user).Error; err != nil {
@@ -157,13 +154,21 @@ func ensureAdminUserRecord(ctx context.Context, db *gorm.DB) (*model.User, error
 		return nil, fmt.Errorf("find console admin: %w", err)
 	}
 
+	initialPassword, ok := configuredInitialAdminPassword(password)
+	if !ok {
+		return nil, fmt.Errorf("invalid console credentials")
+	}
 	user = model.User{
 		BaseModel:             &model.BaseModel{},
 		Account:               constant.ConsoleAdmin,
-		Email:                 constant.ConsoleAdminMail,
-		Password:              consoleAdminPassword,
+		Email:                 "",
+		Password:              initialPassword,
 		Nickname:              constant.ConsoleAdminName,
 		ConsoleManaged:        true,
+		AccountType:           model.AccountTypeConsole,
+		Status:                model.AccountStatusActive,
+		AuthVersion:           1,
+		MallScopeMode:         model.MallScopeAll,
 		CommonTimestampsField: &model.CommonTimestampsField{CreatedAt: now, UpdatedAt: now},
 	}
 	if err := db.WithContext(ctx).Create(&user).Error; err != nil {
@@ -187,6 +192,11 @@ func ensureAdminUserRecord(ctx context.Context, db *gorm.DB) (*model.User, error
 	return &user, nil
 }
 
+func configuredInitialAdminPassword(candidate string) (string, bool) {
+	initialPassword, configured := os.LookupEnv(EnvConsoleAdminInitialPassword)
+	return initialPassword, configured && strings.TrimSpace(initialPassword) != "" && candidate == initialPassword
+}
+
 func isTrustedConsoleAdmin(user *model.User) bool {
 	return user != nil &&
 		user.ConsoleManaged &&
@@ -196,7 +206,7 @@ func isTrustedConsoleAdmin(user *model.User) bool {
 func isLegacyConsoleAdmin(user *model.User) bool {
 	return user != nil &&
 		user.Account == constant.ConsoleAdmin &&
-		user.Email == constant.ConsoleAdminMail &&
+		(user.Email == "" || user.Email == constant.ConsoleAdminMail) &&
 		user.Nickname == constant.ConsoleAdminName
 }
 

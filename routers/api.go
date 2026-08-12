@@ -10,8 +10,12 @@ import (
 	"gin-biz-web-api/internal/controller/auth_ctrl"
 	"gin-biz-web-api/internal/controller/example_ctrl"
 	"gin-biz-web-api/internal/middleware"
+	"gin-biz-web-api/internal/service/auth_svc"
 	"gin-biz-web-api/pkg/config"
 	"gin-biz-web-api/pkg/limiter"
+	"gin-biz-web-api/pkg/phonecode"
+	redisclient "gin-biz-web-api/pkg/redis"
+	"gin-biz-web-api/pkg/sms"
 )
 
 // 实例化针对方法的令牌桶，并添加令牌桶规则
@@ -64,9 +68,16 @@ func RegisterAPIRoutes(r *gin.Engine) {
 }
 
 func healthCheck(c *gin.Context) {
+	smsStatus := "ok"
+	if _, err := sms.LoadConfig(); err != nil {
+		smsStatus = "degraded"
+	}
 	c.JSON(http.StatusOK, gin.H{
 		"status":  "ok",
 		"service": "gin-biz-web-api",
+		"components": gin.H{
+			"sms": smsStatus,
+		},
 	})
 }
 
@@ -96,12 +107,29 @@ func apiAuth(api *gin.RouterGroup) {
 		loginCtrl := auth_ctrl.NewLoginController()
 		authGroup.POST("/login", loginCtrl.ConsoleLogin) // 管理台登录
 
-		userCtrl := new(auth_ctrl.UserController)
-		authGroup.GET("/me", middleware.AuthJWT(), userCtrl.Profile) // 用户个人信息
+		var accountAuthService *auth_svc.AccountAuthService
+		if smsClient, err := sms.NewFromEnvironment(); err == nil {
+			codes := phonecode.New(
+				phonecode.NewRedisStore(redisclient.Instance().Client, redisclient.GetNamespace()),
+				smsClient,
+			)
+			accountAuthService = auth_svc.NewDatabaseAccountAuthService(codes)
+		} else {
+			// SMS configuration is optional: password login remains available,
+			// while phone-code endpoints fail closed with HTTP 503.
+			accountAuthService = auth_svc.NewDatabaseAccountAuthService(nil)
+		}
+		accountAuthCtrl := auth_ctrl.NewAccountAuthController(accountAuthService)
+		authGroup.POST("/login/password", accountAuthCtrl.LoginPassword)
+		authGroup.POST("/phone-codes", middleware.LimitRoute("10-H"), accountAuthCtrl.SendPhoneCode)
+		authGroup.POST("/login/phone-code", accountAuthCtrl.LoginPhoneCode)
+		authGroup.POST("/password/reset", accountAuthCtrl.ResetPassword)
+		authGroup.POST("/password/change", middleware.AuthJWT(), accountAuthCtrl.ChangePassword)
+		authGroup.GET("/me", middleware.AuthJWT(), accountAuthCtrl.Profile)
 
 		tokenCtrl := new(auth_ctrl.TokenController)
-		authGroup.POST("/token/refresh", tokenCtrl.RefreshToken) // 刷新令牌
-		authGroup.GET("/token/info", tokenCtrl.GetTokenInfo)     // 根据token查询当前的信息
+		authGroup.POST("/token/refresh", middleware.AuthJWT(), tokenCtrl.RefreshToken) // 刷新令牌
+		authGroup.GET("/token/info", middleware.AuthJWT(), tokenCtrl.GetTokenInfo)     // 根据token查询当前的信息
 
 		// token数据管理
 		tokenDataCtrl := auth_ctrl.NewTokenDataController()

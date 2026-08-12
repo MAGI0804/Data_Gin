@@ -105,14 +105,31 @@ func TestOpenAPIUserLookupUsesSingleCredentialJoin(t *testing.T) {
 	for _, fragment := range []string{
 		"FROM users AS open_user",
 		"INNER JOIN open_api_credentials AS credential ON credential.user_id = open_user.id",
-		"credential.token_hash = ? AND credential.status = ?",
+		"credential.token_hash = ? AND credential.status = ? AND open_user.account_type = ? AND open_user.status = ?",
 	} {
 		if !strings.Contains(statement, fragment) {
 			t.Fatalf("statement does not contain %q: %s", fragment, statement)
 		}
 	}
-	if len(result.Statement.Vars) != 2 {
+	if len(result.Statement.Vars) != 4 {
 		t.Fatalf("vars=%v", result.Statement.Vars)
+	}
+}
+
+func TestValidConsoleSession(t *testing.T) {
+	valid := &model.User{BaseModel: &model.BaseModel{ID: 7}, AccountType: model.AccountTypeConsole, Status: model.AccountStatusActive, AuthVersion: 3}
+	if !validConsoleSession(valid, 3) {
+		t.Fatal("active console user with matching version was rejected")
+	}
+	for _, user := range []*model.User{
+		nil,
+		{BaseModel: &model.BaseModel{ID: 7}, AccountType: model.AccountTypeOpenAPI, Status: model.AccountStatusActive, AuthVersion: 3},
+		{BaseModel: &model.BaseModel{ID: 7}, AccountType: model.AccountTypeConsole, Status: model.AccountStatusDisabled, AuthVersion: 3},
+		{BaseModel: &model.BaseModel{ID: 7}, AccountType: model.AccountTypeConsole, Status: model.AccountStatusActive, AuthVersion: 4},
+	} {
+		if validConsoleSession(user, 3) {
+			t.Fatalf("invalid session was accepted: %#v", user)
+		}
 	}
 }
 

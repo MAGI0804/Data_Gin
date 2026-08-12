@@ -4,6 +4,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"gin-biz-web-api/internal/requests/auth_request"
+	"gin-biz-web-api/pkg/auth"
 	"gin-biz-web-api/pkg/errcode"
 	"gin-biz-web-api/pkg/jwt"
 	"gin-biz-web-api/pkg/responses"
@@ -43,9 +44,10 @@ func (ctrl *TokenController) RefreshToken(c *gin.Context) {
 
 	// 检查是否提供了 token_type 参数
 	if request.TokenType != "" {
+		user := auth.CurrentUser(c)
 		// 生成新令牌
 		tokenType := request.TokenType
-		newToken := jwt.NewJWT().GenerateToken(userID, tokenType)
+		newToken := jwt.NewJWT().GenerateVersionedToken(userID, tokenType, user.AuthVersion)
 		if newToken == "" {
 			response.ToErrorResponse(errcode.InternalServerError, "生成令牌失败")
 			return

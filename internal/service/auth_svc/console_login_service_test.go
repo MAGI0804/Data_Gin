@@ -12,6 +12,16 @@ import (
 	"gorm.io/gorm"
 )
 
+func TestConsoleAdminInitialPasswordComesFromEnvironment(t *testing.T) {
+	t.Setenv(EnvConsoleAdminInitialPassword, "environment-secret")
+	if value, ok := configuredInitialAdminPassword("environment-secret"); !ok || value != "environment-secret" {
+		t.Fatalf("configuredInitialAdminPassword() = %q, %t", value, ok)
+	}
+	if _, ok := configuredInitialAdminPassword("old-hardcoded-password"); ok {
+		t.Fatal("configuredInitialAdminPassword accepted a different password")
+	}
+}
+
 func TestConsoleLoginRejectsInvalidCredentialsBeforeDatabase(t *testing.T) {
 	service := &ConsoleLoginService{}
 	if token, user, err := service.Login(context.Background(), "user", "wrong"); err == nil || token != "" || user != nil {
@@ -64,6 +74,7 @@ func TestIsTrustedConsoleAdmin(t *testing.T) {
 		want bool
 	}{
 		{name: "console managed", user: &model.User{Account: "admin", Email: "admin@warehouse.local", Nickname: "管理员", ConsoleManaged: true}, want: true},
+		{name: "new console managed without email", user: &model.User{Account: "admin", Nickname: "管理员", ConsoleManaged: true}, want: true},
 		{name: "legacy console shape without marker", user: &model.User{Account: "admin", Email: "admin@warehouse.local", Nickname: "管理员"}},
 		{name: "public registration shape", user: &model.User{Account: "admin", Email: "attacker@example.com", ConsoleManaged: true}},
 		{name: "case variant", user: &model.User{Account: "Admin", Email: "admin@warehouse.local", Nickname: "管理员", ConsoleManaged: true}},

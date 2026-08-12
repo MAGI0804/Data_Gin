@@ -36,9 +36,9 @@ func AuthJWT() gin.HandlerFunc {
 
 		// jwt 解析成功，设置用户信息
 		var user model.User
-		database.DB.First(&user, claims.U)
-		if user.ID == 0 {
-			response.ToErrorResponse(errcode.Unauthorized, "找不到对应用户")
+		result := database.DB.WithContext(c.Request.Context()).First(&user, claims.U)
+		if result.Error != nil || !validConsoleSession(&user, claims.V) {
+			response.ToSafeErrorResponse(errcode.Unauthorized, "身份凭证无效或已过期")
 			c.Abort()
 			return
 		}
@@ -87,7 +87,13 @@ func openAPIUserLookup(ctx context.Context, db *gorm.DB, tokenHash string) *gorm
 		Table("users AS open_user").
 		Select("open_user.*").
 		Joins("INNER JOIN open_api_credentials AS credential ON credential.user_id = open_user.id").
-		Where("credential.token_hash = ? AND credential.status = ?", tokenHash, model.OpenAPICredentialStatusActive)
+		Where(
+			"credential.token_hash = ? AND credential.status = ? AND open_user.account_type = ? AND open_user.status = ?",
+			tokenHash,
+			model.OpenAPICredentialStatusActive,
+			model.AccountTypeOpenAPI,
+			model.AccountStatusActive,
+		)
 }
 
 // AuthInternalBearerJWT authenticates internal management requests from the
@@ -108,8 +114,8 @@ func AuthInternalBearerJWT() gin.HandlerFunc {
 		}
 
 		var user model.User
-		result := database.DB.First(&user, claims.U)
-		if result.Error != nil || user.ID == 0 {
+		result := database.DB.WithContext(c.Request.Context()).First(&user, claims.U)
+		if result.Error != nil || !validConsoleSession(&user, claims.V) {
 			response.ToSafeErrorResponse(errcode.Unauthorized, "身份凭证无效或已过期")
 			return
 		}
@@ -118,6 +124,14 @@ func AuthInternalBearerJWT() gin.HandlerFunc {
 		c.Set(constant.CurrentUserInfo, user)
 		c.Next()
 	}
+}
+
+func validConsoleSession(user *model.User, authVersion uint64) bool {
+	return user != nil &&
+		user.ID != 0 &&
+		user.AccountType == model.AccountTypeConsole &&
+		user.Status == model.AccountStatusActive &&
+		user.AuthVersion == authVersion
 }
 
 func openAPIToken(values []string) (string, bool) {
