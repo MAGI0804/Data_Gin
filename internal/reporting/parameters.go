@@ -534,11 +534,19 @@ func validateAllowedValues(definition ParameterDefinition, values []string) erro
 }
 
 func normalizeInteger(value interface{}) (int64, error) {
-	number, ok := value.(json.Number)
-	if !ok {
-		return 0, errors.New("not a number")
+	var raw string
+	switch typed := value.(type) {
+	case json.Number:
+		raw = typed.String()
+	case string:
+		raw = typed
+	default:
+		return 0, errors.New("not an integer")
 	}
-	return number.Int64()
+	if !regexp.MustCompile(`^-?\d+$`).MatchString(raw) {
+		return 0, errors.New("not an integer")
+	}
+	return strconv.ParseInt(raw, 10, 64)
 }
 
 func normalizeDecimal(value interface{}) (string, error) {

@@ -82,3 +82,8 @@ test('run, result and export parsers preserve cursor and large numeric strings',
   assert.equal(reportExport.status, 'READY')
   assert.equal(reportExport.canDownload, true)
 })
+
+test('parseReportResultPage rejects a missing signed cursor', () => {
+  const run = { id: 31, runUuid: 'run-uuid', definitionId: 9, versionId: 23, status: 'SUCCEEDED', resultAvailable: true }
+  assert.throws(() => parseReportResultPage({ data: { run, columns: [], rows: [], pagination: { pageSize: 100, hasMore: true } } }))
+})

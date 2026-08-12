@@ -56,13 +56,13 @@ export function ReportQueryPage({ client }: { client: ReportCenterClient }) {
   async function submitRun(event: FormEvent) {
     event.preventDefault()
     if (!contract || operation.busy) return
-    const parameters = visibleParameters(contract.parameters).reduce<Record<string, unknown>>((input, parameter) => {
-      const value = values[parameter.code]
-      if (value !== '' && value !== undefined && !(Array.isArray(value) && value.length === 0)) input[parameter.code] = normalizeInputValue(parameter, value)
-      return input
-    }, {})
+    const normalized = buildRunParameters(contract.parameters, values)
+    if (!normalized.ok) {
+      setOperation({ busy: false, error: normalized.error })
+      return
+    }
     setOperation({ busy: true, error: '' })
-    const response = await createReportRun(client, contract.definitionId, parameters)
+    const response = await createReportRun(client, contract.definitionId, normalized.parameters)
     if (!response.ok) {
       setOperation({ busy: false, error: response.error })
       return
@@ -93,6 +93,12 @@ export function ReportQueryPage({ client }: { client: ReportCenterClient }) {
       }
       await wait(1500, controller.signal)
     }
+  }
+
+  async function resumeRun() {
+    if (!run || operation.busy) return
+    setOperation({ busy: true, error: '' })
+    await pollRun(run.id)
   }
 
   async function loadResults(runId: number, cursor: string, pageIndex: number, signal?: AbortSignal) {
@@ -186,7 +192,7 @@ export function ReportQueryPage({ client }: { client: ReportCenterClient }) {
         {!contract && !contractState.loading && !contractState.error ? <FeedbackState kind="empty" title="尚未选择报表" description="请选择一份已发布且有查询权限的报表。" /> : null}
       </Section>
       {run ? <div className={styles.statusBar} role="status"><span><strong>{runLabel(run.status)}</strong><small>运行 #{run.id} · {run.rowCount.toLocaleString('zh-CN')} 行</small></span><span>{run.errorMessage || (run.resultExpiresAt ? `结果保留至 ${formatDate(run.resultExpiresAt)}` : '正在等待 Oracle 结果')}</span></div> : null}
-      {operation.error ? <FeedbackState kind="error" title="操作未完成" description={operation.error} /> : null}
+      {operation.error ? <FeedbackState kind="error" title="操作未完成" description={operation.error} action={run && !terminalRunStatuses.has(run.status) ? <button className="ui-control-radius" type="button" onClick={() => void resumeRun()}>恢复状态查询</button> : undefined} /> : null}
       <Section title="结果预览" description="使用签名 Cursor 进行 Oracle Keyset 分页，不会重新执行存储过程。" actions={run?.resultAvailable ? <div className={styles.resultActions}>{reportExport ? <StatusTag tone={exportTone(reportExport)}>{exportLabel(reportExport.status)}</StatusTag> : null}<button className="ui-control-radius" type="button" onClick={() => void startExport()} disabled={operation.busy || Boolean(reportExport)}><Download aria-hidden="true" />生成正式 Excel</button>{reportExport?.canDownload ? <button className="primary ui-control-radius" type="button" onClick={() => void downloadExport()}>下载文件</button> : null}</div> : undefined} flush>
         {operation.busy && !result ? <FeedbackState kind="loading" title={reportExport ? '正在生成并校验正式 Excel' : '正在执行报表'} description={reportExport ? exportProgress(reportExport) : 'Oracle 存储过程只会执行一次，请稍候。'} /> : null}
         {!run && !loading ? <FeedbackState kind="empty" title={published.length === 0 ? '暂无已发布报表' : '尚未执行报表'} description={published.length === 0 ? '发布版本可用后会出现在上方选择器。' : '填写参数并运行后，结果将在这里分页展示。'} /> : null}
@@ -201,7 +207,7 @@ export function ReportQueryPage({ client }: { client: ReportCenterClient }) {
 function ParameterField({ parameter, value, disabled, onChange }: { parameter: ReportParameter; value: unknown; disabled: boolean; onChange: (value: unknown) => void }) {
   const id = `report-parameter-${parameter.code}`
   const hint = [`{{${parameter.code}}}`, parameter.oracleType, parameter.required ? '必填' : '选填', parameter.sensitive ? '敏感' : ''].filter(Boolean).join(' · ')
-  if (parameter.controlType === 'CHECKBOX') return <label className={styles.checkbox} htmlFor={id}><input id={id} type="checkbox" checked={value === true} disabled={disabled} onChange={(event) => onChange(event.currentTarget.checked)} /><span><strong>{parameter.label}</strong><small>{hint}</small></span></label>
+  if (parameter.controlType === 'CHECKBOX') return <label className={styles.field} htmlFor={id}><span>{parameter.label}{parameter.required ? ' *' : ''}</span><select id={id} className="ui-control-radius" required={parameter.required} disabled={disabled} value={value === true ? 'true' : value === false ? 'false' : ''} onChange={(event) => onChange(event.currentTarget.value === '' ? '' : event.currentTarget.value === 'true')}><option value="">{parameter.required ? '请选择' : '不传入 / NULL'}</option><option value="true">是</option><option value="false">否</option></select><small>{hint}</small></label>
   if (parameter.controlType === 'SELECT' || parameter.controlType === 'MULTI_SELECT') return <label className={styles.field} htmlFor={id}><span>{parameter.label}{parameter.required ? ' *' : ''}</span><select id={id} className="ui-control-radius" multiple={parameter.controlType === 'MULTI_SELECT'} required={parameter.required} disabled={disabled} value={parameter.controlType === 'MULTI_SELECT' ? toStringArray(value) : String(value ?? '')} onChange={(event) => onChange(parameter.controlType === 'MULTI_SELECT' ? Array.from(event.currentTarget.selectedOptions, (option) => option.value) : event.currentTarget.value)}><option value="" disabled={parameter.required}>请选择</option>{parameter.allowedValues.map((option) => <option value={String(option)} key={String(option)}>{String(option)}</option>)}</select><small>{hint}</small></label>
   const type = parameter.controlType === 'DATE' ? 'date' : parameter.controlType === 'DATETIME' ? 'datetime-local' : parameter.sensitive ? 'password' : 'text'
   const rules = parameter.validation
@@ -214,20 +220,27 @@ function ResultTable({ page }: { page: ReportResultPage }) {
 }
 
 function visibleParameters(parameters: ReportParameter[]) { return parameters.filter((parameter) => !parameter.systemInjected) }
-function initialParameterValues(parameters: ReportParameter[]) { return visibleParameters(parameters).reduce<Record<string, unknown>>((result, parameter) => ({ ...result, [parameter.code]: parameter.defaultValue ?? (parameter.controlType === 'CHECKBOX' ? false : parameter.controlType === 'MULTI_SELECT' ? [] : '') }), {}) }
-function normalizeInputValue(parameter: ReportParameter, value: unknown) {
-  if (parameter.logicalType === 'integer' && typeof value === 'string' && /^-?\d+$/.test(value)) {
-    const parsed = Number(value)
-    return Number.isSafeInteger(parsed) ? parsed : value
+function initialParameterValues(parameters: ReportParameter[]) { return visibleParameters(parameters).reduce<Record<string, unknown>>((result, parameter) => ({ ...result, [parameter.code]: parameter.defaultValue ?? (parameter.controlType === 'MULTI_SELECT' ? [] : '') }), {}) }
+function buildRunParameters(parameters: ReportParameter[], values: Record<string, unknown>): { ok: true; parameters: Record<string, unknown> } | { ok: false; error: string } {
+  const result: Record<string, unknown> = {}
+  for (const parameter of visibleParameters(parameters)) {
+    const value = values[parameter.code]
+    if (value === '' || value === undefined || (Array.isArray(value) && value.length === 0)) continue
+    if ((parameter.logicalType === 'integer' || parameter.logicalType === 'decimal') && (typeof value !== 'string' || !/^-?\d+(?:\.\d+)?$/.test(value))) return { ok: false, error: `${parameter.label} 必须填写有效数字。` }
+    if (parameter.logicalType === 'integer' && typeof value === 'string' && !/^-?\d+$/.test(value)) return { ok: false, error: `${parameter.label} 必须填写整数。` }
+    if (parameter.logicalType === 'datetime' && typeof value === 'string') {
+      const dateTime = zonedDateTimeToRFC3339(value, parameter.timezone)
+      if (!dateTime) return { ok: false, error: `${parameter.label} 不是有效日期时间，或时区配置无效。` }
+      result[parameter.code] = dateTime
+      continue
+    }
+    if (parameter.logicalType === 'json' && typeof value === 'string') {
+      try { result[parameter.code] = JSON.parse(value) as unknown } catch { return { ok: false, error: `${parameter.label} 必须填写有效 JSON。` } }
+      continue
+    }
+    result[parameter.code] = value
   }
-  if (parameter.logicalType === 'datetime' && typeof value === 'string') {
-    const parsed = new Date(value)
-    return Number.isNaN(parsed.getTime()) ? value : parsed.toISOString()
-  }
-  if (parameter.logicalType === 'json' && typeof value === 'string') {
-    try { return JSON.parse(value) as unknown } catch { return value }
-  }
-  return value
+  return { ok: true, parameters: result }
 }
 function toStringArray(value: unknown) { return Array.isArray(value) ? value.map(String) : [] }
 function displayCell(value: unknown, nullDisplay: string) { if (value === null || value === undefined) return nullDisplay || '-'; if (typeof value === 'object') return JSON.stringify(value); return String(value) }
@@ -239,3 +252,26 @@ function exportLabel(status: ReportExport['status']) { return ({ PENDING: '等�
 function exportProgress(item: ReportExport) { return `${exportLabel(item.status)} · 已处理 ${item.processedRows.toLocaleString('zh-CN')} 行${item.currentSheet ? ` · ${item.currentSheet}` : ''}` }
 function formatDate(value: string) { const date = new Date(value); return Number.isNaN(date.getTime()) ? '-' : date.toLocaleString('zh-CN') }
 function safeIntegerRule(value: unknown) { return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : undefined }
+function zonedDateTimeToRFC3339(value: string, timezone: string) {
+  if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2})?(?:Z|[+-]\d{2}:\d{2})$/.test(value)) {
+    const parsed = new Date(value)
+    return Number.isNaN(parsed.getTime()) ? '' : parsed.toISOString()
+  }
+  const matched = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?$/.exec(value)
+  if (!matched) return ''
+  const zone = timezone || Intl.DateTimeFormat().resolvedOptions().timeZone
+  try {
+    const expected = { year: Number(matched[1]), month: Number(matched[2]), day: Number(matched[3]), hour: Number(matched[4]), minute: Number(matched[5]), second: Number(matched[6] ?? 0) }
+    let instant = Date.UTC(expected.year, expected.month - 1, expected.day, expected.hour, expected.minute, expected.second)
+    const formatter = new Intl.DateTimeFormat('en-CA', { timeZone: zone, year: 'numeric', month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit', second: '2-digit', hourCycle: 'h23' })
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const parts = Object.fromEntries(formatter.formatToParts(new Date(instant)).filter((part) => part.type !== 'literal').map((part) => [part.type, Number(part.value)]))
+      const rendered = Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour, parts.minute, parts.second)
+      const target = Date.UTC(expected.year, expected.month - 1, expected.day, expected.hour, expected.minute, expected.second)
+      instant += target - rendered
+    }
+    const confirmed = Object.fromEntries(formatter.formatToParts(new Date(instant)).filter((part) => part.type !== 'literal').map((part) => [part.type, Number(part.value)]))
+    if (confirmed.year !== expected.year || confirmed.month !== expected.month || confirmed.day !== expected.day || confirmed.hour !== expected.hour || confirmed.minute !== expected.minute || confirmed.second !== expected.second) return ''
+    return new Date(instant).toISOString()
+  } catch { return '' }
+}

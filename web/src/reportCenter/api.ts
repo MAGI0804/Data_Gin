@@ -145,6 +145,8 @@ export function parseReportResultPage(payload: unknown): ReportResultPage {
     return key ? [{ key, values: value.values }] : []
   })
   if (columns.length !== rawColumns.length || rows.length !== rawRows.length) throw new Error('invalid report result page')
+  const nextCursor = publicString(pagination.nextCursor, 1024)
+  if (pagination.hasMore === true && !nextCursor) throw new Error('invalid report result cursor')
   return {
     run,
     columns,
@@ -152,7 +154,7 @@ export function parseReportResultPage(payload: unknown): ReportResultPage {
     pagination: {
       pageSize: positiveInteger(pagination.pageSize) ?? 100,
       hasMore: pagination.hasMore === true,
-      nextCursor: publicString(pagination.nextCursor, 1024),
+      nextCursor,
     },
   }
 }
@@ -191,7 +193,8 @@ async function requestAndParse<T>(client: ReportCenterClient, path: string, opti
 
 function parseReportExportDownload(payload: unknown) {
   const data = unwrapData(payload)
-  const url = typeof data.url === 'string' && /^https?:\/\//.test(data.url) ? data.url : ''
+  const allowLocalHTTP = typeof window !== 'undefined' && ['localhost', '127.0.0.1', '::1'].includes(window.location.hostname)
+  const url = typeof data.url === 'string' && (/^https:\/\//.test(data.url) || (allowLocalHTTP && /^http:\/\/(?:localhost|127\.0\.0\.1|\[::1\])(?::\d+)?\//.test(data.url))) ? data.url : ''
   if (!url) throw new Error('invalid report download')
   return { url, expiresAt: publicDate(data.expiresAt) }
 }

@@ -237,6 +237,21 @@ func TestNormalizeParametersRejectsMissingAndDisallowedValues(t *testing.T) {
 	}
 }
 
+func TestNormalizeParametersAcceptsExactInt64String(t *testing.T) {
+	definitions := []ParameterDefinition{{
+		Code: "amount", ProcedureArgName: "P_AMOUNT", Position: 1,
+		LogicalType: LogicalTypeInteger, Cardinality: CardinalitySingle,
+		Required: true, NullPolicy: NullPolicyTypedNull,
+	}}
+	normalized, err := NormalizeParameters(definitions, map[string]json.RawMessage{"amount": json.RawMessage(`"9223372036854775807"`)}, nil)
+	if err != nil {
+		t.Fatalf("NormalizeParameters() error = %v", err)
+	}
+	if normalized.DatabaseValues["amount"] != int64(9223372036854775807) {
+		t.Fatalf("database integer = %#v", normalized.DatabaseValues["amount"])
+	}
+}
+
 func TestNormalizeParametersRejectsTrailingJSON(t *testing.T) {
 	definition := ParameterDefinition{
 		Code: "count", ProcedureArgName: "P_COUNT", Position: 1,
