@@ -21,8 +21,8 @@ import {
   Search,
   ScrollText,
   Send,
-  ShieldCheck,
   Upload,
+	Users,
   Wrench,
   X,
 } from 'lucide-react'
@@ -36,6 +36,7 @@ import { verifySessionResponses, type SessionUser } from './api/auth'
 import { parseDataStatisticsSummary, parseHealthSummary, parseMallWeatherMetricsSummary, redactMonitoringJSON, type DataStatisticsSummary, type HealthSummary, type MallWeatherMetricsSummary } from './monitoring'
 import { MallWeatherPage, StoreInfoPage } from './MallWeatherPage'
 import { DataAuthorizationPage } from './DataAuthorizationPage'
+import { AccessManagementPage } from './AccessManagementPage'
 import { PipelineRunPanel } from './PipelineRunPanel'
 import { PipelineComposerPanel } from './PipelineComposerPanel'
 import { pipelineListPath } from './pipelineRun'
@@ -76,7 +77,7 @@ type ApiClientOptions = Omit<ApiRequestOptions, 'method'> & {
 type ApiClient = (path: string, options?: ApiClientOptions) => Promise<ApiResult>
 type MonitoringSnapshot = { statistics: DataStatisticsSummary | null; weather: MallWeatherMetricsSummary | null; health: HealthSummary | null }
 type FileDownloadClient = (path: string, fileName: string, signal: AbortSignal) => Promise<ApiResult>
-type NavKey = 'overview' | 'runs' | 'delivery_logs' | 'step_runs' | 'store_info' | 'mall_weather' | 'data_authorizations' | 'sources' | 'receive' | 'pull_records' | 'backfill' | 'youzan_distribution' | 'rules' | 'processed' | 'methods' | 'destinations' | 'tasks' | 'push_policy' | 'excel_jobs' | 'excel_schemes' | 'excel_write'
+type NavKey = 'overview' | 'runs' | 'delivery_logs' | 'step_runs' | 'store_info' | 'mall_weather' | 'access_management' | 'data_authorizations' | 'sources' | 'receive' | 'pull_records' | 'backfill' | 'youzan_distribution' | 'rules' | 'processed' | 'methods' | 'destinations' | 'tasks' | 'push_policy' | 'excel_jobs' | 'excel_schemes' | 'excel_write'
 type NavItem = { key: NavKey; label: string; description: string; icon: ReactNode }
 type NavGroup = { label: string; items: NavItem[] }
 type MethodKind = 'configured' | 'builtin'
@@ -690,9 +691,9 @@ const navGroups: NavGroup[] = [
     ],
   },
   {
-    label: '数据授权',
+	label: '账号与权限',
     items: [
-      { key: 'data_authorizations', label: '授权管理', description: '开户、授权与访问审计', icon: <ShieldCheck aria-hidden="true" /> },
+	  { key: 'access_management', label: '账号与权限', description: '控制台账号、角色与审计', icon: <Users aria-hidden="true" /> },
     ],
   },
   {
@@ -1348,6 +1349,15 @@ function App() {
 
   if (sessionState !== 'authenticated') return <LoginScreen onLogin={handleLogin} checking={sessionState === 'checking'} />
 
+  const visibleNavGroups = navGroups.map((group) => ({
+	...group,
+	items: group.items.filter((item) => {
+	  if (item.key === 'access_management') return Boolean(sessionUser?.permissions.some((permission) => permission.startsWith('system.')))
+	  const required = navPermission(item.key)
+	  return !required || sessionUser?.permissions.includes(required) || sessionUser?.permissions.includes(required.replace(/\.read$/, '.manage'))
+	}),
+  })).filter((group) => group.items.length > 0)
+
   return (
     <main className={activeNav === 'mall_weather' || activeNav === 'store_info' ? 'ops-shell mall-weather-shell' : 'ops-shell'}>
       {mobileNavOpen && <button className="mobile-nav-backdrop" type="button" aria-label="关闭导航抽屉" onClick={() => setMobileNavOpen(false)} />}
@@ -1376,7 +1386,7 @@ function App() {
           </div>
         </label>
         <nav className="module-nav" id="primary-navigation">
-          {navGroups.map((group) => {
+          {visibleNavGroups.map((group) => {
             const query = navQuery.trim().toLowerCase()
             const items = group.items.filter((item) => !query || `${item.label} ${item.description}`.toLowerCase().includes(query))
             if (items.length === 0) return null
@@ -1432,6 +1442,7 @@ function App() {
         {activeNav === 'step_runs' && <StepRunsQueryPage client={client} focusRunID={stepRunFocusID} />}
         {activeNav === 'store_info' && <StoreInfoPage actorID={actorID} client={client} downloadFile={downloadFile} />}
         {activeNav === 'mall_weather' && <MallWeatherPage actorID={actorID} client={client} downloadFile={downloadFile} />}
+        {activeNav === 'access_management' && <AccessManagementPage client={client} permissions={sessionUser?.permissions ?? []} />}
         {activeNav === 'data_authorizations' && <DataAuthorizationPage client={client} />}
         {activeNav === 'sources' && <SourcesQueryPage client={client} onFetchSource={fetchSource} onTestSource={testSource} refreshVersion={workspaceRefreshVersion} />}
         {activeNav === 'methods' && <MethodsView methods={methods} pipelines={pipelines} client={client} coreMethods={coreMethods} onToggle={toggleTarget} onPipelineRunCompleted={() => void refreshWorkspace(false)} />}
@@ -1585,6 +1596,7 @@ function ModuleHeader({ activeNav, loading, sessionUser, onOpenNavigation, onRef
     step_runs: { title: '步骤运行', subtitle: '选择一次流水线运行并查看每个步骤的输入输出。' },
     store_info: { title: '店铺信息', subtitle: '统一维护店铺资料、地址与天气服务坐标。' },
     mall_weather: { title: '商场天气', subtitle: '查看商场中心点实况、未来降水、小时趋势和气象预警。' },
+	access_management: { title: '账号与权限', subtitle: '管理控制台账号、角色权限矩阵、开放 API 和变更审计。' },
     data_authorizations: { title: '数据授权', subtitle: '由管理员开通开放接口账号，并管理权限有效期、凭证与审计。' },
     sources: { title: '数据源', subtitle: '查询数据接入配置、类型和启用状态。' },
     receive: { title: '接口接收', subtitle: '查询外部系统主动推送进来的原始数据。' },
@@ -6122,6 +6134,16 @@ function loginFailureMessage(status: number, mode: 'password' | 'phone' | 'reset
   if (status === 503) return mode === 'code' ? '短信服务暂时不可用，密码登录仍可使用。' : '认证服务暂时不可用，请稍后再试。'
   if (status >= 500) return '登录服务暂时不可用，请稍后再试。'
   return '请求未完成，请检查输入后重试。'
+}
+
+function navPermission(key: NavKey) {
+  const permissions: Partial<Record<NavKey, string>> = {
+	store_info: 'mall.read', mall_weather: 'weather.read', sources: 'source.read', receive: 'data.read', pull_records: 'data.read',
+	backfill: 'data.manage', youzan_distribution: 'data.manage', rules: 'pipeline.read', processed: 'data.read', methods: 'pipeline.read',
+	destinations: 'delivery.read', tasks: 'delivery.read', push_policy: 'delivery.read', runs: 'pipeline.read', step_runs: 'pipeline.read',
+	delivery_logs: 'delivery.read', excel_jobs: 'excel.read', excel_schemes: 'excel.read', excel_write: 'excel.manage',
+  }
+  return permissions[key]
 }
 
 function formValue(form: FormData, key: string) {
