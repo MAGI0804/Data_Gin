@@ -17,7 +17,7 @@ const consoleTheme: ThemeConfig = {
     borderRadius: 2,
     borderRadiusLG: 2,
     controlHeight: 40,
-    fontFamily: '"IBM Plex Sans", "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif',
+    fontFamily: '"IBM Plex Sans Variable", "Noto Sans SC Variable", "PingFang SC", "Microsoft YaHei", sans-serif',
   },
   components: {
     Button: {
