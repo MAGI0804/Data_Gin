@@ -62,19 +62,42 @@ func (a *Authorizer) HasPermission(ctx context.Context, user model.User, code st
 		if len(roles) == 0 {
 			return false, nil
 		}
-		allowed, err := a.repository.ConsoleRoleHasPermission(ctx, user.ID, code)
-		if err != nil {
-			return false, fmt.Errorf("authorizer: check console permission: %w", err)
+		for _, candidate := range permissionCandidates(code) {
+			allowed, err := a.repository.ConsoleRoleHasPermission(ctx, user.ID, candidate)
+			if err != nil {
+				return false, fmt.Errorf("authorizer: check console permission: %w", err)
+			}
+			if allowed {
+				return true, nil
+			}
 		}
-		return allowed, nil
+		return false, nil
 	case model.AccountTypeOpenAPI:
-		allowed, err := a.repository.OpenAPIHasPermission(ctx, user.ID, code, a.now().UTC())
-		if err != nil {
-			return false, fmt.Errorf("authorizer: check open api permission: %w", err)
+		for _, candidate := range permissionCandidates(code) {
+			allowed, err := a.repository.OpenAPIHasPermission(ctx, user.ID, candidate, a.now().UTC())
+			if err != nil {
+				return false, fmt.Errorf("authorizer: check open api permission: %w", err)
+			}
+			if allowed {
+				return true, nil
+			}
 		}
-		return allowed, nil
+		return false, nil
 	default:
 		return false, nil
+	}
+}
+
+func permissionCandidates(code string) []string {
+	switch code {
+	case model.PermissionSourceRead:
+		return []string{model.PermissionSourceRead, model.PermissionSourceManage}
+	case model.PermissionPipelineRead:
+		return []string{model.PermissionPipelineRead, model.PermissionPipelineManage}
+	case model.PermissionDeliveryRead:
+		return []string{model.PermissionDeliveryRead, model.PermissionDeliveryManage}
+	default:
+		return []string{code}
 	}
 }
 
