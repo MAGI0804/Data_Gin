@@ -47,6 +47,8 @@ func setupScheduler() {
 
 	registerExcelMatchScheduledTasks(scheduler)
 
+	registerReportScheduledTasks(scheduler, config.GetBool("cfg.queue_job.report_worker.enabled"))
+
 	registerMallWeatherScheduledTasks(scheduler)
 
 	go func(scheduler *asynq.Scheduler) {
@@ -59,6 +61,24 @@ func setupScheduler() {
 	global.QueueJobScheduler = scheduler
 
 	console.Success("Scheduler started successfully")
+}
+
+type scheduledTaskRegistrar interface {
+	Register(string, *asynq.Task, ...asynq.Option) (string, error)
+}
+
+func registerReportScheduledTasks(scheduler scheduledTaskRegistrar, enabled bool) {
+	if !enabled || scheduler == nil {
+		return
+	}
+	cleanupTask, err := job.NewReportExportCleanupTask()
+	if err != nil {
+		console.Warning("Failed to create report export cleanup task: %v", err)
+		return
+	}
+	if _, err := scheduler.Register(job.ReportExportCleanupCron, cleanupTask); err != nil {
+		console.Warning("Failed to register report export cleanup: %v", err)
+	}
 }
 
 func registerExcelMatchScheduledTasks(scheduler *asynq.Scheduler) {

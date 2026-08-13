@@ -11,13 +11,17 @@ import (
 )
 
 const (
-	TypeReportRun         = "report:run"
-	TypeReportExport      = "report:export"
-	ReportQueueName       = "report"
-	ReportExportQueueName = "report_export"
-	ReportRunTimeout      = 35 * time.Minute
-	ReportExportTimeout   = 6 * time.Hour
-	ReportRunMaxRetry     = 3
+	TypeReportRun              = "report:run"
+	TypeReportExport           = "report:export"
+	TypeReportExportCleanup    = "report:export_cleanup"
+	ReportQueueName            = "report"
+	ReportExportQueueName      = "report_export"
+	ReportRunTimeout           = 35 * time.Minute
+	ReportExportTimeout        = 6 * time.Hour
+	ReportExportCleanupTimeout = 30 * time.Minute
+	ReportExportCleanupUnique  = 50 * time.Minute
+	ReportExportCleanupCron    = "37 * * * *"
+	ReportRunMaxRetry          = 3
 )
 
 type ReportRunTaskPayload struct {
@@ -71,6 +75,31 @@ func NewReportExportTask(payload []byte) (*asynq.Task, error) {
 		return nil, err
 	}
 	return asynq.NewTask(TypeReportExport, append([]byte(nil), payload...), asynq.Queue(ReportExportQueueName)), nil
+}
+
+func NewReportExportCleanupTask() (*asynq.Task, error) {
+	return asynq.NewTask(
+		TypeReportExportCleanup,
+		[]byte(`{}`),
+		asynq.Queue(ReportExportQueueName),
+		asynq.Timeout(ReportExportCleanupTimeout),
+		asynq.MaxRetry(5),
+		asynq.Unique(ReportExportCleanupUnique),
+	), nil
+}
+
+func DecodeReportExportCleanupTaskPayload(payload []byte) error {
+	var decoded map[string]json.RawMessage
+	decoder := json.NewDecoder(bytes.NewReader(payload))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&decoded); err != nil || decoded == nil || len(decoded) != 0 {
+		return fmt.Errorf("report export cleanup task: invalid payload")
+	}
+	var trailing interface{}
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		return fmt.Errorf("report export cleanup task: invalid payload")
+	}
+	return nil
 }
 
 func ReportOutboxTaskDefinitions(maxRetry int) []OutboxTaskDefinition {

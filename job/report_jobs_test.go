@@ -76,3 +76,19 @@ func TestOutboxRegistryResolvesReportExport(t *testing.T) {
 		t.Fatalf("Resolve() task=%#v options=%#v error=%v", task, options, err)
 	}
 }
+
+func TestReportExportCleanupTaskIsStrictAndScheduledForExportQueue(t *testing.T) {
+	task, err := NewReportExportCleanupTask()
+	if err != nil {
+		t.Fatalf("NewReportExportCleanupTask() error=%v", err)
+	}
+	if task.Type() != TypeReportExportCleanup || string(task.Payload()) != `{}` {
+		t.Fatalf("cleanup task type=%q payload=%q", task.Type(), task.Payload())
+	}
+	if err := DecodeReportExportCleanupTaskPayload([]byte(`{"secret":"x"}`)); err == nil {
+		t.Fatal("DecodeReportExportCleanupTaskPayload() accepted unknown field")
+	}
+	if ReportExportCleanupCron != "37 * * * *" || ReportExportCleanupTimeout != 30*time.Minute {
+		t.Fatalf("cleanup schedule=%q timeout=%v", ReportExportCleanupCron, ReportExportCleanupTimeout)
+	}
+}
