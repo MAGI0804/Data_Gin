@@ -10,7 +10,7 @@
 .list { display: grid; min-width: 0; }
 .listHeader { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); min-height: 48px; border-bottom: 1px solid var(--color-border); }
 .listHeader button { display: inline-flex; gap: var(--space-1); align-items: center; }
-.listHeader svg, .delete svg { width: 16px; height: 16px; }
+.listHeader svg, .inspect svg, .delete svg { width: 16px; height: 16px; }
 .row, .contractRow { display: grid; grid-template-columns: repeat(4, minmax(110px, 1fr)) auto; gap: var(--space-2); align-items: center; min-width: 0; padding-block: var(--space-3); border-bottom: 1px solid var(--color-border); }
 .contractRow { grid-template-columns: repeat(3, minmax(120px, 1fr)); }
 .row label, .contractRow .flag { display: inline-flex; gap: var(--space-1); align-items: center; color: var(--color-text-secondary); font-size: 12px; white-space: nowrap; }
@@ -20,7 +20,9 @@
 .contractGroup legend { min-height: 18px; padding: 0; color: var(--color-text-secondary); font-size: 12px; }
 .jsonField input[aria-invalid="true"] { border-color: var(--color-danger); background: var(--color-danger-soft); }
 .row label input, .contractRow .flag input { width: 16px; min-height: 16px; height: 16px; accent-color: var(--color-brand); }
-.delete { display: grid; width: 38px; height: 38px; place-items: center; padding: 0; color: var(--color-danger); }
+.inspect, .delete { display: grid; width: 38px; height: 38px; place-items: center; padding: 0; }
+.inspect { color: var(--color-text-secondary); }
+.delete { color: var(--color-danger); }
 .notice, .error { margin-block-start: var(--space-4); border-left: 3px solid var(--color-brand); background: var(--color-brand-soft); padding: var(--space-3); color: var(--color-text-secondary); font-size: 13px; line-height: 1.6; }
 .error { border-left-color: var(--color-danger); background: var(--color-danger-soft); color: var(--color-danger); }
 .version { margin-inline-end: auto; color: var(--color-text-secondary); font-family: var(--font-mono); font-size: 12px; }

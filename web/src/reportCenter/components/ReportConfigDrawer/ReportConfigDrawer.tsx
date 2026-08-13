@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
-import { Plus, Trash2 } from 'lucide-react'
+import { Eye, Plus, Trash2 } from 'lucide-react'
 import { Button, Drawer } from '../../../ui'
 import { getReportDraft, publishReportDraft, saveReportDraft, type ReportCenterClient } from '../../api'
 import { reportParameterControls, reportParameterFlagDisabled, updateReportParameterFlag, updateReportParameterLogicalType } from '../../parameterConfig'
 import type { ReportColumn, ReportDatasource, ReportDraft, ReportParameter, ReportSummary } from '../../types'
+import { ReportFieldDetailDrawer } from '../ReportFieldDetailDrawer/ReportFieldDetailDrawer'
 import styles from './ReportConfigDrawer.module.css'
 
 type Tab = 'basic' | 'procedure' | 'parameters' | 'fields' | 'excel' | 'permissions'
@@ -15,6 +16,7 @@ export function ReportConfigDrawer({ client, report, datasources, datasourcesLoa
   const [draft, setDraft] = useState<ReportDraft>(() => emptyDraft())
   const [savedFingerprint, setSavedFingerprint] = useState('')
   const [state, setState] = useState({ loading: Boolean(report), saving: false, error: '', notice: '' })
+  const [inspectedColumn, setInspectedColumn] = useState<ReportColumn | null>(null)
 
   useEffect(() => {
     if (!report) return
@@ -45,11 +47,11 @@ export function ReportConfigDrawer({ client, report, datasources, datasourcesLoa
 
   const dirty = draftFingerprint(draft) !== savedFingerprint
   const footer = <><span className={styles.version}>版本锁 {draft.lockVersion || '新建'} · {dirty ? '有未保存修改' : '已保存'}</span><button type="button" onClick={onClose}>取消</button><button type="button" onClick={() => void save()} disabled={state.loading || state.saving || !dirty}>{state.saving ? '处理中…' : '保存草稿'}</button><Button variant="primary" onClick={() => void publish()} disabled={!draft.id || state.saving || dirty} title={dirty ? '请先保存草稿，再核验并发布' : undefined}>核验并发布</Button></>
-  const editor = <><div className={styles.tabs} role="tablist" aria-label="报表配置步骤" onKeyDown={(event) => { const current = tabs.findIndex((item) => item.key === tab); const delta = event.key === 'ArrowRight' ? 1 : event.key === 'ArrowLeft' ? -1 : 0; if (!delta) return; event.preventDefault(); const next = tabs[(current + delta + tabs.length) % tabs.length]; setTab(next.key); document.getElementById(`report-config-tab-${next.key}`)?.focus() }}>{tabs.map((item) => <button id={`report-config-tab-${item.key}`} type="button" role="tab" aria-selected={tab === item.key} aria-controls="report-config-panel" tabIndex={tab === item.key ? 0 : -1} className={tab === item.key ? styles.active : ''} onClick={() => setTab(item.key)} key={item.key}>{item.label}</button>)}</div><div id="report-config-panel" role="tabpanel" aria-labelledby={`report-config-tab-${tab}`} tabIndex={0} ref={bodyRef} className={styles.body}>{state.loading ? <p>正在读取草稿…</p> : <Editor tab={tab} draft={draft} datasources={datasources} datasourcesLoading={datasourcesLoading} datasourcesError={datasourcesError} onChange={setDraft} />}{state.error ? <div className={styles.error} role="alert">{state.error}</div> : null}{state.notice ? <div className={styles.notice} role="status">{state.notice}</div> : null}</div></>
-  return <Drawer open title={report ? '编辑报表配置' : '创建报表配置'} description="配置保存于 MySQL；发布时在线核验 Oracle 过程签名和结果 Schema。" size="wide" closeDisabled={state.saving} onClose={onClose} footer={footer}>{editor}</Drawer>
+  const editor = <><div className={styles.tabs} role="tablist" aria-label="报表配置步骤" onKeyDown={(event) => { const current = tabs.findIndex((item) => item.key === tab); const delta = event.key === 'ArrowRight' ? 1 : event.key === 'ArrowLeft' ? -1 : 0; if (!delta) return; event.preventDefault(); const next = tabs[(current + delta + tabs.length) % tabs.length]; setTab(next.key); document.getElementById(`report-config-tab-${next.key}`)?.focus() }}>{tabs.map((item) => <button id={`report-config-tab-${item.key}`} type="button" role="tab" aria-selected={tab === item.key} aria-controls="report-config-panel" tabIndex={tab === item.key ? 0 : -1} className={tab === item.key ? styles.active : ''} onClick={() => setTab(item.key)} key={item.key}>{item.label}</button>)}</div><div id="report-config-panel" role="tabpanel" aria-labelledby={`report-config-tab-${tab}`} tabIndex={0} ref={bodyRef} className={styles.body}>{state.loading ? <p>正在读取草稿…</p> : <Editor tab={tab} draft={draft} datasources={datasources} datasourcesLoading={datasourcesLoading} datasourcesError={datasourcesError} onInspectColumn={setInspectedColumn} onChange={setDraft} />}{state.error ? <div className={styles.error} role="alert">{state.error}</div> : null}{state.notice ? <div className={styles.notice} role="status">{state.notice}</div> : null}</div></>
+  return <><Drawer open title={report ? '编辑报表配置' : '创建报表配置'} description="配置保存于 MySQL；发布时在线核验 Oracle 过程签名和结果 Schema。" size="wide" closeDisabled={state.saving} onClose={onClose} footer={footer}>{editor}</Drawer><ReportFieldDetailDrawer column={inspectedColumn} onClose={() => setInspectedColumn(null)} /></>
 }
 
-function Editor({ tab, draft, datasources, datasourcesLoading, datasourcesError, onChange }: { tab: Tab; draft: ReportDraft; datasources: ReportDatasource[]; datasourcesLoading: boolean; datasourcesError: string; onChange: (draft: ReportDraft) => void }) {
+function Editor({ tab, draft, datasources, datasourcesLoading, datasourcesError, onInspectColumn, onChange }: { tab: Tab; draft: ReportDraft; datasources: ReportDatasource[]; datasourcesLoading: boolean; datasourcesError: string; onInspectColumn: (column: ReportColumn) => void; onChange: (draft: ReportDraft) => void }) {
   const set = <K extends keyof ReportDraft>(key: K, value: ReportDraft[K]) => onChange({ ...draft, [key]: value })
   if (tab === 'basic') {
     const selected = datasources.find((item) => item.id === draft.datasourceId)
@@ -58,7 +60,7 @@ function Editor({ tab, draft, datasources, datasourcesLoading, datasourcesError,
   }
   if (tab === 'procedure') return <div className={styles.form}>{(['owner', 'package', 'name', 'overload'] as const).map((key) => <Field label={({ owner: 'Owner', package: 'Package（可选）', name: 'Procedure', overload: 'Overload（可选）' })[key]} key={key}><input className={styles.mono} value={draft.procedure[key]} onChange={(e) => set('procedure', { ...draft.procedure, [key]: e.currentTarget.value })} /></Field>)}{(['tableOwner', 'tableName', 'runIdColumn', 'rowIdColumn'] as const).map((key) => <Field label={({ tableOwner: '结果表 Owner', tableName: '结果表名', runIdColumn: 'run_id 字段', rowIdColumn: '行游标字段' })[key]} key={key}><input className={styles.mono} value={draft.result[key]} onChange={(e) => set('result', { ...draft.result, [key]: e.currentTarget.value })} /></Field>)}<Field label="调用模板（只允许 {{形参}} 绑定）" wide><textarea className={styles.mono} rows={7} value={draft.callTemplate} onChange={(e) => set('callTemplate', e.currentTarget.value)} /></Field></div>
   if (tab === 'parameters') return <ListEditor title="参数契约" onAdd={() => set('parameters', [...draft.parameters, newParameter(nextOrder(draft.parameters.map((item) => item.position)))])}>{draft.parameters.map((item, index) => <ParameterRow item={item} key={`${item.code}-${index}`} onChange={(next) => set('parameters', replaceAt(draft.parameters, index, next))} onDelete={() => set('parameters', removeAt(draft.parameters, index))} />)}</ListEditor>
-  if (tab === 'fields' || tab === 'excel') return <ListEditor title={tab === 'fields' ? '稳定逻辑字段 → Oracle 物理字段' : '页面字段 → Excel 表头'} onAdd={() => set('columns', [...draft.columns, newColumn(nextOrder(draft.columns.flatMap((item) => [item.displayOrder, item.exportOrder])))])}>{draft.columns.map((item, index) => <ColumnRow excel={tab === 'excel'} item={item} key={item.fieldId} onChange={(next) => set('columns', replaceAt(draft.columns, index, next))} onDelete={() => set('columns', removeAt(draft.columns, index))} />)}</ListEditor>
+  if (tab === 'fields' || tab === 'excel') return <ListEditor title={tab === 'fields' ? '稳定逻辑字段 → Oracle 物理字段' : '页面字段 → Excel 表头'} onAdd={() => set('columns', [...draft.columns, newColumn(nextOrder(draft.columns.flatMap((item) => [item.displayOrder, item.exportOrder])))])}>{draft.columns.map((item, index) => <ColumnRow excel={tab === 'excel'} item={item} key={item.fieldId} onInspect={() => onInspectColumn(item)} onChange={(next) => set('columns', replaceAt(draft.columns, index, next))} onDelete={() => set('columns', removeAt(draft.columns, index))} />)}</ListEditor>
   return <ListEditor title="报表级用户/角色授权" onAdd={() => set('grants', [...draft.grants, { subjectType: 'ROLE', subjectId: 0, actions: ['QUERY'] }])}>{draft.grants.map((grant, index) => <div className={styles.row} key={`${grant.subjectType}-${index}`}><select value={grant.subjectType} onChange={(e) => set('grants', replaceAt(draft.grants, index, { ...grant, subjectType: e.currentTarget.value as 'USER' | 'ROLE' }))}><option value="ROLE">角色</option><option value="USER">用户</option></select><input type="number" min="1" aria-label="主体 ID" value={grant.subjectId || ''} onChange={(e) => set('grants', replaceAt(draft.grants, index, { ...grant, subjectId: Number(e.currentTarget.value) }))} /><label><input type="checkbox" checked={grant.actions.includes('QUERY')} onChange={(e) => set('grants', replaceAt(draft.grants, index, { ...grant, actions: toggle(grant.actions, 'QUERY', e.currentTarget.checked) }))} />查询</label><label><input type="checkbox" checked={grant.actions.includes('EXPORT')} onChange={(e) => set('grants', replaceAt(draft.grants, index, { ...grant, actions: toggle(grant.actions, 'EXPORT', e.currentTarget.checked) }))} />导出</label><Delete onClick={() => set('grants', removeAt(draft.grants, index))} /></div>)}</ListEditor>
 }
 
@@ -95,7 +97,7 @@ function ParameterRow({ item, onChange, onDelete }: { item: ReportParameter; onC
   </div>
 }
 
-function ColumnRow({ item, excel, onChange, onDelete }: { item: ReportColumn; excel: boolean; onChange: (item: ReportColumn) => void; onDelete: () => void }) {
+function ColumnRow({ item, excel, onInspect, onChange, onDelete }: { item: ReportColumn; excel: boolean; onInspect: () => void; onChange: (item: ReportColumn) => void; onDelete: () => void }) {
   return <div className={styles.contractRow}>{excel ? <>
     <ContractField label="页面表头"><input value={item.previewHeader} onChange={(event) => onChange({ ...item, previewHeader: event.currentTarget.value })} /></ContractField>
     <ContractField label="Excel 表头"><input value={item.excelHeader} onChange={(event) => onChange({ ...item, excelHeader: event.currentTarget.value })} /></ContractField>
@@ -122,7 +124,7 @@ function ColumnRow({ item, excel, onChange, onDelete }: { item: ReportColumn; ex
     <label className={styles.flag}><input type="checkbox" checked={item.nullable} onChange={(event) => onChange({ ...item, nullable: event.currentTarget.checked })} />可空</label>
     <label className={styles.flag}><input type="checkbox" checked={item.filterable} onChange={(event) => onChange({ ...item, filterable: event.currentTarget.checked })} />允许筛选</label>
     <label className={styles.flag}><input type="checkbox" checked={item.sortable} onChange={(event) => onChange({ ...item, sortable: event.currentTarget.checked })} />允许排序</label>
-  </>}<Delete onClick={onDelete} /></div>
+  </>}<button className={styles.inspect} type="button" aria-label={`查看 ${item.logicalCode || item.databaseColumn} 字段详情`} onClick={onInspect}><Eye aria-hidden="true" /></button><Delete onClick={onDelete} /></div>
 }
 function Field({ label, wide, children }: { label: string; wide?: boolean; children: React.ReactNode }) { return <label className={wide ? styles.wide : ''}>{label}{children}</label> }
 function ListEditor({ title, onAdd, children }: { title: string; onAdd: () => void; children: React.ReactNode }) { return <div className={styles.list}><div className={styles.listHeader}><strong>{title}</strong><button type="button" onClick={onAdd}><Plus aria-hidden="true" />新增</button></div>{children}</div> }
