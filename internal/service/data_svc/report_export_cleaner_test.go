@@ -114,6 +114,24 @@ func TestReportExportCleanerRejectsObjectOutsideReportNamespace(t *testing.T) {
 	}
 }
 
+func TestReportExportCleanerContinuesAfterOneObjectFails(t *testing.T) {
+	now := time.Date(2026, 8, 13, 8, 0, 0, 0, time.UTC)
+	firstUUID, secondUUID := uuid.NewString(), uuid.NewString()
+	firstKey, secondKey := reportExportCleanupTestKey(firstUUID), reportExportCleanupTestKey(secondUUID)
+	store := &fakeReportExportCleanupStore{candidates: []reportrepo.ExportCleanupCandidate{
+		{ID: 17, ExportUUID: firstUUID, ResultObjectKey: firstKey},
+		{ID: 18, ExportUUID: secondUUID, ResultObjectKey: secondKey},
+	}}
+	objects := &fakeReportExportCleanupObjectStore{errorsByKey: map[string]error{firstKey: errors.New("permanent object failure")}}
+	result, err := testReportExportCleaner(now, store, objects).Cleanup(t.Context())
+	if err == nil || result.Scanned != 2 || result.Claimed != 2 || result.Deleted != 1 || result.Expired != 1 {
+		t.Fatalf("result=%+v error=%v", result, err)
+	}
+	if len(store.released) != 1 || store.released[0] != 17 || len(store.finished) != 1 || store.finished[0] != 18 {
+		t.Fatalf("released=%v finished=%v", store.released, store.finished)
+	}
+}
+
 func TestValidReportExportResultObjectKeyRequiresExportIdentity(t *testing.T) {
 	exportUUID := uuid.NewString()
 	valid := reportExportCleanupTestKey(exportUUID)
@@ -190,12 +208,16 @@ type fakeReportExportCleanupObjectStore struct {
 	err            error
 	inspectContext bool
 	hadDeadline    bool
+	errorsByKey    map[string]error
 }
 
 func (store *fakeReportExportCleanupObjectStore) DeleteObject(ctx context.Context, key string) error {
 	store.deleted = append(store.deleted, key)
 	if store.inspectContext {
 		_, store.hadDeadline = ctx.Deadline()
+	}
+	if err := store.errorsByKey[key]; err != nil {
+		return err
 	}
 	return store.err
 }

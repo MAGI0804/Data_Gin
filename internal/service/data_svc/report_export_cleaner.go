@@ -73,6 +73,7 @@ func NewReportExportCleaner() *ReportExportCleaner {
 
 func (cleaner *ReportExportCleaner) Cleanup(ctx context.Context) (ReportExportCleanupResult, error) {
 	var result ReportExportCleanupResult
+	var cleanupErrors []error
 	if cleaner == nil || cleaner.store == nil || cleaner.newObjectStore == nil || cleaner.now == nil || cleaner.newToken == nil ||
 		ctx == nil || cleaner.batchSize < 1 || cleaner.batchSize > cleaner.maxJobs || cleaner.maxJobs < 1 ||
 		cleaner.leaseTTL <= 0 || cleaner.deleteTimeout <= 0 || cleaner.deleteTimeout >= cleaner.leaseTTL ||
@@ -89,10 +90,10 @@ func (cleaner *ReportExportCleaner) Cleanup(ctx context.Context) (ReportExportCl
 		limit := min(cleaner.batchSize, cleaner.maxJobs-result.Scanned)
 		candidates, err := cleaner.store.ListExportCleanupCandidates(ctx, now, afterID, limit)
 		if err != nil {
-			return result, fmt.Errorf("report export cleaner: list candidates: %w", err)
+			return result, errors.Join(append(cleanupErrors, fmt.Errorf("report export cleaner: list candidates: %w", err))...)
 		}
 		if len(candidates) == 0 {
-			return result, nil
+			return result, errors.Join(cleanupErrors...)
 		}
 		if len(candidates) > limit {
 			return result, fmt.Errorf("report export cleaner: candidate batch exceeds limit")
@@ -106,14 +107,16 @@ func (cleaner *ReportExportCleaner) Cleanup(ctx context.Context) (ReportExportCl
 			leaseToken := cleaner.newToken()
 			claimed, err := cleaner.store.ClaimExportCleanup(ctx, candidate, leaseToken, now, cleaner.leaseTTL)
 			if err != nil {
-				return result, fmt.Errorf("report export cleaner: claim export %d: %w", candidate.ID, err)
+				cleanupErrors = append(cleanupErrors, fmt.Errorf("report export cleaner: claim export %d: %w", candidate.ID, err))
+				continue
 			}
 			if !claimed {
 				continue
 			}
 			result.Claimed++
 			if !validReportExportResultObjectKey(candidate.ResultObjectKey, candidate.ExportUUID, cleaner.objectRoot) {
-				return result, cleaner.releaseAfterError(ctx, candidate, leaseToken, fmt.Errorf("report export cleaner: invalid stored object key"))
+				cleanupErrors = append(cleanupErrors, cleaner.releaseAfterError(ctx, candidate, leaseToken, fmt.Errorf("report export cleaner: invalid stored object key")))
+				continue
 			}
 			if objectStore == nil {
 				objectStore, err = cleaner.newObjectStore()
@@ -121,29 +124,32 @@ func (cleaner *ReportExportCleaner) Cleanup(ctx context.Context) (ReportExportCl
 					err = fmt.Errorf("report export cleaner: nil object store")
 				}
 				if err != nil {
-					return result, cleaner.releaseAfterError(ctx, candidate, leaseToken, err)
+					cleanupErrors = append(cleanupErrors, cleaner.releaseAfterError(ctx, candidate, leaseToken, err))
+					continue
 				}
 			}
 			deleteCtx, cancel := context.WithTimeout(ctx, cleaner.deleteTimeout)
 			err = objectStore.DeleteObject(deleteCtx, candidate.ResultObjectKey)
 			cancel()
 			if err != nil {
-				return result, cleaner.releaseAfterError(ctx, candidate, leaseToken, fmt.Errorf("report export cleaner: delete object: %w", err))
+				cleanupErrors = append(cleanupErrors, cleaner.releaseAfterError(ctx, candidate, leaseToken, fmt.Errorf("report export cleaner: delete object: %w", err)))
+				continue
 			}
 			result.Deleted++
 			stateCtx, cancel := cleaner.stateContext(ctx)
 			err = cleaner.store.FinishExportCleanup(stateCtx, candidate, leaseToken, cleaner.now().UTC())
 			cancel()
 			if err != nil {
-				return result, fmt.Errorf("report export cleaner: finish export %d: %w", candidate.ID, err)
+				cleanupErrors = append(cleanupErrors, fmt.Errorf("report export cleaner: finish export %d: %w", candidate.ID, err))
+				continue
 			}
 			result.Expired++
 		}
 		if len(candidates) < limit {
-			return result, nil
+			return result, errors.Join(cleanupErrors...)
 		}
 	}
-	return result, nil
+	return result, errors.Join(cleanupErrors...)
 }
 
 func (cleaner *ReportExportCleaner) releaseAfterError(
