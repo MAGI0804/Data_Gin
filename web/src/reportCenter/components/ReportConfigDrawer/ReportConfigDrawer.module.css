@@ -25,9 +25,4 @@
 .error { border-left-color: var(--color-danger); background: var(--color-danger-soft); color: var(--color-danger); }
 .version { margin-inline-end: auto; color: var(--color-text-secondary); font-family: var(--font-mono); font-size: 12px; }
 .fieldError { color: var(--color-danger); font-size: 12px; font-weight: 500; }
-.embedded { min-width: 0; border-top: 1px solid var(--color-border); }
-.embeddedHeader { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); padding: var(--space-4) var(--space-6); }
-.embeddedHeader strong, .embeddedHeader span { display: block; }
-.embeddedHeader span { margin-top: var(--space-1); color: var(--color-text-secondary); font-size: 12px; }
-.embeddedFooter { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: var(--space-2); border-top: 1px solid var(--color-border); padding: var(--space-4) var(--space-6); }
 @media (max-width: 767px) { .body { padding: var(--space-4); } .tabs { padding-inline: var(--space-4); } .form, .row, .contractRow { grid-template-columns: 1fr; } .wide { grid-column: auto; } .delete { justify-self: end; } .version { flex-basis: 100%; } }
