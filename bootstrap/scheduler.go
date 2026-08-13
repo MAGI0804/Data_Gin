@@ -79,6 +79,14 @@ func registerReportScheduledTasks(scheduler scheduledTaskRegistrar, enabled bool
 	if _, err := scheduler.Register(job.ReportExportCleanupCron, cleanupTask); err != nil {
 		console.Warning("Failed to register report export cleanup: %v", err)
 	}
+	resultCleanupTask, err := job.NewReportResultCleanupTask()
+	if err != nil {
+		console.Warning("Failed to create report result cleanup task: %v", err)
+		return
+	}
+	if _, err := scheduler.Register(job.ReportResultCleanupCron, resultCleanupTask); err != nil {
+		console.Warning("Failed to register report result cleanup: %v", err)
+	}
 }
 
 func registerExcelMatchScheduledTasks(scheduler *asynq.Scheduler) {

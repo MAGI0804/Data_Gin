@@ -92,3 +92,16 @@ func TestReportExportCleanupTaskIsStrictAndScheduledForExportQueue(t *testing.T)
 		t.Fatalf("cleanup schedule=%q timeout=%v", ReportExportCleanupCron, ReportExportCleanupTimeout)
 	}
 }
+
+func TestReportResultCleanupTaskIsStrictAndScheduledForExportQueue(t *testing.T) {
+	task, err := NewReportResultCleanupTask()
+	if err != nil {
+		t.Fatalf("NewReportResultCleanupTask() error=%v", err)
+	}
+	if task.Type() != TypeReportResultCleanup || string(task.Payload()) != `{}` {
+		t.Fatalf("result cleanup task type=%q payload=%q", task.Type(), task.Payload())
+	}
+	if err := DecodeReportResultCleanupTaskPayload([]byte(`{"extra":true}`)); err == nil {
+		t.Fatal("DecodeReportResultCleanupTaskPayload() accepted unknown field")
+	}
+}

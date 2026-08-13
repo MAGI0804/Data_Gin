@@ -117,7 +117,7 @@ func (processor *ReportExportProcessor) Process(ctx context.Context, exportID ui
 		return errReportExportWorkerTemporary
 	case reportrepo.ExportDispositionTerminal:
 		if lease.Export.Status == model.ReportExportStatusReady && lease.Export.PurgedAt == nil {
-			return processor.purgeReadyExport(ctx, exportID)
+			return processor.purgeReadyExport(ctx, exportID, true)
 		}
 		return nil
 	case reportrepo.ExportDispositionAcquired:
@@ -240,10 +240,17 @@ func (processor *ReportExportProcessor) Process(ctx context.Context, exportID ui
 	}
 	cancelRun()
 	<-monitor
-	return processor.purgeReadyExport(ctx, exportID)
+	return processor.purgeReadyExport(ctx, exportID, true)
 }
 
-func (processor *ReportExportProcessor) purgeReadyExport(ctx context.Context, exportID uint) error {
+func (processor *ReportExportProcessor) CleanupReadyResult(ctx context.Context, exportID uint) error {
+	if processor == nil || ctx == nil || exportID == 0 {
+		return fmt.Errorf("report export processor: invalid ready result cleanup")
+	}
+	return processor.purgeReadyExport(ctx, exportID, false)
+}
+
+func (processor *ReportExportProcessor) purgeReadyExport(ctx context.Context, exportID uint, waitForLease bool) error {
 	var runtime *reportrepo.ExportRuntime
 	var purgeToken string
 	for {
@@ -261,6 +268,9 @@ func (processor *ReportExportProcessor) purgeReadyExport(ctx context.Context, ex
 		confirmed, confirmErr := processor.confirmResultPurged(ctx, exportID)
 		if confirmErr == nil && confirmed {
 			return nil
+		}
+		if !waitForLease {
+			return errors.Join(errReportExportWorkerTemporary, err, confirmErr)
 		}
 		if waitErr := waitForReportExportPurge(ctx, processor.heartbeatInterval); waitErr != nil {
 			return errors.Join(errReportExportWorkerTemporary, confirmErr, waitErr)

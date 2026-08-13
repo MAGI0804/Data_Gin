@@ -60,6 +60,8 @@ func setupQueueJob() {
 		mux.HandleFunc(job.TypeReportExport, newReportExportHandler(reportExportProcessor))
 		reportExportCleaner := data_svc.NewReportExportCleaner()
 		mux.HandleFunc(job.TypeReportExportCleanup, newReportExportCleanupHandler(reportExportCleaner))
+		reportResultCleaner := data_svc.NewReportResultCleaner()
+		mux.HandleFunc(job.TypeReportResultCleanup, newReportResultCleanupHandler(reportResultCleaner))
 	}
 	if cleanupTask, err := job.NewExcelMatchCleanupTask(); err != nil {
 		console.Warning("Failed to create initial Excel match cleanup task: %v", err)
@@ -156,6 +158,10 @@ type reportExportCleaner interface {
 	Cleanup(context.Context) (data_svc.ReportExportCleanupResult, error)
 }
 
+type reportResultCleaner interface {
+	Cleanup(context.Context) (data_svc.ReportResultCleanupResult, error)
+}
+
 func reportWorkerQueues(configured map[string]int, enabled bool, weight int) map[string]int {
 	queues := make(map[string]int, len(configured)+2)
 	for name, value := range configured {
@@ -204,6 +210,22 @@ func newReportExportCleanupHandler(cleaner reportExportCleaner) asynq.HandlerFun
 			return fmt.Errorf("%w: invalid report export cleanup task", asynq.SkipRetry)
 		}
 		if err := job.DecodeReportExportCleanupTaskPayload(task.Payload()); err != nil {
+			return fmt.Errorf("%w: %v", asynq.SkipRetry, err)
+		}
+		_, err := cleaner.Cleanup(ctx)
+		return err
+	}
+}
+
+func newReportResultCleanupHandler(cleaner reportResultCleaner) asynq.HandlerFunc {
+	return func(ctx context.Context, task *asynq.Task) error {
+		if cleaner == nil {
+			return fmt.Errorf("report result cleanup handler: cleaner is not configured")
+		}
+		if task == nil || task.Type() != job.TypeReportResultCleanup {
+			return fmt.Errorf("%w: invalid report result cleanup task", asynq.SkipRetry)
+		}
+		if err := job.DecodeReportResultCleanupTaskPayload(task.Payload()); err != nil {
 			return fmt.Errorf("%w: %v", asynq.SkipRetry, err)
 		}
 		_, err := cleaner.Cleanup(ctx)
