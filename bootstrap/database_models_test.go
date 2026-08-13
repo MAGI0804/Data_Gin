@@ -23,8 +23,8 @@ func TestMallWeatherMigrationModelsAreUnique(t *testing.T) {
 
 func TestReportCenterMigrationModelsAreUnique(t *testing.T) {
 	models := reportCenterMigrationModels()
-	if len(models) != 9 {
-		t.Fatalf("reportCenterMigrationModels() count = %d, want 9", len(models))
+	if len(models) != 10 {
+		t.Fatalf("reportCenterMigrationModels() count = %d, want 10", len(models))
 	}
 
 	seen := make(map[reflect.Type]struct{}, len(models))
