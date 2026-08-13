@@ -1,62 +1,3 @@
-.mall-weather-single-page {
-  gap: 0;
-  background: #ffffff;
-}
-
-.mall-weather-single-page .mall-weather-selector {
-  grid-template-columns: 112px minmax(0, 1fr) auto;
-  align-items: center;
-  min-height: 100px;
-  border: 0;
-  border-bottom: 1px solid var(--line);
-  padding: 16px 12px;
-}
-
-.mall-weather-selector-title {
-  align-self: center;
-  font-size: 16px;
-}
-
-.mall-weather-single-page .mall-weather-selector-fields {
-  grid-template-columns: minmax(220px, 0.78fr) minmax(300px, 1.22fr);
-  align-items: end;
-  gap: 16px;
-}
-
-.mall-weather-single-page .mall-weather-selector label {
-  min-width: 0;
-}
-
-.mall-weather-single-page .mall-weather-selector select,
-.mall-weather-single-page .mall-weather-selector input {
-  min-height: 42px;
-  border-radius: 2px;
-}
-
-.mall-weather-single-page .mall-weather-selector label small {
-  display: none;
-}
-
-.mall-weather-query-field {
-  align-self: end;
-}
-
-.mall-weather-single-page .mall-weather-selector-actions button {
-  min-height: 42px;
-  border-radius: 2px;
-  padding-inline: 18px;
-}
-
-.mall-weather-design-toolbar {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 20px;
-  min-height: 68px;
-  border-bottom: 1px solid var(--line);
-  padding: 0 12px;
-}
-
 .mall-weather-design-toolbar .mall-weather-actions-row {
   align-items: center;
   gap: 0;
@@ -173,13 +114,6 @@
   border: 0;
   background: #fff8ec;
   color: #a95b00;
-}
-
-.mall-weather-design-dashboard {
-  display: grid;
-  grid-template-columns: minmax(0, 2.25fr) minmax(210px, 0.95fr) minmax(220px, 0.95fr);
-  min-width: 0;
-  background: #ffffff;
 }
 
 .mall-weather-overview-details {
@@ -795,25 +729,6 @@
 }
 
 @media (max-width: 1180px) {
-  .mall-weather-single-page .mall-weather-selector {
-    grid-template-columns: 100px minmax(0, 1fr);
-  }
-
-  .mall-weather-single-page .mall-weather-selector-actions {
-    grid-column: 2;
-  }
-
-  .mall-weather-design-toolbar {
-    align-items: flex-start;
-    flex-direction: column;
-    gap: 0;
-    padding-block: 8px;
-  }
-
-  .mall-weather-design-dashboard {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
   .mall-weather-single-page .mall-weather-realtime {
     grid-column: 1 / -1;
   }
@@ -828,15 +743,6 @@
 }
 
 @media (max-width: 840px) {
-  .mall-weather-single-page .mall-weather-selector,
-  .mall-weather-single-page .mall-weather-selector-fields {
-    grid-template-columns: 1fr;
-  }
-
-  .mall-weather-single-page .mall-weather-selector-actions {
-    grid-column: auto;
-  }
-
   .mall-weather-design-toolbar .mall-weather-actions-row {
     width: 100%;
     align-items: stretch;
@@ -875,7 +781,6 @@
     padding-inline: 10px;
   }
 
-  .mall-weather-design-dashboard,
   .mall-weather-design-charts,
   .mall-weather-forecast-charts,
   .mall-weather-realtime-body,

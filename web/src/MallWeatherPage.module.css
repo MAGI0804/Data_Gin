@@ -1,0 +1,140 @@
+.page {
+  display: grid;
+  align-content: start;
+  gap: 0;
+  min-width: 0;
+}
+
+.pageHeader {
+  margin-block-end: var(--space-4);
+}
+
+.selector {
+  display: grid;
+  grid-template-columns: 112px minmax(0, 1fr) auto;
+  gap: var(--space-4);
+  align-items: center;
+  min-width: 0;
+  padding: var(--space-4) 0 var(--space-6);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.selectorTitle {
+  align-self: center;
+  color: var(--color-text);
+  font-size: 15px;
+}
+
+.selectorFields {
+  display: grid;
+  grid-template-columns: minmax(220px, 0.78fr) minmax(280px, 1.22fr);
+  gap: var(--space-4);
+  align-items: end;
+  min-width: 0;
+}
+
+.selectorFields label {
+  min-width: 0;
+}
+
+.selectorFields select,
+.selectorFields input {
+  min-height: var(--control-height);
+}
+
+.selectorFields label small {
+  display: none;
+}
+
+.queryField {
+  align-self: end;
+}
+
+.selectorActions {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.selectorActions button {
+  min-height: var(--control-height);
+}
+
+.unavailable {
+  display: flex;
+  gap: var(--space-3);
+  align-items: center;
+  justify-content: space-between;
+  padding-block: var(--space-4);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.toolbar {
+  display: flex;
+  gap: var(--space-4);
+  align-items: center;
+  justify-content: space-between;
+  min-height: 68px;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.dashboard {
+  display: grid;
+  grid-template-columns: minmax(0, 2.25fr) minmax(210px, 0.95fr) minmax(220px, 0.95fr);
+  min-width: 0;
+  background: var(--color-canvas);
+}
+
+@media (max-width: 1179px) {
+  .selector {
+    grid-template-columns: 100px minmax(0, 1fr);
+  }
+
+  .selectorActions {
+    grid-column: 2;
+    justify-content: flex-start;
+  }
+
+  .toolbar {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 0;
+    padding-block: var(--space-2);
+  }
+
+  .dashboard {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 839px) {
+  .selector,
+  .selectorFields {
+    grid-template-columns: 1fr;
+  }
+
+  .selectorActions {
+    grid-column: auto;
+  }
+
+  .unavailable {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .dashboard {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (max-width: 479px) {
+  .selectorActions {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .selectorActions button {
+    width: 100%;
+  }
+}

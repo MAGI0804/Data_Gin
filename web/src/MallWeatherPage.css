@@ -8,10 +8,6 @@
   font-size: 12px;
 }
 
-.mall-weather-page {
-  gap: 14px;
-}
-
 .mall-weather-create-form,
 .mall-weather-manual-coordinate,
 .mall-weather-capacity-form {
@@ -393,120 +389,6 @@
   gap: 12px;
 }
 
-.store-info-toolbar {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: end;
-  gap: 16px;
-}
-
-.store-info-toolbar-fields {
-  display: grid;
-  grid-template-columns: minmax(240px, 1.25fr) minmax(150px, 0.65fr) minmax(220px, 1fr);
-  align-items: end;
-  gap: 12px;
-}
-
-.store-info-toolbar-fields small {
-  color: var(--muted);
-}
-
-.store-info-toolbar-actions {
-  display: flex;
-  align-items: center;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.store-info-detail-layout {
-  display: grid;
-  grid-template-columns: minmax(220px, 280px) minmax(0, 1fr);
-  align-items: start;
-  gap: 16px;
-}
-
-.store-info-summary {
-  position: sticky;
-  top: 0;
-  display: grid;
-  gap: 14px;
-  border-top: 4px solid var(--accent);
-}
-
-.store-info-summary-heading {
-  border-bottom: 1px solid var(--line);
-  padding-bottom: 12px;
-}
-
-.store-info-summary-heading span,
-.store-info-summary-heading strong,
-.store-info-summary-heading small {
-  display: block;
-}
-
-.store-info-summary-heading span,
-.store-info-summary-heading small {
-  color: var(--muted);
-  font-size: 11px;
-}
-
-.store-info-summary-heading strong {
-  margin: 4px 0;
-  font-size: 18px;
-}
-
-.store-info-summary dl {
-  display: grid;
-  gap: 1px;
-  margin: 0;
-  background: var(--line);
-}
-
-.store-info-summary dl > div {
-  display: grid;
-  gap: 4px;
-  background: #ffffff;
-  padding: 10px 0;
-}
-
-.store-info-summary dt {
-  color: var(--muted);
-  font-size: 11px;
-}
-
-.store-info-summary dd {
-  margin: 0;
-  overflow-wrap: anywhere;
-  font-size: 13px;
-  font-weight: 650;
-}
-
-.store-info-maintenance {
-  min-width: 0;
-  gap: 14px;
-}
-
-.store-info-maintenance-heading {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-  border-left: 4px solid #111111;
-  background: #ffffff;
-  padding: 12px 14px;
-}
-
-.store-info-maintenance-heading strong,
-.store-info-maintenance-heading span {
-  display: block;
-}
-
-.store-info-maintenance-heading span {
-  margin-top: 2px;
-  color: var(--muted);
-  font-size: 11px;
-}
-
 .mall-weather-selector label small {
   color: var(--muted);
 }
@@ -802,22 +684,6 @@
 }
 
 @media (min-width: 1025px) {
-  .mall-weather-page {
-    grid-template-rows: minmax(0, 1fr);
-    height: 100%;
-    min-height: 0;
-    overflow: hidden;
-  }
-
-  .mall-weather-page.mall-weather-single-page,
-  .mall-weather-page.store-info-page {
-    grid-template-rows: none;
-    grid-auto-rows: max-content;
-    align-content: start;
-    overflow-y: auto;
-    overscroll-behavior-y: contain;
-  }
-
   .mall-weather-single-page .data-table-wrap {
     min-height: max-content;
     overflow-y: hidden;
@@ -1113,8 +979,6 @@
 
   .mall-weather-selector,
   .mall-weather-selector-fields,
-  .store-info-toolbar,
-  .store-info-toolbar-fields,
   .mall-weather-refresh-form,
   .mall-weather-create-form,
   .mall-weather-capacity-form,
@@ -1131,9 +995,7 @@
   .mall-weather-selector-actions,
   .mall-weather-inline-actions,
   .mall-weather-actions-row,
-  .mall-weather-unavailable,
-  .store-info-toolbar-actions,
-  .store-info-maintenance-heading {
+  .mall-weather-unavailable {
     align-items: stretch;
     flex-direction: column;
   }
@@ -1160,14 +1022,6 @@
     width: 100%;
     margin-top: 8px;
     box-shadow: none;
-  }
-
-  .store-info-detail-layout {
-    grid-template-columns: 1fr;
-  }
-
-  .store-info-summary {
-    position: static;
   }
 
   .mall-weather-push-summary {
@@ -1218,130 +1072,5 @@
 
   .mall-weather-realtime .mall-weather-metrics {
     grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-}
-
-/* 店铺信息设计稿：左侧资料摘要，右侧资料与服务坐标维护。 */
-.store-info-page {
-  gap: 0;
-}
-
-.store-info-page .store-info-toolbar {
-  border: 0;
-  border-bottom: 1px solid var(--line);
-  padding: 0 0 34px;
-}
-
-.store-info-toolbar-fields {
-  gap: 28px;
-}
-
-.store-info-toolbar-fields label > span {
-  color: #333941;
-  font-size: 15px;
-}
-
-.store-info-toolbar-actions {
-  gap: 16px;
-}
-
-.store-info-detail-layout {
-  grid-template-columns: minmax(290px, 340px) minmax(0, 1fr);
-  gap: 0;
-  border-bottom: 1px solid var(--line);
-}
-
-.store-info-summary {
-  position: static;
-  gap: 22px;
-  border-top: 0;
-  border-right: 1px solid var(--line);
-  padding: 34px 48px 36px 0;
-}
-
-.store-info-summary-heading {
-  padding-bottom: 20px;
-}
-
-.store-info-summary-heading span,
-.store-info-summary-heading small,
-.store-info-summary dt {
-  color: #646d78;
-  font-size: 14px;
-}
-
-.store-info-summary-heading strong {
-  margin: 10px 0 12px;
-  color: #15191e;
-  font-size: 25px;
-  font-weight: 700;
-}
-
-.store-info-summary dl {
-  gap: 0;
-  background: transparent;
-}
-
-.store-info-summary dl > div {
-  grid-template-columns: minmax(84px, 1fr) auto;
-  align-items: center;
-  gap: 12px;
-  border-bottom: 1px solid var(--line);
-  padding: 16px 0;
-}
-
-.store-info-summary dd {
-  color: #252b33;
-  font-size: 15px;
-  font-weight: 600;
-  text-align: right;
-}
-
-.store-info-summary dl > div:nth-last-child(-n + 2) dd {
-  color: var(--success);
-}
-
-.store-info-maintenance {
-  gap: 24px;
-  padding: 32px 0 38px 44px;
-}
-
-.store-info-maintenance-heading {
-  align-items: baseline;
-  border-left: 0;
-  border-bottom: 1px solid var(--line);
-  background: transparent;
-  padding: 0 0 20px;
-}
-
-.store-info-maintenance-heading strong {
-  color: #171b21;
-  font-size: 20px;
-}
-
-.store-info-maintenance-heading span {
-  color: #727a85;
-  font-size: 13px;
-}
-
-.store-info-maintenance .workbench-panel {
-  border-top: 1px solid var(--line);
-  padding-top: 22px;
-}
-
-@media (max-width: 840px) {
-  .store-info-page .store-info-toolbar,
-  .store-info-summary,
-  .store-info-maintenance {
-    padding: 18px 0;
-  }
-
-  .store-info-detail-layout {
-    grid-template-columns: 1fr;
-  }
-
-  .store-info-summary {
-    border-right: 0;
-    border-bottom: 1px solid var(--line);
   }
 }

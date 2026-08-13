@@ -2,11 +2,14 @@ import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } fro
 import { AlertTriangle, Clock3, CloudRain, CloudSun, Database, Download, MapPin, RefreshCcw, Thermometer } from 'lucide-react'
 import './MallWeatherPage.css'
 import './MallWeatherDesign.css'
+import weatherStyles from './MallWeatherPage.module.css'
+import storeStyles from './StoreInfoPage.module.css'
 import { MallWeatherChart, type MallWeatherChartSeries } from './MallWeatherChart'
 import { MallWeatherExportPanel } from './MallWeatherExportPanel'
 import { MallWeatherExportProfilePanel } from './MallWeatherExportProfilePanel'
 import { MallWeatherForecastPanel, type MallWeatherForecastDataSnapshot } from './MallWeatherForecastPanel'
 import { MallDetailsFields, MallWeatherMallEditor } from './MallWeatherMallEditor'
+import { PageCanvas, PageHeader } from './ui'
 import { runSingleFlight } from './singleFlight'
 import { mallWeatherCapacityPlanPath, parseMallWeatherCapacityPlan, type MallWeatherCapacityPlan, type MallWeatherCapacityPlanInput } from './mallWeatherCapacityPlan'
 import { parseMallWeatherMetricsSummary, type MallWeatherMetricsSummary } from './monitoring'
@@ -598,9 +601,14 @@ function MallModulePage({
 
   if (view === 'stores') {
     return (
-      <div className="view-stack mall-weather-page store-info-page">
-        <section className="workbench-panel store-info-toolbar" aria-label="店铺筛选与选择">
-          <div className="store-info-toolbar-fields">
+      <PageCanvas className={`${storeStyles.page} mall-weather-page`}>
+        <PageHeader
+          eyebrow="STORE DIRECTORY"
+          title="店铺信息"
+          description="筛选并选择店铺，在同一工作画布中维护基础资料、地址解析和天气服务坐标。"
+        />
+        <section className={storeStyles.toolbar} aria-label="店铺筛选与选择">
+          <div className={storeStyles.toolbarFields}>
             <label>
               <span>筛选店铺</span>
               <input name="storeInfoQuery" type="search" autoComplete="off" value={query} onChange={(event) => setQuery(event.currentTarget.value)} placeholder="名称、编码或地址" />
@@ -634,7 +642,7 @@ function MallModulePage({
               {selectedMall && !selectedMallMatchesFilter && <small>当前店铺不在筛选结果中，可从匹配结果切换</small>}
             </label>
           </div>
-          <div className="store-info-toolbar-actions">
+          <div className={storeStyles.toolbarActions}>
             <button type="button" onClick={() => void loadMalls()} disabled={mallState === 'loading'}>
               <RefreshCcw aria-hidden="true" />刷新店铺
             </button>
@@ -656,9 +664,9 @@ function MallModulePage({
         {showImport && <MallImportPanel client={client} onImported={() => void loadMalls()} />}
 
         {!showCreate && selectedMall && (actorID
-          ? <div className="store-info-detail-layout">
-            <aside className="workbench-panel store-info-summary" aria-label={`${selectedMall.nameCn}资料摘要`}>
-              <div className="store-info-summary-heading">
+          ? <div className={storeStyles.detailLayout}>
+            <aside className={storeStyles.summary} aria-label={`${selectedMall.nameCn}资料摘要`}>
+              <div className={storeStyles.summaryHeading}>
                 <span>当前店铺</span>
                 <strong>{selectedMall.nameCn}</strong>
                 <small>{selectedMall.mallCode}</small>
@@ -671,8 +679,8 @@ function MallModulePage({
                 <div><dt>天气服务</dt><dd>{selectedMall.weatherEnabled ? '已启用' : '未启用'}</dd></div>
               </dl>
             </aside>
-            <section className="view-stack store-info-maintenance" aria-label={`${selectedMall.nameCn}店铺资料维护`}>
-              <div className="store-info-maintenance-heading">
+            <section className={storeStyles.maintenance} aria-label={`${selectedMall.nameCn}店铺资料维护`}>
+              <div className={storeStyles.maintenanceHeading}>
                 <div><strong>店铺资料维护</strong><span>基础资料、地址解析和服务坐标在此统一维护</span></div>
                 <span>版本 {selectedMall.version}</span>
               </div>
@@ -689,15 +697,21 @@ function MallModulePage({
             </section>
           </div>
           : <RequestError message="无法识别当前登录账号，请退出后重新登录再维护店铺。" onRetry={() => window.location.reload()} />)}
-      </div>
+      </PageCanvas>
     )
   }
 
   return (
-    <div className="view-stack mall-weather-page mall-weather-single-page">
-      <section className="workbench-panel mall-weather-selector" aria-label="选择天气商场">
-        <strong className="mall-weather-selector-title">筛选商场</strong>
-        <div className="mall-weather-selector-fields">
+    <PageCanvas className={`${weatherStyles.page} mall-weather-page mall-weather-single-page`}>
+      <PageHeader
+        className={weatherStyles.pageHeader}
+        eyebrow="WEATHER OPERATIONS"
+        title="商场天气"
+        description="选择商场后查看实况、预报、预警与生活指数，并执行刷新、导出和推送操作。"
+      />
+      <section className={weatherStyles.selector} aria-label="选择天气商场">
+        <strong className={weatherStyles.selectorTitle}>筛选商场</strong>
+        <div className={weatherStyles.selectorFields}>
           <label>
             <span>选择商场</span>
             <select
@@ -721,7 +735,7 @@ function MallModulePage({
                 ? `${selectedMall.mallCode} · ${selectedMall.city || '城市待完善'}`
                 : '选择商场后查看全部天气数据'}</small>
           </label>
-          <label className="mall-weather-query-field">
+          <label className={weatherStyles.queryField}>
             <span className="sr-only">搜索商场</span>
             <input
               name="mallWeatherQuery"
@@ -734,7 +748,7 @@ function MallModulePage({
             <small>{query.trim() ? `找到 ${visibleMalls.length} 个商场` : `共 ${malls.length} 个商场`}</small>
           </label>
         </div>
-        <div className="mall-weather-selector-actions">
+        <div className={weatherStyles.selectorActions}>
           <button type="button" onClick={() => void loadMalls()} disabled={mallState === 'loading'}>
             <RefreshCcw aria-hidden="true" />刷新商场
           </button>
@@ -745,13 +759,13 @@ function MallModulePage({
       {mallState === 'error' && <RequestError message={mallError} onRetry={() => void loadMalls()} />}
       {mallState === 'loading' && malls.length === 0 && <LoadingState label="正在加载商场" />}
       {mallState === 'success' && malls.length === 0 && <EmptyState title="还没有可用商场" detail="请先到“基础信息 → 店铺信息”新增并维护店铺。" />}
-      {selectedMall && !selectedMallReady && <section className="workbench-panel mall-weather-unavailable">
+      {selectedMall && !selectedMallReady && <section className={`${weatherStyles.unavailable} mall-weather-unavailable`}>
         <div><strong>{selectedMall.nameCn}尚未完成天气接入</strong><span>请到“基础信息 → 店铺信息”完成地址、坐标和天气启用设置。</span></div>
         <button type="button" onClick={() => { window.location.hash = 'store_info' }}>前往店铺信息</button>
       </section>}
 
       {selectedMallReady && selectedMall && <>
-        <div className="mall-weather-design-toolbar">
+        <div className={`${weatherStyles.toolbar} mall-weather-design-toolbar`}>
           <div className="mall-weather-actions-row">
             {actorID
               ? <ManualRefreshPanel
@@ -779,7 +793,7 @@ function MallModulePage({
           </div>
           <MallWeatherDataNavigation />
         </div>
-        <div className="mall-weather-design-dashboard" id="mall-weather-overview" tabIndex={-1}>
+        <div className={`${weatherStyles.dashboard} mall-weather-design-dashboard`} id="mall-weather-overview" tabIndex={-1}>
           {!selectedOverview && overviewState !== 'error' && overviewState !== 'waiting' && <LoadingState label={`正在加载${selectedMall.nameCn}天气`} />}
           {selectedOverview && <>
             <WeatherRealtime mall={selectedMall} overview={selectedOverview} />
@@ -824,7 +838,7 @@ function MallModulePage({
           </div>
         </details>
       </>}
-    </div>
+    </PageCanvas>
   )
 }
 
