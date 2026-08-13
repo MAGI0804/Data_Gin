@@ -1,14 +1,15 @@
-import { type FormEvent, type ReactNode, useCallback, useEffect, useRef, useState } from 'react'
+import { type FormEvent, useCallback, useEffect, useRef, useState } from 'react'
 import { Database, Download, FileJson, ListChecks, RefreshCcw, Search, Upload } from 'lucide-react'
-import type { ApiRequestOptions, ClientResponse, HTTPMethod } from '../api/client'
-import { buildExcelMatchJobListQuery, normalizeMonitoringPageNumber, parseMonitoringPage, type MonitoringPagination } from '../monitoringRecords'
-import { DataTable, Dialog, Drawer, FeedbackState, FilterToolbar, MetricStrip, PageCanvas, PageHeader, PaginationControls, Section, StatusTag } from '../ui'
-import { buildExcelExportConfig, cloneExcelEmptyCellFills, cloneExcelMatchSteps, excelMatchSchemePath, excelFieldSelectOptions, excelModelSelectOptions, selectExcelMatchStepModel, type ExcelMatchFilterConfig, type ExcelEmptyCellFillConfig, type ExcelMatchModel, type ExcelMatchModelField, type ExcelMatchStepConfig } from '../excelMatchConfig'
-import { bojunMatchFieldOptions, canDownloadExcelJob, compactText, defaultExcelExportScheme, defaultExcelImportScheme, excelChunkSize, excelJobOperation, excelJobOperationLabel, excelJobPollMaxAttempts, excelJobProgressPercent, excelJobStatusLabel, excelLogLevelLabel, excelMatchFilterOperatorOptions, excelPreviewStat, excelPreviewStatusLabel, exportSchemeDefaults, filterSensitiveExcelModels, formValue, formatDate, formatUnixTime, importSchemeDefaults, isExcelJobActive, isExcelMatchStepComplete, parseExportColumnFormats, readDataField, readList, readObject, replaceExcelJobHistoryItem, sameExcelFile, submitExcelDownloadForm, type ExcelDialogMode, type ExcelExportSchemeConfig, type ExcelImportSchemeConfig, type ExcelMatchJob, type ExcelMatchJobLog, type ExcelMatchPreviewResult, type ExcelMatchScheme, type ExcelUploadRef, type ExcelUploadSession, type ExcelUploadSlot, type PendingSchemeSave } from './excelPageSupport'
+import type { ClientResponse } from '../api/client'
+import { Dialog, Drawer, FeedbackState, FilterToolbar, MetricStrip, PageCanvas, PageHeader, PaginationControls, Section } from '../ui'
+import { buildExcelExportConfig, cloneExcelEmptyCellFills, cloneExcelMatchSteps, excelMatchSchemePath, selectExcelMatchStepModel, type ExcelMatchFilterConfig, type ExcelEmptyCellFillConfig, type ExcelMatchModel, type ExcelMatchStepConfig } from '../excelMatchConfig'
+import { bojunMatchFieldOptions, canDownloadExcelJob, defaultExcelExportScheme, defaultExcelImportScheme, excelJobStatusLabel, excelMatchFilterOperatorOptions, exportSchemeDefaults, filterSensitiveExcelModels, formValue, importSchemeDefaults, isExcelMatchStepComplete, parseExportColumnFormats, readDataField, readObject, type ExcelDialogMode, type ExcelExportSchemeConfig, type ExcelImportSchemeConfig, type ExcelMatchJob, type ExcelMatchPreviewResult, type ExcelMatchScheme, type PendingSchemeSave } from './excelPageSupport'
+import { ExcelJobDetailContent, ExcelJobHistoryTable, ExcelMatchPreviewPanel, ExcelModelFieldSelector, ExcelModelSelector, ExcelSchemeList, Field, Metric, Panel, SelectFilter } from './ExcelMatchPageParts'
+import { buildExcelUploadPayload, useExcelUploads, type ExcelPageClient } from './useExcelUploads'
+import { useExcelJobs } from './useExcelJobs'
 import styles from './ExcelMatchPage.module.css'
 
-export type ExcelPageClientOptions = Omit<ApiRequestOptions, 'method'> & { method?: HTTPMethod; showResult?: boolean; silentLoading?: boolean }
-export type ExcelPageClient = (path: string, options?: ExcelPageClientOptions) => Promise<ClientResponse>
+export type { ExcelPageClient, ExcelPageClientOptions } from './useExcelUploads'
 
 export function ExcelMatchPage({
   section,
@@ -29,22 +30,13 @@ export function ExcelMatchPage({
   setResult: (value: ClientResponse | null) => void
   onNavigateToJobs: () => void
 }) {
-  const [jobID, setJobID] = useState('')
-  const [job, setJob] = useState<ExcelMatchJob | null>(null)
-  const [jobDetailOpen, setJobDetailOpen] = useState(false)
-  const jobDetailTriggerRef = useRef<HTMLButtonElement | null>(null)
-  const [jobHistory, setJobHistory] = useState<ExcelMatchJob[]>([])
-  const [jobLogs, setJobLogs] = useState<ExcelMatchJobLog[]>([])
-  const [trackingJobID, setTrackingJobID] = useState<number | null>(null)
-  const [autoRefreshText, setAutoRefreshText] = useState('')
-  const [downloadingJobID, setDownloadingJobID] = useState<number | null>(null)
+  const jobs = useExcelJobs({ section, client, token, refreshVersion, setLoading, setResult })
   const [selectedExportFileName, setSelectedExportFileName] = useState('')
   const [selectedImportFileName, setSelectedImportFileName] = useState('')
   const [selectedClearFileName, setSelectedClearFileName] = useState('')
   const [excelDialog, setExcelDialog] = useState<ExcelDialogMode | null>(null)
   const [previewResult, setPreviewResult] = useState<ExcelMatchPreviewResult | null>(null)
-  const [uploadRefs, setUploadRefs] = useState<Partial<Record<ExcelUploadSlot, ExcelUploadRef>>>({})
-  const [uploadProgress, setUploadProgress] = useState('')
+  const { uploadProgress, clearUploadRef, ensureExcelUpload, resetUploads } = useExcelUploads(client)
   const [exportSchemes, setExportSchemes] = useState<ExcelMatchScheme[]>([])
   const [importSchemes, setImportSchemes] = useState<ExcelMatchScheme[]>([])
   const [exportDefaults, setExportDefaults] = useState<ExcelExportSchemeConfig>(defaultExcelExportScheme)
@@ -66,18 +58,8 @@ export function ExcelMatchPage({
   const [pendingWrite, setPendingWrite] = useState<{ slot: 'import' | 'clear'; file: File; config: unknown; message: string } | null>(null)
   const [writeMode, setWriteMode] = useState<'import' | 'clear'>('import')
   const [latestWriteJob, setLatestWriteJob] = useState<ExcelMatchJob | null>(null)
-  const [jobQuery, setJobQuery] = useState('')
-  const [jobStatus, setJobStatus] = useState('all')
-  const [jobOperation, setJobOperation] = useState('all')
-  const [appliedJobHistoryFilters, setAppliedJobHistoryFilters] = useState({ keyword: '', status: '', operation: '' })
-  const [jobHistoryPage, setJobHistoryPage] = useState(1)
-  const [jobHistoryPagination, setJobHistoryPagination] = useState<MonitoringPagination | null>(null)
-  const [jobHistoryLoading, setJobHistoryLoading] = useState(false)
-  const [jobHistoryError, setJobHistoryError] = useState('')
-  const [jobHistoryReloadVersion, setJobHistoryReloadVersion] = useState(0)
-  const jobHistoryRequestRef = useRef<AbortController | null>(null)
-  const selectedJobProgress = job && job.total_rows > 0
-    ? Math.min(100, Math.round(job.processed_rows / job.total_rows * 100))
+  const selectedJobProgress = jobs.job && jobs.job.total_rows > 0
+    ? Math.min(100, Math.round(jobs.job.processed_rows / jobs.job.total_rows * 100))
     : 0
   const pendingSchemeNameConflict = pendingSchemeSave
     ? (pendingSchemeSave.operation === 'export_match' ? exportSchemes : importSchemes)
@@ -85,32 +67,12 @@ export function ExcelMatchPage({
     : null
   const requestErrorMessage = (response: ClientResponse, fallback: string) => response.error?.message || fallback
 
-  const applyJobResult = useCallback((result: ClientResponse, options: { track?: boolean } = {}) => {
-    const nextJob = readObject<ExcelMatchJob>(result, 'job')
-    if (nextJob) {
-      setJob(nextJob)
-      setJobID(String(nextJob.id))
-      setJobHistory((current) => replaceExcelJobHistoryItem(current, nextJob))
-      if (options.track !== false) {
-        setTrackingJobID(isExcelJobActive(nextJob) ? nextJob.id : null)
-      }
-    }
-    setJobLogs(readList<ExcelMatchJobLog>(result, 'logs'))
-    return nextJob
-  }, [])
-
-  function clearUploadRef(slot: ExcelUploadSlot) {
-    setUploadRefs((current) => ({ ...current, [slot]: undefined }))
-    setUploadProgress('')
-  }
-
   function resetExcelDialogFiles() {
     setSelectedExportFileName('')
     setSelectedImportFileName('')
     setSelectedClearFileName('')
     setPreviewResult(null)
-    setUploadRefs({})
-    setUploadProgress('')
+    resetUploads()
   }
 
   function closeExcelDialog() {
@@ -222,13 +184,6 @@ export function ExcelMatchPage({
     }
   }
 
-  function buildConfigPayload(uploadId: string, config: unknown) {
-    const payload = new FormData()
-    payload.append('uploadId', uploadId)
-    payload.append('config', JSON.stringify(config))
-    return payload
-  }
-
   const fetchSchemes = useCallback(async (operation: 'export_match' | 'import_update') => {
     const response = await client(`/v1/excel-match-jobs/schemes?operation=${operation}`, { method: 'GET', showResult: false, silentLoading: true })
     if (!response.ok) throw new Error(requestErrorMessage(response, '查询 Excel 方案失败'))
@@ -264,51 +219,10 @@ export function ExcelMatchPage({
     }
   }, [fetchSchemes, setResult])
 
-  const loadJobHistory = useCallback(async () => {
-    jobHistoryRequestRef.current?.abort()
-    const controller = new AbortController()
-    jobHistoryRequestRef.current = controller
-    setJobHistoryLoading(true)
-    setJobHistoryError('')
-    const query = buildExcelMatchJobListQuery({ page: jobHistoryPage, pageSize: 20, ...appliedJobHistoryFilters })
-    try {
-      const response = await client(`/v1/excel-match-jobs?${query}`, { method: 'GET', signal: controller.signal, showResult: false, silentLoading: true })
-      if (controller.signal.aborted) return
-      const parsed = response.ok ? parseMonitoringPage<ExcelMatchJob>(response.data, 'jobs') : null
-      if (parsed) {
-        const nextPage = normalizeMonitoringPageNumber(jobHistoryPage, parsed.pagination.totalPages)
-        if (nextPage !== jobHistoryPage) {
-          setJobHistoryPage(nextPage)
-          return
-        }
-        setJobHistory(parsed.list)
-        setJobHistoryPagination(parsed.pagination)
-        return
-      }
-      const legacyItems = readDataField(response.data, 'jobs')
-      if (response.ok && Array.isArray(legacyItems)) {
-        const pageSize = 20
-        if (jobHistoryPage !== 1) {
-          setJobHistoryPage(1)
-          return
-        }
-        setJobHistory(legacyItems.slice(0, pageSize) as ExcelMatchJob[])
-        setJobHistoryPagination({ page: 1, pageSize, total: legacyItems.length, totalPages: legacyItems.length ? 1 : 0 })
-        setJobHistoryError('当前服务暂不支持 Excel 任务分页或筛选，已显示未筛选的兼容数据。')
-        return
-      }
-      setJobHistoryError(response.error?.message || 'Excel 任务历史暂时不可用，请稍后重试。')
-    } finally {
-      if (!controller.signal.aborted) setJobHistoryLoading(false)
-    }
-  }, [appliedJobHistoryFilters, client, jobHistoryPage])
-
   useEffect(() => {
     if (!token) return
-    if (section === 'jobs') void loadJobHistory()
     if (section === 'schemes' || section === 'write') void loadSchemes()
-    return () => jobHistoryRequestRef.current?.abort()
-  }, [jobHistoryReloadVersion, loadJobHistory, loadSchemes, refreshVersion, section, token])
+  }, [loadSchemes, refreshVersion, section, token])
 
   useEffect(() => {
     if (!token || section !== 'schemes') return
@@ -322,213 +236,8 @@ export function ExcelMatchPage({
     setSelectedImportFileName('')
     setSelectedClearFileName('')
     setPreviewResult(null)
-    setUploadRefs({})
-    setUploadProgress('')
-    if (section !== 'jobs') setJobDetailOpen(false)
-  }, [section])
-
-  const refreshJobByID = useCallback(async (id: number, options: { silent?: boolean; track?: boolean; signal?: AbortSignal } = {}) => {
-    if (!options.silent) setLoading(true)
-    try {
-      const nextResult = await client(`/v1/excel-match-jobs/${id}`, { method: 'GET', signal: options.signal, showResult: false, silentLoading: true })
-      if (!options.silent && !nextResult.ok) setResult(nextResult)
-      if (nextResult.ok) {
-        applyJobResult(nextResult, { track: options.track })
-        if (!options.silent) await loadJobHistory()
-        return readObject<ExcelMatchJob>(nextResult, 'job')
-      }
-      if (options.silent) {
-        setAutoRefreshText(`自动刷新失败：${requestErrorMessage(nextResult, '请稍后重试。')}`)
-      }
-    } catch {
-      if (options.signal?.aborted) return null
-      if (!options.silent) {
-        setResult({ ok: false, status: 0, data: { message: '查询 Excel 任务失败，请稍后重试。' } })
-      } else {
-        setAutoRefreshText('自动刷新失败，请稍后重试。')
-      }
-    } finally {
-      if (!options.silent) setLoading(false)
-    }
-    return null
-  }, [applyJobResult, client, loadJobHistory, setLoading, setResult])
-
-  async function openJobDetail(id: number, trigger: HTMLButtonElement) {
-    jobDetailTriggerRef.current = trigger
-    const nextJob = await refreshJobByID(id)
-    if (nextJob) {
-      setJobDetailOpen(true)
-    } else {
-      trigger.focus()
-    }
-  }
-
-  useEffect(() => {
-    if (!token || !trackingJobID) return
-
-    let cancelled = false
-    let attempts = 0
-    let consecutiveFailures = 0
-    let timer: number | null = null
-    let inFlight = false
-    const pollingState = { resumeWhenVisible: false }
-    const controller = new AbortController()
-    const isPageVisible = () => document.visibilityState !== 'hidden'
-
-    const clearScheduledRefresh = () => {
-      if (timer !== null) {
-        window.clearTimeout(timer)
-        timer = null
-      }
-    }
-
-    const stopPolling = (message: string) => {
-      clearScheduledRefresh()
-      setAutoRefreshText(message)
-      setTrackingJobID(null)
-    }
-
-    const scheduleRefresh = (delayMilliseconds: number) => {
-      clearScheduledRefresh()
-      if (cancelled || document.visibilityState === 'hidden') return
-      if (inFlight) return
-      timer = window.setTimeout(() => {
-        timer = null
-        void refreshTrackedJob()
-      }, delayMilliseconds)
-    }
-
-    const refreshTrackedJob = async () => {
-      if (cancelled || document.visibilityState === 'hidden') return
-      if (inFlight) {
-        pollingState.resumeWhenVisible = true
-        return
-      }
-      if (attempts >= excelJobPollMaxAttempts) {
-        stopPolling(`自动刷新已在 ${excelJobPollMaxAttempts} 次后停止，请手动查询任务状态。`)
-        return
-      }
-
-      attempts += 1
-      inFlight = true
-      let nextDelay: number | null = null
-      try {
-        const nextJob = await refreshJobByID(trackingJobID, { silent: true, signal: controller.signal })
-        if (cancelled || controller.signal.aborted) return
-        if (!nextJob) {
-          consecutiveFailures += 1
-          const delayMilliseconds = Math.min(30_000, 2_000 * 2 ** Math.min(consecutiveFailures, 4))
-          if (attempts >= excelJobPollMaxAttempts) {
-            stopPolling(`自动刷新已在 ${excelJobPollMaxAttempts} 次后停止，请手动查询任务状态。`)
-            return
-          }
-          setAutoRefreshText(`自动刷新失败，将在 ${Math.ceil(delayMilliseconds / 1000)} 秒后重试。`)
-          nextDelay = delayMilliseconds
-          return
-        }
-
-        consecutiveFailures = 0
-        setAutoRefreshText(`自动刷新中：任务 #${nextJob.id}，${excelJobStatusLabel(nextJob.status)}，${new Date().toLocaleTimeString()}`)
-        if (!isExcelJobActive(nextJob)) {
-          setTrackingJobID(null)
-          void loadJobHistory()
-          return
-        }
-        nextDelay = 2_000
-      } finally {
-        inFlight = false
-        if (pollingState.resumeWhenVisible && !cancelled && !controller.signal.aborted && isPageVisible()) {
-          pollingState.resumeWhenVisible = false
-          scheduleRefresh(0)
-        } else if (nextDelay !== null) {
-          scheduleRefresh(nextDelay)
-        }
-      }
-    }
-
-    void refreshTrackedJob()
-    const handleVisibilityChange = () => {
-      if (document.visibilityState === 'hidden') {
-        clearScheduledRefresh()
-        setAutoRefreshText('页面已隐藏，任务自动刷新已暂停。')
-        return
-      }
-      if (inFlight) {
-        pollingState.resumeWhenVisible = true
-        return
-      }
-      scheduleRefresh(0)
-    }
-    document.addEventListener('visibilitychange', handleVisibilityChange)
-
-    return () => {
-      cancelled = true
-      clearScheduledRefresh()
-      controller.abort()
-      document.removeEventListener('visibilitychange', handleVisibilityChange)
-    }
-  }, [loadJobHistory, refreshJobByID, token, trackingJobID])
-
-  async function ensureExcelUpload(slot: ExcelUploadSlot, file: File) {
-    const existing = uploadRefs[slot]
-    if (existing && sameExcelFile(file, existing)) {
-      return existing.uploadId
-    }
-
-    const totalChunks = Math.ceil(file.size / excelChunkSize)
-    setUploadProgress(`准备上传 ${file.name}，共 ${totalChunks} 个分片`)
-
-    const createResult = await client('/v1/excel-match-jobs/uploads', {
-      method: 'POST',
-      body: { fileName: file.name, totalChunks },
-      showResult: false,
-      silentLoading: true,
-      retry: false,
-    })
-    if (!createResult.ok) throw new Error(requestErrorMessage(createResult, '创建分片上传会话失败'))
-    const session = readObject<ExcelUploadSession>(createResult, 'upload')
-    if (!session?.uploadId) throw new Error('上传会话返回缺少 uploadId')
-
-    for (let index = 0; index < totalChunks; index++) {
-      const start = index * excelChunkSize
-      const end = Math.min(file.size, start + excelChunkSize)
-      const chunkForm = new FormData()
-      chunkForm.append('index', String(index))
-      chunkForm.append('totalChunks', String(totalChunks))
-      chunkForm.append('chunk', file.slice(start, end), `${file.name}.part${index}`)
-      setUploadProgress(`上传分片 ${index + 1}/${totalChunks}`)
-      const chunkResult = await client(`/v1/excel-match-jobs/uploads/${encodeURIComponent(session.uploadId)}/chunks`, {
-        method: 'POST',
-        body: chunkForm,
-        showResult: false,
-        silentLoading: true,
-        retry: false,
-        timeoutMs: 120_000,
-      })
-      if (!chunkResult.ok) throw new Error(requestErrorMessage(chunkResult, `上传分片 ${index + 1} 失败`))
-    }
-
-    setUploadProgress('合并 Excel 分片')
-    const completeResult = await client(`/v1/excel-match-jobs/uploads/${encodeURIComponent(session.uploadId)}/complete`, {
-      method: 'POST',
-      body: { totalChunks },
-      showResult: false,
-      silentLoading: true,
-      retry: false,
-    })
-    if (!completeResult.ok) throw new Error(requestErrorMessage(completeResult, '合并 Excel 分片失败'))
-
-    const nextRef = {
-      uploadId: session.uploadId,
-      fileName: file.name,
-      size: file.size,
-      lastModified: file.lastModified,
-      totalChunks,
-    }
-    setUploadRefs((current) => ({ ...current, [slot]: nextRef }))
-    setUploadProgress(`上传完成：${file.name}`)
-    return session.uploadId
-  }
+    resetUploads()
+  }, [resetUploads, section])
 
   function beginSchemeSave(formElement: HTMLFormElement, operation: 'export_match' | 'import_update', mode: 'current' | 'new') {
     const selectedSchemeID = operation === 'export_match' ? selectedExportSchemeID : selectedImportSchemeID
@@ -679,7 +388,7 @@ export function ExcelMatchPage({
     setLoading(true)
     try {
       const uploadId = await ensureExcelUpload('export', file)
-      const payload = buildConfigPayload(uploadId, buildExportConfig(form))
+      const payload = buildExcelUploadPayload(uploadId, buildExportConfig(form))
       const nextResult = await client('/v1/excel-match-jobs', {
         method: 'POST',
         body: payload,
@@ -711,7 +420,7 @@ export function ExcelMatchPage({
     setLoading(true)
     try {
       const uploadId = await ensureExcelUpload('export', file)
-      const payload = buildConfigPayload(uploadId, buildExportConfig(form))
+      const payload = buildExcelUploadPayload(uploadId, buildExportConfig(form))
       const nextResult = await client('/v1/excel-match-jobs/preview', {
         method: 'POST',
         body: payload,
@@ -737,7 +446,7 @@ export function ExcelMatchPage({
       const uploadId = await ensureExcelUpload(slot, file)
       const nextResult = await client('/v1/excel-match-jobs', {
         method: 'POST',
-        body: buildConfigPayload(uploadId, config),
+        body: buildExcelUploadPayload(uploadId, config),
         showResult: false,
         silentLoading: true,
         retry: false,
@@ -809,60 +518,28 @@ export function ExcelMatchPage({
   }
 
   function showCreatedJob(result: ClientResponse) {
-    const createdJob = applyJobResult(result)
-    if (createdJob) setJobDetailOpen(true)
-    setAutoRefreshText('')
+    jobs.registerCreatedJob(result, true)
     setResult(null)
     closeExcelDialog()
-    setJobHistoryReloadVersion((version) => version + 1)
     onNavigateToJobs()
   }
 
   function showCreatedWriteJob(result: ClientResponse) {
-    const createdJob = applyJobResult(result)
-    if (createdJob) {
-      setLatestWriteJob(createdJob)
-    }
-    setAutoRefreshText('')
+    const createdJob = jobs.registerCreatedJob(result, false)
+    if (createdJob) setLatestWriteJob(createdJob)
     setResult(null)
-    setJobHistoryReloadVersion((version) => version + 1)
   }
 
   async function refreshJob() {
-    const id = Number(jobID)
+    const id = Number(jobs.jobID)
     if (!id) {
       setResult({ ok: false, status: 0, data: '请输入任务 ID' })
       return
     }
-    const nextJob = await refreshJobByID(id)
+    const nextJob = await jobs.refreshJobByID(id)
     if (nextJob) {
       closeExcelDialog()
-      setJobDetailOpen(true)
-    }
-  }
-
-  async function downloadJob(targetID?: number) {
-    const id = targetID ?? Number(jobID || job?.id)
-    if (!id) {
-      setResult({ ok: false, status: 0, data: '请输入任务 ID' })
-      return
-    }
-    const targetJob = job?.id === id ? job : jobHistory.find((item) => item.id === id) ?? null
-    if (targetJob && !canDownloadExcelJob(targetJob)) {
-      setResult({ ok: false, status: 0, data: targetJob.download_message || '结果文件尚未上传到OSS，上传成功后才能下载，请稍后刷新任务状态' })
-      return
-    }
-
-    setDownloadingJobID(id)
-    setResult({ ok: true, status: 0, data: `正在提交任务 ${id} 的下载请求，浏览器会接管文件下载。` })
-    try {
-      submitExcelDownloadForm(id, token)
-      setResult({ ok: true, status: 0, data: `任务 ${id} 下载请求已提交，请查看浏览器下载栏。` })
-      await loadJobHistory()
-    } catch (error) {
-      setResult({ ok: false, status: 0, data: error instanceof Error ? error.message : String(error) })
-    } finally {
-      setDownloadingJobID(null)
+      jobs.setJobDetailOpen(true)
     }
   }
 
@@ -974,33 +651,33 @@ export function ExcelMatchPage({
         description={section === 'jobs' ? '查询任务状态、进度、日志和下载结果。' : section === 'schemes' ? '配置数据库模型、字段和顺序匹配步骤。' : '执行导入更新与退回未匹配操作。'}
       />
       {section === 'jobs' && <>
-        <MetricStrip items={[{ key: 'history', label: '历史任务', value: jobHistoryPagination?.total ?? jobHistory.length }, { key: 'current', label: '当前任务', value: job ? `#${job.id}` : '-' }, { key: 'status', label: '任务状态', value: job ? excelJobStatusLabel(job.status) : '-' }, { key: 'processed', label: '已处理行', value: job ? `${job.processed_rows.toLocaleString('en-US')} / ${job.total_rows.toLocaleString('en-US')}` : '-' }, { key: 'tracking', label: '自动跟踪', value: trackingJobID ? `#${trackingJobID}` : '-' }]} />
+        <MetricStrip items={[{ key: 'history', label: '历史任务', value: jobs.jobHistoryPagination?.total ?? jobs.jobHistory.length }, { key: 'current', label: '当前任务', value: jobs.job ? `#${jobs.job.id}` : '-' }, { key: 'status', label: '任务状态', value: jobs.job ? excelJobStatusLabel(jobs.job.status) : '-' }, { key: 'processed', label: '已处理行', value: jobs.job ? `${jobs.job.processed_rows.toLocaleString('en-US')} / ${jobs.job.total_rows.toLocaleString('en-US')}` : '-' }, { key: 'tracking', label: '自动跟踪', value: jobs.trackingJobID ? `#${jobs.trackingJobID}` : '-' }]} />
         <form onSubmit={(event) => {
           event.preventDefault()
-          setJobHistoryPage(1)
-          setAppliedJobHistoryFilters({ keyword: jobQuery, status: jobStatus === 'all' ? '' : jobStatus, operation: jobOperation === 'all' ? '' : jobOperation })
-          setJobHistoryReloadVersion((version) => version + 1)
+          jobs.setJobHistoryPage(1)
+          jobs.setAppliedJobHistoryFilters({ keyword: jobs.jobQuery, status: jobs.jobStatus === 'all' ? '' : jobs.jobStatus, operation: jobs.jobOperation === 'all' ? '' : jobs.jobOperation })
+          jobs.setJobHistoryReloadVersion((version) => version + 1)
         }}>
           <FilterToolbar>
-            <label className={styles.search}><span className={styles.visuallyHidden}>任务 ID、文件名或错误</span><span><Search aria-hidden="true" /><input name="excel_job_query" type="search" value={jobQuery} placeholder="任务 ID / 文件名 / 错误" onChange={(event) => setJobQuery(event.currentTarget.value)} /></span></label>
-            <SelectFilter label="状态" value={jobStatus} onChange={(value) => { setJobStatus(value); setJobHistoryPage(1); setAppliedJobHistoryFilters({ keyword: jobQuery, status: value === 'all' ? '' : value, operation: jobOperation === 'all' ? '' : jobOperation }) }} options={[{ value: 'pending', label: '等待处理' }, { value: 'running', label: '处理中' }, { value: 'success', label: '成功' }, { value: 'failed', label: '失败' }, { value: 'expired', label: '已过期' }]} />
-            <SelectFilter label="操作" value={jobOperation} onChange={(value) => { setJobOperation(value); setJobHistoryPage(1); setAppliedJobHistoryFilters({ keyword: jobQuery, status: jobStatus === 'all' ? '' : jobStatus, operation: value === 'all' ? '' : value }) }} options={[{ value: 'match', label: '匹配任务' }, { value: 'write', label: '导入任务' }]} />
-            <button type="submit" disabled={jobHistoryLoading}>{jobHistoryLoading ? '查询中…' : '查询'}</button>
+            <label className={styles.search}><span className={styles.visuallyHidden}>任务 ID、文件名或错误</span><span><Search aria-hidden="true" /><input name="excel_job_query" type="search" value={jobs.jobQuery} placeholder="任务 ID / 文件名 / 错误" onChange={(event) => jobs.setJobQuery(event.currentTarget.value)} /></span></label>
+            <SelectFilter label="状态" value={jobs.jobStatus} onChange={(value) => { jobs.setJobStatus(value); jobs.setJobHistoryPage(1); jobs.setAppliedJobHistoryFilters({ keyword: jobs.jobQuery, status: value === 'all' ? '' : value, operation: jobs.jobOperation === 'all' ? '' : jobs.jobOperation }) }} options={[{ value: 'pending', label: '等待处理' }, { value: 'running', label: '处理中' }, { value: 'success', label: '成功' }, { value: 'failed', label: '失败' }, { value: 'expired', label: '已过期' }]} />
+            <SelectFilter label="操作" value={jobs.jobOperation} onChange={(value) => { jobs.setJobOperation(value); jobs.setJobHistoryPage(1); jobs.setAppliedJobHistoryFilters({ keyword: jobs.jobQuery, status: jobs.jobStatus === 'all' ? '' : jobs.jobStatus, operation: value === 'all' ? '' : value }) }} options={[{ value: 'match', label: '匹配任务' }, { value: 'write', label: '导入任务' }]} />
+            <button type="submit" disabled={jobs.jobHistoryLoading}>{jobs.jobHistoryLoading ? '查询中…' : '查询'}</button>
           </FilterToolbar>
         </form>
-        {jobHistoryError && <FeedbackState kind="error" title="任务列表加载提示" description={`${jobHistoryError}${jobHistoryPagination && !jobHistoryError.includes('兼容数据') ? ' 已保留最近一次成功数据。' : ''}`} action={<button type="button" onClick={() => setJobHistoryReloadVersion((version) => version + 1)} disabled={jobHistoryLoading}>重试</button>} />}
-        <Section title="Excel 任务" description={jobHistoryLoading && !jobHistoryPagination ? '正在加载…' : `共 ${jobHistoryPagination?.total ?? 0} 条`} flush>
+        {jobs.jobHistoryError && <FeedbackState kind="error" title="任务列表加载提示" description={`${jobs.jobHistoryError}${jobs.jobHistoryPagination && !jobs.jobHistoryError.includes('兼容数据') ? ' 已保留最近一次成功数据。' : ''}`} action={<button type="button" onClick={() => jobs.setJobHistoryReloadVersion((version) => version + 1)} disabled={jobs.jobHistoryLoading}>重试</button>} />}
+        <Section title="Excel 任务" description={jobs.jobHistoryLoading && !jobs.jobHistoryPagination ? '正在加载…' : `共 ${jobs.jobHistoryPagination?.total ?? 0} 条`} flush>
               <ExcelJobHistoryTable
-                jobs={jobHistory}
-                loading={jobHistoryLoading}
-                downloadingJobID={downloadingJobID}
-                selectedJobID={job?.id ?? null}
-                onDownload={downloadJob}
-                onView={(id, trigger) => void openJobDetail(id, trigger)}
+                jobs={jobs.jobHistory}
+                loading={jobs.jobHistoryLoading}
+                downloadingJobID={jobs.downloadingJobID}
+                selectedJobID={jobs.job?.id ?? null}
+                onDownload={(id) => void jobs.downloadJob(id)}
+                onView={(id, trigger) => void jobs.openJobDetail(id, trigger)}
               />
-              <PaginationControls page={jobHistoryPagination?.page ?? jobHistoryPage} totalPages={jobHistoryPagination?.totalPages ?? 0} loading={jobHistoryLoading} onPrevious={() => setJobHistoryPage((page) => Math.max(1, page - 1))} onNext={() => setJobHistoryPage((page) => page + 1)} />
+              <PaginationControls page={jobs.jobHistoryPagination?.page ?? jobs.jobHistoryPage} totalPages={jobs.jobHistoryPagination?.totalPages ?? 0} loading={jobs.jobHistoryLoading} onPrevious={() => jobs.setJobHistoryPage((page) => Math.max(1, page - 1))} onNext={() => jobs.setJobHistoryPage((page) => page + 1)} />
         </Section>
-        {jobDetailOpen && job && <Drawer open size="medium" title={`任务 #${job.id}`} description="任务进度、有效期和实时日志" returnFocus={jobDetailTriggerRef.current} onClose={() => setJobDetailOpen(false)}><ExcelJobDetailContent job={job} logs={jobLogs} progress={selectedJobProgress} autoRefreshText={autoRefreshText} loading={loading} downloading={downloadingJobID === job.id} onRefresh={() => void refreshJobByID(job.id)} onDownload={() => void downloadJob(job.id)} /></Drawer>}
+        {jobs.jobDetailOpen && jobs.job && <Drawer open size="medium" title={`任务 #${jobs.job.id}`} description="任务进度、有效期和实时日志" returnFocus={jobs.jobDetailTriggerRef.current} onClose={() => jobs.setJobDetailOpen(false)}><ExcelJobDetailContent job={jobs.job} logs={jobs.jobLogs} progress={selectedJobProgress} autoRefreshText={jobs.autoRefreshText} loading={loading} downloading={jobs.downloadingJobID === jobs.job.id} onRefresh={() => void jobs.refreshJobByID(jobs.job!.id)} onDownload={() => void jobs.downloadJob(jobs.job!.id)} /></Drawer>}
       </>}
 
       {section === 'schemes' && <>
@@ -1392,15 +1069,15 @@ export function ExcelMatchPage({
           <div className={styles.jobActions}>
             <label>
               任务 ID
-              <input value={jobID} onChange={(event) => setJobID(event.target.value)} />
+              <input value={jobs.jobID} onChange={(event) => jobs.setJobID(event.target.value)} />
             </label>
             <button type="button" onClick={refreshJob} disabled={loading}>
               <RefreshCcw aria-hidden="true" />
               查询状态
             </button>
-            <button type="button" onClick={() => void downloadJob()} disabled={loading || !job || !canDownloadExcelJob(job)}>
+            <button type="button" onClick={() => void jobs.downloadJob()} disabled={loading || !jobs.job || !canDownloadExcelJob(jobs.job)}>
               <Download aria-hidden="true" />
-              {downloadingJobID === Number(jobID || job?.id) ? '下载中' : '下载结果'}
+              {jobs.downloadingJobID === Number(jobs.jobID || jobs.job?.id) ? '下载中' : '下载结果'}
             </button>
           </div>
         </Dialog>
@@ -1420,210 +1097,3 @@ export function ExcelMatchPage({
     </PageCanvas>
   )
 }
-
-function ExcelSchemeList({ schemes, deletingSchemeID, onDelete, onOpen }: { schemes: ExcelMatchScheme[]; deletingSchemeID: number | null; onDelete: (scheme: ExcelMatchScheme) => void; onOpen: (id: number) => void }) {
-  if (schemes.length === 0) return <EmptyState text="暂无已保存方案。" />
-  return (
-    <DataTable className={styles.schemeTable} density="compact" minWidth={620} scrollLabel="Excel 匹配方案">
-        <thead>
-          <tr>
-            <th scope="col">方案名称</th>
-            <th scope="col">步骤数</th>
-            <th scope="col">更新时间</th>
-            <th scope="col">操作</th>
-          </tr>
-        </thead>
-        <tbody>
-          {schemes.map((scheme) => (
-            <tr key={scheme.id}>
-              <td>{scheme.name}</td>
-              <td>{scheme.operation === 'export_match' ? (scheme.config.steps?.length || 1) : '-'}</td>
-              <td>{formatUnixTime(scheme.updated_at)}</td>
-              <td>
-                <div className={styles.tableActions}>
-                  <button type="button" onClick={() => onOpen(scheme.id)} disabled={deletingSchemeID !== null}>打开配置</button>
-                  <button type="button" className={styles.danger} onClick={() => onDelete(scheme)} disabled={deletingSchemeID !== null}>
-                    {deletingSchemeID === scheme.id ? '删除中…' : '删除'}
-                  </button>
-                </div>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-    </DataTable>
-  )
-}
-
-function ExcelJobHistoryTable({
-  jobs,
-  loading,
-  downloadingJobID,
-  selectedJobID,
-  onView,
-  onDownload,
-}: {
-  jobs: ExcelMatchJob[]
-  loading: boolean
-  downloadingJobID: number | null
-  selectedJobID: number | null
-  onView: (id: number, trigger: HTMLButtonElement) => void
-  onDownload: (id: number) => void
-}) {
-  if (jobs.length === 0) return <EmptyState text="暂无 Excel 任务历史。" />
-  return (
-    <DataTable className={styles.historyTable} density="compact" minWidth={900} scrollLabel="Excel 任务列表">
-        <thead>
-          <tr>
-            <th scope="col">ID</th>
-            <th scope="col">文件</th>
-            <th scope="col">类型</th>
-            <th scope="col">状态</th>
-            <th scope="col">处理行</th>
-            <th scope="col">匹配/未匹配</th>
-            <th scope="col">创建时间</th>
-            <th scope="col">操作</th>
-          </tr>
-        </thead>
-        <tbody>
-          {jobs.map((item) => (
-            <tr className={item.id === selectedJobID ? styles.historyRowSelected : undefined} key={item.id}>
-              <td>#{item.id}</td>
-              <td>{item.source_file_name || '-'}</td>
-              <td>{excelJobOperationLabel(excelJobOperation(item))}</td>
-              <td><StatusTag tone={excelJobStatusTone(item.status)}>{excelJobStatusLabel(item.status)}</StatusTag></td>
-              <td><div className={styles.jobRowProgress}><span>{item.processed_rows.toLocaleString('en-US')} / {item.total_rows.toLocaleString('en-US')}</span><span>{excelJobProgressPercent(item)}%</span><progress value={excelJobProgressPercent(item)} max="100" aria-label={`任务 #${item.id} 处理进度`} /></div></td>
-              <td><span className={styles.jobMatchCount}>{item.matched_rows.toLocaleString('en-US')}</span> / <span className={styles.jobUnmatchedCount}>{item.unmatched_rows.toLocaleString('en-US')}</span></td>
-              <td>{formatUnixTime(item.created_at)}</td>
-              <td>
-                <div className={styles.tableActions}>
-                  <button type="button" onClick={(event) => onView(item.id, event.currentTarget)} disabled={loading}>
-                    查看
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => onDownload(item.id)}
-                    disabled={loading || downloadingJobID === item.id || !canDownloadExcelJob(item)}
-                    title={item.download_message || undefined}
-                  >
-                    {downloadingJobID === item.id ? '下载中' : '下载'}
-                  </button>
-                </div>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-    </DataTable>
-  )
-}
-
-function ExcelJobDetailContent({ job, logs, progress, autoRefreshText, loading, downloading, onRefresh, onDownload }: {
-  job: ExcelMatchJob
-  logs: ExcelMatchJobLog[]
-  progress: number
-  autoRefreshText: string
-  loading: boolean
-  downloading: boolean
-  onRefresh: () => void
-  onDownload: () => void
-}) {
-  return (
-    <section className={styles.jobDetailPanel} aria-label={`Excel 任务 ${job.id} 执行详情`}>
-      {autoRefreshText && <p className={styles.modeNote} role="status">{autoRefreshText}</p>}
-      <dl className={styles.jobDetailMeta}><div><dt>源文件</dt><dd>{job.source_file_name || '-'}</dd></div><div><dt>类型</dt><dd>{excelJobOperationLabel(excelJobOperation(job))}</dd></div></dl>
-      <div className={styles.jobDetailCounts}><Metric label="匹配行" value={job.matched_rows.toLocaleString('en-US')} /><Metric label="未匹配行" value={job.unmatched_rows.toLocaleString('en-US')} /></div>
-      <div className={styles.jobProgress}>
-        <strong>处理进度</strong><span>{job.processed_rows.toLocaleString('en-US')} / {job.total_rows.toLocaleString('en-US')}（{progress}%）</span>
-        <progress value={progress} max="100" aria-label={`Excel 任务 #${job.id} 处理进度`} />
-      </div>
-      <dl className={styles.jobExpiry}><dt>过期时间</dt><dd>{formatDate(job.expires_at)}</dd></dl>
-      <div className={styles.jobLogHeading}>实时日志</div><ExcelJobLogList logs={logs} />
-      <div className={styles.jobActionHeading}>操作</div>
-      <div className={styles.detailActions}>
-        <button type="button" onClick={onRefresh} disabled={loading}><RefreshCcw aria-hidden="true" />刷新状态</button>
-        <button type="button" onClick={onDownload} disabled={loading || downloading || !canDownloadExcelJob(job)}><Download aria-hidden="true" />{downloading ? '下载中' : '下载结果'}</button>
-        {!canDownloadExcelJob(job) && <span>{job.download_message || '任务完成并生成结果后可下载。'}</span>}
-      </div>
-      {job.status === 'failed' && <div className={styles.errorBanner} role="alert">任务执行失败，请查看受控服务日志。</div>}
-    </section>
-  )
-}
-
-function ExcelMatchPreviewPanel({ preview }: { preview: ExcelMatchPreviewResult }) {
-  return (
-    <div className={styles.previewPanel}>
-      <div className={styles.previewMetrics}>
-        <Metric label="扫描行" value={excelPreviewStat(preview.stats, 'TotalRows')} />
-        <Metric label="参与步骤行" value={excelPreviewStat(preview.stats, 'FilteredRows')} />
-        <Metric label="已匹配" value={excelPreviewStat(preview.stats, 'MatchedRows')} />
-        <Metric label="未匹配" value={excelPreviewStat(preview.stats, 'UnmatchedRows')} />
-        <Metric label="扫描上限" value={preview.truncated ? `${preview.scanLimit}+` : preview.scanLimit} />
-      </div>
-      <div className={styles.tableWrap}>
-        <table className={styles.previewTable}>
-          <thead>
-            <tr>
-              <th scope="col">行号</th>
-              <th scope="col">匹配键</th>
-              <th scope="col">状态</th>
-              <th scope="col">追加值</th>
-              <th scope="col">步骤结果</th>
-              <th scope="col">原因</th>
-              <th scope="col">Excel 行内容</th>
-            </tr>
-          </thead>
-          <tbody>
-            {preview.samples.map((sample) => (
-              <tr key={`${sample.rowNumber}-${sample.matchKey}-${sample.status}`}>
-                <td>{sample.rowNumber}</td>
-                <td>{sample.matchKey || '-'}</td>
-                <td>{excelPreviewStatusLabel(sample.status)}</td>
-                <td>{sample.matchedValue || '-'}</td>
-                <td>
-                  {sample.stepResults?.length ? (
-                    <div className={styles.previewSteps}>
-                      {sample.stepResults.map((step) => (
-                        <span key={`${step.stepIndex}-${step.stepName}`}>
-                          {step.stepIndex}. {step.stepName || '未命名'}：{step.matchedValue || excelPreviewStatusLabel(step.status)}
-                        </span>
-                      ))}
-                    </div>
-                  ) : '-'}
-                </td>
-                <td>{sample.reason || '-'}</td>
-                <td>{compactText(JSON.stringify(sample.values || {})) || '-'}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
-      </div>
-      {preview.samples.length === 0 && <EmptyState text="预览没有返回样例。" />}
-    </div>
-  )
-}
-
-function ExcelJobLogList({ logs }: { logs: ExcelMatchJobLog[] }) {
-  if (logs.length === 0) return <EmptyState text="暂无任务日志。" />
-  return (
-    <div className={styles.jobLogList}>
-      {logs.map((log) => (
-        <article className={styles.recordRow} key={log.id}>
-          <div>
-            <strong>{log.message || '任务日志已记录'}</strong>
-            <span>{excelLogLevelLabel(log.level)} / {formatUnixTime(log.created_at)}</span>
-          </div>
-        </article>
-      ))}
-    </div>
-  )
-}
-
-function Panel({ title, icon, meta, children }: { title: string; icon: ReactNode; meta: string; children: ReactNode }) { return <section className={styles.panel}><div className={styles.panelTitle}>{icon}<div><h3>{title}</h3><span>{meta}</span></div></div>{children}</section> }
-function SelectFilter({ label, value, onChange, options }: { label: string; value: string; onChange: (value: string) => void; options: Array<{ value: string; label: string }> }) { return <label>{label}<select name={`filter-${label}`} value={value} onChange={(event) => onChange(event.currentTarget.value)}><option value="all">全部</option>{options.map((option) => <option value={option.value} key={option.value}>{option.label}</option>)}</select></label> }
-function excelJobStatusTone(status: string): 'neutral' | 'success' | 'warning' | 'danger' { if (status === 'success') return 'success'; if (status === 'failed' || status === 'expired') return 'danger'; if (status === 'pending' || status === 'running') return 'warning'; return 'neutral' }
-function Metric({ label, value }: { label: string; value: ReactNode }) { return <div className={styles.metric}><span>{label}</span><strong>{value}</strong></div> }
-function EmptyState({ text }: { text: string }) { return <div className={styles.emptyState}>{text}</div> }
-function Field({ label, name, defaultValue = '', type = 'text', value, onChange, required = false }: { label: string; name: string; defaultValue?: string; type?: string; value?: string; onChange?: (value: string) => void; required?: boolean }) { return <label>{label}<input name={name} defaultValue={value === undefined ? defaultValue : undefined} value={value} type={type} required={required} onChange={onChange ? (event) => onChange(event.currentTarget.value) : undefined} /></label> }
-function ExcelModelSelector({ name, models, value, onChange }: { name: string; models: ExcelMatchModel[]; value: string; onChange: (value: string) => void }) { const selectedModel = models.find((model) => model.tableName === value); const options = excelModelSelectOptions(models, value); return <label className={styles.catalogControl}>模型名称<select aria-label="模型名称" name={name} value={value} required onChange={(event) => onChange(event.currentTarget.value)}><option value="">选择模型名称</option>{options.map((option) => <option value={option.value} key={option.value}>{option.label}</option>)}</select>{selectedModel ? <ExcelCatalogExplanation title={selectedModel.mapping} detail={selectedModel.description} /> : value ? <ExcelCatalogExplanation title={`当前配置 → 数据库表 ${value}`} detail="该表不在当前模型目录中，保留它是为了兼容历史方案；保存前请确认表仍然存在。" /> : <ExcelCatalogExplanation title="模型名称 → 数据库表" detail="选择模型后，这里会直接解释对应的数据表，无需另行查表。" />}</label> }
-function ExcelModelFieldSelector({ label, name, models, tableName, value, onChange }: { label: string; name: string; models: ExcelMatchModel[]; tableName: string; value: string; onChange: (value: string) => void }) { const selectedModel = models.find((model) => model.tableName === tableName); const fields = selectedModel?.fields ?? []; const selectedField = fields.find((field) => field.columnName === value); const options = excelFieldSelectOptions(fields, value); return <label className={styles.catalogControl}>{label}<select aria-label={label} name={name} value={value} required disabled={!tableName} onChange={(event) => onChange(event.currentTarget.value)}><option value="">选择模型字段</option>{options.map((option) => <option value={option.value} key={option.value}>{option.label}</option>)}</select>{selectedField ? <ExcelModelFieldExplanation field={selectedField} /> : value ? <ExcelCatalogExplanation title={`当前配置字段 → ${tableName}.${value}`} detail="该字段不在当前模型目录中，已作为历史配置保留；保存前请确认字段仍然存在。" /> : selectedModel ? <ExcelCatalogExplanation title={`${selectedModel.modelName}.字段 → ${selectedModel.tableName}.数据库列`} detail={`当前模型提供 ${fields.length} 个字段可选。`} /> : <ExcelCatalogExplanation title="模型字段 → 数据库列" detail="请先选择模型，再从该模型的字段列表中选择。" />}</label> }
-function ExcelModelFieldExplanation({ field }: { field: ExcelMatchModelField }) { const typeDetail = field.dataType && !field.description.includes(field.dataType) ? `；数据库类型 ${field.dataType}` : ''; return <ExcelCatalogExplanation title={field.mapping} detail={`${field.description}${typeDetail}；${field.nullable ? '允许为空' : '不允许为空'}`} /> }
-function ExcelCatalogExplanation({ title, detail }: { title: string; detail: string }) { return <span className={styles.catalogExplanation}><strong>{title}</strong><small>{detail}</small></span> }
