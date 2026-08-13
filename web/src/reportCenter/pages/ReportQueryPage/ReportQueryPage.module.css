@@ -35,3 +35,5 @@
 @media (max-width: 479px) { .catalogSelector { align-items: stretch; flex-direction: column; width: 100%; } .selector, .selector select, .field { width: 100%; } .pagination { align-items: stretch; flex-direction: column; } .pagination > div, .pagination button { flex: 1; } }
 .chevronOpen { transform: rotate(180deg); }
 .collapsedParameters { color: var(--color-text-secondary); font-size: 13px; padding-block: var(--space-3); }
+.cancelWarning { margin: 0; color: var(--color-text-secondary); line-height: 1.7; }
+.cancelError { margin: var(--space-3) 0 0; border-left: 3px solid var(--color-danger); background: var(--color-danger-soft); padding: var(--space-3); color: var(--color-danger); }

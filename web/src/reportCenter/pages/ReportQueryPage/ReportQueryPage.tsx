@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { ChevronDown, ChevronLeft, ChevronRight, Download, Filter, Play, Plus, Square, Trash2 } from 'lucide-react'
-import { Button, DataTable, FeedbackState, FilterToolbar, PageCanvas, PageHeader, Section, StatusTag, type StatusTagTone } from '../../../ui'
+import { Button, DataTable, Dialog, FeedbackState, FilterToolbar, PageCanvas, PageHeader, Section, StatusTag, type StatusTagTone } from '../../../ui'
 import { cancelReportRun, createReportExport, createReportRun, getReportExport, getReportExportDownload, queryReportResults, getReportRun, getReportRunContract, type ReportCenterClient } from '../../api'
 import { buildNewReportRunState, canStartNewReportRun, initialReportParameterValues, terminalReportExportStatuses, terminalReportRunStatuses, visibleReportParameters } from '../../queryParameters'
 import type { ReportExport, ReportFilterOperator, ReportParameter, ReportResultFilter, ReportResultPage, ReportResultQuery, ReportRun, ReportRunContract } from '../../types'
@@ -27,7 +27,9 @@ export function ReportQueryPage({ client, navigation }: { client: ReportCenterCl
 	const [appliedQuery, setAppliedQuery] = useState<ReportResultQuery>(emptyResultQuery)
 	const [filtersOpen, setFiltersOpen] = useState(false)
   const [parametersOpen, setParametersOpen] = useState(true)
+  const [cancelState, setCancelState] = useState({ open: false, busy: false, error: '' })
   const pollAbortRef = useRef<AbortController | null>(null)
+  const keepRunningRef = useRef<HTMLButtonElement>(null)
 
   useEffect(() => () => pollAbortRef.current?.abort(), [])
 
@@ -144,13 +146,16 @@ export function ReportQueryPage({ client, navigation }: { client: ReportCenterCl
 	}
 
   async function cancelRun() {
-    if (!run?.canCancel) return
+    if (!run?.canCancel || cancelState.busy) return
+    setCancelState({ open: true, busy: true, error: '' })
     const response = await cancelReportRun(client, run.id)
-    if (!response.ok) setOperation({ busy: false, error: response.error })
-    else {
-      setRun(response.data)
-      if (!terminalReportRunStatuses.has(response.data.status)) await pollRun(response.data.id)
+    if (!response.ok) {
+      setCancelState({ open: true, busy: false, error: response.error })
+      return
     }
+    setCancelState({ open: false, busy: false, error: '' })
+    setRun(response.data)
+    if (!terminalReportRunStatuses.has(response.data.status)) await pollRun(response.data.id)
   }
 
   async function startExport() {
@@ -216,7 +221,7 @@ export function ReportQueryPage({ client, navigation }: { client: ReportCenterCl
   return (
     <PageCanvas>
       {navigation}
-      <PageHeader eyebrow="ORACLE EXECUTION" title="报表查询" description="参数来自已发布的不可变契约；一次运行生成一个快照，分页和正式导出均复用该 run_id。" actions={run ? <div className={styles.pageActions}>{run.canCancel ? <button type="button" onClick={() => void cancelRun()}><Square aria-hidden="true" />取消运行</button> : null}<button type="button" onClick={startNewRun} disabled={!canStartNewRun}><Plus aria-hidden="true" />新建运行</button></div> : undefined} />
+      <PageHeader eyebrow="ORACLE EXECUTION" title="报表查询" description="参数来自已发布的不可变契约；一次运行生成一个快照，分页和正式导出均复用该 run_id。" actions={run ? <div className={styles.pageActions}>{run.canCancel ? <button type="button" onClick={() => setCancelState({ open: true, busy: false, error: '' })}><Square aria-hidden="true" />取消运行</button> : null}<button type="button" onClick={startNewRun} disabled={!canStartNewRun}><Plus aria-hidden="true" />新建运行</button></div> : undefined} />
       <FilterToolbar summary={run ? <StatusTag tone={runTone(run)}>{runLabel(run.status)}</StatusTag> : <StatusTag tone="neutral">等待选择报表</StatusTag>}>
         <div className={styles.catalogSelector}><label className={styles.selector}>选择报表<select value={selectedId} onChange={(event) => setSelectedId(event.currentTarget.value)} disabled={loading || frozen || published.length === 0}><option value="">请选择已发布报表</option>{published.map((report) => <option value={report.id} key={report.id}>{report.name}</option>)}</select></label>{hasMore ? <button type="button" onClick={() => void loadMore()} disabled={loadingMore || frozen}>{loadingMore ? '正在加载…' : '加载更多'}</button> : null}</div>
       </FilterToolbar>
@@ -238,6 +243,7 @@ export function ReportQueryPage({ client, navigation }: { client: ReportCenterCl
         {result ? <ResultTable page={result} /> : null}
         {result ? <div className={styles.pagination}><span>第 {cursorIndex + 1} 页 · 每页 {result.pagination.pageSize} 行</span><div><button type="button" onClick={() => void previousPage()} disabled={operation.busy || cursorIndex === 0}><ChevronLeft aria-hidden="true" />上一页</button><button type="button" onClick={() => void nextPage()} disabled={operation.busy || !result.pagination.hasMore}>下一页<ChevronRight aria-hidden="true" /></button></div></div> : null}
       </Section>
+      <Dialog open={cancelState.open && Boolean(run?.canCancel)} role="alertdialog" title="确认取消报表运行" description={run ? `运行 #${run.id} 的取消请求提交后不能撤回。` : undefined} closeDisabled={cancelState.busy} closeOnBackdrop={!cancelState.busy} initialFocusRef={keepRunningRef} onClose={() => setCancelState({ open: false, busy: false, error: '' })} footer={<><button ref={keepRunningRef} type="button" disabled={cancelState.busy} onClick={() => setCancelState({ open: false, busy: false, error: '' })}>继续运行</button><Button variant="danger" disabled={cancelState.busy} onClick={() => void cancelRun()}>{cancelState.busy ? '正在提交…' : '确认取消运行'}</Button></>}><p className={styles.cancelWarning}>系统会请求 Oracle 侧停止当前执行；已经写入结果表的数据仍按运行清理策略处理。</p>{cancelState.error ? <p className={styles.cancelError} role="alert">{cancelState.error}</p> : null}</Dialog>
     </PageCanvas>
   )
 }
