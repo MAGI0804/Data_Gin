@@ -36,7 +36,7 @@
 }
 
 .success {
-  --tag-color: var(--color-success);
+  --tag-color: var(--color-success-text);
   --tag-background: var(--color-success-soft);
 }
 

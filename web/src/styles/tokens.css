@@ -12,6 +12,7 @@
   --color-canvas: #ffffff;
   --color-surface-subtle: #f2f4f7;
   --color-success: #07954c;
+  --color-success-text: #06733c;
   --color-success-soft: #edf8f2;
   --color-warning: #d97706;
   --color-warning-soft: #fff7e8;
@@ -27,7 +28,7 @@
   --color-navigation-muted: #717985;
   --color-navigation-icon: #898f98;
   --color-navigation-hover: #fbfaf7;
-  --color-navigation-active: #f08d00;
+  --color-navigation-active: #8a4b00;
   --color-brand-control-hover: #eb8e00;
 
   --font-sans: "IBM Plex Sans", "Noto Sans SC", "PingFang SC", "Microsoft YaHei", sans-serif;

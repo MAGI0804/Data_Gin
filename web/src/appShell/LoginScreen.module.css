@@ -93,7 +93,7 @@
 .primary {
   border-color: var(--color-brand);
   background: var(--color-brand);
-  color: var(--color-on-brand);
+  color: var(--color-text);
 }
 
 .primary:hover:not(:disabled) {
