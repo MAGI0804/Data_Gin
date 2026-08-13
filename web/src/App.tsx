@@ -49,9 +49,11 @@ import { StepRunsPage } from './monitoringPages/StepRunsPage/StepRunsPage'
 import { DeliveryLogsPage } from './monitoringPages/DeliveryLogsPage/DeliveryLogsPage'
 import { parseDeliveryLog, parsePipelineRun } from './monitoringPages/contracts'
 import type { DeliveryLog, PipelineRun } from './monitoringPages/types'
+import { SourcesPage } from './configurationPages/SourcesPage/SourcesPage'
+import type { SourceDefinition } from './configurationPages/types'
 import { parseMallWeatherExportContentStatus, submitMallWeatherExportContentDownload } from './mallWeatherExport'
 import { buildRawRecordsRequest, buildWarehouseRawRecordsQuery, parseRawRecordsPage, type RawRecordOrigin, type RawRecordsPage } from './rawRecords'
-import { buildDeliveryTaskListQuery, buildDestinationListQuery, buildExcelMatchJobListQuery, buildSourceListQuery, buildTransformRuleListQuery, normalizeMonitoringPageNumber, parseMonitoringPage, type MonitoringPage, type MonitoringPagination } from './monitoringRecords'
+import { buildDeliveryTaskListQuery, buildDestinationListQuery, buildExcelMatchJobListQuery, buildTransformRuleListQuery, normalizeMonitoringPageNumber, parseMonitoringPage, type MonitoringPage, type MonitoringPagination } from './monitoringRecords'
 import { validateOrderPushSkipPolicy } from './orderPushPolicy'
 import { runSingleFlight } from './singleFlight'
 import { parseSourceFetchSummary } from './sourceOperations'
@@ -395,34 +397,6 @@ type BojunOrderBackfillResult = {
   failed_count: number
   samples: BojunOrderBackfillSample[]
   failed_samples: BojunOrderBackfillSample[]
-}
-
-type SourceDefinition = {
-  id: number
-  name: string
-  code: string
-  source_type: string
-  enabled: boolean
-  auth_type: string
-  config_json: string
-	 has_secret?: boolean
-  schema_json: string
-  dedupe_keys: string
-  source_query_key: string
-}
-
-type SourceDraft = {
-  id: number | null
-  name: string
-  code: string
-  sourceType: string
-  enabled: boolean
-  authType: string
-  configJSON: string
-  schemaJSON: string
-  dedupeKeys: string
-  sourceQueryKey: string
-  hasSecret: boolean
 }
 
 type RawData = {
@@ -1410,9 +1384,9 @@ function App() {
       navigationRef={mobileNavRef}
       navigationOpen={mobileNavOpen}
       onDismissNavigation={() => setMobileNavOpen(false)}
-      flushWorkspace={Boolean(reportSection) || activeNav === 'access_management' || ['overview', 'runs', 'delivery_logs', 'step_runs'].includes(activeNav)}
+      flushWorkspace={Boolean(reportSection) || ['access_management', 'sources', 'overview', 'runs', 'delivery_logs', 'step_runs'].includes(activeNav)}
       workspaceClassName="ops-workspace"
-      header={<ModuleHeader compact={Boolean(reportSection) || activeNav === 'access_management' || ['overview', 'runs', 'delivery_logs', 'step_runs'].includes(activeNav)} activeNav={activeNav} loading={loading || refreshing} sessionUser={sessionUser} onOpenNavigation={openMobileNavigation} onRefresh={() => void refreshWorkspace(true)} onLogout={handleLogout} refreshing={refreshing} mobileNavTriggerRef={mobileNavTriggerRef} />}
+      header={<ModuleHeader compact={Boolean(reportSection) || ['access_management', 'sources', 'overview', 'runs', 'delivery_logs', 'step_runs'].includes(activeNav)} activeNav={activeNav} loading={loading || refreshing} sessionUser={sessionUser} onOpenNavigation={openMobileNavigation} onRefresh={() => void refreshWorkspace(true)} onLogout={handleLogout} refreshing={refreshing} mobileNavTriggerRef={mobileNavTriggerRef} />}
       notices={<>{sessionValidationError && <div className="result-banner error" role="status" aria-live="polite">{sessionValidationError} <button type="button" onClick={() => setSessionValidationAttempt((attempt) => attempt + 1)}>重试校验</button></div>}{workspaceError && <div className="result-banner error" role="alert">{workspaceError} <button type="button" onClick={() => void refreshWorkspace(false)} disabled={refreshing}>重试</button></div>}</>}
       overlay={<ResultPanel result={result} onClose={() => setResult(null)} />}
     >
@@ -1424,7 +1398,7 @@ function App() {
         {activeNav === 'mall_weather' && <MallWeatherPage actorID={actorID} client={client} downloadFile={downloadFile} />}
         {reportSection && <ReportCenter client={client} permissions={sessionUser?.permissions ?? []} section={reportSection} onNavigate={(section) => navigate(reportCenterNavKey(section))} />}
         {activeNav === 'access_management' && <AccessManagementPage client={client} permissions={sessionUser?.permissions ?? []} />}
-        {activeNav === 'sources' && <SourcesQueryPage client={client} onFetchSource={fetchSource} onTestSource={testSource} refreshVersion={workspaceRefreshVersion} />}
+        {activeNav === 'sources' && <SourcesPage client={client} onFetchSource={fetchSource} onTestSource={testSource} refreshVersion={workspaceRefreshVersion} />}
         {activeNav === 'methods' && <MethodsView methods={methods} pipelines={pipelines} client={client} coreMethods={coreMethods} onToggle={toggleTarget} onPipelineRunCompleted={() => void refreshWorkspace(false)} />}
         {activeNav === 'receive' && <RawRecordsQueryPage title="接口接收记录" origin="receive" client={client} onFetchSource={fetchSource} />}
         {activeNav === 'pull_records' && <RawRecordsQueryPage title="数据拉取记录" origin="pull" client={client} onFetchSource={fetchSource} />}
@@ -1597,7 +1571,7 @@ function ModuleHeader({ activeNav, compact, loading, sessionUser, onOpenNavigati
     <WorkspaceHeader
       title={compact ? undefined : titles[activeNav].title}
       description={compact ? undefined : titles[activeNav].subtitle}
-      context={compact ? activeNav === 'access_management' ? 'ACCESS CONTROL' : ['overview', 'runs', 'delivery_logs', 'step_runs'].includes(activeNav) ? 'OPERATIONS' : 'REPORT CENTER' : undefined}
+      context={compact ? activeNav === 'access_management' ? 'ACCESS CONTROL' : activeNav === 'sources' ? 'DATA CONFIGURATION' : ['overview', 'runs', 'delivery_logs', 'step_runs'].includes(activeNav) ? 'OPERATIONS' : 'REPORT CENTER' : undefined}
       menuButtonRef={mobileNavTriggerRef}
       onOpenNavigation={onOpenNavigation}
       actions={<div className="workspace-session">
@@ -1731,97 +1705,6 @@ function useConfigurationListPage<T>(client: ApiClient, path: string, key: strin
   }, [client, key, path, query, reloadVersion])
 
   return { recordsPage, loading, error }
-}
-
-function SourcesQueryPage({ client, onFetchSource, onTestSource, refreshVersion }: { client: ApiClient; onFetchSource: (sourceID: number) => Promise<ApiResult>; onTestSource: (sourceID: number) => Promise<ApiResult>; refreshVersion: number }) {
-  const [query, setQuery] = useState('')
-  const [status, setStatus] = useState('all')
-  const [sourceType, setSourceType] = useState('')
-  const [applied, setApplied] = useState({ keyword: '', enabled: '' as '' | 'true' | 'false', sourceType: '' })
-  const [page, setPage] = useState(1)
-  const [reloadVersion, setReloadVersion] = useState(0)
-  const [draft, setDraft] = useState<SourceDraft | null>(null)
-  const [saving, setSaving] = useState(false)
-  const [message, setMessage] = useState('')
-  const listQuery = useMemo(() => buildSourceListQuery({ page, pageSize: 20, ...applied }), [applied, page])
-  const { recordsPage, loading, error } = useConfigurationListPage<SourceDefinition>(client, '/v1/sources', 'sources', listQuery, reloadVersion + refreshVersion)
-  const listedSources = recordsPage?.list ?? []
-  const pagination = recordsPage?.pagination
-
-  function submitQuery(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    setPage(1)
-    setApplied({ keyword: query, enabled: status === 'enabled' ? 'true' : status === 'disabled' ? 'false' : '', sourceType })
-    setReloadVersion((version) => version + 1)
-  }
-
-  function resetQuery() {
-    setQuery('')
-    setStatus('all')
-    setSourceType('')
-    setPage(1)
-    setApplied({ keyword: '', enabled: '', sourceType: '' })
-    setReloadVersion((version) => version + 1)
-  }
-
-  async function openDetail(id: number) {
-    setMessage('')
-    const response = await client(`/v1/sources/${id}`, { method: 'GET', showResult: false, silentLoading: true })
-    const source = response.ok ? readObject<SourceDefinition>(response, 'source') : null
-    if (!source) { setMessage(response.error?.message || '数据源详情暂时不可用。'); return }
-    setDraft(sourceDraftFrom(source))
-  }
-
-  async function save(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    if (!draft || saving) return
-    if (!draft.name.trim() || !draft.code.trim()) { setMessage('请填写数据源名称和编码。'); return }
-    try {
-      const config = JSON.parse(draft.configJSON) as unknown
-      const schema = JSON.parse(draft.schemaJSON) as unknown
-      const dedupe = JSON.parse(draft.dedupeKeys) as unknown
-      if (!config || Array.isArray(config) || typeof config !== 'object' || !schema || Array.isArray(schema) || typeof schema !== 'object' || !Array.isArray(dedupe)) throw new Error('shape')
-    } catch { setMessage('配置和 Schema 必须为 JSON 对象，去重键必须为 JSON 数组。'); return }
-    setSaving(true)
-    const response = await client(draft.id ? `/v1/sources/${draft.id}` : '/v1/sources', {
-      method: draft.id ? 'PUT' : 'POST', showResult: false, silentLoading: true,
-      body: { name: draft.name.trim(), code: draft.code.trim(), source_type: draft.sourceType, enabled: draft.enabled, auth_type: draft.authType.trim() || 'none', config_json: draft.configJSON, schema_json: draft.schemaJSON, dedupe_keys: draft.dedupeKeys, source_query_key: draft.sourceQueryKey.trim() },
-    })
-    setSaving(false)
-    if (!response.ok) { setMessage(response.error?.message || '数据源保存未完成。'); return }
-    setDraft(null)
-    setMessage('数据源已保存。')
-    setReloadVersion((version) => version + 1)
-  }
-  return (
-    <div className="view-stack">
-      {message && <div className="result-banner" role="status">{message}</div>}
-      <form className="query-bar source-query-bar" onSubmit={submitQuery}><div className="query-fields">
-        <Field label="名称 / 编码 / 鉴权" name="source_query" value={query} onChange={setQuery} />
-        <SelectFilter label="状态" value={status} onChange={setStatus} options={[{ value: 'enabled', label: '启用' }, { value: 'disabled', label: '停用' }]} />
-        <SelectFilter label="类型" value={sourceType || 'all'} onChange={(value) => setSourceType(value === 'all' ? '' : value)} options={[{ value: 'api_poll', label: 'API' }, { value: 'webhook', label: 'Webhook' }, { value: 'database', label: '数据库' }, { value: 'file', label: '文件' }]} />
-      </div><div className="query-bar-actions"><span>查询命中 <strong>{pagination?.total ?? 0}</strong> 条</span><button type="button" onClick={resetQuery} disabled={loading}>重置筛选</button><button className="primary" type="submit" disabled={loading}>{loading ? '查询中…' : '查询'}</button></div></form>
-      {error && <div className="result-banner error" role="alert">{error}{recordsPage ? ' 已保留最近一次成功数据。' : ''}</div>}
-      <div className="record-actions"><button type="button" className="primary" onClick={() => setDraft({ id: null, name: '', code: '', sourceType: 'api_poll', enabled: true, authType: 'none', configJSON: '{\n  "url": "",\n  "method": "GET",\n  "records_path": "data"\n}', schemaJSON: '{}', dedupeKeys: '[]', sourceQueryKey: '', hasSecret: false })}>新增数据源</button></div>
-      <Panel title="数据源配置" icon={<Database />} meta={loading && !recordsPage ? '正在加载…' : `共 ${pagination?.total ?? 0} 条`}><SourceList sources={listedSources} onDetail={(source) => { void openDetail(source.id) }} onFetchSource={onFetchSource} onTestSource={onTestSource} /><MonitoringPaginationControls page={pagination?.page ?? page} totalPages={pagination?.totalPages ?? 0} loading={loading} onPrevious={() => setPage((current) => Math.max(1, current - 1))} onNext={() => setPage((current) => current + 1)} /></Panel>
-      {draft && <Modal title={draft.id ? '数据源详情与编辑' : '新增数据源'} onClose={() => { if (!saving) setDraft(null) }}>
-        {draft.hasSecret && <div className="result-banner" role="status">配置中的敏感值已隐藏。保留“[已隐藏]”会保留原值；改为新值即可轮换，且不会回显旧值。</div>}
-        <form className="excel-upload-form" onSubmit={save}>
-          <Field label="数据源名称" name="source_name" value={draft.name} required onChange={(name) => setDraft({ ...draft, name })} />
-          <Field label="数据源编码" name="source_code" value={draft.code} required onChange={(code) => setDraft({ ...draft, code })} />
-          <label>数据源类型<select value={draft.sourceType} disabled={saving} onChange={(event) => setDraft({ ...draft, sourceType: event.currentTarget.value })}><option value="api_poll">API 轮询</option><option value="database">数据库</option><option value="webhook">Webhook</option></select></label>
-          <Field label="鉴权类型" name="source_auth_type" value={draft.authType} onChange={(authType) => setDraft({ ...draft, authType })} />
-          <label className="checkbox-label"><input type="checkbox" checked={draft.enabled} disabled={saving} onChange={(event) => setDraft({ ...draft, enabled: event.currentTarget.checked })} />启用数据源</label>
-          <Field label="来源查询键" name="source_query_key" value={draft.sourceQueryKey} onChange={(sourceQueryKey) => setDraft({ ...draft, sourceQueryKey })} />
-          <label>连接配置 JSON<textarea rows={10} value={draft.configJSON} disabled={saving} onChange={(event) => setDraft({ ...draft, configJSON: event.currentTarget.value })} /></label>
-          <label>Schema JSON<textarea rows={5} value={draft.schemaJSON} disabled={saving} onChange={(event) => setDraft({ ...draft, schemaJSON: event.currentTarget.value })} /></label>
-          <label>去重键 JSON 数组<textarea rows={4} value={draft.dedupeKeys} disabled={saving} onChange={(event) => setDraft({ ...draft, dedupeKeys: event.currentTarget.value })} /></label>
-          <p className="query-contract-note">API 测试会发起真实连通性请求；Webhook 不支持主动拉取。Schema 与去重键目前由服务端保存，未参与拉取校验。</p>
-          <div className="excel-form-actions"><button className="primary" type="submit" disabled={saving}>{saving ? '保存中…' : '保存数据源'}</button></div>
-        </form>
-      </Modal>}
-    </div>
-  )
 }
 
 function RawRecordsQueryPage({ title, origin, client, onFetchSource }: { title: string; origin: RawRecordOrigin; client: ApiClient; onFetchSource: (sourceID: number) => Promise<ApiResult> }) {
@@ -4836,47 +4719,6 @@ function RawDataList({ origin, records, onRequestSourceFetch }: { origin: RawRec
   )
 }
 
-function SourceList({ sources, onDetail, onFetchSource, onTestSource }: { sources: SourceDefinition[]; onDetail: (source: SourceDefinition) => void; onFetchSource: (sourceID: number) => Promise<ApiResult>; onTestSource: (sourceID: number) => Promise<ApiResult> }) {
-  const [fetchingID, setFetchingID] = useState<number | null>(null)
-  const [testingID, setTestingID] = useState<number | null>(null)
-  const [messageByID, setMessageByID] = useState<Record<number, string>>({})
-  if (sources.length === 0) return <EmptyState text="暂无数据源配置。" />
-
-  async function fetch(sourceID: number) {
-    setFetchingID(sourceID)
-    const response = await onFetchSource(sourceID)
-    const summary = response.ok ? parseSourceFetchSummary(response.data) : null
-    setMessageByID((current) => ({
-      ...current,
-      [sourceID]: summary
-        ? `拉取完成：成功 ${summary.successCount}/${summary.totalCount}，失败 ${summary.failedCount}；追踪 ${summary.traceID}`
-        : response.error?.message || '拉取完成，但未收到可验证的结果摘要。',
-    }))
-    setFetchingID(null)
-  }
-
-  async function test(sourceID: number) {
-    setTestingID(sourceID)
-    const response = await onTestSource(sourceID)
-    setMessageByID((current) => ({ ...current, [sourceID]: response.ok ? '连接测试通过。' : response.error?.message || '连接测试未完成，请稍后重试。' }))
-    setTestingID(null)
-  }
-
-  return (
-    <div className="data-table-wrap" role="region" aria-label="数据源列表" tabIndex={0}>
-      <table className="data-table">
-        <thead><tr><th scope="col">ID</th><th scope="col">数据源名称</th><th scope="col">编码</th><th scope="col">类型</th><th scope="col">鉴权方式</th><th scope="col">接收键</th><th scope="col">状态</th><th scope="col">操作</th></tr></thead>
-        <tbody>{sources.map((source) => (
-          <tr key={source.id}>
-            <td>#{source.id}</td><td><strong>{source.name}</strong>{source.has_secret && <small>配置已脱敏</small>}</td><td>{source.code}</td><td>{source.source_type}</td><td>{source.auth_type || 'none'}</td><td>{source.source_query_key || '-'}</td><td><StatusPill label={source.enabled ? '启用' : '停用'} /></td>
-            <td><div className="table-actions"><button type="button" disabled={testingID !== null || fetchingID !== null} onClick={() => onDetail(source)}>详情</button><button type="button" disabled={testingID === source.id || fetchingID === source.id || !source.enabled} onClick={() => { void test(source.id) }}>{testingID === source.id ? '测试中…' : '测试连接'}</button><button type="button" disabled={testingID === source.id || fetchingID === source.id || !source.enabled || source.source_type === 'webhook'} onClick={() => { void fetch(source.id) }}>{fetchingID === source.id ? '拉取中…' : '手动拉取'}</button></div>{messageByID[source.id] && <small className="source-operation-message" role="status" aria-live="polite">{messageByID[source.id]}</small>}</td>
-          </tr>
-        ))}</tbody>
-      </table>
-    </div>
-  )
-}
-
 function TransformRuleList({ rules, sources, onDetail }: { rules: TransformRule[]; sources: SourceDefinition[]; onDetail: (rule: TransformRule) => void }) {
   if (rules.length === 0) return <EmptyState text="暂无处理规则。" />
   return (
@@ -5439,10 +5281,6 @@ function ruleDraftFrom(rule: TransformRule): RuleDraft {
 
 function destinationDraftFrom(destination: DestinationDefinition): DestinationDraft {
   return { id: destination.id, name: destination.name, code: destination.code, destinationType: destination.destination_type, configJSON: destination.config_json || '{}', enabled: destination.enabled, hasSecret: Boolean(destination.has_secret) }
-}
-
-function sourceDraftFrom(source: SourceDefinition): SourceDraft {
-  return { id: source.id, name: source.name, code: source.code, sourceType: source.source_type, enabled: source.enabled, authType: source.auth_type, configJSON: jsonText(source.config_json || '{}'), schemaJSON: jsonText(source.schema_json || '{}'), dedupeKeys: jsonText(source.dedupe_keys || '[]'), sourceQueryKey: source.source_query_key, hasSecret: Boolean(source.has_secret) }
 }
 
 function deliveryTaskDraftFrom(task: DeliveryTask): DeliveryTaskDraft {

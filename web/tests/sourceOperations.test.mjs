@@ -9,4 +9,7 @@ test('reads only complete non-sensitive source fetch summaries', () => {
   assert.equal(parseSourceFetchSummary({ data: { result: {
     trace_id: 'run-123', total_count: 1, success_count: 2, failed_count: 0,
   } } }), null)
+  assert.equal(parseSourceFetchSummary({ data: { result: {
+    trace_id: 'run-123', total_count: '3', success_count: 2, failed_count: 1,
+  } } }), null)
 })
