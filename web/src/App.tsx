@@ -28,7 +28,6 @@ import {
   X,
 } from 'lucide-react'
 import './App.css'
-import './DataWorkspacePages.css'
 import { apiURL as buildApiURL } from './apiURL'
 import { clearStoredToken, loadStoredSessionUser, loadStoredToken, saveStoredSessionUser, saveStoredToken, saveStoredTokenExpiry, storedTokenExpiresAt, tokenActorID, type StoredSessionUser } from './authStorage'
 import { createApiClient, type ApiRequestOptions, type ClientResponse, type HTTPMethod } from './api/client'
@@ -61,7 +60,7 @@ import { parseMallWeatherExportContentStatus, submitMallWeatherExportContentDown
 import { buildRawRecordsRequest, buildWarehouseRawRecordsQuery, parseRawRecordsPage, type RawRecordOrigin, type RawRecordsPage } from './rawRecords'
 import { parseMonitoringPage } from './monitoringRecords'
 import { parseSourceFetchSummary } from './sourceOperations'
-import { buildCleanRecordsQuery, buildProcessedRecordsQuery, parseProcessedRecordsPage, type ProcessedRecordsPage } from './processedRecords'
+import { ProcessedRecordsPage } from './dataPages/ProcessedRecordsPage'
 
 const defaultApiBaseURL = import.meta.env.VITE_API_BASE_URL ?? ''
 
@@ -143,26 +142,6 @@ type WarehouseRawRecord = {
   traceID: string
   receivedAt: string
   createdAt: number
-}
-
-type ProcessedData = {
-  id: number
-  raw_data_id: number
-  data_type: string
-  data_fields: string
-  quality_score: number
-  created_at: number
-}
-
-type CleanRecord = {
-  id: number
-  raw_record_id: number
-  source_id: number
-  table_name: string
-  business_key: string
-  quality_score: number
-  status: string
-  created_at: number
 }
 
 type LegacyTask = {
@@ -846,9 +825,9 @@ function App() {
       navigationRef={mobileNavRef}
       navigationOpen={mobileNavOpen}
       onDismissNavigation={() => setMobileNavOpen(false)}
-      flushWorkspace={Boolean(reportSection) || ['access_management', 'sources', 'rules', 'methods', 'destinations', 'tasks', 'push_policy', 'overview', 'runs', 'delivery_logs', 'step_runs'].includes(activeNav)}
+      flushWorkspace={Boolean(reportSection) || ['access_management', 'sources', 'rules', 'processed', 'methods', 'destinations', 'tasks', 'push_policy', 'overview', 'runs', 'delivery_logs', 'step_runs'].includes(activeNav)}
       workspaceClassName="ops-workspace"
-      header={<ModuleHeader compact={Boolean(reportSection) || ['access_management', 'sources', 'rules', 'methods', 'destinations', 'tasks', 'push_policy', 'overview', 'runs', 'delivery_logs', 'step_runs'].includes(activeNav)} activeNav={activeNav} loading={loading || refreshing} sessionUser={sessionUser} onOpenNavigation={openMobileNavigation} onRefresh={() => void refreshWorkspace(true)} onLogout={handleLogout} refreshing={refreshing} mobileNavTriggerRef={mobileNavTriggerRef} />}
+      header={<ModuleHeader compact={Boolean(reportSection) || ['access_management', 'sources', 'rules', 'processed', 'methods', 'destinations', 'tasks', 'push_policy', 'overview', 'runs', 'delivery_logs', 'step_runs'].includes(activeNav)} activeNav={activeNav} loading={loading || refreshing} sessionUser={sessionUser} onOpenNavigation={openMobileNavigation} onRefresh={() => void refreshWorkspace(true)} onLogout={handleLogout} refreshing={refreshing} mobileNavTriggerRef={mobileNavTriggerRef} />}
       notices={<>{sessionValidationError && <div className="result-banner error" role="status" aria-live="polite">{sessionValidationError} <button type="button" onClick={() => setSessionValidationAttempt((attempt) => attempt + 1)}>重试校验</button></div>}{workspaceError && <div className="result-banner error" role="alert">{workspaceError} <button type="button" onClick={() => void refreshWorkspace(false)} disabled={refreshing}>重试</button></div>}</>}
       overlay={<ResultPanel result={result} onClose={() => setResult(null)} />}
     >
@@ -867,7 +846,7 @@ function App() {
         {activeNav === 'backfill' && <BojunBackfillPage loading={loading || refreshing} onPreview={previewBojunOrderBackfill} onConfirm={confirmBojunOrderBackfill} />}
         {activeNav === 'youzan_distribution' && <YouzanDistributionPage task={legacyTasks.find((item) => item.code === 'youzan_distribution_order_fetch')} loading={loading || refreshing} onPreview={previewYouzanDistributionBackfill} onConfirm={confirmYouzanDistributionBackfill} onRun={runLegacyTask} />}
         {activeNav === 'rules' && <RulesPage client={client} rules={transformRules} sources={sources} onRulesChange={setTransformRules} refreshVersion={workspaceRefreshVersion} />}
-        {activeNav === 'processed' && <ProcessedQueryPage client={client} />}
+        {activeNav === 'processed' && <ProcessedRecordsPage client={client} />}
         {activeNav === 'destinations' && <DestinationsPage client={client} refreshVersion={workspaceRefreshVersion} />}
         {activeNav === 'tasks' && <DeliveryTasksPage client={client} canManage={Boolean(sessionUser?.permissions.includes('delivery.manage'))} sources={sources} destinations={destinations} onRefresh={() => refreshWorkspace(false)} refreshVersion={workspaceRefreshVersion} />}
         {activeNav === 'push_policy' && <PushPolicyPage client={client} canManage={Boolean(sessionUser?.permissions.includes('delivery.manage'))} refreshVersion={workspaceRefreshVersion} />}
@@ -1333,191 +1312,6 @@ function WarehouseRawRecordsPanel({ client, origin }: { client: ApiClient; origi
   )
 }
 
-function ProcessedQueryPage({ client }: { client: ApiClient }) {
-  const [view, setView] = useState<'legacy' | 'clean'>('clean')
-  const [statistics, setStatistics] = useState<DataStatisticsSummary | null>(null)
-  const [statisticsLoading, setStatisticsLoading] = useState(true)
-  const [statisticsError, setStatisticsError] = useState('')
-  const [statisticsRequest, setStatisticsRequest] = useState(0)
-
-  useEffect(() => {
-    const controller = new AbortController()
-    setStatisticsLoading(true)
-    setStatisticsError('')
-    void client('/v1/data/statistics', { method: 'GET', signal: controller.signal, showResult: false, silentLoading: true }).then((response) => {
-      if (controller.signal.aborted) return
-      const parsed = response.ok ? parseDataStatisticsSummary(response.data) : null
-      if (!parsed) {
-        setStatisticsError('处理统计暂时不可用，记录列表仍可继续查询。')
-        setStatisticsLoading(false)
-        return
-      }
-      setStatistics(parsed)
-      setStatisticsLoading(false)
-    }).catch(() => {
-      if (controller.signal.aborted) return
-      setStatisticsError('处理统计暂时不可用，记录列表仍可继续查询。')
-      setStatisticsLoading(false)
-    })
-    return () => controller.abort()
-  }, [client, statisticsRequest])
-
-  return (
-    <div className="view-stack design-data-page design-processed-page">
-      {statisticsLoading && !statistics && <p className="query-contract-note" role="status">正在加载处理统计…</p>}
-      {statisticsError && <div className="result-banner error" role="alert">{statisticsError} {statistics && '当前展示的是上一次成功数据。'} <button type="button" onClick={() => setStatisticsRequest((current) => current + 1)} disabled={statisticsLoading}>重试统计</button></div>}
-      {view === 'legacy'
-        ? <LegacyProcessedQueryPanel client={client} />
-        : <CleanRecordsQueryPanel client={client} statistics={statistics} statisticsLoading={statisticsLoading} />}
-      <div className="tab-actions design-view-switch" role="tablist" aria-label="处理结果数据视图">
-        <button type="button" role="tab" aria-selected={view === 'legacy'} className={view === 'legacy' ? 'active' : ''} onClick={() => setView('legacy')}>旧处理结果</button>
-        <button type="button" role="tab" aria-selected={view === 'clean'} className={view === 'clean' ? 'active' : ''} onClick={() => setView('clean')}>清洗记录</button>
-      </div>
-    </div>
-  )
-}
-
-function LegacyProcessedQueryPanel({ client }: { client: ApiClient }) {
-  const [dataType, setDataType] = useState('')
-  const [minQuality, setMinQuality] = useState('')
-  const [maxQuality, setMaxQuality] = useState('')
-  const [createdFrom, setCreatedFrom] = useState('')
-  const [createdTo, setCreatedTo] = useState('')
-  const [appliedQuery, setAppliedQuery] = useState({ dataType: '', minQuality: '', maxQuality: '', createdFrom: '', createdTo: '' })
-  const [page, setPage] = useState(1)
-  const [recordsPage, setRecordsPage] = useState<ProcessedRecordsPage<ProcessedData> | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
-  const requestRef = useRef<AbortController | null>(null)
-
-  useEffect(() => {
-    requestRef.current?.abort()
-    const controller = new AbortController()
-    requestRef.current = controller
-    setLoading(true)
-    setError('')
-    const query = buildProcessedRecordsQuery({ page, pageSize: 20, ...appliedQuery })
-    void client(`/v1/data/processed/list?${query}`, { method: 'GET', signal: controller.signal, showResult: false, silentLoading: true }).then((response) => {
-      if (controller.signal.aborted) return
-      const nextPage = response.ok ? parseProcessedRecordsPage<ProcessedData>(response.data) : null
-      if (nextPage) {
-        setRecordsPage(nextPage)
-        return
-      }
-      setError(response.error?.message || '处理结果查询暂时不可用，请稍后重试。')
-    }).finally(() => { if (!controller.signal.aborted) setLoading(false) })
-    return () => controller.abort()
-  }, [appliedQuery, client, page])
-
-  function submit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    setPage(1)
-    setAppliedQuery({ dataType, minQuality, maxQuality, createdFrom: unixTimestamp(createdFrom), createdTo: unixTimestamp(createdTo) })
-  }
-
-  const records = recordsPage?.list ?? []
-  const totalPages = recordsPage?.totalPages ?? 0
-  return (
-    <div className="view-stack">
-      <form className="query-bar" onSubmit={submit}>
-        <div className="query-fields">
-          <Field label="数据类型" name="processed_type" value={dataType} onChange={setDataType} />
-          <Field label="最低质量分" name="processed_min_quality" type="number" value={minQuality} onChange={setMinQuality} />
-          <Field label="最高质量分" name="processed_max_quality" type="number" value={maxQuality} onChange={setMaxQuality} />
-          <Field label="开始时间" name="processed_from" type="datetime-local" value={createdFrom} onChange={setCreatedFrom} />
-          <Field label="结束时间" name="processed_to" type="datetime-local" value={createdTo} onChange={setCreatedTo} />
-        </div>
-        <button type="submit" disabled={loading}>{loading ? '查询中…' : '查询'}</button>
-      </form>
-      <p className="query-contract-note">旧处理结果支持类型、质量和时间范围筛选；业务键属于 clean records，待独立查询接口接入后提供。</p>
-      {error && <div className="result-banner error" role="alert">{error} 已保留最近一次成功数据。</div>}
-      <Panel title="处理结果" icon={<CheckCircle2 />} meta={loading && !recordsPage ? '正在加载…' : `共 ${recordsPage?.total ?? 0} 条 / 平均质量 ${recordsPage?.averageQuality.toFixed(1) ?? '-'}`}>
-        <ProcessedDataList records={records} />
-        <div className="record-actions raw-record-pagination" role="status" aria-live="polite">
-          <span>第 {recordsPage?.page ?? page} / {Math.max(totalPages, 1)} 页</span>
-          <button type="button" onClick={() => setPage((current) => Math.max(1, current - 1))} disabled={loading || page <= 1}>上一页</button>
-          <button type="button" onClick={() => setPage((current) => current + 1)} disabled={loading || totalPages === 0 || page >= totalPages}>下一页</button>
-        </div>
-      </Panel>
-    </div>
-  )
-}
-
-function CleanRecordsQueryPanel({ client, statistics, statisticsLoading }: { client: ApiClient; statistics: DataStatisticsSummary | null; statisticsLoading: boolean }) {
-  const [sourceID, setSourceID] = useState('')
-  const [tableName, setTableName] = useState('')
-  const [businessKey, setBusinessKey] = useState('')
-  const [status, setStatus] = useState('')
-  const [minQuality, setMinQuality] = useState('')
-  const [maxQuality, setMaxQuality] = useState('')
-  const [qualityBand, setQualityBand] = useState('all')
-  const [createdFrom, setCreatedFrom] = useState('')
-  const [createdTo, setCreatedTo] = useState('')
-  const [appliedQuery, setAppliedQuery] = useState({ sourceID: '', tableName: '', businessKey: '', status: '', minQuality: '', maxQuality: '', createdFrom: '', createdTo: '' })
-  const [page, setPage] = useState(1)
-  const [recordsPage, setRecordsPage] = useState<ProcessedRecordsPage<CleanRecord> | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
-  const requestRef = useRef<AbortController | null>(null)
-
-  useEffect(() => {
-    requestRef.current?.abort()
-    const controller = new AbortController()
-    requestRef.current = controller
-    setLoading(true)
-    setError('')
-    const query = buildCleanRecordsQuery({ page, pageSize: 20, ...appliedQuery })
-    void client(`/v1/data/clean-records/list?${query}`, { method: 'GET', signal: controller.signal, showResult: false, silentLoading: true }).then((response) => {
-      if (controller.signal.aborted) return
-      const nextPage = response.ok ? parseProcessedRecordsPage<CleanRecord>(response.data) : null
-      if (nextPage) {
-        setRecordsPage(nextPage)
-        return
-      }
-      setError(response.error?.message || '清洗记录查询暂时不可用，请稍后重试。')
-    }).finally(() => { if (!controller.signal.aborted) setLoading(false) })
-    return () => controller.abort()
-  }, [appliedQuery, client, page])
-
-  function submit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    setPage(1)
-    setAppliedQuery({ sourceID, tableName, businessKey, status, minQuality, maxQuality, createdFrom: unixTimestamp(createdFrom), createdTo: unixTimestamp(createdTo) })
-  }
-
-  const records = recordsPage?.list ?? []
-  const totalPages = recordsPage?.totalPages ?? 0
-  return (
-    <div className="view-stack design-clean-records">
-      <form className="query-bar design-filter-bar design-processed-filter" onSubmit={submit}>
-        <div className="query-fields">
-          <label>业务键 / Raw ID / 内容<span className="design-search-control"><Search aria-hidden="true" /><input name="clean_business_key" type="search" value={businessKey} onChange={(event) => setBusinessKey(event.currentTarget.value)} placeholder="输入业务键" /></span></label>
-          <label>数据类型<input name="clean_table_name" value={tableName} onChange={(event) => setTableName(event.currentTarget.value)} placeholder="全部" /></label>
-          <label>质量<select name="clean_quality_band" value={qualityBand} onChange={(event) => { const next = event.currentTarget.value; setQualityBand(next); setMinQuality(next === 'high' ? '80' : ''); setMaxQuality(next === 'review' ? '79.99' : '') }}><option value="all">全部</option><option value="high">80 分及以上</option><option value="review">待复核（低于 80 分）</option></select></label>
-        </div>
-        <div className="design-filter-count"><strong>{records.length}</strong><span>/ {recordsPage?.total ?? 0} 条</span></div>
-        <button className="sr-only" type="submit" disabled={loading}>{loading ? '查询中…' : '查询处理结果'}</button>
-        <details className="design-advanced-filters"><summary>更多筛选</summary><div><Field label="来源 ID" name="clean_source_id" type="number" value={sourceID} onChange={setSourceID} /><SelectFilter label="处理状态" value={status || 'all'} onChange={(next) => setStatus(next === 'all' ? '' : next)} options={[{ value: 'ready', label: '待推送' }, { value: 'invalid', label: '无效' }, { value: 'delivered', label: '已交付' }]} /><Field label="开始时间" name="clean_from" type="datetime-local" value={createdFrom} onChange={setCreatedFrom} /><Field label="结束时间" name="clean_to" type="datetime-local" value={createdTo} onChange={setCreatedTo} /></div></details>
-      </form>
-      <section className="overview-grid compact design-processed-summary" aria-label="处理统计" aria-busy={statisticsLoading}>
-        <Metric label="平均质量" value={statistics?.averageQualityScore === null || statistics?.averageQualityScore === undefined ? '-' : statistics.averageQualityScore.toFixed(1)} />
-        <Metric label="已处理" value={statistics?.processedCount ?? '-'} />
-        <Metric label="处理失败" value={statistics?.errorCount ?? '-'} />
-      </section>
-      {error && <div className="result-banner error" role="alert">{error} 已保留最近一次成功数据。</div>}
-      <section className="design-table-section">
-        <div className="design-section-heading"><div><h3>处理结果</h3><span>{loading && !recordsPage ? '正在加载…' : `查询命中 ${recordsPage?.total ?? 0} 条`}</span></div></div>
-        <CleanRecordList records={records} />
-        <div className="record-actions raw-record-pagination" role="status" aria-live="polite">
-          <span>第 {recordsPage?.page ?? page} / {Math.max(totalPages, 1)} 页</span>
-          <button type="button" onClick={() => setPage((current) => Math.max(1, current - 1))} disabled={loading || page <= 1}>上一页</button>
-          <button type="button" onClick={() => setPage((current) => current + 1)} disabled={loading || totalPages === 0 || page >= totalPages}>下一页</button>
-        </div>
-      </section>
-    </div>
-  )
-}
-
 function BojunBackfillPage({ loading, onPreview, onConfirm }: {
   loading: boolean
   onPreview: (payload: { start_time: string; end_time: string }) => Promise<BojunOrderBackfillResult | null>
@@ -1875,48 +1669,6 @@ function RawDataList({ origin, records, onRequestSourceFetch }: { origin: RawRec
   )
 }
 
-function ProcessedDataList({ records }: { records: ProcessedData[] }) {
-  if (records.length === 0) return <EmptyState text="暂无处理后数据。" />
-  return (
-    <div className="data-table-wrap" role="region" aria-label="旧处理结果列表" tabIndex={0}>
-      <table className="data-table">
-        <thead><tr><th scope="col">数据类型</th><th scope="col">Raw ID</th><th scope="col">质量分数</th><th scope="col">处理时间</th><th scope="col">操作</th></tr></thead>
-        <tbody>{records.map((record) => (
-          <tr key={record.id}>
-            <td><strong>{record.data_type || 'processed'}</strong><small>记录 #{record.id}</small></td>
-            <td>#{record.raw_data_id}</td>
-            <td>{formatQualityScore(record.quality_score)}</td>
-            <td>{formatUnixTime(record.created_at)}</td>
-            <td><details><summary>查看字段</summary><ReadonlyJSON value={redactMonitoringJSON(parseJsonText(record.data_fields))} /></details></td>
-          </tr>
-        ))}</tbody>
-      </table>
-    </div>
-  )
-}
-
-function CleanRecordList({ records }: { records: CleanRecord[] }) {
-  if (records.length === 0) return <EmptyState text="暂无清洗记录。" />
-  return (
-    <div className="data-table-wrap" role="region" aria-label="清洗记录列表" tabIndex={0}>
-      <table className="data-table design-processed-table">
-        <thead><tr><th scope="col">业务键</th><th scope="col">数据类型</th><th scope="col">Raw ID</th><th scope="col">质量分数</th><th scope="col">状态</th><th scope="col">处理时间</th><th scope="col">操作</th></tr></thead>
-        <tbody>{records.map((record) => (
-          <tr key={record.id}>
-            <td><strong>{record.business_key || `#${record.id}`}</strong></td>
-            <td>{record.table_name || '-'}</td>
-            <td>#{record.raw_record_id}<small>来源 #{record.source_id}</small></td>
-            <td><div className={record.quality_score >= 80 ? 'design-quality-score' : 'design-quality-score review'}><strong>{Math.round(record.quality_score)}</strong><progress value={Math.max(0, Math.min(100, record.quality_score))} max="100" aria-label={`质量分 ${formatQualityScore(record.quality_score)}`} /></div></td>
-            <td><StatusPill label={record.quality_score >= 80 ? '高质量' : '待复核'} /><small>{cleanRecordStatusLabel(record.status)}</small></td>
-            <td>{formatUnixTime(record.created_at)}</td>
-            <td><details className="design-row-details"><summary className="design-table-link">查看</summary><dl><div><dt>记录 ID</dt><dd>#{record.id}</dd></div><div><dt>业务状态</dt><dd>{cleanRecordStatusLabel(record.status)}</dd></div></dl></details></td>
-          </tr>
-        ))}</tbody>
-      </table>
-    </div>
-  )
-}
-
 function ResultPanel({ result, onClose }: { result: ApiResult | null; onClose: () => void }) {
   if (!result) return null
   return (
@@ -2015,17 +1767,6 @@ function rawDataOrigin(record: RawData) {
   return 'ingest'
 }
 
-function cleanRecordStatusLabel(status: string) {
-  if (status === 'ready') return '待推送'
-  if (status === 'invalid') return '无效'
-  if (status === 'delivered') return '已交付'
-  return status || '-'
-}
-
-function formatQualityScore(value: number) {
-  return Number.isFinite(value) ? `${value.toFixed(1)} / 100` : '-'
-}
-
 function readList<T>(result: ApiResult, key: string): T[] {
   const value = readDataField(result.data, key)
   return Array.isArray(value) ? (value as T[]) : []
@@ -2114,15 +1855,6 @@ function formatUnixTime(value: number) {
   return formatDate(new Date(value * 1000).toISOString())
 }
 
-function parseJsonText(value: string) {
-  if (!value) return {}
-  try {
-    return JSON.parse(value) as unknown
-  } catch {
-    return value
-  }
-}
-
 function parseMaybeJson(value: unknown) {
   if (!value) return null
   if (typeof value === 'object') return value
@@ -2191,12 +1923,6 @@ function previousDayDateTimeLocal(endOfDay: boolean) {
 function backendDateTime(value: string) {
   const normalized = value.trim().replace('T', ' ')
   return /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/.test(normalized) ? `${normalized}:00` : normalized
-}
-
-function unixTimestamp(value: string) {
-  if (!value) return ''
-  const timestamp = Date.parse(value)
-  return Number.isFinite(timestamp) ? String(Math.floor(timestamp / 1000)) : ''
 }
 
 export default App
