@@ -25,6 +25,7 @@ func apiData(api *gin.RouterGroup) {
 	registerReportDatasourceRoutes(api, data_ctrl.NewReportDatasourceController())
 	registerReportRunRoutes(api, data_ctrl.NewReportRunController())
 	registerReportExportRoutes(api, data_ctrl.NewReportExportController())
+	registerReportAuditRoutes(api, data_ctrl.NewReportAuditController())
 
 	sourceGroup := api.Group("/v1/sources")
 	sourceGroup.Use(middleware.AuthJWT())
@@ -340,6 +341,12 @@ func registerReportExportRoutes(api *gin.RouterGroup, exportCtrl *data_ctrl.Repo
 	exportGroup.GET("", middleware.RequirePermission(model.PermissionReportExport), exportCtrl.List)
 	exportGroup.GET("/:id", exportCtrl.Get)
 	exportGroup.GET("/:id/download", middleware.RequirePermission(model.PermissionReportExport), exportCtrl.Download)
+}
+
+func registerReportAuditRoutes(api *gin.RouterGroup, auditCtrl *data_ctrl.ReportAuditController) {
+	auditGroup := api.Group("/v1/report-audits")
+	auditGroup.Use(middleware.AuthJWT(), middleware.RequirePermission(model.PermissionReportManage))
+	auditGroup.GET("", auditCtrl.List)
 }
 
 func registerMallWeatherExportProfileRoutes(

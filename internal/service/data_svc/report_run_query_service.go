@@ -14,6 +14,8 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
+
 	"gin-biz-web-api/internal/reportoracle"
 	"gin-biz-web-api/internal/reportquery"
 	"gin-biz-web-api/internal/reportrepo"
@@ -36,6 +38,7 @@ type reportRunQueryStore interface {
 	RequestRunCancellation(context.Context, uint, uint, time.Time) (*model.ReportRun, error)
 	AcquireResultReadLease(context.Context, uint, uint, time.Time) (*reportrepo.RunResultContract, string, error)
 	ReleaseResultReadLease(context.Context, string) error
+	WriteReportAudit(context.Context, model.ReportAudit) error
 }
 
 type reportResultPageReader interface {
@@ -149,6 +152,7 @@ func (service *ReportRunQueryService) QueryResults(ctx context.Context, actor, r
 	}
 	contract, leaseToken, err := service.store.AcquireResultReadLease(ctx, actor, runID, service.now())
 	if err != nil {
+		service.writeRejectedResultAudit(ctx, actor, runID, err)
 		return nil, classifyReportRunQueryError(err)
 	}
 	defer func() {
@@ -226,7 +230,53 @@ func (service *ReportRunQueryService) QueryResults(ctx context.Context, actor, r
 			return nil, ErrReportRunResultTemporary
 		}
 	}
+	detail, err := json.Marshal(map[string]interface{}{
+		"pageSize": limit,
+		"rowCount": len(result.Rows),
+		"hasMore":  result.Pagination.HasMore,
+	})
+	if err != nil {
+		return nil, ErrReportRunResultTemporary
+	}
+	if err := service.store.WriteReportAudit(ctx, model.ReportAudit{
+		ActorUserID: actor,
+		Action:      "REPORT_RESULT_QUERY_SUCCESS",
+		TargetType:  "REPORT_RUN",
+		TargetID:    runID,
+		RequestID:   uuid.NewString(),
+		DetailJSON:  model.JSONText(detail),
+	}); err != nil {
+		return nil, ErrReportRunResultTemporary
+	}
 	return result, nil
+}
+
+func (service *ReportRunQueryService) writeRejectedResultAudit(ctx context.Context, actor, runID uint, cause error) {
+	detail, err := json.Marshal(map[string]string{"reason": reportRunQueryAuditReason(cause)})
+	if err != nil {
+		return
+	}
+	auditCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+	defer cancel()
+	_ = service.store.WriteReportAudit(auditCtx, model.ReportAudit{
+		ActorUserID: actor,
+		Action:      "REPORT_RESULT_QUERY_DENIED",
+		TargetType:  "REPORT_RUN",
+		TargetID:    runID,
+		RequestID:   uuid.NewString(),
+		DetailJSON:  model.JSONText(detail),
+	})
+}
+
+func reportRunQueryAuditReason(err error) string {
+	switch {
+	case errors.Is(err, reportrepo.ErrReportRunAccessNotFound):
+		return "NOT_FOUND"
+	case errors.Is(err, reportrepo.ErrReportResultUnavailable):
+		return "RESULT_UNAVAILABLE"
+	default:
+		return "ACCESS_FAILED"
+	}
 }
 
 type frozenResultColumn struct {

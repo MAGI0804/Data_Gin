@@ -2,10 +2,13 @@ package data_svc
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/google/uuid"
 
 	"gin-biz-web-api/internal/reportrepo"
 	"gin-biz-web-api/model"
@@ -29,6 +32,7 @@ const (
 type reportExportQueryStore interface {
 	FindExportForActor(context.Context, uint, uint) (*model.ReportExport, error)
 	ListExportsForActor(context.Context, uint, reportrepo.ExportListQuery) (*reportrepo.ExportListPage, error)
+	WriteReportAudit(context.Context, model.ReportAudit) error
 }
 
 type reportExportDownloadSigner interface {
@@ -145,16 +149,20 @@ func validReportExportListStatus(status string) bool {
 func (service *ReportExportQueryService) Download(ctx context.Context, actor, exportID uint) (*ReportExportDownloadDTO, error) {
 	row, err := service.find(ctx, actor, exportID)
 	if err != nil {
+		service.writeRejectedDownloadAudit(ctx, actor, exportID, "NOT_FOUND")
 		return nil, err
 	}
 	now := service.now()
 	if row.Status != model.ReportExportStatusReady || row.ReadyAt == nil {
+		service.writeRejectedDownloadAudit(ctx, actor, exportID, "NOT_READY")
 		return nil, ErrReportExportQueryNotReady
 	}
 	if row.ExpiresAt == nil || !now.Before(row.ExpiresAt.UTC()) {
+		service.writeRejectedDownloadAudit(ctx, actor, exportID, "EXPIRED")
 		return nil, ErrReportExportQueryExpired
 	}
 	if row.ResultObjectKey == "" || row.FileSizeBytes < 1 || row.ResultChecksum == "" {
+		service.writeRejectedDownloadAudit(ctx, actor, exportID, "ARTIFACT_MISSING")
 		return nil, ErrReportExportArtifactMissing
 	}
 	signer, err := service.newSigner()
@@ -185,7 +193,39 @@ func (service *ReportExportQueryService) Download(ctx context.Context, actor, ex
 	if err != nil {
 		return nil, fmt.Errorf("%w: sign download", ErrReportExportStorageUnavailable)
 	}
-	return &ReportExportDownloadDTO{URL: url, ExpiresAt: now.Add(validFor)}, nil
+	expiresAt := now.Add(validFor)
+	detail, err := json.Marshal(map[string]interface{}{"expiresAt": expiresAt})
+	if err != nil {
+		return nil, ErrReportExportStorageUnavailable
+	}
+	if err := service.store.WriteReportAudit(ctx, model.ReportAudit{
+		ActorUserID: actor,
+		Action:      "REPORT_EXPORT_DOWNLOAD_SIGN_SUCCESS",
+		TargetType:  "REPORT_EXPORT",
+		TargetID:    exportID,
+		RequestID:   uuid.NewString(),
+		DetailJSON:  model.JSONText(detail),
+	}); err != nil {
+		return nil, fmt.Errorf("%w: write audit", ErrReportExportStorageUnavailable)
+	}
+	return &ReportExportDownloadDTO{URL: url, ExpiresAt: expiresAt}, nil
+}
+
+func (service *ReportExportQueryService) writeRejectedDownloadAudit(ctx context.Context, actor, exportID uint, reason string) {
+	detail, err := json.Marshal(map[string]string{"reason": reason})
+	if err != nil {
+		return
+	}
+	auditCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 2*time.Second)
+	defer cancel()
+	_ = service.store.WriteReportAudit(auditCtx, model.ReportAudit{
+		ActorUserID: actor,
+		Action:      "REPORT_EXPORT_DOWNLOAD_SIGN_DENIED",
+		TargetType:  "REPORT_EXPORT",
+		TargetID:    exportID,
+		RequestID:   uuid.NewString(),
+		DetailJSON:  model.JSONText(detail),
+	})
 }
 
 func (service *ReportExportQueryService) find(ctx context.Context, actor, exportID uint) (*model.ReportExport, error) {

@@ -3,6 +3,7 @@ package data_svc
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -29,6 +30,33 @@ func TestReportExportQueryServiceScopesActorAndSignsVerifiedObject(t *testing.T)
 	download, err := service.Download(t.Context(), 17, 41)
 	if err != nil || download.URL != "https://download.example/report" || signer.objectKey != "private/report.xlsx" || signer.fileName == "" {
 		t.Fatalf("Download()=%#v error=%v signer=%#v", download, err, signer)
+	}
+	if len(store.audits) != 1 || store.audits[0].Action != "REPORT_EXPORT_DOWNLOAD_SIGN_SUCCESS" ||
+		store.audits[0].TargetType != "REPORT_EXPORT" || store.audits[0].TargetID != 41 ||
+		strings.Contains(string(store.audits[0].DetailJSON), "download.example") {
+		t.Fatalf("download audit = %#v", store.audits)
+	}
+}
+
+func TestReportExportDownloadRequiresSuccessAuditAndPreservesDeniedError(t *testing.T) {
+	now := time.Date(2026, 8, 13, 10, 0, 0, 0, time.UTC)
+	expires := now.Add(time.Hour)
+	store := &fakeReportExportQueryStore{row: &model.ReportExport{
+		BaseModel: model.BaseModel{ID: 41}, ExportUUID: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa",
+		Status: model.ReportExportStatusReady, ResultObjectKey: "private/report.xlsx", ResultChecksum: "checksum",
+		FileSizeBytes: 123, ReadyAt: &now, ExpiresAt: &expires, CreatedBy: 17,
+	}, auditErr: errors.New("audit unavailable")}
+	service := NewReportExportQueryServiceWithDependencies(store, func() (reportExportDownloadSigner, error) {
+		return &fakeReportExportSigner{size: 123}, nil
+	})
+	service.now = func() time.Time { return now }
+	if _, err := service.Download(t.Context(), 17, 41); !errors.Is(err, ErrReportExportStorageUnavailable) {
+		t.Fatalf("success audit failure error = %v", err)
+	}
+
+	store.row.Status = model.ReportExportStatusRunning
+	if _, err := service.Download(t.Context(), 17, 41); !errors.Is(err, ErrReportExportQueryNotReady) {
+		t.Fatalf("denied audit failure error = %v", err)
 	}
 }
 
@@ -100,10 +128,12 @@ func TestReportExportCanDownloadRequiresCompleteReadyArtifact(t *testing.T) {
 }
 
 type fakeReportExportQueryStore struct {
-	row   *model.ReportExport
-	page  *reportrepo.ExportListPage
-	actor uint
-	query reportrepo.ExportListQuery
+	row      *model.ReportExport
+	page     *reportrepo.ExportListPage
+	actor    uint
+	query    reportrepo.ExportListQuery
+	audits   []model.ReportAudit
+	auditErr error
 }
 
 func (store *fakeReportExportQueryStore) ListExportsForActor(_ context.Context, actor uint, query reportrepo.ExportListQuery) (*reportrepo.ExportListPage, error) {
@@ -117,6 +147,11 @@ func (store *fakeReportExportQueryStore) ListExportsForActor(_ context.Context, 
 func (store *fakeReportExportQueryStore) FindExportForActor(_ context.Context, actor, _ uint) (*model.ReportExport, error) {
 	store.actor = actor
 	return store.row, nil
+}
+
+func (store *fakeReportExportQueryStore) WriteReportAudit(_ context.Context, audit model.ReportAudit) error {
+	store.audits = append(store.audits, audit)
+	return store.auditErr
 }
 
 type fakeReportExportSigner struct {
