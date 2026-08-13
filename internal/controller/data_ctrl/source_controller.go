@@ -1,6 +1,7 @@
 package data_ctrl
 
 import (
+	"errors"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
@@ -9,6 +10,7 @@ import (
 	"gin-biz-web-api/internal/msg"
 	"gin-biz-web-api/internal/requestbody"
 	"gin-biz-web-api/internal/service/data_svc"
+	"gorm.io/gorm"
 )
 
 type SourceController struct {
@@ -131,6 +133,29 @@ func (ctrl *SourceController) UpdateSource(c *gin.Context) {
 	c.JSON(200, msg.SuccessResponse("更新数据源成功", &map[string]any{
 		"source": safeSourceDefinition(*source),
 	}))
+}
+
+func (ctrl *SourceController) UpdateSourceEnabled(c *gin.Context) {
+	sourceID, err := parseSourceID(c)
+	if err != nil {
+		c.JSON(400, msg.ErrResponse("无效的数据源ID", err))
+		return
+	}
+	var req requestbody.EnabledUpdateRequest
+	if err := c.ShouldBindJSON(&req); err != nil || req.Enabled == nil {
+		c.JSON(400, msg.ErrResponse("无效的数据源状态参数", err))
+		return
+	}
+	source, err := ctrl.service.SetSourceDefinitionEnabled(c.Request.Context(), sourceID, *req.Enabled)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		c.JSON(404, msg.ErrResponseStr("数据源不存在"))
+		return
+	}
+	if err != nil {
+		c.JSON(500, msg.ErrResponse("更新数据源状态失败", err))
+		return
+	}
+	c.JSON(200, msg.SuccessResponse("更新数据源状态成功", &map[string]any{"source": safeSourceDefinition(*source)}))
 }
 
 func (ctrl *SourceController) TestSource(c *gin.Context) {

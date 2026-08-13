@@ -96,6 +96,13 @@ func (s *TransformService) UpdateTransformRule(ctx context.Context, id uint, req
 	return rule, nil
 }
 
+func (s *TransformService) SetTransformRuleEnabled(ctx context.Context, id uint, enabled bool) (*model.TransformRule, error) {
+	if err := s.ruleDAO.SetEnabled(ctx, id, enabled); err != nil {
+		return nil, err
+	}
+	return s.ruleDAO.FindByID(ctx, id)
+}
+
 func (s *TransformService) TestMappingRule(ctx context.Context, req *requestbody.TransformRuleTestRequest) (map[string]interface{}, error) {
 	_ = ctx
 

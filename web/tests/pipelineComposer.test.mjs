@@ -3,6 +3,8 @@ import test from 'node:test'
 import {
   parsePipelineDetail,
   parsePipelinePreview,
+  parseStageWriteResult,
+  parseStepWriteResult,
   parseStageGeneratedConfig,
   parseStepConfigList,
   isMaskedMethodParam,
@@ -44,6 +46,13 @@ test('parses only complete safe pipeline detail and generated-config envelopes',
   assert.equal(parsePipelineDetail({ ...payload, data: { pipeline: { ...payload.data.pipeline, stages: [{ stage: payload.data.pipeline.stages[0].stage }] } } }), null)
   assert.deepEqual(parseStageGeneratedConfig({ code: 200, data: { config: { id: 8, pipeline_id: 1, stage_id: 3, stage_type: 'fetch', generated_config_json: '{}', target_ref_type: 'source_definition', target_ref_id: 0, version: 2 } } })?.version, 2)
   assert.equal(parseStageGeneratedConfig({ code: 200, data: { config: { id: 8 } } }), null)
+})
+
+test('validates stage and step write responses before accepting a save', () => {
+  assert.deepEqual(parseStageWriteResult({ code: 200, data: { stage: { id: 3, pipeline_id: 1, stage_type: 'fetch', name: '数据获取', order_index: 1, enabled: true } } }), { id: 3, pipeline_id: 1, stage_type: 'fetch', name: '数据获取', order_index: 1, enabled: true })
+  assert.equal(parseStageWriteResult({ code: 200, data: { stage: { id: 3 } } }), null)
+  assert.deepEqual(parseStepWriteResult({ code: 200, data: { step } }), step)
+  assert.equal(parseStepWriteResult({ code: 200, data: { step: { step: { id: 11 }, params: [], outputs: [] } } }), null)
 })
 
 test('keeps unbounded pipeline descriptions returned from the backend', () => {

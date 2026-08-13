@@ -75,7 +75,7 @@ export type DeliveryTaskDraft = {
 }
 
 export type ConfigurationClientOptions = {
-  method: 'GET' | 'POST' | 'PUT'
+  method: 'GET' | 'POST' | 'PUT' | 'PATCH'
   body?: unknown
   signal?: AbortSignal
   showResult?: boolean

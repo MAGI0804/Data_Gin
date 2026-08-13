@@ -6,6 +6,7 @@ import { buildDestinationSavePayload, destinationDraftFrom, newDestinationDraft,
 import { buildRuleSavePayload, newRuleDraft, parseLegacyTransformRules, parseRuleTestContent, parseTransformRuleDetail, parseTransformRulePage, readRuleTestResult, ruleDraftFrom } from '../.test-dist/configurationPages/ruleContracts.js'
 import { buildDeliveryTaskSavePayload, deliveryTaskDraftFrom, newDeliveryTaskDraft, parseDeliveryRunResult, parseDeliveryTaskDetail, parseDeliveryTaskPage, parseLegacyDeliveryTasks } from '../.test-dist/configurationPages/deliveryTaskContracts.js'
 import { buildOrderPushPolicyDraft, buildOrderPushPolicyPayload, parseOrderPushPolicyEnvelope, parseSavedOrderPushPolicy, policyDeliveryRatio } from '../.test-dist/configurationPages/orderPushPolicyContracts.js'
+import { builtinMethods, canToggleTarget, parseLegacyTasks as parseLegacyMethodTasks, parseLegacyTransformRules as parseLegacyMethodRules, parsePipelineSummaries, permissionForToggle, pipelineStepMethodDisplay, updateTargetEnabled } from '../.test-dist/configurationPages/MethodsPage/methodCatalog.js'
 
 const source = {
   id: 7,
@@ -183,4 +184,54 @@ test('builds authoritative policy drafts and normalized payloads', () => {
   assert.deepEqual(buildOrderPushPolicyPayload(draft, policyOptions), { ok: true, payload: { targets: [{ target_code: 'qiantan', target_name: '伯俊-前滩', cycle: 5, skip: 1 }, { target_code: 'custom', target_name: '自定义目标', cycle: 0, skip: 0 }] } })
   assert.match(buildOrderPushPolicyPayload([{ ...draft[0], skip: '5' }, draft[1]], policyOptions).error, /小于/)
   assert.match(buildOrderPushPolicyPayload([{ ...draft[0], cycle: '' }, draft[1]], policyOptions).error, /非负整数/)
+})
+
+test('strictly parses method catalog registries and permissions', () => {
+  const pipelines = [{ id: 3, name: '订单流水线', code: 'orders', description: '', enabled: true }]
+  assert.deepEqual(parsePipelineSummaries({ code: 200, data: { pipelines } }), pipelines)
+  assert.equal(parsePipelineSummaries({ data: { pipelines } }), null)
+  assert.equal(parsePipelineSummaries({ code: 200, data: { pipelines: [{ ...pipelines[0], enabled: 1 }] } }), null)
+
+  const legacyTask = { code: 'pull', name: '拉取', category: 'fetch', source_code: 'source', source_name: '来源', cron_expr: '', input_table: '', output_table: 'orders', target_system: '', description: '说明' }
+  const legacyRule = { code: 'map', name: '映射', source_code: 'source', source_name: '来源', rule_type: 'mapping', trigger_mode: 'auto', input_table: 'raw', output_table: 'clean', description: '说明' }
+  assert.deepEqual(parseLegacyMethodTasks({ code: 200, data: { tasks: [legacyTask] } }), [legacyTask])
+  assert.deepEqual(parseLegacyMethodRules({ code: 200, data: { rules: [legacyRule] } }), [legacyRule])
+  assert.equal(parseLegacyMethodTasks({ code: 200, data: { tasks: [{ ...legacyTask, code: 1 }] } }), null)
+
+  assert.equal(permissionForToggle({ type: 'source', id: 1 }), 'source.manage')
+  assert.equal(permissionForToggle({ type: 'transform_rule', id: 1 }), 'pipeline.manage')
+  assert.equal(permissionForToggle({ type: 'delivery_task', id: 1 }), 'delivery.manage')
+  assert.equal(canToggleTarget({ type: 'destination', id: 1 }, ['delivery.read']), false)
+  assert.equal(canToggleTarget({ type: 'destination', id: 1 }, ['delivery.manage']), true)
+  assert.ok(builtinMethods.every((method) => method.kind === 'builtin' && !method.toggle))
+})
+
+test('maps pipeline steps into stable method rows', () => {
+  const step = {
+    step: { id: 9, pipeline_id: 3, stage_id: 4, code: 'fetch_orders', name: '拉取订单', method_type: 'request', order_index: 0, enabled: true, timeout_seconds: 30 },
+    params: [{ location: 'query', name: 'page', value_source: 'literal', value: '1', value_type: 'integer', required: true, secret: false, description: '', order_index: 0 }],
+    outputs: [{ name: 'orders', source_path: '$.data', value_type: 'array', required: true, description: '', order_index: 0 }],
+  }
+  assert.deepEqual(pipelineStepMethodDisplay(step, '订单流水线'), {
+    key: 'configured-9', kind: 'configured', name: '拉取订单', code: 'fetch_orders', methodType: 'request', category: '数据拉取方法', owner: '订单流水线', description: 'Request 请求，入参 1 个，出参 1 个。', enabled: true,
+  })
+})
+
+test('updates method status through partial enabled endpoints only', async () => {
+  const calls = []
+  const client = async (path, options) => {
+    calls.push({ path, options })
+    return { ok: true, status: 200, data: {} }
+  }
+  const targets = [
+    [{ type: 'source', id: 1 }, '/v1/sources/1/enabled'],
+    [{ type: 'transform_rule', id: 2 }, '/v1/transform-rules/2/enabled'],
+    [{ type: 'destination', id: 3 }, '/v1/destinations/3/enabled'],
+    [{ type: 'delivery_task', id: 4 }, '/v1/delivery-tasks/4/enabled'],
+  ]
+  for (const [target, path] of targets) {
+    await updateTargetEnabled(client, target, false)
+    assert.deepEqual(calls.at(-1), { path, options: { method: 'PATCH', showResult: false, silentLoading: true, body: { enabled: false } } })
+    assert.deepEqual(Object.keys(calls.at(-1).options.body), ['enabled'])
+  }
 })

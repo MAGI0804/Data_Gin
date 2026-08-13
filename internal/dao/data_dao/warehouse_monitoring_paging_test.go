@@ -2,6 +2,7 @@ package data_dao
 
 import (
 	"database/sql"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -98,6 +99,39 @@ func TestMonitoringListFiltersUseBoundParameters(t *testing.T) {
 	}
 	if strings.Contains(taskStatement.SQL.String(), "task-a") || len(taskStatement.Vars) != 4 {
 		t.Fatalf("task filter SQL did not bind inputs: %s; vars=%v", taskStatement.SQL.String(), taskStatement.Vars)
+	}
+}
+
+func TestConfigEnabledUpdateChangesOnlyStatusColumns(t *testing.T) {
+	db := monitoringDryRunDB(t).Session(&gorm.Session{SkipDefaultTransaction: true})
+	tests := []struct {
+		name     string
+		resource interface{}
+		table    string
+	}{
+		{name: "source", resource: &model.SourceDefinition{}, table: "source_definitions"},
+		{name: "rule", resource: &model.TransformRule{}, table: "transform_rules"},
+		{name: "destination", resource: &model.DestinationDefinition{}, table: "destination_definitions"},
+		{name: "task", resource: &model.DeliveryTask{}, table: "delivery_tasks"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			statement := configEnabledUpdate(t.Context(), db, tt.resource, 17, false).Statement
+			sql := statement.SQL.String()
+			for _, fragment := range []string{"UPDATE `" + tt.table + "`", "`enabled`=?", "`updated_at`=?", "WHERE id = ?"} {
+				if !strings.Contains(sql, fragment) {
+					t.Fatalf("status update SQL missing %q: %s", fragment, sql)
+				}
+			}
+			for _, forbidden := range []string{"`name`=", "`code`=", "`config_json`=", "`schema_json`=", "`payload_template`="} {
+				if strings.Contains(sql, forbidden) {
+					t.Fatalf("status update SQL includes %q: %s", forbidden, sql)
+				}
+			}
+			if len(statement.Vars) != 3 || statement.Vars[0] != false || fmt.Sprint(statement.Vars[2]) != "17" {
+				t.Fatalf("status update vars = %v", statement.Vars)
+			}
+		})
 	}
 }
 

@@ -34,6 +34,7 @@ func apiData(api *gin.RouterGroup) {
 		sourceGroup.GET("/:id", middleware.RequirePermission(model.PermissionSourceRead), sourceCtrl.GetSource)
 		sourceGroup.POST("", middleware.RequirePermission(model.PermissionSourceManage), sourceCtrl.CreateSource)
 		sourceGroup.PUT("/:id", middleware.RequirePermission(model.PermissionSourceManage), sourceCtrl.UpdateSource)
+		sourceGroup.PATCH("/:id/enabled", middleware.RequirePermission(model.PermissionSourceManage), sourceCtrl.UpdateSourceEnabled)
 		sourceGroup.POST("/:id/test", middleware.RequirePermission(model.PermissionSourceManage), sourceCtrl.TestSource)
 		sourceGroup.POST("/:id/fetch", middleware.RequirePermission(model.PermissionSourceManage), sourceCtrl.FetchSource)
 	}
@@ -46,6 +47,7 @@ func apiData(api *gin.RouterGroup) {
 		transformGroup.GET("/:id", middleware.RequirePermission(model.PermissionPipelineRead), transformCtrl.GetRule)
 		transformGroup.POST("", middleware.RequirePermission(model.PermissionPipelineManage), transformCtrl.CreateRule)
 		transformGroup.PUT("/:id", middleware.RequirePermission(model.PermissionPipelineManage), transformCtrl.UpdateRule)
+		transformGroup.PATCH("/:id/enabled", middleware.RequirePermission(model.PermissionPipelineManage), transformCtrl.UpdateRuleEnabled)
 		transformGroup.POST("/test", middleware.RequirePermission(model.PermissionPipelineManage), transformCtrl.TestRule)
 	}
 
@@ -66,6 +68,7 @@ func apiData(api *gin.RouterGroup) {
 		destinationGroup.GET("/:id", middleware.RequirePermission(model.PermissionDeliveryRead), deliveryCtrl.GetDestination)
 		destinationGroup.POST("", middleware.RequirePermission(model.PermissionDeliveryManage), deliveryCtrl.CreateDestination)
 		destinationGroup.PUT("/:id", middleware.RequirePermission(model.PermissionDeliveryManage), deliveryCtrl.UpdateDestination)
+		destinationGroup.PATCH("/:id/enabled", middleware.RequirePermission(model.PermissionDeliveryManage), deliveryCtrl.UpdateDestinationEnabled)
 		destinationGroup.POST("/:id/test", middleware.RequirePermission(model.PermissionDeliveryManage), deliveryCtrl.TestDestination)
 	}
 
@@ -77,6 +80,7 @@ func apiData(api *gin.RouterGroup) {
 		deliveryTaskGroup.GET("/:id", middleware.RequirePermission(model.PermissionDeliveryRead), deliveryCtrl.GetTask)
 		deliveryTaskGroup.POST("", middleware.RequirePermission(model.PermissionDeliveryManage), deliveryCtrl.CreateTask)
 		deliveryTaskGroup.PUT("/:id", middleware.RequirePermission(model.PermissionDeliveryManage), deliveryCtrl.UpdateTask)
+		deliveryTaskGroup.PATCH("/:id/enabled", middleware.RequirePermission(model.PermissionDeliveryManage), deliveryCtrl.UpdateTaskEnabled)
 		deliveryTaskGroup.POST("/:id/run", middleware.RequirePermission(model.PermissionDeliveryManage), deliveryCtrl.RunTask)
 	}
 

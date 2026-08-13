@@ -1,6 +1,7 @@
 package data_ctrl
 
 import (
+	"errors"
 	"strconv"
 
 	"github.com/gin-gonic/gin"
@@ -9,6 +10,7 @@ import (
 	"gin-biz-web-api/internal/msg"
 	"gin-biz-web-api/internal/requestbody"
 	"gin-biz-web-api/internal/service/data_svc"
+	"gorm.io/gorm"
 )
 
 type TransformController struct {
@@ -145,6 +147,29 @@ func (ctrl *TransformController) UpdateRule(c *gin.Context) {
 	c.JSON(200, msg.SuccessResponse("更新清洗规则成功", &map[string]any{
 		"rule": safeTransformRule(*rule),
 	}))
+}
+
+func (ctrl *TransformController) UpdateRuleEnabled(c *gin.Context) {
+	ruleID, err := parseUintParam(c, "id")
+	if err != nil {
+		c.JSON(400, msg.ErrResponse("无效的清洗规则ID", err))
+		return
+	}
+	var req requestbody.EnabledUpdateRequest
+	if err := c.ShouldBindJSON(&req); err != nil || req.Enabled == nil {
+		c.JSON(400, msg.ErrResponse("无效的清洗规则状态参数", err))
+		return
+	}
+	rule, err := ctrl.service.SetTransformRuleEnabled(c.Request.Context(), ruleID, *req.Enabled)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		c.JSON(404, msg.ErrResponseStr("清洗规则不存在"))
+		return
+	}
+	if err != nil {
+		c.JSON(500, msg.ErrResponse("更新清洗规则状态失败", err))
+		return
+	}
+	c.JSON(200, msg.SuccessResponse("更新清洗规则状态成功", &map[string]any{"rule": safeTransformRule(*rule)}))
 }
 
 func (ctrl *TransformController) TestRule(c *gin.Context) {

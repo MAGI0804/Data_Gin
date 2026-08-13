@@ -256,6 +256,25 @@ export function parsePipelineWriteResult(payload: unknown): PipelineSummary | nu
   return parsePipeline(payload.data.pipeline)
 }
 
+export function parseStageWriteResult(payload: unknown): PipelineStage | null {
+  if (!isRecord(payload) || payload.code !== 200 || !isRecord(payload.data) || !isRecord(payload.data.stage)) return null
+  const value = payload.data.stage
+  const id = positiveID(value.id)
+  const pipelineID = positiveID(value.pipeline_id)
+  const kind = stageType(value.stage_type)
+  const name = stringField(value.name, 100)
+  const orderIndex = finiteInteger(value.order_index)
+  const enabled = boolField(value.enabled)
+  return id !== null && pipelineID !== null && kind !== null && name !== null && orderIndex !== null && enabled !== null
+    ? { id, pipeline_id: pipelineID, stage_type: kind, name, order_index: orderIndex, enabled }
+    : null
+}
+
+export function parseStepWriteResult(payload: unknown): PipelineStepDetail | null {
+  if (!isRecord(payload) || payload.code !== 200 || !isRecord(payload.data)) return null
+  return parseStepDetail(payload.data.step)
+}
+
 export function parsePipelinePreview(payload: unknown): Record<string, unknown> | null {
   if (!isRecord(payload) || payload.code !== 200 || !isRecord(payload.data) || !isRecord(payload.data.preview)) return null
   return payload.data.preview

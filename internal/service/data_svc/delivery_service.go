@@ -123,6 +123,13 @@ func (s *DeliveryService) UpdateDestination(ctx context.Context, id uint, req *r
 	return destination, nil
 }
 
+func (s *DeliveryService) SetDestinationEnabled(ctx context.Context, id uint, enabled bool) (*model.DestinationDefinition, error) {
+	if err := s.destinationDAO.SetEnabled(ctx, id, enabled); err != nil {
+		return nil, err
+	}
+	return s.destinationDAO.FindByID(ctx, id)
+}
+
 func (s *DeliveryService) TestDestination(ctx context.Context, id uint) error {
 	destination, err := s.destinationDAO.FindByID(ctx, id)
 	if err != nil {
@@ -197,6 +204,13 @@ func (s *DeliveryService) UpdateDeliveryTask(ctx context.Context, id uint, req *
 		return nil, err
 	}
 	return task, nil
+}
+
+func (s *DeliveryService) SetDeliveryTaskEnabled(ctx context.Context, id uint, enabled bool) (*model.DeliveryTask, error) {
+	if err := s.taskDAO.SetEnabled(ctx, id, enabled); err != nil {
+		return nil, err
+	}
+	return s.taskDAO.FindByID(ctx, id)
 }
 
 func (s *DeliveryService) ListDeliveryLogs(ctx context.Context, limit int) ([]model.DeliveryLog, error) {

@@ -104,6 +104,10 @@ func (dao *SourceDefinitionDAO) Update(ctx context.Context, source *model.Source
 	return dao.db.WithContext(ctx).Save(source).Error
 }
 
+func (dao *SourceDefinitionDAO) SetEnabled(ctx context.Context, id uint, enabled bool) error {
+	return configEnabledUpdate(ctx, dao.db, &model.SourceDefinition{}, id, enabled).Error
+}
+
 func (dao *SourceDefinitionDAO) FindEnabledWithQueryKey(ctx context.Context) ([]model.SourceDefinition, error) {
 	var sources []model.SourceDefinition
 	err := dao.db.WithContext(ctx).
@@ -344,6 +348,10 @@ func (dao *TransformRuleDAO) Update(ctx context.Context, rule *model.TransformRu
 	return dao.db.WithContext(ctx).Save(rule).Error
 }
 
+func (dao *TransformRuleDAO) SetEnabled(ctx context.Context, id uint, enabled bool) error {
+	return configEnabledUpdate(ctx, dao.db, &model.TransformRule{}, id, enabled).Error
+}
+
 type CleanRecordDAO struct {
 	db *gorm.DB
 }
@@ -534,6 +542,10 @@ func (dao *DestinationDefinitionDAO) Update(ctx context.Context, destination *mo
 	return dao.db.WithContext(ctx).Save(destination).Error
 }
 
+func (dao *DestinationDefinitionDAO) SetEnabled(ctx context.Context, id uint, enabled bool) error {
+	return configEnabledUpdate(ctx, dao.db, &model.DestinationDefinition{}, id, enabled).Error
+}
+
 type DeliveryTaskDAO struct {
 	db *gorm.DB
 }
@@ -623,6 +635,16 @@ func (dao *DeliveryTaskDAO) applyListFilters(query *gorm.DB, params DeliveryTask
 func (dao *DeliveryTaskDAO) Update(ctx context.Context, task *model.DeliveryTask) error {
 	task.UpdatedAt = int(time.Now().Unix())
 	return dao.db.WithContext(ctx).Save(task).Error
+}
+
+func (dao *DeliveryTaskDAO) SetEnabled(ctx context.Context, id uint, enabled bool) error {
+	return configEnabledUpdate(ctx, dao.db, &model.DeliveryTask{}, id, enabled).Error
+}
+
+func configEnabledUpdate(ctx context.Context, db *gorm.DB, resource interface{}, id uint, enabled bool) *gorm.DB {
+	return db.WithContext(ctx).Model(resource).Where("id = ?", id).Updates(map[string]interface{}{
+		"enabled": enabled, "updated_at": int(time.Now().Unix()),
+	})
 }
 
 type DeliveryLogDAO struct {

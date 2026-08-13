@@ -107,6 +107,13 @@ func (s *SourceService) UpdateSourceDefinition(ctx context.Context, id uint, req
 	return source, nil
 }
 
+func (s *SourceService) SetSourceDefinitionEnabled(ctx context.Context, id uint, enabled bool) (*model.SourceDefinition, error) {
+	if err := s.sourceDAO.SetEnabled(ctx, id, enabled); err != nil {
+		return nil, err
+	}
+	return s.sourceDAO.FindByID(ctx, id)
+}
+
 func (s *SourceService) TestSourceDefinition(ctx context.Context, id uint) error {
 	source, err := s.sourceDAO.FindByID(ctx, id)
 	if err != nil {

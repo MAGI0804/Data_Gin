@@ -11,6 +11,7 @@ import (
 	"gin-biz-web-api/internal/msg"
 	"gin-biz-web-api/internal/requestbody"
 	"gin-biz-web-api/internal/service/data_svc"
+	"gorm.io/gorm"
 )
 
 type DeliveryController struct {
@@ -131,6 +132,29 @@ func (ctrl *DeliveryController) UpdateDestination(c *gin.Context) {
 	c.JSON(200, msg.SuccessResponse("更新推送目标成功", &map[string]any{
 		"destination": safeDestinationDefinition(*destination),
 	}))
+}
+
+func (ctrl *DeliveryController) UpdateDestinationEnabled(c *gin.Context) {
+	id, err := parseUintParam(c, "id")
+	if err != nil {
+		c.JSON(400, msg.ErrResponse("无效的推送目标ID", err))
+		return
+	}
+	var req requestbody.EnabledUpdateRequest
+	if err := c.ShouldBindJSON(&req); err != nil || req.Enabled == nil {
+		c.JSON(400, msg.ErrResponse("无效的推送目标状态参数", err))
+		return
+	}
+	destination, err := ctrl.service.SetDestinationEnabled(c.Request.Context(), id, *req.Enabled)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		c.JSON(404, msg.ErrResponseStr("推送目标不存在"))
+		return
+	}
+	if err != nil {
+		c.JSON(500, msg.ErrResponse("更新推送目标状态失败", err))
+		return
+	}
+	c.JSON(200, msg.SuccessResponse("更新推送目标状态成功", &map[string]any{"destination": safeDestinationDefinition(*destination)}))
 }
 
 func (ctrl *DeliveryController) TestDestination(c *gin.Context) {
@@ -259,6 +283,29 @@ func (ctrl *DeliveryController) UpdateTask(c *gin.Context) {
 	c.JSON(200, msg.SuccessResponse("更新推送任务成功", &map[string]any{
 		"task": task,
 	}))
+}
+
+func (ctrl *DeliveryController) UpdateTaskEnabled(c *gin.Context) {
+	id, err := parseUintParam(c, "id")
+	if err != nil {
+		c.JSON(400, msg.ErrResponse("无效的推送任务ID", err))
+		return
+	}
+	var req requestbody.EnabledUpdateRequest
+	if err := c.ShouldBindJSON(&req); err != nil || req.Enabled == nil {
+		c.JSON(400, msg.ErrResponse("无效的推送任务状态参数", err))
+		return
+	}
+	task, err := ctrl.service.SetDeliveryTaskEnabled(c.Request.Context(), id, *req.Enabled)
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		c.JSON(404, msg.ErrResponseStr("推送任务不存在"))
+		return
+	}
+	if err != nil {
+		c.JSON(500, msg.ErrResponse("更新推送任务状态失败", err))
+		return
+	}
+	c.JSON(200, msg.SuccessResponse("更新推送任务状态成功", &map[string]any{"task": task}))
 }
 
 func (ctrl *DeliveryController) RunTask(c *gin.Context) {
