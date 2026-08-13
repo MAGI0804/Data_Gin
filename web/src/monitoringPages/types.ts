@@ -29,6 +29,24 @@ export interface StepRun {
   finished_at: string | null
 }
 
+export interface DeliveryLog {
+  id: number
+  trace_id: string
+  run_id: number
+  source_code: string
+  destination_code: string
+  destination_name: string
+  destination_id: number
+  clean_record_id: number
+  business_key: string
+  response_summary: string
+  http_status: number
+  success: boolean
+  error_message: string
+  retry_count: number
+  sent_at: string | null
+}
+
 export interface MonitoringClientResult {
   ok: boolean
   status: number

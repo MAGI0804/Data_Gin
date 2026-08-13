@@ -46,11 +46,12 @@ import { AppShell, WorkspaceHeader } from './ui'
 import { RunOverviewPage } from './monitoringPages/RunOverviewPage/RunOverviewPage'
 import { PipelineRunsPage } from './monitoringPages/PipelineRunsPage/PipelineRunsPage'
 import { StepRunsPage } from './monitoringPages/StepRunsPage/StepRunsPage'
-import { parsePipelineRun } from './monitoringPages/contracts'
-import type { PipelineRun } from './monitoringPages/types'
+import { DeliveryLogsPage } from './monitoringPages/DeliveryLogsPage/DeliveryLogsPage'
+import { parseDeliveryLog, parsePipelineRun } from './monitoringPages/contracts'
+import type { DeliveryLog, PipelineRun } from './monitoringPages/types'
 import { parseMallWeatherExportContentStatus, submitMallWeatherExportContentDownload } from './mallWeatherExport'
 import { buildRawRecordsRequest, buildWarehouseRawRecordsQuery, parseRawRecordsPage, type RawRecordOrigin, type RawRecordsPage } from './rawRecords'
-import { buildDeliveryLogListQuery, buildDeliveryTaskListQuery, buildDestinationListQuery, buildExcelMatchJobListQuery, buildSourceListQuery, buildTransformRuleListQuery, normalizeMonitoringPageNumber, parseMonitoringPage, type MonitoringPage, type MonitoringPagination } from './monitoringRecords'
+import { buildDeliveryTaskListQuery, buildDestinationListQuery, buildExcelMatchJobListQuery, buildSourceListQuery, buildTransformRuleListQuery, normalizeMonitoringPageNumber, parseMonitoringPage, type MonitoringPage, type MonitoringPagination } from './monitoringRecords'
 import { validateOrderPushSkipPolicy } from './orderPushPolicy'
 import { runSingleFlight } from './singleFlight'
 import { parseSourceFetchSummary } from './sourceOperations'
@@ -614,24 +615,6 @@ type LegacyTransformRule = {
   input_table: string
   output_table: string
   description: string
-}
-
-type DeliveryLog = {
-  id: number
-  trace_id: string
-  run_id: number
-  source_code: string
-  destination_code: string
-  destination_name: string
-  destination_id: number
-  clean_record_id: number
-  business_key: string
-  response_summary: string
-  http_status: number
-  success: boolean
-  error_message: string
-  retry_count: number
-  sent_at: string | null
 }
 
 const navGroups: NavGroup[] = [
@@ -1427,15 +1410,15 @@ function App() {
       navigationRef={mobileNavRef}
       navigationOpen={mobileNavOpen}
       onDismissNavigation={() => setMobileNavOpen(false)}
-      flushWorkspace={Boolean(reportSection) || activeNav === 'access_management' || ['overview', 'runs', 'step_runs'].includes(activeNav)}
+      flushWorkspace={Boolean(reportSection) || activeNav === 'access_management' || ['overview', 'runs', 'delivery_logs', 'step_runs'].includes(activeNav)}
       workspaceClassName="ops-workspace"
-      header={<ModuleHeader compact={Boolean(reportSection) || activeNav === 'access_management' || ['overview', 'runs', 'step_runs'].includes(activeNav)} activeNav={activeNav} loading={loading || refreshing} sessionUser={sessionUser} onOpenNavigation={openMobileNavigation} onRefresh={() => void refreshWorkspace(true)} onLogout={handleLogout} refreshing={refreshing} mobileNavTriggerRef={mobileNavTriggerRef} />}
+      header={<ModuleHeader compact={Boolean(reportSection) || activeNav === 'access_management' || ['overview', 'runs', 'delivery_logs', 'step_runs'].includes(activeNav)} activeNav={activeNav} loading={loading || refreshing} sessionUser={sessionUser} onOpenNavigation={openMobileNavigation} onRefresh={() => void refreshWorkspace(true)} onLogout={handleLogout} refreshing={refreshing} mobileNavTriggerRef={mobileNavTriggerRef} />}
       notices={<>{sessionValidationError && <div className="result-banner error" role="status" aria-live="polite">{sessionValidationError} <button type="button" onClick={() => setSessionValidationAttempt((attempt) => attempt + 1)}>重试校验</button></div>}{workspaceError && <div className="result-banner error" role="alert">{workspaceError} <button type="button" onClick={() => void refreshWorkspace(false)} disabled={refreshing}>重试</button></div>}</>}
       overlay={<ResultPanel result={result} onClose={() => setResult(null)} />}
     >
         {activeNav === 'overview' && <RunOverviewPage runs={runs} deliveryLogs={deliveryLogs} monitoring={monitoring} stale={monitoringStale} overviewTotals={overviewTotals} onLoadSteps={openStepRuns} />}
         {activeNav === 'runs' && <PipelineRunsPage client={client} pipelines={pipelines} onLoadSteps={openStepRuns} onPipelineRunCompleted={() => void refreshWorkspace(false)} refreshVersion={workspaceRefreshVersion} />}
-        {activeNav === 'delivery_logs' && <DeliveryLogsQueryPage client={client} onRetryLog={retryDeliveryLog} />}
+        {activeNav === 'delivery_logs' && <DeliveryLogsPage client={client} onRetryLog={retryDeliveryLog} />}
         {activeNav === 'step_runs' && <StepRunsPage client={client} focusRunID={stepRunFocusID} />}
         {activeNav === 'store_info' && <StoreInfoPage actorID={actorID} client={client} downloadFile={downloadFile} />}
         {activeNav === 'mall_weather' && <MallWeatherPage actorID={actorID} client={client} downloadFile={downloadFile} />}
@@ -1614,7 +1597,7 @@ function ModuleHeader({ activeNav, compact, loading, sessionUser, onOpenNavigati
     <WorkspaceHeader
       title={compact ? undefined : titles[activeNav].title}
       description={compact ? undefined : titles[activeNav].subtitle}
-      context={compact ? activeNav === 'access_management' ? 'ACCESS CONTROL' : ['overview', 'runs', 'step_runs'].includes(activeNav) ? 'OPERATIONS' : 'REPORT CENTER' : undefined}
+      context={compact ? activeNav === 'access_management' ? 'ACCESS CONTROL' : ['overview', 'runs', 'delivery_logs', 'step_runs'].includes(activeNav) ? 'OPERATIONS' : 'REPORT CENTER' : undefined}
       menuButtonRef={mobileNavTriggerRef}
       onOpenNavigation={onOpenNavigation}
       actions={<div className="workspace-session">
@@ -1748,86 +1731,6 @@ function useConfigurationListPage<T>(client: ApiClient, path: string, key: strin
   }, [client, key, path, query, reloadVersion])
 
   return { recordsPage, loading, error }
-}
-
-function DeliveryLogsQueryPage({ client, onRetryLog }: { client: ApiClient; onRetryLog: (logId: number) => Promise<void> }) {
-  const [destination, setDestination] = useState('')
-  const [source, setSource] = useState('')
-  const [status, setStatus] = useState('all')
-  const [businessKey, setBusinessKey] = useState('')
-  const [startTime, setStartTime] = useState('')
-  const [endTime, setEndTime] = useState('')
-  const [applied, setApplied] = useState({ destination: '', source: '', success: '' as '' | 'true' | 'false', businessKey: '', startTime: '', endTime: '' })
-  const [page, setPage] = useState(1)
-  const [recordsPage, setRecordsPage] = useState<MonitoringPage<DeliveryLog> | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
-  const [retryingLogID, setRetryingLogID] = useState<number | null>(null)
-  const [pendingRetryLog, setPendingRetryLog] = useState<DeliveryLog | null>(null)
-  const [reloadVersion, setReloadVersion] = useState(0)
-  const requestRef = useRef<AbortController | null>(null)
-
-  useEffect(() => {
-    requestRef.current?.abort()
-    const controller = new AbortController()
-    requestRef.current = controller
-    setLoading(true)
-    setError('')
-    const query = buildDeliveryLogListQuery({ page, pageSize: 20, ...applied })
-    void client(`/v1/delivery-logs?${query}`, { method: 'GET', signal: controller.signal, showResult: false, silentLoading: true }).then((response) => {
-      if (controller.signal.aborted) return
-      const parsed = response.ok ? parseMonitoringPage<unknown>(response.data, 'logs') : null
-      const logs = parsed?.list.map(parseDeliveryLog) ?? []
-      if (parsed && logs.every((log): log is DeliveryLog => log !== null)) {
-        setRecordsPage({ ...parsed, list: logs })
-        return
-      }
-      setError(response.error?.message || '推送日志查询暂时不可用，请稍后重试。')
-    }).finally(() => { if (!controller.signal.aborted) setLoading(false) })
-    return () => controller.abort()
-  }, [applied, client, page, reloadVersion])
-
-  function submit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    setPage(1)
-    setApplied({ destination, source, success: status === 'success' ? 'true' : status === 'failed' ? 'false' : '', businessKey, startTime, endTime })
-  }
-
-  async function retryPendingLog() {
-    if (!pendingRetryLog || retryingLogID !== null) return
-    setRetryingLogID(pendingRetryLog.id)
-    try {
-      await onRetryLog(pendingRetryLog.id)
-    } finally {
-      setRetryingLogID(null)
-      setPendingRetryLog(null)
-      setReloadVersion((version) => version + 1)
-    }
-  }
-
-  const logs = recordsPage?.list ?? []
-  const pagination = recordsPage?.pagination
-
-  return (
-    <div className="view-stack">
-      <form className="query-bar" onSubmit={submit}>
-        <div className="query-fields">
-        <Field label="推送目标编码" name="delivery_destination" value={destination} onChange={setDestination} />
-        <Field label="来源编码" name="delivery_source" value={source} onChange={setSource} />
-        <SelectFilter label="交付状态" value={status} onChange={setStatus} options={[{ value: 'success', label: '成功' }, { value: 'failed', label: '失败' }]} />
-        <Field label="业务键" name="delivery_business_key" value={businessKey} onChange={setBusinessKey} />
-        <Field label="开始时间" name="delivery_start_time" type="datetime-local" value={startTime} onChange={setStartTime} />
-        <Field label="结束时间" name="delivery_end_time" type="datetime-local" value={endTime} onChange={setEndTime} />
-        </div>
-        <button type="submit" disabled={loading || retryingLogID !== null}>{loading ? '查询中…' : '查询'}</button>
-      </form>
-      {error && <div className="result-banner error" role="alert">{error} 已保留最近一次成功数据。</div>}
-      <Panel title="推送日志" icon={<Send />} meta={loading && !recordsPage ? '正在加载…' : `共 ${pagination?.total ?? 0} 条`}><DeliveryLogList logs={logs} retryingLogID={retryingLogID} onRetryLog={(log) => {
-        if (!log.success && retryingLogID === null) setPendingRetryLog(log)
-      }} /><MonitoringPaginationControls page={pagination?.page ?? page} totalPages={pagination?.totalPages ?? 0} loading={loading || retryingLogID !== null} onPrevious={() => setPage((current) => Math.max(1, current - 1))} onNext={() => setPage((current) => current + 1)} /></Panel>
-      {pendingRetryLog && <Modal title="确认重试推送日志" closeDisabled={retryingLogID !== null} onClose={() => { if (retryingLogID === null) setPendingRetryLog(null) }} footer={<><button type="button" disabled={retryingLogID !== null} onClick={() => setPendingRetryLog(null)}>取消</button><button className="primary" type="button" disabled={retryingLogID !== null} onClick={() => void retryPendingLog()}>{retryingLogID === pendingRetryLog.id ? '重试中…' : '确认重试'}</button></>}><p>确认重试失败日志 #{pendingRetryLog.id}？这会再次向原推送目标发起交付请求。</p></Modal>}
-    </div>
-  )
 }
 
 function SourcesQueryPage({ client, onFetchSource, onTestSource, refreshVersion }: { client: ApiClient; onFetchSource: (sourceID: number) => Promise<ApiResult>; onTestSource: (sourceID: number) => Promise<ApiResult>; refreshVersion: number }) {
@@ -4822,79 +4725,6 @@ function ToggleButton({ enabled, target, onToggle }: { enabled: boolean; target:
   )
 }
 
-function DeliveryLogList({ logs, onRetryLog, retryingLogID }: { logs: DeliveryLog[]; onRetryLog?: (log: DeliveryLog) => void | Promise<void>; retryingLogID?: number | null }) {
-  const [selectedLogID, setSelectedLogID] = useState<number | null>(null)
-
-  useEffect(() => {
-    setSelectedLogID((current) => logs.some((log) => log.id === current) ? current : logs[0]?.id ?? null)
-  }, [logs])
-
-  if (logs.length === 0) return <EmptyState text="暂无推送日志。" />
-
-  const selectedLog = logs.find((log) => log.id === selectedLogID) ?? logs[0]
-  return (
-    <div className="delivery-log-layout">
-      <div className="delivery-log-main">
-        <div className="data-table-wrap" role="region" aria-label="推送日志列表" tabIndex={0}>
-          <table className="data-table delivery-log-table">
-            <thead>
-              <tr>
-                <th scope="col">状态</th>
-                <th scope="col">业务键</th>
-                <th scope="col">推送目标</th>
-                <th scope="col">来源</th>
-                <th scope="col">HTTP</th>
-                <th scope="col">推送时间</th>
-                <th scope="col">重试</th>
-                <th scope="col">操作</th>
-              </tr>
-            </thead>
-            <tbody>
-              {logs.map((log) => (
-                <tr className={log.id === selectedLog.id ? 'delivery-log-row--selected' : undefined} key={log.id}>
-                  <td><StatusPill label={log.success ? '成功' : '失败'} /></td>
-                  <td>{log.business_key || '-'}</td>
-                  <td>{log.destination_name || log.destination_code || `目标 #${log.destination_id}`}</td>
-                  <td>{log.source_code || '-'}</td>
-                  <td>{log.http_status || '-'}</td>
-                  <td>{formatDate(log.sent_at)}</td>
-                  <td>{log.retry_count}</td>
-                  <td>
-                    <div className="table-actions">
-                      <button type="button" aria-pressed={log.id === selectedLog.id} onClick={() => setSelectedLogID(log.id)}>查看</button>
-                      {!log.success && onRetryLog && <button type="button" disabled={retryingLogID !== null} onClick={() => void onRetryLog(log)}>{retryingLogID === log.id ? '重试中…' : '重试'}</button>}
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      </div>
-      <aside className="delivery-log-detail" aria-live="polite" aria-label="已选推送日志详情">
-        <div className="delivery-log-detail-heading">
-          <div>
-            <span>已选日志</span>
-            <strong>#{selectedLog.id}</strong>
-          </div>
-          <StatusPill label={selectedLog.success ? '成功' : '失败'} />
-        </div>
-        <dl className="delivery-log-detail-fields">
-          <div><dt>业务键</dt><dd>{selectedLog.business_key || '-'}</dd></div>
-          <div><dt>推送目标</dt><dd>{selectedLog.destination_name || selectedLog.destination_code || `目标 #${selectedLog.destination_id}`}</dd></div>
-          <div><dt>来源</dt><dd>{selectedLog.source_code || '-'}</dd></div>
-          <div><dt>Trace ID</dt><dd>{selectedLog.trace_id || '-'}</dd></div>
-          <div><dt>HTTP 状态</dt><dd>{selectedLog.http_status || '-'}</dd></div>
-          <div><dt>推送时间</dt><dd>{formatDate(selectedLog.sent_at)}</dd></div>
-          <div><dt>重试次数</dt><dd>{selectedLog.retry_count}</dd></div>
-        </dl>
-        {!selectedLog.success && <p className="delivery-log-protected-note">该记录存在交付异常。请求与响应内容受保护，不在管理端展示。</p>}
-        {!selectedLog.success && onRetryLog && <div className="delivery-log-detail-actions"><button type="button" disabled={retryingLogID !== null} onClick={() => void onRetryLog(selectedLog)}>{retryingLogID === selectedLog.id ? '重试中…' : '重试推送'}</button></div>}
-      </aside>
-    </div>
-  )
-}
-
 function orderPushTargetConfig(config: OrderPushSkipConfig, targetCode: string): OrderPushSkipTargetConfig {
   const target = config.targets.find((item) => item.target_code.toLowerCase() === targetCode.toLowerCase())
   return target ?? { target_code: targetCode, target_name: '', cycle: 0, skip: 0 }
@@ -4934,44 +4764,6 @@ function publicText(value: unknown, maximumLength: number) {
   if (typeof value !== 'string') return ''
   const text = value.trim()
   return text.length <= maximumLength ? text : ''
-}
-
-function publicDateTime(value: unknown) {
-  return value === null ? null : publicText(value, 32) || null
-}
-
-function publicNonNegativeInteger(value: unknown) {
-  const number = Number(value)
-  return Number.isSafeInteger(number) && number >= 0 ? number : -1
-}
-
-function parseDeliveryLog(value: unknown): DeliveryLog | null {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
-  const log = value as Record<string, unknown>
-  const id = publicNonNegativeInteger(log.id)
-  const runID = publicNonNegativeInteger(log.run_id)
-  const destinationID = publicNonNegativeInteger(log.destination_id)
-  const cleanRecordID = publicNonNegativeInteger(log.clean_record_id)
-  const retryCount = publicNonNegativeInteger(log.retry_count)
-  const httpStatus = publicNonNegativeInteger(log.http_status)
-  if (id <= 0 || runID < 0 || destinationID < 0 || cleanRecordID < 0 || retryCount < 0 || httpStatus < 0 || typeof log.success !== 'boolean') return null
-  return {
-    id,
-    trace_id: publicText(log.trace_id, 64),
-    run_id: runID,
-    source_code: publicText(log.source_code, 100),
-    destination_code: publicText(log.destination_code, 100),
-    destination_name: publicText(log.destination_name, 100),
-    destination_id: destinationID,
-    clean_record_id: cleanRecordID,
-    business_key: publicText(log.business_key, 255),
-    response_summary: publicText(log.response_summary, 240),
-    http_status: httpStatus,
-    success: log.success,
-    error_message: publicText(log.error_message, 240),
-    retry_count: retryCount,
-    sent_at: publicDateTime(log.sent_at),
-  }
 }
 
 function parseWarehouseRawRecord(value: unknown): WarehouseRawRecord | null {

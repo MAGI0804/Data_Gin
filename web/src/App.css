@@ -2378,98 +2378,6 @@ button:focus-visible {
   background: #fcfbf8;
 }
 
-.delivery-log-layout {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(248px, 0.34fr);
-  align-items: stretch;
-  border: 1px solid var(--line);
-}
-
-.delivery-log-main {
-  min-width: 0;
-}
-
-.delivery-log-main .data-table-wrap {
-  border: 0;
-}
-
-.delivery-log-table {
-  min-width: 760px;
-}
-
-.delivery-log-row--selected,
-.delivery-log-row--selected:hover {
-  background: #fff8eb;
-}
-
-.delivery-log-detail {
-  min-width: 0;
-  border-left: 1px solid var(--line);
-  background: #fbfaf7;
-  padding: 14px;
-}
-
-.delivery-log-detail-heading {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 10px;
-  border-bottom: 1px solid var(--line);
-  padding-bottom: 12px;
-}
-
-.delivery-log-detail-heading span,
-.delivery-log-detail-heading strong {
-  display: block;
-}
-
-.delivery-log-detail-heading span,
-.delivery-log-detail-fields dt {
-  color: var(--muted);
-  font-size: 11px;
-  font-weight: 650;
-}
-
-.delivery-log-detail-heading strong {
-  margin-top: 3px;
-  font-size: 18px;
-}
-
-.delivery-log-detail-fields {
-  display: grid;
-  gap: 0;
-  margin: 0;
-}
-
-.delivery-log-detail-fields > div {
-  display: grid;
-  gap: 3px;
-  border-bottom: 1px solid var(--line);
-  padding: 10px 0;
-}
-
-.delivery-log-detail-fields dd {
-  margin: 0;
-  overflow-wrap: anywhere;
-  color: #373531;
-  font-size: 12px;
-}
-
-.delivery-log-protected-note {
-  margin: 12px 0 0;
-  border-left: 3px solid var(--accent);
-  color: #6d5b35;
-  font-size: 11px;
-  line-height: 1.5;
-  padding: 6px 8px;
-}
-
-.delivery-log-detail-actions {
-  display: flex;
-  justify-content: flex-start;
-  margin-top: 12px;
-}
-
 .raw-record-master-detail {
   display: grid;
   grid-template-columns: 1fr;
@@ -2636,15 +2544,6 @@ summary {
     border-top: 1px solid var(--line);
     border-left: 0;
     padding-left: 0;
-  }
-
-  .delivery-log-layout {
-    grid-template-columns: 1fr;
-  }
-
-  .delivery-log-detail {
-    border-top: 1px solid var(--line);
-    border-left: 0;
   }
 
   .nav-search {
@@ -2940,10 +2839,6 @@ button:focus-visible {
 
 .metric:last-child strong {
   color: var(--danger);
-}
-
-.delivery-log-layout {
-  border-color: var(--line);
 }
 
 .panel-title {

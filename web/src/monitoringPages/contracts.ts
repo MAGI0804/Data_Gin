@@ -1,4 +1,4 @@
-import type { PipelineRun, StepRun } from './types'
+import type { DeliveryLog, PipelineRun, StepRun } from './types'
 
 function publicText(value: unknown, maximumLength: number) {
   if (typeof value !== 'string') return ''
@@ -68,6 +68,35 @@ export function parseStepRun(value: unknown): StepRun | null {
     error_message: publicText(step.error_message, 240),
     started_at: publicDateTime(step.started_at),
     finished_at: publicDateTime(step.finished_at),
+  }
+}
+
+export function parseDeliveryLog(value: unknown): DeliveryLog | null {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+  const log = value as Record<string, unknown>
+  const id = publicNonNegativeInteger(log.id)
+  const runID = publicNonNegativeInteger(log.run_id)
+  const destinationID = publicNonNegativeInteger(log.destination_id)
+  const cleanRecordID = publicNonNegativeInteger(log.clean_record_id)
+  const retryCount = publicNonNegativeInteger(log.retry_count)
+  const httpStatus = publicNonNegativeInteger(log.http_status)
+  if (id <= 0 || runID < 0 || destinationID < 0 || cleanRecordID < 0 || retryCount < 0 || httpStatus < 0 || typeof log.success !== 'boolean') return null
+  return {
+    id,
+    trace_id: publicText(log.trace_id, 64),
+    run_id: runID,
+    source_code: publicText(log.source_code, 100),
+    destination_code: publicText(log.destination_code, 100),
+    destination_name: publicText(log.destination_name, 100),
+    destination_id: destinationID,
+    clean_record_id: cleanRecordID,
+    business_key: publicText(log.business_key, 255),
+    response_summary: publicText(log.response_summary, 240),
+    http_status: httpStatus,
+    success: log.success,
+    error_message: publicText(log.error_message, 240),
+    retry_count: retryCount,
+    sent_at: publicDateTime(log.sent_at),
   }
 }
 
