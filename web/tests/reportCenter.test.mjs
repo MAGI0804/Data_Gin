@@ -183,6 +183,14 @@ test('report audit parser preserves safe cursor records and structured detail', 
 test('report audit parser rejects incomplete records and missing cursors', () => {
   assert.throws(() => parseReportAuditPage({ data: { items: [{ id: 1 }], hasMore: false } }))
   assert.throws(() => parseReportAuditPage({ data: { items: [], hasMore: true } }))
+  assert.throws(() => parseReportAuditPage({ data: {} }))
+  assert.throws(() => parseReportAuditPage({ data: { items: 'invalid', hasMore: false } }))
+  assert.throws(() => parseReportAuditPage({ data: { items: [], hasMore: 'invalid' } }))
+  assert.throws(() => parseReportAuditPage({ data: { items: [], hasMore: false, nextAfterId: 1 } }))
+  const audit = { actorUserId: 7, action: 'REPORT_RESULT_QUERY_SUCCESS', targetType: 'REPORT_RUN', targetId: 31, requestId: 'request-uuid', detail: {}, createdAt: '2026-08-13T08:00:00Z' }
+  assert.throws(() => parseReportAuditPage({ data: { items: [{ ...audit, id: 88 }], hasMore: true, nextAfterId: 99 } }))
+  assert.throws(() => parseReportAuditPage({ data: { items: [{ ...audit, id: 88 }, { ...audit, id: 88 }], hasMore: true, nextAfterId: 88 } }))
+  assert.throws(() => parseReportAuditPage({ data: { items: [{ ...audit, id: 87 }, { ...audit, id: 88 }], hasMore: true, nextAfterId: 88 } }))
 })
 
 test('report audit request builds bounded encoded cursor filters', async () => {

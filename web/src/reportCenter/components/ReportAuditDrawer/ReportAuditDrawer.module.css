@@ -1,6 +1,6 @@
 .filters {
   display: grid;
-  grid-template-columns: minmax(180px, 1.4fr) minmax(150px, 1fr) minmax(180px, 1.2fr) auto auto;
+  grid-template-columns: repeat(4, minmax(150px, 1fr)) auto auto;
   gap: var(--space-2);
   align-items: end;
   padding-block-end: var(--space-4);
@@ -17,6 +17,13 @@
   padding-block-start: var(--space-4);
 }
 
+.loadingMore {
+  margin: var(--space-3) 0 0;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  text-align: center;
+}
+
 .detail {
   display: block;
   max-width: 320px;
@@ -27,12 +34,12 @@
   white-space: normal;
 }
 
-td strong,
-td small {
+.table td strong,
+.table td small {
   display: block;
 }
 
-td small {
+.table td small {
   color: var(--color-text-secondary);
 }
 

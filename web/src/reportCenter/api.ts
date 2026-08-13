@@ -323,7 +323,8 @@ export function parseReportExportPage(payload: unknown): ReportExportPage {
 
 export function parseReportAuditPage(payload: unknown): ReportAuditPage {
   const data = unwrapData(payload)
-  const rawItems = firstArray(data.items)
+  if (!Array.isArray(data.items) || typeof data.hasMore !== 'boolean') throw new Error('invalid report audit page')
+  const rawItems = data.items
   const items = rawItems.map((value) => {
     if (!isRecord(value)) throw new Error('invalid report audit')
     const id = positiveInteger(value.id)
@@ -336,9 +337,13 @@ export function parseReportAuditPage(payload: unknown): ReportAuditPage {
     if (!id || !actorUserId || !action || !targetType || !targetId || !requestId || !createdAt) throw new Error('invalid report audit')
     return { id, actorUserId, action, targetType, targetId, requestId, detail: isRecord(value.detail) ? value.detail : {}, createdAt }
   })
-  const hasMore = data.hasMore === true
+  for (let index = 1; index < items.length; index += 1) {
+    if (items[index - 1].id <= items[index].id) throw new Error('invalid report audit order')
+  }
+  const hasMore = data.hasMore
   const nextAfterId = nonNegativeInteger(data.nextAfterId)
-  if (hasMore && nextAfterId < 1) throw new Error('invalid report audit cursor')
+  if (hasMore && (items.length === 0 || nextAfterId !== items[items.length - 1].id)) throw new Error('invalid report audit cursor')
+  if (!hasMore && nextAfterId !== 0) throw new Error('unexpected report audit cursor')
   return { items, hasMore, nextAfterId }
 }
 

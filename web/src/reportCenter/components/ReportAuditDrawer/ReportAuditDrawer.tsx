@@ -21,6 +21,10 @@ export function ReportAuditDrawer({ client, open, reports, onClose }: {
   const [state, setState] = useState({ loading: false, error: '' })
   const requestSequence = useRef(0)
 
+  useEffect(() => {
+    if (!open) requestSequence.current += 1
+  }, [open])
+
   const load = useCallback(async (query: ReportAuditQuery, append = false, signal?: AbortSignal) => {
     const requestId = ++requestSequence.current
     setState({ loading: true, error: '' })
@@ -61,27 +65,29 @@ export function ReportAuditDrawer({ client, open, reports, onClose }: {
   return (
     <Drawer open={open} title="报表审计记录" description="查看配置、运行、查询、导出、下载及结果清理的安全审计元数据。" size="wide" onClose={onClose}>
       <form className={styles.filters} onSubmit={applyFilters}>
-        <label>动作<input value={draft.action ?? ''} maxLength={64} placeholder="例如 REPORT_RUN_RESULT_READ" onChange={(event) => setDraft((current) => ({ ...current, action: event.currentTarget.value }))} /></label>
-        <label>目标类型<select value={draft.targetType ?? ''} onChange={(event) => setDraft((current) => ({ ...current, targetType: event.currentTarget.value, targetId: undefined }))}><option value="">全部类型</option><option value="REPORT_DEFINITION">报表配置</option><option value="REPORT_RUN">报表运行</option><option value="REPORT_EXPORT">报表导出</option></select></label>
-        <label>目标报表<select value={draft.targetType === 'REPORT_DEFINITION' ? draft.targetId ?? '' : ''} disabled={draft.targetType !== 'REPORT_DEFINITION'} onChange={(event) => setDraft((current) => ({ ...current, targetId: Number(event.currentTarget.value) || undefined }))}><option value="">全部报表</option>{reports.map((report) => <option key={report.id} value={report.id}>{report.name}</option>)}</select></label>
+        <label>动作<input value={draft.action ?? ''} maxLength={64} placeholder="例如 REPORT_RESULT_QUERY_SUCCESS" onChange={(event) => setDraft((current) => ({ ...current, action: event.currentTarget.value }))} /></label>
+        <label>目标类型<select value={draft.targetType ?? ''} onChange={(event) => setDraft((current) => ({ ...current, targetType: event.currentTarget.value }))}><option value="">全部类型</option><option value="REPORT_DATASOURCE">Oracle 数据源</option><option value="REPORT_DEFINITION">报表配置</option><option value="REPORT_RUN">报表运行</option><option value="REPORT_EXPORT">报表导出</option></select></label>
+        <label>目标 ID<input type="number" min="1" step="1" value={draft.targetId ?? ''} placeholder="可选，输入精确 ID" onChange={(event) => setDraft((current) => ({ ...current, targetId: Number(event.currentTarget.value) || undefined }))} /></label>
+        {draft.targetType === 'REPORT_DEFINITION' && reports.length > 0 ? <label>当前报表快捷选择<select value={draft.targetId ?? ''} onChange={(event) => setDraft((current) => ({ ...current, targetId: Number(event.currentTarget.value) || undefined }))}><option value="">手动输入 / 全部</option>{reports.map((report) => <option key={report.id} value={report.id}>{report.name}</option>)}</select></label> : null}
         <button type="submit" disabled={state.loading}><Search aria-hidden="true" />查询</button>
         <button type="button" disabled={state.loading} onClick={() => void load(filters)}><RefreshCw aria-hidden="true" />刷新</button>
       </form>
       {state.error ? <FeedbackState kind="error" title="审计记录加载失败" description={state.error} action={<button type="button" onClick={() => void load(filters)}>重试</button>} /> : null}
       {state.loading && items.length === 0 ? <FeedbackState kind="loading" title="正在读取报表审计记录" /> : null}
       {!state.loading && !state.error && items.length === 0 ? <FeedbackState kind="empty" title="暂无匹配的审计记录" /> : null}
-      {items.length > 0 ? <AuditTable items={items} /> : null}
-      {hasMore ? <div className={styles.more}><button type="button" disabled={state.loading} onClick={() => void load({ ...filters, afterId: nextAfterId }, true)}>加载更多</button></div> : null}
+      {items.length > 0 ? <div aria-busy={state.loading}><AuditTable items={items} /></div> : null}
+      {state.loading && items.length > 0 ? <p className={styles.loadingMore} role="status" aria-live="polite">正在加载更多审计记录</p> : null}
+      {hasMore ? <div className={styles.more}><button type="button" disabled={state.loading} onClick={() => void load({ ...filters, afterId: nextAfterId }, true)}>{state.loading ? '加载中…' : '加载更多'}</button></div> : null}
     </Drawer>
   )
 }
 
 function AuditTable({ items }: { items: ReportAudit[] }) {
-  return <DataTable density="compact" minWidth={920} scrollLabel="报表审计记录"><thead><tr><th scope="col">时间</th><th scope="col">动作</th><th scope="col">目标</th><th scope="col">操作人</th><th scope="col">请求标识</th><th scope="col">详情</th></tr></thead><tbody>{items.map((item) => <tr key={item.id}><td>{formatDate(item.createdAt)}</td><td><StatusTag tone={auditTone(item.action)}>{auditActionLabel(item.action)}</StatusTag></td><td><strong>{targetLabel(item.targetType)}</strong><small>#{item.targetId}</small></td><td>用户 #{item.actorUserId}</td><td><code>{item.requestId}</code></td><td><code className={styles.detail}>{JSON.stringify(item.detail)}</code></td></tr>)}</tbody></DataTable>
+  return <DataTable containerClassName={styles.table} density="compact" minWidth={920} scrollLabel="报表审计记录"><thead><tr><th scope="col">时间</th><th scope="col">动作</th><th scope="col">目标</th><th scope="col">操作人</th><th scope="col">请求标识</th><th scope="col">详情</th></tr></thead><tbody>{items.map((item) => <tr key={item.id}><td>{formatDate(item.createdAt)}</td><td><StatusTag tone={auditTone(item.action)}>{auditActionLabel(item.action)}</StatusTag></td><td><strong>{targetLabel(item.targetType)}</strong><small>#{item.targetId}</small></td><td>用户 #{item.actorUserId}</td><td><code>{item.requestId}</code></td><td><code className={styles.detail}>{JSON.stringify(item.detail)}</code></td></tr>)}</tbody></DataTable>
 }
 
 function auditTone(action: string) {
-  if (action.includes('REJECTED') || action.includes('FAILED')) return 'danger' as const
+  if (action.includes('DENIED') || action.includes('REJECTED') || action.includes('FAILED')) return 'danger' as const
   if (action.includes('DOWNLOAD') || action.includes('READ')) return 'info' as const
   if (action.includes('PUBLISH') || action.includes('PURGE')) return 'success' as const
   return 'neutral' as const
@@ -97,7 +103,7 @@ function auditActionLabel(action: string) {
 }
 
 function targetLabel(targetType: string) {
-  return ({ REPORT_DEFINITION: '报表', REPORT_RUN: '运行', REPORT_EXPORT: '导出' } as Record<string, string>)[targetType] ?? targetType
+  return ({ REPORT_DATASOURCE: '数据源', REPORT_DEFINITION: '报表', REPORT_RUN: '运行', REPORT_EXPORT: '导出' } as Record<string, string>)[targetType] ?? targetType
 }
 
 function formatDate(value: string) {
