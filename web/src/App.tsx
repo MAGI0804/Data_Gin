@@ -2,64 +2,30 @@ import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } fr
 import styles from './App.module.css'
 import { apiURL as buildApiURL } from './apiURL'
 import { clearStoredToken, loadStoredSessionUser, loadStoredToken, saveStoredSessionUser, saveStoredToken, saveStoredTokenExpiry, storedTokenExpiresAt, tokenActorID, type StoredSessionUser } from './authStorage'
-import { createApiClient, type ApiRequestOptions, type ClientResponse, type HTTPMethod } from './api/client'
+import { createApiClient, type ApiRequestOptions, type ClientResponse } from './api/client'
 import { verifySessionResponses, type SessionUser } from './api/auth'
-import { parseDataStatisticsSummary, parseHealthSummary, parseMallWeatherMetricsSummary, type DataStatisticsSummary, type HealthSummary, type MallWeatherMetricsSummary } from './monitoring'
-import { MallWeatherPage, StoreInfoPage } from './MallWeatherPage'
-import { AccessManagementPage } from './AccessManagementPage'
+import { parseDataStatisticsSummary, parseHealthSummary, parseMallWeatherMetricsSummary } from './monitoring'
 import { pipelineListPath } from './pipelineRun'
-import { ReportCenter } from './reportCenter/ReportCenter'
 import { AppShell } from './ui'
-import { RunOverviewPage } from './monitoringPages/RunOverviewPage/RunOverviewPage'
-import { PipelineRunsPage } from './monitoringPages/PipelineRunsPage/PipelineRunsPage'
-import { StepRunsPage } from './monitoringPages/StepRunsPage/StepRunsPage'
-import { DeliveryLogsPage } from './monitoringPages/DeliveryLogsPage/DeliveryLogsPage'
 import { parseDeliveryLog, parsePipelineRun } from './monitoringPages/contracts'
 import type { DeliveryLog, PipelineRun } from './monitoringPages/types'
-import { SourcesPage } from './configurationPages/SourcesPage/SourcesPage'
 import type { SourceDefinition } from './configurationPages/types'
-import { RulesPage } from './configurationPages/RulesPage/RulesPage'
 import type { TransformRule } from './configurationPages/ruleContracts'
-import { DestinationsPage } from './configurationPages/DestinationsPage/DestinationsPage'
-import { DeliveryTasksPage } from './configurationPages/DeliveryTasksPage/DeliveryTasksPage'
-import { PushPolicyPage } from './configurationPages/PushPolicyPage/PushPolicyPage'
-import { MethodsPage } from './configurationPages/MethodsPage/MethodsPage'
-import { ExcelMatchPage } from './excelPages/ExcelMatchPage'
 import type { DestinationDefinition } from './configurationPages/types'
 import { parseMallWeatherExportContentStatus, submitMallWeatherExportContentDownload } from './mallWeatherExport'
 import { parseMonitoringPage } from './monitoringRecords'
-import { ProcessedRecordsPage } from './dataPages/ProcessedRecordsPage'
-import { RawRecordsPage } from './dataPages/RawRecordsPage'
-import { BojunBackfillPage } from './backfillPages/BojunBackfillPage'
-import { YouzanDistributionPage } from './backfillPages/YouzanDistributionPage'
 import type { LegacyTask } from './backfillPages/youzanDistributionSupport'
 import { ConsoleHeader } from './appShell/ConsoleHeader'
 import { ConsoleNavigation } from './appShell/ConsoleNavigation'
 import { consoleNavigationClassName } from './appShell/consoleNavigationStyles'
 import { LoginScreen } from './appShell/LoginScreen'
 import { ResultDrawer } from './appShell/ResultDrawer'
-import { navFromHash, reportCenterNavKey, reportCenterSection, usesCompactWorkspace, type NavKey } from './appShell/navigation'
+import { navFromHash, usesCompactWorkspace, type NavKey } from './appShell/navigation'
+import { WorkspaceRouter, type MonitoringSnapshot, type PipelineDefinition, type WorkspaceApiClient, type WorkspaceDownloadClient } from './appShell/WorkspaceRouter'
 
 const defaultApiBaseURL = import.meta.env.VITE_API_BASE_URL ?? ''
 
 type ApiResult = ClientResponse
-
-type ApiClientOptions = Omit<ApiRequestOptions, 'method'> & {
-  method?: HTTPMethod
-  showResult?: boolean
-  silentLoading?: boolean
-}
-
-type ApiClient = (path: string, options?: ApiClientOptions) => Promise<ApiResult>
-type MonitoringSnapshot = { statistics: DataStatisticsSummary | null; weather: MallWeatherMetricsSummary | null; health: HealthSummary | null }
-type FileDownloadClient = (path: string, fileName: string, signal: AbortSignal) => Promise<ApiResult>
-
-type PipelineDefinition = {
-  id: number
-  name: string
-  code: string
-  enabled: boolean
-}
 
 function App() {
   const [token, setToken] = useState(() => loadStoredToken(window.localStorage))
@@ -124,7 +90,7 @@ function App() {
     [clearSession, updateSessionToken],
   )
 
-  const client = useCallback<ApiClient>(
+  const client = useCallback<WorkspaceApiClient>(
     async (path, options = {}) => {
       if (!options.silentLoading) setLoading(true)
       try {
@@ -157,7 +123,7 @@ function App() {
     [apiClient],
   )
 
-  const downloadFile = useCallback<FileDownloadClient>(
+  const downloadFile = useCallback<WorkspaceDownloadClient>(
     async (path, fileName, signal) => {
       const validFileName = /^mall_weather_export_[0-9a-f-]{36}\.xlsx$/i.test(fileName)
       if (!validFileName) return { ok: false, status: 422, data: 'invalid download file name' }
@@ -466,7 +432,6 @@ function App() {
 
   if (sessionState !== 'authenticated') return <LoginScreen onLogin={handleLogin} checking={sessionState === 'checking'} />
 
-  const reportSection = reportCenterSection(activeNav)
   const compactWorkspace = usesCompactWorkspace(activeNav)
   const shellNavigation = (
     <ConsoleNavigation
@@ -493,26 +458,37 @@ function App() {
       notices={<>{sessionValidationError && <div className={styles.notice} role="status" aria-live="polite">{sessionValidationError} <button type="button" onClick={() => setSessionValidationAttempt((attempt) => attempt + 1)}>重试校验</button></div>}{workspaceError && <div className={styles.notice} role="alert">{workspaceError} <button type="button" onClick={() => void refreshWorkspace(false)} disabled={refreshing}>重试</button></div>}</>}
       overlay={<ResultDrawer result={result} onClose={() => setResult(null)} />}
     >
-        {activeNav === 'overview' && <RunOverviewPage runs={runs} deliveryLogs={deliveryLogs} monitoring={monitoring} stale={monitoringStale} overviewTotals={overviewTotals} onLoadSteps={openStepRuns} />}
-        {activeNav === 'runs' && <PipelineRunsPage client={client} pipelines={pipelines} onLoadSteps={openStepRuns} onPipelineRunCompleted={() => void refreshWorkspace(false)} refreshVersion={workspaceRefreshVersion} />}
-        {activeNav === 'delivery_logs' && <DeliveryLogsPage client={client} onRetryLog={retryDeliveryLog} />}
-        {activeNav === 'step_runs' && <StepRunsPage client={client} focusRunID={stepRunFocusID} />}
-        {activeNav === 'store_info' && <StoreInfoPage actorID={actorID} client={client} downloadFile={downloadFile} />}
-        {activeNav === 'mall_weather' && <MallWeatherPage actorID={actorID} client={client} downloadFile={downloadFile} />}
-        {reportSection && <ReportCenter client={client} permissions={sessionUser?.permissions ?? []} section={reportSection} onNavigate={(section) => navigate(reportCenterNavKey(section))} />}
-        {activeNav === 'access_management' && <AccessManagementPage client={client} permissions={sessionUser?.permissions ?? []} />}
-        {activeNav === 'sources' && <SourcesPage client={client} onFetchSource={fetchSource} onTestSource={testSource} refreshVersion={workspaceRefreshVersion} />}
-        {activeNav === 'methods' && <MethodsPage client={client} permissions={sessionUser?.permissions ?? []} refreshVersion={workspaceRefreshVersion} />}
-        {activeNav === 'receive' && <RawRecordsPage title="接口接收记录" origin="receive" client={client} onFetchSource={fetchSource} />}
-        {activeNav === 'pull_records' && <RawRecordsPage title="数据拉取记录" origin="pull" client={client} onFetchSource={fetchSource} />}
-        {activeNav === 'backfill' && <BojunBackfillPage client={client} loading={loading || refreshing} onCompletedRefresh={() => refreshWorkspace(false)} />}
-        {activeNav === 'youzan_distribution' && <YouzanDistributionPage client={client} task={legacyTasks.find((item) => item.code === 'youzan_distribution_order_fetch')} loading={loading || refreshing} onCompletedRefresh={() => refreshWorkspace(false)} />}
-        {activeNav === 'rules' && <RulesPage client={client} rules={transformRules} sources={sources} onRulesChange={setTransformRules} refreshVersion={workspaceRefreshVersion} />}
-        {activeNav === 'processed' && <ProcessedRecordsPage client={client} />}
-        {activeNav === 'destinations' && <DestinationsPage client={client} refreshVersion={workspaceRefreshVersion} />}
-        {activeNav === 'tasks' && <DeliveryTasksPage client={client} canManage={Boolean(sessionUser?.permissions.includes('delivery.manage'))} sources={sources} destinations={destinations} onRefresh={() => refreshWorkspace(false)} refreshVersion={workspaceRefreshVersion} />}
-        {activeNav === 'push_policy' && <PushPolicyPage client={client} canManage={Boolean(sessionUser?.permissions.includes('delivery.manage'))} refreshVersion={workspaceRefreshVersion} />}
-        {(activeNav === 'excel_jobs' || activeNav === 'excel_schemes' || activeNav === 'excel_write') && <ExcelMatchPage section={activeNav === 'excel_jobs' ? 'jobs' : activeNav === 'excel_schemes' ? 'schemes' : 'write'} client={client} token={token} loading={loading} refreshVersion={workspaceRefreshVersion} setLoading={setLoading} setResult={setResult} onNavigateToJobs={() => navigate('excel_jobs')} />}
+        <WorkspaceRouter
+          activeNav={activeNav}
+          actorID={actorID}
+          client={client}
+          deliveryLogs={deliveryLogs}
+          destinations={destinations}
+          downloadFile={downloadFile}
+          legacyTasks={legacyTasks}
+          loading={loading}
+          monitoring={monitoring}
+          monitoringStale={monitoringStale}
+          navigate={navigate}
+          onFetchSource={fetchSource}
+          onLoadSteps={openStepRuns}
+          onRefresh={() => refreshWorkspace(false)}
+          onRetryDeliveryLog={retryDeliveryLog}
+          onTestSource={testSource}
+          overviewTotals={overviewTotals}
+          permissions={sessionUser?.permissions ?? []}
+          pipelines={pipelines}
+          refreshing={refreshing}
+          refreshVersion={workspaceRefreshVersion}
+          runs={runs}
+          setLoading={setLoading}
+          setResult={setResult}
+          setTransformRules={setTransformRules}
+          sources={sources}
+          stepRunFocusID={stepRunFocusID}
+          token={token}
+          transformRules={transformRules}
+        />
     </AppShell>
   )
 }
