@@ -433,6 +433,7 @@ func reportColumnsFromRequest(requests []requestbody.ReportColumnRequest) ([]mod
 	excelHeaders := make(map[string]struct{}, len(requests))
 	displayOrders := make(map[int]struct{}, len(requests))
 	exportOrders := make(map[int]struct{}, len(requests))
+	exportableColumns := 0
 	for _, request := range requests {
 		request.FieldID = strings.TrimSpace(request.FieldID)
 		request.LogicalCode = strings.TrimSpace(request.LogicalCode)
@@ -472,16 +473,20 @@ func reportColumnsFromRequest(requests []requestbody.ReportColumnRequest) ([]mod
 		if _, exists := displayOrders[request.DisplayOrder]; exists {
 			return nil, invalidReport("duplicated column display order")
 		}
-		if request.ExportVisible {
+		exportable := request.ExportVisible && request.ExportAllowed
+		if exportable {
 			if _, exists := exportOrders[request.ExportOrder]; exists {
 				return nil, invalidReport("duplicated column export order")
 			}
 			exportOrders[request.ExportOrder] = struct{}{}
 		}
+		if exportable {
+			exportableColumns++
+		}
 		if request.PreviewVisible && request.PreviewHeader == "" {
 			return nil, invalidReport("visible preview column requires a header")
 		}
-		if request.ExportVisible {
+		if exportable {
 			if request.ExcelHeader == "" {
 				return nil, invalidReport("visible export column requires an Excel header")
 			}
@@ -509,6 +514,9 @@ func reportColumnsFromRequest(requests []requestbody.ReportColumnRequest) ([]mod
 			DictionaryVersionJSON: jsonText(request.DictionaryVersion), MaskingPolicyJSON: jsonText(request.MaskingPolicy),
 			ExcelWidth: request.ExcelWidth, NullDisplay: request.NullDisplay,
 		})
+	}
+	if exportableColumns == 0 {
+		return nil, invalidReport("at least one exportable result column is required")
 	}
 	sort.SliceStable(columns, func(i, j int) bool { return columns[i].DisplayOrder < columns[j].DisplayOrder })
 	return columns, nil

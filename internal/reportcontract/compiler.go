@@ -422,6 +422,7 @@ func compileColumns(
 	logicalCodes := make(map[string]struct{}, len(configured))
 	excelHeaders := make(map[string]struct{}, len(configured))
 	specs := make([]columnSpec, 0, len(configured))
+	exportableColumns := 0
 	for _, column := range configured {
 		actualColumn, exists := actualByName[strings.ToUpper(strings.TrimSpace(column.DatabaseColumn))]
 		if !exists || !sameOracleType(column.SourceOracleType, actualColumn.DataType) ||
@@ -436,7 +437,8 @@ func compileColumns(
 			return nil, nil, contractError("result logical column %q is duplicated", column.LogicalCode)
 		}
 		logicalCodes[logicalKey] = struct{}{}
-		if column.ExportVisible {
+		exportable := column.ExportVisible && column.ExportAllowed
+		if exportable {
 			header := strings.TrimSpace(column.ExcelHeader)
 			if header == "" {
 				return nil, nil, contractError("export column %q requires an Excel header", column.LogicalCode)
@@ -445,6 +447,9 @@ func compileColumns(
 				return nil, nil, contractError("Excel header %q is duplicated", header)
 			}
 			excelHeaders[header] = struct{}{}
+		}
+		if exportable {
+			exportableColumns++
 		}
 		specs = append(specs, columnSpec{
 			FieldID: column.FieldID, LogicalCode: column.LogicalCode,
@@ -460,6 +465,9 @@ func compileColumns(
 			ExcelWidth:  column.ExcelWidth,
 			NullDisplay: column.NullDisplay,
 		})
+	}
+	if exportableColumns == 0 {
+		return nil, nil, contractError("at least one exportable result column is required")
 	}
 	normalized := append([]reportoracle.ResultColumn(nil), actual...)
 	sort.Slice(normalized, func(i, j int) bool { return normalized[i].Position < normalized[j].Position })

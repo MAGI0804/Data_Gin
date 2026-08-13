@@ -100,6 +100,28 @@ func TestCompileRejectsResultAndExcelMappingDrift(t *testing.T) {
 	}
 }
 
+func TestCompileRejectsContractWithoutExportableColumns(t *testing.T) {
+	version, parameters, columns, grants, arguments, result := validContract()
+	for index := range columns {
+		columns[index].ExportAllowed = false
+	}
+	contract := validSnapshotContract(t, version, result, columns)
+	if _, err := Compile(version, parameters, columns, grants, arguments, result, contract); !errors.Is(err, ErrInvalidContract) {
+		t.Fatalf("Compile() error = %v, want ErrInvalidContract", err)
+	}
+}
+
+func TestCompileIgnoresNonExportableFieldsInExcelHeaderUniqueness(t *testing.T) {
+	version, parameters, columns, grants, arguments, result := validContract()
+	columns[0].ExportAllowed = false
+	columns[1].ExcelHeader = columns[0].ExcelHeader
+	columns[1].ExportOrder = columns[0].ExportOrder
+	contract := validSnapshotContract(t, version, result, columns)
+	if _, err := Compile(version, parameters, columns, grants, arguments, result, contract); err != nil {
+		t.Fatalf("Compile() error = %v", err)
+	}
+}
+
 func TestCanonicalJSONPreservesExactNumbers(t *testing.T) {
 	left := canonicalJSON(model.JSONText(`{"value":9007199254740992,"decimal":0.1234567890123456789}`))
 	right := canonicalJSON(model.JSONText(`{"value":9007199254740993,"decimal":0.1234567890123456790}`))

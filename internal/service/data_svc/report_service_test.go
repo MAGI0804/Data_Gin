@@ -71,6 +71,7 @@ func TestReportDraftServiceRejectsInvalidContractsBeforeStore(t *testing.T) {
 			request.Parameters[0].Nullable = true
 		}},
 		{name: "unknown logical type", mutate: func(request *requestbody.ReportDraftSaveRequest) { request.Parameters[0].LogicalType = "shell" }},
+		{name: "no exportable column", mutate: func(request *requestbody.ReportDraftSaveRequest) { request.Columns[0].ExportAllowed = false }},
 		{name: "invalid result precision", mutate: func(request *requestbody.ReportDraftSaveRequest) {
 			precision := 39
 			request.Columns[0].Precision = &precision
@@ -99,6 +100,22 @@ func TestReportDraftServiceRejectsInvalidContractsBeforeStore(t *testing.T) {
 				t.Fatalf("store create calls = %d", store.createCalls)
 			}
 		})
+	}
+}
+
+func TestReportDraftServiceIgnoresNonExportableFieldsInExcelUniqueness(t *testing.T) {
+	request := validReportDraftRequest()
+	request.Columns[0].ExportAllowed = false
+	second := request.Columns[0]
+	second.FieldID = uuid.NewString()
+	second.LogicalCode = "storeName"
+	second.DatabaseColumn = "store_name"
+	second.DisplayOrder = 2
+	second.ExportAllowed = true
+	request.Columns = append(request.Columns, second)
+
+	if _, err := reportDraftFromRequest(17, request); err != nil {
+		t.Fatalf("reportDraftFromRequest() error = %v", err)
 	}
 }
 
