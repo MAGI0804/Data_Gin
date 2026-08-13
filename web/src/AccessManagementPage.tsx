@@ -49,7 +49,10 @@ export function AccessManagementPage({ client, permissions }: { client: ApiClien
   }, [availableTabs, tab])
 
   if (availableTabs.length === 0) {
-    return <PageCanvas><FeedbackState kind="error" title="当前账号无权查看账号与权限" description="请联系管理员补充系统账号、角色或审计查看权限。" /></PageCanvas>
+    return <PageCanvas className={styles.page}>
+      <PageHeader eyebrow="ACCESS CONTROL" title="账号与权限" description="在一个工作画布中管理控制台账号、角色权限矩阵、开放 API 与变更审计。" />
+      <FeedbackState kind="error" title="当前账号无权查看账号与权限" description="请联系管理员补充系统账号、角色或审计查看权限。" />
+    </PageCanvas>
   }
 
   return <PageCanvas className={styles.page}>

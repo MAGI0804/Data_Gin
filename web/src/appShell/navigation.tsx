@@ -114,7 +114,8 @@ const navItems = navGroups.flatMap((group) => group.items)
 const compactWorkspaceKeys = new Set<NavKey>([
   'access_management', 'sources', 'receive', 'pull_records', 'backfill', 'youzan_distribution', 'rules', 'processed',
   'methods', 'destinations', 'tasks', 'push_policy', 'overview', 'runs', 'delivery_logs', 'step_runs', 'store_info',
-  'mall_weather', 'report_catalog', 'report_configuration', 'report_query', 'report_exports',
+  'mall_weather', 'report_catalog', 'report_configuration', 'report_query', 'report_exports', 'excel_jobs',
+  'excel_schemes', 'excel_write',
 ])
 
 export function navGroupFor(key: NavKey) {

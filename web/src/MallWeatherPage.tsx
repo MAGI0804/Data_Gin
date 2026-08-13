@@ -1,6 +1,6 @@
 import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AlertTriangle, Clock3, CloudRain, CloudSun, Database, Download, MapPin, RefreshCcw, Thermometer } from 'lucide-react'
-import storeStyles from './StoreInfoPage.module.css'
+import storeStyles from './MallStoreWorkspace.module.css'
 import { MallWeatherChart, type MallWeatherChartSeries } from './MallWeatherChart'
 import { MallWeatherExportPanel } from './MallWeatherExportPanel'
 import { MallWeatherExportProfilePanel } from './MallWeatherExportProfilePanel'

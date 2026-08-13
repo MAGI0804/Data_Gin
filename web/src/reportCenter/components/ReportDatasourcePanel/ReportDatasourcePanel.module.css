@@ -5,9 +5,9 @@
 .toolbar button, .actions, .actions button, .identity { display: inline-flex; align-items: center; gap: var(--space-2); }
 .toolbar svg, .actions svg, .identity > svg { width: 16px; height: 16px; }
 .identity > svg { color: var(--color-brand-active); }
-.identity strong, .identity code, td small { display: block; }
-.identity code, td code, .mono { font-family: var(--font-mono); }
-td small { margin-top: var(--space-1); color: var(--color-text-secondary); }
+.identity strong, .identity code, .root td small { display: block; }
+.identity code, .root td code, .mono { font-family: var(--font-mono); }
+.root td small { margin-top: var(--space-1); color: var(--color-text-secondary); }
 .actions { flex-wrap: wrap; }
 .actions button { border: 0; background: transparent; padding: var(--space-1); color: var(--color-brand-active); }
 .actions button:disabled { color: var(--color-text-secondary); }
