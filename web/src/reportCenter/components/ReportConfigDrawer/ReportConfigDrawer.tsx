@@ -64,14 +64,16 @@ function Editor({ tab, draft, datasources, datasourcesLoading, datasourcesError,
 }
 
 function ParameterRow({ item, onChange, onDelete }: { item: ReportParameter; onChange: (item: ReportParameter) => void; onDelete: () => void }) {
+	const compatibleControlTypes = controlTypesForLogicalType(item.logicalType)
   const setLogicalType = (logicalType: ReportParameter['logicalType']) => {
-    const source = item.valueSource.source
-    const compatibleSource = (source === 'RUN_ID' && logicalType === 'string') || (source === 'ACTOR_ID' && logicalType === 'integer')
-    const supportsNormalizer = logicalType === 'string' || logicalType === 'enum' || logicalType === 'multi_enum'
-    onChange({
-      ...item,
-      logicalType,
-      controlType: logicalType === 'boolean' ? 'CHECKBOX' : logicalType === 'date' ? 'DATE' : logicalType === 'datetime' ? 'DATETIME' : logicalType === 'enum' ? 'SELECT' : logicalType === 'multi_enum' ? 'MULTI_SELECT' : logicalType === 'integer' || logicalType === 'decimal' ? 'NUMBER' : logicalType === 'json' ? 'TEXTAREA' : item.controlType,
+		const source = item.valueSource.source
+		const compatibleSource = (source === 'RUN_ID' && logicalType === 'string') || (source === 'ACTOR_ID' && logicalType === 'integer')
+		const supportsNormalizer = logicalType === 'string' || logicalType === 'enum' || logicalType === 'multi_enum'
+		const compatibleControls = controlTypesForLogicalType(logicalType)
+		onChange({
+			...item,
+			logicalType,
+			controlType: compatibleControls.includes(item.controlType) ? item.controlType : compatibleControls[0],
       cardinality: logicalType === 'multi_enum' ? 'MULTIPLE' : 'SINGLE',
       collectionEncoding: logicalType === 'multi_enum' ? 'JSON_CLOB' : '',
       normalizer: supportsNormalizer ? item.normalizer : {},
@@ -84,7 +86,7 @@ function ParameterRow({ item, onChange, onDelete }: { item: ReportParameter; onC
     <ContractField label="显示顺序"><input type="number" min="0" step="1" value={item.displayOrder} onChange={(event) => onChange({ ...item, displayOrder: Number(event.currentTarget.value) })} /></ContractField>
     <ContractField label="过程参数名"><input className={styles.mono} value={item.procedureArgName} onChange={(event) => onChange({ ...item, procedureArgName: event.currentTarget.value })} /></ContractField>
     <ContractField label="过程位置"><input type="number" min="1" step="1" value={item.position} onChange={(event) => onChange({ ...item, position: Number(event.currentTarget.value) })} /></ContractField>
-    <ContractField label="控件类型"><select value={item.controlType} onChange={(event) => onChange({ ...item, controlType: event.currentTarget.value as ReportParameter['controlType'] })}>{['TEXT','TEXTAREA','NUMBER','CHECKBOX','DATE','DATETIME','SELECT','MULTI_SELECT'].map((value) => <option key={value}>{value}</option>)}</select></ContractField>
+		<ContractField label="控件类型"><select value={item.controlType} onChange={(event) => onChange({ ...item, controlType: event.currentTarget.value as ReportParameter['controlType'] })}>{compatibleControlTypes.map((value) => <option key={value}>{value}</option>)}</select></ContractField>
     <ContractField label="业务类型"><select value={item.logicalType} onChange={(event) => setLogicalType(event.currentTarget.value as ReportParameter['logicalType'])}>{['string','integer','decimal','boolean','date','datetime','enum','multi_enum','json'].map((value) => <option key={value}>{value}</option>)}</select></ContractField>
     <ContractField label="参数基数"><select value={item.cardinality} onChange={(event) => onChange({ ...item, cardinality: event.currentTarget.value as ReportParameter['cardinality'], collectionEncoding: event.currentTarget.value === 'MULTIPLE' ? 'JSON_CLOB' : '' })}><option value="SINGLE">单值</option><option value="MULTIPLE">多值</option></select></ContractField>
     <ContractField label="Oracle 类型"><input className={styles.mono} value={item.oracleType} onChange={(event) => onChange({ ...item, oracleType: event.currentTarget.value })} /></ContractField>
@@ -108,6 +110,18 @@ function ParameterRow({ item, onChange, onDelete }: { item: ReportParameter; onC
     <Delete onClick={onDelete} />
   </div>
 }
+
+function controlTypesForLogicalType(logicalType: ReportParameter['logicalType']): ReportParameter['controlType'][] {
+	if (logicalType === 'string') return ['TEXT', 'TEXTAREA']
+	if (logicalType === 'integer' || logicalType === 'decimal') return ['NUMBER']
+	if (logicalType === 'boolean') return ['CHECKBOX']
+	if (logicalType === 'date') return ['DATE']
+	if (logicalType === 'datetime') return ['DATETIME']
+	if (logicalType === 'enum') return ['SELECT']
+	if (logicalType === 'multi_enum') return ['MULTI_SELECT']
+	return ['TEXTAREA']
+}
+
 function ColumnRow({ item, excel, onChange, onDelete }: { item: ReportColumn; excel: boolean; onChange: (item: ReportColumn) => void; onDelete: () => void }) {
   return <div className={styles.contractRow}>{excel ? <>
     <ContractField label="页面表头"><input value={item.previewHeader} onChange={(event) => onChange({ ...item, previewHeader: event.currentTarget.value })} /></ContractField>
