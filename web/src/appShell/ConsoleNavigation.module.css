@@ -1,0 +1,183 @@
+.root {
+  gap: var(--space-3);
+}
+
+.brand {
+  margin: 0 10px 22px;
+}
+
+.brand :global(.allblu-brand__logo) {
+  width: 42px;
+  height: 42px;
+  flex-basis: 42px;
+}
+
+.brand :global(.allblu-brand__name) {
+  font-size: 28px;
+  font-weight: 750;
+}
+
+.mobileToggle,
+.search,
+.actions {
+  display: none;
+}
+
+.navigation {
+  display: grid;
+  gap: 15px;
+  padding: 0;
+}
+
+.group {
+  display: grid;
+  gap: 5px;
+}
+
+.group h2 {
+  margin: 0;
+}
+
+.groupToggle {
+  width: 100%;
+  min-height: 24px;
+  justify-content: space-between;
+  border-color: transparent;
+  color: #717985;
+  background: transparent;
+  cursor: default;
+  font-size: 13px;
+  font-weight: 600;
+  padding: 0 10px;
+  pointer-events: none;
+}
+
+.groupToggle:hover {
+  border-color: transparent;
+  background: transparent;
+}
+
+.groupToggle svg {
+  display: none;
+  width: 15px;
+  height: 15px;
+}
+
+.groupItems {
+  display: grid;
+  gap: 2px;
+}
+
+.item {
+  width: 100%;
+  min-height: 43px;
+  justify-content: flex-start;
+  border: 0;
+  border-left: 4px solid transparent;
+  border-radius: 0;
+  color: #5f6670;
+  padding: 8px 12px 8px 14px;
+  text-align: left;
+}
+
+.item:hover {
+  background: #fbfaf7;
+}
+
+.item > span,
+.item strong,
+.item small {
+  display: block;
+}
+
+.item > span {
+  min-width: 0;
+}
+
+.item svg {
+  width: 20px;
+  height: 20px;
+  flex: 0 0 auto;
+  color: #898f98;
+}
+
+.item strong {
+  font-size: 16px;
+  font-weight: 600;
+}
+
+.item small {
+  display: none;
+  margin-top: 2px;
+  color: var(--color-text-secondary);
+  font-size: 10px;
+  font-weight: 500;
+}
+
+.item.active,
+.item.active:hover {
+  border-color: var(--color-brand);
+  background: var(--color-brand-soft);
+  color: #f08d00;
+}
+
+.searchControl {
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  gap: var(--space-2);
+  align-items: center;
+  border: 1px solid var(--color-border-strong);
+  background: var(--color-canvas);
+  padding: 0 var(--space-2);
+}
+
+.searchControl svg {
+  width: 16px;
+  height: 16px;
+}
+
+.searchControl input {
+  border: 0;
+  outline: 0;
+  padding-inline: 0;
+}
+
+.actions {
+  gap: var(--space-2);
+  align-self: stretch;
+  margin-top: auto;
+  padding: var(--space-3) var(--space-1) 0;
+  border-top: 1px solid var(--color-border);
+}
+
+.actions button {
+  border-color: transparent;
+  color: var(--color-text-secondary);
+  padding-inline: var(--space-1);
+}
+
+@media (max-width: 840px) {
+  .mobileToggle {
+    display: inline-flex;
+    justify-self: start;
+  }
+
+  .search {
+    display: grid;
+    gap: 7px;
+  }
+
+  .actions {
+    display: grid;
+  }
+
+  .groupToggle {
+    cursor: pointer;
+    pointer-events: auto;
+  }
+
+  .groupToggle svg,
+  .item small {
+    display: block;
+  }
+}

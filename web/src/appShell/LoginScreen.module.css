@@ -1,0 +1,117 @@
+.shell {
+  display: grid;
+  min-height: 100vh;
+  min-height: 100dvh;
+  place-items: start center;
+  padding: 20px;
+  padding-top: min(20vh, 168px);
+}
+
+.panel {
+  width: min(420px, 100%);
+  padding: 28px 0 24px;
+  border-top: 3px solid var(--color-brand);
+  border-bottom: 1px solid var(--color-border);
+  border-radius: 0;
+  background: var(--color-canvas);
+}
+
+.title {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  justify-content: flex-start;
+  margin-inline: var(--space-6);
+}
+
+.form {
+  display: grid;
+  gap: var(--space-3);
+  margin-inline: var(--space-6);
+}
+
+.form > h1 {
+  margin: var(--space-3) 0 6px;
+  color: var(--color-text);
+  font-size: 22px;
+  letter-spacing: -0.03em;
+}
+
+.error {
+  padding: var(--space-2) 10px;
+  border: 1px solid var(--color-danger);
+  border-radius: 0;
+  background: var(--color-surface-subtle);
+}
+
+.notice {
+  padding: var(--space-2) 10px;
+  border-left: 3px solid var(--color-brand);
+  color: #3b3b3b;
+  background: var(--color-surface-subtle);
+  font-size: 12px;
+}
+
+.tabs {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.tabs button {
+  border: 0;
+  border-bottom: 2px solid transparent;
+  color: var(--color-text-secondary);
+}
+
+.tabs button.active {
+  border-bottom-color: var(--color-brand);
+  color: var(--color-text);
+}
+
+.codeRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: var(--space-2);
+  align-items: end;
+}
+
+.codeRow > button {
+  min-width: 112px;
+}
+
+.link {
+  min-height: auto;
+  justify-self: start;
+  border: 0;
+  background: transparent;
+  color: #4b5563;
+  padding: 2px 0;
+  font-size: 12px;
+}
+
+.primary {
+  border-color: var(--color-brand);
+  background: var(--color-brand);
+  color: #fff;
+}
+
+.primary:hover:not(:disabled) {
+  border-color: #eb8e00;
+  background: #eb8e00;
+}
+
+@media (max-width: 480px) {
+  .shell {
+    padding: 72px var(--space-4) var(--space-4);
+  }
+
+  .panel {
+    padding-top: var(--space-6);
+  }
+
+  .title,
+  .form {
+    margin-inline: 18px;
+  }
+}

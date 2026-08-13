@@ -1,0 +1,64 @@
+.session {
+  display: flex;
+  gap: var(--space-5);
+  align-items: center;
+  color: #414750;
+  font-size: 14px;
+}
+
+.date,
+.health {
+  display: inline-flex;
+  gap: 9px;
+  align-items: center;
+  white-space: nowrap;
+}
+
+.date svg {
+  width: 20px;
+  height: 20px;
+}
+
+.user {
+  display: none;
+}
+
+.refresh,
+.logout {
+  min-width: 112px;
+}
+
+.logout {
+  color: var(--color-danger);
+}
+
+.health {
+  color: var(--color-success);
+  font-weight: 650;
+}
+
+.health::before {
+  width: 10px;
+  height: 10px;
+  flex: 0 0 10px;
+  border-radius: 999px;
+  background: currentColor;
+  content: '';
+}
+
+.health.loading {
+  color: var(--color-warning);
+}
+
+@media (max-width: 840px) {
+  .session {
+    gap: var(--space-2);
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .date,
+  .health {
+    font-size: 12px;
+  }
+}
