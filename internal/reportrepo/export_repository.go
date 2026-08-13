@@ -47,7 +47,14 @@ func (repository *Repository) CreateOrGetExport(ctx context.Context, actor, runI
 			return ErrReportExportRunNotReady
 		}
 		if !frozenRunAllowsAction(run.PermissionSnapshotJSON, actor, ReportActionExport) {
-			return ErrReportExportRunNotReady
+			if !frozenLegacyRunAllowsLiveAuthorization(run.PermissionSnapshotJSON, actor) {
+				return ErrReportExportRunNotReady
+			}
+			if _, err := loadPublishedReport(ctx, tx, actor, run.DefinitionID, ReportActionExport, false); errors.Is(err, ErrReportActionDenied) || errors.Is(err, ErrPublishedReportNotFound) {
+				return ErrReportExportRunNotReady
+			} else if err != nil {
+				return fmt.Errorf("report export: authorize legacy run: %w", err)
+			}
 		}
 		columns, err := FrozenExportQueryColumns(run.PresentationSnapshotJSON)
 		if err != nil {

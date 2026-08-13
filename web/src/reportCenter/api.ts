@@ -369,6 +369,10 @@ function parseReportParameter(value: unknown): ReportParameter | null {
   const code = publicString(value.code, 64)
   if (!code) return null
   const allowedValues = Array.isArray(value.allowedValues) ? value.allowedValues.filter((item): item is string => typeof item === 'string') : []
+  const normalizer = isRecord(value.normalizer) ? { ...value.normalizer } : {}
+  if (typeof normalizer.case === 'string') normalizer.case = normalizer.case.trim().toUpperCase()
+  const valueSource = isRecord(value.valueSource) ? { ...value.valueSource } : {}
+  if (typeof valueSource.source === 'string') valueSource.source = valueSource.source.trim().toUpperCase()
   return {
     code,
     label: publicString(value.label, 128) || code,
@@ -384,8 +388,8 @@ function parseReportParameter(value: unknown): ReportParameter | null {
     defaultValue: value.defaultValue,
     allowedValues,
     validation: isRecord(value.validation) ? value.validation : {},
-    normalizer: isRecord(value.normalizer) ? value.normalizer : {},
-    valueSource: isRecord(value.valueSource) ? value.valueSource : {},
+    normalizer,
+    valueSource,
     timezone: publicString(value.timezone, 64),
     nullPolicy: publicString(value.nullPolicy, 32) || 'TYPED_NULL',
     errorMessage: publicString(value.errorMessage, 300),

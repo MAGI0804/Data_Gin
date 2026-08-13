@@ -255,6 +255,19 @@ func frozenRunAllowsAction(raw model.JSONText, actor uint, action string) bool {
 	return allowed
 }
 
+func frozenLegacyRunAllowsLiveAuthorization(raw model.JSONText, actor uint) bool {
+	var snapshot runPermissionSnapshot
+	decoder := json.NewDecoder(bytes.NewReader([]byte(raw)))
+	decoder.DisallowUnknownFields()
+	if decoder.Decode(&snapshot) != nil || snapshot.Actor != actor || len(snapshot.Actions) != 0 ||
+		strings.ToUpper(strings.TrimSpace(snapshot.Action)) != ReportActionQuery ||
+		strings.TrimSpace(snapshot.GrantedBy) == "" {
+		return false
+	}
+	var trailing interface{}
+	return errors.Is(decoder.Decode(&trailing), io.EOF)
+}
+
 func encodeRunPresentationSnapshot(columns []model.ReportColumn) (model.JSONText, error) {
 	items := make([]runPresentationColumn, 0, len(columns))
 	for _, column := range columns {

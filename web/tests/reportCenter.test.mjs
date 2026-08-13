@@ -132,7 +132,7 @@ test('parseReportDraft preserves parameter, field and excel mappings', () => {
   assert.equal(draft.parameters[0].systemInjected, true)
   assert.equal(draft.parameters[0].precision, 38)
   assert.deepEqual(draft.parameters[0].normalizer, { trim: true })
-  assert.deepEqual(draft.parameters[0].valueSource, { source: 'run_id' })
+  assert.deepEqual(draft.parameters[0].valueSource, { source: 'RUN_ID' })
   assert.equal(draft.columns[0].databaseColumn, 'AMOUNT')
   assert.equal(draft.columns[0].precision, 18)
   assert.equal(draft.columns[0].displayOrder, 2)

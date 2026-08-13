@@ -190,6 +190,29 @@ func TestFrozenRunPermissionKeepsQueryAndExportCapabilities(t *testing.T) {
 	}
 }
 
+func TestLegacyRunPermissionRequiresExplicitLiveAuthorizationPath(t *testing.T) {
+	legacy, err := encodeRunPermissionSnapshot(17, ReportActionQuery, runAuthority{Source: "ROLE", Grants: []model.ReportGrant{{SubjectType: "ROLE", SubjectID: 2, ActionsJSON: model.JSONText(`["QUERY"]`)}}})
+	if err != nil {
+		t.Fatalf("encodeRunPermissionSnapshot() error = %v", err)
+	}
+	if frozenRunAllowsAction(legacy, 17, ReportActionExport) {
+		t.Fatal("legacy snapshot directly granted export")
+	}
+	if !frozenLegacyRunAllowsLiveAuthorization(legacy, 17) {
+		t.Fatal("valid legacy query snapshot did not enter live authorization path")
+	}
+	for _, invalid := range []model.JSONText{
+		`{"actor":18,"action":"QUERY","grantedBy":"ROLE","grants":[]}`,
+		`{"actor":17,"action":"EXPORT","grantedBy":"ROLE","grants":[]}`,
+		`{"actor":17,"action":"QUERY","actions":["QUERY"],"grantedBy":"ROLE","grants":[]}`,
+		`{"actor":17,"action":"QUERY","grantedBy":"","grants":[]}`,
+	} {
+		if frozenLegacyRunAllowsLiveAuthorization(invalid, 17) {
+			t.Fatalf("invalid legacy snapshot accepted: %s", invalid)
+		}
+	}
+}
+
 func TestWriteReportRunSuppressesInterpolatedSQLLogging(t *testing.T) {
 	spy := &traceCountingLogger{}
 	db := newDryRunDB(t).Session(&gorm.Session{Logger: spy})

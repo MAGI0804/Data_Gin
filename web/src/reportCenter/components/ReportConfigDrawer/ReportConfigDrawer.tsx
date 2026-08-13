@@ -63,13 +63,20 @@ function Editor({ tab, draft, datasources, datasourcesLoading, datasourcesError,
 }
 
 function ParameterRow({ item, onChange, onDelete }: { item: ReportParameter; onChange: (item: ReportParameter) => void; onDelete: () => void }) {
-  const setLogicalType = (logicalType: ReportParameter['logicalType']) => onChange({
-    ...item,
-    logicalType,
-    controlType: logicalType === 'boolean' ? 'CHECKBOX' : logicalType === 'date' ? 'DATE' : logicalType === 'datetime' ? 'DATETIME' : logicalType === 'enum' ? 'SELECT' : logicalType === 'multi_enum' ? 'MULTI_SELECT' : logicalType === 'integer' || logicalType === 'decimal' ? 'NUMBER' : logicalType === 'json' ? 'TEXTAREA' : item.controlType,
-    cardinality: logicalType === 'multi_enum' ? 'MULTIPLE' : 'SINGLE',
-    collectionEncoding: logicalType === 'multi_enum' ? 'JSON_CLOB' : '',
-  })
+  const setLogicalType = (logicalType: ReportParameter['logicalType']) => {
+    const source = item.valueSource.source
+    const compatibleSource = (source === 'RUN_ID' && logicalType === 'string') || (source === 'ACTOR_ID' && logicalType === 'integer')
+    const supportsNormalizer = logicalType === 'string' || logicalType === 'enum' || logicalType === 'multi_enum'
+    onChange({
+      ...item,
+      logicalType,
+      controlType: logicalType === 'boolean' ? 'CHECKBOX' : logicalType === 'date' ? 'DATE' : logicalType === 'datetime' ? 'DATETIME' : logicalType === 'enum' ? 'SELECT' : logicalType === 'multi_enum' ? 'MULTI_SELECT' : logicalType === 'integer' || logicalType === 'decimal' ? 'NUMBER' : logicalType === 'json' ? 'TEXTAREA' : item.controlType,
+      cardinality: logicalType === 'multi_enum' ? 'MULTIPLE' : 'SINGLE',
+      collectionEncoding: logicalType === 'multi_enum' ? 'JSON_CLOB' : '',
+      normalizer: supportsNormalizer ? item.normalizer : {},
+      valueSource: compatibleSource ? item.valueSource : {},
+    })
+  }
   return <div className={styles.contractRow}>
     <ContractField label="参数编码"><input className={styles.mono} value={item.code} onChange={(event) => onChange({ ...item, code: event.currentTarget.value })} /></ContractField>
     <ContractField label="显示名称"><input value={item.label} onChange={(event) => onChange({ ...item, label: event.currentTarget.value })} /></ContractField>
@@ -134,7 +141,7 @@ function Delete({ onClick }: { onClick: () => void }) { return <button className
 function ContractField({ label, children }: { label: string; children: React.ReactNode }) { return <label className={styles.contractField}><span>{label}</span>{children}</label> }
 function NullableNumber({ label, value, min, max, onChange }: { label: string; value: number | null; min: number; max: number; onChange: (value: number | null) => void }) { return <ContractField label={label}><input type="number" min={min} max={max} step="1" value={value ?? ''} onChange={(event) => onChange(event.currentTarget.value === '' ? null : Number(event.currentTarget.value))} /></ContractField> }
 function NormalizerField({ value, disabled, onChange }: { value: Record<string, unknown>; disabled: boolean; onChange: (value: Record<string, unknown>) => void }) { const trim = value.trim === true; const letterCase = value.case === 'UPPER' || value.case === 'LOWER' ? value.case : ''; return <fieldset className={styles.contractGroup} disabled={disabled}><legend>归一化</legend><label className={styles.flag}><input type="checkbox" checked={trim} onChange={(event) => onChange(compactObject({ trim: event.currentTarget.checked, case: letterCase }))} />去除首尾空格</label><select aria-label="大小写归一化" value={letterCase} onChange={(event) => onChange(compactObject({ trim, case: event.currentTarget.value }))}><option value="">保留大小写</option><option value="UPPER">转大写</option><option value="LOWER">转小写</option></select></fieldset> }
-function ValueSourceField({ code, logicalType, systemInjected, value, onChange }: { code: string; logicalType: ReportParameter['logicalType']; systemInjected: boolean; value: Record<string, unknown>; onChange: (value: Record<string, unknown>) => void }) { const fallback = systemInjected && code === 'runId' ? 'RUN_ID' : ''; const source = value.source === 'RUN_ID' || value.source === 'ACTOR_ID' ? value.source : fallback; return <ContractField label="系统值来源"><select disabled={!systemInjected} value={source} onChange={(event) => onChange(event.currentTarget.value ? { source: event.currentTarget.value } : {})}><option value="">请选择</option><option value="RUN_ID">运行 UUID</option><option value="ACTOR_ID" disabled={logicalType !== 'integer'}>当前用户 ID（整数）</option></select></ContractField> }
+function ValueSourceField({ code, logicalType, systemInjected, value, onChange }: { code: string; logicalType: ReportParameter['logicalType']; systemInjected: boolean; value: Record<string, unknown>; onChange: (value: Record<string, unknown>) => void }) { const fallback = systemInjected && code === 'runId' && logicalType === 'string' ? 'RUN_ID' : ''; const source = value.source === 'RUN_ID' || value.source === 'ACTOR_ID' ? value.source : fallback; return <ContractField label="系统值来源"><select disabled={!systemInjected} value={source} onChange={(event) => onChange(event.currentTarget.value ? { source: event.currentTarget.value } : {})}><option value="">请选择</option><option value="RUN_ID" disabled={logicalType !== 'string'}>运行 UUID（字符串）</option><option value="ACTOR_ID" disabled={logicalType !== 'integer'}>当前用户 ID（整数）</option></select></ContractField> }
 function JsonInput({ label, value, disabled, shape, onChange }: { label: string; value: unknown; disabled?: boolean; shape?: 'object' | 'array'; onChange: (value: unknown) => void }) { const serialized = value === undefined ? '' : JSON.stringify(value); const [text, setText] = useState(serialized); const [invalid, setInvalid] = useState(false); useEffect(() => { setText(serialized); setInvalid(false) }, [serialized]); return <label className={styles.jsonField}><span>{label}</span><input className={styles.mono} value={text} disabled={disabled} aria-invalid={invalid || undefined} onChange={(event) => setText(event.currentTarget.value)} onBlur={() => { if (!text.trim()) { setInvalid(false); onChange(undefined); return } try { const parsed = JSON.parse(text) as unknown; if ((shape === 'object' && (!parsed || typeof parsed !== 'object' || Array.isArray(parsed))) || (shape === 'array' && !Array.isArray(parsed))) { setInvalid(true); return } setInvalid(false); onChange(parsed) } catch { setInvalid(true) } }} /></label> }
 function compactObject(value: { trim: boolean; case: string }) { return { ...(value.trim ? { trim: true } : {}), ...(value.case ? { case: value.case } : {}) } }
 function replaceAt<T>(items: T[], index: number, item: T) { return items.map((value, position) => position === index ? item : value) }

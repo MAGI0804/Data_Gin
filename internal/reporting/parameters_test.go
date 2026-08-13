@@ -216,6 +216,16 @@ func TestSystemValueSourceUsesExplicitWhitelist(t *testing.T) {
 	}
 }
 
+func TestValidateParameterDefinitionsRejectsSensitiveSystemParameter(t *testing.T) {
+	definitions := []ParameterDefinition{{
+		Code: "runId", ProcedureArgName: "P_RUN_ID", Position: 1, LogicalType: LogicalTypeString,
+		SystemInjected: true, Sensitive: true,
+	}}
+	if err := ValidateParameterDefinitions(definitions); !errors.Is(err, ErrInvalidParameterContract) {
+		t.Fatalf("ValidateParameterDefinitions() error = %v", err)
+	}
+}
+
 func TestNormalizeParametersRejectsClientSystemParameterAndUnknownParameter(t *testing.T) {
 	definitions := []ParameterDefinition{
 		{Code: "runId", ProcedureArgName: "P_RUN_ID", Position: 1, LogicalType: LogicalTypeString, SystemInjected: true},

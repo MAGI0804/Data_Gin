@@ -52,6 +52,9 @@ func ValidateParameterDefinitions(definitions []ParameterDefinition) error {
 		if definition.Sensitive && len(bytes.TrimSpace(definition.DefaultValue)) > 0 {
 			return contractError("sensitive parameter %q cannot define a plaintext default", definition.Code)
 		}
+		if definition.SystemInjected && definition.Sensitive {
+			return contractError("system parameter %q cannot be sensitive", definition.Code)
+		}
 		if definition.SystemInjected && len(bytes.TrimSpace(definition.Normalizer)) > 0 {
 			return contractError("system parameter %q cannot define a normalizer", definition.Code)
 		}

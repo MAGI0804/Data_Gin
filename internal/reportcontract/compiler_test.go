@@ -169,6 +169,15 @@ func TestCompileAcceptsWhitelistedParameterAutomation(t *testing.T) {
 	}
 }
 
+func TestCompileRejectsLegacySensitiveSystemParameter(t *testing.T) {
+	version, parameters, columns, grants, arguments, result := validContract()
+	contract := validSnapshotContract(t, version, result, columns)
+	parameters[0].Sensitive = true
+	if _, err := Compile(version, parameters, columns, grants, arguments, result, contract); !errors.Is(err, ErrInvalidContract) {
+		t.Fatalf("Compile() error = %v, want ErrInvalidContract", err)
+	}
+}
+
 func TestCompileRejectsLogicalOracleTypeDrift(t *testing.T) {
 	version, parameters, columns, grants, arguments, result := validContract()
 	contract := validSnapshotContract(t, version, result, columns)
