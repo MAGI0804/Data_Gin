@@ -16,6 +16,7 @@ test('parseReportCatalogPage reads the standard API envelope', () => {
         datasourceId: 3,
         status: 'ACTIVE',
         lockVersion: 4,
+        isOwner: false,
         updatedAt: '2026-08-12T10:00:00Z',
       }],
       hasMore: true,
@@ -27,6 +28,7 @@ test('parseReportCatalogPage reads the standard API envelope', () => {
   assert.equal(page.items[0].name, '销售报表')
   assert.equal(page.items[0].status, 'ACTIVE')
   assert.equal(page.items[0].lockVersion, 4)
+  assert.equal(page.items[0].isOwner, false)
   assert.equal(page.hasMore, true)
   assert.equal(page.nextAfterId, 12)
 })
@@ -45,6 +47,7 @@ test('parseReportCatalogPage drops malformed rows and normalizes unsafe fields',
   assert.equal(page.items.length, 1)
   assert.equal(page.items[0].status, 'DRAFT')
   assert.equal(page.items[0].datasourceId, 4)
+  assert.equal(page.items[0].isOwner, false)
   assert.equal(page.nextAfterId, 9)
 })
 

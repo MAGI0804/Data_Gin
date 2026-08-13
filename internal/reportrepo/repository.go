@@ -43,11 +43,13 @@ type DraftListQuery struct {
 type DraftSummary struct {
 	Definition  model.ReportDefinition
 	LockVersion uint64
+	IsOwner     bool
 }
 
 type draftSummaryRecord struct {
 	model.ReportDefinition `gorm:"embedded"`
 	LockVersion            uint64 `gorm:"column:lock_version"`
+	IsOwner                bool   `gorm:"column:is_owner"`
 }
 
 type DraftPage struct {
@@ -364,15 +366,15 @@ func validPublication(value Publication) bool {
 		len(value.ExportSchemaHash) == 64 && len(value.SchemaProbeToken) == 36 && !value.SchemaValidatedAt.IsZero()
 }
 
-func (repository *Repository) ListDrafts(ctx context.Context, ownerUserID uint, query DraftListQuery) (DraftPage, error) {
-	if err := repository.validate(ctx, ownerUserID); err != nil {
+func (repository *Repository) ListDrafts(ctx context.Context, actor uint, query DraftListQuery) (DraftPage, error) {
+	if err := repository.validate(ctx, actor); err != nil {
 		return DraftPage{}, err
 	}
 	if query.Limit < 1 || query.Limit > maxDraftPageSize {
 		return DraftPage{}, invalidDraft("page limit must be between 1 and 100")
 	}
 
-	dbQuery := buildDraftListQuery(repository.db.WithContext(ctx), ownerUserID, query)
+	dbQuery := buildDraftListQuery(repository.db.WithContext(ctx), actor, query)
 
 	var records []draftSummaryRecord
 	if err := dbQuery.Scan(&records).Error; err != nil {
@@ -385,7 +387,7 @@ func (repository *Repository) ListDrafts(ctx context.Context, ownerUserID uint, 
 	}
 	for _, record := range records {
 		page.Items = append(page.Items, DraftSummary{
-			Definition: record.ReportDefinition, LockVersion: record.LockVersion,
+			Definition: record.ReportDefinition, LockVersion: record.LockVersion, IsOwner: record.IsOwner,
 		})
 	}
 	if len(page.Items) > 0 {
@@ -394,12 +396,40 @@ func (repository *Repository) ListDrafts(ctx context.Context, ownerUserID uint, 
 	return page, nil
 }
 
-func buildDraftListQuery(db *gorm.DB, ownerUserID uint, query DraftListQuery) *gorm.DB {
+func buildDraftListQuery(db *gorm.DB, actor uint, query DraftListQuery) *gorm.DB {
 	dbQuery := db.Table("report_definitions AS definitions").
-		Select("definitions.*, versions.version_number AS lock_version").
-		Joins("JOIN report_versions AS versions ON versions.id = definitions.current_draft_version_id AND versions.definition_id = definitions.id AND versions.status = ?", model.ReportVersionStatusDraft).
-		Where("definitions.owner_user_id = ? AND definitions.status IN ?", ownerUserID,
-			[]string{model.ReportDefinitionStatusDraft, model.ReportDefinitionStatusActive})
+		Select(`definitions.*,
+			CASE WHEN definitions.owner_user_id = ? THEN draft_versions.version_number ELSE 0 END AS lock_version,
+			definitions.owner_user_id = ? AS is_owner`, actor, actor).
+		Joins("LEFT JOIN report_versions AS draft_versions ON draft_versions.id = definitions.current_draft_version_id AND draft_versions.definition_id = definitions.id AND draft_versions.status = ?", model.ReportVersionStatusDraft).
+		Joins("LEFT JOIN report_versions AS published_versions ON published_versions.id = definitions.current_published_version_id AND published_versions.definition_id = definitions.id AND published_versions.status = ?", model.ReportVersionStatusPublished).
+		Where(`(
+			definitions.owner_user_id = ?
+			AND definitions.status IN ?
+			AND draft_versions.id IS NOT NULL
+		) OR (
+			definitions.status = ?
+			AND published_versions.id IS NOT NULL
+			AND EXISTS (
+				SELECT 1
+				FROM report_grants AS grants
+				WHERE grants.definition_id = definitions.id
+					AND JSON_CONTAINS(grants.actions_json, JSON_QUOTE(?))
+					AND (
+						(grants.subject_type = ? AND grants.subject_id = ?)
+						OR (
+							grants.subject_type = ?
+							AND EXISTS (
+								SELECT 1
+								FROM user_roles AS memberships
+								JOIN roles ON roles.id = memberships.role_id AND roles.status = ?
+								WHERE memberships.user_id = ? AND memberships.role_id = grants.subject_id
+							)
+						)
+					)
+			)
+		)`, actor, []string{model.ReportDefinitionStatusDraft, model.ReportDefinitionStatusActive},
+			model.ReportDefinitionStatusActive, ReportActionQuery, "USER", actor, "ROLE", model.RoleStatusActive, actor)
 	if query.AfterID > 0 {
 		dbQuery = dbQuery.Where("definitions.id > ?", query.AfterID)
 	}

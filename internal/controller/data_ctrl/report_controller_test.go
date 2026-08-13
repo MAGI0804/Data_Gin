@@ -96,6 +96,32 @@ func TestReportControllerListAndUpdateParseBoundaries(t *testing.T) {
 	}
 }
 
+func TestReportControllerListReturnsSharedPublishedSummaryWithoutConfigurationMetadata(t *testing.T) {
+	service := &fakeReportControllerService{listResult: &data_svc.ReportDraftListDTO{Items: []data_svc.ReportDraftSummaryDTO{{
+		ID: 12, Code: "shared_sales", Name: "共享销售报表", Status: "ACTIVE",
+	}}}}
+	controller := NewReportControllerWithService(service)
+	router := reportControllerRouter()
+	router.GET("/reports", controller.List)
+
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/reports", nil))
+	if recorder.Code != http.StatusOK || service.actor != 17 {
+		t.Fatalf("list response = %d %s actor=%d", recorder.Code, recorder.Body, service.actor)
+	}
+	body := recorder.Body.String()
+	for _, expected := range []string{`"code":"shared_sales"`, `"status":"ACTIVE"`, `"datasourceId":0`, `"lockVersion":0`, `"isOwner":false`} {
+		if !strings.Contains(body, expected) {
+			t.Fatalf("list response %s does not contain %s", body, expected)
+		}
+	}
+	for _, forbidden := range []string{"ownerUserId", "currentDraftVersionId", "grants", "callTemplate"} {
+		if strings.Contains(body, forbidden) {
+			t.Fatalf("list response leaked %q: %s", forbidden, body)
+		}
+	}
+}
+
 func TestReportControllerPublishUsesActorAndLockVersion(t *testing.T) {
 	service := &fakeReportControllerService{}
 	publishService := &fakeReportPublishService{result: &data_svc.ReportPublicationDTO{DefinitionID: 7}}

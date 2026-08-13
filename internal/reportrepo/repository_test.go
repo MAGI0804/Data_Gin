@@ -28,6 +28,7 @@ func TestDefinitionScopeAlwaysFiltersOwnerAndDraftStatus(t *testing.T) {
 		t.Fatalf("build scoped query: %v", statement.Error)
 	}
 	sqlText := statement.Statement.SQL.String()
+	t.Logf("list SQL: %s", sqlText)
 	for _, fragment := range []string{"owner_user_id = ?", "status IN", "id = ?"} {
 		if !strings.Contains(sqlText, fragment) {
 			t.Fatalf("scope SQL %q does not contain %q", sqlText, fragment)
@@ -505,22 +506,39 @@ func newTransactionDB(t *testing.T) (*gorm.DB, *transactionDriverState) {
 	return db, state
 }
 
-func TestListDraftsUsesBoundedKeysetQuery(t *testing.T) {
+func TestListDraftsUsesBoundedKeysetAndSharedQueryAccess(t *testing.T) {
 	db := newDryRunDB(t)
 	statement := buildDraftListQuery(db.Session(&gorm.Session{DryRun: true}), 5,
 		DraftListQuery{AfterID: 10, Limit: 20, Search: `a%b_`}).Scan(&[]draftSummaryRecord{})
 	sqlText := statement.Statement.SQL.String()
 	for _, fragment := range []string{
-		"versions.version_number AS lock_version", "owner_user_id = ?", "status IN", "id > ?",
+		"draft_versions.version_number ELSE 0 END AS lock_version", "definitions.owner_user_id = ?", "definitions.status IN", "definitions.id > ?",
+		"published_versions.id IS NOT NULL", "FROM report_grants AS grants", "JSON_CONTAINS(grants.actions_json, JSON_QUOTE(?))",
+		"grants.subject_type = ? AND grants.subject_id = ?", "FROM user_roles AS memberships", "JOIN roles", "roles.status = ?",
+		")) AND definitions.id > ? AND ((definitions.code LIKE ?",
 		"ORDER BY definitions.id ASC", "LIMIT 21",
 	} {
 		if !strings.Contains(sqlText, fragment) {
 			t.Fatalf("list SQL %q does not contain %q", sqlText, fragment)
 		}
 	}
+	for _, value := range []interface{}{ReportActionQuery, "USER", uint(5), "ROLE", model.RoleStatusActive} {
+		if !containsSQLVariable(statement.Statement.Vars, value) {
+			t.Fatalf("list vars %#v do not contain %#v", statement.Statement.Vars, value)
+		}
+	}
 	if got := escapeLike(`a%b_`); got != `a\%b\_` {
 		t.Fatalf("escapeLike() = %q", got)
 	}
+}
+
+func containsSQLVariable(values []interface{}, expected interface{}) bool {
+	for _, value := range values {
+		if value == expected {
+			return true
+		}
+	}
+	return false
 }
 
 func TestNewVersionRecordPreservesResultIdentityContract(t *testing.T) {

@@ -11,6 +11,7 @@ export type ReportSummary = {
   currentDraftVersionId: number
   currentPublishedVersionId: number
   lockVersion: number
+  isOwner: boolean
   updatedAt: string | null
 }
 

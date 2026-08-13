@@ -436,6 +436,7 @@ function parseReportSummary(value: unknown): ReportSummary | null {
     currentDraftVersionId: positiveInteger(definition.currentDraftVersionId) ?? 0,
     currentPublishedVersionId: positiveInteger(definition.currentPublishedVersionId) ?? 0,
     lockVersion: positiveInteger(value.lockVersion) ?? 0,
+    isOwner: value.isOwner === true,
     updatedAt: publicDate(definition.updatedAt),
   }
 }

@@ -164,9 +164,9 @@ func TestReportDraftServiceReturnsPersistedCreateAndUpdateState(t *testing.T) {
 	}
 }
 
-func TestReportDraftServiceListUsesBoundedOwnerScopedQuery(t *testing.T) {
+func TestReportDraftServiceListUsesBoundedActorScopedQuery(t *testing.T) {
 	store := &fakeReportDraftStore{page: reportrepo.DraftPage{
-		Items:   []reportrepo.DraftSummary{{Definition: model.ReportDefinition{BaseModel: model.BaseModel{ID: 9}, Code: "sales", OwnerUserID: 17}, LockVersion: 4}},
+		Items:   []reportrepo.DraftSummary{{Definition: model.ReportDefinition{BaseModel: model.BaseModel{ID: 9}, Code: "sales", OwnerUserID: 17}, LockVersion: 4, IsOwner: true}},
 		HasMore: true, NextAfterID: 9,
 	}}
 	service := NewReportDraftServiceWithStore(store)
@@ -182,6 +182,36 @@ func TestReportDraftServiceListUsesBoundedOwnerScopedQuery(t *testing.T) {
 	}
 	if _, err := service.List(t.Context(), 17, 0, 101, "", ""); !errors.Is(err, ErrReportInvalid) {
 		t.Fatalf("List() invalid limit error = %v", err)
+	}
+}
+
+func TestReportDraftServiceListRedactsSharedConfigurationMetadata(t *testing.T) {
+	store := &fakeReportDraftStore{page: reportrepo.DraftPage{Items: []reportrepo.DraftSummary{
+		{
+			Definition:  model.ReportDefinition{BaseModel: model.BaseModel{ID: 9}, Code: "owned", Name: "自有报表", DatasourceID: 3, Status: model.ReportDefinitionStatusActive},
+			LockVersion: 4, IsOwner: true,
+		},
+		{
+			Definition:  model.ReportDefinition{BaseModel: model.BaseModel{ID: 10}, Code: "shared", Name: "共享报表", DatasourceID: 8, Status: model.ReportDefinitionStatusActive},
+			LockVersion: 7, IsOwner: false,
+		},
+	}}}
+
+	result, err := NewReportDraftServiceWithStore(store).List(t.Context(), 17, 0, 20, "", "")
+	if err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	if len(result.Items) != 2 {
+		t.Fatalf("List() items = %#v", result.Items)
+	}
+	if result.Items[0].DatasourceID != 3 || result.Items[0].LockVersion != 4 {
+		t.Fatalf("owned report metadata = %#v", result.Items[0])
+	}
+	if !result.Items[0].IsOwner {
+		t.Fatalf("owned report ownership = %#v", result.Items[0])
+	}
+	if result.Items[1].IsOwner || result.Items[1].Status != model.ReportDefinitionStatusActive || result.Items[1].DatasourceID != 0 || result.Items[1].LockVersion != 0 {
+		t.Fatalf("shared report metadata = %#v", result.Items[1])
 	}
 }
 
