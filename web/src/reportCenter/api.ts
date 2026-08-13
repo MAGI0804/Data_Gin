@@ -1,5 +1,5 @@
 import type { ClientResponse, HTTPMethod } from '../api/client'
-import type { ReportAudit, ReportAuditPage, ReportAuditQuery, ReportCatalogPage, ReportCatalogQuery, ReportColumn, ReportDatasource, ReportDatasourceInput, ReportDatasourceTest, ReportDefinitionStatus, ReportDraft, ReportExport, ReportExportPage, ReportFilterOperator, ReportGrant, ReportParameter, ReportPublication, ReportResultPage, ReportResultQuery, ReportRun, ReportRunContract, ReportRunStatus, ReportSummary } from './types'
+import type { ReportAudit, ReportAuditPage, ReportAuditQuery, ReportCatalogPage, ReportCatalogQuery, ReportColumn, ReportDatasource, ReportDatasourceInput, ReportDatasourceTest, ReportDefinitionStatus, ReportDraft, ReportExport, ReportExportPage, ReportFilterOperator, ReportGrant, ReportParameter, ReportPublication, ReportResultPage, ReportResultQuery, ReportRun, ReportRunContract, ReportRunStatus, ReportSummary, ReportVersionDiff, ReportVersionPage, ReportVersionSummary } from './types'
 
 type JsonRecord = Record<string, unknown>
 
@@ -129,6 +129,17 @@ export async function saveReportDraft(client: ReportCenterClient, draft: ReportD
 
 export async function publishReportDraft(client: ReportCenterClient, reportId: number, expectedLockVersion: number): Promise<ReportAPIResult<ReportPublication>> {
   return requestAndParse(client, `/v1/reports/${reportId}/publish`, { method: 'POST', body: { expectedLockVersion } }, parsePublication, '报表发布与 Oracle 契约核验失败。')
+}
+
+export async function getReportVersions(client: ReportCenterClient, reportId: number, afterId = 0, signal?: AbortSignal): Promise<ReportAPIResult<ReportVersionPage>> {
+  const search = new URLSearchParams({ limit: '50' })
+  if (afterId > 0) search.set('afterId', String(afterId))
+  return requestAndParse(client, `/v1/reports/${reportId}/versions?${search}`, { method: 'GET', signal }, parseReportVersionPage, '报表版本历史加载失败。')
+}
+
+export async function getReportVersionDiff(client: ReportCenterClient, reportId: number, baseVersionId: number, targetVersionId: number, signal?: AbortSignal): Promise<ReportAPIResult<ReportVersionDiff>> {
+  const search = new URLSearchParams({ baseVersionId: String(baseVersionId), targetVersionId: String(targetVersionId) })
+  return requestAndParse(client, `/v1/reports/${reportId}/version-diff?${search}`, { method: 'GET', signal }, parseReportVersionDiff, '报表版本差异加载失败。')
 }
 
 export async function createReportRun(client: ReportCenterClient, reportId: number, parameters: Record<string, unknown>): Promise<ReportAPIResult<ReportRun>> {
@@ -515,6 +526,74 @@ function parseReportValidationSummary(value: unknown) {
   }
 }
 
+const reportVersionDiffContract = {
+  procedure: { label: '存储过程', changes: { procedureSignatureHash: '过程签名' } },
+  parameters: { label: '{{形参}}', changes: { parameterCount: '参数数量', parameterSchemaHash: '参数 Schema' } },
+  results: { label: '结果字段与 Excel', changes: { columnCount: '字段数量', resultSchemaHash: '结果 Schema' } },
+  excel: { label: 'Excel 契约', changes: { exportSchemaHash: 'Excel Schema' } },
+  permissions: { label: '权限', changes: { grantCount: '授权数量', permissionHash: '权限契约' } },
+} as const
+
+type ReportVersionSectionKey = keyof typeof reportVersionDiffContract
+
+export function parseReportVersionPage(payload: unknown): ReportVersionPage {
+  const data = unwrapData(payload)
+  if (!Array.isArray(data.items) || typeof data.hasMore !== 'boolean') throw new Error('invalid report version page')
+  const items = data.items.map(parseReportVersionSummary)
+  const nextAfterId = nonNegativeInteger(data.nextAfterId)
+  if (items.some((item, index) => index > 0 && item.id >= items[index - 1].id)) throw new Error('invalid report version order')
+  if (data.hasMore && (!items.length || nextAfterId !== items[items.length - 1].id)) throw new Error('invalid report version cursor')
+  if (!data.hasMore && nextAfterId !== 0 && (!items.length || nextAfterId !== items[items.length - 1].id)) throw new Error('invalid report version cursor')
+  return { items, hasMore: data.hasMore, nextAfterId }
+}
+
+export function parseReportVersionDiff(payload: unknown): ReportVersionDiff {
+  const data = unwrapData(payload)
+  const base = parseReportVersionSummary(data.base)
+  const target = parseReportVersionSummary(data.target)
+  if (base.id === target.id || !Array.isArray(data.sections) || data.sections.length !== Object.keys(reportVersionDiffContract).length) throw new Error('invalid report version diff')
+  const seenSections = new Set<string>()
+  const sections = data.sections.map((section) => {
+    if (!isRecord(section) || !Array.isArray(section.changes)) throw new Error('invalid report version diff')
+    const key = publicString(section.key, 64) as ReportVersionSectionKey
+    const contract = reportVersionDiffContract[key]
+    if (!contract || seenSections.has(key) || section.label !== contract.label) throw new Error('invalid report version diff')
+    seenSections.add(key)
+    const seenChanges = new Set<string>()
+    const changes = section.changes.map((change) => {
+      if (!isRecord(change) || change.kind !== 'CHANGED') throw new Error('invalid report version change')
+      const changeKey = publicString(change.key, 64)
+      const changeLabel = contract.changes[changeKey as keyof typeof contract.changes]
+      if (!changeLabel || seenChanges.has(changeKey) || change.label !== changeLabel) throw new Error('invalid report version change')
+      seenChanges.add(changeKey)
+      const countChange = changeKey.endsWith('Count')
+      const before = countChange ? strictNonNegativeInteger(change.before) : shortVersionHash(change.before)
+      const after = countChange ? strictNonNegativeInteger(change.after) : shortVersionHash(change.after)
+      return { kind: 'CHANGED' as const, key: changeKey, label: changeLabel, before, after }
+    })
+    return { key, label: contract.label, changes }
+  })
+  return { base, target, sections }
+}
+
+function parseReportVersionSummary(value: unknown): ReportVersionSummary {
+  if (!isRecord(value)) throw new Error('invalid report version')
+  const id = positiveInteger(value.id)
+  const version = positiveInteger(value.version)
+  const contractFingerprint = shortVersionHash(value.contractFingerprint)
+  if (!id || !version || value.status !== 'PUBLISHED') throw new Error('invalid report version')
+  return {
+    id,
+    version,
+    status: value.status,
+    publishedAt: publicDate(value.publishedAt),
+    contractFingerprint,
+    parameterCount: strictNonNegativeInteger(value.parameterCount),
+    columnCount: strictNonNegativeInteger(value.columnCount),
+    grantCount: strictNonNegativeInteger(value.grantCount),
+  }
+}
+
 function parseReportSummary(value: unknown): ReportSummary | null {
   if (!isRecord(value)) return null
   const definition = isRecord(value.definition) ? value.definition : value
@@ -572,6 +651,16 @@ function nonNegativeInteger(value: unknown) {
   if (typeof value !== 'string' || !/^\d+$/.test(value)) return 0
   const parsed = Number(value)
   return Number.isSafeInteger(parsed) ? parsed : 0
+}
+
+function strictNonNegativeInteger(value: unknown) {
+  if (typeof value !== 'number' || !Number.isSafeInteger(value) || value < 0) throw new Error('invalid non-negative integer')
+  return value
+}
+
+function shortVersionHash(value: unknown) {
+  if (typeof value !== 'string' || !/^[a-f\d]{12}$/i.test(value)) throw new Error('invalid report version fingerprint')
+  return value
 }
 
 function nullableInteger(value: unknown) {

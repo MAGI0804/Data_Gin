@@ -182,6 +182,12 @@ export type ReportPublication = {
   validation: ReportValidationSummary | null
 }
 
+export type ReportVersionSummary = { id: number; version: number; status: 'PUBLISHED'; publishedAt: string | null; contractFingerprint: string; parameterCount: number; columnCount: number; grantCount: number }
+export type ReportVersionPage = { items: ReportVersionSummary[]; hasMore: boolean; nextAfterId: number }
+export type ReportVersionChange = { kind: 'CHANGED'; key: string; label: string; before: string | number; after: string | number }
+export type ReportVersionDiffSection = { key: string; label: string; changes: ReportVersionChange[] }
+export type ReportVersionDiff = { base: ReportVersionSummary; target: ReportVersionSummary; sections: ReportVersionDiffSection[] }
+
 export type ReportRunContract = {
   definitionId: number
   versionId: number

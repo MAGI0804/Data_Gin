@@ -206,6 +206,29 @@ func TestReportControllerGetRunContractUsesActorAndReport(t *testing.T) {
 	}
 }
 
+func TestReportControllerVersionEndpointsValidateAndScopeRequests(t *testing.T) {
+	versionService := &fakeReportVersionService{page: &data_svc.ReportVersionPageDTO{}, diff: &data_svc.ReportVersionDiffDTO{}}
+	controller := NewReportControllerWithVersionService(&fakeReportControllerService{}, nil, nil, versionService)
+	router := reportControllerRouter()
+	router.GET("/reports/:id/versions", controller.ListVersions)
+	router.GET("/reports/:id/version-diff", controller.VersionDiff)
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/reports/9/versions?afterId=23&limit=50", nil))
+	if recorder.Code != http.StatusOK || versionService.actor != 17 || versionService.reportID != 9 || versionService.afterID != 23 || versionService.limit != 50 {
+		t.Fatalf("versions response=%d service=%#v", recorder.Code, versionService)
+	}
+	recorder = httptest.NewRecorder()
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/reports/9/version-diff?baseVersionId=11&targetVersionId=23", nil))
+	if recorder.Code != http.StatusOK || versionService.baseID != 11 || versionService.targetID != 23 {
+		t.Fatalf("diff response=%d service=%#v", recorder.Code, versionService)
+	}
+	recorder = httptest.NewRecorder()
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/reports/9/version-diff?baseVersionId=11&targetVersionId=11", nil))
+	if recorder.Code != http.StatusUnprocessableEntity || versionService.diffCalls != 1 {
+		t.Fatalf("invalid diff response=%d calls=%d", recorder.Code, versionService.diffCalls)
+	}
+}
+
 func TestReportControllerCreateRunMapsDeniedAndInvalid(t *testing.T) {
 	for _, test := range []struct {
 		name       string
@@ -272,6 +295,25 @@ type fakeReportRunService struct {
 	contract      *data_svc.ReportRunContractDTO
 	contractCalls int
 	err           error
+}
+
+type fakeReportVersionService struct {
+	actor, reportID, afterID uint
+	limit                    int
+	baseID, targetID         uint
+	diffCalls                int
+	page                     *data_svc.ReportVersionPageDTO
+	diff                     *data_svc.ReportVersionDiffDTO
+}
+
+func (service *fakeReportVersionService) List(_ context.Context, actor, reportID, afterID uint, limit int) (*data_svc.ReportVersionPageDTO, error) {
+	service.actor, service.reportID, service.afterID, service.limit = actor, reportID, afterID, limit
+	return service.page, nil
+}
+func (service *fakeReportVersionService) Diff(_ context.Context, actor, reportID, baseID, targetID uint) (*data_svc.ReportVersionDiffDTO, error) {
+	service.actor, service.reportID, service.baseID, service.targetID = actor, reportID, baseID, targetID
+	service.diffCalls++
+	return service.diff, nil
 }
 
 func (service *fakeReportRunService) Contract(_ context.Context, actor, reportID uint) (*data_svc.ReportRunContractDTO, error) {

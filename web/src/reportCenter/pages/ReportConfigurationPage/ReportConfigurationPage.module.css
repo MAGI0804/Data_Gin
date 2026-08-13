@@ -1,7 +1,8 @@
 .list { display: grid; }
-.item { display: grid; grid-template-columns: auto minmax(0, 1fr) auto; align-items: center; gap: var(--space-3); min-height: 68px; border: 0; border-bottom: 1px solid var(--color-border); background: transparent; padding: var(--space-3) 0; text-align: left; }
+.item { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; align-items: center; gap: var(--space-3); min-height: 68px; border-bottom: 1px solid var(--color-border); }
+.item > button:first-child { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: var(--space-3); min-width: 0; border: 0; background: transparent; padding: var(--space-3) 0; text-align: left; }
 .item:hover { background: var(--color-brand-soft); }
-.item > svg { width: 19px; color: var(--color-brand-active); }
+.item svg { width: 19px; color: var(--color-brand-active); }
 .item strong, .item small { display: block; }
 .item small { margin-top: var(--space-1); color: var(--color-text-secondary); font-weight: 500; }
 .pagination { display: flex; justify-content: center; padding-block: var(--space-4); border-top: 1px solid var(--color-border); }

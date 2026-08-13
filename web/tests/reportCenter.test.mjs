@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { getReportAudits, parsePublication, parseReportAuditPage, parseReportCatalogPage, parseReportDatasource, parseReportDatasources, parseReportDatasourceTest, parseReportDraft, parseReportExport, parseReportExportPage, parseReportResultPage, parseReportRun, parseReportRunContract } from '../.test-dist/reportCenter/api.js'
+import { getReportAudits, parsePublication, parseReportAuditPage, parseReportCatalogPage, parseReportDatasource, parseReportDatasources, parseReportDatasourceTest, parseReportDraft, parseReportExport, parseReportExportPage, parseReportResultPage, parseReportRun, parseReportRunContract, parseReportVersionDiff, parseReportVersionPage } from '../.test-dist/reportCenter/api.js'
 import { reportParameterControls, reportParameterFlagDisabled, updateReportParameterFlag, updateReportParameterLogicalType } from '../.test-dist/reportCenter/parameterConfig.js'
 import { buildNewReportRunState, canStartNewReportRun, initialReportParameterValues } from '../.test-dist/reportCenter/queryParameters.js'
+import { createLatestRequestGuard } from '../.test-dist/reportCenter/components/ReportVersionDrawer/requestGuard.js'
 
 test('parseReportCatalogPage reads the standard API envelope', () => {
   const page = parseReportCatalogPage({
@@ -248,6 +249,40 @@ test('publication parser keeps only the safe Oracle validation summary', () => {
     { ...publication.validation, export: { ...publication.validation.export, schemaHash: 'a'.repeat(63) } },
     { ...publication.validation, snapshot: { ...publication.validation.snapshot, uniqueKeyValidated: false } },
   ]) assert.throws(() => parsePublication({ data: { definitionId: 9, versionId: 23, version: 3, status: 'PUBLISHED', contractHash: hash, validation } }))
+})
+
+test('version parsers enforce cursor and structured summary differences', () => {
+  const version = (id, number) => ({ id, version: number, status: 'PUBLISHED', contractFingerprint: 'a'.repeat(12), parameterCount: 2, columnCount: 4, grantCount: 1 })
+  const page = parseReportVersionPage({ data: { items: [version(23, 2), version(11, 1)], hasMore: true, nextAfterId: 11 } })
+  assert.equal(page.items[0].version, 2)
+  assert.throws(() => parseReportVersionPage({ data: { items: [version(23, 2)], hasMore: true, nextAfterId: 99 } }))
+  const sections = [
+    { key: 'procedure', label: '存储过程', changes: [] },
+    { key: 'parameters', label: '{{形参}}', changes: [{ kind: 'CHANGED', key: 'parameterCount', label: '参数数量', before: 2, after: 3 }] },
+    { key: 'results', label: '结果字段与 Excel', changes: [] },
+    { key: 'excel', label: 'Excel 契约', changes: [{ kind: 'CHANGED', key: 'exportSchemaHash', label: 'Excel Schema', before: 'b'.repeat(12), after: 'c'.repeat(12) }] },
+    { key: 'permissions', label: '权限', changes: [] },
+  ]
+  const diff = parseReportVersionDiff({ data: { base: version(11, 1), target: version(23, 2), sections } })
+  assert.equal(diff.sections[1].changes[0].after, 3)
+  assert.equal(diff.sections[3].changes[0].before, 'b'.repeat(12))
+  assert.throws(() => parseReportVersionDiff({ data: { base: version(11, 1), target: version(23, 2), sections: sections.map((section) => section.key === 'excel' ? { ...section, changes: [{ ...section.changes[0], before: { leaked: true } }] } : section) } }))
+  assert.throws(() => parseReportVersionPage({ data: { items: [{ ...version(23, 2), contractFingerprint: '' }], hasMore: false, nextAfterId: 23 } }))
+  assert.throws(() => parseReportVersionPage({ data: { items: [{ ...version(23, 2), contractFingerprint: 'a'.repeat(64) }], hasMore: false, nextAfterId: 23 } }))
+  assert.throws(() => parseReportVersionPage({ data: { items: [{ ...version(23, 2), contractFingerprint: 'a'.repeat(13) }], hasMore: false, nextAfterId: 23 } }))
+  assert.throws(() => parseReportVersionPage({ data: { items: [version(11, 1), version(23, 2)], hasMore: false, nextAfterId: 23 } }))
+})
+
+test('version request guard invalidates superseded and cancelled responses', () => {
+  const guard = createLatestRequestGuard()
+  const first = guard.begin()
+  const second = guard.begin()
+  assert.equal(first.signal.aborted, true)
+  assert.equal(first.isCurrent(), false)
+  assert.equal(second.isCurrent(), true)
+  guard.cancel()
+  assert.equal(second.signal.aborted, true)
+  assert.equal(second.isCurrent(), false)
 })
 
 test('Oracle datasource parser exposes only the public management contract', () => {

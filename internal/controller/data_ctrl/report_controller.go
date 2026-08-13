@@ -30,6 +30,7 @@ type ReportController struct {
 	service        ReportDraftServiceAPI
 	publishService ReportPublishServiceAPI
 	runService     ReportRunServiceAPI
+	versionService ReportVersionServiceAPI
 }
 
 type ReportPublishServiceAPI interface {
@@ -41,12 +42,18 @@ type ReportRunServiceAPI interface {
 	Create(context.Context, uint, uint, requestbody.ReportRunCreateRequest) (*data_svc.ReportRunDTO, error)
 }
 
+type ReportVersionServiceAPI interface {
+	List(context.Context, uint, uint, uint, int) (*data_svc.ReportVersionPageDTO, error)
+	Diff(context.Context, uint, uint, uint, uint) (*data_svc.ReportVersionDiffDTO, error)
+}
+
 func NewReportController() *ReportController {
 	repository := reportrepo.New()
-	return NewReportControllerWithAllServices(
+	return NewReportControllerWithVersionService(
 		data_svc.NewReportDraftServiceWithStore(repository),
 		data_svc.NewReportPublishService(repository, reportsecret.EnvironmentKeyring{}, data_svc.OpenReportOracle),
 		data_svc.NewReportRunServiceWithDependencies(repository, reportsecret.EnvironmentParameterCipher{}),
+		data_svc.NewReportVersionService(repository),
 	)
 }
 
@@ -63,6 +70,63 @@ func NewReportControllerWithAllServices(service ReportDraftServiceAPI, publishSe
 		panic("report controller: nil service")
 	}
 	return &ReportController{service: service, publishService: publishService, runService: runService}
+}
+
+func NewReportControllerWithVersionService(service ReportDraftServiceAPI, publishService ReportPublishServiceAPI, runService ReportRunServiceAPI, versionService ReportVersionServiceAPI) *ReportController {
+	controller := NewReportControllerWithAllServices(service, publishService, runService)
+	controller.versionService = versionService
+	return controller
+}
+
+func (controller *ReportController) ListVersions(c *gin.Context) {
+	if controller.versionService == nil {
+		writeReportError(c, errors.New("report version service is unavailable"))
+		return
+	}
+	reportID, err := parseReportUint(c.Param("id"), "report id")
+	if err != nil {
+		writeReportError(c, err)
+		return
+	}
+	afterID, limit, err := parseReportListQuery(c)
+	if err != nil {
+		writeReportError(c, err)
+		return
+	}
+	result, err := controller.versionService.List(c.Request.Context(), auth.CurrentUserID(c), reportID, afterID, limit)
+	if err != nil {
+		writeReportError(c, err)
+		return
+	}
+	responses.New(c).ToResponseWithStatus(http.StatusOK, result)
+}
+
+func (controller *ReportController) VersionDiff(c *gin.Context) {
+	if controller.versionService == nil {
+		writeReportError(c, errors.New("report version service is unavailable"))
+		return
+	}
+	reportID, err := parseReportUint(c.Param("id"), "report id")
+	if err != nil {
+		writeReportError(c, err)
+		return
+	}
+	baseID, err := parseReportUint(c.Query("baseVersionId"), "baseVersionId")
+	if err != nil {
+		writeReportError(c, err)
+		return
+	}
+	targetID, err := parseReportUint(c.Query("targetVersionId"), "targetVersionId")
+	if err != nil || baseID == targetID {
+		writeReportError(c, fmt.Errorf("%w: invalid version diff", data_svc.ErrReportInvalid))
+		return
+	}
+	result, err := controller.versionService.Diff(c.Request.Context(), auth.CurrentUserID(c), reportID, baseID, targetID)
+	if err != nil {
+		writeReportError(c, err)
+		return
+	}
+	responses.New(c).ToResponseWithStatus(http.StatusOK, result)
 }
 
 func (controller *ReportController) CreateRun(c *gin.Context) {
