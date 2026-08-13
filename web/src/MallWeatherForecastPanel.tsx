@@ -14,6 +14,7 @@ import {
   type MallWeatherMeta,
   type MallWeatherMinutely,
 } from './mallWeather'
+import styles from './MallWeatherForecastPanel.module.css'
 
 type QueryClient = (
   path: string,
@@ -179,8 +180,8 @@ export function MallWeatherForecastPanel({
   const lifeSeries = buildLifeIndexSeries(life.items)
 
   return (
-    <section className="workbench-panel mall-weather-forecast-panel" aria-busy={loading}>
-      <div className="mall-weather-section-title">
+    <section className={[styles['workbench-panel'], styles['mall-weather-forecast-panel']].join(' ')} aria-busy={loading}>
+      <div className={styles['mall-weather-section-title']}>
         <div>
           <strong>完整预报与生活指数</strong>
           <span>
@@ -189,14 +190,14 @@ export function MallWeatherForecastPanel({
         </div>
         <button type="button" onClick={load} disabled={loading}><RefreshCcw aria-hidden="true" />{loading ? '加载中' : '重新查询'}</button>
       </div>
-      {csvError && <p className="mall-weather-action-message error" role="alert">{csvError}</p>}
+      {csvError && <p className={[styles['mall-weather-action-message'], styles['error']].join(' ')} role="alert">{csvError}</p>}
       <ForecastDataset
         id="mall-weather-minutely"
         title={`中心点未来 ${mallWeatherMinutelyForecastMinutes} 分钟降水（约 1 km 分辨率）`}
         state={minutely}
         empty={`未来 ${mallWeatherMinutelyForecastMinutes} 分钟窗口没有分钟级降水预报`}
       >
-        <div className="mall-weather-forecast-charts">
+        <div className={styles['mall-weather-forecast-charts']}>
           <MallWeatherChart title="分钟级降水强度" detail={`未来 ${mallWeatherMinutelyForecastMinutes} 分钟`} unit="mm/h" icon={<CloudRain aria-hidden="true" />} floorZero
             series={[chartSeries('降水强度', '#0F9F78', minutely.items, 'forecastMinuteLocal', 'precipitationMmH')]}
             onDownload={(series) => downloadChartCsv('minutely_precipitation', 'mm/h', series)} downloadDisabled={minutelyDownloadDisabled} />
@@ -214,7 +215,7 @@ export function MallWeatherForecastPanel({
           ? `当前服务端可用 ${hourly.items.length} / ${mallWeatherHourlyForecastHours} 条连续逐小时数据，已展示全部可用内容。`
           : ''}
       >
-        <div className="mall-weather-forecast-charts">
+        <div className={styles['mall-weather-forecast-charts']}>
           <MallWeatherChart title="温度趋势" detail="逐小时预报" unit="°C" icon={<Thermometer aria-hidden="true" />}
             series={[
               chartSeries('温度', '#B45309', hourly.items, 'forecastTimeLocal', 'temperatureC'),
@@ -239,7 +240,7 @@ export function MallWeatherForecastPanel({
         state={daily}
         empty={`当前 ${mallWeatherDailyForecastDays} 天窗口没有逐日预报`}
       >
-        <div className="mall-weather-forecast-charts">
+        <div className={styles['mall-weather-forecast-charts']}>
           <MallWeatherChart title="每日温度区间" detail={`未来 ${mallWeatherDailyForecastDays} 日`} unit="°C" icon={<Thermometer aria-hidden="true" />}
             series={dailyRangeSeries(daily.items, 'temperatureMinC', 'temperatureAvgC', 'temperatureMaxC', ['#1D4ED8', '#B45309', '#B91C1C'])}
             onDownload={(series) => downloadChartCsv('daily_temperature', '°C', series)} downloadDisabled={dailyDownloadDisabled} />
@@ -260,7 +261,7 @@ export function MallWeatherForecastPanel({
         state={life}
         empty={`当前 ${mallWeatherDailyForecastDays} 天窗口没有生活指数`}
       >
-        <div className="mall-weather-forecast-charts single">
+        <div className={[styles['mall-weather-forecast-charts'], styles['single']].join(' ')}>
           <MallWeatherChart title="生活指数等级趋势" detail="按日期对比全部指数" unit="级" icon={<Sparkles aria-hidden="true" />} floorZero
             series={lifeSeries} onDownload={(series) => downloadChartCsv('life_indices', '级', series)} downloadDisabled={lifeDownloadDisabled} />
         </div>
@@ -278,12 +279,12 @@ function ForecastDataset<T>({ id, title, state, empty, notice = '', children }: 
   children: ReactNode
 }) {
   return (
-    <section id={id} className="mall-weather-forecast-dataset" tabIndex={-1}>
+    <section id={id} className={styles['mall-weather-forecast-dataset']} tabIndex={-1}>
       <header><strong>{title}</strong><span>{state.items.length} 条{state.meta ? ` · ${mallWeatherFreshnessLabel(state.meta.freshnessStatus)}` : ''}</span></header>
       {state.loading && state.items.length === 0 && <p role="status">正在加载全部分页…</p>}
-      {state.error && <p className="mall-weather-action-message error" role="alert">{state.error}</p>}
+      {state.error && <p className={[styles['mall-weather-action-message'], styles['error']].join(' ')} role="alert">{state.error}</p>}
       {!state.loading && !state.error && state.items.length === 0 && <p role="status">{empty}</p>}
-      {notice && <p className="mall-weather-action-message" role="status">{notice}</p>}
+      {notice && <p className={styles['mall-weather-action-message']} role="status">{notice}</p>}
       {state.items.length > 0 && children}
     </section>
   )

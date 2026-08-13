@@ -10,6 +10,7 @@ import {
   mallWeatherMetric,
   mallWeatherNearestChartPoint,
 } from './mallWeather'
+import styles from './MallWeatherChart.module.css'
 
 const chartHeight = 260
 const plot = { left: 52, right: 18, top: 18, bottom: 38 }
@@ -134,15 +135,15 @@ export function MallWeatherChart({
   const tooltipVertical = selectedY < plotHeight * 0.35 ? 'below' : 'above'
 
   return (
-    <article className="workbench-panel mall-weather-chart-panel">
-      <header className="mall-weather-chart-heading">
-        <div className="mall-weather-chart-title">
-          {icon && <span className="mall-weather-chart-icon">{icon}</span>}
+    <article className={styles.panel}>
+      <header className={styles.heading}>
+        <div className={styles.title}>
+          {icon && <span className={styles.icon}>{icon}</span>}
           <div><strong>{title}</strong><span>{detail} · {unit}</span></div>
         </div>
         <button
           type="button"
-          className="mall-weather-chart-download"
+          className={styles.download}
           aria-label={`下载数据：${title}`}
           disabled={downloadDisabled}
           onClick={() => onDownload(series)}
@@ -150,7 +151,7 @@ export function MallWeatherChart({
           <Download aria-hidden="true" />下载数据
         </button>
       </header>
-      <div className="mall-weather-chart-legend" aria-label="曲线图例">
+      <div className={styles.legend} aria-label="曲线图例">
         {series.map((item) => (
           <span key={item.id}>
             <svg viewBox="0 0 20 6" aria-hidden="true">
@@ -161,12 +162,12 @@ export function MallWeatherChart({
         ))}
       </div>
       {!hasData ? (
-        <div className="empty-state" role="status">
+        <div className={styles.empty} role="status">
           <strong>暂无趋势数据</strong>
           <span>当前时间窗口没有可绘制的数据。</span>
         </div>
       ) : (
-        <div className="mall-weather-chart-visual" ref={visualRef}>
+        <div className={styles.visual} ref={visualRef}>
           <svg
             viewBox={`0 0 ${chartWidth} ${chartHeight}`}
             role="slider"
@@ -188,29 +189,29 @@ export function MallWeatherChart({
           >
             <title>{title}</title>
             <desc>使用鼠标悬停或方向键查看各时间点，默认隐藏数据点以保持曲线清晰。</desc>
-            <g className="mall-weather-chart-plot" transform={`translate(${plot.left} ${plot.top})`}>
+            <g transform={`translate(${plot.left} ${plot.top})`}>
               {scale?.ticks.map((tick) => {
                 const y = plotHeight - (tick - scale.minimum) / (scale.maximum - scale.minimum) * plotHeight
-                return <g className="mall-weather-chart-y-tick" key={tick}>
+                return <g className={styles.yTick} key={tick}>
                   <line x1="0" x2={plotWidth} y1={y} y2={y} />
                   <text x="-10" y={y + 4} textAnchor="end">{chartAxisLabel(tick)}</text>
                 </g>
               })}
               {xTickIndexes.map((index) => {
                 const x = itemCount <= 1 ? 0 : index / (itemCount - 1) * plotWidth
-                return <text className="mall-weather-chart-x-tick" x={x} y={plotHeight + 25} textAnchor={index === 0 ? 'start' : index === itemCount - 1 ? 'end' : 'middle'} key={index}>
+                return <text className={styles.xTick} x={x} y={plotHeight + 25} textAnchor={index === 0 ? 'start' : index === itemCount - 1 ? 'end' : 'middle'} key={index}>
                   {chartTimeLabel(timeDomain[index] || '', showDateInTimeTicks)}
                 </text>
               })}
               {plottedSeries.map((item) => (
-                <g className="mall-weather-chart-series" key={item.id}>
+                <g className={styles.series} key={item.id}>
                   {item.segments.map((segment, index) => segment.includes(' ')
                     ? <polyline points={segment} style={{ stroke: item.color, strokeDasharray: item.dash }} key={index} />
                     : <ChartPoint point={segment} color={item.color} key={index} />)}
                 </g>
               ))}
               {activeAxisPoint && (
-                <g className="mall-weather-chart-active" aria-hidden="true">
+                <g className={styles.active} aria-hidden="true">
                   <line x1={activeAxisPoint.x} x2={activeAxisPoint.x} y1="0" y2={plotHeight} />
                   {plottedSeries.map((item) => {
                     const point = item.points.find((candidate) => candidate.index === selectedPosition)
@@ -222,7 +223,7 @@ export function MallWeatherChart({
           </svg>
           {activeAxisPoint && (
             <div
-              className={`mall-weather-chart-tooltip ${tooltipHorizontal} ${tooltipVertical}`}
+              className={`${styles.tooltip} ${tooltipHorizontal === 'start' ? styles.tooltipStart : tooltipHorizontal === 'end' ? styles.tooltipEnd : styles.tooltipCenter} ${tooltipVertical === 'below' ? styles.tooltipBelow : ''}`}
               id={tooltipID}
               role="tooltip"
               style={{
@@ -242,7 +243,7 @@ export function MallWeatherChart({
 
 function ChartPoint({ point, color }: { point: string; color: string }) {
   const [cx = '0', cy = '0'] = point.split(',')
-  return <circle className="mall-weather-chart-single-point" cx={cx} cy={cy} r="3" style={{ stroke: color }} />
+  return <circle className={styles.singlePoint} cx={cx} cy={cy} r="3" style={{ stroke: color }} />
 }
 
 function sampleIndexes(length: number, maximum: number) {

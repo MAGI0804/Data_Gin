@@ -1,15 +1,12 @@
 import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { AlertTriangle, Clock3, CloudRain, CloudSun, Database, Download, MapPin, RefreshCcw, Thermometer } from 'lucide-react'
-import './MallWeatherPage.css'
-import './MallWeatherDesign.css'
-import weatherStyles from './MallWeatherPage.module.css'
 import storeStyles from './StoreInfoPage.module.css'
 import { MallWeatherChart, type MallWeatherChartSeries } from './MallWeatherChart'
 import { MallWeatherExportPanel } from './MallWeatherExportPanel'
 import { MallWeatherExportProfilePanel } from './MallWeatherExportProfilePanel'
 import { MallWeatherForecastPanel, type MallWeatherForecastDataSnapshot } from './MallWeatherForecastPanel'
 import { MallDetailsFields, MallWeatherMallEditor } from './MallWeatherMallEditor'
-import { PageCanvas, PageHeader } from './ui'
+import { Dialog, PageCanvas, PageHeader } from './ui'
 import { runSingleFlight } from './singleFlight'
 import { mallWeatherCapacityPlanPath, parseMallWeatherCapacityPlan, type MallWeatherCapacityPlan, type MallWeatherCapacityPlanInput } from './mallWeatherCapacityPlan'
 import { parseMallWeatherMetricsSummary, type MallWeatherMetricsSummary } from './monitoring'
@@ -92,6 +89,7 @@ import {
   type MallWeatherSheetPushOption,
   type MallWeatherSheetPushRun,
 } from './mallWeather'
+import styles from './MallWeatherPage.module.css'
 
 type MallWeatherApiResult = {
   ok: boolean
@@ -601,7 +599,7 @@ function MallModulePage({
 
   if (view === 'stores') {
     return (
-      <PageCanvas className={`${storeStyles.page} mall-weather-page`}>
+      <PageCanvas className={`${storeStyles.page} ${styles.weatherPage}`}>
         <PageHeader
           eyebrow="STORE DIRECTORY"
           title="店铺信息"
@@ -647,7 +645,7 @@ function MallModulePage({
               <RefreshCcw aria-hidden="true" />刷新店铺
             </button>
             {nextAfterID > 0 && <button type="button" onClick={() => void loadMalls(nextAfterID)} disabled={mallState === 'loading'}>加载更多</button>}
-            <button className="primary" type="button" onClick={() => setShowCreate((current) => !current)} aria-expanded={showCreate} aria-controls="mall-weather-create-panel">
+            <button className={styles['primary']} type="button" onClick={() => setShowCreate((current) => !current)} aria-expanded={showCreate} aria-controls="mall-weather-create-panel">
               {showCreate ? '返回店铺资料' : '新增店铺'}
             </button>
             <button type="button" onClick={() => setShowImport((current) => !current)}>批量导入 CSV</button>
@@ -702,16 +700,16 @@ function MallModulePage({
   }
 
   return (
-    <PageCanvas className={`${weatherStyles.page} mall-weather-page mall-weather-single-page`}>
+    <PageCanvas className={`${styles.page} ${styles.weatherPage}`}>
       <PageHeader
-        className={weatherStyles.pageHeader}
+        className={styles.pageHeader}
         eyebrow="WEATHER OPERATIONS"
         title="商场天气"
         description="选择商场后查看实况、预报、预警与生活指数，并执行刷新、导出和推送操作。"
       />
-      <section className={weatherStyles.selector} aria-label="选择天气商场">
-        <strong className={weatherStyles.selectorTitle}>筛选商场</strong>
-        <div className={weatherStyles.selectorFields}>
+      <section className={styles.selector} aria-label="选择天气商场">
+        <strong className={styles.selectorTitle}>筛选商场</strong>
+        <div className={styles.selectorFields}>
           <label>
             <span>选择商场</span>
             <select
@@ -735,8 +733,8 @@ function MallModulePage({
                 ? `${selectedMall.mallCode} · ${selectedMall.city || '城市待完善'}`
                 : '选择商场后查看全部天气数据'}</small>
           </label>
-          <label className={weatherStyles.queryField}>
-            <span className="sr-only">搜索商场</span>
+          <label className={styles.queryField}>
+            <span className={styles['sr-only']}>搜索商场</span>
             <input
               name="mallWeatherQuery"
               type="search"
@@ -748,7 +746,7 @@ function MallModulePage({
             <small>{query.trim() ? `找到 ${visibleMalls.length} 个商场` : `共 ${malls.length} 个商场`}</small>
           </label>
         </div>
-        <div className={weatherStyles.selectorActions}>
+        <div className={styles.selectorActions}>
           <button type="button" onClick={() => void loadMalls()} disabled={mallState === 'loading'}>
             <RefreshCcw aria-hidden="true" />刷新商场
           </button>
@@ -759,14 +757,14 @@ function MallModulePage({
       {mallState === 'error' && <RequestError message={mallError} onRetry={() => void loadMalls()} />}
       {mallState === 'loading' && malls.length === 0 && <LoadingState label="正在加载商场" />}
       {mallState === 'success' && malls.length === 0 && <EmptyState title="还没有可用商场" detail="请先到“基础信息 → 店铺信息”新增并维护店铺。" />}
-      {selectedMall && !selectedMallReady && <section className={`${weatherStyles.unavailable} mall-weather-unavailable`}>
+      {selectedMall && !selectedMallReady && <section className={styles.unavailable}>
         <div><strong>{selectedMall.nameCn}尚未完成天气接入</strong><span>请到“基础信息 → 店铺信息”完成地址、坐标和天气启用设置。</span></div>
         <button type="button" onClick={() => { window.location.hash = 'store_info' }}>前往店铺信息</button>
       </section>}
 
       {selectedMallReady && selectedMall && <>
-        <div className={`${weatherStyles.toolbar} mall-weather-design-toolbar`}>
-          <div className="mall-weather-actions-row">
+        <div className={styles.toolbar}>
+          <div className={styles['mall-weather-actions-row']}>
             {actorID
               ? <ManualRefreshPanel
                 actorID={actorID}
@@ -793,7 +791,7 @@ function MallModulePage({
           </div>
           <MallWeatherDataNavigation />
         </div>
-        <div className={`${weatherStyles.dashboard} mall-weather-design-dashboard`} id="mall-weather-overview" tabIndex={-1}>
+        <div className={styles.dashboard} id="mall-weather-overview" tabIndex={-1}>
           {!selectedOverview && overviewState !== 'error' && overviewState !== 'waiting' && <LoadingState label={`正在加载${selectedMall.nameCn}天气`} />}
           {selectedOverview && <>
             <WeatherRealtime mall={selectedMall} overview={selectedOverview} />
@@ -829,9 +827,9 @@ function MallModulePage({
         {actorID && <section id="mall-weather-push" tabIndex={-1}>
           <MallWeatherSheetPushPanel actorID={actorID} mall={selectedMall} client={client} key={`push-${actorID}:${selectedMall.id}`} />
         </section>}
-        <details className="mall-weather-advanced-tools">
+        <details className={styles['mall-weather-advanced-tools']}>
           <summary>天气服务高级配置与运营工具</summary>
-          <div className="view-stack">
+          <div className={styles['view-stack']}>
             <MallWeatherCapacityPlanPanel client={client} />
             <MallWeatherOperationalMetricsPanel client={client} />
             <MallWeatherExportProfilePanel client={client} />
@@ -850,7 +848,7 @@ function MallWeatherDataNavigation() {
   }
 
   return (
-    <nav className="mall-weather-data-nav" aria-label="天气数据快速入口">
+    <nav className={styles['mall-weather-data-nav']} aria-label="天气数据快速入口">
       <strong><Database aria-hidden="true" />天气数据</strong>
       {mallWeatherDataNavigationItems.filter((item) => ['mall-weather-overview', 'mall-weather-minutely', 'mall-weather-hourly', 'mall-weather-alerts'].includes(item.targetID)).map((item) => (
         <button type="button" aria-controls={item.targetID} onClick={() => navigateTo(item.targetID)} key={item.targetID}>
@@ -912,9 +910,9 @@ function MallWeatherCapacityPlanPanel({ client }: { client: MallWeatherApiClient
     setPlan(parsed)
   }
 
-  return <section className="workbench-panel mall-weather-capacity-panel" aria-busy={submitting}>
-    <div className="mall-weather-section-title"><div><strong>天气容量规划</strong><span>按规划目标测算供应商调用、数据库写入和飞书批次；不会修改任何配置。</span></div></div>
-    <form className="mall-weather-capacity-form" onSubmit={submit}>
+  return <section className={[styles['workbench-panel'], styles['mall-weather-capacity-panel']].join(' ')} aria-busy={submitting}>
+    <div className={styles['mall-weather-section-title']}><div><strong>天气容量规划</strong><span>按规划目标测算供应商调用、数据库写入和飞书批次；不会修改任何配置。</span></div></div>
+    <form className={styles['mall-weather-capacity-form']} onSubmit={submit}>
       <label><span>目标商场数 *</span><input name="capacityMallCount" inputMode="numeric" type="number" min="1" max="100000" value={form.mallCount} onChange={(event) => change('mallCount', event.currentTarget.value)} required disabled={submitting} /></label>
       <label><span>供应商 QPS *</span><input name="capacityProviderQps" inputMode="decimal" type="number" min="0" max="10000" step="any" value={form.providerQps} onChange={(event) => change('providerQps', event.currentTarget.value)} required disabled={submitting} /></label>
       <label><span>逐小时预报步数</span><input name="capacityHourlySteps" inputMode="numeric" type="number" min="1" max="360" value={form.hourlySteps} onChange={(event) => change('hourlySteps', event.currentTarget.value)} required disabled={submitting} /></label>
@@ -922,10 +920,10 @@ function MallWeatherCapacityPlanPanel({ client }: { client: MallWeatherApiClient
       <label><span>生活指数天数</span><input name="capacityLifeIndexDays" inputMode="numeric" type="number" min="1" max="15" value={form.lifeIndexDays} onChange={(event) => change('lifeIndexDays', event.currentTarget.value)} required disabled={submitting} /></label>
       <label><span>每商场预警数</span><input name="capacityAlertsPerMall" inputMode="numeric" type="number" min="0" max="256" value={form.alertsPerMall} onChange={(event) => change('alertsPerMall', event.currentTarget.value)} required disabled={submitting} /></label>
       <label><span>飞书每批行数</span><input name="capacityFeishuBatchRows" inputMode="numeric" type="number" min="1" max="500" value={form.feishuBatchRows} onChange={(event) => change('feishuBatchRows', event.currentTarget.value)} required disabled={submitting} /></label>
-      <div className="mall-weather-form-actions"><button className="primary" type="submit" disabled={submitting}>{submitting ? '计算中' : '计算容量'}</button></div>
+      <div className={styles['mall-weather-form-actions']}><button className={styles['primary']} type="submit" disabled={submitting}>{submitting ? '计算中' : '计算容量'}</button></div>
     </form>
     {plan && <>
-      <div className="mall-weather-meta" aria-live="polite">
+      <div className={styles['mall-weather-meta']} aria-live="polite">
         <MetaItem label="每日供应商请求" value={String(plan.providerRequests)} />
         <MetaItem label="预计耗时" value={`${plan.providerDrainSeconds.toFixed(1)} 秒`} />
         <MetaItem label="一小时最低 QPS" value={plan.minimumQpsForOneHourDrain.toFixed(2)} />
@@ -935,9 +933,9 @@ function MallWeatherCapacityPlanPanel({ client }: { client: MallWeatherApiClient
         <MetaItem label="飞书每批行数" value={String(plan.feishuBatchRows)} />
         <MetaItem label="规划商场数" value={String(plan.mallCount)} />
       </div>
-      <div className="data-table-wrap"><table className="data-table"><caption>各天气数据集容量明细</caption><thead><tr><th>数据集</th><th>行数</th><th>数据库批次</th><th>飞书批次</th></tr></thead><tbody>{plan.datasets.map((dataset) => <tr key={dataset.kind}><td>{dataset.kind}</td><td>{dataset.rows}</td><td>{dataset.databaseBatches}</td><td>{dataset.feishuBatches}</td></tr>)}</tbody></table></div>
+      <div className={styles['data-table-wrap']}><table className={styles['data-table']}><caption>各天气数据集容量明细</caption><thead><tr><th>数据集</th><th>行数</th><th>数据库批次</th><th>飞书批次</th></tr></thead><tbody>{plan.datasets.map((dataset) => <tr key={dataset.kind}><td>{dataset.kind}</td><td>{dataset.rows}</td><td>{dataset.databaseBatches}</td><td>{dataset.feishuBatches}</td></tr>)}</tbody></table></div>
     </>}
-    {error && <p className="mall-weather-action-message error" role="alert">{error}</p>}
+    {error && <p className={[styles['mall-weather-action-message'], styles['error']].join(' ')} role="alert">{error}</p>}
   </section>
 }
 
@@ -982,14 +980,14 @@ function MallWeatherOperationalMetricsPanel({ client }: { client: MallWeatherApi
     return () => controllerRef.current?.abort()
   }, [loadMetrics])
 
-  return <section className="workbench-panel mall-weather-capacity-panel" aria-busy={loading} aria-label="天气运维指标">
-    <div className="mall-weather-section-title">
+  return <section className={[styles['workbench-panel'], styles['mall-weather-capacity-panel']].join(' ')} aria-busy={loading} aria-label="天气运维指标">
+    <div className={styles['mall-weather-section-title']}>
       <div><strong>天气运维指标</strong><span>仅展示聚合运行指标与告警数量，不展示第三方响应、标签或敏感配置。</span></div>
       <button type="button" onClick={() => void loadMetrics()} disabled={loading}>{loading ? '加载中' : '刷新指标'}</button>
     </div>
     {loading && !metrics && <LoadingState label="正在加载天气运维指标" />}
     {metrics && <>
-      <div className="mall-weather-meta" aria-live="polite">
+      <div className={styles['mall-weather-meta']} aria-live="polite">
         <MetaItem label="运维告警" value={String(metrics.totalAlerts)} />
         <MetaItem label="严重告警" value={String(metrics.criticalAlerts)} />
         <MetaItem label="警告告警" value={String(metrics.warningAlerts)} />
@@ -1001,7 +999,7 @@ function MallWeatherOperationalMetricsPanel({ client }: { client: MallWeatherApi
         <MetaItem label="最大数据时效" value={metricDuration(metrics.maxDataAgeSeconds)} />
         <MetaItem label="最大队列等待" value={metricDuration(metrics.maxQueueLagSeconds)} />
       </div>
-      {error && <p className="mall-weather-action-message" role="status">指标刷新失败，仍显示最近一次成功数据。</p>}
+      {error && <p className={styles['mall-weather-action-message']} role="status">指标刷新失败，仍显示最近一次成功数据。</p>}
     </>}
     {!loading && !metrics && !error && <EmptyState title="暂无天气运维指标" detail="尚未采集到可展示的聚合运行数据。" />}
     {error && <RequestError message={error} onRetry={() => void loadMetrics()} />}
@@ -1102,30 +1100,30 @@ function MallImportPanel({ client, onImported }: { client: MallWeatherApiClient;
     setCanRetryOriginal(false)
   }
 
-  return <section className="workbench-panel mall-import-panel" aria-busy={submitting}>
-    <div className="mall-weather-section-title"><div><strong>批量导入店铺</strong><span>仅支持 UTF-8 CSV，表头固定为 mallCode,nameCn,province,city,district,address；每次 1–200 行。</span></div></div>
+  return <section className={[styles['workbench-panel'], styles['mall-import-panel']].join(' ')} aria-busy={submitting}>
+    <div className={styles['mall-weather-section-title']}><div><strong>批量导入店铺</strong><span>仅支持 UTF-8 CSV，表头固定为 mallCode,nameCn,province,city,district,address；每次 1–200 行。</span></div></div>
     <label>CSV 文件<input ref={fileInputRef} type="file" accept=".csv,text/csv" disabled={submitting} onChange={(event) => {
       const file = event.currentTarget.files?.[0]
       if (file) chooseFile(file)
     }} /></label>
-    {rows.length > 0 && <div className="mall-import-summary" role="status" aria-live="polite"><MetaItem label="已解析" value={`${rows.length} 行`} /><MetaItem label="可提交" value={`${items.length} 行`} /><MetaItem label="待修正" value={`${invalidRows.length} 行`} /></div>}
-    {invalidRows.length > 0 && <ul className="mall-import-errors" role="alert">{invalidRows.map((row) => <li key={row.row}>CSV 第 {row.row} 行：{row.error}</li>)}</ul>}
-    {validForSubmit && !result && <div className="mall-import-actions">
+    {rows.length > 0 && <div className={styles['mall-import-summary']} role="status" aria-live="polite"><MetaItem label="已解析" value={`${rows.length} 行`} /><MetaItem label="可提交" value={`${items.length} 行`} /><MetaItem label="待修正" value={`${invalidRows.length} 行`} /></div>}
+    {invalidRows.length > 0 && <ul className={styles['mall-import-errors']} role="alert">{invalidRows.map((row) => <li key={row.row}>CSV 第 {row.row} 行：{row.error}</li>)}</ul>}
+    {validForSubmit && !result && <div className={styles['mall-import-actions']}>
       {!confirming
-        ? <button className="primary" type="button" disabled={submitting} onClick={() => { setError(''); setConfirming(true) }}>提交导入</button>
-        : <div className="mall-import-confirm" role="status"><span>将逐行创建 {items.length} 个店铺。成功店铺仍需确认坐标后才能启用天气。</span><button type="button" disabled={submitting} onClick={() => setConfirming(false)}>返回检查</button><button className="primary" type="button" disabled={submitting} onClick={() => void submit()}>{submitting ? '导入中…' : '确认并提交'}</button></div>}
+        ? <button className={styles['primary']} type="button" disabled={submitting} onClick={() => { setError(''); setConfirming(true) }}>提交导入</button>
+        : <div className={styles['mall-import-confirm']} role="status"><span>将逐行创建 {items.length} 个店铺。成功店铺仍需确认坐标后才能启用天气。</span><button type="button" disabled={submitting} onClick={() => setConfirming(false)}>返回检查</button><button className={styles['primary']} type="button" disabled={submitting} onClick={() => void submit()}>{submitting ? '导入中…' : '确认并提交'}</button></div>}
       {canRetryOriginal && <button type="button" disabled={submitting} onClick={() => void submit()}>重试原请求</button>}
       <button type="button" disabled={submitting} onClick={abandon}>放弃本次导入</button>
     </div>}
     {result && <MallImportResultPanel result={result} rows={rows} onAbandon={abandon} />}
-    {error && <p className="mall-weather-action-message error" role="alert">{error}</p>}
+    {error && <p className={[styles['mall-weather-action-message'], styles['error']].join(' ')} role="alert">{error}</p>}
   </section>
 }
 
 function MallImportResultPanel({ result, rows, onAbandon }: { result: MallImportResult; rows: MallImportRow[]; onAbandon: () => void }) {
-  return <div className="mall-import-result" aria-live="polite">
-    <div className="mall-import-summary"><MetaItem label="已创建" value={`${result.created} 行`} /><MetaItem label="幂等重放" value={`${result.replayed} 行`} /><MetaItem label="失败" value={`${result.failed} 行`} /></div>
-    <ul className="mall-import-result-rows">
+  return <div className={styles['mall-import-result']} aria-live="polite">
+    <div className={styles['mall-import-summary']}><MetaItem label="已创建" value={`${result.created} 行`} /><MetaItem label="幂等重放" value={`${result.replayed} 行`} /><MetaItem label="失败" value={`${result.failed} 行`} /></div>
+    <ul className={styles['mall-import-result-rows']}>
       {result.rows.map((row) => <li key={row.row} data-status={row.status}>
         <strong>{row.status === 'CREATED' ? '已创建' : row.status === 'REPLAYED' ? '已确认创建' : '未创建'}</strong>
         <span>CSV 第 {rows[row.row - 1]?.row ?? row.row + 1} 行</span>
@@ -1240,16 +1238,16 @@ function MallCreatePanel({ actorID, client, onCreated, onCancel }: {
   }
 
   return (
-    <section className="workbench-panel mall-weather-onboarding-panel" id="mall-weather-create-panel">
-      <div className="mall-weather-section-title"><div><strong>新增商场</strong><span>创建后继续确认坐标并启用天气</span></div><span>天气口径：full · 1000 m</span></div>
-      <form className="mall-weather-create-form" onSubmit={submit} aria-busy={submitting}>
+    <section className={[styles['workbench-panel'], styles['mall-weather-onboarding-panel']].join(' ')} id="mall-weather-create-panel">
+      <div className={styles['mall-weather-section-title']}><div><strong>新增商场</strong><span>创建后继续确认坐标并启用天气</span></div><span>天气口径：full · 1000 m</span></div>
+      <form className={styles['mall-weather-create-form']} onSubmit={submit} aria-busy={submitting}>
         <MallDetailsFields form={form} onChange={change} disabled={submitting} />
-        <div className="mall-weather-form-actions mall-weather-form-wide">
-          <button className="primary" type="submit" disabled={submitting}>{submitting ? '提交中' : pending ? '重试原请求' : '创建并继续'}</button>
+        <div className={[styles['mall-weather-form-actions'], styles['mall-weather-form-wide']].join(' ')}>
+          <button className={styles['primary']} type="submit" disabled={submitting}>{submitting ? '提交中' : pending ? '重试原请求' : '创建并继续'}</button>
           <button type="button" onClick={onCancel} disabled={submitting}>取消</button>
         </div>
       </form>
-      {error && <p className="mall-weather-action-message error" role="alert">{error}</p>}
+      {error && <p className={[styles['mall-weather-action-message'], styles['error']].join(' ')} role="alert">{error}</p>}
     </section>
   )
 }
@@ -1461,50 +1459,49 @@ function MallOnboardingPanel({ mall, client, onMallUpdated, onReloadMall }: {
   }
 
   return (
-    <section className="workbench-panel mall-weather-onboarding-panel">
-      <div className="mall-weather-section-title">
+    <section className={[styles['workbench-panel'], styles['mall-weather-onboarding-panel']].join(' ')}>
+      <div className={styles['mall-weather-section-title']}>
         <div><strong>{mall.nameCn} · 接入天气</strong><span>{mall.mallCode} · {mallLifecycleLabel(mall)}</span></div>
         <button type="button" onClick={() => void onReloadMall(mall.id)} disabled={submitting}>刷新状态</button>
       </div>
-      <ol className="mall-weather-steps" aria-label="商场天气接入步骤">
-        <li className="done"><strong>1. 商场已创建</strong><span>{mall.province} {mall.city} {mall.district} {mall.address}</span></li>
-        <li className={mall.geocodeStatus.toLowerCase() === 'confirmed' ? 'done' : 'current'} aria-current={mall.geocodeStatus.toLowerCase() === 'confirmed' ? undefined : 'step'}><strong>2. 确认坐标</strong><span>先读取高德 GCJ-02 候选，再确认或修改</span></li>
-        <li className={mall.geocodeStatus.toLowerCase() === 'confirmed' && !mall.weatherEnabled ? 'current' : ''} aria-current={mall.geocodeStatus.toLowerCase() === 'confirmed' && !mall.weatherEnabled ? 'step' : undefined}><strong>3. 启用天气</strong><span>确认坐标时同步启用并创建首次采集任务</span></li>
+      <ol className={styles['mall-weather-steps']} aria-label="商场天气接入步骤">
+        <li className={styles['done']}><strong>1. 商场已创建</strong><span>{mall.province} {mall.city} {mall.district} {mall.address}</span></li>
+        <li className={mall.geocodeStatus.toLowerCase() === 'confirmed' ? styles.done : styles.current} aria-current={mall.geocodeStatus.toLowerCase() === 'confirmed' ? undefined : 'step'}><strong>2. 确认坐标</strong><span>先读取高德 GCJ-02 候选，再确认或修改</span></li>
+        <li className={mall.geocodeStatus.toLowerCase() === 'confirmed' && !mall.weatherEnabled ? styles.current : undefined} aria-current={mall.geocodeStatus.toLowerCase() === 'confirmed' && !mall.weatherEnabled ? 'step' : undefined}><strong>3. 启用天气</strong><span>确认坐标时同步启用并创建首次采集任务</span></li>
       </ol>
 
-      <div className="mall-weather-geocode-actions">
+      <div className={styles['mall-weather-geocode-actions']}>
         <div><strong>高德地址解析</strong><span>任务状态：{candidates?.runStatus || mall.geocodeStatus || '等待处理'} · 输出坐标系 GCJ-02</span></div>
-        <div className="mall-weather-form-actions">
+        <div className={styles['mall-weather-form-actions']}>
           <button type="button" onClick={() => { setCandidatePollAttempts(0); setCandidatePollFailures(0); void loadCandidates() }} disabled={candidateState === 'loading' || submitting}>{candidateState === 'loading' ? '加载中' : '刷新候选'}</button>
           <button type="button" onClick={() => void triggerGeocode()} disabled={submitting || candidateState === 'loading'}>{submitting ? '处理中' : '重新解析地址'}</button>
         </div>
       </div>
-      {candidates && candidates.items.length > 0 && <div className="mall-weather-candidates">
+      {candidates && candidates.items.length > 0 && <div className={styles['mall-weather-candidates']}>
         {candidates.items.map((candidate) => <article key={candidate.id}>
           <div><strong>候选 {candidate.candidateNo}</strong><span>置信度 {candidate.confidenceScore.toFixed(0)}% · {candidate.level || '层级未知'}</span></div>
           <p>{candidate.formattedAddress}</p>
           <small>{candidate.longitude.toFixed(6)}, {candidate.latitude.toFixed(6)} · 高德 {candidate.coordinateSystem}</small>
-          <button className={candidate.id === selectedCandidateID ? 'primary' : ''} type="button" onClick={() => selectCandidate(candidate.id)} disabled={submitting || candidateState === 'loading'}>{candidate.id === selectedCandidateID ? '已选择，可在下方修改' : '选择此高德坐标'}</button>
+          <button className={candidate.id === selectedCandidateID ? styles.primary : undefined} type="button" onClick={() => selectCandidate(candidate.id)} disabled={submitting || candidateState === 'loading'}>{candidate.id === selectedCandidateID ? '已选择，可在下方修改' : '选择此高德坐标'}</button>
         </article>)}
       </div>}
-      {candidateState === 'success' && candidates?.items.length === 0 && <p className="mall-weather-action-message">高德暂未返回候选。请确认地址完整、AMAP_WEB_SERVICE_KEY 已配置且天气 Worker 已启用，然后重新解析地址。</p>}
+      {candidateState === 'success' && candidates?.items.length === 0 && <p className={styles['mall-weather-action-message']}>高德暂未返回候选。请确认地址完整、AMAP_WEB_SERVICE_KEY 已配置且天气 Worker 已启用，然后重新解析地址。</p>}
 
-      {selectedCandidateID > 0 && <form className="mall-weather-manual-coordinate" onSubmit={(event) => { event.preventDefault(); requestCoordinateConfirmation() }}>
-        <div className="mall-weather-section-title"><div><strong>确认或修改高德坐标</strong><span>默认带入所选高德候选；如位置有偏差，可修改后再确认</span></div><span>GCJ-02</span></div>
+      {selectedCandidateID > 0 && <form className={styles['mall-weather-manual-coordinate']} onSubmit={(event) => { event.preventDefault(); requestCoordinateConfirmation() }}>
+        <div className={styles['mall-weather-section-title']}><div><strong>确认或修改高德坐标</strong><span>默认带入所选高德候选；如位置有偏差，可修改后再确认</span></div><span>GCJ-02</span></div>
         <label><span>高德经度</span><input name="longitude" inputMode="decimal" value={longitude} onChange={(event) => setLongitude(event.currentTarget.value)} required disabled={submitting || candidateState === 'loading'} /></label>
         <label><span>高德纬度</span><input name="latitude" inputMode="decimal" value={latitude} onChange={(event) => setLatitude(event.currentTarget.value)} required disabled={submitting || candidateState === 'loading'} /></label>
-        <label className="mall-weather-form-wide"><span>修改原因</span><input name="reason" value={reason} onChange={(event) => setReason(event.currentTarget.value)} maxLength={500} disabled={submitting || candidateState === 'loading'} /></label>
-        <button className="primary mall-weather-form-wide" type="submit" disabled={submitting || candidateState === 'loading'}>{submitting ? '确认中' : '确认高德坐标并启用天气'}</button>
+        <label className={styles['mall-weather-form-wide']}><span>修改原因</span><input name="reason" value={reason} onChange={(event) => setReason(event.currentTarget.value)} maxLength={500} disabled={submitting || candidateState === 'loading'} /></label>
+        <button className={[styles['primary'], styles['mall-weather-form-wide']].join(' ')} type="submit" disabled={submitting || candidateState === 'loading'}>{submitting ? '确认中' : '确认高德坐标并启用天气'}</button>
       </form>}
-      {coordinateConfirming && <div className="mall-weather-delete-confirm" role="alertdialog" aria-modal="true" aria-label="确认高德坐标并启用天气">
-        <strong>确认高德坐标并启用天气？</strong>
+      {coordinateConfirming && <Dialog open role="alertdialog" title="确认高德坐标并启用天气" closeDisabled={submitting} onClose={() => setCoordinateConfirming(false)}><div className={styles.dialogBody}>
         <p>将使用当前 GCJ-02 坐标启用天气服务，并创建首次采集任务。</p>
-        <div className="mall-weather-form-actions">
-          <button className="primary" type="button" disabled={submitting} onClick={() => { setCoordinateConfirming(false); void runSingleFlight(coordinateConfirmationInFlight.current, confirmCoordinate) }}>{submitting ? '确认中' : '确认启用天气'}</button>
+        <div className={styles['mall-weather-form-actions']}>
+          <button className={styles['primary']} type="button" disabled={submitting} onClick={() => { setCoordinateConfirming(false); void runSingleFlight(coordinateConfirmationInFlight.current, confirmCoordinate) }}>{submitting ? '确认中' : '确认启用天气'}</button>
           <button type="button" disabled={submitting} onClick={() => setCoordinateConfirming(false)}>返回修改</button>
         </div>
-      </div>}
-      {error && <p className="mall-weather-action-message error" role="alert">{error}</p>}
+      </div></Dialog>}
+      {error && <p className={[styles['mall-weather-action-message'], styles['error']].join(' ')} role="alert">{error}</p>}
     </section>
   )
 }
@@ -1547,18 +1544,18 @@ function MallCoordinateAdjustmentPanel({ mall, client, onMallUpdated }: {
   }
 
   return (
-    <section className="workbench-panel mall-weather-onboarding-panel">
-      <div className="mall-weather-section-title">
+    <section className={[styles['workbench-panel'], styles['mall-weather-onboarding-panel']].join(' ')}>
+      <div className={styles['mall-weather-section-title']}>
         <div><strong>高德商场坐标</strong><span>{Number(mall.longitude).toFixed(6)}, {Number(mall.latitude).toFixed(6)} · GCJ-02</span></div>
         <button type="button" onClick={() => { setEditing((current) => !current); setError('') }} disabled={submitting}>{editing ? '取消修改' : '修改坐标'}</button>
       </div>
-      {editing && <form className="mall-weather-manual-coordinate" onSubmit={submit}>
+      {editing && <form className={styles['mall-weather-manual-coordinate']} onSubmit={submit}>
         <label><span>高德经度</span><input name="longitude" inputMode="decimal" value={longitude} onChange={(event) => setLongitude(event.currentTarget.value)} required disabled={submitting} /></label>
         <label><span>高德纬度</span><input name="latitude" inputMode="decimal" value={latitude} onChange={(event) => setLatitude(event.currentTarget.value)} required disabled={submitting} /></label>
-        <label className="mall-weather-form-wide"><span>修改原因</span><input name="reason" value={reason} onChange={(event) => setReason(event.currentTarget.value)} maxLength={500} required disabled={submitting} /></label>
-        <button className="primary mall-weather-form-wide" type="submit" disabled={submitting}>{submitting ? '保存中' : '保存高德坐标'}</button>
+        <label className={styles['mall-weather-form-wide']}><span>修改原因</span><input name="reason" value={reason} onChange={(event) => setReason(event.currentTarget.value)} maxLength={500} required disabled={submitting} /></label>
+        <button className={[styles['primary'], styles['mall-weather-form-wide']].join(' ')} type="submit" disabled={submitting}>{submitting ? '保存中' : '保存高德坐标'}</button>
       </form>}
-      {error && <p className="mall-weather-action-message error" role="alert">{error}</p>}
+      {error && <p className={[styles['mall-weather-action-message'], styles['error']].join(' ')} role="alert">{error}</p>}
     </section>
   )
 }
@@ -1755,44 +1752,44 @@ function MallWeatherSheetPushPanel({ actorID, mall, client }: {
   }
 
   return (
-    <section className="workbench-panel mall-weather-push-panel">
-      <div className="mall-weather-section-title"><div><strong>绑定已有推送目标</strong><span>以 {mall.nameCn} 作为 mallIds 过滤条件，先验证再发起推送</span></div><span>飞书天气表</span></div>
+    <section className={[styles['workbench-panel'], styles['mall-weather-push-panel']].join(' ')}>
+      <div className={styles['mall-weather-section-title']}><div><strong>绑定已有推送目标</strong><span>以 {mall.nameCn} 作为 mallIds 过滤条件，先验证再发起推送</span></div><span>飞书天气表</span></div>
       {optionState === 'loading' && <LoadingState label="正在加载已有推送目标" />}
       {optionState === 'error' && <RequestError message={error} onRetry={() => void loadOptions()} />}
       {optionState === 'success' && options.length === 0 && <EmptyState title="没有可用推送目标" detail="请先启用 feishu_sheet 推送目标，并关联已启用的天气导出 Profile。" />}
-      {optionState === 'success' && options.length > 0 && <div className="mall-weather-push-controls">
+      {optionState === 'success' && options.length > 0 && <div className={styles['mall-weather-push-controls']}>
         <label><span>已有推送目标</span><select name="weatherSheetPushTarget" value={selectedDestinationID} onChange={(event) => changeOption(event.currentTarget.value)} disabled={checking || submitting || monitoring}>
           {options.map((option) => <option value={option.destinationId} key={option.destinationId}>{option.name} · {option.code} · {option.profileCode} v{option.profileVersion}</option>)}
         </select></label>
         <button type="button" onClick={() => void checkBinding()} disabled={checking || submitting || monitoring}>{checking ? '验证中' : '验证绑定'}</button>
-        <button className="primary" type="button" onClick={() => void submitPush()} disabled={checking || submitting || monitoring || !dryRun?.canExecute || Boolean(pending && !pendingMatchesOption)}>{submitting ? '提交中' : pending ? '重试原请求' : '绑定并发起推送'}</button>
+        <button className={styles['primary']} type="button" onClick={() => void submitPush()} disabled={checking || submitting || monitoring || !dryRun?.canExecute || Boolean(pending && !pendingMatchesOption)}>{submitting ? '提交中' : pending ? '重试原请求' : '绑定并发起推送'}</button>
       </div>}
-      {pending && <div className="mall-weather-pending-push" role="status">
+      {pending && <div className={styles['mall-weather-pending-push']} role="status">
         <span>存在结果待确认的原请求：商场 #{pending.body.filters.mallIds[0]}，目标 #{pending.body.destinationId}，Profile #{pending.body.profileId} v{pending.body.expectedProfileVersion}。{pendingMatchesOption ? ' 重试前仍需重新验证绑定。' : ' 当前选择与原请求不一致。'}</span>
         <button type="button" onClick={abandonPending} disabled={submitting}>放弃原请求</button>
       </div>}
-      {dryRun && <div className="mall-weather-push-summary" aria-live="polite">
+      {dryRun && <div className={styles['mall-weather-push-summary']} aria-live="polite">
         <MetaItem label="写入模式" value={dryRun.writeMode} />
         <MetaItem label="预计行数" value={String(dryRun.totalEstimatedRows)} />
         <MetaItem label="预计单元格" value={String(dryRun.totalEstimatedCells)} />
         <MetaItem label="可执行" value={dryRun.canExecute ? '是' : '否'} />
       </div>}
-      {dryRun && dryRun.warnings.length > 0 && <ul className="mall-weather-push-warnings">{dryRun.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul>}
-      {dryRun && dryRun.datasets.length > 0 && <div className="mall-weather-push-datasets">
+      {dryRun && dryRun.warnings.length > 0 && <ul className={styles['mall-weather-push-warnings']}>{dryRun.warnings.map((warning) => <li key={warning}>{warning}</li>)}</ul>}
+      {dryRun && dryRun.datasets.length > 0 && <div className={styles['mall-weather-push-datasets']}>
         {dryRun.datasets.map((dataset, datasetIndex) => <section key={`${dataset.datasetKind}:${datasetIndex}`}>
           <strong>{dataset.datasetKind}</strong>
           <span>预计 {dataset.estimatedRows} 行 / {dataset.estimatedCells} 单元格 · 可执行：{dataset.canExecute ? '是' : '否'}</span>
-          {dataset.warnings.length > 0 && <ul className="mall-weather-push-warnings">{dataset.warnings.map((warning, warningIndex) => <li key={`${warningIndex}:${warning}`}>{warning}</li>)}</ul>}
+          {dataset.warnings.length > 0 && <ul className={styles['mall-weather-push-warnings']}>{dataset.warnings.map((warning, warningIndex) => <li key={`${warningIndex}:${warning}`}>{warning}</li>)}</ul>}
         </section>)}
       </div>}
-      {run && <div className="mall-weather-push-summary" aria-live="polite">
+      {run && <div className={styles['mall-weather-push-summary']} aria-live="polite">
         <MetaItem label="运行状态" value={monitoring ? `${run.status}（查询中）` : run.status} />
         <MetaItem label="成功行数" value={String(run.successCount)} />
         <MetaItem label="失败行数" value={String(run.failedCount)} />
         <MetaItem label="总行数" value={String(run.totalCount)} />
       </div>}
-      {message && <p className="mall-weather-action-message" role="status">{message}</p>}
-      {error && optionState !== 'error' && <p className="mall-weather-action-message error" role="alert">{error}</p>}
+      {message && <p className={styles['mall-weather-action-message']} role="status">{message}</p>}
+      {error && optionState !== 'error' && <p className={[styles['mall-weather-action-message'], styles['error']].join(' ')} role="alert">{error}</p>}
     </section>
   )
 }
@@ -1943,32 +1940,32 @@ function ManualRefreshPanel({ actorID, mall, client, onWeatherUpdated }: {
   }
 
   const refreshPanel = (
-    <section className="workbench-panel mall-weather-refresh-panel">
-      <div className="mall-weather-section-title"><div><strong>手工刷新</strong><span>提交异步采集任务，不阻塞等待供应商</span></div><RefreshCcw aria-hidden="true" /></div>
-      <form className="mall-weather-refresh-form" onSubmit={submit} aria-busy={submitting || monitoring}>
+    <section className={[styles['workbench-panel'], styles['mall-weather-refresh-panel']].join(' ')}>
+      <div className={styles['mall-weather-section-title']}><div><strong>手工刷新</strong><span>提交异步采集任务，不阻塞等待供应商</span></div><RefreshCcw aria-hidden="true" /></div>
+      <form className={styles['mall-weather-refresh-form']} onSubmit={submit} aria-busy={submitting || monitoring}>
         <label><span>采集范围</span><input name="weatherRefreshScope" value="综合天气（含实况、分钟、小时、逐日、预警、生活指数）" disabled />
           <small>固定提交全部天气数据类型</small>
         </label>
         <label><span>刷新原因</span><input name="weatherRefreshReason" value={reason} onChange={(event) => changeReason(event.currentTarget.value)} disabled={submitting || monitoring || Boolean(pending)} aria-describedby={reasonHelpID} />
           <small id={reasonHelpID}>必填单行文本，最多 500 个字符</small>
         </label>
-        <div className="mall-weather-refresh-submit">
+        <div className={styles['mall-weather-refresh-submit']}>
           <span>操作</span>
-          <button className="primary" type="submit" disabled={submitting || monitoring}>
+          <button className={styles['primary']} type="submit" disabled={submitting || monitoring}>
             {submitting ? '提交中' : monitoring ? '等待采集完成' : pending ? '重试原请求' : '提交刷新'}
           </button>
           <small>提交后异步执行并跟踪结果</small>
         </div>
       </form>
-      {message && <p className="mall-weather-action-message" role="status">{message}</p>}
-      {error && <p className="mall-weather-action-message error" role="alert">{error}</p>}
+      {message && <p className={styles['mall-weather-action-message']} role="status">{message}</p>}
+      {error && <p className={[styles['mall-weather-action-message'], styles['error']].join(' ')} role="alert">{error}</p>}
     </section>
   )
 
   return (
-    <details className="mall-weather-refresh-compact">
+    <details className={styles['mall-weather-refresh-compact']}>
       <summary><RefreshCcw aria-hidden="true" />综合天气刷新</summary>
-      <div className="mall-weather-refresh-popover">{refreshPanel}</div>
+      <div className={styles['mall-weather-refresh-popover']}>{refreshPanel}</div>
     </details>
   )
 }
@@ -1995,26 +1992,26 @@ function WeatherRealtime({ mall, overview }: { mall: MallWeatherMall; overview: 
   }
 
   return (
-    <article className="workbench-panel mall-weather-realtime" aria-label="当前实况天气">
-      <header className="mall-weather-realtime-heading">
+    <article className={[styles['workbench-panel'], styles['mall-weather-realtime']].join(' ')} aria-label="当前实况天气">
+      <header className={styles['mall-weather-realtime-heading']}>
         <div><strong>当前实况</strong><span>{realtime?.snapshotAtLocal || '暂无快照时间'}</span></div>
         <button type="button" onClick={downloadCsv} disabled={!realtime} aria-label={`下载数据：${mall.nameCn}当前实况 CSV`}><Download aria-hidden="true" />下载数据</button>
       </header>
-      {downloadError && <p className="mall-weather-action-message error" role="alert">{downloadError}</p>}
+      {downloadError && <p className={[styles['mall-weather-action-message'], styles['error']].join(' ')} role="alert">{downloadError}</p>}
       {realtime ? (
         <>
-          <div className="mall-weather-realtime-body">
-            <div className="mall-weather-sky-summary">
+          <div className={styles['mall-weather-realtime-body']}>
+            <div className={styles['mall-weather-sky-summary']}>
               <CloudSun aria-hidden="true" />
-              <div className="mall-weather-temperature"><strong>{mallWeatherMetric(realtime.temperatureC, '°C')}</strong><span>{mallWeatherSkyconLabel(realtime.skycon).replace(/（.*）/, '')}</span></div>
+              <div className={styles['mall-weather-temperature']}><strong>{mallWeatherMetric(realtime.temperatureC, '°C')}</strong><span>{mallWeatherSkyconLabel(realtime.skycon).replace(/（.*）/, '')}</span></div>
             </div>
-            <dl className="mall-weather-current-metrics">
+            <dl className={styles['mall-weather-current-metrics']}>
               <div><dt>体感</dt><dd>{mallWeatherMetric(realtime.apparentTemperatureC, '°C')}</dd></div>
               <div><dt>湿度</dt><dd>{mallWeatherMetric(realtime.humidityPct, '%', 0)}</dd></div>
               <div><dt>风速</dt><dd>{mallWeatherMetric(realtime.windSpeedKph, ' km/h')}</dd></div>
               <div><dt>能见度</dt><dd>{mallWeatherMetric(realtime.visibilityKm, ' km')}</dd></div>
               <div><dt>本地降水</dt><dd>{mallWeatherMetric(realtime.localPrecipitationMmH, ' mm/h')}</dd></div>
-              <div><dt>质量</dt><dd className={realtime.qualityWarnings.length === 0 ? 'success' : 'warning'}>{realtime.qualityWarnings.length === 0 ? '正常' : `${realtime.qualityWarnings.length} 项告警`}</dd></div>
+              <div><dt>质量</dt><dd className={realtime.qualityWarnings.length === 0 ? styles.success : styles.warning}>{realtime.qualityWarnings.length === 0 ? '正常' : `${realtime.qualityWarnings.length} 项告警`}</dd></div>
             </dl>
           </div>
         </>
@@ -2064,21 +2061,21 @@ function WeatherOverviewDetails({ mall, overview, alerts, refreshing, onRefresh,
   const primaryAlert = alerts.items[0]
 
   return (
-    <div className="mall-weather-overview-details">
-      <section className="workbench-panel mall-weather-air-quality" aria-label="空气质量">
-        <strong className="mall-weather-card-title">空气质量</strong>
-        <div className="mall-weather-aqi"><strong>{mallWeatherMetric(realtime?.aqiChn, '', 0)}</strong><span>AQI</span></div>
-        <b className="mall-weather-aqi-grade">{realtime?.aqiDescriptionChn || '暂无评级'}</b>
-        <dl className="mall-weather-air-metrics">
+    <div className={styles['mall-weather-overview-details']}>
+      <section className={[styles['workbench-panel'], styles['mall-weather-air-quality']].join(' ')} aria-label="空气质量">
+        <strong className={styles['mall-weather-card-title']}>空气质量</strong>
+        <div className={styles['mall-weather-aqi']}><strong>{mallWeatherMetric(realtime?.aqiChn, '', 0)}</strong><span>AQI</span></div>
+        <b className={styles['mall-weather-aqi-grade']}>{realtime?.aqiDescriptionChn || '暂无评级'}</b>
+        <dl className={styles['mall-weather-air-metrics']}>
           <div><dt>PM2.5</dt><dd>{mallWeatherMetric(realtime?.pm25UgM3, '')}</dd></div>
           <div><dt>PM10</dt><dd>{mallWeatherMetric(realtime?.pm10UgM3, '')}</dd></div>
           <div><dt>O₃</dt><dd>{mallWeatherMetric(realtime?.o3UgM3, '')}</dd></div>
         </dl>
       </section>
 
-      <section className="workbench-panel mall-weather-design-alert" id="mall-weather-alerts" tabIndex={-1} aria-busy={alerts.loading}>
-        <header className="mall-weather-card-heading">
-          <strong className="mall-weather-card-title">气象预警</strong>
+      <section className={[styles['workbench-panel'], styles['mall-weather-design-alert']].join(' ')} id="mall-weather-alerts" tabIndex={-1} aria-busy={alerts.loading}>
+        <header className={styles['mall-weather-card-heading']}>
+          <strong className={styles['mall-weather-card-title']}>气象预警</strong>
           <button type="button" onClick={downloadAlertsCsv} disabled={alerts.loading || Boolean(alerts.error)} aria-label={`下载数据：${mall.nameCn}气象预警 CSV`}><Download aria-hidden="true" />下载数据</button>
         </header>
         {alerts.loading && <LoadingState label="正在加载全部气象预警" />}
@@ -2092,10 +2089,10 @@ function WeatherOverviewDetails({ mall, overview, alerts, refreshing, onRefresh,
             {primaryAlert.description && <p>{primaryAlert.description}</p>}
           </article>
           : <EmptyState title="当前无有效预警" detail="当前查询窗口没有返回有效气象预警。" />)}
-        {alertDownloadError && <p className="mall-weather-action-message error" role="alert">{alertDownloadError}</p>}
+        {alertDownloadError && <p className={[styles['mall-weather-action-message'], styles['error']].join(' ')} role="alert">{alertDownloadError}</p>}
       </section>
 
-      <section className="content-grid two mall-weather-design-charts">
+      <section className={[styles['content-grid'], styles['two'], styles['mall-weather-design-charts']].join(' ')}>
         <MallWeatherChart
           title="未来 120 分钟降水"
           detail="1 km 级"
@@ -2117,34 +2114,34 @@ function WeatherOverviewDetails({ mall, overview, alerts, refreshing, onRefresh,
           onDownload={(series) => downloadChartCsv('overview_hourly_temperature', '°C', series)}
         />
       </section>
-      {chartDownloadError && <p className="mall-weather-action-message error mall-weather-chart-download-error" role="alert">{chartDownloadError}</p>}
+      {chartDownloadError && <p className={[styles['mall-weather-action-message'], styles['error'], styles['mall-weather-chart-download-error']].join(' ')} role="alert">{chartDownloadError}</p>}
 
-      <section className="workbench-panel mall-weather-summary">
-        <div className="mall-weather-meta" aria-label="天气数据口径">
-          <div className="mall-weather-source-item"><CloudSun aria-hidden="true" /><span>供应商<strong>{`${meta.provider || '彩云天气'} ${meta.apiVersion}`.trim()}</strong></span></div>
-          <div className="mall-weather-source-item"><Clock3 aria-hidden="true" /><span>新鲜度<strong>{mallWeatherFreshnessLabel(meta.freshnessStatus)}</strong></span></div>
-          <div className="mall-weather-source-item"><MapPin aria-hidden="true" /><span>坐标<strong>{meta.longitude === 0 && meta.latitude === 0 ? '坐标未提供' : `${meta.longitude.toFixed(4)}, ${meta.latitude.toFixed(4)} ${meta.coordinateSystem}`}</strong></span></div>
+      <section className={[styles['workbench-panel'], styles['mall-weather-summary']].join(' ')}>
+        <div className={styles['mall-weather-meta']} aria-label="天气数据口径">
+          <div className={styles['mall-weather-source-item']}><CloudSun aria-hidden="true" /><span>供应商<strong>{`${meta.provider || '彩云天气'} ${meta.apiVersion}`.trim()}</strong></span></div>
+          <div className={styles['mall-weather-source-item']}><Clock3 aria-hidden="true" /><span>新鲜度<strong>{mallWeatherFreshnessLabel(meta.freshnessStatus)}</strong></span></div>
+          <div className={styles['mall-weather-source-item']}><MapPin aria-hidden="true" /><span>坐标<strong>{meta.longitude === 0 && meta.latitude === 0 ? '坐标未提供' : `${meta.longitude.toFixed(4)}, ${meta.latitude.toFixed(4)} ${meta.coordinateSystem}`}</strong></span></div>
         </div>
-        <details className="mall-weather-resolution"><summary>查看天气数据口径</summary><p>代表点：{representativePoint} · {coverageRadius}。实况与未来两小时降水为商场中心点 1 km 级数据；常规小时预报为商场中心点所在 9～13 km 预报网格，预警按行政区域发布。</p><button type="button" onClick={onRefresh} disabled={refreshing}><RefreshCcw aria-hidden="true" />{refreshing ? '加载中' : '重新加载'}</button></details>
+        <details className={styles['mall-weather-resolution']}><summary>查看天气数据口径</summary><p>代表点：{representativePoint} · {coverageRadius}。实况与未来两小时降水为商场中心点 1 km 级数据；常规小时预报为商场中心点所在 9～13 km 预报网格，预警按行政区域发布。</p><button type="button" onClick={onRefresh} disabled={refreshing}><RefreshCcw aria-hidden="true" />{refreshing ? '加载中' : '重新加载'}</button></details>
       </section>
     </div>
   )
 }
 
 function MetaItem({ label, value }: { label: string; value: string }) {
-  return <div className="mall-weather-meta-item"><span>{label}</span><strong>{value || '—'}</strong></div>
+  return <div className={styles['mall-weather-meta-item']}><span>{label}</span><strong>{value || '—'}</strong></div>
 }
 
 function RequestError({ message, onRetry }: { message: string; onRetry: () => void }) {
-  return <div className="mall-weather-request-state error" role="alert"><strong>加载失败</strong><span>{message}</span><button type="button" onClick={onRetry}>重试</button></div>
+  return <div className={[styles['mall-weather-request-state'], styles['error']].join(' ')} role="alert"><strong>加载失败</strong><span>{message}</span><button type="button" onClick={onRetry}>重试</button></div>
 }
 
 function LoadingState({ label }: { label: string }) {
-  return <div className="mall-weather-request-state" role="status" aria-busy="true"><RefreshCcw aria-hidden="true" /><span>{label}</span></div>
+  return <div className={styles['mall-weather-request-state']} role="status" aria-busy="true"><RefreshCcw aria-hidden="true" /><span>{label}</span></div>
 }
 
 function EmptyState({ title, detail }: { title: string; detail: string }) {
-  return <div className="empty-state" role="status"><strong>{title}</strong><span>{detail}</span></div>
+  return <div className={styles['empty-state']} role="status"><strong>{title}</strong><span>{detail}</span></div>
 }
 
 function weatherRequestError(status: number, fallback: string, forbidden: string) {

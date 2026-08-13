@@ -11,6 +11,8 @@ import {
   type MallWeatherMall,
 } from './mallWeather'
 import { runSingleFlight } from './singleFlight'
+import { Dialog } from './ui'
+import styles from './MallWeatherMallEditor.module.css'
 
 type MallWeatherMutationClient = (
   path: string,
@@ -36,7 +38,7 @@ export function MallDetailsFields({ form, onChange, disabled, mallCodeReadOnly =
     <label><span>省份 *</span><input name="province" value={form.province} onChange={(event) => onChange('province', event.currentTarget.value)} placeholder="上海市" maxLength={128} disabled={disabled} /></label>
     <label><span>城市 *</span><input name="city" value={form.city} onChange={(event) => onChange('city', event.currentTarget.value)} placeholder="上海市" maxLength={128} disabled={disabled} /></label>
     <label><span>区县</span><input name="district" value={form.district} onChange={(event) => onChange('district', event.currentTarget.value)} placeholder="浦东新区" maxLength={128} disabled={disabled} /></label>
-    <label className="mall-weather-form-wide"><span>详细地址 *</span><input name="address" value={form.address} onChange={(event) => onChange('address', event.currentTarget.value)} placeholder="道路、门牌号及建筑名称" maxLength={1000} disabled={disabled} /></label>
+    <label className={styles['mall-weather-form-wide']}><span>详细地址 *</span><input name="address" value={form.address} onChange={(event) => onChange('address', event.currentTarget.value)} placeholder="道路、门牌号及建筑名称" maxLength={1000} disabled={disabled} /></label>
   </>
 }
 
@@ -192,47 +194,42 @@ export function MallWeatherMallEditor({ mall, client, onMallUpdated, onMallDelet
   }
 
   return (
-    <section className="workbench-panel mall-weather-editor-panel">
-      <div className="mall-weather-section-title">
+    <section className={[styles['workbench-panel'], styles['mall-weather-editor-panel']].join(' ')}>
+      <div className={styles['mall-weather-section-title']}>
         <div><strong>商场信息</strong><span>{workingMall.mallCode} · {mallEditorLifecycleLabel(workingMall)}</span></div>
-        <div className="mall-weather-form-actions">
+        <div className={styles['mall-weather-form-actions']}>
           <button type="button" onClick={() => { setEditing((current) => !current); setError(''); setMessage('') }} disabled={submitting} aria-expanded={editing}>
             <Pencil aria-hidden="true" />{editing ? '收起编辑' : '编辑商场'}
           </button>
-          <button className="danger" type="button" onClick={() => { setDeleteConfirming((current) => !current); setDeleteName(''); setError(''); setMessage('') }} disabled={submitting} aria-expanded={deleteConfirming}>
+          <button className={styles['danger']} type="button" onClick={() => { setDeleteConfirming((current) => !current); setDeleteName(''); setError(''); setMessage('') }} disabled={submitting} aria-expanded={deleteConfirming}>
             <Trash2 aria-hidden="true" />删除商场
           </button>
         </div>
       </div>
-      {failedGeocode && !editing && <p className="mall-weather-action-message error" role="alert">地址解析失败，请编辑地址，或直接填写高德经纬度后确认。</p>}
-      {editing && <form className="mall-weather-create-form" onSubmit={(event: FormEvent<HTMLFormElement>) => { event.preventDefault(); void save(false) }} aria-busy={submitting}>
+      {failedGeocode && !editing && <p className={[styles['mall-weather-action-message'], styles['error']].join(' ')} role="alert">地址解析失败，请编辑地址，或直接填写高德经纬度后确认。</p>}
+      {editing && <form className={styles['mall-weather-create-form']} onSubmit={(event: FormEvent<HTMLFormElement>) => { event.preventDefault(); void save(false) }} aria-busy={submitting}>
         <MallDetailsFields form={form} onChange={change} disabled={submitting} mallCodeReadOnly />
-        <div className="mall-weather-manual-coordinate mall-weather-form-wide">
-          <div className="mall-weather-section-title mall-weather-form-wide"><div><strong>手动确认高德坐标</strong><span>地址解析失败或候选不准确时填写；坐标系固定为 GCJ-02</span></div><span>可选</span></div>
+        <div className={[styles['mall-weather-manual-coordinate'], styles['mall-weather-form-wide']].join(' ')}>
+          <div className={[styles['mall-weather-section-title'], styles['mall-weather-form-wide']].join(' ')}><div><strong>手动确认高德坐标</strong><span>地址解析失败或候选不准确时填写；坐标系固定为 GCJ-02</span></div><span>可选</span></div>
           <label><span>高德经度</span><input name="editLongitude" inputMode="decimal" value={longitude} onChange={(event) => setLongitude(event.currentTarget.value)} disabled={submitting} placeholder="例如 121.4737" /></label>
           <label><span>高德纬度</span><input name="editLatitude" inputMode="decimal" value={latitude} onChange={(event) => setLatitude(event.currentTarget.value)} disabled={submitting} placeholder="例如 31.2304" /></label>
-          <label className="mall-weather-form-wide"><span>确认原因</span><input name="editCoordinateReason" value={reason} onChange={(event) => setReason(event.currentTarget.value)} maxLength={500} disabled={submitting} /></label>
+          <label className={styles['mall-weather-form-wide']}><span>确认原因</span><input name="editCoordinateReason" value={reason} onChange={(event) => setReason(event.currentTarget.value)} maxLength={500} disabled={submitting} /></label>
         </div>
-        <div className="mall-weather-form-actions mall-weather-form-wide">
+        <div className={[styles['mall-weather-form-actions'], styles['mall-weather-form-wide']].join(' ')}>
           <button type="submit" disabled={submitting}>{submitting ? '保存中' : '保存地址并重新解析'}</button>
-          <button className="primary" type="button" onClick={requestCoordinateConfirmation} disabled={submitting}>{submitting ? '确认中' : '保存并确认高德坐标'}</button>
+          <button className={styles['primary']} type="button" onClick={requestCoordinateConfirmation} disabled={submitting}>{submitting ? '确认中' : '保存并确认高德坐标'}</button>
         </div>
       </form>}
-      {coordinateConfirming && <div className="mall-weather-delete-confirm" role="alertdialog" aria-modal="true" aria-label="确认高德坐标并启用天气">
-        <strong>确认高德坐标并启用天气？</strong>
+      {coordinateConfirming && <Dialog open role="alertdialog" title="确认高德坐标并启用天气" closeDisabled={submitting} onClose={() => setCoordinateConfirming(false)}><div className={styles.dialogBody}>
         <p>将使用当前 GCJ-02 坐标启用天气服务，并创建首次采集任务。</p>
-        <div className="mall-weather-form-actions"><button className="primary" type="button" disabled={submitting} onClick={() => { setCoordinateConfirming(false); void runSingleFlight(coordinateConfirmationInFlight.current, () => save(true)) }}>{submitting ? '确认中' : '确认启用天气'}</button><button type="button" disabled={submitting} onClick={() => setCoordinateConfirming(false)}>返回修改</button></div>
-      </div>}
-      {deleteConfirming && <div className="mall-weather-delete-confirm" role="group" aria-label="删除商场二次确认">
-        <strong>此操作会删除商场及其天气配置</strong>
+        <div className={styles['mall-weather-form-actions']}><button className={styles.primary} type="button" disabled={submitting} onClick={() => { setCoordinateConfirming(false); void runSingleFlight(coordinateConfirmationInFlight.current, () => save(true)) }}>{submitting ? '确认中' : '确认启用天气'}</button><button type="button" disabled={submitting} onClick={() => setCoordinateConfirming(false)}>返回修改</button></div>
+      </div></Dialog>}
+      {deleteConfirming && <Dialog open role="alertdialog" title="删除商场及天气配置" closeDisabled={submitting} onClose={() => { setDeleteConfirming(false); setDeleteName('') }}><div className={styles.dialogBody}>
         <label><span>请输入商场名称“{workingMall.nameCn}”确认</span><input value={deleteName} onChange={(event) => setDeleteName(event.currentTarget.value)} disabled={submitting} autoComplete="off" /></label>
-        <div className="mall-weather-form-actions">
-          <button className="danger" type="button" onClick={() => void deleteMall()} disabled={submitting || deleteName !== workingMall.nameCn}>{submitting ? '删除中' : '确认删除'}</button>
-          <button type="button" onClick={() => { setDeleteConfirming(false); setDeleteName('') }} disabled={submitting}>取消</button>
-        </div>
-      </div>}
-      {message && <p className="mall-weather-action-message" role="status">{message}</p>}
-      {error && <p className="mall-weather-action-message error" role="alert">{error}</p>}
+        <div className={styles['mall-weather-form-actions']}><button className={styles.danger} type="button" onClick={() => void deleteMall()} disabled={submitting || deleteName !== workingMall.nameCn}>{submitting ? '删除中' : '确认删除'}</button><button type="button" onClick={() => { setDeleteConfirming(false); setDeleteName('') }} disabled={submitting}>取消</button></div>
+      </div></Dialog>}
+      {message && <p className={styles['mall-weather-action-message']} role="status">{message}</p>}
+      {error && <p className={[styles['mall-weather-action-message'], styles['error']].join(' ')} role="alert">{error}</p>}
     </section>
   )
 }

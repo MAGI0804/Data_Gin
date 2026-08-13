@@ -1,0 +1,50 @@
+.panel {
+  min-width: 0;
+  border: 1px solid var(--color-border);
+  background: var(--color-canvas);
+  padding: var(--space-4);
+}
+
+.heading,
+.title,
+.legend,
+.legend span,
+.tooltip span {
+  display: flex;
+  align-items: center;
+}
+
+.heading { align-items: flex-start; justify-content: space-between; gap: var(--space-4); }
+.title { align-items: flex-start; gap: 10px; min-width: 0; }
+.title strong, .title span { display: block; }
+.title strong { color: var(--color-text); font-size: 16px; line-height: 1.35; }
+.title span { margin-top: 3px; color: var(--color-text-secondary); font-size: 11px; }
+.icon { display: grid; width: 30px; height: 30px; flex: 0 0 auto; place-items: center; border-radius: var(--radius-control); background: var(--color-surface-subtle); color: var(--color-text-secondary); }
+.icon svg { width: 17px; height: 17px; }
+.download { min-height: 32px; flex: 0 0 auto; font-size: 12px; padding: 6px 10px; }
+.legend { flex-wrap: wrap; gap: 7px 16px; min-height: 20px; margin: 12px 0 4px 40px; color: var(--color-text-secondary); font-size: 11px; }
+.legend span, .tooltip span { gap: 6px; }
+.legend svg { width: 20px; height: 6px; flex: 0 0 auto; overflow: visible; }
+.empty { padding: var(--space-6); color: var(--color-text-secondary); text-align: center; }
+.empty strong, .empty span { display: block; }
+.visual { position: relative; width: 100%; }
+.visual > svg { display: block; width: 100%; height: auto; overflow: visible; cursor: crosshair; }
+.yTick line { stroke: var(--color-border); stroke-width: 1; vector-effect: non-scaling-stroke; }
+.yTick text, .xTick { fill: var(--color-text-secondary); font-size: 10px; font-weight: 400; }
+.series polyline { fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
+.series circle, .active circle, .singlePoint { fill: var(--color-canvas); stroke-width: 2; vector-effect: non-scaling-stroke; }
+.active line { stroke: var(--color-text-disabled); stroke-width: 1; stroke-dasharray: 4 4; vector-effect: non-scaling-stroke; }
+.tooltip { position: absolute; z-index: 2; display: grid; gap: 5px; max-width: min(260px, calc(100vw - 32px)); max-height: 220px; overflow: auto; border: 1px solid var(--color-border); border-radius: var(--radius-control); background: var(--color-canvas); box-shadow: 0 8px 24px rgb(31 35 41 / 12%); padding: 8px 10px; white-space: normal; pointer-events: none; }
+.tooltip i { width: 7px; height: 7px; flex: 0 0 auto; border-radius: 50%; }
+.tooltipStart { transform: translate(0, -100%); }
+.tooltipCenter { transform: translate(-50%, -100%); }
+.tooltipEnd { transform: translate(-100%, -100%); }
+.tooltipBelow.tooltipStart { transform: translate(0, 10px); }
+.tooltipBelow.tooltipCenter { transform: translate(-50%, 10px); }
+.tooltipBelow.tooltipEnd { transform: translate(-100%, 10px); }
+
+@media (max-width: 479px) {
+  .heading { align-items: stretch; flex-direction: column; }
+  .download { width: 100%; }
+  .legend { margin-left: 0; }
+}
