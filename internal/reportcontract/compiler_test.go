@@ -2,6 +2,7 @@ package reportcontract
 
 import (
 	"errors"
+	"strings"
 	"testing"
 
 	"gin-biz-web-api/internal/reportoracle"
@@ -47,6 +48,25 @@ func TestVerifyRuntimeMetadataAcceptsPublishedContractAndRejectsDrift(t *testing
 	procedure[0].Name = "P_WRONG"
 	if err := VerifyRuntimeMetadata(compiled.SpecJSON, compiled.Hashes.Contract, compiled.Hashes.ProcedureSignature, compiled.Hashes.ResultSchema, procedure, result); !errors.Is(err, ErrInvalidContract) {
 		t.Fatalf("procedure drift error = %v", err)
+	}
+}
+
+func TestVerifyRuntimeResultMetadataRejectsDriftAfterRun(t *testing.T) {
+	version, parameters, columns, grants, procedure, result := validContract()
+	compiled, err := Compile(version, parameters, columns, grants, procedure, result, validSnapshotContract(t, version, result, columns))
+	if err != nil {
+		t.Fatalf("Compile() error = %v", err)
+	}
+	if err := VerifyRuntimeResultMetadata(compiled.SpecJSON, compiled.Hashes.Contract, compiled.Hashes.ResultSchema, result); err != nil {
+		t.Fatalf("VerifyRuntimeResultMetadata() error = %v", err)
+	}
+	drifted := append([]reportoracle.ResultColumn(nil), result...)
+	drifted[len(drifted)-1].DataType = "CLOB"
+	if err := VerifyRuntimeResultMetadata(compiled.SpecJSON, compiled.Hashes.Contract, compiled.Hashes.ResultSchema, drifted); !errors.Is(err, ErrInvalidContract) {
+		t.Fatalf("drift error = %v", err)
+	}
+	if err := VerifyRuntimeResultMetadata(compiled.SpecJSON, strings.Repeat("0", 64), compiled.Hashes.ResultSchema, result); !errors.Is(err, ErrInvalidContract) {
+		t.Fatalf("contract hash error = %v", err)
 	}
 }
 

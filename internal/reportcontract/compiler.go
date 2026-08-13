@@ -36,37 +36,16 @@ type Compiled struct {
 // still match the immutable publication contract. Runtime execution must stop
 // before invoking the procedure when either schema has drifted.
 func VerifyRuntimeMetadata(specJSON []byte, contractHash, procedureHash, resultHash string, procedure []reportoracle.ProcedureArgument, result []reportoracle.ResultColumn) error {
-	if len(bytes.TrimSpace(specJSON)) == 0 {
-		return contractError("stored contract payload is empty")
-	}
-	var spec contractSpec
-	decoder := json.NewDecoder(bytes.NewReader(specJSON))
-	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&spec); err != nil {
-		return contractError("stored contract payload is invalid")
-	}
-	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
-		return contractError("stored contract payload contains trailing data")
-	}
-	canonicalSpec, err := json.Marshal(spec)
+	spec, err := decodeVerifiedSpec(specJSON, contractHash)
 	if err != nil {
-		return fmt.Errorf("canonicalize stored report contract: %w", err)
-	}
-	if hashBytes(canonicalSpec) != contractHash {
-		return contractError("stored contract payload hash does not match")
+		return err
 	}
 	normalizedProcedure := normalizeProcedureArguments(procedure)
 	actualProcedureHash, err := hashJSON(normalizedProcedure)
 	if err != nil {
 		return err
 	}
-	normalizedResult := append([]reportoracle.ResultColumn(nil), result...)
-	sort.Slice(normalizedResult, func(i, j int) bool { return normalizedResult[i].Position < normalizedResult[j].Position })
-	for index := range normalizedResult {
-		normalizedResult[index].Name = strings.ToUpper(strings.TrimSpace(normalizedResult[index].Name))
-		normalizedResult[index].DataType = normalizeOracleType(normalizedResult[index].DataType)
-	}
-	actualResultHash, err := hashJSON(normalizedResult)
+	actualResultHash, err := resultSchemaHash(result)
 	if err != nil {
 		return err
 	}
@@ -85,6 +64,61 @@ func VerifyRuntimeMetadata(specJSON []byte, contractHash, procedureHash, resultH
 		return contractError("stored Oracle metadata hashes do not match")
 	}
 	return nil
+}
+
+// VerifyRuntimeResultMetadata is used before every preview and export read.
+// It prevents a changed Oracle result table from being interpreted through an
+// older frozen presentation contract even when the original run succeeded.
+func VerifyRuntimeResultMetadata(specJSON []byte, contractHash, resultHash string, result []reportoracle.ResultColumn) error {
+	spec, err := decodeVerifiedSpec(specJSON, contractHash)
+	if err != nil {
+		return err
+	}
+	actualResultHash, err := resultSchemaHash(result)
+	if err != nil {
+		return err
+	}
+	storedResultHash, err := hashJSON(spec.Result)
+	if err != nil {
+		return err
+	}
+	if actualResultHash != resultHash || storedResultHash != resultHash {
+		return contractError("live Oracle result metadata does not match the published contract")
+	}
+	return nil
+}
+
+func decodeVerifiedSpec(specJSON []byte, contractHash string) (contractSpec, error) {
+	if len(bytes.TrimSpace(specJSON)) == 0 {
+		return contractSpec{}, contractError("stored contract payload is empty")
+	}
+	var spec contractSpec
+	decoder := json.NewDecoder(bytes.NewReader(specJSON))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&spec); err != nil {
+		return contractSpec{}, contractError("stored contract payload is invalid")
+	}
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		return contractSpec{}, contractError("stored contract payload contains trailing data")
+	}
+	canonicalSpec, err := json.Marshal(spec)
+	if err != nil {
+		return contractSpec{}, fmt.Errorf("canonicalize stored report contract: %w", err)
+	}
+	if hashBytes(canonicalSpec) != contractHash {
+		return contractSpec{}, contractError("stored contract payload hash does not match")
+	}
+	return spec, nil
+}
+
+func resultSchemaHash(result []reportoracle.ResultColumn) (string, error) {
+	normalized := append([]reportoracle.ResultColumn(nil), result...)
+	sort.Slice(normalized, func(i, j int) bool { return normalized[i].Position < normalized[j].Position })
+	for index := range normalized {
+		normalized[index].Name = strings.ToUpper(strings.TrimSpace(normalized[index].Name))
+		normalized[index].DataType = normalizeOracleType(normalized[index].DataType)
+	}
+	return hashJSON(normalized)
 }
 
 type contractSpec struct {

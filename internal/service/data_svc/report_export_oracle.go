@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"strings"
 
+	"gin-biz-web-api/internal/reportcontract"
 	"gin-biz-web-api/internal/reportoracle"
 	"gin-biz-web-api/internal/reportquery"
 	"gin-biz-web-api/internal/reportrepo"
@@ -54,6 +55,15 @@ func (oracleReportExportSessionFactory) Open(ctx context.Context, runtime report
 	ref := reportoracle.ResultSnapshotRef{
 		Table:       reportoracle.ResultTableRef{Owner: runtime.Version.ResultTableOwner, Name: runtime.Version.ResultTableName},
 		RunIDColumn: runtime.Version.ResultRunIDColumn, RowIDColumn: runtime.Version.ResultRowIDColumn, Columns: queryDatabaseColumns(queryColumns, databaseColumns),
+	}
+	resultColumns, err := adapter.InspectResultTable(ctx, ref.Table)
+	if err != nil {
+		return closeOnError(err)
+	}
+	if err := reportcontract.VerifyRuntimeResultMetadata(
+		[]byte(runtime.Version.CompiledSpecJSON), runtime.Run.ContractHash, runtime.Run.ResultSchemaHash, resultColumns,
+	); err != nil {
+		return closeOnError(err)
 	}
 	contract, err := adapter.InspectResultSnapshotContract(ctx, ref)
 	if err != nil {

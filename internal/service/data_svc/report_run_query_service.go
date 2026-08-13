@@ -16,6 +16,7 @@ import (
 
 	"github.com/google/uuid"
 
+	"gin-biz-web-api/internal/reportcontract"
 	"gin-biz-web-api/internal/reportoracle"
 	"gin-biz-web-api/internal/reportquery"
 	"gin-biz-web-api/internal/reportrepo"
@@ -488,6 +489,15 @@ func (oracleReportResultPageReader) Read(ctx context.Context, contract reportrep
 	ref := reportoracle.ResultSnapshotRef{
 		Table:       reportoracle.ResultTableRef{Owner: contract.Version.ResultTableOwner, Name: contract.Version.ResultTableName},
 		RunIDColumn: contract.Version.ResultRunIDColumn, RowIDColumn: contract.Version.ResultRowIDColumn, Columns: columns,
+	}
+	resultColumns, err := adapter.InspectResultTable(ctx, ref.Table)
+	if err != nil {
+		return reportoracle.ResultPage{}, err
+	}
+	if err := reportcontract.VerifyRuntimeResultMetadata(
+		[]byte(contract.Version.CompiledSpecJSON), contract.Run.ContractHash, contract.Run.ResultSchemaHash, resultColumns,
+	); err != nil {
+		return reportoracle.ResultPage{}, err
 	}
 	snapshot, err := adapter.InspectResultSnapshotContract(ctx, ref)
 	if err != nil {
