@@ -1,0 +1,155 @@
+.field {
+  display: grid;
+  min-width: min(100%, 190px);
+  gap: var(--space-1);
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.field input,
+.field select {
+  min-height: var(--control-height);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-control);
+  background: var(--color-canvas);
+  color: var(--color-text);
+  padding-inline: var(--space-3);
+}
+
+.field input[readonly] {
+  background: var(--color-surface-subtle);
+  font-family: var(--font-mono);
+}
+
+.actions,
+.dialogFormActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.primary {
+  border-color: var(--color-brand-active);
+  background: var(--color-brand-active);
+  color: var(--color-canvas);
+}
+
+.warning {
+  display: flex;
+  gap: var(--space-2);
+  align-items: flex-start;
+  border-top: 1px solid var(--color-border);
+  padding-block-start: var(--space-3);
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.warning svg {
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+  color: var(--color-warning);
+}
+
+.warning strong {
+  margin-inline-end: var(--space-2);
+  color: var(--color-text);
+}
+
+.definition {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin: 0;
+  border-top: 1px solid var(--color-border);
+}
+
+.definition > div {
+  display: grid;
+  grid-template-columns: 104px minmax(0, 1fr);
+  gap: var(--space-3);
+  min-width: 0;
+  border-bottom: 1px solid var(--color-border);
+  padding-block: var(--space-3);
+}
+
+.definition > div:nth-child(odd):not(.wide) {
+  padding-inline-end: var(--space-4);
+}
+
+.definition .wide {
+  grid-column: 1 / -1;
+}
+
+.definition dt {
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.definition dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.definition code {
+  font-family: var(--font-mono);
+  font-size: 12px;
+}
+
+.dialogForm {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+
+.dialogForm .field {
+  min-width: 0;
+}
+
+.dialogFormActions {
+  grid-column: 1 / -1;
+  justify-content: flex-end;
+  border-top: 1px solid var(--color-border);
+  padding-block-start: var(--space-3);
+}
+
+.confirmation {
+  display: grid;
+  gap: var(--space-4);
+}
+
+@media (max-width: 839px) {
+  .field {
+    width: 100%;
+  }
+
+  .field input,
+  .field select,
+  .actions,
+  .actions button {
+    width: 100%;
+  }
+
+  .actions button {
+    flex: 1 1 0;
+  }
+}
+
+@media (max-width: 639px) {
+  .definition,
+  .dialogForm {
+    grid-template-columns: 1fr;
+  }
+
+  .definition .wide,
+  .dialogFormActions {
+    grid-column: auto;
+  }
+
+  .definition > div:nth-child(odd):not(.wide) {
+    padding-inline-end: 0;
+  }
+}

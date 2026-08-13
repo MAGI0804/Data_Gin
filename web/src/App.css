@@ -708,54 +708,6 @@ button:focus-visible {
   justify-content: flex-start;
 }
 
-.youzan-backfill-form {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto auto;
-  gap: 12px;
-  align-items: end;
-}
-
-.task-definition-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  margin: 0;
-  border-top: 1px solid #d0d0d0;
-}
-
-.task-definition-grid > div {
-  display: grid;
-  grid-template-columns: 96px minmax(0, 1fr);
-  gap: 10px;
-  border-bottom: 1px solid #d0d0d0;
-  padding: 10px 0;
-}
-
-.task-definition-grid > div:nth-child(odd):not(.wide) {
-  padding-right: 16px;
-}
-
-.task-definition-grid .wide {
-  grid-column: 1 / -1;
-}
-
-.task-definition-grid dt {
-  color: #666666;
-  font-size: 12px;
-  font-weight: 700;
-}
-
-.task-definition-grid dd {
-  min-width: 0;
-  margin: 0;
-  overflow-wrap: anywhere;
-}
-
-.task-page-actions {
-  display: flex;
-  justify-content: flex-end;
-  margin-top: 12px;
-}
-
 .push-skip-form {
   display: grid;
   gap: 12px;
@@ -808,110 +760,8 @@ button:focus-visible {
   overflow-wrap: anywhere;
 }
 
-.backfill-note {
-  margin: 10px 0 0;
-  color: #666666;
-  font-size: 12px;
-  line-height: 1.5;
-}
-
-.backfill-warning {
-  display: flex;
-  align-items: center;
-  gap: 18px;
-  margin-top: 20px;
-  border-top: 2px solid var(--accent);
-  background: #fffaf1;
-  color: #3f3f46;
-  font-size: 12px;
-  line-height: 1.5;
-  padding: 14px 16px;
-}
-
-.backfill-warning svg {
-  width: 24px;
-  height: 24px;
-  flex: 0 0 auto;
-  color: #e98b00;
-}
-
-.backfill-warning span + span {
-  border-left: 1px solid var(--line);
-  padding-left: 18px;
-}
-
-.backfill-warning.compact {
-  align-items: flex-start;
-  gap: 10px;
-  margin-top: 14px;
-}
-
-.youzan-operations-grid {
-  display: grid;
-  grid-template-columns: minmax(360px, 0.9fr) minmax(0, 1.4fr);
-  border-top: 1px solid var(--line);
-}
-
-.youzan-operations-grid > .workbench-panel {
-  border-top: 0;
-  padding: 0 22px 22px 0;
-}
-
-.youzan-operations-grid > .workbench-panel + .workbench-panel {
-  border-left: 1px solid var(--line);
-  padding-right: 0;
-  padding-left: 22px;
-}
-
-.youzan-operations-grid .youzan-backfill-form {
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-}
-
-.youzan-operations-grid .youzan-backfill-form > label:first-child {
-  grid-column: 1 / -1;
-}
-
-.youzan-operations-grid .youzan-backfill-form > button {
-  width: 100%;
-}
-
-.youzan-operations-grid .overview-grid.compact {
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-}
-
-.youzan-operations-grid .overview-grid.compact .metric:nth-child(4) {
-  border-left: 0;
-}
-
-.backfill-result {
-  display: grid;
-  gap: 12px;
-  margin-top: 12px;
-}
-
-.backfill-result-title {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
-  border-top: 1px solid #d0d0d0;
-  padding-top: 12px;
-}
-
-.backfill-result-title span {
-  color: #666666;
-  font-size: 12px;
-}
-
 .overview-grid.compact {
   grid-template-columns: repeat(5, minmax(0, 1fr));
-}
-
-.manual-task-actions {
-  display: flex;
-  justify-content: flex-end;
-  gap: 10px;
-  flex-wrap: wrap;
 }
 
 code {
@@ -1039,11 +889,6 @@ summary {
     grid-template-columns: 1fr;
   }
 
-  .bojun-backfill-form,
-  .youzan-backfill-form {
-    grid-template-columns: repeat(2, minmax(0, 1fr));
-  }
-
   .log-board {
     height: auto;
   }
@@ -1117,23 +962,6 @@ summary {
   .store-log-title {
     align-items: stretch;
     flex-direction: column;
-  }
-
-  .bojun-backfill-form,
-  .youzan-backfill-form {
-    grid-template-columns: 1fr;
-  }
-
-  .task-definition-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .task-definition-grid .wide {
-    grid-column: auto;
-  }
-
-  .task-definition-grid > div:nth-child(odd):not(.wide) {
-    padding-right: 0;
   }
 
   .ops-workspace {
@@ -1542,38 +1370,6 @@ button:focus-visible {
 
 .data-table tbody tr:hover {
   background: #fcfbf8;
-}
-
-@media (max-width: 1180px) {
-  .youzan-operations-grid {
-    grid-template-columns: 1fr;
-  }
-
-  .youzan-operations-grid > .workbench-panel,
-  .youzan-operations-grid > .workbench-panel + .workbench-panel {
-    border-left: 0;
-    padding: 0 0 22px;
-  }
-
-  .backfill-warning {
-    align-items: flex-start;
-    flex-wrap: wrap;
-  }
-
-  .backfill-warning span + span {
-    border-left: 0;
-    padding-left: 0;
-  }
-}
-
-@media (max-width: 840px) {
-  .youzan-operations-grid .youzan-backfill-form {
-    grid-template-columns: 1fr;
-  }
-
-  .youzan-operations-grid .youzan-backfill-form > label:first-child {
-    grid-column: auto;
-  }
 }
 
 .json-preview {

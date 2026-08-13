@@ -1,7 +1,6 @@
 import { FormEvent, ReactNode, type RefObject, useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import {
   Activity,
-  AlertTriangle,
   ArrowDownToLine,
   ArrowUpFromLine,
   BookOpen,
@@ -39,7 +38,7 @@ import { pipelineListPath } from './pipelineRun'
 import { Brand } from './components/Brand'
 import { ReportCenter } from './reportCenter/ReportCenter'
 import type { ReportCenterSection } from './reportCenter/types'
-import { AppShell, Dialog, WorkspaceHeader } from './ui'
+import { AppShell, WorkspaceHeader } from './ui'
 import { RunOverviewPage } from './monitoringPages/RunOverviewPage/RunOverviewPage'
 import { PipelineRunsPage } from './monitoringPages/PipelineRunsPage/PipelineRunsPage'
 import { StepRunsPage } from './monitoringPages/StepRunsPage/StepRunsPage'
@@ -61,6 +60,8 @@ import { parseMonitoringPage } from './monitoringRecords'
 import { ProcessedRecordsPage } from './dataPages/ProcessedRecordsPage'
 import { RawRecordsPage } from './dataPages/RawRecordsPage'
 import { BojunBackfillPage } from './backfillPages/BojunBackfillPage'
+import { YouzanDistributionPage } from './backfillPages/YouzanDistributionPage'
+import type { LegacyTask } from './backfillPages/youzanDistributionSupport'
 
 const defaultApiBaseURL = import.meta.env.VITE_API_BASE_URL ?? ''
 
@@ -84,57 +85,6 @@ type PipelineDefinition = {
   name: string
   code: string
   enabled: boolean
-}
-
-type LegacyTask = {
-  code: string
-  name: string
-  category: string
-  source_code: string
-  source_name: string
-  cron_expr: string
-  input_table: string
-  output_table: string
-  target_system: string
-  description: string
-}
-
-type LegacyTaskRunResult = {
-  id: string
-  queue: string
-  type: string
-}
-
-type YouzanDistributionBackfillSample = {
-  tid: string
-  status: string
-  reason: string
-  success_time: string
-  payment: string
-  fans_nickname: string
-}
-
-type YouzanDistributionTimeFilter = 'created' | 'success'
-
-type YouzanDistributionBackfillPayload = {
-  time_filter: YouzanDistributionTimeFilter
-  start_time: string
-  end_time: string
-}
-
-type YouzanDistributionBackfillResult = {
-  time_filter: YouzanDistributionTimeFilter
-  start_time: string
-  end_time: string
-  page_size: number
-  fetch_pages: number
-  total_count: number
-  preview_count: number
-  writable_count: number
-  saved_count: number
-  existing_count: number
-  failed_count: number
-  samples: YouzanDistributionBackfillSample[]
 }
 
 const navGroups: NavGroup[] = [
@@ -627,31 +577,6 @@ function App() {
     return client(`/v1/sources/${sourceID}/test`, { method: 'POST' })
   }
 
-  async function previewYouzanDistributionBackfill(payload: YouzanDistributionBackfillPayload) {
-    const response = await client('/v1/youzan-distribution-order-backfill/preview', {
-      method: 'POST',
-      body: payload,
-    })
-    return response.ok ? readObject<YouzanDistributionBackfillResult>(response, 'result') : null
-  }
-
-  async function confirmYouzanDistributionBackfill(payload: YouzanDistributionBackfillPayload) {
-    const response = await client('/v1/youzan-distribution-order-backfill/confirm', {
-      method: 'POST',
-      body: payload,
-    })
-    return response.ok ? readObject<YouzanDistributionBackfillResult>(response, 'result') : null
-  }
-
-  async function runLegacyTask(code: string, payload: YouzanDistributionBackfillPayload) {
-    const response = await client(`/v1/legacy-tasks/${encodeURIComponent(code)}/run`, {
-      method: 'POST',
-      body: payload,
-    })
-    if (response.ok) await refreshWorkspace(false)
-    return response
-  }
-
   if (sessionState !== 'authenticated') return <LoginScreen onLogin={handleLogin} checking={sessionState === 'checking'} />
 
   const visibleNavGroups = navGroups.map((group) => ({
@@ -747,9 +672,9 @@ function App() {
       navigationRef={mobileNavRef}
       navigationOpen={mobileNavOpen}
       onDismissNavigation={() => setMobileNavOpen(false)}
-      flushWorkspace={Boolean(reportSection) || ['access_management', 'sources', 'receive', 'pull_records', 'backfill', 'rules', 'processed', 'methods', 'destinations', 'tasks', 'push_policy', 'overview', 'runs', 'delivery_logs', 'step_runs'].includes(activeNav)}
+      flushWorkspace={Boolean(reportSection) || ['access_management', 'sources', 'receive', 'pull_records', 'backfill', 'youzan_distribution', 'rules', 'processed', 'methods', 'destinations', 'tasks', 'push_policy', 'overview', 'runs', 'delivery_logs', 'step_runs'].includes(activeNav)}
       workspaceClassName="ops-workspace"
-      header={<ModuleHeader compact={Boolean(reportSection) || ['access_management', 'sources', 'receive', 'pull_records', 'backfill', 'rules', 'processed', 'methods', 'destinations', 'tasks', 'push_policy', 'overview', 'runs', 'delivery_logs', 'step_runs'].includes(activeNav)} activeNav={activeNav} loading={loading || refreshing} sessionUser={sessionUser} onOpenNavigation={openMobileNavigation} onRefresh={() => void refreshWorkspace(true)} onLogout={handleLogout} refreshing={refreshing} mobileNavTriggerRef={mobileNavTriggerRef} />}
+      header={<ModuleHeader compact={Boolean(reportSection) || ['access_management', 'sources', 'receive', 'pull_records', 'backfill', 'youzan_distribution', 'rules', 'processed', 'methods', 'destinations', 'tasks', 'push_policy', 'overview', 'runs', 'delivery_logs', 'step_runs'].includes(activeNav)} activeNav={activeNav} loading={loading || refreshing} sessionUser={sessionUser} onOpenNavigation={openMobileNavigation} onRefresh={() => void refreshWorkspace(true)} onLogout={handleLogout} refreshing={refreshing} mobileNavTriggerRef={mobileNavTriggerRef} />}
       notices={<>{sessionValidationError && <div className="result-banner error" role="status" aria-live="polite">{sessionValidationError} <button type="button" onClick={() => setSessionValidationAttempt((attempt) => attempt + 1)}>重试校验</button></div>}{workspaceError && <div className="result-banner error" role="alert">{workspaceError} <button type="button" onClick={() => void refreshWorkspace(false)} disabled={refreshing}>重试</button></div>}</>}
       overlay={<ResultPanel result={result} onClose={() => setResult(null)} />}
     >
@@ -766,7 +691,7 @@ function App() {
         {activeNav === 'receive' && <RawRecordsPage title="接口接收记录" origin="receive" client={client} onFetchSource={fetchSource} />}
         {activeNav === 'pull_records' && <RawRecordsPage title="数据拉取记录" origin="pull" client={client} onFetchSource={fetchSource} />}
         {activeNav === 'backfill' && <BojunBackfillPage client={client} loading={loading || refreshing} onCompletedRefresh={() => refreshWorkspace(false)} />}
-        {activeNav === 'youzan_distribution' && <YouzanDistributionPage task={legacyTasks.find((item) => item.code === 'youzan_distribution_order_fetch')} loading={loading || refreshing} onPreview={previewYouzanDistributionBackfill} onConfirm={confirmYouzanDistributionBackfill} onRun={runLegacyTask} />}
+        {activeNav === 'youzan_distribution' && <YouzanDistributionPage client={client} task={legacyTasks.find((item) => item.code === 'youzan_distribution_order_fetch')} loading={loading || refreshing} onCompletedRefresh={() => refreshWorkspace(false)} />}
         {activeNav === 'rules' && <RulesPage client={client} rules={transformRules} sources={sources} onRulesChange={setTransformRules} refreshVersion={workspaceRefreshVersion} />}
         {activeNav === 'processed' && <ProcessedRecordsPage client={client} />}
         {activeNav === 'destinations' && <DestinationsPage client={client} refreshVersion={workspaceRefreshVersion} />}
@@ -948,227 +873,6 @@ function ModuleHeader({ activeNav, compact, loading, sessionUser, onOpenNavigati
   )
 }
 
-function YouzanDistributionPage({ task, loading, onPreview, onConfirm, onRun }: {
-  task?: LegacyTask
-  loading: boolean
-  onPreview: (payload: YouzanDistributionBackfillPayload) => Promise<YouzanDistributionBackfillResult | null>
-  onConfirm: (payload: YouzanDistributionBackfillPayload) => Promise<YouzanDistributionBackfillResult | null>
-  onRun: (code: string, payload: YouzanDistributionBackfillPayload) => Promise<ApiResult>
-}) {
-  const previewVersionRef = useRef(0)
-  const [timeFilter, setTimeFilter] = useState<YouzanDistributionTimeFilter>('created')
-  const [payload, setPayload] = useState<YouzanDistributionBackfillPayload | null>(null)
-  const [preview, setPreview] = useState<YouzanDistributionBackfillResult | null>(null)
-  const [confirmed, setConfirmed] = useState<YouzanDistributionBackfillResult | null>(null)
-  const [showManualRun, setShowManualRun] = useState(false)
-  const [manualRunPayload, setManualRunPayload] = useState<YouzanDistributionBackfillPayload | null>(null)
-  const [manualRunResult, setManualRunResult] = useState<LegacyTaskRunResult | null>(null)
-  const [manualRunError, setManualRunError] = useState('')
-  const [runningManualTask, setRunningManualTask] = useState(false)
-  const [confirmingBackfill, setConfirmingBackfill] = useState(false)
-  const [writingBackfill, setWritingBackfill] = useState(false)
-
-  function invalidateBackfillPreview() {
-    previewVersionRef.current += 1
-    setPayload(null)
-    setPreview(null)
-    setConfirmed(null)
-    setConfirmingBackfill(false)
-  }
-
-  async function submit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    const form = new FormData(event.currentTarget)
-    const nextPayload = {
-      time_filter: timeFilter,
-      start_time: backendDateTime(formValue(form, 'start_time')),
-      end_time: backendDateTime(formValue(form, 'end_time')),
-    }
-    const requestVersion = previewVersionRef.current + 1
-    invalidateBackfillPreview()
-    const result = await onPreview(nextPayload)
-    if (previewVersionRef.current !== requestVersion) return
-    setPayload(result ? nextPayload : null)
-    setPreview(result)
-  }
-
-  async function confirmBackfill() {
-    if (!payload || !preview || writingBackfill) return
-    setWritingBackfill(true)
-    try {
-      setConfirmed(await onConfirm(payload))
-      setConfirmingBackfill(false)
-    } finally {
-      setWritingBackfill(false)
-    }
-  }
-
-  function changeTimeFilter(value: string) {
-    if (value !== 'created' && value !== 'success') return
-    setTimeFilter(value)
-    invalidateBackfillPreview()
-  }
-
-  function openManualRun() {
-    setManualRunPayload(null)
-    setManualRunResult(null)
-    setManualRunError('')
-    setShowManualRun(true)
-  }
-
-  function prepareManualRun(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    const form = new FormData(event.currentTarget)
-    setManualRunPayload({
-      time_filter: formValue(form, 'time_filter') === 'success' ? 'success' : 'created',
-      start_time: backendDateTime(formValue(form, 'start_time')),
-      end_time: backendDateTime(formValue(form, 'end_time')),
-    })
-  }
-
-  async function confirmManualRun() {
-    if (!task || !manualRunPayload || runningManualTask) return
-    setRunningManualTask(true)
-    setManualRunError('')
-    const response = await onRun(task.code, manualRunPayload)
-    if (response.ok) {
-      const result = readObject<LegacyTaskRunResult>(response, 'result')
-      if (result?.id && result.queue && result.type) setManualRunResult(result)
-      else setManualRunError('任务已提交，但未收到完整的队列任务信息。请在任务系统中核对执行状态。')
-    } else {
-      setManualRunError(response.error?.message || '任务投递失败，请稍后重试。')
-    }
-    setRunningManualTask(false)
-  }
-
-  return (
-    <div className="view-stack">
-      <Panel title="每日自动拉取" icon={<ArrowDownToLine />} meta={task?.cron_expr || '等待后端任务定义'}>
-        {!task ? <EmptyState text="后端尚未返回有赞分销任务定义，请确认服务已部署并刷新页面。" /> : (
-          <>
-            <dl className="task-definition-grid">
-              <div><dt>任务名称</dt><dd>{task.name}</dd></div>
-              <div><dt>Cron</dt><dd><code>{task.cron_expr}</code></dd></div>
-              <div><dt>数据来源</dt><dd>{task.input_table}</dd></div>
-              <div><dt>写入表</dt><dd><code>{task.output_table}</code></dd></div>
-              <div className="wide"><dt>执行规则</dt><dd>{task.description}</dd></div>
-              <div className="wide"><dt>昵称处理</dt><dd>所有非空 fans_nickname 必须先批量解密；解密失败时本页订单不写入。</dd></div>
-            </dl>
-            <div className="task-page-actions">
-              <button type="button" onClick={openManualRun} disabled={loading}>运行计划任务</button>
-            </div>
-          </>
-        )}
-      </Panel>
-
-      <section className="youzan-operations-grid">
-        <Panel title="时间范围补拉" icon={<Download />} meta="按时间筛选并预览">
-          <form className="youzan-backfill-form" onSubmit={submit}>
-            <label>
-              时间筛选方式
-              <select name="time_filter" value={timeFilter} onChange={(event) => changeTimeFilter(event.currentTarget.value)}>
-                <option value="created">下单时间</option>
-                <option value="success">订单完成时间</option>
-              </select>
-            </label>
-            <Field label={timeFilter === 'created' ? '下单开始时间' : '完成开始时间'} name="start_time" type="datetime-local" defaultValue={previousDayDateTimeLocal(false)} onChange={invalidateBackfillPreview} required />
-            <Field label={timeFilter === 'created' ? '下单结束时间' : '完成结束时间'} name="end_time" type="datetime-local" defaultValue={previousDayDateTimeLocal(true)} onChange={invalidateBackfillPreview} required />
-            <button className="primary" type="submit" disabled={loading}>{loading ? '预览中' : '预览补拉'}</button>
-            <button type="button" disabled={loading || writingBackfill || !preview || preview.writable_count === 0} onClick={() => setConfirmingBackfill(true)}>确认写入</button>
-          </form>
-          <aside className="backfill-warning compact" aria-label="补拉提示"><AlertTriangle aria-hidden="true" /><span>预览会真实拉取、解密并判重，但不写数据库；已有 tid 不覆盖。</span></aside>
-          {preview && <YouzanDistributionBackfillResultView title="预览结果" result={preview} />}
-        </Panel>
-        <Panel title="补拉结果" icon={<CheckCircle2 />} meta={confirmed ? `${youzanDistributionTimeFilterLabel(confirmed.time_filter)} / ${confirmed.start_time} ~ ${confirmed.end_time}` : '等待本次写入'}>
-          {confirmed ? <YouzanDistributionBackfillResultView title="写入结果" result={confirmed} /> : <EmptyState text="当前接口未提供补拉历史列表；完成写入后，这里会保留本次结果。" />}
-        </Panel>
-      </section>
-
-      {confirmingBackfill && preview && <Dialog open title="确认写入有赞分销订单" closeDisabled={loading || writingBackfill} onClose={() => { if (!loading && !writingBackfill) setConfirmingBackfill(false) }} footer={<><button type="button" disabled={loading || writingBackfill} onClick={() => setConfirmingBackfill(false)}>返回预览</button><button className="primary" type="button" disabled={loading || writingBackfill} onClick={() => void confirmBackfill()}>{writingBackfill ? '写入中…' : '确认写入'}</button></>}><p>确认写入 {preview.writable_count} 条有赞分销订单？系统会按 tid 判重，已有订单不会覆盖。</p></Dialog>}
-
-      {showManualRun && task && (
-        <Dialog open title="运行有赞分销计划任务" onClose={() => { if (!runningManualTask) setShowManualRun(false) }}>
-          {!manualRunPayload ? (
-            <form className="youzan-backfill-form" onSubmit={prepareManualRun}>
-              <p className="backfill-note">此操作会投递异步任务，不直接写入本页。请确认任务编码和时间范围后再继续。</p>
-              <label>任务编码<input name="task_code" value={task.code} readOnly /></label>
-              <label>
-                时间筛选方式
-                <select name="time_filter" defaultValue="created">
-                  <option value="created">下单时间</option>
-                  <option value="success">订单完成时间</option>
-                </select>
-              </label>
-              <Field label="开始时间" name="start_time" type="datetime-local" defaultValue={previousDayDateTimeLocal(false)} required />
-              <Field label="结束时间" name="end_time" type="datetime-local" defaultValue={previousDayDateTimeLocal(true)} required />
-              <button className="primary" type="submit">继续确认</button>
-            </form>
-          ) : (
-            <div className="view-stack">
-              <dl className="task-definition-grid">
-                <div><dt>任务编码</dt><dd><code>{task.code}</code></dd></div>
-                <div><dt>筛选方式</dt><dd>{youzanDistributionTimeFilterLabel(manualRunPayload.time_filter)}</dd></div>
-                <div className="wide"><dt>执行时间范围</dt><dd>{manualRunPayload.start_time} ~ {manualRunPayload.end_time}</dd></div>
-              </dl>
-              {!manualRunResult && <div className="manual-task-actions">
-                <button type="button" onClick={() => setManualRunPayload(null)} disabled={runningManualTask}>返回修改</button>
-                <button className="primary" type="button" onClick={() => void confirmManualRun()} disabled={runningManualTask}>{runningManualTask ? '投递中…' : '确认投递任务'}</button>
-              </div>}
-              {manualRunError && <div className="result-banner error" role="alert">{manualRunError}</div>}
-              {manualRunResult && <div className="result-banner" role="status">已投递：任务 ID {manualRunResult.id}，队列 {manualRunResult.queue}，类型 {manualRunResult.type}。</div>}
-            </div>
-          )}
-        </Dialog>
-      )}
-    </div>
-  )
-}
-
-function YouzanDistributionBackfillResultView({ title, result }: { title: string; result: YouzanDistributionBackfillResult }) {
-  return (
-    <section className="backfill-result">
-      <div className="backfill-result-title">
-        <strong>{title}</strong>
-        <span>{youzanDistributionTimeFilterLabel(result.time_filter)} / {result.start_time} ~ {result.end_time} / 拉取 {result.fetch_pages} 页</span>
-      </div>
-      <div className="overview-grid compact">
-        <Metric label="有赞返回" value={result.total_count} />
-        <Metric label="可写入" value={result.writable_count} />
-        <Metric label="已存在" value={result.existing_count} />
-        <Metric label="已写入" value={result.saved_count} />
-        <Metric label="失败" value={result.failed_count} />
-      </div>
-      {!result.samples?.length ? <EmptyState text="暂无样例数据。" /> : (
-        <div className="data-table-wrap">
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>状态</th>
-                <th>订单号</th>
-                <th>成功时间</th>
-                <th>实付金额</th>
-                <th>解密昵称</th>
-                <th>说明</th>
-              </tr>
-            </thead>
-            <tbody>
-              {result.samples.map((sample, index) => (
-                <tr key={`${sample.tid}-${sample.status}-${index}`}>
-                  <td>{youzanDistributionBackfillStatusLabel(sample.status)}</td>
-                  <td>{sample.tid || '-'}</td>
-                  <td>{sample.success_time || '-'}</td>
-                  <td>{sample.payment || '-'}</td>
-                  <td>{sample.fans_nickname || '-'}</td>
-                  <td>{sample.reason || '-'}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </section>
-  )
-}
 function apiURL(path: string) {
   return buildApiURL(path, defaultApiBaseURL)
 }
@@ -1185,15 +889,6 @@ function ResultPanel({ result, onClose }: { result: ApiResult | null; onClose: (
   )
 }
 
-function Panel({ title, icon, meta, children }: { title: string; icon: ReactNode; meta: string; children: ReactNode }) {
-  return (
-    <section className="workbench-panel">
-      <PanelTitle icon={icon} title={title} meta={meta} />
-      {children}
-    </section>
-  )
-}
-
 function PanelTitle({ icon, title, meta }: { icon: ReactNode; title: string; meta: string }) {
   return (
     <div className="panel-title">
@@ -1204,14 +899,6 @@ function PanelTitle({ icon, title, meta }: { icon: ReactNode; title: string; met
       </div>
     </div>
   )
-}
-
-function Metric({ label, value }: { label: string; value: ReactNode }) {
-  return <div className="metric"><span>{label}</span><strong>{value}</strong></div>
-}
-
-function EmptyState({ text }: { text: string }) {
-  return <div className="empty-state">{text}</div>
 }
 
 function Field({ label, name, defaultValue = '', type = 'text', value, onChange, required = false, autoComplete, inputMode, pattern, minLength, maxLength }: { label: string; name: string; defaultValue?: string; type?: string; value?: string; onChange?: (value: string) => void; required?: boolean; autoComplete?: string; inputMode?: 'text' | 'numeric' | 'tel' | 'email' | 'decimal' | 'search' | 'url' | 'none'; pattern?: string; minLength?: number; maxLength?: number }) {
@@ -1230,11 +917,6 @@ function ReadonlyJSON({ value }: { value: unknown }) {
 function readList<T>(result: ApiResult, key: string): T[] {
   const value = readDataField(result.data, key)
   return Array.isArray(value) ? (value as T[]) : []
-}
-
-function readObject<T>(result: ApiResult, key: string): T | null {
-  const value = readDataField(result.data, key)
-  return value && typeof value === 'object' ? (value as T) : null
 }
 
 function readDataField(data: unknown, key: string) {
@@ -1304,34 +986,6 @@ function monitoringDayStartTime() {
   const month = String(now.getMonth() + 1).padStart(2, '0')
   const day = String(now.getDate()).padStart(2, '0')
   return `${year}-${month}-${day}T00:00`
-}
-
-function youzanDistributionBackfillStatusLabel(value: string) {
-  const labels: Record<string, string> = {
-    pending: '待写入',
-    created: '已写入',
-    exists: '已存在',
-    invalid: '无效',
-    failed: '失败',
-  }
-  return labels[value] ?? (value || '-')
-}
-
-function youzanDistributionTimeFilterLabel(value: YouzanDistributionTimeFilter) {
-  return value === 'success' ? '订单完成时间' : '下单时间'
-}
-
-function previousDayDateTimeLocal(endOfDay: boolean) {
-  const date = new Date()
-  date.setDate(date.getDate() - 1)
-  date.setHours(endOfDay ? 23 : 0, endOfDay ? 59 : 0, endOfDay ? 59 : 0, 0)
-  const pad = (value: number) => String(value).padStart(2, '0')
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}:${pad(date.getSeconds())}`
-}
-
-function backendDateTime(value: string) {
-  const normalized = value.trim().replace('T', ' ')
-  return /^\d{4}-\d{2}-\d{2} \d{2}:\d{2}$/.test(normalized) ? `${normalized}:00` : normalized
 }
 
 export default App
