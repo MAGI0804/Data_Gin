@@ -175,6 +175,47 @@ func TestNormalizeParametersFingerprintExcludesSystemValues(t *testing.T) {
 	}
 }
 
+func TestNormalizeParametersAppliesBoundedStringNormalizer(t *testing.T) {
+	definitions := []ParameterDefinition{{
+		Code: "store", ProcedureArgName: "P_STORE", Position: 1, LogicalType: LogicalTypeEnum, Required: true,
+		AllowedValues: json.RawMessage(`["S001"]`), Normalizer: json.RawMessage(`{"trim":true,"case":"UPPER"}`),
+	}}
+	normalized, err := NormalizeParameters(definitions, map[string]json.RawMessage{"store": json.RawMessage(`" s001 "`)}, nil)
+	if err != nil {
+		t.Fatalf("NormalizeParameters() error = %v", err)
+	}
+	if normalized.DatabaseValues["store"] != "S001" {
+		t.Fatalf("normalized store = %#v", normalized.DatabaseValues["store"])
+	}
+	for _, invalid := range []json.RawMessage{json.RawMessage(`{"unknown":true}`), json.RawMessage(`{"case":"TITLE"}`)} {
+		definitions[0].Normalizer = invalid
+		if err := ValidateParameterDefinitions(definitions); !errors.Is(err, ErrInvalidParameterContract) {
+			t.Fatalf("normalizer %s error = %v", invalid, err)
+		}
+	}
+}
+
+func TestSystemValueSourceUsesExplicitWhitelist(t *testing.T) {
+	definition := ParameterDefinition{Code: "actorId", ProcedureArgName: "P_ACTOR_ID", Position: 1, LogicalType: LogicalTypeInteger, SystemInjected: true, ValueSource: json.RawMessage(`{"source":"ACTOR_ID"}`)}
+	if source, err := SystemValueSource(definition); err != nil || source != ValueSourceActorID {
+		t.Fatalf("SystemValueSource() = %q, %v", source, err)
+	}
+	definition.ValueSource = json.RawMessage(`{"source":"REQUEST_HEADER"}`)
+	if _, err := SystemValueSource(definition); !errors.Is(err, ErrInvalidParameterContract) {
+		t.Fatalf("unsupported SystemValueSource() error = %v", err)
+	}
+	definition.LogicalType = LogicalTypeString
+	definition.ValueSource = json.RawMessage(`{"source":"ACTOR_ID"}`)
+	if _, err := SystemValueSource(definition); !errors.Is(err, ErrInvalidParameterContract) {
+		t.Fatalf("incompatible SystemValueSource() error = %v", err)
+	}
+	definition.LogicalType = LogicalTypeInteger
+	definition.ValueSource = json.RawMessage(`{"source":"RUN_ID"}`)
+	if _, err := SystemValueSource(definition); !errors.Is(err, ErrInvalidParameterContract) {
+		t.Fatalf("incompatible run id SystemValueSource() error = %v", err)
+	}
+}
+
 func TestNormalizeParametersRejectsClientSystemParameterAndUnknownParameter(t *testing.T) {
 	definitions := []ParameterDefinition{
 		{Code: "runId", ProcedureArgName: "P_RUN_ID", Position: 1, LogicalType: LogicalTypeString, SystemInjected: true},

@@ -39,11 +39,10 @@ export function parseReportCatalogPage(payload: unknown): ReportCatalogPage {
     const parsed = parseReportSummary(item)
     return parsed ? [parsed] : []
   })
-  return {
-    items,
-    hasMore: data.hasMore === true,
-    nextAfterId: positiveInteger(data.nextAfterId) ?? positiveInteger(data.next_after_id) ?? 0,
-  }
+  const hasMore = data.hasMore === true
+  const nextAfterId = positiveInteger(data.nextAfterId) ?? positiveInteger(data.next_after_id) ?? 0
+  if (hasMore && (items.length === 0 || nextAfterId !== items[items.length - 1].id)) throw new Error('invalid report catalog cursor')
+  return { items, hasMore, nextAfterId }
 }
 
 export async function getReportRunContract(client: ReportCenterClient, reportId: number, signal?: AbortSignal): Promise<ReportAPIResult<ReportRunContract>> {

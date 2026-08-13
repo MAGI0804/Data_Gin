@@ -272,7 +272,11 @@ func (processor *ReportRunProcessor) restoreParameters(run model.ReportRun, defi
 			publicValues[code] = value
 		}
 	}
-	normalized, err := reporting.NormalizeParameters(definitions, publicValues, map[string]interface{}{"runId": run.RunUUID})
+	systemValues, err := reportSystemValues(definitions, run.RunUUID, run.RequestedBy)
+	if err != nil {
+		return nil, err
+	}
+	normalized, err := reporting.NormalizeParameters(definitions, publicValues, systemValues)
 	if err != nil {
 		return nil, err
 	}

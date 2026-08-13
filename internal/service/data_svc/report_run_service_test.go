@@ -77,6 +77,17 @@ func TestReportRunServiceRejectsSystemParameterAndInvalidAllowedValue(t *testing
 	}
 }
 
+func TestReportRunServiceRejectsInvalidPublishedSystemValueSource(t *testing.T) {
+	published := publishedRunFixture()
+	published.Parameters[0].ValueSourceJSON = model.JSONText(`{"source":"ACTOR_ID"}`)
+	store := &fakeReportRunStore{published: published}
+	service := NewReportRunServiceWithDependencies(store, &fakeReportParameterCipher{})
+	_, err := service.Create(t.Context(), 17, 9, requestbody.ReportRunCreateRequest{Parameters: map[string]json.RawMessage{"storeCode": json.RawMessage(`"S001"`), "secret": json.RawMessage(`"value"`)}})
+	if !errors.Is(err, ErrReportRunInvalid) || store.command != nil {
+		t.Fatalf("Create() error = %v, command = %#v", err, store.command)
+	}
+}
+
 func TestReportRunServiceDoesNotEncryptEmptySensitiveObject(t *testing.T) {
 	published := publishedRunFixture()
 	published.Parameters = published.Parameters[:2]

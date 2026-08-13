@@ -46,10 +46,8 @@ func (repository *Repository) CreateOrGetExport(ctx context.Context, actor, runI
 		if run.Status != model.ReportRunStatusSucceeded || run.ResultPurgedAt != nil || run.ResultExpiresAt == nil || !requestedAt.Before(run.ResultExpiresAt.UTC()) {
 			return ErrReportExportRunNotReady
 		}
-		if _, err := loadPublishedReport(ctx, tx, actor, run.DefinitionID, ReportActionExport, false); errors.Is(err, ErrReportActionDenied) {
+		if !frozenRunAllowsAction(run.PermissionSnapshotJSON, actor, ReportActionExport) {
 			return ErrReportExportRunNotReady
-		} else if err != nil {
-			return fmt.Errorf("report export: authorize report: %w", err)
 		}
 		columns, err := FrozenExportQueryColumns(run.PresentationSnapshotJSON)
 		if err != nil {

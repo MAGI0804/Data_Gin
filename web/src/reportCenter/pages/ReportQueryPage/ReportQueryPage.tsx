@@ -12,7 +12,7 @@ const emptyResultQuery: ReportResultQuery = { filters: [], sort: [] }
 
 export function ReportQueryPage({ client, navigation }: { client: ReportCenterClient; navigation?: ReactNode }) {
   const query = useMemo(() => ({ limit: 100 }), [])
-  const { items, loading, error, reload } = useReportCatalog(client, query)
+  const { items, loading, loadingMore, error, hasMore, reload, loadMore } = useReportCatalog(client, query)
   const published = items.filter((report) => report.status === 'ACTIVE')
   const [selectedId, setSelectedId] = useState('')
   const [contract, setContract] = useState<ReportRunContract | null>(null)
@@ -200,7 +200,7 @@ export function ReportQueryPage({ client, navigation }: { client: ReportCenterCl
       {navigation}
       <PageHeader eyebrow="ORACLE EXECUTION" title="报表查询" description="参数来自已发布的不可变契约；一次运行生成一个快照，分页和正式导出均复用该 run_id。" actions={run?.canCancel ? <button type="button" onClick={() => void cancelRun()}><Square aria-hidden="true" />取消运行</button> : undefined} />
       <FilterToolbar summary={run ? <StatusTag tone={runTone(run)}>{runLabel(run.status)}</StatusTag> : <StatusTag tone="neutral">等待选择报表</StatusTag>}>
-        <label className={styles.selector}>选择报表<select value={selectedId} onChange={(event) => setSelectedId(event.currentTarget.value)} disabled={loading || frozen || published.length === 0}><option value="">请选择已发布报表</option>{published.map((report) => <option value={report.id} key={report.id}>{report.name}</option>)}</select></label>
+        <div className={styles.catalogSelector}><label className={styles.selector}>选择报表<select value={selectedId} onChange={(event) => setSelectedId(event.currentTarget.value)} disabled={loading || frozen || published.length === 0}><option value="">请选择已发布报表</option>{published.map((report) => <option value={report.id} key={report.id}>{report.name}</option>)}</select></label>{hasMore ? <button type="button" onClick={() => void loadMore()} disabled={loadingMore || frozen}>{loadingMore ? '正在加载…' : '加载更多'}</button> : null}</div>
       </FilterToolbar>
       <Section title="运行参数" description={contract ? `发布版本 #${contract.versionId} · {{形参}} 仅作为 Oracle 绑定变量` : '选择报表后读取已发布参数契约。'} actions={<button type="button" aria-expanded={parametersOpen} onClick={() => setParametersOpen((open) => !open)}><ChevronDown className={parametersOpen ? styles.chevronOpen : undefined} aria-hidden="true" />{parametersOpen ? '收起参数' : '展开参数'}</button>}>
         {parametersOpen ? <>

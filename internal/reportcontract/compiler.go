@@ -287,15 +287,6 @@ func compileParameters(
 	specs := make([]parameterSpec, 0, len(configured))
 	definitions := make([]reporting.ParameterDefinition, 0, len(configured))
 	for _, parameter := range configured {
-		if parameter.SystemInjected && parameter.ParameterCode != "runId" {
-			return nil, nil, contractError("parameter %q uses an unsupported system injection", parameter.ParameterCode)
-		}
-		if strings.TrimSpace(string(parameter.NormalizerJSON)) != "" {
-			return nil, nil, contractError("parameter %q uses an unsupported normalizer", parameter.ParameterCode)
-		}
-		if strings.TrimSpace(string(parameter.ValueSourceJSON)) != "" {
-			return nil, nil, contractError("parameter %q uses an unsupported value source", parameter.ParameterCode)
-		}
 		argument, exists := actualByPosition[parameter.Position]
 		if !exists || !sameIdentifier(parameter.ProcedureArgName, argument.Name) ||
 			!sameOracleType(parameter.OracleType, argument.DataType) ||
@@ -315,7 +306,8 @@ func compileParameters(
 			Nullable: parameter.Nullable, SystemInjected: parameter.SystemInjected,
 			Sensitive: parameter.Sensitive, DefaultValue: json.RawMessage(parameter.DefaultValueJSON),
 			AllowedValues: json.RawMessage(parameter.AllowedValuesJSON),
-			Validation:    json.RawMessage(parameter.ValidationJSON), Timezone: parameter.Timezone,
+			Validation:    json.RawMessage(parameter.ValidationJSON), Normalizer: json.RawMessage(parameter.NormalizerJSON),
+			ValueSource: json.RawMessage(parameter.ValueSourceJSON), Timezone: parameter.Timezone,
 			NullPolicy: parameter.NullPolicy, CollectionEncoding: parameter.CollectionEncoding,
 		}
 		definitions = append(definitions, definition)
@@ -340,7 +332,11 @@ func compileParameters(
 	}
 	runParameterCount := 0
 	for _, definition := range definitions {
-		if definition.Code == "runId" && definition.SystemInjected && definition.LogicalType == reporting.LogicalTypeString {
+		source, sourceErr := reporting.SystemValueSource(definition)
+		if sourceErr != nil {
+			return nil, nil, contractError("parameter schema is invalid: %v", sourceErr)
+		}
+		if source == reporting.ValueSourceRunID && definition.SystemInjected && definition.LogicalType == reporting.LogicalTypeString {
 			if !characterOracleType(definition.OracleType) {
 				return nil, nil, contractError("system-injected runId parameter must bind a character Oracle type")
 			}

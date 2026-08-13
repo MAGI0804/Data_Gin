@@ -52,6 +52,15 @@ func ValidateParameterDefinitions(definitions []ParameterDefinition) error {
 		if definition.Sensitive && len(bytes.TrimSpace(definition.DefaultValue)) > 0 {
 			return contractError("sensitive parameter %q cannot define a plaintext default", definition.Code)
 		}
+		if definition.SystemInjected && len(bytes.TrimSpace(definition.Normalizer)) > 0 {
+			return contractError("system parameter %q cannot define a normalizer", definition.Code)
+		}
+		if _, err := parseNormalizerRules(definition); err != nil {
+			return err
+		}
+		if _, err := SystemValueSource(definition); err != nil {
+			return err
+		}
 		if definition.LogicalType == LogicalTypeMultiEnum {
 			if definition.Cardinality != CardinalityMultiple || definition.CollectionEncoding != CollectionEncodingJSONCLOB {
 				return contractError("multi enum parameter %q must use MULTIPLE JSON_CLOB encoding", definition.Code)
@@ -112,6 +121,8 @@ type ParameterDefinition struct {
 	DefaultValue       json.RawMessage
 	AllowedValues      json.RawMessage
 	Validation         json.RawMessage
+	Normalizer         json.RawMessage
+	ValueSource        json.RawMessage
 	Timezone           string
 	NullPolicy         string
 	CollectionEncoding string
@@ -126,6 +137,20 @@ type ValidationRules struct {
 	MinItems  *int         `json:"minItems"`
 	MaxItems  *int         `json:"maxItems"`
 }
+
+type normalizerRules struct {
+	Trim bool   `json:"trim"`
+	Case string `json:"case"`
+}
+
+type valueSourceRules struct {
+	Source string `json:"source"`
+}
+
+const (
+	ValueSourceRunID   = "RUN_ID"
+	ValueSourceActorID = "ACTOR_ID"
+)
 
 type BindSlot struct {
 	Code             string
@@ -342,6 +367,11 @@ func normalizeValue(definition ParameterDefinition, raw json.RawMessage, present
 	if err := requireJSONEOF(decoder); err != nil {
 		return nil, nil, inputError(definition.Code, "value must contain one JSON value")
 	}
+	normalizer, err := parseNormalizerRules(definition)
+	if err != nil {
+		return nil, nil, err
+	}
+	decoded = applyNormalizer(decoded, normalizer)
 	rules, err := parseValidationRules(definition)
 	if err != nil {
 		return nil, nil, err
@@ -438,6 +468,86 @@ func normalizeValue(definition ParameterDefinition, raw json.RawMessage, present
 	default:
 		return nil, nil, contractError("parameter %q has unsupported logical type", definition.Code)
 	}
+}
+
+func parseNormalizerRules(definition ParameterDefinition) (normalizerRules, error) {
+	if len(bytes.TrimSpace(definition.Normalizer)) == 0 {
+		return normalizerRules{}, nil
+	}
+	var rules normalizerRules
+	if err := decodeStrictJSON(definition.Normalizer, &rules); err != nil {
+		return normalizerRules{}, contractError("parameter %q has invalid normalizer", definition.Code)
+	}
+	rules.Case = strings.ToUpper(strings.TrimSpace(rules.Case))
+	if rules.Case != "" && rules.Case != "UPPER" && rules.Case != "LOWER" {
+		return normalizerRules{}, contractError("parameter %q has unsupported normalizer case", definition.Code)
+	}
+	if (rules.Trim || rules.Case != "") && definition.LogicalType != LogicalTypeString && definition.LogicalType != LogicalTypeEnum && definition.LogicalType != LogicalTypeMultiEnum {
+		return normalizerRules{}, contractError("parameter %q normalizer requires a string or enum type", definition.Code)
+	}
+	return rules, nil
+}
+
+func applyNormalizer(value interface{}, rules normalizerRules) interface{} {
+	normalize := func(value string) string {
+		if rules.Trim {
+			value = strings.TrimSpace(value)
+		}
+		switch rules.Case {
+		case "UPPER":
+			return strings.ToUpper(value)
+		case "LOWER":
+			return strings.ToLower(value)
+		default:
+			return value
+		}
+	}
+	switch typed := value.(type) {
+	case string:
+		return normalize(typed)
+	case []interface{}:
+		result := append([]interface{}(nil), typed...)
+		for index, item := range result {
+			if text, ok := item.(string); ok {
+				result[index] = normalize(text)
+			}
+		}
+		return result
+	default:
+		return value
+	}
+}
+
+// SystemValueSource returns the bounded runtime source for a system-owned
+// parameter. Empty valueSource remains compatible with the required runId.
+func SystemValueSource(definition ParameterDefinition) (string, error) {
+	if len(bytes.TrimSpace(definition.ValueSource)) == 0 {
+		if definition.SystemInjected && definition.Code == "runId" {
+			return ValueSourceRunID, nil
+		}
+		if definition.SystemInjected {
+			return "", contractError("system parameter %q requires a value source", definition.Code)
+		}
+		return "", nil
+	}
+	var rules valueSourceRules
+	if err := decodeStrictJSON(definition.ValueSource, &rules); err != nil {
+		return "", contractError("parameter %q has invalid value source", definition.Code)
+	}
+	rules.Source = strings.ToUpper(strings.TrimSpace(rules.Source))
+	if !definition.SystemInjected {
+		return "", contractError("client parameter %q cannot define a value source", definition.Code)
+	}
+	if rules.Source != ValueSourceRunID && rules.Source != ValueSourceActorID {
+		return "", contractError("system parameter %q has unsupported value source", definition.Code)
+	}
+	if rules.Source == ValueSourceRunID && definition.LogicalType != LogicalTypeString {
+		return "", contractError("system parameter %q run id source requires string type", definition.Code)
+	}
+	if rules.Source == ValueSourceActorID && definition.LogicalType != LogicalTypeInteger {
+		return "", contractError("system parameter %q actor source requires integer type", definition.Code)
+	}
+	return rules.Source, nil
 }
 
 func parseValidationRules(definition ParameterDefinition) (ValidationRules, error) {

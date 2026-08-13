@@ -368,6 +368,9 @@ func reportParametersFromRequest(requests []requestbody.ReportParameterRequest) 
 		if request.Required && request.Nullable {
 			return nil, nil, invalidReport("required parameter cannot be nullable")
 		}
+		if request.SystemInjected && request.Sensitive {
+			return nil, nil, invalidReport("system-injected parameter cannot be sensitive")
+		}
 		if _, exists := displayOrders[request.DisplayOrder]; exists {
 			return nil, nil, invalidReport("duplicated parameter display order")
 		}
@@ -393,7 +396,8 @@ func reportParametersFromRequest(requests []requestbody.ReportParameterRequest) 
 			LogicalType: request.LogicalType, OracleType: request.OracleType, Cardinality: request.Cardinality,
 			Required: request.Required, Nullable: request.Nullable, SystemInjected: request.SystemInjected,
 			Sensitive: request.Sensitive, DefaultValue: cloneJSON(request.DefaultValue), AllowedValues: cloneJSON(request.AllowedValues),
-			Validation: cloneJSON(request.Validation), Timezone: request.Timezone, NullPolicy: request.NullPolicy,
+			Validation: cloneJSON(request.Validation), Normalizer: cloneJSON(request.Normalizer),
+			ValueSource: cloneJSON(request.ValueSource), Timezone: request.Timezone, NullPolicy: request.NullPolicy,
 			CollectionEncoding: request.CollectionEncoding,
 		}
 		parameters = append(parameters, model.ReportParameter{

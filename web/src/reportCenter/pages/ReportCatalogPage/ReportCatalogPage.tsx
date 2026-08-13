@@ -13,7 +13,7 @@ export function ReportCatalogPage({ client, canManage, navigation }: { client: R
   const [search, setSearch] = useState('')
   const [drawerState, setDrawerState] = useState<{ open: boolean; report: ReportSummary | null }>({ open: false, report: null })
   const query = useMemo(() => ({ search, limit: 50 }), [search])
-  const { items, loading, error, reload } = useReportCatalog(client, query)
+  const { items, loading, loadingMore, error, hasMore, reload, loadMore } = useReportCatalog(client, query)
   const datasources = useReportDatasources(client, canManage)
 
   return (
@@ -31,6 +31,7 @@ export function ReportCatalogPage({ client, canManage, navigation }: { client: R
         {error ? <FeedbackState kind="error" title="报表目录加载失败" description={error} action={<button type="button" onClick={reload}>重试</button>} /> : null}
         {!loading && !error && items.length === 0 ? <FeedbackState kind="empty" title="暂无报表" description="后端尚未返回可查看的报表定义。" action={canManage ? <button type="button" onClick={() => setDrawerState({ open: true, report: null })}>创建第一份报表</button> : null} /> : null}
         {items.length > 0 ? <ReportTable reports={items} onEdit={canManage ? (report) => setDrawerState({ open: true, report }) : undefined} /> : null}
+        {items.length > 0 && hasMore ? <div className={styles.pagination}><button type="button" onClick={() => void loadMore()} disabled={loadingMore}>{loadingMore ? '正在加载…' : '加载更多报表'}</button></div> : null}
       </Section>
       {drawerState.open ? <ReportConfigDrawer client={client} report={drawerState.report} datasources={datasources.items} datasourcesLoading={datasources.loading} datasourcesError={datasources.error} onSaved={reload} onClose={() => setDrawerState({ open: false, report: null })} /> : null}
     </PageCanvas>

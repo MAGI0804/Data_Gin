@@ -51,6 +51,11 @@ test('parseReportCatalogPage drops malformed rows and normalizes unsafe fields',
   assert.equal(page.nextAfterId, 9)
 })
 
+test('parseReportCatalogPage rejects an incomplete or mismatched continuation cursor', () => {
+  assert.throws(() => parseReportCatalogPage({ data: { items: [], hasMore: true, nextAfterId: 9 } }))
+  assert.throws(() => parseReportCatalogPage({ data: { items: [{ id: 9, code: 'sales', name: '销售' }], hasMore: true, nextAfterId: 10 } }))
+})
+
 test('parseReportRunContract keeps typed published parameters', () => {
   const contract = parseReportRunContract({ data: {
     definitionId: 9,
@@ -120,12 +125,18 @@ test('parseReportDraft preserves parameter, field and excel mappings', () => {
     procedure: { owner: 'BI', package: 'REPORT_PKG', name: 'SALES' },
     result: { tableOwner: 'BI', tableName: 'REPORT_RESULT', runIdColumn: 'RUN_ID', rowIdColumn: 'ROW_NO' },
     callTemplate: 'BEGIN BI.REPORT_PKG.SALES({{runId}}, {{storeCode}}); END;',
-    parameters: [{ code: 'runId', label: '运行编号', displayOrder: 0, controlType: 'TEXT', logicalType: 'string', procedureArgName: 'P_RUN_ID', position: 1, oracleType: 'VARCHAR2', required: true, systemInjected: true, nullPolicy: 'TYPED_NULL' }],
-    columns: [{ fieldId: '11111111-1111-4111-8111-111111111111', logicalCode: 'amount', databaseColumn: 'AMOUNT', sourceOracleType: 'NUMBER', valueType: 'decimal', previewHeader: '金额', excelHeader: '含税金额', previewVisible: true, exportVisible: true, exportAllowed: true }],
+    parameters: [{ code: 'runId', label: '运行编号', displayOrder: 0, controlType: 'TEXT', logicalType: 'string', procedureArgName: 'P_RUN_ID', position: 1, oracleType: 'VARCHAR2', precision: 38, scale: 0, required: true, systemInjected: true, normalizer: { trim: true }, valueSource: { source: 'run_id' }, nullPolicy: 'TYPED_NULL' }],
+    columns: [{ fieldId: '11111111-1111-4111-8111-111111111111', logicalCode: 'amount', databaseColumn: 'AMOUNT', sourceOracleType: 'NUMBER', precision: 18, scale: 2, valueType: 'decimal', previewHeader: '金额', excelHeader: '含税金额', displayOrder: 2, exportOrder: 1, previewVisible: true, exportVisible: true, exportAllowed: true, dictionaryVersion: { version: 'v2' } }],
     grants: [{ subjectType: 'ROLE', subjectId: 7, actions: ['QUERY', 'EXPORT'] }],
   } })
   assert.equal(draft.parameters[0].systemInjected, true)
+  assert.equal(draft.parameters[0].precision, 38)
+  assert.deepEqual(draft.parameters[0].normalizer, { trim: true })
+  assert.deepEqual(draft.parameters[0].valueSource, { source: 'run_id' })
   assert.equal(draft.columns[0].databaseColumn, 'AMOUNT')
+  assert.equal(draft.columns[0].precision, 18)
+  assert.equal(draft.columns[0].displayOrder, 2)
+  assert.deepEqual(draft.columns[0].dictionaryVersion, { version: 'v2' })
   assert.equal(draft.columns[0].excelHeader, '含税金额')
   assert.deepEqual(draft.grants[0].actions, ['QUERY', 'EXPORT'])
 })

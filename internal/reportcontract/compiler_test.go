@@ -136,13 +136,13 @@ func TestCompileRejectsUnsupportedParameterAutomation(t *testing.T) {
 			},
 		},
 		{
-			name: "normalizer",
+			name: "normalizer on date",
 			mutate: func(parameters []model.ReportParameter) {
 				parameters[1].NormalizerJSON = model.JSONText(`{"trim":true}`)
 			},
 		},
 		{
-			name: "value source",
+			name: "unsupported value source",
 			mutate: func(parameters []model.ReportParameter) {
 				parameters[1].ValueSourceJSON = model.JSONText(`{"source":"actor"}`)
 			},
@@ -157,6 +157,15 @@ func TestCompileRejectsUnsupportedParameterAutomation(t *testing.T) {
 				t.Fatalf("Compile() error = %v, want ErrInvalidContract", err)
 			}
 		})
+	}
+}
+
+func TestCompileAcceptsWhitelistedParameterAutomation(t *testing.T) {
+	version, parameters, columns, grants, arguments, result := validContract()
+	contract := validSnapshotContract(t, version, result, columns)
+	parameters[0].ValueSourceJSON = model.JSONText(`{"source":"RUN_ID"}`)
+	if _, err := Compile(version, parameters, columns, grants, arguments, result, contract); err != nil {
+		t.Fatalf("Compile() error = %v", err)
 	}
 }
 

@@ -19,7 +19,12 @@ func TestReportDraftServiceCreateNormalizesContractAndHidesSensitiveFields(t *te
 	store := &fakeReportDraftStore{}
 	service := NewReportDraftServiceWithStore(store)
 	request := validReportDraftRequest()
-	request.Parameters[0].Sensitive = true
+	request.Parameters = append(request.Parameters, requestbody.ReportParameterRequest{
+		Code: "secret", Label: "密钥", DisplayOrder: 2, ControlType: "TEXT", LogicalType: "string",
+		Cardinality: "SINGLE", ProcedureArgName: "p_secret", Position: 2, OracleType: "VARCHAR2",
+		Required: true, Sensitive: true, NullPolicy: "TYPED_NULL",
+	})
+	request.CallTemplate = "BEGIN REPORT_OWNER.PKG_SALES.BUILD_REPORT(P_RUN_ID => {{runId}}, P_SECRET => {{secret}}); END;"
 
 	result, err := service.Create(t.Context(), 17, request)
 	if err != nil {
@@ -31,7 +36,7 @@ func TestReportDraftServiceCreateNormalizesContractAndHidesSensitiveFields(t *te
 	if store.created.Version.ProcedureOwner != "REPORT_OWNER" || store.created.Version.ResultRunIDColumn != "RUN_ID" {
 		t.Fatalf("normalized version = %#v", store.created.Version)
 	}
-	if result.Parameters[0].DefaultValue != nil {
+	if result.Parameters[1].DefaultValue != nil {
 		t.Fatal("sensitive parameter default leaked in DTO")
 	}
 	encoded, err := json.Marshal(result)
@@ -232,6 +237,14 @@ func validReportDraftRequest() requestbody.ReportDraftSaveRequest {
 			ExportVisible: true, ExportAllowed: true, DisplayOrder: 1, ExportOrder: 1, ExcelWidth: 18,
 		}},
 		Grants: []requestbody.ReportGrantRequest{{SubjectType: "ROLE", SubjectID: 2, Actions: json.RawMessage(`["QUERY","EXPORT"]`)}},
+	}
+}
+
+func TestReportDraftRejectsSensitiveSystemParameter(t *testing.T) {
+	request := validReportDraftRequest()
+	request.Parameters[0].Sensitive = true
+	if _, err := reportDraftFromRequest(17, request); !errors.Is(err, ErrReportInvalid) {
+		t.Fatalf("reportDraftFromRequest() error = %v", err)
 	}
 }
 

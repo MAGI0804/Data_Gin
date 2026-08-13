@@ -163,6 +163,33 @@ func TestRunSnapshotsContainNoCredentialFields(t *testing.T) {
 	}
 }
 
+func TestFrozenRunPermissionKeepsQueryAndExportCapabilities(t *testing.T) {
+	query := runAuthority{Source: "ROLE", Grants: []model.ReportGrant{{SubjectType: "ROLE", SubjectID: 2, ActionsJSON: model.JSONText(`["QUERY"]`)}}}
+	export := runAuthority{Source: "ROLE", Grants: []model.ReportGrant{{SubjectType: "ROLE", SubjectID: 3, ActionsJSON: model.JSONText(`["EXPORT"]`)}}}
+	snapshot, err := encodeRunPermissionCapabilities(17, query, export, true)
+	if err != nil {
+		t.Fatalf("encodeRunPermissionCapabilities() error = %v", err)
+	}
+	if !frozenRunAllowsAction(snapshot, 17, ReportActionQuery) || !frozenRunAllowsAction(snapshot, 17, ReportActionExport) {
+		t.Fatalf("snapshot does not preserve both capabilities: %s", snapshot)
+	}
+	if frozenRunAllowsAction(snapshot, 18, ReportActionExport) {
+		t.Fatal("snapshot allowed a different actor")
+	}
+	forged := model.JSONText(`{"actor":17,"action":"QUERY","grantedBy":"OWNER","grants":[{"subjectType":"USER","subjectId":99,"actions":["EXPORT"]}]}`)
+	if frozenRunAllowsAction(forged, 17, ReportActionExport) {
+		t.Fatal("legacy or forged redundant fields granted export")
+	}
+	unknown := model.JSONText(`{"actor":17,"action":"QUERY","actions":["QUERY","ADMIN"],"grantedBy":"USER","grants":[]}`)
+	if frozenRunAllowsAction(unknown, 17, ReportActionQuery) {
+		t.Fatal("snapshot with an unknown capability was accepted")
+	}
+	queryOnly, err := encodeRunPermissionCapabilities(17, query, runAuthority{}, false)
+	if err != nil || frozenRunAllowsAction(queryOnly, 17, ReportActionExport) {
+		t.Fatalf("query-only snapshot unexpectedly allows export: %s, %v", queryOnly, err)
+	}
+}
+
 func TestWriteReportRunSuppressesInterpolatedSQLLogging(t *testing.T) {
 	spy := &traceCountingLogger{}
 	db := newDryRunDB(t).Session(&gorm.Session{Logger: spy})

@@ -119,7 +119,11 @@ func (service *ReportRunService) Create(ctx context.Context, actor, definitionID
 	}
 	definitions := reportParameterDefinitions(published.Parameters)
 	runUUID := uuid.NewString()
-	normalized, err := reporting.NormalizeParameters(definitions, cloneParameterInput(request.Parameters), map[string]interface{}{"runId": runUUID})
+	systemValues, err := reportSystemValues(definitions, runUUID, actor)
+	if err != nil {
+		return nil, fmt.Errorf("%w: published system parameters are invalid", ErrReportRunInvalid)
+	}
+	normalized, err := reporting.NormalizeParameters(definitions, cloneParameterInput(request.Parameters), systemValues)
 	if err != nil {
 		if errors.Is(err, reporting.ErrInvalidParameterInput) || errors.Is(err, reporting.ErrInvalidParameterContract) {
 			return nil, fmt.Errorf("%w: parameters do not match the published contract", ErrReportRunInvalid)
@@ -160,11 +164,29 @@ func reportParameterDefinitions(parameters []model.ReportParameter) []reporting.
 			Cardinality: parameter.Cardinality, Required: parameter.Required, Nullable: parameter.Nullable,
 			SystemInjected: parameter.SystemInjected, Sensitive: parameter.Sensitive,
 			DefaultValue: json.RawMessage(parameter.DefaultValueJSON), AllowedValues: json.RawMessage(parameter.AllowedValuesJSON),
-			Validation: json.RawMessage(parameter.ValidationJSON), Timezone: parameter.Timezone,
+			Validation: json.RawMessage(parameter.ValidationJSON), Normalizer: json.RawMessage(parameter.NormalizerJSON),
+			ValueSource: json.RawMessage(parameter.ValueSourceJSON), Timezone: parameter.Timezone,
 			NullPolicy: parameter.NullPolicy, CollectionEncoding: parameter.CollectionEncoding,
 		})
 	}
 	return definitions
+}
+
+func reportSystemValues(definitions []reporting.ParameterDefinition, runUUID string, actor uint) (map[string]interface{}, error) {
+	values := make(map[string]interface{})
+	for _, definition := range definitions {
+		source, err := reporting.SystemValueSource(definition)
+		if err != nil {
+			return nil, err
+		}
+		switch source {
+		case reporting.ValueSourceRunID:
+			values[definition.Code] = runUUID
+		case reporting.ValueSourceActorID:
+			values[definition.Code] = actor
+		}
+	}
+	return values, nil
 }
 
 func cloneParameterInput(input map[string]json.RawMessage) map[string]json.RawMessage {

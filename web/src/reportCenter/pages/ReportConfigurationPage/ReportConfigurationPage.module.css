@@ -4,4 +4,5 @@
 .item > svg { width: 19px; color: var(--color-brand-active); }
 .item strong, .item small { display: block; }
 .item small { margin-top: var(--space-1); color: var(--color-text-secondary); font-weight: 500; }
+.pagination { display: flex; justify-content: center; padding-block: var(--space-4); border-top: 1px solid var(--color-border); }
 @media (max-width: 479px) { .item { grid-template-columns: auto minmax(0, 1fr); } .item > :last-child { grid-column: 2; } }

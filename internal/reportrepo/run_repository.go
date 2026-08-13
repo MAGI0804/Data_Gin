@@ -78,7 +78,11 @@ func (repository *Repository) CreateRun(ctx context.Context, actor, definitionID
 			published.Version.ProcedureSignatureHash != command.Run.ProcedureSignatureHash || published.Version.ResultSchemaHash != command.Run.ResultSchemaHash {
 			return ErrDraftVersionConflict
 		}
-		permissionSnapshot, err := encodeRunPermissionSnapshot(actor, ReportActionQuery, published.authority)
+		exportAuthority, exportAllowed, err := actorCanRunReport(ctx, tx, actor, published.Definition.OwnerUserID, ReportActionExport, published.Grants)
+		if err != nil {
+			return err
+		}
+		permissionSnapshot, err := encodeRunPermissionCapabilities(actor, published.authority, exportAuthority, exportAllowed)
 		if err != nil {
 			return err
 		}
@@ -143,6 +147,7 @@ type runGrantSnapshot struct {
 type runPermissionSnapshot struct {
 	Actor     uint               `json:"actor"`
 	Action    string             `json:"action"`
+	Actions   []string           `json:"actions,omitempty"`
 	GrantedBy string             `json:"grantedBy"`
 	Grants    []runGrantSnapshot `json:"grants"`
 }
@@ -188,6 +193,66 @@ func encodeRunPermissionSnapshot(actor uint, action string, authority runAuthori
 		return "", fmt.Errorf("report run: encode permission snapshot: %w", err)
 	}
 	return model.JSONText(encoded), nil
+}
+
+func encodeRunPermissionCapabilities(actor uint, queryAuthority, exportAuthority runAuthority, exportAllowed bool) (model.JSONText, error) {
+	actions := []string{ReportActionQuery}
+	grantedBy := queryAuthority.Source
+	grants := append([]model.ReportGrant(nil), queryAuthority.Grants...)
+	if exportAllowed {
+		actions = append(actions, ReportActionExport)
+		if exportAuthority.Source != "" && exportAuthority.Source != grantedBy {
+			grantedBy += "+" + exportAuthority.Source
+		}
+		for _, candidate := range exportAuthority.Grants {
+			duplicate := false
+			for _, existing := range grants {
+				if existing.SubjectType == candidate.SubjectType && existing.SubjectID == candidate.SubjectID {
+					duplicate = true
+					break
+				}
+			}
+			if !duplicate {
+				grants = append(grants, candidate)
+			}
+		}
+	}
+	items := make([]runGrantSnapshot, 0, len(grants))
+	for _, grant := range grants {
+		items = append(items, runGrantSnapshot{SubjectType: grant.SubjectType, SubjectID: grant.SubjectID, Actions: json.RawMessage(grant.ActionsJSON)})
+	}
+	encoded, err := json.Marshal(runPermissionSnapshot{Actor: actor, Action: ReportActionQuery, Actions: actions, GrantedBy: grantedBy, Grants: items})
+	if err != nil {
+		return "", fmt.Errorf("report run: encode permission capabilities: %w", err)
+	}
+	return model.JSONText(encoded), nil
+}
+
+func frozenRunAllowsAction(raw model.JSONText, actor uint, action string) bool {
+	var snapshot runPermissionSnapshot
+	decoder := json.NewDecoder(bytes.NewReader([]byte(raw)))
+	decoder.DisallowUnknownFields()
+	if decoder.Decode(&snapshot) != nil || snapshot.Actor != actor || !validReportAction(action) {
+		return false
+	}
+	var trailing interface{}
+	if !errors.Is(decoder.Decode(&trailing), io.EOF) {
+		return false
+	}
+	if len(snapshot.Actions) == 0 {
+		return false
+	}
+	allowed := false
+	for _, candidate := range snapshot.Actions {
+		candidate = strings.ToUpper(strings.TrimSpace(candidate))
+		if !validReportAction(candidate) {
+			return false
+		}
+		if candidate == action {
+			allowed = true
+		}
+	}
+	return allowed
 }
 
 func encodeRunPresentationSnapshot(columns []model.ReportColumn) (model.JSONText, error) {
