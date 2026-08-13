@@ -747,7 +747,7 @@ export function ExcelMatchPage({
           <form id="excel-export-job-form" className={styles.uploadForm} onSubmit={createExportJob} key={exportFormKey} hidden={pendingSchemeSave !== null}>
             <label>
               已保存方案
-              <select value={selectedExportSchemeID} onChange={(event) => applyExportScheme(event.currentTarget.value)}>
+              <select name="exportSchemeID" value={selectedExportSchemeID} onChange={(event) => applyExportScheme(event.currentTarget.value)}>
                 <option value="">选择方案</option>
                 {exportSchemes.map((scheme) => <option value={scheme.id} key={scheme.id}>{scheme.name}</option>)}
               </select>
@@ -896,7 +896,7 @@ export function ExcelMatchPage({
                             </select>
                           </label>
                           {valueNotRequired
-                            ? <label>筛选值<input value="此运算无需填写" readOnly disabled /></label>
+                            ? <label>筛选值<input name={`step_filter_value_${index}_${filterIndex}`} value="此运算无需填写" readOnly disabled /></label>
                             : <Field
                                 label="筛选值"
                                 name={`step_filter_value_${index}_${filterIndex}`}
@@ -935,7 +935,7 @@ export function ExcelMatchPage({
           <form className={styles.uploadForm} onSubmit={createImportJob} key={importFormKey} hidden={pendingWrite?.slot === 'import' || pendingSchemeSave !== null}>
             <label>
               已保存方案
-              <select value={selectedImportSchemeID} onChange={(event) => applyImportScheme(event.currentTarget.value)}>
+              <select name="importSchemeID" value={selectedImportSchemeID} onChange={(event) => applyImportScheme(event.currentTarget.value)}>
                 <option value="">选择方案</option>
                 {importSchemes.map((scheme) => <option value={scheme.id} key={scheme.id}>{scheme.name}</option>)}
               </select>
@@ -1069,7 +1069,7 @@ export function ExcelMatchPage({
           <div className={styles.jobActions}>
             <label>
               任务 ID
-              <input value={jobs.jobID} onChange={(event) => jobs.setJobID(event.target.value)} />
+              <input name="excelJobID" value={jobs.jobID} onChange={(event) => jobs.setJobID(event.target.value)} />
             </label>
             <button type="button" onClick={refreshJob} disabled={loading}>
               <RefreshCcw aria-hidden="true" />
