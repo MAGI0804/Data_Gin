@@ -298,9 +298,16 @@ func TestPublishDraftFreezesContractAndCreatesCleanNextDraft(t *testing.T) {
 		record.ID = 12
 		return nil
 	}
-	repository.copyCollections = func(_ context.Context, _ *gorm.DB, versionID uint, parameters []model.ReportParameter, columns []model.ReportColumn) error {
-		if versionID != 12 || len(parameters) != 1 || len(columns) != 1 {
-			t.Fatalf("copied version=%d parameters=%#v columns=%#v", versionID, parameters, columns)
+	repository.copyCollections = func(
+		_ context.Context,
+		_ *gorm.DB,
+		definitionID, versionID uint,
+		parameters []model.ReportParameter,
+		columns []model.ReportColumn,
+		grants []model.ReportGrant,
+	) error {
+		if definitionID != 7 || versionID != 12 || len(parameters) != 1 || len(columns) != 1 || len(grants) != 1 {
+			t.Fatalf("copied definition=%d version=%d parameters=%#v columns=%#v grants=%#v", definitionID, versionID, parameters, columns, grants)
 		}
 		return nil
 	}
@@ -378,7 +385,15 @@ func TestPublishDraftStopsAtEveryAtomicBoundary(t *testing.T) {
 				version.ID = 12
 				return nil
 			}
-			repository.copyCollections = func(context.Context, *gorm.DB, uint, []model.ReportParameter, []model.ReportColumn) error {
+			repository.copyCollections = func(
+				context.Context,
+				*gorm.DB,
+				uint,
+				uint,
+				[]model.ReportParameter,
+				[]model.ReportColumn,
+				[]model.ReportGrant,
+			) error {
 				calls = append(calls, steps[3])
 				if failedStep == steps[3] {
 					return injected
@@ -513,7 +528,8 @@ func TestListDraftsUsesBoundedKeysetAndSharedQueryAccess(t *testing.T) {
 	sqlText := statement.Statement.SQL.String()
 	for _, fragment := range []string{
 		"draft_versions.version_number ELSE 0 END AS lock_version", "definitions.owner_user_id = ?", "definitions.status IN", "definitions.id > ?",
-		"published_versions.id IS NOT NULL", "FROM report_grants AS grants", "JSON_CONTAINS(grants.actions_json, JSON_QUOTE(?))",
+		"published_versions.id IS NOT NULL", "FROM report_grants AS grants", "grants.version_id = published_versions.id",
+		"JSON_CONTAINS(grants.actions_json, JSON_QUOTE(?))",
 		"grants.subject_type = ? AND grants.subject_id = ?", "FROM user_roles AS memberships", "JOIN roles", "roles.status = ?",
 		")) AND definitions.id > ? AND ((definitions.code LIKE ?",
 		"ORDER BY definitions.id ASC", "LIMIT 21",
@@ -577,6 +593,24 @@ func TestRecordTableNamesUseExistingReportTables(t *testing.T) {
 		if test.got != test.want {
 			t.Fatalf("TableName() = %q, want %q", test.got, test.want)
 		}
+	}
+}
+
+func TestNewGrantRecordsBindEveryGrantToOneVersion(t *testing.T) {
+	now := time.Date(2026, 8, 13, 12, 0, 0, 0, time.UTC)
+	rows := newGrantRecords(7, 12, []model.ReportGrant{{
+		BaseModel:    model.BaseModel{ID: 99},
+		DefinitionID: 2,
+		VersionID:    3,
+		SubjectType:  "ROLE",
+		SubjectID:    5,
+	}}, now)
+	if len(rows) != 1 {
+		t.Fatalf("rows = %#v", rows)
+	}
+	grant := rows[0].ReportGrant
+	if grant.ID != 0 || grant.DefinitionID != 7 || grant.VersionID != 12 || grant.CreatedAt != now || grant.UpdatedAt != now {
+		t.Fatalf("versioned grant = %#v", grant)
 	}
 }
 

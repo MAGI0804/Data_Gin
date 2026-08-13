@@ -87,7 +87,7 @@ func loadCollections(
 
 	var grants []grantRecord
 	if err := db.WithContext(ctx).Model(&grantRecord{}).
-		Where("definition_id = ?", definitionID).
+		Where("definition_id = ? AND version_id = ?", definitionID, versionID).
 		Order("subject_type ASC, subject_id ASC, id ASC").Find(&grants).Error; err != nil {
 		return fmt.Errorf("report draft: list grants: %w", err)
 	}
@@ -150,19 +150,11 @@ func replaceCollections(
 	}
 
 	if err := tx.WithContext(ctx).
-		Where("definition_id = ?", definitionID).
+		Where("definition_id = ? AND version_id = ?", definitionID, versionID).
 		Delete(&grantRecord{}).Error; err != nil {
 		return fmt.Errorf("report draft: replace grants: delete old set: %w", err)
 	}
-	grantRows := make([]grantRecord, 0, len(grants))
-	now := time.Now().UTC()
-	for _, grant := range grants {
-		grant.ID = 0
-		grant.DefinitionID = definitionID
-		grant.CreatedAt = now
-		grant.UpdatedAt = now
-		grantRows = append(grantRows, grantRecord{ReportGrant: grant})
-	}
+	grantRows := newGrantRecords(definitionID, versionID, grants, time.Now().UTC())
 	if len(grantRows) > 0 {
 		if err := tx.WithContext(ctx).Create(&grantRows).Error; err != nil {
 			return fmt.Errorf("report draft: replace grants: create new set: %w", err)
@@ -171,7 +163,14 @@ func replaceCollections(
 	return nil
 }
 
-func replaceVersionCollections(ctx context.Context, tx *gorm.DB, versionID uint, parameters []model.ReportParameter, columns []model.ReportColumn) error {
+func replaceVersionCollections(
+	ctx context.Context,
+	tx *gorm.DB,
+	definitionID, versionID uint,
+	parameters []model.ReportParameter,
+	columns []model.ReportColumn,
+	grants []model.ReportGrant,
+) error {
 	parameterRows := make([]parameterRecord, 0, len(parameters))
 	for _, parameter := range parameters {
 		parameter.ID = 0
@@ -196,7 +195,26 @@ func replaceVersionCollections(ctx context.Context, tx *gorm.DB, versionID uint,
 			return fmt.Errorf("report draft: copy columns: %w", err)
 		}
 	}
+	grantRows := newGrantRecords(definitionID, versionID, grants, time.Now().UTC())
+	if len(grantRows) > 0 {
+		if err := tx.WithContext(ctx).Create(&grantRows).Error; err != nil {
+			return fmt.Errorf("report draft: copy grants: %w", err)
+		}
+	}
 	return nil
+}
+
+func newGrantRecords(definitionID, versionID uint, grants []model.ReportGrant, now time.Time) []grantRecord {
+	rows := make([]grantRecord, 0, len(grants))
+	for _, grant := range grants {
+		grant.ID = 0
+		grant.DefinitionID = definitionID
+		grant.VersionID = versionID
+		grant.CreatedAt = now
+		grant.UpdatedAt = now
+		rows = append(rows, grantRecord{ReportGrant: grant})
+	}
+	return rows
 }
 
 func validateDraftReferences(ctx context.Context, tx *gorm.DB, datasourceID uint, grants []model.ReportGrant) error {

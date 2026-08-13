@@ -78,7 +78,7 @@ type reportAuditWriter func(context.Context, *gorm.DB, model.ReportAudit) error
 type draftCollectionsLoader func(context.Context, *gorm.DB, uint, uint, uint, *Draft) error
 type publishedVersionWriter func(context.Context, *gorm.DB, uint, uint, uint64, map[string]interface{}) error
 type draftVersionCreator func(context.Context, *gorm.DB, *versionRecord) error
-type versionCollectionsCopier func(context.Context, *gorm.DB, uint, []model.ReportParameter, []model.ReportColumn) error
+type versionCollectionsCopier func(context.Context, *gorm.DB, uint, uint, []model.ReportParameter, []model.ReportColumn, []model.ReportGrant) error
 type publishedDefinitionSwitcher func(context.Context, *gorm.DB, uint, uint, uint, uint, uint) error
 type publishedReportLoader func(context.Context, *gorm.DB, uint, uint, string, bool) (*PublishedReport, error)
 type reportRunWriter func(context.Context, *gorm.DB, *model.ReportRun) error
@@ -286,7 +286,15 @@ func (repository *Repository) PublishDraft(ctx context.Context, ownerUserID, def
 			return err
 		}
 		nextDraftVersionID = nextRecord.ID
-		if err := repository.copyCollections(ctx, tx, nextRecord.ID, published.Parameters, published.Columns); err != nil {
+		if err := repository.copyCollections(
+			ctx,
+			tx,
+			definitionID,
+			nextRecord.ID,
+			published.Parameters,
+			published.Columns,
+			published.Grants,
+		); err != nil {
 			return err
 		}
 		if err := repository.switchDefinition(ctx, tx, ownerUserID, definitionID, current.ID, nextRecord.ID, ownerUserID); err != nil {
@@ -414,6 +422,7 @@ func buildDraftListQuery(db *gorm.DB, actor uint, query DraftListQuery) *gorm.DB
 				SELECT 1
 				FROM report_grants AS grants
 				WHERE grants.definition_id = definitions.id
+					AND grants.version_id = published_versions.id
 					AND JSON_CONTAINS(grants.actions_json, JSON_QUOTE(?))
 					AND (
 						(grants.subject_type = ? AND grants.subject_id = ?)

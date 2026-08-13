@@ -191,12 +191,14 @@ type ReportColumn struct {
 
 func (ReportColumn) TableName() string { return "report_columns" }
 
-// ReportGrant assigns report-scoped actions to a user or role. The published
-// permission hash and each run's permission snapshot are derived from these
-// rows plus the global RBAC decision.
+// ReportGrant assigns version-scoped actions to a user or role. Published
+// permissions remain immutable while a later draft changes its own grants.
+// The permission hash and each run snapshot are derived from the selected
+// version's rows plus the global RBAC decision.
 type ReportGrant struct {
 	BaseModel
-	DefinitionID uint      `gorm:"column:definition_id;not null;uniqueIndex:uk_report_grant_subject,priority:1;index" json:"definitionId"`
+	DefinitionID uint      `gorm:"column:definition_id;not null;index" json:"definitionId"`
+	VersionID    uint      `gorm:"column:version_id;not null;uniqueIndex:uk_report_grant_subject,priority:1;index" json:"versionId"`
 	SubjectType  string    `gorm:"column:subject_type;size:16;not null;uniqueIndex:uk_report_grant_subject,priority:2" json:"subjectType"`
 	SubjectID    uint      `gorm:"column:subject_id;not null;uniqueIndex:uk_report_grant_subject,priority:3;index" json:"subjectId"`
 	ActionsJSON  JSONText  `gorm:"column:actions_json;type:json;not null" json:"actions"`

@@ -23,7 +23,7 @@ import (
 	"go.uber.org/zap"
 )
 
-const schemaMigrationVersion = "2026-08-12-report-center-v6"
+const schemaMigrationVersion = "2026-08-13-report-center-v7"
 const schemaMigrationLockName = "data_gin_schema_migration_v1"
 
 type schemaMigrationRecord struct {
@@ -196,6 +196,10 @@ func autoMigrateTables() error {
 	if err := prepareReportVersionDatasourceSnapshot(db); err != nil {
 		logger.Error("回填报表版本数据源快照失败", zap.Error(err))
 		return fmt.Errorf("prepare report version datasource snapshot: %w", err)
+	}
+	if err := prepareReportGrantVersionSnapshot(db); err != nil {
+		logger.Error("回填报表授权版本快照失败", zap.Error(err))
+		return fmt.Errorf("prepare report grant version snapshot: %w", err)
 	}
 
 	// 迁移数据存储相关表

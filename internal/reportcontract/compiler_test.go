@@ -124,6 +124,42 @@ func TestCompileRejectsSensitiveDefaultAndUnknownGrantAction(t *testing.T) {
 	}
 }
 
+func TestCompileRejectsUnsupportedParameterAutomation(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func([]model.ReportParameter)
+	}{
+		{
+			name: "system injection other than run id",
+			mutate: func(parameters []model.ReportParameter) {
+				parameters[1].SystemInjected = true
+			},
+		},
+		{
+			name: "normalizer",
+			mutate: func(parameters []model.ReportParameter) {
+				parameters[1].NormalizerJSON = model.JSONText(`{"trim":true}`)
+			},
+		},
+		{
+			name: "value source",
+			mutate: func(parameters []model.ReportParameter) {
+				parameters[1].ValueSourceJSON = model.JSONText(`{"source":"actor"}`)
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			version, parameters, columns, grants, arguments, result := validContract()
+			test.mutate(parameters)
+			contract := validSnapshotContract(t, version, result, columns)
+			if _, err := Compile(version, parameters, columns, grants, arguments, result, contract); !errors.Is(err, ErrInvalidContract) {
+				t.Fatalf("Compile() error = %v, want ErrInvalidContract", err)
+			}
+		})
+	}
+}
+
 func TestCompileRejectsLogicalOracleTypeDrift(t *testing.T) {
 	version, parameters, columns, grants, arguments, result := validContract()
 	contract := validSnapshotContract(t, version, result, columns)

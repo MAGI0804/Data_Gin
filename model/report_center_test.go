@@ -2,8 +2,12 @@ package model
 
 import (
 	"encoding/json"
+	"reflect"
 	"strings"
+	"sync"
 	"testing"
+
+	"gorm.io/gorm/schema"
 )
 
 func TestReportCenterTableNames(t *testing.T) {
@@ -30,6 +34,28 @@ func TestReportCenterTableNames(t *testing.T) {
 				t.Fatalf("TableName() = %q, want %q", test.got, test.want)
 			}
 		})
+	}
+}
+
+func TestReportGrantUniqueSubjectIsVersionScoped(t *testing.T) {
+	parsed, err := schema.Parse(&ReportGrant{}, &sync.Map{}, schema.NamingStrategy{})
+	if err != nil {
+		t.Fatalf("schema.Parse() error = %v", err)
+	}
+	index, ok := parsed.ParseIndexes()["uk_report_grant_subject"]
+	if !ok {
+		t.Fatal("version-scoped grant subject index not found")
+	}
+	if index.Class != "UNIQUE" {
+		t.Fatalf("index class = %q, want UNIQUE", index.Class)
+	}
+	got := make([]string, 0, len(index.Fields))
+	for _, field := range index.Fields {
+		got = append(got, field.DBName)
+	}
+	want := []string{"version_id", "subject_type", "subject_id"}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("index fields = %v, want %v", got, want)
 	}
 }
 
