@@ -1,4 +1,5 @@
 import type { HTMLAttributes } from 'react'
+import styles from './Brand.module.css'
 
 export type BrandSize = 'small' | 'medium' | 'large'
 
@@ -18,14 +19,14 @@ export function Brand({
   size = 'medium',
   ...props
 }: BrandProps) {
-  const classes = ['allblu-brand', `allblu-brand--${size}`, compact && 'allblu-brand--compact', className]
+  const classes = [styles.brand, styles[size], compact && styles.compact, className]
     .filter(Boolean)
     .join(' ')
 
   return (
     <div className={classes} data-compact={compact || undefined} {...props}>
-      <img className="allblu-brand__logo" src="/logo.jpg" alt={logoAlt} />
-      <span className="allblu-brand__name">Allblu</span>
+      <img className={styles.logo} src="/logo.jpg" alt={logoAlt} />
+      <span className={styles.name}>Allblu</span>
     </div>
   )
 }

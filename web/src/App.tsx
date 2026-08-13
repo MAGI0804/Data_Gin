@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import './App.css'
+import styles from './App.module.css'
 import { apiURL as buildApiURL } from './apiURL'
 import { clearStoredToken, loadStoredSessionUser, loadStoredToken, saveStoredSessionUser, saveStoredToken, saveStoredTokenExpiry, storedTokenExpiresAt, tokenActorID, type StoredSessionUser } from './authStorage'
 import { createApiClient, type ApiRequestOptions, type ClientResponse, type HTTPMethod } from './api/client'
@@ -490,7 +491,7 @@ function App() {
       onDismissNavigation={() => setMobileNavOpen(false)}
       flushWorkspace={compactWorkspace}
       header={<ConsoleHeader compact={compactWorkspace} activeNav={activeNav} loading={loading || refreshing} sessionUser={sessionUser} onOpenNavigation={openMobileNavigation} onRefresh={() => void refreshWorkspace(true)} onLogout={handleLogout} refreshing={refreshing} mobileNavTriggerRef={mobileNavTriggerRef} />}
-      notices={<>{sessionValidationError && <div className="result-banner error" role="status" aria-live="polite">{sessionValidationError} <button type="button" onClick={() => setSessionValidationAttempt((attempt) => attempt + 1)}>重试校验</button></div>}{workspaceError && <div className="result-banner error" role="alert">{workspaceError} <button type="button" onClick={() => void refreshWorkspace(false)} disabled={refreshing}>重试</button></div>}</>}
+      notices={<>{sessionValidationError && <div className={styles.notice} role="status" aria-live="polite">{sessionValidationError} <button type="button" onClick={() => setSessionValidationAttempt((attempt) => attempt + 1)}>重试校验</button></div>}{workspaceError && <div className={styles.notice} role="alert">{workspaceError} <button type="button" onClick={() => void refreshWorkspace(false)} disabled={refreshing}>重试</button></div>}</>}
       overlay={<ResultDrawer result={result} onClose={() => setResult(null)} />}
     >
         {activeNav === 'overview' && <RunOverviewPage runs={runs} deliveryLogs={deliveryLogs} monitoring={monitoring} stale={monitoringStale} overviewTotals={overviewTotals} onLoadSteps={openStepRuns} />}

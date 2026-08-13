@@ -2,14 +2,14 @@
   --excel-control-height: 40px;
 }
 
-.page :global(.workbench-panel) {
+.panel {
   min-width: 0;
   border: 0;
   background: var(--color-canvas);
   padding: var(--space-4);
 }
 
-.page :global(.panel-title) {
+.panelTitle {
   display: flex;
   align-items: center;
   gap: var(--space-2);
@@ -18,133 +18,194 @@
   padding-block-end: var(--space-3);
 }
 
-.page :global(.panel-title svg) { width: 18px; height: 18px; color: var(--color-brand); }
-.page :global(.panel-title h3) { margin: 0; font-size: 16px; }
-.page :global(.panel-title span) { color: var(--color-text-secondary); font-size: 12px; }
+.panelTitle svg { width: 18px; height: 18px; color: var(--color-brand); }
+.panelTitle h3 { margin: 0; font-size: 16px; }
+.panelTitle span { color: var(--color-text-secondary); font-size: 12px; }
 
-.page :global(.excel-upload-form),
-.dialog :global(.excel-upload-form) {
+.uploadForm,
+.dialog .uploadForm {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
   align-items: end;
   gap: var(--space-3);
 }
 
-.page :global(.excel-upload-form > label),
-.dialog :global(.excel-upload-form > label) { display: grid; gap: var(--space-1); min-width: 0; color: var(--color-text-secondary); font-size: 12px; font-weight: 650; }
-.page :global(.excel-upload-form input),
-.page :global(.excel-upload-form select),
-.page :global(.excel-upload-form textarea),
-.dialog :global(.excel-upload-form input),
-.dialog :global(.excel-upload-form select),
-.dialog :global(.excel-upload-form textarea) { width: 100%; min-width: 0; min-height: var(--excel-control-height); border: 1px solid var(--color-border-strong); background: var(--color-canvas); padding-inline: var(--space-3); }
-.page :global(.excel-upload-form textarea),
-.dialog :global(.excel-upload-form textarea) { padding-block: var(--space-2); }
+.uploadForm > label,
+.dialog .uploadForm > label { display: grid; gap: var(--space-1); min-width: 0; color: var(--color-text-secondary); font-size: 12px; font-weight: 650; }
+.uploadForm input,
+.uploadForm select,
+.uploadForm textarea,
+.dialog .uploadForm input,
+.dialog .uploadForm select,
+.dialog .uploadForm textarea { width: 100%; min-width: 0; min-height: var(--excel-control-height); border: 1px solid var(--color-border-strong); background: var(--color-canvas); padding-inline: var(--space-3); }
+.uploadForm textarea,
+.dialog .uploadForm textarea { padding-block: var(--space-2); }
 
-.page :global(.excel-form-actions),
-.page :global(.table-actions),
-.page :global(.excel-scheme-toolbar-actions),
-.page :global(.excel-detail-actions),
-.dialog :global(.excel-form-actions),
-.dialog :global(.table-actions),
-.dialog :global(.excel-scheme-toolbar-actions),
-.dialog :global(.excel-detail-actions) { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: var(--space-2); }
-.page :global(.excel-form-actions),
-.dialog :global(.excel-form-actions) { grid-column: 1 / -1; }
+.formActions,
+.tableActions,
+.schemeToolbarActions,
+.detailActions,
+.dialog .formActions,
+.dialog .tableActions,
+.dialog .schemeToolbarActions,
+.dialog .detailActions { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: var(--space-2); }
+.formActions,
+.dialog .formActions { grid-column: 1 / -1; }
 
-.page :global(.excel-scheme-toolbar) { display: grid; grid-template-columns: minmax(220px, 1fr) minmax(120px, .4fr) auto; align-items: end; gap: var(--space-3); margin-block-end: var(--space-4); }
-.page :global(.excel-scheme-form) { display: block; }
-.page :global(.excel-step-editor),
-.dialog :global(.excel-step-editor) { display: grid; grid-column: 1 / -1; gap: var(--space-4); border-block: 1px solid var(--color-border); padding-block: var(--space-4); }
-.page :global(.excel-step-editor-title),
-.page :global(.excel-step-heading),
-.page :global(.excel-step-filter-heading),
-.dialog :global(.excel-step-editor-title),
-.dialog :global(.excel-step-heading),
-.dialog :global(.excel-step-filter-heading) { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); }
-.page :global(.excel-step-card),
-.dialog :global(.excel-step-card) { display: grid; gap: var(--space-3); border: 1px solid var(--color-border); background: var(--color-canvas); padding: var(--space-3); }
-.page :global(.excel-step-index) { display: inline-grid; width: 24px; height: 24px; place-items: center; border: 1px solid var(--color-brand); border-radius: 50%; color: var(--color-brand); }
-.page :global(.excel-step-fields),
-.dialog :global(.excel-step-fields) { display: grid; grid-template-columns: repeat(4, minmax(120px, 1fr)); gap: var(--space-3); }
-.page :global(.excel-step-filter-editor),
-.dialog :global(.excel-step-filter-editor) { display: grid; gap: var(--space-2); border-top: 1px solid var(--color-border); padding-top: var(--space-3); }
-.page :global(.excel-step-filter-row),
-.dialog :global(.excel-step-filter-row) { display: grid; grid-template-columns: minmax(140px, 1fr) 120px minmax(140px, 1fr) auto; align-items: end; gap: var(--space-2); }
-.page :global(.excel-step-filter-empty),
-.page :global(.excel-mode-note),
-.dialog :global(.excel-step-filter-empty),
-.dialog :global(.excel-mode-note) { margin: 0; color: var(--color-text-secondary); font-size: 12px; line-height: 1.6; }
-.page :global(.excel-step-name-input) { min-height: 32px; border: 0; background: transparent; font: inherit; font-weight: 650; }
-.page :global(.excel-catalog-control),
-.page :global(.excel-catalog-explanation),
-.dialog :global(.excel-catalog-control),
-.dialog :global(.excel-catalog-explanation) { min-width: 0; }
-.page :global(.excel-catalog-explanation),
-.dialog :global(.excel-catalog-explanation) { display: grid; gap: 2px; margin-block-start: var(--space-1); border-inline-start: 2px solid var(--color-brand); padding-inline-start: var(--space-2); }
-.page :global(.excel-catalog-explanation small),
-.dialog :global(.excel-catalog-explanation small) { color: var(--color-text-secondary); font-size: 11px; }
-.page :global(.excel-catalog-error),
-.dialog :global(.excel-catalog-error) { display: flex; justify-content: space-between; gap: var(--space-2); border: 1px solid var(--color-danger); padding: var(--space-2); }
-.page :global(.excel-scheme-advanced) { margin-block-start: var(--space-4); border: 1px solid var(--color-border); padding: var(--space-3); }
-.page :global(.excel-scheme-advanced > div) { display: grid; grid-template-columns: minmax(180px, 1fr) auto auto; align-items: end; gap: var(--space-2); padding-block-start: var(--space-3); }
+.schemeToolbar { display: grid; grid-template-columns: minmax(220px, 1fr) minmax(120px, .4fr) auto; align-items: end; gap: var(--space-3); margin-block-end: var(--space-4); }
+.schemeForm { display: block; }
+.stepEditor,
+.dialog .stepEditor { display: grid; grid-column: 1 / -1; gap: var(--space-4); border-block: 1px solid var(--color-border); padding-block: var(--space-4); }
+.stepEditorTitle,
+.stepHeading,
+.stepFilterHeading,
+.dialog .stepEditorTitle,
+.dialog .stepHeading,
+.dialog .stepFilterHeading { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); }
+.stepCard,
+.dialog .stepCard { display: grid; gap: var(--space-3); border: 1px solid var(--color-border); background: var(--color-canvas); padding: var(--space-3); }
+.stepIndex,
+.dialog .stepIndex { display: inline-grid; width: 24px; height: 24px; place-items: center; border: 1px solid var(--color-brand); border-radius: 50%; color: var(--color-brand); }
+.stepFields,
+.dialog .stepFields { display: grid; grid-template-columns: repeat(4, minmax(120px, 1fr)); gap: var(--space-3); }
+.stepFilterEditor,
+.dialog .stepFilterEditor { display: grid; gap: var(--space-2); border-top: 1px solid var(--color-border); padding-top: var(--space-3); }
+.stepFilterRow,
+.dialog .stepFilterRow { display: grid; grid-template-columns: minmax(140px, 1fr) 120px minmax(140px, 1fr) auto; align-items: end; gap: var(--space-2); }
+.stepFilterEmpty,
+.modeNote,
+.dialog .stepFilterEmpty,
+.dialog .modeNote { margin: 0; color: var(--color-text-secondary); font-size: 12px; line-height: 1.6; }
+.stepNameInput,
+.dialog .stepNameInput { min-height: 32px; border: 0; background: transparent; font: inherit; font-weight: 650; }
+.catalogControl,
+.catalogExplanation,
+.dialog .catalogControl,
+.dialog .catalogExplanation { min-width: 0; }
+.catalogExplanation,
+.dialog .catalogExplanation { display: grid; gap: 2px; margin-block-start: var(--space-1); border-inline-start: 2px solid var(--color-brand); padding-inline-start: var(--space-2); }
+.catalogExplanation small,
+.dialog .catalogExplanation small { color: var(--color-text-secondary); font-size: 11px; }
+.catalogError,
+.dialog .catalogError { display: flex; justify-content: space-between; gap: var(--space-2); border: 1px solid var(--color-danger); padding: var(--space-2); }
+.schemeAdvanced { margin-block-start: var(--space-4); border: 1px solid var(--color-border); padding: var(--space-3); }
+.schemeAdvanced > div { display: grid; grid-template-columns: minmax(180px, 1fr) auto auto; align-items: end; gap: var(--space-2); padding-block-start: var(--space-3); }
 
-.page :global(.excel-mode-switch) { display: flex; gap: var(--space-2); margin-block-end: var(--space-3); }
-.page :global(.excel-mode-switch .active) { border-color: var(--color-brand); background: var(--color-brand-soft); }
-.page :global(.excel-write-summary) { display: grid; gap: var(--space-3); margin-block-start: var(--space-4); border-top: 1px solid var(--color-border); padding-block-start: var(--space-4); }
-.page :global(.excel-job-detail) { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
-.page :global(.metric) { display: grid; gap: var(--space-1); padding: var(--space-3); border-inline-end: 1px solid var(--color-border); }
-.page :global(.metric span) { color: var(--color-text-secondary); font-size: 12px; }
-.page :global(.metric strong) { font-size: 18px; }
+.modeSwitch { display: flex; gap: var(--space-2); margin-block-end: var(--space-3); }
+.modeSwitch .active { border-color: var(--color-brand); background: var(--color-brand-soft); }
+.writeSummary { display: grid; gap: var(--space-3); margin-block-start: var(--space-4); border-top: 1px solid var(--color-border); padding-block-start: var(--space-4); }
+.jobDetail { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.metric { display: grid; gap: var(--space-1); padding: var(--space-3); border-inline-end: 1px solid var(--color-border); }
+.metric span { color: var(--color-text-secondary); font-size: 12px; }
+.metric strong { font-size: 18px; }
 
-.page :global(.excel-job-row-progress) { display: grid; grid-template-columns: 1fr auto; gap: 4px var(--space-2); }
-.page :global(.excel-job-row-progress progress) { grid-column: 1 / -1; width: 100%; height: 5px; accent-color: var(--color-success); }
-.page :global(.excel-job-match-count) { color: var(--color-success); }
-.page :global(.excel-job-unmatched-count) { color: var(--color-danger); }
-.page :global(.excel-history-row--selected) { background: var(--color-brand-soft); }
-.page :global(.excel-job-detail-panel),
-.page :global(.excel-job-detail-meta),
-.page :global(.excel-job-log-list) { display: grid; gap: var(--space-3); }
-.page :global(.excel-job-detail-meta) { grid-template-columns: 1fr 1fr; margin: 0; }
-.page :global(.excel-job-detail-meta div),
-.page :global(.excel-job-expiry) { display: grid; gap: var(--space-1); }
-.page :global(.excel-job-detail-meta dt),
-.page :global(.excel-job-expiry dt) { color: var(--color-text-secondary); font-size: 12px; }
-.page :global(.excel-job-detail-meta dd),
-.page :global(.excel-job-expiry dd) { margin: 0; }
-.page :global(.excel-job-detail-counts) { display: grid; grid-template-columns: 1fr 1fr; }
-.page :global(.excel-job-progress) { display: grid; gap: var(--space-2); border-block: 1px solid var(--color-border); padding-block: var(--space-3); }
-.page :global(.excel-job-progress progress) { width: 100%; accent-color: var(--color-success); }
-.page :global(.excel-job-log-heading),
-.page :global(.excel-job-action-heading) { border-bottom: 1px solid var(--color-border); padding-block-end: var(--space-2); font-weight: 650; }
-.page :global(.record-row) { padding-block: var(--space-2); border-bottom: 1px solid var(--color-border); }
-.page :global(.record-row > div) { display: grid; gap: var(--space-1); }
-.page :global(.record-row span) { color: var(--color-text-secondary); font-size: 11px; }
+.jobRowProgress { display: grid; grid-template-columns: 1fr auto; gap: 4px var(--space-2); }
+.jobRowProgress progress { grid-column: 1 / -1; width: 100%; height: 5px; accent-color: var(--color-success); }
+.jobMatchCount { color: var(--color-success); }
+.jobUnmatchedCount { color: var(--color-danger); }
+.historyRowSelected { background: var(--color-brand-soft); }
+.jobDetailPanel,
+.jobDetailMeta,
+.jobLogList { display: grid; gap: var(--space-3); }
+.jobDetailMeta { grid-template-columns: 1fr 1fr; margin: 0; }
+.jobDetailMeta div,
+.jobExpiry { display: grid; gap: var(--space-1); }
+.jobDetailMeta dt,
+.jobExpiry dt { color: var(--color-text-secondary); font-size: 12px; }
+.jobDetailMeta dd,
+.jobExpiry dd { margin: 0; }
+.jobDetailCounts { display: grid; grid-template-columns: 1fr 1fr; }
+.jobProgress { display: grid; gap: var(--space-2); border-block: 1px solid var(--color-border); padding-block: var(--space-3); }
+.jobProgress progress { width: 100%; accent-color: var(--color-success); }
+.jobLogHeading,
+.jobActionHeading { border-bottom: 1px solid var(--color-border); padding-block-end: var(--space-2); font-weight: 650; }
+.recordRow { padding-block: var(--space-2); border-bottom: 1px solid var(--color-border); }
+.recordRow > div { display: grid; gap: var(--space-1); }
+.recordRow span { color: var(--color-text-secondary); font-size: 11px; }
 
-.page :global(.excel-preview-panel) { display: grid; gap: var(--space-3); grid-column: 1 / -1; }
-.page :global(.excel-preview-panel .overview-grid) { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); border-block: 1px solid var(--color-border); }
-.page :global(.excel-preview-steps) { display: grid; gap: var(--space-1); }
-.page :global(.empty-state) { padding: var(--space-6); color: var(--color-text-secondary); text-align: center; }
-.page :global(.checkbox-label),
-.dialog :global(.checkbox-label) { display: flex; align-items: center; gap: var(--space-2); }
-.page :global(.checkbox-label input),
-.dialog :global(.checkbox-label input) { width: auto; min-height: auto; }
-.page :global(.file-input-label span),
-.dialog :global(.file-input-label span) { min-height: var(--excel-control-height); border: 1px solid var(--color-border-strong); padding: var(--space-2) var(--space-3); }
-.page :global(.file-input-label input[type='file']),
-.dialog :global(.file-input-label input[type='file']) { width: 1px; height: 1px; position: absolute; clip-path: inset(50%); }
-.page :global(.result-banner.error),
-.page :global(.login-error) { border: 1px solid var(--color-danger); background: var(--color-danger-soft); color: var(--color-danger); padding: var(--space-3); }
-
-.page :global(button),
-.page :global(input),
-.page :global(select),
-.page :global(textarea) {
-  border-radius: var(--radius-control);
-}
+.previewPanel { display: grid; gap: var(--space-3); grid-column: 1 / -1; }
+.previewMetrics { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); border-block: 1px solid var(--color-border); }
+.previewSteps { display: grid; gap: var(--space-1); }
+.emptyState { padding: var(--space-6); color: var(--color-text-secondary); text-align: center; }
+.checkboxLabel,
+.dialog .checkboxLabel { display: flex; align-items: center; gap: var(--space-2); }
+.checkboxLabel input,
+.dialog .checkboxLabel input { width: auto; min-height: auto; }
+.fileInputLabel span,
+.dialog .fileInputLabel span { min-height: var(--excel-control-height); border: 1px solid var(--color-border-strong); padding: var(--space-2) var(--space-3); }
+.fileInputLabel input[type='file'],
+.dialog .fileInputLabel input[type='file'] { width: 1px; height: 1px; position: absolute; clip-path: inset(50%); }
+.errorBanner,
+.dialog .errorBanner { border: 1px solid var(--color-danger); background: var(--color-danger-soft); color: var(--color-danger); padding: var(--space-3); }
 
 .dialog {
   --excel-control-height: 40px;
+}
+
+.viewStack {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.primary {
+  border-color: var(--color-brand);
+  background: var(--color-brand);
+  color: var(--color-text);
+}
+
+.danger {
+  border-color: var(--color-danger);
+  color: var(--color-danger);
+}
+
+.active {
+  border-color: var(--color-brand);
+  background: var(--color-brand-soft);
+}
+
+.stepComplete,
+.stepIncomplete {
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.stepComplete {
+  color: var(--color-success);
+}
+
+.stepIncomplete {
+  color: var(--color-warning);
+}
+
+.configSummary,
+.modalFooterContent,
+.jobActions {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.modalFooterStatus {
+  flex: 1 1 240px;
+}
+
+.tableWrap {
+  min-width: 0;
+  overflow-x: auto;
+}
+
+.previewTable {
+  width: 100%;
+  min-width: 760px;
+  border-collapse: collapse;
+}
+
+.previewTable th,
+.previewTable td {
+  height: var(--table-row-height);
+  border-bottom: 1px solid var(--color-border);
+  padding: var(--space-2) var(--space-3);
+  text-align: left;
+  vertical-align: top;
 }
 
 .mediumDialog {
@@ -238,7 +299,8 @@
     border-left: 0;
   }
 
-  .page :global(.excel-step-fields) { grid-template-columns: repeat(2, minmax(140px, 1fr)); }
+  .page .stepFields,
+  .dialog .stepFields { grid-template-columns: repeat(2, minmax(140px, 1fr)); }
 }
 
 @media (max-width: 768px) {
@@ -246,13 +308,13 @@
     min-width: 100%;
   }
 
-  .page :global(.excel-upload-form),
-  .dialog :global(.excel-upload-form),
-  .page :global(.excel-scheme-toolbar),
-  .page :global(.excel-step-fields),
-  .dialog :global(.excel-step-fields),
-  .page :global(.excel-step-filter-row),
-  .dialog :global(.excel-step-filter-row),
-  .page :global(.excel-scheme-advanced > div),
-  .page :global(.excel-job-detail) { grid-template-columns: 1fr; }
+  .page .uploadForm,
+  .dialog .uploadForm,
+  .page .schemeToolbar,
+  .page .stepFields,
+  .dialog .stepFields,
+  .page .stepFilterRow,
+  .dialog .stepFilterRow,
+  .page .schemeAdvanced > div,
+  .page .jobDetail { grid-template-columns: 1fr; }
 }

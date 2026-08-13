@@ -134,42 +134,10 @@ button:focus-visible {
   margin: 0;
 }
 
-.allblu-brand,
 .panel-title span,
 .eyebrow {
   color: #666666;
   font-size: 12px;
-}
-
-.allblu-brand {
-  display: inline-flex;
-  align-items: center;
-  gap: 10px;
-  color: var(--ink);
-}
-
-.allblu-brand__logo {
-  width: 32px;
-  height: 32px;
-  flex: 0 0 32px;
-  object-fit: cover;
-}
-
-.allblu-brand__name {
-  color: var(--ink);
-  font-size: 19px;
-  font-weight: 750;
-  letter-spacing: -0.03em;
-}
-
-.allblu-brand--large .allblu-brand__logo {
-  width: 44px;
-  height: 44px;
-  flex-basis: 44px;
-}
-
-.allblu-brand--large .allblu-brand__name {
-  font-size: 26px;
 }
 
 .view-stack,
@@ -628,21 +596,6 @@ select:focus,
 textarea:focus,
 button:focus-visible {
   outline-color: var(--accent);
-}
-
-.allblu-brand {
-  padding: 0 8px 8px;
-}
-
-.allblu-brand__logo {
-  width: 25px;
-  height: 25px;
-  flex-basis: 25px;
-}
-
-.allblu-brand__name {
-  font-size: 16px;
-  letter-spacing: -0.025em;
 }
 
 .view-stack {

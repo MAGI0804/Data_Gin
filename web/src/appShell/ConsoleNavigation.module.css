@@ -6,17 +6,6 @@
   margin: 0 10px 22px;
 }
 
-.brand :global(.allblu-brand__logo) {
-  width: 42px;
-  height: 42px;
-  flex-basis: 42px;
-}
-
-.brand :global(.allblu-brand__name) {
-  font-size: 28px;
-  font-weight: 750;
-}
-
 .mobileToggle,
 .search,
 .actions {
