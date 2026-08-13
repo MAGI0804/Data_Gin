@@ -2,18 +2,9 @@ import { Activity, AlertTriangle, Server } from 'lucide-react'
 import type { DataStatisticsSummary, HealthSummary, MallWeatherMetricsSummary } from '../../monitoring'
 import { DataTable, FeedbackState, MetricStrip, PageCanvas, PageHeader, Section, StatusTag, type StatusTagTone } from '../../ui'
 import styles from './RunOverviewPage.module.css'
+import type { PipelineRun } from '../types'
 
-export interface OverviewPipelineRun {
-  id: number
-  trace_id: string
-  run_type: string
-  trigger_type: string
-  status: string
-  total_count: number
-  success_count: number
-  failed_count: number
-  started_at: string | null
-}
+export type OverviewPipelineRun = Pick<PipelineRun, 'id' | 'trace_id' | 'run_type' | 'trigger_type' | 'status' | 'total_count' | 'success_count' | 'failed_count' | 'started_at'>
 
 export interface OverviewDeliveryLog {
   id: number

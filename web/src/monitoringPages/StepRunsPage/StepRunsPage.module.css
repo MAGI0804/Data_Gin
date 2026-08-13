@@ -1,0 +1,224 @@
+.filters {
+  display: flex;
+  flex: 1 1 auto;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: end;
+}
+
+.filters label {
+  display: grid;
+  gap: var(--space-1);
+  min-width: 152px;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+}
+
+.filters label:first-child {
+  min-width: 220px;
+}
+
+.explorer {
+  min-height: 650px;
+}
+
+.pane {
+  display: grid;
+  align-content: start;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.paneHeading,
+.detailHeading {
+  display: flex;
+  gap: var(--space-3);
+  align-items: flex-start;
+  justify-content: space-between;
+  padding-block-end: var(--space-2);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.paneHeading h3 {
+  margin: 0;
+  font-size: 14px;
+}
+
+.paneHeading span,
+.detailHeading span {
+  color: var(--color-text-secondary);
+  font-size: 12px;
+}
+
+.list {
+  display: grid;
+  align-content: start;
+  max-height: 440px;
+  overflow: auto;
+  border-top: 1px solid var(--color-border);
+}
+
+.list > button {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  justify-content: space-between;
+  min-width: 0;
+  min-height: 72px;
+  padding: var(--space-3) var(--space-2);
+  border: 0;
+  border-bottom: 1px solid var(--color-border);
+  border-radius: var(--radius-none);
+  color: inherit;
+  background: var(--color-canvas);
+  text-align: start;
+}
+
+.list > button:hover,
+.list > .selectedItem {
+  background: var(--color-brand-soft);
+}
+
+.list > .selectedItem {
+  box-shadow: inset 3px 0 0 var(--color-brand);
+}
+
+.list > button > span:first-child {
+  display: grid;
+  min-width: 0;
+  gap: var(--space-1);
+}
+
+.list small {
+  overflow: hidden;
+  color: var(--color-text-secondary);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.stepList {
+  max-height: 300px;
+}
+
+.stepSearch {
+  display: grid;
+  gap: var(--space-1);
+  color: var(--color-text-secondary);
+  font-size: 12px;
+}
+
+.stepSearch > span:last-child {
+  position: relative;
+}
+
+.stepSearch svg {
+  position: absolute;
+  top: 12px;
+  left: var(--space-3);
+  width: 16px;
+  height: 16px;
+}
+
+.stepSearch input {
+  width: 100%;
+  padding-inline-start: 36px;
+}
+
+.detail {
+  display: grid;
+  gap: var(--space-3);
+  padding-block-start: var(--space-4);
+  border-top: 1px solid var(--color-border);
+}
+
+.detailHeading > div {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.protectedError {
+  margin: 0;
+  padding: var(--space-2);
+  border-inline-start: 3px solid var(--color-danger);
+  color: var(--color-danger);
+  background: var(--color-danger-soft);
+  font-size: 12px;
+}
+
+.jsonGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  border: 1px solid var(--color-border);
+}
+
+.jsonGrid section {
+  display: grid;
+  min-width: 0;
+  gap: var(--space-2);
+  padding: var(--space-3);
+}
+
+.jsonGrid section + section {
+  border-inline-start: 1px solid var(--color-border);
+}
+
+.jsonHeading {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+  justify-content: space-between;
+}
+
+.jsonHeading h3 {
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+}
+
+.jsonHeading button {
+  min-height: 30px;
+}
+
+.jsonHeading svg {
+  width: 14px;
+  height: 14px;
+}
+
+.json {
+  max-height: 240px;
+  margin: 0;
+  overflow: auto;
+  padding: var(--space-3);
+  border: 1px solid var(--color-border);
+  color: var(--color-text);
+  background: var(--color-surface-subtle);
+  font-family: var(--font-mono);
+  font-size: 11px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+@media (max-width: 839px) {
+  .explorer {
+    min-height: 0;
+  }
+}
+
+@media (max-width: 599px) {
+  .filters,
+  .filters label,
+  .filters label:first-child,
+  .filters button {
+    width: 100%;
+  }
+
+  .jsonGrid {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .jsonGrid section + section {
+    border-top: 1px solid var(--color-border);
+    border-inline-start: 0;
+  }
+}

@@ -1,0 +1,62 @@
+.panel {
+  display: grid;
+  gap: var(--space-3);
+  padding-block: var(--space-4);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.heading {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.heading span,
+.result {
+  color: var(--color-text-secondary);
+  font-size: 12px;
+}
+
+.controls {
+  display: grid;
+  grid-template-columns: minmax(0, 360px) auto;
+  gap: var(--space-3);
+  align-items: end;
+}
+
+.controls label {
+  display: grid;
+  gap: var(--space-1);
+  color: var(--color-text-secondary);
+  font-size: 12px;
+}
+
+.primary {
+  color: var(--color-canvas);
+  border-color: var(--color-brand-active);
+  background: var(--color-brand-active);
+}
+
+.dialogCopy {
+  margin: 0;
+  color: var(--color-text-secondary);
+  line-height: 1.7;
+}
+
+.dialogFooter {
+  display: flex;
+  gap: var(--space-2);
+}
+
+.result {
+  margin: 0;
+}
+
+.error {
+  color: var(--color-danger);
+}
+
+@media (max-width: 479px) {
+  .controls {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
