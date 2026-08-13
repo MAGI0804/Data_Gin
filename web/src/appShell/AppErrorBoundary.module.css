@@ -1,0 +1,92 @@
+.shell {
+  min-height: 100vh;
+  background: var(--color-workspace);
+  padding: var(--space-6);
+}
+
+.canvas {
+  width: min(760px, 100%);
+  margin: 10vh auto 0;
+  border: 1px solid var(--color-border);
+  background: var(--color-canvas);
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+  border-bottom: 1px solid var(--color-border);
+  padding: var(--space-4) var(--space-6);
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  letter-spacing: .08em;
+  text-transform: uppercase;
+}
+
+.content {
+  display: flex;
+  align-items: flex-start;
+  gap: var(--space-4);
+  padding: var(--space-8) var(--space-6);
+}
+
+.content > svg {
+  flex: 0 0 auto;
+  width: 24px;
+  height: 24px;
+  color: var(--color-warning);
+}
+
+.content h1 {
+  margin: 0;
+  color: var(--color-text);
+  font-size: 24px;
+  line-height: 1.3;
+}
+
+.content p {
+  margin: var(--space-3) 0 0;
+  color: var(--color-text-secondary);
+  line-height: 1.7;
+}
+
+.actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-3);
+  border-top: 1px solid var(--color-border);
+  padding: var(--space-4) var(--space-6);
+}
+
+.actions button {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  min-height: var(--button-height);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-control);
+  background: var(--color-canvas);
+  color: var(--color-text);
+  padding: var(--space-2) var(--space-4);
+}
+
+.actions button > svg {
+  width: 16px;
+  height: 16px;
+}
+
+.actions .primary {
+  border-color: var(--color-brand);
+  background: var(--color-brand);
+  color: var(--color-on-brand);
+}
+
+@media (max-width: 640px) {
+  .shell { padding: var(--space-3); }
+  .canvas { margin-top: var(--space-6); }
+  .header, .content, .actions { padding-inline: var(--space-4); }
+  .content { padding-block: var(--space-6); }
+  .actions { align-items: stretch; flex-direction: column-reverse; }
+  .actions button { justify-content: center; }
+}

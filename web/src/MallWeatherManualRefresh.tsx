@@ -1,5 +1,6 @@
 import { RefreshCcw } from 'lucide-react'
 import { type FormEvent, useEffect, useRef, useState } from 'react'
+import { browserSessionStorage } from './browserStorage'
 import {
   clearMallWeatherPendingRefresh,
   loadMallWeatherPendingRefresh,
@@ -27,7 +28,7 @@ export function MallWeatherManualRefresh({ actorID, mall, client, onWeatherUpdat
   client: ApiClient
   onWeatherUpdated: (signal: AbortSignal) => Promise<WeatherOverviewReloadResult>
 }) {
-  const [pending, setPending] = useState<MallWeatherPendingRefresh | null>(() => loadMallWeatherPendingRefresh(actorID, mall.id, window.sessionStorage))
+  const [pending, setPending] = useState<MallWeatherPendingRefresh | null>(() => loadMallWeatherPendingRefresh(actorID, mall.id, browserSessionStorage))
   const [reason, setReason] = useState(() => pending?.body.reason || '管理端手工刷新')
   const [submitting, setSubmitting] = useState(false)
   const [monitoring, setMonitoring] = useState(false)
@@ -51,7 +52,7 @@ export function MallWeatherManualRefresh({ actorID, mall, client, onWeatherUpdat
         return
       }
       request = { key: mallWeatherRefreshKey(), body }
-      saveMallWeatherPendingRefresh(actorID, mall.id, request, window.sessionStorage)
+      saveMallWeatherPendingRefresh(actorID, mall.id, request, browserSessionStorage)
       setPending(request)
     }
     operationController.current?.abort()
@@ -73,7 +74,7 @@ export function MallWeatherManualRefresh({ actorID, mall, client, onWeatherUpdat
       setSubmitting(false)
       const disposition = mallWeatherRefreshDisposition(response, actorID, mall.id, request.body)
       if (disposition.kind === 'rejected') {
-        clearMallWeatherPendingRefresh(actorID, mall.id, window.sessionStorage)
+        clearMallWeatherPendingRefresh(actorID, mall.id, browserSessionStorage)
         setPending(null)
         setError(weatherRequestError(response.status, '天气刷新任务提交失败', '当前账号缺少 weather.refresh 权限'))
         return
@@ -82,7 +83,7 @@ export function MallWeatherManualRefresh({ actorID, mall, client, onWeatherUpdat
         setError('刷新响应暂不确定；已保留原请求，请使用“重试原请求”确认。')
         return
       }
-      clearMallWeatherPendingRefresh(actorID, mall.id, window.sessionStorage)
+      clearMallWeatherPendingRefresh(actorID, mall.id, browserSessionStorage)
       setPending(null)
       const queued = disposition.result.kinds.some((item) => item.status === 'QUEUED')
       if (!queued) {

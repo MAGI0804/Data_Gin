@@ -8,6 +8,7 @@ import '@fontsource/ibm-plex-mono/latin-600.css'
 import '@fontsource/ibm-plex-mono/latin-700.css'
 import './index.css'
 import App from './App.tsx'
+import { AppErrorBoundary } from './appShell/AppErrorBoundary'
 import { AppTheme } from './ui/AppTheme/AppTheme'
 import controlStyles from './ui/Controls/Controls.module.css'
 
@@ -15,7 +16,9 @@ createRoot(document.getElementById('root')!).render(
   <StrictMode>
     <div className={controlStyles.surface}>
       <AppTheme>
-        <App />
+        <AppErrorBoundary>
+          <App />
+        </AppErrorBoundary>
       </AppTheme>
     </div>
   </StrictMode>,

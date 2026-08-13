@@ -1,4 +1,5 @@
 import { type FormEvent, useMemo, useRef, useState } from 'react'
+import { browserSessionStorage } from './browserStorage'
 import { MallDetailsFields } from './MallWeatherMallEditor'
 import { mallImportRequestWithinLimit, parseMallImportCSV, parseMallImportResult, type MallImportResult, type MallImportRow } from './mallImport'
 import {
@@ -176,7 +177,7 @@ export function MallCreatePanel({ actorID, client, onCreated, onCancel }: {
   onCreated: (mall: MallWeatherMall) => void
   onCancel: () => void
 }) {
-  const restored = useMemo(() => loadMallWeatherPendingCreate(actorID, window.sessionStorage), [actorID])
+  const restored = useMemo(() => loadMallWeatherPendingCreate(actorID, browserSessionStorage), [actorID])
   const [form, setForm] = useState<MallWeatherCreateInput>(() => pendingCreateInput(restored))
   const [pending, setPending] = useState<MallWeatherPendingCreate | null>(restored)
   const [submitting, setSubmitting] = useState(false)
@@ -185,7 +186,7 @@ export function MallCreatePanel({ actorID, client, onCreated, onCancel }: {
   function change(field: keyof MallWeatherCreateInput, value: string) {
     setForm((current) => ({ ...current, [field]: value }))
     setPending(null)
-    clearMallWeatherPendingCreate(actorID, window.sessionStorage)
+    clearMallWeatherPendingCreate(actorID, browserSessionStorage)
     setError('')
   }
 
@@ -200,7 +201,7 @@ export function MallCreatePanel({ actorID, client, onCreated, onCancel }: {
         return
       }
       setPending(request)
-      saveMallWeatherPendingCreate(actorID, request, window.sessionStorage)
+      saveMallWeatherPendingCreate(actorID, request, browserSessionStorage)
     }
     setSubmitting(true)
     setError('')
@@ -213,7 +214,7 @@ export function MallCreatePanel({ actorID, client, onCreated, onCancel }: {
         setError(response.status === 0 ? '创建结果暂不确定，已保留原请求；请点击“重试原请求”确认。' : '创建请求正在处理或发生冲突，请先重试原请求；仍失败时再修改表单。')
       } else {
         setPending(null)
-        clearMallWeatherPendingCreate(actorID, window.sessionStorage)
+        clearMallWeatherPendingCreate(actorID, browserSessionStorage)
         setError(actionError(response.status, '商场创建失败', '当前账号缺少 mall.write 权限'))
       }
       return
@@ -224,7 +225,7 @@ export function MallCreatePanel({ actorID, client, onCreated, onCancel }: {
       return
     }
     setPending(null)
-    clearMallWeatherPendingCreate(actorID, window.sessionStorage)
+    clearMallWeatherPendingCreate(actorID, browserSessionStorage)
     onCreated({
       id: created.id,
       mallCode: created.mallCode,

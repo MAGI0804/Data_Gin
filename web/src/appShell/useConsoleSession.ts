@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { apiURL } from '../apiURL'
 import { createApiClient, type ApiRequestOptions, type ClientResponse } from '../api/client'
 import { verifySessionResponses, type SessionUser } from '../api/auth'
+import { browserLocalStorage } from '../browserStorage'
 import {
   clearStoredToken,
   loadStoredSessionUser,
@@ -18,15 +19,15 @@ import type { WorkspaceApiClient, WorkspaceDownloadClient } from './WorkspaceRou
 export type ConsoleSessionState = 'checking' | 'authenticated' | 'anonymous'
 
 export function useConsoleSession(baseURL: string) {
-  const [token, setToken] = useState(() => loadStoredToken(window.localStorage))
+  const [token, setToken] = useState(() => loadStoredToken(browserLocalStorage))
   const tokenRef = useRef(token)
   const [sessionState, setSessionState] = useState<ConsoleSessionState>(() => token ? 'checking' : 'anonymous')
   const authenticatedSessionRef = useRef(sessionState === 'authenticated')
   const [sessionUser, setSessionUser] = useState<SessionUser | null>(() => {
-    const user = loadStoredSessionUser(window.localStorage)
+    const user = loadStoredSessionUser(browserLocalStorage)
     return user ? { ...user, phone: '', accountType: 'CONSOLE', status: 'ACTIVE', mallScopeMode: 'SELECTED', roles: [], permissions: [], mallIds: [] } : null
   })
-  const [sessionExpiresAt, setSessionExpiresAt] = useState(() => storedTokenExpiresAt(window.localStorage))
+  const [sessionExpiresAt, setSessionExpiresAt] = useState(() => storedTokenExpiresAt(browserLocalStorage))
   const [sessionValidationError, setSessionValidationError] = useState('')
   const [sessionValidationAttempt, setSessionValidationAttempt] = useState(0)
   const [loading, setLoading] = useState(false)
@@ -34,7 +35,7 @@ export function useConsoleSession(baseURL: string) {
   const actorID = sessionState === 'authenticated' && sessionUser ? String(sessionUser.id) : null
 
   const clearSession = useCallback(() => {
-    clearStoredToken(window.localStorage)
+    clearStoredToken(browserLocalStorage)
     tokenRef.current = ''
     setToken('')
     setSessionUser(null)
@@ -45,7 +46,7 @@ export function useConsoleSession(baseURL: string) {
   }, [])
 
   const updateSessionToken = useCallback((nextToken: string) => {
-    const expiresAt = saveStoredToken(nextToken, window.localStorage)
+    const expiresAt = saveStoredToken(nextToken, browserLocalStorage)
     tokenRef.current = nextToken
     setToken(nextToken)
     setSessionExpiresAt(expiresAt)
@@ -172,8 +173,8 @@ export function useConsoleSession(baseURL: string) {
       }
       const { user, tokenInfo } = verification
       const storedUser: StoredSessionUser = { id: user.id, account: user.account, nickname: user.nickname }
-      saveStoredSessionUser(storedUser, window.localStorage)
-      saveStoredTokenExpiry(tokenInfo.expireTime * 1000, window.localStorage)
+      saveStoredSessionUser(storedUser, browserLocalStorage)
+      saveStoredTokenExpiry(tokenInfo.expireTime * 1000, browserLocalStorage)
       setSessionUser(user)
       setSessionExpiresAt(tokenInfo.expireTime * 1000)
       setSessionValidationError('')

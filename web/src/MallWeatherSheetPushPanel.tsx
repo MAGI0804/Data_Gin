@@ -1,5 +1,6 @@
 import { RefreshCcw } from 'lucide-react'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { browserSessionStorage } from './browserStorage'
 import {
   clearMallWeatherPendingSheetPush,
   loadMallWeatherPendingSheetPush,
@@ -30,7 +31,7 @@ export function MallWeatherSheetPushPanel({ actorID, mall, client }: {
   mall: MallWeatherMall
   client: ApiClient
 }) {
-  const restored = useMemo(() => loadMallWeatherPendingSheetPush(actorID, mall.id, window.sessionStorage), [actorID, mall.id])
+  const restored = useMemo(() => loadMallWeatherPendingSheetPush(actorID, mall.id, browserSessionStorage), [actorID, mall.id])
   const [options, setOptions] = useState<MallWeatherSheetPushOption[]>([])
   const [selectedDestinationID, setSelectedDestinationID] = useState(restored?.body.destinationId || 0)
   const [optionState, setOptionState] = useState<LoadState>('loading')
@@ -127,7 +128,7 @@ export function MallWeatherSheetPushPanel({ actorID, mall, client }: {
     if (!request) {
       request = { key: mallWeatherSheetPushKey(), body: mallWeatherSheetPushRequest(selectedOption, mall.id) }
       setPending(request)
-      saveMallWeatherPendingSheetPush(actorID, mall.id, request, window.sessionStorage)
+      saveMallWeatherPendingSheetPush(actorID, mall.id, request, browserSessionStorage)
     }
     setSubmitting(true)
     setError('')
@@ -152,7 +153,7 @@ export function MallWeatherSheetPushPanel({ actorID, mall, client }: {
         setError('推送结果暂不确定，已保留原请求；请重新验证绑定后重试原请求确认。')
       } else {
         setPending(null)
-        clearMallWeatherPendingSheetPush(actorID, mall.id, window.sessionStorage)
+        clearMallWeatherPendingSheetPush(actorID, mall.id, browserSessionStorage)
         setError(weatherPushError(response.status, '天气推送发起失败'))
       }
       setSubmitting(false)
@@ -171,7 +172,7 @@ export function MallWeatherSheetPushPanel({ actorID, mall, client }: {
     }
     setSubmitting(false)
     setPending(null)
-    clearMallWeatherPendingSheetPush(actorID, mall.id, window.sessionStorage)
+    clearMallWeatherPendingSheetPush(actorID, mall.id, browserSessionStorage)
     setRun({
       runId: result.runId, traceId: result.traceId, status: result.status === 'RUNNING' ? 'RUNNING' : 'PENDING',
       destinationId: result.destinationId, profileId: result.profileId, profileVersion: result.profileVersion,
@@ -211,7 +212,7 @@ export function MallWeatherSheetPushPanel({ actorID, mall, client }: {
   function abandonPending() {
     setPending(null)
     setDryRun(null)
-    clearMallWeatherPendingSheetPush(actorID, mall.id, window.sessionStorage)
+    clearMallWeatherPendingSheetPush(actorID, mall.id, browserSessionStorage)
     setMessage('已放弃待确认请求。为避免误推，请重新验证绑定后再创建新任务。')
     setError('')
   }
