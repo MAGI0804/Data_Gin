@@ -87,6 +87,33 @@ func TestValidateParameterDefinitionsRejectsUnusableEnumContracts(t *testing.T) 
 	}
 }
 
+func TestValidateParameterPresentation(t *testing.T) {
+	tests := []struct {
+		name        string
+		controlType string
+		definition  ParameterDefinition
+		wantError   bool
+	}{
+		{name: "string text", controlType: "TEXT", definition: ParameterDefinition{Code: "name", LogicalType: LogicalTypeString, Cardinality: CardinalitySingle}},
+		{name: "system string hidden", controlType: "hidden", definition: ParameterDefinition{Code: "runId", LogicalType: LogicalTypeString, Cardinality: CardinalitySingle, SystemInjected: true}},
+		{name: "multi enum", controlType: "MULTI_SELECT", definition: ParameterDefinition{Code: "stores", LogicalType: LogicalTypeMultiEnum, Cardinality: CardinalityMultiple, CollectionEncoding: CollectionEncodingJSONCLOB}},
+		{name: "wrong boolean control", controlType: "TEXT", definition: ParameterDefinition{Code: "enabled", LogicalType: LogicalTypeBoolean, Cardinality: CardinalitySingle}, wantError: true},
+		{name: "multiple scalar", controlType: "TEXT", definition: ParameterDefinition{Code: "name", LogicalType: LogicalTypeString, Cardinality: CardinalityMultiple, CollectionEncoding: CollectionEncodingJSONCLOB}, wantError: true},
+		{name: "scalar collection encoding", controlType: "DATE", definition: ParameterDefinition{Code: "from", LogicalType: LogicalTypeDate, Cardinality: CardinalitySingle, CollectionEncoding: CollectionEncodingJSONCLOB}, wantError: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			err := ValidateParameterPresentation(test.controlType, test.definition)
+			if test.wantError && !errors.Is(err, ErrInvalidParameterContract) {
+				t.Fatalf("ValidateParameterPresentation() error = %v, want ErrInvalidParameterContract", err)
+			}
+			if !test.wantError && err != nil {
+				t.Fatalf("ValidateParameterPresentation() error = %v", err)
+			}
+		})
+	}
+}
+
 func TestNormalizeParameters(t *testing.T) {
 	definitions := []ParameterDefinition{
 		{

@@ -99,6 +99,49 @@ func ValidateParameterDefinitions(definitions []ParameterDefinition) error {
 	return nil
 }
 
+// ValidateParameterPresentation keeps the configured input control aligned with
+// the value shape accepted by the parameter normalization contract.
+func ValidateParameterPresentation(controlType string, definition ParameterDefinition) error {
+	controlType = strings.ToUpper(strings.TrimSpace(controlType))
+	logicalType := strings.ToLower(strings.TrimSpace(definition.LogicalType))
+	cardinality := strings.ToUpper(strings.TrimSpace(definition.Cardinality))
+	collectionEncoding := strings.ToUpper(strings.TrimSpace(definition.CollectionEncoding))
+
+	if logicalType == LogicalTypeMultiEnum {
+		if controlType != "MULTI_SELECT" || cardinality != CardinalityMultiple ||
+			collectionEncoding != CollectionEncodingJSONCLOB {
+			return contractError("parameter %q must use MULTI_SELECT with MULTIPLE JSON_CLOB encoding", definition.Code)
+		}
+		return nil
+	}
+	if cardinality != CardinalitySingle || collectionEncoding != "" {
+		return contractError("parameter %q must use SINGLE cardinality without collection encoding", definition.Code)
+	}
+
+	compatible := false
+	switch logicalType {
+	case LogicalTypeString:
+		compatible = controlType == "TEXT" || controlType == "TEXTAREA" ||
+			definition.SystemInjected && controlType == "HIDDEN"
+	case LogicalTypeInteger, LogicalTypeDecimal:
+		compatible = controlType == "NUMBER"
+	case LogicalTypeBoolean:
+		compatible = controlType == "CHECKBOX"
+	case LogicalTypeDate:
+		compatible = controlType == "DATE"
+	case LogicalTypeDateTime:
+		compatible = controlType == "DATETIME"
+	case LogicalTypeEnum:
+		compatible = controlType == "SELECT"
+	case LogicalTypeJSON:
+		compatible = controlType == "TEXTAREA"
+	}
+	if !compatible {
+		return contractError("parameter %q control %q does not match logical type %q", definition.Code, controlType, logicalType)
+	}
+	return nil
+}
+
 func decodeStrictJSON(raw []byte, target interface{}) error {
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.DisallowUnknownFields()
