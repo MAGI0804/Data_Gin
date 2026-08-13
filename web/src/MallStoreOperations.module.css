@@ -1,0 +1,140 @@
+.panel {
+  display: grid;
+  min-width: 0;
+  gap: var(--space-3);
+  border-top: 1px solid var(--color-border);
+  background: var(--color-canvas);
+  padding-block: var(--space-4);
+}
+
+.sectionTitle {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding-bottom: var(--space-3);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.sectionTitle strong,
+.sectionTitle span {
+  display: block;
+}
+
+.sectionTitle span {
+  color: var(--color-text-secondary);
+  font-size: 12px;
+}
+
+.createForm {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  align-items: end;
+  gap: var(--space-3);
+}
+
+.formActions,
+.importActions,
+.importConfirm {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.wide {
+  grid-column: 1 / -1;
+}
+
+.summary {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  border: 1px solid var(--color-border);
+}
+
+.metricItem {
+  min-width: 0;
+  padding: var(--space-3);
+  border-right: 1px solid var(--color-border);
+}
+
+.metricItem span,
+.metricItem strong {
+  display: block;
+  overflow-wrap: anywhere;
+}
+
+.metricItem span {
+  color: var(--color-text-secondary);
+  font-size: 11px;
+}
+
+.metricItem strong {
+  margin-top: var(--space-1);
+}
+
+.importConfirm {
+  padding: var(--space-3);
+  border-left: 2px solid var(--color-brand);
+  background: var(--color-brand-soft);
+}
+
+.importConfirm span {
+  flex: 1 1 260px;
+}
+
+.importErrors,
+.importResultRows {
+  display: grid;
+  gap: var(--space-1);
+  margin: 0;
+  padding: var(--space-3);
+  list-style: none;
+}
+
+.importResult {
+  display: grid;
+  gap: var(--space-3);
+}
+
+.importErrors {
+  border-left: 2px solid var(--color-danger);
+  background: var(--color-danger-soft);
+  color: var(--color-danger);
+}
+
+.importResultRows li {
+  display: grid;
+  grid-template-columns: auto auto 1fr 1.5fr;
+  gap: var(--space-3);
+  padding: var(--space-2);
+  border-bottom: 1px solid var(--color-border);
+}
+
+.message {
+  margin: var(--space-2) 0 0;
+  padding: var(--space-2) var(--space-3);
+  border-left: 2px solid var(--color-brand);
+  background: var(--color-brand-soft);
+  font-size: 12px;
+}
+
+.error {
+  border-color: var(--color-danger);
+  background: var(--color-danger-soft);
+  color: var(--color-danger);
+}
+
+.primary {
+  border-color: var(--color-brand);
+  background: var(--color-brand);
+  color: var(--color-text);
+}
+
+@media (max-width: 839px) {
+  .createForm,
+  .summary,
+  .importResultRows li {
+    grid-template-columns: 1fr;
+  }
+}
