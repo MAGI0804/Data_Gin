@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, type HTMLAttributes, type ReactNode } from 'r
 import { createPortal } from 'react-dom'
 import { X } from 'lucide-react'
 import styles from './Dialog.module.css'
+import controlStyles from '../Controls/Controls.module.css'
 import { isolateModalLayer, isTopModalLayer } from '../modalIsolation'
 
 const focusableSelector = [
@@ -123,7 +124,7 @@ export function Dialog({
   const panelClasses = [styles.dialog, className].filter(Boolean).join(' ')
 
   return createPortal(
-    <div ref={layerRef} className={styles.layer}>
+    <div ref={layerRef} className={`${styles.layer} ${controlStyles.surface}`}>
       <button
         className={styles.backdrop}
         type="button"

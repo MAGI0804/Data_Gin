@@ -2,6 +2,7 @@ import { useEffect, useId, useRef, type HTMLAttributes, type ReactNode } from 'r
 import { createPortal } from 'react-dom'
 import { X } from 'lucide-react'
 import styles from './Drawer.module.css'
+import controlStyles from '../Controls/Controls.module.css'
 import { isolateModalLayer, isTopModalLayer } from '../modalIsolation'
 
 const focusableSelector = [
@@ -125,7 +126,7 @@ export function Drawer({
   const panelClasses = [styles.drawer, styles[size], className].filter(Boolean).join(' ')
 
   return createPortal(
-    <div ref={layerRef} className={styles.layer}>
+    <div ref={layerRef} className={`${styles.layer} ${controlStyles.surface}`}>
       <button
         className={styles.backdrop}
         type="button"
