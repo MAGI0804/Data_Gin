@@ -481,7 +481,9 @@ func classifyReportRunQueryError(err error) error {
 type oracleReportResultPageReader struct{}
 
 func (oracleReportResultPageReader) Read(ctx context.Context, contract reportrepo.RunResultContract, password string, columns []string, query reportquery.Query, after *reportoracle.ResultCursor, limit int) (reportoracle.ResultPage, error) {
-	adapter, err := reportoracle.Open(ctx, oracleConfigFromDatasource(contract.Datasource, password))
+	queryCtx, cancel := reportOracleQueryContext(ctx, contract.Datasource)
+	defer cancel()
+	adapter, err := reportoracle.Open(queryCtx, oracleConfigFromDatasource(contract.Datasource, password))
 	if err != nil {
 		return reportoracle.ResultPage{}, err
 	}
@@ -490,7 +492,7 @@ func (oracleReportResultPageReader) Read(ctx context.Context, contract reportrep
 		Table:       reportoracle.ResultTableRef{Owner: contract.Version.ResultTableOwner, Name: contract.Version.ResultTableName},
 		RunIDColumn: contract.Version.ResultRunIDColumn, RowIDColumn: contract.Version.ResultRowIDColumn, Columns: columns,
 	}
-	resultColumns, err := adapter.InspectResultTable(ctx, ref.Table)
+	resultColumns, err := adapter.InspectResultTable(queryCtx, ref.Table)
 	if err != nil {
 		return reportoracle.ResultPage{}, err
 	}
@@ -499,7 +501,7 @@ func (oracleReportResultPageReader) Read(ctx context.Context, contract reportrep
 	); err != nil {
 		return reportoracle.ResultPage{}, err
 	}
-	snapshot, err := adapter.InspectResultSnapshotContract(ctx, ref)
+	snapshot, err := adapter.InspectResultSnapshotContract(queryCtx, ref)
 	if err != nil {
 		return reportoracle.ResultPage{}, err
 	}
@@ -507,5 +509,5 @@ func (oracleReportResultPageReader) Read(ctx context.Context, contract reportrep
 	if err != nil {
 		return reportoracle.ResultPage{}, err
 	}
-	return adapter.ReadResultPage(ctx, plan, contract.Run.RunUUID, after, limit)
+	return adapter.ReadResultPage(queryCtx, plan, contract.Run.RunUUID, after, limit)
 }

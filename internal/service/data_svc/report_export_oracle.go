@@ -6,6 +6,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"time"
 
 	"gin-biz-web-api/internal/reportcontract"
 	"gin-biz-web-api/internal/reportoracle"
@@ -24,16 +25,19 @@ type reportExportOracleSessionFactory interface {
 }
 
 type oracleReportExportSession struct {
-	adapter   *reportoracle.Adapter
-	pagePlan  reportoracle.ResultPagePlan
-	purgePlan reportoracle.PurgePlan
-	runUUID   string
+	adapter      *reportoracle.Adapter
+	pagePlan     reportoracle.ResultPagePlan
+	purgePlan    reportoracle.PurgePlan
+	runUUID      string
+	queryTimeout time.Duration
 }
 
 type oracleReportExportSessionFactory struct{}
 
 func (oracleReportExportSessionFactory) Open(ctx context.Context, runtime reportrepo.ExportRuntime, password string) (reportExportOracleSession, error) {
-	adapter, err := reportoracle.Open(ctx, oracleConfigFromDatasource(runtime.Datasource, password))
+	queryCtx, cancel := reportOracleQueryContext(ctx, runtime.Datasource)
+	defer cancel()
+	adapter, err := reportoracle.Open(queryCtx, oracleConfigFromDatasource(runtime.Datasource, password))
 	if err != nil {
 		return nil, err
 	}
@@ -56,7 +60,7 @@ func (oracleReportExportSessionFactory) Open(ctx context.Context, runtime report
 		Table:       reportoracle.ResultTableRef{Owner: runtime.Version.ResultTableOwner, Name: runtime.Version.ResultTableName},
 		RunIDColumn: runtime.Version.ResultRunIDColumn, RowIDColumn: runtime.Version.ResultRowIDColumn, Columns: queryDatabaseColumns(queryColumns, databaseColumns),
 	}
-	resultColumns, err := adapter.InspectResultTable(ctx, ref.Table)
+	resultColumns, err := adapter.InspectResultTable(queryCtx, ref.Table)
 	if err != nil {
 		return closeOnError(err)
 	}
@@ -65,7 +69,7 @@ func (oracleReportExportSessionFactory) Open(ctx context.Context, runtime report
 	); err != nil {
 		return closeOnError(err)
 	}
-	contract, err := adapter.InspectResultSnapshotContract(ctx, ref)
+	contract, err := adapter.InspectResultSnapshotContract(queryCtx, ref)
 	if err != nil {
 		return closeOnError(err)
 	}
@@ -84,7 +88,11 @@ func (oracleReportExportSessionFactory) Open(ctx context.Context, runtime report
 	if err != nil {
 		return closeOnError(err)
 	}
-	return &oracleReportExportSession{adapter: adapter, pagePlan: pagePlan, purgePlan: purgePlan, runUUID: runtime.Run.RunUUID}, nil
+	queryTimeout := time.Duration(runtime.Datasource.QueryTimeoutSeconds) * time.Second
+	if queryTimeout <= 0 {
+		queryTimeout = defaultReportPublicationInspectionTimeout
+	}
+	return &oracleReportExportSession{adapter: adapter, pagePlan: pagePlan, purgePlan: purgePlan, runUUID: runtime.Run.RunUUID, queryTimeout: queryTimeout}, nil
 }
 
 func queryDatabaseColumns(columns []reportquery.Column, output []string) []string {
@@ -116,14 +124,18 @@ func (session *oracleReportExportSession) Read(ctx context.Context, columns []st
 			return reportoracle.ResultPage{}, fmt.Errorf("report export oracle: column contract changed")
 		}
 	}
-	return session.adapter.ReadResultPage(ctx, session.pagePlan, session.runUUID, after, limit)
+	queryCtx, cancel := context.WithTimeout(ctx, session.queryTimeout)
+	defer cancel()
+	return session.adapter.ReadResultPage(queryCtx, session.pagePlan, session.runUUID, after, limit)
 }
 
 func (session *oracleReportExportSession) Purge(ctx context.Context, batchSize int) (deleted int64, resultErr error) {
 	if session == nil || session.adapter == nil || ctx == nil {
 		return 0, fmt.Errorf("report export oracle: invalid purge session")
 	}
-	tx, err := session.adapter.BeginTx(ctx, &sql.TxOptions{})
+	queryCtx, cancel := context.WithTimeout(ctx, session.queryTimeout)
+	defer cancel()
+	tx, err := session.adapter.BeginTx(queryCtx, &sql.TxOptions{})
 	if err != nil {
 		return 0, err
 	}
@@ -134,7 +146,7 @@ func (session *oracleReportExportSession) Purge(ctx context.Context, batchSize i
 			}
 		}
 	}()
-	deleted, err = session.adapter.PurgeResultBatch(ctx, tx, session.purgePlan, session.runUUID, batchSize)
+	deleted, err = session.adapter.PurgeResultBatch(queryCtx, tx, session.purgePlan, session.runUUID, batchSize)
 	if err != nil {
 		return 0, err
 	}

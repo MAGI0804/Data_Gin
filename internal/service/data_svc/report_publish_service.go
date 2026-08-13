@@ -177,6 +177,14 @@ func oracleConfigFromDatasource(datasource model.ReportDatasource, password stri
 	}
 }
 
+func reportOracleQueryContext(parent context.Context, datasource model.ReportDatasource) (context.Context, context.CancelFunc) {
+	timeout := time.Duration(datasource.QueryTimeoutSeconds) * time.Second
+	if timeout <= 0 {
+		timeout = defaultReportPublicationInspectionTimeout
+	}
+	return context.WithTimeout(parent, timeout)
+}
+
 func classifyPublicationStoreError(err error) error {
 	switch {
 	case errors.Is(err, reportrepo.ErrDraftNotFound):

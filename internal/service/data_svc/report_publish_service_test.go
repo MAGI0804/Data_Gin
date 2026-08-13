@@ -83,6 +83,20 @@ func TestReportPublishServiceBoundsOracleInspectionAndClosesBeforePublishing(t *
 	}
 }
 
+func TestReportOracleQueryContextUsesDatasourceLimit(t *testing.T) {
+	started := time.Now()
+	ctx, cancel := reportOracleQueryContext(t.Context(), model.ReportDatasource{QueryTimeoutSeconds: 7})
+	defer cancel()
+	deadline, ok := ctx.Deadline()
+	if !ok {
+		t.Fatal("reportOracleQueryContext() did not set a deadline")
+	}
+	remaining := deadline.Sub(started)
+	if remaining < 6*time.Second || remaining > 8*time.Second {
+		t.Fatalf("deadline remaining = %v, want about 7s", remaining)
+	}
+}
+
 func TestReportPublishServiceDoesNotWriteWhenOracleCloseFails(t *testing.T) {
 	store := &fakePublicationStore{draft: publicationDraft(), datasource: publicationDatasource()}
 	inspector := &fakeReportOracleInspector{procedure: publicationProcedure(), columns: publicationResultColumns(), closeErr: errors.New("close failed")}

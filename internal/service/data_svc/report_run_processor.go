@@ -365,18 +365,20 @@ var errOracleCommitOutcomeUnknown = errors.New("oracle report commit outcome unk
 type oracleReportProcedureExecutor struct{}
 
 func (oracleReportProcedureExecutor) Execute(ctx context.Context, request reportProcedureExecutionRequest, password string) (rowCount int64, resultErr error) {
-	adapter, err := reportoracle.Open(ctx, oracleConfigFromDatasource(request.Runtime.Datasource, password))
+	queryCtx, cancel := reportOracleQueryContext(ctx, request.Runtime.Datasource)
+	defer cancel()
+	adapter, err := reportoracle.Open(queryCtx, oracleConfigFromDatasource(request.Runtime.Datasource, password))
 	if err != nil {
 		return 0, err
 	}
 	defer func() { _ = adapter.Close() }()
 	procedureRef := reportoracle.ProcedureRef{Owner: request.Runtime.Version.ProcedureOwner, Package: request.Runtime.Version.PackageName, Name: request.Runtime.Version.ProcedureName, Overload: request.Runtime.Version.ProcedureOverload}
-	procedure, err := adapter.InspectProcedure(ctx, procedureRef)
+	procedure, err := adapter.InspectProcedure(queryCtx, procedureRef)
 	if err != nil {
 		return 0, err
 	}
 	resultRef := reportoracle.ResultTableRef{Owner: request.Runtime.Version.ResultTableOwner, Name: request.Runtime.Version.ResultTableName}
-	resultColumns, err := adapter.InspectResultTable(ctx, resultRef)
+	resultColumns, err := adapter.InspectResultTable(queryCtx, resultRef)
 	if err != nil {
 		return 0, err
 	}
@@ -387,7 +389,7 @@ func (oracleReportProcedureExecutor) Execute(ctx context.Context, request report
 	for _, column := range request.Runtime.Columns {
 		configuredColumns = append(configuredColumns, column.DatabaseColumn)
 	}
-	snapshot, err := adapter.InspectResultSnapshotContract(ctx, reportoracle.ResultSnapshotRef{Table: resultRef, RunIDColumn: request.Runtime.Version.ResultRunIDColumn, RowIDColumn: request.Runtime.Version.ResultRowIDColumn, Columns: configuredColumns})
+	snapshot, err := adapter.InspectResultSnapshotContract(queryCtx, reportoracle.ResultSnapshotRef{Table: resultRef, RunIDColumn: request.Runtime.Version.ResultRunIDColumn, RowIDColumn: request.Runtime.Version.ResultRowIDColumn, Columns: configuredColumns})
 	if err != nil {
 		return 0, err
 	}
@@ -395,11 +397,11 @@ func (oracleReportProcedureExecutor) Execute(ctx context.Context, request report
 	if err != nil {
 		return 0, err
 	}
-	tx, err := adapter.BeginTx(ctx, &sql.TxOptions{})
+	tx, err := adapter.BeginTx(queryCtx, &sql.TxOptions{})
 	if err != nil {
 		return 0, err
 	}
-	if err := adapter.Execute(ctx, tx, plan, request.Values); err != nil {
+	if err := adapter.Execute(queryCtx, tx, plan, request.Values); err != nil {
 		if rollbackErr := tx.Rollback(); rollbackErr != nil && !errors.Is(rollbackErr, sql.ErrTxDone) {
 			return 0, fmt.Errorf("%w: rollback after execution failure: %v", errOracleCommitOutcomeUnknown, rollbackErr)
 		}
@@ -410,7 +412,7 @@ func (oracleReportProcedureExecutor) Execute(ctx context.Context, request report
 		_ = tx.Rollback()
 		return 0, err
 	}
-	rowCount, err = adapter.CountResultRowsTx(ctx, tx, countPlan, request.Runtime.Run.RunUUID)
+	rowCount, err = adapter.CountResultRowsTx(queryCtx, tx, countPlan, request.Runtime.Run.RunUUID)
 	if err != nil {
 		_ = tx.Rollback()
 		return 0, err

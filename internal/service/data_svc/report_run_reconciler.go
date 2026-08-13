@@ -166,7 +166,9 @@ func (reconciler *ReportRunReconciler) pending(ctx context.Context, runID uint, 
 type oracleReportResultEvidenceReader struct{}
 
 func (oracleReportResultEvidenceReader) CountCommittedRows(ctx context.Context, runtime reportrepo.RuntimeContract, password string) (int64, error) {
-	adapter, err := reportoracle.Open(ctx, oracleConfigFromDatasource(runtime.Datasource, password))
+	queryCtx, cancel := reportOracleQueryContext(ctx, runtime.Datasource)
+	defer cancel()
+	adapter, err := reportoracle.Open(queryCtx, oracleConfigFromDatasource(runtime.Datasource, password))
 	if err != nil {
 		return 0, err
 	}
@@ -175,7 +177,7 @@ func (oracleReportResultEvidenceReader) CountCommittedRows(ctx context.Context, 
 	for _, column := range runtime.Columns {
 		configuredColumns = append(configuredColumns, column.DatabaseColumn)
 	}
-	contract, err := adapter.InspectResultSnapshotContract(ctx, reportoracle.ResultSnapshotRef{
+	contract, err := adapter.InspectResultSnapshotContract(queryCtx, reportoracle.ResultSnapshotRef{
 		Table:       reportoracle.ResultTableRef{Owner: runtime.Version.ResultTableOwner, Name: runtime.Version.ResultTableName},
 		RunIDColumn: runtime.Version.ResultRunIDColumn, RowIDColumn: runtime.Version.ResultRowIDColumn, Columns: configuredColumns,
 	})
@@ -186,5 +188,5 @@ func (oracleReportResultEvidenceReader) CountCommittedRows(ctx context.Context, 
 	if err != nil {
 		return 0, err
 	}
-	return adapter.CountResultRows(ctx, plan, runtime.Run.RunUUID)
+	return adapter.CountResultRows(queryCtx, plan, runtime.Run.RunUUID)
 }
