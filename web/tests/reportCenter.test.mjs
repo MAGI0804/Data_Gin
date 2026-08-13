@@ -2,7 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import { getReportAudits, parseReportAuditPage, parseReportCatalogPage, parseReportDatasource, parseReportDatasources, parseReportDatasourceTest, parseReportDraft, parseReportExport, parseReportExportPage, parseReportResultPage, parseReportRun, parseReportRunContract } from '../.test-dist/reportCenter/api.js'
-import { reportParameterFlagDisabled, updateReportParameterFlag } from '../.test-dist/reportCenter/parameterConfig.js'
+import { reportParameterControls, reportParameterFlagDisabled, updateReportParameterFlag, updateReportParameterLogicalType } from '../.test-dist/reportCenter/parameterConfig.js'
 import { buildNewReportRunState, canStartNewReportRun, initialReportParameterValues } from '../.test-dist/reportCenter/queryParameters.js'
 
 test('parseReportCatalogPage reads the standard API envelope', () => {
@@ -109,6 +109,24 @@ test('historical sensitive system parameters can be repaired without recreation'
 
   assert.equal(reportParameterFlagDisabled({ ...historical, systemInjected: false }, 'systemInjected'), true)
   assert.equal(reportParameterFlagDisabled({ ...historical, sensitive: false }, 'sensitive'), true)
+})
+
+test('report parameter logical types derive compatible control and collection shapes', () => {
+  const parameter = {
+    controlType: 'TEXTAREA', logicalType: 'string', cardinality: 'SINGLE', collectionEncoding: '',
+    normalizer: { trim: true }, valueSource: { source: 'RUN_ID' },
+  }
+  assert.deepEqual(reportParameterControls('string'), ['TEXT', 'TEXTAREA'])
+  assert.deepEqual(reportParameterControls('boolean'), ['CHECKBOX'])
+  assert.deepEqual(reportParameterControls('multi_enum'), ['MULTI_SELECT'])
+  assert.deepEqual(updateReportParameterLogicalType(parameter, 'multi_enum'), {
+    ...parameter, logicalType: 'multi_enum', controlType: 'MULTI_SELECT', cardinality: 'MULTIPLE',
+    collectionEncoding: 'JSON_CLOB', valueSource: {},
+  })
+  assert.deepEqual(updateReportParameterLogicalType(parameter, 'json'), {
+    ...parameter, logicalType: 'json', controlType: 'TEXTAREA', cardinality: 'SINGLE',
+    collectionEncoding: '', normalizer: {}, valueSource: {},
+  })
 })
 
 test('new report runs are allowed only after run and export processing finish', () => {
