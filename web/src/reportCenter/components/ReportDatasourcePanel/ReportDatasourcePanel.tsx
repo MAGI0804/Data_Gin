@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { Database, Pencil, Plus, RefreshCw, Unplug } from 'lucide-react'
-import { DataTable, Drawer, FeedbackState, StatusTag } from '../../../ui'
+import { Button, DataTable, Drawer, FeedbackState, StatusTag } from '../../../ui'
 import {
   createReportDatasource,
   testReportDatasource,
@@ -49,7 +49,7 @@ export function ReportDatasourcePanel({
           <strong>Oracle 数据源</strong>
           <span>连接参数和加密凭据保存在 MySQL，Oracle 仅用于执行和取数。</span>
         </div>
-        <button className="ui-control-radius" type="button" onClick={() => setEditor({ open: true, datasource: null })}>
+        <button type="button" onClick={() => setEditor({ open: true, datasource: null })}>
           <Plus aria-hidden="true" />新增数据源
         </button>
       </div>
@@ -129,7 +129,7 @@ function ReportDatasourceDrawer({ client, datasource, onClose, onSaved }: { clie
       sid: nextMode === 'SID' ? sidDraft.current : '',
     }))
   }
-  const footer = <><button type="button" disabled={state.saving} onClick={onClose}>取消</button><button className="primary" type="button" disabled={state.saving} onClick={() => void save()}>{state.saving ? '保存中…' : '保存数据源'}</button></>
+  const footer = <><button type="button" disabled={state.saving} onClick={onClose}>取消</button><Button variant="primary" disabled={state.saving} onClick={() => void save()}>{state.saving ? '保存中…' : '保存数据源'}</Button></>
   return (
     <Drawer open title={datasource ? '编辑 Oracle 数据源' : '新增 Oracle 数据源'} description="凭据由服务端使用当前密钥版本加密，页面不会读取或回显密文。" size="medium" closeDisabled={state.saving} onClose={onClose} footer={footer}>
       <form className={styles.form} onSubmit={(event) => { event.preventDefault(); void save() }}>

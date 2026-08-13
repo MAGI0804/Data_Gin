@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
 import { Plus, Trash2 } from 'lucide-react'
-import { Drawer } from '../../../ui'
+import { Button, Drawer } from '../../../ui'
 import { getReportDraft, publishReportDraft, saveReportDraft, type ReportCenterClient } from '../../api'
 import type { ReportColumn, ReportDatasource, ReportDraft, ReportParameter, ReportSummary } from '../../types'
 import styles from './ReportConfigDrawer.module.css'
@@ -43,7 +43,7 @@ export function ReportConfigDrawer({ client, report, datasources, datasourcesLoa
   }
 
   const dirty = draftFingerprint(draft) !== savedFingerprint
-  const footer = <><span className={styles.version}>版本锁 {draft.lockVersion || '新建'} · {dirty ? '有未保存修改' : '已保存'}</span><button type="button" onClick={onClose}>取消</button><button type="button" onClick={() => void save()} disabled={state.loading || state.saving || !dirty}>{state.saving ? '处理中…' : '保存草稿'}</button><button className="primary" type="button" onClick={() => void publish()} disabled={!draft.id || state.saving || dirty} title={dirty ? '请先保存草稿，再核验并发布' : undefined}>核验并发布</button></>
+  const footer = <><span className={styles.version}>版本锁 {draft.lockVersion || '新建'} · {dirty ? '有未保存修改' : '已保存'}</span><button type="button" onClick={onClose}>取消</button><button type="button" onClick={() => void save()} disabled={state.loading || state.saving || !dirty}>{state.saving ? '处理中…' : '保存草稿'}</button><Button variant="primary" onClick={() => void publish()} disabled={!draft.id || state.saving || dirty} title={dirty ? '请先保存草稿，再核验并发布' : undefined}>核验并发布</Button></>
   const editor = <><nav className={styles.tabs} aria-label="报表配置步骤">{tabs.map((item) => <button type="button" className={tab === item.key ? styles.active : ''} onClick={() => setTab(item.key)} aria-current={tab === item.key ? 'step' : undefined} key={item.key}>{item.label}</button>)}</nav><div ref={bodyRef} className={styles.body}>{state.loading ? <p>正在读取草稿…</p> : <Editor tab={tab} draft={draft} datasources={datasources} datasourcesLoading={datasourcesLoading} datasourcesError={datasourcesError} onChange={setDraft} />}{state.error ? <div className={styles.error} role="alert">{state.error}</div> : null}{state.notice ? <div className={styles.notice} role="status">{state.notice}</div> : null}</div></>
   if (embedded) return <section className={styles.embedded} aria-label={report ? `编辑报表配置：${report.name}` : '创建报表配置'}><header className={styles.embeddedHeader}><div><strong>{report ? report.name : '创建报表配置'}</strong><span>配置保存于 MySQL；发布时在线核验 Oracle 过程签名和结果 Schema。</span></div></header>{editor}<footer className={styles.embeddedFooter}>{footer}</footer></section>
   return <Drawer open title={report ? '编辑报表配置' : '创建报表配置'} description="配置保存于 MySQL；发布时在线核验 Oracle 过程签名和结果 Schema。" size="wide" closeDisabled={state.saving} onClose={onClose} footer={footer}>{editor}</Drawer>

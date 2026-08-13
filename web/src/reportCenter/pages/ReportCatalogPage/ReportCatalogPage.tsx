@@ -1,6 +1,6 @@
 import { useMemo, useState, type ReactNode } from 'react'
 import { FileText, Plus, RefreshCcw, Search } from 'lucide-react'
-import { DataTable, FeedbackState, FilterToolbar, PageCanvas, PageHeader, Section, StatusTag, type StatusTagTone } from '../../../ui'
+import { Button, DataTable, FeedbackState, FilterToolbar, PageCanvas, PageHeader, Section, StatusTag, type StatusTagTone } from '../../../ui'
 import type { ReportCenterClient } from '../../api'
 import { ReportConfigDrawer } from '../../components/ReportConfigDrawer/ReportConfigDrawer'
 import type { ReportSummary } from '../../types'
@@ -19,17 +19,17 @@ export function ReportCatalogPage({ client, canManage, navigation }: { client: R
   return (
     <PageCanvas>
       {navigation}
-      <PageHeader eyebrow="REPORT CENTER" title="报表目录" description="从 MySQL 配置中心查看报表定义、发布状态和当前版本。" actions={<><button className="ui-control-radius" type="button" onClick={reload} disabled={loading}><RefreshCcw aria-hidden="true" />刷新</button><button className="primary ui-control-radius" type="button" onClick={() => setDrawerState({ open: true, report: null })} disabled={!canManage}><Plus aria-hidden="true" />创建报表</button></>} />
+      <PageHeader eyebrow="REPORT CENTER" title="报表目录" description="从 MySQL 配置中心查看报表定义、发布状态和当前版本。" actions={<><button type="button" onClick={reload} disabled={loading}><RefreshCcw aria-hidden="true" />刷新</button><Button variant="primary" onClick={() => setDrawerState({ open: true, report: null })} disabled={!canManage}><Plus aria-hidden="true" />创建报表</Button></>} />
       <FilterToolbar summary={`当前加载 ${items.length} 个报表`}>
         <form className={styles.search} onSubmit={(event) => { event.preventDefault(); setSearch(draftSearch.trim()) }}>
-          <label><span>搜索报表</span><span className={styles.input}><Search aria-hidden="true" /><input className="ui-control-radius" type="search" value={draftSearch} onChange={(event) => setDraftSearch(event.currentTarget.value)} placeholder="名称或编码" /></span></label>
-          <button className="ui-control-radius" type="submit" disabled={loading}>查询</button>
+          <label><span>搜索报表</span><span className={styles.input}><Search aria-hidden="true" /><input type="search" value={draftSearch} onChange={(event) => setDraftSearch(event.currentTarget.value)} placeholder="名称或编码" /></span></label>
+          <button type="submit" disabled={loading}>查询</button>
         </form>
       </FilterToolbar>
       <Section title="已登记报表" description="目录只展示后端真实返回的数据，不创建演示记录。" flush>
         {loading && items.length === 0 ? <FeedbackState kind="loading" title="正在加载报表目录" description="正在请求 GET /v1/reports。" /> : null}
-        {error ? <FeedbackState kind="error" title="报表目录加载失败" description={error} action={<button className="ui-control-radius" type="button" onClick={reload}>重试</button>} /> : null}
-        {!loading && !error && items.length === 0 ? <FeedbackState kind="empty" title="暂无报表" description="后端尚未返回可查看的报表定义。" action={canManage ? <button className="ui-control-radius" type="button" onClick={() => setDrawerState({ open: true, report: null })}>创建第一份报表</button> : null} /> : null}
+        {error ? <FeedbackState kind="error" title="报表目录加载失败" description={error} action={<button type="button" onClick={reload}>重试</button>} /> : null}
+        {!loading && !error && items.length === 0 ? <FeedbackState kind="empty" title="暂无报表" description="后端尚未返回可查看的报表定义。" action={canManage ? <button type="button" onClick={() => setDrawerState({ open: true, report: null })}>创建第一份报表</button> : null} /> : null}
         {items.length > 0 ? <ReportTable reports={items} onEdit={canManage ? (report) => setDrawerState({ open: true, report }) : undefined} /> : null}
       </Section>
       {drawerState.open ? <ReportConfigDrawer client={client} report={drawerState.report} datasources={datasources.items} datasourcesLoading={datasources.loading} datasourcesError={datasources.error} onSaved={reload} onClose={() => setDrawerState({ open: false, report: null })} /> : null}
