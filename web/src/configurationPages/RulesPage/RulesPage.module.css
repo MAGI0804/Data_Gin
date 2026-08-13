@@ -1,0 +1,24 @@
+.primary { display:inline-flex; gap:var(--space-2); align-items:center; color:var(--color-canvas); border-color:var(--color-brand-active); background:var(--color-brand-active); }
+.primary svg,.testForm button svg { width:15px; height:15px; }
+.notice { margin:0; padding-block:var(--space-3); border-bottom:1px solid var(--color-border); color:var(--color-success); font-size:13px; }
+.filters { display:flex; flex:1 1 auto; flex-wrap:wrap; gap:var(--space-2); align-items:end; }
+.filters label,.form label,.testForm label { display:grid; gap:var(--space-1); color:var(--color-text-secondary); font-size:12px; }
+.filters label:first-child { min-width:260px; }
+.filters input,.filters select,.form input,.form select,.form textarea,.testForm textarea { width:100%; min-width:0; border:1px solid var(--color-border-strong); border-radius:var(--radius-control); color:var(--color-text); background:var(--color-canvas); }
+.filters input,.filters select,.form input,.form select { min-height:var(--control-height); padding:var(--space-2) var(--space-3); }
+.form textarea,.testForm textarea { padding:var(--space-3); line-height:1.6; resize:vertical; }
+.identity { display:grid; gap:2px; }
+.identity code,.identity small { color:var(--color-text-secondary); font-size:11px; }
+.mono,.identity code,.table code { font-family:var(--font-mono); }
+.drawerContent,.form,.testSection,.testForm { display:grid; gap:var(--space-4); }
+.form > .checkbox { display:flex; gap:var(--space-2); align-items:center; }
+.checkbox input { width:16px; min-height:16px; }
+.secretNotice,.error { margin:0; padding:var(--space-3); border-inline-start:3px solid var(--color-brand); background:var(--color-brand-soft); color:var(--color-text-secondary); font-size:12px; line-height:1.6; }
+.testSection { padding-block-start:var(--space-6); border-top:1px solid var(--color-border); }
+.testSection h3,.testSection p { margin:0; }
+.testSection h3 { font-size:15px; }
+.testSection p { margin-block-start:var(--space-1); color:var(--color-text-secondary); font-size:12px; }
+.testForm button { display:inline-flex; gap:var(--space-2); align-items:center; justify-self:start; }
+.result { max-height:320px; margin:0; overflow:auto; padding:var(--space-3); border:1px solid var(--color-border); background:var(--color-surface-subtle); font-family:var(--font-mono); font-size:12px; white-space:pre-wrap; overflow-wrap:anywhere; }
+.error { color:var(--color-danger); border-inline-start-color:var(--color-danger); background:var(--color-danger-soft); }
+@media (max-width:599px) { .filters,.filters label,.filters button { width:100%; } .filters label:first-child { min-width:0; } }

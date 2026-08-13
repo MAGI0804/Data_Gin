@@ -1,0 +1,192 @@
+.primary {
+  display: inline-flex;
+  gap: var(--space-2);
+  align-items: center;
+  color: var(--color-canvas);
+  border-color: var(--color-brand-active);
+  background: var(--color-brand-active);
+}
+
+.primary svg,
+.actions svg {
+  width: 15px;
+  height: 15px;
+}
+
+.notice {
+  margin: 0;
+  padding-block: var(--space-3);
+  color: var(--color-success);
+  border-bottom: 1px solid var(--color-border);
+  font-size: 13px;
+}
+
+.filters {
+  display: flex;
+  flex: 1 1 auto;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: end;
+}
+
+.filters label,
+.form > label {
+  display: grid;
+  gap: var(--space-1);
+  color: var(--color-text-secondary);
+  font-size: 12px;
+}
+
+.filters label:first-child {
+  min-width: 240px;
+}
+
+.filters input,
+.filters select,
+.form input,
+.form select,
+.form textarea {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-control);
+  color: var(--color-text);
+  background: var(--color-canvas);
+}
+
+.filters input,
+.filters select,
+.form input,
+.form select {
+  min-height: var(--control-height);
+  padding: var(--space-2) var(--space-3);
+}
+
+.form textarea {
+  padding: var(--space-3);
+  line-height: 1.6;
+  resize: vertical;
+}
+
+.filterActions,
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.table th:last-child,
+.table td:last-child {
+  position: sticky;
+  right: 0;
+  z-index: 2;
+  border-inline-start: 1px solid var(--color-border);
+  background: var(--color-canvas);
+}
+
+.table th:last-child {
+  z-index: 3;
+  background: var(--color-surface-subtle);
+}
+
+.identity {
+  display: inline-flex;
+  gap: var(--space-2);
+  align-items: flex-start;
+}
+
+.identity > svg {
+  flex: 0 0 auto;
+  width: 17px;
+  height: 17px;
+  margin-block-start: 2px;
+  color: var(--color-brand-active);
+}
+
+.identity > span {
+  display: grid;
+  gap: 2px;
+}
+
+.identity code,
+.identity small {
+  color: var(--color-text-secondary);
+  font-size: 11px;
+}
+
+.identity code,
+.mono,
+.table code {
+  font-family: var(--font-mono);
+}
+
+.actions {
+  min-width: max-content;
+}
+
+.actions button {
+  display: inline-flex;
+  gap: var(--space-1);
+  align-items: center;
+}
+
+.form {
+  display: grid;
+  gap: var(--space-4);
+}
+
+.form > .checkbox {
+  display: flex;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+.checkbox input {
+  width: 16px;
+  min-height: 16px;
+}
+
+.secretNotice,
+.contractNote,
+.formError {
+  margin: 0;
+  padding: var(--space-3);
+  border-inline-start: 3px solid var(--color-brand);
+  background: var(--color-brand-soft);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.secretNotice,
+.contractNote {
+  color: var(--color-text-secondary);
+}
+
+.formError {
+  color: var(--color-danger);
+  border-inline-start-color: var(--color-danger);
+  background: var(--color-danger-soft);
+}
+
+.dialogCopy {
+  margin: 0;
+  color: var(--color-text-secondary);
+  line-height: 1.7;
+}
+
+@media (max-width: 599px) {
+  .filters,
+  .filters label,
+  .filterActions,
+  .filterActions button {
+    width: 100%;
+  }
+
+  .filters label:first-child {
+    min-width: 0;
+  }
+
+  .filterActions button {
+    flex: 1 1 0;
+  }
+}

@@ -28,6 +28,26 @@ export type SourceDraft = {
   hasSecret: boolean
 }
 
+export type DestinationDefinition = {
+  id: number
+  name: string
+  code: string
+  destination_type: string
+  config_json: string
+  has_secret?: boolean
+  enabled: boolean
+}
+
+export type DestinationDraft = {
+  id: number | null
+  name: string
+  code: string
+  destinationType: string
+  configJSON: string
+  enabled: boolean
+  hasSecret: boolean
+}
+
 export type ConfigurationClientOptions = {
   method: 'GET' | 'POST' | 'PUT'
   body?: unknown

@@ -51,9 +51,13 @@ import { parseDeliveryLog, parsePipelineRun } from './monitoringPages/contracts'
 import type { DeliveryLog, PipelineRun } from './monitoringPages/types'
 import { SourcesPage } from './configurationPages/SourcesPage/SourcesPage'
 import type { SourceDefinition } from './configurationPages/types'
+import { RulesPage } from './configurationPages/RulesPage/RulesPage'
+import type { TransformRule } from './configurationPages/ruleContracts'
+import { DestinationsPage } from './configurationPages/DestinationsPage/DestinationsPage'
+import type { DestinationDefinition } from './configurationPages/types'
 import { parseMallWeatherExportContentStatus, submitMallWeatherExportContentDownload } from './mallWeatherExport'
 import { buildRawRecordsRequest, buildWarehouseRawRecordsQuery, parseRawRecordsPage, type RawRecordOrigin, type RawRecordsPage } from './rawRecords'
-import { buildDeliveryTaskListQuery, buildDestinationListQuery, buildExcelMatchJobListQuery, buildTransformRuleListQuery, normalizeMonitoringPageNumber, parseMonitoringPage, type MonitoringPage, type MonitoringPagination } from './monitoringRecords'
+import { buildDeliveryTaskListQuery, buildExcelMatchJobListQuery, normalizeMonitoringPageNumber, parseMonitoringPage, type MonitoringPage, type MonitoringPagination } from './monitoringRecords'
 import { validateOrderPushSkipPolicy } from './orderPushPolicy'
 import { runSingleFlight } from './singleFlight'
 import { parseSourceFetchSummary } from './sourceOperations'
@@ -442,48 +446,6 @@ type CleanRecord = {
   quality_score: number
   status: string
   created_at: number
-}
-
-type TransformRule = {
-  id: number
-  source_id: number
-  name: string
-  rule_type: string
-  order_index: number
-  config_json: string
-	 has_secret?: boolean
-  enabled: boolean
-}
-
-type RuleDraft = {
-  id: number | null
-  sourceID: string
-  name: string
-  ruleType: string
-  orderIndex: string
-  configJSON: string
-  enabled: boolean
-  hasSecret: boolean
-}
-
-type DestinationDefinition = {
-  id: number
-  name: string
-  code: string
-  destination_type: string
-  config_json: string
-  has_secret?: boolean
-  enabled: boolean
-}
-
-type DestinationDraft = {
-  id: number | null
-  name: string
-  code: string
-  destinationType: string
-  configJSON: string
-  enabled: boolean
-  hasSecret: boolean
 }
 
 type DeliveryTask = {
@@ -1384,9 +1346,9 @@ function App() {
       navigationRef={mobileNavRef}
       navigationOpen={mobileNavOpen}
       onDismissNavigation={() => setMobileNavOpen(false)}
-      flushWorkspace={Boolean(reportSection) || ['access_management', 'sources', 'overview', 'runs', 'delivery_logs', 'step_runs'].includes(activeNav)}
+      flushWorkspace={Boolean(reportSection) || ['access_management', 'sources', 'rules', 'destinations', 'overview', 'runs', 'delivery_logs', 'step_runs'].includes(activeNav)}
       workspaceClassName="ops-workspace"
-      header={<ModuleHeader compact={Boolean(reportSection) || ['access_management', 'sources', 'overview', 'runs', 'delivery_logs', 'step_runs'].includes(activeNav)} activeNav={activeNav} loading={loading || refreshing} sessionUser={sessionUser} onOpenNavigation={openMobileNavigation} onRefresh={() => void refreshWorkspace(true)} onLogout={handleLogout} refreshing={refreshing} mobileNavTriggerRef={mobileNavTriggerRef} />}
+      header={<ModuleHeader compact={Boolean(reportSection) || ['access_management', 'sources', 'rules', 'destinations', 'overview', 'runs', 'delivery_logs', 'step_runs'].includes(activeNav)} activeNav={activeNav} loading={loading || refreshing} sessionUser={sessionUser} onOpenNavigation={openMobileNavigation} onRefresh={() => void refreshWorkspace(true)} onLogout={handleLogout} refreshing={refreshing} mobileNavTriggerRef={mobileNavTriggerRef} />}
       notices={<>{sessionValidationError && <div className="result-banner error" role="status" aria-live="polite">{sessionValidationError} <button type="button" onClick={() => setSessionValidationAttempt((attempt) => attempt + 1)}>重试校验</button></div>}{workspaceError && <div className="result-banner error" role="alert">{workspaceError} <button type="button" onClick={() => void refreshWorkspace(false)} disabled={refreshing}>重试</button></div>}</>}
       overlay={<ResultPanel result={result} onClose={() => setResult(null)} />}
     >
@@ -1404,9 +1366,9 @@ function App() {
         {activeNav === 'pull_records' && <RawRecordsQueryPage title="数据拉取记录" origin="pull" client={client} onFetchSource={fetchSource} />}
         {activeNav === 'backfill' && <BojunBackfillPage loading={loading || refreshing} onPreview={previewBojunOrderBackfill} onConfirm={confirmBojunOrderBackfill} />}
         {activeNav === 'youzan_distribution' && <YouzanDistributionPage task={legacyTasks.find((item) => item.code === 'youzan_distribution_order_fetch')} loading={loading || refreshing} onPreview={previewYouzanDistributionBackfill} onConfirm={confirmYouzanDistributionBackfill} onRun={runLegacyTask} />}
-        {activeNav === 'rules' && <RulesQueryPage client={client} rules={transformRules} sources={sources} onRulesChange={setTransformRules} refreshVersion={workspaceRefreshVersion} />}
+        {activeNav === 'rules' && <RulesPage client={client} rules={transformRules} sources={sources} onRulesChange={setTransformRules} refreshVersion={workspaceRefreshVersion} />}
         {activeNav === 'processed' && <ProcessedQueryPage client={client} />}
-        {activeNav === 'destinations' && <DestinationsQueryPage client={client} refreshVersion={workspaceRefreshVersion} />}
+        {activeNav === 'destinations' && <DestinationsPage client={client} refreshVersion={workspaceRefreshVersion} />}
         {activeNav === 'tasks' && <DeliveryTasksQueryPage client={client} sources={sources} destinations={destinations} onRefresh={() => refreshWorkspace(false)} refreshVersion={workspaceRefreshVersion} />}
         {activeNav === 'push_policy' && <PushPolicyPage coreMethod={coreMethods.find((item) => item.key === 'mall_push')} config={orderPushSkipConfig} targets={orderPushTargets} onSave={saveOrderPushSkipConfig} onToggle={toggleTarget} />}
         {(activeNav === 'excel_jobs' || activeNav === 'excel_schemes' || activeNav === 'excel_write') && <ExcelMatchView section={activeNav === 'excel_jobs' ? 'jobs' : activeNav === 'excel_schemes' ? 'schemes' : 'write'} client={client} token={token} loading={loading} refreshVersion={workspaceRefreshVersion} setLoading={setLoading} setResult={setResult} onNavigateToJobs={() => navigate('excel_jobs')} />}
@@ -1571,7 +1533,7 @@ function ModuleHeader({ activeNav, compact, loading, sessionUser, onOpenNavigati
     <WorkspaceHeader
       title={compact ? undefined : titles[activeNav].title}
       description={compact ? undefined : titles[activeNav].subtitle}
-      context={compact ? activeNav === 'access_management' ? 'ACCESS CONTROL' : activeNav === 'sources' ? 'DATA CONFIGURATION' : ['overview', 'runs', 'delivery_logs', 'step_runs'].includes(activeNav) ? 'OPERATIONS' : 'REPORT CENTER' : undefined}
+      context={compact ? activeNav === 'access_management' ? 'ACCESS CONTROL' : ['sources', 'rules', 'destinations'].includes(activeNav) ? 'DATA CONFIGURATION' : ['overview', 'runs', 'delivery_logs', 'step_runs'].includes(activeNav) ? 'OPERATIONS' : 'REPORT CENTER' : undefined}
       menuButtonRef={mobileNavTriggerRef}
       onOpenNavigation={onOpenNavigation}
       actions={<div className="workspace-session">
@@ -1941,157 +1903,6 @@ function WarehouseRawRecordsPanel({ client, origin }: { client: ApiClient; origi
       </Panel>
       {pendingRetransform && <Modal title="确认重新处理原始记录" closeDisabled={retransformingID !== null} onClose={() => { if (retransformingID === null) setPendingRetransform(null) }} footer={<><button type="button" disabled={retransformingID !== null} onClick={() => setPendingRetransform(null)}>取消</button><button className="primary" type="button" disabled={retransformingID !== null} onClick={() => void retransform()}>{retransformingID === pendingRetransform.id ? '处理中…' : '确认重新处理'}</button></>}><p>确认重新处理仓库原始记录 #{pendingRetransform.id}？系统会创建新的清洗记录；原始内容不会在管理端展示。</p></Modal>}
     </>
-  )
-}
-
-function RulesQueryPage({ client, rules, sources, onRulesChange, refreshVersion }: { client: ApiClient; rules: TransformRule[]; sources: SourceDefinition[]; onRulesChange: (rules: TransformRule[]) => void; refreshVersion: number }) {
-  const [query, setQuery] = useState('')
-  const [status, setStatus] = useState('all')
-  const [ruleType, setRuleType] = useState('all')
-  const [applied, setApplied] = useState({ keyword: '', enabled: '' as '' | 'true' | 'false', ruleType: '' })
-  const [page, setPage] = useState(1)
-  const [reloadVersion, setReloadVersion] = useState(0)
-  const [draft, setDraft] = useState<RuleDraft | null>(null)
-  const [rawContent, setRawContent] = useState('{}')
-  const [testResult, setTestResult] = useState<unknown>(null)
-  const [saving, setSaving] = useState(false)
-  const [testing, setTesting] = useState(false)
-  const [operationError, setOperationError] = useState('')
-  const listQuery = useMemo(() => buildTransformRuleListQuery({ page, pageSize: 20, ...applied }), [applied, page])
-  const { recordsPage, loading, error } = useConfigurationListPage<TransformRule>(client, '/v1/transform-rules', 'rules', listQuery, reloadVersion + refreshVersion)
-  const listedRules = recordsPage?.list ?? []
-  const pagination = recordsPage?.pagination
-
-  function submitQuery(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    applyQuery(query, status, ruleType)
-  }
-
-  function applyQuery(nextQuery: string, nextStatus: string, nextRuleType: string) {
-    setPage(1)
-    setApplied({ keyword: nextQuery, enabled: nextStatus === 'enabled' ? 'true' : nextStatus === 'disabled' ? 'false' : '', ruleType: nextRuleType === 'all' ? '' : nextRuleType })
-    setReloadVersion((version) => version + 1)
-  }
-
-  function openCreate() {
-    setOperationError('')
-    setDraft({ id: null, sourceID: sources[0]?.id ? String(sources[0].id) : '', name: '', ruleType: 'mapping', orderIndex: '0', configJSON: '{\n  "table_name": "",\n  "business_key_field": "",\n  "fields": []\n}', enabled: true, hasSecret: false })
-  }
-
-  async function openDetail(ruleID: number) {
-    setOperationError('')
-    const response = await client(`/v1/transform-rules/${ruleID}`, { method: 'GET', showResult: false, silentLoading: true })
-    const rule = response.ok ? readObject<TransformRule>(response, 'rule') : null
-    if (!rule) {
-      setOperationError(response.error?.message || '规则详情暂时不可用，请稍后重试。')
-      return
-    }
-    setDraft(ruleDraftFrom(rule))
-  }
-
-  async function saveDraft(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    if (!draft || saving) return
-    const sourceID = Number(draft.sourceID)
-    const orderIndex = Number(draft.orderIndex)
-    if (!Number.isInteger(sourceID) || sourceID <= 0 || !draft.name.trim() || !Number.isInteger(orderIndex)) {
-      setOperationError('请填写来源、名称和有效的顺序号。')
-      return
-    }
-    try { JSON.parse(draft.configJSON) } catch { setOperationError('配置必须是有效 JSON。'); return }
-    setSaving(true)
-    setOperationError('')
-    const response = await client(draft.id ? `/v1/transform-rules/${draft.id}` : '/v1/transform-rules', {
-      method: draft.id ? 'PUT' : 'POST', showResult: false, silentLoading: true,
-      body: { source_id: sourceID, name: draft.name.trim(), rule_type: draft.ruleType, order_index: orderIndex, config_json: draft.configJSON, enabled: draft.enabled },
-    })
-    const saved = response.ok ? readObject<TransformRule>(response, 'rule') : null
-    if (!saved) {
-      setOperationError(response.error?.message || '规则保存未完成，请稍后重试。')
-      setSaving(false)
-      return
-    }
-    onRulesChange(draft.id ? rules.map((rule) => rule.id === saved.id ? saved : rule) : [...rules, saved].sort((left, right) => left.source_id - right.source_id || left.order_index - right.order_index || right.id - left.id))
-    setSaving(false)
-    setDraft(null)
-    setReloadVersion((version) => version + 1)
-  }
-
-  async function runTest(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    if (!draft || draft.ruleType !== 'mapping' || testing) return
-    let parsedContent: Record<string, unknown>
-    try {
-      parsedContent = JSON.parse(rawContent) as Record<string, unknown>
-      JSON.parse(draft.configJSON)
-    } catch {
-      setOperationError('测试内容和规则配置都必须是有效 JSON。')
-      return
-    }
-    if (!parsedContent || Array.isArray(parsedContent) || typeof parsedContent !== 'object') {
-      setOperationError('测试原始内容必须是 JSON 对象。')
-      return
-    }
-    setTesting(true)
-    setOperationError('')
-    const response = await client('/v1/transform-rules/test', { method: 'POST', body: { raw_content: parsedContent, config_json: draft.configJSON }, showResult: false, silentLoading: true })
-    const cleanContent = response.ok ? readObject<unknown>(response, 'clean_content') : null
-    if (cleanContent === null) setOperationError(response.error?.message || '规则测试未完成，请稍后重试。')
-    else setTestResult(redactMonitoringJSON(cleanContent))
-    setTesting(false)
-  }
-
-  const testable = draft?.ruleType === 'mapping'
-  return (
-    <div className="view-stack design-data-page design-rules-page">
-      {operationError && <div className="result-banner error" role="alert">{operationError}</div>}
-      <form className="query-bar design-filter-bar design-rules-filter" onSubmit={submitQuery}>
-        <div className="query-fields">
-          <label>名称 / 来源 ID / 配置<span className="design-search-control"><Search aria-hidden="true" /><input name="rule_query" type="search" value={query} onChange={(event) => setQuery(event.currentTarget.value)} placeholder="搜索规则" /></span></label>
-          <SelectFilter label="状态" value={status} onChange={(nextStatus) => { setStatus(nextStatus); applyQuery(query, nextStatus, ruleType) }} options={[{ value: 'enabled', label: '启用' }, { value: 'disabled', label: '停用' }]} />
-          <SelectFilter label="规则类型" value={ruleType} onChange={(nextRuleType) => { setRuleType(nextRuleType); applyQuery(query, status, nextRuleType) }} options={[{ value: 'mapping', label: 'mapping' }, { value: 'validator', label: 'validator' }, { value: 'http_enrich', label: 'http_enrich' }, { value: 'db_enrich', label: 'db_enrich' }, { value: 'script', label: 'script' }]} />
-        </div>
-        <div className="design-filter-count"><strong>{listedRules.length}</strong><span>/ {pagination?.total ?? 0} 条</span></div>
-        <button className="sr-only" type="submit" disabled={loading}>{loading ? '查询中…' : '查询规则'}</button>
-      </form>
-      {error && <div className="result-banner error" role="alert">{error}{recordsPage ? ' 已保留最近一次成功数据。' : ''}</div>}
-      <section className="design-table-section">
-        <div className="design-section-heading"><div><h3>清洗规则</h3><span>{loading && !recordsPage ? '正在加载…' : `查询命中 ${pagination?.total ?? 0} 条`}</span></div><button type="button" className="primary" onClick={openCreate}>新增规则</button></div>
-        <TransformRuleList rules={listedRules} sources={sources} onDetail={(rule) => { void openDetail(rule.id) }} />
-        <MonitoringPaginationControls page={pagination?.page ?? page} totalPages={pagination?.totalPages ?? 0} loading={loading} onPrevious={() => setPage((current) => Math.max(1, current - 1))} onNext={() => setPage((current) => current + 1)} />
-      </section>
-      {draft && (
-        <Modal title={draft.id ? '清洗规则详情与编辑' : '新增清洗规则'} onClose={() => { if (!saving && !testing) setDraft(null) }}>
-          {draft.hasSecret && <div className="result-banner" role="status">配置中的敏感值已隐藏。保留“[已隐藏]”会保留原值；改为新值即可轮换，且不会回显旧值。</div>}
-          <form className="excel-upload-form" onSubmit={saveDraft}>
-            <label>来源
-              <select value={draft.sourceID} disabled={saving} required onChange={(event) => setDraft({ ...draft, sourceID: event.currentTarget.value })}>
-                <option value="">选择数据源</option>
-                {sources.map((source) => <option value={source.id} key={source.id}>#{source.id} {source.name}</option>)}
-              </select>
-            </label>
-            <Field label="规则名称" name="rule_name" value={draft.name} required onChange={(name) => setDraft({ ...draft, name })} />
-            <label>规则类型
-              <select value={draft.ruleType} disabled={saving} onChange={(event) => setDraft({ ...draft, ruleType: event.currentTarget.value })}>
-                {['mapping', 'http_enrich', 'db_enrich', 'script', 'validator'].map((type) => <option key={type} value={type}>{type}</option>)}
-              </select>
-            </label>
-            <Field label="执行顺序" name="rule_order" type="number" value={draft.orderIndex} required onChange={(orderIndex) => setDraft({ ...draft, orderIndex })} />
-            <label className="checkbox-label"><input type="checkbox" checked={draft.enabled} disabled={saving} onChange={(event) => setDraft({ ...draft, enabled: event.currentTarget.checked })} />启用规则</label>
-            <label>规则配置 JSON<textarea value={draft.configJSON} disabled={saving} rows={12} onChange={(event) => setDraft({ ...draft, configJSON: event.currentTarget.value })} /></label>
-            <div className="excel-form-actions"><button className="primary" type="submit" disabled={saving}>{saving ? '保存中…' : '保存规则'}</button></div>
-          </form>
-          <hr />
-          <form className="excel-upload-form" onSubmit={runTest}>
-            <h4>Mapping 规则测试</h4>
-            <p className="query-contract-note">测试只使用当前草稿，不会保存配置；仅 mapping 类型有真实后端执行能力。</p>
-            <label>测试原始内容 JSON<textarea value={rawContent} disabled={!testable || testing} rows={8} onChange={(event) => setRawContent(event.currentTarget.value)} /></label>
-            <div className="excel-form-actions"><button type="submit" disabled={!testable || testing}>{testing ? '测试中…' : '执行测试'}</button></div>
-            {testResult !== null && <ReadonlyJSON value={testResult} />}
-          </form>
-        </Modal>
-      )}
-    </div>
   )
 }
 
@@ -2556,86 +2367,6 @@ function YouzanDistributionBackfillResultView({ title, result }: { title: string
         </div>
       )}
     </section>
-  )
-}
-
-function DestinationsQueryPage({ client, refreshVersion }: { client: ApiClient; refreshVersion: number }) {
-  const [query, setQuery] = useState('')
-  const [status, setStatus] = useState('all')
-  const [destinationType, setDestinationType] = useState('')
-  const [applied, setApplied] = useState({ keyword: '', enabled: '' as '' | 'true' | 'false', destinationType: '' })
-  const [page, setPage] = useState(1)
-  const [reloadVersion, setReloadVersion] = useState(0)
-  const [draft, setDraft] = useState<DestinationDraft | null>(null)
-  const [saving, setSaving] = useState(false)
-  const [testingID, setTestingID] = useState<number | null>(null)
-  const [pendingTest, setPendingTest] = useState<DestinationDefinition | null>(null)
-  const [message, setMessage] = useState('')
-  const listQuery = useMemo(() => buildDestinationListQuery({ page, pageSize: 20, ...applied }), [applied, page])
-  const { recordsPage, loading, error } = useConfigurationListPage<DestinationDefinition>(client, '/v1/destinations', 'destinations', listQuery, reloadVersion + refreshVersion)
-  const listedDestinations = recordsPage?.list ?? []
-  const pagination = recordsPage?.pagination
-
-  function submitQuery(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    setPage(1)
-    setApplied({ keyword: query, enabled: status === 'enabled' ? 'true' : status === 'disabled' ? 'false' : '', destinationType })
-    setReloadVersion((version) => version + 1)
-  }
-
-  async function openDetail(id: number) {
-    setMessage('')
-    const response = await client(`/v1/destinations/${id}`, { method: 'GET', showResult: false, silentLoading: true })
-    const destination = response.ok ? readObject<DestinationDefinition>(response, 'destination') : null
-    if (!destination) { setMessage(response.error?.message || '推送目标详情暂时不可用。'); return }
-    setDraft(destinationDraftFrom(destination))
-  }
-
-  async function save(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    if (!draft || saving) return
-    if (!draft.name.trim() || !draft.code.trim()) { setMessage('请填写目标名称和编码。'); return }
-    try { JSON.parse(draft.configJSON) } catch { setMessage('配置必须是有效 JSON。'); return }
-    setSaving(true)
-    const response = await client(draft.id ? `/v1/destinations/${draft.id}` : '/v1/destinations', { method: draft.id ? 'PUT' : 'POST', showResult: false, silentLoading: true, body: { name: draft.name.trim(), code: draft.code.trim(), destination_type: draft.destinationType, config_json: draft.configJSON, enabled: draft.enabled } })
-    setSaving(false)
-    if (!response.ok) { setMessage(response.error?.message || '推送目标保存未完成。'); return }
-    setDraft(null)
-    setMessage('推送目标已保存。')
-    setReloadVersion((version) => version + 1)
-  }
-
-  async function test(destination: DestinationDefinition) {
-    if (testingID !== null) return
-    setTestingID(destination.id)
-    const response = await client(`/v1/destinations/${destination.id}/test`, { method: 'POST', showResult: false, silentLoading: true })
-    setTestingID(null)
-    setMessage(response.ok ? '连通性测试通过；仅发送了无业务载荷的 HEAD 或 GET 请求。' : response.error?.message || '连通性测试未完成。')
-  }
-  return (
-    <div className="view-stack">
-      {message && <div className="result-banner" role="status">{message}</div>}
-      <form className="query-bar" onSubmit={submitQuery}><div className="query-fields">
-        <Field label="名称 / 编码" name="destination_query" value={query} onChange={setQuery} />
-        <SelectFilter label="状态" value={status} onChange={setStatus} options={[{ value: 'enabled', label: '启用' }, { value: 'disabled', label: '停用' }]} />
-        <Field label="类型" name="destination_type" value={destinationType} onChange={setDestinationType} />
-      </div><button type="submit" disabled={loading}>{loading ? '查询中…' : '查询'}</button></form>
-      {error && <div className="result-banner error" role="alert">{error}{recordsPage ? ' 已保留最近一次成功数据。' : ''}</div>}
-      <div className="record-actions"><button type="button" className="primary" onClick={() => setDraft({ id: null, name: '', code: '', destinationType: 'http', configJSON: '{\n  "url": "",\n  "method": "POST"\n}', enabled: true, hasSecret: false })}>新增目标</button></div>
-      <Panel title="推送目标" icon={<Send />} meta={loading && !recordsPage ? '正在加载…' : `共 ${pagination?.total ?? 0} 条`}><DestinationList destinations={listedDestinations} testingID={testingID} onDetail={(item) => { void openDetail(item.id) }} onTest={setPendingTest} /><MonitoringPaginationControls page={pagination?.page ?? page} totalPages={pagination?.totalPages ?? 0} loading={loading || testingID !== null} onPrevious={() => setPage((current) => Math.max(1, current - 1))} onNext={() => setPage((current) => current + 1)} /></Panel>
-      {draft && <Modal title={draft.id ? '推送目标详情与编辑' : '新增推送目标'} onClose={() => { if (!saving) setDraft(null) }}>
-        {draft.hasSecret && <div className="result-banner" role="status">配置中的敏感值已隐藏。保留“[已隐藏]”会保留原值；改为新值即可轮换，且不会回显旧值。</div>}
-        <form className="excel-upload-form" onSubmit={save}>
-          <Field label="目标名称" name="destination_name" value={draft.name} required onChange={(name) => setDraft({ ...draft, name })} />
-          <Field label="目标编码" name="destination_code" value={draft.code} required onChange={(code) => setDraft({ ...draft, code })} />
-          <label>目标类型<select value={draft.destinationType} disabled={saving} onChange={(event) => setDraft({ ...draft, destinationType: event.currentTarget.value })}><option value="http">http</option><option value="soap">soap</option></select></label>
-          <label className="checkbox-label"><input type="checkbox" checked={draft.enabled} disabled={saving} onChange={(event) => setDraft({ ...draft, enabled: event.currentTarget.checked })} />启用目标</label>
-          <label>配置 JSON<textarea rows={10} value={draft.configJSON} disabled={saving} onChange={(event) => setDraft({ ...draft, configJSON: event.currentTarget.value })} /></label>
-          <div className="excel-form-actions"><button className="primary" type="submit" disabled={saving}>{saving ? '保存中…' : '保存目标'}</button></div>
-        </form>
-      </Modal>}
-      {pendingTest && <Modal title="确认测试推送目标" onClose={() => { if (testingID === null) setPendingTest(null) }} footer={<><button type="button" disabled={testingID !== null} onClick={() => setPendingTest(null)}>取消</button><button className="primary" type="button" disabled={testingID !== null} onClick={() => { const target = pendingTest; setPendingTest(null); void test(target) }}>{testingID === pendingTest.id ? '测试中…' : '确认测试'}</button></>}><p>将向“{pendingTest.name}”配置的目标地址发起真实连通性请求。系统仅允许无业务载荷的 HEAD 或 GET；请确认目标的 GET 接口无副作用。确认继续？</p></Modal>}
-    </div>
   )
 }
 
@@ -4719,20 +4450,6 @@ function RawDataList({ origin, records, onRequestSourceFetch }: { origin: RawRec
   )
 }
 
-function TransformRuleList({ rules, sources, onDetail }: { rules: TransformRule[]; sources: SourceDefinition[]; onDetail: (rule: TransformRule) => void }) {
-  if (rules.length === 0) return <EmptyState text="暂无处理规则。" />
-  return (
-    <div className="data-table-wrap" role="region" aria-label="清洗规则列表" tabIndex={0}>
-      <table className="data-table design-rules-table"><thead><tr><th scope="col">规则名称</th><th scope="col">规则类型</th><th scope="col">来源</th><th scope="col">执行顺序</th><th scope="col">状态</th><th scope="col">操作</th></tr></thead>
-        <tbody>{rules.map((rule) => {
-          const source = sources.find((item) => item.id === rule.source_id)
-          return <tr key={rule.id}><td><strong>{rule.name}</strong>{rule.has_secret && <small>配置已脱敏</small>}</td><td>{rule.rule_type}</td><td>{source ? source.name : `#${rule.source_id}`}</td><td>{rule.order_index}</td><td><StatusPill label={rule.enabled ? '启用' : '停用'} /></td><td><button className="design-table-link" type="button" onClick={() => onDetail(rule)}>查看</button></td></tr>
-        })}</tbody>
-      </table>
-    </div>
-  )
-}
-
 function ProcessedDataList({ records }: { records: ProcessedData[] }) {
   if (records.length === 0) return <EmptyState text="暂无处理后数据。" />
   return (
@@ -4770,17 +4487,6 @@ function CleanRecordList({ records }: { records: CleanRecord[] }) {
             <td><details className="design-row-details"><summary className="design-table-link">查看</summary><dl><div><dt>记录 ID</dt><dd>#{record.id}</dd></div><div><dt>业务状态</dt><dd>{cleanRecordStatusLabel(record.status)}</dd></div></dl></details></td>
           </tr>
         ))}</tbody>
-      </table>
-    </div>
-  )
-}
-
-function DestinationList({ destinations, testingID, onDetail, onTest }: { destinations: DestinationDefinition[]; testingID: number | null; onDetail: (destination: DestinationDefinition) => void; onTest: (destination: DestinationDefinition) => void }) {
-  if (destinations.length === 0) return <EmptyState text="暂无推送目标。" />
-  return (
-    <div className="data-table-wrap" role="region" aria-label="推送目标列表" tabIndex={0}>
-      <table className="data-table"><thead><tr><th scope="col">目标系统</th><th scope="col">目标编码</th><th scope="col">接口类型</th><th scope="col">状态</th><th scope="col">操作</th></tr></thead>
-        <tbody>{destinations.map((destination) => <tr key={destination.id}><td><strong>{destination.name}</strong>{destination.has_secret && <small>配置已脱敏</small>}</td><td>{destination.code}</td><td>{destination.destination_type}</td><td><StatusPill label={destination.enabled ? '启用' : '停用'} /></td><td><div className="table-actions"><button type="button" onClick={() => onDetail(destination)}>详情</button><button type="button" disabled={testingID !== null} onClick={() => onTest(destination)}>{testingID === destination.id ? '测试中…' : '测试连接'}</button></div></td></tr>)}</tbody>
       </table>
     </div>
   )
@@ -5264,23 +4970,6 @@ function cleanRecordStatusLabel(status: string) {
 
 function formatQualityScore(value: number) {
   return Number.isFinite(value) ? `${value.toFixed(1)} / 100` : '-'
-}
-
-function ruleDraftFrom(rule: TransformRule): RuleDraft {
-  return {
-    id: rule.id,
-    sourceID: String(rule.source_id),
-    name: rule.name,
-    ruleType: rule.rule_type,
-    orderIndex: String(rule.order_index),
-    configJSON: rule.config_json || '{}',
-    enabled: rule.enabled,
-    hasSecret: Boolean(rule.has_secret),
-  }
-}
-
-function destinationDraftFrom(destination: DestinationDefinition): DestinationDraft {
-  return { id: destination.id, name: destination.name, code: destination.code, destinationType: destination.destination_type, configJSON: destination.config_json || '{}', enabled: destination.enabled, hasSecret: Boolean(destination.has_secret) }
 }
 
 function deliveryTaskDraftFrom(task: DeliveryTask): DeliveryTaskDraft {
