@@ -593,6 +593,34 @@ function textValue(record: JsonRecord, key: string) {
   return typeof record[key] === 'string' ? record[key] : ''
 }
 
+function aliasedValue(record: JsonRecord, primaryKey: string, legacyKey: string) {
+  return record[primaryKey] !== undefined ? record[primaryKey] : record[legacyKey]
+}
+
+function aliasedTextValue(record: JsonRecord, primaryKey: string, legacyKey: string) {
+  const value = aliasedValue(record, primaryKey, legacyKey)
+  return typeof value === 'string' ? value : ''
+}
+
+function aliasedNumberValue(record: JsonRecord, primaryKey: string, legacyKey: string) {
+  const value = aliasedValue(record, primaryKey, legacyKey)
+  return typeof value === 'number' && Number.isFinite(value) ? value : undefined
+}
+
+function positiveSafeIntegerValue(value: unknown) {
+  if (positiveSafeInteger(value)) return value
+  if (typeof value !== 'string' || !/^[1-9]\d*$/.test(value)) return undefined
+  const parsed = Number(value)
+  return positiveSafeInteger(parsed) ? parsed : undefined
+}
+
+function nonNegativeSafeIntegerValue(value: unknown) {
+  if (nonNegativeSafeInteger(value)) return value
+  if (typeof value !== 'string' || !/^(?:0|[1-9]\d*)$/.test(value)) return undefined
+  const parsed = Number(value)
+  return nonNegativeSafeInteger(parsed) ? parsed : undefined
+}
+
 function numberValue(record: JsonRecord, key: string) {
   const value = record[key]
   return typeof value === 'number' && Number.isFinite(value) ? value : undefined
@@ -603,39 +631,44 @@ function isMallWeatherSheetPushStatus(value: unknown): value is MallWeatherSheet
 }
 
 function mallWeatherMall(value: unknown): MallWeatherMall | null {
-  if (!isRecord(value) || !positiveSafeInteger(value.id) || !positiveSafeInteger(value.version) ||
-    typeof value.mallCode !== 'string' || typeof value.nameCn !== 'string' || !value.mallCode.trim() || !value.nameCn.trim()) return null
+  if (!isRecord(value)) return null
+  const id = positiveSafeIntegerValue(value.id)
+  const version = positiveSafeIntegerValue(value.version)
+  const mallCode = aliasedTextValue(value, 'mallCode', 'mall_code').trim()
+  const nameCn = aliasedTextValue(value, 'nameCn', 'name_cn').trim()
+  if (id === undefined || version === undefined || !mallCode || !nameCn) return null
   const longitude = numberValue(value, 'longitude')
   const latitude = numberValue(value, 'latitude')
   const coordinates = longitude !== undefined && latitude !== undefined &&
     validCoordinateValue(longitude, -180, 180) && validCoordinateValue(latitude, -90, 90)
     ? { longitude, latitude }
     : {}
-  const detailProfile = typeof value.detailProfile === 'string' && ['full', 'standard', 'economy'].includes(value.detailProfile.trim().toLowerCase())
-    ? value.detailProfile.trim().toLowerCase()
+  const configuredDetailProfile = aliasedTextValue(value, 'detailProfile', 'detail_profile').trim().toLowerCase()
+  const detailProfile = ['full', 'standard', 'economy'].includes(configuredDetailProfile)
+    ? configuredDetailProfile
     : 'full'
-  const configuredCoverageRadiusM = numberValue(value, 'coverageRadiusM')
+  const configuredCoverageRadiusM = aliasedNumberValue(value, 'coverageRadiusM', 'coverage_radius_m')
   const coverageRadiusM = configuredCoverageRadiusM !== undefined && Number.isSafeInteger(configuredCoverageRadiusM) &&
     configuredCoverageRadiusM >= 100 && configuredCoverageRadiusM <= 10000
     ? configuredCoverageRadiusM
     : 1000
   return {
-    id: value.id,
-    mallCode: value.mallCode.trim(),
-    nameCn: value.nameCn.trim(),
+    id,
+    mallCode,
+    nameCn,
     province: textValue(value, 'province'),
     city: textValue(value, 'city'),
     district: textValue(value, 'district'),
-    address: textValue(value, 'address'),
+    address: aliasedTextValue(value, 'address', 'address_raw'),
     ...coordinates,
-    coordinateSystem: 'longitude' in coordinates ? textValue(value, 'coordinateSystem').trim().toUpperCase() : '',
-    geocodeStatus: textValue(value, 'geocodeStatus').trim().toLowerCase() || 'pending',
-    weatherEnabled: value.weatherEnabled === true,
+    coordinateSystem: 'longitude' in coordinates ? aliasedTextValue(value, 'coordinateSystem', 'coordinate_system').trim().toUpperCase() : '',
+    geocodeStatus: aliasedTextValue(value, 'geocodeStatus', 'geocode_status').trim().toLowerCase() || 'pending',
+    weatherEnabled: aliasedValue(value, 'weatherEnabled', 'weather_enabled') === true,
     detailProfile,
     coverageRadiusM,
-    timeZone: textValue(value, 'timeZone').trim() || 'Asia/Shanghai',
+    timeZone: aliasedTextValue(value, 'timeZone', 'timezone').trim() || 'Asia/Shanghai',
     status: textValue(value, 'status').trim().toLowerCase() || 'draft',
-    version: value.version,
+    version,
   }
 }
 
@@ -831,15 +864,18 @@ function mallWeatherAlert(record: JsonRecord): MallWeatherAlert {
 
 export function parseMallWeatherMallList(payload: unknown): MallWeatherMallList | null {
   const data = envelopeData(payload)
-  if (!data || !Array.isArray(data.items)) return null
+  if (!data) return null
+  const rawItems = Array.isArray(data.items) ? data.items : Array.isArray(data.result) ? data.result : null
+  if (!rawItems) return null
 
   const items: MallWeatherMall[] = []
-  for (const item of data.items) {
+  for (const item of rawItems) {
     const mall = mallWeatherMall(item)
     if (mall) items.push(mall)
   }
-  if (data.items.length > 0 && items.length === 0) return null
-  const nextAfterId = data.nextAfterId === undefined ? 0 : numberValue(data, 'nextAfterId')
+  if (rawItems.length > 0 && items.length === 0) return null
+  const rawNextAfterId = aliasedValue(data, 'nextAfterId', 'next_after_id')
+  const nextAfterId = rawNextAfterId === undefined ? 0 : nonNegativeSafeIntegerValue(rawNextAfterId)
   if (nextAfterId === undefined || !Number.isSafeInteger(nextAfterId) || nextAfterId < 0) return null
   return { items, nextAfterId }
 }

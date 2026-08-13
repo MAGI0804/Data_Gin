@@ -222,6 +222,57 @@ test('keeps legacy mall rows visible while normalizing optional weather configur
   })
 })
 
+test('matches the legacy snake case mall list returned by deployed backends', () => {
+  const result = parseMallWeatherMallList({
+    code: 0,
+    data: {
+      result: [{
+        id: '12',
+        version: '4',
+        mall_code: 'HZ-001',
+        name_cn: '杭州示例店铺',
+        province: '浙江省',
+        city: '杭州市',
+        district: '西湖区',
+        address_raw: '文三路 1 号',
+        longitude: 120.13,
+        latitude: 30.27,
+        coordinate_system: 'gcj02',
+        geocode_status: 'CONFIRMED',
+        weather_enabled: true,
+        detail_profile: 'standard',
+        coverage_radius_m: 800,
+        timezone: 'Asia/Shanghai',
+        status: 'ACTIVE',
+      }],
+      next_after_id: '12',
+    },
+  })
+
+  assert.deepEqual(result, {
+    nextAfterId: 12,
+    items: [{
+      id: 12,
+      mallCode: 'HZ-001',
+      nameCn: '杭州示例店铺',
+      province: '浙江省',
+      city: '杭州市',
+      district: '西湖区',
+      address: '文三路 1 号',
+      longitude: 120.13,
+      latitude: 30.27,
+      coordinateSystem: 'GCJ02',
+      geocodeStatus: 'confirmed',
+      weatherEnabled: true,
+      detailProfile: 'standard',
+      coverageRadiusM: 800,
+      timeZone: 'Asia/Shanghai',
+      status: 'active',
+      version: 4,
+    }],
+  })
+})
+
 test('builds a normalized mall onboarding request and stable operation paths', () => {
   assert.deepEqual(mallWeatherCreateRequest({
     mallCode: ' sh-002 ', nameCn: ' 新商场 ', province: ' 上海市 ', city: ' 上海市 ', district: ' 浦东新区 ', address: ' 世纪大道 1 号 ',
