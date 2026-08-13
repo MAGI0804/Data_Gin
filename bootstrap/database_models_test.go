@@ -38,7 +38,7 @@ func TestReportCenterMigrationModelsAreUnique(t *testing.T) {
 }
 
 func TestReportCenterMigrationVersionIncludesVersionedGrants(t *testing.T) {
-	if schemaMigrationVersion != "2026-08-13-report-center-v7" {
+	if schemaMigrationVersion != "2026-08-13-report-center-v8" {
 		t.Fatalf("schemaMigrationVersion = %q", schemaMigrationVersion)
 	}
 }

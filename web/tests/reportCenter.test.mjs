@@ -180,15 +180,25 @@ test('Oracle datasource test parser accepts only safe stable fields', () => {
 test('report audit parser preserves safe cursor records and structured detail', () => {
   const page = parseReportAuditPage({ data: {
     items: [{
-      id: 88, actorUserId: 7, action: 'REPORT_RUN_RESULT_READ', targetType: 'REPORT_RUN', targetId: 31,
+      id: 88, actorType: 'USER', actorUserId: 7, action: 'REPORT_RUN_RESULT_READ', targetType: 'REPORT_RUN', targetId: 31,
       requestId: 'request-uuid', detail: { rowCount: 100, cursor: 'redacted' }, createdAt: '2026-08-13T08:00:00Z',
     }],
     hasMore: true,
     nextAfterId: 88,
   } })
   assert.equal(page.items[0].action, 'REPORT_RUN_RESULT_READ')
+  assert.equal(page.items[0].actorType, 'USER')
   assert.deepEqual(page.items[0].detail, { rowCount: 100, cursor: 'redacted' })
   assert.equal(page.nextAfterId, 88)
+})
+
+test('report audit parser accepts a system actor and rejects inconsistent actors', () => {
+  const base = { id: 89, action: 'REPORT_RUN_SUCCEEDED', targetType: 'REPORT_RUN', targetId: 31, requestId: 'system-request', detail: {}, createdAt: '2026-08-13T08:00:00Z' }
+  const page = parseReportAuditPage({ data: { items: [{ ...base, actorType: 'SYSTEM', actorUserId: 0 }], hasMore: false } })
+  assert.equal(page.items[0].actorType, 'SYSTEM')
+  assert.equal(page.items[0].actorUserId, 0)
+  assert.throws(() => parseReportAuditPage({ data: { items: [{ ...base, actorType: 'USER', actorUserId: 0 }], hasMore: false } }))
+  assert.throws(() => parseReportAuditPage({ data: { items: [{ ...base, actorType: 'SYSTEM', actorUserId: 7 }], hasMore: false } }))
 })
 
 test('report audit parser rejects incomplete records and missing cursors', () => {

@@ -488,6 +488,9 @@ func (transactionDriver) Open(name string) (driver.Conn, error) {
 func (connection *transactionConnection) Prepare(string) (driver.Stmt, error) {
 	return nil, errors.New("report transaction test: prepare is unsupported")
 }
+func (connection *transactionConnection) ExecContext(context.Context, string, []driver.NamedValue) (driver.Result, error) {
+	return driver.RowsAffected(1), nil
+}
 func (connection *transactionConnection) Close() error { return nil }
 func (connection *transactionConnection) Begin() (driver.Tx, error) {
 	connection.state.begins++

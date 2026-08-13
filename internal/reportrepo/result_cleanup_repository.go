@@ -142,7 +142,11 @@ func (repository *Repository) ClaimExpiredResultCleanup(ctx context.Context, run
 			}
 		}
 		runtime.Run.Status, runtime.Run.LeaseToken, runtime.Run.LeaseExpiresAt = model.ReportRunStatusResultPurging, leaseToken, &expiresAt
-		return nil
+		detail := map[string]interface{}{"reasonCode": "RESULT_EXPIRED"}
+		if runtime.Export != nil {
+			detail["exportId"] = runtime.Export.ID
+		}
+		return repository.writeSystemAudit(ctx, tx, "REPORT_RESULT_PURGE_STARTED", "REPORT_RUN", runID, detail)
 	})
 	if err != nil {
 		return nil, err
@@ -187,7 +191,7 @@ func (repository *Repository) MarkExpiredResultPurged(ctx context.Context, runID
 		}
 		var export model.ReportExport
 		if err := tx.Where("run_id = ?", runID).First(&export).Error; errors.Is(err, gorm.ErrRecordNotFound) {
-			return nil
+			return repository.writeSystemAudit(ctx, tx, "REPORT_RESULT_PURGED", "REPORT_RUN", runID, map[string]interface{}{"purgedRows": purgedRows})
 		} else if err != nil {
 			return fmt.Errorf("report result cleanup: load export completion: %w", err)
 		}
@@ -201,7 +205,7 @@ func (repository *Repository) MarkExpiredResultPurged(ctx context.Context, runID
 			}
 			return ErrReportResultCleanupLeaseLost
 		}
-		return nil
+		return repository.writeSystemAudit(ctx, tx, "REPORT_RESULT_PURGED", "REPORT_RUN", runID, map[string]interface{}{"exportId": export.ID, "purgedRows": purgedRows})
 	})
 }
 
@@ -223,6 +227,6 @@ func (repository *Repository) ReleaseExpiredResultCleanup(ctx context.Context, r
 			Updates(map[string]interface{}{"worker_id": "", "lease_token": "", "lease_expires_at": nil, "heartbeat_at": nil, "updated_at": now}).Error; err != nil {
 			return fmt.Errorf("report result cleanup: release export: %w", err)
 		}
-		return nil
+		return repository.writeSystemAudit(ctx, tx, "REPORT_RESULT_PURGE_RETRY", "REPORT_RUN", runID, map[string]interface{}{"reasonCode": "RESULT_EXPIRED"})
 	})
 }

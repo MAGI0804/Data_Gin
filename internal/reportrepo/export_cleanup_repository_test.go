@@ -72,4 +72,10 @@ func TestExportCleanupRejectsInvalidLeaseIdentity(t *testing.T) {
 	if err := repository.ReleaseExportCleanup(t.Context(), candidate, "bad-token", time.Now().UTC()); err == nil {
 		t.Fatal("ReleaseExportCleanup() accepted invalid token")
 	}
+	if err := repository.FinishExportCleanup(t.Context(), candidate, "bad-token", time.Now().UTC()); err == nil {
+		t.Fatal("FinishExportCleanup() accepted invalid token")
+	}
+	if err := (*Repository)(nil).FinishExportCleanup(t.Context(), candidate, uuid.NewString(), time.Now().UTC()); err == nil {
+		t.Fatal("FinishExportCleanup() accepted nil repository")
+	}
 }

@@ -26,7 +26,7 @@ type ReportAuditPage struct {
 }
 
 func (repository *Repository) WriteReportAudit(ctx context.Context, audit model.ReportAudit) error {
-	if repository == nil || repository.db == nil || ctx == nil || audit.ActorUserID == 0 ||
+	if repository == nil || repository.db == nil || ctx == nil || !validReportAuditActor(audit) ||
 		strings.TrimSpace(audit.Action) == "" || strings.TrimSpace(audit.TargetType) == "" || audit.TargetID == 0 ||
 		strings.TrimSpace(audit.RequestID) == "" || !validOptionalAuditJSON(audit.DetailJSON) {
 		return fmt.Errorf("report audit: invalid record")
@@ -35,6 +35,17 @@ func (repository *Repository) WriteReportAudit(ctx context.Context, audit model.
 		return fmt.Errorf("report audit: create: %w", err)
 	}
 	return nil
+}
+
+func validReportAuditActor(audit model.ReportAudit) bool {
+	switch audit.ActorType {
+	case "", model.ReportAuditActorUser:
+		return audit.ActorUserID > 0
+	case model.ReportAuditActorSystem:
+		return audit.ActorUserID == 0
+	default:
+		return false
+	}
 }
 
 func (repository *Repository) ListReportAudits(ctx context.Context, query ReportAuditListQuery) (*ReportAuditPage, error) {

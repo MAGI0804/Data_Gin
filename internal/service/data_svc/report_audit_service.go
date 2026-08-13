@@ -27,6 +27,7 @@ type ReportAuditQuery struct {
 
 type ReportAuditDTO struct {
 	ID          uint           `json:"id"`
+	ActorType   string         `json:"actorType"`
 	ActorUserID uint           `json:"actorUserId"`
 	Action      string         `json:"action"`
 	TargetType  string         `json:"targetType"`
@@ -76,10 +77,17 @@ func (service *ReportAuditService) List(ctx context.Context, query ReportAuditQu
 	}
 	for _, row := range page.Items {
 		result.Items = append(result.Items, ReportAuditDTO{
-			ID: row.ID, ActorUserID: row.ActorUserID, Action: row.Action,
+			ID: row.ID, ActorType: reportAuditActorType(row), ActorUserID: row.ActorUserID, Action: row.Action,
 			TargetType: row.TargetType, TargetID: row.TargetID, RequestID: row.RequestID,
 			Detail: row.DetailJSON, CreatedAt: row.CreatedAt,
 		})
 	}
 	return result, nil
+}
+
+func reportAuditActorType(row model.ReportAudit) string {
+	if row.ActorType == model.ReportAuditActorSystem {
+		return model.ReportAuditActorSystem
+	}
+	return model.ReportAuditActorUser
 }

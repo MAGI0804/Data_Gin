@@ -1,5 +1,5 @@
 import type { ClientResponse, HTTPMethod } from '../api/client'
-import type { ReportAuditPage, ReportAuditQuery, ReportCatalogPage, ReportCatalogQuery, ReportColumn, ReportDatasource, ReportDatasourceInput, ReportDatasourceTest, ReportDefinitionStatus, ReportDraft, ReportExport, ReportExportPage, ReportFilterOperator, ReportGrant, ReportParameter, ReportResultPage, ReportResultQuery, ReportRun, ReportRunContract, ReportRunStatus, ReportSummary } from './types'
+import type { ReportAudit, ReportAuditPage, ReportAuditQuery, ReportCatalogPage, ReportCatalogQuery, ReportColumn, ReportDatasource, ReportDatasourceInput, ReportDatasourceTest, ReportDefinitionStatus, ReportDraft, ReportExport, ReportExportPage, ReportFilterOperator, ReportGrant, ReportParameter, ReportResultPage, ReportResultQuery, ReportRun, ReportRunContract, ReportRunStatus, ReportSummary } from './types'
 
 type JsonRecord = Record<string, unknown>
 
@@ -327,14 +327,19 @@ export function parseReportAuditPage(payload: unknown): ReportAuditPage {
   const items = rawItems.map((value) => {
     if (!isRecord(value)) throw new Error('invalid report audit')
     const id = positiveInteger(value.id)
-    const actorUserId = positiveInteger(value.actorUserId)
+    const actorType: ReportAudit['actorType'] | '' = value.actorType === 'SYSTEM'
+      ? 'SYSTEM'
+      : value.actorType === 'USER' || value.actorType === undefined
+        ? 'USER'
+        : ''
+    const actorUserId = actorType === 'SYSTEM' ? nonNegativeInteger(value.actorUserId) : positiveInteger(value.actorUserId)
     const action = publicString(value.action, 64)
     const targetType = publicString(value.targetType, 32)
     const targetId = positiveInteger(value.targetId)
     const requestId = publicString(value.requestId, 128)
     const createdAt = publicDate(value.createdAt)
-    if (!id || !actorUserId || !action || !targetType || !targetId || !requestId || !createdAt) throw new Error('invalid report audit')
-    return { id, actorUserId, action, targetType, targetId, requestId, detail: isRecord(value.detail) ? value.detail : {}, createdAt }
+    if (!id || !actorType || (actorType === 'USER' ? !actorUserId : actorUserId !== 0) || !action || !targetType || !targetId || !requestId || !createdAt) throw new Error('invalid report audit')
+    return { id, actorType, actorUserId, action, targetType, targetId, requestId, detail: isRecord(value.detail) ? value.detail : {}, createdAt }
   })
   for (let index = 1; index < items.length; index += 1) {
     if (items[index - 1].id <= items[index].id) throw new Error('invalid report audit order')

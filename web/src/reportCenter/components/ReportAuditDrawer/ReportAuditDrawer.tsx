@@ -83,7 +83,7 @@ export function ReportAuditDrawer({ client, open, reports, onClose }: {
 }
 
 function AuditTable({ items }: { items: ReportAudit[] }) {
-  return <DataTable containerClassName={styles.table} density="compact" minWidth={920} scrollLabel="报表审计记录"><thead><tr><th scope="col">时间</th><th scope="col">动作</th><th scope="col">目标</th><th scope="col">操作人</th><th scope="col">请求标识</th><th scope="col">详情</th></tr></thead><tbody>{items.map((item) => <tr key={item.id}><td>{formatDate(item.createdAt)}</td><td><StatusTag tone={auditTone(item.action)}>{auditActionLabel(item.action)}</StatusTag></td><td><strong>{targetLabel(item.targetType)}</strong><small>#{item.targetId}</small></td><td>用户 #{item.actorUserId}</td><td><code>{item.requestId}</code></td><td><code className={styles.detail}>{JSON.stringify(item.detail)}</code></td></tr>)}</tbody></DataTable>
+  return <DataTable containerClassName={styles.table} density="compact" minWidth={920} scrollLabel="报表审计记录"><thead><tr><th scope="col">时间</th><th scope="col">动作</th><th scope="col">目标</th><th scope="col">操作人</th><th scope="col">请求标识</th><th scope="col">详情</th></tr></thead><tbody>{items.map((item) => <tr key={item.id}><td>{formatDate(item.createdAt)}</td><td><StatusTag tone={auditTone(item.action)}>{auditActionLabel(item.action)}</StatusTag></td><td><strong>{targetLabel(item.targetType)}</strong><small>#{item.targetId}</small></td><td>{item.actorType === 'SYSTEM' ? '系统任务' : `用户 #${item.actorUserId}`}</td><td><code>{item.requestId}</code></td><td><code className={styles.detail}>{JSON.stringify(item.detail)}</code></td></tr>)}</tbody></DataTable>
 }
 
 function auditTone(action: string) {
@@ -97,7 +97,13 @@ function auditActionLabel(action: string) {
   return ({
     REPORT_DRAFT_CREATE: '创建草稿', REPORT_DRAFT_UPDATE: '更新草稿', REPORT_DRAFT_COLLECTIONS_UPDATE: '更新配置集合',
     REPORT_PUBLISH: '发布报表', REPORT_RUN_CREATE: '创建运行', REPORT_RUN_CANCEL_REQUEST: '取消运行',
+    REPORT_RUN_SUCCEEDED: '运行完成', REPORT_RUN_FAILED: '运行失败', REPORT_RUN_CANCELLED: '运行已取消',
+    REPORT_RUN_UNKNOWN: '运行结果待确认', REPORT_RUN_RECONCILED: '运行结果已确认', REPORT_RUN_RECONCILE_PENDING: '运行结果仍待确认',
+    REPORT_RUN_STARTED: '运行已开始', REPORT_RUN_ORACLE_STARTED: 'Oracle 过程已开始', REPORT_RUN_RETRY_QUEUED: '运行已重新排队', REPORT_RUN_RECONCILIATION_STARTED: '运行对账已开始',
     REPORT_RESULT_QUERY_SUCCESS: '查询结果', REPORT_RESULT_QUERY_DENIED: '查询被拒绝', REPORT_EXPORT_CREATE: '创建导出',
+    REPORT_EXPORT_READY: '导出完成', REPORT_EXPORT_FAILED: '导出失败', REPORT_EXPORT_CANCELLED: '导出已取消',
+    REPORT_EXPORT_STARTED: '导出已开始', REPORT_EXPORT_RETRY_QUEUED: '导出已重新排队',
+    REPORT_RESULT_PURGE_STARTED: '结果清理已开始', REPORT_RESULT_PURGE_RETRY: '结果清理等待重试', REPORT_RESULT_PURGED: '结果数据已清理', REPORT_EXPORT_FILE_EXPIRED: '导出文件已过期',
     REPORT_EXPORT_DOWNLOAD_SIGN_SUCCESS: '获取下载地址', REPORT_EXPORT_DOWNLOAD_SIGN_DENIED: '下载被拒绝',
   } as Record<string, string>)[action] ?? action
 }

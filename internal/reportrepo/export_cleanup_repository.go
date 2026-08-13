@@ -78,17 +78,30 @@ func (repository *Repository) FinishExportCleanup(
 	leaseToken string,
 	finishedAt time.Time,
 ) error {
-	if finishedAt.IsZero() {
+	if !repository.validExportCleanupLease(ctx, candidate, leaseToken) || finishedAt.IsZero() {
 		return fmt.Errorf("report export cleanup: invalid finish time")
 	}
-	return repository.updateExportCleanupLease(ctx, candidate, leaseToken, map[string]interface{}{
-		"status":            model.ReportExportStatusExpired,
-		"result_object_key": "",
-		"worker_id":         "",
-		"lease_token":       "",
-		"lease_expires_at":  nil,
-		"heartbeat_at":      nil,
-		"updated_at":        finishedAt.UTC().Truncate(time.Millisecond),
+	finishedAt = finishedAt.UTC().Truncate(time.Millisecond)
+	return repository.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		result := tx.Model(&model.ReportExport{}).
+			Where("id = ? AND export_uuid = ? AND status = ?", candidate.ID, candidate.ExportUUID, model.ReportExportStatusReady).
+			Where("result_object_key = ? AND purged_at IS NOT NULL AND lease_token = ?", candidate.ResultObjectKey, leaseToken).
+			Updates(map[string]interface{}{
+				"status":            model.ReportExportStatusExpired,
+				"result_object_key": "",
+				"worker_id":         "",
+				"lease_token":       "",
+				"lease_expires_at":  nil,
+				"heartbeat_at":      nil,
+				"updated_at":        finishedAt,
+			})
+		if result.Error != nil {
+			return fmt.Errorf("report export cleanup: finish update: %w", result.Error)
+		}
+		if result.RowsAffected != 1 {
+			return ErrReportExportCleanupLeaseLost
+		}
+		return repository.writeSystemAudit(ctx, tx, "REPORT_EXPORT_FILE_EXPIRED", "REPORT_EXPORT", candidate.ID, nil)
 	})
 }
 

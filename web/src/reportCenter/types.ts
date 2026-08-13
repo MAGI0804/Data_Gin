@@ -230,6 +230,7 @@ export type ReportExportPage = { items: ReportExport[]; hasMore: boolean; nextAf
 
 export type ReportAudit = {
   id: number
+  actorType: 'USER' | 'SYSTEM'
   actorUserId: number
   action: string
   targetType: string

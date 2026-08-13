@@ -3,6 +3,9 @@ package model
 import "time"
 
 const (
+	ReportAuditActorUser   = "USER"
+	ReportAuditActorSystem = "SYSTEM"
+
 	ReportDatasourceDriverOracle = "ORACLE"
 
 	ReportDefinitionStatusDraft    = "DRAFT"
@@ -305,6 +308,7 @@ func (ReportResultReadLease) TableName() string { return "report_result_read_lea
 
 type ReportAudit struct {
 	BaseModel
+	ActorType   string    `gorm:"column:actor_type;size:16;not null;default:'USER';index" json:"actorType"`
 	ActorUserID uint      `gorm:"column:actor_user_id;not null;index:idx_report_audit_actor_created,priority:1" json:"actorUserId"`
 	Action      string    `gorm:"column:action;size:64;not null;index" json:"action"`
 	TargetType  string    `gorm:"column:target_type;size:32;not null;index:idx_report_audit_target_created,priority:1" json:"targetType"`

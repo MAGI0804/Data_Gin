@@ -155,6 +155,9 @@ func (repository *Repository) RecoverExpiredPreOracleRuns(ctx context.Context, n
 			if outbox.RowsAffected != 1 {
 				return fmt.Errorf("reset outbox count changed")
 			}
+			if err := repository.writeSystemAudit(ctx, tx, "REPORT_RUN_RETRY_QUEUED", "REPORT_RUN", candidate.ID, map[string]interface{}{"reasonCode": "PRE_ORACLE_LEASE_EXPIRED"}); err != nil {
+				return err
+			}
 			recovered++
 			return nil
 		})
@@ -195,7 +198,7 @@ func (repository *Repository) BeginExecution(
 			lease.Disposition = RunDispositionTerminal
 			lease.Run.Status = model.ReportRunStatusCancelled
 			lease.Run.FinishedAt = &now
-			return nil
+			return repository.writeSystemAudit(ctx, tx, "REPORT_RUN_CANCELLED", "REPORT_RUN", runID, map[string]interface{}{"reasonCode": "CANCELLED_BEFORE_ORACLE_START"})
 		}
 		disposition, err := classifyRunStart(&lease.Run, now)
 		if err != nil {
@@ -215,7 +218,7 @@ func (repository *Repository) BeginExecution(
 			lease.Run.LeaseToken = ""
 			lease.Run.WorkerID = ""
 			lease.Run.LeaseExpiresAt = nil
-			return nil
+			return repository.writeSystemAudit(ctx, tx, "REPORT_RUN_UNKNOWN", "REPORT_RUN", runID, map[string]interface{}{"reasonCode": "WORKER_LEASE_EXPIRED_AFTER_ORACLE_START"})
 		}
 		if disposition != RunDispositionAcquired {
 			return nil
@@ -244,7 +247,7 @@ func (repository *Repository) BeginExecution(
 		lease.Run.LeaseExpiresAt = &expiresAt
 		lease.Run.HeartbeatAt = &now
 		lease.Run.Attempt++
-		return nil
+		return repository.writeSystemAudit(ctx, tx, "REPORT_RUN_STARTED", "REPORT_RUN", runID, map[string]interface{}{"attempt": lease.Run.Attempt})
 	})
 	if err != nil {
 		return nil, err
@@ -350,7 +353,7 @@ func (repository *Repository) BeginReconciliation(ctx context.Context, runID uin
 		lease.Run.LeaseToken = leaseToken
 		lease.Run.WorkerID = strings.TrimSpace(workerID)
 		lease.Run.LeaseExpiresAt = &expiresAt
-		return nil
+		return repository.writeSystemAudit(ctx, tx, "REPORT_RUN_RECONCILIATION_STARTED", "REPORT_RUN", runID, nil)
 	})
 	if err != nil {
 		return nil, err
@@ -405,22 +408,23 @@ func (repository *Repository) MarkOracleExecutionStarted(ctx context.Context, ru
 	if now.IsZero() {
 		return fmt.Errorf("report execution: invalid oracle start time")
 	}
-	return repository.updateOwnedExecution(ctx, runID, leaseToken, map[string]interface{}{
+	return repository.updateOwnedExecutionWithAudit(ctx, runID, leaseToken, map[string]interface{}{
 		"oracle_started_at": now.UTC().Truncate(time.Millisecond), "updated_at": now.UTC().Truncate(time.Millisecond),
-	}, true)
+	}, true, "REPORT_RUN_ORACLE_STARTED", nil)
 }
 
 func (repository *Repository) MarkExecutionSucceeded(ctx context.Context, runID uint, leaseToken string, rowCount int64, finishedAt, expiresAt time.Time) error {
 	if rowCount < 0 || finishedAt.IsZero() || !expiresAt.After(finishedAt) {
 		return fmt.Errorf("report execution: invalid success update")
 	}
-	return repository.updateOwnedExecution(ctx, runID, leaseToken, map[string]interface{}{
+	updates := map[string]interface{}{
 		"status": model.ReportRunStatusSucceeded, "row_count": rowCount,
 		"finished_at": finishedAt.UTC().Truncate(time.Millisecond), "result_expires_at": expiresAt.UTC().Truncate(time.Millisecond),
 		"error_code": "", "error_message_safe": "", "unknown_at": nil, "unknown_reason_code": "",
 		"worker_id": "", "lease_token": "", "lease_expires_at": nil, "heartbeat_at": nil,
 		"updated_at": finishedAt.UTC().Truncate(time.Millisecond),
-	}, true)
+	}
+	return repository.updateOwnedExecutionWithAudit(ctx, runID, leaseToken, updates, true, "REPORT_RUN_SUCCEEDED", map[string]interface{}{"rowCount": rowCount})
 }
 
 func (repository *Repository) ConfirmExecutionSucceeded(ctx context.Context, runID uint, rowCount int64) (bool, error) {
@@ -442,21 +446,21 @@ func (repository *Repository) MarkExecutionFailed(ctx context.Context, runID uin
 	if !validRunError(code, safeMessage) || finishedAt.IsZero() {
 		return fmt.Errorf("report execution: invalid failure update")
 	}
-	return repository.updateOwnedExecution(ctx, runID, leaseToken, terminalRunUpdates(model.ReportRunStatusFailed, code, safeMessage, finishedAt), false)
+	return repository.updateOwnedExecutionWithAudit(ctx, runID, leaseToken, terminalRunUpdates(model.ReportRunStatusFailed, code, safeMessage, finishedAt), false, "REPORT_RUN_FAILED", map[string]interface{}{"errorCode": code})
 }
 
 func (repository *Repository) MarkExecutionCancelled(ctx context.Context, runID uint, leaseToken string, finishedAt time.Time) error {
 	if finishedAt.IsZero() {
 		return fmt.Errorf("report execution: invalid cancellation update")
 	}
-	return repository.updateOwnedExecution(ctx, runID, leaseToken, terminalRunUpdates(model.ReportRunStatusCancelled, "CANCELLED", "报表运行已取消", finishedAt), false)
+	return repository.updateOwnedExecutionWithAudit(ctx, runID, leaseToken, terminalRunUpdates(model.ReportRunStatusCancelled, "CANCELLED", "报表运行已取消", finishedAt), false, "REPORT_RUN_CANCELLED", nil)
 }
 
 func (repository *Repository) MarkExecutionUnknown(ctx context.Context, runID uint, leaseToken, reasonCode, safeMessage string, now time.Time) error {
 	if !validRunError(reasonCode, safeMessage) || now.IsZero() {
 		return fmt.Errorf("report execution: invalid unknown update")
 	}
-	return repository.updateOwnedExecution(ctx, runID, leaseToken, unknownRunUpdates(now.UTC().Truncate(time.Millisecond), reasonCode, safeMessage), false)
+	return repository.updateOwnedExecutionWithAudit(ctx, runID, leaseToken, unknownRunUpdates(now.UTC().Truncate(time.Millisecond), reasonCode, safeMessage), false, "REPORT_RUN_UNKNOWN", map[string]interface{}{"reasonCode": reasonCode})
 }
 
 func (repository *Repository) ReleaseExecutionForRetry(ctx context.Context, runID uint, leaseToken string, now time.Time) error {
@@ -464,10 +468,10 @@ func (repository *Repository) ReleaseExecutionForRetry(ctx context.Context, runI
 		return fmt.Errorf("report execution: invalid retry release")
 	}
 	now = now.UTC().Truncate(time.Millisecond)
-	return repository.updateOwnedExecution(ctx, runID, leaseToken, map[string]interface{}{
+	return repository.updateOwnedExecutionWithAudit(ctx, runID, leaseToken, map[string]interface{}{
 		"status": model.ReportRunStatusQueued, "worker_id": "", "lease_token": "", "lease_expires_at": nil,
 		"heartbeat_at": nil, "finished_at": nil, "error_code": "", "error_message_safe": "", "updated_at": now,
-	}, true)
+	}, true, "REPORT_RUN_RETRY_QUEUED", nil)
 }
 
 func (repository *Repository) LoadRuntimeContract(ctx context.Context, runID uint, leaseToken string) (*RuntimeContract, error) {
@@ -510,12 +514,12 @@ func (repository *Repository) MarkReconciliationSucceeded(ctx context.Context, r
 	if rowCount < 0 || finishedAt.IsZero() || !expiresAt.After(finishedAt) {
 		return fmt.Errorf("report reconciliation: invalid success update")
 	}
-	return repository.updateOwnedReconciliation(ctx, runID, leaseToken, map[string]interface{}{
+	return repository.updateOwnedReconciliationWithAudit(ctx, runID, leaseToken, map[string]interface{}{
 		"status": model.ReportRunStatusSucceeded, "row_count": rowCount, "finished_at": finishedAt.UTC().Truncate(time.Millisecond),
 		"result_expires_at": expiresAt.UTC().Truncate(time.Millisecond), "unknown_at": nil, "unknown_reason_code": "",
 		"next_reconcile_at": nil, "error_code": "", "error_message_safe": "", "worker_id": "", "lease_token": "",
 		"lease_expires_at": nil, "heartbeat_at": nil, "updated_at": finishedAt.UTC().Truncate(time.Millisecond),
-	})
+	}, "REPORT_RUN_RECONCILED", map[string]interface{}{"rowCount": rowCount})
 }
 
 func (repository *Repository) MarkReconciliationPending(ctx context.Context, runID uint, leaseToken, code, safeMessage string, now time.Time) error {
@@ -524,7 +528,7 @@ func (repository *Repository) MarkReconciliationPending(ctx context.Context, run
 	}
 	updates := unknownRunUpdates(now.UTC().Truncate(time.Millisecond), code, safeMessage)
 	updates["next_reconcile_at"] = now.UTC().Add(time.Minute).Truncate(time.Millisecond)
-	return repository.updateOwnedReconciliation(ctx, runID, leaseToken, updates)
+	return repository.updateOwnedReconciliationWithAudit(ctx, runID, leaseToken, updates, "REPORT_RUN_RECONCILE_PENDING", map[string]interface{}{"reasonCode": code})
 }
 
 func (repository *Repository) ownedExecution(ctx context.Context, runID uint, leaseToken string) *gorm.DB {
@@ -568,6 +572,42 @@ func (repository *Repository) updateOwnedExecution(ctx context.Context, runID ui
 		return ErrReportRunLeaseLost
 	}
 	return nil
+}
+
+func (repository *Repository) updateOwnedExecutionWithAudit(ctx context.Context, runID uint, leaseToken string, updates map[string]interface{}, requireActive bool, action string, detail map[string]interface{}) error {
+	if repository == nil || repository.db == nil || ctx == nil || runID == 0 || uuid.Validate(leaseToken) != nil {
+		return fmt.Errorf("report execution: invalid audited update")
+	}
+	return repository.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		query := tx.Model(&model.ReportRun{}).Where("id = ? AND status = ? AND lease_token = ?", runID, model.ReportRunStatusRunning, leaseToken)
+		if requireActive {
+			query = query.Where("cancel_requested = ?", false)
+		}
+		result := query.Updates(updates)
+		if result.Error != nil {
+			return fmt.Errorf("report execution: audited update: %w", result.Error)
+		}
+		if result.RowsAffected != 1 {
+			return ErrReportRunLeaseLost
+		}
+		return repository.writeSystemAudit(ctx, tx, action, "REPORT_RUN", runID, detail)
+	})
+}
+
+func (repository *Repository) updateOwnedReconciliationWithAudit(ctx context.Context, runID uint, leaseToken string, updates map[string]interface{}, action string, detail map[string]interface{}) error {
+	if repository == nil || repository.db == nil || ctx == nil || runID == 0 || uuid.Validate(leaseToken) != nil {
+		return fmt.Errorf("report reconciliation: invalid audited update")
+	}
+	return repository.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		result := tx.Model(&model.ReportRun{}).Where("id = ? AND status = ? AND lease_token = ?", runID, model.ReportRunStatusReconciling, leaseToken).Updates(updates)
+		if result.Error != nil {
+			return fmt.Errorf("report reconciliation: audited update: %w", result.Error)
+		}
+		if result.RowsAffected != 1 {
+			return ErrReportRunLeaseLost
+		}
+		return repository.writeSystemAudit(ctx, tx, action, "REPORT_RUN", runID, detail)
+	})
 }
 
 func terminalRunUpdates(status, code, message string, finishedAt time.Time) map[string]interface{} {

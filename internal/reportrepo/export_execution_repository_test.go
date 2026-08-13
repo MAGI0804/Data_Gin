@@ -1,6 +1,8 @@
 package reportrepo
 
 import (
+	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -9,6 +11,20 @@ import (
 
 	"gorm.io/gorm"
 )
+
+func TestAuditedExportUpdateRollsBackWhenAuditFails(t *testing.T) {
+	db, transactionState := newTransactionDB(t)
+	repository := New(db)
+	auditCalled := false
+	repository.writeSystemAudit = func(context.Context, *gorm.DB, string, string, uint, map[string]interface{}) error {
+		auditCalled = true
+		return errors.New("injected audit failure")
+	}
+	err := repository.updateOwnedExportWithAudit(t.Context(), 41, "11111111-1111-4111-8111-111111111111", map[string]interface{}{"status": model.ReportExportStatusReady}, false, "REPORT_EXPORT_READY", nil)
+	if err == nil || !auditCalled || transactionState.begins != 1 || transactionState.rollbacks != 1 || transactionState.commits != 0 {
+		t.Fatalf("error=%v transaction=%#v", err, transactionState)
+	}
+}
 
 func TestClassifyExportStartUsesLeaseExpiry(t *testing.T) {
 	now := time.Date(2026, 8, 12, 12, 0, 0, 0, time.UTC)

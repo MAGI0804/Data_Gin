@@ -23,7 +23,7 @@ import (
 	"go.uber.org/zap"
 )
 
-const schemaMigrationVersion = "2026-08-13-report-center-v7"
+const schemaMigrationVersion = "2026-08-13-report-center-v8"
 const schemaMigrationLockName = "data_gin_schema_migration_v1"
 
 type schemaMigrationRecord struct {

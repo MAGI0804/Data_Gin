@@ -1,6 +1,8 @@
 package reportrepo
 
 import (
+	"context"
+	"errors"
 	"strings"
 	"testing"
 	"time"
@@ -9,6 +11,20 @@ import (
 
 	"gorm.io/gorm"
 )
+
+func TestAuditedExecutionUpdateRollsBackWhenAuditFails(t *testing.T) {
+	db, transactionState := newTransactionDB(t)
+	repository := New(db)
+	auditCalled := false
+	repository.writeSystemAudit = func(context.Context, *gorm.DB, string, string, uint, map[string]interface{}) error {
+		auditCalled = true
+		return errors.New("injected audit failure")
+	}
+	err := repository.updateOwnedExecutionWithAudit(t.Context(), 31, "11111111-1111-4111-8111-111111111111", map[string]interface{}{"status": model.ReportRunStatusSucceeded}, false, "REPORT_RUN_SUCCEEDED", nil)
+	if err == nil || !auditCalled || transactionState.begins != 1 || transactionState.rollbacks != 1 || transactionState.commits != 0 {
+		t.Fatalf("error=%v transaction=%#v", err, transactionState)
+	}
+}
 
 func TestRuntimeContractDoesNotDependOnMutableDefinitionDatasource(t *testing.T) {
 	runtime := RuntimeContract{

@@ -30,6 +30,20 @@ func TestReportAuditServiceNormalizesFiltersAndMapsPage(t *testing.T) {
 	if _, err := NewReportAuditServiceWithStore(store).List(t.Context(), ReportAuditQuery{Limit: 101}); !errors.Is(err, ErrReportAuditQueryInvalid) {
 		t.Fatalf("invalid limit error = %v", err)
 	}
+	if result.Items[0].ActorType != model.ReportAuditActorUser {
+		t.Fatalf("actorType=%q", result.Items[0].ActorType)
+	}
+}
+
+func TestReportAuditServiceMapsSystemActor(t *testing.T) {
+	store := &fakeReportAuditStore{page: &reportrepo.ReportAuditPage{Items: []model.ReportAudit{{
+		BaseModel: model.BaseModel{ID: 1}, ActorType: model.ReportAuditActorSystem, ActorUserID: 0,
+		Action: "REPORT_RUN_SUCCEEDED", TargetType: "REPORT_RUN", TargetID: 31, RequestID: "request", CreatedAt: time.Now(),
+	}}}}
+	result, err := NewReportAuditServiceWithStore(store).List(t.Context(), ReportAuditQuery{Limit: 20})
+	if err != nil || result.Items[0].ActorType != model.ReportAuditActorSystem || result.Items[0].ActorUserID != 0 {
+		t.Fatalf("List()=%#v error=%v", result, err)
+	}
 }
 
 type fakeReportAuditStore struct {

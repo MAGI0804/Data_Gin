@@ -114,7 +114,7 @@ func (repository *Repository) BeginExport(ctx context.Context, exportID uint, wo
 		lease.Export.LeaseExpiresAt = &expiresAt
 		lease.Export.HeartbeatAt = &now
 		lease.Export.Attempt++
-		return nil
+		return repository.writeSystemAudit(ctx, tx, "REPORT_EXPORT_STARTED", "REPORT_EXPORT", exportID, map[string]interface{}{"attempt": lease.Export.Attempt})
 	})
 	if err != nil {
 		return nil, err
@@ -221,13 +221,13 @@ func (repository *Repository) MarkExportReady(ctx context.Context, exportID uint
 		return fmt.Errorf("report export execution: invalid ready update")
 	}
 	readyAt = readyAt.UTC().Truncate(time.Millisecond)
-	return repository.updateOwnedExport(ctx, exportID, leaseToken, map[string]interface{}{
+	return repository.updateOwnedExportWithAudit(ctx, exportID, leaseToken, map[string]interface{}{
 		"status": model.ReportExportStatusReady, "result_object_key": objectKey, "result_checksum": checksum,
 		"file_size_bytes": sizeBytes, "exported_rows": rows, "processed_rows": rows, "sheet_count": sheets,
 		"truncated_cell_count": truncated, "ready_at": readyAt, "expires_at": expiresAt.UTC().Truncate(time.Millisecond),
 		"error_code": "", "error_message_safe": "", "worker_id": "", "lease_token": "", "lease_expires_at": nil,
 		"heartbeat_at": nil, "updated_at": readyAt,
-	}, true)
+	}, true, "REPORT_EXPORT_READY", map[string]interface{}{"exportedRows": rows, "fileSizeBytes": sizeBytes})
 }
 
 func (repository *Repository) ConfirmExportReady(ctx context.Context, exportID uint, objectKey, checksum string, sizeBytes, rows int64) (bool, error) {
@@ -250,10 +250,10 @@ func (repository *Repository) ReleaseExportForRetry(ctx context.Context, exportI
 		return fmt.Errorf("report export execution: invalid retry release")
 	}
 	now = now.UTC().Truncate(time.Millisecond)
-	return repository.updateOwnedExport(ctx, exportID, leaseToken, map[string]interface{}{
+	return repository.updateOwnedExportWithAudit(ctx, exportID, leaseToken, map[string]interface{}{
 		"status": model.ReportExportStatusPending, "worker_id": "", "lease_token": "", "lease_expires_at": nil,
 		"heartbeat_at": nil, "error_code": "", "error_message_safe": "", "updated_at": now,
-	}, false)
+	}, false, "REPORT_EXPORT_RETRY_QUEUED", nil)
 }
 
 func (repository *Repository) MarkExportFailed(ctx context.Context, exportID uint, leaseToken, code, safeMessage string, finishedAt time.Time) error {
@@ -261,10 +261,10 @@ func (repository *Repository) MarkExportFailed(ctx context.Context, exportID uin
 		return fmt.Errorf("report export execution: invalid failure update")
 	}
 	finishedAt = finishedAt.UTC().Truncate(time.Millisecond)
-	return repository.updateOwnedExport(ctx, exportID, leaseToken, map[string]interface{}{
+	return repository.updateOwnedExportWithAudit(ctx, exportID, leaseToken, map[string]interface{}{
 		"status": model.ReportExportStatusFailed, "error_code": code, "error_message_safe": strings.TrimSpace(safeMessage),
 		"worker_id": "", "lease_token": "", "lease_expires_at": nil, "heartbeat_at": nil, "updated_at": finishedAt,
-	}, false)
+	}, false, "REPORT_EXPORT_FAILED", map[string]interface{}{"errorCode": code})
 }
 
 func (repository *Repository) MarkExportCancelled(ctx context.Context, exportID uint, leaseToken string, finishedAt time.Time) error {
@@ -272,11 +272,11 @@ func (repository *Repository) MarkExportCancelled(ctx context.Context, exportID 
 		return fmt.Errorf("report export execution: invalid cancellation update")
 	}
 	finishedAt = finishedAt.UTC().Truncate(time.Millisecond)
-	return repository.updateOwnedExport(ctx, exportID, leaseToken, map[string]interface{}{
+	return repository.updateOwnedExportWithAudit(ctx, exportID, leaseToken, map[string]interface{}{
 		"status": model.ReportExportStatusCancelled, "cancel_requested": true,
 		"error_code": "CANCELLED", "error_message_safe": "报表导出已取消",
 		"worker_id": "", "lease_token": "", "lease_expires_at": nil, "heartbeat_at": nil, "updated_at": finishedAt,
-	}, false)
+	}, false, "REPORT_EXPORT_CANCELLED", nil)
 }
 
 func (repository *Repository) ClaimResultPurge(ctx context.Context, exportID uint, leaseToken string, now time.Time) (*ExportRuntime, error) {
@@ -342,7 +342,7 @@ func (repository *Repository) ClaimResultPurge(ctx context.Context, exportID uin
 		runtime.Export.HeartbeatAt = &now
 		runtime.Export.PurgeStartedAt = &now
 		runtime.Run.Status = model.ReportRunStatusResultPurging
-		return nil
+		return repository.writeSystemAudit(ctx, tx, "REPORT_RESULT_PURGE_STARTED", "REPORT_RUN", runtime.Run.ID, map[string]interface{}{"exportId": exportID})
 	})
 	if err != nil {
 		return nil, err
@@ -403,7 +403,7 @@ func (repository *Repository) MarkResultPurged(ctx context.Context, exportID uin
 			}
 			return ErrReportExportLeaseLost
 		}
-		return nil
+		return repository.writeSystemAudit(ctx, tx, "REPORT_RESULT_PURGED", "REPORT_RUN", export.RunID, map[string]interface{}{"exportId": exportID, "purgedRows": purgedRows})
 	})
 }
 
@@ -455,7 +455,7 @@ func (repository *Repository) ReleaseResultPurge(ctx context.Context, exportID u
 			}
 			return ErrReportExportLeaseLost
 		}
-		return nil
+		return repository.writeSystemAudit(ctx, tx, "REPORT_RESULT_PURGE_RETRY", "REPORT_RUN", export.RunID, map[string]interface{}{"exportId": exportID})
 	})
 }
 
@@ -482,6 +482,26 @@ func (repository *Repository) updateOwnedExport(ctx context.Context, exportID ui
 		return ErrReportExportLeaseLost
 	}
 	return nil
+}
+
+func (repository *Repository) updateOwnedExportWithAudit(ctx context.Context, exportID uint, leaseToken string, updates map[string]interface{}, requireActive bool, action string, detail map[string]interface{}) error {
+	if repository == nil || repository.db == nil || ctx == nil || exportID == 0 || uuid.Validate(leaseToken) != nil {
+		return fmt.Errorf("report export execution: invalid audited update")
+	}
+	return repository.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		query := tx.Model(&model.ReportExport{}).Where("id = ? AND status = ? AND lease_token = ?", exportID, model.ReportExportStatusRunning, leaseToken)
+		if requireActive {
+			query = query.Where("cancel_requested = ?", false)
+		}
+		result := query.Updates(updates)
+		if result.Error != nil {
+			return fmt.Errorf("report export execution: audited update: %w", result.Error)
+		}
+		if result.RowsAffected != 1 {
+			return ErrReportExportLeaseLost
+		}
+		return repository.writeSystemAudit(ctx, tx, action, "REPORT_EXPORT", exportID, detail)
+	})
 }
 
 func validExportCheckpoint(checkpoint model.JSONText) bool {

@@ -308,6 +308,12 @@ func buildReportAudit(action string, actor, definitionID uint, detail reportDraf
 }
 
 func createReportAudit(ctx context.Context, tx *gorm.DB, audit model.ReportAudit) error {
+	if audit.ActorType == "" {
+		audit.ActorType = model.ReportAuditActorUser
+	}
+	if !validReportAuditActor(audit) {
+		return fmt.Errorf("report audit: invalid actor")
+	}
 	if err := tx.WithContext(ctx).Create(&audit).Error; err != nil {
 		return fmt.Errorf("report draft: create audit: %w", err)
 	}

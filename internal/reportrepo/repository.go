@@ -75,6 +75,7 @@ type draftReferenceValidator func(context.Context, *gorm.DB, uint, []model.Repor
 type draftDefinitionLocker func(context.Context, *gorm.DB, uint, uint) (*definitionRecord, error)
 type draftVersionLocker func(context.Context, *gorm.DB, uint, uint) (*versionRecord, error)
 type reportAuditWriter func(context.Context, *gorm.DB, model.ReportAudit) error
+type systemReportAuditWriter func(context.Context, *gorm.DB, string, string, uint, map[string]interface{}) error
 type draftCollectionsLoader func(context.Context, *gorm.DB, uint, uint, uint, *Draft) error
 type publishedVersionWriter func(context.Context, *gorm.DB, uint, uint, uint64, map[string]interface{}) error
 type draftVersionCreator func(context.Context, *gorm.DB, *versionRecord) error
@@ -92,6 +93,7 @@ type Repository struct {
 	lockDefinition     draftDefinitionLocker
 	lockVersion        draftVersionLocker
 	writeAudit         reportAuditWriter
+	writeSystemAudit   systemReportAuditWriter
 	loadCollections    draftCollectionsLoader
 	publishVersion     publishedVersionWriter
 	createVersion      draftVersionCreator
@@ -110,7 +112,7 @@ func New(databases ...*gorm.DB) *Repository {
 	}
 	return &Repository{
 		db: db, transact: runTransaction, validateReferences: validateDraftReferences,
-		lockDefinition: lockDraftDefinition, lockVersion: lockDraftVersion, writeAudit: createReportAudit,
+		lockDefinition: lockDraftDefinition, lockVersion: lockDraftVersion, writeAudit: createReportAudit, writeSystemAudit: writeSystemReportAudit,
 		loadCollections: loadCollections, publishVersion: writePublishedVersion, createVersion: createDraftVersion,
 		copyCollections: replaceVersionCollections, switchDefinition: switchPublishedDefinition,
 		loadPublished: loadPublishedReport, createReportRun: writeReportRun, createRunOutbox: writeReportRunOutbox,
