@@ -1,0 +1,25 @@
+.panel { display: grid; min-width: 0; gap: var(--space-3); border-top: 1px solid var(--color-border); background: var(--color-canvas); padding-block: var(--space-4); }
+.sectionTitle { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-3); border-bottom: 1px solid var(--color-border); padding-bottom: var(--space-3); }
+.sectionTitle strong, .sectionTitle span { display: block; }
+.sectionTitle span { color: var(--color-text-secondary); font-size: 12px; }
+.controls { display: grid; grid-template-columns: minmax(260px, 1fr) auto auto; align-items: end; gap: var(--space-3); }
+.datasets { display: grid; gap: var(--space-2); }
+.datasets > section { display: grid; grid-template-columns: auto 1fr; gap: var(--space-2); border: 1px solid var(--color-border); padding: var(--space-3); }
+.pending { display: flex; justify-content: space-between; gap: var(--space-3); border: 1px solid var(--color-danger); background: var(--color-danger-soft); padding: var(--space-3); }
+.summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border: 1px solid var(--color-border); }
+.mall-weather-meta-item { min-width: 0; border-right: 1px solid var(--color-border); padding: var(--space-3); }
+.mall-weather-meta-item span, .mall-weather-meta-item strong { display: block; overflow-wrap: anywhere; }
+.mall-weather-meta-item span { color: var(--color-text-secondary); font-size: 11px; }
+.mall-weather-meta-item strong { margin-top: var(--space-1); }
+.warnings { display: grid; gap: var(--space-1); margin: 0; padding: var(--space-3); border-left: 2px solid var(--color-danger); background: var(--color-danger-soft); color: var(--color-danger); list-style: none; }
+.message { margin: var(--space-2) 0 0; border-left: 2px solid var(--color-brand); background: var(--color-brand-soft); font-size: 12px; padding: var(--space-2) var(--space-3); }
+.error { border-color: var(--color-danger); background: var(--color-danger-soft); color: var(--color-danger); }
+.primary { border-color: var(--color-brand); background: var(--color-brand); color: var(--color-text); }
+.mall-weather-request-state { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--space-3); border: 1px solid var(--color-border); padding: var(--space-3); }
+.empty-state { padding: var(--space-6); color: var(--color-text-secondary); text-align: center; }
+.empty-state strong, .empty-state span { display: block; }
+
+@media (max-width: 839px) {
+  .controls, .summary { grid-template-columns: 1fr; }
+  .pending { align-items: stretch; flex-direction: column; }
+}

@@ -26,13 +26,8 @@
 .mall-weather-data-nav { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2); border-bottom: 1px solid var(--color-border); padding-block: var(--space-3); }
 .mall-weather-manual-coordinate { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: end; gap: var(--space-3); }
 .mall-weather-form-wide { grid-column: 1 / -1; }
-.mall-weather-onboarding-panel, .mall-weather-push-panel, .mall-weather-refresh-panel { display: grid; gap: var(--space-3); }
-.mall-weather-meta, .mall-weather-push-summary { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border: 1px solid var(--color-border); }
-.mall-weather-meta-item { min-width: 0; border-right: 1px solid var(--color-border); padding: var(--space-3); }
-.mall-weather-meta-item span, .mall-weather-meta-item strong { display: block; overflow-wrap: anywhere; }
-.mall-weather-meta-item span { color: var(--color-text-secondary); font-size: 11px; }
-.mall-weather-meta-item strong { margin-top: var(--space-1); }
-.mall-weather-push-warnings { display: grid; gap: var(--space-1); margin: 0; padding: var(--space-3); border-left: 2px solid var(--color-danger); background: var(--color-danger-soft); color: var(--color-danger); list-style: none; }
+.mall-weather-onboarding-panel { display: grid; gap: var(--space-3); }
+.mall-weather-meta { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); border: 1px solid var(--color-border); }
 
 .mall-weather-steps { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); margin: 0; padding: 0; list-style: none; }
 .mall-weather-steps li { border: 1px solid var(--color-border); padding: var(--space-3); }
@@ -46,15 +41,6 @@
 .mall-weather-candidates article > div { display: flex; justify-content: space-between; gap: var(--space-2); }
 .mall-weather-candidates p, .mall-weather-candidates small { margin: 0; }
 
-.mall-weather-push-controls { display: grid; grid-template-columns: minmax(260px, 1fr) auto auto; align-items: end; gap: var(--space-3); }
-.mall-weather-push-datasets { display: grid; gap: var(--space-2); }
-.mall-weather-push-datasets > section { display: grid; grid-template-columns: auto 1fr; gap: var(--space-2); border: 1px solid var(--color-border); padding: var(--space-3); }
-.mall-weather-pending-push { display: flex; justify-content: space-between; gap: var(--space-3); border: 1px solid var(--color-danger); background: var(--color-danger-soft); padding: var(--space-3); }
-.mall-weather-refresh-form { display: grid; grid-template-columns: .8fr 1.6fr auto; align-items: end; gap: var(--space-3); }
-.mall-weather-refresh-submit { display: grid; gap: var(--space-1); }
-.mall-weather-refresh-compact { position: relative; }
-.mall-weather-refresh-compact > summary { display: inline-flex; min-height: var(--button-height); align-items: center; cursor: pointer; padding: var(--space-2) var(--space-3); list-style: none; }
-.mall-weather-refresh-popover { position: absolute; z-index: var(--layer-sticky); top: calc(100% + var(--space-2)); left: 0; width: min(760px, calc(100vw - 64px)); border: 1px solid var(--color-border); background: var(--color-canvas); }
 
 .mall-weather-overview-details { display: contents; }
 .mall-weather-realtime, .mall-weather-air-quality, .mall-weather-design-alert { min-height: 300px; border-right: 1px solid var(--color-border); border-bottom: 1px solid var(--color-border); padding: var(--space-6); }
@@ -95,10 +81,9 @@
 .mall-weather-chart-download-error { grid-column: 1 / -1; }
 
 @media (max-width: 839px) {
-  .two, .mall-weather-design-charts, .mall-weather-realtime-body, .mall-weather-manual-coordinate, .mall-weather-push-controls, .mall-weather-refresh-form { grid-template-columns: 1fr; }
-  .mall-weather-steps, .mall-weather-candidates, .mall-weather-meta, .mall-weather-push-summary { grid-template-columns: 1fr; }
-  .mall-weather-geocode-actions, .mall-weather-pending-push { align-items: stretch; flex-direction: column; }
-  .mall-weather-refresh-popover { position: static; width: auto; }
+  .two, .mall-weather-design-charts, .mall-weather-realtime-body, .mall-weather-manual-coordinate { grid-template-columns: 1fr; }
+  .mall-weather-steps, .mall-weather-candidates, .mall-weather-meta { grid-template-columns: 1fr; }
+  .mall-weather-geocode-actions { align-items: stretch; flex-direction: column; }
 }
 
 .pageHeader {
