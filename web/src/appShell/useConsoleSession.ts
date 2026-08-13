@@ -10,7 +10,6 @@ import {
   saveStoredToken,
   saveStoredTokenExpiry,
   storedTokenExpiresAt,
-  tokenActorID,
   type StoredSessionUser,
 } from '../authStorage'
 import { parseMallWeatherExportContentStatus, submitMallWeatherExportContentDownload } from '../mallWeatherExport'
@@ -21,7 +20,6 @@ export type ConsoleSessionState = 'checking' | 'authenticated' | 'anonymous'
 export function useConsoleSession(baseURL: string) {
   const [token, setToken] = useState(() => loadStoredToken(window.localStorage))
   const tokenRef = useRef(token)
-  const actorID = useMemo(() => tokenActorID(token), [token])
   const [sessionState, setSessionState] = useState<ConsoleSessionState>(() => token ? 'checking' : 'anonymous')
   const authenticatedSessionRef = useRef(sessionState === 'authenticated')
   const [sessionUser, setSessionUser] = useState<SessionUser | null>(() => {
@@ -33,6 +31,7 @@ export function useConsoleSession(baseURL: string) {
   const [sessionValidationAttempt, setSessionValidationAttempt] = useState(0)
   const [loading, setLoading] = useState(false)
   const [result, setResult] = useState<ClientResponse | null>(null)
+  const actorID = sessionState === 'authenticated' && sessionUser ? String(sessionUser.id) : null
 
   const clearSession = useCallback(() => {
     clearStoredToken(window.localStorage)

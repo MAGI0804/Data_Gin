@@ -17,7 +17,7 @@ function decodedTokenParts(token: string): string[] | null {
     const normalized = token.replace(/-/g, '+').replace(/_/g, '/')
     const padded = normalized.padEnd(Math.ceil(normalized.length / 4) * 4, '=')
     const parts = globalThis.atob(padded).split(':')
-    return parts.length === 5 || parts.length === 3 ? parts : null
+    return parts.length === 6 || parts.length === 3 ? parts : null
   } catch {
     return null
   }
@@ -31,7 +31,7 @@ export function tokenActorID(token: string): string | null {
 
 export function tokenExpiresAt(token: string): number | null {
   const parts = decodedTokenParts(token)
-  const rawExpiry = parts?.length === 5 ? parts[2] : parts?.[1] ?? ''
+  const rawExpiry = parts?.length === 6 ? parts[2] : parts?.[1] ?? ''
   const expirySeconds = Number(rawExpiry)
   return Number.isSafeInteger(expirySeconds) && expirySeconds > 0 ? expirySeconds * 1000 : null
 }
