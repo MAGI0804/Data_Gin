@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState, type FormEvent } from 'react'
+import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { ChevronDown, ChevronLeft, ChevronRight, Download, Filter, Play, Plus, Square, Trash2 } from 'lucide-react'
 import { DataTable, FeedbackState, FilterToolbar, PageCanvas, PageHeader, Section, StatusTag, type StatusTagTone } from '../../../ui'
 import { cancelReportRun, createReportExport, createReportRun, getReportExport, getReportExportDownload, queryReportResults, getReportRun, getReportRunContract, type ReportCenterClient } from '../../api'
@@ -10,7 +10,7 @@ const terminalRunStatuses = new Set(['SUCCEEDED', 'FAILED', 'CANCELLED'])
 const terminalExportStatuses = new Set(['READY', 'FAILED', 'CANCELLED', 'EXPIRED'])
 const emptyResultQuery: ReportResultQuery = { filters: [], sort: [] }
 
-export function ReportQueryPage({ client }: { client: ReportCenterClient }) {
+export function ReportQueryPage({ client, navigation }: { client: ReportCenterClient; navigation?: ReactNode }) {
   const query = useMemo(() => ({ limit: 100 }), [])
   const { items, loading, error, reload } = useReportCatalog(client, query)
   const published = items.filter((report) => report.status === 'ACTIVE')
@@ -27,6 +27,7 @@ export function ReportQueryPage({ client }: { client: ReportCenterClient }) {
 	const [resultQuery, setResultQuery] = useState<ReportResultQuery>(emptyResultQuery)
 	const [appliedQuery, setAppliedQuery] = useState<ReportResultQuery>(emptyResultQuery)
 	const [filtersOpen, setFiltersOpen] = useState(false)
+  const [parametersOpen, setParametersOpen] = useState(true)
   const pollAbortRef = useRef<AbortController | null>(null)
 
   useEffect(() => () => pollAbortRef.current?.abort(), [])
@@ -196,15 +197,18 @@ export function ReportQueryPage({ client }: { client: ReportCenterClient }) {
   const frozen = Boolean(run)
   return (
     <PageCanvas>
+      {navigation}
       <PageHeader eyebrow="ORACLE EXECUTION" title="报表查询" description="参数来自已发布的不可变契约；一次运行生成一个快照，分页和正式导出均复用该 run_id。" actions={run?.canCancel ? <button className="ui-control-radius" type="button" onClick={() => void cancelRun()}><Square aria-hidden="true" />取消运行</button> : undefined} />
       <FilterToolbar summary={run ? <StatusTag tone={runTone(run)}>{runLabel(run.status)}</StatusTag> : <StatusTag tone="neutral">等待选择报表</StatusTag>}>
         <label className={styles.selector}>选择报表<select className="ui-control-radius" value={selectedId} onChange={(event) => setSelectedId(event.currentTarget.value)} disabled={loading || frozen || published.length === 0}><option value="">请选择已发布报表</option>{published.map((report) => <option value={report.id} key={report.id}>{report.name}</option>)}</select></label>
       </FilterToolbar>
-      <Section title="运行参数" description={contract ? `发布版本 #${contract.versionId} · {{形参}} 仅作为 Oracle 绑定变量` : '选择报表后读取已发布参数契约。'}>
+      <Section title="运行参数" description={contract ? `发布版本 #${contract.versionId} · {{形参}} 仅作为 Oracle 绑定变量` : '选择报表后读取已发布参数契约。'} actions={<button className="ui-control-radius" type="button" aria-expanded={parametersOpen} onClick={() => setParametersOpen((open) => !open)}><ChevronDown className={parametersOpen ? styles.chevronOpen : undefined} aria-hidden="true" />{parametersOpen ? '收起参数' : '展开参数'}</button>}>
+        {parametersOpen ? <>
         {contractState.loading ? <FeedbackState kind="loading" title="正在读取已发布参数契约" /> : null}
         {contractState.error ? <FeedbackState kind="error" title="参数契约加载失败" description={contractState.error} /> : null}
         {contract ? <form className={styles.parameterForm} onSubmit={(event) => void submitRun(event)}>{visibleParameters(contract.parameters).map((parameter) => <ParameterField disabled={frozen || operation.busy} key={parameter.code} parameter={parameter} value={values[parameter.code]} onChange={(value) => setValues((current) => ({ ...current, [parameter.code]: value }))} />)}<div className={styles.runActions}><span>{frozen ? '本次条件已冻结；如需修改，请重新选择页面后发起新运行。' : `${visibleParameters(contract.parameters).length} 个可填写参数，系统参数不会显示。`}</span><button className="primary ui-control-radius" type="submit" disabled={frozen || operation.busy}><Play aria-hidden="true" />运行报表</button></div></form> : null}
         {!contract && !contractState.loading && !contractState.error ? <FeedbackState kind="empty" title="尚未选择报表" description="请选择一份已发布且有查询权限的报表。" /> : null}
+        </> : <div className={styles.collapsedParameters}>{contract ? `${visibleParameters(contract.parameters).length} 个业务参数${frozen ? ' · 本次运行条件已冻结' : ''}` : '参数区已收起'}</div>}
       </Section>
       {run ? <div className={styles.statusBar} role="status"><span><strong>{runLabel(run.status)}</strong><small>运行 #{run.id} · {run.rowCount.toLocaleString('zh-CN')} 行</small></span><span>{run.errorMessage || (run.resultExpiresAt ? `结果保留至 ${formatDate(run.resultExpiresAt)}` : '正在等待 Oracle 结果')}</span></div> : null}
       {operation.error ? <FeedbackState kind="error" title="操作未完成" description={operation.error} action={run && !terminalRunStatuses.has(run.status) ? <button className="ui-control-radius" type="button" onClick={() => void resumeRun()}>恢复状态查询</button> : undefined} /> : null}

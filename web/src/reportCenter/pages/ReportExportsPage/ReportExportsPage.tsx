@@ -1,11 +1,11 @@
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState, type ReactNode } from 'react'
 import { Download, RefreshCw } from 'lucide-react'
 import { DataTable, FeedbackState, FilterToolbar, PageCanvas, PageHeader, Section, StatusTag, type StatusTagTone } from '../../../ui'
 import { getReportExportDownload, getReportExports, type ReportCenterClient } from '../../api'
 import type { ReportExport, ReportExportStatus } from '../../types'
 import styles from './ReportExportsPage.module.css'
 
-export function ReportExportsPage({ client }: { client: ReportCenterClient }) {
+export function ReportExportsPage({ client, navigation }: { client: ReportCenterClient; navigation?: ReactNode }) {
 	const [status, setStatus] = useState('')
 	const [items, setItems] = useState<ReportExport[]>([])
 	const [nextAfterId, setNextAfterId] = useState(0)
@@ -40,7 +40,7 @@ export function ReportExportsPage({ client }: { client: ReportCenterClient }) {
 		window.location.assign(response.data.url)
 	}
 
-	return <PageCanvas><PageHeader eyebrow="EXPORT ARCHIVE" title="导出中心" description="查看正式 Excel、文件留存与 Oracle 结果清理状态。" actions={<button className="ui-control-radius" type="button" onClick={() => void load()} disabled={state.loading}><RefreshCw aria-hidden="true" />刷新</button>} /><FilterToolbar summary={<StatusTag tone="neutral">{items.length} 个任务</StatusTag>}><div className={styles.filters}><label>任务状态<select className="ui-control-radius" value={status} onChange={(event) => setStatus(event.currentTarget.value)}><option value="">全部状态</option>{['PENDING','RUNNING','READY','FAILED','CANCELLED','EXPIRED'].map((value) => <option key={value} value={value}>{exportLabel(value as ReportExportStatus)}</option>)}</select></label></div></FilterToolbar><Section title="导出任务" description="一个运行只生成一个正式 Excel；文件就绪后复用 OSS，Oracle 结果按 run_id 清理。" flush>
+	return <PageCanvas>{navigation}<PageHeader eyebrow="EXPORT ARCHIVE" title="导出中心" description="查看正式 Excel、文件留存与 Oracle 结果清理状态。" actions={<button className="ui-control-radius" type="button" onClick={() => void load()} disabled={state.loading}><RefreshCw aria-hidden="true" />刷新</button>} /><FilterToolbar summary={<StatusTag tone="neutral">{items.length} 个任务</StatusTag>}><div className={styles.filters}><label>任务状态<select className="ui-control-radius" value={status} onChange={(event) => setStatus(event.currentTarget.value)}><option value="">全部状态</option>{['PENDING','RUNNING','READY','FAILED','CANCELLED','EXPIRED'].map((value) => <option key={value} value={value}>{exportLabel(value as ReportExportStatus)}</option>)}</select></label></div></FilterToolbar><Section title="导出任务" description="一个运行只生成一个正式 Excel；文件就绪后复用 OSS，Oracle 结果按 run_id 清理。" flush>
 		{state.error ? <FeedbackState kind="error" title="导出任务加载失败" description={state.error} action={<button className="ui-control-radius" type="button" onClick={() => void load()}>重试</button>} /> : null}
 		{state.loading && items.length === 0 ? <FeedbackState kind="loading" title="正在加载导出任务" /> : null}
 		{!state.loading && !state.error && items.length === 0 ? <FeedbackState kind="empty" title="暂无导出任务" description="在报表查询中生成正式 Excel 后，任务会出现在这里。" /> : null}

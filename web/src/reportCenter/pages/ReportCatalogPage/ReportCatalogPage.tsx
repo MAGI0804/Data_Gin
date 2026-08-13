@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useMemo, useState, type ReactNode } from 'react'
 import { FileText, Plus, RefreshCcw, Search } from 'lucide-react'
 import { DataTable, FeedbackState, FilterToolbar, PageCanvas, PageHeader, Section, StatusTag, type StatusTagTone } from '../../../ui'
 import type { ReportCenterClient } from '../../api'
@@ -8,7 +8,7 @@ import { useReportCatalog } from '../../useReportCatalog'
 import { useReportDatasources } from '../../useReportDatasources'
 import styles from './ReportCatalogPage.module.css'
 
-export function ReportCatalogPage({ client, canManage }: { client: ReportCenterClient; canManage: boolean }) {
+export function ReportCatalogPage({ client, canManage, navigation }: { client: ReportCenterClient; canManage: boolean; navigation?: ReactNode }) {
   const [draftSearch, setDraftSearch] = useState('')
   const [search, setSearch] = useState('')
   const [drawerState, setDrawerState] = useState<{ open: boolean; report: ReportSummary | null }>({ open: false, report: null })
@@ -18,6 +18,7 @@ export function ReportCatalogPage({ client, canManage }: { client: ReportCenterC
 
   return (
     <PageCanvas>
+      {navigation}
       <PageHeader eyebrow="REPORT CENTER" title="报表目录" description="从 MySQL 配置中心查看报表定义、发布状态和当前版本。" actions={<><button className="ui-control-radius" type="button" onClick={reload} disabled={loading}><RefreshCcw aria-hidden="true" />刷新</button><button className="primary ui-control-radius" type="button" onClick={() => setDrawerState({ open: true, report: null })} disabled={!canManage}><Plus aria-hidden="true" />创建报表</button></>} />
       <FilterToolbar summary={`当前加载 ${items.length} 个报表`}>
         <form className={styles.search} onSubmit={(event) => { event.preventDefault(); setSearch(draftSearch.trim()) }}>

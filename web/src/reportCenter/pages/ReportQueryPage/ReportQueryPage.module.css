@@ -31,3 +31,5 @@
 @media (max-width: 1023px) { .parameterForm { grid-template-columns: repeat(2, minmax(180px, 1fr)); } }
 @media (max-width: 767px) { .parameterForm { grid-template-columns: minmax(0, 1fr); } .runActions, .statusBar, .querySummary { align-items: stretch; flex-direction: column; } .filterRow { grid-template-columns: minmax(0, 1fr); } }
 @media (max-width: 479px) { .selector, .selector select, .field { width: 100%; } .pagination { align-items: stretch; flex-direction: column; } .pagination > div, .pagination button { flex: 1; } }
+.chevronOpen { transform: rotate(180deg); }
+.collapsedParameters { color: var(--color-text-secondary); font-size: 13px; padding-block: var(--space-3); }

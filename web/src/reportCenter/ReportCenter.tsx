@@ -23,21 +23,17 @@ export function ReportCenter({ client, permissions, section, onNavigate }: {
 }) {
   const visibleSections = sections.filter((item) => hasSectionPermission(permissions, item.key))
   const allowed = visibleSections.some((item) => item.key === section)
+  const navigation = <nav className={styles.tabs} aria-label="报表中心模块">
+    {visibleSections.map((item) => <button className={item.key === section ? styles.active : ''} type="button" aria-current={item.key === section ? 'page' : undefined} onClick={() => onNavigate(item.key)} key={item.key}>{item.label}</button>)}
+  </nav>
   let content: ReactNode
-  if (!allowed) content = <PageCanvas><FeedbackState kind="error" title="当前账号无权访问此报表模块" description="请从侧栏选择已授权模块，或联系管理员补充报表中心权限。" /></PageCanvas>
-  else if (section === 'configuration') content = <ReportConfigurationPage client={client} />
-  else if (section === 'query') content = <ReportQueryPage client={client} />
-  else if (section === 'exports') content = <ReportExportsPage client={client} />
-  else content = <ReportCatalogPage client={client} canManage={hasReportPermission(permissions, 'report.manage')} />
+  if (!allowed) content = <PageCanvas>{navigation}<FeedbackState kind="error" title="当前账号无权访问此报表模块" description="请从侧栏选择已授权模块，或联系管理员补充报表中心权限。" /></PageCanvas>
+  else if (section === 'configuration') content = <ReportConfigurationPage client={client} navigation={navigation} />
+  else if (section === 'query') content = <ReportQueryPage client={client} navigation={navigation} />
+  else if (section === 'exports') content = <ReportExportsPage client={client} navigation={navigation} />
+  else content = <ReportCatalogPage client={client} canManage={hasReportPermission(permissions, 'report.manage')} navigation={navigation} />
 
-  return (
-    <div className={styles.center}>
-      <nav className={styles.tabs} aria-label="报表中心模块">
-        {visibleSections.map((item) => <button className={item.key === section ? styles.active : ''} type="button" aria-current={item.key === section ? 'page' : undefined} onClick={() => onNavigate(item.key)} key={item.key}>{item.label}</button>)}
-      </nav>
-      {content}
-    </div>
-  )
+  return content
 }
 
 function hasReportPermission(permissions: string[], required: string) {
