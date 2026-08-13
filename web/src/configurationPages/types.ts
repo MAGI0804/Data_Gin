@@ -48,6 +48,32 @@ export type DestinationDraft = {
   hasSecret: boolean
 }
 
+export type DeliveryTask = {
+  id: number
+  name: string
+  source_id: number
+  clean_table: string
+  destination_id: number
+  trigger_type: 'manual' | 'schedule' | 'event'
+  cron_expr: string
+  filter_json: string
+  payload_template: string
+  enabled: boolean
+}
+
+export type DeliveryTaskDraft = {
+  id: number | null
+  name: string
+  sourceID: string
+  cleanTable: string
+  destinationID: string
+  triggerType: DeliveryTask['trigger_type']
+  cronExpr: string
+  filterJSON: string
+  payloadTemplate: string
+  enabled: boolean
+}
+
 export type ConfigurationClientOptions = {
   method: 'GET' | 'POST' | 'PUT'
   body?: unknown

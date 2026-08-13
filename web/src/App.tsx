@@ -54,12 +54,12 @@ import type { SourceDefinition } from './configurationPages/types'
 import { RulesPage } from './configurationPages/RulesPage/RulesPage'
 import type { TransformRule } from './configurationPages/ruleContracts'
 import { DestinationsPage } from './configurationPages/DestinationsPage/DestinationsPage'
-import type { DestinationDefinition } from './configurationPages/types'
+import { DeliveryTasksPage } from './configurationPages/DeliveryTasksPage/DeliveryTasksPage'
+import { PushPolicyPage } from './configurationPages/PushPolicyPage/PushPolicyPage'
+import type { DeliveryTask, DestinationDefinition } from './configurationPages/types'
 import { parseMallWeatherExportContentStatus, submitMallWeatherExportContentDownload } from './mallWeatherExport'
 import { buildRawRecordsRequest, buildWarehouseRawRecordsQuery, parseRawRecordsPage, type RawRecordOrigin, type RawRecordsPage } from './rawRecords'
-import { buildDeliveryTaskListQuery, buildExcelMatchJobListQuery, normalizeMonitoringPageNumber, parseMonitoringPage, type MonitoringPage, type MonitoringPagination } from './monitoringRecords'
-import { validateOrderPushSkipPolicy } from './orderPushPolicy'
-import { runSingleFlight } from './singleFlight'
+import { buildExcelMatchJobListQuery, normalizeMonitoringPageNumber, parseMonitoringPage, type MonitoringPagination } from './monitoringRecords'
 import { parseSourceFetchSummary } from './sourceOperations'
 import { buildCleanRecordsQuery, buildProcessedRecordsQuery, parseProcessedRecordsPage, type ProcessedRecordsPage } from './processedRecords'
 import {
@@ -367,10 +367,6 @@ const defaultExcelImportScheme: ExcelImportSchemeConfig = {
   batchSize: '1000',
 }
 
-const defaultOrderPushSkipConfig: OrderPushSkipConfig = {
-  targets: [],
-}
-
 type BojunOrderBackfillSample = {
   docno: string
   otherdocno: string
@@ -446,48 +442,6 @@ type CleanRecord = {
   quality_score: number
   status: string
   created_at: number
-}
-
-type DeliveryTask = {
-  id: number
-  name: string
-  source_id: number
-  clean_table: string
-  destination_id: number
-  trigger_type: string
-  cron_expr: string
-  filter_json: string
-  payload_template: string
-  enabled: boolean
-}
-
-type DeliveryTaskDraft = {
-  id: number | null
-  name: string
-  sourceID: string
-  cleanTable: string
-  destinationID: string
-  triggerType: string
-  cronExpr: string
-  filterJSON: string
-  payloadTemplate: string
-  enabled: boolean
-}
-
-type OrderPushSkipConfig = {
-  targets: OrderPushSkipTargetConfig[]
-}
-
-type OrderPushSkipTargetConfig = {
-  target_code: string
-  target_name: string
-  cycle: number
-  skip: number
-}
-
-type OrderPushTargetOption = {
-  code: string
-  name: string
 }
 
 type LegacyTask = {
@@ -749,8 +703,6 @@ function App() {
   const [overviewTotals, setOverviewTotals] = useState({ runs: null as number | null, deliveryLogs: null as number | null })
   const [monitoring, setMonitoring] = useState<MonitoringSnapshot>({ statistics: null, weather: null, health: null })
   const [monitoringStale, setMonitoringStale] = useState(false)
-  const [orderPushSkipConfig, setOrderPushSkipConfig] = useState<OrderPushSkipConfig>(defaultOrderPushSkipConfig)
-  const [orderPushTargets, setOrderPushTargets] = useState<OrderPushTargetOption[]>([])
   const [legacyTasks, setLegacyTasks] = useState<LegacyTask[]>([])
   const [legacyRules, setLegacyRules] = useState<LegacyTransformRule[]>([])
 
@@ -924,19 +876,6 @@ function App() {
             if (sourceResult.ok) setSources(readList<SourceDefinition>(sourceResult, 'sources'))
             if (destinationResult.ok) setDestinations(readList<DestinationDefinition>(destinationResult, 'destinations'))
             if (!sourceResult.ok || !destinationResult.ok) setWorkspaceError('推送任务关联配置加载不完整，已保留上一次成功数据。')
-          }
-        } else if (activeNav === 'push_policy') {
-          const [sourceResult, ruleResult, destinationResult, taskResult, orderPushSkipResult] = await Promise.all([get('/v1/sources'), get('/v1/transform-rules'), get('/v1/destinations'), get('/v1/delivery-tasks'), get('/v1/order-push-skip-config')])
-          if (!controller.signal.aborted) {
-            if (sourceResult.ok) setSources(readList<SourceDefinition>(sourceResult, 'sources'))
-            if (ruleResult.ok) setTransformRules(readList<TransformRule>(ruleResult, 'rules'))
-            if (destinationResult.ok) setDestinations(readList<DestinationDefinition>(destinationResult, 'destinations'))
-            if (taskResult.ok) setDeliveryTasks(readList<DeliveryTask>(taskResult, 'tasks'))
-            if (orderPushSkipResult.ok) {
-              setOrderPushSkipConfig(normalizeOrderPushSkipConfig(readObject<OrderPushSkipConfig>(orderPushSkipResult, 'config')))
-              setOrderPushTargets(readList<OrderPushTargetOption>(orderPushSkipResult, 'targets'))
-            }
-            if (!sourceResult.ok || !ruleResult.ok || !destinationResult.ok || !taskResult.ok || !orderPushSkipResult.ok) setWorkspaceError('推送策略配置加载不完整，已保留上一次成功数据。')
           }
         } else if (activeNav === 'youzan_distribution') {
           const legacyTaskResult = await get('/v1/legacy-tasks')
@@ -1189,18 +1128,6 @@ function App() {
     return client(`/v1/sources/${sourceID}/test`, { method: 'POST' })
   }
 
-  async function saveOrderPushSkipConfig(config: OrderPushSkipConfig) {
-    const response = await client('/v1/order-push-skip-config', {
-      method: 'PUT',
-      body: config,
-    })
-    if (response.ok) {
-      setOrderPushSkipConfig(normalizeOrderPushSkipConfig(readObject<OrderPushSkipConfig>(response, 'config')) ?? config)
-      await refreshWorkspace(false)
-    }
-    return response
-  }
-
   async function previewBojunOrderBackfill(payload: { start_time: string; end_time: string }) {
     const response = await client('/v1/bojun-order-backfill/preview', {
       method: 'POST',
@@ -1346,9 +1273,9 @@ function App() {
       navigationRef={mobileNavRef}
       navigationOpen={mobileNavOpen}
       onDismissNavigation={() => setMobileNavOpen(false)}
-      flushWorkspace={Boolean(reportSection) || ['access_management', 'sources', 'rules', 'destinations', 'overview', 'runs', 'delivery_logs', 'step_runs'].includes(activeNav)}
+      flushWorkspace={Boolean(reportSection) || ['access_management', 'sources', 'rules', 'destinations', 'tasks', 'push_policy', 'overview', 'runs', 'delivery_logs', 'step_runs'].includes(activeNav)}
       workspaceClassName="ops-workspace"
-      header={<ModuleHeader compact={Boolean(reportSection) || ['access_management', 'sources', 'rules', 'destinations', 'overview', 'runs', 'delivery_logs', 'step_runs'].includes(activeNav)} activeNav={activeNav} loading={loading || refreshing} sessionUser={sessionUser} onOpenNavigation={openMobileNavigation} onRefresh={() => void refreshWorkspace(true)} onLogout={handleLogout} refreshing={refreshing} mobileNavTriggerRef={mobileNavTriggerRef} />}
+      header={<ModuleHeader compact={Boolean(reportSection) || ['access_management', 'sources', 'rules', 'destinations', 'tasks', 'push_policy', 'overview', 'runs', 'delivery_logs', 'step_runs'].includes(activeNav)} activeNav={activeNav} loading={loading || refreshing} sessionUser={sessionUser} onOpenNavigation={openMobileNavigation} onRefresh={() => void refreshWorkspace(true)} onLogout={handleLogout} refreshing={refreshing} mobileNavTriggerRef={mobileNavTriggerRef} />}
       notices={<>{sessionValidationError && <div className="result-banner error" role="status" aria-live="polite">{sessionValidationError} <button type="button" onClick={() => setSessionValidationAttempt((attempt) => attempt + 1)}>重试校验</button></div>}{workspaceError && <div className="result-banner error" role="alert">{workspaceError} <button type="button" onClick={() => void refreshWorkspace(false)} disabled={refreshing}>重试</button></div>}</>}
       overlay={<ResultPanel result={result} onClose={() => setResult(null)} />}
     >
@@ -1369,8 +1296,8 @@ function App() {
         {activeNav === 'rules' && <RulesPage client={client} rules={transformRules} sources={sources} onRulesChange={setTransformRules} refreshVersion={workspaceRefreshVersion} />}
         {activeNav === 'processed' && <ProcessedQueryPage client={client} />}
         {activeNav === 'destinations' && <DestinationsPage client={client} refreshVersion={workspaceRefreshVersion} />}
-        {activeNav === 'tasks' && <DeliveryTasksQueryPage client={client} sources={sources} destinations={destinations} onRefresh={() => refreshWorkspace(false)} refreshVersion={workspaceRefreshVersion} />}
-        {activeNav === 'push_policy' && <PushPolicyPage coreMethod={coreMethods.find((item) => item.key === 'mall_push')} config={orderPushSkipConfig} targets={orderPushTargets} onSave={saveOrderPushSkipConfig} onToggle={toggleTarget} />}
+        {activeNav === 'tasks' && <DeliveryTasksPage client={client} canManage={Boolean(sessionUser?.permissions.includes('delivery.manage'))} sources={sources} destinations={destinations} onRefresh={() => refreshWorkspace(false)} refreshVersion={workspaceRefreshVersion} />}
+        {activeNav === 'push_policy' && <PushPolicyPage client={client} canManage={Boolean(sessionUser?.permissions.includes('delivery.manage'))} refreshVersion={workspaceRefreshVersion} />}
         {(activeNav === 'excel_jobs' || activeNav === 'excel_schemes' || activeNav === 'excel_write') && <ExcelMatchView section={activeNav === 'excel_jobs' ? 'jobs' : activeNav === 'excel_schemes' ? 'schemes' : 'write'} client={client} token={token} loading={loading} refreshVersion={workspaceRefreshVersion} setLoading={setLoading} setResult={setResult} onNavigateToJobs={() => navigate('excel_jobs')} />}
     </AppShell>
   )
@@ -1631,42 +1558,6 @@ function BojunBackfillResultView({ title, result }: { title: string; result: Boj
       )}
     </section>
   )
-}
-
-function useConfigurationListPage<T>(client: ApiClient, path: string, key: string, query: string, reloadVersion: number) {
-  const [recordsPage, setRecordsPage] = useState<MonitoringPage<T> | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
-  const requestRef = useRef<AbortController | null>(null)
-
-  useEffect(() => {
-    requestRef.current?.abort()
-    const controller = new AbortController()
-    requestRef.current = controller
-    setLoading(true)
-    setError('')
-    void client(`${path}?${query}`, { method: 'GET', signal: controller.signal, showResult: false, silentLoading: true }).then((response) => {
-      if (controller.signal.aborted) return
-      const parsed = response.ok ? parseMonitoringPage<T>(response.data, key) : null
-      if (parsed) {
-        setRecordsPage(parsed)
-        return
-      }
-      const legacyItems = readDataField(response.data, key)
-      if (response.ok && Array.isArray(legacyItems)) {
-        const pageSize = 20
-        setRecordsPage({ list: legacyItems.slice(0, pageSize) as T[], pagination: { page: 1, pageSize, total: legacyItems.length, totalPages: legacyItems.length ? 1 : 0 } })
-        setError('当前服务暂不支持配置列表分页或筛选，已显示未筛选的兼容数据。')
-        return
-      }
-      setError(response.error?.message || '配置列表暂时不可用，请稍后重试。')
-    }).finally(() => {
-      if (!controller.signal.aborted) setLoading(false)
-    })
-    return () => controller.abort()
-  }, [client, key, path, query, reloadVersion])
-
-  return { recordsPage, loading, error }
 }
 
 function RawRecordsQueryPage({ title, origin, client, onFetchSource }: { title: string; origin: RawRecordOrigin; client: ApiClient; onFetchSource: (sourceID: number) => Promise<ApiResult> }) {
@@ -2367,249 +2258,6 @@ function YouzanDistributionBackfillResultView({ title, result }: { title: string
         </div>
       )}
     </section>
-  )
-}
-
-function DeliveryTasksQueryPage({ client, sources, destinations, onRefresh, refreshVersion }: { client: ApiClient; sources: SourceDefinition[]; destinations: DestinationDefinition[]; onRefresh: () => Promise<void>; refreshVersion: number }) {
-  const [query, setQuery] = useState('')
-  const [status, setStatus] = useState('all')
-  const [destinationID, setDestinationID] = useState('all')
-  const [applied, setApplied] = useState({ keyword: '', enabled: '' as '' | 'true' | 'false', destinationID: '' })
-  const [page, setPage] = useState(1)
-  const [reloadVersion, setReloadVersion] = useState(0)
-  const [draft, setDraft] = useState<DeliveryTaskDraft | null>(null)
-  const destinationOptions = destinations.map((destination) => ({ value: String(destination.id), label: destination.name || destination.code }))
-  const [runningID, setRunningID] = useState<number | null>(null)
-  const [pendingRun, setPendingRun] = useState<DeliveryTask | null>(null)
-  const [loadingDetailID, setLoadingDetailID] = useState<number | null>(null)
-  const [saving, setSaving] = useState(false)
-  const [message, setMessage] = useState('')
-  const listQuery = useMemo(() => buildDeliveryTaskListQuery({ page, pageSize: 20, ...applied }), [applied, page])
-  const { recordsPage, loading, error } = useConfigurationListPage<DeliveryTask>(client, '/v1/delivery-tasks', 'tasks', listQuery, reloadVersion + refreshVersion)
-  const listedTasks = recordsPage?.list ?? []
-  const pagination = recordsPage?.pagination
-
-  function submitQuery(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    setPage(1)
-    setApplied({ keyword: query, enabled: status === 'enabled' ? 'true' : status === 'disabled' ? 'false' : '', destinationID: destinationID === 'all' ? '' : destinationID })
-    setReloadVersion((version) => version + 1)
-  }
-
-  function openCreate() {
-    setMessage('')
-    setDraft({
-      id: null,
-      name: '',
-      sourceID: sources[0]?.id ? String(sources[0].id) : '',
-      cleanTable: '',
-      destinationID: destinations[0]?.id ? String(destinations[0].id) : '',
-      triggerType: 'manual',
-      cronExpr: '',
-      filterJSON: '{}',
-      payloadTemplate: '',
-      enabled: true,
-    })
-  }
-
-  async function openDetail(id: number) {
-    if (loadingDetailID !== null) return
-    setMessage('')
-    setLoadingDetailID(id)
-    const response = await client(`/v1/delivery-tasks/${id}`, { method: 'GET', showResult: false, silentLoading: true })
-    setLoadingDetailID(null)
-    const task = response.ok ? readObject<DeliveryTask>(response, 'task') : null
-    if (!task) {
-      setMessage(response.error?.message || '推送任务详情暂时不可用，请稍后重试。')
-      return
-    }
-    setDraft(deliveryTaskDraftFrom(task))
-  }
-
-  async function saveDraft(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    if (!draft || saving) return
-    const sourceID = Number(draft.sourceID)
-    const nextDestinationID = Number(draft.destinationID)
-    if (!draft.name.trim() || !draft.cleanTable.trim() || !Number.isInteger(sourceID) || sourceID <= 0 || !Number.isInteger(nextDestinationID) || nextDestinationID <= 0) {
-      setMessage('请填写任务名称、来源、清洗表和推送目标。')
-      return
-    }
-    if (draft.triggerType === 'schedule' && !draft.cronExpr.trim()) {
-      setMessage('定时触发任务必须填写 Cron 表达式。')
-      return
-    }
-    try {
-      const filter = JSON.parse(draft.filterJSON) as unknown
-      if (!filter || Array.isArray(filter) || typeof filter !== 'object') {
-        setMessage('筛选条件必须是 JSON 对象。')
-        return
-      }
-    } catch {
-      setMessage('筛选条件必须是有效 JSON。')
-      return
-    }
-    setSaving(true)
-    setMessage('')
-    const response = await client(draft.id ? `/v1/delivery-tasks/${draft.id}` : '/v1/delivery-tasks', {
-      method: draft.id ? 'PUT' : 'POST',
-      showResult: false,
-      silentLoading: true,
-      body: {
-        name: draft.name.trim(),
-        source_id: sourceID,
-        clean_table: draft.cleanTable.trim(),
-        destination_id: nextDestinationID,
-        trigger_type: draft.triggerType,
-        cron_expr: draft.cronExpr.trim(),
-        filter_json: draft.filterJSON,
-        payload_template: draft.payloadTemplate,
-        enabled: draft.enabled,
-      },
-    })
-    setSaving(false)
-    if (!response.ok || !readObject<DeliveryTask>(response, 'task')) {
-      setMessage(response.error?.message || '推送任务保存未完成，请稍后重试。')
-      return
-    }
-    setDraft(null)
-    setMessage('推送任务已保存。')
-    await onRefresh()
-    setReloadVersion((version) => version + 1)
-  }
-
-  async function run(task: DeliveryTask) {
-    if (runningID !== null) return
-    setRunningID(task.id)
-    const response = await client(`/v1/delivery-tasks/${task.id}/run`, { method: 'POST', showResult: false, silentLoading: true })
-    const result = response.ok ? readObject<{ total_count: number; success_count: number; failed_count: number; skipped_count: number }>(response, 'result') : null
-    setRunningID(null)
-    setMessage(result ? `执行完成：总计 ${result.total_count}，成功 ${result.success_count}，失败 ${result.failed_count}，跳过 ${result.skipped_count}。` : response.error?.message || '推送任务未完成。')
-    if (response.ok) {
-      await onRefresh()
-      setReloadVersion((version) => version + 1)
-    }
-  }
-  return (
-    <div className="view-stack">
-      {message && <div className="result-banner" role="status">{message}</div>}
-      <form className="query-bar" onSubmit={submitQuery}><div className="query-fields">
-        <Field label="名称 / 表 / 触发方式" name="task_query" value={query} onChange={setQuery} />
-        <SelectFilter label="状态" value={status} onChange={setStatus} options={[{ value: 'enabled', label: '启用' }, { value: 'disabled', label: '停用' }]} />
-        <SelectFilter label="推送目标" value={destinationID} onChange={setDestinationID} options={destinationOptions} />
-      </div><button type="submit" disabled={loading || runningID !== null}>{loading ? '查询中…' : '查询'}</button></form>
-      {error && <div className="result-banner error" role="alert">{error}{recordsPage ? ' 已保留最近一次成功数据。' : ''}</div>}
-      <div className="record-actions"><button type="button" className="primary" onClick={openCreate}>新增推送任务</button></div>
-      <Panel title="推送任务" icon={<ArrowUpFromLine />} meta={loading && !recordsPage ? '正在加载…' : `共 ${pagination?.total ?? 0} 条`}><DeliveryTaskList tasks={listedTasks} runningID={runningID} loadingDetailID={loadingDetailID} destinations={destinations} onDetail={(task) => { void openDetail(task.id) }} onRun={setPendingRun} /><MonitoringPaginationControls page={pagination?.page ?? page} totalPages={pagination?.totalPages ?? 0} loading={loading || runningID !== null || loadingDetailID !== null} onPrevious={() => setPage((current) => Math.max(1, current - 1))} onNext={() => setPage((current) => current + 1)} /></Panel>
-      {draft && <Modal title={draft.id ? '推送任务详情与编辑' : '新增推送任务'} onClose={() => { if (!saving) setDraft(null) }}>
-        <form className="excel-upload-form" onSubmit={saveDraft}>
-          <Field label="任务名称" name="delivery_task_name" value={draft.name} required onChange={(name) => setDraft({ ...draft, name })} />
-          <label>来源
-            <select value={draft.sourceID} required disabled={saving} onChange={(event) => setDraft({ ...draft, sourceID: event.currentTarget.value })}>
-              <option value="">选择数据源</option>
-              {sources.map((source) => <option value={source.id} key={source.id}>#{source.id} {source.name || source.code}{source.enabled ? '' : '（已停用）'}</option>)}
-            </select>
-          </label>
-          <Field label="清洗结果表" name="delivery_clean_table" value={draft.cleanTable} required onChange={(cleanTable) => setDraft({ ...draft, cleanTable })} />
-          <label>推送目标
-            <select value={draft.destinationID} required disabled={saving} onChange={(event) => setDraft({ ...draft, destinationID: event.currentTarget.value })}>
-              <option value="">选择推送目标</option>
-              {destinations.map((destination) => <option value={destination.id} key={destination.id}>#{destination.id} {destination.name || destination.code}{destination.enabled ? '' : '（已停用）'}</option>)}
-            </select>
-          </label>
-          <label>触发方式
-            <select value={draft.triggerType} disabled={saving} onChange={(event) => setDraft({ ...draft, triggerType: event.currentTarget.value })}>
-              <option value="manual">手动</option>
-              <option value="schedule">定时</option>
-              <option value="event">事件</option>
-            </select>
-          </label>
-          <Field label="Cron 表达式" name="delivery_task_cron" value={draft.cronExpr} required={draft.triggerType === 'schedule'} onChange={(cronExpr) => setDraft({ ...draft, cronExpr })} />
-          <label className="checkbox-label"><input type="checkbox" checked={draft.enabled} disabled={saving} onChange={(event) => setDraft({ ...draft, enabled: event.currentTarget.checked })} />启用任务</label>
-          <label>筛选条件 JSON<textarea rows={8} value={draft.filterJSON} disabled={saving} onChange={(event) => setDraft({ ...draft, filterJSON: event.currentTarget.value })} /></label>
-          <label>推送载荷模板<textarea rows={8} value={draft.payloadTemplate} disabled={saving} onChange={(event) => setDraft({ ...draft, payloadTemplate: event.currentTarget.value })} /></label>
-          <p className="query-contract-note">完整保存会覆盖任务配置；筛选条件仅接受 JSON 对象。手动运行请从列表单独确认执行。</p>
-          <div className="excel-form-actions"><button className="primary" type="submit" disabled={saving}>{saving ? '保存中…' : '保存任务'}</button></div>
-        </form>
-      </Modal>}
-      {pendingRun && <Modal title="确认执行推送任务" onClose={() => { if (runningID === null) setPendingRun(null) }} footer={<><button type="button" disabled={runningID !== null} onClick={() => setPendingRun(null)}>取消</button><button className="primary" type="button" disabled={runningID !== null} onClick={() => { const task = pendingRun; setPendingRun(null); void run(task) }}>{runningID === pendingRun.id ? '执行中…' : '确认执行'}</button></>}><p>将执行“{pendingRun.name}”，最多向 {destinations.find((item) => item.id === pendingRun.destination_id)?.name || `目标 #${pendingRun.destination_id}`} 推送 100 条 ready 记录；成功记录将标记为已交付。</p></Modal>}
-    </div>
-  )
-}
-
-function PushPolicyPage({ coreMethod, config, targets, onSave, onToggle }: {
-  coreMethod?: CoreMethod
-  config: OrderPushSkipConfig
-  targets: OrderPushTargetOption[]
-  onSave: (config: OrderPushSkipConfig) => Promise<ApiResult>
-  onToggle: (target: ToggleTarget, enabled: boolean) => void
-}) {
-  return (
-    <div className="view-stack">
-      {coreMethod && <Panel title="商场推送方法" icon={<Send />} meta="当前推送能力"><CoreMethodList methods={[coreMethod]} onToggle={onToggle} /></Panel>}
-      <Panel title="订单少推送配置" icon={<ListChecks />} meta="按具体目标独立配置"><OrderPushSkipConfigForm config={config} targets={targets} onSave={onSave} /></Panel>
-    </div>
-  )
-}
-
-function OrderPushSkipConfigForm({ config, targets, onSave }: { config: OrderPushSkipConfig; targets: OrderPushTargetOption[]; onSave: (config: OrderPushSkipConfig) => Promise<ApiResult> }) {
-  const [draft, setDraft] = useState(() => targets.map((target) => orderPushTargetConfig(config, target.code)))
-  const [error, setError] = useState('')
-  const [saving, setSaving] = useState(false)
-  const saveInFlightRef = useRef(false)
-  const enabledCount = draft.filter((target) => target.cycle > 0 && target.skip > 0).length
-
-  useEffect(() => setDraft(targets.map((target) => orderPushTargetConfig(config, target.code))), [config, targets])
-
-  async function submit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    const validationError = validateOrderPushSkipPolicy(draft)
-    if (validationError) {
-      setError(validationError)
-      return
-    }
-    setError('')
-    const responsePromise = runSingleFlight(saveInFlightRef, () => onSave({ targets: draft }))
-    if (!responsePromise) return
-    setSaving(true)
-    try {
-      const response = await responsePromise
-      if (!response.ok) setError(response.error?.message || '配置保存未完成，请稍后重试。')
-    } catch {
-      setError('配置保存未完成，请稍后重试。')
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  return (
-    <form className="push-skip-form" onSubmit={submit}>
-      <fieldset disabled={saving}>
-        <div className="push-skip-summary">
-          <StatusPill label={enabledCount > 0 ? `已启用 ${enabledCount} 个目标` : '未启用'} />
-          <span>只对下方配置的推送目标生效；未配置或填 0 的目标不少推。</span>
-        </div>
-        {targets.length === 0 ? <EmptyState text="后端未返回可配置推送目标。" /> : <div className="push-skip-list">
-          {targets.map((target, index) => {
-            const value = draft[index] ?? { target_code: target.code, target_name: target.name, cycle: 0, skip: 0 }
-            const ratio = value.cycle > 0 ? `${(((value.cycle - value.skip) / value.cycle) * 100).toFixed(1)}%` : '100.0%'
-            return (
-              <div className="push-skip-row" key={target.code}>
-                <div>
-                  <strong>{target.name}</strong>
-                  <span>{target.code}</span>
-                </div>
-                <Field label="循环总单数" name={`cycle_${index}`} value={String(value.cycle)} type="number" onChange={(raw) => setDraft((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, cycle: Number(raw) } : item))} />
-                <Field label="少推单数" name={`skip_${index}`} value={String(value.skip)} type="number" onChange={(raw) => setDraft((current) => current.map((item, itemIndex) => itemIndex === index ? { ...item, skip: Number(raw) } : item))} />
-                <small>预计推送比例：{ratio}</small>
-              </div>
-            )
-          })}
-        </div>}
-        {error && <div className="result-banner error" role="alert">{error}</div>}
-        <button className="primary" type="submit">{saving ? '保存中…' : '保存配置'}</button>
-      </fieldset>
-    </form>
   )
 }
 
@@ -4339,23 +3987,6 @@ function ToggleButton({ enabled, target, onToggle }: { enabled: boolean; target:
   )
 }
 
-function orderPushTargetConfig(config: OrderPushSkipConfig, targetCode: string): OrderPushSkipTargetConfig {
-  const target = config.targets.find((item) => item.target_code.toLowerCase() === targetCode.toLowerCase())
-  return target ?? { target_code: targetCode, target_name: '', cycle: 0, skip: 0 }
-}
-
-function normalizeOrderPushSkipConfig(config: OrderPushSkipConfig | null): OrderPushSkipConfig {
-  if (!config || !Array.isArray(config.targets)) return defaultOrderPushSkipConfig
-  return {
-    targets: config.targets.map((target) => ({
-      target_code: target.target_code || '',
-      target_name: target.target_name || '',
-      cycle: Number(target.cycle || 0),
-      skip: Number(target.skip || 0),
-    })),
-  }
-}
-
 function apiURL(path: string) {
   return buildApiURL(path, defaultApiBaseURL)
 }
@@ -4487,24 +4118,6 @@ function CleanRecordList({ records }: { records: CleanRecord[] }) {
             <td><details className="design-row-details"><summary className="design-table-link">查看</summary><dl><div><dt>记录 ID</dt><dd>#{record.id}</dd></div><div><dt>业务状态</dt><dd>{cleanRecordStatusLabel(record.status)}</dd></div></dl></details></td>
           </tr>
         ))}</tbody>
-      </table>
-    </div>
-  )
-}
-
-function DeliveryTaskList({ tasks, runningID, loadingDetailID, destinations, onDetail, onRun }: {
-  tasks: DeliveryTask[]
-  runningID: number | null
-  loadingDetailID: number | null
-  destinations: DestinationDefinition[]
-  onDetail: (task: DeliveryTask) => void
-  onRun: (task: DeliveryTask) => void
-}) {
-  if (tasks.length === 0) return <EmptyState text="暂无推送任务。" />
-  return (
-    <div className="data-table-wrap" role="region" aria-label="推送任务列表" tabIndex={0}>
-      <table className="data-table"><thead><tr><th scope="col">任务名称</th><th scope="col">触发方式</th><th scope="col">清洗表</th><th scope="col">推送目标</th><th scope="col">状态</th><th scope="col">操作</th></tr></thead>
-        <tbody>{tasks.map((task) => <tr key={task.id}><td><strong>{task.name}</strong></td><td>{deliveryTaskTriggerLabel(task.trigger_type)}{task.trigger_type === 'schedule' && task.cron_expr && <small>{task.cron_expr}</small>}</td><td>{task.clean_table}</td><td>{deliveryTaskDestinationLabel(task, destinations)}</td><td><StatusPill label={task.enabled ? '启用' : '停用'} /></td><td><div className="table-actions"><button type="button" disabled={loadingDetailID !== null || runningID !== null} onClick={() => onDetail(task)}>{loadingDetailID === task.id ? '加载中…' : '详情'}</button><button type="button" disabled={!task.enabled || runningID !== null || loadingDetailID !== null} onClick={() => onRun(task)}>{runningID === task.id ? '推送中…' : '手动运行'}</button></div></td></tr>)}</tbody>
       </table>
     </div>
   )
@@ -4970,31 +4583,6 @@ function cleanRecordStatusLabel(status: string) {
 
 function formatQualityScore(value: number) {
   return Number.isFinite(value) ? `${value.toFixed(1)} / 100` : '-'
-}
-
-function deliveryTaskDraftFrom(task: DeliveryTask): DeliveryTaskDraft {
-  return {
-    id: task.id,
-    name: task.name,
-    sourceID: String(task.source_id),
-    cleanTable: task.clean_table,
-    destinationID: String(task.destination_id),
-    triggerType: task.trigger_type,
-    cronExpr: task.cron_expr,
-    filterJSON: jsonText(task.filter_json || '{}'),
-    payloadTemplate: task.payload_template,
-    enabled: task.enabled,
-  }
-}
-
-function deliveryTaskDestinationLabel(task: DeliveryTask, destinations: DestinationDefinition[]) {
-  const destination = destinations.find((item) => item.id === task.destination_id)
-  return destination ? `${destination.name || destination.code} (#${destination.id})` : `目标 #${task.destination_id}`
-}
-
-function deliveryTaskTriggerLabel(value: string) {
-  const labels: Record<string, string> = { manual: '手动', schedule: '定时', event: '事件' }
-  return labels[value] ?? (value || '-')
 }
 
 function isExcelMatchStepComplete(step: ExcelMatchStepConfig) {
