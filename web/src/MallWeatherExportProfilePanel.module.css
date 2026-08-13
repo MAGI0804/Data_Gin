@@ -1,4 +1,4 @@
-.workbench-panel { min-width: 0; border: 1px solid var(--color-border); background: var(--color-canvas); padding: var(--space-4); }
+.workbench-panel { min-width: 0; border: 0; background: var(--color-canvas); padding: 0; }
 .mall-weather-export-profiles, .mall-weather-profile-form, .mall-weather-profile-datasets, .mall-weather-profile-details { display: grid; gap: var(--space-4); }
 .mall-weather-section-title { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-3); border-bottom: 1px solid var(--color-border); padding-bottom: var(--space-3); }
 .mall-weather-section-title strong, .mall-weather-section-title span { display: block; }
@@ -11,9 +11,6 @@
 .mall-weather-profile-dataset { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)) auto auto auto; align-items: end; gap: var(--space-2); border-top: 1px solid var(--color-border); padding-top: var(--space-3); }
 .mall-weather-checkbox { display: flex; align-items: center; gap: var(--space-2); }
 .mall-weather-checkbox input { width: auto; }
-.data-table-wrap { overflow-x: auto; }
-.data-table { width: 100%; min-width: 760px; border-collapse: collapse; }
-.data-table th, .data-table td { height: var(--table-row-height); border-bottom: 1px solid var(--color-border); padding: var(--space-2) var(--space-3); text-align: left; }
 .mall-weather-action-message { margin: 0; border-left: 2px solid var(--color-brand); background: var(--color-brand-soft); padding: var(--space-3); }
 .error { border-color: var(--color-danger); background: var(--color-danger-soft); color: var(--color-danger); }
 .primary { border-color: var(--color-brand); background: var(--color-brand); color: var(--color-text); }

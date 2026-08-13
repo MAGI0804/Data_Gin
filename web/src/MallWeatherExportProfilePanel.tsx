@@ -1,5 +1,6 @@
 import { Plus, RefreshCcw, Save, X } from 'lucide-react'
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
+import { DataTable } from './ui'
 import {
   emptyMallWeatherExportProfileForm,
   mallWeatherExportProfileDatasetKinds,
@@ -191,7 +192,7 @@ export function MallWeatherExportProfilePanel({ client }: { client: ProfileApiCl
       <button type="submit" disabled={loading || saving}>查询</button>
     </form>
 
-    {profiles.length > 0 && <div className={styles['data-table-wrap']}><table className={styles['data-table']}><caption>天气导出 Profile 列表</caption><thead><tr><th scope="col">名称</th><th scope="col">编码</th><th scope="col">版本</th><th scope="col">状态</th><th scope="col">数据集</th><th scope="col">更新时间</th><th scope="col">操作</th></tr></thead><tbody>{profiles.map((profile) => <tr key={profile.id}><td>{profile.name}</td><td>{profile.code}</td><td>{profile.version}</td><td>{profile.enabled ? '已启用' : '已停用'}</td><td>{profile.datasets.length}</td><td>{formatDate(profile.updatedAt)}</td><td><button type="button" onClick={() => startEdit(profile)} disabled={saving || mallWeatherExportProfileReadOnly(profile.code)}>{mallWeatherExportProfileReadOnly(profile.code) ? '系统固定' : '编辑'}</button></td></tr>)}</tbody></table></div>}
+    {profiles.length > 0 && <DataTable density="compact" minWidth={760} scrollLabel="天气导出 Profile 列表"><caption>天气导出 Profile 列表</caption><thead><tr><th scope="col">名称</th><th scope="col">编码</th><th scope="col">版本</th><th scope="col">状态</th><th scope="col">数据集</th><th scope="col">更新时间</th><th scope="col">操作</th></tr></thead><tbody>{profiles.map((profile) => <tr key={profile.id}><td>{profile.name}</td><td>{profile.code}</td><td>{profile.version}</td><td>{profile.enabled ? '已启用' : '已停用'}</td><td>{profile.datasets.length}</td><td>{formatDate(profile.updatedAt)}</td><td><button type="button" onClick={() => startEdit(profile)} disabled={saving || mallWeatherExportProfileReadOnly(profile.code)}>{mallWeatherExportProfileReadOnly(profile.code) ? '系统固定' : '编辑'}</button></td></tr>)}</tbody></DataTable>}
     {!loading && !error && profiles.length === 0 && <p className={styles['mall-weather-action-message']} role="status">暂无符合条件的天气导出 Profile。</p>}
     {nextCursor && <button type="button" onClick={() => void loadProfiles(nextCursor, true)} disabled={loading || saving}>加载更多</button>}
 
