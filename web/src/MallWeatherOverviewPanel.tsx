@@ -17,6 +17,7 @@ import {
   type MallWeatherOverview,
 } from './mallWeather'
 import styles from './MallWeatherOverviewPanel.module.css'
+import { weatherChartPalette } from './weatherChartPalette'
 
 export type MallWeatherAlertSnapshot = {
   mallID: number
@@ -149,7 +150,7 @@ export function WeatherOverviewDetails({ mall, overview, alerts, refreshing, onR
           detail="1 km 级"
           unit="mm/h"
           icon={<CloudRain aria-hidden="true" />}
-          series={[{ id: 'precipitationMmH', name: '降水强度', color: '#0F9F78', data: overview.minutely.map((item) => ({ time: item.forecastMinuteLocal, value: item.precipitationMmH })) }]}
+          series={[{ id: 'precipitationMmH', name: '降水强度', color: weatherChartPalette.precipitation, data: overview.minutely.map((item) => ({ time: item.forecastMinuteLocal, value: item.precipitationMmH })) }]}
           floorZero
           onDownload={(series) => downloadChartCsv('overview_minutely_precipitation', 'mm/h', series)}
         />
@@ -159,8 +160,8 @@ export function WeatherOverviewDetails({ mall, overview, alerts, refreshing, onR
           unit="°C"
           icon={<Thermometer aria-hidden="true" />}
           series={[
-            { id: 'temperatureC', name: '温度', color: '#B45309', data: overview.hourly.map((item) => ({ time: item.forecastTimeLocal, value: item.temperatureC })) },
-            { id: 'apparentTemperatureC', name: '体感温度', color: '#B91C1C', dash: '6 4', data: overview.hourly.map((item) => ({ time: item.forecastTimeLocal, value: item.apparentTemperatureC })) },
+            { id: 'temperatureC', name: '温度', color: weatherChartPalette.temperature, data: overview.hourly.map((item) => ({ time: item.forecastTimeLocal, value: item.temperatureC })) },
+            { id: 'apparentTemperatureC', name: '体感温度', color: weatherChartPalette.apparentTemperature, dash: '6 4', data: overview.hourly.map((item) => ({ time: item.forecastTimeLocal, value: item.apparentTemperatureC })) },
           ]}
           onDownload={(series) => downloadChartCsv('overview_hourly_temperature', '°C', series)}
         />

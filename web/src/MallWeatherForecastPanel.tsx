@@ -15,6 +15,7 @@ import {
   type MallWeatherMinutely,
 } from './mallWeather'
 import styles from './MallWeatherForecastPanel.module.css'
+import { weatherChartPalette } from './weatherChartPalette'
 
 type QueryClient = (
   path: string,
@@ -199,10 +200,10 @@ export function MallWeatherForecastPanel({
       >
         <div className={styles['mall-weather-forecast-charts']}>
           <MallWeatherChart title="分钟级降水强度" detail={`未来 ${mallWeatherMinutelyForecastMinutes} 分钟`} unit="mm/h" icon={<CloudRain aria-hidden="true" />} floorZero
-            series={[chartSeries('降水强度', '#0F9F78', minutely.items, 'forecastMinuteLocal', 'precipitationMmH')]}
+            series={[chartSeries('降水强度', weatherChartPalette.precipitation, minutely.items, 'forecastMinuteLocal', 'precipitationMmH')]}
             onDownload={(series) => downloadChartCsv('minutely_precipitation', 'mm/h', series)} downloadDisabled={minutelyDownloadDisabled} />
           <MallWeatherChart title="分钟级降水概率" detail={`未来 ${mallWeatherMinutelyForecastMinutes} 分钟`} unit="%" icon={<Droplets aria-hidden="true" />} floorZero
-            series={[chartSeries('降水概率', '#1D4ED8', minutely.items, 'forecastMinuteLocal', 'probabilityPct')]}
+            series={[chartSeries('降水概率', weatherChartPalette.probability, minutely.items, 'forecastMinuteLocal', 'probabilityPct')]}
             onDownload={(series) => downloadChartCsv('minutely_probability', '%', series)} downloadDisabled={minutelyDownloadDisabled} />
         </div>
       </ForecastDataset>
@@ -218,19 +219,19 @@ export function MallWeatherForecastPanel({
         <div className={styles['mall-weather-forecast-charts']}>
           <MallWeatherChart title="温度趋势" detail="逐小时预报" unit="°C" icon={<Thermometer aria-hidden="true" />}
             series={[
-              chartSeries('温度', '#B45309', hourly.items, 'forecastTimeLocal', 'temperatureC'),
-              chartSeries('体感温度', '#B91C1C', hourly.items, 'forecastTimeLocal', 'apparentTemperatureC', '6 4'),
+              chartSeries('温度', weatherChartPalette.temperature, hourly.items, 'forecastTimeLocal', 'temperatureC'),
+              chartSeries('体感温度', weatherChartPalette.apparentTemperature, hourly.items, 'forecastTimeLocal', 'apparentTemperatureC', '6 4'),
             ]} onDownload={(series) => downloadChartCsv('hourly_temperature', '°C', series)} downloadDisabled={hourlyDownloadDisabled} />
           <MallWeatherChart title="降水趋势" detail="逐小时预报" unit="mm/h" icon={<CloudRain aria-hidden="true" />} floorZero
-            series={[chartSeries('降水强度', '#0F9F78', hourly.items, 'forecastTimeLocal', 'precipitationMmH')]}
+            series={[chartSeries('降水强度', weatherChartPalette.precipitation, hourly.items, 'forecastTimeLocal', 'precipitationMmH')]}
             onDownload={(series) => downloadChartCsv('hourly_precipitation', 'mm/h', series)} downloadDisabled={hourlyDownloadDisabled} />
           <MallWeatherChart title="湿度与降水概率" detail="逐小时预报" unit="%" icon={<Droplets aria-hidden="true" />} floorZero
             series={[
-              chartSeries('相对湿度', '#1D4ED8', hourly.items, 'forecastTimeLocal', 'humidityPct'),
-              chartSeries('降水概率', '#6D28D9', hourly.items, 'forecastTimeLocal', 'precipitationProbabilityPct', '6 4'),
+              chartSeries('相对湿度', weatherChartPalette.probability, hourly.items, 'forecastTimeLocal', 'humidityPct'),
+              chartSeries('降水概率', weatherChartPalette.probabilityDark, hourly.items, 'forecastTimeLocal', 'precipitationProbabilityPct', '6 4'),
             ]} onDownload={(series) => downloadChartCsv('hourly_humidity_probability', '%', series)} downloadDisabled={hourlyDownloadDisabled} />
           <MallWeatherChart title="风速趋势" detail="逐小时预报" unit="km/h" icon={<Wind aria-hidden="true" />} floorZero
-            series={[chartSeries('风速', '#475569', hourly.items, 'forecastTimeLocal', 'windSpeedKph')]}
+            series={[chartSeries('风速', weatherChartPalette.wind, hourly.items, 'forecastTimeLocal', 'windSpeedKph')]}
             onDownload={(series) => downloadChartCsv('hourly_wind_speed', 'km/h', series)} downloadDisabled={hourlyDownloadDisabled} />
         </div>
       </ForecastDataset>
@@ -242,16 +243,16 @@ export function MallWeatherForecastPanel({
       >
         <div className={styles['mall-weather-forecast-charts']}>
           <MallWeatherChart title="每日温度区间" detail={`未来 ${mallWeatherDailyForecastDays} 日`} unit="°C" icon={<Thermometer aria-hidden="true" />}
-            series={dailyRangeSeries(daily.items, 'temperatureMinC', 'temperatureAvgC', 'temperatureMaxC', ['#1D4ED8', '#B45309', '#B91C1C'])}
+            series={dailyRangeSeries(daily.items, 'temperatureMinC', 'temperatureAvgC', 'temperatureMaxC', [weatherChartPalette.probability, weatherChartPalette.temperature, weatherChartPalette.apparentTemperature])}
             onDownload={(series) => downloadChartCsv('daily_temperature', '°C', series)} downloadDisabled={dailyDownloadDisabled} />
           <MallWeatherChart title="每日降水区间" detail={`未来 ${mallWeatherDailyForecastDays} 日`} unit="mm/h" icon={<CloudRain aria-hidden="true" />} floorZero
-            series={dailyRangeSeries(daily.items, 'precipitationMinMmH', 'precipitationAvgMmH', 'precipitationMaxMmH', ['#15803D', '#047857', '#065F46'])}
+            series={dailyRangeSeries(daily.items, 'precipitationMinMmH', 'precipitationAvgMmH', 'precipitationMaxMmH', [weatherChartPalette.precipitationLight, weatherChartPalette.precipitationAverage, weatherChartPalette.precipitationDark])}
             onDownload={(series) => downloadChartCsv('daily_precipitation', 'mm/h', series)} downloadDisabled={dailyDownloadDisabled} />
           <MallWeatherChart title="每日湿度区间" detail={`未来 ${mallWeatherDailyForecastDays} 日`} unit="%" icon={<Droplets aria-hidden="true" />} floorZero
-            series={dailyRangeSeries(daily.items, 'humidityMinPct', 'humidityAvgPct', 'humidityMaxPct', ['#1D4ED8', '#0E7490', '#1E3A8A'])}
+            series={dailyRangeSeries(daily.items, 'humidityMinPct', 'humidityAvgPct', 'humidityMaxPct', [weatherChartPalette.probability, weatherChartPalette.humidity, weatherChartPalette.humidityDark])}
             onDownload={(series) => downloadChartCsv('daily_humidity', '%', series)} downloadDisabled={dailyDownloadDisabled} />
           <MallWeatherChart title="每日风速区间" detail={`未来 ${mallWeatherDailyForecastDays} 日`} unit="km/h" icon={<Wind aria-hidden="true" />} floorZero
-            series={dailyRangeSeries(daily.items, 'windMinSpeedKph', 'windAvgSpeedKph', 'windMaxSpeedKph', ['#475569', '#334155', '#111827'])}
+            series={dailyRangeSeries(daily.items, 'windMinSpeedKph', 'windAvgSpeedKph', 'windMaxSpeedKph', [weatherChartPalette.wind, weatherChartPalette.windDark, weatherChartPalette.windDeep])}
             onDownload={(series) => downloadChartCsv('daily_wind_speed', 'km/h', series)} downloadDisabled={dailyDownloadDisabled} />
         </div>
       </ForecastDataset>
@@ -353,7 +354,7 @@ function buildLifeIndexSeries(items: MallWeatherLifeIndex[]): MallWeatherChartSe
     const key = item.indexCode || String(item.indexType)
     groups.set(key, [...(groups.get(key) ?? []), item])
   }
-  const colors = ['#B45309', '#047857', '#1D4ED8', '#B91C1C', '#6D28D9', '#0E7490', '#475569', '#9A3412', '#BE185D', '#3F6212', '#4338CA', '#713F12']
+  const colors = weatherChartPalette.life
   const dashPatterns = [undefined, '6 4', '2 3', '8 3 2 3']
   return [...groups.entries()].map(([code, group], index) => {
     const byDate = new Map(group.map((item) => [item.forecastDateLocal, item]))

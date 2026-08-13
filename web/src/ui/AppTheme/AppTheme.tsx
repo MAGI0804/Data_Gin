@@ -1,19 +1,20 @@
 import ConfigProvider from 'antd/es/config-provider'
 import type { ThemeConfig } from 'antd/es/config-provider/context'
 import type { ReactNode } from 'react'
+import { consoleColors } from '../../styles/themeTokens'
 
 const consoleTheme: ThemeConfig = {
   token: {
-    colorPrimary: '#FF9D0A',
-    colorInfo: '#185F9E',
-    colorSuccess: '#07954C',
-    colorWarning: '#D97706',
-    colorError: '#D92D20',
-    colorText: '#1F2329',
-    colorTextSecondary: '#68707C',
-    colorBorder: '#E3E7ED',
-    colorBgBase: '#FFFFFF',
-    colorBgLayout: '#F7F8FA',
+    colorPrimary: consoleColors.brand,
+    colorInfo: consoleColors.info,
+    colorSuccess: consoleColors.success,
+    colorWarning: consoleColors.warning,
+    colorError: consoleColors.danger,
+    colorText: consoleColors.text,
+    colorTextSecondary: consoleColors.textSecondary,
+    colorBorder: consoleColors.border,
+    colorBgBase: consoleColors.canvas,
+    colorBgLayout: consoleColors.workspace,
     borderRadius: 2,
     borderRadiusLG: 2,
     controlHeight: 40,

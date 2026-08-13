@@ -30,6 +30,24 @@
   --color-navigation-hover: #fbfaf7;
   --color-navigation-active: #8a4b00;
   --color-brand-control-hover: #eb8e00;
+  --color-chart-precipitation: #0f9f78;
+  --color-chart-emerald: #047857;
+  --color-chart-green: #15803d;
+  --color-chart-forest: #065f46;
+  --color-chart-amber: #b45309;
+  --color-chart-red: #b91c1c;
+  --color-chart-blue: #1d4ed8;
+  --color-chart-violet: #6d28d9;
+  --color-chart-teal: #0e7490;
+  --color-chart-navy: #1e3a8a;
+  --color-chart-slate: #475569;
+  --color-chart-slate-dark: #334155;
+  --color-chart-charcoal: #111827;
+  --color-chart-rust: #9a3412;
+  --color-chart-rose: #be185d;
+  --color-chart-olive: #3f6212;
+  --color-chart-indigo: #4338ca;
+  --color-chart-brown: #713f12;
 
   --font-sans: "IBM Plex Sans Variable", "Noto Sans SC Variable", "PingFang SC", "Microsoft YaHei", sans-serif;
   --font-mono: "IBM Plex Mono", "SFMono-Regular", Consolas, "Liberation Mono", monospace;
