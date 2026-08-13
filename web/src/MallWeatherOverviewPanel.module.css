@@ -1,0 +1,51 @@
+.panel { min-width: 0; border-top: 1px solid var(--color-border); background: var(--color-canvas); padding-block: var(--space-4); }
+.success { color: var(--color-success); }
+.warning { color: var(--color-warning); }
+.error { border-color: var(--color-danger); background: var(--color-danger-soft); color: var(--color-danger); }
+.message { margin: var(--space-2) 0 0; border-left: 2px solid var(--color-brand); background: var(--color-brand-soft); font-size: 12px; padding: var(--space-2) var(--space-3); }
+.requestState { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--space-3); border: 1px solid var(--color-border); padding: var(--space-3); }
+.emptyState { padding: var(--space-6); color: var(--color-text-secondary); text-align: center; }
+.emptyState strong, .emptyState span { display: block; }
+.contentGrid { display: grid; gap: var(--space-3); }
+.two, .charts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+.overviewDetails { display: contents; }
+.realtime, .airQuality, .alert { min-height: 300px; border-right: 1px solid var(--color-border); border-bottom: 1px solid var(--color-border); padding: var(--space-6); }
+.alert { border-right: 0; }
+.realtimeHeading, .cardHeading { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-4); }
+.realtimeHeading strong, .realtimeHeading span { display: block; }
+.realtimeHeading strong, .cardTitle { color: var(--color-text); font-size: 20px; }
+.realtimeHeading span { color: var(--color-text-secondary); font-size: 12px; }
+.realtimeBody { display: grid; grid-template-columns: 1.12fr .88fr; align-items: center; gap: var(--space-8); margin-top: var(--space-6); }
+.skySummary { display: flex; align-items: center; gap: var(--space-6); }
+.skySummary > svg { width: 96px; height: 96px; color: var(--color-brand); stroke-width: 1.5; }
+.temperature { display: block; }
+.temperature strong, .temperature span { display: block; }
+.temperature strong { color: var(--color-text); font-size: clamp(48px, 4.9vw, 70px); font-weight: 500; letter-spacing: -.05em; white-space: nowrap; }
+.temperature span { margin-top: var(--space-2); font-size: 23px; }
+.currentMetrics, .airMetrics { display: grid; margin: 0; }
+.currentMetrics > div, .airMetrics > div { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-4); min-height: 34px; }
+.currentMetrics dt, .airMetrics dt { color: var(--color-text-secondary); font-size: 13px; }
+.currentMetrics dd, .airMetrics dd { margin: 0; font-size: 13px; font-weight: 600; text-align: right; }
+.aqi { display: flex; align-items: baseline; justify-content: center; gap: var(--space-2); margin-top: var(--space-6); }
+.aqi strong { color: var(--color-success); font-size: 55px; font-weight: 500; }
+.aqiGrade { display: block; margin: var(--space-2) 0 var(--space-4); color: var(--color-success); font-size: 17px; text-align: center; }
+.airMetrics { border-top: 1px solid var(--color-border); padding-top: var(--space-3); }
+.alert > article { display: grid; justify-items: start; margin-top: var(--space-6); }
+.alert > article > svg { width: 52px; height: 52px; color: var(--color-danger); }
+.alert > article > strong { margin-top: var(--space-4); color: var(--color-danger); font-size: 18px; }
+.alert > article > span, .alert > article > time { margin-top: var(--space-2); color: var(--color-text-secondary); font-size: 12px; }
+.alert > article > p { width: 100%; border-top: 1px solid var(--color-border); padding-top: var(--space-3); }
+.charts { grid-column: 1 / -1; background: var(--color-workspace); border-bottom: 1px solid var(--color-border); padding: var(--space-3); }
+.chartDownloadError { grid-column: 1 / -1; }
+.summary { grid-column: 1 / -1; }
+.meta { display: grid; grid-template-columns: 1fr .8fr 1.5fr; border: 0; }
+.sourceItem { display: flex; align-items: center; gap: var(--space-4); min-height: 102px; border-right: 1px solid var(--color-border); padding: var(--space-4); }
+.sourceItem > svg { width: 42px; height: 42px; }
+.sourceItem span, .sourceItem strong { display: block; }
+.sourceItem span { font-size: 12px; }
+.sourceItem strong { margin-top: var(--space-1); }
+.resolution { margin: 0; border-top: 1px solid var(--color-border); padding: var(--space-3) var(--space-4); }
+
+@media (max-width: 839px) {
+  .two, .charts, .realtimeBody, .meta { grid-template-columns: 1fr; }
+}

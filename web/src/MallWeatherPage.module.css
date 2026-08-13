@@ -9,8 +9,6 @@
 .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
 .workbench-panel { min-width: 0; border-top: 1px solid var(--color-border); background: var(--color-canvas); padding-block: var(--space-4); }
 .primary { border-color: var(--color-brand); background: var(--color-brand); color: var(--color-text); }
-.success { color: var(--color-success); }
-.warning { color: var(--color-warning); }
 .error { border-color: var(--color-danger); background: var(--color-danger-soft); color: var(--color-danger); }
 .dialogBody { display: grid; gap: var(--space-4); }
 .mall-weather-actions-row, .mall-weather-form-actions { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2); }
@@ -21,8 +19,6 @@
 .mall-weather-request-state { display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: var(--space-3); border: 1px solid var(--color-border); padding: var(--space-3); }
 .empty-state { padding: var(--space-6); color: var(--color-text-secondary); text-align: center; }
 .empty-state strong, .empty-state span { display: block; }
-.content-grid { display: grid; gap: var(--space-3); }
-.two, .mall-weather-design-charts { grid-template-columns: repeat(2, minmax(0, 1fr)); }
 .mall-weather-data-nav { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2); border-bottom: 1px solid var(--color-border); padding-block: var(--space-3); }
 .mall-weather-manual-coordinate { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: end; gap: var(--space-3); }
 .mall-weather-form-wide { grid-column: 1 / -1; }
@@ -42,46 +38,9 @@
 .mall-weather-candidates p, .mall-weather-candidates small { margin: 0; }
 
 
-.mall-weather-overview-details { display: contents; }
-.mall-weather-realtime, .mall-weather-air-quality, .mall-weather-design-alert { min-height: 300px; border-right: 1px solid var(--color-border); border-bottom: 1px solid var(--color-border); padding: var(--space-6); }
-.mall-weather-design-alert { border-right: 0; }
-.mall-weather-realtime-heading, .mall-weather-card-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-4); }
-.mall-weather-realtime-heading strong, .mall-weather-realtime-heading span { display: block; }
-.mall-weather-realtime-heading strong, .mall-weather-card-title { color: var(--color-text); font-size: 20px; }
-.mall-weather-realtime-heading span { color: var(--color-text-secondary); font-size: 12px; }
-.mall-weather-realtime-body { display: grid; grid-template-columns: 1.12fr .88fr; align-items: center; gap: var(--space-8); margin-top: var(--space-6); }
-.mall-weather-sky-summary { display: flex; align-items: center; gap: var(--space-6); }
-.mall-weather-sky-summary > svg { width: 96px; height: 96px; color: var(--color-brand); stroke-width: 1.5; }
-.mall-weather-temperature { display: block; }
-.mall-weather-temperature strong, .mall-weather-temperature span { display: block; }
-.mall-weather-temperature strong { color: var(--color-text); font-size: clamp(48px, 4.9vw, 70px); font-weight: 500; letter-spacing: -.05em; white-space: nowrap; }
-.mall-weather-temperature span { margin-top: var(--space-2); font-size: 23px; }
-.mall-weather-current-metrics, .mall-weather-air-metrics { display: grid; margin: 0; }
-.mall-weather-current-metrics > div, .mall-weather-air-metrics > div { display: flex; align-items: baseline; justify-content: space-between; gap: var(--space-4); min-height: 34px; }
-.mall-weather-current-metrics dt, .mall-weather-air-metrics dt { color: var(--color-text-secondary); font-size: 13px; }
-.mall-weather-current-metrics dd, .mall-weather-air-metrics dd { margin: 0; font-size: 13px; font-weight: 600; text-align: right; }
-.mall-weather-aqi { display: flex; align-items: baseline; justify-content: center; gap: var(--space-2); margin-top: var(--space-6); }
-.mall-weather-aqi strong { color: var(--color-success); font-size: 55px; font-weight: 500; }
-.mall-weather-aqi-grade { display: block; margin: var(--space-2) 0 var(--space-4); color: var(--color-success); font-size: 17px; text-align: center; }
-.mall-weather-air-metrics { border-top: 1px solid var(--color-border); padding-top: var(--space-3); }
-.mall-weather-design-alert > article { display: grid; justify-items: start; margin-top: var(--space-6); }
-.mall-weather-design-alert > article > svg { width: 52px; height: 52px; color: var(--color-danger); }
-.mall-weather-design-alert > article > strong { margin-top: var(--space-4); color: var(--color-danger); font-size: 18px; }
-.mall-weather-design-alert > article > span, .mall-weather-design-alert > article > time { margin-top: var(--space-2); color: var(--color-text-secondary); font-size: 12px; }
-.mall-weather-design-alert > article > p { width: 100%; border-top: 1px solid var(--color-border); padding-top: var(--space-3); }
-.mall-weather-design-charts { grid-column: 1 / -1; background: var(--color-workspace); border-bottom: 1px solid var(--color-border); padding: var(--space-3); }
-.mall-weather-summary { grid-column: 1 / -1; }
-.mall-weather-summary .mall-weather-meta { grid-template-columns: 1fr .8fr 1.5fr; border: 0; }
-.mall-weather-source-item { display: flex; align-items: center; gap: var(--space-4); min-height: 102px; border-right: 1px solid var(--color-border); padding: var(--space-4); }
-.mall-weather-source-item > svg { width: 42px; height: 42px; }
-.mall-weather-source-item span, .mall-weather-source-item strong { display: block; }
-.mall-weather-source-item span { font-size: 12px; }
-.mall-weather-source-item strong { margin-top: var(--space-1); }
-.mall-weather-resolution { margin: 0; border-top: 1px solid var(--color-border); padding: var(--space-3) var(--space-4); }
-.mall-weather-chart-download-error { grid-column: 1 / -1; }
 
 @media (max-width: 839px) {
-  .two, .mall-weather-design-charts, .mall-weather-realtime-body, .mall-weather-manual-coordinate { grid-template-columns: 1fr; }
+  .mall-weather-manual-coordinate { grid-template-columns: 1fr; }
   .mall-weather-steps, .mall-weather-candidates, .mall-weather-meta { grid-template-columns: 1fr; }
   .mall-weather-geocode-actions { align-items: stretch; flex-direction: column; }
 }
