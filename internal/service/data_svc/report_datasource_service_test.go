@@ -59,6 +59,66 @@ func TestReportDatasourceServiceTestReturnsOnlySafeFailure(t *testing.T) {
 	}
 }
 
+func TestReportDatasourceServiceTestsUnsavedConnectionDraft(t *testing.T) {
+	store := &fakeReportDatasourceStore{}
+	var opened reportoracle.Config
+	connection := &fakeReportDatasourceConnection{}
+	service := NewReportDatasourceServiceWithDependencies(store, &fakeReportDatasourceCipher{}, func(_ context.Context, config reportoracle.Config) (reportDatasourceConnection, error) {
+		opened = config
+		return connection, nil
+	})
+	request := validReportDatasourceConnectionTestRequest("draft-password")
+	result, err := service.TestConnection(t.Context(), 7, request)
+	if err != nil {
+		t.Fatalf("TestConnection() error = %v", err)
+	}
+	if result.Status != reportDatasourceTestSuccess || opened.Host != "draft.oracle.internal" || opened.ServiceName != "DRAFT" || opened.Username != "draft_user" || opened.Password != "draft-password" {
+		t.Fatalf("TestConnection() result=%+v config=%+v", result, opened)
+	}
+	if store.created != nil || store.updated != nil || store.testStatus != "" {
+		t.Fatalf("unsaved draft test mutated MySQL store: %+v", store)
+	}
+	if !connection.closed {
+		t.Fatal("successful draft connection was not closed")
+	}
+}
+
+func TestReportDatasourceServiceConnectionDraftClosesConnectionAndMapsTimeout(t *testing.T) {
+	connection := &fakeReportDatasourceConnection{}
+	service := NewReportDatasourceServiceWithDependencies(&fakeReportDatasourceStore{}, &fakeReportDatasourceCipher{}, func(context.Context, reportoracle.Config) (reportDatasourceConnection, error) {
+		return connection, context.DeadlineExceeded
+	})
+	result, err := service.TestConnection(t.Context(), 7, validReportDatasourceConnectionTestRequest("draft-password"))
+	if err != nil {
+		t.Fatalf("TestConnection() error = %v", err)
+	}
+	if result.Status != reportDatasourceTestFailed || result.ErrorCode != "CONNECT_TIMEOUT" || !connection.closed {
+		t.Fatalf("TestConnection() result=%+v closed=%t", result, connection.closed)
+	}
+}
+
+func TestReportDatasourceServiceConnectionDraftReusesExistingPassword(t *testing.T) {
+	store := &fakeReportDatasourceStore{item: model.ReportDatasource{BaseModel: model.BaseModel{ID: 4}, PasswordCiphertext: "ciphertext", CredentialKeyVersion: "key-v1"}}
+	var opened reportoracle.Config
+	service := NewReportDatasourceServiceWithDependencies(store, &fakeReportDatasourceCipher{}, func(_ context.Context, config reportoracle.Config) (reportDatasourceConnection, error) {
+		opened = config
+		return &fakeReportDatasourceConnection{}, nil
+	})
+	request := validReportDatasourceConnectionTestRequest("")
+	request.DatasourceID = 4
+	result, err := service.TestConnection(t.Context(), 7, request)
+	if err != nil || result.Status != reportDatasourceTestSuccess || opened.Password != "secret-password" || opened.Host != "draft.oracle.internal" {
+		t.Fatalf("TestConnection() result=%+v error=%v config=%+v", result, err, opened)
+	}
+}
+
+func TestReportDatasourceServiceConnectionDraftRequiresPasswordOrDatasource(t *testing.T) {
+	service := NewReportDatasourceServiceWithDependencies(&fakeReportDatasourceStore{}, &fakeReportDatasourceCipher{}, func(context.Context, reportoracle.Config) (reportDatasourceConnection, error) { return nil, nil })
+	if _, err := service.TestConnection(t.Context(), 7, validReportDatasourceConnectionTestRequest("")); !errors.Is(err, ErrReportDatasourceInvalid) {
+		t.Fatalf("TestConnection() error = %v, want ErrReportDatasourceInvalid", err)
+	}
+}
+
 func TestReportDatasourceRequestRequiresExactlyOneOracleServiceSelector(t *testing.T) {
 	for _, test := range []struct {
 		name        string
@@ -150,4 +210,15 @@ func (*fakeReportDatasourceCipher) Decrypt(string, string) (string, error) {
 
 func validReportDatasourceRequest(password string) requestbody.ReportDatasourceSaveRequest {
 	return requestbody.ReportDatasourceSaveRequest{Code: "report_oracle", Name: "报表 Oracle", Host: "oracle.internal", Port: 1521, ServiceName: "REPORT", Username: "report_user", Password: password, SessionTimezone: "Asia/Shanghai", ConnectTimeoutSeconds: 5, QueryTimeoutSeconds: 300, MaxOpenConnections: 10, MaxIdleConnections: 2, PrefetchRows: 1000, ArraySize: 1000, Enabled: true}
+}
+
+type fakeReportDatasourceConnection struct{ closed bool }
+
+func (connection *fakeReportDatasourceConnection) Close() error {
+	connection.closed = true
+	return nil
+}
+
+func validReportDatasourceConnectionTestRequest(password string) requestbody.ReportDatasourceConnectionTestRequest {
+	return requestbody.ReportDatasourceConnectionTestRequest{Host: "draft.oracle.internal", Port: 1521, ServiceName: "DRAFT", Username: "draft_user", Password: password, SessionTimezone: "Asia/Shanghai", ConnectTimeoutSeconds: 5, QueryTimeoutSeconds: 300, MaxOpenConnections: 10, MaxIdleConnections: 2, PrefetchRows: 1000, ArraySize: 1000}
 }

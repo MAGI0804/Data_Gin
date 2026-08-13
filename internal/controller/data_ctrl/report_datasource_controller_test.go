@@ -40,6 +40,24 @@ func TestReportDatasourceControllerUsesStrictJSONAndRedactedResponse(t *testing.
 	}
 }
 
+func TestReportDatasourceControllerTestsConnectionDraft(t *testing.T) {
+	service := &fakeReportDatasourceService{connectionTest: &data_svc.ReportDatasourceTestDTO{Status: "SUCCESS", Message: "Oracle 连接测试成功"}}
+	controller := NewReportDatasourceControllerWithService(service)
+	router := datasourceControllerRouter()
+	router.POST("/report-datasource-connection-tests", controller.TestConnection)
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodPost, "/report-datasource-connection-tests", strings.NewReader(`{"host":"oracle.internal","port":1521,"serviceName":"REPORT","username":"report_user","password":"secret"}`))
+	request.Header.Set("Content-Type", "application/json")
+	router.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK || service.connectionTestCalls != 1 || service.connectionRequest.Password != "secret" || service.actor != 17 {
+		t.Fatalf("connection test response=%d %s service=%#v", recorder.Code, recorder.Body, service)
+	}
+	if strings.Contains(recorder.Body.String(), "secret") {
+		t.Fatalf("connection test response leaked password: %s", recorder.Body)
+	}
+}
+
 func datasourceControllerRouter() *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
@@ -48,10 +66,13 @@ func datasourceControllerRouter() *gin.Engine {
 }
 
 type fakeReportDatasourceService struct {
-	actor       uint
-	request     requestbody.ReportDatasourceSaveRequest
-	createCalls int
-	created     *data_svc.ReportDatasourceDTO
+	actor               uint
+	request             requestbody.ReportDatasourceSaveRequest
+	createCalls         int
+	created             *data_svc.ReportDatasourceDTO
+	connectionTest      *data_svc.ReportDatasourceTestDTO
+	connectionRequest   requestbody.ReportDatasourceConnectionTestRequest
+	connectionTestCalls int
 }
 
 func (*fakeReportDatasourceService) List(context.Context, uint) ([]data_svc.ReportDatasourceDTO, error) {
@@ -70,4 +91,9 @@ func (*fakeReportDatasourceService) Update(context.Context, uint, uint, requestb
 }
 func (*fakeReportDatasourceService) Test(context.Context, uint, uint) (*data_svc.ReportDatasourceTestDTO, error) {
 	return nil, nil
+}
+func (service *fakeReportDatasourceService) TestConnection(_ context.Context, actor uint, request requestbody.ReportDatasourceConnectionTestRequest) (*data_svc.ReportDatasourceTestDTO, error) {
+	service.actor, service.connectionRequest = actor, request
+	service.connectionTestCalls++
+	return service.connectionTest, nil
 }

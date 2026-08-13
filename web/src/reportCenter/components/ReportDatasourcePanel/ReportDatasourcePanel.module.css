@@ -21,4 +21,5 @@
 .switch input { width: 16px; height: 16px; accent-color: var(--color-brand); }
 .error { display: flex; align-items: flex-start; gap: var(--space-2); margin-top: var(--space-4); border-left: 3px solid var(--color-danger); background: var(--color-danger-soft); padding: var(--space-3); color: var(--color-danger); font-size: 13px; }
 .error svg { flex: 0 0 auto; width: 16px; height: 16px; }
+.success { margin-top: var(--space-4); border-left: 3px solid var(--color-success); background: var(--color-success-soft); padding: var(--space-3); color: var(--color-success); font-size: 13px; }
 @media (max-width: 767px) { .toolbar { align-items: flex-start; flex-direction: column; } .form { grid-template-columns: 1fr; } .switch { grid-column: auto; } }

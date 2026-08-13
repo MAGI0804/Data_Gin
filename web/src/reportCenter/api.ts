@@ -65,6 +65,17 @@ export async function testReportDatasource(client: ReportCenterClient, datasourc
   return requestAndParse(client, `/v1/report-datasources/${datasourceId}/test`, { method: 'POST' }, parseReportDatasourceTest, 'Oracle 连接测试失败。')
 }
 
+export async function testReportDatasourceConnection(client: ReportCenterClient, input: ReportDatasourceInput, datasourceId = 0): Promise<ReportAPIResult<ReportDatasourceTest>> {
+  return requestAndParse(client, '/v1/report-datasource-connection-tests', { method: 'POST', body: {
+    datasourceId: datasourceId || undefined,
+    host: input.host, port: input.port, serviceName: input.serviceName, sid: input.sid,
+    username: input.username, ...(input.password ? { password: input.password } : {}), sessionTimezone: input.sessionTimezone,
+    connectTimeoutSeconds: input.connectTimeoutSeconds, queryTimeoutSeconds: input.queryTimeoutSeconds,
+    maxOpenConnections: input.maxOpenConnections, maxIdleConnections: input.maxIdleConnections,
+    prefetchRows: input.prefetchRows, arraySize: input.arraySize,
+  } }, parseReportDatasourceTest, 'Oracle 连接测试失败。')
+}
+
 export function parseReportDatasources(payload: unknown): ReportDatasource[] {
   const data = unwrapData(payload)
   const rawItems = firstArray(data.items)

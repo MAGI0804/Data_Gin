@@ -220,6 +220,7 @@ func apiData(api *gin.RouterGroup) {
 }
 
 func registerReportDatasourceRoutes(api *gin.RouterGroup, controller *data_ctrl.ReportDatasourceController) {
+	api.POST("/v1/report-datasource-connection-tests", middleware.AuthJWT(), middleware.RequirePermission(model.PermissionReportManage), middleware.LimitRoute("30-M"), controller.TestConnection)
 	group := api.Group("/v1/report-datasources")
 	group.Use(middleware.AuthJWT())
 	group.GET("", middleware.RequirePermission(model.PermissionReportManage), controller.List)

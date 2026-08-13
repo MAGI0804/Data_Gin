@@ -21,6 +21,7 @@ type ReportDatasourceServiceAPI interface {
 	Create(context.Context, uint, requestbody.ReportDatasourceSaveRequest) (*data_svc.ReportDatasourceDTO, error)
 	Update(context.Context, uint, uint, requestbody.ReportDatasourceSaveRequest) (*data_svc.ReportDatasourceDTO, error)
 	Test(context.Context, uint, uint) (*data_svc.ReportDatasourceTestDTO, error)
+	TestConnection(context.Context, uint, requestbody.ReportDatasourceConnectionTestRequest) (*data_svc.ReportDatasourceTestDTO, error)
 }
 
 type ReportDatasourceController struct{ service ReportDatasourceServiceAPI }
@@ -99,6 +100,20 @@ func (controller *ReportDatasourceController) Test(c *gin.Context) {
 		return
 	}
 	result, err := controller.service.Test(c.Request.Context(), auth.CurrentUserID(c), datasourceID)
+	if err != nil {
+		writeReportDatasourceError(c, err)
+		return
+	}
+	responses.New(c).ToResponseWithStatus(http.StatusOK, result)
+}
+
+func (controller *ReportDatasourceController) TestConnection(c *gin.Context) {
+	var request requestbody.ReportDatasourceConnectionTestRequest
+	if err := decodeMallJSON(c, &request); err != nil {
+		writeReportDatasourceError(c, fmt.Errorf("%w: invalid JSON body", data_svc.ErrReportDatasourceInvalid))
+		return
+	}
+	result, err := controller.service.TestConnection(c.Request.Context(), auth.CurrentUserID(c), request)
 	if err != nil {
 		writeReportDatasourceError(c, err)
 		return

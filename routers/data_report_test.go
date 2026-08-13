@@ -2,6 +2,8 @@ package routers
 
 import (
 	"net/http"
+	"os"
+	"strings"
 	"testing"
 
 	"github.com/gin-gonic/gin"
@@ -36,6 +38,7 @@ func TestRegisterReportRoutesUsesExpectedMethodsAndPaths(t *testing.T) {
 		http.MethodPost + " /api/v1/report-datasources",
 		http.MethodPut + " /api/v1/report-datasources/:id",
 		http.MethodPost + " /api/v1/report-datasources/:id/test",
+		http.MethodPost + " /api/v1/report-datasource-connection-tests",
 		http.MethodGet + " /api/v1/report-runs/:id",
 		http.MethodGet + " /api/v1/report-runs/:id/results",
 		http.MethodPost + " /api/v1/report-runs/:id/cancel",
@@ -47,5 +50,16 @@ func TestRegisterReportRoutesUsesExpectedMethodsAndPaths(t *testing.T) {
 		if _, exists := routes[expected]; !exists {
 			t.Fatalf("missing route %q: %#v", expected, routes)
 		}
+	}
+}
+
+func TestReportDatasourceDraftConnectionTestUsesDedicatedRateLimit(t *testing.T) {
+	source, err := os.ReadFile("data.go")
+	if err != nil {
+		t.Fatalf("read data routes: %v", err)
+	}
+	line := `api.POST("/v1/report-datasource-connection-tests", middleware.AuthJWT(), middleware.RequirePermission(model.PermissionReportManage), middleware.LimitRoute("30-M"), controller.TestConnection)`
+	if !strings.Contains(string(source), line) {
+		t.Fatal("draft Oracle connection test must keep its dedicated route rate limit")
 	}
 }

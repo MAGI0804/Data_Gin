@@ -181,8 +181,48 @@ func (service *ReportDatasourceService) Test(ctx context.Context, actor, datasou
 	if err != nil {
 		return nil, fmt.Errorf("report datasource service: decrypt credential: %w", err)
 	}
+	result := service.testConnection(ctx, *datasource, password)
+	safeError := ""
+	if result.Status == reportDatasourceTestFailed {
+		safeError = result.ErrorCode + ": " + result.Message
+	}
+	if err := service.store.RecordReportDatasourceTest(ctx, actor, datasourceID, result.Status, safeError, result.TestedAt); err != nil {
+		return nil, classifyReportDatasourceStoreError(err)
+	}
+	return result, nil
+}
+
+// TestConnection performs a real Oracle PingContext against an unsaved draft.
+// When editing, an omitted password reuses the encrypted credential from the
+// referenced datasource while every other field comes from the draft.
+func (service *ReportDatasourceService) TestConnection(ctx context.Context, actor uint, request requestbody.ReportDatasourceConnectionTestRequest) (*ReportDatasourceTestDTO, error) {
+	if service == nil || ctx == nil || actor == 0 {
+		return nil, ErrReportDatasourceInvalid
+	}
+	datasource, err := reportDatasourceFromConnectionTest(request)
+	if err != nil {
+		return nil, ErrReportDatasourceInvalid
+	}
+	password := request.Password
+	if password == "" {
+		if request.DatasourceID == 0 {
+			return nil, ErrReportDatasourceInvalid
+		}
+		persisted, loadErr := service.store.GetReportDatasource(ctx, request.DatasourceID)
+		if loadErr != nil {
+			return nil, classifyReportDatasourceStoreError(loadErr)
+		}
+		password, err = service.cipher.Decrypt(persisted.CredentialKeyVersion, persisted.PasswordCiphertext)
+		if err != nil {
+			return nil, fmt.Errorf("report datasource service: decrypt credential for connection test: %w", err)
+		}
+	}
+	return service.testConnection(ctx, *datasource, password), nil
+}
+
+func (service *ReportDatasourceService) testConnection(ctx context.Context, datasource model.ReportDatasource, password string) *ReportDatasourceTestDTO {
 	startedAt := service.now()
-	connection, openErr := service.open(ctx, oracleConfigFromDatasource(*datasource, password))
+	connection, openErr := service.open(ctx, oracleConfigFromDatasource(datasource, password))
 	testedAt := service.now()
 	result := &ReportDatasourceTestDTO{Status: reportDatasourceTestSuccess, TestedAt: testedAt, LatencyMS: maxInt64(0, testedAt.Sub(startedAt).Milliseconds()), Message: "Oracle 连接测试成功"}
 	if openErr != nil {
@@ -192,14 +232,26 @@ func (service *ReportDatasourceService) Test(ctx context.Context, actor, datasou
 	if connection != nil {
 		_ = connection.Close()
 	}
-	safeError := ""
-	if result.Status == reportDatasourceTestFailed {
-		safeError = result.ErrorCode + ": " + result.Message
+	return result
+}
+
+func reportDatasourceFromConnectionTest(request requestbody.ReportDatasourceConnectionTestRequest) (*model.ReportDatasource, error) {
+	host := strings.TrimSpace(request.Host)
+	serviceName := strings.TrimSpace(request.ServiceName)
+	sid := strings.TrimSpace(request.SID)
+	username := strings.TrimSpace(request.Username)
+	timezone := strings.TrimSpace(request.SessionTimezone)
+	if timezone == "" {
+		timezone = "Asia/Shanghai"
 	}
-	if err := service.store.RecordReportDatasourceTest(ctx, actor, datasourceID, result.Status, safeError, testedAt); err != nil {
-		return nil, classifyReportDatasourceStoreError(err)
+	if host == "" || utf8.RuneCountInString(host) > 255 || username == "" || utf8.RuneCountInString(username) > 128 ||
+		request.Port < 1 || request.Port > 65535 || (serviceName == "") == (sid == "") || len(request.Password) > 1024 ||
+		request.ConnectTimeoutSeconds < 1 || request.ConnectTimeoutSeconds > 60 || request.QueryTimeoutSeconds < 1 || request.QueryTimeoutSeconds > 86400 ||
+		request.MaxOpenConnections < 1 || request.MaxOpenConnections > 100 || request.MaxIdleConnections < 0 || request.MaxIdleConnections > request.MaxOpenConnections ||
+		request.PrefetchRows < 1 || request.PrefetchRows > 10000 || request.ArraySize < 1 || request.ArraySize > 10000 {
+		return nil, ErrReportDatasourceInvalid
 	}
-	return result, nil
+	return &model.ReportDatasource{Driver: model.ReportDatasourceDriverOracle, Host: host, Port: request.Port, ServiceName: serviceName, SID: sid, Username: username, SessionTimezone: timezone, ConnectTimeoutSeconds: request.ConnectTimeoutSeconds, QueryTimeoutSeconds: request.QueryTimeoutSeconds, MaxOpenConnections: request.MaxOpenConnections, MaxIdleConnections: request.MaxIdleConnections, PrefetchRows: request.PrefetchRows, ArraySize: request.ArraySize, Enabled: true}, nil
 }
 
 func reportDatasourceFromRequest(request requestbody.ReportDatasourceSaveRequest, passwordRequired bool) (*model.ReportDatasource, error) {

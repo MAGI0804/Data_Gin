@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { getReportAudits, parsePublication, parseReportAuditPage, parseReportCatalogPage, parseReportDatasource, parseReportDatasources, parseReportDatasourceTest, parseReportDraft, parseReportExport, parseReportExportPage, parseReportResultPage, parseReportRun, parseReportRunContract, parseReportVersionDiff, parseReportVersionPage } from '../.test-dist/reportCenter/api.js'
+import { getReportAudits, parsePublication, parseReportAuditPage, parseReportCatalogPage, parseReportDatasource, parseReportDatasources, parseReportDatasourceTest, parseReportDraft, parseReportExport, parseReportExportPage, parseReportResultPage, parseReportRun, parseReportRunContract, parseReportVersionDiff, parseReportVersionPage, testReportDatasourceConnection } from '../.test-dist/reportCenter/api.js'
 import { reportParameterControls, reportParameterFlagDisabled, updateReportParameterFlag, updateReportParameterLogicalType } from '../.test-dist/reportCenter/parameterConfig.js'
 import { buildNewReportRunState, canStartNewReportRun, initialReportParameterValues } from '../.test-dist/reportCenter/queryParameters.js'
 import { createLatestRequestGuard } from '../.test-dist/reportCenter/components/ReportVersionDrawer/requestGuard.js'
@@ -319,6 +319,42 @@ test('Oracle datasource test parser accepts only safe stable fields', () => {
   const result = parseReportDatasourceTest({ data: { status: 'FAILED', testedAt: '2026-08-13T08:00:00Z', latencyMs: 12, errorCode: 'AUTHENTICATION_FAILED', message: 'Oracle 用户名或密码无效', rawError: 'password=secret' } })
   assert.equal(result.errorCode, 'AUTHENTICATION_FAILED')
   assert.equal(Object.hasOwn(result, 'rawError'), false)
+})
+
+test('Oracle datasource draft test sends connection fields without saving metadata', async () => {
+  let captured = null
+  const client = async (path, options) => {
+    captured = { path, options }
+    return { ok: true, status: 200, data: { data: { status: 'SUCCESS', testedAt: '2026-08-13T08:00:00Z', latencyMs: 18, message: 'Oracle 连接测试成功' } } }
+  }
+  const result = await testReportDatasourceConnection(client, {
+    code: 'draft_oracle', name: '草稿连接', host: 'oracle.internal', port: 1521, serviceName: 'REPORT', sid: '',
+    username: 'report_user', password: 'draft-password', sessionTimezone: 'Asia/Shanghai', connectTimeoutSeconds: 5,
+    queryTimeoutSeconds: 300, maxOpenConnections: 10, maxIdleConnections: 2, prefetchRows: 1000, arraySize: 1000, enabled: true,
+  }, 7)
+  assert.equal(result.ok, true)
+  assert.equal(captured.path, '/v1/report-datasource-connection-tests')
+  assert.equal(captured.options.method, 'POST')
+  assert.equal(captured.options.body.datasourceId, 7)
+  assert.equal(captured.options.body.password, 'draft-password')
+  assert.equal(Object.hasOwn(captured.options.body, 'code'), false)
+  assert.equal(Object.hasOwn(captured.options.body, 'name'), false)
+  assert.equal(Object.hasOwn(captured.options.body, 'enabled'), false)
+})
+
+test('Oracle datasource draft test reuses a saved password without sending an empty password', async () => {
+  let captured = null
+  const client = async (path, options) => {
+    captured = { path, options }
+    return { ok: true, status: 200, data: { data: { status: 'SUCCESS', testedAt: '2026-08-13T08:00:00Z', latencyMs: 18, message: 'Oracle 连接测试成功' } } }
+  }
+  await testReportDatasourceConnection(client, {
+    code: 'saved_oracle', name: '已保存连接', host: 'oracle.internal', port: 1521, serviceName: 'REPORT', sid: '',
+    username: 'report_user', password: '', sessionTimezone: 'Asia/Shanghai', connectTimeoutSeconds: 5,
+    queryTimeoutSeconds: 300, maxOpenConnections: 10, maxIdleConnections: 2, prefetchRows: 1000, arraySize: 1000, enabled: true,
+  }, 7)
+  assert.equal(captured.options.body.datasourceId, 7)
+  assert.equal(Object.hasOwn(captured.options.body, 'password'), false)
 })
 
 test('report audit parser preserves safe cursor records and structured detail', () => {
