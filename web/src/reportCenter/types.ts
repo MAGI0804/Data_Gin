@@ -227,3 +227,28 @@ export type ReportExport = {
 }
 
 export type ReportExportPage = { items: ReportExport[]; hasMore: boolean; nextAfterId: number }
+
+export type ReportAudit = {
+  id: number
+  actorUserId: number
+  action: string
+  targetType: string
+  targetId: number
+  requestId: string
+  detail: Record<string, unknown>
+  createdAt: string
+}
+
+export type ReportAuditQuery = {
+  action?: string
+  targetType?: string
+  targetId?: number
+  afterId?: number
+  limit?: number
+}
+
+export type ReportAuditPage = {
+  items: ReportAudit[]
+  hasMore: boolean
+  nextAfterId: number
+}

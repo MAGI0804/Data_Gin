@@ -1,5 +1,5 @@
 import type { ClientResponse, HTTPMethod } from '../api/client'
-import type { ReportCatalogPage, ReportCatalogQuery, ReportColumn, ReportDatasource, ReportDatasourceInput, ReportDatasourceTest, ReportDefinitionStatus, ReportDraft, ReportExport, ReportExportPage, ReportFilterOperator, ReportGrant, ReportParameter, ReportResultPage, ReportResultQuery, ReportRun, ReportRunContract, ReportRunStatus, ReportSummary } from './types'
+import type { ReportAuditPage, ReportAuditQuery, ReportCatalogPage, ReportCatalogQuery, ReportColumn, ReportDatasource, ReportDatasourceInput, ReportDatasourceTest, ReportDefinitionStatus, ReportDraft, ReportExport, ReportExportPage, ReportFilterOperator, ReportGrant, ReportParameter, ReportResultPage, ReportResultQuery, ReportRun, ReportRunContract, ReportRunStatus, ReportSummary } from './types'
 
 type JsonRecord = Record<string, unknown>
 
@@ -171,6 +171,16 @@ export async function getReportExportDownload(client: ReportCenterClient, export
   return requestAndParse(client, `/v1/report-exports/${exportId}/download`, { method: 'GET' }, parseReportExportDownload, '下载地址获取失败。')
 }
 
+export async function getReportAudits(client: ReportCenterClient, query: ReportAuditQuery, signal?: AbortSignal): Promise<ReportAPIResult<ReportAuditPage>> {
+  const search = new URLSearchParams()
+  if (query.action?.trim()) search.set('action', query.action.trim())
+  if (query.targetType?.trim()) search.set('targetType', query.targetType.trim())
+  if (query.targetId && query.targetId > 0) search.set('targetId', String(query.targetId))
+  if (query.afterId && query.afterId > 0) search.set('afterId', String(query.afterId))
+  search.set('limit', String(Math.min(100, Math.max(1, query.limit ?? 50))))
+  return requestAndParse(client, `/v1/report-audits?${search}`, { method: 'GET', signal }, parseReportAuditPage, '报表审计记录加载失败。')
+}
+
 export function parseReportRunContract(payload: unknown): ReportRunContract {
   const data = unwrapData(payload)
   const definitionId = positiveInteger(data.definitionId)
@@ -309,6 +319,27 @@ export function parseReportExportPage(payload: unknown): ReportExportPage {
 	const nextAfterId = nonNegativeInteger(data.nextAfterId)
 	if (hasMore && nextAfterId < 1) throw new Error('invalid report export cursor')
 	return { items, hasMore, nextAfterId }
+}
+
+export function parseReportAuditPage(payload: unknown): ReportAuditPage {
+  const data = unwrapData(payload)
+  const rawItems = firstArray(data.items)
+  const items = rawItems.map((value) => {
+    if (!isRecord(value)) throw new Error('invalid report audit')
+    const id = positiveInteger(value.id)
+    const actorUserId = positiveInteger(value.actorUserId)
+    const action = publicString(value.action, 64)
+    const targetType = publicString(value.targetType, 32)
+    const targetId = positiveInteger(value.targetId)
+    const requestId = publicString(value.requestId, 128)
+    const createdAt = publicDate(value.createdAt)
+    if (!id || !actorUserId || !action || !targetType || !targetId || !requestId || !createdAt) throw new Error('invalid report audit')
+    return { id, actorUserId, action, targetType, targetId, requestId, detail: isRecord(value.detail) ? value.detail : {}, createdAt }
+  })
+  const hasMore = data.hasMore === true
+  const nextAfterId = nonNegativeInteger(data.nextAfterId)
+  if (hasMore && nextAfterId < 1) throw new Error('invalid report audit cursor')
+  return { items, hasMore, nextAfterId }
 }
 
 async function requestAndParse<T>(client: ReportCenterClient, path: string, options: Parameters<ReportCenterClient>[1], parse: (payload: unknown) => T, fallback: string): Promise<ReportAPIResult<T>> {

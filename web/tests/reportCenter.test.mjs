@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { parseReportCatalogPage, parseReportDatasource, parseReportDatasources, parseReportDatasourceTest, parseReportDraft, parseReportExport, parseReportExportPage, parseReportResultPage, parseReportRun, parseReportRunContract } from '../.test-dist/reportCenter/api.js'
+import { getReportAudits, parseReportAuditPage, parseReportCatalogPage, parseReportDatasource, parseReportDatasources, parseReportDatasourceTest, parseReportDraft, parseReportExport, parseReportExportPage, parseReportResultPage, parseReportRun, parseReportRunContract } from '../.test-dist/reportCenter/api.js'
 
 test('parseReportCatalogPage reads the standard API envelope', () => {
   const page = parseReportCatalogPage({
@@ -164,4 +164,37 @@ test('Oracle datasource test parser accepts only safe stable fields', () => {
   const result = parseReportDatasourceTest({ data: { status: 'FAILED', testedAt: '2026-08-13T08:00:00Z', latencyMs: 12, errorCode: 'AUTHENTICATION_FAILED', message: 'Oracle 用户名或密码无效', rawError: 'password=secret' } })
   assert.equal(result.errorCode, 'AUTHENTICATION_FAILED')
   assert.equal(Object.hasOwn(result, 'rawError'), false)
+})
+
+test('report audit parser preserves safe cursor records and structured detail', () => {
+  const page = parseReportAuditPage({ data: {
+    items: [{
+      id: 88, actorUserId: 7, action: 'REPORT_RUN_RESULT_READ', targetType: 'REPORT_RUN', targetId: 31,
+      requestId: 'request-uuid', detail: { rowCount: 100, cursor: 'redacted' }, createdAt: '2026-08-13T08:00:00Z',
+    }],
+    hasMore: true,
+    nextAfterId: 88,
+  } })
+  assert.equal(page.items[0].action, 'REPORT_RUN_RESULT_READ')
+  assert.deepEqual(page.items[0].detail, { rowCount: 100, cursor: 'redacted' })
+  assert.equal(page.nextAfterId, 88)
+})
+
+test('report audit parser rejects incomplete records and missing cursors', () => {
+  assert.throws(() => parseReportAuditPage({ data: { items: [{ id: 1 }], hasMore: false } }))
+  assert.throws(() => parseReportAuditPage({ data: { items: [], hasMore: true } }))
+})
+
+test('report audit request builds bounded encoded cursor filters', async () => {
+  let request
+  const client = async (path, options) => {
+    request = { path, options }
+    return { ok: true, data: { data: { items: [], hasMore: false } } }
+  }
+  const result = await getReportAudits(client, {
+    action: ' REPORT_RESULT_QUERY_SUCCESS ', targetType: 'REPORT_RUN', targetId: 31, afterId: 88, limit: 1000,
+  })
+  assert.equal(result.ok, true)
+  assert.equal(request.path, '/v1/report-audits?action=REPORT_RESULT_QUERY_SUCCESS&targetType=REPORT_RUN&targetId=31&afterId=88&limit=100')
+  assert.deepEqual(request.options, { method: 'GET', signal: undefined, showResult: false, silentLoading: true })
 })
