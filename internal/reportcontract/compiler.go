@@ -332,6 +332,9 @@ func compileParameters(
 		if strings.ToUpper(strings.TrimSpace(argument.Direction)) != "IN" {
 			return nil, nil, contractError("parameter %q is not an IN parameter", parameter.ParameterCode)
 		}
+		if !parameterControlCompatible(parameter.ControlType, parameter.LogicalType, parameter.Cardinality) {
+			return nil, nil, contractError("parameter %q control type does not match its logical type and cardinality", parameter.ParameterCode)
+		}
 		definition := reporting.ParameterDefinition{
 			Code: parameter.ParameterCode, ProcedureArgName: parameter.ProcedureArgName,
 			Position: parameter.Position, Direction: parameter.Direction,
@@ -343,6 +346,9 @@ func compileParameters(
 			Validation:    json.RawMessage(parameter.ValidationJSON), Normalizer: json.RawMessage(parameter.NormalizerJSON),
 			ValueSource: json.RawMessage(parameter.ValueSourceJSON), Timezone: parameter.Timezone,
 			NullPolicy: parameter.NullPolicy, CollectionEncoding: parameter.CollectionEncoding,
+		}
+		if err := reporting.ValidateParameterPresentation(parameter.ControlType, definition); err != nil {
+			return nil, nil, contractError("parameter presentation is invalid: %v", err)
 		}
 		definitions = append(definitions, definition)
 		specs = append(specs, parameterSpec{
@@ -661,6 +667,36 @@ func logicalOracleCompatible(logicalType, oracleType string) bool {
 		return oracleType == "DATE" || strings.HasPrefix(oracleType, "TIMESTAMP")
 	case reporting.LogicalTypeMultiEnum, reporting.LogicalTypeJSON:
 		return oracleType == "CLOB" || oracleType == "NCLOB"
+	default:
+		return false
+	}
+}
+
+func parameterControlCompatible(controlType, logicalType, cardinality string) bool {
+	controlType = strings.ToUpper(strings.TrimSpace(controlType))
+	logicalType = strings.ToLower(strings.TrimSpace(logicalType))
+	cardinality = strings.ToUpper(strings.TrimSpace(cardinality))
+	if logicalType == reporting.LogicalTypeMultiEnum {
+		return controlType == "MULTI_SELECT" && cardinality == reporting.CardinalityMultiple
+	}
+	if cardinality != reporting.CardinalitySingle {
+		return false
+	}
+	switch logicalType {
+	case reporting.LogicalTypeBoolean:
+		return controlType == "CHECKBOX"
+	case reporting.LogicalTypeDate:
+		return controlType == "DATE"
+	case reporting.LogicalTypeDateTime:
+		return controlType == "DATETIME"
+	case reporting.LogicalTypeInteger, reporting.LogicalTypeDecimal:
+		return controlType == "NUMBER"
+	case reporting.LogicalTypeEnum:
+		return controlType == "SELECT"
+	case reporting.LogicalTypeJSON:
+		return controlType == "TEXTAREA"
+	case reporting.LogicalTypeString:
+		return controlType == "TEXT" || controlType == "TEXTAREA" || controlType == "HIDDEN"
 	default:
 		return false
 	}

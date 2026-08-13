@@ -238,6 +238,45 @@ func TestCompileRejectsLogicalOracleTypeDrift(t *testing.T) {
 	}
 }
 
+func TestCompileRejectsParameterControlTypeDrift(t *testing.T) {
+	version, parameters, columns, grants, arguments, result := validContract()
+	parameters[1].ControlType = "CHECKBOX"
+	contract := validSnapshotContract(t, version, result, columns)
+	if _, err := Compile(version, parameters, columns, grants, arguments, result, contract); !errors.Is(err, ErrInvalidContract) {
+		t.Fatalf("control type drift error = %v", err)
+	}
+}
+
+func TestCompileRejectsInvalidParameterPresentation(t *testing.T) {
+	tests := []struct {
+		name   string
+		mutate func([]model.ReportParameter)
+	}{
+		{
+			name: "control does not match logical type",
+			mutate: func(parameters []model.ReportParameter) {
+				parameters[1].ControlType = "CHECKBOX"
+			},
+		},
+		{
+			name: "collection encoding on scalar",
+			mutate: func(parameters []model.ReportParameter) {
+				parameters[1].CollectionEncoding = "JSON_CLOB"
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			version, parameters, columns, grants, arguments, result := validContract()
+			test.mutate(parameters)
+			contract := validSnapshotContract(t, version, result, columns)
+			if _, err := Compile(version, parameters, columns, grants, arguments, result, contract); !errors.Is(err, ErrInvalidContract) {
+				t.Fatalf("Compile() error = %v, want ErrInvalidContract", err)
+			}
+		})
+	}
+}
+
 func validSnapshotContract(
 	t *testing.T,
 	version model.ReportVersion,

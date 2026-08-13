@@ -43,6 +43,33 @@ var (
 	reportGrantActions       = map[string]struct{}{"QUERY": {}, "EXPORT": {}}
 )
 
+func reportParameterControlCompatible(controlType, logicalType, cardinality string) bool {
+	if logicalType == reporting.LogicalTypeMultiEnum {
+		return controlType == "MULTI_SELECT" && cardinality == reporting.CardinalityMultiple
+	}
+	if cardinality != reporting.CardinalitySingle {
+		return false
+	}
+	switch logicalType {
+	case reporting.LogicalTypeBoolean:
+		return controlType == "CHECKBOX"
+	case reporting.LogicalTypeDate:
+		return controlType == "DATE"
+	case reporting.LogicalTypeDateTime:
+		return controlType == "DATETIME"
+	case reporting.LogicalTypeInteger, reporting.LogicalTypeDecimal:
+		return controlType == "NUMBER"
+	case reporting.LogicalTypeEnum:
+		return controlType == "SELECT"
+	case reporting.LogicalTypeJSON:
+		return controlType == "TEXTAREA"
+	case reporting.LogicalTypeString:
+		return controlType == "TEXT" || controlType == "TEXTAREA"
+	default:
+		return false
+	}
+}
+
 type reportDraftStore interface {
 	CreateDraft(context.Context, uint, *reportrepo.Draft) error
 	FindDraftByID(context.Context, uint, uint) (*reportrepo.Draft, error)
@@ -378,6 +405,9 @@ func reportParametersFromRequest(requests []requestbody.ReportParameterRequest) 
 		if request.Cardinality != reporting.CardinalitySingle && request.Cardinality != reporting.CardinalityMultiple {
 			return nil, nil, invalidReport("invalid parameter cardinality")
 		}
+		if !reportParameterControlCompatible(request.ControlType, request.LogicalType, request.Cardinality) {
+			return nil, nil, invalidReport("parameter control type does not match its logical type and cardinality")
+		}
 		if request.NullPolicy != "TYPED_NULL" {
 			return nil, nil, invalidReport("invalid parameter null policy")
 		}
@@ -399,6 +429,9 @@ func reportParametersFromRequest(requests []requestbody.ReportParameterRequest) 
 			Validation: cloneJSON(request.Validation), Normalizer: cloneJSON(request.Normalizer),
 			ValueSource: cloneJSON(request.ValueSource), Timezone: request.Timezone, NullPolicy: request.NullPolicy,
 			CollectionEncoding: request.CollectionEncoding,
+		}
+		if err := reporting.ValidateParameterPresentation(request.ControlType, definition); err != nil {
+			return nil, nil, invalidReport("parameter control configuration is invalid")
 		}
 		parameters = append(parameters, model.ReportParameter{
 			ParameterCode: request.Code, Label: request.Label, DisplayOrder: request.DisplayOrder,

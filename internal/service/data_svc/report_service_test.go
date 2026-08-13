@@ -71,6 +71,16 @@ func TestReportDraftServiceRejectsInvalidContractsBeforeStore(t *testing.T) {
 			request.Parameters[0].Nullable = true
 		}},
 		{name: "unknown logical type", mutate: func(request *requestbody.ReportDraftSaveRequest) { request.Parameters[0].LogicalType = "shell" }},
+		{name: "incompatible parameter control", mutate: func(request *requestbody.ReportDraftSaveRequest) { request.Parameters[0].ControlType = "CHECKBOX" }},
+		{name: "unbound boolean Oracle type", mutate: func(request *requestbody.ReportDraftSaveRequest) {
+			request.Parameters[0].ControlType = "CHECKBOX"
+			request.Parameters[0].LogicalType = "boolean"
+			request.Parameters[0].OracleType = "NUMBER"
+		}},
+		{name: "incompatible parameter control", mutate: func(request *requestbody.ReportDraftSaveRequest) { request.Parameters[0].ControlType = "CHECKBOX" }},
+		{name: "collection encoding on scalar", mutate: func(request *requestbody.ReportDraftSaveRequest) {
+			request.Parameters[0].CollectionEncoding = "JSON_CLOB"
+		}},
 		{name: "no exportable column", mutate: func(request *requestbody.ReportDraftSaveRequest) { request.Columns[0].ExportAllowed = false }},
 		{name: "invalid result precision", mutate: func(request *requestbody.ReportDraftSaveRequest) {
 			precision := 39

@@ -105,6 +105,19 @@ func TestBuildCallPlanRejectsOutputParameter(t *testing.T) {
 	}
 }
 
+func TestBuildCallPlanRejectsUnbindableLogicalOracleTypes(t *testing.T) {
+	tests := []reporting.ParameterDefinition{
+		{Code: "amount", ProcedureArgName: "P_AMOUNT", Position: 1, Direction: "IN", LogicalType: reporting.LogicalTypeDecimal, OracleType: "BINARY_DOUBLE"},
+		{Code: "enabled", ProcedureArgName: "P_ENABLED", Position: 1, Direction: "IN", LogicalType: reporting.LogicalTypeBoolean, OracleType: "NUMBER"},
+		{Code: "count", ProcedureArgName: "P_COUNT", Position: 1, Direction: "IN", LogicalType: reporting.LogicalTypeInteger, OracleType: "VARCHAR2"},
+	}
+	for _, definition := range tests {
+		if _, err := BuildCallPlan(ProcedureRef{Owner: "REPORT", Name: "RUN"}, []reporting.ParameterDefinition{definition}); !errors.Is(err, ErrUnsupportedBinding) {
+			t.Fatalf("BuildCallPlan(%s) error = %v", definition.Code, err)
+		}
+	}
+}
+
 func TestBuildCallPlanSupportsProcedureWithoutArguments(t *testing.T) {
 	call, err := BuildCallPlan(ProcedureRef{Owner: "REPORT", Name: "REFRESH_ALL"}, nil)
 	if err != nil {

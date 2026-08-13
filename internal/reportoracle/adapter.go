@@ -354,6 +354,12 @@ func compileBindKind(definition reporting.ParameterDefinition) (oracleBindKind, 
 		}
 		return oracleBindNumber, nil
 	}
+	if definition.LogicalType == reporting.LogicalTypeInteger && oracleType != "NUMBER" {
+		return 0, fmt.Errorf("%w: integer parameter %q must bind NUMBER", ErrUnsupportedBinding, definition.Code)
+	}
+	if definition.LogicalType == reporting.LogicalTypeBoolean && oracleType != "BOOLEAN" {
+		return 0, fmt.Errorf("%w: boolean parameter %q must bind BOOLEAN", ErrUnsupportedBinding, definition.Code)
+	}
 	if oracleType == "CLOB" || oracleType == "NCLOB" {
 		return oracleBindCLOB, nil
 	}
