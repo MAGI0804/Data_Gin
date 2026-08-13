@@ -10,7 +10,7 @@
 .field { display: grid; gap: var(--space-1); min-width: 0; color: var(--color-text-secondary); font-size: 12px; font-weight: 650; }
 .field :is(input, select, textarea), .search input { width: 100%; border: 1px solid var(--color-border-strong); background: var(--color-canvas); padding-inline: var(--space-3); }
 .field textarea { padding-block: var(--space-2); resize: vertical; }
-.fullPrimary, .primary { border-color: var(--color-brand-active); color: #fff; background: var(--color-brand-active); }
+.fullPrimary, .primary { border-color: var(--color-brand-active); color: var(--color-on-brand); background: var(--color-brand-active); }
 .fullPrimary { width: 100%; margin-block-start: var(--space-3); }
 .list { display: grid; margin-block-start: var(--space-3); border-top: 1px solid var(--color-border); }
 .list > button { display: flex; justify-content: space-between; width: 100%; min-height: 64px; gap: var(--space-2); border: 0; border-bottom: 1px solid var(--color-border); border-radius: 0; background: transparent; text-align: left; }
@@ -42,7 +42,7 @@
 .saveRow { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--space-2); align-items: end; }
 .drawerForm { display: grid; gap: var(--space-3); }
 .danger { border-color: var(--color-danger); color: var(--color-danger); background: var(--color-canvas); }
-.dangerNotice { margin: 0; border-inline-start: 3px solid var(--color-danger); background: #fff5f4; padding: var(--space-3); color: var(--color-danger); }
+.dangerNotice { margin: 0; border-inline-start: 3px solid var(--color-danger); background: var(--color-notice-danger); padding: var(--space-3); color: var(--color-danger); }
 .auditFilter { display: flex; flex: 1 1 auto; flex-wrap: wrap; gap: var(--space-2); align-items: end; }
 .auditFilter label { display: grid; gap: var(--space-1); min-width: 180px; color: var(--color-text-secondary); font-size: 12px; font-weight: 650; }
 .auditFilter :is(input, select) { border: 1px solid var(--color-border-strong); background: var(--color-canvas); padding-inline: var(--space-3); }

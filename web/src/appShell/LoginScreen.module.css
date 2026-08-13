@@ -47,7 +47,7 @@
 .notice {
   padding: var(--space-2) 10px;
   border-left: 3px solid var(--color-brand);
-  color: #3b3b3b;
+  color: var(--color-text);
   background: var(--color-surface-subtle);
   font-size: 12px;
 }
@@ -85,7 +85,7 @@
   justify-self: start;
   border: 0;
   background: transparent;
-  color: #4b5563;
+  color: var(--color-text-secondary);
   padding: 2px 0;
   font-size: 12px;
 }
@@ -93,12 +93,12 @@
 .primary {
   border-color: var(--color-brand);
   background: var(--color-brand);
-  color: #fff;
+  color: var(--color-on-brand);
 }
 
 .primary:hover:not(:disabled) {
-  border-color: #eb8e00;
-  background: #eb8e00;
+  border-color: var(--color-brand-control-hover);
+  background: var(--color-brand-control-hover);
 }
 
 @media (max-width: 480px) {

@@ -4,10 +4,10 @@
 .embeddedHeader strong { font-size: 16px; }
 .embeddedHeader span { color: var(--color-text-secondary); font-size: 13px; }
 .actions { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; }
-.primary { border-color: var(--color-brand-active); color: #fff; background: var(--color-brand-active); }
+.primary { border-color: var(--color-brand-active); color: var(--color-on-brand); background: var(--color-brand-active); }
 .danger { border-color: var(--color-danger); color: var(--color-danger); background: var(--color-canvas); }
 .banner, .errorBanner { margin-block-start: var(--space-3); border-inline-start: 3px solid var(--color-brand-active); background: var(--color-brand-soft); padding: var(--space-2) var(--space-3); font-size: 13px; }
-.errorBanner { border-inline-start-color: var(--color-danger); color: var(--color-danger); background: #fff5f4; }
+.errorBanner { border-inline-start-color: var(--color-danger); color: var(--color-danger); background: var(--color-notice-danger); }
 .masterDetail { min-height: 480px; }
 .masterPane, .detailPane { min-width: 0; padding-block: var(--space-4); }
 .masterPane { padding-inline-end: var(--space-4); }
@@ -47,7 +47,7 @@
 .checkbox { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: var(--space-2); align-items: start; color: var(--color-text); font-size: 13px; font-weight: 500; }
 .checkbox span, .checkbox strong, .checkbox small { display: block; }
 .checkbox small { margin-block-start: var(--space-1); color: var(--color-text-secondary); font-weight: 500; }
-.warning { display: flex; gap: var(--space-2); align-items: flex-start; margin: 0; border-inline-start: 3px solid var(--color-warning); background: var(--color-brand-soft); padding: var(--space-3); color: #713f12; font-size: 12px; }
+.warning { display: flex; gap: var(--space-2); align-items: flex-start; margin: 0; border-inline-start: 3px solid var(--color-warning); background: var(--color-brand-soft); padding: var(--space-3); color: var(--color-warning-text); font-size: 12px; }
 .formActions { display: flex; flex-wrap: wrap; gap: var(--space-2); justify-content: flex-end; padding-block-start: var(--space-3); border-top: 1px solid var(--color-border); }
 .token { display: grid; gap: var(--space-3); }
 .token p { margin: 0; color: var(--color-text-secondary); }

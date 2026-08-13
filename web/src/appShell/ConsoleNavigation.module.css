@@ -32,7 +32,7 @@
   min-height: 24px;
   justify-content: space-between;
   border-color: transparent;
-  color: #717985;
+  color: var(--color-navigation-muted);
   background: transparent;
   cursor: default;
   font-size: 13px;
@@ -64,13 +64,13 @@
   border: 0;
   border-left: 4px solid transparent;
   border-radius: 0;
-  color: #5f6670;
+  color: var(--color-navigation-text);
   padding: 8px 12px 8px 14px;
   text-align: left;
 }
 
 .item:hover {
-  background: #fbfaf7;
+  background: var(--color-navigation-hover);
 }
 
 .item > span,
@@ -87,7 +87,7 @@
   width: 20px;
   height: 20px;
   flex: 0 0 auto;
-  color: #898f98;
+  color: var(--color-navigation-icon);
 }
 
 .item strong {
@@ -107,7 +107,7 @@
 .item.active:hover {
   border-color: var(--color-brand);
   background: var(--color-brand-soft);
-  color: #f08d00;
+  color: var(--color-navigation-active);
 }
 
 .searchControl {

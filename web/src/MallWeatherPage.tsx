@@ -933,7 +933,7 @@ function MallWeatherCapacityPlanPanel({ client }: { client: MallWeatherApiClient
         <MetaItem label="飞书每批行数" value={String(plan.feishuBatchRows)} />
         <MetaItem label="规划商场数" value={String(plan.mallCount)} />
       </div>
-      <div className={styles['data-table-wrap']}><table className={styles['data-table']}><caption>各天气数据集容量明细</caption><thead><tr><th>数据集</th><th>行数</th><th>数据库批次</th><th>飞书批次</th></tr></thead><tbody>{plan.datasets.map((dataset) => <tr key={dataset.kind}><td>{dataset.kind}</td><td>{dataset.rows}</td><td>{dataset.databaseBatches}</td><td>{dataset.feishuBatches}</td></tr>)}</tbody></table></div>
+      <div className={styles['data-table-wrap']}><table className={styles['data-table']}><caption>各天气数据集容量明细</caption><thead><tr><th scope="col">数据集</th><th scope="col">行数</th><th scope="col">数据库批次</th><th scope="col">飞书批次</th></tr></thead><tbody>{plan.datasets.map((dataset) => <tr key={dataset.kind}><td>{dataset.kind}</td><td>{dataset.rows}</td><td>{dataset.databaseBatches}</td><td>{dataset.feishuBatches}</td></tr>)}</tbody></table></div>
     </>}
     {error && <p className={[styles['mall-weather-action-message'], styles['error']].join(' ')} role="alert">{error}</p>}
   </section>

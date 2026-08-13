@@ -1427,10 +1427,10 @@ function ExcelSchemeList({ schemes, deletingSchemeID, onDelete, onOpen }: { sche
     <DataTable className={styles.schemeTable} density="compact" minWidth={620} scrollLabel="Excel 匹配方案">
         <thead>
           <tr>
-            <th>方案名称</th>
-            <th>步骤数</th>
-            <th>更新时间</th>
-            <th>操作</th>
+            <th scope="col">方案名称</th>
+            <th scope="col">步骤数</th>
+            <th scope="col">更新时间</th>
+            <th scope="col">操作</th>
           </tr>
         </thead>
         <tbody>
@@ -1474,14 +1474,14 @@ function ExcelJobHistoryTable({
     <DataTable className={styles.historyTable} density="compact" minWidth={900} scrollLabel="Excel 任务列表">
         <thead>
           <tr>
-            <th>ID</th>
-            <th>文件</th>
-            <th>类型</th>
-            <th>状态</th>
-            <th>处理行</th>
-            <th>匹配/未匹配</th>
-            <th>创建时间</th>
-            <th>操作</th>
+            <th scope="col">ID</th>
+            <th scope="col">文件</th>
+            <th scope="col">类型</th>
+            <th scope="col">状态</th>
+            <th scope="col">处理行</th>
+            <th scope="col">匹配/未匹配</th>
+            <th scope="col">创建时间</th>
+            <th scope="col">操作</th>
           </tr>
         </thead>
         <tbody>
@@ -1562,13 +1562,13 @@ function ExcelMatchPreviewPanel({ preview }: { preview: ExcelMatchPreviewResult 
         <table className={styles.previewTable}>
           <thead>
             <tr>
-              <th>行号</th>
-              <th>匹配键</th>
-              <th>状态</th>
-              <th>追加值</th>
-              <th>步骤结果</th>
-              <th>原因</th>
-              <th>Excel 行内容</th>
+              <th scope="col">行号</th>
+              <th scope="col">匹配键</th>
+              <th scope="col">状态</th>
+              <th scope="col">追加值</th>
+              <th scope="col">步骤结果</th>
+              <th scope="col">原因</th>
+              <th scope="col">Excel 行内容</th>
             </tr>
           </thead>
           <tbody>
