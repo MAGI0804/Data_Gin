@@ -57,10 +57,9 @@ import { MethodsPage } from './configurationPages/MethodsPage/MethodsPage'
 import { ExcelMatchPage } from './excelPages/ExcelMatchPage'
 import type { DestinationDefinition } from './configurationPages/types'
 import { parseMallWeatherExportContentStatus, submitMallWeatherExportContentDownload } from './mallWeatherExport'
-import { buildRawRecordsRequest, buildWarehouseRawRecordsQuery, parseRawRecordsPage, type RawRecordOrigin, type RawRecordsPage } from './rawRecords'
 import { parseMonitoringPage } from './monitoringRecords'
-import { parseSourceFetchSummary } from './sourceOperations'
 import { ProcessedRecordsPage } from './dataPages/ProcessedRecordsPage'
+import { RawRecordsPage } from './dataPages/RawRecordsPage'
 
 const defaultApiBaseURL = import.meta.env.VITE_API_BASE_URL ?? ''
 
@@ -78,7 +77,6 @@ type FileDownloadClient = (path: string, fileName: string, signal: AbortSignal) 
 type NavKey = 'overview' | 'runs' | 'delivery_logs' | 'step_runs' | 'store_info' | 'mall_weather' | 'access_management' | 'sources' | 'receive' | 'pull_records' | 'backfill' | 'youzan_distribution' | 'rules' | 'processed' | 'methods' | 'destinations' | 'tasks' | 'push_policy' | 'excel_jobs' | 'excel_schemes' | 'excel_write' | 'report_catalog' | 'report_configuration' | 'report_query' | 'report_exports'
 type NavItem = { key: NavKey; label: string; description: string; icon: ReactNode }
 type NavGroup = { label: string; items: NavItem[] }
-type JsonRecord = Record<string, unknown>
 
 type PipelineDefinition = {
   id: number
@@ -117,31 +115,6 @@ type BojunOrderBackfillResult = {
   failed_count: number
   samples: BojunOrderBackfillSample[]
   failed_samples: BojunOrderBackfillSample[]
-}
-
-type RawData = {
-  id: number
-  data_source_id: number
-  external_id: string
-  data_type: string
-  raw_content: unknown
-  rawContent?: unknown
-  metadata: unknown
-  status: string
-  remark: string
-  source: string
-  created_at: number
-  updated_at: number
-}
-
-type WarehouseRawRecord = {
-  id: number
-  sourceID: number
-  sourceCode: string
-  status: 'received' | 'queued' | 'cleaning' | 'cleaned' | 'failed'
-  traceID: string
-  receivedAt: string
-  createdAt: number
 }
 
 type LegacyTask = {
@@ -825,9 +798,9 @@ function App() {
       navigationRef={mobileNavRef}
       navigationOpen={mobileNavOpen}
       onDismissNavigation={() => setMobileNavOpen(false)}
-      flushWorkspace={Boolean(reportSection) || ['access_management', 'sources', 'rules', 'processed', 'methods', 'destinations', 'tasks', 'push_policy', 'overview', 'runs', 'delivery_logs', 'step_runs'].includes(activeNav)}
+      flushWorkspace={Boolean(reportSection) || ['access_management', 'sources', 'receive', 'pull_records', 'rules', 'processed', 'methods', 'destinations', 'tasks', 'push_policy', 'overview', 'runs', 'delivery_logs', 'step_runs'].includes(activeNav)}
       workspaceClassName="ops-workspace"
-      header={<ModuleHeader compact={Boolean(reportSection) || ['access_management', 'sources', 'rules', 'processed', 'methods', 'destinations', 'tasks', 'push_policy', 'overview', 'runs', 'delivery_logs', 'step_runs'].includes(activeNav)} activeNav={activeNav} loading={loading || refreshing} sessionUser={sessionUser} onOpenNavigation={openMobileNavigation} onRefresh={() => void refreshWorkspace(true)} onLogout={handleLogout} refreshing={refreshing} mobileNavTriggerRef={mobileNavTriggerRef} />}
+      header={<ModuleHeader compact={Boolean(reportSection) || ['access_management', 'sources', 'receive', 'pull_records', 'rules', 'processed', 'methods', 'destinations', 'tasks', 'push_policy', 'overview', 'runs', 'delivery_logs', 'step_runs'].includes(activeNav)} activeNav={activeNav} loading={loading || refreshing} sessionUser={sessionUser} onOpenNavigation={openMobileNavigation} onRefresh={() => void refreshWorkspace(true)} onLogout={handleLogout} refreshing={refreshing} mobileNavTriggerRef={mobileNavTriggerRef} />}
       notices={<>{sessionValidationError && <div className="result-banner error" role="status" aria-live="polite">{sessionValidationError} <button type="button" onClick={() => setSessionValidationAttempt((attempt) => attempt + 1)}>重试校验</button></div>}{workspaceError && <div className="result-banner error" role="alert">{workspaceError} <button type="button" onClick={() => void refreshWorkspace(false)} disabled={refreshing}>重试</button></div>}</>}
       overlay={<ResultPanel result={result} onClose={() => setResult(null)} />}
     >
@@ -841,8 +814,8 @@ function App() {
         {activeNav === 'access_management' && <AccessManagementPage client={client} permissions={sessionUser?.permissions ?? []} />}
         {activeNav === 'sources' && <SourcesPage client={client} onFetchSource={fetchSource} onTestSource={testSource} refreshVersion={workspaceRefreshVersion} />}
         {activeNav === 'methods' && <MethodsPage client={client} permissions={sessionUser?.permissions ?? []} refreshVersion={workspaceRefreshVersion} />}
-        {activeNav === 'receive' && <RawRecordsQueryPage title="接口接收记录" origin="receive" client={client} onFetchSource={fetchSource} />}
-        {activeNav === 'pull_records' && <RawRecordsQueryPage title="数据拉取记录" origin="pull" client={client} onFetchSource={fetchSource} />}
+        {activeNav === 'receive' && <RawRecordsPage title="接口接收记录" origin="receive" client={client} onFetchSource={fetchSource} />}
+        {activeNav === 'pull_records' && <RawRecordsPage title="数据拉取记录" origin="pull" client={client} onFetchSource={fetchSource} />}
         {activeNav === 'backfill' && <BojunBackfillPage loading={loading || refreshing} onPreview={previewBojunOrderBackfill} onConfirm={confirmBojunOrderBackfill} />}
         {activeNav === 'youzan_distribution' && <YouzanDistributionPage task={legacyTasks.find((item) => item.code === 'youzan_distribution_order_fetch')} loading={loading || refreshing} onPreview={previewYouzanDistributionBackfill} onConfirm={confirmYouzanDistributionBackfill} onRun={runLegacyTask} />}
         {activeNav === 'rules' && <RulesPage client={client} rules={transformRules} sources={sources} onRulesChange={setTransformRules} refreshVersion={workspaceRefreshVersion} />}
@@ -1072,243 +1045,6 @@ function BojunBackfillResultView({ title, result }: { title: string; result: Boj
         </div>
       )}
     </section>
-  )
-}
-
-function RawRecordsQueryPage({ title, origin, client, onFetchSource }: { title: string; origin: RawRecordOrigin; client: ApiClient; onFetchSource: (sourceID: number) => Promise<ApiResult> }) {
-  const [source, setSource] = useState('')
-  const [dataType, setDataType] = useState('')
-  const [status, setStatus] = useState('')
-  const [businessKey, setBusinessKey] = useState('')
-  const [startTime, setStartTime] = useState('')
-  const [endTime, setEndTime] = useState('')
-  const [appliedQuery, setAppliedQuery] = useState({ source: '', dataType: '', status: '', businessKey: '', startTime: '', endTime: '' })
-  const [page, setPage] = useState(1)
-  const [recordsPage, setRecordsPage] = useState<RawRecordsPage<RawData> | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
-  const [pendingSourceFetchID, setPendingSourceFetchID] = useState<number | null>(null)
-  const [fetchingSourceID, setFetchingSourceID] = useState<number | null>(null)
-  const [sourceFetchMessage, setSourceFetchMessage] = useState('')
-  const requestRef = useRef<AbortController | null>(null)
-
-  useEffect(() => {
-    requestRef.current?.abort()
-    const controller = new AbortController()
-    requestRef.current = controller
-    setLoading(true)
-    setError('')
-    const body = buildRawRecordsRequest({ page, pageSize: 20, origin, ...appliedQuery })
-    void client('/v1/data/raw/list', {
-      method: 'POST', body, signal: controller.signal, showResult: false, silentLoading: true,
-    }).then((response) => {
-      if (controller.signal.aborted) return
-      const nextPage = response.ok ? parseRawRecordsPage<RawData>(response.data) : null
-      if (nextPage) {
-        setRecordsPage(nextPage)
-        return
-      }
-      setError(response.error?.message || '记录查询暂时不可用，请稍后重试。')
-    }).finally(() => {
-      if (!controller.signal.aborted) setLoading(false)
-    })
-    return () => controller.abort()
-  }, [appliedQuery, client, origin, page])
-
-  function submit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    setPage(1)
-    setAppliedQuery({
-      source,
-      dataType,
-      status,
-      businessKey,
-      startTime: backendDateTime(startTime),
-      endTime: backendDateTime(endTime),
-    })
-  }
-
-  function resetQuery() {
-    setSource('')
-    setDataType('')
-    setStatus('')
-    setBusinessKey('')
-    setStartTime('')
-    setEndTime('')
-    setPage(1)
-    setAppliedQuery({ source: '', dataType: '', status: '', businessKey: '', startTime: '', endTime: '' })
-  }
-
-  async function fetchSource() {
-    const sourceID = pendingSourceFetchID
-    if (!sourceID || fetchingSourceID !== null) return
-    setFetchingSourceID(sourceID)
-    setSourceFetchMessage('')
-    const response = await onFetchSource(sourceID)
-    const summary = response.ok ? parseSourceFetchSummary(response.data) : null
-    setSourceFetchMessage(summary
-      ? `数据源 #${sourceID} 拉取完成：成功 ${summary.successCount}/${summary.totalCount}，失败 ${summary.failedCount}。`
-      : response.error?.message || '数据源拉取未完成，请稍后重试。')
-    setFetchingSourceID(null)
-    setPendingSourceFetchID(null)
-  }
-
-  const records = recordsPage?.list ?? []
-  const total = recordsPage?.total ?? 0
-  const totalPages = recordsPage?.totalPages ?? 0
-  return (
-    <div className="view-stack">
-      {origin === 'pull' && <section className="raw-record-summary" aria-label="拉取记录摘要">
-        <Metric label="当前结果" value={total} />
-        <Metric label="当前页" value={records.length} />
-        <Metric label="总页数" value={Math.max(totalPages, 1)} />
-      </section>}
-      <form className="query-bar raw-record-query-bar" onSubmit={submit}>
-        <div className="query-fields">
-          <Field label="ID / 外部编号 / 内容" name="raw_business_key" value={businessKey} onChange={setBusinessKey} />
-          <SelectFilter label="状态" value={status || 'all'} onChange={(next) => setStatus(next === 'all' ? '' : next)} options={[
-            { value: 'pending', label: '待处理' }, { value: 'processing', label: '处理中' }, { value: 'processed', label: '已处理' }, { value: 'error', label: '异常' },
-          ]} />
-          <Field label="来源" name="raw_source" value={source} onChange={setSource} />
-          {origin === 'pull' && <Field label="开始时间" name="raw_start_time" type="datetime-local" value={startTime} onChange={setStartTime} />}
-          {origin === 'pull' && <Field label="结束时间" name="raw_end_time" type="datetime-local" value={endTime} onChange={setEndTime} />}
-        </div>
-        <div className="query-bar-actions"><span>查询命中 <strong>{total}</strong> 条</span><button type="button" onClick={resetQuery} disabled={loading}>重置</button><button className="primary" type="submit" disabled={loading}>{loading ? '查询中…' : '查询'}</button></div>
-        <details className="raw-record-advanced-filter"><summary>更多筛选</summary><Field label="数据类型" name="raw_data_type" value={dataType} onChange={setDataType} />{origin === 'receive' && <><Field label="开始时间" name="raw_start_time" type="datetime-local" value={startTime} onChange={setStartTime} /><Field label="结束时间" name="raw_end_time" type="datetime-local" value={endTime} onChange={setEndTime} /></>}</details>
-      </form>
-      <p className="query-contract-note">来源、类型、状态、外部业务键与时间范围均由服务端分页筛选；业务键对应原始记录的外部 ID。</p>
-      {error && <div className="result-banner error" role="alert">{error} 已保留最近一次成功数据。</div>}
-      <Panel title={`${title}（含脱敏内容）`} icon={<Inbox />} meta={loading && !recordsPage ? '正在加载…' : `共 ${total} 条`}>
-        {sourceFetchMessage && <div className="result-banner" role="status" aria-live="polite">{sourceFetchMessage}</div>}
-        <RawDataList origin={origin} records={records} onRequestSourceFetch={setPendingSourceFetchID} />
-        <div className="record-actions raw-record-pagination" role="status" aria-live="polite">
-          <span>第 {recordsPage?.page ?? page} / {Math.max(totalPages, 1)} 页</span>
-          <button type="button" onClick={() => setPage((current) => Math.max(1, current - 1))} disabled={loading || page <= 1}>上一页</button>
-          <button type="button" onClick={() => setPage((current) => current + 1)} disabled={loading || totalPages === 0 || page >= totalPages}>下一页</button>
-        </div>
-      </Panel>
-      <WarehouseRawRecordsPanel client={client} origin={origin} />
-      {pendingSourceFetchID !== null && <Dialog open title="确认拉取数据源" closeDisabled={fetchingSourceID !== null} onClose={() => { if (fetchingSourceID === null) setPendingSourceFetchID(null) }} footer={<><button type="button" disabled={fetchingSourceID !== null} onClick={() => setPendingSourceFetchID(null)}>取消</button><button className="primary" type="button" disabled={fetchingSourceID !== null} onClick={() => void fetchSource()}>{fetchingSourceID === pendingSourceFetchID ? '拉取中…' : '确认拉取'}</button></>}><p>确认立即拉取数据源 #{pendingSourceFetchID}？该操作会向已配置的来源发起真实请求。</p></Dialog>}
-    </div>
-  )
-}
-
-function WarehouseRawRecordsPanel({ client, origin }: { client: ApiClient; origin: RawRecordOrigin }) {
-  const [source, setSource] = useState('')
-  const [status, setStatus] = useState('')
-  const [traceID, setTraceID] = useState('')
-  const [startTime, setStartTime] = useState('')
-  const [endTime, setEndTime] = useState('')
-  const [appliedQuery, setAppliedQuery] = useState({ source: '', status: '', traceID: '', startTime: '', endTime: '' })
-  const [page, setPage] = useState(1)
-  const [recordsPage, setRecordsPage] = useState<RawRecordsPage<WarehouseRawRecord> | null>(null)
-  const [loading, setLoading] = useState(true)
-  const [error, setError] = useState('')
-  const [message, setMessage] = useState('')
-  const [pendingRetransform, setPendingRetransform] = useState<WarehouseRawRecord | null>(null)
-  const [retransformingID, setRetransformingID] = useState<number | null>(null)
-  const [reloadVersion, setReloadVersion] = useState(0)
-  const requestRef = useRef<AbortController | null>(null)
-
-  useEffect(() => {
-    requestRef.current?.abort()
-    const controller = new AbortController()
-    requestRef.current = controller
-    setLoading(true)
-    setError('')
-    const query = buildWarehouseRawRecordsQuery({ page, pageSize: 20, origin, ...appliedQuery })
-    void client(`/v1/raw-records?${query}`, {
-      method: 'GET', signal: controller.signal, showResult: false, silentLoading: true,
-    }).then((response) => {
-      if (controller.signal.aborted) return
-      const parsed = response.ok ? parseRawRecordsPage<unknown>(response.data) : null
-      const records = parsed?.list.map(parseWarehouseRawRecord) ?? []
-      if (parsed && records.every((record): record is WarehouseRawRecord => record !== null)) {
-        setRecordsPage({ ...parsed, list: records })
-        return
-      }
-      setError(response.error?.message || '可重新处理记录查询暂时不可用，请稍后重试。')
-    }).finally(() => {
-      if (!controller.signal.aborted) setLoading(false)
-    })
-    return () => controller.abort()
-  }, [appliedQuery, client, origin, page, reloadVersion])
-
-  function submit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    setPage(1)
-    setAppliedQuery({ source, status, traceID, startTime: backendDateTime(startTime), endTime: backendDateTime(endTime) })
-  }
-
-  async function retransform() {
-    const record = pendingRetransform
-    if (!record || retransformingID !== null) return
-    setRetransformingID(record.id)
-    setError('')
-    const response = await client(`/v1/raw-records/${record.id}/retransform`, {
-      method: 'POST', retry: false, showResult: false, silentLoading: true,
-    })
-    setRetransformingID(null)
-    if (!response.ok) {
-      setError(response.error?.message || '重新处理未完成，请稍后重试。')
-      return
-    }
-    const result = parseRetransformResult(response.data)
-    if (!result) {
-      setError('重新处理已提交，但未收到可验证的结果摘要。')
-      return
-    }
-    setPendingRetransform(null)
-    setMessage(`重新处理完成：追踪 ${result.traceID || '-'}，清洗记录 #${result.cleanRecordID}。`)
-    setReloadVersion((version) => version + 1)
-  }
-
-  const records = recordsPage?.list ?? []
-  const total = recordsPage?.total ?? 0
-  const totalPages = recordsPage?.totalPages ?? 0
-  return (
-    <>
-      <Panel title={`可重新处理${origin === 'pull' ? '拉取' : '接收'}记录（仅元数据）`} icon={<RefreshCcw />} meta={loading && !recordsPage ? '正在加载…' : `共 ${total} 条`}>
-        <p className="query-contract-note">此列表查询新仓库中 origin={origin} 的脱敏记录。历史列表仍只读；只有本列表中的 ID 可安全重新处理。</p>
-        <form className="query-bar" onSubmit={submit}>
-          <div className="query-fields">
-            <Field label="来源" name="warehouse_raw_source" value={source} onChange={setSource} />
-            <SelectFilter label="状态" value={status || 'all'} onChange={(next) => setStatus(next === 'all' ? '' : next)} options={[
-              { value: 'received', label: '已接收' }, { value: 'queued', label: '排队中' }, { value: 'cleaning', label: '处理中' }, { value: 'cleaned', label: '已清洗' }, { value: 'failed', label: '失败' },
-            ]} />
-            <Field label="追踪 ID" name="warehouse_raw_trace_id" value={traceID} onChange={setTraceID} />
-            <Field label="开始时间" name="warehouse_raw_start_time" type="datetime-local" value={startTime} onChange={setStartTime} />
-            <Field label="结束时间" name="warehouse_raw_end_time" type="datetime-local" value={endTime} onChange={setEndTime} />
-          </div>
-          <button type="submit" disabled={loading || retransformingID !== null}>{loading ? '查询中…' : '查询'}</button>
-        </form>
-        {message && <div className="result-banner" role="status" aria-live="polite">{message}</div>}
-        {error && <div className="result-banner error" role="alert">{error} 已保留最近一次成功数据。</div>}
-        {records.length === 0 ? <EmptyState text="暂无可重新处理的原始记录。" /> : (
-          <div className="data-table-wrap" role="region" aria-label="可重新处理原始记录列表" tabIndex={0}>
-            <table className="data-table">
-              <thead><tr><th scope="col">记录 ID</th><th scope="col">来源</th><th scope="col">追踪 ID</th><th scope="col">接收时间</th><th scope="col">状态</th><th scope="col">操作</th></tr></thead>
-              <tbody>{records.map((record) => (
-                <tr key={record.id}>
-                  <td>#{record.id}</td>
-                  <td><strong>{record.sourceCode || '未命名来源'}</strong><small>来源 #{record.sourceID || '-'}</small></td>
-                  <td>{record.traceID || '-'}</td>
-                  <td>{record.receivedAt || (record.createdAt ? formatUnixTime(record.createdAt) : '-')}</td>
-                  <td><StatusPill label={rawRecordStatusLabel(record.status)} /></td>
-                  <td><button type="button" disabled={retransformingID !== null || record.status === 'cleaning'} onClick={() => setPendingRetransform(record)}>{retransformingID === record.id ? '处理中…' : '重新处理'}</button></td>
-                </tr>
-              ))}</tbody>
-            </table>
-          </div>
-        )}
-        <div className="record-actions raw-record-pagination" role="status" aria-live="polite">
-          <span>第 {recordsPage?.page ?? page} / {Math.max(totalPages, 1)} 页</span>
-          <button type="button" onClick={() => setPage((current) => Math.max(1, current - 1))} disabled={loading || retransformingID !== null || page <= 1}>上一页</button>
-          <button type="button" onClick={() => setPage((current) => current + 1)} disabled={loading || retransformingID !== null || totalPages === 0 || page >= totalPages}>下一页</button>
-        </div>
-      </Panel>
-      {pendingRetransform && <Dialog open title="确认重新处理原始记录" closeDisabled={retransformingID !== null} onClose={() => { if (retransformingID === null) setPendingRetransform(null) }} footer={<><button type="button" disabled={retransformingID !== null} onClick={() => setPendingRetransform(null)}>取消</button><button className="primary" type="button" disabled={retransformingID !== null} onClick={() => void retransform()}>{retransformingID === pendingRetransform.id ? '处理中…' : '确认重新处理'}</button></>}><p>确认重新处理仓库原始记录 #{pendingRetransform.id}？系统会创建新的清洗记录；原始内容不会在管理端展示。</p></Dialog>}
-    </>
   )
 }
 
@@ -1593,82 +1329,6 @@ function YouzanDistributionBackfillResultView({ title, result }: { title: string
 function apiURL(path: string) {
   return buildApiURL(path, defaultApiBaseURL)
 }
-function publicText(value: unknown, maximumLength: number) {
-  if (typeof value !== 'string') return ''
-  const text = value.trim()
-  return text.length <= maximumLength ? text : ''
-}
-
-function parseWarehouseRawRecord(value: unknown): WarehouseRawRecord | null {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) return null
-  const record = value as Record<string, unknown>
-  const id = Number(record.id)
-  const sourceID = Number(record.source_id)
-  const createdAt = Number(record.created_at)
-  const status = publicText(record.status, 16)
-  if (!Number.isInteger(id) || id <= 0 || !Number.isInteger(sourceID) || sourceID < 0
-    || !Number.isInteger(createdAt) || createdAt < 0
-    || !['received', 'queued', 'cleaning', 'cleaned', 'failed'].includes(status)) return null
-  return {
-    id,
-    sourceID,
-    sourceCode: publicText(record.source_code, 100),
-    status: status as WarehouseRawRecord['status'],
-    traceID: publicText(record.trace_id, 64),
-    receivedAt: publicText(record.received_at, 32),
-    createdAt,
-  }
-}
-
-function parseRetransformResult(payload: unknown): { traceID: string; cleanRecordID: number } | null {
-  if (!payload || typeof payload !== 'object') return null
-  const data = (payload as { data?: unknown }).data
-  if (!data || typeof data !== 'object' || Array.isArray(data)) return null
-  const result = (data as { result?: unknown }).result
-  if (!result || typeof result !== 'object' || Array.isArray(result)) return null
-  const cleanRecordID = Number((result as Record<string, unknown>).clean_record_id)
-  if (!Number.isInteger(cleanRecordID) || cleanRecordID <= 0) return null
-  return { traceID: publicText((result as Record<string, unknown>).trace_id, 64), cleanRecordID }
-}
-
-function rawRecordStatusLabel(status: WarehouseRawRecord['status']) {
-  return ({ received: '已接收', queued: '排队中', cleaning: '处理中', cleaned: '已清洗', failed: '失败' } as const)[status]
-}
-
-function RawDataList({ origin, records, onRequestSourceFetch }: { origin: RawRecordOrigin; records: RawData[]; onRequestSourceFetch: (sourceID: number) => void }) {
-  const [selectedID, setSelectedID] = useState<number | null>(null)
-  if (records.length === 0) return <EmptyState text="暂无原始数据。" />
-  const selected = records.find((record) => record.id === selectedID) ?? records[0]
-  return (
-    <div className="raw-record-master-detail">
-      <div className="data-table-wrap raw-record-table-wrap">
-        <table className="data-table raw-record-table">
-          <thead><tr><th scope="col">ID / 外部编号</th><th scope="col">数据类型</th><th scope="col">来源</th><th scope="col">{origin === 'pull' ? '拉取时间' : '接收时间'}</th><th scope="col">状态</th><th scope="col">操作</th></tr></thead>
-          <tbody>
-            {records.map((record) => {
-              const isSelected = selected.id === record.id
-              return <tr className={isSelected ? 'is-selected' : ''} key={record.id}>
-                <td><button className="table-row-select" type="button" aria-pressed={isSelected} onClick={() => setSelectedID(record.id)}>#{record.id}</button><small>{record.external_id || '-'}</small></td>
-                <td>{record.data_type || 'raw'}</td>
-                <td>{record.source || `#${record.data_source_id || '-'}`}</td>
-                <td>{formatUnixTime(record.created_at)}</td>
-                <td><StatusPill label={record.status || '未知'} /></td>
-                <td className="table-actions"><button type="button" onClick={() => setSelectedID(record.id)}>查看</button>{origin === 'pull' && record.data_source_id > 0 && <button type="button" onClick={() => onRequestSourceFetch(record.data_source_id)}>重新拉取</button>}</td>
-              </tr>
-            })}
-          </tbody>
-        </table>
-      </div>
-      <section className="raw-record-detail" aria-live="polite" aria-label="原始记录详情">
-        <div className="raw-record-detail-title"><div><span>{origin === 'pull' ? '拉取详情' : '原始记录'} #{selected.id}</span><strong>{selected.external_id || selected.data_type || 'raw'}</strong></div><StatusPill label={selected.status || '未知'} /></div>
-        <dl className="task-definition-grid raw-record-fields"><div><dt>来源</dt><dd>{selected.source || `数据源 #${selected.data_source_id || '-'}`}</dd></div><div><dt>接入方式</dt><dd>{rawDataOrigin(selected)}</dd></div><div><dt>记录时间</dt><dd>{formatUnixTime(selected.created_at)}</dd></div><div><dt>数据类型</dt><dd>{selected.data_type || '-'}</dd></div></dl>
-        <h3>脱敏原始内容与元数据</h3>
-        <ReadonlyJSON value={redactMonitoringJSON({ raw_content: selected.raw_content ?? selected.rawContent ?? null, metadata: selected.metadata ?? null })} />
-      </section>
-    </div>
-  )
-}
-
 function ResultPanel({ result, onClose }: { result: ApiResult | null; onClose: () => void }) {
   if (!result) return null
   return (
@@ -1703,40 +1363,8 @@ function PanelTitle({ icon, title, meta }: { icon: ReactNode; title: string; met
   )
 }
 
-function SelectFilter({ label, value, onChange, options }: { label: string; value: string; onChange: (value: string) => void; options: Array<{ value: string; label: string }> }) {
-  return (
-    <label>
-      {label}
-      <select name={`filter-${label}`} value={value} onChange={(event) => onChange(event.currentTarget.value)}>
-        <option value="all">全部</option>
-        {options.map((option) => <option value={option.value} key={option.value}>{option.label}</option>)}
-      </select>
-    </label>
-  )
-}
-
 function Metric({ label, value }: { label: string; value: ReactNode }) {
   return <div className="metric"><span>{label}</span><strong>{value}</strong></div>
-}
-
-function StatusPill({ label }: { label: string }) {
-  const displayLabel = ({
-    success: '已完成',
-    running: '运行中',
-    failed: '失败',
-    partial_success: '部分成功',
-    pending: '待处理',
-    enabled: '已启用',
-    disabled: '已停用',
-  } as Record<string, string>)[label.toLowerCase()] ?? label
-  const tone = /失败|错误|无效|停用|风险|超时/i.test(displayLabel)
-    ? 'danger'
-    : /成功|已就绪|启用|完成|已接收|已清洗|已交付|正常/i.test(displayLabel)
-      ? 'success'
-      : /处理中|运行中|排队|加载|待处理|待推送/i.test(displayLabel)
-        ? 'warning'
-        : 'neutral'
-  return <span className={`status-pill ${tone}`}>{displayLabel}</span>
 }
 
 function EmptyState({ text }: { text: string }) {
@@ -1754,17 +1382,6 @@ function Field({ label, name, defaultValue = '', type = 'text', value, onChange,
 
 function ReadonlyJSON({ value }: { value: unknown }) {
   return <pre className="json-preview" aria-label="只读 JSON">{jsonText(value)}</pre>
-}
-
-function rawDataOrigin(record: RawData) {
-  const metadata = parseMaybeJson(record.metadata)
-  if (metadata && typeof metadata === 'object' && (metadata as JsonRecord).format === 'fetch') return 'fetch'
-  if (metadata && typeof metadata === 'object' && typeof (metadata as JsonRecord).format === 'string') return String((metadata as JsonRecord).format)
-  if (record.source) return record.source
-  if (record.remark) return record.remark
-  if (metadata && typeof metadata === 'object' && typeof (metadata as JsonRecord).source === 'string') return String((metadata as JsonRecord).source)
-  if (metadata && typeof metadata === 'object' && typeof (metadata as JsonRecord).remark === 'string') return String((metadata as JsonRecord).remark)
-  return 'ingest'
 }
 
 function readList<T>(result: ApiResult, key: string): T[] {
@@ -1848,39 +1465,6 @@ function bojunBackfillStatusLabel(value: string) {
     push_failed: '推送失败',
   }
   return labels[value] ?? (value || '-')
-}
-
-function formatUnixTime(value: number) {
-  if (!value) return '-'
-  return formatDate(new Date(value * 1000).toISOString())
-}
-
-function parseMaybeJson(value: unknown) {
-  if (!value) return null
-  if (typeof value === 'object') return value
-  if (typeof value !== 'string') return null
-  try {
-    return JSON.parse(value) as unknown
-  } catch {
-    return null
-  }
-}
-
-function formatDate(value: string | null) {
-  if (!value) return '-'
-  const normalized = value.includes('T') ? value : `${value.replace(' ', 'T')}+08:00`
-  const date = new Date(normalized)
-  if (Number.isNaN(date.getTime())) return value
-  return new Intl.DateTimeFormat('zh-CN', {
-    timeZone: 'Asia/Shanghai',
-    year: 'numeric',
-    month: '2-digit',
-    day: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
-    hour12: false,
-  }).format(date).replace(/\//g, '-')
 }
 
 function monitoringDayStartTime() {

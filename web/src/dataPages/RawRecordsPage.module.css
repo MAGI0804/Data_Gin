@@ -1,0 +1,182 @@
+.filters {
+  display: flex;
+  flex: 1 1 auto;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: end;
+  min-width: 0;
+}
+
+.filters > label,
+.advancedFilters label {
+  display: grid;
+  gap: var(--space-1);
+  min-width: 150px;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+}
+
+.filters > label:first-child {
+  min-width: 240px;
+}
+
+.filters input,
+.filters select {
+  width: 100%;
+  min-width: 0;
+  min-height: var(--control-height);
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--color-border-strong);
+  border-radius: var(--radius-control);
+  color: var(--color-text);
+  background: var(--color-canvas);
+}
+
+.filterActions,
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+}
+
+.primary {
+  color: var(--color-canvas);
+  border-color: var(--color-brand-active);
+  background: var(--color-brand-active);
+}
+
+.advancedFilters {
+  flex: 1 0 100%;
+  min-width: 0;
+  border: 0;
+  border-radius: var(--radius-none);
+  padding: 0;
+  background: transparent;
+}
+
+.advancedFilters summary {
+  width: max-content;
+  cursor: pointer;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+}
+
+.advancedFilters > div {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: var(--space-3);
+  margin-block-start: var(--space-3);
+  padding-block-start: var(--space-3);
+  border-top: 1px solid var(--color-border);
+}
+
+.contractNote,
+.notice {
+  margin: 0;
+  padding-block: var(--space-3);
+  border-bottom: 1px solid var(--color-border);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.contractNote {
+  color: var(--color-text-secondary);
+}
+
+.notice {
+  color: var(--color-success);
+}
+
+.identity {
+  display: grid;
+  gap: 2px;
+}
+
+.identity small {
+  color: var(--color-text-secondary);
+  font-size: 11px;
+}
+
+.detailList {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  margin: 0;
+  border-top: 1px solid var(--color-border);
+}
+
+.detailList > div {
+  display: grid;
+  grid-template-columns: minmax(92px, 0.35fr) minmax(0, 1fr);
+  gap: var(--space-3);
+  padding: var(--space-3) 0;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.detailList > div:nth-child(odd) {
+  padding-inline-end: var(--space-4);
+}
+
+.detailList dt {
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.detailList dd {
+  min-width: 0;
+  margin: 0;
+  overflow-wrap: anywhere;
+}
+
+.detailHeading {
+  margin: var(--space-6) 0 var(--space-2);
+  color: var(--color-text-secondary);
+  font-size: 13px;
+}
+
+.jsonPreview {
+  max-height: 56vh;
+  margin: 0;
+  overflow: auto;
+  padding: var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-none);
+  color: var(--color-text);
+  background: var(--color-surface-subtle);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  word-break: break-word;
+}
+
+@media (max-width: 839px) {
+  .advancedFilters > div,
+  .detailList {
+    grid-template-columns: 1fr;
+  }
+
+  .detailList > div:nth-child(odd) {
+    padding-inline-end: 0;
+  }
+}
+
+@media (max-width: 599px) {
+  .filters,
+  .filters > label,
+  .filters > label:first-child,
+  .filterActions,
+  .filterActions button {
+    width: 100%;
+    min-width: 0;
+  }
+
+  .filterActions button {
+    flex: 1 1 0;
+  }
+
+  .detailList > div {
+    grid-template-columns: 1fr;
+    gap: var(--space-1);
+  }
+}

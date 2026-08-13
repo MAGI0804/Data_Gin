@@ -592,18 +592,6 @@ button:focus-visible {
   flex-wrap: wrap;
 }
 
-.query-contract-note {
-  margin: 0;
-  color: #71717a;
-  font-size: 12px;
-}
-
-.raw-record-pagination {
-  margin-top: 12px;
-  border-top: 1px solid #e6e3dc;
-  padding-top: 12px;
-}
-
 .table-actions {
   min-width: max-content;
 }
@@ -622,54 +610,6 @@ button:focus-visible {
   border: 1px solid #111111;
   background: #ffffff;
   padding: 12px;
-}
-
-.query-bar-actions {
-  display: flex;
-  align-items: center;
-  justify-content: flex-end;
-  gap: 10px;
-  white-space: nowrap;
-}
-
-.query-bar-actions > span {
-  color: var(--muted);
-  font-size: 12px;
-}
-
-.query-bar-actions > span strong {
-  color: var(--success, #138a47);
-  font-size: 15px;
-}
-
-.raw-record-summary {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  border-top: 1px solid var(--line);
-  border-bottom: 1px solid var(--line);
-}
-
-.raw-record-summary .metric {
-  min-height: 72px;
-}
-
-.raw-record-query-bar {
-  grid-template-columns: minmax(0, 1fr) auto;
-}
-
-.raw-record-advanced-filter {
-  grid-column: 1 / -1;
-  margin: 0;
-}
-
-.raw-record-advanced-filter[open] {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 10px;
-}
-
-.raw-record-advanced-filter summary {
-  grid-column: 1 / -1;
 }
 
 .query-fields {
@@ -1611,93 +1551,6 @@ button:focus-visible {
   background: #fcfbf8;
 }
 
-.raw-record-master-detail {
-  display: grid;
-  grid-template-columns: 1fr;
-  border: 1px solid var(--line);
-}
-
-.raw-record-table-wrap {
-  max-height: 580px;
-  border-bottom: 1px solid var(--line);
-}
-
-.raw-record-table tbody tr.is-selected {
-  background: #fff8e8;
-  box-shadow: inset 3px 0 0 var(--accent);
-}
-
-.table-row-select {
-  min-height: 24px;
-  border: 0;
-  background: transparent;
-  color: inherit;
-  font: inherit;
-  font-weight: 700;
-  padding: 0;
-  text-align: left;
-}
-
-.table-row-select:hover,
-.table-row-select:focus-visible {
-  color: #9a6100;
-  outline-offset: 3px;
-}
-
-.raw-record-detail {
-  min-width: 0;
-  background: #fff;
-  padding: 14px;
-}
-
-.raw-record-table td:first-child small {
-  display: block;
-  margin-top: 3px;
-  color: var(--muted);
-  font-size: 10px;
-}
-
-.raw-record-detail-title {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 12px;
-  border-bottom: 1px solid var(--line);
-  padding-bottom: 12px;
-}
-
-.raw-record-detail-title span,
-.raw-record-detail h3 {
-  color: var(--muted);
-  font-size: 11px;
-  font-weight: 700;
-}
-
-.raw-record-detail-title strong {
-  display: block;
-  margin-top: 3px;
-  font-size: 13px;
-}
-
-.raw-record-fields {
-  margin-top: 12px;
-}
-
-.raw-record-detail h3 {
-  margin: 16px 0 8px;
-}
-
-@media (max-width: 900px) {
-  .raw-record-master-detail {
-    grid-template-columns: 1fr;
-  }
-
-  .raw-record-table-wrap {
-    border-right: 0;
-    border-bottom: 1px solid var(--line);
-  }
-}
-
 @media (max-width: 1180px) {
   .youzan-operations-grid {
     grid-template-columns: 1fr;
@@ -1721,13 +1574,6 @@ button:focus-visible {
 }
 
 @media (max-width: 840px) {
-  .query-bar-actions {
-    justify-content: flex-start;
-    flex-wrap: wrap;
-  }
-
-  .raw-record-summary,
-  .raw-record-advanced-filter[open],
   .youzan-operations-grid .youzan-backfill-form {
     grid-template-columns: 1fr;
   }
