@@ -22,7 +22,7 @@
     "test:processed-records": "tsc src/processedRecords.ts --target ES2020 --module ES2020 --lib ES2020,DOM --outDir .test-dist --skipLibCheck && node --test tests/processedRecords.test.mjs",
     "test:source-operations": "tsc src/sourceOperations.ts --target ES2020 --module ES2020 --lib ES2020,DOM --outDir .test-dist --skipLibCheck && node --test tests/sourceOperations.test.mjs",
     "test:data-authorization": "tsc src/dataAuthorization.ts --target ES2020 --module ES2020 --lib ES2020,DOM --outDir .test-dist --skipLibCheck && node --test tests/dataAuthorization.test.mjs",
-    "test:report-center": "tsc src/reportCenter/api.ts src/reportCenter/queryParameters.ts --rootDir src --target ES2020 --module ES2020 --moduleResolution node --lib ES2020,DOM --outDir .test-dist --skipLibCheck && node --test tests/reportCenter.test.mjs",
+    "test:report-center": "tsc src/reportCenter/api.ts src/reportCenter/parameterConfig.ts src/reportCenter/queryParameters.ts --rootDir src --target ES2020 --module ES2020 --moduleResolution node --lib ES2020,DOM --outDir .test-dist --skipLibCheck && node --test tests/reportCenter.test.mjs",
     "test:excel": "tsc src/excelMatchConfig.ts --target ES2020 --module ES2020 --lib ES2020,DOM --outDir .test-dist --skipLibCheck && node --test tests/excelMatchConfig.test.mjs",
     "test:mall-import": "tsc src/mallImport.ts --target ES2020 --module ES2020 --lib ES2020,DOM --outDir .test-dist --skipLibCheck && node --test tests/mallImport.test.mjs",
     "test:capacity": "tsc src/mallWeatherCapacityPlan.ts --target ES2020 --module ES2020 --lib ES2020,DOM --outDir .test-dist --skipLibCheck && node --test tests/mallWeatherCapacityPlan.test.mjs",

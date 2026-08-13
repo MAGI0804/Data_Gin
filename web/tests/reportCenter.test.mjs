@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import { getReportAudits, parseReportAuditPage, parseReportCatalogPage, parseReportDatasource, parseReportDatasources, parseReportDatasourceTest, parseReportDraft, parseReportExport, parseReportExportPage, parseReportResultPage, parseReportRun, parseReportRunContract } from '../.test-dist/reportCenter/api.js'
+import { reportParameterFlagDisabled, updateReportParameterFlag } from '../.test-dist/reportCenter/parameterConfig.js'
 import { buildNewReportRunState, canStartNewReportRun, initialReportParameterValues } from '../.test-dist/reportCenter/queryParameters.js'
 
 test('parseReportCatalogPage reads the standard API envelope', () => {
@@ -93,6 +94,21 @@ test('report parameter defaults use the same editable shapes as their controls',
     count: '12', ratio: '12.5', options: '{"active":true}', jsonText: '"literal"', stores: ['S001', '2'],
     enabled: false, name: ' 默认名称 ', emptyJson: '',
   })
+})
+
+test('historical sensitive system parameters can be repaired without recreation', () => {
+  const historical = { systemInjected: true, sensitive: true, normalizer: {}, valueSource: { source: 'RUN_ID' }, defaultValue: undefined }
+  assert.equal(reportParameterFlagDisabled(historical, 'systemInjected'), false)
+  assert.equal(reportParameterFlagDisabled(historical, 'sensitive'), false)
+  assert.deepEqual(updateReportParameterFlag(historical, 'systemInjected', false), {
+    ...historical, systemInjected: false, valueSource: {},
+  })
+  assert.deepEqual(updateReportParameterFlag(historical, 'sensitive', false), {
+    ...historical, sensitive: false,
+  })
+
+  assert.equal(reportParameterFlagDisabled({ ...historical, systemInjected: false }, 'systemInjected'), true)
+  assert.equal(reportParameterFlagDisabled({ ...historical, sensitive: false }, 'sensitive'), true)
 })
 
 test('new report runs are allowed only after run and export processing finish', () => {

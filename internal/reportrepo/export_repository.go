@@ -29,7 +29,7 @@ type CreateExportCommand struct {
 }
 
 func (repository *Repository) CreateOrGetExport(ctx context.Context, actor, runID uint, input reportquery.Input, command *CreateExportCommand) (bool, error) {
-	if repository == nil || repository.db == nil || repository.writeAudit == nil || ctx == nil || actor == 0 || runID == 0 || command == nil ||
+	if repository == nil || repository.db == nil || repository.loadPublished == nil || repository.writeAudit == nil || ctx == nil || actor == 0 || runID == 0 || command == nil ||
 		uuid.Validate(command.Export.ExportUUID) != nil || command.Export.RunID != runID || command.Export.CreatedBy != actor ||
 		command.Export.Status != model.ReportExportStatusPending || !validReportExportOutbox(command.Outbox, command.Export.ExportUUID) {
 		return false, fmt.Errorf("report export: invalid create request")
@@ -46,15 +46,8 @@ func (repository *Repository) CreateOrGetExport(ctx context.Context, actor, runI
 		if run.Status != model.ReportRunStatusSucceeded || run.ResultPurgedAt != nil || run.ResultExpiresAt == nil || !requestedAt.Before(run.ResultExpiresAt.UTC()) {
 			return ErrReportExportRunNotReady
 		}
-		if !frozenRunAllowsAction(run.PermissionSnapshotJSON, actor, ReportActionExport) {
-			if !frozenLegacyRunAllowsLiveAuthorization(run.PermissionSnapshotJSON, actor) {
-				return ErrReportExportRunNotReady
-			}
-			if _, err := loadPublishedReport(ctx, tx, actor, run.DefinitionID, ReportActionExport, false); errors.Is(err, ErrReportActionDenied) || errors.Is(err, ErrPublishedReportNotFound) {
-				return ErrReportExportRunNotReady
-			} else if err != nil {
-				return fmt.Errorf("report export: authorize legacy run: %w", err)
-			}
+		if err := repository.authorizeRunExport(ctx, tx, actor, &run); err != nil {
+			return err
 		}
 		columns, err := FrozenExportQueryColumns(run.PresentationSnapshotJSON)
 		if err != nil {
@@ -99,6 +92,24 @@ func (repository *Repository) CreateOrGetExport(ctx context.Context, actor, runI
 		return nil
 	})
 	return created, err
+}
+
+func (repository *Repository) authorizeRunExport(ctx context.Context, tx *gorm.DB, actor uint, run *model.ReportRun) error {
+	if run == nil || frozenRunAllowsAction(run.PermissionSnapshotJSON, actor, ReportActionExport) {
+		if run == nil {
+			return ErrReportExportRunNotReady
+		}
+		return nil
+	}
+	if !frozenLegacyRunAllowsLiveAuthorization(run.PermissionSnapshotJSON, actor) {
+		return ErrReportExportRunNotReady
+	}
+	if _, err := repository.loadPublished(ctx, tx, actor, run.DefinitionID, ReportActionExport, false); errors.Is(err, ErrReportActionDenied) || errors.Is(err, ErrPublishedReportNotFound) {
+		return ErrReportExportRunNotReady
+	} else if err != nil {
+		return fmt.Errorf("report export: authorize legacy run: %w", err)
+	}
+	return nil
 }
 
 type frozenExportQueryColumn struct {

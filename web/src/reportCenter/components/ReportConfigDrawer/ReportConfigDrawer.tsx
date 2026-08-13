@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Plus, Trash2 } from 'lucide-react'
 import { Button, Drawer } from '../../../ui'
 import { getReportDraft, publishReportDraft, saveReportDraft, type ReportCenterClient } from '../../api'
+import { reportParameterFlagDisabled, updateReportParameterFlag } from '../../parameterConfig'
 import type { ReportColumn, ReportDatasource, ReportDraft, ReportParameter, ReportSummary } from '../../types'
 import styles from './ReportConfigDrawer.module.css'
 
@@ -101,8 +102,9 @@ function ParameterRow({ item, onChange, onDelete }: { item: ReportParameter; onC
     <ContractField label="校验提示"><input value={item.errorMessage} onChange={(event) => onChange({ ...item, errorMessage: event.currentTarget.value })} /></ContractField>
     <label className={styles.flag}><input type="checkbox" checked={item.required} onChange={(event) => onChange({ ...item, required: event.currentTarget.checked, nullable: event.currentTarget.checked ? false : item.nullable })} />必填</label>
     <label className={styles.flag}><input type="checkbox" checked={item.nullable} disabled={item.required} onChange={(event) => onChange({ ...item, nullable: event.currentTarget.checked })} />可空</label>
-    <label className={styles.flag}><input type="checkbox" checked={item.systemInjected} disabled={item.sensitive} onChange={(event) => onChange({ ...item, systemInjected: event.currentTarget.checked, normalizer: event.currentTarget.checked ? {} : item.normalizer, valueSource: event.currentTarget.checked ? item.valueSource : {} })} />系统注入</label>
-    <label className={styles.flag}><input type="checkbox" checked={item.sensitive} disabled={item.systemInjected} onChange={(event) => onChange({ ...item, sensitive: event.currentTarget.checked, defaultValue: event.currentTarget.checked ? undefined : item.defaultValue })} />敏感</label>
+    <label className={styles.flag}><input type="checkbox" checked={item.systemInjected} disabled={reportParameterFlagDisabled(item, 'systemInjected')} onChange={(event) => onChange(updateReportParameterFlag(item, 'systemInjected', event.currentTarget.checked))} />系统注入</label>
+    <label className={styles.flag}><input type="checkbox" checked={item.sensitive} disabled={reportParameterFlagDisabled(item, 'sensitive')} onChange={(event) => onChange(updateReportParameterFlag(item, 'sensitive', event.currentTarget.checked))} />敏感</label>
+    {item.systemInjected && item.sensitive ? <span className={styles.fieldError} role="alert">历史配置不允许同时启用“系统注入”和“敏感”，请取消其中一项。</span> : null}
     <Delete onClick={onDelete} />
   </div>
 }
