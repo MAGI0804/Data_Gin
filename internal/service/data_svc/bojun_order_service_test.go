@@ -211,6 +211,24 @@ func TestBojunOrderPushSkipsByConfiguredPolicy(t *testing.T) {
 	}
 }
 
+func TestBojunOrderPushWithoutTargetDoesNotWriteDeliveryLog(t *testing.T) {
+	logCreator := &fakeDeliveryLogCreator{}
+	service := &BojunOrderPushService{logDAO: logCreator}
+
+	result := service.PushNewOrderWithPolicy(context.Background(), &model.BojunRetailOrder{
+		BaseModel: model.BaseModel{ID: 8},
+		DocNo:     "B006",
+		StoreCode: "UNKNOWN",
+	}, 1, OrderPushSkipPolicy{})
+
+	if !result.Skipped || result.Error == nil {
+		t.Fatalf("result = %+v, want unmatched target skip", result)
+	}
+	if len(logCreator.logs) != 0 {
+		t.Fatalf("logs length = %d, want no delivery log", len(logCreator.logs))
+	}
+}
+
 func TestBojunOrderDeliveryLogDoesNotWriteSourceCode(t *testing.T) {
 	log := newBojunOrderDeliveryLog(deliveryLogPayload{
 		TraceID: "trace-1",

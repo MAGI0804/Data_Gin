@@ -25,13 +25,21 @@ func TestMonitoringListFiltersUseBoundParameters(t *testing.T) {
 		DestinationCode: "mall-a", SourceCode: "source-a", Success: &success, BusinessKey: "order-1", SentFrom: &start, SentTo: &end,
 	})
 	logStatement := logQuery.Find(&[]model.DeliveryLog{}).Statement
-	for _, fragment := range []string{"destination_code = ?", "source_code = ?", "success = ?", "business_key = ?", "sent_at >= ?", "sent_at <= ?"} {
+	for _, fragment := range []string{"NOT (COALESCE(destination_code, '') = ? AND destination_id = 0", "COALESCE(source_code, '') = ?", "COALESCE(dataset_kind, '') = ?", "destination_code = ?", "source_code = ?", "success = ?", "business_key = ?", "sent_at >= ?", "sent_at <= ?"} {
 		if !strings.Contains(logStatement.SQL.String(), fragment) {
 			t.Fatalf("delivery filter SQL missing %q: %s", fragment, logStatement.SQL.String())
 		}
 	}
-	if strings.Contains(logStatement.SQL.String(), "mall-a") || len(logStatement.Vars) != 6 {
+	if strings.Contains(logStatement.SQL.String(), "mall-a") || len(logStatement.Vars) != 9 ||
+		logStatement.Vars[0] != unmatchedStoreDeliveryCode || logStatement.Vars[1] != bojunOrderDeliverySource ||
+		logStatement.Vars[2] != bojunOrderDeliveryDataset {
 		t.Fatalf("delivery filter SQL did not bind inputs: %s; vars=%v", logStatement.SQL.String(), logStatement.Vars)
+	}
+	recentStatement := visibleDeliveryLogs(db.Model(&model.DeliveryLog{})).Find(&[]model.DeliveryLog{}).Statement
+	if !strings.Contains(recentStatement.SQL.String(), "NOT (COALESCE(destination_code, '') = ? AND destination_id = 0") ||
+		len(recentStatement.Vars) != 3 || recentStatement.Vars[0] != unmatchedStoreDeliveryCode ||
+		recentStatement.Vars[1] != bojunOrderDeliverySource || recentStatement.Vars[2] != bojunOrderDeliveryDataset {
+		t.Fatalf("recent delivery SQL does not hide unmatched logs: %s; vars=%v", recentStatement.SQL.String(), recentStatement.Vars)
 	}
 
 	runDAO := &PipelineRunDAO{db: db}

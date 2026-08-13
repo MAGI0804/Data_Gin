@@ -651,6 +651,12 @@ type DeliveryLogDAO struct {
 	db *gorm.DB
 }
 
+const (
+	unmatchedStoreDeliveryCode = "unmatched_store"
+	bojunOrderDeliverySource   = "bojun_order"
+	bojunOrderDeliveryDataset  = "retail_order"
+)
+
 // DeliveryLogListQuery contains bounded management list filters.
 type DeliveryLogListQuery struct {
 	Page            int
@@ -709,7 +715,7 @@ func (dao *DeliveryLogDAO) FindRecent(ctx context.Context, limit int) ([]model.D
 	}
 
 	var logs []model.DeliveryLog
-	err := dao.db.WithContext(ctx).
+	err := visibleDeliveryLogs(dao.db.WithContext(ctx)).
 		Order("id DESC").
 		Limit(limit).
 		Find(&logs).
@@ -732,6 +738,7 @@ func (dao *DeliveryLogDAO) FindPage(ctx context.Context, params DeliveryLogListQ
 }
 
 func (dao *DeliveryLogDAO) applyListFilters(query *gorm.DB, params DeliveryLogListQuery) *gorm.DB {
+	query = visibleDeliveryLogs(query)
 	if params.DestinationCode != "" {
 		query = query.Where("destination_code = ?", params.DestinationCode)
 	}
@@ -751,6 +758,15 @@ func (dao *DeliveryLogDAO) applyListFilters(query *gorm.DB, params DeliveryLogLi
 		query = query.Where("sent_at <= ?", *params.SentTo)
 	}
 	return query
+}
+
+func visibleDeliveryLogs(query *gorm.DB) *gorm.DB {
+	return query.Where(
+		"NOT (COALESCE(destination_code, '') = ? AND destination_id = 0 AND (COALESCE(source_code, '') = ? OR COALESCE(dataset_kind, '') = ?))",
+		unmatchedStoreDeliveryCode,
+		bojunOrderDeliverySource,
+		bojunOrderDeliveryDataset,
+	)
 }
 
 type DeliveryLogBatchFinish struct {

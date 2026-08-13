@@ -70,7 +70,6 @@ func (s *BojunOrderPushService) PushNewOrderWithPolicy(ctx context.Context, orde
 	target, ok := bojunTargetForStore(order.StoreCode)
 	if !ok {
 		err := fmt.Errorf("bojun store %q has no configured push target", order.StoreCode)
-		s.writeSkippedLog(ctx, order, err)
 		return bojunOrderPushResult{Skipped: true, Error: err}
 	}
 	if policy.ShouldSkip(position) {
@@ -251,21 +250,6 @@ func newBojunOrderDeliveryLog(payload deliveryLogPayload, sentAt time.Time) *mod
 		log.ErrorMessage = payload.DeliveryError.Error()
 	}
 	return log
-}
-
-func (s *BojunOrderPushService) writeSkippedLog(ctx context.Context, order *model.BojunRetailOrder, skipErr error) {
-	_, _ = s.logDAO.Create(ctx, &model.DeliveryLog{
-		TraceID:         uuid.NewString(),
-		CleanRecordID:   order.ID,
-		DestinationID:   0,
-		DestinationCode: "unmatched_store",
-		DestinationName: "未匹配门店",
-		BusinessKey:     order.DocNo,
-		DatasetKind:     bojunOrderDatasetKind,
-		Success:         false,
-		ErrorMessage:    skipErr.Error(),
-		SentAt:          &model.TimeNormal{Time: app.TimeNowInTimezone()},
-	})
 }
 
 func (s *BojunOrderPushService) writePolicySkippedLog(ctx context.Context, order *model.BojunRetailOrder, target bojunOrderPushTarget, policy OrderPushSkipPolicy, position int) {
