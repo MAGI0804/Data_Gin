@@ -401,9 +401,6 @@ func reportParametersFromRequest(requests []requestbody.ReportParameterRequest) 
 			CollectionEncoding: request.CollectionEncoding,
 		}
 		if err := reporting.ValidateParameterPresentation(request.ControlType, definition); err != nil {
-			return nil, nil, invalidReport("parameter control type does not match its logical type and cardinality")
-		}
-		if err := reporting.ValidateParameterPresentation(request.ControlType, definition); err != nil {
 			return nil, nil, invalidReport("parameter control configuration is invalid")
 		}
 		parameters = append(parameters, model.ReportParameter{

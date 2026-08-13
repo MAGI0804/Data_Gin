@@ -332,13 +332,6 @@ func compileParameters(
 		if strings.ToUpper(strings.TrimSpace(argument.Direction)) != "IN" {
 			return nil, nil, contractError("parameter %q is not an IN parameter", parameter.ParameterCode)
 		}
-		if err := reporting.ValidateParameterPresentation(parameter.ControlType, reporting.ParameterDefinition{
-			Code: parameter.ParameterCode, LogicalType: parameter.LogicalType,
-			Cardinality: parameter.Cardinality, CollectionEncoding: parameter.CollectionEncoding,
-			SystemInjected: parameter.SystemInjected,
-		}); err != nil {
-			return nil, nil, contractError("parameter %q control type does not match its logical type and cardinality", parameter.ParameterCode)
-		}
 		definition := reporting.ParameterDefinition{
 			Code: parameter.ParameterCode, ProcedureArgName: parameter.ProcedureArgName,
 			Position: parameter.Position, Direction: parameter.Direction,
