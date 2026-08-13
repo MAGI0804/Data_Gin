@@ -9,6 +9,7 @@ import {
   type ReportCenterClient,
 } from '../../api'
 import type { ReportDatasource, ReportDatasourceInput } from '../../types'
+import { normalizeDatasourceCode, validateDatasourceConnection, validateDatasourceSave } from '../../datasourceValidation'
 import styles from './ReportDatasourcePanel.module.css'
 
 type EditorState = { open: false } | { open: true; datasource: ReportDatasource | null }
@@ -110,7 +111,7 @@ function ReportDatasourceDrawer({ client, datasource, onClose, onSaved }: { clie
   }, [datasource])
 
   async function save() {
-    const validationError = validateDatasource(input, Boolean(datasource))
+    const validationError = validateDatasourceSave(input, Boolean(datasource))
     if (validationError) { setState({ busy: false, error: validationError, notice: '' }); return }
     setState({ busy: true, error: '', notice: '' })
     const response = datasource
@@ -121,7 +122,7 @@ function ReportDatasourceDrawer({ client, datasource, onClose, onSaved }: { clie
   }
 
   async function testConnection() {
-    const validationError = validateDatasource(input, Boolean(datasource))
+    const validationError = validateDatasourceConnection(input, Boolean(datasource))
     if (validationError) { setState({ busy: false, error: validationError, notice: '' }); return }
     setState({ busy: true, error: '', notice: '' })
     const response = await testReportDatasourceConnection(client, input, datasource?.id)
@@ -144,7 +145,7 @@ function ReportDatasourceDrawer({ client, datasource, onClose, onSaved }: { clie
     <Drawer open title={datasource ? '编辑 Oracle 数据源' : '新增 Oracle 数据源'} description="先用当前草稿发起真实 Oracle 连接测试；测试不会保存配置或密码。保存后凭据由服务端加密且不回显。" size="medium" closeDisabled={state.busy} onClose={onClose} footer={footer}>
       <form className={styles.form} onSubmit={(event) => { event.preventDefault(); void save() }}>
         <Field label="数据源名称"><input required disabled={state.busy} maxLength={128} value={input.name} onChange={(event) => set('name', event.currentTarget.value)} /></Field>
-        <Field label="数据源编码"><input required disabled={state.busy} className={styles.mono} maxLength={64} pattern="[a-z][a-z0-9_]{2,63}" value={input.code} onChange={(event) => set('code', event.currentTarget.value)} placeholder="report_oracle" /></Field>
+        <Field label="数据源编码" hint="以字母开头，可使用字母、数字和下划线；输入的大写字母会自动转为小写。"><input required disabled={state.busy} className={styles.mono} maxLength={64} pattern="[a-z][a-z0-9_]{2,63}" value={input.code} onChange={(event) => set('code', normalizeDatasourceCode(event.currentTarget.value))} placeholder="report_oracle" /></Field>
         <Field label="主机地址"><input required disabled={state.busy} className={styles.mono} maxLength={255} value={input.host} onChange={(event) => set('host', event.currentTarget.value)} placeholder="oracle.internal" /></Field>
         <Field label="端口"><input required disabled={state.busy} type="number" min="1" max="65535" value={input.port} onChange={(event) => set('port', Number(event.currentTarget.value))} /></Field>
         <Field label="连接标识类型"><select disabled={state.busy} value={serviceMode} onChange={(event) => changeServiceMode(event.currentTarget.value as 'SERVICE_NAME' | 'SID')}><option value="SERVICE_NAME">Service Name</option><option value="SID">SID</option></select></Field>
@@ -179,14 +180,6 @@ function datasourceInput(datasource: ReportDatasource | null): ReportDatasourceI
     maxIdleConnections: datasource.maxIdleConnections, prefetchRows: datasource.prefetchRows,
     arraySize: datasource.arraySize, enabled: datasource.enabled,
   } : { code: '', name: '', host: '', port: 1521, serviceName: '', sid: '', username: '', password: '', sessionTimezone: 'Asia/Shanghai', connectTimeoutSeconds: 5, queryTimeoutSeconds: 300, maxOpenConnections: 10, maxIdleConnections: 2, prefetchRows: 1000, arraySize: 1000, enabled: true }
-}
-
-function validateDatasource(input: ReportDatasourceInput, editing: boolean) {
-  if (!input.name.trim() || !/^[a-z][a-z0-9_]{2,63}$/.test(input.code.trim()) || !input.host.trim() || !input.username.trim()) return '请完整填写名称、合法编码、主机和用户名。'
-  if (Boolean(input.serviceName.trim()) === Boolean(input.sid.trim())) return 'Service Name 与 SID 必须且只能填写一个。'
-  if (!editing && !input.password) return '创建数据源时必须填写密码。'
-  if (input.maxIdleConnections > input.maxOpenConnections) return '最大空闲连接不能超过最大连接数。'
-  return ''
 }
 
 function formatDate(value: string | null) {

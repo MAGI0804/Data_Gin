@@ -5,6 +5,7 @@ import { getReportAudits, parsePublication, parseReportAuditPage, parseReportCat
 import { reportParameterControls, reportParameterFlagDisabled, updateReportParameterFlag, updateReportParameterLogicalType } from '../.test-dist/reportCenter/parameterConfig.js'
 import { buildNewReportRunState, canStartNewReportRun, initialReportParameterValues } from '../.test-dist/reportCenter/queryParameters.js'
 import { createLatestRequestGuard } from '../.test-dist/reportCenter/components/ReportVersionDrawer/requestGuard.js'
+import { normalizeDatasourceCode, validateDatasourceConnection, validateDatasourceSave } from '../.test-dist/reportCenter/datasourceValidation.js'
 
 test('parseReportCatalogPage reads the standard API envelope', () => {
   const page = parseReportCatalogPage({
@@ -319,6 +320,38 @@ test('Oracle datasource test parser accepts only safe stable fields', () => {
   const result = parseReportDatasourceTest({ data: { status: 'FAILED', testedAt: '2026-08-13T08:00:00Z', latencyMs: 12, errorCode: 'AUTHENTICATION_FAILED', message: 'Oracle 用户名或密码无效', rawError: 'password=secret' } })
   assert.equal(result.errorCode, 'AUTHENTICATION_FAILED')
   assert.equal(Object.hasOwn(result, 'rawError'), false)
+})
+
+test('Oracle connection validation does not require save-only name and code fields', () => {
+  const input = {
+    code: '', name: '', host: 'oracle.internal', port: 1521, serviceName: 'REPORT', sid: '',
+    username: 'report_user', password: 'draft-password', sessionTimezone: 'Asia/Shanghai', connectTimeoutSeconds: 5,
+    queryTimeoutSeconds: 300, maxOpenConnections: 10, maxIdleConnections: 2, prefetchRows: 1000, arraySize: 1000, enabled: true,
+  }
+  assert.equal(validateDatasourceConnection(input, false), '')
+  assert.equal(validateDatasourceSave(input, false), '请填写数据源名称。')
+})
+
+test('Oracle datasource code normalizes uppercase input and reports exact missing fields', () => {
+  assert.equal(normalizeDatasourceCode('  REPORT_Oracle  '), 'report_oracle')
+  const input = {
+    code: 'REPORT_Oracle', name: 'Oracle 报表库', host: '', port: 1521, serviceName: 'REPORT', sid: '',
+    username: 'report_user', password: 'draft-password', sessionTimezone: 'Asia/Shanghai', connectTimeoutSeconds: 5,
+    queryTimeoutSeconds: 300, maxOpenConnections: 10, maxIdleConnections: 2, prefetchRows: 1000, arraySize: 1000, enabled: true,
+  }
+  assert.equal(validateDatasourceSave(input, false), '请填写主机地址。')
+})
+
+test('Oracle datasource validation distinguishes invalid code and saved-password reuse', () => {
+  const input = {
+    code: 'report-oracle', name: 'Oracle 报表库', host: 'oracle.internal', port: 1521, serviceName: 'REPORT', sid: '',
+    username: 'report_user', password: '', sessionTimezone: 'Asia/Shanghai', connectTimeoutSeconds: 5,
+    queryTimeoutSeconds: 300, maxOpenConnections: 10, maxIdleConnections: 2, prefetchRows: 1000, arraySize: 1000, enabled: true,
+  }
+  assert.match(validateDatasourceSave(input, false), /数据源编码/)
+  input.code = 'report_oracle'
+  assert.equal(validateDatasourceConnection(input, false), '创建数据源时必须填写密码。')
+  assert.equal(validateDatasourceConnection(input, true), '')
 })
 
 test('Oracle datasource draft test sends connection fields without saving metadata', async () => {
