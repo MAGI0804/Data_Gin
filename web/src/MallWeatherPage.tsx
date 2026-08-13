@@ -1,6 +1,5 @@
 import { type FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Database, RefreshCcw } from 'lucide-react'
-import storeStyles from './MallStoreWorkspace.module.css'
 import { MallWeatherAdvancedTools } from './MallWeatherAdvancedTools'
 import { MallWeatherExportPanel } from './MallWeatherExportPanel'
 import { MallWeatherForecastPanel, type MallWeatherForecastDataSnapshot } from './MallWeatherForecastPanel'
@@ -546,14 +545,14 @@ function MallModulePage({
 
   if (view === 'stores') {
     return (
-      <PageCanvas className={`${storeStyles.page} ${styles.weatherPage}`}>
+      <PageCanvas className={`${styles.storePage} ${styles.weatherPage}`}>
         <PageHeader
           eyebrow="STORE DIRECTORY"
           title="店铺信息"
           description="筛选并选择店铺，在同一工作画布中维护基础资料、地址解析和天气服务坐标。"
         />
-        <section className={storeStyles.toolbar} aria-label="店铺筛选与选择">
-          <div className={storeStyles.toolbarFields}>
+        <section className={styles.storeToolbar} aria-label="店铺筛选与选择">
+          <div className={styles.storeToolbarFields}>
             <label>
               <span>筛选店铺</span>
               <input name="storeInfoQuery" type="search" autoComplete="off" value={query} onChange={(event) => setQuery(event.currentTarget.value)} placeholder="名称、编码或地址" />
@@ -587,7 +586,7 @@ function MallModulePage({
               {selectedMall && !selectedMallMatchesFilter && <small>当前店铺不在筛选结果中，可从匹配结果切换</small>}
             </label>
           </div>
-          <div className={storeStyles.toolbarActions}>
+          <div className={styles.storeToolbarActions}>
             <button type="button" onClick={() => void loadMalls()} disabled={mallState === 'loading'}>
               <RefreshCcw aria-hidden="true" />刷新店铺
             </button>
@@ -609,9 +608,9 @@ function MallModulePage({
         {showImport && <MallImportPanel client={client} onImported={() => void loadMalls()} />}
 
         {!showCreate && selectedMall && (actorID
-          ? <div className={storeStyles.detailLayout}>
-            <aside className={storeStyles.summary} aria-label={`${selectedMall.nameCn}资料摘要`}>
-              <div className={storeStyles.summaryHeading}>
+          ? <div className={styles.storeDetailLayout}>
+            <aside className={styles.storeSummary} aria-label={`${selectedMall.nameCn}资料摘要`}>
+              <div className={styles.storeSummaryHeading}>
                 <span>当前店铺</span>
                 <strong>{selectedMall.nameCn}</strong>
                 <small>{selectedMall.mallCode}</small>
@@ -624,8 +623,8 @@ function MallModulePage({
                 <div><dt>天气服务</dt><dd>{selectedMall.weatherEnabled ? '已启用' : '未启用'}</dd></div>
               </dl>
             </aside>
-            <section className={storeStyles.maintenance} aria-label={`${selectedMall.nameCn}店铺资料维护`}>
-              <div className={storeStyles.maintenanceHeading}>
+            <section className={styles.storeMaintenance} aria-label={`${selectedMall.nameCn}店铺资料维护`}>
+              <div className={styles.storeMaintenanceHeading}>
                 <div><strong>店铺资料维护</strong><span>基础资料、地址解析和服务坐标在此统一维护</span></div>
                 <span>版本 {selectedMall.version}</span>
               </div>
