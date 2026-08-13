@@ -3,14 +3,14 @@ import { Eye, Plus, Trash2 } from 'lucide-react'
 import { Button, Drawer } from '../../../ui'
 import { getReportDraft, publishReportDraft, saveReportDraft, type ReportCenterClient } from '../../api'
 import { reportParameterControls, reportParameterFlagDisabled, updateReportParameterFlag, updateReportParameterLogicalType } from '../../parameterConfig'
-import type { ReportColumn, ReportDatasource, ReportDraft, ReportParameter, ReportSummary } from '../../types'
+import type { ReportColumn, ReportDatasource, ReportDraft, ReportParameter, ReportPublication, ReportSummary } from '../../types'
 import { ReportFieldDetailDrawer } from '../ReportFieldDetailDrawer/ReportFieldDetailDrawer'
 import styles from './ReportConfigDrawer.module.css'
 
 type Tab = 'basic' | 'procedure' | 'parameters' | 'fields' | 'excel' | 'permissions'
 const tabs: Array<{ key: Tab; label: string }> = [{ key: 'basic', label: '基本信息' }, { key: 'procedure', label: '存储过程' }, { key: 'parameters', label: '{{形参}}' }, { key: 'fields', label: '结果字段' }, { key: 'excel', label: 'Excel' }, { key: 'permissions', label: '权限' }]
 
-export function ReportConfigDrawer({ client, report, datasources, datasourcesLoading = false, datasourcesError = '', onClose, onSaved }: { client: ReportCenterClient; report: ReportSummary | null; datasources: ReportDatasource[]; datasourcesLoading?: boolean; datasourcesError?: string; onClose: () => void; onSaved?: () => void }) {
+export function ReportConfigDrawer({ client, report, datasources, datasourcesLoading = false, datasourcesError = '', onClose, onPublished, onSaved }: { client: ReportCenterClient; report: ReportSummary | null; datasources: ReportDatasource[]; datasourcesLoading?: boolean; datasourcesError?: string; onClose: () => void; onPublished?: (publication: ReportPublication) => void; onSaved?: () => void }) {
   const bodyRef = useRef<HTMLDivElement>(null)
   const [tab, setTab] = useState<Tab>('basic')
   const [draft, setDraft] = useState<ReportDraft>(() => emptyDraft())
@@ -42,7 +42,7 @@ export function ReportConfigDrawer({ client, report, datasources, datasourcesLoa
     setState((current) => ({ ...current, saving: true, error: '', notice: '' }))
     const response = await publishReportDraft(client, draft.id, draft.lockVersion)
     if (!response.ok) { setState((current) => ({ ...current, saving: false, error: response.error })); return }
-    setState((current) => ({ ...current, saving: false, notice: `Oracle 契约核验通过，已发布版本 #${response.data.versionId}。` })); onSaved?.(); onClose()
+    setState((current) => ({ ...current, saving: false, notice: `Oracle 契约核验通过，已发布版本 #${response.data.versionId}。` })); onSaved?.(); onClose(); onPublished?.(response.data)
   }
 
   const dirty = draftFingerprint(draft) !== savedFingerprint

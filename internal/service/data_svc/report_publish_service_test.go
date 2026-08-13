@@ -39,6 +39,18 @@ func TestReportPublishServicePublishesValidatedOracleContract(t *testing.T) {
 	if !result.PublishedAt.Equal(validatedAt.Add(time.Second)) {
 		t.Fatalf("publishedAt = %v", result.PublishedAt)
 	}
+	if result.Validation == nil {
+		t.Fatal("validation summary is nil")
+	}
+	if !result.Validation.ValidatedAt.Equal(validatedAt) || result.Validation.Procedure.ArgumentCount != 1 || result.Validation.Procedure.SignatureHash != store.publication.ProcedureSignatureHash {
+		t.Fatalf("procedure validation = %#v", result.Validation.Procedure)
+	}
+	if result.Validation.Result.ColumnCount != 3 || result.Validation.Result.SchemaHash != store.publication.ResultSchemaHash || !result.Validation.Snapshot.UniqueKeyValidated {
+		t.Fatalf("result validation = %#v snapshot=%#v", result.Validation.Result, result.Validation.Snapshot)
+	}
+	if result.Validation.Export.ExportableColumnCount != 1 || result.Validation.Export.SchemaHash != store.publication.ExportSchemaHash {
+		t.Fatalf("export validation = %#v", result.Validation.Export)
+	}
 }
 
 func TestReportPublishServiceDoesNotWriteWhenOracleValidationFails(t *testing.T) {

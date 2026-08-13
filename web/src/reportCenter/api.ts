@@ -1,5 +1,5 @@
 import type { ClientResponse, HTTPMethod } from '../api/client'
-import type { ReportAudit, ReportAuditPage, ReportAuditQuery, ReportCatalogPage, ReportCatalogQuery, ReportColumn, ReportDatasource, ReportDatasourceInput, ReportDatasourceTest, ReportDefinitionStatus, ReportDraft, ReportExport, ReportExportPage, ReportFilterOperator, ReportGrant, ReportParameter, ReportResultPage, ReportResultQuery, ReportRun, ReportRunContract, ReportRunStatus, ReportSummary } from './types'
+import type { ReportAudit, ReportAuditPage, ReportAuditQuery, ReportCatalogPage, ReportCatalogQuery, ReportColumn, ReportDatasource, ReportDatasourceInput, ReportDatasourceTest, ReportDefinitionStatus, ReportDraft, ReportExport, ReportExportPage, ReportFilterOperator, ReportGrant, ReportParameter, ReportPublication, ReportResultPage, ReportResultQuery, ReportRun, ReportRunContract, ReportRunStatus, ReportSummary } from './types'
 
 type JsonRecord = Record<string, unknown>
 
@@ -127,7 +127,7 @@ export async function saveReportDraft(client: ReportCenterClient, draft: ReportD
   return requestAndParse(client, creating ? '/v1/reports' : `/v1/reports/${draft.id}`, { method: creating ? 'POST' : 'PUT', body }, parseReportDraft, '报表草稿保存失败。')
 }
 
-export async function publishReportDraft(client: ReportCenterClient, reportId: number, expectedLockVersion: number): Promise<ReportAPIResult<{ definitionId: number; versionId: number; status: string }>> {
+export async function publishReportDraft(client: ReportCenterClient, reportId: number, expectedLockVersion: number): Promise<ReportAPIResult<ReportPublication>> {
   return requestAndParse(client, `/v1/reports/${reportId}/publish`, { method: 'POST', body: { expectedLockVersion } }, parsePublication, '报表发布与 Oracle 契约核验失败。')
 }
 
@@ -455,12 +455,64 @@ function serializeReportDatasource(input: ReportDatasourceInput) {
   }
 }
 
-function parsePublication(payload: unknown) {
+export function parsePublication(payload: unknown): ReportPublication {
   const data = unwrapData(payload)
   const definitionId = positiveInteger(data.definitionId)
   const versionId = positiveInteger(data.versionId)
-  if (!definitionId || !versionId) throw new Error('invalid publication')
-  return { definitionId, versionId, status: publicString(data.status, 32) }
+  const version = positiveInteger(data.version)
+  const contractHash = safeHash(data.contractHash)
+  const validation = data.validation === undefined || data.validation === null ? null : parseReportValidationSummary(data.validation)
+  if (!definitionId || !versionId || !version || !contractHash) throw new Error('invalid publication')
+  return { definitionId, versionId, version, status: publicString(data.status, 32), contractHash, publishedAt: publicDate(data.publishedAt), validation }
+}
+
+function parseReportValidationSummary(value: unknown) {
+  if (!isRecord(value)) throw new Error('invalid publication validation')
+  const validation = value
+  const procedure = isRecord(validation.procedure) ? validation.procedure : {}
+  const result = isRecord(validation.result) ? validation.result : {}
+  const snapshot = isRecord(validation.snapshot) ? validation.snapshot : {}
+  const reportExport = isRecord(validation.export) ? validation.export : {}
+  const validatedAt = publicDate(validation.validatedAt)
+  const procedureSignatureHash = safeHash(procedure.signatureHash)
+  const resultSchemaHash = safeHash(result.schemaHash)
+  const exportSchemaHash = safeHash(reportExport.schemaHash)
+  const argumentCount = positiveInteger(procedure.argumentCount)
+  const columnCount = positiveInteger(result.columnCount)
+  const exportableColumnCount = positiveInteger(reportExport.exportableColumnCount)
+  const owner = publicString(procedure.owner, 128)
+  const name = publicString(procedure.name, 128)
+  const tableOwner = publicString(result.tableOwner, 128)
+  const tableName = publicString(result.tableName, 128)
+  const runIdColumn = publicString(snapshot.runIdColumn, 128)
+  const rowIdColumn = publicString(snapshot.rowIdColumn, 128)
+  if (!validatedAt || !procedureSignatureHash || !resultSchemaHash || !exportSchemaHash || !owner || !name || !tableOwner || !tableName || !runIdColumn || !rowIdColumn || argumentCount === null || columnCount === null || exportableColumnCount === null || snapshot.uniqueKeyValidated !== true) throw new Error('invalid publication validation')
+  return {
+      validatedAt,
+      procedure: {
+        owner,
+        package: publicString(procedure.package, 128),
+        name,
+        overload: publicString(procedure.overload, 32),
+        argumentCount,
+        signatureHash: procedureSignatureHash,
+      },
+      result: {
+        tableOwner,
+        tableName,
+        columnCount,
+        schemaHash: resultSchemaHash,
+      },
+      snapshot: {
+        runIdColumn,
+        rowIdColumn,
+        uniqueKeyValidated: true,
+      },
+      export: {
+        exportableColumnCount,
+        schemaHash: exportSchemaHash,
+      },
+  }
 }
 
 function parseReportSummary(value: unknown): ReportSummary | null {
@@ -501,6 +553,11 @@ function isRecord(value: unknown): value is JsonRecord {
 
 function publicString(value: unknown, maximumLength: number) {
   return typeof value === 'string' ? value.trim().slice(0, maximumLength) : ''
+}
+
+function safeHash(value: unknown) {
+  const hash = publicString(value, 128)
+  return /^[a-f\d]{64}$/i.test(hash) ? hash : ''
 }
 
 function positiveInteger(value: unknown) {

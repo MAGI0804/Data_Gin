@@ -145,6 +145,43 @@ export type ReportDraft = {
   updatedAt: string | null
 }
 
+export type ReportValidationSummary = {
+  validatedAt: string
+  procedure: {
+    owner: string
+    package: string
+    name: string
+    overload: string
+    argumentCount: number
+    signatureHash: string
+  }
+  result: {
+    tableOwner: string
+    tableName: string
+    columnCount: number
+    schemaHash: string
+  }
+  snapshot: {
+    runIdColumn: string
+    rowIdColumn: string
+    uniqueKeyValidated: boolean
+  }
+  export: {
+    exportableColumnCount: number
+    schemaHash: string
+  }
+}
+
+export type ReportPublication = {
+  definitionId: number
+  versionId: number
+  version: number
+  status: string
+  contractHash: string
+  publishedAt: string | null
+  validation: ReportValidationSummary | null
+}
+
 export type ReportRunContract = {
   definitionId: number
   versionId: number

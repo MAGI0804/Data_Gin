@@ -3,7 +3,8 @@ import { FileText, Plus, RefreshCcw, Search } from 'lucide-react'
 import { Button, DataTable, FeedbackState, FilterToolbar, PageCanvas, PageHeader, Section, StatusTag, type StatusTagTone } from '../../../ui'
 import type { ReportCenterClient } from '../../api'
 import { ReportConfigDrawer } from '../../components/ReportConfigDrawer/ReportConfigDrawer'
-import type { ReportSummary } from '../../types'
+import { ReportValidationResultDrawer } from '../../components/ReportValidationResultDrawer/ReportValidationResultDrawer'
+import type { ReportPublication, ReportSummary } from '../../types'
 import { useReportCatalog } from '../../useReportCatalog'
 import { useReportDatasources } from '../../useReportDatasources'
 import styles from './ReportCatalogPage.module.css'
@@ -12,6 +13,7 @@ export function ReportCatalogPage({ client, canManage, navigation }: { client: R
   const [draftSearch, setDraftSearch] = useState('')
   const [search, setSearch] = useState('')
   const [drawerState, setDrawerState] = useState<{ open: boolean; report: ReportSummary | null }>({ open: false, report: null })
+  const [publication, setPublication] = useState<ReportPublication | null>(null)
   const query = useMemo(() => ({ search, limit: 50 }), [search])
   const { items, loading, loadingMore, error, hasMore, reload, loadMore } = useReportCatalog(client, query)
   const datasources = useReportDatasources(client, canManage)
@@ -33,7 +35,8 @@ export function ReportCatalogPage({ client, canManage, navigation }: { client: R
         {items.length > 0 ? <ReportTable reports={items} onEdit={canManage ? (report) => setDrawerState({ open: true, report }) : undefined} /> : null}
         {items.length > 0 && hasMore ? <div className={styles.pagination}><button type="button" onClick={() => void loadMore()} disabled={loadingMore}>{loadingMore ? '正在加载…' : '加载更多报表'}</button></div> : null}
       </Section>
-      {drawerState.open ? <ReportConfigDrawer client={client} report={drawerState.report} datasources={datasources.items} datasourcesLoading={datasources.loading} datasourcesError={datasources.error} onSaved={reload} onClose={() => setDrawerState({ open: false, report: null })} /> : null}
+      {drawerState.open ? <ReportConfigDrawer client={client} report={drawerState.report} datasources={datasources.items} datasourcesLoading={datasources.loading} datasourcesError={datasources.error} onPublished={setPublication} onSaved={reload} onClose={() => setDrawerState({ open: false, report: null })} /> : null}
+      <ReportValidationResultDrawer publication={publication} onClose={() => setPublication(null)} />
     </PageCanvas>
   )
 }

@@ -2,6 +2,7 @@ package data_ctrl
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -124,7 +125,13 @@ func TestReportControllerListReturnsSharedPublishedSummaryWithoutConfigurationMe
 
 func TestReportControllerPublishUsesActorAndLockVersion(t *testing.T) {
 	service := &fakeReportControllerService{}
-	publishService := &fakeReportPublishService{result: &data_svc.ReportPublicationDTO{DefinitionID: 7}}
+	hash := strings.Repeat("a", 64)
+	publishService := &fakeReportPublishService{result: &data_svc.ReportPublicationDTO{DefinitionID: 7, VersionID: 23, Version: 3, Status: "PUBLISHED", ContractHash: hash, Validation: &data_svc.ReportPublicationValidationDTO{
+		Procedure: data_svc.ReportPublicationProcedureDTO{Owner: "REPORT", Name: "BUILD", ArgumentCount: 1, SignatureHash: hash},
+		Result:    data_svc.ReportPublicationResultDTO{TableOwner: "REPORT", TableName: "RESULT", ColumnCount: 3, SchemaHash: hash},
+		Snapshot:  data_svc.ReportPublicationSnapshotDTO{RunIDColumn: "RUN_ID", RowIDColumn: "ROW_NO", UniqueKeyValidated: true},
+		Export:    data_svc.ReportPublicationExportDTO{ExportableColumnCount: 1, SchemaHash: hash},
+	}}}
 	controller := NewReportControllerWithServices(service, publishService)
 	router := reportControllerRouter()
 	router.POST("/reports/:id/publish", controller.Publish)
@@ -135,6 +142,21 @@ func TestReportControllerPublishUsesActorAndLockVersion(t *testing.T) {
 	router.ServeHTTP(recorder, request)
 	if recorder.Code != http.StatusOK || publishService.actor != 17 || publishService.reportID != 7 || publishService.lockVersion != 3 {
 		t.Fatalf("publish response = %d %s service=%#v", recorder.Code, recorder.Body, publishService)
+	}
+	var envelope map[string]any
+	if err := json.Unmarshal(recorder.Body.Bytes(), &envelope); err != nil {
+		t.Fatalf("decode publish response: %v", err)
+	}
+	encoded := recorder.Body.String()
+	for _, expected := range []string{`"definitionId":7`, `"versionId":23`, `"contractHash":"` + hash + `"`, `"argumentCount":1`, `"uniqueKeyValidated":true`, `"exportableColumnCount":1`} {
+		if !strings.Contains(encoded, expected) {
+			t.Fatalf("publish response %s does not contain %s", encoded, expected)
+		}
+	}
+	for _, forbidden := range []string{"compiledSpec", "schemaProbeToken", "password", "credential", "dsn"} {
+		if strings.Contains(strings.ToLower(encoded), strings.ToLower(forbidden)) {
+			t.Fatalf("publish response leaked %q: %s", forbidden, encoded)
+		}
 	}
 
 	recorder = httptest.NewRecorder()

@@ -49,12 +49,52 @@ type ReportPublishService struct {
 }
 
 type ReportPublicationDTO struct {
-	DefinitionID uint      `json:"definitionId"`
-	VersionID    uint      `json:"versionId"`
-	Version      uint64    `json:"version"`
-	Status       string    `json:"status"`
-	ContractHash string    `json:"contractHash"`
-	PublishedAt  time.Time `json:"publishedAt"`
+	DefinitionID uint                            `json:"definitionId"`
+	VersionID    uint                            `json:"versionId"`
+	Version      uint64                          `json:"version"`
+	Status       string                          `json:"status"`
+	ContractHash string                          `json:"contractHash"`
+	PublishedAt  time.Time                       `json:"publishedAt"`
+	Validation   *ReportPublicationValidationDTO `json:"validation,omitempty"`
+}
+
+type ReportPublicationValidationDTO struct {
+	ValidatedAt time.Time                     `json:"validatedAt"`
+	Procedure   ReportPublicationProcedureDTO `json:"procedure"`
+	Result      ReportPublicationResultDTO    `json:"result"`
+	Snapshot    ReportPublicationSnapshotDTO  `json:"snapshot"`
+	Export      ReportPublicationExportDTO    `json:"export"`
+}
+
+type ReportPublicationProcedureDTO struct {
+	Owner         string `json:"owner"`
+	Package       string `json:"package"`
+	Name          string `json:"name"`
+	Overload      string `json:"overload"`
+	ArgumentCount int    `json:"argumentCount"`
+	SignatureHash string `json:"signatureHash"`
+}
+type ReportPublicationResultDTO struct {
+	TableOwner  string `json:"tableOwner"`
+	TableName   string `json:"tableName"`
+	ColumnCount int    `json:"columnCount"`
+	SchemaHash  string `json:"schemaHash"`
+}
+type ReportPublicationSnapshotDTO struct {
+	RunIDColumn        string `json:"runIdColumn"`
+	RowIDColumn        string `json:"rowIdColumn"`
+	UniqueKeyValidated bool   `json:"uniqueKeyValidated"`
+}
+type ReportPublicationExportDTO struct {
+	ExportableColumnCount int    `json:"exportableColumnCount"`
+	SchemaHash            string `json:"schemaHash"`
+}
+
+type reportPublicationInspection struct {
+	compiled               reportcontract.Compiled
+	procedureArgumentCount int
+	resultColumnCount      int
+	uniqueKeyValidated     bool
 }
 
 func NewReportPublishService(store reportPublicationStore, decryptor reportCredentialDecryptor, opener reportOracleOpener) *ReportPublishService {
@@ -86,16 +126,16 @@ func (service *ReportPublishService) Publish(ctx context.Context, actor, definit
 	if err != nil {
 		return nil, fmt.Errorf("report publication: decrypt datasource credential: %w", err)
 	}
-	compiled, err := service.inspectContract(ctx, datasource, password, draft)
+	inspection, err := service.inspectContract(ctx, datasource, password, draft)
 	if err != nil {
 		return nil, err
 	}
 	validatedAt := service.now().UTC()
 	published, err := service.store.PublishDraft(ctx, actor, definitionID, expectedLockVersion, reportrepo.Publication{
-		CompiledSpecJSON: model.JSONText(compiled.SpecJSON), ContractHash: compiled.Hashes.Contract,
-		ParameterSchemaHash: compiled.Hashes.ParameterSchema, ProcedureSignatureHash: compiled.Hashes.ProcedureSignature,
-		ResultSchemaHash: compiled.Hashes.ResultSchema, PermissionHash: compiled.Hashes.Permission,
-		ExportSchemaHash: compiled.Hashes.ExportSchema, SchemaProbeToken: uuid.NewString(), SchemaValidatedAt: validatedAt,
+		CompiledSpecJSON: model.JSONText(inspection.compiled.SpecJSON), ContractHash: inspection.compiled.Hashes.Contract,
+		ParameterSchemaHash: inspection.compiled.Hashes.ParameterSchema, ProcedureSignatureHash: inspection.compiled.Hashes.ProcedureSignature,
+		ResultSchemaHash: inspection.compiled.Hashes.ResultSchema, PermissionHash: inspection.compiled.Hashes.Permission,
+		ExportSchemaHash: inspection.compiled.Hashes.ExportSchema, SchemaProbeToken: uuid.NewString(), SchemaValidatedAt: validatedAt,
 	})
 	if err != nil {
 		return nil, classifyPublicationStoreError(err)
@@ -106,7 +146,14 @@ func (service *ReportPublishService) Publish(ctx context.Context, actor, definit
 	}
 	return &ReportPublicationDTO{
 		DefinitionID: published.Definition.ID, VersionID: published.Version.ID, Version: published.Version.VersionNumber,
-		Status: model.ReportVersionStatusPublished, ContractHash: compiled.Hashes.Contract, PublishedAt: publishedAt,
+		Status: model.ReportVersionStatusPublished, ContractHash: inspection.compiled.Hashes.Contract, PublishedAt: publishedAt,
+		Validation: &ReportPublicationValidationDTO{
+			ValidatedAt: validatedAt,
+			Procedure:   ReportPublicationProcedureDTO{Owner: draft.Version.ProcedureOwner, Package: draft.Version.PackageName, Name: draft.Version.ProcedureName, Overload: draft.Version.ProcedureOverload, ArgumentCount: inspection.procedureArgumentCount, SignatureHash: inspection.compiled.Hashes.ProcedureSignature},
+			Result:      ReportPublicationResultDTO{TableOwner: draft.Version.ResultTableOwner, TableName: draft.Version.ResultTableName, ColumnCount: inspection.resultColumnCount, SchemaHash: inspection.compiled.Hashes.ResultSchema},
+			Snapshot:    ReportPublicationSnapshotDTO{RunIDColumn: draft.Version.ResultRunIDColumn, RowIDColumn: draft.Version.ResultRowIDColumn, UniqueKeyValidated: inspection.uniqueKeyValidated},
+			Export:      ReportPublicationExportDTO{ExportableColumnCount: exportableReportColumnCount(draft.Columns), SchemaHash: inspection.compiled.Hashes.ExportSchema},
+		},
 	}, nil
 }
 
@@ -115,7 +162,7 @@ func (service *ReportPublishService) inspectContract(
 	datasource *model.ReportDatasource,
 	password string,
 	draft *reportrepo.Draft,
-) (compiled reportcontract.Compiled, resultErr error) {
+) (inspection reportPublicationInspection, resultErr error) {
 	timeout := defaultReportPublicationInspectionTimeout
 	if datasource.QueryTimeoutSeconds > 0 {
 		timeout = time.Duration(datasource.QueryTimeoutSeconds) * time.Second
@@ -125,7 +172,7 @@ func (service *ReportPublishService) inspectContract(
 
 	inspector, err := service.open(inspectionCtx, oracleConfigFromDatasource(*datasource, password))
 	if err != nil {
-		return compiled, fmt.Errorf("report publication: open oracle datasource: %w", err)
+		return inspection, fmt.Errorf("report publication: open oracle datasource: %w", err)
 	}
 	defer func() {
 		if closeErr := inspector.Close(); closeErr != nil {
@@ -136,12 +183,12 @@ func (service *ReportPublishService) inspectContract(
 	procedureRef := reportoracle.ProcedureRef{Owner: draft.Version.ProcedureOwner, Package: draft.Version.PackageName, Name: draft.Version.ProcedureName, Overload: draft.Version.ProcedureOverload}
 	procedure, err := inspector.InspectProcedure(inspectionCtx, procedureRef)
 	if err != nil {
-		return compiled, classifyOracleInspectionError("procedure", err)
+		return inspection, classifyOracleInspectionError("procedure", err)
 	}
 	resultRef := reportoracle.ResultTableRef{Owner: draft.Version.ResultTableOwner, Name: draft.Version.ResultTableName}
 	resultColumns, err := inspector.InspectResultTable(inspectionCtx, resultRef)
 	if err != nil {
-		return compiled, classifyOracleInspectionError("result table", err)
+		return inspection, classifyOracleInspectionError("result table", err)
 	}
 	configuredColumns := make([]string, 0, len(draft.Columns))
 	for _, column := range draft.Columns {
@@ -151,13 +198,23 @@ func (service *ReportPublishService) inspectContract(
 		Table: resultRef, RunIDColumn: draft.Version.ResultRunIDColumn, RowIDColumn: draft.Version.ResultRowIDColumn, Columns: configuredColumns,
 	})
 	if err != nil {
-		return compiled, classifyOracleInspectionError("result snapshot", err)
+		return inspection, classifyOracleInspectionError("result snapshot", err)
 	}
-	compiled, err = reportcontract.Compile(draft.Version, draft.Parameters, draft.Columns, draft.Grants, procedure, resultColumns, snapshot)
+	compiled, err := reportcontract.Compile(draft.Version, draft.Parameters, draft.Columns, draft.Grants, procedure, resultColumns, snapshot)
 	if err != nil {
-		return compiled, fmt.Errorf("%w: %v", ErrReportPublicationInvalid, err)
+		return inspection, fmt.Errorf("%w: %v", ErrReportPublicationInvalid, err)
 	}
-	return compiled, nil
+	return reportPublicationInspection{compiled: compiled, procedureArgumentCount: len(procedure), resultColumnCount: len(resultColumns), uniqueKeyValidated: true}, nil
+}
+
+func exportableReportColumnCount(columns []model.ReportColumn) int {
+	count := 0
+	for _, column := range columns {
+		if column.ExportVisible && column.ExportAllowed {
+			count++
+		}
+	}
+	return count
 }
 
 func classifyOracleInspectionError(target string, err error) error {

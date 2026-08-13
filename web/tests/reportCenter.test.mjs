@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { getReportAudits, parseReportAuditPage, parseReportCatalogPage, parseReportDatasource, parseReportDatasources, parseReportDatasourceTest, parseReportDraft, parseReportExport, parseReportExportPage, parseReportResultPage, parseReportRun, parseReportRunContract } from '../.test-dist/reportCenter/api.js'
+import { getReportAudits, parsePublication, parseReportAuditPage, parseReportCatalogPage, parseReportDatasource, parseReportDatasources, parseReportDatasourceTest, parseReportDraft, parseReportExport, parseReportExportPage, parseReportResultPage, parseReportRun, parseReportRunContract } from '../.test-dist/reportCenter/api.js'
 import { reportParameterControls, reportParameterFlagDisabled, updateReportParameterFlag, updateReportParameterLogicalType } from '../.test-dist/reportCenter/parameterConfig.js'
 import { buildNewReportRunState, canStartNewReportRun, initialReportParameterValues } from '../.test-dist/reportCenter/queryParameters.js'
 
@@ -221,6 +221,33 @@ test('parseReportDraft preserves parameter, field and excel mappings', () => {
   assert.deepEqual(draft.columns[0].dictionaryVersion, { version: 'v2' })
   assert.equal(draft.columns[0].excelHeader, '含税金额')
   assert.deepEqual(draft.grants[0].actions, ['QUERY', 'EXPORT'])
+})
+
+test('publication parser keeps only the safe Oracle validation summary', () => {
+  const hash = 'a'.repeat(64)
+  const publication = parsePublication({ data: {
+    definitionId: 9, versionId: 23, version: 3, status: 'PUBLISHED', contractHash: hash, publishedAt: '2026-08-13T08:00:01Z',
+    validation: {
+      validatedAt: '2026-08-13T08:00:00Z',
+      procedure: { owner: 'REPORT', package: 'PKG_SALES', name: 'BUILD_REPORT', overload: '', argumentCount: 2, signatureHash: hash, password: 'must-not-pass' },
+      result: { tableOwner: 'REPORT', tableName: 'SALES_RESULT', columnCount: 12, schemaHash: hash, dsn: 'must-not-pass' },
+      snapshot: { runIdColumn: 'RUN_ID', rowIdColumn: 'ROW_NO', uniqueKeyValidated: true },
+      export: { exportableColumnCount: 8, schemaHash: hash },
+    },
+  } })
+  assert.equal(publication.validation.procedure.argumentCount, 2)
+  assert.equal(publication.validation.result.columnCount, 12)
+  assert.equal(publication.validation.snapshot.uniqueKeyValidated, true)
+  assert.equal(Object.hasOwn(publication.validation.procedure, 'password'), false)
+  assert.equal(Object.hasOwn(publication.validation.result, 'dsn'), false)
+  assert.equal(parsePublication({ data: { definitionId: 9, versionId: 23, version: 3, status: 'PUBLISHED', contractHash: hash } }).validation, null)
+  assert.throws(() => parsePublication({ data: { definitionId: 9, versionId: 23, version: 3, contractHash: hash, validation: {} } }))
+  for (const validation of [
+    { ...publication.validation, procedure: { ...publication.validation.procedure, name: '' } },
+    { ...publication.validation, result: { ...publication.validation.result, columnCount: 0 } },
+    { ...publication.validation, export: { ...publication.validation.export, schemaHash: 'a'.repeat(63) } },
+    { ...publication.validation, snapshot: { ...publication.validation.snapshot, uniqueKeyValidated: false } },
+  ]) assert.throws(() => parsePublication({ data: { definitionId: 9, versionId: 23, version: 3, status: 'PUBLISHED', contractHash: hash, validation } }))
 })
 
 test('Oracle datasource parser exposes only the public management contract', () => {
