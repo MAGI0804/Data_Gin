@@ -284,13 +284,19 @@ func safeDatasourceConnectionFailure(err error) (string, string) {
 	}
 	upper := strings.ToUpper(err.Error())
 	switch {
+	case strings.Contains(upper, "DPI-1047"), strings.Contains(upper, "DPI-1072"):
+		return "ORACLE_CLIENT_UNAVAILABLE", "服务端 Oracle 客户端不可用，请联系管理员"
 	case strings.Contains(upper, "ORA-01017"):
 		return "AUTHENTICATION_FAILED", "Oracle 用户名或密码无效"
-	case strings.Contains(upper, "ORA-12154"), strings.Contains(upper, "ORA-12514"):
+	case strings.Contains(upper, "ORA-28000"):
+		return "ACCOUNT_LOCKED", "Oracle 账号已锁定"
+	case strings.Contains(upper, "ORA-28001"):
+		return "PASSWORD_EXPIRED", "Oracle 密码已过期"
+	case strings.Contains(upper, "ORA-12154"), strings.Contains(upper, "ORA-12505"), strings.Contains(upper, "ORA-12514"):
 		return "SERVICE_NOT_FOUND", "Oracle 服务名或 SID 不可用"
 	case strings.Contains(upper, "ORA-12170"), strings.Contains(upper, "ORA-12535"):
 		return "CONNECT_TIMEOUT", "Oracle 连接超时"
-	case strings.Contains(upper, "ORA-12541"), strings.Contains(upper, "NO SUCH HOST"), strings.Contains(upper, "CONNECTION REFUSED"):
+	case strings.Contains(upper, "ORA-12541"), strings.Contains(upper, "NO SUCH HOST"), strings.Contains(upper, "CONNECTION REFUSED"), strings.Contains(upper, "NO ROUTE TO HOST"), strings.Contains(upper, "NETWORK IS UNREACHABLE"):
 		return "NETWORK_UNREACHABLE", "无法连接 Oracle 网络地址"
 	default:
 		return "UNKNOWN", "Oracle 连接测试失败"

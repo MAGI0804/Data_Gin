@@ -59,6 +59,28 @@ func TestReportDatasourceServiceTestReturnsOnlySafeFailure(t *testing.T) {
 	}
 }
 
+func TestReportDatasourceConnectionFailureClassifiesSafeOperationalErrors(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		err      error
+		wantCode string
+		wantText string
+	}{
+		{name: "missing instant client", err: errors.New("DPI-1047: cannot locate a 64-bit Oracle Client library: password=secret"), wantCode: "ORACLE_CLIENT_UNAVAILABLE", wantText: "服务端 Oracle 客户端不可用，请联系管理员"},
+		{name: "locked account", err: errors.New("ORA-28000: the account is locked"), wantCode: "ACCOUNT_LOCKED", wantText: "Oracle 账号已锁定"},
+		{name: "expired password", err: errors.New("ORA-28001: the password has expired"), wantCode: "PASSWORD_EXPIRED", wantText: "Oracle 密码已过期"},
+		{name: "unknown sid", err: errors.New("ORA-12505: listener does not currently know of SID"), wantCode: "SERVICE_NOT_FOUND", wantText: "Oracle 服务名或 SID 不可用"},
+		{name: "unreachable network", err: errors.New("dial tcp: connect: network is unreachable"), wantCode: "NETWORK_UNREACHABLE", wantText: "无法连接 Oracle 网络地址"},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			code, message := safeDatasourceConnectionFailure(test.err)
+			if code != test.wantCode || message != test.wantText || strings.Contains(message, "secret") {
+				t.Fatalf("safeDatasourceConnectionFailure() = %q, %q", code, message)
+			}
+		})
+	}
+}
+
 func TestReportDatasourceServiceTestsUnsavedConnectionDraft(t *testing.T) {
 	store := &fakeReportDatasourceStore{}
 	var opened reportoracle.Config
