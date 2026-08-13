@@ -1,0 +1,258 @@
+.page {
+  --excel-control-height: 40px;
+}
+
+.page :global(.workbench-panel) {
+  min-width: 0;
+  border: 0;
+  background: var(--color-canvas);
+  padding: var(--space-4);
+}
+
+.page :global(.panel-title) {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  margin-block-end: var(--space-4);
+  border-bottom: 1px solid var(--color-border);
+  padding-block-end: var(--space-3);
+}
+
+.page :global(.panel-title svg) { width: 18px; height: 18px; color: var(--color-brand); }
+.page :global(.panel-title h3) { margin: 0; font-size: 16px; }
+.page :global(.panel-title span) { color: var(--color-text-secondary); font-size: 12px; }
+
+.page :global(.excel-upload-form),
+.dialog :global(.excel-upload-form) {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  align-items: end;
+  gap: var(--space-3);
+}
+
+.page :global(.excel-upload-form > label),
+.dialog :global(.excel-upload-form > label) { display: grid; gap: var(--space-1); min-width: 0; color: var(--color-text-secondary); font-size: 12px; font-weight: 650; }
+.page :global(.excel-upload-form input),
+.page :global(.excel-upload-form select),
+.page :global(.excel-upload-form textarea),
+.dialog :global(.excel-upload-form input),
+.dialog :global(.excel-upload-form select),
+.dialog :global(.excel-upload-form textarea) { width: 100%; min-width: 0; min-height: var(--excel-control-height); border: 1px solid var(--color-border-strong); background: var(--color-canvas); padding-inline: var(--space-3); }
+.page :global(.excel-upload-form textarea),
+.dialog :global(.excel-upload-form textarea) { padding-block: var(--space-2); }
+
+.page :global(.excel-form-actions),
+.page :global(.table-actions),
+.page :global(.excel-scheme-toolbar-actions),
+.page :global(.excel-detail-actions),
+.dialog :global(.excel-form-actions),
+.dialog :global(.table-actions),
+.dialog :global(.excel-scheme-toolbar-actions),
+.dialog :global(.excel-detail-actions) { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: var(--space-2); }
+.page :global(.excel-form-actions),
+.dialog :global(.excel-form-actions) { grid-column: 1 / -1; }
+
+.page :global(.excel-scheme-toolbar) { display: grid; grid-template-columns: minmax(220px, 1fr) minmax(120px, .4fr) auto; align-items: end; gap: var(--space-3); margin-block-end: var(--space-4); }
+.page :global(.excel-scheme-form) { display: block; }
+.page :global(.excel-step-editor),
+.dialog :global(.excel-step-editor) { display: grid; grid-column: 1 / -1; gap: var(--space-4); border-block: 1px solid var(--color-border); padding-block: var(--space-4); }
+.page :global(.excel-step-editor-title),
+.page :global(.excel-step-heading),
+.page :global(.excel-step-filter-heading),
+.dialog :global(.excel-step-editor-title),
+.dialog :global(.excel-step-heading),
+.dialog :global(.excel-step-filter-heading) { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); }
+.page :global(.excel-step-card),
+.dialog :global(.excel-step-card) { display: grid; gap: var(--space-3); border: 1px solid var(--color-border); background: var(--color-canvas); padding: var(--space-3); }
+.page :global(.excel-step-index) { display: inline-grid; width: 24px; height: 24px; place-items: center; border: 1px solid var(--color-brand); border-radius: 50%; color: var(--color-brand); }
+.page :global(.excel-step-fields),
+.dialog :global(.excel-step-fields) { display: grid; grid-template-columns: repeat(4, minmax(120px, 1fr)); gap: var(--space-3); }
+.page :global(.excel-step-filter-editor),
+.dialog :global(.excel-step-filter-editor) { display: grid; gap: var(--space-2); border-top: 1px solid var(--color-border); padding-top: var(--space-3); }
+.page :global(.excel-step-filter-row),
+.dialog :global(.excel-step-filter-row) { display: grid; grid-template-columns: minmax(140px, 1fr) 120px minmax(140px, 1fr) auto; align-items: end; gap: var(--space-2); }
+.page :global(.excel-step-filter-empty),
+.page :global(.excel-mode-note),
+.dialog :global(.excel-step-filter-empty),
+.dialog :global(.excel-mode-note) { margin: 0; color: var(--color-text-secondary); font-size: 12px; line-height: 1.6; }
+.page :global(.excel-step-name-input) { min-height: 32px; border: 0; background: transparent; font: inherit; font-weight: 650; }
+.page :global(.excel-catalog-control),
+.page :global(.excel-catalog-explanation),
+.dialog :global(.excel-catalog-control),
+.dialog :global(.excel-catalog-explanation) { min-width: 0; }
+.page :global(.excel-catalog-explanation),
+.dialog :global(.excel-catalog-explanation) { display: grid; gap: 2px; margin-block-start: var(--space-1); border-inline-start: 2px solid var(--color-brand); padding-inline-start: var(--space-2); }
+.page :global(.excel-catalog-explanation small),
+.dialog :global(.excel-catalog-explanation small) { color: var(--color-text-secondary); font-size: 11px; }
+.page :global(.excel-catalog-error),
+.dialog :global(.excel-catalog-error) { display: flex; justify-content: space-between; gap: var(--space-2); border: 1px solid var(--color-danger); padding: var(--space-2); }
+.page :global(.excel-scheme-advanced) { margin-block-start: var(--space-4); border: 1px solid var(--color-border); padding: var(--space-3); }
+.page :global(.excel-scheme-advanced > div) { display: grid; grid-template-columns: minmax(180px, 1fr) auto auto; align-items: end; gap: var(--space-2); padding-block-start: var(--space-3); }
+
+.page :global(.excel-mode-switch) { display: flex; gap: var(--space-2); margin-block-end: var(--space-3); }
+.page :global(.excel-mode-switch .active) { border-color: var(--color-brand); background: var(--color-brand-soft); }
+.page :global(.excel-write-summary) { display: grid; gap: var(--space-3); margin-block-start: var(--space-4); border-top: 1px solid var(--color-border); padding-block-start: var(--space-4); }
+.page :global(.excel-job-detail) { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.page :global(.metric) { display: grid; gap: var(--space-1); padding: var(--space-3); border-inline-end: 1px solid var(--color-border); }
+.page :global(.metric span) { color: var(--color-text-secondary); font-size: 12px; }
+.page :global(.metric strong) { font-size: 18px; }
+
+.page :global(.excel-job-row-progress) { display: grid; grid-template-columns: 1fr auto; gap: 4px var(--space-2); }
+.page :global(.excel-job-row-progress progress) { grid-column: 1 / -1; width: 100%; height: 5px; accent-color: var(--color-success); }
+.page :global(.excel-job-match-count) { color: var(--color-success); }
+.page :global(.excel-job-unmatched-count) { color: var(--color-danger); }
+.page :global(.excel-history-row--selected) { background: var(--color-brand-soft); }
+.page :global(.excel-job-detail-panel),
+.page :global(.excel-job-detail-meta),
+.page :global(.excel-job-log-list) { display: grid; gap: var(--space-3); }
+.page :global(.excel-job-detail-meta) { grid-template-columns: 1fr 1fr; margin: 0; }
+.page :global(.excel-job-detail-meta div),
+.page :global(.excel-job-expiry) { display: grid; gap: var(--space-1); }
+.page :global(.excel-job-detail-meta dt),
+.page :global(.excel-job-expiry dt) { color: var(--color-text-secondary); font-size: 12px; }
+.page :global(.excel-job-detail-meta dd),
+.page :global(.excel-job-expiry dd) { margin: 0; }
+.page :global(.excel-job-detail-counts) { display: grid; grid-template-columns: 1fr 1fr; }
+.page :global(.excel-job-progress) { display: grid; gap: var(--space-2); border-block: 1px solid var(--color-border); padding-block: var(--space-3); }
+.page :global(.excel-job-progress progress) { width: 100%; accent-color: var(--color-success); }
+.page :global(.excel-job-log-heading),
+.page :global(.excel-job-action-heading) { border-bottom: 1px solid var(--color-border); padding-block-end: var(--space-2); font-weight: 650; }
+.page :global(.record-row) { padding-block: var(--space-2); border-bottom: 1px solid var(--color-border); }
+.page :global(.record-row > div) { display: grid; gap: var(--space-1); }
+.page :global(.record-row span) { color: var(--color-text-secondary); font-size: 11px; }
+
+.page :global(.excel-preview-panel) { display: grid; gap: var(--space-3); grid-column: 1 / -1; }
+.page :global(.excel-preview-panel .overview-grid) { display: grid; grid-template-columns: repeat(5, minmax(0, 1fr)); border-block: 1px solid var(--color-border); }
+.page :global(.excel-preview-steps) { display: grid; gap: var(--space-1); }
+.page :global(.empty-state) { padding: var(--space-6); color: var(--color-text-secondary); text-align: center; }
+.page :global(.checkbox-label),
+.dialog :global(.checkbox-label) { display: flex; align-items: center; gap: var(--space-2); }
+.page :global(.checkbox-label input),
+.dialog :global(.checkbox-label input) { width: auto; min-height: auto; }
+.page :global(.file-input-label span),
+.dialog :global(.file-input-label span) { min-height: var(--excel-control-height); border: 1px solid var(--color-border-strong); padding: var(--space-2) var(--space-3); }
+.page :global(.file-input-label input[type='file']),
+.dialog :global(.file-input-label input[type='file']) { width: 1px; height: 1px; position: absolute; clip-path: inset(50%); }
+.page :global(.result-banner.error),
+.page :global(.login-error) { border: 1px solid var(--color-danger); background: var(--color-danger-soft); color: var(--color-danger); padding: var(--space-3); }
+
+.page :global(button),
+.page :global(input),
+.page :global(select),
+.page :global(textarea) {
+  border-radius: var(--radius-control);
+}
+
+.dialog {
+  --excel-control-height: 40px;
+}
+
+.mediumDialog {
+  width: min(100%, 820px);
+  max-height: min(90vh, 820px);
+}
+
+.wideDialog {
+  width: min(100%, 1040px);
+  max-height: min(92vh, 860px);
+}
+
+.masterDetail {
+  display: grid;
+  grid-template-columns: minmax(0, 3fr) minmax(300px, 1fr);
+  min-width: 0;
+  border-top: 1px solid var(--color-border);
+}
+
+.aside {
+  min-width: 0;
+  border-left: 1px solid var(--color-border);
+}
+
+.search {
+  min-width: min(360px, 100%);
+}
+
+.search > span:last-child {
+  position: relative;
+  display: block;
+}
+
+.search svg {
+  position: absolute;
+  top: 50%;
+  left: 12px;
+  width: 16px;
+  height: 16px;
+  color: var(--color-text-secondary);
+  pointer-events: none;
+  transform: translateY(-50%);
+}
+
+.search input {
+  width: 100%;
+  min-height: var(--excel-control-height);
+  padding-left: 36px;
+}
+
+.visuallyHidden {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.historyTable {
+  table-layout: fixed;
+  font-size: 12px;
+}
+
+.historyTable th:nth-child(1) { width: 7%; }
+.historyTable th:nth-child(2) { width: 19%; }
+.historyTable th:nth-child(3) { width: 10%; }
+.historyTable th:nth-child(4) { width: 10%; }
+.historyTable th:nth-child(5) { width: 20%; }
+.historyTable th:nth-child(6) { width: 13%; }
+.historyTable th:nth-child(7) { width: 13%; }
+.historyTable th:nth-child(8) { width: 10%; }
+
+.schemeTable {
+  table-layout: fixed;
+  font-size: 12px;
+}
+
+.schemeTable th:nth-child(1) { width: 33%; }
+.schemeTable th:nth-child(2) { width: 15%; }
+.schemeTable th:nth-child(3) { width: 32%; }
+.schemeTable th:nth-child(4) { width: 20%; }
+
+@media (max-width: 1180px) {
+  .masterDetail {
+    grid-template-columns: 1fr;
+  }
+
+  .aside {
+    border-top: 1px solid var(--color-border);
+    border-left: 0;
+  }
+
+  .page :global(.excel-step-fields) { grid-template-columns: repeat(2, minmax(140px, 1fr)); }
+}
+
+@media (max-width: 768px) {
+  .search {
+    min-width: 100%;
+  }
+
+  .page :global(.excel-upload-form),
+  .dialog :global(.excel-upload-form),
+  .page :global(.excel-scheme-toolbar),
+  .page :global(.excel-step-fields),
+  .dialog :global(.excel-step-fields),
+  .page :global(.excel-step-filter-row),
+  .dialog :global(.excel-step-filter-row),
+  .page :global(.excel-scheme-advanced > div),
+  .page :global(.excel-job-detail) { grid-template-columns: 1fr; }
+}
