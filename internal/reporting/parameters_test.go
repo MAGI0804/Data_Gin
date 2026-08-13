@@ -272,6 +272,18 @@ func TestNormalizeParametersRejectsMissingAndDisallowedValues(t *testing.T) {
 				LogicalType: LogicalTypeInteger, Validation: json.RawMessage(`{"min":1,"max":10}`)},
 			value: json.RawMessage(`11`),
 		},
+		{
+			name: "string outside allowlist",
+			definition: ParameterDefinition{Code: "store", ProcedureArgName: "P_STORE", Position: 1,
+				LogicalType: LogicalTypeString, AllowedValues: json.RawMessage(`["S001","S002"]`)},
+			value: json.RawMessage(`"S003"`),
+		},
+		{
+			name: "integer outside allowlist",
+			definition: ParameterDefinition{Code: "level", ProcedureArgName: "P_LEVEL", Position: 1,
+				LogicalType: LogicalTypeInteger, AllowedValues: json.RawMessage(`["1","2"]`)},
+			value: json.RawMessage(`3`),
+		},
 	}
 
 	for _, test := range tests {
@@ -285,6 +297,32 @@ func TestNormalizeParametersRejectsMissingAndDisallowedValues(t *testing.T) {
 				t.Fatalf("error = %v, want ErrInvalidParameterInput", err)
 			}
 		})
+	}
+}
+
+func TestNormalizeParametersAppliesTypedAllowedValues(t *testing.T) {
+	definitions := []ParameterDefinition{
+		{Code: "store", ProcedureArgName: "P_STORE", Position: 1, LogicalType: LogicalTypeString, AllowedValues: json.RawMessage(`["S001"]`), Normalizer: json.RawMessage(`{"trim":true,"case":"UPPER"}`)},
+		{Code: "level", ProcedureArgName: "P_LEVEL", Position: 2, LogicalType: LogicalTypeInteger, AllowedValues: json.RawMessage(`["01","2"]`)},
+		{Code: "enabled", ProcedureArgName: "P_ENABLED", Position: 3, LogicalType: LogicalTypeBoolean, AllowedValues: json.RawMessage(`["true"]`)},
+		{Code: "day", ProcedureArgName: "P_DAY", Position: 4, LogicalType: LogicalTypeDate, AllowedValues: json.RawMessage(`["2026-08-13"]`)},
+	}
+	values := map[string]json.RawMessage{
+		"store": json.RawMessage(`" s001 "`), "level": json.RawMessage(`1`),
+		"enabled": json.RawMessage(`true`), "day": json.RawMessage(`"2026-08-13"`),
+	}
+	if _, err := NormalizeParameters(definitions, values, nil); err != nil {
+		t.Fatalf("NormalizeParameters() error = %v", err)
+	}
+}
+
+func TestValidateParameterDefinitionsRejectsInvalidTypedAllowedValues(t *testing.T) {
+	definitions := []ParameterDefinition{{
+		Code: "level", ProcedureArgName: "P_LEVEL", Position: 1,
+		LogicalType: LogicalTypeInteger, AllowedValues: json.RawMessage(`["one"]`),
+	}}
+	if err := ValidateParameterDefinitions(definitions); !errors.Is(err, ErrInvalidParameterContract) {
+		t.Fatalf("ValidateParameterDefinitions() error = %v", err)
 	}
 }
 

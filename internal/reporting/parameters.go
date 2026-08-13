@@ -79,6 +79,14 @@ func ValidateParameterDefinitions(definitions []ParameterDefinition) error {
 			if err := decodeStrictJSON(definition.AllowedValues, &allowed); err != nil || len(allowed) == 0 {
 				return contractError("parameter %q has invalid allowed values", definition.Code)
 			}
+			if definition.LogicalType == LogicalTypeJSON {
+				return contractError("JSON parameter %q cannot define allowed values", definition.Code)
+			}
+			for _, value := range allowed {
+				if _, err := canonicalAllowedValue(definition, value); err != nil {
+					return contractError("parameter %q has invalid allowed value %q", definition.Code, value)
+				}
+			}
 		} else if definition.LogicalType == LogicalTypeEnum || definition.LogicalType == LogicalTypeMultiEnum {
 			return contractError("enum parameter %q requires allowed values", definition.Code)
 		}
@@ -389,6 +397,9 @@ func normalizeValue(definition ParameterDefinition, raw json.RawMessage, present
 		if err := validateString(definition.Code, value, rules); err != nil {
 			return nil, nil, err
 		}
+		if err := validateAllowedValue(definition, value); err != nil {
+			return nil, nil, err
+		}
 		return value, value, nil
 	case LogicalTypeInteger:
 		value, err := normalizeInteger(decoded)
@@ -396,6 +407,9 @@ func normalizeValue(definition ParameterDefinition, raw json.RawMessage, present
 			return nil, nil, inputError(definition.Code, "value must be an integer")
 		}
 		if err := validateNumber(definition.Code, strconv.FormatInt(value, 10), rules); err != nil {
+			return nil, nil, err
+		}
+		if err := validateAllowedValue(definition, strconv.FormatInt(value, 10)); err != nil {
 			return nil, nil, err
 		}
 		return value, value, nil
@@ -407,11 +421,17 @@ func normalizeValue(definition ParameterDefinition, raw json.RawMessage, present
 		if err := validateNumber(definition.Code, value, rules); err != nil {
 			return nil, nil, err
 		}
+		if err := validateAllowedValue(definition, value); err != nil {
+			return nil, nil, err
+		}
 		return value, value, nil
 	case LogicalTypeBoolean:
 		value, ok := decoded.(bool)
 		if !ok {
 			return nil, nil, inputError(definition.Code, "value must be a boolean")
+		}
+		if err := validateAllowedValue(definition, strconv.FormatBool(value)); err != nil {
+			return nil, nil, err
 		}
 		return value, value, nil
 	case LogicalTypeDate:
@@ -423,6 +443,9 @@ func normalizeValue(definition ParameterDefinition, raw json.RawMessage, present
 		if err != nil {
 			return nil, nil, inputError(definition.Code, "value must use YYYY-MM-DD")
 		}
+		if err := validateAllowedValue(definition, value); err != nil {
+			return nil, nil, err
+		}
 		return value, parsed, nil
 	case LogicalTypeDateTime:
 		value, ok := decoded.(string)
@@ -433,7 +456,11 @@ func normalizeValue(definition ParameterDefinition, raw json.RawMessage, present
 		if err != nil {
 			return nil, nil, inputError(definition.Code, "value must use RFC3339 with timezone")
 		}
-		return parsed.UTC().Format(time.RFC3339Nano), parsed, nil
+		canonical := parsed.UTC().Format(time.RFC3339Nano)
+		if err := validateAllowedValue(definition, canonical); err != nil {
+			return nil, nil, err
+		}
+		return canonical, parsed, nil
 	case LogicalTypeEnum:
 		value, ok := decoded.(string)
 		if !ok {
@@ -636,14 +663,66 @@ func validateAllowedValues(definition ParameterDefinition, values []string) erro
 	}
 	allowedSet := make(map[string]struct{}, len(allowed))
 	for _, value := range allowed {
-		allowedSet[value] = struct{}{}
+		canonical, err := canonicalAllowedValue(definition, value)
+		if err != nil {
+			return contractError("parameter %q has invalid allowed value", definition.Code)
+		}
+		allowedSet[canonical] = struct{}{}
 	}
 	for _, value := range values {
-		if _, ok := allowedSet[value]; !ok {
+		canonical, err := canonicalAllowedValue(definition, value)
+		if err != nil {
+			return inputError(definition.Code, "value is not allowed")
+		}
+		if _, ok := allowedSet[canonical]; !ok {
 			return inputError(definition.Code, "value is not allowed")
 		}
 	}
 	return nil
+}
+
+func validateAllowedValue(definition ParameterDefinition, value string) error {
+	if len(bytes.TrimSpace(definition.AllowedValues)) == 0 {
+		return nil
+	}
+	return validateAllowedValues(definition, []string{value})
+}
+
+func canonicalAllowedValue(definition ParameterDefinition, value string) (string, error) {
+	switch definition.LogicalType {
+	case LogicalTypeString, LogicalTypeEnum, LogicalTypeMultiEnum:
+		rules, err := parseNormalizerRules(definition)
+		if err != nil {
+			return "", err
+		}
+		return applyNormalizer(value, rules).(string), nil
+	case LogicalTypeInteger:
+		parsed, err := normalizeInteger(value)
+		if err != nil {
+			return "", err
+		}
+		return strconv.FormatInt(parsed, 10), nil
+	case LogicalTypeDecimal:
+		return normalizeDecimal(value)
+	case LogicalTypeBoolean:
+		if value != "true" && value != "false" {
+			return "", errors.New("not a boolean")
+		}
+		return value, nil
+	case LogicalTypeDate:
+		if _, err := time.Parse("2006-01-02", value); err != nil {
+			return "", err
+		}
+		return value, nil
+	case LogicalTypeDateTime:
+		parsed, err := time.Parse(time.RFC3339, value)
+		if err != nil {
+			return "", err
+		}
+		return parsed.UTC().Format(time.RFC3339Nano), nil
+	default:
+		return "", errors.New("unsupported allowed value type")
+	}
 }
 
 func normalizeInteger(value interface{}) (int64, error) {
