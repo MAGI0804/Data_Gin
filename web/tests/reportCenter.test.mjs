@@ -2,6 +2,7 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import { getReportAudits, parseReportAuditPage, parseReportCatalogPage, parseReportDatasource, parseReportDatasources, parseReportDatasourceTest, parseReportDraft, parseReportExport, parseReportExportPage, parseReportResultPage, parseReportRun, parseReportRunContract } from '../.test-dist/reportCenter/api.js'
+import { buildNewReportRunState, canStartNewReportRun, initialReportParameterValues } from '../.test-dist/reportCenter/queryParameters.js'
 
 test('parseReportCatalogPage reads the standard API envelope', () => {
   const page = parseReportCatalogPage({
@@ -70,6 +71,53 @@ test('parseReportRunContract keeps typed published parameters', () => {
   assert.equal(contract.versionId, 23)
   assert.equal(contract.parameters[1].controlType, 'SELECT')
   assert.deepEqual(contract.parameters[1].allowedValues, ['S001', 'S002'])
+})
+
+test('report parameter defaults use the same editable shapes as their controls', () => {
+  const parameter = (code, logicalType, defaultValue, extra = {}) => ({
+    code, logicalType, defaultValue, systemInjected: false, controlType: 'TEXT', ...extra,
+  })
+  const values = initialReportParameterValues([
+    parameter('count', 'integer', 12),
+    parameter('ratio', 'decimal', 12.5),
+    parameter('options', 'json', { active: true }),
+    parameter('jsonText', 'json', 'literal'),
+    parameter('stores', 'multi_enum', ['S001', 2], { controlType: 'MULTI_SELECT' }),
+    parameter('enabled', 'boolean', false, { controlType: 'CHECKBOX' }),
+    parameter('name', 'string', ' 默认名称 '),
+    parameter('emptyJson', 'json', null, { controlType: 'TEXTAREA' }),
+    parameter('runId', 'string', 'ignored', { systemInjected: true }),
+  ])
+
+  assert.deepEqual(values, {
+    count: '12', ratio: '12.5', options: '{"active":true}', jsonText: '"literal"', stores: ['S001', '2'],
+    enabled: false, name: ' 默认名称 ', emptyJson: '',
+  })
+})
+
+test('new report runs are allowed only after run and export processing finish', () => {
+  const runStatuses = ['QUEUED', 'RUNNING', 'CANCEL_REQUESTED', 'SUCCEEDED', 'FAILED', 'CANCELLED', 'UNKNOWN', 'RECONCILING', 'EXPORTING', 'EXPORTED', 'RESULT_PURGING', 'RESULT_PURGED']
+  const exportStatuses = [null, 'PENDING', 'RUNNING', 'READY', 'FAILED', 'CANCELLED', 'EXPIRED']
+  const terminalRuns = new Set(['SUCCEEDED', 'FAILED', 'CANCELLED', 'EXPORTED', 'RESULT_PURGED'])
+  const terminalExports = new Set([null, 'READY', 'FAILED', 'CANCELLED', 'EXPIRED'])
+  for (const runStatus of runStatuses) {
+    for (const exportStatus of exportStatuses) {
+      assert.equal(canStartNewReportRun(runStatus, exportStatus, false), terminalRuns.has(runStatus) && terminalExports.has(exportStatus), `${runStatus}/${exportStatus}`)
+      assert.equal(canStartNewReportRun(runStatus, exportStatus, true), false, `${runStatus}/${exportStatus}/busy`)
+    }
+  }
+})
+
+test('new report run state clears the frozen snapshot and restores parameter defaults', () => {
+  const state = buildNewReportRunState([{
+    code: 'count', logicalType: 'integer', defaultValue: 5, systemInjected: false,
+  }])
+  assert.deepEqual(state, {
+    values: { count: '5' }, run: null, result: null, reportExport: null,
+    resultQuery: { filters: [], sort: [] }, appliedQuery: { filters: [], sort: [] },
+    cursorHistory: [''], cursorIndex: 0, filtersOpen: false, parametersOpen: true,
+    operation: { busy: false, error: '' },
+  })
 })
 
 test('run, result and export parsers preserve cursor and large numeric strings', () => {

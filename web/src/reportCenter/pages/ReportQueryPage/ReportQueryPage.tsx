@@ -2,12 +2,11 @@ import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } 
 import { ChevronDown, ChevronLeft, ChevronRight, Download, Filter, Play, Plus, Square, Trash2 } from 'lucide-react'
 import { Button, DataTable, FeedbackState, FilterToolbar, PageCanvas, PageHeader, Section, StatusTag, type StatusTagTone } from '../../../ui'
 import { cancelReportRun, createReportExport, createReportRun, getReportExport, getReportExportDownload, queryReportResults, getReportRun, getReportRunContract, type ReportCenterClient } from '../../api'
+import { buildNewReportRunState, canStartNewReportRun, initialReportParameterValues, terminalReportExportStatuses, terminalReportRunStatuses, visibleReportParameters } from '../../queryParameters'
 import type { ReportExport, ReportFilterOperator, ReportParameter, ReportResultFilter, ReportResultPage, ReportResultQuery, ReportRun, ReportRunContract } from '../../types'
 import { useReportCatalog } from '../../useReportCatalog'
 import styles from './ReportQueryPage.module.css'
 
-const terminalRunStatuses = new Set(['SUCCEEDED', 'FAILED', 'CANCELLED'])
-const terminalExportStatuses = new Set(['READY', 'FAILED', 'CANCELLED', 'EXPIRED'])
 const emptyResultQuery: ReportResultQuery = { filters: [], sort: [] }
 
 export function ReportQueryPage({ client, navigation }: { client: ReportCenterClient; navigation?: ReactNode }) {
@@ -54,7 +53,7 @@ export function ReportQueryPage({ client, navigation }: { client: ReportCenterCl
         return
       }
       setContract(response.data)
-      setValues(initialParameterValues(response.data.parameters))
+      setValues(initialReportParameterValues(response.data.parameters))
       setContractState({ loading: false, error: '' })
     })
     return () => controller.abort()
@@ -93,7 +92,7 @@ export function ReportQueryPage({ client, navigation }: { client: ReportCenterCl
         return
       }
       setRun(response.data)
-      if (terminalRunStatuses.has(response.data.status)) {
+      if (terminalReportRunStatuses.has(response.data.status)) {
         setOperation({ busy: false, error: response.data.errorMessage })
 				if (response.data.resultAvailable) await loadResults(runId, emptyResultQuery, '', 0, controller.signal)
         return
@@ -150,7 +149,7 @@ export function ReportQueryPage({ client, navigation }: { client: ReportCenterCl
     if (!response.ok) setOperation({ busy: false, error: response.error })
     else {
       setRun(response.data)
-      if (!terminalRunStatuses.has(response.data.status)) await pollRun(response.data.id)
+      if (!terminalReportRunStatuses.has(response.data.status)) await pollRun(response.data.id)
     }
   }
 
@@ -176,7 +175,7 @@ export function ReportQueryPage({ client, navigation }: { client: ReportCenterCl
         return
       }
       setReportExport(response.data)
-      if (terminalExportStatuses.has(response.data.status)) {
+      if (terminalReportExportStatuses.has(response.data.status)) {
         setOperation({ busy: false, error: response.data.errorMessage })
         return
       }
@@ -194,11 +193,30 @@ export function ReportQueryPage({ client, navigation }: { client: ReportCenterCl
     window.location.assign(response.data.url)
   }
 
+  function startNewRun() {
+    if (!contract || !run || !canStartNewReportRun(run.status, reportExport?.status ?? null, operation.busy)) return
+    pollAbortRef.current?.abort()
+    pollAbortRef.current = null
+    const next = buildNewReportRunState(contract.parameters)
+    setRun(next.run)
+    setResult(next.result)
+    setReportExport(next.reportExport)
+    setResultQuery(next.resultQuery)
+    setAppliedQuery(next.appliedQuery)
+    setCursorHistory(next.cursorHistory)
+    setCursorIndex(next.cursorIndex)
+    setFiltersOpen(next.filtersOpen)
+    setParametersOpen(next.parametersOpen)
+    setValues(next.values)
+    setOperation(next.operation)
+  }
+
   const frozen = Boolean(run)
+  const canStartNewRun = run ? canStartNewReportRun(run.status, reportExport?.status ?? null, operation.busy) : false
   return (
     <PageCanvas>
       {navigation}
-      <PageHeader eyebrow="ORACLE EXECUTION" title="报表查询" description="参数来自已发布的不可变契约；一次运行生成一个快照，分页和正式导出均复用该 run_id。" actions={run?.canCancel ? <button type="button" onClick={() => void cancelRun()}><Square aria-hidden="true" />取消运行</button> : undefined} />
+      <PageHeader eyebrow="ORACLE EXECUTION" title="报表查询" description="参数来自已发布的不可变契约；一次运行生成一个快照，分页和正式导出均复用该 run_id。" actions={run ? <div className={styles.pageActions}>{run.canCancel ? <button type="button" onClick={() => void cancelRun()}><Square aria-hidden="true" />取消运行</button> : null}<button type="button" onClick={startNewRun} disabled={!canStartNewRun}><Plus aria-hidden="true" />新建运行</button></div> : undefined} />
       <FilterToolbar summary={run ? <StatusTag tone={runTone(run)}>{runLabel(run.status)}</StatusTag> : <StatusTag tone="neutral">等待选择报表</StatusTag>}>
         <div className={styles.catalogSelector}><label className={styles.selector}>选择报表<select value={selectedId} onChange={(event) => setSelectedId(event.currentTarget.value)} disabled={loading || frozen || published.length === 0}><option value="">请选择已发布报表</option>{published.map((report) => <option value={report.id} key={report.id}>{report.name}</option>)}</select></label>{hasMore ? <button type="button" onClick={() => void loadMore()} disabled={loadingMore || frozen}>{loadingMore ? '正在加载…' : '加载更多'}</button> : null}</div>
       </FilterToolbar>
@@ -206,12 +224,12 @@ export function ReportQueryPage({ client, navigation }: { client: ReportCenterCl
         {parametersOpen ? <>
         {contractState.loading ? <FeedbackState kind="loading" title="正在读取已发布参数契约" /> : null}
         {contractState.error ? <FeedbackState kind="error" title="参数契约加载失败" description={contractState.error} /> : null}
-        {contract ? <form className={styles.parameterForm} onSubmit={(event) => void submitRun(event)}>{visibleParameters(contract.parameters).map((parameter) => <ParameterField disabled={frozen || operation.busy} key={parameter.code} parameter={parameter} value={values[parameter.code]} onChange={(value) => setValues((current) => ({ ...current, [parameter.code]: value }))} />)}<div className={styles.runActions}><span>{frozen ? '本次条件已冻结；如需修改，请重新选择页面后发起新运行。' : `${visibleParameters(contract.parameters).length} 个可填写参数，系统参数不会显示。`}</span><Button variant="primary" type="submit" disabled={frozen || operation.busy}><Play aria-hidden="true" />运行报表</Button></div></form> : null}
+        {contract ? <form className={styles.parameterForm} onSubmit={(event) => void submitRun(event)}>{visibleReportParameters(contract.parameters).map((parameter) => <ParameterField disabled={frozen || operation.busy} key={parameter.code} parameter={parameter} value={values[parameter.code]} onChange={(value) => setValues((current) => ({ ...current, [parameter.code]: value }))} />)}<div className={styles.runActions}><span>{frozen ? '本次条件已冻结；点击页头“新建运行”可恢复默认参数并重新查询。' : `${visibleReportParameters(contract.parameters).length} 个可填写参数，系统参数不会显示。`}</span><Button variant="primary" type="submit" disabled={frozen || operation.busy}><Play aria-hidden="true" />运行报表</Button></div></form> : null}
         {!contract && !contractState.loading && !contractState.error ? <FeedbackState kind="empty" title="尚未选择报表" description="请选择一份已发布且有查询权限的报表。" /> : null}
-        </> : <div className={styles.collapsedParameters}>{contract ? `${visibleParameters(contract.parameters).length} 个业务参数${frozen ? ' · 本次运行条件已冻结' : ''}` : '参数区已收起'}</div>}
+        </> : <div className={styles.collapsedParameters}>{contract ? `${visibleReportParameters(contract.parameters).length} 个业务参数${frozen ? ' · 本次运行条件已冻结' : ''}` : '参数区已收起'}</div>}
       </Section>
       {run ? <div className={styles.statusBar} role="status"><span><strong>{runLabel(run.status)}</strong><small>运行 #{run.id} · {run.rowCount.toLocaleString('zh-CN')} 行</small></span><span>{run.errorMessage || (run.resultExpiresAt ? `结果保留至 ${formatDate(run.resultExpiresAt)}` : '正在等待 Oracle 结果')}</span></div> : null}
-      {operation.error ? <FeedbackState kind="error" title="操作未完成" description={operation.error} action={run && !terminalRunStatuses.has(run.status) ? <button type="button" onClick={() => void resumeRun()}>恢复状态查询</button> : undefined} /> : null}
+      {operation.error ? <FeedbackState kind="error" title="操作未完成" description={operation.error} action={run && !terminalReportRunStatuses.has(run.status) ? <button type="button" onClick={() => void resumeRun()}>恢复状态查询</button> : undefined} /> : null}
       <Section title="结果预览" description="使用签名 Cursor 进行 Oracle Keyset 分页，不会重新执行存储过程。" actions={run?.resultAvailable ? <div className={styles.resultActions}>{reportExport ? <StatusTag tone={exportTone(reportExport)}>{exportLabel(reportExport.status)}</StatusTag> : null}<button type="button" onClick={() => void startExport()} disabled={operation.busy || Boolean(reportExport)}><Download aria-hidden="true" />生成正式 Excel</button>{reportExport?.canDownload ? <Button variant="primary" onClick={() => void downloadExport()}>下载文件</Button> : null}</div> : undefined} flush>
 		{result ? <ResultQueryToolbar page={result} query={resultQuery} open={filtersOpen} disabled={operation.busy || Boolean(reportExport)} onToggle={() => setFiltersOpen((value) => !value)} onChange={setResultQuery} onApply={() => void applyResultQuery()} /> : null}
         {operation.busy && !result ? <FeedbackState kind="loading" title={reportExport ? '正在生成并校验正式 Excel' : '正在执行报表'} description={reportExport ? exportProgress(reportExport) : 'Oracle 存储过程只会执行一次，请稍候。'} /> : null}
@@ -272,11 +290,9 @@ function filterValue(value: unknown) { return Array.isArray(value) ? value.join(
 function replaceAt<T>(items: T[], index: number, value: T) { return items.map((item, itemIndex) => itemIndex === index ? value : item) }
 function operatorLabel(operator: ReportFilterOperator) { return ({ EQ: '等于', NE: '不等于', GT: '大于', GTE: '大于等于', LT: '小于', LTE: '小于等于', IN: '属于集合', NOT_IN: '不属于集合', IS_NULL: '为空', IS_NOT_NULL: '不为空', CONTAINS: '包含', STARTS_WITH: '开头为', BETWEEN: '区间' })[operator] }
 
-function visibleParameters(parameters: ReportParameter[]) { return parameters.filter((parameter) => !parameter.systemInjected) }
-function initialParameterValues(parameters: ReportParameter[]) { return visibleParameters(parameters).reduce<Record<string, unknown>>((result, parameter) => ({ ...result, [parameter.code]: parameter.defaultValue ?? (parameter.controlType === 'MULTI_SELECT' ? [] : '') }), {}) }
 function buildRunParameters(parameters: ReportParameter[], values: Record<string, unknown>): { ok: true; parameters: Record<string, unknown> } | { ok: false; error: string } {
   const result: Record<string, unknown> = {}
-  for (const parameter of visibleParameters(parameters)) {
+  for (const parameter of visibleReportParameters(parameters)) {
     const value = values[parameter.code]
     if (value === '' || value === undefined || (Array.isArray(value) && value.length === 0)) continue
     if ((parameter.logicalType === 'integer' || parameter.logicalType === 'decimal') && (typeof value !== 'string' || !/^-?\d+(?:\.\d+)?$/.test(value))) return { ok: false, error: `${parameter.label} 必须填写有效数字。` }
