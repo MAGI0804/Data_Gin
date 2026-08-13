@@ -23,8 +23,9 @@ FROM oraclelinux:9-slim
 # godror compiles without Oracle Client headers, but requires libclntsh at
 # runtime. Oracle Linux keeps the official Instant Client and its native
 # dependencies in one compatible glibc-based image.
-RUN microdnf install -y oracle-instantclient-release-el9 && \
-    microdnf install -y oracle-instantclient-basiclite ca-certificates tzdata wget && \
+RUN mkdir -p /etc/yum/vars && \
+    microdnf install -y oracle-instantclient-release-el9 && \
+    microdnf install -y oracle-instantclient19.32-basiclite ca-certificates tzdata wget && \
     microdnf clean all
 
 WORKDIR /app
