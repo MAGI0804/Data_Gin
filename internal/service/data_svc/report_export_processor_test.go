@@ -2,6 +2,8 @@ package data_svc
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"os"
 	"testing"
 	"time"
@@ -64,6 +66,25 @@ func TestReportExportProcessorDoesNotPurgeWhenUploadFails(t *testing.T) {
 	}
 }
 
+func TestReportExportProcessorDoesNotPurgeWhenUploadedChecksumDiffers(t *testing.T) {
+	now := time.Date(2026, 8, 12, 12, 0, 0, 0, time.UTC)
+	store := &fakeReportExportExecutionStore{runtime: testReportExportRuntime(now)}
+	session := &fakeReportExportOracleSession{pages: []reportoracle.ResultPage{{Columns: []string{"ORDER_NO"}}}}
+	objects := &fakeReportExportObjectStore{checksumOverride: "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"}
+	processor := NewReportExportProcessorWithDependencies(store, staticReportCredentialDecryptor{}, fakeReportExportOracleFactory{session: session})
+	processor.now = func() time.Time { return now }
+	processor.newToken = tokenSequence("11111111-1111-4111-8111-111111111111")
+	processor.workerID = "worker"
+	processor.workRoot = shortReportExportTestRoot(t)
+	processor.heartbeatInterval = time.Hour
+	processor.buildObjectKey = func(parts ...string) string { return parts[0] }
+	processor.newObjectStore = func() (reportExportObjectStore, error) { return objects, nil }
+	err := processor.Process(t.Context(), 41, false)
+	if err == nil || !store.failed || store.ready || store.purged || !objects.deleted {
+		t.Fatalf("Process() error=%v store=%#v objects=%#v", err, store, objects)
+	}
+}
+
 func testReportExportRuntime(now time.Time) *reportrepo.ExportRuntime {
 	expires := now.Add(time.Hour)
 	return &reportrepo.ExportRuntime{
@@ -106,10 +127,12 @@ func (session *fakeReportExportOracleSession) Purge(_ context.Context, _ int) (i
 func (*fakeReportExportOracleSession) Close() error { return nil }
 
 type fakeReportExportObjectStore struct {
-	uploaded  bool
-	deleted   bool
-	uploadErr error
-	size      int64
+	uploaded         bool
+	deleted          bool
+	uploadErr        error
+	size             int64
+	checksum         string
+	checksumOverride string
 }
 
 func (store *fakeReportExportObjectStore) UploadFile(_ context.Context, objectKey, localPath, _ string) (storage.UploadResult, error) {
@@ -120,12 +143,21 @@ func (store *fakeReportExportObjectStore) UploadFile(_ context.Context, objectKe
 	if err != nil {
 		return storage.UploadResult{}, err
 	}
-	store.uploaded, store.size = true, info.Size()
+	contents, err := os.ReadFile(localPath)
+	if err != nil {
+		return storage.UploadResult{}, err
+	}
+	digest := sha256.Sum256(contents)
+	store.uploaded, store.size, store.checksum = true, info.Size(), hex.EncodeToString(digest[:])
 	return storage.UploadResult{ObjectKey: objectKey}, nil
 }
 
 func (store *fakeReportExportObjectStore) StatDownloadObject(context.Context, string) (storage.ObjectMetadata, error) {
-	return storage.ObjectMetadata{Size: store.size}, nil
+	checksum := store.checksum
+	if store.checksumOverride != "" {
+		checksum = store.checksumOverride
+	}
+	return storage.ObjectMetadata{Size: store.size, ChecksumSHA256: checksum}, nil
 }
 
 func (store *fakeReportExportObjectStore) DeleteObject(context.Context, string) error {

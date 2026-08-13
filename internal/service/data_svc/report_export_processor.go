@@ -200,6 +200,8 @@ func (processor *ReportExportProcessor) Process(ctx context.Context, exportID ui
 			err = fmt.Errorf("report export processor: verify uploaded object: %w", verifyErr)
 		} else if metadata.Size != fileSize {
 			err = fmt.Errorf("report export processor: uploaded object size mismatch")
+		} else if !strings.EqualFold(metadata.ChecksumSHA256, checksum) {
+			err = fmt.Errorf("report export processor: uploaded object checksum mismatch")
 		}
 	}
 	if err != nil {

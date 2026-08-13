@@ -2,6 +2,8 @@ package storage
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -55,7 +57,8 @@ type UploadResult struct {
 }
 
 type ObjectMetadata struct {
-	Size int64
+	Size           int64
+	ChecksumSHA256 string
 }
 
 type DownloadObject struct {
@@ -197,6 +200,10 @@ func (c *OSSClient) UploadFileWithProgress(ctx context.Context, objectKey, local
 	if err != nil {
 		return UploadResult{}, err
 	}
+	checksum, err := fileSHA256(localPath)
+	if err != nil {
+		return UploadResult{}, err
+	}
 	contentType := mime.TypeByExtension(strings.ToLower(filepath.Ext(localPath)))
 	if contentType == "" {
 		contentType = "application/octet-stream"
@@ -208,6 +215,7 @@ func (c *OSSClient) UploadFileWithProgress(ctx context.Context, objectKey, local
 		ContentType:        alioss.Ptr(contentType),
 		CacheControl:       alioss.Ptr("private, max-age=86400"),
 		ContentDisposition: alioss.Ptr(contentDisposition(downloadName)),
+		Metadata:           map[string]string{"sha256": checksum},
 	}
 	if onProgress != nil {
 		request.ProgressFn = func(increment, transferred, total int64) {
@@ -340,7 +348,29 @@ func (c *OSSClient) StatDownloadObject(ctx context.Context, objectKey string) (O
 	if result == nil || result.ContentLength < 0 {
 		return ObjectMetadata{}, fmt.Errorf("OSS 下载对象元数据无效")
 	}
-	return ObjectMetadata{Size: result.ContentLength}, nil
+	return ObjectMetadata{Size: result.ContentLength, ChecksumSHA256: objectMetadataValue(result.Metadata, "sha256")}, nil
+}
+
+func fileSHA256(localPath string) (string, error) {
+	file, err := os.Open(localPath)
+	if err != nil {
+		return "", fmt.Errorf("OSS 读取上传文件失败: %w", err)
+	}
+	defer file.Close()
+	hash := sha256.New()
+	if _, err := io.Copy(hash, file); err != nil {
+		return "", fmt.Errorf("OSS 计算上传文件摘要失败: %w", err)
+	}
+	return hex.EncodeToString(hash.Sum(nil)), nil
+}
+
+func objectMetadataValue(metadata map[string]string, key string) string {
+	for name, value := range metadata {
+		if strings.EqualFold(strings.TrimSpace(name), key) {
+			return strings.ToLower(strings.TrimSpace(value))
+		}
+	}
+	return ""
 }
 
 func (c *OSSClient) OpenDownloadObject(ctx context.Context, objectKey string) (DownloadObject, error) {
