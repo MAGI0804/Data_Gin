@@ -60,6 +60,7 @@ import { parseMallWeatherExportContentStatus, submitMallWeatherExportContentDown
 import { parseMonitoringPage } from './monitoringRecords'
 import { ProcessedRecordsPage } from './dataPages/ProcessedRecordsPage'
 import { RawRecordsPage } from './dataPages/RawRecordsPage'
+import { BojunBackfillPage } from './backfillPages/BojunBackfillPage'
 
 const defaultApiBaseURL = import.meta.env.VITE_API_BASE_URL ?? ''
 
@@ -83,38 +84,6 @@ type PipelineDefinition = {
   name: string
   code: string
   enabled: boolean
-}
-
-type BojunOrderBackfillSample = {
-  docno: string
-  otherdocno: string
-  c_store_code: string
-  c_store_name: string
-  order_type_code: string
-  order_type_name: string
-  billdate: number
-  tot_qty: number
-  tot_amt_actual: number
-  status: string
-  reason: string
-}
-
-type BojunOrderBackfillResult = {
-  start_time: string
-  end_time: string
-  page_size: number
-  max_pages: number
-  fetch_pages: number
-  total_count: number
-  preview_count: number
-  writable_count: number
-  existing_count: number
-  saved_count: number
-  retail_count: number
-  skipped_count: number
-  failed_count: number
-  samples: BojunOrderBackfillSample[]
-  failed_samples: BojunOrderBackfillSample[]
 }
 
 type LegacyTask = {
@@ -658,26 +627,6 @@ function App() {
     return client(`/v1/sources/${sourceID}/test`, { method: 'POST' })
   }
 
-  async function previewBojunOrderBackfill(payload: { start_time: string; end_time: string }) {
-    const response = await client('/v1/bojun-order-backfill/preview', {
-      method: 'POST',
-      body: payload,
-    })
-    return response.ok ? readObject<BojunOrderBackfillResult>(response, 'result') : null
-  }
-
-  async function confirmBojunOrderBackfill(payload: { start_time: string; end_time: string }) {
-    const response = await client('/v1/bojun-order-backfill/confirm', {
-      method: 'POST',
-      body: payload,
-    })
-    if (response.ok) {
-      await refreshWorkspace(false)
-      return readObject<BojunOrderBackfillResult>(response, 'result')
-    }
-    return null
-  }
-
   async function previewYouzanDistributionBackfill(payload: YouzanDistributionBackfillPayload) {
     const response = await client('/v1/youzan-distribution-order-backfill/preview', {
       method: 'POST',
@@ -798,9 +747,9 @@ function App() {
       navigationRef={mobileNavRef}
       navigationOpen={mobileNavOpen}
       onDismissNavigation={() => setMobileNavOpen(false)}
-      flushWorkspace={Boolean(reportSection) || ['access_management', 'sources', 'receive', 'pull_records', 'rules', 'processed', 'methods', 'destinations', 'tasks', 'push_policy', 'overview', 'runs', 'delivery_logs', 'step_runs'].includes(activeNav)}
+      flushWorkspace={Boolean(reportSection) || ['access_management', 'sources', 'receive', 'pull_records', 'backfill', 'rules', 'processed', 'methods', 'destinations', 'tasks', 'push_policy', 'overview', 'runs', 'delivery_logs', 'step_runs'].includes(activeNav)}
       workspaceClassName="ops-workspace"
-      header={<ModuleHeader compact={Boolean(reportSection) || ['access_management', 'sources', 'receive', 'pull_records', 'rules', 'processed', 'methods', 'destinations', 'tasks', 'push_policy', 'overview', 'runs', 'delivery_logs', 'step_runs'].includes(activeNav)} activeNav={activeNav} loading={loading || refreshing} sessionUser={sessionUser} onOpenNavigation={openMobileNavigation} onRefresh={() => void refreshWorkspace(true)} onLogout={handleLogout} refreshing={refreshing} mobileNavTriggerRef={mobileNavTriggerRef} />}
+      header={<ModuleHeader compact={Boolean(reportSection) || ['access_management', 'sources', 'receive', 'pull_records', 'backfill', 'rules', 'processed', 'methods', 'destinations', 'tasks', 'push_policy', 'overview', 'runs', 'delivery_logs', 'step_runs'].includes(activeNav)} activeNav={activeNav} loading={loading || refreshing} sessionUser={sessionUser} onOpenNavigation={openMobileNavigation} onRefresh={() => void refreshWorkspace(true)} onLogout={handleLogout} refreshing={refreshing} mobileNavTriggerRef={mobileNavTriggerRef} />}
       notices={<>{sessionValidationError && <div className="result-banner error" role="status" aria-live="polite">{sessionValidationError} <button type="button" onClick={() => setSessionValidationAttempt((attempt) => attempt + 1)}>重试校验</button></div>}{workspaceError && <div className="result-banner error" role="alert">{workspaceError} <button type="button" onClick={() => void refreshWorkspace(false)} disabled={refreshing}>重试</button></div>}</>}
       overlay={<ResultPanel result={result} onClose={() => setResult(null)} />}
     >
@@ -816,7 +765,7 @@ function App() {
         {activeNav === 'methods' && <MethodsPage client={client} permissions={sessionUser?.permissions ?? []} refreshVersion={workspaceRefreshVersion} />}
         {activeNav === 'receive' && <RawRecordsPage title="接口接收记录" origin="receive" client={client} onFetchSource={fetchSource} />}
         {activeNav === 'pull_records' && <RawRecordsPage title="数据拉取记录" origin="pull" client={client} onFetchSource={fetchSource} />}
-        {activeNav === 'backfill' && <BojunBackfillPage loading={loading || refreshing} onPreview={previewBojunOrderBackfill} onConfirm={confirmBojunOrderBackfill} />}
+        {activeNav === 'backfill' && <BojunBackfillPage client={client} loading={loading || refreshing} onCompletedRefresh={() => refreshWorkspace(false)} />}
         {activeNav === 'youzan_distribution' && <YouzanDistributionPage task={legacyTasks.find((item) => item.code === 'youzan_distribution_order_fetch')} loading={loading || refreshing} onPreview={previewYouzanDistributionBackfill} onConfirm={confirmYouzanDistributionBackfill} onRun={runLegacyTask} />}
         {activeNav === 'rules' && <RulesPage client={client} rules={transformRules} sources={sources} onRulesChange={setTransformRules} refreshVersion={workspaceRefreshVersion} />}
         {activeNav === 'processed' && <ProcessedRecordsPage client={client} />}
@@ -996,112 +945,6 @@ function ModuleHeader({ activeNav, compact, loading, sessionUser, onOpenNavigati
         <span className={loading ? 'workspace-health is-loading' : 'workspace-health'}><i aria-hidden="true" />{loading ? '数据加载中' : '系统正常'}</span>
       </div>}
     />
-  )
-}
-
-function BojunBackfillResultView({ title, result }: { title: string; result: BojunOrderBackfillResult }) {
-  const samples = [...(result.samples ?? []), ...(result.failed_samples ?? [])].slice(0, 12)
-  return (
-    <section className="backfill-result">
-      <div className="backfill-result-title">
-        <strong>{title}</strong>
-        <span>{result.start_time} ~ {result.end_time} / 拉取 {result.fetch_pages} 页</span>
-      </div>
-      <div className="overview-grid compact">
-        <Metric label="伯俊返回" value={result.total_count} />
-        <Metric label="可写入" value={result.writable_count} />
-        <Metric label="已存在" value={result.existing_count} />
-        <Metric label="已写入" value={result.retail_count} />
-        <Metric label="失败" value={result.failed_count} />
-      </div>
-      {samples.length === 0 ? <EmptyState text="暂无样例数据。" /> : (
-        <div className="data-table-wrap">
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>状态</th>
-                <th>订单号</th>
-                <th>门店</th>
-                <th>类型</th>
-                <th>数量</th>
-                <th>金额</th>
-                <th>说明</th>
-              </tr>
-            </thead>
-            <tbody>
-              {samples.map((sample, index) => (
-                <tr key={`${sample.docno || 'empty'}-${sample.status}-${index}`}>
-                  <td>{bojunBackfillStatusLabel(sample.status)}</td>
-                  <td>{sample.docno || '-'}</td>
-                  <td>{sample.c_store_name || sample.c_store_code || '-'}</td>
-                  <td>{sample.order_type_name || sample.order_type_code || '-'}</td>
-                  <td>{sample.tot_qty ?? '-'}</td>
-                  <td>{sample.tot_amt_actual ?? '-'}</td>
-                  <td>{sample.reason || '-'}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
-      )}
-    </section>
-  )
-}
-
-function BojunBackfillPage({ loading, onPreview, onConfirm }: {
-  loading: boolean
-  onPreview: (payload: { start_time: string; end_time: string }) => Promise<BojunOrderBackfillResult | null>
-  onConfirm: (payload: { start_time: string; end_time: string }) => Promise<BojunOrderBackfillResult | null>
-}) {
-  const previewVersionRef = useRef(0)
-  const [payload, setPayload] = useState<{ start_time: string; end_time: string } | null>(null)
-  const [preview, setPreview] = useState<BojunOrderBackfillResult | null>(null)
-  const [confirmed, setConfirmed] = useState<BojunOrderBackfillResult | null>(null)
-  const [confirmingWrite, setConfirmingWrite] = useState(false)
-  const [writing, setWriting] = useState(false)
-  function invalidatePreview() {
-    previewVersionRef.current += 1
-    setPayload(null)
-    setPreview(null)
-    setConfirmed(null)
-    setConfirmingWrite(false)
-  }
-  async function submit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault()
-    const form = new FormData(event.currentTarget)
-    const nextPayload = { start_time: formValue(form, 'start_time'), end_time: formValue(form, 'end_time') }
-    const requestVersion = previewVersionRef.current + 1
-    invalidatePreview()
-    const result = await onPreview(nextPayload)
-    if (previewVersionRef.current !== requestVersion) return
-    setPayload(result ? nextPayload : null)
-    setPreview(result)
-  }
-  async function confirmWrite() {
-    if (!payload || !preview || writing) return
-    setWriting(true)
-    try {
-      setConfirmed(await onConfirm(payload))
-      setConfirmingWrite(false)
-    } finally {
-      setWriting(false)
-    }
-  }
-  return (
-    <div className="view-stack">
-      <Panel title="伯俊订单补拉" icon={<Download />} meta="预览不写库，确认后按 docno 判重">
-        <form className="bojun-backfill-form" onSubmit={submit}>
-          <Field label="开始时间" name="start_time" type="datetime-local" defaultValue={datetimeLocalMinutesAgo(60)} onChange={invalidatePreview} required />
-          <Field label="结束时间" name="end_time" type="datetime-local" defaultValue={datetimeLocalMinutesAgo(0)} onChange={invalidatePreview} required />
-          <button className="primary" type="submit" disabled={loading}>预览补拉</button>
-          <button type="button" disabled={loading || writing || !preview || preview.writable_count === 0} onClick={() => setConfirmingWrite(true)}>确认写入</button>
-        </form>
-        <aside className="backfill-warning" aria-label="写入提示"><AlertTriangle aria-hidden="true" /><strong>写入前请确认</strong><span>预览会真实请求伯俊接口，但不会写入数据库。</span><span>确认后将重新拉取相同时间范围。</span><span>已有 docno 不覆盖，请核对可写入数量。</span></aside>
-        {preview && <BojunBackfillResultView title="预览结果" result={preview} />}
-        {confirmed && <BojunBackfillResultView title="写入结果" result={confirmed} />}
-      </Panel>
-      {confirmingWrite && preview && <Dialog open title="确认写入伯俊订单" closeDisabled={loading || writing} onClose={() => { if (!loading && !writing) setConfirmingWrite(false) }} footer={<><button type="button" disabled={loading || writing} onClick={() => setConfirmingWrite(false)}>取消</button><button className="primary" type="button" disabled={loading || writing} onClick={() => void confirmWrite()}>{writing ? '写入中…' : '确认写入'}</button></>}><p>确认写入 {preview.writable_count} 条伯俊订单？系统会按 docno 判重，已有订单不会覆盖。</p></Dialog>}
-    </div>
   )
 }
 
@@ -1455,30 +1298,12 @@ function jsonText(value: unknown) {
   return JSON.stringify(value ?? {}, null, 2)
 }
 
-function bojunBackfillStatusLabel(value: string) {
-  const labels: Record<string, string> = {
-    pending: '待写入',
-    created: '已写入',
-    exists: '已存在',
-    invalid: '无效',
-    failed: '失败',
-    push_failed: '推送失败',
-  }
-  return labels[value] ?? (value || '-')
-}
-
 function monitoringDayStartTime() {
   const now = new Date()
   const year = now.getFullYear()
   const month = String(now.getMonth() + 1).padStart(2, '0')
   const day = String(now.getDate()).padStart(2, '0')
   return `${year}-${month}-${day}T00:00`
-}
-
-function datetimeLocalMinutesAgo(minutes: number) {
-  const date = new Date(Date.now() - minutes * 60 * 1000)
-  const pad = (value: number) => String(value).padStart(2, '0')
-  return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}`
 }
 
 function youzanDistributionBackfillStatusLabel(value: string) {

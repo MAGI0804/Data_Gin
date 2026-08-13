@@ -708,13 +708,6 @@ button:focus-visible {
   justify-content: flex-start;
 }
 
-.bojun-backfill-form {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto auto;
-  gap: 12px;
-  align-items: end;
-}
-
 .youzan-backfill-form {
   display: grid;
   grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto auto;

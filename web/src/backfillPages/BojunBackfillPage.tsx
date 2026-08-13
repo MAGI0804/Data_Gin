@@ -1,0 +1,139 @@
+import { AlertTriangle } from 'lucide-react'
+import { useRef, useState, type FormEvent } from 'react'
+import type { ClientResponse } from '../api/client'
+import { DataTable, Dialog, FeedbackState, MetricStrip, PageCanvas, PageHeader, Section, StatusTag } from '../ui'
+import styles from './BojunBackfillPage.module.css'
+
+type BackfillClient = (path: string, options: { method: 'POST'; body: unknown; showResult?: boolean }) => Promise<ClientResponse>
+
+type BojunOrderBackfillSample = {
+  docno: string
+  otherdocno: string
+  c_store_code: string
+  c_store_name: string
+  order_type_code: string
+  order_type_name: string
+  billdate: number
+  tot_qty: number
+  tot_amt_actual: number
+  status: string
+  reason: string
+}
+
+type BojunOrderBackfillResult = {
+  start_time: string
+  end_time: string
+  page_size: number
+  max_pages: number
+  fetch_pages: number
+  total_count: number
+  preview_count: number
+  writable_count: number
+  existing_count: number
+  saved_count: number
+  retail_count: number
+  skipped_count: number
+  failed_count: number
+  samples: BojunOrderBackfillSample[]
+  failed_samples: BojunOrderBackfillSample[]
+}
+
+export function BojunBackfillPage({ client, loading, onCompletedRefresh }: { client: BackfillClient; loading: boolean; onCompletedRefresh: () => Promise<unknown> }) {
+  const previewVersionRef = useRef(0)
+  const [payload, setPayload] = useState<{ start_time: string; end_time: string } | null>(null)
+  const [preview, setPreview] = useState<BojunOrderBackfillResult | null>(null)
+  const [confirmed, setConfirmed] = useState<BojunOrderBackfillResult | null>(null)
+  const [confirmingWrite, setConfirmingWrite] = useState(false)
+  const [writing, setWriting] = useState(false)
+  const [error, setError] = useState('')
+
+  function invalidatePreview() {
+    previewVersionRef.current += 1
+    setPayload(null)
+    setPreview(null)
+    setConfirmed(null)
+    setConfirmingWrite(false)
+    setError('')
+  }
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault()
+    const form = new FormData(event.currentTarget)
+    const nextPayload = { start_time: formValue(form, 'start_time'), end_time: formValue(form, 'end_time') }
+    const requestVersion = previewVersionRef.current + 1
+    invalidatePreview()
+    try {
+      const response = await client('/v1/bojun-order-backfill/preview', { method: 'POST', body: nextPayload, showResult: false })
+      if (previewVersionRef.current !== requestVersion) return
+      const result = response.ok ? readResult(response) : null
+      if (!result) {
+        setError(response.error?.message || '补拉预览失败，请检查时间范围后重试。')
+        return
+      }
+      setPayload(nextPayload)
+      setPreview(result)
+    } catch {
+      if (previewVersionRef.current === requestVersion) setError('补拉预览失败，请稍后重试。')
+    }
+  }
+
+  async function confirmWrite() {
+    if (!payload || !preview || writing) return
+    setWriting(true)
+    setError('')
+    try {
+      const response = await client('/v1/bojun-order-backfill/confirm', { method: 'POST', body: payload, showResult: false })
+      const result = response.ok ? readResult(response) : null
+      if (!result) {
+        setError(response.error?.message || '补拉写入失败，请重新预览后再试。')
+        return
+      }
+      setConfirmed(result)
+      setConfirmingWrite(false)
+      await onCompletedRefresh()
+    } catch {
+      setError('补拉写入失败，请稍后重试。')
+    } finally {
+      setWriting(false)
+    }
+  }
+
+  return <PageCanvas>
+    <PageHeader eyebrow="DATA BACKFILL" title="伯俊订单补拉" description="先真实拉取并预览，再按相同时间范围确认写入；已有 docno 不覆盖。" />
+    <Section title="补拉范围" description="预览阶段不会写入数据库。" actions={<StatusTag tone={preview ? 'success' : 'neutral'}>{preview ? '预览已就绪' : '等待预览'}</StatusTag>}>
+      <form className={styles.form} onSubmit={submit}>
+        <Field label="开始时间" name="start_time" defaultValue={datetimeLocalMinutesAgo(60)} onChange={invalidatePreview} />
+        <Field label="结束时间" name="end_time" defaultValue={datetimeLocalMinutesAgo(0)} onChange={invalidatePreview} />
+        <div className={styles.actions}><button className={styles.primary} type="submit" disabled={loading || writing}>{loading ? '预览中…' : '预览补拉'}</button><button type="button" disabled={loading || writing || !preview || preview.writable_count === 0} onClick={() => setConfirmingWrite(true)}>确认写入</button></div>
+      </form>
+      <div className={styles.warning}><AlertTriangle aria-hidden="true" /><span><strong>写入前请确认</strong>确认时会重新拉取相同时间范围，请以可写入数量为核对依据。</span></div>
+    </Section>
+    {error ? <FeedbackState kind="error" title="伯俊补拉未完成" description={error} /> : null}
+    {preview ? <BackfillResult title="预览结果" result={preview} /> : <FeedbackState kind="empty" title="等待补拉预览" description="选择时间范围并预览后，可在这里核对订单样例与写入数量。" />}
+    {confirmed ? <BackfillResult title="本次写入结果" result={confirmed} /> : null}
+    <Dialog open={confirmingWrite && Boolean(preview)} title="确认写入伯俊订单" role="alertdialog" closeDisabled={loading || writing} onClose={() => { if (!loading && !writing) setConfirmingWrite(false) }} footer={<><button type="button" disabled={loading || writing} onClick={() => setConfirmingWrite(false)}>取消</button><button className={styles.primary} type="button" disabled={loading || writing} onClick={() => void confirmWrite()}>{writing ? '写入中…' : '确认写入'}</button></>}><p>确认写入 {preview?.writable_count ?? 0} 条伯俊订单？系统会按 docno 判重，已有订单不会覆盖。</p></Dialog>
+  </PageCanvas>
+}
+
+function BackfillResult({ title, result }: { title: string; result: BojunOrderBackfillResult }) {
+  const samples = [...(result.samples ?? []), ...(result.failed_samples ?? [])].slice(0, 12)
+  return <Section title={title} description={`${result.start_time} ~ ${result.end_time} / 拉取 ${result.fetch_pages} 页`} flush>
+    <MetricStrip label={`${title}统计`} items={[{ key: 'total', label: '伯俊返回', value: result.total_count }, { key: 'writable', label: '可写入', value: result.writable_count }, { key: 'existing', label: '已存在', value: result.existing_count }, { key: 'written', label: '已写入', value: result.retail_count }, { key: 'failed', label: '失败', value: result.failed_count }]} />
+    {samples.length === 0 ? <FeedbackState kind="empty" title="暂无样例数据" /> : <DataTable minWidth={860} scrollLabel={`${title}订单样例`}><thead><tr><th>状态</th><th>订单号</th><th>门店</th><th>类型</th><th>数量</th><th>金额</th><th>说明</th></tr></thead><tbody>{samples.map((sample, index) => <tr key={`${sample.docno || 'empty'}-${sample.status}-${index}`}><td><StatusTag tone={sampleTone(sample.status)}>{statusLabel(sample.status)}</StatusTag></td><td>{sample.docno || '-'}</td><td>{sample.c_store_name || sample.c_store_code || '-'}</td><td>{sample.order_type_name || sample.order_type_code || '-'}</td><td>{sample.tot_qty ?? '-'}</td><td>{sample.tot_amt_actual ?? '-'}</td><td>{sample.reason || '-'}</td></tr>)}</tbody></DataTable>}
+  </Section>
+}
+
+function Field({ label, name, defaultValue, onChange }: { label: string; name: string; defaultValue: string; onChange: () => void }) {
+  return <label>{label}<input name={name} type="datetime-local" defaultValue={defaultValue} onChange={onChange} required /></label>
+}
+
+function readResult(response: ClientResponse) {
+  if (!response.data || typeof response.data !== 'object') return null
+  const data = (response.data as { data?: Record<string, unknown> }).data
+  return data?.result && typeof data.result === 'object' ? data.result as BojunOrderBackfillResult : null
+}
+
+function formValue(form: FormData, key: string) { const value = form.get(key); return typeof value === 'string' ? value : '' }
+function datetimeLocalMinutesAgo(minutes: number) { const date = new Date(Date.now() - minutes * 60 * 1000); const pad = (value: number) => String(value).padStart(2, '0'); return `${date.getFullYear()}-${pad(date.getMonth() + 1)}-${pad(date.getDate())}T${pad(date.getHours())}:${pad(date.getMinutes())}` }
+function statusLabel(value: string) { return ({ pending: '待写入', created: '已写入', exists: '已存在', invalid: '无效', failed: '失败', push_failed: '推送失败' } as Record<string, string>)[value] ?? (value || '-') }
+function sampleTone(value: string) { return value === 'created' ? 'success' as const : /failed|invalid/.test(value) ? 'danger' as const : value === 'pending' ? 'warning' as const : 'neutral' as const }
