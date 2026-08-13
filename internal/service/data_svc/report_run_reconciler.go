@@ -29,14 +29,14 @@ type reportReconciliationStore interface {
 	EnsureRunQueued(context.Context, uint, time.Time) error
 }
 
-type reportReceiptReader interface {
-	Read(context.Context, reportrepo.RuntimeContract, string) (reportoracle.RunReceipt, error)
+type reportResultEvidenceReader interface {
+	CountCommittedRows(context.Context, reportrepo.RuntimeContract, string) (int64, error)
 }
 
 type ReportRunReconciler struct {
 	store        reportReconciliationStore
 	credential   reportDatasourceCredentialDecryptor
-	receipts     reportReceiptReader
+	results      reportResultEvidenceReader
 	workerID     string
 	leaseTTL     time.Duration
 	pollInterval time.Duration
@@ -47,7 +47,7 @@ type ReportRunReconciler struct {
 }
 
 func NewReportRunReconciler() *ReportRunReconciler {
-	return NewReportRunReconcilerWithDependencies(reportrepo.New(), reportsecretCredentialDecryptor{}, oracleReportReceiptReader{})
+	return NewReportRunReconcilerWithDependencies(reportrepo.New(), reportsecretCredentialDecryptor{}, oracleReportResultEvidenceReader{})
 }
 
 type reportsecretCredentialDecryptor struct{}
@@ -56,12 +56,12 @@ func (reportsecretCredentialDecryptor) Decrypt(version, ciphertext string) (stri
 	return (reportsecret.EnvironmentKeyring{}).Decrypt(version, ciphertext)
 }
 
-func NewReportRunReconcilerWithDependencies(store reportReconciliationStore, credential reportDatasourceCredentialDecryptor, receipts reportReceiptReader) *ReportRunReconciler {
-	if store == nil || credential == nil || receipts == nil {
+func NewReportRunReconcilerWithDependencies(store reportReconciliationStore, credential reportDatasourceCredentialDecryptor, results reportResultEvidenceReader) *ReportRunReconciler {
+	if store == nil || credential == nil || results == nil {
 		panic("report run reconciliation: dependencies are required")
 	}
 	return &ReportRunReconciler{
-		store: store, credential: credential, receipts: receipts, workerID: "report-reconcile-" + uuid.NewString(),
+		store: store, credential: credential, results: results, workerID: "report-reconcile-" + uuid.NewString(),
 		leaseTTL: defaultReportRunLeaseTTL, pollInterval: defaultReportReconcilePollInterval,
 		batchSize: defaultReportReconcileBatchSize, stateTimeout: defaultReportRunStateTimeout,
 		retention: defaultReportResultRetention, now: func() time.Time { return time.Now().UTC() },
@@ -138,42 +138,53 @@ func (reconciler *ReportRunReconciler) reconcileOne(ctx context.Context, runID u
 	if err != nil {
 		return reconciler.pending(ctx, runID, leaseToken, "RECONCILE_CREDENTIAL_UNAVAILABLE", err)
 	}
-	receipt, err := reconciler.receipts.Read(ctx, *runtime, password)
-	if errors.Is(err, reportoracle.ErrRunReceiptNotFound) {
-		return reconciler.pending(ctx, runID, leaseToken, "ORACLE_RECEIPT_NOT_FOUND", err)
-	}
+	rowCount, err := reconciler.results.CountCommittedRows(ctx, *runtime, password)
 	if err != nil {
-		return reconciler.pending(ctx, runID, leaseToken, "ORACLE_RECEIPT_UNAVAILABLE", err)
+		return reconciler.pending(ctx, runID, leaseToken, "ORACLE_RESULT_UNAVAILABLE", err)
 	}
-	if receipt.RunID != runtime.Run.RunUUID || receipt.ReportCode != runtime.Definition.Code || receipt.ContractHash != runtime.Run.ContractHash {
-		return reconciler.pending(ctx, runID, leaseToken, "ORACLE_RECEIPT_MISMATCH", errors.New("receipt contract mismatch"))
+	// A positive row count proves that Oracle committed the run-scoped result.
+	// Zero rows cannot distinguish a valid empty report from a transaction that
+	// never committed, so keep the run in UNKNOWN instead of risking a replay.
+	if rowCount == 0 {
+		return reconciler.pending(ctx, runID, leaseToken, "ORACLE_RESULT_NOT_PROVEN", errors.New("committed result is not observable"))
 	}
 	finishedAt := reconciler.now().UTC()
 	stateCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), reconciler.stateTimeout)
 	defer cancel()
-	return reconciler.store.MarkReconciliationSucceeded(stateCtx, runID, leaseToken, receipt.RowCount, finishedAt, finishedAt.Add(reconciler.retention))
+	return reconciler.store.MarkReconciliationSucceeded(stateCtx, runID, leaseToken, rowCount, finishedAt, finishedAt.Add(reconciler.retention))
 }
 
 func (reconciler *ReportRunReconciler) pending(ctx context.Context, runID uint, leaseToken, code string, cause error) error {
 	stateCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), reconciler.stateTimeout)
 	defer cancel()
-	if err := reconciler.store.MarkReconciliationPending(stateCtx, runID, leaseToken, code, "运行结果等待Oracle回执确认", reconciler.now().UTC()); err != nil {
+	if err := reconciler.store.MarkReconciliationPending(stateCtx, runID, leaseToken, code, "运行结果等待Oracle结果表确认", reconciler.now().UTC()); err != nil {
 		return fmt.Errorf("report run reconciliation: persist pending state")
 	}
 	return nil
 }
 
-type oracleReportReceiptReader struct{}
+type oracleReportResultEvidenceReader struct{}
 
-func (oracleReportReceiptReader) Read(ctx context.Context, runtime reportrepo.RuntimeContract, password string) (reportoracle.RunReceipt, error) {
+func (oracleReportResultEvidenceReader) CountCommittedRows(ctx context.Context, runtime reportrepo.RuntimeContract, password string) (int64, error) {
 	adapter, err := reportoracle.Open(ctx, oracleConfigFromDatasource(runtime.Datasource, password))
 	if err != nil {
-		return reportoracle.RunReceipt{}, err
+		return 0, err
 	}
 	defer func() { _ = adapter.Close() }()
-	plan, err := reportoracle.BuildRunReceiptPlan(runtime.Version.ResultTableOwner)
-	if err != nil {
-		return reportoracle.RunReceipt{}, err
+	configuredColumns := make([]string, 0, len(runtime.Columns))
+	for _, column := range runtime.Columns {
+		configuredColumns = append(configuredColumns, column.DatabaseColumn)
 	}
-	return adapter.ReadRunReceipt(ctx, plan, runtime.Run.RunUUID)
+	contract, err := adapter.InspectResultSnapshotContract(ctx, reportoracle.ResultSnapshotRef{
+		Table:       reportoracle.ResultTableRef{Owner: runtime.Version.ResultTableOwner, Name: runtime.Version.ResultTableName},
+		RunIDColumn: runtime.Version.ResultRunIDColumn, RowIDColumn: runtime.Version.ResultRowIDColumn, Columns: configuredColumns,
+	})
+	if err != nil {
+		return 0, err
+	}
+	plan, err := reportoracle.BuildResultCountPlan(contract)
+	if err != nil {
+		return 0, err
+	}
+	return adapter.CountResultRows(ctx, plan, runtime.Run.RunUUID)
 }

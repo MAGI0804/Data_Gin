@@ -99,7 +99,7 @@ func NewReportRunProcessorWithDependencies(
 		resultRetention: defaultReportResultRetention, now: func() time.Time { return time.Now().UTC() },
 	}
 	if reconciliationStore, ok := store.(reportReconciliationStore); ok {
-		reconciler := NewReportRunReconcilerWithDependencies(reconciliationStore, credential, oracleReportReceiptReader{})
+		reconciler := NewReportRunReconcilerWithDependencies(reconciliationStore, credential, oracleReportResultEvidenceReader{})
 		processor.reconcileOne = reconciler.ReconcileOne
 	}
 	return processor
@@ -408,18 +408,6 @@ func (oracleReportProcedureExecutor) Execute(ctx context.Context, request report
 	}
 	rowCount, err = adapter.CountResultRowsTx(ctx, tx, countPlan, request.Runtime.Run.RunUUID)
 	if err != nil {
-		_ = tx.Rollback()
-		return 0, err
-	}
-	receiptPlan, err := reportoracle.BuildRunReceiptPlan(request.Runtime.Version.ResultTableOwner)
-	if err != nil {
-		_ = tx.Rollback()
-		return 0, err
-	}
-	if err := adapter.WriteRunReceipt(ctx, tx, receiptPlan, reportoracle.RunReceipt{
-		RunID: request.Runtime.Run.RunUUID, ReportCode: request.Runtime.Definition.Code,
-		ContractHash: request.Runtime.Run.ContractHash, RowCount: rowCount, CompletedAt: time.Now().UTC(),
-	}); err != nil {
 		_ = tx.Rollback()
 		return 0, err
 	}
