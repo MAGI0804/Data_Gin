@@ -332,13 +332,14 @@ export function parseReportAuditPage(payload: unknown): ReportAuditPage {
       : value.actorType === 'USER' || value.actorType === undefined
         ? 'USER'
         : ''
-    const actorUserId = actorType === 'SYSTEM' ? nonNegativeInteger(value.actorUserId) : positiveInteger(value.actorUserId)
+    const parsedActorUserId = actorType === 'SYSTEM' ? nonNegativeInteger(value.actorUserId) : positiveInteger(value.actorUserId)
     const action = publicString(value.action, 64)
     const targetType = publicString(value.targetType, 32)
     const targetId = positiveInteger(value.targetId)
     const requestId = publicString(value.requestId, 128)
     const createdAt = publicDate(value.createdAt)
-    if (!id || !actorType || (actorType === 'USER' ? !actorUserId : actorUserId !== 0) || !action || !targetType || !targetId || !requestId || !createdAt) throw new Error('invalid report audit')
+    if (!id || !actorType || parsedActorUserId === null || (actorType === 'USER' ? parsedActorUserId < 1 : parsedActorUserId !== 0) || !action || !targetType || !targetId || !requestId || !createdAt) throw new Error('invalid report audit')
+    const actorUserId = parsedActorUserId
     return { id, actorType, actorUserId, action, targetType, targetId, requestId, detail: isRecord(value.detail) ? value.detail : {}, createdAt }
   })
   for (let index = 1; index < items.length; index += 1) {
