@@ -2,6 +2,7 @@ package data_svc
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -94,6 +95,28 @@ func TestMallWeatherSchedulePlannerCreatesBoundedRepairOutboxes(t *testing.T) {
 	}
 }
 
+func TestMallWeatherSchedulePlannerTimesOutRepairCandidateQuery(t *testing.T) {
+	store := &fakeMallWeatherScheduleStore{
+		repairList: func(ctx context.Context, _ uint, _ int) ([]model.MallWeatherFetchRun, error) {
+			if _, ok := ctx.Deadline(); !ok {
+				t.Fatal("repair candidate query context has no deadline")
+			}
+			<-ctx.Done()
+			return nil, ctx.Err()
+		},
+	}
+	planner, err := newMallWeatherSchedulePlanner(store, time.Now, time.UTC)
+	if err != nil {
+		t.Fatalf("newMallWeatherSchedulePlanner() error=%v", err)
+	}
+	planner.repairQueryTimeout = 10 * time.Millisecond
+
+	err = planner.Plan(t.Context(), job.MallWeatherSchedulePayload{TaskType: job.TypeMallWeatherRepair})
+	if !errors.Is(err, context.DeadlineExceeded) {
+		t.Fatalf("Plan(repair) error=%v, want context deadline exceeded", err)
+	}
+}
+
 func TestNextWeatherRepairIdentityValidatesHistory(t *testing.T) {
 	tests := []struct {
 		name         string
@@ -136,6 +159,7 @@ func TestDeterministicRepairDelaySpreadsByRunID(t *testing.T) {
 type fakeMallWeatherScheduleStore struct {
 	malls            []model.Mall
 	repairCandidates []model.MallWeatherFetchRun
+	repairList       func(context.Context, uint, int) ([]model.MallWeatherFetchRun, error)
 	rows             []model.AsyncJobOutbox
 	reconciledAt     time.Time
 
@@ -145,7 +169,10 @@ type fakeMallWeatherScheduleStore struct {
 	createErr     error
 }
 
-func (store *fakeMallWeatherScheduleStore) ListRepairCandidates(_ context.Context, afterID uint, limit int) ([]model.MallWeatherFetchRun, error) {
+func (store *fakeMallWeatherScheduleStore) ListRepairCandidates(ctx context.Context, afterID uint, limit int) ([]model.MallWeatherFetchRun, error) {
+	if store.repairList != nil {
+		return store.repairList(ctx, afterID, limit)
+	}
 	if store.repairListErr != nil {
 		return nil, store.repairListErr
 	}

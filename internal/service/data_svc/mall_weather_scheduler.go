@@ -16,7 +16,10 @@ import (
 	"gin-biz-web-api/pkg/database"
 )
 
-const mallWeatherSchedulePageSize = 200
+const (
+	mallWeatherSchedulePageSize = 200
+	defaultRepairQueryTimeout   = 30 * time.Second
+)
 
 type mallWeatherScheduleStore interface {
 	ListEnabledMalls(ctx context.Context, afterID uint, limit int) ([]model.Mall, error)
@@ -48,8 +51,9 @@ type MallWeatherSchedulePlanner struct {
 	now      func() time.Time
 	location *time.Location
 
-	repairMaxRounds int
-	repairSpread    time.Duration
+	repairMaxRounds    int
+	repairSpread       time.Duration
+	repairQueryTimeout time.Duration
 }
 
 func NewMallWeatherSchedulePlanner() (*MallWeatherSchedulePlanner, error) {
@@ -66,7 +70,9 @@ func NewMallWeatherSchedulePlanner() (*MallWeatherSchedulePlanner, error) {
 	}
 	planner.repairMaxRounds = config.GetInt("cfg.mall_weather.repair_max_rounds")
 	planner.repairSpread = time.Duration(config.GetInt("cfg.mall_weather.repair_spread_seconds")) * time.Second
-	if planner.repairMaxRounds < 1 || planner.repairMaxRounds > 10 || planner.repairSpread < 0 || planner.repairSpread > time.Hour {
+	planner.repairQueryTimeout = time.Duration(config.GetInt("cfg.mall_weather.repair_query_timeout_seconds")) * time.Second
+	if planner.repairMaxRounds < 1 || planner.repairMaxRounds > 10 || planner.repairSpread < 0 || planner.repairSpread > time.Hour ||
+		planner.repairQueryTimeout < time.Second || planner.repairQueryTimeout > 5*time.Minute {
 		return nil, fmt.Errorf("mall weather scheduler: invalid repair configuration")
 	}
 	return planner, nil
@@ -78,7 +84,7 @@ func newMallWeatherSchedulePlanner(store mallWeatherScheduleStore, now func() ti
 	}
 	return &MallWeatherSchedulePlanner{
 		store: store, now: now, location: location,
-		repairMaxRounds: 3, repairSpread: 15 * time.Minute,
+		repairMaxRounds: 3, repairSpread: 15 * time.Minute, repairQueryTimeout: defaultRepairQueryTimeout,
 	}, nil
 }
 
@@ -130,7 +136,7 @@ func (planner *MallWeatherSchedulePlanner) Plan(ctx context.Context, payload job
 }
 
 func (planner *MallWeatherSchedulePlanner) planRepairs(ctx context.Context, scheduledAt time.Time) error {
-	if planner.repairMaxRounds < 1 || planner.repairSpread < 0 || scheduledAt.IsZero() {
+	if planner.repairMaxRounds < 1 || planner.repairSpread < 0 || planner.repairQueryTimeout <= 0 || scheduledAt.IsZero() {
 		return fmt.Errorf("mall weather scheduler: invalid repair plan")
 	}
 	if _, err := planner.store.ReconcileLatestFreshness(ctx, scheduledAt); err != nil {
@@ -138,7 +144,9 @@ func (planner *MallWeatherSchedulePlanner) planRepairs(ctx context.Context, sche
 	}
 	var afterID uint
 	for {
-		candidates, err := planner.store.ListRepairCandidates(ctx, afterID, mallWeatherSchedulePageSize)
+		queryCtx, cancel := context.WithTimeout(ctx, planner.repairQueryTimeout)
+		candidates, err := planner.store.ListRepairCandidates(queryCtx, afterID, mallWeatherSchedulePageSize)
+		cancel()
 		if err != nil {
 			return fmt.Errorf("mall weather scheduler: list repair candidates: %w", err)
 		}

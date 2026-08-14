@@ -113,6 +113,11 @@ func TestValidateMallWeatherConfig(t *testing.T) {
 			wantError: "repair spread",
 		},
 		{
+			name:      "repair query timeout is bounded",
+			yaml:      "MallWeather:\n  Enabled: true\n  RepairQueryTimeoutSeconds: 301\nCaiyun:\n  QPS: 2\n",
+			wantError: "repair query timeout",
+		},
+		{
 			name:      "enabled requires weather queue consumer",
 			yaml:      "MallWeather:\n  Enabled: true\nCaiyun:\n  QPS: 2\nQueueJob:\n  ConfigOpt:\n    Queues:\n      default: 1\n",
 			wantError: "weather queue",
