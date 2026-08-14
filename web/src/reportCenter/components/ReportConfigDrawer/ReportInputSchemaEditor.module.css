@@ -5,15 +5,18 @@
 .tableHeader button { display: inline-flex; align-items: center; gap: var(--space-2); white-space: nowrap; }
 .tableHeader svg, .delete svg { width: 16px; height: 16px; }
 .rows { display: grid; border-top: 1px solid var(--color-border); }
-.row { display: grid; grid-template-columns: repeat(4, minmax(130px, 1fr)) 38px; gap: var(--space-2); align-items: end; border-bottom: 1px solid var(--color-border); padding-block: var(--space-3); }
+.row { display: grid; grid-template-columns: repeat(4, minmax(130px, 1fr)); gap: var(--space-2); align-items: end; border-bottom: 1px solid var(--color-border); padding-block: var(--space-3); }
 .field { display: grid; gap: var(--space-1); min-width: 0; color: var(--color-text-secondary); font-size: 12px; }
 .field input, .field select { width: 100%; min-width: 0; min-height: var(--control-height); border: 1px solid var(--color-border-strong); border-radius: var(--radius-control); background: var(--color-canvas); color: var(--color-text); padding: var(--space-2) var(--space-3); }
 .field input[aria-invalid="true"] { border-color: var(--color-danger); background: var(--color-danger-soft); }
+.formatField { grid-column: span 2; border-inline-start: 2px solid var(--color-brand); background: var(--color-brand-soft); padding: var(--space-2) var(--space-3); }
+.formatField select { border-color: var(--color-brand); font-family: var(--font-mono); font-weight: 650; }
+.formatField small { color: var(--color-text-secondary); font-family: var(--font-mono); }
 .mono { font-family: var(--font-mono); }
 .flags { display: flex; align-items: center; gap: var(--space-4); min-height: var(--control-height); }
 .flags label { display: inline-flex; align-items: center; gap: var(--space-1); color: var(--color-text-secondary); font-size: 12px; }
 .flags input { width: 16px; height: 16px; accent-color: var(--color-brand); }
-.delete { display: grid; width: 38px; height: 38px; place-items: center; padding: 0; color: var(--color-danger); }
+.delete { display: grid; width: 38px; height: 38px; place-items: center; justify-self: end; padding: 0; color: var(--color-danger); }
 .empty { margin: 0; padding: var(--space-6) 0; color: var(--color-text-secondary); text-align: center; }
-@media (max-width: 1023px) { .row { grid-template-columns: repeat(2, minmax(160px, 1fr)) 38px; } }
-@media (max-width: 767px) { .tableHeader { align-items: stretch; flex-direction: column; } .tableHeader button { align-self: start; } .row { grid-template-columns: minmax(0, 1fr); } .delete { justify-self: end; } }
+@media (max-width: 1023px) { .row { grid-template-columns: repeat(2, minmax(160px, 1fr)); } }
+@media (max-width: 767px) { .tableHeader { align-items: stretch; flex-direction: column; } .tableHeader button { align-self: start; } .row { grid-template-columns: minmax(0, 1fr); } .formatField { grid-column: auto; } .delete { justify-self: end; } }

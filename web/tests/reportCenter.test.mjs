@@ -3,7 +3,7 @@ import { readdirSync, readFileSync } from 'node:fs'
 import test from 'node:test'
 import ts from 'typescript'
 
-import { createReportRun, deleteReportDraft, getReportAudits, getReportProcedureSignature, getReportProcedures, getReportResultTableSchema, getReportResultTables, parsePublication, parseReportAuditPage, parseReportCatalogPage, parseReportDatasource, parseReportDatasources, parseReportDatasourceTest, parseReportDraft, parseReportExport, parseReportExportPage, parseReportProcedurePage, parseReportProcedureSignature, parseReportResultPage, parseReportResultTablePage, parseReportResultTableSchema, parseReportRun, parseReportRunContract, parseReportVersionDiff, parseReportVersionPage, saveReportDraft, testReportDatasourceConnection } from '../.test-dist/reportCenter/api.js'
+import { createReportRun, deleteReportDraft, getReportAudits, getReportProcedureSignature, getReportProcedures, getReportResultTableSchema, getReportResultTables, parsePublication, parseReportAuditPage, parseReportCatalogPage, parseReportDatasource, parseReportDatasources, parseReportDatasourceTest, parseReportDraft, parseReportExport, parseReportExportPage, parseReportProcedurePage, parseReportProcedureSignature, parseReportResultPage, parseReportResultTablePage, parseReportResultTableSchema, parseReportRun, parseReportRunContract, parseReportVersionDiff, parseReportVersionPage, saveAndPublishReportDraft, saveReportDraft, testReportDatasourceConnection } from '../.test-dist/reportCenter/api.js'
 import { applyExcelMapping, buildReportConditions, excelMappingFromColumns, initialReportConditionValues, parseExcelMappingDocument, parseReportInputSchemaDocument, parseReportInputSchemaText, reconcileReportColumnsWithResultSchema, renameExcelMappingField, reportColumnsFromResultSchema } from '../.test-dist/reportCenter/refCursorConfig.js'
 import { reportParameterControls, reportParameterFlagDisabled, updateReportParameterFlag, updateReportParameterLogicalType } from '../.test-dist/reportCenter/parameterConfig.js'
 import { buildNewReportRunState, canStartNewReportRun, initialReportParameterValues } from '../.test-dist/reportCenter/queryParameters.js'
@@ -48,6 +48,21 @@ test('drawer keeps long parsed configuration inside its scrollable body', () => 
   assert.match(drawerRule, /min-height:\s*0\s*;/)
   assert.match(bodyRule, /min-height:\s*0\s*;/)
   assert.match(bodyRule, /overflow-y:\s*auto\s*;/)
+})
+
+test('condition editor keeps date format out of a narrow action column', () => {
+  const source = readFileSync(new URL('../src/reportCenter/components/ReportConfigDrawer/ReportInputSchemaEditor.module.css', import.meta.url), 'utf8')
+  const rowRule = source.match(/\.row\s*\{([^}]*)\}/)?.[1] ?? ''
+  const formatRule = source.match(/\.formatField\s*\{([^}]*)\}/)?.[1] ?? ''
+  assert.match(rowRule, /grid-template-columns:\s*repeat\(4,\s*minmax\(130px,\s*1fr\)\)\s*;/)
+  assert.doesNotMatch(rowRule, /38px/)
+  assert.match(formatRule, /grid-column:\s*span 2\s*;/)
+  assert.match(formatRule, /border-inline-start:\s*2px solid var\(--color-brand\)\s*;/)
+})
+
+test('report configuration locks its editor while save and publication are in flight', () => {
+  const source = readFileSync(new URL('../src/reportCenter/components/ReportConfigDrawer/ReportConfigDrawer.tsx', import.meta.url), 'utf8')
+  assert.match(source, /<fieldset[^>]*disabled=\{state\.saving\}[^>]*aria-busy=\{state\.saving \|\| undefined\}/)
 })
 
 function typescriptFiles(directory) {
@@ -384,6 +399,51 @@ test('JSON result-table draft keeps one input binding and the Oracle snapshot ta
   assert.deepEqual(requests[0].options.body.inputSchema.store_id, { type: 'list[str]', displayName: '门店筛选', required: true, control: 'SELECT', allowedValues: ['S001', 'S002'] })
   assert.deepEqual(requests[0].options.body.result, { tableOwner: 'BI', tableName: 'REPORT_RESULT' })
   assert.equal(requests[0].options.body.callTemplate, '')
+})
+
+test('dirty report configuration saves the selected date format before publication', async () => {
+  const hash = 'a'.repeat(64)
+  const savedPayload = { data: {
+    id: 11, code: 'table_json_report', name: '结果表报表', datasourceId: 3, status: 'DRAFT', lockVersion: 4,
+    executionMode: 'TABLE_SNAPSHOT', procedure: { owner: 'BI', package: 'REPORT_PKG', name: 'BUILD_RESULT', jsonInputArgName: 'P_PAYLOAD', resultCursorArgName: '' },
+    inputSchema: { datein_begin: { type: 'str', displayName: '开始日期', control: 'DATE', format: 'YYYYMMDD' } },
+    result: { tableOwner: 'BI', tableName: 'REPORT_RESULT' },
+    columns: [{ fieldId: '11111111-1111-4111-8111-111111111111', logicalCode: 'amount', databaseColumn: 'AMOUNT', sourceOracleType: 'NUMBER', valueType: 'decimal', previewHeader: '金额', excelHeader: '金额', displayOrder: 0, exportOrder: 0, previewVisible: true, exportVisible: true, exportAllowed: true }],
+    grants: [], parameters: [], callTemplate: '',
+  } }
+  const draft = parseReportDraft(savedPayload)
+  draft.lockVersion = 3
+  const requests = []
+  const client = async (path, options) => {
+    requests.push({ path, options })
+    if (path.endsWith('/publish')) return { ok: true, data: { data: { definitionId: 11, versionId: 8, version: 4, status: 'PUBLISHED', contractHash: hash, publishedAt: '2026-08-14T14:30:00Z' } } }
+    return { ok: true, data: savedPayload }
+  }
+  const result = await saveAndPublishReportDraft(client, draft)
+  assert.equal(result.ok, true)
+  assert.equal(requests[0].path, '/v1/reports/11')
+  assert.equal(requests[0].options.body.inputSchema.datein_begin.format, 'YYYYMMDD')
+  assert.equal(requests[1].path, '/v1/reports/11/publish')
+  assert.equal(requests[1].options.body.expectedLockVersion, 4)
+
+  const saveFailureRequests = []
+  const saveFailure = await saveAndPublishReportDraft(async (path, options) => {
+    saveFailureRequests.push({ path, options })
+    return { ok: false, error: { message: '草稿保存失败' } }
+  }, draft)
+  assert.deepEqual(saveFailure, { ok: false, error: '草稿保存失败' })
+  assert.equal(saveFailureRequests.length, 1)
+
+  const publishFailureRequests = []
+  const publishFailure = await saveAndPublishReportDraft(async (path, options) => {
+    publishFailureRequests.push({ path, options })
+    if (path.endsWith('/publish')) return { ok: false, error: { message: '发布失败' } }
+    return { ok: true, data: savedPayload }
+  }, draft)
+  assert.equal(publishFailure.ok, false)
+  assert.equal(publishFailure.error, '发布失败')
+  assert.equal(publishFailure.draft.lockVersion, 4)
+  assert.equal(publishFailureRequests.length, 2)
 })
 
 test('condition JSON requires a filter display name and normalizes supported types', () => {

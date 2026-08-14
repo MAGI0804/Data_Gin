@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState, type Dispatch, type SetStateAction } from 'react'
 import { Plus, Trash2 } from 'lucide-react'
 import { Button, Drawer } from '../../../ui'
-import { getReportDraft, publishReportDraft, saveReportDraft, type ReportCenterClient } from '../../api'
+import { getReportDraft, publishReportDraft, saveAndPublishReportDraft, saveReportDraft, type ReportCenterClient } from '../../api'
 import { newReportInputField, parseExcelMappingDocument, parseReportInputSchemaDocument, excelMappingFromColumns } from '../../refCursorConfig'
 import type { ReportDatasource, ReportDraft, ReportGrant, ReportPublication, ReportSummary } from '../../types'
 import { ReportExcelMappingEditor } from './ReportExcelMappingEditor'
@@ -69,22 +69,38 @@ export function ReportConfigDrawer({ client, report, datasources, datasourcesLoa
   async function publish() {
     const error = validationError()
     if (error) { setState((current) => ({ ...current, error })); return }
-    if (!draft.id || !draft.lockVersion || draftFingerprint(draft) !== savedFingerprint) return
     setState((current) => ({ ...current, saving: true, error: '', notice: '' }))
-    const response = await publishReportDraft(client, draft.id, draft.lockVersion)
-    if (!response.ok) { setState((current) => ({ ...current, saving: false, error: response.error })); return }
-    setState((current) => ({ ...current, saving: false, notice: `Oracle 契约核验通过，已发布版本 #${response.data.versionId}。` }))
+    let publication: ReportPublication
+    if (dirty || !draft.id || !draft.lockVersion) {
+      const response = await saveAndPublishReportDraft(client, draft)
+      if (!response.ok) {
+        if (response.draft) {
+          setDraft(response.draft)
+          setSavedFingerprint(draftFingerprint(response.draft))
+        }
+        setState((current) => ({ ...current, saving: false, error: response.error }))
+        return
+      }
+      setDraft(response.draft)
+      setSavedFingerprint(draftFingerprint(response.draft))
+      publication = response.publication
+    } else {
+      const response = await publishReportDraft(client, draft.id, draft.lockVersion)
+      if (!response.ok) { setState((current) => ({ ...current, saving: false, error: response.error })); return }
+      publication = response.data
+    }
+    setState((current) => ({ ...current, saving: false, notice: `Oracle 契约核验通过，已发布版本 #${publication.versionId}。` }))
     onSaved?.()
     onClose()
-    onPublished?.(response.data)
+    onPublished?.(publication)
   }
 
   const dirty = draftFingerprint(draft) !== savedFingerprint
-  const footer = <><span className={styles.version}>版本锁 {draft.lockVersion || '新建'} · {dirty ? '有未保存修改' : '已保存'}</span><button type="button" onClick={onClose}>取消</button><button type="button" onClick={() => void save()} disabled={state.loading || state.saving || !dirty}>{state.saving ? '处理中…' : '保存草稿'}</button><Button variant="primary" onClick={() => void publish()} disabled={!draft.id || state.saving || dirty} title={dirty ? '请先保存草稿，再核验并发布' : undefined}>核验并发布</Button></>
+  const footer = <><span className={styles.version}>版本锁 {draft.lockVersion || '新建'} · {dirty ? '有未发布修改' : '草稿已保存'}</span><button type="button" onClick={onClose}>取消</button><button type="button" onClick={() => void save()} disabled={state.loading || state.saving || !dirty}>{state.saving ? '处理中…' : '仅保存草稿'}</button><Button variant="primary" onClick={() => void publish()} disabled={state.loading || state.saving}>{state.saving ? '处理中…' : dirty || !draft.id ? '保存并核验发布' : '核验并发布'}</Button></>
   return <Drawer open title={report ? '编辑报表配置' : '创建报表配置'} description="配置保存于 MySQL；Oracle 过程仅接收一份 JSON，系统整表读取运行结果并在导出成功后清理。" size="wide" closeDisabled={state.saving} onClose={onClose} footer={footer}>
     <div className={styles.tabs} role="tablist" aria-label="报表配置步骤" onKeyDown={(event) => { const current = tabs.findIndex((item) => item.key === tab); const delta = event.key === 'ArrowRight' ? 1 : event.key === 'ArrowLeft' ? -1 : 0; if (!delta) return; event.preventDefault(); const next = tabs[(current + delta + tabs.length) % tabs.length]; setTab(next.key); document.getElementById(`report-config-tab-${next.key}`)?.focus() }}>{tabs.map((item) => <button id={`report-config-tab-${item.key}`} type="button" role="tab" aria-selected={tab === item.key} aria-controls="report-config-panel" tabIndex={tab === item.key ? 0 : -1} className={tab === item.key ? styles.active : ''} onClick={() => setTab(item.key)} key={item.key}>{item.label}</button>)}</div>
     <div id="report-config-panel" role="tabpanel" aria-labelledby={`report-config-tab-${tab}`} tabIndex={0} ref={bodyRef} className={styles.body}>
-      {state.loading ? <p>正在读取草稿…</p> : <Editor tab={tab} client={client} draft={draft} datasources={datasources} datasourcesLoading={datasourcesLoading} datasourcesError={datasourcesError} onChange={setDraft} />}
+      {state.loading ? <p>正在读取草稿…</p> : <fieldset className={styles.editorFieldset} disabled={state.saving} aria-busy={state.saving || undefined}><Editor tab={tab} client={client} draft={draft} datasources={datasources} datasourcesLoading={datasourcesLoading} datasourcesError={datasourcesError} onChange={setDraft} /></fieldset>}
       {state.error ? <div className={styles.error} role="alert">{state.error}</div> : null}
       {state.notice ? <div className={styles.notice} role="status">{state.notice}</div> : null}
     </div>

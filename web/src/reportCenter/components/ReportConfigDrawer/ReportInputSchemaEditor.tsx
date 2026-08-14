@@ -32,7 +32,7 @@ function InputFieldRow({ code, field, onRename, onChange, onDelete }: { code: st
     <EditorField label="筛选显示名"><input value={field.displayName} onChange={(event) => onChange({ ...field, displayName: event.currentTarget.value })} /></EditorField>
     <EditorField label="JSON 类型"><select value={field.type} onChange={(event) => onChange(changeInputType(field, event.currentTarget.value as ReportInputType))}>{reportInputTypes.map((type) => <option key={type}>{type}</option>)}</select></EditorField>
     <EditorField label="查询控件"><select value={field.control} onChange={(event) => onChange(changeInputControl(field, event.currentTarget.value as ReportInputControl | ''))}>{reportInputControls.map((control) => <option value={control} key={control || 'AUTO'}>{inputControlLabel(control)}</option>)}</select></EditorField>
-    {field.control === 'DATE' || field.control === 'DATETIME' ? <EditorField label="存储过程传值格式"><select value={field.format ?? defaultFormat(field.control)} onChange={(event) => onChange({ ...field, format: event.currentTarget.value as ReportInputFormat })}>{(field.control === 'DATE' ? reportDateFormats : reportDateTimeFormats).map((format) => <option value={format} key={format}>{inputFormatLabel(format)}</option>)}</select></EditorField> : null}
+    {field.control === 'DATE' || field.control === 'DATETIME' ? <EditorField className={styles.formatField} label="日期传值格式（必选）"><select className={styles.mono} value={field.format ?? defaultFormat(field.control)} onChange={(event) => onChange({ ...field, format: event.currentTarget.value as ReportInputFormat })}>{(field.control === 'DATE' ? reportDateFormats : reportDateTimeFormats).map((format) => <option value={format} key={format}>{inputFormatLabel(format)}</option>)}</select><small>传入示例：{inputFormatExample(field.format ?? defaultFormat(field.control))}</small></EditorField> : null}
     <JSONValueInput label="示例值" value={field.example} exists={Object.hasOwnProperty.call(field, 'example')} numeric={field.type === 'number' || field.type === 'list[number]'} onChange={(value, exists) => onChange(withOptional(field, 'example', value, exists))} />
     <JSONValueInput label="默认值" value={field.default} exists={Object.hasOwnProperty.call(field, 'default')} numeric={field.type === 'number' || field.type === 'list[number]'} onChange={(value, exists) => onChange(withOptional(field, 'default', value, exists))} />
     <JSONValueInput label="允许值" value={field.allowedValues} exists={Boolean(field.allowedValues)} array numeric={field.type === 'number' || field.type === 'list[number]'} onChange={(value, exists) => onChange(withOptional(field, 'allowedValues', value as unknown[], exists))} />
@@ -41,8 +41,8 @@ function InputFieldRow({ code, field, onRename, onChange, onDelete }: { code: st
   </div>
 }
 
-function EditorField({ label, children }: { label: string; children: React.ReactNode }) {
-  return <label className={styles.field}><span>{label}</span>{children}</label>
+function EditorField({ label, className = '', children }: { label: string; className?: string; children: React.ReactNode }) {
+  return <label className={[styles.field, className].filter(Boolean).join(' ')}><span>{label}</span>{children}</label>
 }
 
 function JSONValueInput({ label, value, exists, array = false, numeric = false, onChange }: { label: string; value: unknown; exists: boolean; array?: boolean; numeric?: boolean; onChange: (value: unknown, exists: boolean) => void }) {
@@ -95,12 +95,16 @@ function inputControlLabel(control: ReportInputControl | '') {
 }
 
 function inputFormatLabel(format: ReportInputFormat) {
+  return `${format}（${inputFormatExample(format)}）`
+}
+
+function inputFormatExample(format: ReportInputFormat) {
   const examples: Record<ReportInputFormat, string> = {
     YYYYMMDD: '20260504',
     'YYYY-MM-DD': '2026-05-04',
-    YYYYMMDDHHmmss: '20260504123045',
-    'YYYY-MM-DD HH:mm:ss': '2026-05-04 12:30:45',
-    ISO8601: '2026-05-04T12:30:45',
+    YYYYMMDDHHmmss: '20260504132500',
+    'YYYY-MM-DD HH:mm:ss': '2026-05-04 13:25:00',
+    ISO8601: '2026-05-04T13:25:00',
   }
-  return `${format}（${examples[format]}）`
+  return examples[format]
 }

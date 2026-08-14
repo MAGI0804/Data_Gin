@@ -236,6 +236,17 @@ export async function publishReportDraft(client: ReportCenterClient, reportId: n
   return requestAndParse(client, `/v1/reports/${reportId}/publish`, { method: 'POST', body: { expectedLockVersion } }, parsePublication, '报表发布与 Oracle 契约核验失败。')
 }
 
+export async function saveAndPublishReportDraft(client: ReportCenterClient, draft: ReportDraft): Promise<
+  { ok: true; draft: ReportDraft; publication: ReportPublication } |
+  { ok: false; error: string; draft?: ReportDraft }
+> {
+  const saved = await saveReportDraft(client, draft)
+  if (saved.ok === false) return { ok: false, error: saved.error }
+  const published = await publishReportDraft(client, saved.data.id, saved.data.lockVersion)
+  if (published.ok === false) return { ok: false, error: published.error, draft: saved.data }
+  return { ok: true, draft: saved.data, publication: published.data }
+}
+
 export async function getReportVersions(client: ReportCenterClient, reportId: number, afterId = 0, signal?: AbortSignal): Promise<ReportAPIResult<ReportVersionPage>> {
   const search = new URLSearchParams({ limit: '50' })
   if (afterId > 0) search.set('afterId', String(afterId))
