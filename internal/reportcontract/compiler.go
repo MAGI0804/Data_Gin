@@ -66,6 +66,29 @@ func VerifyRuntimeMetadata(specJSON []byte, contractHash, procedureHash, resultH
 	return nil
 }
 
+// VerifyRuntimeProcedureMetadata verifies the immutable Oracle procedure
+// signature for REF_CURSOR reports. The cursor result schema is discovered
+// only after execution and is therefore stored in the run snapshot manifest.
+func VerifyRuntimeProcedureMetadata(specJSON []byte, contractHash, procedureHash string, procedure []reportoracle.ProcedureArgument) error {
+	spec, err := decodeVerifiedSpec(specJSON, contractHash)
+	if err != nil {
+		return err
+	}
+	normalized := normalizeProcedureArguments(procedure)
+	actualHash, err := hashJSON(normalized)
+	if err != nil {
+		return err
+	}
+	storedHash, err := hashJSON(spec.Procedure)
+	if err != nil {
+		return err
+	}
+	if actualHash != procedureHash || storedHash != procedureHash {
+		return contractError("live Oracle procedure metadata does not match the published contract")
+	}
+	return nil
+}
+
 // VerifyRuntimeResultMetadata is used before every preview and export read.
 // It prevents a changed Oracle result table from being interpreted through an
 // older frozen presentation contract even when the original run succeeded.
@@ -131,16 +154,20 @@ type contractSpec struct {
 }
 
 type versionSpec struct {
-	DatasourceID      uint   `json:"datasourceId"`
-	ProcedureOwner    string `json:"procedureOwner"`
-	PackageName       string `json:"packageName,omitempty"`
-	ProcedureName     string `json:"procedureName"`
-	ProcedureOverload string `json:"procedureOverload,omitempty"`
-	ResultTableOwner  string `json:"resultTableOwner"`
-	ResultTableName   string `json:"resultTableName"`
-	ResultRunIDColumn string `json:"resultRunIdColumn"`
-	ResultRowIDColumn string `json:"resultRowIdColumn"`
-	CallStatement     string `json:"callStatement"`
+	DatasourceID        uint            `json:"datasourceId"`
+	ExecutionMode       string          `json:"executionMode,omitempty"`
+	ProcedureOwner      string          `json:"procedureOwner"`
+	PackageName         string          `json:"packageName,omitempty"`
+	ProcedureName       string          `json:"procedureName"`
+	ProcedureOverload   string          `json:"procedureOverload,omitempty"`
+	JSONInputArgName    string          `json:"jsonInputArgName,omitempty"`
+	ResultCursorArgName string          `json:"resultCursorArgName,omitempty"`
+	InputSchema         json.RawMessage `json:"inputSchema,omitempty"`
+	ResultTableOwner    string          `json:"resultTableOwner,omitempty"`
+	ResultTableName     string          `json:"resultTableName,omitempty"`
+	ResultRunIDColumn   string          `json:"resultRunIdColumn,omitempty"`
+	ResultRowIDColumn   string          `json:"resultRowIdColumn,omitempty"`
+	CallStatement       string          `json:"callStatement"`
 }
 
 type parameterSpec struct {
@@ -216,6 +243,9 @@ func Compile(
 	if version.DatasourceID == 0 {
 		return Compiled{}, contractError("datasource id is required")
 	}
+	if version.ExecutionMode == model.ReportExecutionModeRefCursor {
+		return compileRefCursor(version, columns, grants, procedureArguments)
+	}
 	if err := validateProcedureSequences(procedureArguments); err != nil {
 		return Compiled{}, err
 	}
@@ -255,6 +285,7 @@ func Compile(
 	spec := contractSpec{
 		Version: versionSpec{
 			DatasourceID:      version.DatasourceID,
+			ExecutionMode:     version.ExecutionMode,
 			ProcedureOwner:    strings.ToUpper(strings.TrimSpace(version.ProcedureOwner)),
 			PackageName:       strings.ToUpper(strings.TrimSpace(version.PackageName)),
 			ProcedureName:     strings.ToUpper(strings.TrimSpace(version.ProcedureName)),
@@ -297,6 +328,132 @@ func Compile(
 		ProcedureSignature: procedureHash, ResultSchema: resultHash,
 		Permission: permissionHash, ExportSchema: exportHash,
 	}}, nil
+}
+
+func compileRefCursor(
+	version model.ReportVersion,
+	columns []model.ReportColumn,
+	grants []model.ReportGrant,
+	procedureArguments []reportoracle.ProcedureArgument,
+) (Compiled, error) {
+	if err := validateProcedureSequences(procedureArguments); err != nil {
+		return Compiled{}, err
+	}
+	plan, err := reportoracle.BuildJSONCursorCallPlan(
+		reportoracle.ProcedureRef{Owner: version.ProcedureOwner, Package: version.PackageName, Name: version.ProcedureName, Overload: version.ProcedureOverload},
+		procedureArguments, version.JSONInputArgName, version.ResultCursorArgName,
+	)
+	if err != nil {
+		return Compiled{}, contractError("compile JSON cursor call: %v", err)
+	}
+	inputSchema := canonicalJSON(version.InputSchemaJSON)
+	if len(inputSchema) == 0 || bytes.Equal(inputSchema, []byte("null")) || bytes.Equal(inputSchema, []byte("{}")) {
+		return Compiled{}, contractError("JSON input schema is required")
+	}
+	columnSpecs, err := compileCursorColumns(columns)
+	if err != nil {
+		return Compiled{}, err
+	}
+	grantSpecs, err := compileGrants(grants)
+	if err != nil {
+		return Compiled{}, err
+	}
+	spec := contractSpec{
+		Version: versionSpec{
+			DatasourceID: version.DatasourceID, ExecutionMode: model.ReportExecutionModeRefCursor,
+			ProcedureOwner: strings.ToUpper(strings.TrimSpace(version.ProcedureOwner)), PackageName: strings.ToUpper(strings.TrimSpace(version.PackageName)),
+			ProcedureName: strings.ToUpper(strings.TrimSpace(version.ProcedureName)), ProcedureOverload: strings.TrimSpace(version.ProcedureOverload),
+			JSONInputArgName: strings.ToUpper(strings.TrimSpace(version.JSONInputArgName)), ResultCursorArgName: strings.ToUpper(strings.TrimSpace(version.ResultCursorArgName)),
+			InputSchema: inputSchema, CallStatement: plan.Statement(),
+		},
+		Parameters: []parameterSpec{}, Procedure: normalizeProcedureArguments(procedureArguments),
+		Columns: columnSpecs, Result: []reportoracle.ResultColumn{}, Grants: grantSpecs,
+	}
+	parameterHash, err := hashJSON(spec.Version.InputSchema)
+	if err != nil {
+		return Compiled{}, err
+	}
+	procedureHash, err := hashJSON(spec.Procedure)
+	if err != nil {
+		return Compiled{}, err
+	}
+	resultHash, err := hashJSON(spec.Result)
+	if err != nil {
+		return Compiled{}, err
+	}
+	permissionHash, err := hashJSON(spec.Grants)
+	if err != nil {
+		return Compiled{}, err
+	}
+	exportHash, err := hashJSON(spec.Columns)
+	if err != nil {
+		return Compiled{}, err
+	}
+	specJSON, err := json.Marshal(spec)
+	if err != nil {
+		return Compiled{}, fmt.Errorf("encode JSON cursor publication contract: %w", err)
+	}
+	return Compiled{SpecJSON: specJSON, Hashes: Hashes{
+		Contract: hashBytes(specJSON), ParameterSchema: parameterHash, ProcedureSignature: procedureHash,
+		ResultSchema: resultHash, Permission: permissionHash, ExportSchema: exportHash,
+	}}, nil
+}
+
+func compileCursorColumns(columns []model.ReportColumn) ([]columnSpec, error) {
+	if len(columns) == 0 {
+		return nil, contractError("result cursor columns are required")
+	}
+	configured := append([]model.ReportColumn(nil), columns...)
+	sort.Slice(configured, func(i, j int) bool {
+		if configured[i].DisplayOrder == configured[j].DisplayOrder {
+			return configured[i].LogicalCode < configured[j].LogicalCode
+		}
+		return configured[i].DisplayOrder < configured[j].DisplayOrder
+	})
+	logicalCodes := make(map[string]struct{}, len(configured))
+	databaseColumns := make(map[string]struct{}, len(configured))
+	excelHeaders := make(map[string]struct{}, len(configured))
+	exportableColumns := 0
+	specs := make([]columnSpec, 0, len(configured))
+	for _, column := range configured {
+		logicalKey := strings.ToUpper(strings.TrimSpace(column.LogicalCode))
+		databaseKey := strings.ToUpper(strings.TrimSpace(column.DatabaseColumn))
+		if logicalKey == "" || databaseKey == "" {
+			return nil, contractError("result cursor logical and Oracle fields are required")
+		}
+		if _, duplicate := logicalCodes[logicalKey]; duplicate {
+			return nil, contractError("result logical column %q is duplicated", column.LogicalCode)
+		}
+		if _, duplicate := databaseColumns[databaseKey]; duplicate {
+			return nil, contractError("result cursor column %q is duplicated", column.DatabaseColumn)
+		}
+		logicalCodes[logicalKey] = struct{}{}
+		databaseColumns[databaseKey] = struct{}{}
+		if column.ExportVisible && column.ExportAllowed {
+			header := strings.TrimSpace(column.ExcelHeader)
+			if header == "" {
+				return nil, contractError("export column %q requires an Excel header", column.LogicalCode)
+			}
+			if _, duplicate := excelHeaders[header]; duplicate {
+				return nil, contractError("Excel header %q is duplicated", header)
+			}
+			excelHeaders[header] = struct{}{}
+			exportableColumns++
+		}
+		specs = append(specs, columnSpec{
+			FieldID: column.FieldID, LogicalCode: column.LogicalCode, DatabaseColumn: databaseKey,
+			SourceOracleType: normalizeOracleType(column.SourceOracleType), Precision: column.PrecisionValue, Scale: column.ScaleValue,
+			Nullable: column.Nullable, ValueType: column.ValueType, PreviewHeader: column.PreviewHeader, ExcelHeader: column.ExcelHeader,
+			DisplayOrder: column.DisplayOrder, ExportOrder: column.ExportOrder, PreviewVisible: column.PreviewVisible,
+			ExportVisible: column.ExportVisible, Filterable: false, Sortable: false, ExportAllowed: column.ExportAllowed,
+			AllowedOperators: nil, Format: canonicalJSON(column.FormatJSON), MaskingPolicy: canonicalJSON(column.MaskingPolicyJSON),
+			Dictionary: canonicalJSON(column.DictionaryVersionJSON), ExcelWidth: column.ExcelWidth, NullDisplay: column.NullDisplay,
+		})
+	}
+	if exportableColumns == 0 {
+		return nil, contractError("at least one exportable cursor column is required")
+	}
+	return specs, nil
 }
 
 func compileParameters(

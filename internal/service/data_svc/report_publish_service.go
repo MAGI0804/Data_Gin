@@ -32,6 +32,7 @@ type reportOracleInspector interface {
 	InspectProcedure(context.Context, reportoracle.ProcedureRef) ([]reportoracle.ProcedureArgument, error)
 	InspectResultTable(context.Context, reportoracle.ResultTableRef) ([]reportoracle.ResultColumn, error)
 	InspectResultSnapshotContract(context.Context, reportoracle.ResultSnapshotRef) (reportoracle.ResultSnapshotContract, error)
+	ValidateJSONSnapshotStore(context.Context) error
 	Close() error
 }
 
@@ -184,6 +185,16 @@ func (service *ReportPublishService) inspectContract(
 	procedure, err := inspector.InspectProcedure(inspectionCtx, procedureRef)
 	if err != nil {
 		return inspection, classifyOracleInspectionError("procedure", err)
+	}
+	if draft.Version.ExecutionMode == model.ReportExecutionModeRefCursor {
+		if err := inspector.ValidateJSONSnapshotStore(inspectionCtx); err != nil {
+			return inspection, classifyOracleInspectionError("JSON snapshot store", err)
+		}
+		compiled, err := reportcontract.Compile(draft.Version, nil, draft.Columns, draft.Grants, procedure, nil, reportoracle.ResultSnapshotContract{})
+		if err != nil {
+			return inspection, fmt.Errorf("%w: %v", ErrReportPublicationInvalid, err)
+		}
+		return reportPublicationInspection{compiled: compiled, procedureArgumentCount: len(procedure), resultColumnCount: len(draft.Columns), uniqueKeyValidated: true}, nil
 	}
 	resultRef := reportoracle.ResultTableRef{Owner: draft.Version.ResultTableOwner, Name: draft.Version.ResultTableName}
 	resultColumns, err := inspector.InspectResultTable(inspectionCtx, resultRef)

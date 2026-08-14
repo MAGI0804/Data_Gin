@@ -42,6 +42,24 @@ type CursorSnapshot struct {
 	RowCount   int64
 }
 
+func (adapter *Adapter) ValidateJSONSnapshotStore(ctx context.Context) error {
+	if adapter == nil || adapter.db == nil || ctx == nil {
+		return fmt.Errorf("validate JSON snapshot store: adapter is closed")
+	}
+	var columnCount int
+	if err := adapter.db.QueryRowContext(ctx, `
+SELECT COUNT(*)
+FROM user_tab_columns
+WHERE (table_name = 'REPORT_RUN_SNAPSHOTS' AND column_name IN ('RUN_ID','SCHEMA_JSON','SCHEMA_HASH','ROW_COUNT','STATUS','CREATED_AT'))
+   OR (table_name = 'REPORT_RUN_SNAPSHOT_ROWS' AND column_name IN ('RUN_ID','ROW_NO','VALUES_JSON'))`).Scan(&columnCount); err != nil {
+		return fmt.Errorf("validate JSON snapshot store: %w", err)
+	}
+	if columnCount != 9 {
+		return fmt.Errorf("%w: Oracle JSON snapshot tables are not installed", ErrMetadataMismatch)
+	}
+	return nil
+}
+
 func (plan JSONCursorCallPlan) Statement() string { return plan.statement }
 
 func BuildJSONCursorCallPlan(ref ProcedureRef, arguments []ProcedureArgument, inputArgName, outputArgName string) (JSONCursorCallPlan, error) {

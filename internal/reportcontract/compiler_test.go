@@ -35,6 +35,47 @@ func TestCompileProducesStablePublicationContract(t *testing.T) {
 	}
 }
 
+func TestCompileRefCursorUsesJSONSchemaAndDiscoveredSignature(t *testing.T) {
+	version, _, columns, grants, _, _ := validContract()
+	version.ExecutionMode = model.ReportExecutionModeRefCursor
+	version.JSONInputArgName = "P_JSON"
+	version.ResultCursorArgName = "P_RESULT"
+	version.InputSchemaJSON = model.JSONText(`{"store_id":{"type":"VARCHAR2","displayName":"门店","required":true}}`)
+	version.ResultTableOwner, version.ResultTableName = "", ""
+	version.ResultRunIDColumn, version.ResultRowIDColumn = "", ""
+	version.CallTemplate = "BEGIN REPORT.PKG.SALES(P_JSON => :payload, P_RESULT => :resultCursor); END;"
+	arguments := []reportoracle.ProcedureArgument{
+		{Name: "P_JSON", Position: 1, Sequence: 1, Direction: "IN", DataType: "CLOB"},
+		{Name: "P_RESULT", Position: 2, Sequence: 2, Direction: "OUT", DataType: "REF CURSOR"},
+	}
+
+	compiled, err := Compile(version, nil, columns, grants, arguments, nil, reportoracle.ResultSnapshotContract{})
+	if err != nil {
+		t.Fatalf("Compile() error = %v", err)
+	}
+	if len(compiled.SpecJSON) == 0 || len(compiled.Hashes.Contract) != 64 || len(compiled.Hashes.ParameterSchema) != 64 {
+		t.Fatalf("compiled = %#v", compiled)
+	}
+	if err := VerifyRuntimeProcedureMetadata(compiled.SpecJSON, compiled.Hashes.Contract, compiled.Hashes.ProcedureSignature, arguments); err != nil {
+		t.Fatalf("VerifyRuntimeProcedureMetadata() error = %v", err)
+	}
+}
+
+func TestCompileRefCursorRejectsMissingExcelMapping(t *testing.T) {
+	version, _, _, grants, _, _ := validContract()
+	version.ExecutionMode = model.ReportExecutionModeRefCursor
+	version.JSONInputArgName, version.ResultCursorArgName = "P_JSON", "P_RESULT"
+	version.InputSchemaJSON = model.JSONText(`{"store_id":{"type":"VARCHAR2","displayName":"门店"}}`)
+	arguments := []reportoracle.ProcedureArgument{
+		{Name: "P_JSON", Position: 1, Sequence: 1, Direction: "IN", DataType: "CLOB"},
+		{Name: "P_RESULT", Position: 2, Sequence: 2, Direction: "OUT", DataType: "REF CURSOR"},
+	}
+
+	if _, err := Compile(version, nil, nil, grants, arguments, nil, reportoracle.ResultSnapshotContract{}); !errors.Is(err, ErrInvalidContract) {
+		t.Fatalf("Compile() error = %v, want ErrInvalidContract", err)
+	}
+}
+
 func TestVerifyRuntimeMetadataAcceptsPublishedContractAndRejectsDrift(t *testing.T) {
 	version, parameters, columns, grants, procedure, result := validContract()
 	contract := validSnapshotContract(t, version, result, columns)

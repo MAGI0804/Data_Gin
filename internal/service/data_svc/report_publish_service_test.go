@@ -230,6 +230,10 @@ func (inspector *fakeReportOracleInspector) InspectResultTable(context.Context, 
 func (inspector *fakeReportOracleInspector) InspectResultSnapshotContract(_ context.Context, ref reportoracle.ResultSnapshotRef) (reportoracle.ResultSnapshotContract, error) {
 	return reportoracle.CompileResultSnapshotContract(ref, inspector.columns, true)
 }
+
+func (inspector *fakeReportOracleInspector) ValidateJSONSnapshotStore(context.Context) error {
+	return nil
+}
 func (inspector *fakeReportOracleInspector) Close() error {
 	inspector.closed = true
 	return inspector.closeErr
