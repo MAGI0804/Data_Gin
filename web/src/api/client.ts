@@ -25,6 +25,7 @@ export type ApiRequestOptions = {
   retry?: boolean
   timeoutMs?: number
   acceptBareJSONSuccess?: boolean
+  acceptSafeErrorMessage?: boolean
 }
 
 type FetchLike = (input: RequestInfo | URL, init?: RequestInit) => Promise<Response>
@@ -71,6 +72,18 @@ function publicFailure(status: number, retryAfterSeconds?: number): NonNullable<
   if (status === 429) return { kind: 'rate_limited', message: retryAfterSeconds ? `请求过于频繁，请在 ${retryAfterSeconds} 秒后重试。` : '请求过于频繁，请稍后重试。', retryAfterSeconds }
   if (status >= 500) return { kind: 'server', message: '服务暂时不可用，请稍后重试。' }
   return { kind: 'client', message: '请求未能完成，请检查输入后重试。' }
+}
+
+function publicResponseMessage(payload: unknown, status: number) {
+  if (status < 400 || status >= 500 || payload === null || typeof payload !== 'object' || Array.isArray(payload)) return ''
+  const message = (payload as Record<string, unknown>).msg
+  if (typeof message !== 'string') return ''
+  const normalized = message.trim()
+  const hasControlCharacter = Array.from(normalized).some((character) => {
+    const code = character.charCodeAt(0)
+    return code <= 31 || code === 127
+  })
+  return normalized && normalized.length <= 300 && !hasControlCharacter ? normalized : ''
 }
 
 function retryAfterSeconds(headers: Headers) {
@@ -185,7 +198,7 @@ export function createApiClient(options: ApiClientOptions) {
   }
 
   async function request(path: string, requestOptions: ApiRequestOptions): Promise<ClientResponse> {
-    const { method, body, headers, signal, retry = true, acceptBareJSONSuccess = false } = requestOptions
+    const { method, body, headers, signal, retry = true, acceptBareJSONSuccess = false, acceptSafeErrorMessage = false } = requestOptions
     const retryable = method === 'GET' && retry
     let attempt = 0
     let replayedAfterRefresh = false
@@ -220,6 +233,8 @@ export function createApiClient(options: ApiClientOptions) {
           continue
         }
         const error = publicFailure(status, retryAfter)
+        const responseMessage = acceptSafeErrorMessage ? publicResponseMessage(payload, status) : ''
+        if (responseMessage && error.kind === 'client') error.message = responseMessage
         return { ok: false, status, data: { message: error.message }, error }
       } catch {
         if (signal?.aborted) return abortedResponse()

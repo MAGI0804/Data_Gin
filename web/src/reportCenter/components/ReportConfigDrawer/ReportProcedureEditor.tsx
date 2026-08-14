@@ -1,22 +1,30 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react'
 import { RefreshCw, Search } from 'lucide-react'
-import { getReportProcedureSignature, getReportProcedures, type ReportCenterClient } from '../../api'
-import type { ReportDraft, ReportProcedureSignature, ReportProcedureSummary } from '../../types'
+import { getReportProcedureSignature, getReportProcedures, getReportResultTableSchema, getReportResultTables, type ReportCenterClient } from '../../api'
+import { reconcileReportColumnsWithResultSchema, reportColumnsFromResultSchema, resultKeyColumnsFromSchema } from '../../refCursorConfig'
+import type { ReportDraft, ReportProcedureSignature, ReportProcedureSummary, ReportResultTablePage, ReportResultTableSchema, ReportResultTableSummary } from '../../types'
 import styles from './ReportProcedureEditor.module.css'
 
-export function ReportProcedureEditor({ client, draft, onChange }: { client: ReportCenterClient; draft: ReportDraft; onChange: (draft: ReportDraft) => void }) {
+export function ReportProcedureEditor({ client, draft, onChange }: { client: ReportCenterClient; draft: ReportDraft; onChange: Dispatch<SetStateAction<ReportDraft>> }) {
   const [filters, setFilters] = useState({ owner: draft.procedure.owner, search: '' })
   const [catalog, setCatalog] = useState<{ items: ReportProcedureSummary[]; hasMore: boolean; nextAfter: string }>({ items: [], hasMore: false, nextAfter: '' })
   const [signature, setSignature] = useState<ReportProcedureSignature | null>(null)
   const [state, setState] = useState({ loading: false, inspecting: false, error: '' })
+  const [tableFilters, setTableFilters] = useState({ owner: draft.result.tableOwner || draft.procedure.owner, search: '' })
+  const [tableCatalog, setTableCatalog] = useState<ReportResultTablePage>({ items: [], hasMore: false, nextAfter: '' })
+  const [tableSchema, setTableSchema] = useState<ReportResultTableSchema | null>(null)
+  const [tableState, setTableState] = useState({ loading: false, inspecting: false, error: '' })
   const catalogRequest = useRef(0)
   const signatureRequest = useRef(0)
+  const tableCatalogRequest = useRef(0)
+  const tableSchemaRequest = useRef(0)
   const signatureCache = useRef<ReportProcedureSignature | null>(null)
   const selectedKey = procedureKey(draft.procedure)
   const selectedOwner = draft.procedure.owner
   const selectedPackage = draft.procedure.package
   const selectedName = draft.procedure.name
   const selectedOverload = draft.procedure.overload
+  const selectedTableKey = resultTableKey(draft.result)
 
   const inspect = useCallback(async (procedure: ReportProcedureSummary | ReportDraft['procedure'], signal?: AbortSignal) => {
     if (!draft.datasourceId || !procedure.owner || !procedure.name) return
@@ -36,8 +44,8 @@ export function ReportProcedureEditor({ client, draft, onChange }: { client: Rep
       setState((current) => ({ ...current, error: response.data.blockingReasons[0] || '所选过程不符合唯一 JSON 输入协议。' }))
       return
     }
-    onChange({
-      ...draft,
+    onChange((currentDraft) => ({
+      ...currentDraft,
       executionMode: 'TABLE_SNAPSHOT',
       procedure: {
         owner: response.data.procedure.owner,
@@ -48,14 +56,14 @@ export function ReportProcedureEditor({ client, draft, onChange }: { client: Rep
         resultCursorArgName: '',
       },
       result: {
-        tableOwner: draft.result.tableOwner || response.data.procedure.owner,
-        tableName: draft.result.tableName,
-        runIdColumn: draft.result.runIdColumn || 'RUN_ID',
-        rowIdColumn: draft.result.rowIdColumn || 'ROW_NO',
+        tableOwner: currentDraft.result.tableOwner || response.data.procedure.owner,
+        tableName: currentDraft.result.tableName,
+        runIdColumn: currentDraft.result.runIdColumn || 'RUN_ID',
+        rowIdColumn: currentDraft.result.rowIdColumn || 'ROW_NO',
       },
       callTemplate: '',
       parameters: [],
-    })
+    }))
   }, [client, draft, onChange])
 
   const load = useCallback(async (append = false, signal?: AbortSignal) => {
@@ -100,6 +108,23 @@ export function ReportProcedureEditor({ client, draft, onChange }: { client: Rep
   }, [client, draft.datasourceId])
 
   useEffect(() => {
+    if (!draft.datasourceId) return
+    setTableFilters({ owner: '', search: '' })
+    setTableSchema(null)
+    const controller = new AbortController()
+    const request = ++tableCatalogRequest.current
+    setTableState((current) => ({ ...current, loading: true, error: '' }))
+    void getReportResultTables(client, draft.datasourceId, { limit: 30 }, controller.signal).then((response) => {
+      if (controller.signal.aborted || request !== tableCatalogRequest.current) return
+      if (response.ok) {
+        setTableCatalog(response.data)
+        setTableState((current) => ({ ...current, loading: false }))
+      } else setTableState((current) => ({ ...current, loading: false, error: response.error }))
+    })
+    return () => { controller.abort(); tableCatalogRequest.current += 1 }
+  }, [client, draft.datasourceId])
+
+  useEffect(() => {
     if (!draft.datasourceId || !selectedOwner || !selectedName) {
       signatureCache.current = null
       setSignature(null)
@@ -126,6 +151,28 @@ export function ReportProcedureEditor({ client, draft, onChange }: { client: Rep
     return () => { controller.abort(); signatureRequest.current += 1 }
   }, [client, draft.datasourceId, selectedKey, selectedName, selectedOwner, selectedOverload, selectedPackage])
 
+  useEffect(() => {
+    if (!draft.datasourceId || !draft.result.tableOwner || !draft.result.tableName) {
+      setTableSchema(null)
+      return
+    }
+    if (tableSchema && resultTableKey(tableSchema.table) === selectedTableKey) return
+    const controller = new AbortController()
+    const request = ++tableSchemaRequest.current
+    setTableState((current) => ({ ...current, inspecting: true, error: '' }))
+    void getReportResultTableSchema(client, draft.datasourceId, { owner: draft.result.tableOwner, name: draft.result.tableName }, controller.signal).then((response) => {
+      if (controller.signal.aborted || request !== tableSchemaRequest.current) return
+      if (response.ok) {
+        setTableSchema(response.data)
+        setTableState((current) => ({ ...current, inspecting: false }))
+      } else {
+        setTableSchema(null)
+        setTableState((current) => ({ ...current, inspecting: false, error: response.error }))
+      }
+    })
+    return () => { controller.abort(); tableSchemaRequest.current += 1 }
+  }, [client, draft.datasourceId, draft.result.tableName, draft.result.tableOwner, selectedTableKey, tableSchema])
+
   const selectedLabel = useMemo(() => signature?.procedure.qualifiedName || qualifiedName(draft.procedure) || '尚未绑定存储过程', [draft.procedure, signature])
   if (!draft.datasourceId) return <div className={styles.empty} role="status">请先在“基本信息”中选择可用的 Oracle 数据源。</div>
 
@@ -133,8 +180,63 @@ export function ReportProcedureEditor({ client, draft, onChange }: { client: Rep
     setFilters((current) => ({ ...current, [key]: value }))
   }
 
-  function updateResult(key: keyof ReportDraft['result'], value: string) {
-    onChange({ ...draft, result: { ...draft.result, [key]: value.toUpperCase() } })
+  async function loadResultTables(append = false, signal?: AbortSignal) {
+    if (!draft.datasourceId) return
+    const request = ++tableCatalogRequest.current
+    setTableState((current) => ({ ...current, loading: true, error: '' }))
+    const response = await getReportResultTables(client, draft.datasourceId, {
+      owner: tableFilters.owner,
+      search: tableFilters.search,
+      after: append ? tableCatalog.nextAfter : '',
+      limit: 30,
+    }, signal)
+    if (signal?.aborted || request !== tableCatalogRequest.current) return
+    if (!response.ok) {
+      setTableState((current) => ({ ...current, loading: false, error: response.error }))
+      return
+    }
+    setTableCatalog((current) => ({
+      items: append ? deduplicateResultTables([...current.items, ...response.data.items]) : response.data.items,
+      hasMore: response.data.hasMore,
+      nextAfter: response.data.nextAfter,
+    }))
+    setTableState((current) => ({ ...current, loading: false }))
+  }
+
+  async function selectResultTable(table: ReportResultTableSummary) {
+    if (!draft.datasourceId) return
+    const request = ++tableSchemaRequest.current
+    setTableState((current) => ({ ...current, inspecting: true, error: '' }))
+    const response = await getReportResultTableSchema(client, draft.datasourceId, table)
+    if (request !== tableSchemaRequest.current) return
+    if (!response.ok) {
+      setTableState((current) => ({ ...current, inspecting: false, error: response.error }))
+      return
+    }
+    setTableSchema(response.data)
+    setTableState((current) => ({ ...current, inspecting: false }))
+    onChange((currentDraft) => {
+      const sameTable = resultTableKey(currentDraft.result) === resultTableKey(table)
+      const { runIdColumn, rowIdColumn } = resultKeyColumnsFromSchema(response.data.columns, currentDraft.result, sameTable)
+      const columns = sameTable
+        ? reconcileReportColumnsWithResultSchema(response.data.columns, [runIdColumn, rowIdColumn], currentDraft.columns)
+        : reportColumnsFromResultSchema(response.data.columns, [runIdColumn, rowIdColumn])
+      return {
+        ...currentDraft,
+        result: { tableOwner: table.owner, tableName: table.name, runIdColumn, rowIdColumn },
+        columns,
+      }
+    })
+  }
+
+  function updateResultColumn(key: 'runIdColumn' | 'rowIdColumn', value: string) {
+    onChange((currentDraft) => {
+      const result = { ...currentDraft.result, [key]: value }
+      const columns = tableSchema
+        ? reconcileReportColumnsWithResultSchema(tableSchema.columns, [result.runIdColumn, result.rowIdColumn], currentDraft.columns)
+        : currentDraft.columns
+      return { ...currentDraft, result, columns }
+    })
   }
 
   return <div className={styles.editor}>
@@ -161,12 +263,24 @@ export function ReportProcedureEditor({ client, draft, onChange }: { client: Rep
     </section>
     <section className={styles.resultTable} aria-labelledby="report-result-table-title">
       <div><h3 id="report-result-table-title">Oracle 结果表绑定</h3><p>过程按系统注入的 run_id 写入持久化中间表；预览、Excel 和清理均只处理本次 run_id。</p></div>
-      <div className={styles.resultFields}>
-        <label>表 Owner<input className={styles.mono} value={draft.result.tableOwner} onChange={(event) => updateResult('tableOwner', event.currentTarget.value)} placeholder="例如 REPORT" /></label>
-        <label>结果表名<input className={styles.mono} value={draft.result.tableName} onChange={(event) => updateResult('tableName', event.currentTarget.value)} placeholder="例如 SALES_REPORT_RESULT" /></label>
-        <label>run_id 字段<input className={styles.mono} value={draft.result.runIdColumn} onChange={(event) => updateResult('runIdColumn', event.currentTarget.value)} placeholder="RUN_ID" /></label>
-        <label>行游标字段<input className={styles.mono} value={draft.result.rowIdColumn} onChange={(event) => updateResult('rowIdColumn', event.currentTarget.value)} placeholder="ROW_NO" /></label>
+      <form className={styles.tableSearch} onSubmit={(event) => { event.preventDefault(); void loadResultTables(false) }}>
+        <label>Owner<input className={styles.mono} value={tableFilters.owner} placeholder="可选，例如 REPORT" onChange={(event) => { const owner = event.currentTarget.value; setTableFilters((current) => ({ ...current, owner })) }} /></label>
+        <label>结果表<input value={tableFilters.search} placeholder="搜索表名" onChange={(event) => { const search = event.currentTarget.value; setTableFilters((current) => ({ ...current, search })) }} /></label>
+        <button type="submit" disabled={tableState.loading}><Search aria-hidden="true" />{tableState.loading ? '查询中…' : '查询 Oracle'}</button>
+      </form>
+      <div className={styles.tableCatalog} aria-label="Oracle 结果表查询结果">
+        <div className={styles.catalogHeader}><strong>可见结果表</strong><span>{tableCatalog.items.length} 项</span></div>
+        {tableCatalog.items.length === 0 && !tableState.loading ? <p className={styles.empty}>当前条件下未查询到可见表。</p> : null}
+        {tableCatalog.items.map((item) => <button type="button" className={resultTableKey(item) === selectedTableKey ? styles.selected : ''} aria-pressed={resultTableKey(item) === selectedTableKey} onClick={() => void selectResultTable(item)} key={resultTableKey(item)}><code>{item.qualifiedName}</code><span>{item.columnCount} 个字段</span></button>)}
+        {tableCatalog.hasMore ? <button type="button" className={styles.more} disabled={tableState.loading} onClick={() => void loadResultTables(true)}><RefreshCw aria-hidden="true" />加载更多</button> : null}
       </div>
+      <div className={styles.selectedTable}><strong>已选结果表</strong><code>{draft.result.tableOwner && draft.result.tableName ? `${draft.result.tableOwner}.${draft.result.tableName}` : '尚未选择'}</code>{tableState.inspecting ? <span role="status">正在读取字段…</span> : null}</div>
+      <div className={styles.resultFields}>
+        <label>run_id 字段<select className={styles.mono} value={draft.result.runIdColumn} disabled={!tableSchema} onChange={(event) => updateResultColumn('runIdColumn', event.currentTarget.value)}><option value="">请选择</option>{tableSchema?.columns.map((column) => <option value={column.name} key={column.name}>{column.name} · {column.oracleType}</option>)}</select></label>
+        <label>行游标字段<select className={styles.mono} value={draft.result.rowIdColumn} disabled={!tableSchema} onChange={(event) => updateResultColumn('rowIdColumn', event.currentTarget.value)}><option value="">请选择</option>{tableSchema?.columns.map((column) => <option value={column.name} key={column.name}>{column.name} · {column.oracleType}</option>)}</select></label>
+      </div>
+      {tableSchema ? <div className={styles.columnSummary}><div><strong>结果表字段</strong><span>已自动生成 {draft.columns.length} 个 Excel 字段，可到“Excel 映射”继续修改表头。</span></div>{tableSchema.columns.map((column) => <div key={column.name}><code>{column.name}</code><span>{column.oracleType}</span><span>{column.nullable ? '可空' : '必填'}</span></div>)}</div> : null}
+      {tableState.error ? <div className={styles.error} role="alert">{tableState.error}</div> : null}
     </section>
     {state.error ? <div className={styles.error} role="alert">{state.error}</div> : null}
   </div>
@@ -184,4 +298,12 @@ function qualifiedName(procedure: ReportDraft['procedure']) {
 
 function deduplicateProcedures(items: ReportProcedureSummary[]) {
   return [...new Map(items.map((item) => [procedureKey(item), item])).values()]
+}
+
+function resultTableKey(table: { owner?: string; name?: string; tableOwner?: string; tableName?: string }) {
+  return `${table.owner || table.tableOwner || ''}|${table.name || table.tableName || ''}`.toUpperCase()
+}
+
+function deduplicateResultTables(items: ReportResultTableSummary[]) {
+  return [...new Map(items.map((item) => [resultTableKey(item), item])).values()]
 }

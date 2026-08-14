@@ -84,6 +84,7 @@ export function useConsoleSession(baseURL: string) {
           retry: options.retry,
           timeoutMs: options.timeoutMs,
           acceptBareJSONSuccess: options.acceptBareJSONSuccess,
+          acceptSafeErrorMessage: options.acceptSafeErrorMessage,
         }
         const nextResult = await apiClient.request(path, requestOptions)
         if (options.showResult !== false) setResult(nextResult)

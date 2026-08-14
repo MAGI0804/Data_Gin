@@ -1,4 +1,4 @@
-import type { ReportColumn, ReportInputControl, ReportInputField, ReportInputSchema } from './types'
+import type { ReportColumn, ReportInputControl, ReportInputField, ReportInputSchema, ReportResultTableColumn } from './types'
 
 const conditionCodePattern = /^[A-Za-z][A-Za-z0-9_]{0,63}$/
 const oracleFieldPattern = /^[A-Za-z][A-Za-z0-9_$#]{0,127}$/
@@ -9,6 +9,7 @@ export const reportInputControls: Array<ReportInputControl | ''> = ['', 'TEXT', 
 export function parseReportInputSchemaDocument(value: unknown, allowEmpty = false): ReportInputSchema {
   if (!isRecord(value) || (!allowEmpty && Object.keys(value).length === 0)) throw new Error('筛选条件必须是非空 JSON 对象。')
   if (Object.keys(value).length > 128) throw new Error('筛选条件最多配置 128 个字段。')
+  if (new TextEncoder().encode(JSON.stringify(value)).byteLength > 64 * 1024) throw new Error('筛选条件 JSON 不能超过 64 KiB。')
   const result: ReportInputSchema = {}
   for (const [code, rawField] of Object.entries(value)) {
     if (!conditionCodePattern.test(code)) throw new Error(`筛选字段 ${code || '（空）'} 的编码不合法。`)
@@ -94,6 +95,43 @@ export function applyExcelMapping(columns: ReportColumn[], mapping: Record<strin
       exportAllowed: true,
     }
   })
+}
+
+export function reportColumnsFromResultSchema(columns: ReportResultTableColumn[], excludedColumns: string[], createFieldId: () => string = () => crypto.randomUUID()): ReportColumn[] {
+  return reconcileReportColumnsWithResultSchema(columns, excludedColumns, [], createFieldId)
+}
+
+export function reconcileReportColumnsWithResultSchema(columns: ReportResultTableColumn[], excludedColumns: string[], existingColumns: ReportColumn[], createFieldId: () => string = () => crypto.randomUUID()): ReportColumn[] {
+  const excluded = new Set(excludedColumns.map((column) => column.trim().toUpperCase()).filter(Boolean))
+  const exportColumns = columns.filter((column) => !excluded.has(column.name.toUpperCase()))
+  const existingByName = new Map(existingColumns.map((column) => [column.databaseColumn.toUpperCase(), column]))
+  const mapping = Object.fromEntries(exportColumns.map((column) => [column.name, existingByName.get(column.name.toUpperCase())?.excelHeader || column.name]))
+  const initial = applyExcelMapping(existingColumns, mapping, createFieldId)
+  const schemaByName = new Map(exportColumns.map((column) => [column.name.toUpperCase(), column]))
+  return initial.map((column) => {
+    const schema = schemaByName.get(column.databaseColumn.toUpperCase())
+    if (!schema) return column
+    return {
+      ...column,
+      sourceOracleType: schema.oracleType,
+      precision: schema.precision,
+      scale: schema.scale,
+      nullable: schema.nullable,
+      valueType: reportValueTypeFromOracle(schema.oracleType),
+    }
+  })
+}
+
+export function resultKeyColumnsFromSchema(columns: ReportResultTableColumn[], current: { runIdColumn: string; rowIdColumn: string }, preserveCurrent: boolean) {
+  const names = new Set(columns.map((column) => column.name.toUpperCase()))
+  const currentRun = current.runIdColumn.toUpperCase()
+  const currentRow = current.rowIdColumn.toUpperCase()
+  if (preserveCurrent && currentRun !== currentRow && names.has(currentRun) && names.has(currentRow)) {
+    return { runIdColumn: current.runIdColumn, rowIdColumn: current.rowIdColumn }
+  }
+  const runIdColumn = columns.find((column) => column.name.toUpperCase() === 'RUN_ID')?.name || ''
+  const rowIdColumn = columns.find((column) => ['ROW_NO', 'ROW_ID'].includes(column.name.toUpperCase()) && column.name.toUpperCase() !== runIdColumn.toUpperCase())?.name || ''
+  return { runIdColumn, rowIdColumn }
 }
 
 export function renameExcelMappingField(columns: ReportColumn[], currentField: string, nextField: string): ReportColumn[] {
@@ -203,6 +241,15 @@ function newReportColumn(index: number, fieldId: string): ReportColumn {
 function logicalCodeFromOracleField(databaseColumn: string, index: number) {
   const normalized = databaseColumn.toLowerCase().replace(/[^a-z0-9_]/g, '_')
   return /^[a-z]/.test(normalized) ? normalized.slice(0, 64) : `field${index + 1}`
+}
+
+function reportValueTypeFromOracle(oracleType: string) {
+  const normalized = oracleType.trim().toUpperCase()
+  if (normalized === 'NUMBER' || normalized === 'BINARY_FLOAT' || normalized === 'BINARY_DOUBLE') return 'decimal'
+  if (normalized === 'DATE') return 'date'
+  if (normalized.startsWith('TIMESTAMP')) return 'datetime'
+  if (normalized === 'BOOLEAN') return 'boolean'
+  return 'string'
 }
 
 function uniqueLogicalCode(preferred: string, used: Set<string>) {

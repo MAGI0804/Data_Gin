@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useRef, useState, type Dispatch, type SetStateAction } from 'react'
 import { Plus, Trash2 } from 'lucide-react'
 import { Button, Drawer } from '../../../ui'
 import { getReportDraft, publishReportDraft, saveReportDraft, type ReportCenterClient } from '../../api'
@@ -11,6 +11,7 @@ import styles from './ReportConfigDrawer.module.css'
 
 type Tab = 'basic' | 'procedure' | 'conditions' | 'excel' | 'permissions'
 const tabs: Array<{ key: Tab; label: string }> = [{ key: 'basic', label: '基本信息' }, { key: 'procedure', label: '存储过程' }, { key: 'conditions', label: '筛选条件' }, { key: 'excel', label: 'Excel 映射' }, { key: 'permissions', label: '权限' }]
+const oracleIdentifierPattern = /^[A-Za-z][A-Za-z0-9_$#]{0,127}$/
 
 export function ReportConfigDrawer({ client, report, datasources, datasourcesLoading = false, datasourcesError = '', onClose, onPublished, onSaved }: { client: ReportCenterClient; report: ReportSummary | null; datasources: ReportDatasource[]; datasourcesLoading?: boolean; datasourcesError?: string; onClose: () => void; onPublished?: (publication: ReportPublication) => void; onSaved?: () => void }) {
   const bodyRef = useRef<HTMLDivElement>(null)
@@ -36,15 +37,23 @@ export function ReportConfigDrawer({ client, report, datasources, datasourcesLoa
 
   function validationError() {
     if (bodyRef.current?.querySelector('[aria-invalid="true"]')) return '请先修正标红的 JSON 配置。'
-    if (!draft.name.trim() || !/^[A-Za-z][A-Za-z0-9_]{2,63}$/.test(draft.code.trim()) || !draft.datasourceId) return '请完整填写报表名称、合法编码和 Oracle 数据源。'
+    if (!draft.name.trim() || draft.name.trim().length > 128 || !/^[A-Za-z][A-Za-z0-9_-]{2,63}$/.test(draft.code.trim()) || !draft.datasourceId) return '请完整填写报表名称、合法编码和 Oracle 数据源。'
+    if (draft.category.trim().length > 64 || draft.description.trim().length > 500) return '分类最多 64 字，说明最多 500 字。'
+    if (datasources.find((item) => item.id === draft.datasourceId)?.enabled === false) return '当前 Oracle 数据源已停用，请先启用或更换数据源。'
     if (!draft.procedure.owner || !draft.procedure.name) return '请从 Oracle 查询结果中选择存储过程。'
     if (!draft.procedure.jsonInputArgName || draft.procedure.resultCursorArgName) return '所选过程必须只有一个 JSON 输入参数，且不能包含任何出参。'
     if (!draft.result.tableOwner || !draft.result.tableName || !draft.result.runIdColumn || !draft.result.rowIdColumn) return '请完整绑定 Oracle 结果表、run_id 字段和行游标字段。'
+    if (![draft.procedure.owner, draft.procedure.name, draft.procedure.jsonInputArgName, draft.result.tableOwner, draft.result.tableName, draft.result.runIdColumn, draft.result.rowIdColumn].every((value) => oracleIdentifierPattern.test(value))) return 'Oracle 对象或字段名不合法，请从 Oracle 搜索结果中重新选择。'
+    if (draft.procedure.package && !oracleIdentifierPattern.test(draft.procedure.package)) return 'Oracle 包名不合法，请重新选择存储过程。'
+    if (draft.result.runIdColumn.toUpperCase() === draft.result.rowIdColumn.toUpperCase()) return 'run_id 字段和行游标字段不能相同。'
+    const resultKeyColumns = new Set([draft.result.runIdColumn, draft.result.rowIdColumn].map((column) => column.toUpperCase()))
+    if (draft.columns.some((column) => resultKeyColumns.has(column.databaseColumn.toUpperCase()))) return 'run_id 和行游标是系统字段，不能加入预览或 Excel 映射。'
     try { parseReportInputSchemaDocument(draft.inputSchema) } catch (error) { return error instanceof Error ? error.message : '筛选条件配置不完整。' }
     try {
       const mapping = parseExcelMappingDocument(excelMappingFromColumns(draft.columns))
       if (Object.keys(mapping).length === 0) return '请至少配置一个 Oracle 结果表字段到 Excel 表头的映射。'
     } catch (error) { return error instanceof Error ? error.message : 'Excel 字段映射不完整。' }
+    if (draft.grants.some((grant) => grant.subjectId <= 0 || grant.actions.length === 0)) return '每个权限主体都必须填写大于 0 的 ID，并至少选择查询或导出权限。'
     return ''
   }
 
@@ -85,8 +94,8 @@ export function ReportConfigDrawer({ client, report, datasources, datasourcesLoa
   </Drawer>
 }
 
-function Editor({ tab, client, draft, datasources, datasourcesLoading, datasourcesError, onChange }: { tab: Tab; client: ReportCenterClient; draft: ReportDraft; datasources: ReportDatasource[]; datasourcesLoading: boolean; datasourcesError: string; onChange: (draft: ReportDraft) => void }) {
-  const set = <K extends keyof ReportDraft>(key: K, value: ReportDraft[K]) => onChange({ ...draft, [key]: value })
+function Editor({ tab, client, draft, datasources, datasourcesLoading, datasourcesError, onChange }: { tab: Tab; client: ReportCenterClient; draft: ReportDraft; datasources: ReportDatasource[]; datasourcesLoading: boolean; datasourcesError: string; onChange: Dispatch<SetStateAction<ReportDraft>> }) {
+  const set = <K extends keyof ReportDraft>(key: K, value: ReportDraft[K]) => onChange((current) => ({ ...current, [key]: value }))
   if (tab === 'basic') {
     const selected = datasources.find((item) => item.id === draft.datasourceId)
     const unavailable = draft.datasourceId > 0 && !selected

@@ -1,6 +1,6 @@
 import type { ClientResponse, HTTPMethod } from '../api/client'
 import { parseReportInputSchemaDocument } from './refCursorConfig.js'
-import type { ReportAudit, ReportAuditPage, ReportAuditQuery, ReportCatalogPage, ReportCatalogQuery, ReportColumn, ReportDatasource, ReportDatasourceInput, ReportDatasourceTest, ReportDefinitionStatus, ReportDraft, ReportExport, ReportExportPage, ReportFilterOperator, ReportGrant, ReportParameter, ReportProcedureArgument, ReportProcedurePage, ReportProcedureRef, ReportProcedureSignature, ReportProcedureSummary, ReportPublication, ReportResultPage, ReportResultQuery, ReportRun, ReportRunContract, ReportRunStatus, ReportSummary, ReportVersionDiff, ReportVersionPage, ReportVersionSummary } from './types'
+import type { ReportAudit, ReportAuditPage, ReportAuditQuery, ReportCatalogPage, ReportCatalogQuery, ReportColumn, ReportDatasource, ReportDatasourceInput, ReportDatasourceTest, ReportDefinitionStatus, ReportDraft, ReportExport, ReportExportPage, ReportFilterOperator, ReportGrant, ReportParameter, ReportProcedureArgument, ReportProcedurePage, ReportProcedureRef, ReportProcedureSignature, ReportProcedureSummary, ReportPublication, ReportResultPage, ReportResultQuery, ReportResultTableColumn, ReportResultTablePage, ReportResultTableRef, ReportResultTableSchema, ReportResultTableSummary, ReportRun, ReportRunContract, ReportRunStatus, ReportSummary, ReportVersionDiff, ReportVersionPage, ReportVersionSummary } from './types'
 
 type JsonRecord = Record<string, unknown>
 
@@ -10,6 +10,7 @@ export type ReportCenterClient = (path: string, options?: {
   signal?: AbortSignal
   showResult?: boolean
   silentLoading?: boolean
+  acceptSafeErrorMessage?: boolean
 }) => Promise<ClientResponse>
 
 type ReportAPIResult<T> = { ok: true; data: T } | { ok: false; error: string }
@@ -93,6 +94,20 @@ export async function getReportProcedureSignature(client: ReportCenterClient, da
   return requestAndParse(client, `/v1/report-datasources/${datasourceId}/procedure-signature?${search}`, { method: 'GET', signal }, parseReportProcedureSignature, 'Oracle 存储过程签名加载失败。')
 }
 
+export async function getReportResultTables(client: ReportCenterClient, datasourceId: number, query: { owner?: string; search?: string; after?: string; limit?: number }, signal?: AbortSignal): Promise<ReportAPIResult<ReportResultTablePage>> {
+  const search = new URLSearchParams()
+  if (query.owner?.trim()) search.set('owner', query.owner.trim())
+  if (query.search?.trim()) search.set('search', query.search.trim())
+  if (query.after) search.set('after', query.after)
+  search.set('limit', String(Math.min(100, Math.max(1, query.limit ?? 50))))
+  return requestAndParse(client, `/v1/report-datasources/${datasourceId}/result-tables?${search}`, { method: 'GET', signal }, parseReportResultTablePage, 'Oracle 结果表目录加载失败。')
+}
+
+export async function getReportResultTableSchema(client: ReportCenterClient, datasourceId: number, table: ReportResultTableRef, signal?: AbortSignal): Promise<ReportAPIResult<ReportResultTableSchema>> {
+  const search = new URLSearchParams({ owner: table.owner, name: table.name })
+  return requestAndParse(client, `/v1/report-datasources/${datasourceId}/result-table-schema?${search}`, { method: 'GET', signal }, parseReportResultTableSchema, 'Oracle 结果表字段加载失败。')
+}
+
 export function parseReportDatasources(payload: unknown): ReportDatasource[] {
   const data = unwrapData(payload)
   const rawItems = firstArray(data.items)
@@ -174,6 +189,26 @@ export function parseReportProcedureSignature(payload: unknown): ReportProcedure
     callTemplate: typeof data.callTemplate === 'string' ? data.callTemplate.slice(0, 65536) : '',
     blockingReasons,
   }
+}
+
+export function parseReportResultTablePage(payload: unknown): ReportResultTablePage {
+  const data = unwrapData(payload)
+  if (!Array.isArray(data.items) || typeof data.hasMore !== 'boolean') throw new Error('invalid result table page')
+  const items = data.items.map(parseReportResultTableSummary)
+  const nextAfter = publicString(data.nextAfter, 1024)
+  if (data.hasMore && (!items.length || !nextAfter)) throw new Error('invalid result table cursor')
+  return { items, hasMore: data.hasMore, nextAfter }
+}
+
+export function parseReportResultTableSchema(payload: unknown): ReportResultTableSchema {
+  const data = unwrapData(payload)
+  if (!Array.isArray(data.columns) || data.columns.length === 0) throw new Error('invalid result table schema')
+  const columns = data.columns.map(parseReportResultTableColumn)
+  if (columns.some((column, index) => index > 0 && column.position <= columns[index - 1].position)) throw new Error('invalid result table column order')
+  if (new Set(columns.map((column) => column.name.toUpperCase())).size !== columns.length) throw new Error('invalid result table column names')
+  const table = parseReportResultTableSummary(data.table, columns.length)
+  if (table.columnCount !== columns.length) throw new Error('invalid result table column count')
+  return { table, columns }
 }
 
 export async function getReportDraft(client: ReportCenterClient, reportId: number, signal?: AbortSignal): Promise<ReportAPIResult<ReportDraft>> {
@@ -439,7 +474,7 @@ export function parseReportAuditPage(payload: unknown): ReportAuditPage {
 }
 
 async function requestAndParse<T>(client: ReportCenterClient, path: string, options: Parameters<ReportCenterClient>[1], parse: (payload: unknown) => T, fallback: string): Promise<ReportAPIResult<T>> {
-  const response = await client(path, { ...options, showResult: false, silentLoading: true })
+  const response = await client(path, { ...options, showResult: false, silentLoading: true, acceptSafeErrorMessage: true })
   if (!response.ok) return { ok: false, error: response.error?.message ?? fallback }
   try {
     return { ok: true, data: parse(response.data) }
@@ -518,6 +553,35 @@ function parseReportProcedureArgument(value: unknown): ReportProcedureArgument {
     unsupportedReason: publicString(value.unsupportedReason, 300), suggestedCode: publicString(value.suggestedCode, 64),
     suggestedLogicalType: publicString(value.suggestedLogicalType, 32), suggestedControlType: publicString(value.suggestedControlType, 32),
     suggestedSystemValue: publicString(value.suggestedSystemValue, 32), role,
+  }
+}
+
+function parseReportResultTableSummary(value: unknown, fallbackColumnCount?: number): ReportResultTableSummary {
+  if (!isRecord(value)) throw new Error('invalid result table')
+  const owner = publicString(value.owner, 128)
+  const name = publicString(value.name, 128)
+  const columnCount = value.columnCount === undefined && fallbackColumnCount !== undefined
+    ? fallbackColumnCount
+    : strictNonNegativeInteger(value.columnCount)
+  const qualifiedName = publicString(value.qualifiedName, 257) || (owner && name ? `${owner}.${name}` : '')
+  if (!owner || !name || !qualifiedName) throw new Error('invalid result table')
+  return { owner, name, columnCount, qualifiedName }
+}
+
+function parseReportResultTableColumn(value: unknown): ReportResultTableColumn {
+  if (!isRecord(value)) throw new Error('invalid result table column')
+  const name = publicString(value.name, 128)
+  const position = positiveInteger(value.position)
+  const oracleType = publicString(value.oracleType, 64)
+  if (!name || !position || !oracleType || typeof value.nullable !== 'boolean') throw new Error('invalid result table column')
+  return {
+    name,
+    position,
+    oracleType,
+    dataLength: nullableInteger(value.dataLength),
+    precision: nullableInteger(value.precision),
+    scale: nullableInteger(value.scale),
+    nullable: value.nullable,
   }
 }
 

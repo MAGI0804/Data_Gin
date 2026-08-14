@@ -40,6 +40,8 @@ func TestRegisterReportRoutesUsesExpectedMethodsAndPaths(t *testing.T) {
 		http.MethodPost + " /api/v1/report-datasources/:id/test",
 		http.MethodGet + " /api/v1/report-datasources/:id/procedures",
 		http.MethodGet + " /api/v1/report-datasources/:id/procedure-signature",
+		http.MethodGet + " /api/v1/report-datasources/:id/result-tables",
+		http.MethodGet + " /api/v1/report-datasources/:id/result-table-schema",
 		http.MethodPost + " /api/v1/report-datasource-connection-tests",
 		http.MethodGet + " /api/v1/report-runs/:id",
 		http.MethodGet + " /api/v1/report-runs/:id/results",

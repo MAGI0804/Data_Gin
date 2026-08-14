@@ -101,6 +101,28 @@ func TestReportDatasourceControllerQueriesProcedureCatalogAndSignature(t *testin
 	}
 }
 
+func TestReportDatasourceControllerQueriesResultTableCatalogAndSchema(t *testing.T) {
+	service := &fakeReportDatasourceService{}
+	controller := NewReportDatasourceControllerWithService(service)
+	router := datasourceControllerRouter()
+	router.GET("/report-datasources/:id/result-tables", controller.ListResultTables)
+	router.GET("/report-datasources/:id/result-table-schema", controller.GetResultTableSchema)
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/report-datasources/9/result-tables?owner=REPORT&search=RESULT&after=cursor&limit=25", nil)
+	router.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK || service.datasourceID != 9 || service.resultTableQuery.Owner != "REPORT" || service.resultTableQuery.Search != "RESULT" || service.resultTableQuery.After != "cursor" || service.resultTableQuery.Limit != 25 {
+		t.Fatalf("catalog response=%d %s service=%+v", recorder.Code, recorder.Body, service)
+	}
+
+	recorder = httptest.NewRecorder()
+	request = httptest.NewRequest(http.MethodGet, "/report-datasources/9/result-table-schema?owner=REPORT&name=DAILY_RESULT_ROWS", nil)
+	router.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK || service.resultTableRef.Owner != "REPORT" || service.resultTableRef.Name != "DAILY_RESULT_ROWS" {
+		t.Fatalf("schema response=%d %s ref=%+v", recorder.Code, recorder.Body, service.resultTableRef)
+	}
+}
+
 func datasourceControllerRouter() *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
@@ -119,6 +141,8 @@ type fakeReportDatasourceService struct {
 	datasourceID        uint
 	procedureQuery      data_svc.ReportProcedureCatalogQuery
 	procedureRef        reportoracle.ProcedureRef
+	resultTableQuery    data_svc.ReportResultTableCatalogQuery
+	resultTableRef      reportoracle.ResultTableRef
 }
 
 func (*fakeReportDatasourceService) List(context.Context, uint) ([]data_svc.ReportDatasourceDTO, error) {
@@ -150,4 +174,12 @@ func (service *fakeReportDatasourceService) ListProcedures(_ context.Context, _ 
 func (service *fakeReportDatasourceService) GetProcedureSignature(_ context.Context, _ uint, datasourceID uint, ref reportoracle.ProcedureRef) (*data_svc.ReportProcedureSignatureDTO, error) {
 	service.datasourceID, service.procedureRef = datasourceID, ref
 	return &data_svc.ReportProcedureSignatureDTO{}, nil
+}
+func (service *fakeReportDatasourceService) ListResultTables(_ context.Context, _ uint, datasourceID uint, query data_svc.ReportResultTableCatalogQuery) (*data_svc.ReportResultTablePageDTO, error) {
+	service.datasourceID, service.resultTableQuery = datasourceID, query
+	return &data_svc.ReportResultTablePageDTO{}, nil
+}
+func (service *fakeReportDatasourceService) GetResultTableSchema(_ context.Context, _ uint, datasourceID uint, ref reportoracle.ResultTableRef) (*data_svc.ReportResultTableSchemaDTO, error) {
+	service.datasourceID, service.resultTableRef = datasourceID, ref
+	return &data_svc.ReportResultTableSchemaDTO{}, nil
 }

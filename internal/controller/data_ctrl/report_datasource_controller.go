@@ -26,6 +26,8 @@ type ReportDatasourceServiceAPI interface {
 	TestConnection(context.Context, uint, requestbody.ReportDatasourceConnectionTestRequest) (*data_svc.ReportDatasourceTestDTO, error)
 	ListProcedures(context.Context, uint, uint, data_svc.ReportProcedureCatalogQuery) (*data_svc.ReportProcedurePageDTO, error)
 	GetProcedureSignature(context.Context, uint, uint, reportoracle.ProcedureRef) (*data_svc.ReportProcedureSignatureDTO, error)
+	ListResultTables(context.Context, uint, uint, data_svc.ReportResultTableCatalogQuery) (*data_svc.ReportResultTablePageDTO, error)
+	GetResultTableSchema(context.Context, uint, uint, reportoracle.ResultTableRef) (*data_svc.ReportResultTableSchemaDTO, error)
 }
 
 type ReportDatasourceController struct{ service ReportDatasourceServiceAPI }
@@ -157,6 +159,46 @@ func (controller *ReportDatasourceController) GetProcedureSignature(c *gin.Conte
 	}
 	result, err := controller.service.GetProcedureSignature(c.Request.Context(), auth.CurrentUserID(c), datasourceID, reportoracle.ProcedureRef{
 		Owner: c.Query("owner"), Package: c.Query("package"), Name: c.Query("name"), Overload: c.Query("overload"),
+	})
+	if err != nil {
+		writeReportDatasourceError(c, err)
+		return
+	}
+	responses.New(c).ToResponseWithStatus(http.StatusOK, result)
+}
+
+func (controller *ReportDatasourceController) ListResultTables(c *gin.Context) {
+	datasourceID, err := parseReportUint(c.Param("id"), "datasource id")
+	if err != nil {
+		writeReportDatasourceError(c, err)
+		return
+	}
+	limit := 0
+	if rawLimit := c.Query("limit"); rawLimit != "" {
+		limit, err = strconv.Atoi(rawLimit)
+		if err != nil {
+			writeReportDatasourceError(c, data_svc.ErrReportDatasourceInvalid)
+			return
+		}
+	}
+	result, err := controller.service.ListResultTables(c.Request.Context(), auth.CurrentUserID(c), datasourceID, data_svc.ReportResultTableCatalogQuery{
+		Owner: c.Query("owner"), Search: c.Query("search"), After: c.Query("after"), Limit: limit,
+	})
+	if err != nil {
+		writeReportDatasourceError(c, err)
+		return
+	}
+	responses.New(c).ToResponseWithStatus(http.StatusOK, result)
+}
+
+func (controller *ReportDatasourceController) GetResultTableSchema(c *gin.Context) {
+	datasourceID, err := parseReportUint(c.Param("id"), "datasource id")
+	if err != nil {
+		writeReportDatasourceError(c, err)
+		return
+	}
+	result, err := controller.service.GetResultTableSchema(c.Request.Context(), auth.CurrentUserID(c), datasourceID, reportoracle.ResultTableRef{
+		Owner: c.Query("owner"), Name: c.Query("name"),
 	})
 	if err != nil {
 		writeReportDatasourceError(c, err)

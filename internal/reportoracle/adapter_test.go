@@ -81,6 +81,40 @@ func TestProcedureCursorRoundTrip(t *testing.T) {
 	}
 }
 
+func TestResultTableCatalogUsesBoundFiltersAndVisibleTables(t *testing.T) {
+	for _, bind := range []string{":1", ":2", ":3", ":4"} {
+		if count := strings.Count(resultTableCatalogSQL, bind); count != 1 {
+			t.Fatalf("bind %s occurs %d times, want once", bind, count)
+		}
+	}
+	for _, fragment := range []string{"all_tables", "all_tab_columns", "INSTR(", "REGEXP_LIKE", "CHR(31)"} {
+		if !strings.Contains(resultTableCatalogSQL, fragment) {
+			t.Fatalf("result table catalog SQL is missing %q", fragment)
+		}
+	}
+	if strings.Contains(resultTableCatalogSQL, "all_views") {
+		t.Fatal("result table catalog must not include Oracle views")
+	}
+}
+
+func TestResultTableCursorRoundTrip(t *testing.T) {
+	ref := ResultTableRef{Owner: "report_owner", Name: "daily_result_rows"}
+	key, err := ResultTableCursorKey(ref)
+	if err != nil {
+		t.Fatalf("ResultTableCursorKey() error = %v", err)
+	}
+	parsed, err := ParseResultTableCursorKey(key)
+	if err != nil {
+		t.Fatalf("ParseResultTableCursorKey() error = %v", err)
+	}
+	if parsed.Owner != "REPORT_OWNER" || parsed.Name != "DAILY_RESULT_ROWS" {
+		t.Fatalf("parsed cursor = %+v", parsed)
+	}
+	if _, err := ParseResultTableCursorKey("REPORT_OWNER.DAILY_RESULT_ROWS"); !errors.Is(err, ErrInvalidConfiguration) {
+		t.Fatalf("invalid cursor error = %v", err)
+	}
+}
+
 func TestBuildConnectStringRejectsUnsafeConfiguration(t *testing.T) {
 	tests := []Config{
 		{Host: "db)(PORT=9999", Port: 1521, ServiceName: "REPORT"},

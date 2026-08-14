@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -67,6 +68,20 @@ func TestReportControllerErrorContract(t *testing.T) {
 				t.Fatalf("internal error leaked: %s", recorder.Body)
 			}
 		})
+	}
+}
+
+func TestReportControllerInvalidDraftReturnsSafeSpecificReason(t *testing.T) {
+	controller := NewReportControllerWithService(&fakeReportControllerService{
+		getErr: fmt.Errorf("%w: invalid Oracle result table", data_svc.ErrReportInvalid),
+	})
+	router := reportControllerRouter()
+	router.GET("/reports/:id", controller.Get)
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/reports/9", nil))
+
+	if recorder.Code != http.StatusUnprocessableEntity || !strings.Contains(recorder.Body.String(), "Oracle 结果表") {
+		t.Fatalf("response = %d %s", recorder.Code, recorder.Body)
 	}
 }
 

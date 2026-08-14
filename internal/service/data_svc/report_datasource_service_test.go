@@ -223,6 +223,95 @@ func TestReportDatasourceServiceListsVisibleProceduresWithOpaqueCursor(t *testin
 	}
 }
 
+func TestReportDatasourceServiceListsVisibleResultTablesWithOpaqueCursor(t *testing.T) {
+	refs := []reportoracle.ResultTableRef{
+		{Owner: "REPORT", Name: "DAILY_RESULT_ROWS"},
+		{Owner: "REPORT", Name: "MONTHLY_RESULT_ROWS"},
+		{Owner: "REPORT", Name: "YEARLY_RESULT_ROWS"},
+	}
+	tables := make([]reportoracle.ResultTableSummary, 0, len(refs))
+	for index, ref := range refs {
+		cursor, err := reportoracle.ResultTableCursorKey(ref)
+		if err != nil {
+			t.Fatal(err)
+		}
+		tables = append(tables, reportoracle.ResultTableSummary{ResultTableRef: ref, ColumnCount: index + 3, CursorKey: cursor})
+	}
+	connection := &fakeReportDatasourceConnection{resultTables: tables}
+	store := &fakeReportDatasourceStore{item: model.ReportDatasource{
+		BaseModel: model.BaseModel{ID: 4}, Enabled: true, PasswordCiphertext: "ciphertext", CredentialKeyVersion: "key-v1", QueryTimeoutSeconds: 30,
+	}}
+	service := NewReportDatasourceServiceWithDependencies(store, &fakeReportDatasourceCipher{}, func(context.Context, reportoracle.Config) (reportDatasourceConnection, error) {
+		return connection, nil
+	})
+	page, err := service.ListResultTables(t.Context(), 7, 4, ReportResultTableCatalogQuery{Owner: "report", Search: "result", Limit: 2})
+	if err != nil {
+		t.Fatalf("ListResultTables() error = %v", err)
+	}
+	if len(page.Items) != 2 || !page.HasMore || page.NextAfter == "" || page.Items[0].QualifiedName != "REPORT.DAILY_RESULT_ROWS" || page.Items[0].ColumnCount != 3 {
+		t.Fatalf("ListResultTables() page = %+v", page)
+	}
+	if connection.resultTableQuery.Owner != "report" || connection.resultTableQuery.Search != "result" || connection.resultTableQuery.Limit != 3 || !connection.closed {
+		t.Fatalf("metadata query = %+v closed=%t", connection.resultTableQuery, connection.closed)
+	}
+	if _, err := service.ListResultTables(t.Context(), 7, 4, ReportResultTableCatalogQuery{After: "not-base64***", Limit: 2}); !errors.Is(err, ErrReportDatasourceInvalid) {
+		t.Fatalf("invalid cursor error = %v", err)
+	}
+}
+
+func TestReportDatasourceServiceReturnsResultTableSchema(t *testing.T) {
+	precision, scale := int64(18), int64(0)
+	connection := &fakeReportDatasourceConnection{resultColumns: []reportoracle.ResultColumn{
+		{Name: "RUN_ID", Position: 1, DataType: "VARCHAR2", DataLength: 36, Nullable: false},
+		{Name: "ROW_NO", Position: 2, DataType: "NUMBER", DataLength: 22, DataPrecision: &precision, DataScale: &scale, Nullable: false},
+		{Name: "STORE_NAME", Position: 3, DataType: "NVARCHAR2", DataLength: 400, Nullable: true},
+	}}
+	store := &fakeReportDatasourceStore{item: model.ReportDatasource{
+		BaseModel: model.BaseModel{ID: 4}, Enabled: true, PasswordCiphertext: "ciphertext", CredentialKeyVersion: "key-v1", QueryTimeoutSeconds: 30,
+	}}
+	service := NewReportDatasourceServiceWithDependencies(store, &fakeReportDatasourceCipher{}, func(context.Context, reportoracle.Config) (reportDatasourceConnection, error) {
+		return connection, nil
+	})
+	schema, err := service.GetResultTableSchema(t.Context(), 7, 4, reportoracle.ResultTableRef{Owner: "report", Name: "daily_result_rows"})
+	if err != nil {
+		t.Fatalf("GetResultTableSchema() error = %v", err)
+	}
+	if schema.Table.QualifiedName != "REPORT.DAILY_RESULT_ROWS" || schema.Table.ColumnCount != 3 || len(schema.Columns) != 3 || schema.Columns[1].OracleType != "NUMBER" || schema.Columns[1].Precision == nil || *schema.Columns[1].Precision != 18 {
+		t.Fatalf("GetResultTableSchema() = %+v", schema)
+	}
+	if connection.resultTableRef.Owner != "REPORT" || connection.resultTableRef.Name != "DAILY_RESULT_ROWS" || !connection.closed {
+		t.Fatalf("schema ref=%+v closed=%t", connection.resultTableRef, connection.closed)
+	}
+}
+
+func TestReportDatasourceServiceClassifiesResultTableMetadataErrors(t *testing.T) {
+	store := &fakeReportDatasourceStore{item: model.ReportDatasource{
+		BaseModel: model.BaseModel{ID: 4}, Enabled: true, PasswordCiphertext: "ciphertext", CredentialKeyVersion: "key-v1", QueryTimeoutSeconds: 30,
+	}}
+
+	missing := &fakeReportDatasourceConnection{metadataErr: reportoracle.ErrMetadataMismatch}
+	missingService := NewReportDatasourceServiceWithDependencies(store, &fakeReportDatasourceCipher{}, func(context.Context, reportoracle.Config) (reportDatasourceConnection, error) {
+		return missing, nil
+	})
+	if _, err := missingService.GetResultTableSchema(t.Context(), 7, 4, reportoracle.ResultTableRef{Owner: "REPORT", Name: "MISSING_ROWS"}); !errors.Is(err, ErrReportDatasourceNotFound) {
+		t.Fatalf("missing schema error = %v", err)
+	}
+	if !missing.closed {
+		t.Fatal("missing schema connection was not closed")
+	}
+
+	unavailable := &fakeReportDatasourceConnection{metadataErr: errors.New("ORA-03113: end-of-file on communication channel")}
+	unavailableService := NewReportDatasourceServiceWithDependencies(store, &fakeReportDatasourceCipher{}, func(context.Context, reportoracle.Config) (reportDatasourceConnection, error) {
+		return unavailable, nil
+	})
+	if _, err := unavailableService.ListResultTables(t.Context(), 7, 4, ReportResultTableCatalogQuery{Limit: 20}); !errors.Is(err, ErrReportDatasourceOracleUnavailable) {
+		t.Fatalf("unavailable catalog error = %v", err)
+	}
+	if !unavailable.closed {
+		t.Fatal("unavailable catalog connection was not closed")
+	}
+}
+
 func TestReportDatasourceServiceBuildsProcedureSignatureRecommendations(t *testing.T) {
 	length := int64(4000)
 	connection := &fakeReportDatasourceConnection{arguments: []reportoracle.ProcedureArgument{
@@ -330,12 +419,16 @@ func validReportDatasourceRequest(password string) requestbody.ReportDatasourceS
 }
 
 type fakeReportDatasourceConnection struct {
-	closed      bool
-	procedures  []reportoracle.ProcedureSummary
-	arguments   []reportoracle.ProcedureArgument
-	metadataErr error
-	query       reportoracle.ProcedureCatalogQuery
-	ref         reportoracle.ProcedureRef
+	closed           bool
+	procedures       []reportoracle.ProcedureSummary
+	arguments        []reportoracle.ProcedureArgument
+	resultTables     []reportoracle.ResultTableSummary
+	resultColumns    []reportoracle.ResultColumn
+	metadataErr      error
+	query            reportoracle.ProcedureCatalogQuery
+	ref              reportoracle.ProcedureRef
+	resultTableQuery reportoracle.ResultTableCatalogQuery
+	resultTableRef   reportoracle.ResultTableRef
 }
 
 func (connection *fakeReportDatasourceConnection) Close() error {
@@ -351,6 +444,16 @@ func (connection *fakeReportDatasourceConnection) ListProcedures(_ context.Conte
 func (connection *fakeReportDatasourceConnection) InspectProcedure(_ context.Context, ref reportoracle.ProcedureRef) ([]reportoracle.ProcedureArgument, error) {
 	connection.ref = ref
 	return connection.arguments, connection.metadataErr
+}
+
+func (connection *fakeReportDatasourceConnection) ListResultTables(_ context.Context, query reportoracle.ResultTableCatalogQuery) ([]reportoracle.ResultTableSummary, error) {
+	connection.resultTableQuery = query
+	return connection.resultTables, connection.metadataErr
+}
+
+func (connection *fakeReportDatasourceConnection) InspectResultTable(_ context.Context, ref reportoracle.ResultTableRef) ([]reportoracle.ResultColumn, error) {
+	connection.resultTableRef = ref
+	return connection.resultColumns, connection.metadataErr
 }
 
 func validReportDatasourceConnectionTestRequest(password string) requestbody.ReportDatasourceConnectionTestRequest {

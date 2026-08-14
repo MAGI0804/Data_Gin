@@ -118,6 +118,37 @@ export type ReportProcedureSignature = {
   blockingReasons: string[]
 }
 
+export type ReportResultTableRef = {
+  owner: string
+  name: string
+}
+
+export type ReportResultTableSummary = ReportResultTableRef & {
+  columnCount: number
+  qualifiedName: string
+}
+
+export type ReportResultTablePage = {
+  items: ReportResultTableSummary[]
+  hasMore: boolean
+  nextAfter: string
+}
+
+export type ReportResultTableColumn = {
+  name: string
+  position: number
+  oracleType: string
+  dataLength: number | null
+  precision: number | null
+  scale: number | null
+  nullable: boolean
+}
+
+export type ReportResultTableSchema = {
+  table: ReportResultTableSummary
+  columns: ReportResultTableColumn[]
+}
+
 export type ReportExecutionMode = 'TABLE_SNAPSHOT' | 'REF_CURSOR'
 
 export type ReportInputControl = 'TEXT' | 'TEXTAREA' | 'NUMBER' | 'CHECKBOX' | 'DATE' | 'DATETIME' | 'SELECT' | 'MULTI_SELECT'

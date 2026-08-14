@@ -265,6 +265,40 @@ test('classifies public failures without exposing credentials', async (t) => {
   }
 })
 
+test('uses the backend safe validation message for 4xx responses', async () => {
+  const client = createApiClient(clientOptions({
+    fetch: async () => response(422, { code: 100422, msg: '请选择 Oracle 结果表', data: null }),
+  }))
+
+  const result = await client.request('/v1/reports', { method: 'POST', body: {}, acceptSafeErrorMessage: true })
+
+  assert.equal(result.ok, false)
+  assert.equal(result.status, 422)
+  assert.equal(result.error?.message, '请选择 Oracle 结果表')
+})
+
+test('does not trust backend validation messages unless the endpoint opts in', async () => {
+  const client = createApiClient(clientOptions({
+    fetch: async () => response(422, { code: 100422, msg: 'raw provider detail', data: null }),
+  }))
+
+  const result = await client.request('/v1/legacy', { method: 'POST', body: {} })
+
+  assert.equal(result.error?.message, '请求未能完成，请检查输入后重试。')
+  assert.doesNotMatch(JSON.stringify(result), /provider detail/)
+})
+
+test('does not expose backend messages from 5xx responses', async () => {
+  const client = createApiClient(clientOptions({
+    fetch: async () => response(500, { code: 100500, msg: 'database password=secret', data: null }),
+  }))
+
+  const result = await client.request('/v1/reports', { method: 'POST', body: {} })
+
+  assert.equal(result.error?.message, '服务暂时不可用，请稍后重试。')
+  assert.doesNotMatch(JSON.stringify(result), /password|secret/i)
+})
+
 test('classifies network and caller cancellation failures', async () => {
   const networkClient = createApiClient(clientOptions({
     fetch: async () => { throw new TypeError('connection reset') },

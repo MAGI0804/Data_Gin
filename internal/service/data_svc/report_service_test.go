@@ -223,6 +223,19 @@ func TestReportDraftServiceAcceptsJSONInputResultTable(t *testing.T) {
 	}
 }
 
+func TestReportDraftServiceRejectsResultKeyColumnsFromReportMapping(t *testing.T) {
+	for _, keyColumn := range []string{"RUN_ID", "ROW_NO"} {
+		t.Run(keyColumn, func(t *testing.T) {
+			request := validReportDraftRequest()
+			request.Columns[0].DatabaseColumn = keyColumn
+
+			if _, err := reportDraftFromRequest(17, request); !errors.Is(err, ErrReportInvalid) || !strings.Contains(err.Error(), "result key columns") {
+				t.Fatalf("reportDraftFromRequest() error = %v, want result key validation", err)
+			}
+		})
+	}
+}
+
 func TestReportDraftServiceRejectsMixedJSONAndLegacyParameters(t *testing.T) {
 	request := validReportDraftRequest()
 	request.ExecutionMode = model.ReportExecutionModeTableSnapshot

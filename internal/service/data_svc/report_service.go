@@ -373,6 +373,13 @@ func reportDraftFromRequest(actor uint, request requestbody.ReportDraftSaveReque
 	} else if mode == model.ReportExecutionModeTableSnapshot {
 		return nil, invalidReport("result columns are required")
 	}
+	if mode == model.ReportExecutionModeTableSnapshot {
+		for _, column := range columns {
+			if column.DatabaseColumn == runIDColumn || column.DatabaseColumn == rowIDColumn {
+				return nil, invalidReport("result key columns must not be configured as report columns")
+			}
+		}
+	}
 	grants, err := reportGrantsFromRequest(request.Grants, actor)
 	if err != nil {
 		return nil, err

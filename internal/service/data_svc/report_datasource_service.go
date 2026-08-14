@@ -51,6 +51,8 @@ type reportDatasourceConnection interface {
 	Close() error
 	ListProcedures(context.Context, reportoracle.ProcedureCatalogQuery) ([]reportoracle.ProcedureSummary, error)
 	InspectProcedure(context.Context, reportoracle.ProcedureRef) ([]reportoracle.ProcedureArgument, error)
+	ListResultTables(context.Context, reportoracle.ResultTableCatalogQuery) ([]reportoracle.ResultTableSummary, error)
+	InspectResultTable(context.Context, reportoracle.ResultTableRef) ([]reportoracle.ResultColumn, error)
 }
 type reportDatasourceOpener func(context.Context, reportoracle.Config) (reportDatasourceConnection, error)
 
@@ -113,6 +115,41 @@ type ReportProcedurePageDTO struct {
 	Items     []ReportProcedureSummaryDTO `json:"items"`
 	HasMore   bool                        `json:"hasMore"`
 	NextAfter string                      `json:"nextAfter"`
+}
+
+type ReportResultTableCatalogQuery struct {
+	Owner  string
+	Search string
+	After  string
+	Limit  int
+}
+
+type ReportResultTableSummaryDTO struct {
+	Owner         string `json:"owner"`
+	Name          string `json:"name"`
+	QualifiedName string `json:"qualifiedName"`
+	ColumnCount   int    `json:"columnCount"`
+}
+
+type ReportResultTablePageDTO struct {
+	Items     []ReportResultTableSummaryDTO `json:"items"`
+	HasMore   bool                          `json:"hasMore"`
+	NextAfter string                        `json:"nextAfter"`
+}
+
+type ReportResultTableColumnDTO struct {
+	Name       string `json:"name"`
+	Position   int    `json:"position"`
+	OracleType string `json:"oracleType"`
+	DataLength int64  `json:"dataLength"`
+	Precision  *int64 `json:"precision"`
+	Scale      *int64 `json:"scale"`
+	Nullable   bool   `json:"nullable"`
+}
+
+type ReportResultTableSchemaDTO struct {
+	Table   ReportResultTableSummaryDTO  `json:"table"`
+	Columns []ReportResultTableColumnDTO `json:"columns"`
 }
 
 type ReportProcedureArgumentDTO struct {
@@ -394,6 +431,91 @@ func (service *ReportDatasourceService) GetProcedureSignature(ctx context.Contex
 	}, nil
 }
 
+func (service *ReportDatasourceService) ListResultTables(ctx context.Context, actor, datasourceID uint, query ReportResultTableCatalogQuery) (*ReportResultTablePageDTO, error) {
+	if service == nil || ctx == nil || actor == 0 || datasourceID == 0 {
+		return nil, ErrReportDatasourceInvalid
+	}
+	query.Owner = strings.TrimSpace(query.Owner)
+	query.Search = strings.TrimSpace(query.Search)
+	if utf8.RuneCountInString(query.Search) > 128 || query.Limit < 0 || query.Limit > 100 {
+		return nil, ErrReportDatasourceInvalid
+	}
+	if query.Limit == 0 {
+		query.Limit = 50
+	}
+	afterKey := ""
+	if query.After != "" {
+		decoded, err := base64.RawURLEncoding.DecodeString(query.After)
+		if err != nil || len(decoded) > 260 {
+			return nil, ErrReportDatasourceInvalid
+		}
+		afterKey = string(decoded)
+		if _, err := reportoracle.ParseResultTableCursorKey(afterKey); err != nil {
+			return nil, ErrReportDatasourceInvalid
+		}
+	}
+
+	connection, queryCtx, cancel, err := service.openMetadataConnection(ctx, datasourceID)
+	if err != nil {
+		return nil, err
+	}
+	defer cancel()
+	defer connection.Close()
+	tables, err := connection.ListResultTables(queryCtx, reportoracle.ResultTableCatalogQuery{
+		Owner: query.Owner, Search: query.Search, AfterKey: afterKey, Limit: query.Limit + 1,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("%w: list result tables: %v", ErrReportDatasourceOracleUnavailable, err)
+	}
+	hasMore := len(tables) > query.Limit
+	if hasMore {
+		tables = tables[:query.Limit]
+	}
+	items := make([]ReportResultTableSummaryDTO, 0, len(tables))
+	for _, table := range tables {
+		items = append(items, resultTableSummaryDTO(table.ResultTableRef, table.ColumnCount))
+	}
+	nextAfter := ""
+	if hasMore && len(tables) > 0 {
+		nextAfter = base64.RawURLEncoding.EncodeToString([]byte(tables[len(tables)-1].CursorKey))
+	}
+	return &ReportResultTablePageDTO{Items: items, HasMore: hasMore, NextAfter: nextAfter}, nil
+}
+
+func (service *ReportDatasourceService) GetResultTableSchema(ctx context.Context, actor, datasourceID uint, ref reportoracle.ResultTableRef) (*ReportResultTableSchemaDTO, error) {
+	if service == nil || ctx == nil || actor == 0 || datasourceID == 0 {
+		return nil, ErrReportDatasourceInvalid
+	}
+	normalized, err := reportoracle.NormalizeResultTableRef(ref)
+	if err != nil {
+		return nil, ErrReportDatasourceInvalid
+	}
+	connection, queryCtx, cancel, err := service.openMetadataConnection(ctx, datasourceID)
+	if err != nil {
+		return nil, err
+	}
+	defer cancel()
+	defer connection.Close()
+	columns, err := connection.InspectResultTable(queryCtx, normalized)
+	if err != nil {
+		if errors.Is(err, reportoracle.ErrMetadataMismatch) {
+			return nil, ErrReportDatasourceNotFound
+		}
+		return nil, fmt.Errorf("%w: inspect result table: %v", ErrReportDatasourceOracleUnavailable, err)
+	}
+	items := make([]ReportResultTableColumnDTO, 0, len(columns))
+	for _, column := range columns {
+		items = append(items, ReportResultTableColumnDTO{
+			Name: column.Name, Position: column.Position, OracleType: column.DataType,
+			DataLength: column.DataLength, Precision: column.DataPrecision, Scale: column.DataScale,
+			Nullable: column.Nullable,
+		})
+	}
+	return &ReportResultTableSchemaDTO{
+		Table: resultTableSummaryDTO(normalized, len(items)), Columns: items,
+	}, nil
+}
+
 func (service *ReportDatasourceService) openMetadataConnection(ctx context.Context, datasourceID uint) (reportDatasourceConnection, context.Context, context.CancelFunc, error) {
 	datasource, err := service.store.GetReportDatasource(ctx, datasourceID)
 	if err != nil {
@@ -422,6 +544,12 @@ func procedureSummaryDTO(ref reportoracle.ProcedureRef, argumentCount int) Repor
 	return ReportProcedureSummaryDTO{
 		Owner: ref.Owner, Package: ref.Package, Name: ref.Name, Overload: ref.Overload,
 		ArgumentCount: argumentCount, QualifiedName: displayProcedureName(ref),
+	}
+}
+
+func resultTableSummaryDTO(ref reportoracle.ResultTableRef, columnCount int) ReportResultTableSummaryDTO {
+	return ReportResultTableSummaryDTO{
+		Owner: ref.Owner, Name: ref.Name, QualifiedName: ref.Owner + "." + ref.Name, ColumnCount: columnCount,
 	}
 }
 

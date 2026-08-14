@@ -83,6 +83,19 @@ type ProcedureSummary struct {
 	CursorKey     string
 }
 
+type ResultTableCatalogQuery struct {
+	Owner    string
+	Search   string
+	AfterKey string
+	Limit    int
+}
+
+type ResultTableSummary struct {
+	ResultTableRef
+	ColumnCount int
+	CursorKey   string
+}
+
 type ResultColumn struct {
 	Name          string
 	Position      int
@@ -301,6 +314,81 @@ func ParseProcedureCursorKey(value string) (ProcedureRef, error) {
 	canonical, err := ProcedureCursorKey(normalized)
 	if err != nil || canonical != value {
 		return ProcedureRef{}, configurationError("procedure cursor is invalid")
+	}
+	return normalized, nil
+}
+
+// ListResultTables returns table objects visible to the Oracle account. Views
+// are deliberately excluded because report results are deleted by run_id after
+// a successful export.
+func (adapter *Adapter) ListResultTables(ctx context.Context, query ResultTableCatalogQuery) ([]ResultTableSummary, error) {
+	if adapter == nil || adapter.db == nil {
+		return nil, fmt.Errorf("list oracle result tables: adapter is closed")
+	}
+	owner := ""
+	var err error
+	if strings.TrimSpace(query.Owner) != "" {
+		owner, err = normalizeIdentifier(query.Owner, "result table owner")
+		if err != nil {
+			return nil, err
+		}
+	}
+	search := strings.ToUpper(strings.TrimSpace(query.Search))
+	if len(search) > 128 {
+		return nil, configurationError("result table search is too long")
+	}
+	if query.AfterKey != "" {
+		if _, err := ParseResultTableCursorKey(query.AfterKey); err != nil {
+			return nil, err
+		}
+	}
+	if query.Limit < 1 || query.Limit > 101 {
+		return nil, configurationError("result table list limit is invalid")
+	}
+
+	rows, err := adapter.db.QueryContext(ctx, resultTableCatalogSQL,
+		nullableQueryValue(owner), nullableQueryValue(search), nullableQueryValue(query.AfterKey), query.Limit,
+		godror.PrefetchCount(adapter.prefetchRows), godror.FetchArraySize(adapter.fetchArraySize),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list oracle result tables: %w", err)
+	}
+	defer rows.Close()
+
+	tables := make([]ResultTableSummary, 0, query.Limit)
+	for rows.Next() {
+		var table ResultTableSummary
+		if err := rows.Scan(&table.Owner, &table.Name, &table.ColumnCount, &table.CursorKey); err != nil {
+			return nil, fmt.Errorf("scan oracle result table catalog: %w", err)
+		}
+		tables = append(tables, table)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate oracle result table catalog: %w", err)
+	}
+	return tables, nil
+}
+
+func ResultTableCursorKey(ref ResultTableRef) (string, error) {
+	normalized, err := NormalizeResultTableRef(ref)
+	if err != nil {
+		return "", err
+	}
+	return strings.Join([]string{normalized.Owner, normalized.Name}, "\x1f"), nil
+}
+
+func ParseResultTableCursorKey(value string) (ResultTableRef, error) {
+	parts := strings.Split(value, "\x1f")
+	if len(parts) != 2 {
+		return ResultTableRef{}, configurationError("result table cursor is invalid")
+	}
+	normalized, err := NormalizeResultTableRef(ResultTableRef{Owner: parts[0], Name: parts[1]})
+	if err != nil {
+		return ResultTableRef{}, configurationError("result table cursor is invalid")
+	}
+	canonical, err := ResultTableCursorKey(normalized)
+	if err != nil || canonical != value {
+		return ResultTableRef{}, configurationError("result table cursor is invalid")
 	}
 	return normalized, nil
 }
@@ -733,3 +821,31 @@ SELECT column_name, column_id, data_type, data_length,
 FROM all_tab_columns
 WHERE owner = :1 AND table_name = :2
 ORDER BY column_id`
+
+const resultTableCatalogSQL = `
+WITH filters AS (
+    SELECT :1 AS owner_name, :2 AS search_text, :3 AS after_key, :4 AS row_limit
+    FROM dual
+), ordered_catalog AS (
+    SELECT tables.owner,
+           tables.table_name,
+           (
+               SELECT COUNT(*)
+               FROM all_tab_columns columns
+               WHERE columns.owner = tables.owner
+                 AND columns.table_name = tables.table_name
+           ) AS column_count,
+           tables.owner || CHR(31) || tables.table_name AS cursor_key,
+           filters.row_limit
+    FROM all_tables tables
+    CROSS JOIN filters
+    WHERE REGEXP_LIKE(tables.owner, '^[A-Z][A-Z0-9_$#]*$')
+      AND REGEXP_LIKE(tables.table_name, '^[A-Z][A-Z0-9_$#]*$')
+      AND (filters.owner_name IS NULL OR tables.owner = filters.owner_name)
+      AND (filters.search_text IS NULL OR INSTR(tables.owner || '.' || tables.table_name, filters.search_text) > 0)
+      AND (filters.after_key IS NULL OR tables.owner || CHR(31) || tables.table_name > filters.after_key)
+    ORDER BY cursor_key
+)
+SELECT owner, table_name, column_count, cursor_key
+FROM ordered_catalog
+WHERE ROWNUM <= row_limit`

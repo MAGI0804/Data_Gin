@@ -3,8 +3,8 @@ import { readdirSync, readFileSync } from 'node:fs'
 import test from 'node:test'
 import ts from 'typescript'
 
-import { createReportRun, getReportAudits, getReportProcedureSignature, getReportProcedures, parsePublication, parseReportAuditPage, parseReportCatalogPage, parseReportDatasource, parseReportDatasources, parseReportDatasourceTest, parseReportDraft, parseReportExport, parseReportExportPage, parseReportProcedurePage, parseReportProcedureSignature, parseReportResultPage, parseReportRun, parseReportRunContract, parseReportVersionDiff, parseReportVersionPage, saveReportDraft, testReportDatasourceConnection } from '../.test-dist/reportCenter/api.js'
-import { applyExcelMapping, buildReportConditions, excelMappingFromColumns, initialReportConditionValues, parseExcelMappingDocument, parseReportInputSchemaDocument, renameExcelMappingField } from '../.test-dist/reportCenter/refCursorConfig.js'
+import { createReportRun, getReportAudits, getReportProcedureSignature, getReportProcedures, getReportResultTableSchema, getReportResultTables, parsePublication, parseReportAuditPage, parseReportCatalogPage, parseReportDatasource, parseReportDatasources, parseReportDatasourceTest, parseReportDraft, parseReportExport, parseReportExportPage, parseReportProcedurePage, parseReportProcedureSignature, parseReportResultPage, parseReportResultTablePage, parseReportResultTableSchema, parseReportRun, parseReportRunContract, parseReportVersionDiff, parseReportVersionPage, saveReportDraft, testReportDatasourceConnection } from '../.test-dist/reportCenter/api.js'
+import { applyExcelMapping, buildReportConditions, excelMappingFromColumns, initialReportConditionValues, parseExcelMappingDocument, parseReportInputSchemaDocument, reconcileReportColumnsWithResultSchema, renameExcelMappingField, reportColumnsFromResultSchema, resultKeyColumnsFromSchema } from '../.test-dist/reportCenter/refCursorConfig.js'
 import { reportParameterControls, reportParameterFlagDisabled, updateReportParameterFlag, updateReportParameterLogicalType } from '../.test-dist/reportCenter/parameterConfig.js'
 import { buildNewReportRunState, canStartNewReportRun, initialReportParameterValues } from '../.test-dist/reportCenter/queryParameters.js'
 import { createLatestRequestGuard } from '../.test-dist/reportCenter/components/ReportVersionDrawer/requestGuard.js'
@@ -39,7 +39,13 @@ test('functional state updates do not retain React DOM events', () => {
 
 test('drawer keeps long parsed configuration inside its scrollable body', () => {
   const source = readFileSync(new URL('../src/ui/Drawer/Drawer.module.css', import.meta.url), 'utf8')
+  const layerRule = source.match(/\.layer\s*\{([^}]*)\}/)?.[1] ?? ''
+  const drawerRule = source.match(/\.drawer\s*\{([^}]*)\}/)?.[1] ?? ''
   const bodyRule = source.match(/\.body\s*\{([^}]*)\}/)?.[1] ?? ''
+  assert.match(layerRule, /grid-template-rows:\s*minmax\(0,\s*1fr\)\s*;/)
+  assert.match(layerRule, /overflow:\s*hidden\s*;/)
+  assert.match(drawerRule, /height:\s*100%\s*;/)
+  assert.match(drawerRule, /min-height:\s*0\s*;/)
   assert.match(bodyRule, /min-height:\s*0\s*;/)
   assert.match(bodyRule, /overflow-y:\s*auto\s*;/)
 })
@@ -80,6 +86,13 @@ test('parseReportCatalogPage reads the standard API envelope', () => {
   assert.equal(page.items[0].isOwner, false)
   assert.equal(page.hasMore, true)
   assert.equal(page.nextAfterId, 12)
+})
+
+test('input schema rejects payloads beyond the backend 64 KiB boundary', () => {
+  assert.throws(
+    () => parseReportInputSchemaDocument({ condition1: { type: 'VARCHAR2', displayName: '条件', example: '测'.repeat(22_000) } }),
+    /64 KiB/,
+  )
 })
 
 test('parseReportCatalogPage drops malformed rows and normalizes unsafe fields', () => {
@@ -373,6 +386,63 @@ test('Excel JSON mapping and table edits share the existing columns contract', (
   assert.equal(renamed[0].databaseColumn, 'supplier_id')
 })
 
+test('result table schema generates Excel fields and keeps edited headers when key columns change', () => {
+  let index = 0
+  const createFieldId = () => `00000000-0000-4000-8000-${String(++index).padStart(12, '0')}`
+  const schema = [
+    { name: 'RUN_ID', position: 1, oracleType: 'VARCHAR2', dataLength: 36, precision: null, scale: null, nullable: false },
+    { name: 'ROW_NO', position: 2, oracleType: 'NUMBER', dataLength: 22, precision: 20, scale: 0, nullable: false },
+    { name: 'SUPPLIER_ID', position: 3, oracleType: 'VARCHAR2', dataLength: 64, precision: null, scale: null, nullable: true },
+  ]
+  const generated = reportColumnsFromResultSchema(schema, ['RUN_ID', 'ROW_NO'], createFieldId)
+  assert.deepEqual(generated.map((column) => column.databaseColumn), ['SUPPLIER_ID'])
+  assert.equal(generated[0].sourceOracleType, 'VARCHAR2')
+  const customized = [{ ...generated[0], excelHeader: '供应商编码', previewHeader: '供应商编码' }]
+  const reconciled = reconcileReportColumnsWithResultSchema(schema, ['RUN_ID', 'ROW_NO'], customized, () => { throw new Error('existing field must keep its stable id') })
+  assert.equal(reconciled[0].fieldId, generated[0].fieldId)
+  assert.equal(reconciled[0].excelHeader, '供应商编码')
+})
+
+test('reselecting the same result table preserves valid custom key columns', () => {
+  const schema = [
+    { name: 'BATCH_KEY', position: 1, oracleType: 'VARCHAR2', dataLength: 36, precision: null, scale: null, nullable: false },
+    { name: 'LINE_KEY', position: 2, oracleType: 'NUMBER', dataLength: 22, precision: 20, scale: 0, nullable: false },
+    { name: 'AMOUNT', position: 3, oracleType: 'NUMBER', dataLength: 22, precision: 18, scale: 2, nullable: true },
+  ]
+  assert.deepEqual(
+    resultKeyColumnsFromSchema(schema, { runIdColumn: 'BATCH_KEY', rowIdColumn: 'LINE_KEY' }, true),
+    { runIdColumn: 'BATCH_KEY', rowIdColumn: 'LINE_KEY' },
+  )
+  assert.deepEqual(
+    resultKeyColumnsFromSchema(schema, { runIdColumn: 'MISSING', rowIdColumn: 'LINE_KEY' }, true),
+    { runIdColumn: '', rowIdColumn: '' },
+  )
+})
+
+test('result table metadata parsers and requests enforce the Oracle table contract', async () => {
+  const table = { owner: 'REPORT', name: 'SALES_RESULT', qualifiedName: 'REPORT.SALES_RESULT', columnCount: 3 }
+  const columns = [
+    { name: 'RUN_ID', position: 1, oracleType: 'VARCHAR2', dataLength: 36, precision: null, scale: null, nullable: false },
+    { name: 'ROW_NO', position: 2, oracleType: 'NUMBER', dataLength: 22, precision: 20, scale: 0, nullable: false },
+    { name: 'AMOUNT', position: 3, oracleType: 'NUMBER', dataLength: 22, precision: 18, scale: 2, nullable: true },
+  ]
+  assert.equal(parseReportResultTablePage({ data: { items: [table], hasMore: true, nextAfter: 'opaque' } }).items[0].qualifiedName, table.qualifiedName)
+  assert.equal(parseReportResultTableSchema({ data: { table, columns } }).columns[2].precision, 18)
+  assert.throws(() => parseReportResultTableSchema({ data: { table, columns: [columns[1], columns[0], columns[2]] } }), /column order/)
+
+  const requests = []
+  const client = async (path, options) => {
+    requests.push({ path, options })
+    return path.includes('result-table-schema')
+      ? { ok: true, data: { data: { table, columns } } }
+      : { ok: true, data: { data: { items: [table], hasMore: false, nextAfter: '' } } }
+  }
+  await getReportResultTables(client, 3, { owner: ' REPORT ', search: ' sales ', after: 'opaque', limit: 200 })
+  await getReportResultTableSchema(client, 3, { owner: 'REPORT', name: 'SALES_RESULT' })
+  assert.equal(requests[0].path, '/v1/report-datasources/3/result-tables?owner=REPORT&search=sales&after=opaque&limit=100')
+  assert.equal(requests[1].path, '/v1/report-datasources/3/result-table-schema?owner=REPORT&name=SALES_RESULT')
+})
+
 test('procedure catalog and signature parsers enforce the JSON cursor protocol contract', () => {
   const page = parseReportProcedurePage({ data: { items: [{ owner: 'REPORT', package: 'PKG', name: 'BUILD', overload: '1', argumentCount: 2, qualifiedName: 'REPORT.PKG.BUILD #1' }], hasMore: true, nextAfter: 'cursor' } })
   assert.equal(page.items[0].qualifiedName, 'REPORT.PKG.BUILD #1')
@@ -641,5 +711,5 @@ test('report audit request builds bounded encoded cursor filters', async () => {
   })
   assert.equal(result.ok, true)
   assert.equal(request.path, '/v1/report-audits?action=REPORT_RESULT_QUERY_SUCCESS&targetType=REPORT_RUN&targetId=31&afterId=88&limit=100')
-  assert.deepEqual(request.options, { method: 'GET', signal: undefined, showResult: false, silentLoading: true })
+  assert.deepEqual(request.options, { method: 'GET', signal: undefined, showResult: false, silentLoading: true, acceptSafeErrorMessage: true })
 })
