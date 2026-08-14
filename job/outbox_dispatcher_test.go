@@ -276,6 +276,50 @@ func TestOutboxDispatcherRunStopsOnCancellation(t *testing.T) {
 	}
 }
 
+func TestOutboxDispatcherRunBacksOffAfterCycleFailureAndResetsAfterRecovery(t *testing.T) {
+	store := &recoveringOutboxStore{
+		claimErrors: []error{errors.New("database unavailable"), nil},
+		claimCalls:  make(chan int, 3),
+	}
+	publisher := &fakeMallWeatherPublisher{}
+	dispatcher := newTestOutboxDispatcher(t, store, publisher, time.Now())
+	dispatcher.pollInterval = time.Hour
+	dispatcher.retryBase = 5 * time.Millisecond
+	dispatcher.retryMax = 20 * time.Millisecond
+
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- dispatcher.Run(ctx) }()
+	t.Cleanup(cancel)
+
+	for want := 1; want <= 2; want++ {
+		select {
+		case got := <-store.claimCalls:
+			if got != want {
+				t.Fatalf("claim call = %d, want %d", got, want)
+			}
+		case <-time.After(time.Second):
+			t.Fatalf("claim call %d did not run after retry backoff", want)
+		}
+	}
+
+	select {
+	case call := <-store.claimCalls:
+		t.Fatalf("claim call %d ran before the recovered poll interval", call)
+	case <-time.After(25 * time.Millisecond):
+	}
+
+	cancel()
+	select {
+	case err := <-done:
+		if !errors.Is(err, context.Canceled) {
+			t.Fatalf("Run() error = %v, want context.Canceled", err)
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Run() did not stop after recovery cancellation")
+	}
+}
+
 func TestOutboxBackoffIsBounded(t *testing.T) {
 	tests := []struct {
 		name     string
@@ -327,4 +371,33 @@ func weatherOutboxRow(id uint, attempts int) model.AsyncJobOutbox {
 		QueueName:   MallWeatherQueueName,
 		Attempts:    attempts,
 	}
+}
+
+type recoveringOutboxStore struct {
+	mu          sync.Mutex
+	claimErrors []error
+	claimCalls  chan int
+	calls       int
+}
+
+func (store *recoveringOutboxStore) ClaimBatch(_ context.Context, _ string, _ []string, _ time.Time, _ time.Duration, _ int) ([]model.AsyncJobOutbox, error) {
+	store.mu.Lock()
+	store.calls++
+	call := store.calls
+	var err error
+	if len(store.claimErrors) > 0 {
+		err = store.claimErrors[0]
+		store.claimErrors = store.claimErrors[1:]
+	}
+	store.mu.Unlock()
+	store.claimCalls <- call
+	return nil, err
+}
+
+func (*recoveringOutboxStore) MarkPublished(context.Context, uint, time.Time) error {
+	return nil
+}
+
+func (*recoveringOutboxStore) MarkFailed(context.Context, uint, time.Time, string) error {
+	return nil
 }

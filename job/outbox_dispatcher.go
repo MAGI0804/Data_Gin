@@ -220,24 +220,35 @@ func NewOutboxDispatcher(store OutboxStore, publisher TaskPublisher, registry *O
 	}, nil
 }
 
-// Run dispatches immediately, then on each ticker event, until ctx is
-// cancelled. Transient cycle errors are reported and retried on the next tick.
+// Run dispatches immediately, then waits between cycles until ctx is cancelled.
+// Successful cycles use the normal poll interval. Consecutive cycle failures
+// use the configured retry backoff so a database outage is not polled every
+// second.
 func (dispatcher *OutboxDispatcher) Run(ctx context.Context) error {
-	ticker := time.NewTicker(dispatcher.pollInterval)
-	defer ticker.Stop()
+	consecutiveFailures := 0
 
 	for {
 		if err := ctx.Err(); err != nil {
 			return err
 		}
-		if err := dispatcher.DispatchOnce(ctx); err != nil && !errors.Is(err, context.Canceled) && dispatcher.onCycleError != nil {
-			dispatcher.onCycleError(err)
+
+		delay := dispatcher.pollInterval
+		if err := dispatcher.DispatchOnce(ctx); err != nil && !errors.Is(err, context.Canceled) {
+			if dispatcher.onCycleError != nil {
+				dispatcher.onCycleError(err)
+			}
+			delay = outboxBackoff(dispatcher.retryBase, dispatcher.retryMax, consecutiveFailures)
+			consecutiveFailures++
+		} else {
+			consecutiveFailures = 0
 		}
 
+		timer := time.NewTimer(delay)
 		select {
 		case <-ctx.Done():
+			timer.Stop()
 			return ctx.Err()
-		case <-ticker.C:
+		case <-timer.C:
 		}
 	}
 }
