@@ -24,6 +24,7 @@ type ReportDraftServiceAPI interface {
 	Get(context.Context, uint, uint) (*data_svc.ReportDraftDTO, error)
 	List(context.Context, uint, uint, int, string, string) (*data_svc.ReportDraftListDTO, error)
 	Update(context.Context, uint, uint, requestbody.ReportDraftSaveRequest) (*data_svc.ReportDraftDTO, error)
+	Delete(context.Context, uint, uint, uint64) (*data_svc.ReportDraftDeleteDTO, error)
 }
 
 type ReportController struct {
@@ -234,6 +235,25 @@ func (controller *ReportController) Update(c *gin.Context) {
 	responses.New(c).ToResponseWithStatus(http.StatusOK, result)
 }
 
+func (controller *ReportController) Delete(c *gin.Context) {
+	reportID, err := parseReportUint(c.Param("id"), "report id")
+	if err != nil {
+		writeReportError(c, err)
+		return
+	}
+	expectedLockVersion, err := strconv.ParseUint(strings.TrimSpace(c.Query("expectedLockVersion")), 10, 64)
+	if err != nil || expectedLockVersion == 0 {
+		writeReportError(c, fmt.Errorf("%w: invalid expectedLockVersion", data_svc.ErrReportInvalid))
+		return
+	}
+	result, err := controller.service.Delete(c.Request.Context(), auth.CurrentUserID(c), reportID, expectedLockVersion)
+	if err != nil {
+		writeReportError(c, err)
+		return
+	}
+	responses.New(c).ToResponseWithStatus(http.StatusOK, result)
+}
+
 func (controller *ReportController) Publish(c *gin.Context) {
 	if controller.publishService == nil {
 		writeReportError(c, errors.New("report publication service is unavailable"))
@@ -299,6 +319,8 @@ func classifyReportError(err error) (*errcode.Error, string) {
 		return errcode.NotFound, "报表草稿不存在"
 	case errors.Is(err, data_svc.ErrReportConflict):
 		return errcode.Conflict, "报表草稿已被修改或编码已存在，请刷新后重试"
+	case errors.Is(err, data_svc.ErrReportDeleteConflict):
+		return errcode.Conflict, "仅未发布且从未运行的草稿模板可以删除"
 	case errors.Is(err, data_svc.ErrReportInvalid):
 		return errcode.UnprocessableEntity, reportDraftValidationMessage(err)
 	case errors.Is(err, data_svc.ErrReportPublicationTemporaryTable):

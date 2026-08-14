@@ -73,6 +73,78 @@ func TestRepositoryRejectsUnscopedOrStaleInputBeforeDatabase(t *testing.T) {
 	}
 }
 
+func TestDeleteDraftRemovesUnpublishedConfigurationAtomically(t *testing.T) {
+	db, transactionState := newTransactionDB(t)
+	repository := New(db)
+	repository.lockDefinition = func(context.Context, *gorm.DB, uint, uint) (*definitionRecord, error) {
+		return &definitionRecord{ReportDefinition: model.ReportDefinition{
+			BaseModel: model.BaseModel{ID: 7}, Code: "draft_report", OwnerUserID: 8,
+			Status: model.ReportDefinitionStatusDraft, CurrentDraftVersionID: 11,
+		}}, nil
+	}
+	repository.lockVersion = func(context.Context, *gorm.DB, uint, uint) (*versionRecord, error) {
+		return &versionRecord{ReportVersion: model.ReportVersion{BaseModel: model.BaseModel{ID: 11}, DefinitionID: 7, VersionNumber: 4, Status: model.ReportVersionStatusDraft}}, nil
+	}
+	repository.writeAudit = func(_ context.Context, _ *gorm.DB, audit model.ReportAudit) error {
+		if audit.Action != "REPORT_DRAFT_DELETE" || audit.ActorUserID != 8 || audit.TargetID != 7 || !strings.Contains(string(audit.DetailJSON), `"code":"draft_report"`) {
+			t.Fatalf("delete audit = %#v", audit)
+		}
+		return nil
+	}
+
+	if err := repository.DeleteDraft(t.Context(), 8, 7, 4); err != nil {
+		t.Fatalf("DeleteDraft() error = %v", err)
+	}
+	if transactionState.begins != 1 || transactionState.commits != 1 || transactionState.rollbacks != 0 {
+		t.Fatalf("transaction state = %#v", transactionState)
+	}
+	statements := strings.Join(transactionState.execs, "\n")
+	for _, fragment := range []string{
+		"SELECT count(*) FROM `report_runs`", "DELETE FROM `report_parameters`", "DELETE FROM `report_columns`",
+		"DELETE FROM `report_grants`", "DELETE FROM `report_result_table_bindings`", "DELETE FROM `report_versions`", "DELETE FROM `report_definitions`",
+	} {
+		if !strings.Contains(statements, fragment) {
+			t.Fatalf("delete transaction is missing %q: %s", fragment, statements)
+		}
+	}
+}
+
+func TestDeleteDraftRejectsPublishedStaleOrExecutedTemplate(t *testing.T) {
+	tests := []struct {
+		name       string
+		definition model.ReportDefinition
+		version    uint64
+		runCount   int64
+		want       error
+	}{
+		{name: "published", definition: model.ReportDefinition{Status: model.ReportDefinitionStatusActive, CurrentDraftVersionID: 11, CurrentPublishedVersionID: 10}, version: 4, want: ErrDraftDeleteConflict},
+		{name: "stale", definition: model.ReportDefinition{Status: model.ReportDefinitionStatusDraft, CurrentDraftVersionID: 11}, version: 5, want: ErrDraftVersionConflict},
+		{name: "executed", definition: model.ReportDefinition{Status: model.ReportDefinitionStatusDraft, CurrentDraftVersionID: 11}, version: 4, runCount: 1, want: ErrDraftDeleteConflict},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			db, transactionState := newTransactionDB(t)
+			transactionState.queryCount = test.runCount
+			repository := New(db)
+			repository.lockDefinition = func(context.Context, *gorm.DB, uint, uint) (*definitionRecord, error) {
+				definition := test.definition
+				definition.ID = 7
+				definition.OwnerUserID = 8
+				return &definitionRecord{ReportDefinition: definition}, nil
+			}
+			repository.lockVersion = func(context.Context, *gorm.DB, uint, uint) (*versionRecord, error) {
+				return &versionRecord{ReportVersion: model.ReportVersion{BaseModel: model.BaseModel{ID: 11}, DefinitionID: 7, VersionNumber: test.version, Status: model.ReportVersionStatusDraft}}, nil
+			}
+			if err := repository.DeleteDraft(t.Context(), 8, 7, 4); !errors.Is(err, test.want) {
+				t.Fatalf("DeleteDraft() error = %v, want %v", err, test.want)
+			}
+			if transactionState.commits != 0 || transactionState.rollbacks != 1 || strings.Contains(strings.Join(transactionState.execs, "\n"), "DELETE FROM `report_definitions`") {
+				t.Fatalf("transaction state = %#v", transactionState)
+			}
+		})
+	}
+}
+
 func TestValidateCollectionsRejectsDuplicateStableKeys(t *testing.T) {
 	tests := []struct {
 		name       string

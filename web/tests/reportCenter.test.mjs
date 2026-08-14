@@ -3,7 +3,7 @@ import { readdirSync, readFileSync } from 'node:fs'
 import test from 'node:test'
 import ts from 'typescript'
 
-import { createReportRun, getReportAudits, getReportProcedureSignature, getReportProcedures, getReportResultTableSchema, getReportResultTables, parsePublication, parseReportAuditPage, parseReportCatalogPage, parseReportDatasource, parseReportDatasources, parseReportDatasourceTest, parseReportDraft, parseReportExport, parseReportExportPage, parseReportProcedurePage, parseReportProcedureSignature, parseReportResultPage, parseReportResultTablePage, parseReportResultTableSchema, parseReportRun, parseReportRunContract, parseReportVersionDiff, parseReportVersionPage, saveReportDraft, testReportDatasourceConnection } from '../.test-dist/reportCenter/api.js'
+import { createReportRun, deleteReportDraft, getReportAudits, getReportProcedureSignature, getReportProcedures, getReportResultTableSchema, getReportResultTables, parsePublication, parseReportAuditPage, parseReportCatalogPage, parseReportDatasource, parseReportDatasources, parseReportDatasourceTest, parseReportDraft, parseReportExport, parseReportExportPage, parseReportProcedurePage, parseReportProcedureSignature, parseReportResultPage, parseReportResultTablePage, parseReportResultTableSchema, parseReportRun, parseReportRunContract, parseReportVersionDiff, parseReportVersionPage, saveReportDraft, testReportDatasourceConnection } from '../.test-dist/reportCenter/api.js'
 import { applyExcelMapping, buildReportConditions, excelMappingFromColumns, initialReportConditionValues, parseExcelMappingDocument, parseReportInputSchemaDocument, parseReportInputSchemaText, reconcileReportColumnsWithResultSchema, renameExcelMappingField, reportColumnsFromResultSchema } from '../.test-dist/reportCenter/refCursorConfig.js'
 import { reportParameterControls, reportParameterFlagDisabled, updateReportParameterFlag, updateReportParameterLogicalType } from '../.test-dist/reportCenter/parameterConfig.js'
 import { buildNewReportRunState, canStartNewReportRun, initialReportParameterValues } from '../.test-dist/reportCenter/queryParameters.js'
@@ -116,6 +116,20 @@ test('parseReportCatalogPage drops malformed rows and normalizes unsafe fields',
 test('parseReportCatalogPage rejects an incomplete or mismatched continuation cursor', () => {
   assert.throws(() => parseReportCatalogPage({ data: { items: [], hasMore: true, nextAfterId: 9 } }))
   assert.throws(() => parseReportCatalogPage({ data: { items: [{ id: 9, code: 'sales', name: '销售' }], hasMore: true, nextAfterId: 10 } }))
+})
+
+test('deleteReportDraft sends an optimistic DELETE and validates the deleted id', async () => {
+  const requests = []
+  const client = async (path, options) => {
+    requests.push({ path, options })
+    return { ok: true, data: { data: { id: 9 } } }
+  }
+  assert.deepEqual(await deleteReportDraft(client, 9, 4), { ok: true, data: { id: 9 } })
+  assert.equal(requests[0].path, '/v1/reports/9?expectedLockVersion=4')
+  assert.equal(requests[0].options.method, 'DELETE')
+
+  const malformed = await deleteReportDraft(async () => ({ ok: true, data: { data: { id: 0 } } }), 9, 4)
+  assert.deepEqual(malformed, { ok: false, error: '服务返回的数据格式不完整，请稍后重试。' })
 })
 
 test('parseReportRunContract keeps typed published parameters', () => {

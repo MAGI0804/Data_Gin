@@ -32,9 +32,10 @@ const (
 )
 
 var (
-	ErrReportInvalid  = errors.New("report draft service: invalid input")
-	ErrReportNotFound = errors.New("report draft service: not found")
-	ErrReportConflict = errors.New("report draft service: conflict")
+	ErrReportInvalid        = errors.New("report draft service: invalid input")
+	ErrReportNotFound       = errors.New("report draft service: not found")
+	ErrReportConflict       = errors.New("report draft service: conflict")
+	ErrReportDeleteConflict = errors.New("report draft service: report cannot be deleted")
 
 	reportCodePattern        = regexp.MustCompile(`^[a-z][a-z0-9_-]{2,63}$`)
 	reportLogicalCodePattern = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_]{0,63}$`)
@@ -48,6 +49,7 @@ type reportDraftStore interface {
 	FindDraftByID(context.Context, uint, uint) (*reportrepo.Draft, error)
 	ListDrafts(context.Context, uint, reportrepo.DraftListQuery) (reportrepo.DraftPage, error)
 	UpdateDraft(context.Context, uint, uint, uint64, *reportrepo.Draft) error
+	DeleteDraft(context.Context, uint, uint, uint64) error
 }
 
 type ReportDraftService struct {
@@ -180,6 +182,10 @@ type ReportDraftListDTO struct {
 	NextAfterID uint                    `json:"nextAfterId,omitempty"`
 }
 
+type ReportDraftDeleteDTO struct {
+	ID uint `json:"id"`
+}
+
 func (service *ReportDraftService) Create(ctx context.Context, actor uint, request requestbody.ReportDraftSaveRequest) (*ReportDraftDTO, error) {
 	if service == nil || service.store == nil || ctx == nil || actor == 0 {
 		return nil, invalidReport("service, context and actor are required")
@@ -262,6 +268,16 @@ func (service *ReportDraftService) Update(ctx context.Context, actor, definition
 		return nil, classifyReportStoreError(err)
 	}
 	return reportDraftDTO(persisted), nil
+}
+
+func (service *ReportDraftService) Delete(ctx context.Context, actor, definitionID uint, expectedLockVersion uint64) (*ReportDraftDeleteDTO, error) {
+	if service == nil || service.store == nil || ctx == nil || actor == 0 || definitionID == 0 || expectedLockVersion == 0 {
+		return nil, invalidReport("service, context, actor, report id and lock version are required")
+	}
+	if err := service.store.DeleteDraft(ctx, actor, definitionID, expectedLockVersion); err != nil {
+		return nil, classifyReportStoreError(err)
+	}
+	return &ReportDraftDeleteDTO{ID: definitionID}, nil
 }
 
 func reportDraftFromRequest(actor uint, request requestbody.ReportDraftSaveRequest) (*reportrepo.Draft, error) {
@@ -694,6 +710,8 @@ func classifyReportStoreError(err error) error {
 		return ErrReportNotFound
 	case errors.Is(err, reportrepo.ErrDraftVersionConflict), isReportDuplicateError(err):
 		return ErrReportConflict
+	case errors.Is(err, reportrepo.ErrDraftDeleteConflict):
+		return ErrReportDeleteConflict
 	case errors.Is(err, reportrepo.ErrInvalidDraft):
 		return invalidReport("draft repository rejected the contract")
 	default:

@@ -339,6 +339,28 @@ func TestReportDraftServiceReturnsPersistedCreateAndUpdateState(t *testing.T) {
 	}
 }
 
+func TestReportDraftServiceDeletesOnlyExistingScopedDraft(t *testing.T) {
+	store := &fakeReportDraftStore{}
+	service := NewReportDraftServiceWithStore(store)
+
+	if _, err := service.Delete(t.Context(), 17, 9, 0); !errors.Is(err, ErrReportInvalid) || store.deleteCalls != 0 {
+		t.Fatalf("Delete() invalid error=%v calls=%d", err, store.deleteCalls)
+	}
+	store.deleteErr = reportrepo.ErrDraftNotFound
+	if _, err := service.Delete(t.Context(), 17, 9, 3); !errors.Is(err, ErrReportNotFound) || store.deleteCalls != 1 {
+		t.Fatalf("Delete() missing error=%v calls=%d", err, store.deleteCalls)
+	}
+	store.deleteErr = reportrepo.ErrDraftDeleteConflict
+	if _, err := service.Delete(t.Context(), 17, 9, 3); !errors.Is(err, ErrReportDeleteConflict) || store.deleteCalls != 2 {
+		t.Fatalf("Delete() conflict error=%v calls=%d", err, store.deleteCalls)
+	}
+	store.deleteErr = nil
+	result, err := service.Delete(t.Context(), 17, 9, 4)
+	if err != nil || result.ID != 9 || store.deleteActor != 17 || store.deleteID != 9 || store.deleteLockVersion != 4 || store.deleteCalls != 3 {
+		t.Fatalf("Delete() result=%#v error=%v store=%#v", result, err, store)
+	}
+}
+
 func TestReportDraftServiceListUsesBoundedActorScopedQuery(t *testing.T) {
 	store := &fakeReportDraftStore{page: reportrepo.DraftPage{
 		Items:   []reportrepo.DraftSummary{{Definition: model.ReportDefinition{BaseModel: model.BaseModel{ID: 9}, Code: "sales", OwnerUserID: 17}, LockVersion: 4, IsOwner: true}},
@@ -430,15 +452,20 @@ func draftFromValidRequestForTest(t *testing.T, request requestbody.ReportDraftS
 }
 
 type fakeReportDraftStore struct {
-	created     *reportrepo.Draft
-	found       *reportrepo.Draft
-	page        reportrepo.DraftPage
-	findErr     error
-	updateErr   error
-	createCalls int
-	updateCalls int
-	listOwner   uint
-	listQuery   reportrepo.DraftListQuery
+	created           *reportrepo.Draft
+	found             *reportrepo.Draft
+	page              reportrepo.DraftPage
+	findErr           error
+	updateErr         error
+	deleteErr         error
+	createCalls       int
+	updateCalls       int
+	deleteCalls       int
+	deleteActor       uint
+	deleteID          uint
+	deleteLockVersion uint64
+	listOwner         uint
+	listQuery         reportrepo.DraftListQuery
 }
 
 func (store *fakeReportDraftStore) CreateDraft(_ context.Context, _ uint, draft *reportrepo.Draft) error {
@@ -481,4 +508,12 @@ func (store *fakeReportDraftStore) UpdateDraft(_ context.Context, _, _ uint, _ u
 		store.found = draft
 	}
 	return store.updateErr
+}
+
+func (store *fakeReportDraftStore) DeleteDraft(_ context.Context, actor, definitionID uint, expectedLockVersion uint64) error {
+	store.deleteCalls++
+	store.deleteActor = actor
+	store.deleteID = definitionID
+	store.deleteLockVersion = expectedLockVersion
+	return store.deleteErr
 }

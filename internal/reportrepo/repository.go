@@ -22,6 +22,7 @@ var (
 	ErrDraftNotFound         = errors.New("report draft: not found")
 	ErrDatasourceUnavailable = errors.New("report draft: datasource unavailable")
 	ErrDraftVersionConflict  = errors.New("report draft: version conflict")
+	ErrDraftDeleteConflict   = errors.New("report draft: cannot delete published or executed report")
 	ErrResultTableConflict   = errors.New("report draft: result table is already bound")
 	ErrInvalidDraft          = errors.New("report draft: invalid input")
 )
@@ -232,6 +233,74 @@ func (repository *Repository) FindDraftByID(ctx context.Context, ownerUserID, de
 		return nil, err
 	}
 	return draft, nil
+}
+
+// DeleteDraft permanently removes an unpublished template and its versioned
+// configuration. Published reports and run history remain immutable.
+func (repository *Repository) DeleteDraft(ctx context.Context, ownerUserID, definitionID uint, expectedLockVersion uint64) error {
+	if err := repository.validate(ctx, ownerUserID); err != nil {
+		return err
+	}
+	if definitionID == 0 || expectedLockVersion == 0 {
+		return invalidDraft("definition id and lock version are required")
+	}
+
+	return repository.transact(ctx, repository.db, func(tx *gorm.DB) error {
+		definition, err := repository.lockDefinition(ctx, tx, ownerUserID, definitionID)
+		if err != nil {
+			return err
+		}
+		version, err := repository.lockVersion(ctx, tx, definitionID, definition.CurrentDraftVersionID)
+		if err != nil {
+			return err
+		}
+		if version.VersionNumber != expectedLockVersion {
+			return ErrDraftVersionConflict
+		}
+		if definition.Status != model.ReportDefinitionStatusDraft || definition.CurrentPublishedVersionID != 0 {
+			return ErrDraftDeleteConflict
+		}
+
+		var runCount int64
+		if err := tx.WithContext(ctx).Model(&model.ReportRun{}).Where("definition_id = ?", definitionID).Count(&runCount).Error; err != nil {
+			return fmt.Errorf("report draft: inspect run history before delete: %w", err)
+		}
+		if runCount != 0 {
+			return ErrDraftDeleteConflict
+		}
+
+		auditDraft := &Draft{Definition: definition.ReportDefinition, Version: version.ReportVersion, LockVersion: version.VersionNumber}
+		if err := repository.writeAudit(ctx, tx, newDraftAudit("REPORT_DRAFT_DELETE", ownerUserID, definitionID, version.VersionNumber, auditDraft)); err != nil {
+			return err
+		}
+
+		versionIDs := tx.WithContext(ctx).Model(&versionRecord{}).Select("id").Where("definition_id = ?", definitionID)
+		if err := tx.WithContext(ctx).Where("version_id IN (?)", versionIDs).Delete(&parameterRecord{}).Error; err != nil {
+			return fmt.Errorf("report draft: delete parameters: %w", err)
+		}
+		if err := tx.WithContext(ctx).Where("version_id IN (?)", versionIDs).Delete(&columnRecord{}).Error; err != nil {
+			return fmt.Errorf("report draft: delete columns: %w", err)
+		}
+		if err := tx.WithContext(ctx).Where("definition_id = ?", definitionID).Delete(&grantRecord{}).Error; err != nil {
+			return fmt.Errorf("report draft: delete grants: %w", err)
+		}
+		if err := tx.WithContext(ctx).Where("definition_id = ?", definitionID).Delete(&model.ReportResultTableBinding{}).Error; err != nil {
+			return fmt.Errorf("report draft: delete result table binding: %w", err)
+		}
+		if err := tx.WithContext(ctx).Where("definition_id = ?", definitionID).Delete(&versionRecord{}).Error; err != nil {
+			return fmt.Errorf("report draft: delete versions: %w", err)
+		}
+		result := definitionScope(tx.WithContext(ctx), ownerUserID).
+			Where("id = ? AND current_draft_version_id = ? AND current_published_version_id = 0", definitionID, version.ID).
+			Delete(&definitionRecord{})
+		if result.Error != nil {
+			return fmt.Errorf("report draft: delete definition: %w", result.Error)
+		}
+		if result.RowsAffected != 1 {
+			return ErrDraftVersionConflict
+		}
+		return nil
+	})
 }
 
 func (repository *Repository) FindDatasource(ctx context.Context, datasourceID uint) (*model.ReportDatasource, error) {

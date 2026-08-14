@@ -221,6 +221,17 @@ export async function saveReportDraft(client: ReportCenterClient, draft: ReportD
   return requestAndParse(client, creating ? '/v1/reports' : `/v1/reports/${draft.id}`, { method: creating ? 'POST' : 'PUT', body }, parseReportDraft, '报表草稿保存失败。')
 }
 
+export async function deleteReportDraft(client: ReportCenterClient, reportId: number, expectedLockVersion: number): Promise<ReportAPIResult<{ id: number }>> {
+  const search = new URLSearchParams({ expectedLockVersion: String(expectedLockVersion) })
+  return requestAndParse(client, `/v1/reports/${reportId}?${search}`, { method: 'DELETE' }, parseReportDraftDelete, '报表模板删除失败。')
+}
+
+function parseReportDraftDelete(payload: unknown) {
+  const id = positiveInteger(unwrapData(payload).id)
+  if (!id) throw new Error('invalid deleted report')
+  return { id }
+}
+
 export async function publishReportDraft(client: ReportCenterClient, reportId: number, expectedLockVersion: number): Promise<ReportAPIResult<ReportPublication>> {
   return requestAndParse(client, `/v1/reports/${reportId}/publish`, { method: 'POST', body: { expectedLockVersion } }, parsePublication, '报表发布与 Oracle 契约核验失败。')
 }

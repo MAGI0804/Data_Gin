@@ -49,6 +49,7 @@ func TestReportControllerErrorContract(t *testing.T) {
 	}{
 		{name: "not found", err: data_svc.ErrReportNotFound, wantStatus: http.StatusNotFound},
 		{name: "conflict", err: data_svc.ErrReportConflict, wantStatus: http.StatusConflict},
+		{name: "delete conflict", err: data_svc.ErrReportDeleteConflict, wantStatus: http.StatusConflict},
 		{name: "invalid", err: data_svc.ErrReportInvalid, wantStatus: http.StatusUnprocessableEntity},
 		{name: "publication invalid", err: data_svc.ErrReportPublicationInvalid, wantStatus: http.StatusUnprocessableEntity},
 		{name: "temporary result table", err: fmt.Errorf("%w: %w", data_svc.ErrReportPublicationInvalid, data_svc.ErrReportPublicationTemporaryTable), wantStatus: http.StatusUnprocessableEntity},
@@ -145,6 +146,27 @@ func TestReportControllerListAndUpdateParseBoundaries(t *testing.T) {
 	router.ServeHTTP(recorder, request)
 	if recorder.Code != http.StatusOK || service.reportID != 7 || service.updateCalls != 1 {
 		t.Fatalf("update response = %d %s id=%d calls=%d", recorder.Code, recorder.Body, service.reportID, service.updateCalls)
+	}
+}
+
+func TestReportControllerDeleteUsesActorAndExpectedLockVersion(t *testing.T) {
+	service := &fakeReportControllerService{deleteResult: &data_svc.ReportDraftDeleteDTO{ID: 7}}
+	controller := NewReportControllerWithService(service)
+	router := reportControllerRouter()
+	router.DELETE("/reports/:id", controller.Delete)
+
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodDelete, "/reports/7?expectedLockVersion=3", nil))
+	if recorder.Code != http.StatusOK || service.actor != 17 || service.reportID != 7 || service.deleteLockVersion != 3 || service.deleteCalls != 1 || !strings.Contains(recorder.Body.String(), `"id":7`) {
+		t.Fatalf("delete response = %d %s service=%#v", recorder.Code, recorder.Body, service)
+	}
+
+	for _, path := range []string{"/reports/7", "/reports/7?expectedLockVersion=0", "/reports/7?expectedLockVersion=bad", "/reports/0?expectedLockVersion=3"} {
+		recorder = httptest.NewRecorder()
+		router.ServeHTTP(recorder, httptest.NewRequest(http.MethodDelete, path, nil))
+		if recorder.Code != http.StatusUnprocessableEntity || service.deleteCalls != 1 {
+			t.Fatalf("invalid delete %q response = %d %s calls=%d", path, recorder.Code, recorder.Body, service.deleteCalls)
+		}
 	}
 }
 
@@ -315,18 +337,21 @@ func reportControllerRouter() *gin.Engine {
 }
 
 type fakeReportControllerService struct {
-	actor        uint
-	reportID     uint
-	afterID      uint
-	limit        int
-	category     string
-	search       string
-	createCalls  int
-	updateCalls  int
-	createResult *data_svc.ReportDraftDTO
-	listResult   *data_svc.ReportDraftListDTO
-	updateResult *data_svc.ReportDraftDTO
-	getErr       error
+	actor             uint
+	reportID          uint
+	afterID           uint
+	limit             int
+	category          string
+	search            string
+	createCalls       int
+	updateCalls       int
+	createResult      *data_svc.ReportDraftDTO
+	listResult        *data_svc.ReportDraftListDTO
+	updateResult      *data_svc.ReportDraftDTO
+	deleteResult      *data_svc.ReportDraftDeleteDTO
+	deleteCalls       int
+	deleteLockVersion uint64
+	getErr            error
 }
 
 type fakeReportPublishService struct {
@@ -411,4 +436,12 @@ func (service *fakeReportControllerService) Update(_ context.Context, actor, rep
 	service.reportID = reportID
 	service.updateCalls++
 	return service.updateResult, nil
+}
+
+func (service *fakeReportControllerService) Delete(_ context.Context, actor, reportID uint, expectedLockVersion uint64) (*data_svc.ReportDraftDeleteDTO, error) {
+	service.actor = actor
+	service.reportID = reportID
+	service.deleteLockVersion = expectedLockVersion
+	service.deleteCalls++
+	return service.deleteResult, service.getErr
 }

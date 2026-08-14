@@ -330,6 +330,7 @@ func registerReportRoutes(api *gin.RouterGroup, reportCtrl *data_ctrl.ReportCont
 	reportGroup.GET("", middleware.RequirePermission(model.PermissionReportRead), reportCtrl.List)
 	reportGroup.GET("/:id", middleware.RequirePermission(model.PermissionReportRead), reportCtrl.Get)
 	reportGroup.PUT("/:id", middleware.RequirePermission(model.PermissionReportManage), reportCtrl.Update)
+	reportGroup.DELETE("/:id", middleware.RequirePermission(model.PermissionReportManage), reportCtrl.Delete)
 	reportGroup.POST("/:id/publish", middleware.RequirePermission(model.PermissionReportManage), reportCtrl.Publish)
 	reportGroup.GET("/:id/versions", middleware.RequirePermission(model.PermissionReportManage), reportCtrl.ListVersions)
 	reportGroup.GET("/:id/version-diff", middleware.RequirePermission(model.PermissionReportManage), reportCtrl.VersionDiff)
