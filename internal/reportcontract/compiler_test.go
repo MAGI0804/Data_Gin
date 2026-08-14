@@ -104,6 +104,41 @@ func TestCompileJSONInputResultTableUsesOneInputAndPublishedTable(t *testing.T) 
 	}
 }
 
+func TestVerifyRuntimeMetadataAcceptsMySQLNormalizedNestedJSON(t *testing.T) {
+	version, _, columns, grants, _, result := validContract()
+	version.ExecutionMode = model.ReportExecutionModeTableSnapshot
+	version.JSONInputArgName = "P_JSON"
+	version.InputSchemaJSON = model.JSONText(`{"long_condition":{"type":"str","displayName":"较长条件","control":"TEXT"},"day":{"type":"str","displayName":"日期","control":"DATE","format":"YYYYMMDD"}}`)
+	version.CallTemplate = "BEGIN REPORT.PKG.SALES(P_JSON => :payload); END;"
+	arguments := []reportoracle.ProcedureArgument{{Name: "P_JSON", Position: 1, Sequence: 1, Direction: "IN", DataType: "CLOB"}}
+	compiled, err := Compile(version, nil, columns, grants, arguments, result, validSnapshotContract(t, version, result, columns))
+	if err != nil {
+		t.Fatalf("Compile() error = %v", err)
+	}
+
+	var stored contractSpec
+	if err := json.Unmarshal(compiled.SpecJSON, &stored); err != nil {
+		t.Fatalf("decode compiled contract: %v", err)
+	}
+	stored.Version.InputSchema = json.RawMessage(`{ "long_condition": { "type": "str", "displayName": "较长条件", "control": "TEXT" }, "day": { "type": "str", "format": "YYYYMMDD", "displayName": "日期", "control": "DATE" } }`)
+	mysqlJSON, err := json.Marshal(stored)
+	if err != nil {
+		t.Fatalf("encode MySQL-normalized contract: %v", err)
+	}
+	if err := VerifyRuntimeMetadata(mysqlJSON, compiled.Hashes.Contract, compiled.Hashes.ProcedureSignature, compiled.Hashes.ResultSchema, arguments, result); err != nil {
+		t.Fatalf("VerifyRuntimeMetadata(MySQL JSON) error = %v", err)
+	}
+
+	stored.Version.InputSchema = json.RawMessage(`{"day":{"type":"str","displayName":"被篡改","control":"DATE","format":"YYYYMMDD"},"long_condition":{"type":"str","displayName":"较长条件","control":"TEXT"}}`)
+	tamperedJSON, err := json.Marshal(stored)
+	if err != nil {
+		t.Fatalf("encode tampered contract: %v", err)
+	}
+	if err := VerifyRuntimeMetadata(tamperedJSON, compiled.Hashes.Contract, compiled.Hashes.ProcedureSignature, compiled.Hashes.ResultSchema, arguments, result); !errors.Is(err, ErrInvalidContract) {
+		t.Fatalf("VerifyRuntimeMetadata(tampered) error = %v, want ErrInvalidContract", err)
+	}
+}
+
 func TestCompileJSONInputResultTableRejectsCursorOutput(t *testing.T) {
 	version, _, columns, grants, _, result := validContract()
 	version.ExecutionMode = model.ReportExecutionModeTableSnapshot

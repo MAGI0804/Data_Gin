@@ -124,6 +124,7 @@ func decodeVerifiedSpec(specJSON []byte, contractHash string) (contractSpec, err
 	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
 		return contractSpec{}, contractError("stored contract payload contains trailing data")
 	}
+	canonicalizeContractSpecJSON(&spec)
 	canonicalSpec, err := json.Marshal(spec)
 	if err != nil {
 		return contractSpec{}, fmt.Errorf("canonicalize stored report contract: %w", err)
@@ -132,6 +133,35 @@ func decodeVerifiedSpec(specJSON []byte, contractHash string) (contractSpec, err
 		return contractSpec{}, contractError("stored contract payload hash does not match")
 	}
 	return spec, nil
+}
+
+func canonicalizeContractSpecJSON(spec *contractSpec) {
+	if spec == nil {
+		return
+	}
+	spec.Version.InputSchema = canonicalRawJSON(spec.Version.InputSchema)
+	for index := range spec.Parameters {
+		parameter := &spec.Parameters[index]
+		parameter.DefaultValue = canonicalRawJSON(parameter.DefaultValue)
+		parameter.AllowedValues = canonicalRawJSON(parameter.AllowedValues)
+		parameter.Validation = canonicalRawJSON(parameter.Validation)
+		parameter.Normalizer = canonicalRawJSON(parameter.Normalizer)
+		parameter.ValueSource = canonicalRawJSON(parameter.ValueSource)
+	}
+	for index := range spec.Columns {
+		column := &spec.Columns[index]
+		column.AllowedOperators = canonicalRawJSON(column.AllowedOperators)
+		column.Format = canonicalRawJSON(column.Format)
+		column.MaskingPolicy = canonicalRawJSON(column.MaskingPolicy)
+		column.Dictionary = canonicalRawJSON(column.Dictionary)
+	}
+	for index := range spec.Grants {
+		spec.Grants[index].Actions = canonicalRawJSON(spec.Grants[index].Actions)
+	}
+}
+
+func canonicalRawJSON(value json.RawMessage) json.RawMessage {
+	return canonicalJSON(model.JSONText(value))
 }
 
 func resultSchemaHash(result []reportoracle.ResultColumn) (string, error) {
