@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	"gin-biz-web-api/internal/reporting"
 	"gin-biz-web-api/internal/reportoracle"
 	"gin-biz-web-api/model"
 )
@@ -208,6 +209,54 @@ func TestCompileUsesLiveOracleMetadataForBoundResultColumns(t *testing.T) {
 	}
 	if spec.Columns[1].SourceOracleType != "NUMBER" || spec.Columns[1].ValueType != "decimal" || spec.Columns[1].Nullable != result[3].Nullable {
 		t.Fatalf("compiled numeric column metadata = %#v, want live Oracle metadata", spec.Columns[1])
+	}
+}
+
+func TestCompilePreservesCompatibleResultPresentationTypes(t *testing.T) {
+	version, parameters, columns, grants, arguments, result := validContract()
+	result[2].DataType = "DATE"
+	result[2].DataPrecision = nil
+	result[2].DataScale = nil
+	columns[0].DatabaseColumn = result[2].Name
+	columns[0].ValueType = reporting.LogicalTypeDateTime
+	columns[1].ValueType = reporting.LogicalTypeInteger
+	integerScale := int64(0)
+	result[3].DataScale = &integerScale
+	contract := validSnapshotContract(t, version, result, columns)
+
+	compiled, err := Compile(version, parameters, columns, grants, arguments, result, contract)
+	if err != nil {
+		t.Fatalf("Compile() error = %v", err)
+	}
+	var spec contractSpec
+	if err := json.Unmarshal(compiled.SpecJSON, &spec); err != nil {
+		t.Fatalf("decode compiled spec: %v", err)
+	}
+	if spec.Columns[0].ValueType != reporting.LogicalTypeDateTime {
+		t.Fatalf("DATE presentation type = %q, want datetime", spec.Columns[0].ValueType)
+	}
+	if spec.Columns[1].ValueType != reporting.LogicalTypeInteger {
+		t.Fatalf("NUMBER presentation type = %q, want integer", spec.Columns[1].ValueType)
+	}
+}
+
+func TestCompileRejectsIntegerForScaledNumber(t *testing.T) {
+	version, parameters, columns, grants, arguments, result := validContract()
+	columns[1].ValueType = reporting.LogicalTypeInteger
+	scale := int64(2)
+	result[3].DataScale = &scale
+	contract := validSnapshotContract(t, version, result, columns)
+	if _, err := Compile(version, parameters, columns, grants, arguments, result, contract); !errors.Is(err, ErrInvalidContract) {
+		t.Fatalf("scaled NUMBER presentation error = %v", err)
+	}
+}
+
+func TestCompileRejectsUnsupportedOracleResultType(t *testing.T) {
+	version, parameters, columns, grants, arguments, result := validContract()
+	result[3].DataType = "BLOB"
+	contract := validSnapshotContract(t, version, result, columns)
+	if _, err := Compile(version, parameters, columns, grants, arguments, result, contract); !errors.Is(err, ErrInvalidContract) {
+		t.Fatalf("unsupported result type error = %v", err)
 	}
 }
 

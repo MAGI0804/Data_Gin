@@ -381,7 +381,10 @@ func (processor *ReportRunProcessor) finishFailure(ctx context.Context, runID ui
 		}
 		return errReportRunWorkerTemporary
 	}
-	return fmt.Errorf("%w: %s", ErrReportRunProcessNonRetryable, safeMessage)
+	return errors.Join(
+		ErrReportRunProcessNonRetryable,
+		fmt.Errorf("%s: %w", safeMessage, cause),
+	)
 }
 
 func (processor *ReportRunProcessor) finishCancelled(ctx context.Context, runID uint, leaseToken string) error {

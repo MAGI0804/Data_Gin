@@ -126,29 +126,34 @@ export function reconcileReportColumnsWithResultSchema(columns: ReportResultTabl
   return initial.map((column) => {
     const schema = schemaByName.get(column.databaseColumn.toUpperCase())
     if (!schema) return column
+    const valueType = reportValueTypeCompatible(column.valueType, schema.oracleType, schema.scale)
+      ? column.valueType
+      : reportValueTypeFromOracle(schema.oracleType, schema.scale)
     return {
       ...column,
       sourceOracleType: schema.oracleType,
       precision: schema.precision,
       scale: schema.scale,
       nullable: schema.nullable,
-      valueType: reportValueTypeFromOracle(schema.oracleType),
+      valueType,
     }
   })
 }
 
 export function refreshReportColumnMetadata(columns: ReportResultTableColumn[], existingColumns: ReportColumn[]): ReportColumn[] {
   const schemaByName = new Map(columns.map((column) => [column.name.toUpperCase(), column]))
-  return existingColumns.map((column) => {
-    const schema = schemaByName.get(column.databaseColumn.toUpperCase())
-    if (!schema) return column
+  return existingColumns.filter((column) => schemaByName.has(column.databaseColumn.toUpperCase())).map((column) => {
+    const schema = schemaByName.get(column.databaseColumn.toUpperCase())!
+    const valueType = reportValueTypeCompatible(column.valueType, schema.oracleType, schema.scale)
+      ? column.valueType
+      : reportValueTypeFromOracle(schema.oracleType, schema.scale)
     return {
       ...column,
       sourceOracleType: schema.oracleType,
       precision: schema.precision,
       scale: schema.scale,
       nullable: schema.nullable,
-      valueType: reportValueTypeFromOracle(schema.oracleType),
+      valueType,
     }
   })
 }
@@ -475,13 +480,27 @@ function logicalCodeFromOracleField(databaseColumn: string, index: number) {
   return /^[a-z]/.test(normalized) ? normalized.slice(0, 64) : `field${index + 1}`
 }
 
-function reportValueTypeFromOracle(oracleType: string) {
+function reportValueTypeFromOracle(oracleType: string, scale: number | null = null) {
   const normalized = oracleType.trim().toUpperCase()
-  if (normalized === 'NUMBER' || normalized === 'BINARY_FLOAT' || normalized === 'BINARY_DOUBLE') return 'decimal'
+  if (normalized === 'NUMBER') return scale === 0 ? 'integer' : 'decimal'
+  if (normalized === 'BINARY_FLOAT' || normalized === 'BINARY_DOUBLE') return 'decimal'
   if (normalized === 'DATE') return 'date'
   if (normalized.startsWith('TIMESTAMP')) return 'datetime'
   if (normalized === 'BOOLEAN') return 'boolean'
   return 'string'
+}
+
+function reportValueTypeCompatible(valueType: string, oracleType: string, scale: number | null) {
+  const logical = valueType.trim().toLowerCase()
+  const oracle = oracleType.trim().toUpperCase()
+  if (logical === 'string' || logical === 'enum') return ['CHAR', 'NCHAR', 'VARCHAR2', 'NVARCHAR2', 'CLOB', 'NCLOB'].includes(oracle)
+  if (logical === 'integer') return oracle === 'NUMBER' && scale === 0
+  if (logical === 'decimal') return ['NUMBER', 'BINARY_FLOAT', 'BINARY_DOUBLE'].includes(oracle)
+  if (logical === 'boolean') return oracle === 'BOOLEAN' || oracle === 'NUMBER' || ['CHAR', 'NCHAR', 'VARCHAR2', 'NVARCHAR2'].includes(oracle)
+  if (logical === 'date') return oracle === 'DATE'
+  if (logical === 'datetime') return oracle === 'DATE' || oracle.startsWith('TIMESTAMP')
+  if (logical === 'multi_enum' || logical === 'json') return oracle === 'CLOB' || oracle === 'NCLOB'
+  return false
 }
 
 function uniqueLogicalCode(preferred: string, used: Set<string>) {

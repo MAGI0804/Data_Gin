@@ -3,6 +3,7 @@ package data_svc
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -122,6 +123,27 @@ func TestReportRunProcessorRejectsRuntimeContractBeforeOracleStart(t *testing.T)
 	}
 }
 
+func TestReportRunProcessorPreservesOracleCauseForWorkerAndPersistsSafeFailure(t *testing.T) {
+	store := newFakeReportExecutionStore()
+	oracleErr := errors.New("ORA-06502: PL/SQL numeric or value error")
+	executor := &fakeReportProcedureExecutor{err: oracleErr}
+	processor := newTestReportRunProcessor(store, executor)
+
+	err := processor.Process(t.Context(), 31, true)
+	if !errors.Is(err, ErrReportRunProcessNonRetryable) {
+		t.Fatalf("Process() error = %v, want non-retryable", err)
+	}
+	if !errors.Is(err, oracleErr) {
+		t.Fatalf("Process() error = %v, want Oracle cause", err)
+	}
+	if !strings.Contains(err.Error(), oracleErr.Error()) {
+		t.Fatalf("Process() error = %q, want Worker-visible Oracle details", err)
+	}
+	if store.failed != 1 || store.failedCode != "ORACLE_EXECUTION_FAILED" || store.failedMessage != "Oracle存储过程执行失败" {
+		t.Fatalf("failed=%d code=%q message=%q", store.failed, store.failedCode, store.failedMessage)
+	}
+}
+
 func newTestReportRunProcessor(store *fakeReportExecutionStore, executor *fakeReportProcedureExecutor) *ReportRunProcessor {
 	processor := NewReportRunProcessorWithDependencies(store, fakeReportCredentialDecryptor{}, fakeRunParameterDecryptor{}, executor)
 	processor.heartbeatInterval = time.Hour
@@ -140,6 +162,8 @@ type fakeReportExecutionStore struct {
 	oracleStarted              int
 	succeeded                  int
 	failed                     int
+	failedCode                 string
+	failedMessage              string
 	cancelled                  int
 	unknown                    int
 	unknownCode                string
@@ -197,10 +221,12 @@ func (store *fakeReportExecutionStore) MarkExecutionSucceeded(context.Context, u
 func (store *fakeReportExecutionStore) ConfirmExecutionSucceeded(context.Context, uint, int64) (bool, error) {
 	return false, nil
 }
-func (store *fakeReportExecutionStore) MarkExecutionFailed(context.Context, uint, string, string, string, time.Time) error {
+func (store *fakeReportExecutionStore) MarkExecutionFailed(_ context.Context, _ uint, _, code, message string, _ time.Time) error {
 	store.mu.Lock()
 	defer store.mu.Unlock()
 	store.failed++
+	store.failedCode = code
+	store.failedMessage = message
 	return nil
 }
 func (store *fakeReportExecutionStore) MarkExecutionCancelled(context.Context, uint, string, time.Time) error {

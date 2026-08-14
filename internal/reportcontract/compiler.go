@@ -668,7 +668,13 @@ func compileColumns(
 		if !exists {
 			return nil, nil, contractError("result column %q does not match Oracle result table", column.LogicalCode)
 		}
-		valueType := resultValueTypeFromOracle(actualColumn.DataType)
+		if _, supported := resultValueTypeFromOracle(actualColumn.DataType, actualColumn.DataScale); !supported {
+			return nil, nil, contractError("result column %q uses unsupported Oracle type %q", column.LogicalCode, actualColumn.DataType)
+		}
+		valueType := strings.ToLower(strings.TrimSpace(column.ValueType))
+		if !logicalResultOracleCompatible(valueType, actualColumn) {
+			return nil, nil, contractError("result column %q presentation type does not match Oracle result table", column.LogicalCode)
+		}
 		logicalKey := strings.ToUpper(strings.TrimSpace(column.LogicalCode))
 		if logicalKey == "" {
 			return nil, nil, contractError("result logical column is required")
@@ -726,20 +732,37 @@ func int64Pointer(value *int64) *int {
 	return &result
 }
 
-func resultValueTypeFromOracle(oracleType string) string {
+func resultValueTypeFromOracle(oracleType string, scale *int64) (string, bool) {
 	normalized := normalizeOracleType(oracleType)
 	switch {
-	case normalized == "NUMBER" || normalized == "BINARY_FLOAT" || normalized == "BINARY_DOUBLE":
-		return reporting.LogicalTypeDecimal
+	case characterOracleType(normalized) || normalized == "CLOB" || normalized == "NCLOB":
+		return reporting.LogicalTypeString, true
+	case normalized == "NUMBER":
+		if scale != nil && *scale == 0 {
+			return reporting.LogicalTypeInteger, true
+		}
+		return reporting.LogicalTypeDecimal, true
+	case normalized == "BINARY_FLOAT" || normalized == "BINARY_DOUBLE":
+		return reporting.LogicalTypeDecimal, true
 	case normalized == "DATE":
-		return reporting.LogicalTypeDate
+		return reporting.LogicalTypeDate, true
 	case strings.HasPrefix(normalized, "TIMESTAMP"):
-		return reporting.LogicalTypeDateTime
+		return reporting.LogicalTypeDateTime, true
 	case normalized == "BOOLEAN":
-		return reporting.LogicalTypeBoolean
+		return reporting.LogicalTypeBoolean, true
 	default:
-		return reporting.LogicalTypeString
+		return "", false
 	}
+}
+
+func logicalResultOracleCompatible(logicalType string, column reportoracle.ResultColumn) bool {
+	if !logicalOracleCompatible(logicalType, column.DataType) {
+		return false
+	}
+	if strings.EqualFold(strings.TrimSpace(logicalType), reporting.LogicalTypeInteger) {
+		return normalizeOracleType(column.DataType) == "NUMBER" && column.DataScale != nil && *column.DataScale == 0
+	}
+	return true
 }
 
 func compileGrants(grants []model.ReportGrant) ([]grantSpec, error) {
