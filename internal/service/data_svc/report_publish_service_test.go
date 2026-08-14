@@ -82,6 +82,24 @@ func TestReportPublishServiceRejectsResultTableWithoutStableROWID(t *testing.T) 
 	}
 }
 
+func TestReportPublishServiceClassifiesTemporaryResultTable(t *testing.T) {
+	store := &fakePublicationStore{draft: publicationDraft(), datasource: publicationDatasource()}
+	inspector := &fakeReportOracleInspector{
+		procedure: publicationProcedure(), columns: publicationResultColumns(),
+		rowIDErr: fmt.Errorf("%w: %w", reportoracle.ErrMetadataMismatch, reportoracle.ErrTemporaryResultTable),
+	}
+	service := NewReportPublishService(store, &fakePublicationDecryptor{password: "password"}, func(context.Context, reportoracle.Config) (reportOracleInspector, error) {
+		return inspector, nil
+	})
+
+	if _, err := service.Publish(t.Context(), 17, 9, 3); !errors.Is(err, ErrReportPublicationInvalid) || !errors.Is(err, ErrReportPublicationTemporaryTable) {
+		t.Fatalf("Publish() error = %v", err)
+	}
+	if store.publishCalls != 0 {
+		t.Fatalf("publish calls = %d", store.publishCalls)
+	}
+}
+
 func TestReportPublishServiceRejectsMissingStableOracleDatabaseIdentity(t *testing.T) {
 	store := &fakePublicationStore{draft: publicationDraft(), datasource: publicationDatasource()}
 	inspector := &fakeReportOracleInspector{identityErr: fmt.Errorf("%w: identity unavailable", reportoracle.ErrMetadataMismatch)}

@@ -51,6 +51,7 @@ func TestReportControllerErrorContract(t *testing.T) {
 		{name: "conflict", err: data_svc.ErrReportConflict, wantStatus: http.StatusConflict},
 		{name: "invalid", err: data_svc.ErrReportInvalid, wantStatus: http.StatusUnprocessableEntity},
 		{name: "publication invalid", err: data_svc.ErrReportPublicationInvalid, wantStatus: http.StatusUnprocessableEntity},
+		{name: "temporary result table", err: fmt.Errorf("%w: %w", data_svc.ErrReportPublicationInvalid, data_svc.ErrReportPublicationTemporaryTable), wantStatus: http.StatusUnprocessableEntity},
 		{name: "parameter keyring unavailable", err: data_svc.ErrReportRunCredentialUnavailable, wantStatus: http.StatusServiceUnavailable},
 		{name: "internal", err: errors.New("database password=secret"), wantStatus: http.StatusInternalServerError},
 	}
@@ -68,6 +69,20 @@ func TestReportControllerErrorContract(t *testing.T) {
 				t.Fatalf("internal error leaked: %s", recorder.Body)
 			}
 		})
+	}
+}
+
+func TestReportControllerExplainsUnsupportedTemporaryResultTable(t *testing.T) {
+	controller := NewReportControllerWithService(&fakeReportControllerService{
+		getErr: fmt.Errorf("%w: %w", data_svc.ErrReportPublicationInvalid, data_svc.ErrReportPublicationTemporaryTable),
+	})
+	router := reportControllerRouter()
+	router.GET("/reports/:id", controller.Get)
+	recorder := httptest.NewRecorder()
+	router.ServeHTTP(recorder, httptest.NewRequest(http.MethodGet, "/reports/9", nil))
+
+	if recorder.Code != http.StatusUnprocessableEntity || !strings.Contains(recorder.Body.String(), "不能使用临时表") || !strings.Contains(recorder.Body.String(), "导出成功后清空") {
+		t.Fatalf("response = %d %s", recorder.Code, recorder.Body)
 	}
 }
 

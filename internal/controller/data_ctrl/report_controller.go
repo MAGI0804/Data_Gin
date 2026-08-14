@@ -301,6 +301,8 @@ func classifyReportError(err error) (*errcode.Error, string) {
 		return errcode.Conflict, "报表草稿已被修改或编码已存在，请刷新后重试"
 	case errors.Is(err, data_svc.ErrReportInvalid):
 		return errcode.UnprocessableEntity, reportDraftValidationMessage(err)
+	case errors.Is(err, data_svc.ErrReportPublicationTemporaryTable):
+		return errcode.UnprocessableEntity, "Oracle结果表不能使用临时表，请改为普通永久表；系统会在导出成功后清空结果数据"
 	case errors.Is(err, data_svc.ErrReportPublicationInvalid):
 		return errcode.UnprocessableEntity, "Oracle过程或结果表与报表配置不一致"
 	case errors.Is(err, data_svc.ErrReportRunInvalid):

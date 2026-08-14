@@ -159,7 +159,7 @@ func resultTableROWIDProbe(table ResultTableRef) string {
 
 func validateResultTableStorage(temporary, iotType, rowMovement string) error {
 	if strings.ToUpper(strings.TrimSpace(temporary)) != "N" {
-		return fmt.Errorf("%w: result table must be permanent", ErrMetadataMismatch)
+		return fmt.Errorf("%w: %w", ErrMetadataMismatch, ErrTemporaryResultTable)
 	}
 	if strings.TrimSpace(iotType) != "" {
 		return fmt.Errorf("%w: index-organized result tables do not expose stable physical ROWID", ErrMetadataMismatch)

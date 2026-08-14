@@ -25,6 +25,7 @@ var (
 	ErrInvalidConfiguration = errors.New("invalid oracle report configuration")
 	ErrUnsupportedBinding   = errors.New("unsupported oracle report binding")
 	ErrMetadataMismatch     = errors.New("oracle report metadata mismatch")
+	ErrTemporaryResultTable = errors.New("oracle temporary result table is unsupported")
 )
 
 type Config struct {

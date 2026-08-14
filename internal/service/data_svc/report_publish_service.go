@@ -15,7 +15,10 @@ import (
 	"gin-biz-web-api/model"
 )
 
-var ErrReportPublicationInvalid = errors.New("report publication: invalid contract")
+var (
+	ErrReportPublicationInvalid        = errors.New("report publication: invalid contract")
+	ErrReportPublicationTemporaryTable = errors.New("report publication: temporary result table is unsupported")
+)
 
 const defaultReportPublicationInspectionTimeout = 5 * time.Minute
 
@@ -253,6 +256,9 @@ func exportableReportColumnCount(columns []model.ReportColumn) int {
 }
 
 func classifyOracleInspectionError(target string, err error) error {
+	if errors.Is(err, reportoracle.ErrTemporaryResultTable) {
+		return fmt.Errorf("%w: %w", ErrReportPublicationInvalid, ErrReportPublicationTemporaryTable)
+	}
 	if errors.Is(err, reportoracle.ErrInvalidConfiguration) || errors.Is(err, reportoracle.ErrMetadataMismatch) || errors.Is(err, reportoracle.ErrUnsupportedBinding) {
 		return fmt.Errorf("%w: inspect Oracle %s: %v", ErrReportPublicationInvalid, target, err)
 	}

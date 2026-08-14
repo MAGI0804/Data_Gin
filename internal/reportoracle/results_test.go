@@ -148,6 +148,9 @@ func TestValidateResultTableStorageRequiresStablePhysicalROWID(t *testing.T) {
 			if test.wantError && !errors.Is(err, ErrMetadataMismatch) {
 				t.Fatalf("validateResultTableStorage() error = %v, want ErrMetadataMismatch", err)
 			}
+			if test.name == "temporary table" && !errors.Is(err, ErrTemporaryResultTable) {
+				t.Fatalf("validateResultTableStorage() error = %v, want ErrTemporaryResultTable", err)
+			}
 			if !test.wantError && err != nil {
 				t.Fatalf("validateResultTableStorage() error = %v", err)
 			}
