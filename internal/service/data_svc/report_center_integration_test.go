@@ -327,7 +327,7 @@ func inspectReportIntegrationFixture(t *testing.T, ctx context.Context, cfg repo
 	if resultColumn == nil {
 		t.Fatalf("Oracle result column %q does not exist", cfg.oracle.resultColumn)
 	}
-	if _, err := adapter.InspectResultSnapshotContract(ctx, reportoracle.SystemResultSnapshotRef(resultRef, []string{resultColumn.Name})); err != nil {
+	if _, err := adapter.InspectResultSnapshotContract(ctx, reportoracle.ResultTableSnapshotRef(resultRef, []string{resultColumn.Name})); err != nil {
 		t.Fatalf("inspect Oracle integration snapshot contract: %v", err)
 	}
 	logicalType, ok := reportIntegrationLogicalType(resultColumn.DataType)
@@ -449,7 +449,6 @@ func createReportIntegrationDraft(t *testing.T, ctx context.Context, repository 
 			DatasourceID: datasourceID, ProcedureOwner: cfg.oracle.owner, PackageName: cfg.oracle.packageName,
 			ProcedureName: cfg.oracle.procedure, ProcedureOverload: cfg.oracle.overload,
 			ResultTableOwner: cfg.oracle.owner, ResultTableName: cfg.oracle.resultTable,
-			ResultRunIDColumn: reportoracle.SystemResultRunIDColumn, ResultRowIDColumn: reportoracle.SystemResultRecordColumn,
 			CallTemplate: fmt.Sprintf("BEGIN %s(P_RUN_ID => {{runId}}); END;", target), CreatedBy: actor,
 		},
 		Parameters: []model.ReportParameter{fixture.parameter}, Columns: []model.ReportColumn{fixture.column}, Grants: []model.ReportGrant{},
@@ -694,7 +693,7 @@ func countReportIntegrationOracleRows(t *testing.T, ctx context.Context, cfg rep
 		t.Fatalf("open Oracle for integration count: %v", err)
 	}
 	defer adapter.Close()
-	contract, err := adapter.InspectResultSnapshotContract(ctx, reportoracle.SystemResultSnapshotRef(
+	contract, err := adapter.InspectResultSnapshotContract(ctx, reportoracle.ResultTableSnapshotRef(
 		reportoracle.ResultTableRef{Owner: cfg.oracle.owner, Name: cfg.oracle.resultTable}, []string{fixture.column.DatabaseColumn},
 	))
 	if err != nil {
@@ -704,7 +703,7 @@ func countReportIntegrationOracleRows(t *testing.T, ctx context.Context, cfg rep
 	if err != nil {
 		t.Fatalf("build Oracle integration count: %v", err)
 	}
-	count, err := adapter.CountResultRows(ctx, plan, reportID)
+	count, err := adapter.CountResultRows(ctx, plan)
 	if err != nil {
 		t.Fatalf("count Oracle integration rows: %v", err)
 	}
@@ -741,7 +740,7 @@ func purgeReportIntegrationOracleRows(ctx context.Context, cfg reportIntegration
 		return err
 	}
 	defer adapter.Close()
-	contract, err := adapter.InspectResultSnapshotContract(ctx, reportoracle.SystemResultSnapshotRef(
+	contract, err := adapter.InspectResultSnapshotContract(ctx, reportoracle.ResultTableSnapshotRef(
 		reportoracle.ResultTableRef{Owner: cfg.oracle.owner, Name: cfg.oracle.resultTable}, []string{fixture.column.DatabaseColumn},
 	))
 	if err != nil {
@@ -756,7 +755,7 @@ func purgeReportIntegrationOracleRows(ctx context.Context, cfg reportIntegration
 		if err != nil {
 			return err
 		}
-		deleted, err := adapter.PurgeResultBatch(ctx, tx, plan, reportID, 1000)
+		deleted, err := adapter.PurgeResultBatch(ctx, tx, plan, 1000)
 		if err != nil {
 			_ = tx.Rollback()
 			return err

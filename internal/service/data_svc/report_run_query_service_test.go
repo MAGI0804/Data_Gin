@@ -39,7 +39,7 @@ func TestReportRunQueryServiceReadsFrozenPreviewColumnsAndSignedCursor(t *testin
 {"fieldId":"22222222-2222-4222-8222-222222222222","logicalCode":"secret","databaseColumn":"SECRET_VALUE","sourceOracleType":"VARCHAR2","nullable":true,"valueType":"string","previewHeader":"密文","excelHeader":"密文","displayOrder":2,"exportOrder":2,"previewVisible":false,"exportVisible":false,"filterable":false,"sortable":false,"exportAllowed":false,"allowedOperators":[],"format":{},"dictionaryVersion":{},"maskingPolicy":{},"excelWidth":12,"nullDisplay":""}
 ]`)
 	store := &fakeReportRunQueryStore{run: run, contract: &reportrepo.RunResultContract{Run: run, Datasource: model.ReportDatasource{CredentialKeyVersion: "v1", PasswordCiphertext: "cipher"}}}
-	reader := &fakeReportResultReader{page: reportoracle.ResultPage{Rows: []reportoracle.ResultRow{{RowID: 9, Values: []interface{}{json.Number("123.45")}}}, NextRowID: 9, HasNext: true}}
+	reader := &fakeReportResultReader{page: reportoracle.ResultPage{Rows: []reportoracle.ResultRow{{Key: "AAAPr9AAEAAAAGrAAA", Values: []interface{}{json.Number("123.45")}}}, NextKey: "AAAPr9AAEAAAAGrAAA", HasNext: true}}
 	service := newTestReportRunQueryService(store, reader)
 	service.now = func() time.Time { return now }
 	page, err := service.ReadResults(t.Context(), 17, 31, "", 20)
@@ -91,17 +91,17 @@ func TestFrozenPreviewColumnsRejectsUnknownSnapshotFields(t *testing.T) {
 	}
 }
 
-func TestReportResultCursorSupportsAnyOracleIntegerRowID(t *testing.T) {
+func TestReportResultCursorSupportsOracleRowKey(t *testing.T) {
 	service := newTestReportRunQueryService(&fakeReportRunQueryStore{}, &fakeReportResultReader{})
 	run := resultQueryRun(time.Date(2026, 8, 12, 12, 0, 0, 0, time.UTC))
-	for _, rowID := range []int64{-9, 0, 9} {
-		encoded, err := service.encodeCursor(reportResultCursor{Version: 2, RunUUID: run.RunUUID, ContractHash: run.ContractHash, PageSize: 20, QueryFingerprint: "empty", AfterRowID: rowID})
+	for _, rowKey := range []string{"AAAPr9AAEAAAAGrAAA", "AAAPr9AAEAAAAGrAAB"} {
+		encoded, err := service.encodeCursor(reportResultCursor{Version: 3, RunUUID: run.RunUUID, ContractHash: run.ContractHash, PageSize: 20, QueryFingerprint: "empty", AfterKey: rowKey})
 		if err != nil {
-			t.Fatalf("encode cursor %d: %v", rowID, err)
+			t.Fatalf("encode cursor %s: %v", rowKey, err)
 		}
 		decoded, err := service.decodeCursor(encoded, run, 20, "empty")
-		if err != nil || decoded.AfterRowID != rowID {
-			t.Fatalf("decode cursor %d = %#v, %v", rowID, decoded, err)
+		if err != nil || decoded.AfterKey != rowKey {
+			t.Fatalf("decode cursor %s = %#v, %v", rowKey, decoded, err)
 		}
 	}
 }

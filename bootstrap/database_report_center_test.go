@@ -89,6 +89,26 @@ func TestReportJSONProcedureContractMigrationRequiresExistingBaselineTable(t *te
 	}
 }
 
+func TestLegacyResultTableMigrationRejectsDuplicateOwnerAndTableAcrossDefinitions(t *testing.T) {
+	candidates := []reportResultTableBindingCandidate{
+		{DefinitionID: 7, Host: "primary.internal", ServiceName: "REPORT", Username: "USER_A", TableOwner: " report ", TableName: " sales_result "},
+		{DefinitionID: 8, Host: "scan-alias.internal", ServiceName: "REPORT_ALIAS", Username: "USER_B", TableOwner: "REPORT", TableName: "SALES_RESULT"},
+	}
+	if err := validateLegacyResultTableBindings(candidates); err == nil || !strings.Contains(err.Error(), "reports 7 and 8") {
+		t.Fatalf("validateLegacyResultTableBindings() error = %v", err)
+	}
+}
+
+func TestLegacyResultTableMigrationAllowsDistinctTables(t *testing.T) {
+	candidates := []reportResultTableBindingCandidate{
+		{DefinitionID: 7, TableOwner: "REPORT", TableName: "SALES_RESULT"},
+		{DefinitionID: 8, TableOwner: "REPORT", TableName: "INVENTORY_RESULT"},
+	}
+	if err := validateLegacyResultTableBindings(candidates); err != nil {
+		t.Fatalf("validateLegacyResultTableBindings() error = %v", err)
+	}
+}
+
 type fakeReportSchemaMigrator struct {
 	tableExists bool
 	columns     map[string]bool

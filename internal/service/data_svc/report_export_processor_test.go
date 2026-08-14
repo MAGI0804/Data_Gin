@@ -19,7 +19,7 @@ func TestReportExportProcessorRendersUploadsVerifiesAndPurges(t *testing.T) {
 	runtime := testReportExportRuntime(now)
 	store := &fakeReportExportExecutionStore{runtime: runtime}
 	session := &fakeReportExportOracleSession{pages: []reportoracle.ResultPage{{
-		Columns: []string{"ORDER_NO"}, Rows: []reportoracle.ResultRow{{RowID: 1, Values: []interface{}{"SO-1"}}}, NextRowID: 1,
+		Columns: []string{"ORDER_NO"}, Rows: []reportoracle.ResultRow{{Key: "ROW-A", Values: []interface{}{"SO-1"}}}, NextKey: "ROW-A",
 	}}, purgeCounts: []int64{1}}
 	objects := &fakeReportExportObjectStore{}
 	processor := NewReportExportProcessorWithDependencies(store, staticReportCredentialDecryptor{}, fakeReportExportOracleFactory{session: session})

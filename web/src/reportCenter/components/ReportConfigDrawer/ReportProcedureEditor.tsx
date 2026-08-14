@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react'
 import { RefreshCw, Search } from 'lucide-react'
 import { getReportProcedureSignature, getReportProcedures, getReportResultTableSchema, getReportResultTables, type ReportCenterClient } from '../../api'
-import { reconcileReportColumnsWithResultSchema, reportColumnsFromResultSchema, resultTableHasSystemColumns } from '../../refCursorConfig'
+import { reconcileReportColumnsWithResultSchema, reportColumnsFromResultSchema } from '../../refCursorConfig'
 import type { ReportDraft, ReportProcedureSignature, ReportProcedureSummary, ReportResultTablePage, ReportResultTableSchema, ReportResultTableSummary } from '../../types'
 import styles from './ReportProcedureEditor.module.css'
 
@@ -211,11 +211,6 @@ export function ReportProcedureEditor({ client, draft, onChange }: { client: Rep
       setTableState((current) => ({ ...current, inspecting: false, error: response.error }))
       return
     }
-    if (!resultTableHasSystemColumns(response.data.columns)) {
-      setTableSchema(response.data)
-      setTableState((current) => ({ ...current, inspecting: false, error: '结果表必须包含固定系统字段 RUN_ID 和 ID。' }))
-      return
-    }
     setTableSchema(response.data)
     setTableState((current) => ({ ...current, inspecting: false }))
     onChange((currentDraft) => {
@@ -254,7 +249,7 @@ export function ReportProcedureEditor({ client, draft, onChange }: { client: Rep
       </> : <p className={styles.empty}>从上方 Oracle 查询结果中选择过程后，系统会自动绑定唯一 JSON 输入参数，不绑定任何出参。</p>}
     </section>
     <section className={styles.resultTable} aria-labelledby="report-result-table-title">
-      <div><h3 id="report-result-table-title">Oracle 结果表绑定</h3><p>系统直接把报表编号作为 report_id 传入；过程写入固定 RUN_ID，ID 仅用于内部分页，两项都无需配置。</p></div>
+      <div><h3 id="report-result-table-title">Oracle 结果表绑定</h3><p>存储过程仅接收已绑定的唯一 JSON 入参；系统将绑定表作为完整结果读取，Excel 导出成功后清理表中数据。</p></div>
       <form className={styles.tableSearch} onSubmit={(event) => { event.preventDefault(); void loadResultTables(false) }}>
         <label>Owner<input className={styles.mono} value={tableFilters.owner} placeholder="可选，例如 REPORT" onChange={(event) => { const owner = event.currentTarget.value; setTableFilters((current) => ({ ...current, owner })) }} /></label>
         <label>结果表<input value={tableFilters.search} placeholder="搜索表名" onChange={(event) => { const search = event.currentTarget.value; setTableFilters((current) => ({ ...current, search })) }} /></label>

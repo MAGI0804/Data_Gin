@@ -33,7 +33,7 @@ func TestReportDraftServiceCreateNormalizesContractAndHidesSensitiveFields(t *te
 	if store.created == nil || store.created.Definition.OwnerUserID != 17 || store.created.Definition.Code != "sales-report" {
 		t.Fatalf("created draft = %#v", store.created)
 	}
-	if store.created.Version.ProcedureOwner != "REPORT_OWNER" || store.created.Version.ResultRunIDColumn != "RUN_ID" {
+	if store.created.Version.ProcedureOwner != "REPORT_OWNER" || store.created.Version.ResultRunIDColumn != "" || store.created.Version.ResultRowIDColumn != "" {
 		t.Fatalf("normalized version = %#v", store.created.Version)
 	}
 	if result.Parameters[1].DefaultValue != nil {
@@ -150,8 +150,8 @@ func TestReportDraftServiceAcceptsRefCursorInputSchemaWithDisplayName(t *testing
 	request.Procedure.JSONInputArgName = "p_payload"
 	request.Procedure.ResultCursorArgName = "p_result"
 	request.InputSchema = json.RawMessage(`{
-		"c_supplier_id":{"type":"varchar2","displayName":"供应商","control":"multi_select","required":true,"multiple":true,"example":["a","b"]},
-		"datein_begin":{"type":"date","displayName":"开始日期","control":"date","example":"20260504"}
+		"c_supplier_id":{"type":"list[str]","displayName":"供应商","control":"multi_select","required":true,"example":["a","b"]},
+		"datein_begin":{"type":"str","displayName":"开始日期","control":"date","format":"YYYYMMDD","example":"20260504"}
 	}`)
 	request.Result = requestbody.ReportResultRequest{}
 	request.CallTemplate = ""
@@ -168,7 +168,8 @@ func TestReportDraftServiceAcceptsRefCursorInputSchemaWithDisplayName(t *testing
 	if draft.Version.ExecutionMode != model.ReportExecutionModeRefCursor || draft.Version.JSONInputArgName != "P_PAYLOAD" || draft.Version.ResultCursorArgName != "P_RESULT" {
 		t.Fatalf("REF CURSOR contract = %#v", draft.Version)
 	}
-	if strings.Contains(string(draft.Version.InputSchemaJSON), `"label"`) || !strings.Contains(string(draft.Version.InputSchemaJSON), `"displayName":"供应商"`) {
+	if strings.Contains(string(draft.Version.InputSchemaJSON), `"label"`) || !strings.Contains(string(draft.Version.InputSchemaJSON), `"displayName":"供应商"`) ||
+		!strings.Contains(string(draft.Version.InputSchemaJSON), `"type":"list[str]"`) || !strings.Contains(string(draft.Version.InputSchemaJSON), `"format":"YYYYMMDD"`) {
 		t.Fatalf("canonical input schema = %s", draft.Version.InputSchemaJSON)
 	}
 	if len(draft.Parameters) != 0 || draft.Version.CallTemplate != "BEGIN REPORT_OWNER.PKG_SALES.BUILD_REPORT(P_PAYLOAD => :payload, P_RESULT => :resultCursor); END;" {
@@ -193,13 +194,51 @@ func TestReportDraftServiceRejectsRefCursorConditionWithoutDisplayName(t *testin
 	}
 }
 
+func TestCanonicalReportInputSchemaValidatesConfiguredValuesAndDatePrecision(t *testing.T) {
+	tests := []struct {
+		name   string
+		schema string
+	}{
+		{name: "number default is string", schema: `{"amount":{"type":"number","displayName":"金额","default":"12.5"}}`},
+		{name: "list item type", schema: `{"stores":{"type":"list[str]","displayName":"门店","example":["S001",2]}}`},
+		{name: "allowed value type", schema: `{"enabled":{"type":"bool","displayName":"启用","allowedValues":[true,"false"]}}`},
+		{name: "date includes seconds", schema: `{"day":{"type":"str","displayName":"日期","control":"DATE","format":"YYYYMMDD","default":"20260504123045"}}`},
+		{name: "datetime only includes day", schema: `{"at":{"type":"str","displayName":"时间","control":"DATETIME","format":"YYYY-MM-DD HH:mm:ss","example":"2026-05-04"}}`},
+		{name: "iso datetime includes timezone", schema: `{"at":{"type":"str","displayName":"时间","control":"DATETIME","format":"ISO8601","example":"2026-05-04T12:30:45+08:00"}}`},
+		{name: "iso datetime includes fractional seconds", schema: `{"at":{"type":"str","displayName":"时间","control":"DATETIME","format":"ISO8601","example":"2026-05-04T12:30:45.123"}}`},
+		{name: "default outside allowed values", schema: `{"store":{"type":"str","displayName":"门店","allowedValues":["S001"],"default":"S002"}}`},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if _, err := canonicalReportInputSchema(json.RawMessage(test.schema)); !errors.Is(err, ErrReportInvalid) {
+				t.Fatalf("canonicalReportInputSchema() error = %v, want ErrReportInvalid", err)
+			}
+		})
+	}
+}
+
+func TestCanonicalReportInputSchemaKeepsDateAndDateTimeAsFormattedStrings(t *testing.T) {
+	schema := json.RawMessage(`{
+		"day":{"type":"str","displayName":"日期","control":"DATE","format":"YYYY-MM-DD","default":"2026-05-04"},
+		"at":{"type":"str","displayName":"时间","control":"DATETIME","format":"YYYYMMDDHHmmss","example":"20260504123045"},
+		"iso":{"type":"str","displayName":"同步时间","control":"DATETIME","format":"ISO8601","example":"2026-05-04T12:30:45"}
+	}`)
+	canonical, err := canonicalReportInputSchema(schema)
+	if err != nil {
+		t.Fatalf("canonicalReportInputSchema() error = %v", err)
+	}
+	if !strings.Contains(string(canonical), `"control":"DATE"`) || !strings.Contains(string(canonical), `"format":"YYYYMMDDHHmmss"`) {
+		t.Fatalf("canonical schema = %s", canonical)
+	}
+}
+
 func TestReportDraftServiceAcceptsJSONInputResultTable(t *testing.T) {
 	request := validReportDraftRequest()
 	request.ExecutionMode = model.ReportExecutionModeTableSnapshot
 	request.Procedure.JSONInputArgName = "p_payload"
 	request.InputSchema = json.RawMessage(`{
-		"c_store_id":{"type":"VARCHAR2","displayName":"门店","multiple":true,"required":true},
-		"datein_begin":{"type":"DATE","displayName":"开始日期"}
+		"c_store_id":{"type":"list[str]","displayName":"门店","required":true},
+		"datein_begin":{"type":"str","displayName":"开始日期","control":"DATE","format":"YYYYMMDD"}
 	}`)
 	request.Parameters = nil
 	request.CallTemplate = ""
@@ -212,7 +251,7 @@ func TestReportDraftServiceAcceptsJSONInputResultTable(t *testing.T) {
 		t.Fatalf("JSON result-table contract = %#v", draft.Version)
 	}
 	if draft.Version.ResultTableOwner != "REPORT_OWNER" || draft.Version.ResultTableName != "SALES_RESULT" ||
-		draft.Version.ResultRunIDColumn != "RUN_ID" || draft.Version.ResultRowIDColumn != "ID" {
+		draft.Version.ResultRunIDColumn != "" || draft.Version.ResultRowIDColumn != "" {
 		t.Fatalf("result table contract = %#v", draft.Version)
 	}
 	if got, want := draft.Version.CallTemplate, "BEGIN REPORT_OWNER.PKG_SALES.BUILD_REPORT(P_PAYLOAD => :payload); END;"; got != want {
@@ -223,14 +262,15 @@ func TestReportDraftServiceAcceptsJSONInputResultTable(t *testing.T) {
 	}
 }
 
-func TestReportDraftServiceRejectsResultKeyColumnsFromReportMapping(t *testing.T) {
+func TestReportDraftServiceTreatsFormerResultKeyNamesAsBusinessColumns(t *testing.T) {
 	for _, keyColumn := range []string{"RUN_ID", "ID"} {
 		t.Run(keyColumn, func(t *testing.T) {
 			request := validReportDraftRequest()
 			request.Columns[0].DatabaseColumn = keyColumn
 
-			if _, err := reportDraftFromRequest(17, request); !errors.Is(err, ErrReportInvalid) || !strings.Contains(err.Error(), "result key columns") {
-				t.Fatalf("reportDraftFromRequest() error = %v, want result key validation", err)
+			draft, err := reportDraftFromRequest(17, request)
+			if err != nil || draft.Columns[0].DatabaseColumn != keyColumn {
+				t.Fatalf("reportDraftFromRequest() draft=%#v error=%v", draft, err)
 			}
 		})
 	}

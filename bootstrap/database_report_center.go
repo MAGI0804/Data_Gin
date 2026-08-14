@@ -2,7 +2,9 @@ package bootstrap
 
 import (
 	"fmt"
+	"strings"
 
+	"gin-biz-web-api/internal/reportidentity"
 	"gin-biz-web-api/model"
 
 	"gorm.io/gorm"
@@ -116,6 +118,89 @@ func migrateReportJSONProcedureContract(migrator reportSchemaMigrator) error {
 		if err := migrator.AddColumn(version, field); err != nil {
 			return fmt.Errorf("report json procedure contract migration: add %s: %w", field, err)
 		}
+	}
+	return nil
+}
+
+type reportResultTableBindingCandidate struct {
+	DefinitionID uint   `gorm:"column:definition_id"`
+	VersionID    uint   `gorm:"column:version_id"`
+	Driver       string `gorm:"column:driver"`
+	Host         string `gorm:"column:host"`
+	Port         int    `gorm:"column:port"`
+	ServiceName  string `gorm:"column:service_name"`
+	SID          string `gorm:"column:sid"`
+	Username     string `gorm:"column:username"`
+	TableOwner   string `gorm:"column:table_owner"`
+	TableName    string `gorm:"column:table_name"`
+}
+
+// prepareReportResultTableBindings creates and rebuilds the MySQL registry
+// from current published contracts. The transaction either registers every
+// physical Oracle table exclusively or leaves the previous registry intact.
+func prepareReportResultTableBindings(db *gorm.DB) error {
+	if db == nil {
+		return fmt.Errorf("report result table binding migration: database is unavailable")
+	}
+	if err := db.AutoMigrate(&model.ReportResultTableBinding{}); err != nil {
+		return fmt.Errorf("report result table binding migration: create registry: %w", err)
+	}
+	var candidates []reportResultTableBindingCandidate
+	err := db.Table("report_definitions AS definitions").
+		Select(`definitions.id AS definition_id, versions.id AS version_id,
+			datasources.driver, datasources.host, datasources.port, datasources.service_name, datasources.sid, datasources.username,
+			versions.result_table_owner AS table_owner, versions.result_table_name AS table_name`).
+		Joins("JOIN report_versions AS versions ON versions.id = definitions.current_published_version_id AND versions.definition_id = definitions.id").
+		Joins("JOIN report_datasources AS datasources ON datasources.id = versions.datasource_id").
+		Where("definitions.status IN ?", []string{model.ReportDefinitionStatusActive, model.ReportDefinitionStatusDisabled}).
+		Where("versions.status = ? AND versions.execution_mode = ?", model.ReportVersionStatusPublished, model.ReportExecutionModeTableSnapshot).
+		Scan(&candidates).Error
+	if err != nil {
+		return fmt.Errorf("report result table binding migration: load published contracts: %w", err)
+	}
+	if err := validateLegacyResultTableBindings(candidates); err != nil {
+		return err
+	}
+	return db.Transaction(func(tx *gorm.DB) error {
+		if err := tx.Where("definition_id > 0").Delete(&model.ReportResultTableBinding{}).Error; err != nil {
+			return fmt.Errorf("report result table binding migration: reset registry: %w", err)
+		}
+		for _, candidate := range candidates {
+			binding := model.ReportResultTableBinding{
+				ConnectionFingerprint: reportidentity.DatasourceFingerprint(model.ReportDatasource{
+					Driver: candidate.Driver, Host: candidate.Host, Port: candidate.Port,
+					ServiceName: candidate.ServiceName, SID: candidate.SID, Username: candidate.Username,
+				}),
+				IdentitySource:  reportidentity.BindingIdentitySourceLegacy,
+				TableOwner:      strings.ToUpper(strings.TrimSpace(candidate.TableOwner)),
+				ResultTableName: strings.ToUpper(strings.TrimSpace(candidate.TableName)),
+				DefinitionID:    candidate.DefinitionID,
+				VersionID:       candidate.VersionID,
+			}
+			if binding.TableOwner == "" || binding.ResultTableName == "" {
+				return fmt.Errorf("report result table binding migration: report %d has no result table", candidate.DefinitionID)
+			}
+			if err := tx.Create(&binding).Error; err != nil {
+				return fmt.Errorf("report result table binding migration: register report %d: %w", candidate.DefinitionID, err)
+			}
+		}
+		return nil
+	})
+}
+
+func validateLegacyResultTableBindings(candidates []reportResultTableBindingCandidate) error {
+	definitionsByTable := make(map[string]uint, len(candidates))
+	for _, candidate := range candidates {
+		owner := strings.ToUpper(strings.TrimSpace(candidate.TableOwner))
+		table := strings.ToUpper(strings.TrimSpace(candidate.TableName))
+		if owner == "" || table == "" {
+			return fmt.Errorf("report result table binding migration: report %d has no result table", candidate.DefinitionID)
+		}
+		key := owner + "\x1f" + table
+		if existingDefinition, exists := definitionsByTable[key]; exists && existingDefinition != candidate.DefinitionID {
+			return fmt.Errorf("report result table binding migration: reports %d and %d both use legacy result table %s.%s", existingDefinition, candidate.DefinitionID, owner, table)
+		}
+		definitionsByTable[key] = candidate.DefinitionID
 	}
 	return nil
 }

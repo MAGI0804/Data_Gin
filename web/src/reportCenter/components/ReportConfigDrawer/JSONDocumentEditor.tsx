@@ -2,7 +2,7 @@ import { useEffect, useId, useState } from 'react'
 import { Braces } from 'lucide-react'
 import styles from './JSONDocumentEditor.module.css'
 
-export function JSONDocumentEditor<T>({ label, description, value, parse, onChange }: { label: string; description: string; value: unknown; parse: (value: unknown) => T; onChange: (value: T) => void }) {
+export function JSONDocumentEditor<T>({ label, description, value, parse, parseText, onChange }: { label: string; description: string; value: unknown; parse: (value: unknown) => T; parseText?: (source: string) => T; onChange: (value: T) => void }) {
   const serialized = JSON.stringify(value, null, 2)
   const errorId = useId()
   const [text, setText] = useState(serialized)
@@ -16,7 +16,7 @@ export function JSONDocumentEditor<T>({ label, description, value, parse, onChan
   function apply() {
     try {
       const decoded = JSON.parse(text) as unknown
-      onChange(parse(decoded))
+      onChange(parseText ? parseText(text) : parse(decoded))
       setError('')
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : 'JSON 格式不正确。')

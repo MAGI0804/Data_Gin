@@ -165,8 +165,6 @@ type versionSpec struct {
 	InputSchema         json.RawMessage `json:"inputSchema,omitempty"`
 	ResultTableOwner    string          `json:"resultTableOwner,omitempty"`
 	ResultTableName     string          `json:"resultTableName,omitempty"`
-	ResultRunIDColumn   string          `json:"resultRunIdColumn,omitempty"`
-	ResultRowIDColumn   string          `json:"resultRowIdColumn,omitempty"`
 	CallStatement       string          `json:"callStatement"`
 }
 
@@ -246,10 +244,6 @@ func Compile(
 	if version.ExecutionMode == model.ReportExecutionModeRefCursor {
 		return compileRefCursor(version, columns, grants, procedureArguments)
 	}
-	if version.ExecutionMode == model.ReportExecutionModeTableSnapshot {
-		version.ResultRunIDColumn = reportoracle.SystemResultRunIDColumn
-		version.ResultRowIDColumn = reportoracle.SystemResultRecordColumn
-	}
 	if version.ExecutionMode == model.ReportExecutionModeTableSnapshot && strings.TrimSpace(version.JSONInputArgName) != "" {
 		return compileJSONTableSnapshot(version, parameters, columns, grants, procedureArguments, resultColumns, snapshotContract)
 	}
@@ -274,11 +268,9 @@ func Compile(
 	for _, column := range columns {
 		configuredResultColumns = append(configuredResultColumns, column.DatabaseColumn)
 	}
-	if err := reportoracle.ValidateResultSnapshotContract(snapshotContract, reportoracle.ResultSnapshotRef{
-		Table:       reportoracle.ResultTableRef{Owner: version.ResultTableOwner, Name: version.ResultTableName},
-		RunIDColumn: version.ResultRunIDColumn, RowIDColumn: version.ResultRowIDColumn,
-		Columns: configuredResultColumns,
-	}); err != nil {
+	if err := reportoracle.ValidateResultSnapshotContract(snapshotContract, reportoracle.ResultTableSnapshotRef(
+		reportoracle.ResultTableRef{Owner: version.ResultTableOwner, Name: version.ResultTableName}, configuredResultColumns,
+	)); err != nil {
 		return Compiled{}, contractError("result snapshot contract is invalid: %v", err)
 	}
 	columnSpecs, normalizedResult, err := compileColumns(version, columns, resultColumns)
@@ -299,8 +291,6 @@ func Compile(
 			ProcedureOverload: strings.TrimSpace(version.ProcedureOverload),
 			ResultTableOwner:  strings.ToUpper(strings.TrimSpace(version.ResultTableOwner)),
 			ResultTableName:   strings.ToUpper(strings.TrimSpace(version.ResultTableName)),
-			ResultRunIDColumn: strings.ToUpper(strings.TrimSpace(version.ResultRunIDColumn)),
-			ResultRowIDColumn: strings.ToUpper(strings.TrimSpace(version.ResultRowIDColumn)),
 			CallStatement:     callPlan.Statement(),
 		},
 		Parameters: parameterSpecs, Procedure: normalizeProcedureArguments(procedureArguments),
@@ -370,11 +360,9 @@ func compileJSONTableSnapshot(
 	for _, column := range columns {
 		configuredResultColumns = append(configuredResultColumns, column.DatabaseColumn)
 	}
-	if err := reportoracle.ValidateResultSnapshotContract(snapshotContract, reportoracle.ResultSnapshotRef{
-		Table:       reportoracle.ResultTableRef{Owner: version.ResultTableOwner, Name: version.ResultTableName},
-		RunIDColumn: version.ResultRunIDColumn, RowIDColumn: version.ResultRowIDColumn,
-		Columns: configuredResultColumns,
-	}); err != nil {
+	if err := reportoracle.ValidateResultSnapshotContract(snapshotContract, reportoracle.ResultTableSnapshotRef(
+		reportoracle.ResultTableRef{Owner: version.ResultTableOwner, Name: version.ResultTableName}, configuredResultColumns,
+	)); err != nil {
 		return Compiled{}, contractError("result snapshot contract is invalid: %v", err)
 	}
 	columnSpecs, normalizedResult, err := compileColumns(version, columns, resultColumns)
@@ -392,7 +380,6 @@ func compileJSONTableSnapshot(
 			ProcedureName: strings.ToUpper(strings.TrimSpace(version.ProcedureName)), ProcedureOverload: strings.TrimSpace(version.ProcedureOverload),
 			JSONInputArgName: strings.ToUpper(strings.TrimSpace(version.JSONInputArgName)), InputSchema: inputSchema,
 			ResultTableOwner: strings.ToUpper(strings.TrimSpace(version.ResultTableOwner)), ResultTableName: strings.ToUpper(strings.TrimSpace(version.ResultTableName)),
-			ResultRunIDColumn: strings.ToUpper(strings.TrimSpace(version.ResultRunIDColumn)), ResultRowIDColumn: strings.ToUpper(strings.TrimSpace(version.ResultRowIDColumn)),
 			CallStatement: plan.Statement(),
 		},
 		Parameters: []parameterSpec{}, Procedure: normalizeProcedureArguments(procedureArguments),
@@ -664,11 +651,6 @@ func compileColumns(
 		}
 		actualByName[name] = column
 		actualPositions[column.Position] = struct{}{}
-	}
-	for _, key := range []string{version.ResultRunIDColumn, version.ResultRowIDColumn} {
-		if _, exists := actualByName[strings.ToUpper(strings.TrimSpace(key))]; !exists {
-			return nil, nil, contractError("result key column %q does not exist", key)
-		}
 	}
 	configured := append([]model.ReportColumn(nil), columns...)
 	sort.Slice(configured, func(i, j int) bool {

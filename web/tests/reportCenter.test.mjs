@@ -4,7 +4,7 @@ import test from 'node:test'
 import ts from 'typescript'
 
 import { createReportRun, getReportAudits, getReportProcedureSignature, getReportProcedures, getReportResultTableSchema, getReportResultTables, parsePublication, parseReportAuditPage, parseReportCatalogPage, parseReportDatasource, parseReportDatasources, parseReportDatasourceTest, parseReportDraft, parseReportExport, parseReportExportPage, parseReportProcedurePage, parseReportProcedureSignature, parseReportResultPage, parseReportResultTablePage, parseReportResultTableSchema, parseReportRun, parseReportRunContract, parseReportVersionDiff, parseReportVersionPage, saveReportDraft, testReportDatasourceConnection } from '../.test-dist/reportCenter/api.js'
-import { applyExcelMapping, buildReportConditions, excelMappingFromColumns, initialReportConditionValues, parseExcelMappingDocument, parseReportInputSchemaDocument, reconcileReportColumnsWithResultSchema, renameExcelMappingField, reportColumnsFromResultSchema, resultTableHasSystemColumns } from '../.test-dist/reportCenter/refCursorConfig.js'
+import { applyExcelMapping, buildReportConditions, excelMappingFromColumns, initialReportConditionValues, parseExcelMappingDocument, parseReportInputSchemaDocument, parseReportInputSchemaText, reconcileReportColumnsWithResultSchema, renameExcelMappingField, reportColumnsFromResultSchema } from '../.test-dist/reportCenter/refCursorConfig.js'
 import { reportParameterControls, reportParameterFlagDisabled, updateReportParameterFlag, updateReportParameterLogicalType } from '../.test-dist/reportCenter/parameterConfig.js'
 import { buildNewReportRunState, canStartNewReportRun, initialReportParameterValues } from '../.test-dist/reportCenter/queryParameters.js'
 import { createLatestRequestGuard } from '../.test-dist/reportCenter/components/ReportVersionDrawer/requestGuard.js'
@@ -147,6 +147,8 @@ test('parseReportRunContract exposes REF CURSOR condition schema for the query f
   assert.equal(contract.executionMode, 'REF_CURSOR')
   assert.equal(contract.jsonInput, true)
   assert.equal(contract.inputSchema.store_id.displayName, '门店')
+  assert.equal(contract.inputSchema.store_id.type, 'str')
+  assert.equal(contract.inputSchema.product_ids.type, 'list[str]')
   assert.deepEqual(initialReportConditionValues(contract.inputSchema), { store_id: '', product_ids: ['P001'] })
   assert.deepEqual(buildReportConditions(contract.inputSchema, { store_id: 'S001', product_ids: '["P001","P002"]' }), { ok: true, conditions: { store_id: 'S001', product_ids: ['P001', 'P002'] } })
   assert.deepEqual(buildReportConditions(contract.inputSchema, { store_id: '' }), { ok: false, error: '门店 为必填筛选条件。' })
@@ -154,6 +156,7 @@ test('parseReportRunContract exposes REF CURSOR condition schema for the query f
 
 test('REF CURSOR numeric enum defaults keep their type for query selectors', () => {
   const schema = parseReportInputSchemaDocument({ status: { type: 'NUMBER', displayName: '状态', default: 1, allowedValues: [1, 2] } })
+  assert.equal(schema.status.type, 'number')
   assert.deepEqual(initialReportConditionValues(schema), { status: 1 })
   assert.deepEqual(buildReportConditions(schema, { status: 1 }), { ok: true, conditions: { status: 1 } })
 })
@@ -336,7 +339,11 @@ test('REF CURSOR draft keeps JSON condition display names and automatic argument
   assert.equal(draft.executionMode, 'REF_CURSOR')
   assert.equal(draft.procedure.jsonInputArgName, 'P_PAYLOAD')
   assert.equal(draft.inputSchema.c_supplier_id.displayName, '供应商')
-  assert.equal(draft.inputSchema.c_supplier_id.control, 'MULTI_SELECT')
+  assert.equal(draft.inputSchema.c_supplier_id.type, 'list[str]')
+  assert.equal(draft.inputSchema.c_supplier_id.control, 'SELECT')
+  assert.equal(draft.inputSchema.datein_begin.type, 'str')
+  assert.equal(draft.inputSchema.datein_begin.control, 'DATE')
+  assert.equal(draft.inputSchema.datein_begin.format, 'YYYYMMDD')
   assert.deepEqual(draft.inputSchema.c_supplier_id.example, ['a', 'b'])
 })
 
@@ -354,21 +361,88 @@ test('JSON result-table draft keeps one input binding and the Oracle snapshot ta
   assert.equal(draft.procedure.resultCursorArgName, '')
   assert.equal(draft.result.tableName, 'REPORT_RESULT')
   assert.equal(draft.inputSchema.store_id.displayName, '门店')
+  draft.inputSchema.store_id = { ...draft.inputSchema.store_id, type: 'list[str]', displayName: '门店筛选', required: true, control: 'SELECT', allowedValues: ['S001', 'S002'] }
   const requests = []
   const client = async (path, options) => { requests.push({ path, options }); return { ok: true, data: payload } }
   await saveReportDraft(client, draft)
   assert.equal(requests[0].options.body.executionMode, 'TABLE_SNAPSHOT')
   assert.deepEqual(requests[0].options.body.parameters, [])
-  assert.equal(requests[0].options.body.inputSchema.store_id.displayName, '门店')
+  assert.deepEqual(requests[0].options.body.inputSchema.store_id, { type: 'list[str]', displayName: '门店筛选', required: true, control: 'SELECT', allowedValues: ['S001', 'S002'] })
   assert.deepEqual(requests[0].options.body.result, { tableOwner: 'BI', tableName: 'REPORT_RESULT' })
   assert.equal(requests[0].options.body.callTemplate, '')
 })
 
 test('condition JSON requires a filter display name and normalizes supported types', () => {
   const schema = parseReportInputSchemaDocument({ a: { type: 'varchar2', displayName: '门店', control: 'text', required: true, example: '01' } })
-  assert.deepEqual(schema.a, { type: 'VARCHAR2', displayName: '门店', control: 'TEXT', required: true, multiple: false, example: '01' })
+  assert.deepEqual(schema.a, { type: 'str', displayName: '门店', control: 'TEXT', required: true, example: '01' })
   assert.throws(() => parseReportInputSchemaDocument({ a: { type: 'VARCHAR2' } }), /筛选显示名/)
   assert.throws(() => parseReportInputSchemaDocument({ a: { type: 'VARCHAR2', displayName: '门店', unknown: true } }), /未知配置/)
+})
+
+test('condition JSON validates metadata types, date precision and exact numeric literals before save', () => {
+  assert.throws(() => parseReportInputSchemaDocument({ amount: { type: 'number', displayName: '金额', default: '12.5' } }), /默认值/)
+  assert.throws(() => parseReportInputSchemaDocument({ stores: { type: 'list[str]', displayName: '门店', example: ['S001', 2] } }), /示例值/)
+  assert.throws(() => parseReportInputSchemaDocument({ day: { type: 'str', displayName: '日期', control: 'DATE', format: 'YYYYMMDD', default: '20260504123045' } }), /日期格式/)
+  assert.throws(() => parseReportInputSchemaDocument({ day: { type: 'str', displayName: '日期', control: 'DATE', format: 'BAD' } }), /日期格式不受支持/)
+  assert.throws(() => parseReportInputSchemaText('{"amount":{"type":"number","displayName":"金额","default":9007199254740993}}'), /安全数字范围/)
+  assert.throws(() => parseReportInputSchemaText('{"amount":{"type":"number","displayName":"金额","default":0.10000000000000001}}'), /安全数字范围/)
+})
+
+test('condition JSON sends only configured canonical values and formats date controls', () => {
+  const schema = parseReportInputSchemaDocument({
+    supplier: { type: 'str', displayName: '供应商' },
+    amount: { type: 'number', displayName: '金额' },
+    enabled: { type: 'bool', displayName: '启用' },
+    stores: { type: 'list[str]', displayName: '门店' },
+    levels: { type: 'list[number]', displayName: '等级' },
+    flags: { type: 'list[bool]', displayName: '标记' },
+    options: { type: 'json', displayName: '扩展条件' },
+    dayCompact: { type: 'str', displayName: '业务日期', control: 'DATE', format: 'YYYYMMDD' },
+    dayDashed: { type: 'str', displayName: '结束日期', control: 'DATE', format: 'YYYY-MM-DD' },
+    timeCompact: { type: 'str', displayName: '执行时间', control: 'DATETIME', format: 'YYYYMMDDHHmmss' },
+    timeReadable: { type: 'str', displayName: '完成时间', control: 'DATETIME', format: 'YYYY-MM-DD HH:mm:ss' },
+    timeISO: { type: 'str', displayName: '同步时间', control: 'DATETIME', format: 'ISO8601' },
+  })
+  assert.deepEqual(buildReportConditions(schema, {
+    supplier: 'A001', amount: '12.5', enabled: true, stores: '["S001","S002"]', levels: '[1,2]', flags: '[true,false]', options: '{"active":true}',
+    dayCompact: '2026-05-04', dayDashed: '2026-05-05', timeCompact: '2026-05-04T13:25', timeReadable: '2026-05-04T13:25:06', timeISO: '2026-05-04T13:25',
+    report_id: 99, run_id: 100,
+  }), { ok: true, conditions: {
+    supplier: 'A001', amount: 12.5, enabled: true, stores: ['S001', 'S002'], levels: [1, 2], flags: [true, false], options: { active: true },
+    dayCompact: '20260504', dayDashed: '2026-05-05', timeCompact: '20260504132500', timeReadable: '2026-05-04 13:25:06', timeISO: '2026-05-04T13:25:00',
+  } })
+  assert.deepEqual(buildReportConditions(parseReportInputSchemaDocument({ day: { type: 'str', displayName: '日期', control: 'DATE' } }), { day: '2026-05-04' }), { ok: true, conditions: { day: '2026-05-04' } })
+  assert.deepEqual(buildReportConditions(schema, { levels: '["1"]' }), { ok: false, error: '等级 与 list[number] 类型不匹配。' })
+  assert.deepEqual(buildReportConditions(schema, { dayCompact: '2026-02-30' }), { ok: false, error: '业务日期 必须填写有效日期。' })
+})
+
+test('number conditions reject values that JavaScript cannot preserve safely', () => {
+  const schema = parseReportInputSchemaDocument({
+    amount: { type: 'number', displayName: '金额' },
+    levels: { type: 'list[number]', displayName: '等级' },
+  })
+  const unsafeMessage = ' 超出 JavaScript 安全数字范围或无法无损表示，请改用 str 类型。'
+
+  assert.deepEqual(buildReportConditions(schema, { amount: '9007199254740991' }), { ok: true, conditions: { amount: 9007199254740991 } })
+  assert.deepEqual(buildReportConditions(schema, { amount: '1.25e3' }), { ok: true, conditions: { amount: 1250 } })
+  assert.deepEqual(buildReportConditions(schema, { amount: '9007199254740993' }), { ok: false, error: `金额${unsafeMessage}` })
+  assert.deepEqual(buildReportConditions(schema, { amount: '0.10000000000000001' }), { ok: false, error: `金额${unsafeMessage}` })
+  assert.deepEqual(buildReportConditions(schema, { levels: '[1,9007199254740993]' }), { ok: false, error: `等级${unsafeMessage}` })
+  assert.deepEqual(buildReportConditions(schema, { levels: '[0.1,0.10000000000000001]' }), { ok: false, error: `等级${unsafeMessage}` })
+  assert.deepEqual(buildReportConditions(schema, { levels: '[1e309]' }), { ok: false, error: `等级${unsafeMessage}` })
+})
+
+test('formatted date defaults use HTML input values and convert back before submission', () => {
+  const schema = parseReportInputSchemaDocument({
+    day: { type: 'str', displayName: '日期', control: 'DATE', format: 'YYYYMMDD', default: '20260504', allowedValues: ['20260504', '20260505'] },
+    compactTime: { type: 'str', displayName: '紧凑时间', control: 'DATETIME', format: 'YYYYMMDDHHmmss', default: '20260504123045' },
+    readableTime: { type: 'str', displayName: '可读时间', control: 'DATETIME', format: 'YYYY-MM-DD HH:mm:ss', default: '2026-05-04 12:30:45' },
+    isoTime: { type: 'str', displayName: 'ISO 时间', control: 'DATETIME', format: 'ISO8601', default: '2026-05-04T12:30:45' },
+  })
+  const values = initialReportConditionValues(schema)
+  assert.deepEqual(values, { day: '2026-05-04', compactTime: '2026-05-04T12:30:45', readableTime: '2026-05-04T12:30:45', isoTime: '2026-05-04T12:30:45' })
+  assert.deepEqual(buildReportConditions(schema, values), { ok: true, conditions: { day: '20260504', compactTime: '20260504123045', readableTime: '2026-05-04 12:30:45', isoTime: '2026-05-04T12:30:45' } })
+  assert.deepEqual(buildReportConditions(schema, { ...values, day: '2026-05-05' }), { ok: true, conditions: { day: '20260505', compactTime: '20260504123045', readableTime: '2026-05-04 12:30:45', isoTime: '2026-05-04T12:30:45' } })
 })
 
 test('Excel JSON mapping and table edits share the existing columns contract', () => {
@@ -386,7 +460,7 @@ test('Excel JSON mapping and table edits share the existing columns contract', (
   assert.equal(renamed[0].databaseColumn, 'supplier_id')
 })
 
-test('result table schema excludes fixed system fields and keeps edited headers', () => {
+test('result table schema maps every field and keeps edited headers', () => {
   let index = 0
   const createFieldId = () => `00000000-0000-4000-8000-${String(++index).padStart(12, '0')}`
   const schema = [
@@ -395,22 +469,16 @@ test('result table schema excludes fixed system fields and keeps edited headers'
     { name: 'SUPPLIER_ID', position: 3, oracleType: 'VARCHAR2', dataLength: 64, precision: null, scale: null, nullable: true },
   ]
   const generated = reportColumnsFromResultSchema(schema, createFieldId)
-  assert.deepEqual(generated.map((column) => column.databaseColumn), ['SUPPLIER_ID'])
+  assert.deepEqual(generated.map((column) => column.databaseColumn), ['RUN_ID', 'ID', 'SUPPLIER_ID'])
   assert.equal(generated[0].sourceOracleType, 'VARCHAR2')
-  const customized = [{ ...generated[0], excelHeader: '供应商编码', previewHeader: '供应商编码' }]
+  assert.equal(generated[1].sourceOracleType, 'NUMBER')
+  const customized = generated.map((column) => column.databaseColumn === 'SUPPLIER_ID'
+    ? { ...column, excelHeader: '供应商编码', previewHeader: '供应商编码' }
+    : column)
   const reconciled = reconcileReportColumnsWithResultSchema(schema, customized, () => { throw new Error('existing field must keep its stable id') })
-  assert.equal(reconciled[0].fieldId, generated[0].fieldId)
-  assert.equal(reconciled[0].excelHeader, '供应商编码')
-})
-
-test('result table requires fixed RUN_ID and ID system columns', () => {
-  const schema = [
-    { name: 'RUN_ID', position: 1, oracleType: 'NUMBER', dataLength: 22, precision: 18, scale: 0, nullable: false },
-    { name: 'ID', position: 2, oracleType: 'NUMBER', dataLength: 22, precision: 18, scale: 0, nullable: false },
-    { name: 'AMOUNT', position: 3, oracleType: 'NUMBER', dataLength: 22, precision: 18, scale: 2, nullable: true },
-  ]
-  assert.equal(resultTableHasSystemColumns(schema), true)
-  assert.equal(resultTableHasSystemColumns(schema.filter((column) => column.name !== 'ID')), false)
+  const supplier = reconciled.find((column) => column.databaseColumn === 'SUPPLIER_ID')
+  assert.equal(supplier.fieldId, generated[2].fieldId)
+  assert.equal(supplier.excelHeader, '供应商编码')
 })
 
 test('result table metadata parsers and requests enforce the Oracle table contract', async () => {
@@ -499,13 +567,13 @@ test('publication parser keeps only the safe Oracle validation summary', () => {
       validatedAt: '2026-08-13T08:00:00Z',
       procedure: { owner: 'REPORT', package: 'PKG_SALES', name: 'BUILD_REPORT', overload: '', argumentCount: 2, signatureHash: hash, password: 'must-not-pass' },
       result: { tableOwner: 'REPORT', tableName: 'SALES_RESULT', columnCount: 12, schemaHash: hash, dsn: 'must-not-pass' },
-      snapshot: { uniqueKeyValidated: true },
+      snapshot: { resultTableValidated: true },
       export: { exportableColumnCount: 8, schemaHash: hash },
     },
   } })
   assert.equal(publication.validation.procedure.argumentCount, 2)
   assert.equal(publication.validation.result.columnCount, 12)
-  assert.equal(publication.validation.snapshot.uniqueKeyValidated, true)
+  assert.equal(publication.validation.snapshot.resultTableValidated, true)
   assert.equal(Object.hasOwn(publication.validation.procedure, 'password'), false)
   assert.equal(Object.hasOwn(publication.validation.result, 'dsn'), false)
   assert.equal(parsePublication({ data: { definitionId: 9, versionId: 23, version: 3, status: 'PUBLISHED', contractHash: hash } }).validation, null)
@@ -514,7 +582,7 @@ test('publication parser keeps only the safe Oracle validation summary', () => {
     { ...publication.validation, procedure: { ...publication.validation.procedure, name: '' } },
     { ...publication.validation, result: { ...publication.validation.result, columnCount: 0 } },
     { ...publication.validation, export: { ...publication.validation.export, schemaHash: 'a'.repeat(63) } },
-    { ...publication.validation, snapshot: { ...publication.validation.snapshot, uniqueKeyValidated: false } },
+    { ...publication.validation, snapshot: { ...publication.validation.snapshot, resultTableValidated: false } },
   ]) assert.throws(() => parsePublication({ data: { definitionId: 9, versionId: 23, version: 3, status: 'PUBLISHED', contractHash: hash, validation } }))
 })
 

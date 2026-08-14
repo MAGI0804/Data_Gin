@@ -9,6 +9,7 @@ import (
 	"github.com/google/uuid"
 
 	"gin-biz-web-api/internal/reportcontract"
+	"gin-biz-web-api/internal/reportidentity"
 	"gin-biz-web-api/internal/reportoracle"
 	"gin-biz-web-api/internal/reportrepo"
 	"gin-biz-web-api/model"
@@ -29,9 +30,11 @@ type reportCredentialDecryptor interface {
 }
 
 type reportOracleInspector interface {
+	InspectDatabaseIdentity(context.Context) (reportoracle.DatabaseIdentity, error)
 	InspectProcedure(context.Context, reportoracle.ProcedureRef) ([]reportoracle.ProcedureArgument, error)
 	InspectResultTable(context.Context, reportoracle.ResultTableRef) ([]reportoracle.ResultColumn, error)
 	InspectResultSnapshotContract(context.Context, reportoracle.ResultSnapshotRef) (reportoracle.ResultSnapshotContract, error)
+	ValidateResultSnapshotTable(context.Context, reportoracle.ResultTableRef) error
 	ValidateJSONSnapshotStore(context.Context) error
 	Close() error
 }
@@ -82,7 +85,7 @@ type ReportPublicationResultDTO struct {
 	SchemaHash  string `json:"schemaHash"`
 }
 type ReportPublicationSnapshotDTO struct {
-	UniqueKeyValidated bool `json:"uniqueKeyValidated"`
+	ResultTableValidated bool `json:"resultTableValidated"`
 }
 type ReportPublicationExportDTO struct {
 	ExportableColumnCount int    `json:"exportableColumnCount"`
@@ -91,9 +94,10 @@ type ReportPublicationExportDTO struct {
 
 type reportPublicationInspection struct {
 	compiled               reportcontract.Compiled
+	connectionFingerprint  string
 	procedureArgumentCount int
 	resultColumnCount      int
-	uniqueKeyValidated     bool
+	resultTableValidated   bool
 }
 
 func NewReportPublishService(store reportPublicationStore, decryptor reportCredentialDecryptor, opener reportOracleOpener) *ReportPublishService {
@@ -135,6 +139,8 @@ func (service *ReportPublishService) Publish(ctx context.Context, actor, definit
 		ParameterSchemaHash: inspection.compiled.Hashes.ParameterSchema, ProcedureSignatureHash: inspection.compiled.Hashes.ProcedureSignature,
 		ResultSchemaHash: inspection.compiled.Hashes.ResultSchema, PermissionHash: inspection.compiled.Hashes.Permission,
 		ExportSchemaHash: inspection.compiled.Hashes.ExportSchema, SchemaProbeToken: uuid.NewString(), SchemaValidatedAt: validatedAt,
+		ConnectionFingerprint: inspection.connectionFingerprint, ConnectionIdentitySource: reportidentity.BindingIdentitySourceOracle,
+		DatasourceSnapshotFingerprint: reportidentity.DatasourceFingerprint(*datasource),
 	})
 	if err != nil {
 		return nil, classifyPublicationStoreError(err)
@@ -150,7 +156,7 @@ func (service *ReportPublishService) Publish(ctx context.Context, actor, definit
 			ValidatedAt: validatedAt,
 			Procedure:   ReportPublicationProcedureDTO{Owner: draft.Version.ProcedureOwner, Package: draft.Version.PackageName, Name: draft.Version.ProcedureName, Overload: draft.Version.ProcedureOverload, ArgumentCount: inspection.procedureArgumentCount, SignatureHash: inspection.compiled.Hashes.ProcedureSignature},
 			Result:      ReportPublicationResultDTO{TableOwner: draft.Version.ResultTableOwner, TableName: draft.Version.ResultTableName, ColumnCount: inspection.resultColumnCount, SchemaHash: inspection.compiled.Hashes.ResultSchema},
-			Snapshot:    ReportPublicationSnapshotDTO{UniqueKeyValidated: inspection.uniqueKeyValidated},
+			Snapshot:    ReportPublicationSnapshotDTO{ResultTableValidated: inspection.resultTableValidated},
 			Export:      ReportPublicationExportDTO{ExportableColumnCount: exportableReportColumnCount(draft.Columns), SchemaHash: inspection.compiled.Hashes.ExportSchema},
 		},
 	}, nil
@@ -178,6 +184,17 @@ func (service *ReportPublishService) inspectContract(
 			resultErr = errors.Join(resultErr, fmt.Errorf("report publication: close oracle datasource: %w", closeErr))
 		}
 	}()
+	databaseIdentity, err := inspector.InspectDatabaseIdentity(inspectionCtx)
+	if err != nil {
+		return inspection, classifyOracleInspectionError("database identity", err)
+	}
+	inspection.connectionFingerprint, err = reportidentity.OracleDatabaseFingerprint(reportidentity.OracleDatabaseIdentity{
+		DBID: databaseIdentity.DBID, DBUniqueName: databaseIdentity.DBUniqueName, DBName: databaseIdentity.DBName,
+		ContainerID: databaseIdentity.ContainerID, ContainerUID: databaseIdentity.ContainerUID, ContainerName: databaseIdentity.ContainerName,
+	})
+	if err != nil {
+		return inspection, fmt.Errorf("%w: Oracle database identity is incomplete", ErrReportPublicationInvalid)
+	}
 
 	procedureRef := reportoracle.ProcedureRef{Owner: draft.Version.ProcedureOwner, Package: draft.Version.PackageName, Name: draft.Version.ProcedureName, Overload: draft.Version.ProcedureOverload}
 	procedure, err := inspector.InspectProcedure(inspectionCtx, procedureRef)
@@ -192,18 +209,25 @@ func (service *ReportPublishService) inspectContract(
 		if err != nil {
 			return inspection, fmt.Errorf("%w: %v", ErrReportPublicationInvalid, err)
 		}
-		return reportPublicationInspection{compiled: compiled, procedureArgumentCount: len(procedure), resultColumnCount: len(draft.Columns), uniqueKeyValidated: true}, nil
+		inspection.compiled = compiled
+		inspection.procedureArgumentCount = len(procedure)
+		inspection.resultColumnCount = len(draft.Columns)
+		inspection.resultTableValidated = true
+		return inspection, nil
 	}
 	resultRef := reportoracle.ResultTableRef{Owner: draft.Version.ResultTableOwner, Name: draft.Version.ResultTableName}
 	resultColumns, err := inspector.InspectResultTable(inspectionCtx, resultRef)
 	if err != nil {
 		return inspection, classifyOracleInspectionError("result table", err)
 	}
+	if err := inspector.ValidateResultSnapshotTable(inspectionCtx, resultRef); err != nil {
+		return inspection, classifyOracleInspectionError("result table ROWID", err)
+	}
 	configuredColumns := make([]string, 0, len(draft.Columns))
 	for _, column := range draft.Columns {
 		configuredColumns = append(configuredColumns, column.DatabaseColumn)
 	}
-	snapshot, err := inspector.InspectResultSnapshotContract(inspectionCtx, reportoracle.SystemResultSnapshotRef(resultRef, configuredColumns))
+	snapshot, err := inspector.InspectResultSnapshotContract(inspectionCtx, reportoracle.ResultTableSnapshotRef(resultRef, configuredColumns))
 	if err != nil {
 		return inspection, classifyOracleInspectionError("result snapshot", err)
 	}
@@ -211,7 +235,11 @@ func (service *ReportPublishService) inspectContract(
 	if err != nil {
 		return inspection, fmt.Errorf("%w: %v", ErrReportPublicationInvalid, err)
 	}
-	return reportPublicationInspection{compiled: compiled, procedureArgumentCount: len(procedure), resultColumnCount: len(resultColumns), uniqueKeyValidated: true}, nil
+	inspection.compiled = compiled
+	inspection.procedureArgumentCount = len(procedure)
+	inspection.resultColumnCount = len(resultColumns)
+	inspection.resultTableValidated = true
+	return inspection, nil
 }
 
 func exportableReportColumnCount(columns []model.ReportColumn) int {
@@ -259,6 +287,8 @@ func classifyPublicationStoreError(err error) error {
 		return fmt.Errorf("%w: datasource does not exist, is disabled or is not Oracle", ErrReportPublicationInvalid)
 	case errors.Is(err, reportrepo.ErrInvalidDraft):
 		return fmt.Errorf("%w: repository rejected publication", ErrReportPublicationInvalid)
+	case errors.Is(err, reportrepo.ErrResultTableConflict):
+		return fmt.Errorf("%w: Oracle结果表已被其他已发布报表绑定，结果表必须独占", ErrReportPublicationInvalid)
 	default:
 		return fmt.Errorf("report publication: store: %w", err)
 	}

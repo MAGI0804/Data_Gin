@@ -44,7 +44,7 @@ func (oracleReportResultCleanupFactory) Open(ctx context.Context, runtime report
 			runUUID: runtime.Run.RunUUID, queryTimeout: queryTimeout,
 		}, nil
 	}
-	ref := reportoracle.SystemResultSnapshotRef(
+	ref := reportoracle.ResultTableSnapshotRef(
 		reportoracle.ResultTableRef{Owner: runtime.Version.ResultTableOwner, Name: runtime.Version.ResultTableName}, configuredColumns,
 	)
 	resultColumns, err := adapter.InspectResultTable(queryCtx, ref.Table)
@@ -65,6 +65,6 @@ func (oracleReportResultCleanupFactory) Open(ctx context.Context, runtime report
 		return closeOnError(err)
 	}
 	return &oracleReportExportSession{
-		adapter: adapter, purgePlan: purgePlan, reportID: runtime.Run.DefinitionID, queryTimeout: queryTimeout,
+		adapter: adapter, purgePlan: purgePlan, queryTimeout: queryTimeout,
 	}, nil
 }

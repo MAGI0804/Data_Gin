@@ -97,6 +97,17 @@ func TestResultTableCatalogUsesBoundFiltersAndVisibleTables(t *testing.T) {
 	}
 }
 
+func TestDatabaseIdentityQueriesPreferDBIDAndRetainLeastPrivilegeFallback(t *testing.T) {
+	for _, fragment := range []string{"v$database", "dbid", "db_unique_name", "CON_UID", "CON_NAME"} {
+		if !strings.Contains(databaseIdentitySQL, fragment) {
+			t.Fatalf("database identity SQL is missing %q", fragment)
+		}
+	}
+	if !strings.Contains(databaseIdentityFallbackSQL, "DB_UNIQUE_NAME") || !strings.Contains(databaseIdentityFallbackSQL, "FROM dual") {
+		t.Fatalf("database identity fallback is incomplete: %s", databaseIdentityFallbackSQL)
+	}
+}
+
 func TestResultTableCursorRoundTrip(t *testing.T) {
 	ref := ResultTableRef{Owner: "report_owner", Name: "daily_result_rows"}
 	key, err := ResultTableCursorKey(ref)

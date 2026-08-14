@@ -46,7 +46,7 @@ type ReportExportRenderProgress struct {
 	ProcessedRows int64
 	CurrentSheet  string
 	SheetCount    int
-	AfterRowID    int64
+	AfterKey      string
 }
 
 type ReportExportRenderResult struct {
@@ -250,19 +250,19 @@ func (renderer *ReportExportRenderer) Render(
 			rowsInSheet++
 			result.ProcessedRows++
 			if onProgress != nil && result.ProcessedRows%reportExportProgressRows == 0 {
-				if err := onProgress(ReportExportRenderProgress{ProcessedRows: result.ProcessedRows, CurrentSheet: currentSheet, SheetCount: result.SheetCount, AfterRowID: row.RowID}); err != nil {
+				if err := onProgress(ReportExportRenderProgress{ProcessedRows: result.ProcessedRows, CurrentSheet: currentSheet, SheetCount: result.SheetCount, AfterKey: row.Key}); err != nil {
 					return result, fmt.Errorf("report export renderer: update progress: %w", err)
 				}
 			}
 		}
 		if len(page.Rows) > 0 {
 			last := page.Rows[len(page.Rows)-1]
-			if page.NextRowID != last.RowID {
+			if page.NextKey != last.Key {
 				return result, fmt.Errorf("report export renderer: page cursor mismatch")
 			}
-			next := reportoracle.ResultCursor{RowID: page.NextRowID}
+			next := reportoracle.ResultCursor{Key: page.NextKey}
 			next.SortValue = last.SortValue
-			if after != nil && after.RowID == next.RowID && reflect.DeepEqual(after.SortValue, next.SortValue) {
+			if after != nil && after.Key == next.Key && reflect.DeepEqual(after.SortValue, next.SortValue) {
 				return result, fmt.Errorf("report export renderer: non-advancing result cursor")
 			}
 			after = &next

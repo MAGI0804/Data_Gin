@@ -2,6 +2,7 @@ package data_svc
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -455,5 +456,9 @@ func reportExportCheckpoint(progress ReportExportRenderProgress) (model.JSONText
 	if progress.ProcessedRows < 0 || progress.SheetCount < 1 || progress.CurrentSheet == "" {
 		return "", fmt.Errorf("report export processor: invalid progress checkpoint")
 	}
-	return model.JSONText(fmt.Sprintf(`{"afterRowId":%d,"sheetCount":%d}`, progress.AfterRowID, progress.SheetCount)), nil
+	encoded, err := json.Marshal(map[string]interface{}{"afterKey": progress.AfterKey, "sheetCount": progress.SheetCount})
+	if err != nil {
+		return "", fmt.Errorf("report export processor: encode progress checkpoint: %w", err)
+	}
+	return model.JSONText(encoded), nil
 }

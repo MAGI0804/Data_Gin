@@ -29,7 +29,10 @@ var (
 	ErrReportRunCredentialUnavailable = errors.New("report run service: credential configuration unavailable")
 )
 
-var refreshNoncePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`)
+var (
+	refreshNoncePattern        = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`)
+	exactISO8601SecondsPattern = regexp.MustCompile(`^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}$`)
+)
 
 const maxReportJSONConditionsBytes = 1024 * 1024
 
@@ -173,6 +176,7 @@ type reportRunInputFieldSchema struct {
 	Type          string            `json:"type"`
 	DisplayName   string            `json:"displayName"`
 	Control       string            `json:"control,omitempty"`
+	Format        string            `json:"format,omitempty"`
 	Required      bool              `json:"required,omitempty"`
 	Multiple      bool              `json:"multiple,omitempty"`
 	Example       json.RawMessage   `json:"example,omitempty"`
@@ -253,7 +257,7 @@ func normalizeRefCursorConditions(schemaJSON []byte, input map[string]json.RawMe
 			}
 		}
 		canonical, decoded, err := canonicalConditionValue(value)
-		if err != nil || !conditionValueMatchesField(decoded, field) || !conditionValueAllowed(canonical, field.AllowedValues, field.Multiple) {
+		if err != nil || !conditionValueMatchesField(decoded, field) || !conditionValueAllowed(canonical, field.AllowedValues, conditionTypeIsList(field.Type, field.Multiple)) {
 			return nil, "", ErrReportRunInvalid
 		}
 		normalized[code] = canonical
@@ -284,13 +288,16 @@ func canonicalConditionValue(raw json.RawMessage) (json.RawMessage, interface{},
 }
 
 func conditionValueMatchesField(value interface{}, field reportRunInputFieldSchema) bool {
-	if field.Multiple {
+	if normalizeJSONConditionType(field.Type, false) == "json" {
+		return value != nil
+	}
+	if conditionTypeIsList(field.Type, field.Multiple) {
 		values, ok := value.([]interface{})
 		if !ok || (field.Required && len(values) == 0) {
 			return false
 		}
 		for _, item := range values {
-			if !conditionScalarMatchesType(item, field.Type) {
+			if !conditionScalarMatchesType(item, conditionListItemType(field.Type)) {
 				return false
 			}
 		}
@@ -299,30 +306,87 @@ func conditionValueMatchesField(value interface{}, field reportRunInputFieldSche
 	if _, isArray := value.([]interface{}); isArray {
 		return false
 	}
-	return conditionScalarMatchesType(value, field.Type)
+	if !conditionScalarMatchesType(value, field.Type) {
+		return false
+	}
+	text, isString := value.(string)
+	if !isString || field.Control == "" {
+		return true
+	}
+	format := field.Format
+	if format == "" && strings.EqualFold(strings.TrimSpace(field.Type), "DATE") {
+		format = "YYYYMMDD"
+	}
+	return conditionStringMatchesFormat(text, field.Control, format)
 }
 
-func conditionScalarMatchesType(value interface{}, oracleType string) bool {
-	switch strings.ToUpper(strings.TrimSpace(oracleType)) {
-	case "NUMBER":
-		switch typed := value.(type) {
-		case json.Number:
-			return typed.String() != ""
-		case string:
-			_, err := strconv.ParseFloat(typed, 64)
-			return err == nil
-		default:
-			return false
-		}
-	case "BOOLEAN":
+func conditionScalarMatchesType(value interface{}, valueType string) bool {
+	switch normalizeJSONConditionType(valueType, false) {
+	case "number":
+		_, ok := value.(json.Number)
+		return ok
+	case "bool":
 		_, ok := value.(bool)
 		return ok
-	case "VARCHAR2", "NVARCHAR2", "CHAR", "NCHAR", "CLOB", "NCLOB", "DATE", "TIMESTAMP":
+	case "str":
 		text, ok := value.(string)
 		return ok && text != ""
+	case "json":
+		return value != nil
 	default:
 		return false
 	}
+}
+
+func conditionTypeIsList(valueType string, legacyMultiple bool) bool {
+	return legacyMultiple || strings.HasPrefix(normalizeJSONConditionType(valueType, false), "list[")
+}
+
+func conditionListItemType(valueType string) string {
+	normalized := normalizeJSONConditionType(valueType, false)
+	switch normalized {
+	case "list[str]":
+		return "str"
+	case "list[number]":
+		return "number"
+	case "list[bool]":
+		return "bool"
+	default:
+		return valueType
+	}
+}
+
+func conditionStringMatchesFormat(value, control, format string) bool {
+	var layout string
+	switch strings.ToUpper(strings.TrimSpace(control)) {
+	case "DATE":
+		switch format {
+		case "YYYYMMDD":
+			layout = "20060102"
+		case "YYYY-MM-DD", "":
+			layout = "2006-01-02"
+		default:
+			return false
+		}
+	case "DATETIME":
+		if strings.EqualFold(strings.TrimSpace(format), "ISO8601") && !exactISO8601SecondsPattern.MatchString(value) {
+			return false
+		}
+		switch format {
+		case "YYYYMMDDHHmmss":
+			layout = "20060102150405"
+		case "YYYY-MM-DD HH:mm:ss":
+			layout = "2006-01-02 15:04:05"
+		case "ISO8601", "":
+			layout = "2006-01-02T15:04:05"
+		default:
+			return false
+		}
+	default:
+		return true
+	}
+	_, err := time.Parse(layout, value)
+	return err == nil
 }
 
 func conditionValueAllowed(value json.RawMessage, allowed []json.RawMessage, multiple bool) bool {

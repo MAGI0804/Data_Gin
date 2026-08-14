@@ -183,7 +183,7 @@ func (service *ReportRunQueryService) QueryResults(ctx context.Context, actor, r
 		if decodeErr != nil {
 			return nil, ErrReportRunQueryInvalid
 		}
-		after = &reportoracle.ResultCursor{RowID: decoded.AfterRowID, SortValue: decoded.SortValue}
+		after = &reportoracle.ResultCursor{Key: decoded.AfterKey, SortValue: decoded.SortValue}
 	}
 	password, err := service.credential.Decrypt(contract.Datasource.CredentialKeyVersion, contract.Datasource.PasswordCiphertext)
 	if err != nil {
@@ -218,10 +218,10 @@ func (service *ReportRunQueryService) QueryResults(ctx context.Context, actor, r
 		for index, column := range columns {
 			values[column.LogicalCode] = reportResultValue(row.Values[index], column)
 		}
-		result.Rows = append(result.Rows, ReportResultRowDTO{Key: strconv.FormatInt(row.RowID, 10), Values: values})
+		result.Rows = append(result.Rows, ReportResultRowDTO{Key: row.Key, Values: values})
 	}
 	if page.HasNext {
-		cursor := reportResultCursor{Version: 2, RunUUID: contract.Run.RunUUID, ContractHash: contract.Run.ContractHash, PageSize: limit, QueryFingerprint: fingerprint, AfterRowID: page.NextRowID}
+		cursor := reportResultCursor{Version: 3, RunUUID: contract.Run.RunUUID, ContractHash: contract.Run.ContractHash, PageSize: limit, QueryFingerprint: fingerprint, AfterKey: page.NextKey}
 		if len(query.Sort) == 1 {
 			last := page.Rows[len(page.Rows)-1]
 			cursor.SortValue = last.SortValue
@@ -422,7 +422,7 @@ type reportResultCursor struct {
 	RunUUID          string             `json:"runUuid"`
 	ContractHash     string             `json:"contractHash"`
 	PageSize         int                `json:"pageSize"`
-	AfterRowID       int64              `json:"afterRowId"`
+	AfterKey         string             `json:"afterKey"`
 	QueryFingerprint string             `json:"queryFingerprint"`
 	SortValue        *reportquery.Value `json:"sortValue,omitempty"`
 }
@@ -458,7 +458,7 @@ func (service *ReportRunQueryService) decodeCursor(value string, run model.Repor
 	var cursor reportResultCursor
 	decoder := json.NewDecoder(bytes.NewReader(payload))
 	decoder.DisallowUnknownFields()
-	if err := decoder.Decode(&cursor); err != nil || cursor.Version != 2 || cursor.RunUUID != run.RunUUID || cursor.ContractHash != run.ContractHash || cursor.PageSize != limit || cursor.QueryFingerprint != fingerprint {
+	if err := decoder.Decode(&cursor); err != nil || cursor.Version != 3 || strings.TrimSpace(cursor.AfterKey) == "" || cursor.RunUUID != run.RunUUID || cursor.ContractHash != run.ContractHash || cursor.PageSize != limit || cursor.QueryFingerprint != fingerprint {
 		return reportResultCursor{}, ErrReportRunQueryInvalid
 	}
 	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
@@ -497,11 +497,14 @@ func (oracleReportResultPageReader) Read(ctx context.Context, contract reportrep
 		}
 		afterRowID := int64(0)
 		if after != nil {
-			afterRowID = after.RowID
+			afterRowID, err = strconv.ParseInt(after.Key, 10, 64)
+			if err != nil || afterRowID < 0 {
+				return reportoracle.ResultPage{}, fmt.Errorf("JSON cursor report result cursor is invalid")
+			}
 		}
 		return adapter.ReadJSONSnapshotPage(queryCtx, contract.Run.RunUUID, columns, afterRowID, limit)
 	}
-	ref := reportoracle.SystemResultSnapshotRef(
+	ref := reportoracle.ResultTableSnapshotRef(
 		reportoracle.ResultTableRef{Owner: contract.Version.ResultTableOwner, Name: contract.Version.ResultTableName}, columns,
 	)
 	resultColumns, err := adapter.InspectResultTable(queryCtx, ref.Table)
@@ -521,5 +524,5 @@ func (oracleReportResultPageReader) Read(ctx context.Context, contract reportrep
 	if err != nil {
 		return reportoracle.ResultPage{}, err
 	}
-	return adapter.ReadResultPage(queryCtx, plan, contract.Run.DefinitionID, after, limit)
+	return adapter.ReadResultPage(queryCtx, plan, after, limit)
 }

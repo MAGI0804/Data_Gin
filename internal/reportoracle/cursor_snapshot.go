@@ -293,8 +293,9 @@ func (adapter *Adapter) ReadJSONSnapshotPage(ctx context.Context, runID string, 
 		for index, source := range indexes {
 			selected[index] = allValues[source]
 		}
-		page.Rows = append(page.Rows, ResultRow{RowID: rowID, Values: selected})
-		page.NextRowID = rowID
+		rowKey := strconv.FormatInt(rowID, 10)
+		page.Rows = append(page.Rows, ResultRow{Key: rowKey, Values: selected})
+		page.NextKey = rowKey
 	}
 	if err := rows.Err(); err != nil {
 		return ResultPage{}, fmt.Errorf("iterate JSON snapshot rows: %w", err)

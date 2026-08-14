@@ -7,12 +7,14 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"strings"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
+	"gin-biz-web-api/internal/reportidentity"
 	"gin-biz-web-api/model"
 
 	"gorm.io/driver/mysql"
@@ -237,6 +239,9 @@ func TestValidPublicationRequiresCompleteImmutableContract(t *testing.T) {
 		ProcedureSignatureHash: strings.Repeat("c", 64), ResultSchemaHash: strings.Repeat("d", 64),
 		PermissionHash: strings.Repeat("e", 64), ExportSchemaHash: strings.Repeat("f", 64),
 		SchemaProbeToken: "11111111-1111-4111-8111-111111111111", SchemaValidatedAt: time.Now().UTC(),
+		ConnectionFingerprint:         strings.Repeat("1", 64),
+		ConnectionIdentitySource:      reportidentity.BindingIdentitySourceOracle,
+		DatasourceSnapshotFingerprint: strings.Repeat("2", 64),
 	}
 	if !validPublication(publication) {
 		t.Fatal("complete publication rejected")
@@ -265,11 +270,18 @@ func TestPublishDraftRejectsInvalidContractBeforeTransaction(t *testing.T) {
 func TestPublishDraftFreezesContractAndCreatesCleanNextDraft(t *testing.T) {
 	db, transactionState := newTransactionDB(t)
 	repository := New(db)
+	publication := validPublicationFixture()
+	repository.lockPublicationSource = func(_ context.Context, _ *gorm.DB, datasourceID uint, fingerprint string) error {
+		if datasourceID != 3 || fingerprint != publication.DatasourceSnapshotFingerprint {
+			t.Fatalf("publication datasource snapshot = %d/%q", datasourceID, fingerprint)
+		}
+		return nil
+	}
 	repository.lockDefinition = func(context.Context, *gorm.DB, uint, uint) (*definitionRecord, error) {
 		return &definitionRecord{ReportDefinition: model.ReportDefinition{BaseModel: model.BaseModel{ID: 7}, Code: "orders", DatasourceID: 3, OwnerUserID: 8, CurrentDraftVersionID: 11}}, nil
 	}
 	repository.lockVersion = func(context.Context, *gorm.DB, uint, uint) (*versionRecord, error) {
-		return &versionRecord{ReportVersion: model.ReportVersion{BaseModel: model.BaseModel{ID: 11}, DefinitionID: 7, DatasourceID: 3, VersionNumber: 4, Status: model.ReportVersionStatusDraft, ContractHash: "old", CompiledSpecJSON: model.JSONText(`{"old":true}`), SchemaProbeToken: "old", PublishedBy: 99}}, nil
+		return &versionRecord{ReportVersion: model.ReportVersion{BaseModel: model.BaseModel{ID: 11}, DefinitionID: 7, DatasourceID: 3, VersionNumber: 4, Status: model.ReportVersionStatusDraft, ExecutionMode: model.ReportExecutionModeTableSnapshot, ResultTableOwner: "REPORT", ResultTableName: "ORDER_RESULTS", ContractHash: "old", CompiledSpecJSON: model.JSONText(`{"old":true}`), SchemaProbeToken: "old", PublishedBy: 99}}, nil
 	}
 	repository.loadCollections = func(_ context.Context, _ *gorm.DB, _, _, _ uint, draft *Draft) error {
 		draft.Parameters = []model.ReportParameter{{BaseModel: model.BaseModel{ID: 21}, VersionID: 11, ParameterCode: "runId"}}
@@ -283,7 +295,6 @@ func TestPublishDraftFreezesContractAndCreatesCleanNextDraft(t *testing.T) {
 		}
 		return nil
 	}
-	publication := validPublicationFixture()
 	var publishedUpdates map[string]interface{}
 	repository.publishVersion = func(_ context.Context, _ *gorm.DB, versionID, definitionID uint, versionNumber uint64, updates map[string]interface{}) error {
 		if versionID != 11 || definitionID != 7 || versionNumber != 4 {
@@ -353,6 +364,43 @@ func TestPublishDraftFreezesContractAndCreatesCleanNextDraft(t *testing.T) {
 	}
 	if transactionState.begins != 1 || transactionState.commits != 1 || transactionState.rollbacks != 0 {
 		t.Fatalf("transaction state = %#v", transactionState)
+	}
+	statements := strings.Join(transactionState.execs, "\n")
+	if !strings.Contains(statements, "DELETE FROM `report_result_table_bindings`") || !strings.Contains(statements, "INSERT INTO report_result_table_bindings") {
+		t.Fatalf("publication transaction did not replace result table binding: %s", statements)
+	}
+}
+
+func TestPublishDraftRejectsAnotherLegacyBindingForTheSameOwnerAndTable(t *testing.T) {
+	repository, transactionState := publicationTestRepository(t)
+	transactionState.queryCount = 1
+	_, err := repository.PublishDraft(t.Context(), 8, 7, 4, validPublicationFixture())
+	if !errors.Is(err, ErrResultTableConflict) {
+		t.Fatalf("PublishDraft() error = %v, want ErrResultTableConflict", err)
+	}
+	if transactionState.commits != 0 || transactionState.rollbacks != 1 {
+		t.Fatalf("transaction state = %#v", transactionState)
+	}
+	statements := strings.Join(transactionState.execs, "\n")
+	if !strings.Contains(statements, "identity_source IS NULL OR identity_source <>") || strings.Contains(statements, "INSERT INTO report_result_table_bindings") {
+		t.Fatalf("legacy binding guard statements = %s", statements)
+	}
+}
+
+func TestPublishDraftRollsBackWhenDatasourceChangesAfterOracleInspection(t *testing.T) {
+	repository, transactionState := publicationTestRepository(t)
+	repository.lockPublicationSource = func(context.Context, *gorm.DB, uint, string) error {
+		return ErrDraftVersionConflict
+	}
+	_, err := repository.PublishDraft(t.Context(), 8, 7, 4, validPublicationFixture())
+	if !errors.Is(err, ErrDraftVersionConflict) {
+		t.Fatalf("PublishDraft() error = %v, want ErrDraftVersionConflict", err)
+	}
+	if transactionState.commits != 0 || transactionState.rollbacks != 1 {
+		t.Fatalf("transaction state = %#v", transactionState)
+	}
+	if statements := strings.Join(transactionState.execs, "\n"); strings.Contains(statements, "INSERT INTO report_result_table_bindings") {
+		t.Fatalf("stale datasource publication wrote a binding: %s", statements)
 	}
 }
 
@@ -431,11 +479,12 @@ func publicationTestRepository(t *testing.T) (*Repository, *transactionDriverSta
 	t.Helper()
 	db, transactionState := newTransactionDB(t)
 	repository := New(db)
+	repository.lockPublicationSource = func(context.Context, *gorm.DB, uint, string) error { return nil }
 	repository.lockDefinition = func(context.Context, *gorm.DB, uint, uint) (*definitionRecord, error) {
 		return &definitionRecord{ReportDefinition: model.ReportDefinition{BaseModel: model.BaseModel{ID: 7}, Code: "orders", DatasourceID: 3, OwnerUserID: 8, CurrentDraftVersionID: 11}}, nil
 	}
 	repository.lockVersion = func(context.Context, *gorm.DB, uint, uint) (*versionRecord, error) {
-		return &versionRecord{ReportVersion: model.ReportVersion{BaseModel: model.BaseModel{ID: 11}, DefinitionID: 7, DatasourceID: 3, VersionNumber: 4, Status: model.ReportVersionStatusDraft}}, nil
+		return &versionRecord{ReportVersion: model.ReportVersion{BaseModel: model.BaseModel{ID: 11}, DefinitionID: 7, DatasourceID: 3, VersionNumber: 4, Status: model.ReportVersionStatusDraft, ExecutionMode: model.ReportExecutionModeTableSnapshot, ResultTableOwner: "REPORT", ResultTableName: "ORDER_RESULTS"}}, nil
 	}
 	repository.loadCollections = func(_ context.Context, _ *gorm.DB, _, _, _ uint, draft *Draft) error {
 		draft.Parameters = []model.ReportParameter{{ParameterCode: "runId"}}
@@ -452,6 +501,9 @@ func validPublicationFixture() Publication {
 		ParameterSchemaHash: strings.Repeat("b", 64), ProcedureSignatureHash: strings.Repeat("c", 64),
 		ResultSchemaHash: strings.Repeat("d", 64), PermissionHash: strings.Repeat("e", 64), ExportSchemaHash: strings.Repeat("f", 64),
 		SchemaProbeToken: "11111111-1111-4111-8111-111111111111", SchemaValidatedAt: time.Now().UTC(),
+		ConnectionFingerprint:         strings.Repeat("1", 64),
+		ConnectionIdentitySource:      reportidentity.BindingIdentitySourceOracle,
+		DatasourceSnapshotFingerprint: strings.Repeat("2", 64),
 	}
 }
 
@@ -468,13 +520,31 @@ type transactionConnection struct {
 }
 
 type transactionDriverState struct {
-	begins    int
-	commits   int
-	rollbacks int
+	begins     int
+	commits    int
+	rollbacks  int
+	execs      []string
+	queryCount int64
 }
 
 type transactionHandle struct {
 	state *transactionDriverState
+}
+
+type transactionRows struct {
+	read  bool
+	count int64
+}
+
+func (*transactionRows) Columns() []string { return []string{"count"} }
+func (*transactionRows) Close() error      { return nil }
+func (rows *transactionRows) Next(values []driver.Value) error {
+	if rows.read {
+		return io.EOF
+	}
+	rows.read = true
+	values[0] = rows.count
+	return nil
 }
 
 func (transactionDriver) Open(name string) (driver.Conn, error) {
@@ -488,8 +558,13 @@ func (transactionDriver) Open(name string) (driver.Conn, error) {
 func (connection *transactionConnection) Prepare(string) (driver.Stmt, error) {
 	return nil, errors.New("report transaction test: prepare is unsupported")
 }
-func (connection *transactionConnection) ExecContext(context.Context, string, []driver.NamedValue) (driver.Result, error) {
+func (connection *transactionConnection) ExecContext(_ context.Context, query string, _ []driver.NamedValue) (driver.Result, error) {
+	connection.state.execs = append(connection.state.execs, query)
 	return driver.RowsAffected(1), nil
+}
+func (connection *transactionConnection) QueryContext(_ context.Context, query string, _ []driver.NamedValue) (driver.Rows, error) {
+	connection.state.execs = append(connection.state.execs, query)
+	return &transactionRows{count: connection.state.queryCount}, nil
 }
 func (connection *transactionConnection) Close() error { return nil }
 func (connection *transactionConnection) Begin() (driver.Tx, error) {

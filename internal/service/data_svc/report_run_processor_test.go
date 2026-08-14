@@ -35,7 +35,7 @@ func TestReportRunProcessorBuildsSingleJSONCursorPayload(t *testing.T) {
 	if err := processor.Process(t.Context(), 31, true); err != nil {
 		t.Fatalf("Process() error = %v", err)
 	}
-	if got, want := executor.jsonPayload, `{"report_id":1234,"conditions":{"c_supplier_id":["a","b"],"datein_begin":"20260504"}}`; got != want {
+	if got, want := executor.jsonPayload, `{"report_id":31,"conditions":{"c_supplier_id":["a","b"],"datein_begin":"20260504"}}`; got != want {
 		t.Fatalf("JSON payload = %s, want %s", got, want)
 	}
 }
@@ -53,7 +53,7 @@ func TestReportRunProcessorBuildsJSONResultTablePayloadWithRunID(t *testing.T) {
 	if err := processor.Process(t.Context(), 31, true); err != nil {
 		t.Fatalf("Process() error = %v", err)
 	}
-	if got, want := executor.jsonPayload, `{"report_id":1234,"conditions":{"c_supplier_id":["a","b"],"datein_begin":"20260504"}}`; got != want {
+	if got, want := executor.jsonPayload, `{"report_id":31,"conditions":{"c_supplier_id":["a","b"],"datein_begin":"20260504"}}`; got != want {
 		t.Fatalf("JSON payload = %s, want %s", got, want)
 	}
 }

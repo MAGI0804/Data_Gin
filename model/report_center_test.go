@@ -17,6 +17,7 @@ func TestReportCenterTableNames(t *testing.T) {
 		want string
 	}{
 		{name: "datasources", got: (ReportDatasource{}).TableName(), want: "report_datasources"},
+		{name: "result table bindings", got: (ReportResultTableBinding{}).TableName(), want: "report_result_table_bindings"},
 		{name: "definitions", got: (ReportDefinition{}).TableName(), want: "report_definitions"},
 		{name: "versions", got: (ReportVersion{}).TableName(), want: "report_versions"},
 		{name: "parameters", got: (ReportParameter{}).TableName(), want: "report_parameters"},
@@ -56,6 +57,32 @@ func TestReportGrantUniqueSubjectIsVersionScoped(t *testing.T) {
 	want := []string{"version_id", "subject_type", "subject_id"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("index fields = %v, want %v", got, want)
+	}
+}
+
+func TestReportResultTableBindingHasAtomicUniquenessConstraints(t *testing.T) {
+	parsed, err := schema.Parse(&ReportResultTableBinding{}, &sync.Map{}, schema.NamingStrategy{})
+	if err != nil {
+		t.Fatalf("schema.Parse() error = %v", err)
+	}
+	tableIndex, ok := parsed.ParseIndexes()["uk_report_result_table_binding"]
+	if !ok || tableIndex.Class != "UNIQUE" {
+		t.Fatalf("result table index = %#v", tableIndex)
+	}
+	fields := make([]string, 0, len(tableIndex.Fields))
+	for _, field := range tableIndex.Fields {
+		fields = append(fields, field.DBName)
+	}
+	if want := []string{"connection_fingerprint", "table_owner", "table_name"}; !reflect.DeepEqual(fields, want) {
+		t.Fatalf("result table index fields = %v, want %v", fields, want)
+	}
+	definitionIndex, ok := parsed.ParseIndexes()["idx_report_result_table_bindings_definition_id"]
+	if !ok || definitionIndex.Class != "UNIQUE" {
+		t.Fatalf("definition index = %#v", definitionIndex)
+	}
+	identityField := parsed.LookUpField("IdentitySource")
+	if identityField == nil || identityField.DBName != "identity_source" || identityField.DefaultValue != "LEGACY_DATASOURCE_V1" {
+		t.Fatalf("identity source field = %#v", identityField)
 	}
 }
 

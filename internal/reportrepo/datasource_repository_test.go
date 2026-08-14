@@ -47,3 +47,18 @@ func TestDatasourceConnectionChangedSeparatesOperationalAndDisplayUpdates(t *tes
 		t.Fatal("credential rotation was not treated as a connection change")
 	}
 }
+
+func TestDatasourcePhysicalIdentityChangedIgnoresPasswordAndPoolSettings(t *testing.T) {
+	current := model.ReportDatasource{Driver: model.ReportDatasourceDriverOracle, Host: "oracle.internal", Port: 1521, ServiceName: "REPORT", Username: "report_user"}
+	operational := current
+	operational.PasswordCiphertext = "rotated"
+	operational.MaxOpenConnections = 20
+	if datasourcePhysicalIdentityChanged(current, operational) {
+		t.Fatal("password and pool update changed physical datasource identity")
+	}
+	identity := current
+	identity.ServiceName = "OTHER_PDB"
+	if !datasourcePhysicalIdentityChanged(current, identity) {
+		t.Fatal("service-name update did not change physical datasource identity")
+	}
+}

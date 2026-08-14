@@ -1,10 +1,19 @@
-import type { ReportColumn, ReportInputControl, ReportInputField, ReportInputSchema, ReportResultTableColumn } from './types'
+import type { ReportColumn, ReportInputControl, ReportInputField, ReportInputFormat, ReportInputSchema, ReportInputType, ReportResultTableColumn } from './types'
 
 const conditionCodePattern = /^[A-Za-z][A-Za-z0-9_]{0,63}$/
 const oracleFieldPattern = /^[A-Za-z][A-Za-z0-9_$#]{0,127}$/
+const jsonNumberPattern = /^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?$/
+const unsafeNumberError = ' 超出 JavaScript 安全数字范围或无法无损表示，请改用 str 类型。'
 
-export const reportInputTypes = ['VARCHAR2', 'NVARCHAR2', 'CHAR', 'NCHAR', 'CLOB', 'NCLOB', 'NUMBER', 'DATE', 'TIMESTAMP', 'BOOLEAN'] as const
-export const reportInputControls: Array<ReportInputControl | ''> = ['', 'TEXT', 'TEXTAREA', 'NUMBER', 'CHECKBOX', 'DATE', 'DATETIME', 'SELECT', 'MULTI_SELECT']
+export const reportInputTypes: ReportInputType[] = ['str', 'number', 'bool', 'list[str]', 'list[number]', 'list[bool]', 'json']
+export const reportInputControls: Array<ReportInputControl | ''> = ['', 'TEXT', 'TEXTAREA', 'NUMBER', 'CHECKBOX', 'DATE', 'DATETIME', 'SELECT']
+export const reportDateFormats: ReportInputFormat[] = ['YYYYMMDD', 'YYYY-MM-DD']
+export const reportDateTimeFormats: ReportInputFormat[] = ['YYYYMMDDHHmmss', 'YYYY-MM-DD HH:mm:ss', 'ISO8601']
+
+export function parseReportInputSchemaText(source: string): ReportInputSchema {
+  if (reportJSONContainsUnsafeNumber(source)) throw new Error(`筛选条件 JSON 中的数字${unsafeNumberError}`)
+  return parseReportInputSchemaDocument(JSON.parse(source) as unknown)
+}
 
 export function parseReportInputSchemaDocument(value: unknown, allowEmpty = false): ReportInputSchema {
   if (!isRecord(value) || (!allowEmpty && Object.keys(value).length === 0)) throw new Error('筛选条件必须是非空 JSON 对象。')
@@ -14,27 +23,35 @@ export function parseReportInputSchemaDocument(value: unknown, allowEmpty = fals
   for (const [code, rawField] of Object.entries(value)) {
     if (!conditionCodePattern.test(code)) throw new Error(`筛选字段 ${code || '（空）'} 的编码不合法。`)
     if (!isRecord(rawField)) throw new Error(`筛选字段 ${code} 必须使用 JSON 对象配置。`)
-    const unknownKeys = Object.keys(rawField).filter((key) => !['type', 'displayName', 'control', 'required', 'multiple', 'example', 'default', 'allowedValues'].includes(key))
+    const unknownKeys = Object.keys(rawField).filter((key) => !['type', 'displayName', 'control', 'format', 'required', 'multiple', 'example', 'default', 'allowedValues'].includes(key))
     if (unknownKeys.length) throw new Error(`筛选字段 ${code} 含有未知配置：${unknownKeys.join('、')}。`)
-    const type = normalizedString(rawField.type).toUpperCase()
-    const displayName = normalizedString(rawField.displayName)
-    const control = normalizedString(rawField.control).toUpperCase()
-    if (!(reportInputTypes as readonly string[]).includes(type)) throw new Error(`筛选字段 ${code} 的 Oracle 类型不受支持。`)
-    if (!displayName || displayName.length > 128) throw new Error(`筛选字段 ${code} 必须填写筛选显示名。`)
-    if (!reportInputControls.includes(control as ReportInputControl | '')) throw new Error(`筛选字段 ${code} 的控件类型不受支持。`)
-    if (rawField.required !== undefined && typeof rawField.required !== 'boolean') throw new Error(`筛选字段 ${code} 的 required 必须是布尔值。`)
     if (rawField.multiple !== undefined && typeof rawField.multiple !== 'boolean') throw new Error(`筛选字段 ${code} 的 multiple 必须是布尔值。`)
+    const normalizedType = normalizeReportInputType(rawField.type, rawField.multiple === true)
+    if (!normalizedType) throw new Error(`筛选字段 ${code} 的 JSON 类型不受支持。`)
+    const displayName = normalizedString(rawField.displayName)
+    const control = normalizeReportInputControl(rawField.control, normalizedType.legacyControl)
+    const rawFormat = normalizedString(rawField.format)
+    const parsedFormat = normalizeReportInputFormat(rawField.format)
+    const format = parsedFormat || (control === 'DATE' ? normalizedType.legacyFormat ?? 'YYYY-MM-DD' : control === 'DATETIME' ? normalizedType.legacyFormat ?? 'YYYY-MM-DD HH:mm:ss' : '')
+    if (!displayName || displayName.length > 128) throw new Error(`筛选字段 ${code} 必须填写筛选显示名。`)
+    if (control === null) throw new Error(`筛选字段 ${code} 的控件类型不受支持。`)
+    if (rawFormat && !parsedFormat) throw new Error(`筛选字段 ${code} 的日期格式不受支持。`)
+    if (format && !validFormatForControl(format, control)) throw new Error(`筛选字段 ${code} 的日期格式与查询控件不匹配。`)
+    if ((control === 'DATE' || control === 'DATETIME') && normalizedType.type !== 'str') throw new Error(`筛选字段 ${code} 的日期控件必须使用 str 类型。`)
+    if (rawField.required !== undefined && typeof rawField.required !== 'boolean') throw new Error(`筛选字段 ${code} 的 required 必须是布尔值。`)
     if (rawField.allowedValues !== undefined && (!Array.isArray(rawField.allowedValues) || rawField.allowedValues.length === 0)) throw new Error(`筛选字段 ${code} 的 allowedValues 必须是非空数组。`)
-    result[code] = compactInputField({
-      type,
+    const field = compactInputField({
+      type: normalizedType.type,
       displayName,
-      control: control as ReportInputControl | '',
+      control,
       required: rawField.required === true,
-      multiple: rawField.multiple === true,
+      ...(format ? { format } : {}),
       ...(Object.prototype.hasOwnProperty.call(rawField, 'example') ? { example: rawField.example } : {}),
       ...(Object.prototype.hasOwnProperty.call(rawField, 'default') ? { default: rawField.default } : {}),
       ...(Array.isArray(rawField.allowedValues) ? { allowedValues: [...rawField.allowedValues] } : {}),
     })
+    validateReportInputFieldMetadata(code, field)
+    result[code] = field
   }
   return result
 }
@@ -97,18 +114,15 @@ export function applyExcelMapping(columns: ReportColumn[], mapping: Record<strin
   })
 }
 
-const resultSystemColumns = new Set(['RUN_ID', 'ID'])
-
 export function reportColumnsFromResultSchema(columns: ReportResultTableColumn[], createFieldId: () => string = () => crypto.randomUUID()): ReportColumn[] {
   return reconcileReportColumnsWithResultSchema(columns, [], createFieldId)
 }
 
 export function reconcileReportColumnsWithResultSchema(columns: ReportResultTableColumn[], existingColumns: ReportColumn[], createFieldId: () => string = () => crypto.randomUUID()): ReportColumn[] {
-  const exportColumns = columns.filter((column) => !resultSystemColumns.has(column.name.toUpperCase()))
   const existingByName = new Map(existingColumns.map((column) => [column.databaseColumn.toUpperCase(), column]))
-  const mapping = Object.fromEntries(exportColumns.map((column) => [column.name, existingByName.get(column.name.toUpperCase())?.excelHeader || column.name]))
+  const mapping = Object.fromEntries(columns.map((column) => [column.name, existingByName.get(column.name.toUpperCase())?.excelHeader || column.name]))
   const initial = applyExcelMapping(existingColumns, mapping, createFieldId)
-  const schemaByName = new Map(exportColumns.map((column) => [column.name.toUpperCase(), column]))
+  const schemaByName = new Map(columns.map((column) => [column.name.toUpperCase(), column]))
   return initial.map((column) => {
     const schema = schemaByName.get(column.databaseColumn.toUpperCase())
     if (!schema) return column
@@ -123,29 +137,51 @@ export function reconcileReportColumnsWithResultSchema(columns: ReportResultTabl
   })
 }
 
-export function resultTableHasSystemColumns(columns: ReportResultTableColumn[]) {
-  const names = new Set(columns.map((column) => column.name.toUpperCase()))
-  return names.has('RUN_ID') && names.has('ID')
-}
-
 export function renameExcelMappingField(columns: ReportColumn[], currentField: string, nextField: string): ReportColumn[] {
   return columns.map((column) => column.databaseColumn === currentField ? { ...column, databaseColumn: nextField } : column)
 }
 
 export function newReportInputField(index: number): [string, ReportInputField] {
   return [`condition${index + 1}`, {
-    type: 'VARCHAR2',
+    type: 'str',
     displayName: `筛选条件 ${index + 1}`,
     control: 'TEXT',
     required: false,
-    multiple: false,
   }]
+}
+
+export function isReportInputListType(type: ReportInputType): type is 'list[str]' | 'list[number]' | 'list[bool]' {
+  return type.startsWith('list[')
+}
+
+export function reportJSONContainsUnsafeNumber(source: string) {
+  for (let index = 0; index < source.length;) {
+    if (source[index] === '"') {
+      index += 1
+      while (index < source.length) {
+        if (source[index] === '\\') { index += 2; continue }
+        if (source[index] === '"') { index += 1; break }
+        index += 1
+      }
+      continue
+    }
+    if (source[index] === '-' || /\d/.test(source[index])) {
+      const matched = /^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?/.exec(source.slice(index))
+      if (matched) {
+        if ('error' in normalizeSafeNumber(matched[0])) return true
+        index += matched[0].length
+        continue
+      }
+    }
+    index += 1
+  }
+  return false
 }
 
 export function initialReportConditionValues(schema: ReportInputSchema): Record<string, unknown> {
   return Object.fromEntries(Object.entries(schema).map(([code, field]) => {
-    if (Object.prototype.hasOwnProperty.call(field, 'default')) return [code, editableConditionValue(field.default, field)]
-    return [code, field.multiple ? [] : '']
+    if (Object.prototype.hasOwnProperty.call(field, 'default')) return [code, editableReportConditionValue(field.default, field)]
+    return [code, isReportInputListType(field.type) ? [] : '']
   }))
 }
 
@@ -157,14 +193,10 @@ export function buildReportConditions(schema: ReportInputSchema, values: Record<
       if (field.required && !Object.prototype.hasOwnProperty.call(field, 'default')) return { ok: false, error: `${field.displayName} 为必填筛选条件。` }
       continue
     }
-    let value: unknown = rawValue
-    if (field.multiple && typeof rawValue === 'string') {
-      try { value = JSON.parse(rawValue) as unknown } catch { return { ok: false, error: `${field.displayName} 必须填写 JSON 数组。` } }
-    }
-    if (field.multiple && !Array.isArray(value)) return { ok: false, error: `${field.displayName} 必须填写 JSON 数组。` }
-    if (!field.multiple && Array.isArray(value)) return { ok: false, error: `${field.displayName} 只能填写单值。` }
-    const items = field.multiple ? value as unknown[] : [value]
-    if (items.some((item) => !conditionValueMatchesType(item, field.type))) return { ok: false, error: `${field.displayName} 与 ${field.type} 类型不匹配。` }
+    const normalized = normalizeConditionValue(rawValue, field)
+    if ('error' in normalized) return { ok: false, error: `${field.displayName}${normalized.error}` }
+    const value = normalized.value
+    const items = isReportInputListType(field.type) ? value as unknown[] : [value]
     if (field.allowedValues?.length) {
       const allowed = new Set(field.allowedValues.map(canonicalComparableValue))
       if (items.some((item) => !allowed.has(canonicalComparableValue(item)))) return { ok: false, error: `${field.displayName} 只能选择指定值。` }
@@ -174,30 +206,220 @@ export function buildReportConditions(schema: ReportInputSchema, values: Record<
   return { ok: true, conditions }
 }
 
+function normalizeReportInputType(value: unknown, legacyMultiple: boolean): { type: ReportInputType; legacyControl: ReportInputControl | ''; legacyFormat?: ReportInputFormat } | null {
+  const raw = normalizedString(value)
+  const canonical = reportInputTypes.find((item) => item.toLowerCase() === raw.toLowerCase())
+  if (canonical) return { type: legacyMultiple && canonical === 'str' ? 'list[str]' : legacyMultiple && canonical === 'number' ? 'list[number]' : legacyMultiple && canonical === 'bool' ? 'list[bool]' : canonical, legacyControl: '' }
+  const oracleType = raw.toUpperCase()
+  if (['VARCHAR', 'VARCHAR2', 'NVARCHAR2', 'CHAR', 'NCHAR', 'CLOB', 'NCLOB', 'STRING'].includes(oracleType)) return { type: legacyMultiple ? 'list[str]' : 'str', legacyControl: '' }
+  if (['NUMBER', 'INTEGER', 'DECIMAL', 'FLOAT', 'BINARY_FLOAT', 'BINARY_DOUBLE'].includes(oracleType)) return { type: legacyMultiple ? 'list[number]' : 'number', legacyControl: '' }
+  if (oracleType === 'BOOLEAN') return { type: legacyMultiple ? 'list[bool]' : 'bool', legacyControl: '' }
+  if (oracleType === 'DATE') return { type: legacyMultiple ? 'list[str]' : 'str', legacyControl: legacyMultiple ? '' : 'DATE', ...(legacyMultiple ? {} : { legacyFormat: 'YYYYMMDD' as const }) }
+  if (oracleType.startsWith('TIMESTAMP')) return { type: legacyMultiple ? 'list[str]' : 'str', legacyControl: legacyMultiple ? '' : 'DATETIME', ...(legacyMultiple ? {} : { legacyFormat: 'ISO8601' as const }) }
+  return null
+}
+
+function validateReportInputFieldMetadata(code: string, field: ReportInputField) {
+  const allowed = field.allowedValues ?? []
+  const allowedField = isReportInputListType(field.type) ? { ...field, type: listItemType(field.type), required: false } : field
+  for (const value of allowed) {
+    if (!metadataValueMatchesField(value, allowedField)) throw new Error(`筛选字段 ${code} 的允许值与 ${field.type} 类型或日期格式不匹配。`)
+  }
+  for (const [label, value] of [['示例值', field.example], ['默认值', field.default]] as const) {
+    if (!Object.prototype.hasOwnProperty.call(field, label === '示例值' ? 'example' : 'default')) continue
+    if (!metadataValueMatchesField(value, field)) throw new Error(`筛选字段 ${code} 的${label}与 ${field.type} 类型或日期格式不匹配。`)
+    const values = isReportInputListType(field.type) && Array.isArray(value) ? value : [value]
+    if (allowed.length && values.some((item) => !allowed.some((candidate) => canonicalComparableValue(candidate) === canonicalComparableValue(item)))) {
+      throw new Error(`筛选字段 ${code} 的${label}不在允许值中。`)
+    }
+  }
+}
+
+function metadataValueMatchesField(value: unknown, field: ReportInputField): boolean {
+  if (field.type === 'str') {
+    if (typeof value !== 'string' || !value.length) return false
+    if (field.control !== 'DATE' && field.control !== 'DATETIME') return true
+    const editable = field.control === 'DATE' ? editableDateValue(value, field.format) : editableDateTimeValue(value, field.format)
+    const normalized = normalizeConditionValue(editable, field)
+    return 'value' in normalized && normalized.value === value
+  }
+  if (field.type === 'number') return typeof value === 'number' && !('error' in normalizeSafeNumber(value))
+  if (field.type === 'bool') return typeof value === 'boolean'
+  if (field.type === 'json') return value !== undefined && value !== null && isJSONValue(value)
+  if (!Array.isArray(value) || (field.required && value.length === 0)) return false
+  const itemField = { ...field, type: listItemType(field.type), required: false }
+  return value.every((item) => metadataValueMatchesField(item, itemField))
+}
+
+function listItemType(type: 'list[str]' | 'list[number]' | 'list[bool]'): 'str' | 'number' | 'bool' {
+  if (type === 'list[number]') return 'number'
+  if (type === 'list[bool]') return 'bool'
+  return 'str'
+}
+
+function normalizeReportInputControl(value: unknown, fallback: ReportInputControl | ''): ReportInputControl | '' | null {
+  const raw = normalizedString(value).toUpperCase()
+  if (!raw) return fallback
+  if (raw === 'MULTI_SELECT') return 'SELECT'
+  return reportInputControls.includes(raw as ReportInputControl) ? raw as ReportInputControl : null
+}
+
+function normalizeReportInputFormat(value: unknown): ReportInputFormat | '' {
+  const raw = normalizedString(value)
+  return [...reportDateFormats, ...reportDateTimeFormats].find((item) => item.toUpperCase() === raw.toUpperCase()) ?? ''
+}
+
+function validFormatForControl(format: ReportInputFormat, control: ReportInputControl | '') {
+  if (control === 'DATE') return reportDateFormats.includes(format)
+  if (control === 'DATETIME') return reportDateTimeFormats.includes(format)
+  return false
+}
+
+function normalizeConditionValue(rawValue: unknown, field: ReportInputField): { ok: true; value: unknown } | { ok: false; error: string } {
+  if (field.type === 'str') {
+    if (typeof rawValue !== 'string' || !rawValue.length) return { ok: false, error: ' 必须填写字符串。' }
+    if (field.control === 'DATE') return formatDateCondition(rawValue, field.format)
+    if (field.control === 'DATETIME') return formatDateTimeCondition(rawValue, field.format)
+    return { ok: true, value: rawValue }
+  }
+  if (field.type === 'number') {
+    return normalizeSafeNumber(rawValue)
+  }
+  if (field.type === 'bool') return typeof rawValue === 'boolean' ? { ok: true, value: rawValue } : { ok: false, error: ' 必须填写布尔值。' }
+  if (isReportInputListType(field.type)) {
+    let value = rawValue
+    if (typeof rawValue === 'string') {
+      try { value = JSON.parse(rawValue) as unknown } catch { return { ok: false, error: ' 必须填写 JSON 数组。' } }
+    }
+    if (!Array.isArray(value)) return { ok: false, error: ' 必须填写 JSON 数组。' }
+    if (field.type === 'list[number]') {
+      const rawNumberItems = typeof rawValue === 'string' ? jsonNumberArrayItems(rawValue) : value
+      if (!rawNumberItems || value.some((item) => typeof item !== 'number')) return { ok: false, error: ` 与 ${field.type} 类型不匹配。` }
+      const normalizedItems: number[] = []
+      for (const item of rawNumberItems) {
+        const normalized = normalizeSafeNumber(item)
+        if ('error' in normalized) return { ok: false, error: unsafeNumberError }
+        normalizedItems.push(normalized.value)
+      }
+      return { ok: true, value: normalizedItems }
+    }
+    const itemType = field.type.slice(5, -1)
+    const valid = value.every((item) => itemType === 'str' ? typeof item === 'string' : typeof item === 'boolean')
+    if (!valid) return { ok: false, error: ` 与 ${field.type} 类型不匹配。` }
+    return { ok: true, value }
+  }
+  let value = rawValue
+  if (typeof rawValue === 'string') {
+    try { value = JSON.parse(rawValue) as unknown } catch { return { ok: false, error: ' 必须填写合法 JSON。' } }
+  }
+  return isJSONValue(value) ? { ok: true, value } : { ok: false, error: ' 必须填写合法 JSON。' }
+}
+
+function normalizeSafeNumber(rawValue: unknown): { ok: true; value: number } | { ok: false; error: string } {
+  if (typeof rawValue === 'number') {
+    if (!Number.isFinite(rawValue)) return { ok: false, error: ' 必须填写有效数字。' }
+    return Number.isInteger(rawValue) && !Number.isSafeInteger(rawValue) ? { ok: false, error: unsafeNumberError } : { ok: true, value: rawValue }
+  }
+  const text = typeof rawValue === 'string' ? rawValue.trim() : ''
+  if (!jsonNumberPattern.test(text)) return { ok: false, error: ' 必须填写有效数字。' }
+  const value = Number(text)
+  if (!Number.isFinite(value) || (Number.isInteger(value) && !Number.isSafeInteger(value)) || !sameDecimalValue(text, String(value))) return { ok: false, error: unsafeNumberError }
+  return { ok: true, value }
+}
+
+function jsonNumberArrayItems(value: string): string[] | null {
+  const text = value.trim()
+  if (!text.startsWith('[') || !text.endsWith(']')) return null
+  const body = text.slice(1, -1).trim()
+  if (!body) return []
+  const items = body.split(',').map((item) => item.trim())
+  return items.every((item) => jsonNumberPattern.test(item)) ? items : null
+}
+
+function sameDecimalValue(left: string, right: string) {
+  const leftValue = decimalSignature(left)
+  const rightValue = decimalSignature(right)
+  return Boolean(leftValue && rightValue && leftValue.negative === rightValue.negative && leftValue.digits === rightValue.digits && leftValue.exponent === rightValue.exponent)
+}
+
+function decimalSignature(value: string): { negative: boolean; digits: string; exponent: number } | null {
+  const matched = /^(-?)(\d+)(?:\.(\d+))?(?:[eE]([+-]?\d+))?$/.exec(value)
+  if (!matched) return null
+  const fraction = matched[3] ?? ''
+  const digits = `${matched[2]}${fraction}`.replace(/^0+/, '')
+  if (!digits) return { negative: false, digits: '0', exponent: 0 }
+  const normalizedDigits = digits.replace(/0+$/, '')
+  return {
+    negative: matched[1] === '-',
+    digits: normalizedDigits,
+    exponent: Number(matched[4] ?? '0') - fraction.length + digits.length - normalizedDigits.length,
+  }
+}
+
+function formatDateCondition(value: string, format: ReportInputFormat | undefined): { ok: true; value: string } | { ok: false; error: string } {
+  const parts = /^(\d{4})-(\d{2})-(\d{2})$/.exec(value)
+  if (!parts || !validDateParts(Number(parts[1]), Number(parts[2]), Number(parts[3]))) return { ok: false, error: ' 必须填写有效日期。' }
+  return { ok: true, value: format === 'YYYYMMDD' ? `${parts[1]}${parts[2]}${parts[3]}` : `${parts[1]}-${parts[2]}-${parts[3]}` }
+}
+
+function formatDateTimeCondition(value: string, format: ReportInputFormat | undefined): { ok: true; value: string } | { ok: false; error: string } {
+  const parts = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})(?::(\d{2}))?$/.exec(value)
+  if (!parts || !validDateParts(Number(parts[1]), Number(parts[2]), Number(parts[3])) || Number(parts[4]) > 23 || Number(parts[5]) > 59 || Number(parts[6] ?? '0') > 59) return { ok: false, error: ' 必须填写有效日期时间。' }
+  const second = parts[6] ?? '00'
+  if (format === 'YYYYMMDDHHmmss') return { ok: true, value: `${parts[1]}${parts[2]}${parts[3]}${parts[4]}${parts[5]}${second}` }
+  if (format === 'YYYY-MM-DD HH:mm:ss') return { ok: true, value: `${parts[1]}-${parts[2]}-${parts[3]} ${parts[4]}:${parts[5]}:${second}` }
+  return { ok: true, value: `${parts[1]}-${parts[2]}-${parts[3]}T${parts[4]}:${parts[5]}:${second}` }
+}
+
+function validDateParts(year: number, month: number, day: number) {
+  if (month < 1 || month > 12 || day < 1) return false
+  return day <= new Date(Date.UTC(year, month, 0)).getUTCDate()
+}
+
+function isJSONValue(value: unknown): boolean {
+  if (value === null || typeof value === 'string' || typeof value === 'boolean') return true
+  if (typeof value === 'number') return Number.isFinite(value)
+  if (Array.isArray(value)) return value.every(isJSONValue)
+  return isRecord(value) && Object.values(value).every(isJSONValue)
+}
+
 function compactInputField(field: ReportInputField): ReportInputField {
   return {
     type: field.type,
     displayName: field.displayName,
     control: field.control,
     required: field.required,
-    multiple: field.multiple,
+    ...(field.format ? { format: field.format } : {}),
     ...(Object.prototype.hasOwnProperty.call(field, 'example') ? { example: field.example } : {}),
     ...(Object.prototype.hasOwnProperty.call(field, 'default') ? { default: field.default } : {}),
     ...(field.allowedValues ? { allowedValues: [...field.allowedValues] } : {}),
   }
 }
 
-function editableConditionValue(value: unknown, field: ReportInputField) {
-  if (field.multiple) return Array.isArray(value) ? [...value] : []
+export function editableReportConditionValue(value: unknown, field: ReportInputField) {
+  if (isReportInputListType(field.type)) return Array.isArray(value) ? [...value] : []
+  if (field.type === 'bool') return typeof value === 'boolean' ? value : ''
+  if (typeof value === 'string' && field.control === 'DATE') return editableDateValue(value, field.format)
+  if (typeof value === 'string' && field.control === 'DATETIME') return editableDateTimeValue(value, field.format)
   if (field.allowedValues?.length) return value
-  if (field.type === 'BOOLEAN') return typeof value === 'boolean' ? value : ''
   return value === undefined || value === null ? '' : String(value)
 }
 
-function conditionValueMatchesType(value: unknown, oracleType: string) {
-  if (oracleType === 'BOOLEAN') return typeof value === 'boolean'
-  if (oracleType === 'NUMBER') return (typeof value === 'string' && /^-?\d+(?:\.\d+)?$/.test(value)) || (typeof value === 'number' && Number.isFinite(value))
-  return typeof value === 'string' && value.length > 0
+function editableDateValue(value: string, format: ReportInputFormat | undefined) {
+  if (format === 'YYYYMMDD') {
+    const parts = /^(\d{4})(\d{2})(\d{2})$/.exec(value)
+    return parts ? `${parts[1]}-${parts[2]}-${parts[3]}` : value
+  }
+  return value
+}
+
+function editableDateTimeValue(value: string, format: ReportInputFormat | undefined) {
+  if (format === 'YYYYMMDDHHmmss') {
+    const parts = /^(\d{4})(\d{2})(\d{2})(\d{2})(\d{2})(\d{2})$/.exec(value)
+    return parts ? `${parts[1]}-${parts[2]}-${parts[3]}T${parts[4]}:${parts[5]}:${parts[6]}` : value
+  }
+  if (format === 'YYYY-MM-DD HH:mm:ss') return value.replace(' ', 'T')
+  return value
 }
 
 function canonicalComparableValue(value: unknown) {

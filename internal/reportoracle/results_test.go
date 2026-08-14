@@ -8,8 +8,6 @@ import (
 	"testing"
 
 	"gin-biz-web-api/internal/reportquery"
-
-	"github.com/godror/godror"
 )
 
 func TestBuildResultQueryPlanUsesBoundFiltersAndStableSort(t *testing.T) {
@@ -22,7 +20,7 @@ func TestBuildResultQueryPlanUsesBoundFiltersAndStableSort(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildResultQueryPlan() error = %v", err)
 	}
-	for _, required := range []string{"STORE_CODE = :2", "ORDER BY AMOUNT DESC NULLS LAST, ID ASC", "FETCH NEXT :3 ROWS ONLY", "FETCH NEXT :10 ROWS ONLY"} {
+	for _, required := range []string{"STORE_CODE = :1", "ORDER BY AMOUNT DESC NULLS LAST, ROWID ASC", "FETCH NEXT :2 ROWS ONLY", "FETCH NEXT :8 ROWS ONLY", "ROWIDTOCHAR(ROWID)"} {
 		if !strings.Contains(plan.initialStatement+plan.nextStatement, required) {
 			t.Fatalf("plan does not contain %q: %s / %s", required, plan.initialStatement, plan.nextStatement)
 		}
@@ -32,6 +30,15 @@ func TestBuildResultQueryPlanUsesBoundFiltersAndStableSort(t *testing.T) {
 	}
 	if len(plan.initialArguments) != 1 || plan.initialArguments[0] != "S001' OR 1=1 --" {
 		t.Fatalf("initial arguments = %#v", plan.initialArguments)
+	}
+}
+
+func TestResultTableROWIDProbeValidatesBothConversions(t *testing.T) {
+	probe := resultTableROWIDProbe(ResultTableRef{Owner: "REPORT", Name: "RESULTS"})
+	for _, fragment := range []string{"ROWIDTOCHAR", "CHARTOROWID", "ROWNUM <= 1"} {
+		if !strings.Contains(probe, fragment) {
+			t.Fatalf("ROWID probe is missing %q", fragment)
+		}
 	}
 }
 
@@ -56,12 +63,12 @@ func TestBuildResultPagePlan(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildResultPagePlan() error = %v", err)
 	}
-	want := "SELECT ID, STORE_CODE, AMOUNT FROM REPORT_OWNER.SALES_RESULT WHERE RUN_ID = :1 AND ID > :2 ORDER BY ID ASC FETCH NEXT :3 ROWS ONLY"
+	want := "SELECT ROWIDTOCHAR(ROWID), STORE_CODE, AMOUNT FROM REPORT_OWNER.SALES_RESULT WHERE 1 = 1 AND ROWID > CHARTOROWID(:1) ORDER BY ROWID ASC FETCH NEXT :2 ROWS ONLY"
 	if plan.nextStatement != want {
 		t.Fatalf("statement = %q, want %q", plan.nextStatement, want)
 	}
-	if strings.Contains(plan.initialStatement, "ID >") {
-		t.Fatalf("initial statement unexpectedly assumes a minimum row id: %q", plan.initialStatement)
+	if strings.Contains(plan.initialStatement, "CHARTOROWID") {
+		t.Fatalf("initial statement unexpectedly assumes a row cursor: %q", plan.initialStatement)
 	}
 	columns := plan.Columns()
 	columns[0] = "MUTATED"
@@ -70,27 +77,27 @@ func TestBuildResultPagePlan(t *testing.T) {
 	}
 }
 
-func TestBuildPurgePlanIsScopedAndBounded(t *testing.T) {
+func TestBuildPurgePlanIsBounded(t *testing.T) {
 	contract := ResultSnapshotContract{
-		table: ResultTableRef{Owner: "REPORT", Name: "RESULT_ROWS"}, runIDColumn: "RUN_ID", rowIDColumn: "ID", columns: map[string]struct{}{"VALUE": {}},
+		table: ResultTableRef{Owner: "REPORT", Name: "RESULT_ROWS"}, columns: map[string]struct{}{"VALUE": {}},
 	}
 	plan, err := BuildPurgePlan(contract)
 	if err != nil {
 		t.Fatalf("BuildPurgePlan() error = %v", err)
 	}
-	for _, required := range []string{"WHERE RUN_ID = :1", "ROWNUM <= :2"} {
+	for _, required := range []string{"WHERE ROWID IN", "ROWNUM <= :1"} {
 		if !strings.Contains(plan.statement, required) {
 			t.Fatalf("purge statement %q does not contain %q", plan.statement, required)
 		}
 	}
 }
 
-func TestBuildResultCountPlanIsRunScoped(t *testing.T) {
+func TestBuildResultCountPlanCountsWholeTable(t *testing.T) {
 	plan, err := BuildResultCountPlan(testSnapshotContract())
 	if err != nil {
 		t.Fatalf("BuildResultCountPlan() error = %v", err)
 	}
-	want := "SELECT COUNT(*) FROM REPORT_OWNER.SALES_RESULT WHERE RUN_ID = :1"
+	want := "SELECT COUNT(*) FROM REPORT_OWNER.SALES_RESULT"
 	if plan.statement != want {
 		t.Fatalf("statement = %q, want %q", plan.statement, want)
 	}
@@ -98,14 +105,12 @@ func TestBuildResultCountPlanIsRunScoped(t *testing.T) {
 
 func TestResultPlansRejectUnsafeOrAmbiguousColumns(t *testing.T) {
 	tests := []ResultSnapshotRef{
-		{Table: ResultTableRef{Owner: "REPORT", Name: "ROWS; DROP TABLE X"}, RunIDColumn: "RUN_ID", RowIDColumn: "ID", Columns: []string{"VALUE"}},
-		{Table: ResultTableRef{Owner: "REPORT", Name: "ROWS"}, RunIDColumn: "RUN_ID OR 1=1", RowIDColumn: "ID", Columns: []string{"VALUE"}},
-		{Table: ResultTableRef{Owner: "REPORT", Name: "ROWS"}, RunIDColumn: "RUN_ID", RowIDColumn: "RUN_ID", Columns: []string{"VALUE"}},
-		{Table: ResultTableRef{Owner: "REPORT", Name: "ROWS"}, RunIDColumn: "RUN_ID", RowIDColumn: "ID", Columns: []string{"VALUE", "value"}},
-		{Table: ResultTableRef{Owner: "REPORT", Name: "ROWS"}, RunIDColumn: "RUN_ID", RowIDColumn: "ID", Columns: []string{"RUN_ID"}},
+		{Table: ResultTableRef{Owner: "REPORT", Name: "ROWS; DROP TABLE X"}, Columns: []string{"VALUE"}},
+		{Table: ResultTableRef{Owner: "REPORT", Name: "ROWS"}, Columns: []string{"VALUE", "value"}},
+		{Table: ResultTableRef{Owner: "REPORT", Name: "ROWS"}, Columns: nil},
 	}
 	for index, ref := range tests {
-		contract := ResultSnapshotContract{table: ref.Table, runIDColumn: ref.RunIDColumn, rowIDColumn: ref.RowIDColumn}
+		contract := ResultSnapshotContract{table: ref.Table, columns: map[string]struct{}{"VALUE": {}}}
 		if _, err := BuildResultPagePlan(contract, ref.Columns); !errors.Is(err, ErrInvalidConfiguration) {
 			t.Fatalf("case %d error = %v, want ErrInvalidConfiguration", index, err)
 		}
@@ -121,6 +126,32 @@ func TestResultPlanRejectsUnvalidatedContract(t *testing.T) {
 	}
 	if _, err := BuildResultCountPlan(ResultSnapshotContract{}); !errors.Is(err, ErrInvalidConfiguration) {
 		t.Fatalf("BuildResultCountPlan() error = %v, want ErrInvalidConfiguration", err)
+	}
+}
+
+func TestValidateResultTableStorageRequiresStablePhysicalROWID(t *testing.T) {
+	tests := []struct {
+		name        string
+		temporary   string
+		iotType     string
+		rowMovement string
+		wantError   bool
+	}{
+		{name: "heap table", temporary: "N", rowMovement: "DISABLED"},
+		{name: "temporary table", temporary: "Y", rowMovement: "DISABLED", wantError: true},
+		{name: "index organized table", temporary: "N", iotType: "IOT", rowMovement: "DISABLED", wantError: true},
+		{name: "row movement enabled", temporary: "N", rowMovement: "ENABLED", wantError: true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			err := validateResultTableStorage(test.temporary, test.iotType, test.rowMovement)
+			if test.wantError && !errors.Is(err, ErrMetadataMismatch) {
+				t.Fatalf("validateResultTableStorage() error = %v, want ErrMetadataMismatch", err)
+			}
+			if !test.wantError && err != nil {
+				t.Fatalf("validateResultTableStorage() error = %v", err)
+			}
+		})
 	}
 }
 
@@ -140,40 +171,21 @@ func TestResultPlanSupportsConfiguredMaximumColumns(t *testing.T) {
 	}
 }
 
-func TestSupportedSystemResultIDTypes(t *testing.T) {
-	zero, two, eighteen := int64(0), int64(2), int64(18)
-	for _, column := range []ResultColumn{{DataType: "CHAR"}, {DataType: "VARCHAR2"}, {DataType: "NUMBER"}, {DataType: "NUMBER", DataScale: &zero}} {
-		if _, supported := supportedReportIDColumn(column); !supported {
-			t.Fatalf("supportedReportIDColumn(%#v) = false", column)
+func TestOracleRowKey(t *testing.T) {
+	for _, input := range []interface{}{"AAAPr9AAEAAAAGrAAA", []byte("AAAPr9AAEAAAAGrAAA")} {
+		got, err := oracleRowKey(input)
+		if err != nil || got != "AAAPr9AAEAAAAGrAAA" {
+			t.Fatalf("oracleRowKey(%T) = %q, %v", input, got, err)
 		}
 	}
-	if _, supported := supportedReportIDColumn(ResultColumn{DataType: "NUMBER", DataScale: &two}); supported {
-		t.Fatal("supportedReportIDColumn accepted a decimal report id")
-	}
-	if !supportedRecordIDColumn(ResultColumn{DataType: "NUMBER"}) || !supportedRecordIDColumn(ResultColumn{DataType: "NUMBER", DataPrecision: &eighteen, DataScale: &zero}) {
-		t.Fatal("supportedRecordIDColumn rejected an integer NUMBER")
-	}
-	if supportedRecordIDColumn(ResultColumn{DataType: "VARCHAR2"}) || supportedRecordIDColumn(ResultColumn{DataType: "NUMBER", DataScale: &two}) {
-		t.Fatal("supportedRecordIDColumn accepted an unsupported type")
-	}
-}
-
-func TestOracleRowID(t *testing.T) {
-	for _, input := range []interface{}{int64(42), int32(42), int(42), godror.Number("42"), "42"} {
-		got, err := oracleRowID(input)
-		if err != nil || got != 42 {
-			t.Fatalf("oracleRowID(%T) = %d, %v", input, got, err)
-		}
-	}
-	if _, err := oracleRowID("42.1"); err == nil {
-		t.Fatal("oracleRowID accepted a decimal row id")
+	if _, err := oracleRowKey(42); err == nil {
+		t.Fatal("oracleRowKey accepted an unsupported value")
 	}
 }
 
 func testSnapshotContract() ResultSnapshotContract {
 	return ResultSnapshotContract{
-		table:       ResultTableRef{Owner: "REPORT_OWNER", Name: "SALES_RESULT"},
-		runIDColumn: "RUN_ID", rowIDColumn: "ID",
+		table:   ResultTableRef{Owner: "REPORT_OWNER", Name: "SALES_RESULT"},
 		columns: map[string]struct{}{"STORE_CODE": {}, "AMOUNT": {}},
 	}
 }

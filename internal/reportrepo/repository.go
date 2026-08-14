@@ -8,6 +8,9 @@ import (
 	"strings"
 	"time"
 
+	mysqlDriver "github.com/go-sql-driver/mysql"
+
+	"gin-biz-web-api/internal/reportidentity"
 	"gin-biz-web-api/model"
 	"gin-biz-web-api/pkg/database"
 
@@ -19,6 +22,7 @@ var (
 	ErrDraftNotFound         = errors.New("report draft: not found")
 	ErrDatasourceUnavailable = errors.New("report draft: datasource unavailable")
 	ErrDraftVersionConflict  = errors.New("report draft: version conflict")
+	ErrResultTableConflict   = errors.New("report draft: result table is already bound")
 	ErrInvalidDraft          = errors.New("report draft: invalid input")
 )
 
@@ -59,21 +63,25 @@ type DraftPage struct {
 }
 
 type Publication struct {
-	CompiledSpecJSON       model.JSONText
-	ContractHash           string
-	ParameterSchemaHash    string
-	ProcedureSignatureHash string
-	ResultSchemaHash       string
-	PermissionHash         string
-	ExportSchemaHash       string
-	SchemaProbeToken       string
-	SchemaValidatedAt      time.Time
+	CompiledSpecJSON              model.JSONText
+	ContractHash                  string
+	ParameterSchemaHash           string
+	ProcedureSignatureHash        string
+	ResultSchemaHash              string
+	PermissionHash                string
+	ExportSchemaHash              string
+	SchemaProbeToken              string
+	SchemaValidatedAt             time.Time
+	ConnectionFingerprint         string
+	ConnectionIdentitySource      string
+	DatasourceSnapshotFingerprint string
 }
 
 type transactionRunner func(context.Context, *gorm.DB, func(*gorm.DB) error) error
 type draftReferenceValidator func(context.Context, *gorm.DB, uint, []model.ReportGrant) error
 type draftDefinitionLocker func(context.Context, *gorm.DB, uint, uint) (*definitionRecord, error)
 type draftVersionLocker func(context.Context, *gorm.DB, uint, uint) (*versionRecord, error)
+type publicationDatasourceLocker func(context.Context, *gorm.DB, uint, string) error
 type reportAuditWriter func(context.Context, *gorm.DB, model.ReportAudit) error
 type systemReportAuditWriter func(context.Context, *gorm.DB, string, string, uint, map[string]interface{}) error
 type draftCollectionsLoader func(context.Context, *gorm.DB, uint, uint, uint, *Draft) error
@@ -88,23 +96,24 @@ type enabledDatasourceValidator func(context.Context, *gorm.DB, uint) error
 type reportRunSlotPreparer func(context.Context, *gorm.DB, uint, time.Time) ([]uint, error)
 
 type Repository struct {
-	db                 *gorm.DB
-	transact           transactionRunner
-	validateReferences draftReferenceValidator
-	lockDefinition     draftDefinitionLocker
-	lockVersion        draftVersionLocker
-	writeAudit         reportAuditWriter
-	writeSystemAudit   systemReportAuditWriter
-	loadCollections    draftCollectionsLoader
-	publishVersion     publishedVersionWriter
-	createVersion      draftVersionCreator
-	copyCollections    versionCollectionsCopier
-	switchDefinition   publishedDefinitionSwitcher
-	loadPublished      publishedReportLoader
-	createReportRun    reportRunWriter
-	createRunOutbox    reportRunOutboxWriter
-	validateRunSource  enabledDatasourceValidator
-	prepareRunSlot     reportRunSlotPreparer
+	db                    *gorm.DB
+	transact              transactionRunner
+	validateReferences    draftReferenceValidator
+	lockDefinition        draftDefinitionLocker
+	lockVersion           draftVersionLocker
+	lockPublicationSource publicationDatasourceLocker
+	writeAudit            reportAuditWriter
+	writeSystemAudit      systemReportAuditWriter
+	loadCollections       draftCollectionsLoader
+	publishVersion        publishedVersionWriter
+	createVersion         draftVersionCreator
+	copyCollections       versionCollectionsCopier
+	switchDefinition      publishedDefinitionSwitcher
+	loadPublished         publishedReportLoader
+	createReportRun       reportRunWriter
+	createRunOutbox       reportRunOutboxWriter
+	validateRunSource     enabledDatasourceValidator
+	prepareRunSlot        reportRunSlotPreparer
 }
 
 func New(databases ...*gorm.DB) *Repository {
@@ -114,7 +123,8 @@ func New(databases ...*gorm.DB) *Repository {
 	}
 	return &Repository{
 		db: db, transact: runTransaction, validateReferences: validateDraftReferences,
-		lockDefinition: lockDraftDefinition, lockVersion: lockDraftVersion, writeAudit: createReportAudit, writeSystemAudit: writeSystemReportAudit,
+		lockDefinition: lockDraftDefinition, lockVersion: lockDraftVersion, lockPublicationSource: lockPublicationDatasource,
+		writeAudit: createReportAudit, writeSystemAudit: writeSystemReportAudit,
 		loadCollections: loadCollections, publishVersion: writePublishedVersion, createVersion: createDraftVersion,
 		copyCollections: replaceVersionCollections, switchDefinition: switchPublishedDefinition,
 		loadPublished: loadPublishedReport, createReportRun: writeReportRun, createRunOutbox: writeReportRunOutbox,
@@ -268,7 +278,13 @@ func (repository *Repository) PublishDraft(ctx context.Context, ownerUserID, def
 		if current.DatasourceID == 0 || current.DatasourceID != definition.DatasourceID {
 			return invalidDraft("draft datasource snapshot is inconsistent")
 		}
+		if err := repository.lockPublicationSource(ctx, tx, current.DatasourceID, publication.DatasourceSnapshotFingerprint); err != nil {
+			return err
+		}
 		if err := repository.validateReferences(ctx, tx, current.DatasourceID, published.Grants); err != nil {
+			return err
+		}
+		if err := replaceResultTableBinding(ctx, tx, definitionID, current.ID, current.ReportVersion, publication.ConnectionFingerprint, publication.ConnectionIdentitySource); err != nil {
 			return err
 		}
 		publishedAt = time.Now().UTC()
@@ -375,7 +391,81 @@ func switchPublishedDefinition(ctx context.Context, tx *gorm.DB, ownerUserID, de
 func validPublication(value Publication) bool {
 	return json.Valid([]byte(value.CompiledSpecJSON)) && len(value.ContractHash) == 64 && len(value.ParameterSchemaHash) == 64 &&
 		len(value.ProcedureSignatureHash) == 64 && len(value.ResultSchemaHash) == 64 && len(value.PermissionHash) == 64 &&
-		len(value.ExportSchemaHash) == 64 && len(value.SchemaProbeToken) == 36 && !value.SchemaValidatedAt.IsZero()
+		len(value.ExportSchemaHash) == 64 && len(value.SchemaProbeToken) == 36 && !value.SchemaValidatedAt.IsZero() &&
+		len(value.ConnectionFingerprint) == 64 && value.ConnectionIdentitySource == reportidentity.BindingIdentitySourceOracle &&
+		len(value.DatasourceSnapshotFingerprint) == 64
+}
+
+func lockPublicationDatasource(ctx context.Context, tx *gorm.DB, datasourceID uint, expectedFingerprint string) error {
+	if ctx == nil || tx == nil || datasourceID == 0 || len(expectedFingerprint) != 64 {
+		return invalidDraft("publication datasource snapshot is required")
+	}
+	var datasource model.ReportDatasource
+	err := tx.WithContext(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).
+		Where("id = ? AND driver = ? AND enabled = ?", datasourceID, model.ReportDatasourceDriverOracle, true).
+		First(&datasource).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return ErrDatasourceUnavailable
+	}
+	if err != nil {
+		return fmt.Errorf("report draft: lock publication datasource: %w", err)
+	}
+	if reportidentity.DatasourceFingerprint(datasource) != expectedFingerprint {
+		return ErrDraftVersionConflict
+	}
+	return nil
+}
+
+func replaceResultTableBinding(
+	ctx context.Context,
+	tx *gorm.DB,
+	definitionID, versionID uint,
+	version model.ReportVersion,
+	connectionFingerprint, identitySource string,
+) error {
+	if tx == nil || ctx == nil || definitionID == 0 || versionID == 0 {
+		return invalidDraft("result table binding transaction is required")
+	}
+	if err := tx.WithContext(ctx).Where("definition_id = ?", definitionID).Delete(&model.ReportResultTableBinding{}).Error; err != nil {
+		return fmt.Errorf("report draft: remove previous result table binding: %w", err)
+	}
+	if version.ExecutionMode != model.ReportExecutionModeTableSnapshot {
+		return nil
+	}
+	binding := model.ReportResultTableBinding{
+		ConnectionFingerprint: strings.TrimSpace(connectionFingerprint),
+		IdentitySource:        strings.TrimSpace(identitySource),
+		TableOwner:            strings.ToUpper(strings.TrimSpace(version.ResultTableOwner)),
+		ResultTableName:       strings.ToUpper(strings.TrimSpace(version.ResultTableName)),
+		DefinitionID:          definitionID,
+		VersionID:             versionID,
+	}
+	if len(binding.ConnectionFingerprint) != 64 || binding.IdentitySource != reportidentity.BindingIdentitySourceOracle || binding.TableOwner == "" || binding.ResultTableName == "" {
+		return invalidDraft("result table binding identity is invalid")
+	}
+	var legacyBindings int64
+	if err := tx.WithContext(ctx).Model(&model.ReportResultTableBinding{}).
+		Where("table_owner = ? AND table_name = ? AND definition_id <> ?", binding.TableOwner, binding.ResultTableName, definitionID).
+		Where("identity_source IS NULL OR identity_source <> ?", reportidentity.BindingIdentitySourceOracle).
+		Count(&legacyBindings).Error; err != nil {
+		return fmt.Errorf("report draft: inspect legacy result table bindings: %w", err)
+	}
+	if legacyBindings > 0 {
+		return ErrResultTableConflict
+	}
+	now := time.Now().UTC()
+	result := tx.WithContext(ctx).Exec(`INSERT INTO report_result_table_bindings
+		(connection_fingerprint, identity_source, table_owner, table_name, definition_id, version_id, created_at, updated_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`, binding.ConnectionFingerprint, binding.IdentitySource, binding.TableOwner, binding.ResultTableName,
+		binding.DefinitionID, binding.VersionID, now, now)
+	if err := result.Error; err != nil {
+		var mysqlError *mysqlDriver.MySQLError
+		if errors.As(err, &mysqlError) && mysqlError.Number == 1062 {
+			return ErrResultTableConflict
+		}
+		return fmt.Errorf("report draft: register result table binding: %w", err)
+	}
+	return nil
 }
 
 func (repository *Repository) ListDrafts(ctx context.Context, actor uint, query DraftListQuery) (DraftPage, error) {
@@ -605,7 +695,7 @@ func (repository *Repository) SaveDraftCollections(
 
 func (repository *Repository) validate(ctx context.Context, ownerUserID uint) error {
 	if repository == nil || repository.db == nil || repository.transact == nil || repository.validateReferences == nil ||
-		repository.lockDefinition == nil || repository.lockVersion == nil || repository.writeAudit == nil || repository.loadCollections == nil ||
+		repository.lockDefinition == nil || repository.lockVersion == nil || repository.lockPublicationSource == nil || repository.writeAudit == nil || repository.loadCollections == nil ||
 		repository.publishVersion == nil || repository.createVersion == nil || repository.copyCollections == nil || repository.switchDefinition == nil ||
 		ctx == nil || ownerUserID == 0 {
 		return invalidDraft("repository, context and owner scope are required")

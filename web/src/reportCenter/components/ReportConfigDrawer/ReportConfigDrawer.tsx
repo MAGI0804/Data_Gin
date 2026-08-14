@@ -42,10 +42,9 @@ export function ReportConfigDrawer({ client, report, datasources, datasourcesLoa
     if (datasources.find((item) => item.id === draft.datasourceId)?.enabled === false) return '当前 Oracle 数据源已停用，请先启用或更换数据源。'
     if (!draft.procedure.owner || !draft.procedure.name) return '请从 Oracle 查询结果中选择存储过程。'
     if (!draft.procedure.jsonInputArgName || draft.procedure.resultCursorArgName) return '所选过程必须只有一个 JSON 输入参数，且不能包含任何出参。'
-    if (!draft.result.tableOwner || !draft.result.tableName) return '请绑定包含 RUN_ID 和 ID 的 Oracle 结果表。'
+    if (!draft.result.tableOwner || !draft.result.tableName) return '请绑定 Oracle 结果表。'
     if (![draft.procedure.owner, draft.procedure.name, draft.procedure.jsonInputArgName, draft.result.tableOwner, draft.result.tableName].every((value) => oracleIdentifierPattern.test(value))) return 'Oracle 对象或字段名不合法，请从 Oracle 搜索结果中重新选择。'
     if (draft.procedure.package && !oracleIdentifierPattern.test(draft.procedure.package)) return 'Oracle 包名不合法，请重新选择存储过程。'
-    if (draft.columns.some((column) => ['RUN_ID', 'ID'].includes(column.databaseColumn.toUpperCase()))) return 'RUN_ID 和 ID 是系统字段，不能加入预览或 Excel 映射。'
     try { parseReportInputSchemaDocument(draft.inputSchema) } catch (error) { return error instanceof Error ? error.message : '筛选条件配置不完整。' }
     try {
       const mapping = parseExcelMappingDocument(excelMappingFromColumns(draft.columns))
@@ -82,7 +81,7 @@ export function ReportConfigDrawer({ client, report, datasources, datasourcesLoa
 
   const dirty = draftFingerprint(draft) !== savedFingerprint
   const footer = <><span className={styles.version}>版本锁 {draft.lockVersion || '新建'} · {dirty ? '有未保存修改' : '已保存'}</span><button type="button" onClick={onClose}>取消</button><button type="button" onClick={() => void save()} disabled={state.loading || state.saving || !dirty}>{state.saving ? '处理中…' : '保存草稿'}</button><Button variant="primary" onClick={() => void publish()} disabled={!draft.id || state.saving || dirty} title={dirty ? '请先保存草稿，再核验并发布' : undefined}>核验并发布</Button></>
-  return <Drawer open title={report ? '编辑报表配置' : '创建报表配置'} description="配置保存于 MySQL；Oracle 过程仅接收一份 JSON，并将本次运行结果写入绑定结果表。" size="wide" closeDisabled={state.saving} onClose={onClose} footer={footer}>
+  return <Drawer open title={report ? '编辑报表配置' : '创建报表配置'} description="配置保存于 MySQL；Oracle 过程仅接收一份 JSON，系统整表读取运行结果并在导出成功后清理。" size="wide" closeDisabled={state.saving} onClose={onClose} footer={footer}>
     <div className={styles.tabs} role="tablist" aria-label="报表配置步骤" onKeyDown={(event) => { const current = tabs.findIndex((item) => item.key === tab); const delta = event.key === 'ArrowRight' ? 1 : event.key === 'ArrowLeft' ? -1 : 0; if (!delta) return; event.preventDefault(); const next = tabs[(current + delta + tabs.length) % tabs.length]; setTab(next.key); document.getElementById(`report-config-tab-${next.key}`)?.focus() }}>{tabs.map((item) => <button id={`report-config-tab-${item.key}`} type="button" role="tab" aria-selected={tab === item.key} aria-controls="report-config-panel" tabIndex={tab === item.key ? 0 : -1} className={tab === item.key ? styles.active : ''} onClick={() => setTab(item.key)} key={item.key}>{item.label}</button>)}</div>
     <div id="report-config-panel" role="tabpanel" aria-labelledby={`report-config-tab-${tab}`} tabIndex={0} ref={bodyRef} className={styles.body}>
       {state.loading ? <p>正在读取草稿…</p> : <Editor tab={tab} client={client} draft={draft} datasources={datasources} datasourcesLoading={datasourcesLoading} datasourcesError={datasourcesError} onChange={setDraft} />}

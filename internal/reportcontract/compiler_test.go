@@ -171,8 +171,8 @@ func TestCompileRejectsProcedureAndTemplateDrift(t *testing.T) {
 
 func TestCompileRejectsResultAndExcelMappingDrift(t *testing.T) {
 	version, parameters, columns, grants, arguments, result := validContract()
-	columns[0].DatabaseColumn = "MISSING_COLUMN"
 	contract := validSnapshotContract(t, version, result, columns)
+	columns[0].DatabaseColumn = "MISSING_COLUMN"
 	if _, err := Compile(version, parameters, columns, grants, arguments, result, contract); !errors.Is(err, ErrInvalidContract) {
 		t.Fatalf("result drift error = %v", err)
 	}
@@ -372,9 +372,9 @@ func validSnapshotContract(
 	for _, column := range columns {
 		columnNames = append(columnNames, column.DatabaseColumn)
 	}
-	contract, err := reportoracle.CompileResultSnapshotContract(reportoracle.SystemResultSnapshotRef(
+	contract, err := reportoracle.CompileResultSnapshotContract(reportoracle.ResultTableSnapshotRef(
 		reportoracle.ResultTableRef{Owner: version.ResultTableOwner, Name: version.ResultTableName}, columnNames,
-	), result, true)
+	), result)
 	if err != nil {
 		t.Fatalf("CompileResultSnapshotContract() error = %v", err)
 	}

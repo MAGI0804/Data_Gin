@@ -1,5 +1,5 @@
 import type { ClientResponse, HTTPMethod } from '../api/client'
-import { parseReportInputSchemaDocument } from './refCursorConfig.js'
+import { parseReportInputSchemaDocument, reportInputSchemaDocument } from './refCursorConfig.js'
 import type { ReportAudit, ReportAuditPage, ReportAuditQuery, ReportCatalogPage, ReportCatalogQuery, ReportColumn, ReportDatasource, ReportDatasourceInput, ReportDatasourceTest, ReportDefinitionStatus, ReportDraft, ReportExport, ReportExportPage, ReportFilterOperator, ReportGrant, ReportParameter, ReportProcedureArgument, ReportProcedurePage, ReportProcedureRef, ReportProcedureSignature, ReportProcedureSummary, ReportPublication, ReportResultPage, ReportResultQuery, ReportResultTableColumn, ReportResultTablePage, ReportResultTableRef, ReportResultTableSchema, ReportResultTableSummary, ReportRun, ReportRunContract, ReportRunStatus, ReportSummary, ReportVersionDiff, ReportVersionPage, ReportVersionSummary } from './types'
 
 type JsonRecord = Record<string, unknown>
@@ -612,7 +612,7 @@ function serializeReportDraft(draft: ReportDraft, creating: boolean) {
   return {
     code: draft.code, name: draft.name, category: draft.category, description: draft.description, datasourceId: draft.datasourceId,
     ...(creating ? {} : { expectedLockVersion: draft.lockVersion }), executionMode: draft.executionMode, procedure: draft.procedure,
-    inputSchema: jsonInput ? draft.inputSchema : undefined,
+    inputSchema: jsonInput ? reportInputSchemaDocument(draft.inputSchema) : undefined,
     result: draft.executionMode === 'REF_CURSOR' ? {} : { tableOwner: draft.result.tableOwner, tableName: draft.result.tableName },
     callTemplate: jsonInput ? '' : draft.callTemplate,
     parameters: jsonInput ? [] : draft.parameters.map((parameter) => ({ ...parameter, defaultValue: parameter.sensitive ? undefined : parameter.defaultValue, allowedValues: parameter.allowedValues.length ? parameter.allowedValues : undefined, validation: Object.keys(parameter.validation).length ? parameter.validation : undefined, normalizer: Object.keys(parameter.normalizer).length ? parameter.normalizer : undefined, valueSource: Object.keys(parameter.valueSource).length ? parameter.valueSource : undefined, nullPolicy: parameter.nullPolicy || 'TYPED_NULL' })),
@@ -671,7 +671,7 @@ function parseReportValidationSummary(value: unknown) {
   const name = publicString(procedure.name, 128)
   const tableOwner = publicString(result.tableOwner, 128)
   const tableName = publicString(result.tableName, 128)
-  if (!validatedAt || !procedureSignatureHash || !resultSchemaHash || !exportSchemaHash || !owner || !name || !tableOwner || !tableName || argumentCount === null || columnCount === null || exportableColumnCount === null || snapshot.uniqueKeyValidated !== true) throw new Error('invalid publication validation')
+  if (!validatedAt || !procedureSignatureHash || !resultSchemaHash || !exportSchemaHash || !owner || !name || !tableOwner || !tableName || argumentCount === null || columnCount === null || exportableColumnCount === null || snapshot.resultTableValidated !== true) throw new Error('invalid publication validation')
   return {
       validatedAt,
       procedure: {
@@ -689,7 +689,7 @@ function parseReportValidationSummary(value: unknown) {
         schemaHash: resultSchemaHash,
       },
       snapshot: {
-        uniqueKeyValidated: true,
+        resultTableValidated: true,
       },
       export: {
         exportableColumnCount,

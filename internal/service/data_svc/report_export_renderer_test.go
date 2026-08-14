@@ -15,9 +15,9 @@ import (
 
 func TestReportExportRendererWritesFrozenHeadersTypesAndSafeText(t *testing.T) {
 	pager := &fakeReportExportPager{pages: []reportoracle.ResultPage{{
-		Columns:   []string{"CODE", "AMOUNT", "CREATED_AT", "SECRET"},
-		Rows:      []reportoracle.ResultRow{{RowID: -3, Values: []interface{}{"=2+3", "9007199254740993", time.Date(2026, 8, 12, 12, 30, 0, 0, time.UTC), "private"}}},
-		NextRowID: -3,
+		Columns: []string{"CODE", "AMOUNT", "CREATED_AT", "SECRET"},
+		Rows:    []reportoracle.ResultRow{{Key: "ROW-A", Values: []interface{}{"=2+3", "9007199254740993", time.Date(2026, 8, 12, 12, 30, 0, 0, time.UTC), "private"}}},
+		NextKey: "ROW-A",
 	}}}
 	output := filepath.Join(t.TempDir(), "report.xlsx")
 	renderer := NewReportExportRenderer(pager)
@@ -53,9 +53,9 @@ func TestReportExportRendererWritesFrozenHeadersTypesAndSafeText(t *testing.T) {
 
 func TestReportExportRendererRejectsNonAdvancingCursor(t *testing.T) {
 	pager := &fakeReportExportPager{pages: []reportoracle.ResultPage{{
-		Columns: []string{"CODE"}, Rows: []reportoracle.ResultRow{{RowID: 7, Values: []interface{}{"a"}}}, NextRowID: 7, HasNext: true,
+		Columns: []string{"CODE"}, Rows: []reportoracle.ResultRow{{Key: "ROW-A", Values: []interface{}{"a"}}}, NextKey: "ROW-A", HasNext: true,
 	}, {
-		Columns: []string{"CODE"}, Rows: []reportoracle.ResultRow{{RowID: 7, Values: []interface{}{"b"}}}, NextRowID: 7,
+		Columns: []string{"CODE"}, Rows: []reportoracle.ResultRow{{Key: "ROW-A", Values: []interface{}{"b"}}}, NextKey: "ROW-A",
 	}}}
 	renderer := NewReportExportRenderer(pager)
 	_, err := renderer.Render(t.Context(), ReportExportRenderRequest{

@@ -73,6 +73,22 @@ type ReportDatasource struct {
 
 func (ReportDatasource) TableName() string { return "report_datasources" }
 
+// ReportResultTableBinding makes a physical Oracle result table exclusive to
+// one report definition. ConnectionFingerprint identifies the Oracle database
+// and CDB/PDB container without persisting credentials in the registry.
+type ReportResultTableBinding struct {
+	BaseModel
+	ConnectionFingerprint string `gorm:"column:connection_fingerprint;type:char(64);not null;uniqueIndex:uk_report_result_table_binding,priority:1" json:"-"`
+	IdentitySource        string `gorm:"column:identity_source;size:32;not null;default:LEGACY_DATASOURCE_V1;index" json:"-"`
+	TableOwner            string `gorm:"column:table_owner;size:128;not null;uniqueIndex:uk_report_result_table_binding,priority:2" json:"tableOwner"`
+	ResultTableName       string `gorm:"column:table_name;size:128;not null;uniqueIndex:uk_report_result_table_binding,priority:3" json:"tableName"`
+	DefinitionID          uint   `gorm:"column:definition_id;not null;uniqueIndex" json:"definitionId"`
+	VersionID             uint   `gorm:"column:version_id;not null;index" json:"versionId"`
+	WeatherTimestamps
+}
+
+func (ReportResultTableBinding) TableName() string { return "report_result_table_bindings" }
+
 // ReportDefinition is the mutable catalog entry. Published behavior is always
 // read from CurrentPublishedVersionID and the immutable ReportVersion snapshot.
 type ReportDefinition struct {

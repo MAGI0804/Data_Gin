@@ -3,8 +3,8 @@ package reportoracle
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
-	"strconv"
 	"strings"
 	"time"
 
@@ -19,43 +19,32 @@ const (
 	maxResultColumns      = 512
 	defaultPurgeBatchSize = 5000
 	maxPurgeBatchSize     = 20000
-
-	SystemResultRunIDColumn  = "RUN_ID"
-	SystemResultRecordColumn = "ID"
 )
 
 type ResultSnapshotRef struct {
-	Table       ResultTableRef
-	RunIDColumn string
-	RowIDColumn string
-	Columns     []string
+	Table   ResultTableRef
+	Columns []string
 }
 
-// SystemResultSnapshotRef builds the fixed TABLE_SNAPSHOT contract. RUN_ID
-// stores the MySQL report definition ID and ID is the internal page cursor.
-func SystemResultSnapshotRef(table ResultTableRef, columns []string) ResultSnapshotRef {
-	return ResultSnapshotRef{
-		Table: table, RunIDColumn: SystemResultRunIDColumn,
-		RowIDColumn: SystemResultRecordColumn, Columns: columns,
-	}
+// ResultTableSnapshotRef builds a result-table contract without imposing
+// system columns on the Oracle schema.
+func ResultTableSnapshotRef(table ResultTableRef, columns []string) ResultSnapshotRef {
+	return ResultSnapshotRef{Table: table, Columns: columns}
 }
 
-// ResultSnapshotContract is produced only after Oracle metadata proves the
-// run and row columns are safe for snapshot keyset pagination.
+// ResultSnapshotContract is produced after Oracle metadata proves that the
+// configured output columns exist in the bound result table.
 type ResultSnapshotContract struct {
-	table           ResultTableRef
-	runIDColumn     string
-	rowIDColumn     string
-	reportIDNumeric bool
-	columns         map[string]struct{}
+	table   ResultTableRef
+	columns map[string]struct{}
 }
 
 func ValidateResultSnapshotContract(contract ResultSnapshotContract, ref ResultSnapshotRef) error {
-	table, runIDColumn, rowIDColumn, columns, err := normalizeSnapshotRef(ref)
+	table, columns, err := normalizeSnapshotRef(ref)
 	if err != nil {
 		return err
 	}
-	if contract.table != table || contract.runIDColumn != runIDColumn || contract.rowIDColumn != rowIDColumn || len(contract.columns) != len(columns) {
+	if contract.table != table || len(contract.columns) != len(columns) {
 		return configurationError("result snapshot contract does not match report version")
 	}
 	for _, column := range columns {
@@ -73,7 +62,6 @@ type ResultPagePlan struct {
 	query            reportquery.Query
 	initialArguments []interface{}
 	nextArguments    []interface{}
-	reportIDNumeric  bool
 }
 
 func (plan ResultPagePlan) Columns() []string {
@@ -81,33 +69,36 @@ func (plan ResultPagePlan) Columns() []string {
 }
 
 type ResultRow struct {
-	RowID     int64
+	Key       string
 	Values    []interface{}
 	SortValue *reportquery.Value
 }
 
 type ResultPage struct {
-	Columns   []string
-	Rows      []ResultRow
-	NextRowID int64
-	HasNext   bool
+	Columns []string
+	Rows    []ResultRow
+	NextKey string
+	HasNext bool
 }
 
 type PurgePlan struct {
-	statement       string
-	reportIDNumeric bool
+	statement string
 }
 
 type ResultCountPlan struct {
-	statement       string
-	reportIDNumeric bool
+	statement string
 }
+
+const resultTableStorageSQL = `
+SELECT temporary, iot_type, row_movement
+FROM all_tables
+WHERE owner = :1 AND table_name = :2`
 
 func (adapter *Adapter) InspectResultSnapshotContract(
 	ctx context.Context,
 	ref ResultSnapshotRef,
 ) (ResultSnapshotContract, error) {
-	normalizedTable, runIDColumn, rowIDColumn, _, err := normalizeSnapshotRef(ref)
+	normalizedTable, _, err := normalizeSnapshotRef(ref)
 	if err != nil {
 		return ResultSnapshotContract{}, err
 	}
@@ -115,21 +106,75 @@ func (adapter *Adapter) InspectResultSnapshotContract(
 	if err != nil {
 		return ResultSnapshotContract{}, err
 	}
-	var uniqueIndexes int
-	if err := adapter.db.QueryRowContext(ctx, uniqueResultKeySQL,
-		normalizedTable.Owner, normalizedTable.Name, runIDColumn, rowIDColumn,
-	).Scan(&uniqueIndexes); err != nil {
-		return ResultSnapshotContract{}, fmt.Errorf("inspect oracle result key: %w", err)
+	return CompileResultSnapshotContract(ref, columns)
+}
+
+// ValidateResultSnapshotTable proves that the bound object is a permanent
+// heap table whose physical ROWID can be used for stable keyset pagination.
+func (adapter *Adapter) ValidateResultSnapshotTable(ctx context.Context, ref ResultTableRef) error {
+	if adapter == nil || adapter.db == nil {
+		return fmt.Errorf("validate oracle result snapshot table: adapter is closed")
 	}
-	return CompileResultSnapshotContract(ref, columns, uniqueIndexes > 0)
+	normalized, err := NormalizeResultTableRef(ref)
+	if err != nil {
+		return err
+	}
+	var temporary, rowMovement string
+	var iotType sql.NullString
+	err = adapter.db.QueryRowContext(ctx, resultTableStorageSQL, normalized.Owner, normalized.Name).
+		Scan(&temporary, &iotType, &rowMovement)
+	if errors.Is(err, sql.ErrNoRows) {
+		return fmt.Errorf("%w: no matching result table", ErrMetadataMismatch)
+	}
+	if err != nil {
+		return fmt.Errorf("inspect oracle result table storage: %w", err)
+	}
+	if err := validateResultTableStorage(temporary, iotType.String, rowMovement); err != nil {
+		return err
+	}
+	probe := resultTableROWIDProbe(normalized)
+	rows, err := adapter.db.QueryContext(ctx, probe)
+	if err != nil {
+		return fmt.Errorf("validate oracle result table ROWID: %w", err)
+	}
+	defer rows.Close()
+	if rows.Next() {
+		var rowID string
+		if err := rows.Scan(&rowID); err != nil {
+			return fmt.Errorf("scan oracle result table ROWID: %w", err)
+		}
+		if strings.TrimSpace(rowID) == "" {
+			return fmt.Errorf("%w: result table returned an empty ROWID", ErrMetadataMismatch)
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return fmt.Errorf("iterate oracle result table ROWID probe: %w", err)
+	}
+	return nil
+}
+
+func resultTableROWIDProbe(table ResultTableRef) string {
+	return fmt.Sprintf("SELECT ROWIDTOCHAR(CHARTOROWID(ROWIDTOCHAR(ROWID))) FROM %s.%s WHERE ROWNUM <= 1", table.Owner, table.Name)
+}
+
+func validateResultTableStorage(temporary, iotType, rowMovement string) error {
+	if strings.ToUpper(strings.TrimSpace(temporary)) != "N" {
+		return fmt.Errorf("%w: result table must be permanent", ErrMetadataMismatch)
+	}
+	if strings.TrimSpace(iotType) != "" {
+		return fmt.Errorf("%w: index-organized result tables do not expose stable physical ROWID", ErrMetadataMismatch)
+	}
+	if strings.ToUpper(strings.TrimSpace(rowMovement)) != "DISABLED" {
+		return fmt.Errorf("%w: result table row movement must be disabled", ErrMetadataMismatch)
+	}
+	return nil
 }
 
 func CompileResultSnapshotContract(
 	ref ResultSnapshotRef,
 	columns []ResultColumn,
-	hasUniqueKey bool,
 ) (ResultSnapshotContract, error) {
-	normalizedTable, runIDColumn, rowIDColumn, _, err := normalizeSnapshotRef(ref)
+	normalizedTable, configuredColumns, err := normalizeSnapshotRef(ref)
 	if err != nil {
 		return ResultSnapshotContract{}, err
 	}
@@ -137,26 +182,14 @@ func CompileResultSnapshotContract(
 	for _, column := range columns {
 		byName[strings.ToUpper(column.Name)] = column
 	}
-	runColumn, runExists := byName[runIDColumn]
-	rowColumn, rowExists := byName[rowIDColumn]
-	if !runExists || !rowExists || runColumn.Nullable || rowColumn.Nullable {
-		return ResultSnapshotContract{}, configurationError("result key columns must exist and be not null")
+	allowedColumns := make(map[string]struct{}, len(configuredColumns))
+	for _, column := range configuredColumns {
+		if _, exists := byName[column]; !exists {
+			return ResultSnapshotContract{}, configurationError("configured result column does not exist")
+		}
+		allowedColumns[column] = struct{}{}
 	}
-	reportIDNumeric, supported := supportedReportIDColumn(runColumn)
-	if !supported {
-		return ResultSnapshotContract{}, configurationError("result run id column type is unsupported")
-	}
-	if !supportedRecordIDColumn(rowColumn) {
-		return ResultSnapshotContract{}, configurationError("result record id column must be an integer NUMBER within int64")
-	}
-	if !hasUniqueKey {
-		return ResultSnapshotContract{}, configurationError("result record id requires a unique index")
-	}
-	allowedColumns := make(map[string]struct{})
-	for _, column := range ref.Columns {
-		allowedColumns[strings.ToUpper(strings.TrimSpace(column))] = struct{}{}
-	}
-	return ResultSnapshotContract{table: normalizedTable, runIDColumn: runIDColumn, rowIDColumn: rowIDColumn, reportIDNumeric: reportIDNumeric, columns: allowedColumns}, nil
+	return ResultSnapshotContract{table: normalizedTable, columns: allowedColumns}, nil
 }
 
 func BuildResultPagePlan(contract ResultSnapshotContract, columns []string) (ResultPagePlan, error) {
@@ -164,12 +197,10 @@ func BuildResultPagePlan(contract ResultSnapshotContract, columns []string) (Res
 }
 
 func BuildResultQueryPlan(contract ResultSnapshotContract, columns []string, query reportquery.Query) (ResultPagePlan, error) {
-	if contract.table.Owner == "" || contract.table.Name == "" || contract.runIDColumn == "" || contract.rowIDColumn == "" {
+	if contract.table.Owner == "" || contract.table.Name == "" || len(contract.columns) == 0 {
 		return ResultPagePlan{}, configurationError("result snapshot contract is not validated")
 	}
-	_, _, _, normalizedColumns, err := normalizeSnapshotRef(ResultSnapshotRef{
-		Table: contract.table, RunIDColumn: contract.runIDColumn, RowIDColumn: contract.rowIDColumn, Columns: columns,
-	})
+	_, normalizedColumns, err := normalizeSnapshotRef(ResultSnapshotRef{Table: contract.table, Columns: columns})
 	if err != nil {
 		return ResultPagePlan{}, err
 	}
@@ -182,7 +213,7 @@ func BuildResultQueryPlan(contract ResultSnapshotContract, columns []string, que
 		return ResultPagePlan{}, configurationError("result query is excessive")
 	}
 	selectColumns := make([]string, 0, len(normalizedColumns)+2)
-	selectColumns = append(selectColumns, contract.rowIDColumn)
+	selectColumns = append(selectColumns, "ROWIDTOCHAR(ROWID)")
 	if len(query.Sort) == 1 {
 		sortColumn, sortErr := normalizeIdentifier(query.Sort[0].Column, "result sort column")
 		if sortErr != nil || (query.Sort[0].Direction != "ASC" && query.Sort[0].Direction != "DESC") {
@@ -195,27 +226,29 @@ func BuildResultQueryPlan(contract ResultSnapshotContract, columns []string, que
 		selectColumns = append(selectColumns, query.Sort[0].Column)
 	}
 	selectColumns = append(selectColumns, normalizedColumns...)
-	filterSQL, filterArguments, nextBind, err := buildResultFilters(query.Filters, contract.columns, 2)
+	filterSQL, filterArguments, nextBind, err := buildResultFilters(query.Filters, contract.columns, 1)
 	if err != nil {
 		return ResultPagePlan{}, err
 	}
-	where := contract.runIDColumn + " = :1" + filterSQL
-	order := contract.rowIDColumn + " ASC"
+	where := "1 = 1" + filterSQL
+	order := "ROWID ASC"
 	initialArguments := append([]interface{}(nil), filterArguments...)
 	nextArguments := append([]interface{}(nil), filterArguments...)
 	initialFetchBind := nextBind
-	nextPredicate := fmt.Sprintf("%s > :%d", contract.rowIDColumn, nextBind)
-	nextBind++
+	nextPredicate := ""
 	if len(query.Sort) == 1 {
 		sort := query.Sort[0]
-		order = fmt.Sprintf("%s %s NULLS LAST, %s ASC", sort.Column, sort.Direction, contract.rowIDColumn)
+		order = fmt.Sprintf("%s %s NULLS LAST, ROWID ASC", sort.Column, sort.Direction)
 		comparison := ">"
 		if sort.Direction == "DESC" {
 			comparison = "<"
 		}
-		nextPredicate = fmt.Sprintf("((:%d = 1 AND %s IS NULL AND %s > :%d) OR (:%d = 0 AND ((%s %s :%d) OR %s IS NULL OR (%s = :%d AND %s > :%d))))",
-			nextBind, sort.Column, contract.rowIDColumn, nextBind+1, nextBind+2, sort.Column, comparison, nextBind+3, sort.Column, sort.Column, nextBind+4, contract.rowIDColumn, nextBind+5)
+		nextPredicate = fmt.Sprintf("((:%d = 1 AND %s IS NULL AND ROWID > CHARTOROWID(:%d)) OR (:%d = 0 AND ((%s %s :%d) OR %s IS NULL OR (%s = :%d AND ROWID > CHARTOROWID(:%d)))))",
+			nextBind, sort.Column, nextBind+1, nextBind+2, sort.Column, comparison, nextBind+3, sort.Column, sort.Column, nextBind+4, nextBind+5)
 		nextBind += 6
+	} else {
+		nextPredicate = fmt.Sprintf("ROWID > CHARTOROWID(:%d)", nextBind)
+		nextBind++
 	}
 	initialStatement := fmt.Sprintf(
 		"SELECT %s FROM %s.%s WHERE %s ORDER BY %s FETCH NEXT :%d ROWS ONLY",
@@ -227,36 +260,36 @@ func BuildResultQueryPlan(contract ResultSnapshotContract, columns []string, que
 		strings.Join(selectColumns, ", "), contract.table.Owner, contract.table.Name,
 		where, nextPredicate, order, nextBind,
 	)
-	return ResultPagePlan{initialStatement: initialStatement, nextStatement: nextStatement, columns: normalizedColumns, query: query, initialArguments: initialArguments, nextArguments: nextArguments, reportIDNumeric: contract.reportIDNumeric}, nil
+	return ResultPagePlan{initialStatement: initialStatement, nextStatement: nextStatement, columns: normalizedColumns, query: query, initialArguments: initialArguments, nextArguments: nextArguments}, nil
 }
 
 func BuildPurgePlan(contract ResultSnapshotContract) (PurgePlan, error) {
-	if contract.table.Owner == "" || contract.table.Name == "" || contract.runIDColumn == "" {
+	if contract.table.Owner == "" || contract.table.Name == "" {
 		return PurgePlan{}, configurationError("result snapshot contract is not validated")
 	}
 	statement := fmt.Sprintf(
-		"DELETE FROM %s.%s WHERE ROWID IN (SELECT ROWID FROM %s.%s WHERE %s = :1 AND ROWNUM <= :2)",
-		contract.table.Owner, contract.table.Name, contract.table.Owner, contract.table.Name, contract.runIDColumn,
+		"DELETE FROM %s.%s WHERE ROWID IN (SELECT ROWID FROM %s.%s WHERE ROWNUM <= :1)",
+		contract.table.Owner, contract.table.Name, contract.table.Owner, contract.table.Name,
 	)
-	return PurgePlan{statement: statement, reportIDNumeric: contract.reportIDNumeric}, nil
+	return PurgePlan{statement: statement}, nil
 }
 
 func BuildResultCountPlan(contract ResultSnapshotContract) (ResultCountPlan, error) {
-	if contract.table.Owner == "" || contract.table.Name == "" || contract.runIDColumn == "" {
+	if contract.table.Owner == "" || contract.table.Name == "" {
 		return ResultCountPlan{}, configurationError("result snapshot contract is not validated")
 	}
 	return ResultCountPlan{statement: fmt.Sprintf(
-		"SELECT COUNT(*) FROM %s.%s WHERE %s = :1",
-		contract.table.Owner, contract.table.Name, contract.runIDColumn,
-	), reportIDNumeric: contract.reportIDNumeric}, nil
+		"SELECT COUNT(*) FROM %s.%s",
+		contract.table.Owner, contract.table.Name,
+	)}, nil
 }
 
-func (adapter *Adapter) CountResultRows(ctx context.Context, plan ResultCountPlan, reportID uint) (int64, error) {
-	if adapter == nil || adapter.db == nil || strings.TrimSpace(plan.statement) == "" || reportID == 0 {
+func (adapter *Adapter) CountResultRows(ctx context.Context, plan ResultCountPlan) (int64, error) {
+	if adapter == nil || adapter.db == nil || strings.TrimSpace(plan.statement) == "" {
 		return 0, fmt.Errorf("count oracle report result rows: invalid request")
 	}
 	var count int64
-	if err := adapter.db.QueryRowContext(ctx, plan.statement, reportIDBind(reportID, plan.reportIDNumeric)).Scan(&count); err != nil {
+	if err := adapter.db.QueryRowContext(ctx, plan.statement).Scan(&count); err != nil {
 		return 0, fmt.Errorf("count oracle report result rows: %w", err)
 	}
 	if count < 0 {
@@ -265,12 +298,12 @@ func (adapter *Adapter) CountResultRows(ctx context.Context, plan ResultCountPla
 	return count, nil
 }
 
-func (adapter *Adapter) CountResultRowsTx(ctx context.Context, tx *sql.Tx, plan ResultCountPlan, reportID uint) (int64, error) {
-	if adapter == nil || tx == nil || strings.TrimSpace(plan.statement) == "" || reportID == 0 {
+func (adapter *Adapter) CountResultRowsTx(ctx context.Context, tx *sql.Tx, plan ResultCountPlan) (int64, error) {
+	if adapter == nil || tx == nil || strings.TrimSpace(plan.statement) == "" {
 		return 0, fmt.Errorf("count oracle report result rows: invalid transaction request")
 	}
 	var count int64
-	if err := tx.QueryRowContext(ctx, plan.statement, reportIDBind(reportID, plan.reportIDNumeric)).Scan(&count); err != nil {
+	if err := tx.QueryRowContext(ctx, plan.statement).Scan(&count); err != nil {
 		return 0, fmt.Errorf("count oracle report result rows: %w", err)
 	}
 	if count < 0 {
@@ -282,12 +315,11 @@ func (adapter *Adapter) CountResultRowsTx(ctx context.Context, tx *sql.Tx, plan 
 func (adapter *Adapter) ReadResultPage(
 	ctx context.Context,
 	plan ResultPagePlan,
-	reportID uint,
 	after *ResultCursor,
 	pageSize int,
 ) (ResultPage, error) {
 	if adapter == nil || adapter.db == nil || strings.TrimSpace(plan.initialStatement) == "" ||
-		strings.TrimSpace(plan.nextStatement) == "" || len(plan.columns) == 0 || reportID == 0 {
+		strings.TrimSpace(plan.nextStatement) == "" || len(plan.columns) == 0 {
 		return ResultPage{}, fmt.Errorf("read oracle report result page: invalid request")
 	}
 	if pageSize == 0 {
@@ -297,14 +329,12 @@ func (adapter *Adapter) ReadResultPage(
 		return ResultPage{}, fmt.Errorf("read oracle report result page: invalid page size")
 	}
 	statement := plan.initialStatement
-	arguments := []interface{}{reportIDBind(reportID, plan.reportIDNumeric)}
-	arguments = append(arguments, plan.initialArguments...)
+	arguments := append([]interface{}(nil), plan.initialArguments...)
 	if after != nil {
 		statement = plan.nextStatement
-		arguments = []interface{}{reportIDBind(reportID, plan.reportIDNumeric)}
-		arguments = append(arguments, plan.nextArguments...)
+		arguments = append([]interface{}(nil), plan.nextArguments...)
 		if len(plan.query.Sort) == 0 {
-			arguments = append(arguments, after.RowID)
+			arguments = append(arguments, after.Key)
 		} else {
 			isNull := 0
 			var value interface{}
@@ -317,7 +347,7 @@ func (adapter *Adapter) ReadResultPage(
 					return ResultPage{}, err
 				}
 			}
-			arguments = append(arguments, isNull, after.RowID, isNull, value, value, after.RowID)
+			arguments = append(arguments, isNull, after.Key, isNull, value, value, after.Key)
 		}
 	}
 	arguments = append(arguments, pageSize+1)
@@ -343,7 +373,7 @@ func (adapter *Adapter) ReadResultPage(
 		if err := rows.Scan(destinations...); err != nil {
 			return ResultPage{}, fmt.Errorf("scan oracle report result row: %w", err)
 		}
-		rowID, err := oracleRowID(values[0])
+		rowKey, err := oracleRowKey(values[0])
 		if err != nil {
 			return ResultPage{}, err
 		}
@@ -351,7 +381,7 @@ func (adapter *Adapter) ReadResultPage(
 			result.HasNext = true
 			break
 		}
-		row := ResultRow{RowID: rowID, Values: values[hidden:]}
+		row := ResultRow{Key: rowKey, Values: values[hidden:]}
 		if len(plan.query.Sort) == 1 && values[1] != nil {
 			sortValue, valueErr := reportquery.ValueFromDatabase(plan.query.Sort[0].Kind, values[1])
 			if valueErr != nil {
@@ -360,7 +390,7 @@ func (adapter *Adapter) ReadResultPage(
 			row.SortValue = &sortValue
 		}
 		result.Rows = append(result.Rows, row)
-		result.NextRowID = rowID
+		result.NextKey = rowKey
 	}
 	if err := rows.Err(); err != nil {
 		return ResultPage{}, fmt.Errorf("iterate oracle report result rows: %w", err)
@@ -369,7 +399,7 @@ func (adapter *Adapter) ReadResultPage(
 }
 
 type ResultCursor struct {
-	RowID     int64
+	Key       string
 	SortValue *reportquery.Value
 }
 
@@ -495,10 +525,9 @@ func (adapter *Adapter) PurgeResultBatch(
 	ctx context.Context,
 	tx *sql.Tx,
 	plan PurgePlan,
-	reportID uint,
 	batchSize int,
 ) (int64, error) {
-	if adapter == nil || tx == nil || strings.TrimSpace(plan.statement) == "" || reportID == 0 {
+	if adapter == nil || tx == nil || strings.TrimSpace(plan.statement) == "" {
 		return 0, fmt.Errorf("purge oracle report result: invalid request")
 	}
 	if batchSize == 0 {
@@ -507,7 +536,7 @@ func (adapter *Adapter) PurgeResultBatch(
 	if batchSize < 1 || batchSize > maxPurgeBatchSize {
 		return 0, fmt.Errorf("purge oracle report result: invalid batch size")
 	}
-	result, err := tx.ExecContext(ctx, plan.statement, reportIDBind(reportID, plan.reportIDNumeric), batchSize)
+	result, err := tx.ExecContext(ctx, plan.statement, batchSize)
 	if err != nil {
 		if contextError := ctx.Err(); contextError != nil {
 			return 0, contextError
@@ -521,119 +550,38 @@ func (adapter *Adapter) PurgeResultBatch(
 	return deleted, nil
 }
 
-func supportedReportIDColumn(column ResultColumn) (numeric bool, supported bool) {
-	switch strings.ToUpper(strings.TrimSpace(column.DataType)) {
-	case "CHAR", "NCHAR", "VARCHAR2", "NVARCHAR2":
-		return false, true
-	case "NUMBER":
-		return true, column.DataScale == nil || *column.DataScale == 0
-	default:
-		return false, false
-	}
-}
-
-func supportedRecordIDColumn(column ResultColumn) bool {
-	if strings.ToUpper(strings.TrimSpace(column.DataType)) != "NUMBER" {
-		return false
-	}
-	if column.DataScale != nil && *column.DataScale != 0 {
-		return false
-	}
-	return column.DataPrecision == nil || (*column.DataPrecision >= 1 && *column.DataPrecision <= 18)
-}
-
-func reportIDBind(reportID uint, numeric bool) interface{} {
-	value := strconv.FormatUint(uint64(reportID), 10)
-	if numeric {
-		return godror.Number(value)
-	}
-	return value
-}
-
-func normalizeSnapshotRef(ref ResultSnapshotRef) (ResultTableRef, string, string, []string, error) {
+func normalizeSnapshotRef(ref ResultSnapshotRef) (ResultTableRef, []string, error) {
 	table, err := NormalizeResultTableRef(ref.Table)
 	if err != nil {
-		return ResultTableRef{}, "", "", nil, err
-	}
-	runIDColumn, err := normalizeIdentifier(ref.RunIDColumn, "result run id column")
-	if err != nil {
-		return ResultTableRef{}, "", "", nil, err
-	}
-	rowIDColumn, err := normalizeIdentifier(ref.RowIDColumn, "result row id column")
-	if err != nil {
-		return ResultTableRef{}, "", "", nil, err
-	}
-	if runIDColumn == rowIDColumn {
-		return ResultTableRef{}, "", "", nil, configurationError("result key columns must be distinct")
-	}
-	if runIDColumn != SystemResultRunIDColumn || rowIDColumn != SystemResultRecordColumn {
-		return ResultTableRef{}, "", "", nil, configurationError("result system columns must be RUN_ID and ID")
+		return ResultTableRef{}, nil, err
 	}
 	if len(ref.Columns) == 0 || len(ref.Columns) > maxResultColumns {
-		return ResultTableRef{}, "", "", nil, configurationError("result columns are invalid")
+		return ResultTableRef{}, nil, configurationError("result columns are invalid")
 	}
 	columns := make([]string, len(ref.Columns))
-	seen := map[string]struct{}{runIDColumn: {}, rowIDColumn: {}}
+	seen := make(map[string]struct{}, len(ref.Columns))
 	for index, column := range ref.Columns {
 		columns[index], err = normalizeIdentifier(column, "result column")
 		if err != nil {
-			return ResultTableRef{}, "", "", nil, err
+			return ResultTableRef{}, nil, err
 		}
 		if _, exists := seen[columns[index]]; exists {
-			return ResultTableRef{}, "", "", nil, configurationError("result columns contain duplicate or key column")
+			return ResultTableRef{}, nil, configurationError("result columns contain duplicate column")
 		}
 		seen[columns[index]] = struct{}{}
 	}
-	return table, runIDColumn, rowIDColumn, columns, nil
+	return table, columns, nil
 }
-
-const uniqueResultKeySQL = `
-WITH filters AS (
-    SELECT :1 AS table_owner, :2 AS table_name, :3 AS run_id_column, :4 AS row_id_column
-    FROM dual
-)
-SELECT COUNT(*)
-FROM (
-    SELECT indexes.index_name
-    FROM all_indexes indexes
-    JOIN all_ind_columns columns
-      ON columns.index_owner = indexes.owner AND columns.index_name = indexes.index_name
-    CROSS JOIN filters
-    WHERE indexes.table_owner = filters.table_owner
-      AND indexes.table_name = filters.table_name
-      AND indexes.uniqueness = 'UNIQUE'
-    GROUP BY indexes.index_name, filters.run_id_column, filters.row_id_column
-    HAVING (
-        COUNT(*) = 1
-        AND MAX(CASE WHEN columns.column_position = 1 AND columns.column_name = filters.row_id_column THEN 1 ELSE 0 END) = 1
-    ) OR (
-        COUNT(*) = 2
-        AND MAX(CASE WHEN columns.column_position = 1 AND columns.column_name = filters.run_id_column THEN 1 ELSE 0 END) = 1
-        AND MAX(CASE WHEN columns.column_position = 2 AND columns.column_name = filters.row_id_column THEN 1 ELSE 0 END) = 1
-    )
-)`
-
-func oracleRowID(value interface{}) (int64, error) {
+func oracleRowKey(value interface{}) (string, error) {
 	switch typed := value.(type) {
-	case int64:
-		return typed, nil
-	case int32:
-		return int64(typed), nil
-	case int:
-		return int64(typed), nil
-	case godror.Number:
-		parsed, err := strconv.ParseInt(string(typed), 10, 64)
-		if err != nil {
-			return 0, fmt.Errorf("scan oracle report result row: invalid row id")
-		}
-		return parsed, nil
 	case string:
-		parsed, err := strconv.ParseInt(typed, 10, 64)
-		if err != nil {
-			return 0, fmt.Errorf("scan oracle report result row: invalid row id")
+		if strings.TrimSpace(typed) == "" {
+			return "", fmt.Errorf("scan oracle report result row: empty row key")
 		}
-		return parsed, nil
+		return typed, nil
+	case []byte:
+		return oracleRowKey(string(typed))
 	default:
-		return 0, fmt.Errorf("scan oracle report result row: unsupported row id type %T", value)
+		return "", fmt.Errorf("scan oracle report result row: unsupported row key type %T", value)
 	}
 }

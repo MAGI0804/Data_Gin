@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -32,7 +33,6 @@ type oracleReportExportSession struct {
 	jsonSnapshot bool
 	columns      []string
 	runUUID      string
-	reportID     uint
 	queryTimeout time.Duration
 }
 
@@ -80,7 +80,7 @@ func (oracleReportExportSessionFactory) Open(ctx context.Context, runtime report
 			runUUID: runtime.Run.RunUUID, queryTimeout: queryTimeout,
 		}, nil
 	}
-	ref := reportoracle.SystemResultSnapshotRef(
+	ref := reportoracle.ResultTableSnapshotRef(
 		reportoracle.ResultTableRef{Owner: runtime.Version.ResultTableOwner, Name: runtime.Version.ResultTableName},
 		queryDatabaseColumns(queryColumns, databaseColumns),
 	)
@@ -112,7 +112,7 @@ func (oracleReportExportSessionFactory) Open(ctx context.Context, runtime report
 	if queryTimeout <= 0 {
 		queryTimeout = defaultReportPublicationInspectionTimeout
 	}
-	return &oracleReportExportSession{adapter: adapter, pagePlan: pagePlan, purgePlan: purgePlan, reportID: runtime.Run.DefinitionID, queryTimeout: queryTimeout}, nil
+	return &oracleReportExportSession{adapter: adapter, pagePlan: pagePlan, purgePlan: purgePlan, queryTimeout: queryTimeout}, nil
 }
 
 func queryDatabaseColumns(columns []reportquery.Column, output []string) []string {
@@ -152,11 +152,15 @@ func (session *oracleReportExportSession) Read(ctx context.Context, columns []st
 	if session.jsonSnapshot {
 		afterRowID := int64(0)
 		if after != nil {
-			afterRowID = after.RowID
+			var err error
+			afterRowID, err = strconv.ParseInt(after.Key, 10, 64)
+			if err != nil || afterRowID < 0 {
+				return reportoracle.ResultPage{}, fmt.Errorf("report export oracle: invalid JSON snapshot cursor")
+			}
 		}
 		return session.adapter.ReadJSONSnapshotPage(queryCtx, session.runUUID, planned, afterRowID, limit)
 	}
-	return session.adapter.ReadResultPage(queryCtx, session.pagePlan, session.reportID, after, limit)
+	return session.adapter.ReadResultPage(queryCtx, session.pagePlan, after, limit)
 }
 
 func (session *oracleReportExportSession) Purge(ctx context.Context, batchSize int) (deleted int64, resultErr error) {
@@ -179,7 +183,7 @@ func (session *oracleReportExportSession) Purge(ctx context.Context, batchSize i
 	if session.jsonSnapshot {
 		deleted, err = session.adapter.PurgeJSONSnapshotBatch(queryCtx, tx, session.runUUID, batchSize)
 	} else {
-		deleted, err = session.adapter.PurgeResultBatch(queryCtx, tx, session.purgePlan, session.reportID, batchSize)
+		deleted, err = session.adapter.PurgeResultBatch(queryCtx, tx, session.purgePlan, batchSize)
 	}
 	if err != nil {
 		return 0, err

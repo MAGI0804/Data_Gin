@@ -23,8 +23,8 @@ import (
 	"go.uber.org/zap"
 )
 
-const schemaMigrationVersion = "2026-08-14-report-center-v9"
-const previousSchemaMigrationVersion = "2026-08-13-report-center-v8"
+const schemaMigrationVersion = "2026-08-14-report-center-v10"
+const previousSchemaMigrationVersion = "2026-08-14-report-center-v9"
 const schemaMigrationLockName = "data_gin_schema_migration_v1"
 
 type schemaMigrationRecord struct {
@@ -103,7 +103,7 @@ func ApplySchemaMigrations() (resultErr error) {
 	}
 	if err := runPendingSchemaMigration(
 		previousApplied,
-		func() error { return prepareReportJSONProcedureContract(db) },
+		func() error { return prepareReportResultTableBindings(db) },
 		autoMigrateTables,
 	); err != nil {
 		return err
@@ -278,6 +278,9 @@ func autoMigrateTables() error {
 		logger.Error("数据表自动迁移失败", zap.Error(err))
 		return fmt.Errorf("auto migrate tables: %w", err)
 	}
+	if err := prepareReportResultTableBindings(db); err != nil {
+		return err
+	}
 	if err := verifyMallWeatherVersionIndexes(db); err != nil {
 		logger.Error("校验商场天气版本索引失败", zap.Error(err))
 		return fmt.Errorf("verify mall weather version indexes: %w", err)
@@ -308,6 +311,7 @@ func autoMigrateTables() error {
 func reportCenterMigrationModels() []interface{} {
 	return []interface{}{
 		&model.ReportDatasource{},
+		&model.ReportResultTableBinding{},
 		&model.ReportDefinition{},
 		&model.ReportVersion{},
 		&model.ReportParameter{},

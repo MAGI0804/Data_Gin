@@ -151,14 +151,18 @@ export type ReportResultTableSchema = {
 
 export type ReportExecutionMode = 'TABLE_SNAPSHOT' | 'REF_CURSOR'
 
-export type ReportInputControl = 'TEXT' | 'TEXTAREA' | 'NUMBER' | 'CHECKBOX' | 'DATE' | 'DATETIME' | 'SELECT' | 'MULTI_SELECT'
+export type ReportInputType = 'str' | 'number' | 'bool' | 'list[str]' | 'list[number]' | 'list[bool]' | 'json'
+
+export type ReportInputControl = 'TEXT' | 'TEXTAREA' | 'NUMBER' | 'CHECKBOX' | 'DATE' | 'DATETIME' | 'SELECT'
+
+export type ReportInputFormat = 'YYYYMMDD' | 'YYYY-MM-DD' | 'YYYYMMDDHHmmss' | 'YYYY-MM-DD HH:mm:ss' | 'ISO8601'
 
 export type ReportInputField = {
-  type: string
+  type: ReportInputType
   displayName: string
   control: ReportInputControl | ''
   required: boolean
-  multiple: boolean
+  format?: ReportInputFormat
   example?: unknown
   default?: unknown
   allowedValues?: unknown[]
@@ -262,7 +266,7 @@ export type ReportValidationSummary = {
     schemaHash: string
   }
   snapshot: {
-    uniqueKeyValidated: boolean
+    resultTableValidated: boolean
   }
   export: {
     exportableColumnCount: number

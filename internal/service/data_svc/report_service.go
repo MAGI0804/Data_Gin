@@ -306,8 +306,6 @@ func reportDraftFromRequest(actor uint, request requestbody.ReportDraftSaveReque
 		if err != nil {
 			return nil, invalidReport("invalid Oracle result table")
 		}
-		runIDColumn = reportoracle.SystemResultRunIDColumn
-		rowIDColumn = reportoracle.SystemResultRecordColumn
 		if strings.TrimSpace(request.Procedure.JSONInputArgName) != "" {
 			jsonInputArgName, err = normalizeReportIdentifier(request.Procedure.JSONInputArgName)
 			if err != nil || strings.TrimSpace(request.Procedure.ResultCursorArgName) != "" {
@@ -364,13 +362,6 @@ func reportDraftFromRequest(actor uint, request requestbody.ReportDraftSaveReque
 		}
 	} else if mode == model.ReportExecutionModeTableSnapshot {
 		return nil, invalidReport("result columns are required")
-	}
-	if mode == model.ReportExecutionModeTableSnapshot {
-		for _, column := range columns {
-			if column.DatabaseColumn == runIDColumn || column.DatabaseColumn == rowIDColumn {
-				return nil, invalidReport("result key columns must not be configured as report columns")
-			}
-		}
 	}
 	grants, err := reportGrantsFromRequest(request.Grants, actor)
 	if err != nil {
@@ -730,6 +721,7 @@ type reportInputFieldSchema struct {
 	Type          string          `json:"type"`
 	DisplayName   string          `json:"displayName"`
 	Control       string          `json:"control,omitempty"`
+	Format        string          `json:"format,omitempty"`
 	Required      bool            `json:"required,omitempty"`
 	Multiple      bool            `json:"multiple,omitempty"`
 	Example       json.RawMessage `json:"example,omitempty"`
@@ -749,10 +741,6 @@ func canonicalReportInputSchema(raw json.RawMessage) (json.RawMessage, error) {
 	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
 		return nil, invalidReport("input schema contains trailing JSON")
 	}
-	allowedTypes := map[string]struct{}{
-		"VARCHAR2": {}, "NVARCHAR2": {}, "CHAR": {}, "NCHAR": {}, "CLOB": {}, "NCLOB": {},
-		"NUMBER": {}, "DATE": {}, "TIMESTAMP": {}, "BOOLEAN": {},
-	}
 	canonical := make(map[string]reportInputFieldSchema, len(fields))
 	for code, encoded := range fields {
 		if !reportLogicalCodePattern.MatchString(code) {
@@ -767,10 +755,12 @@ func canonicalReportInputSchema(raw json.RawMessage) (json.RawMessage, error) {
 		if err := fieldDecoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
 			return nil, invalidReport("input schema field contains trailing JSON")
 		}
-		field.Type = strings.ToUpper(strings.Join(strings.Fields(field.Type), " "))
+		field.Type = normalizeJSONConditionType(field.Type, field.Multiple)
 		field.DisplayName = strings.TrimSpace(field.DisplayName)
 		field.Control = strings.ToUpper(strings.TrimSpace(field.Control))
-		if _, ok := allowedTypes[field.Type]; !ok || field.DisplayName == "" || utf8.RuneCountInString(field.DisplayName) > 128 {
+		field.Format = strings.TrimSpace(field.Format)
+		field.Multiple = false
+		if field.Type == "" || field.DisplayName == "" || utf8.RuneCountInString(field.DisplayName) > 128 {
 			return nil, invalidReport("input schema field type or displayName is invalid")
 		}
 		if field.Control != "" {
@@ -778,19 +768,17 @@ func canonicalReportInputSchema(raw json.RawMessage) (json.RawMessage, error) {
 				return nil, invalidReport("input schema field control is invalid")
 			}
 		}
+		if !validJSONConditionFormat(field.Type, field.Control, field.Format) {
+			return nil, invalidReport("input schema field format is invalid")
+		}
 		if len(bytes.TrimSpace(field.AllowedValues)) > 0 {
-			var allowed []interface{}
+			var allowed []json.RawMessage
 			if err := decodeStrictReportJSON(field.AllowedValues, &allowed); err != nil || len(allowed) == 0 {
 				return nil, invalidReport("input schema allowedValues must be a non-empty JSON array")
 			}
 		}
-		for _, value := range []json.RawMessage{field.Example, field.DefaultValue} {
-			if len(bytes.TrimSpace(value)) > 0 {
-				var decoded interface{}
-				if err := decodeStrictReportJSON(value, &decoded); err != nil {
-					return nil, invalidReport("input schema example or default value is invalid")
-				}
-			}
+		if err := validateReportInputFieldValues(field); err != nil {
+			return nil, err
 		}
 		canonical[code] = field
 	}
@@ -799,6 +787,86 @@ func canonicalReportInputSchema(raw json.RawMessage) (json.RawMessage, error) {
 		return nil, invalidReport("input schema cannot be canonicalized")
 	}
 	return encoded, nil
+}
+
+func validateReportInputFieldValues(field reportInputFieldSchema) error {
+	runtimeField := reportRunInputFieldSchema{
+		Type: field.Type, DisplayName: field.DisplayName, Control: field.Control,
+		Format: field.Format, Required: field.Required,
+	}
+	var allowed []json.RawMessage
+	if len(bytes.TrimSpace(field.AllowedValues)) > 0 {
+		if err := decodeStrictReportJSON(field.AllowedValues, &allowed); err != nil || len(allowed) == 0 {
+			return invalidReport("input schema allowedValues must be a non-empty JSON array")
+		}
+		allowedField := runtimeField
+		if conditionTypeIsList(field.Type, false) {
+			allowedField.Type = conditionListItemType(field.Type)
+			allowedField.Required = false
+		}
+		for _, value := range allowed {
+			_, decoded, err := canonicalConditionValue(value)
+			if err != nil || !conditionValueMatchesField(decoded, allowedField) {
+				return invalidReport("input schema allowedValues do not match the field type")
+			}
+		}
+	}
+	for _, candidate := range []struct {
+		name  string
+		value json.RawMessage
+	}{
+		{name: "example", value: field.Example},
+		{name: "default", value: field.DefaultValue},
+	} {
+		if len(bytes.TrimSpace(candidate.value)) == 0 {
+			continue
+		}
+		canonical, decoded, err := canonicalConditionValue(candidate.value)
+		if err != nil || !conditionValueMatchesField(decoded, runtimeField) {
+			return invalidReport("input schema " + candidate.name + " does not match the field type or format")
+		}
+		if !conditionValueAllowed(canonical, allowed, conditionTypeIsList(field.Type, false)) {
+			return invalidReport("input schema " + candidate.name + " is outside allowedValues")
+		}
+	}
+	return nil
+}
+
+func normalizeJSONConditionType(value string, multiple bool) string {
+	normalized := strings.ToLower(strings.Join(strings.Fields(value), ""))
+	base := ""
+	switch normalized {
+	case "str", "string", "varchar2", "nvarchar2", "char", "nchar", "clob", "nclob", "date", "timestamp":
+		base = "str"
+	case "number":
+		base = "number"
+	case "bool", "boolean":
+		base = "bool"
+	case "json":
+		base = "json"
+	case "list[str]", "list[string]", "string[]":
+		return "list[str]"
+	case "list[number]", "number[]":
+		return "list[number]"
+	case "list[bool]", "list[boolean]", "boolean[]":
+		return "list[bool]"
+	default:
+		return ""
+	}
+	if multiple && base != "json" {
+		return "list[" + base + "]"
+	}
+	return base
+}
+
+func validJSONConditionFormat(valueType, control, format string) bool {
+	if control == "DATE" {
+		return valueType == "str" && (format == "YYYYMMDD" || format == "YYYY-MM-DD")
+	}
+	if control == "DATETIME" {
+		return valueType == "str" && (format == "YYYYMMDDHHmmss" || format == "YYYY-MM-DD HH:mm:ss" || format == "ISO8601")
+	}
+	return format == ""
 }
 
 func decodeStrictReportJSON(raw []byte, target interface{}) error {

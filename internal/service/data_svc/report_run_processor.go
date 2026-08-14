@@ -162,9 +162,9 @@ func (processor *ReportRunProcessor) Process(ctx context.Context, runID uint, re
 	values := map[string]interface{}{}
 	jsonPayload := ""
 	if runtime.Version.ExecutionMode == model.ReportExecutionModeRefCursor {
-		jsonPayload, err = buildRefCursorPayload(runtime.Run, runtime.Definition.ID)
+		jsonPayload, err = buildRefCursorPayload(runtime.Run)
 	} else if isJSONTableSnapshot(runtime.Version) {
-		jsonPayload, err = buildJSONTablePayload(runtime.Run, runtime.Definition.ID)
+		jsonPayload, err = buildJSONTablePayload(runtime.Run)
 	} else {
 		values, err = processor.restoreParameters(runtime.Run, definitions)
 	}
@@ -232,9 +232,9 @@ func (processor *ReportRunProcessor) Process(ctx context.Context, runID uint, re
 	return unknownErr
 }
 
-func buildRefCursorPayload(run model.ReportRun, definitionID uint) (string, error) {
-	if definitionID == 0 {
-		return "", fmt.Errorf("report definition id is missing")
+func buildRefCursorPayload(run model.ReportRun) (string, error) {
+	if run.ID == 0 {
+		return "", fmt.Errorf("report run id is missing")
 	}
 	conditions, err := decodeParameterSnapshot([]byte(run.NormalizedParametersJSON))
 	if err != nil {
@@ -243,16 +243,16 @@ func buildRefCursorPayload(run model.ReportRun, definitionID uint) (string, erro
 	payload, err := json.Marshal(struct {
 		ReportID   uint                       `json:"report_id"`
 		Conditions map[string]json.RawMessage `json:"conditions"`
-	}{ReportID: definitionID, Conditions: conditions})
+	}{ReportID: run.ID, Conditions: conditions})
 	if err != nil {
 		return "", fmt.Errorf("encode JSON cursor payload: %w", err)
 	}
 	return string(payload), nil
 }
 
-func buildJSONTablePayload(run model.ReportRun, definitionID uint) (string, error) {
-	if definitionID == 0 {
-		return "", fmt.Errorf("report definition id is missing")
+func buildJSONTablePayload(run model.ReportRun) (string, error) {
+	if run.ID == 0 {
+		return "", fmt.Errorf("report run id is missing")
 	}
 	conditions, err := decodeParameterSnapshot([]byte(run.NormalizedParametersJSON))
 	if err != nil {
@@ -261,7 +261,7 @@ func buildJSONTablePayload(run model.ReportRun, definitionID uint) (string, erro
 	payload, err := json.Marshal(struct {
 		ReportID   uint                       `json:"report_id"`
 		Conditions map[string]json.RawMessage `json:"conditions"`
-	}{ReportID: definitionID, Conditions: conditions})
+	}{ReportID: run.ID, Conditions: conditions})
 	if err != nil {
 		return "", fmt.Errorf("encode JSON result-table payload: %w", err)
 	}
@@ -438,7 +438,7 @@ func (oracleReportProcedureExecutor) Execute(ctx context.Context, request report
 	for _, column := range request.Runtime.Columns {
 		configuredColumns = append(configuredColumns, column.DatabaseColumn)
 	}
-	snapshot, err := adapter.InspectResultSnapshotContract(queryCtx, reportoracle.SystemResultSnapshotRef(resultRef, configuredColumns))
+	snapshot, err := adapter.InspectResultSnapshotContract(queryCtx, reportoracle.ResultTableSnapshotRef(resultRef, configuredColumns))
 	if err != nil {
 		return 0, err
 	}
@@ -452,7 +452,7 @@ func (oracleReportProcedureExecutor) Execute(ctx context.Context, request report
 		return 0, err
 	}
 	for {
-		deleted, purgeErr := adapter.PurgeResultBatch(queryCtx, tx, purgePlan, request.Runtime.Run.DefinitionID, 0)
+		deleted, purgeErr := adapter.PurgeResultBatch(queryCtx, tx, purgePlan, 0)
 		if purgeErr != nil {
 			_ = tx.Rollback()
 			return 0, purgeErr
@@ -488,7 +488,7 @@ func (oracleReportProcedureExecutor) Execute(ctx context.Context, request report
 		_ = tx.Rollback()
 		return 0, err
 	}
-	rowCount, err = adapter.CountResultRowsTx(queryCtx, tx, countPlan, request.Runtime.Run.DefinitionID)
+	rowCount, err = adapter.CountResultRowsTx(queryCtx, tx, countPlan)
 	if err != nil {
 		_ = tx.Rollback()
 		return 0, err

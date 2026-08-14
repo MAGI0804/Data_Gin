@@ -66,8 +66,8 @@ func TestReportRunServiceCreatesRefCursorRunFromJSONConditions(t *testing.T) {
 	published := publishedRunFixture()
 	published.Version.ExecutionMode = model.ReportExecutionModeRefCursor
 	published.Version.InputSchemaJSON = model.JSONText(`{
-		"c_store_id":{"type":"VARCHAR2","displayName":"门店","multiple":true,"required":true,"allowedValues":["S001","S002"]},
-		"datein_begin":{"type":"DATE","displayName":"开始日期","default":"20260504"}
+		"c_store_id":{"type":"list[str]","displayName":"门店","required":true,"allowedValues":["S001","S002"]},
+		"datein_begin":{"type":"str","displayName":"开始日期","control":"DATE","format":"YYYYMMDD","default":"20260504"}
 	}`)
 	published.Parameters = nil
 	store := &fakeReportRunStore{published: published}
@@ -99,7 +99,7 @@ func TestReportRunServiceCreatesJSONInputResultTableRun(t *testing.T) {
 	published := publishedRunFixture()
 	published.Version.ExecutionMode = model.ReportExecutionModeTableSnapshot
 	published.Version.JSONInputArgName = "P_PAYLOAD"
-	published.Version.InputSchemaJSON = model.JSONText(`{"c_store_id":{"type":"VARCHAR2","displayName":"门店","required":true}}`)
+	published.Version.InputSchemaJSON = model.JSONText(`{"c_store_id":{"type":"str","displayName":"门店","required":true}}`)
 	published.Parameters = nil
 	store := &fakeReportRunStore{published: published}
 	cipher := &fakeReportParameterCipher{err: errors.New("must not encrypt JSON conditions")}
@@ -126,10 +126,38 @@ func TestReportRunServiceCreatesJSONInputResultTableRun(t *testing.T) {
 	}
 }
 
+func TestJSONConditionsPreserveWireTypesAndConfiguredTimePrecision(t *testing.T) {
+	schema := []byte(`{
+		"supplier_ids":{"type":"list[str]","displayName":"供应商"},
+		"report_date":{"type":"str","displayName":"报表日期","control":"DATE","format":"YYYYMMDD"},
+		"created_at":{"type":"str","displayName":"创建时间","control":"DATETIME","format":"YYYY-MM-DD HH:mm:ss"},
+		"minimum":{"type":"number","displayName":"最小值"},
+		"enabled":{"type":"bool","displayName":"启用"}
+	}`)
+	input := map[string]json.RawMessage{
+		"supplier_ids": json.RawMessage(`["a","b"]`),
+		"report_date":  json.RawMessage(`"20260504"`),
+		"created_at":   json.RawMessage(`"2026-05-04 12:30:45"`),
+		"minimum":      json.RawMessage(`12.5`),
+		"enabled":      json.RawMessage(`true`),
+	}
+	canonical, _, err := normalizeRefCursorConditions(schema, input)
+	if err != nil {
+		t.Fatalf("normalizeRefCursorConditions() error = %v", err)
+	}
+	if got := string(canonical); got != `{"created_at":"2026-05-04 12:30:45","enabled":true,"minimum":12.5,"report_date":"20260504","supplier_ids":["a","b"]}` {
+		t.Fatalf("conditions = %s", got)
+	}
+	input["report_date"] = json.RawMessage(`"20260504123045"`)
+	if _, _, err := normalizeRefCursorConditions(schema, input); !errors.Is(err, ErrReportRunInvalid) {
+		t.Fatalf("date with seconds error = %v", err)
+	}
+}
+
 func TestReportRunServiceRejectsInvalidRefCursorConditions(t *testing.T) {
 	published := publishedRunFixture()
 	published.Version.ExecutionMode = model.ReportExecutionModeRefCursor
-	published.Version.InputSchemaJSON = model.JSONText(`{"store_id":{"type":"VARCHAR2","displayName":"门店","required":true,"allowedValues":["S001"]}}`)
+	published.Version.InputSchemaJSON = model.JSONText(`{"store_id":{"type":"str","displayName":"门店","required":true,"allowedValues":["S001"]}}`)
 	published.Parameters = nil
 	for _, conditions := range []map[string]json.RawMessage{
 		{},

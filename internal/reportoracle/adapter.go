@@ -319,8 +319,8 @@ func ParseProcedureCursorKey(value string) (ProcedureRef, error) {
 }
 
 // ListResultTables returns table objects visible to the Oracle account. Views
-// are deliberately excluded because report results are deleted by run_id after
-// a successful export.
+// are deliberately excluded because a successful export purges the bound
+// result table.
 func (adapter *Adapter) ListResultTables(ctx context.Context, query ResultTableCatalogQuery) ([]ResultTableSummary, error) {
 	if adapter == nil || adapter.db == nil {
 		return nil, fmt.Errorf("list oracle result tables: adapter is closed")

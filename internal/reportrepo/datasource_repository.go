@@ -72,6 +72,15 @@ func (repository *Repository) UpdateReportDatasource(ctx context.Context, actor 
 			return fmt.Errorf("report datasource: lock current: %w", err)
 		}
 		if datasourceConnectionChanged(current, *datasource) {
+			if datasourcePhysicalIdentityChanged(current, *datasource) {
+				bound, err := datasourceHasPublishedBinding(ctx, tx, datasource.ID)
+				if err != nil {
+					return err
+				}
+				if bound {
+					return ErrDatasourceInUse
+				}
+			}
 			inUse, err := datasourceHasLiveRuns(ctx, tx, datasource.ID)
 			if err != nil {
 				return err
@@ -101,6 +110,21 @@ func (repository *Repository) UpdateReportDatasource(ctx context.Context, actor 
 		}
 		return createDatasourceAudit(ctx, tx, actor, datasource.ID, "REPORT_DATASOURCE_UPDATE", datasourceAuditDetailFrom(*datasource))
 	})
+}
+
+func datasourcePhysicalIdentityChanged(current, next model.ReportDatasource) bool {
+	return current.Host != next.Host || current.Port != next.Port || current.ServiceName != next.ServiceName ||
+		current.SID != next.SID || current.Username != next.Username
+}
+
+func datasourceHasPublishedBinding(ctx context.Context, tx *gorm.DB, datasourceID uint) (bool, error) {
+	var count int64
+	if err := tx.WithContext(ctx).Table("report_result_table_bindings AS bindings").
+		Joins("JOIN report_versions AS versions ON versions.id = bindings.version_id").
+		Where("versions.datasource_id = ?", datasourceID).Count(&count).Error; err != nil {
+		return false, fmt.Errorf("report datasource: find published result table bindings: %w", err)
+	}
+	return count > 0, nil
 }
 
 func datasourceConnectionChanged(current, next model.ReportDatasource) bool {

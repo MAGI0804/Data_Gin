@@ -22,12 +22,13 @@ export function ReportValidationResultDrawer({ publication, onClose }: { publica
           ['过程参数数量', result.procedure.argumentCount],
           ['签名 Hash', result.procedure.signatureHash],
         ]} />
-        <ResultSection title="结果表与快照" rows={[
+        <ResultSection title="结果表" rows={[
           ['结果表', qualifiedName(result.result.tableOwner, '', result.result.tableName)],
           ['字段数量', result.result.columnCount],
           ['结果 Schema Hash', result.result.schemaHash],
-          ['系统字段', 'RUN_ID（报表编号）/ ID（内部分页）'],
-          ['记录 ID 唯一性', result.snapshot.uniqueKeyValidated ? '通过' : '未通过'],
+          ['结果表核验', result.snapshot.resultTableValidated ? '通过' : '未通过'],
+          ['取数方式', '整表读取'],
+          ['清理策略', 'Excel 导出成功后清理'],
         ]} />
         <ResultSection title="Excel 与发布契约" rows={[
           ['允许导出字段', result.export.exportableColumnCount],

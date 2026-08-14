@@ -3,10 +3,12 @@ package data_svc
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
 
+	"gin-biz-web-api/internal/reportidentity"
 	"gin-biz-web-api/internal/reportoracle"
 	"gin-biz-web-api/internal/reportrepo"
 	"gin-biz-web-api/model"
@@ -33,7 +35,16 @@ func TestReportPublishServicePublishesValidatedOracleContract(t *testing.T) {
 	if store.publication.ContractHash == "" || len(store.publication.CompiledSpecJSON) == 0 || store.publication.SchemaValidatedAt != validatedAt {
 		t.Fatalf("publication = %#v", store.publication)
 	}
-	if result.DefinitionID != 9 || result.VersionID != 23 || result.Version != 3 || len(result.ContractHash) != 64 || !inspector.closed {
+	if len(store.publication.ConnectionFingerprint) != 64 {
+		t.Fatalf("connection fingerprint = %q", store.publication.ConnectionFingerprint)
+	}
+	if store.publication.ConnectionIdentitySource != reportidentity.BindingIdentitySourceOracle || !inspector.identityChecked {
+		t.Fatalf("connection identity source=%q checked=%t", store.publication.ConnectionIdentitySource, inspector.identityChecked)
+	}
+	if store.publication.DatasourceSnapshotFingerprint != reportidentity.DatasourceFingerprint(*store.datasource) {
+		t.Fatalf("datasource snapshot fingerprint = %q", store.publication.DatasourceSnapshotFingerprint)
+	}
+	if result.DefinitionID != 9 || result.VersionID != 23 || result.Version != 3 || len(result.ContractHash) != 64 || !inspector.closed || !inspector.rowIDChecked {
 		t.Fatalf("result = %#v closed=%t", result, inspector.closed)
 	}
 	if !result.PublishedAt.Equal(validatedAt.Add(time.Second)) {
@@ -45,7 +56,7 @@ func TestReportPublishServicePublishesValidatedOracleContract(t *testing.T) {
 	if !result.Validation.ValidatedAt.Equal(validatedAt) || result.Validation.Procedure.ArgumentCount != 1 || result.Validation.Procedure.SignatureHash != store.publication.ProcedureSignatureHash {
 		t.Fatalf("procedure validation = %#v", result.Validation.Procedure)
 	}
-	if result.Validation.Result.ColumnCount != 3 || result.Validation.Result.SchemaHash != store.publication.ResultSchemaHash || !result.Validation.Snapshot.UniqueKeyValidated {
+	if result.Validation.Result.ColumnCount != 3 || result.Validation.Result.SchemaHash != store.publication.ResultSchemaHash || !result.Validation.Snapshot.ResultTableValidated {
 		t.Fatalf("result validation = %#v snapshot=%#v", result.Validation.Result, result.Validation.Snapshot)
 	}
 	if result.Validation.Export.ExportableColumnCount != 1 || result.Validation.Export.SchemaHash != store.publication.ExportSchemaHash {
@@ -53,16 +64,48 @@ func TestReportPublishServicePublishesValidatedOracleContract(t *testing.T) {
 	}
 }
 
+func TestReportPublishServiceRejectsResultTableWithoutStableROWID(t *testing.T) {
+	store := &fakePublicationStore{draft: publicationDraft(), datasource: publicationDatasource()}
+	inspector := &fakeReportOracleInspector{
+		procedure: publicationProcedure(), columns: publicationResultColumns(),
+		rowIDErr: fmt.Errorf("%w: result table row movement must be disabled", reportoracle.ErrMetadataMismatch),
+	}
+	service := NewReportPublishService(store, &fakePublicationDecryptor{password: "password"}, func(context.Context, reportoracle.Config) (reportOracleInspector, error) {
+		return inspector, nil
+	})
+
+	if _, err := service.Publish(t.Context(), 17, 9, 3); !errors.Is(err, ErrReportPublicationInvalid) || !strings.Contains(err.Error(), "ROWID") {
+		t.Fatalf("Publish() error = %v", err)
+	}
+	if store.publishCalls != 0 || !inspector.rowIDChecked || !inspector.closed {
+		t.Fatalf("publish calls=%d rowID checked=%t closed=%t", store.publishCalls, inspector.rowIDChecked, inspector.closed)
+	}
+}
+
+func TestReportPublishServiceRejectsMissingStableOracleDatabaseIdentity(t *testing.T) {
+	store := &fakePublicationStore{draft: publicationDraft(), datasource: publicationDatasource()}
+	inspector := &fakeReportOracleInspector{identityErr: fmt.Errorf("%w: identity unavailable", reportoracle.ErrMetadataMismatch)}
+	service := NewReportPublishService(store, &fakePublicationDecryptor{password: "password"}, func(context.Context, reportoracle.Config) (reportOracleInspector, error) {
+		return inspector, nil
+	})
+	if _, err := service.Publish(t.Context(), 17, 9, 3); !errors.Is(err, ErrReportPublicationInvalid) || !strings.Contains(err.Error(), "database identity") {
+		t.Fatalf("Publish() error = %v", err)
+	}
+	if store.publishCalls != 0 || !inspector.identityChecked || !inspector.closed {
+		t.Fatalf("publish calls=%d identity checked=%t closed=%t", store.publishCalls, inspector.identityChecked, inspector.closed)
+	}
+}
+
 func TestReportPublishServicePublishesJSONInputResultTableContract(t *testing.T) {
 	draft := publicationDraft()
 	draft.Version.ExecutionMode = model.ReportExecutionModeTableSnapshot
 	draft.Version.JSONInputArgName = "P_PAYLOAD"
-	draft.Version.InputSchemaJSON = model.JSONText(`{"store_id":{"type":"VARCHAR2","displayName":"门店"}}`)
+	draft.Version.InputSchemaJSON = model.JSONText(`{"store_id":{"type":"str","displayName":"门店"}}`)
 	draft.Version.CallTemplate = "BEGIN REPORT.PKG_SALES.BUILD_REPORT(P_PAYLOAD => :payload); END;"
 	draft.Parameters = nil
 	procedure := []reportoracle.ProcedureArgument{{Name: "P_PAYLOAD", Position: 1, Sequence: 1, Direction: "IN", DataType: "CLOB"}}
 	store := &fakePublicationStore{draft: draft, datasource: publicationDatasource()}
-	inspector := &fakeReportOracleInspector{procedure: procedure, columns: publicationResultColumns()}
+	inspector := &fakeReportOracleInspector{procedure: procedure, columns: []reportoracle.ResultColumn{{Name: "ORDER_NO", Position: 1, DataType: "VARCHAR2", DataLength: 128}}}
 	service := NewReportPublishService(store, &fakePublicationDecryptor{password: "password"}, func(context.Context, reportoracle.Config) (reportOracleInspector, error) {
 		return inspector, nil
 	})
@@ -71,7 +114,7 @@ func TestReportPublishServicePublishesJSONInputResultTableContract(t *testing.T)
 	if err != nil {
 		t.Fatalf("Publish() error = %v", err)
 	}
-	if result.Validation == nil || result.Validation.Procedure.ArgumentCount != 1 || result.Validation.Result.ColumnCount != 3 ||
+	if result.Validation == nil || result.Validation.Procedure.ArgumentCount != 1 || result.Validation.Result.ColumnCount != 1 ||
 		!strings.Contains(string(store.publication.CompiledSpecJSON), `"jsonInputArgName":"P_PAYLOAD"`) {
 		t.Fatalf("result=%#v publication=%#v", result, store.publication)
 	}
@@ -87,6 +130,21 @@ func TestReportPublishServiceDoesNotWriteWhenOracleValidationFails(t *testing.T)
 	}
 	if store.publishCalls != 0 || !inspector.closed {
 		t.Fatalf("publish calls = %d closed=%t", store.publishCalls, inspector.closed)
+	}
+}
+
+func TestReportPublishServiceMapsAtomicResultTableBindingConflict(t *testing.T) {
+	store := &fakePublicationStore{draft: publicationDraft(), datasource: publicationDatasource(), publishErr: reportrepo.ErrResultTableConflict}
+	openCalls := 0
+	service := NewReportPublishService(store, &fakePublicationDecryptor{password: "password"}, func(context.Context, reportoracle.Config) (reportOracleInspector, error) {
+		openCalls++
+		return &fakeReportOracleInspector{procedure: publicationProcedure(), columns: publicationResultColumns()}, nil
+	})
+	if _, err := service.Publish(t.Context(), 17, 9, 3); !errors.Is(err, ErrReportPublicationInvalid) || !strings.Contains(err.Error(), "结果表必须独占") {
+		t.Fatalf("Publish() error = %v", err)
+	}
+	if openCalls != 1 || store.publishCalls != 1 {
+		t.Fatalf("open calls=%d publish calls=%d", openCalls, store.publishCalls)
 	}
 }
 
@@ -186,6 +244,7 @@ func TestClassifyPublicationStoreErrorUsesResourceSpecificSemantics(t *testing.T
 		{name: "stale version", source: reportrepo.ErrDraftVersionConflict, want: ErrReportConflict},
 		{name: "datasource unavailable", source: reportrepo.ErrDatasourceUnavailable, want: ErrReportPublicationInvalid},
 		{name: "invalid contract", source: reportrepo.ErrInvalidDraft, want: ErrReportPublicationInvalid},
+		{name: "result table conflict", source: reportrepo.ErrResultTableConflict, want: ErrReportPublicationInvalid},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
@@ -202,6 +261,7 @@ type fakePublicationStore struct {
 	publication   reportrepo.Publication
 	publishCalls  int
 	beforePublish func()
+	publishErr    error
 }
 
 func (store *fakePublicationStore) FindDraftByID(context.Context, uint, uint) (*reportrepo.Draft, error) {
@@ -216,6 +276,9 @@ func (store *fakePublicationStore) PublishDraft(_ context.Context, _ uint, _ uin
 	}
 	store.publishCalls++
 	store.publication = publication
+	if store.publishErr != nil {
+		return nil, store.publishErr
+	}
 	published := *store.draft
 	published.Version.Status = model.ReportVersionStatusPublished
 	publishedAt := publication.SchemaValidatedAt.Add(time.Second)
@@ -234,12 +297,28 @@ func (decryptor *fakePublicationDecryptor) Decrypt(_, _ string) (string, error) 
 }
 
 type fakeReportOracleInspector struct {
-	procedure    []reportoracle.ProcedureArgument
-	columns      []reportoracle.ResultColumn
-	procedureErr error
-	closed       bool
-	closeErr     error
-	onInspect    func(context.Context)
+	databaseIdentity reportoracle.DatabaseIdentity
+	identityErr      error
+	identityChecked  bool
+	procedure        []reportoracle.ProcedureArgument
+	columns          []reportoracle.ResultColumn
+	procedureErr     error
+	rowIDErr         error
+	rowIDChecked     bool
+	closed           bool
+	closeErr         error
+	onInspect        func(context.Context)
+}
+
+func (inspector *fakeReportOracleInspector) InspectDatabaseIdentity(ctx context.Context) (reportoracle.DatabaseIdentity, error) {
+	inspector.identityChecked = true
+	if inspector.onInspect != nil {
+		inspector.onInspect(ctx)
+	}
+	if inspector.databaseIdentity.DBID == "" && inspector.databaseIdentity.DBUniqueName == "" {
+		inspector.databaseIdentity = reportoracle.DatabaseIdentity{DBID: "123456789", DBUniqueName: "REPORT_PRIMARY", ContainerUID: "9988", ContainerName: "REPORT_PDB"}
+	}
+	return inspector.databaseIdentity, inspector.identityErr
 }
 
 func (inspector *fakeReportOracleInspector) InspectProcedure(ctx context.Context, _ reportoracle.ProcedureRef) ([]reportoracle.ProcedureArgument, error) {
@@ -252,7 +331,11 @@ func (inspector *fakeReportOracleInspector) InspectResultTable(context.Context, 
 	return inspector.columns, nil
 }
 func (inspector *fakeReportOracleInspector) InspectResultSnapshotContract(_ context.Context, ref reportoracle.ResultSnapshotRef) (reportoracle.ResultSnapshotContract, error) {
-	return reportoracle.CompileResultSnapshotContract(ref, inspector.columns, true)
+	return reportoracle.CompileResultSnapshotContract(ref, inspector.columns)
+}
+func (inspector *fakeReportOracleInspector) ValidateResultSnapshotTable(context.Context, reportoracle.ResultTableRef) error {
+	inspector.rowIDChecked = true
+	return inspector.rowIDErr
 }
 
 func (inspector *fakeReportOracleInspector) ValidateJSONSnapshotStore(context.Context) error {
