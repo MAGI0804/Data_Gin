@@ -70,6 +70,26 @@ func TestReportControllerErrorContract(t *testing.T) {
 	}
 }
 
+func TestWriteReportErrorRecordsPrivateCauseWithoutLeakingIt(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(recorder)
+	cause := errors.New("database password=secret")
+
+	writeReportError(context, cause)
+
+	if recorder.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d body=%s", recorder.Code, recorder.Body)
+	}
+	privateErrors := context.Errors.ByType(gin.ErrorTypePrivate)
+	if len(privateErrors) != 1 || !errors.Is(privateErrors[0].Err, cause) {
+		t.Fatalf("private errors = %#v", privateErrors)
+	}
+	if strings.Contains(recorder.Body.String(), "password") || strings.Contains(recorder.Body.String(), "secret") {
+		t.Fatalf("internal error leaked: %s", recorder.Body)
+	}
+}
+
 func TestReportControllerListAndUpdateParseBoundaries(t *testing.T) {
 	service := &fakeReportControllerService{listResult: &data_svc.ReportDraftListDTO{}, updateResult: &data_svc.ReportDraftDTO{ID: 7}}
 	controller := NewReportControllerWithService(service)

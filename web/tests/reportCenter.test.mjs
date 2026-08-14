@@ -37,6 +37,13 @@ test('functional state updates do not retain React DOM events', () => {
   assert.deepEqual(violations, [])
 })
 
+test('drawer keeps long parsed configuration inside its scrollable body', () => {
+  const source = readFileSync(new URL('../src/ui/Drawer/Drawer.module.css', import.meta.url), 'utf8')
+  const bodyRule = source.match(/\.body\s*\{([^}]*)\}/)?.[1] ?? ''
+  assert.match(bodyRule, /min-height:\s*0\s*;/)
+  assert.match(bodyRule, /overflow-y:\s*auto\s*;/)
+})
+
 function typescriptFiles(directory) {
   return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
     const file = new URL(entry.name, directory)

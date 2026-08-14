@@ -286,6 +286,9 @@ func parseReportUint(value, field string) (uint, error) {
 }
 
 func writeReportError(c *gin.Context, err error) {
+	if c != nil && err != nil {
+		_ = c.Error(err).SetType(gin.ErrorTypePrivate)
+	}
 	code, message := classifyReportError(err)
 	responses.New(c).ToSafeErrorResponse(code, message)
 }
