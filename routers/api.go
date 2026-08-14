@@ -19,11 +19,10 @@ import (
 func RegisterAPIRoutes(r *gin.Engine) {
 	// 设置静态资源访问
 	setStaticURL(r)
-	r.GET("/health", healthCheck)
 
 	var api *gin.RouterGroup
 	api = r.Group("/api")
-	api.GET("/health", healthCheck)
+	registerHealthRoutes(r, api)
 
 	// 全局限流中间件
 	// 作为参考 Github API 每小时最多 60 个请求（根据 IP）
@@ -39,7 +38,18 @@ func RegisterAPIRoutes(r *gin.Engine) {
 
 }
 
+func registerHealthRoutes(root, api gin.IRoutes) {
+	for _, routes := range []gin.IRoutes{root, api} {
+		routes.GET("/health", healthCheck)
+		routes.HEAD("/health", healthCheck)
+	}
+}
+
 func healthCheck(c *gin.Context) {
+	if c.Request.Method == http.MethodHead {
+		c.Status(http.StatusOK)
+		return
+	}
 	smsStatus := "ok"
 	if _, err := sms.LoadConfig(); err != nil {
 		smsStatus = "degraded"
