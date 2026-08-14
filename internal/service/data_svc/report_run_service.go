@@ -125,8 +125,8 @@ func (service *ReportRunService) Create(ctx context.Context, actor, definitionID
 	if err != nil {
 		return nil, classifyReportRunStoreError(err)
 	}
-	if published.Version.ExecutionMode == model.ReportExecutionModeRefCursor {
-		return service.createRefCursorRun(ctx, actor, definitionID, request, published)
+	if isJSONInputReport(published.Version) {
+		return service.createJSONInputRun(ctx, actor, definitionID, request, published)
 	}
 	definitions := reportParameterDefinitions(published.Parameters)
 	runUUID := uuid.NewString()
@@ -180,14 +180,14 @@ type reportRunInputFieldSchema struct {
 	AllowedValues []json.RawMessage `json:"allowedValues,omitempty"`
 }
 
-func (service *ReportRunService) createRefCursorRun(
+func (service *ReportRunService) createJSONInputRun(
 	ctx context.Context,
 	actor, definitionID uint,
 	request requestbody.ReportRunCreateRequest,
 	published *reportrepo.PublishedReport,
 ) (*ReportRunDTO, error) {
 	if len(request.Parameters) > 0 && len(request.Conditions) > 0 {
-		return nil, fmt.Errorf("%w: use conditions for JSON cursor reports", ErrReportRunInvalid)
+		return nil, fmt.Errorf("%w: use conditions for JSON input reports", ErrReportRunInvalid)
 	}
 	conditions := request.Conditions
 	if conditions == nil {

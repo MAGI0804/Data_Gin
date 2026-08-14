@@ -264,6 +264,7 @@ export type ReportRunContract = {
   name: string
   description: string
   executionMode: ReportExecutionMode
+  jsonInput: boolean
   inputSchema: ReportInputSchema
   parameters: ReportParameter[]
 }

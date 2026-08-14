@@ -316,6 +316,19 @@ func reportDraftFromRequest(actor uint, request requestbody.ReportDraftSaveReque
 		if err != nil || runIDColumn == rowIDColumn {
 			return nil, invalidReport("invalid result row id column")
 		}
+		if strings.TrimSpace(request.Procedure.JSONInputArgName) != "" {
+			jsonInputArgName, err = normalizeReportIdentifier(request.Procedure.JSONInputArgName)
+			if err != nil || strings.TrimSpace(request.Procedure.ResultCursorArgName) != "" {
+				return nil, invalidReport("invalid JSON result-table arguments")
+			}
+			inputSchema, err = canonicalReportInputSchema(request.InputSchema)
+			if err != nil {
+				return nil, err
+			}
+			if len(request.Parameters) != 0 {
+				return nil, invalidReport("JSON result-table reports must not configure procedure parameters")
+			}
+		}
 	} else {
 		return nil, invalidReport("invalid report execution mode")
 	}
@@ -325,7 +338,7 @@ func reportDraftFromRequest(actor uint, request requestbody.ReportDraftSaveReque
 	}
 	parameters := []model.ReportParameter{}
 	definitions := []reporting.ParameterDefinition{}
-	if mode == model.ReportExecutionModeTableSnapshot {
+	if mode == model.ReportExecutionModeTableSnapshot && jsonInputArgName == "" {
 		parameters, definitions, err = reportParametersFromRequest(request.Parameters)
 		if err != nil {
 			return nil, err
@@ -335,7 +348,7 @@ func reportDraftFromRequest(actor uint, request requestbody.ReportDraftSaveReque
 	if len(callTemplate) > 64*1024 {
 		return nil, invalidReport("call template is too large")
 	}
-	if mode == model.ReportExecutionModeTableSnapshot {
+	if mode == model.ReportExecutionModeTableSnapshot && jsonInputArgName == "" {
 		if _, err := reporting.CompileCallTemplate(callTemplate, definitions); err != nil {
 			return nil, invalidReport("call template and parameters do not match")
 		}
@@ -345,7 +358,11 @@ func reportDraftFromRequest(actor uint, request requestbody.ReportDraftSaveReque
 			target += procedure.Package + "."
 		}
 		target += procedure.Name
-		callTemplate = fmt.Sprintf("BEGIN %s(%s => :payload, %s => :resultCursor); END;", target, jsonInputArgName, resultCursorArgName)
+		if mode == model.ReportExecutionModeRefCursor {
+			callTemplate = fmt.Sprintf("BEGIN %s(%s => :payload, %s => :resultCursor); END;", target, jsonInputArgName, resultCursorArgName)
+		} else {
+			callTemplate = fmt.Sprintf("BEGIN %s(%s => :payload); END;", target, jsonInputArgName)
+		}
 	}
 	columns := []model.ReportColumn{}
 	if len(request.Columns) > 0 {

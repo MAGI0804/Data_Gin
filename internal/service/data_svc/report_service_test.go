@@ -193,6 +193,47 @@ func TestReportDraftServiceRejectsRefCursorConditionWithoutDisplayName(t *testin
 	}
 }
 
+func TestReportDraftServiceAcceptsJSONInputResultTable(t *testing.T) {
+	request := validReportDraftRequest()
+	request.ExecutionMode = model.ReportExecutionModeTableSnapshot
+	request.Procedure.JSONInputArgName = "p_payload"
+	request.InputSchema = json.RawMessage(`{
+		"c_store_id":{"type":"VARCHAR2","displayName":"门店","multiple":true,"required":true},
+		"datein_begin":{"type":"DATE","displayName":"开始日期"}
+	}`)
+	request.Parameters = nil
+	request.CallTemplate = ""
+
+	draft, err := reportDraftFromRequest(17, request)
+	if err != nil {
+		t.Fatalf("reportDraftFromRequest() error = %v", err)
+	}
+	if !isJSONTableSnapshot(draft.Version) || draft.Version.JSONInputArgName != "P_PAYLOAD" || draft.Version.ResultCursorArgName != "" {
+		t.Fatalf("JSON result-table contract = %#v", draft.Version)
+	}
+	if draft.Version.ResultTableOwner != "REPORT_OWNER" || draft.Version.ResultTableName != "SALES_RESULT" ||
+		draft.Version.ResultRunIDColumn != "RUN_ID" || draft.Version.ResultRowIDColumn != "ROW_NO" {
+		t.Fatalf("result table contract = %#v", draft.Version)
+	}
+	if got, want := draft.Version.CallTemplate, "BEGIN REPORT_OWNER.PKG_SALES.BUILD_REPORT(P_PAYLOAD => :payload); END;"; got != want {
+		t.Fatalf("call template = %q, want %q", got, want)
+	}
+	if len(draft.Parameters) != 0 || !strings.Contains(string(draft.Version.InputSchemaJSON), `"displayName":"门店"`) {
+		t.Fatalf("JSON input draft = %#v", draft)
+	}
+}
+
+func TestReportDraftServiceRejectsMixedJSONAndLegacyParameters(t *testing.T) {
+	request := validReportDraftRequest()
+	request.ExecutionMode = model.ReportExecutionModeTableSnapshot
+	request.Procedure.JSONInputArgName = "p_payload"
+	request.InputSchema = json.RawMessage(`{"store_id":{"type":"VARCHAR2","displayName":"门店"}}`)
+
+	if _, err := reportDraftFromRequest(17, request); !errors.Is(err, ErrReportInvalid) {
+		t.Fatalf("reportDraftFromRequest() error = %v, want ErrReportInvalid", err)
+	}
+}
+
 func TestReportDraftServiceUpdateRequiresLockAndMapsMissingBeforeConflict(t *testing.T) {
 	request := validReportDraftRequest()
 	store := &fakeReportDraftStore{findErr: reportrepo.ErrDraftNotFound}

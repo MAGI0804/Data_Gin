@@ -53,6 +53,30 @@ func TestReportPublishServicePublishesValidatedOracleContract(t *testing.T) {
 	}
 }
 
+func TestReportPublishServicePublishesJSONInputResultTableContract(t *testing.T) {
+	draft := publicationDraft()
+	draft.Version.ExecutionMode = model.ReportExecutionModeTableSnapshot
+	draft.Version.JSONInputArgName = "P_PAYLOAD"
+	draft.Version.InputSchemaJSON = model.JSONText(`{"store_id":{"type":"VARCHAR2","displayName":"门店"}}`)
+	draft.Version.CallTemplate = "BEGIN REPORT.PKG_SALES.BUILD_REPORT(P_PAYLOAD => :payload); END;"
+	draft.Parameters = nil
+	procedure := []reportoracle.ProcedureArgument{{Name: "P_PAYLOAD", Position: 1, Sequence: 1, Direction: "IN", DataType: "CLOB"}}
+	store := &fakePublicationStore{draft: draft, datasource: publicationDatasource()}
+	inspector := &fakeReportOracleInspector{procedure: procedure, columns: publicationResultColumns()}
+	service := NewReportPublishService(store, &fakePublicationDecryptor{password: "password"}, func(context.Context, reportoracle.Config) (reportOracleInspector, error) {
+		return inspector, nil
+	})
+
+	result, err := service.Publish(t.Context(), 17, 9, 3)
+	if err != nil {
+		t.Fatalf("Publish() error = %v", err)
+	}
+	if result.Validation == nil || result.Validation.Procedure.ArgumentCount != 1 || result.Validation.Result.ColumnCount != 3 ||
+		!strings.Contains(string(store.publication.CompiledSpecJSON), `"jsonInputArgName":"P_PAYLOAD"`) {
+		t.Fatalf("result=%#v publication=%#v", result, store.publication)
+	}
+}
+
 func TestReportPublishServiceDoesNotWriteWhenOracleValidationFails(t *testing.T) {
 	store := &fakePublicationStore{draft: publicationDraft(), datasource: publicationDatasource()}
 	inspector := &fakeReportOracleInspector{procedureErr: errors.New("oracle unavailable")}

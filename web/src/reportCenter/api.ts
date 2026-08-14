@@ -163,7 +163,7 @@ export function parseReportProcedureSignature(payload: unknown): ReportProcedure
   if (blockingReasons.some((value) => !value) || procedure.argumentCount !== argumentsList.length || data.protocolReady !== data.allSupported) throw new Error('invalid procedure signature')
   const inputArgName = publicString(data.inputArgName, 128)
   const outputArgName = publicString(data.outputArgName, 128)
-  if (data.protocolReady && (!inputArgName || !outputArgName || blockingReasons.length > 0)) throw new Error('invalid procedure protocol')
+  if (data.protocolReady && (!inputArgName || blockingReasons.length > 0)) throw new Error('invalid procedure protocol')
   return {
     procedure,
     arguments: argumentsList,
@@ -201,8 +201,8 @@ export async function getReportVersionDiff(client: ReportCenterClient, reportId:
   return requestAndParse(client, `/v1/reports/${reportId}/version-diff?${search}`, { method: 'GET', signal }, parseReportVersionDiff, '报表版本差异加载失败。')
 }
 
-export async function createReportRun(client: ReportCenterClient, reportId: number, input: Record<string, unknown>, executionMode: ReportDraft['executionMode']): Promise<ReportAPIResult<ReportRun>> {
-  const body = executionMode === 'REF_CURSOR' ? { conditions: input } : { parameters: input }
+export async function createReportRun(client: ReportCenterClient, reportId: number, input: Record<string, unknown>, executionMode: ReportDraft['executionMode'], jsonInput = executionMode === 'REF_CURSOR'): Promise<ReportAPIResult<ReportRun>> {
+  const body = jsonInput ? { conditions: input } : { parameters: input }
   return requestAndParse(client, `/v1/reports/${reportId}/runs`, { method: 'POST', body }, parseReportRun, '报表运行创建失败。')
 }
 
@@ -263,7 +263,8 @@ export function parseReportRunContract(payload: unknown): ReportRunContract {
   })
   if (parameters.length !== rawParameters.length) throw new Error('invalid run contract parameters')
   const executionMode = data.executionMode === 'REF_CURSOR' ? 'REF_CURSOR' : 'TABLE_SNAPSHOT'
-  const inputSchema = executionMode === 'REF_CURSOR' ? parseReportInputSchemaDocument(data.inputSchema) : {}
+  const jsonInput = executionMode === 'REF_CURSOR' || data.inputSchema !== undefined
+  const inputSchema = jsonInput ? parseReportInputSchemaDocument(data.inputSchema, true) : {}
   return {
     definitionId,
     versionId,
@@ -271,6 +272,7 @@ export function parseReportRunContract(payload: unknown): ReportRunContract {
     name: publicString(data.name, 128),
     description: publicString(data.description, 500),
     executionMode,
+    jsonInput,
     inputSchema,
     parameters: parameters.sort((left, right) => left.displayOrder - right.displayOrder || left.position - right.position),
   }
@@ -289,8 +291,9 @@ export function parseReportDraft(payload: unknown): ReportDraft {
   const rawGrants = firstArray(data.grants)
   const grants = rawGrants.flatMap((value) => { const item = parseReportGrant(value); return item ? [item] : [] })
   const executionMode = data.executionMode === 'REF_CURSOR' ? 'REF_CURSOR' : 'TABLE_SNAPSHOT'
+  const jsonTableSnapshot = executionMode === 'TABLE_SNAPSHOT' && Boolean(publicString(procedure.jsonInputArgName, 128))
   let inputSchema: ReportDraft['inputSchema'] = {}
-  if (executionMode === 'REF_CURSOR') inputSchema = parseReportInputSchemaDocument(data.inputSchema)
+  if (executionMode === 'REF_CURSOR' || jsonTableSnapshot) inputSchema = parseReportInputSchemaDocument(data.inputSchema, true)
   if (!id || !datasourceId || parameters.length !== rawParameters.length || columns.length !== rawColumns.length || grants.length !== rawGrants.length) throw new Error('invalid report draft')
   return {
     id, datasourceId, code: publicString(data.code, 64), name: publicString(data.name, 128), category: publicString(data.category, 64), description: publicString(data.description, 500),
@@ -540,13 +543,15 @@ function parseReportGrant(value: unknown): ReportGrant | null {
 }
 
 function serializeReportDraft(draft: ReportDraft, creating: boolean) {
+  const jsonTableSnapshot = draft.executionMode === 'TABLE_SNAPSHOT' && Boolean(draft.procedure.jsonInputArgName)
+  const jsonInput = draft.executionMode === 'REF_CURSOR' || jsonTableSnapshot
   return {
     code: draft.code, name: draft.name, category: draft.category, description: draft.description, datasourceId: draft.datasourceId,
     ...(creating ? {} : { expectedLockVersion: draft.lockVersion }), executionMode: draft.executionMode, procedure: draft.procedure,
-    inputSchema: draft.executionMode === 'REF_CURSOR' ? draft.inputSchema : undefined,
+    inputSchema: jsonInput ? draft.inputSchema : undefined,
     result: draft.executionMode === 'REF_CURSOR' ? {} : draft.result,
-    callTemplate: draft.executionMode === 'REF_CURSOR' ? '' : draft.callTemplate,
-    parameters: draft.executionMode === 'REF_CURSOR' ? [] : draft.parameters.map((parameter) => ({ ...parameter, defaultValue: parameter.sensitive ? undefined : parameter.defaultValue, allowedValues: parameter.allowedValues.length ? parameter.allowedValues : undefined, validation: Object.keys(parameter.validation).length ? parameter.validation : undefined, normalizer: Object.keys(parameter.normalizer).length ? parameter.normalizer : undefined, valueSource: Object.keys(parameter.valueSource).length ? parameter.valueSource : undefined, nullPolicy: parameter.nullPolicy || 'TYPED_NULL' })),
+    callTemplate: jsonInput ? '' : draft.callTemplate,
+    parameters: jsonInput ? [] : draft.parameters.map((parameter) => ({ ...parameter, defaultValue: parameter.sensitive ? undefined : parameter.defaultValue, allowedValues: parameter.allowedValues.length ? parameter.allowedValues : undefined, validation: Object.keys(parameter.validation).length ? parameter.validation : undefined, normalizer: Object.keys(parameter.normalizer).length ? parameter.normalizer : undefined, valueSource: Object.keys(parameter.valueSource).length ? parameter.valueSource : undefined, nullPolicy: parameter.nullPolicy || 'TYPED_NULL' })),
     columns: draft.columns,
     grants: draft.grants,
   }

@@ -32,18 +32,27 @@ export function ReportProcedureEditor({ client, draft, onChange }: { client: Rep
     signatureCache.current = response.data
     setSignature(response.data)
     setState((current) => ({ ...current, inspecting: false }))
+    if (!response.data.protocolReady) {
+      setState((current) => ({ ...current, error: response.data.blockingReasons[0] || '所选过程不符合唯一 JSON 输入协议。' }))
+      return
+    }
     onChange({
       ...draft,
-      executionMode: 'REF_CURSOR',
+      executionMode: 'TABLE_SNAPSHOT',
       procedure: {
         owner: response.data.procedure.owner,
         package: response.data.procedure.package,
         name: response.data.procedure.name,
         overload: response.data.procedure.overload,
         jsonInputArgName: response.data.inputArgName,
-        resultCursorArgName: response.data.outputArgName,
+        resultCursorArgName: '',
       },
-      result: { tableOwner: '', tableName: '', runIdColumn: '', rowIdColumn: '' },
+      result: {
+        tableOwner: draft.result.tableOwner || response.data.procedure.owner,
+        tableName: draft.result.tableName,
+        runIdColumn: draft.result.runIdColumn || 'RUN_ID',
+        rowIdColumn: draft.result.rowIdColumn || 'ROW_NO',
+      },
       callTemplate: '',
       parameters: [],
     })
@@ -124,6 +133,10 @@ export function ReportProcedureEditor({ client, draft, onChange }: { client: Rep
     setFilters((current) => ({ ...current, [key]: value }))
   }
 
+  function updateResult(key: keyof ReportDraft['result'], value: string) {
+    onChange({ ...draft, result: { ...draft.result, [key]: value.toUpperCase() } })
+  }
+
   return <div className={styles.editor}>
     <form className={styles.search} onSubmit={(event) => { event.preventDefault(); void load(false) }}>
       <label>Owner<input className={styles.mono} value={filters.owner} placeholder="可选，例如 REPORT" onChange={(event) => updateFilter('owner', event.currentTarget.value)} /></label>
@@ -142,12 +155,22 @@ export function ReportProcedureEditor({ client, draft, onChange }: { client: Rep
       <div className={styles.signatureHeader}><div><h3 id="report-procedure-signature-title">已绑定过程</h3><code>{selectedLabel}</code></div>{signature ? <span className={signature.protocolReady ? styles.ready : styles.blocked}>{signature.protocolReady ? '协议可用' : '协议不兼容'}</span> : null}</div>
       {state.inspecting ? <p role="status">正在读取 Oracle 参数签名…</p> : null}
       {signature ? <>
-        <div className={styles.arguments}>{signature.arguments.map((argument) => <div key={`${argument.position}-${argument.name}`}><code>{argument.name}</code><span>{argument.direction}</span><span>{argument.oracleType}</span><span>{argument.role === 'JSON_INPUT' ? 'JSON 输入' : argument.role === 'RESULT_CURSOR' ? '结果游标' : '不支持'}</span></div>)}</div>
-        {signature.protocolReady ? <dl className={styles.binding}><div><dt>JSON 输入参数</dt><dd><code>{signature.inputArgName}</code></dd></div><div><dt>结果游标参数</dt><dd><code>{signature.outputArgName}</code></dd></div></dl> : <ul className={styles.reasons}>{signature.blockingReasons.map((reason) => <li key={reason}>{reason}</li>)}</ul>}
-      </> : <p className={styles.empty}>从上方 Oracle 查询结果中选择过程后，系统会自动绑定唯一 JSON 输入参数和 OUT REF CURSOR。</p>}
+        <div className={styles.arguments}>{signature.arguments.map((argument) => <div key={`${argument.position}-${argument.name}`}><code>{argument.name}</code><span>{argument.direction}</span><span>{argument.oracleType}</span><span>{argument.role === 'JSON_INPUT' ? 'JSON 输入' : '不支持'}</span></div>)}</div>
+        {signature.protocolReady ? <dl className={styles.binding}><div><dt>JSON 输入参数</dt><dd><code>{signature.inputArgName}</code></dd></div><div><dt>结果获取方式</dt><dd>读取绑定结果表</dd></div></dl> : <ul className={styles.reasons}>{signature.blockingReasons.map((reason) => <li key={reason}>{reason}</li>)}</ul>}
+      </> : <p className={styles.empty}>从上方 Oracle 查询结果中选择过程后，系统会自动绑定唯一 JSON 输入参数，不绑定任何出参。</p>}
+    </section>
+    <section className={styles.resultTable} aria-labelledby="report-result-table-title">
+      <div><h3 id="report-result-table-title">Oracle 结果表绑定</h3><p>过程按系统注入的 run_id 写入持久化中间表；预览、Excel 和清理均只处理本次 run_id。</p></div>
+      <div className={styles.resultFields}>
+        <label>表 Owner<input className={styles.mono} value={draft.result.tableOwner} onChange={(event) => updateResult('tableOwner', event.currentTarget.value)} placeholder="例如 REPORT" /></label>
+        <label>结果表名<input className={styles.mono} value={draft.result.tableName} onChange={(event) => updateResult('tableName', event.currentTarget.value)} placeholder="例如 SALES_REPORT_RESULT" /></label>
+        <label>run_id 字段<input className={styles.mono} value={draft.result.runIdColumn} onChange={(event) => updateResult('runIdColumn', event.currentTarget.value)} placeholder="RUN_ID" /></label>
+        <label>行游标字段<input className={styles.mono} value={draft.result.rowIdColumn} onChange={(event) => updateResult('rowIdColumn', event.currentTarget.value)} placeholder="ROW_NO" /></label>
+      </div>
     </section>
     {state.error ? <div className={styles.error} role="alert">{state.error}</div> : null}
   </div>
+
 }
 
 function procedureKey(procedure: Pick<ReportDraft['procedure'], 'owner' | 'package' | 'name' | 'overload'>) {

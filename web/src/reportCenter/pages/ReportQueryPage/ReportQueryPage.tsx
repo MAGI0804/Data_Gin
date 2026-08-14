@@ -56,7 +56,7 @@ export function ReportQueryPage({ client, navigation }: { client: ReportCenterCl
         return
       }
       setContract(response.data)
-      setValues(response.data.executionMode === 'REF_CURSOR' ? initialReportConditionValues(response.data.inputSchema) : initialReportParameterValues(response.data.parameters))
+      setValues(response.data.jsonInput ? initialReportConditionValues(response.data.inputSchema) : initialReportParameterValues(response.data.parameters))
       setContractState({ loading: false, error: '' })
     })
     return () => controller.abort()
@@ -66,7 +66,7 @@ export function ReportQueryPage({ client, navigation }: { client: ReportCenterCl
     event.preventDefault()
     if (!contract || operation.busy) return
     let runInput: Record<string, unknown>
-    if (contract.executionMode === 'REF_CURSOR') {
+    if (contract.jsonInput) {
       const normalized = buildReportConditions(contract.inputSchema, values)
       if (!normalized.ok) { setOperation({ busy: false, error: normalized.error }); return }
       runInput = normalized.conditions
@@ -76,7 +76,7 @@ export function ReportQueryPage({ client, navigation }: { client: ReportCenterCl
       runInput = normalized.parameters
     }
     setOperation({ busy: true, error: '' })
-    const response = await createReportRun(client, contract.definitionId, runInput, contract.executionMode)
+    const response = await createReportRun(client, contract.definitionId, runInput, contract.executionMode, contract.jsonInput)
     if (!response.ok) {
       setOperation({ busy: false, error: response.error })
       return
@@ -218,7 +218,7 @@ export function ReportQueryPage({ client, navigation }: { client: ReportCenterCl
     setCursorIndex(next.cursorIndex)
     setFiltersOpen(next.filtersOpen)
     setParametersOpen(next.parametersOpen)
-    setValues(contract.executionMode === 'REF_CURSOR' ? initialReportConditionValues(contract.inputSchema) : next.values)
+    setValues(contract.jsonInput ? initialReportConditionValues(contract.inputSchema) : next.values)
     setOperation(next.operation)
   }
 
@@ -235,13 +235,13 @@ export function ReportQueryPage({ client, navigation }: { client: ReportCenterCl
         {parametersOpen ? <>
         {contractState.loading ? <FeedbackState kind="loading" title="正在读取已发布筛选契约" /> : null}
         {contractState.error ? <FeedbackState kind="error" title="筛选契约加载失败" description={contractState.error} /> : null}
-        {contract ? <form className={styles.parameterForm} onSubmit={(event) => void submitRun(event)}>{contract.executionMode === 'REF_CURSOR' ? Object.entries(contract.inputSchema).map(([code, field]) => <ConditionField code={code} disabled={frozen || operation.busy} field={field} key={code} value={values[code]} onChange={(value) => setValues((current) => ({ ...current, [code]: value }))} />) : visibleReportParameters(contract.parameters).map((parameter) => <ParameterField disabled={frozen || operation.busy} key={parameter.code} parameter={parameter} value={values[parameter.code]} onChange={(value) => setValues((current) => ({ ...current, [parameter.code]: value }))} />)}<div className={styles.runActions}><span>{frozen ? '本次条件已冻结；点击页头“新建运行”可恢复默认条件并重新查询。' : `${reportConditionCount(contract)} 个可填写筛选条件。`}</span><Button variant="primary" type="submit" disabled={frozen || operation.busy}><Play aria-hidden="true" />运行报表</Button></div></form> : null}
+        {contract ? <form className={styles.parameterForm} onSubmit={(event) => void submitRun(event)}>{contract.jsonInput ? Object.entries(contract.inputSchema).map(([code, field]) => <ConditionField code={code} disabled={frozen || operation.busy} field={field} key={code} value={values[code]} onChange={(value) => setValues((current) => ({ ...current, [code]: value }))} />) : visibleReportParameters(contract.parameters).map((parameter) => <ParameterField disabled={frozen || operation.busy} key={parameter.code} parameter={parameter} value={values[parameter.code]} onChange={(value) => setValues((current) => ({ ...current, [parameter.code]: value }))} />)}<div className={styles.runActions}><span>{frozen ? '本次条件已冻结；点击页头“新建运行”可恢复默认条件并重新查询。' : `${reportConditionCount(contract)} 个可填写筛选条件。`}</span><Button variant="primary" type="submit" disabled={frozen || operation.busy}><Play aria-hidden="true" />运行报表</Button></div></form> : null}
         {!contract && !contractState.loading && !contractState.error ? <FeedbackState kind="empty" title="尚未选择报表" description="请选择一份已发布且有查询权限的报表。" /> : null}
         </> : <div className={styles.collapsedParameters}>{contract ? `${reportConditionCount(contract)} 个筛选条件${frozen ? ' · 本次运行条件已冻结' : ''}` : '筛选区已收起'}</div>}
       </Section>
       {run ? <div className={styles.statusBar} role="status"><span><strong>{runLabel(run.status)}</strong><small>运行 #{run.id} · {run.rowCount.toLocaleString('zh-CN')} 行</small></span><span>{run.errorMessage || (run.resultExpiresAt ? `结果保留至 ${formatDate(run.resultExpiresAt)}` : '正在等待 Oracle 结果')}</span></div> : null}
       {operation.error ? <FeedbackState kind="error" title="操作未完成" description={operation.error} action={run && !terminalReportRunStatuses.has(run.status) ? <button type="button" onClick={() => void resumeRun()}>恢复状态查询</button> : undefined} /> : null}
-      <Section title="结果预览" description={contract?.executionMode === 'REF_CURSOR' ? '读取本次运行的 REF CURSOR 快照；筛选统一在过程 JSON 中完成。' : '使用签名 Cursor 进行 Oracle Keyset 分页，不会重新执行存储过程。'} actions={run?.resultAvailable ? <div className={styles.resultActions}>{reportExport ? <StatusTag tone={exportTone(reportExport)}>{exportLabel(reportExport.status)}</StatusTag> : null}<button type="button" onClick={() => void startExport()} disabled={operation.busy || Boolean(reportExport)}><Download aria-hidden="true" />生成正式 Excel</button>{reportExport?.canDownload ? <Button variant="primary" onClick={() => void downloadExport()}>下载文件</Button> : null}</div> : undefined} flush>
+      <Section title="结果预览" description={contract?.jsonInput ? '读取过程写入的本次 run_id 结果表快照；分页和导出不会重新执行存储过程。' : '使用签名 Cursor 进行 Oracle Keyset 分页，不会重新执行存储过程。'} actions={run?.resultAvailable ? <div className={styles.resultActions}>{reportExport ? <StatusTag tone={exportTone(reportExport)}>{exportLabel(reportExport.status)}</StatusTag> : null}<button type="button" onClick={() => void startExport()} disabled={operation.busy || Boolean(reportExport)}><Download aria-hidden="true" />生成正式 Excel</button>{reportExport?.canDownload ? <Button variant="primary" onClick={() => void downloadExport()}>下载文件</Button> : null}</div> : undefined} flush>
 		{result && contract?.executionMode !== 'REF_CURSOR' ? <ResultQueryToolbar page={result} query={resultQuery} open={filtersOpen} disabled={operation.busy || Boolean(reportExport)} onToggle={() => setFiltersOpen((value) => !value)} onChange={setResultQuery} onApply={() => void applyResultQuery()} /> : null}
         {operation.busy && !result ? <FeedbackState kind="loading" title={reportExport ? '正在生成并校验正式 Excel' : '正在执行报表'} description={reportExport ? exportProgress(reportExport) : 'Oracle 存储过程只会执行一次，请稍候。'} /> : null}
         {!run && !loading ? <FeedbackState kind="empty" title={published.length === 0 ? '暂无已发布报表' : '尚未执行报表'} description={published.length === 0 ? '发布版本可用后会出现在上方选择器。' : '填写筛选条件并运行后，结果将在这里分页展示。'} /> : null}
@@ -339,7 +339,7 @@ function buildRunParameters(parameters: ReportParameter[], values: Record<string
   return { ok: true, parameters: result }
 }
 function toStringArray(value: unknown) { return Array.isArray(value) ? value.map(String) : [] }
-function reportConditionCount(contract: ReportRunContract) { return contract.executionMode === 'REF_CURSOR' ? Object.keys(contract.inputSchema).length : visibleReportParameters(contract.parameters).length }
+function reportConditionCount(contract: ReportRunContract) { return contract.jsonInput ? Object.keys(contract.inputSchema).length : visibleReportParameters(contract.parameters).length }
 function displayConditionOption(value: unknown) { return typeof value === 'string' ? value : JSON.stringify(value) }
 function comparableConditionValue(value: unknown) { return JSON.stringify(value) }
 function displayCell(value: unknown, nullDisplay: string) { if (value === null || value === undefined) return nullDisplay || '-'; if (typeof value === 'object') return JSON.stringify(value); return String(value) }

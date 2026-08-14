@@ -56,9 +56,9 @@ export function parseExcelMappingDocument(value: unknown): Record<string, string
   const result: Record<string, string> = {}
   for (const [databaseColumn, rawHeader] of Object.entries(value)) {
     const header = normalizedString(rawHeader)
-    if (!oracleFieldPattern.test(databaseColumn)) throw new Error(`Oracle 游标字段 ${databaseColumn || '（空）'} 不合法。`)
-    if (fields.has(databaseColumn.toUpperCase())) throw new Error(`Oracle 游标字段 ${databaseColumn} 重复。`)
-    if (!header || header.length > 255) throw new Error(`Oracle 游标字段 ${databaseColumn} 必须配置 Excel 表头。`)
+    if (!oracleFieldPattern.test(databaseColumn)) throw new Error(`Oracle 结果字段 ${databaseColumn || '（空）'} 不合法。`)
+    if (fields.has(databaseColumn.toUpperCase())) throw new Error(`Oracle 结果字段 ${databaseColumn} 重复。`)
+    if (!header || header.length > 255) throw new Error(`Oracle 结果字段 ${databaseColumn} 必须配置 Excel 表头。`)
     if (headers.has(header)) throw new Error(`Excel 表头 ${header} 重复。`)
     headers.add(header)
     fields.add(databaseColumn.toUpperCase())

@@ -37,13 +37,13 @@ export function ReportConfigDrawer({ client, report, datasources, datasourcesLoa
   function validationError() {
     if (bodyRef.current?.querySelector('[aria-invalid="true"]')) return '请先修正标红的 JSON 配置。'
     if (!draft.name.trim() || !/^[A-Za-z][A-Za-z0-9_]{2,63}$/.test(draft.code.trim()) || !draft.datasourceId) return '请完整填写报表名称、合法编码和 Oracle 数据源。'
-    if (draft.executionMode === 'TABLE_SNAPSHOT') return ''
     if (!draft.procedure.owner || !draft.procedure.name) return '请从 Oracle 查询结果中选择存储过程。'
-    if (!draft.procedure.jsonInputArgName || !draft.procedure.resultCursorArgName) return '所选过程不符合“单 JSON 输入 + OUT REF CURSOR”协议。'
+    if (!draft.procedure.jsonInputArgName || draft.procedure.resultCursorArgName) return '所选过程必须只有一个 JSON 输入参数，且不能包含任何出参。'
+    if (!draft.result.tableOwner || !draft.result.tableName || !draft.result.runIdColumn || !draft.result.rowIdColumn) return '请完整绑定 Oracle 结果表、run_id 字段和行游标字段。'
     try { parseReportInputSchemaDocument(draft.inputSchema) } catch (error) { return error instanceof Error ? error.message : '筛选条件配置不完整。' }
     try {
       const mapping = parseExcelMappingDocument(excelMappingFromColumns(draft.columns))
-      if (Object.keys(mapping).length === 0) return '请至少配置一个 Oracle 游标字段到 Excel 表头的映射。'
+      if (Object.keys(mapping).length === 0) return '请至少配置一个 Oracle 结果表字段到 Excel 表头的映射。'
     } catch (error) { return error instanceof Error ? error.message : 'Excel 字段映射不完整。' }
     return ''
   }
@@ -75,7 +75,7 @@ export function ReportConfigDrawer({ client, report, datasources, datasourcesLoa
 
   const dirty = draftFingerprint(draft) !== savedFingerprint
   const footer = <><span className={styles.version}>版本锁 {draft.lockVersion || '新建'} · {dirty ? '有未保存修改' : '已保存'}</span><button type="button" onClick={onClose}>取消</button><button type="button" onClick={() => void save()} disabled={state.loading || state.saving || !dirty}>{state.saving ? '处理中…' : '保存草稿'}</button><Button variant="primary" onClick={() => void publish()} disabled={!draft.id || state.saving || dirty} title={dirty ? '请先保存草稿，再核验并发布' : undefined}>核验并发布</Button></>
-  return <Drawer open title={report ? '编辑报表配置' : '创建报表配置'} description="配置保存于 MySQL；Oracle 过程仅接收一份 JSON，并通过 REF CURSOR 返回结果。" size="wide" closeDisabled={state.saving} onClose={onClose} footer={footer}>
+  return <Drawer open title={report ? '编辑报表配置' : '创建报表配置'} description="配置保存于 MySQL；Oracle 过程仅接收一份 JSON，并将本次运行结果写入绑定结果表。" size="wide" closeDisabled={state.saving} onClose={onClose} footer={footer}>
     <div className={styles.tabs} role="tablist" aria-label="报表配置步骤" onKeyDown={(event) => { const current = tabs.findIndex((item) => item.key === tab); const delta = event.key === 'ArrowRight' ? 1 : event.key === 'ArrowLeft' ? -1 : 0; if (!delta) return; event.preventDefault(); const next = tabs[(current + delta + tabs.length) % tabs.length]; setTab(next.key); document.getElementById(`report-config-tab-${next.key}`)?.focus() }}>{tabs.map((item) => <button id={`report-config-tab-${item.key}`} type="button" role="tab" aria-selected={tab === item.key} aria-controls="report-config-panel" tabIndex={tab === item.key ? 0 : -1} className={tab === item.key ? styles.active : ''} onClick={() => setTab(item.key)} key={item.key}>{item.label}</button>)}</div>
     <div id="report-config-panel" role="tabpanel" aria-labelledby={`report-config-tab-${tab}`} tabIndex={0} ref={bodyRef} className={styles.body}>
       {state.loading ? <p>正在读取草稿…</p> : <Editor tab={tab} client={client} draft={draft} datasources={datasources} datasourcesLoading={datasourcesLoading} datasourcesError={datasourcesError} onChange={setDraft} />}
@@ -96,7 +96,7 @@ function Editor({ tab, client, draft, datasources, datasourcesLoading, datasourc
       <Field label="分类"><input value={draft.category} onChange={(event) => set('category', event.currentTarget.value)} /></Field>
       <Field label="Oracle 数据源"><select value={draft.datasourceId || ''} disabled={datasourcesLoading} onChange={(event) => {
         const datasourceId = Number(event.currentTarget.value)
-        onChange(datasourceId === draft.datasourceId ? draft : { ...draft, datasourceId, procedure: emptyProcedure(), executionMode: 'REF_CURSOR' })
+        onChange(datasourceId === draft.datasourceId ? draft : { ...draft, datasourceId, procedure: emptyProcedure(), executionMode: 'TABLE_SNAPSHOT', result: emptyResult() })
       }}><option value="">{datasourcesLoading ? '正在加载数据源…' : '请选择数据源'}</option>{unavailable ? <option value={draft.datasourceId}>#{draft.datasourceId}（当前不可读取，请勿误切换）</option> : null}{datasources.map((item) => <option value={item.id} disabled={!item.enabled} key={item.id}>{item.name} · {item.code}{item.enabled ? '' : '（已停用）'}</option>)}</select>{datasourcesError ? <small className={styles.fieldError}>{datasourcesError}</small> : null}{selected && !selected.enabled ? <small className={styles.fieldError}>当前绑定数据源已停用，不能发布或创建新运行。</small> : null}</Field>
       <Field label="说明" wide><textarea rows={4} value={draft.description} onChange={(event) => set('description', event.currentTarget.value)} /></Field>
     </div>
@@ -113,7 +113,8 @@ function PermissionEditor({ grants, onChange }: { grants: ReportGrant[]; onChang
 
 function Field({ label, wide, children }: { label: string; wide?: boolean; children: React.ReactNode }) { return <label className={wide ? styles.wide : ''}>{label}{children}</label> }
 function emptyProcedure(): ReportDraft['procedure'] { return { owner: '', package: '', name: '', overload: '', jsonInputArgName: '', resultCursorArgName: '' } }
-function emptyDraft(): ReportDraft { const [code, field] = newReportInputField(0); return { id: 0, code: '', name: '', category: '', description: '', datasourceId: 0, status: 'DRAFT', lockVersion: 0, executionMode: 'REF_CURSOR', procedure: emptyProcedure(), inputSchema: { [code]: field }, result: { tableOwner: '', tableName: '', runIdColumn: '', rowIdColumn: '' }, callTemplate: '', parameters: [], columns: [], grants: [], createdAt: null, updatedAt: null } }
+function emptyResult(): ReportDraft['result'] { return { tableOwner: '', tableName: '', runIdColumn: 'RUN_ID', rowIdColumn: 'ROW_NO' } }
+function emptyDraft(): ReportDraft { const [code, field] = newReportInputField(0); return { id: 0, code: '', name: '', category: '', description: '', datasourceId: 0, status: 'DRAFT', lockVersion: 0, executionMode: 'TABLE_SNAPSHOT', procedure: emptyProcedure(), inputSchema: { [code]: field }, result: emptyResult(), callTemplate: '', parameters: [], columns: [], grants: [], createdAt: null, updatedAt: null } }
 function replaceAt<T>(items: T[], index: number, item: T) { return items.map((value, position) => position === index ? item : value) }
 function toggle(values: string[], value: string, checked: boolean) { return checked ? [...new Set([...values, value])] : values.filter((item) => item !== value) }
 function draftFingerprint(draft: ReportDraft) { return JSON.stringify(draft) }

@@ -40,6 +40,24 @@ func TestReportRunProcessorBuildsSingleJSONCursorPayload(t *testing.T) {
 	}
 }
 
+func TestReportRunProcessorBuildsJSONResultTablePayloadWithRunID(t *testing.T) {
+	store := newFakeReportExecutionStore()
+	store.runtime.Definition.ID = 1234
+	store.runtime.Version.ExecutionMode = model.ReportExecutionModeTableSnapshot
+	store.runtime.Version.JSONInputArgName = "P_PAYLOAD"
+	store.runtime.Parameters = nil
+	store.runtime.Run.NormalizedParametersJSON = model.JSONText(`{"c_supplier_id":["a","b"],"datein_begin":"20260504"}`)
+	executor := &fakeReportProcedureExecutor{rowCount: 2}
+	processor := newTestReportRunProcessor(store, executor)
+
+	if err := processor.Process(t.Context(), 31, true); err != nil {
+		t.Fatalf("Process() error = %v", err)
+	}
+	if got, want := executor.jsonPayload, `{"report_id":1234,"run_id":"11111111-1111-4111-8111-111111111111","conditions":{"c_supplier_id":["a","b"],"datein_begin":"20260504"}}`; got != want {
+		t.Fatalf("JSON payload = %s, want %s", got, want)
+	}
+}
+
 func TestReportRunProcessorMarksUnknownWithoutRetryingAfterCommitAmbiguity(t *testing.T) {
 	store := newFakeReportExecutionStore()
 	executor := &fakeReportProcedureExecutor{err: errOracleCommitOutcomeUnknown}
@@ -251,9 +269,9 @@ func (executor *fakeReportProcedureExecutor) Execute(ctx context.Context, reques
 	if password != "password" {
 		return 0, errors.New("unexpected execution request")
 	}
-	if request.Runtime.Version.ExecutionMode == model.ReportExecutionModeRefCursor {
+	if isJSONInputReport(request.Runtime.Version) {
 		if request.JSONPayload == "" || len(request.Values) != 0 {
-			return 0, errors.New("unexpected JSON cursor execution request")
+			return 0, errors.New("unexpected JSON execution request")
 		}
 	} else if request.Values["runId"] == nil || request.Values["storeCode"] != "S001" {
 		return 0, errors.New("unexpected execution request")

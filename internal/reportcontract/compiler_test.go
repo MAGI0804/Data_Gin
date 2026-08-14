@@ -76,6 +76,49 @@ func TestCompileRefCursorRejectsMissingExcelMapping(t *testing.T) {
 	}
 }
 
+func TestCompileJSONInputResultTableUsesOneInputAndPublishedTable(t *testing.T) {
+	version, _, columns, grants, _, result := validContract()
+	version.ExecutionMode = model.ReportExecutionModeTableSnapshot
+	version.JSONInputArgName = "P_JSON"
+	version.InputSchemaJSON = model.JSONText(`{"store_id":{"type":"VARCHAR2","displayName":"门店","required":true}}`)
+	version.CallTemplate = "BEGIN REPORT.PKG.SALES(P_JSON => :payload); END;"
+	arguments := []reportoracle.ProcedureArgument{
+		{Name: "P_JSON", Position: 1, Sequence: 1, Direction: "IN", DataType: "CLOB"},
+	}
+	contract := validSnapshotContract(t, version, result, columns)
+
+	compiled, err := Compile(version, nil, columns, grants, arguments, result, contract)
+	if err != nil {
+		t.Fatalf("Compile() error = %v", err)
+	}
+	if len(compiled.SpecJSON) == 0 || len(compiled.Hashes.ParameterSchema) != 64 || len(compiled.Hashes.ResultSchema) != 64 {
+		t.Fatalf("compiled = %#v", compiled)
+	}
+	if !strings.Contains(string(compiled.SpecJSON), `"jsonInputArgName":"P_JSON"`) || !strings.Contains(string(compiled.SpecJSON), `"resultTableName":"SALES_RESULT"`) {
+		t.Fatalf("compiled spec = %s", compiled.SpecJSON)
+	}
+	if err := VerifyRuntimeMetadata(compiled.SpecJSON, compiled.Hashes.Contract, compiled.Hashes.ProcedureSignature, compiled.Hashes.ResultSchema, arguments, result); err != nil {
+		t.Fatalf("VerifyRuntimeMetadata() error = %v", err)
+	}
+}
+
+func TestCompileJSONInputResultTableRejectsCursorOutput(t *testing.T) {
+	version, _, columns, grants, _, result := validContract()
+	version.ExecutionMode = model.ReportExecutionModeTableSnapshot
+	version.JSONInputArgName = "P_JSON"
+	version.InputSchemaJSON = model.JSONText(`{"store_id":{"type":"VARCHAR2","displayName":"门店"}}`)
+	version.CallTemplate = "BEGIN REPORT.PKG.SALES(P_JSON => :payload); END;"
+	arguments := []reportoracle.ProcedureArgument{
+		{Name: "P_JSON", Position: 1, Sequence: 1, Direction: "IN", DataType: "CLOB"},
+		{Name: "P_RESULT", Position: 2, Sequence: 2, Direction: "OUT", DataType: "REF CURSOR"},
+	}
+
+	_, err := Compile(version, nil, columns, grants, arguments, result, validSnapshotContract(t, version, result, columns))
+	if !errors.Is(err, ErrInvalidContract) {
+		t.Fatalf("Compile() error = %v, want ErrInvalidContract", err)
+	}
+}
+
 func TestVerifyRuntimeMetadataAcceptsPublishedContractAndRejectsDrift(t *testing.T) {
 	version, parameters, columns, grants, procedure, result := validContract()
 	contract := validSnapshotContract(t, version, result, columns)

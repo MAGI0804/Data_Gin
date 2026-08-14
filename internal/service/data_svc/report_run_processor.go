@@ -162,6 +162,8 @@ func (processor *ReportRunProcessor) Process(ctx context.Context, runID uint, re
 	jsonPayload := ""
 	if runtime.Version.ExecutionMode == model.ReportExecutionModeRefCursor {
 		jsonPayload, err = buildRefCursorPayload(runtime.Run, runtime.Definition.ID)
+	} else if isJSONTableSnapshot(runtime.Version) {
+		jsonPayload, err = buildJSONTablePayload(runtime.Run, runtime.Definition.ID)
 	} else {
 		values, err = processor.restoreParameters(runtime.Run, definitions)
 	}
@@ -243,6 +245,25 @@ func buildRefCursorPayload(run model.ReportRun, definitionID uint) (string, erro
 	}{ReportID: definitionID, Conditions: conditions})
 	if err != nil {
 		return "", fmt.Errorf("encode JSON cursor payload: %w", err)
+	}
+	return string(payload), nil
+}
+
+func buildJSONTablePayload(run model.ReportRun, definitionID uint) (string, error) {
+	if definitionID == 0 || uuid.Validate(run.RunUUID) != nil {
+		return "", fmt.Errorf("report definition id or run id is missing")
+	}
+	conditions, err := decodeParameterSnapshot([]byte(run.NormalizedParametersJSON))
+	if err != nil {
+		return "", err
+	}
+	payload, err := json.Marshal(struct {
+		ReportID   uint                       `json:"report_id"`
+		RunID      string                     `json:"run_id"`
+		Conditions map[string]json.RawMessage `json:"conditions"`
+	}{ReportID: definitionID, RunID: run.RunUUID, Conditions: conditions})
+	if err != nil {
+		return "", fmt.Errorf("encode JSON result-table payload: %w", err)
 	}
 	return string(payload), nil
 }
@@ -421,19 +442,31 @@ func (oracleReportProcedureExecutor) Execute(ctx context.Context, request report
 	if err != nil {
 		return 0, err
 	}
-	plan, err := reportoracle.BuildCallPlan(procedureRef, request.Definitions)
-	if err != nil {
-		return 0, err
-	}
 	tx, err := adapter.BeginTx(queryCtx, &sql.TxOptions{})
 	if err != nil {
 		return 0, err
 	}
-	if err := adapter.Execute(queryCtx, tx, plan, request.Values); err != nil {
+	var executionErr error
+	if isJSONTableSnapshot(request.Runtime.Version) {
+		plan, planErr := reportoracle.BuildJSONTableCallPlan(procedureRef, procedure, request.Runtime.Version.JSONInputArgName)
+		if planErr != nil {
+			_ = tx.Rollback()
+			return 0, planErr
+		}
+		executionErr = adapter.ExecuteJSONTable(queryCtx, tx, plan, request.JSONPayload)
+	} else {
+		plan, planErr := reportoracle.BuildCallPlan(procedureRef, request.Definitions)
+		if planErr != nil {
+			_ = tx.Rollback()
+			return 0, planErr
+		}
+		executionErr = adapter.Execute(queryCtx, tx, plan, request.Values)
+	}
+	if executionErr != nil {
 		if rollbackErr := tx.Rollback(); rollbackErr != nil && !errors.Is(rollbackErr, sql.ErrTxDone) {
 			return 0, fmt.Errorf("%w: rollback after execution failure: %v", errOracleCommitOutcomeUnknown, rollbackErr)
 		}
-		return 0, err
+		return 0, executionErr
 	}
 	countPlan, err := reportoracle.BuildResultCountPlan(snapshot)
 	if err != nil {

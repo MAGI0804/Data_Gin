@@ -246,6 +246,9 @@ func Compile(
 	if version.ExecutionMode == model.ReportExecutionModeRefCursor {
 		return compileRefCursor(version, columns, grants, procedureArguments)
 	}
+	if version.ExecutionMode == model.ReportExecutionModeTableSnapshot && strings.TrimSpace(version.JSONInputArgName) != "" {
+		return compileJSONTableSnapshot(version, parameters, columns, grants, procedureArguments, resultColumns, snapshotContract)
+	}
 	if err := validateProcedureSequences(procedureArguments); err != nil {
 		return Compiled{}, err
 	}
@@ -327,6 +330,97 @@ func Compile(
 		Contract: hashBytes(specJSON), ParameterSchema: parameterHash,
 		ProcedureSignature: procedureHash, ResultSchema: resultHash,
 		Permission: permissionHash, ExportSchema: exportHash,
+	}}, nil
+}
+
+func compileJSONTableSnapshot(
+	version model.ReportVersion,
+	parameters []model.ReportParameter,
+	columns []model.ReportColumn,
+	grants []model.ReportGrant,
+	procedureArguments []reportoracle.ProcedureArgument,
+	resultColumns []reportoracle.ResultColumn,
+	snapshotContract reportoracle.ResultSnapshotContract,
+) (Compiled, error) {
+	if len(parameters) != 0 {
+		return Compiled{}, contractError("JSON result-table reports must not configure procedure parameters")
+	}
+	if err := validateProcedureSequences(procedureArguments); err != nil {
+		return Compiled{}, err
+	}
+	plan, err := reportoracle.BuildJSONTableCallPlan(
+		reportoracle.ProcedureRef{Owner: version.ProcedureOwner, Package: version.PackageName, Name: version.ProcedureName, Overload: version.ProcedureOverload},
+		procedureArguments, version.JSONInputArgName,
+	)
+	if err != nil {
+		return Compiled{}, contractError("compile JSON result-table call: %v", err)
+	}
+	if strings.TrimSpace(version.CallTemplate) != plan.Statement() {
+		return Compiled{}, contractError("configured JSON result-table call differs from the canonical procedure call")
+	}
+	inputSchema := canonicalJSON(version.InputSchemaJSON)
+	if len(inputSchema) == 0 || bytes.Equal(inputSchema, []byte("null")) || bytes.Equal(inputSchema, []byte("{}")) {
+		return Compiled{}, contractError("JSON input schema is required")
+	}
+	configuredResultColumns := make([]string, 0, len(columns))
+	for _, column := range columns {
+		configuredResultColumns = append(configuredResultColumns, column.DatabaseColumn)
+	}
+	if err := reportoracle.ValidateResultSnapshotContract(snapshotContract, reportoracle.ResultSnapshotRef{
+		Table:       reportoracle.ResultTableRef{Owner: version.ResultTableOwner, Name: version.ResultTableName},
+		RunIDColumn: version.ResultRunIDColumn, RowIDColumn: version.ResultRowIDColumn,
+		Columns: configuredResultColumns,
+	}); err != nil {
+		return Compiled{}, contractError("result snapshot contract is invalid: %v", err)
+	}
+	columnSpecs, normalizedResult, err := compileColumns(version, columns, resultColumns)
+	if err != nil {
+		return Compiled{}, err
+	}
+	grantSpecs, err := compileGrants(grants)
+	if err != nil {
+		return Compiled{}, err
+	}
+	spec := contractSpec{
+		Version: versionSpec{
+			DatasourceID: version.DatasourceID, ExecutionMode: model.ReportExecutionModeTableSnapshot,
+			ProcedureOwner: strings.ToUpper(strings.TrimSpace(version.ProcedureOwner)), PackageName: strings.ToUpper(strings.TrimSpace(version.PackageName)),
+			ProcedureName: strings.ToUpper(strings.TrimSpace(version.ProcedureName)), ProcedureOverload: strings.TrimSpace(version.ProcedureOverload),
+			JSONInputArgName: strings.ToUpper(strings.TrimSpace(version.JSONInputArgName)), InputSchema: inputSchema,
+			ResultTableOwner: strings.ToUpper(strings.TrimSpace(version.ResultTableOwner)), ResultTableName: strings.ToUpper(strings.TrimSpace(version.ResultTableName)),
+			ResultRunIDColumn: strings.ToUpper(strings.TrimSpace(version.ResultRunIDColumn)), ResultRowIDColumn: strings.ToUpper(strings.TrimSpace(version.ResultRowIDColumn)),
+			CallStatement: plan.Statement(),
+		},
+		Parameters: []parameterSpec{}, Procedure: normalizeProcedureArguments(procedureArguments),
+		Columns: columnSpecs, Result: normalizedResult, Grants: grantSpecs,
+	}
+	parameterHash, err := hashJSON(spec.Version.InputSchema)
+	if err != nil {
+		return Compiled{}, err
+	}
+	procedureHash, err := hashJSON(spec.Procedure)
+	if err != nil {
+		return Compiled{}, err
+	}
+	resultHash, err := hashJSON(spec.Result)
+	if err != nil {
+		return Compiled{}, err
+	}
+	permissionHash, err := hashJSON(spec.Grants)
+	if err != nil {
+		return Compiled{}, err
+	}
+	exportHash, err := hashJSON(spec.Columns)
+	if err != nil {
+		return Compiled{}, err
+	}
+	specJSON, err := json.Marshal(spec)
+	if err != nil {
+		return Compiled{}, fmt.Errorf("encode JSON result-table publication contract: %w", err)
+	}
+	return Compiled{SpecJSON: specJSON, Hashes: Hashes{
+		Contract: hashBytes(specJSON), ParameterSchema: parameterHash, ProcedureSignature: procedureHash,
+		ResultSchema: resultHash, Permission: permissionHash, ExportSchema: exportHash,
 	}}, nil
 }
 

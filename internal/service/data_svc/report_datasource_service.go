@@ -363,7 +363,6 @@ func (service *ReportDatasourceService) GetProcedureSignature(ctx context.Contex
 	usedCodes := make(map[string]int, len(arguments))
 	items := make([]ReportProcedureArgumentDTO, 0, len(arguments))
 	inputArgName := ""
-	outputArgName := ""
 	blockingReasons := make([]string, 0, 3)
 	for _, argument := range arguments {
 		item := procedureArgumentDTO(argument, usedCodes)
@@ -375,32 +374,23 @@ func (service *ReportDatasourceService) GetProcedureSignature(ctx context.Contex
 			} else {
 				blockingReasons = append(blockingReasons, "存储过程只能有一个 JSON 输入参数")
 			}
-		case "RESULT_CURSOR":
-			if outputArgName == "" {
-				outputArgName = item.Name
-			} else {
-				blockingReasons = append(blockingReasons, "存储过程只能有一个 OUT REF CURSOR")
-			}
 		default:
-			blockingReasons = append(blockingReasons, fmt.Sprintf("参数 %s 不符合单 JSON 输入或 REF CURSOR 输出协议", item.Name))
+			blockingReasons = append(blockingReasons, fmt.Sprintf("参数 %s 不符合单 JSON 输入协议", item.Name))
 		}
 	}
 	if inputArgName == "" {
 		blockingReasons = append(blockingReasons, "缺少唯一的 IN CLOB/字符 JSON 输入参数")
 	}
-	if outputArgName == "" {
-		blockingReasons = append(blockingReasons, "缺少唯一的 OUT REF CURSOR 输出参数")
-	}
-	protocolReady := len(blockingReasons) == 0 && len(arguments) == 2
+	protocolReady := len(blockingReasons) == 0 && len(arguments) == 1
 	callTemplate := ""
 	if protocolReady {
 		target := qualifiedProcedureName(normalized)
-		callTemplate = fmt.Sprintf("BEGIN %s(%s => :payload, %s => :resultCursor); END;", target, inputArgName, outputArgName)
+		callTemplate = fmt.Sprintf("BEGIN %s(%s => :payload); END;", target, inputArgName)
 	}
 	return &ReportProcedureSignatureDTO{
 		Procedure: procedureSummaryDTO(normalized, len(arguments)), Arguments: items,
 		AllSupported: protocolReady, ProtocolReady: protocolReady, InputArgName: inputArgName,
-		OutputArgName: outputArgName, CallTemplate: callTemplate, BlockingReasons: blockingReasons,
+		OutputArgName: "", CallTemplate: callTemplate, BlockingReasons: blockingReasons,
 	}, nil
 }
 
@@ -477,11 +467,8 @@ func procedureArgumentDTO(argument reportoracle.ProcedureArgument, usedCodes map
 
 func recommendedProcedureArgumentType(direction, oracleType, typeOwner, typeName string, scale *int64) (string, string, string, bool, string) {
 	direction = strings.ToUpper(strings.TrimSpace(direction))
-	if direction == "OUT" && (oracleType == "REF CURSOR" || oracleType == "SYS_REFCURSOR" || strings.EqualFold(typeName, "SYS_REFCURSOR")) {
-		return "cursor", "", "RESULT_CURSOR", true, ""
-	}
 	if direction != "IN" {
-		return "", "", "UNSUPPORTED", false, "仅支持一个 JSON 输入参数和一个 OUT REF CURSOR"
+		return "", "", "UNSUPPORTED", false, "仅支持一个 JSON 输入参数"
 	}
 	if strings.TrimSpace(typeOwner) != "" || strings.TrimSpace(typeName) != "" {
 		return "", "", "UNSUPPORTED", false, "暂不支持 Oracle 对象、集合或复合类型"

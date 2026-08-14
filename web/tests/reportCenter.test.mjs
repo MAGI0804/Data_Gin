@@ -111,6 +111,7 @@ test('parseReportRunContract keeps typed published parameters', () => {
   } })
   assert.equal(contract.versionId, 23)
   assert.equal(contract.executionMode, 'TABLE_SNAPSHOT')
+  assert.equal(contract.jsonInput, false)
   assert.equal(contract.parameters[1].controlType, 'SELECT')
   assert.deepEqual(contract.parameters[1].allowedValues, ['S001', 'S002'])
 })
@@ -124,6 +125,7 @@ test('parseReportRunContract exposes REF CURSOR condition schema for the query f
     },
   } })
   assert.equal(contract.executionMode, 'REF_CURSOR')
+  assert.equal(contract.jsonInput, true)
   assert.equal(contract.inputSchema.store_id.displayName, '门店')
   assert.deepEqual(initialReportConditionValues(contract.inputSchema), { store_id: '', product_ids: ['P001'] })
   assert.deepEqual(buildReportConditions(contract.inputSchema, { store_id: 'S001', product_ids: '["P001","P002"]' }), { ok: true, conditions: { store_id: 'S001', product_ids: ['P001', 'P002'] } })
@@ -136,7 +138,7 @@ test('REF CURSOR numeric enum defaults keep their type for query selectors', () 
   assert.deepEqual(buildReportConditions(schema, { status: 1 }), { ok: true, conditions: { status: 1 } })
 })
 
-test('createReportRun sends conditions for REF CURSOR and keeps parameters for legacy reports', async () => {
+test('createReportRun sends conditions for JSON procedures and keeps parameters for legacy reports', async () => {
   const requests = []
   const client = async (path, options) => {
     requests.push({ path, options })
@@ -144,8 +146,10 @@ test('createReportRun sends conditions for REF CURSOR and keeps parameters for l
   }
   await createReportRun(client, 9, { store_id: 'S001' }, 'REF_CURSOR')
   await createReportRun(client, 9, { storeCode: 'S001' }, 'TABLE_SNAPSHOT')
+  await createReportRun(client, 9, { supplier_id: 'A001' }, 'TABLE_SNAPSHOT', true)
   assert.deepEqual(requests[0].options.body, { conditions: { store_id: 'S001' } })
   assert.deepEqual(requests[1].options.body, { parameters: { storeCode: 'S001' } })
+  assert.deepEqual(requests[2].options.body, { conditions: { supplier_id: 'A001' } })
 })
 
 test('report parameter defaults use the same editable shapes as their controls', () => {
@@ -316,6 +320,30 @@ test('REF CURSOR draft keeps JSON condition display names and automatic argument
   assert.deepEqual(draft.inputSchema.c_supplier_id.example, ['a', 'b'])
 })
 
+test('JSON result-table draft keeps one input binding and the Oracle snapshot table', async () => {
+  const payload = { data: {
+    id: 11, code: 'table_json_report', name: '结果表报表', datasourceId: 3, status: 'DRAFT', lockVersion: 3,
+    executionMode: 'TABLE_SNAPSHOT',
+    procedure: { owner: 'BI', package: 'REPORT_PKG', name: 'BUILD_RESULT', jsonInputArgName: 'P_PAYLOAD', resultCursorArgName: '' },
+    inputSchema: { store_id: { type: 'VARCHAR2', displayName: '门店' } },
+    result: { tableOwner: 'BI', tableName: 'REPORT_RESULT', runIdColumn: 'RUN_ID', rowIdColumn: 'ROW_NO' },
+    columns: [{ fieldId: '11111111-1111-4111-8111-111111111111', logicalCode: 'amount', databaseColumn: 'AMOUNT', sourceOracleType: 'NUMBER', valueType: 'decimal', previewHeader: '金额', excelHeader: '金额', displayOrder: 0, exportOrder: 0, previewVisible: true, exportVisible: true, exportAllowed: true }],
+    grants: [], parameters: [], callTemplate: '',
+  } }
+  const draft = parseReportDraft(payload)
+  assert.equal(draft.procedure.resultCursorArgName, '')
+  assert.equal(draft.result.tableName, 'REPORT_RESULT')
+  assert.equal(draft.inputSchema.store_id.displayName, '门店')
+  const requests = []
+  const client = async (path, options) => { requests.push({ path, options }); return { ok: true, data: payload } }
+  await saveReportDraft(client, draft)
+  assert.equal(requests[0].options.body.executionMode, 'TABLE_SNAPSHOT')
+  assert.deepEqual(requests[0].options.body.parameters, [])
+  assert.equal(requests[0].options.body.inputSchema.store_id.displayName, '门店')
+  assert.deepEqual(requests[0].options.body.result, { tableOwner: 'BI', tableName: 'REPORT_RESULT', runIdColumn: 'RUN_ID', rowIdColumn: 'ROW_NO' })
+  assert.equal(requests[0].options.body.callTemplate, '')
+})
+
 test('condition JSON requires a filter display name and normalizes supported types', () => {
   const schema = parseReportInputSchemaDocument({ a: { type: 'varchar2', displayName: '门店', control: 'text', required: true, example: '01' } })
   assert.deepEqual(schema.a, { type: 'VARCHAR2', displayName: '门店', control: 'TEXT', required: true, multiple: false, example: '01' })
@@ -351,6 +379,17 @@ test('procedure catalog and signature parsers enforce the JSON cursor protocol c
   assert.equal(signature.protocolReady, true)
   assert.equal(signature.outputArgName, 'P_RESULT')
   assert.throws(() => parseReportProcedureSignature({ data: { ...signature, blockingReasons: ['blocked'] } }))
+})
+
+test('procedure signature accepts one JSON input without an output cursor', () => {
+  const signature = parseReportProcedureSignature({ data: {
+    procedure: { owner: 'REPORT', package: 'PKG', name: 'BUILD', overload: '', argumentCount: 1, qualifiedName: 'REPORT.PKG.BUILD' },
+    allSupported: true, protocolReady: true, inputArgName: 'P_PAYLOAD', outputArgName: '', callTemplate: 'BEGIN REPORT.PKG.BUILD(P_PAYLOAD => :payload); END;', blockingReasons: [],
+    arguments: [{ name: 'P_PAYLOAD', position: 1, sequence: 1, direction: 'IN', oracleType: 'CLOB', dataLength: null, precision: null, scale: null, typeOwner: '', typeName: '', defaulted: false, supported: true, suggestedCode: 'payload', suggestedLogicalType: 'json', suggestedControlType: 'TEXTAREA', suggestedSystemValue: '', role: 'JSON_INPUT' }],
+  } })
+  assert.equal(signature.protocolReady, true)
+  assert.equal(signature.inputArgName, 'P_PAYLOAD')
+  assert.equal(signature.outputArgName, '')
 })
 
 test('procedure API encodes discovery filters and REF CURSOR draft save omits legacy contracts', async () => {

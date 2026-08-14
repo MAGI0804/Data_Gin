@@ -95,6 +95,37 @@ func TestReportRunServiceCreatesRefCursorRunFromJSONConditions(t *testing.T) {
 	}
 }
 
+func TestReportRunServiceCreatesJSONInputResultTableRun(t *testing.T) {
+	published := publishedRunFixture()
+	published.Version.ExecutionMode = model.ReportExecutionModeTableSnapshot
+	published.Version.JSONInputArgName = "P_PAYLOAD"
+	published.Version.InputSchemaJSON = model.JSONText(`{"c_store_id":{"type":"VARCHAR2","displayName":"门店","required":true}}`)
+	published.Parameters = nil
+	store := &fakeReportRunStore{published: published}
+	cipher := &fakeReportParameterCipher{err: errors.New("must not encrypt JSON conditions")}
+	service := NewReportRunServiceWithDependencies(store, cipher)
+
+	result, err := service.Create(t.Context(), 17, 9, requestbody.ReportRunCreateRequest{Conditions: map[string]json.RawMessage{
+		"c_store_id": json.RawMessage(`"S001"`),
+	}})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	if result.Status != model.ReportRunStatusQueued || cipher.calls != 0 {
+		t.Fatalf("result=%#v cipher calls=%d", result, cipher.calls)
+	}
+	if got := string(store.command.Run.NormalizedParametersJSON); got != `{"c_store_id":"S001"}` {
+		t.Fatalf("conditions snapshot = %s", got)
+	}
+	contract, err := service.Contract(t.Context(), 17, 9)
+	if err != nil {
+		t.Fatalf("Contract() error = %v", err)
+	}
+	if contract.ExecutionMode != model.ReportExecutionModeTableSnapshot || !strings.Contains(string(contract.InputSchema), `"displayName":"门店"`) || len(contract.Parameters) != 0 {
+		t.Fatalf("contract = %#v", contract)
+	}
+}
+
 func TestReportRunServiceRejectsInvalidRefCursorConditions(t *testing.T) {
 	published := publishedRunFixture()
 	published.Version.ExecutionMode = model.ReportExecutionModeRefCursor
