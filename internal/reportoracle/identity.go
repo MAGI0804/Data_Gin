@@ -11,13 +11,13 @@ import (
 const databaseIdentitySQL = `
 SELECT TO_CHAR(database_identity.dbid), database_identity.db_unique_name,
        SYS_CONTEXT('USERENV', 'DB_NAME'), SYS_CONTEXT('USERENV', 'CON_ID'),
-       SYS_CONTEXT('USERENV', 'CON_UID'), SYS_CONTEXT('USERENV', 'CON_NAME')
+       SYS_CONTEXT('USERENV', 'CON_NAME')
 FROM v$database database_identity`
 
 const databaseIdentityFallbackSQL = `
 SELECT NULL, SYS_CONTEXT('USERENV', 'DB_UNIQUE_NAME'),
        SYS_CONTEXT('USERENV', 'DB_NAME'), SYS_CONTEXT('USERENV', 'CON_ID'),
-       SYS_CONTEXT('USERENV', 'CON_UID'), SYS_CONTEXT('USERENV', 'CON_NAME')
+       SYS_CONTEXT('USERENV', 'CON_NAME')
 FROM dual`
 
 type DatabaseIdentity struct {
@@ -52,15 +52,15 @@ type databaseIdentityQueryer interface {
 }
 
 func queryDatabaseIdentity(ctx context.Context, queryer databaseIdentityQueryer, statement string) (DatabaseIdentity, error) {
-	var dbid, uniqueName, dbName, containerID, containerUID, containerName sql.NullString
-	err := queryer.QueryRowContext(ctx, statement).Scan(&dbid, &uniqueName, &dbName, &containerID, &containerUID, &containerName)
+	var dbid, uniqueName, dbName, containerID, containerName sql.NullString
+	err := queryer.QueryRowContext(ctx, statement).Scan(&dbid, &uniqueName, &dbName, &containerID, &containerName)
 	if err != nil {
 		return DatabaseIdentity{}, err
 	}
 	return DatabaseIdentity{
 		DBID: strings.TrimSpace(dbid.String), DBUniqueName: strings.TrimSpace(uniqueName.String),
 		DBName: strings.TrimSpace(dbName.String), ContainerID: strings.TrimSpace(containerID.String),
-		ContainerUID: strings.TrimSpace(containerUID.String), ContainerName: strings.TrimSpace(containerName.String),
+		ContainerName: strings.TrimSpace(containerName.String),
 	}, nil
 }
 

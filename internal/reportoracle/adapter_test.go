@@ -98,10 +98,13 @@ func TestResultTableCatalogUsesBoundFiltersAndVisibleTables(t *testing.T) {
 }
 
 func TestDatabaseIdentityQueriesPreferDBIDAndRetainLeastPrivilegeFallback(t *testing.T) {
-	for _, fragment := range []string{"v$database", "dbid", "db_unique_name", "CON_UID", "CON_NAME"} {
+	for _, fragment := range []string{"v$database", "dbid", "db_unique_name", "CON_ID", "CON_NAME"} {
 		if !strings.Contains(databaseIdentitySQL, fragment) {
 			t.Fatalf("database identity SQL is missing %q", fragment)
 		}
+	}
+	if strings.Contains(databaseIdentitySQL, "CON_UID") || strings.Contains(databaseIdentityFallbackSQL, "CON_UID") {
+		t.Fatal("Oracle 19c database identity queries must not request unsupported USERENV CON_UID")
 	}
 	if !strings.Contains(databaseIdentityFallbackSQL, "DB_UNIQUE_NAME") || !strings.Contains(databaseIdentityFallbackSQL, "FROM dual") {
 		t.Fatalf("database identity fallback is incomplete: %s", databaseIdentityFallbackSQL)
