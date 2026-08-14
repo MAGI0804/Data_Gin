@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react'
 import { RefreshCw, Search } from 'lucide-react'
 import { getReportProcedureSignature, getReportProcedures, getReportResultTableSchema, getReportResultTables, type ReportCenterClient } from '../../api'
-import { reconcileReportColumnsWithResultSchema, reportColumnsFromResultSchema } from '../../refCursorConfig'
+import { reconcileReportColumnsWithResultSchema, refreshReportColumnMetadata, reportColumnsFromResultSchema } from '../../refCursorConfig'
 import type { ReportDraft, ReportProcedureSignature, ReportProcedureSummary, ReportResultTablePage, ReportResultTableSchema, ReportResultTableSummary } from '../../types'
 import styles from './ReportProcedureEditor.module.css'
 
@@ -163,13 +163,16 @@ export function ReportProcedureEditor({ client, draft, onChange }: { client: Rep
       if (response.ok) {
         setTableSchema(response.data)
         setTableState((current) => ({ ...current, inspecting: false }))
+        onChange((currentDraft) => resultTableKey(currentDraft.result) === resultTableKey(response.data.table)
+          ? { ...currentDraft, columns: refreshReportColumnMetadata(response.data.columns, currentDraft.columns) }
+          : currentDraft)
       } else {
         setTableSchema(null)
         setTableState((current) => ({ ...current, inspecting: false, error: response.error }))
       }
     })
     return () => { controller.abort(); tableSchemaRequest.current += 1 }
-  }, [client, draft.datasourceId, draft.result.tableName, draft.result.tableOwner, selectedTableKey, tableSchema])
+  }, [client, draft.datasourceId, draft.result.tableName, draft.result.tableOwner, onChange, selectedTableKey, tableSchema])
 
   const selectedLabel = useMemo(() => signature?.procedure.qualifiedName || qualifiedName(draft.procedure) || '尚未绑定存储过程', [draft.procedure, signature])
   if (!draft.datasourceId) return <div className={styles.empty} role="status">请先在“基本信息”中选择可用的 Oracle 数据源。</div>

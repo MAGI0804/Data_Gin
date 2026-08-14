@@ -665,10 +665,10 @@ func compileColumns(
 	exportableColumns := 0
 	for _, column := range configured {
 		actualColumn, exists := actualByName[strings.ToUpper(strings.TrimSpace(column.DatabaseColumn))]
-		if !exists || !sameOracleType(column.SourceOracleType, actualColumn.DataType) ||
-			!logicalOracleCompatible(column.ValueType, actualColumn.DataType) || !sameColumnShape(column, actualColumn) {
+		if !exists {
 			return nil, nil, contractError("result column %q does not match Oracle result table", column.LogicalCode)
 		}
+		valueType := resultValueTypeFromOracle(actualColumn.DataType)
 		logicalKey := strings.ToUpper(strings.TrimSpace(column.LogicalCode))
 		if logicalKey == "" {
 			return nil, nil, contractError("result logical column is required")
@@ -694,8 +694,8 @@ func compileColumns(
 		specs = append(specs, columnSpec{
 			FieldID: column.FieldID, LogicalCode: column.LogicalCode,
 			DatabaseColumn:   strings.ToUpper(strings.TrimSpace(column.DatabaseColumn)),
-			SourceOracleType: normalizeOracleType(column.SourceOracleType), ValueType: column.ValueType,
-			Precision: column.PrecisionValue, Scale: column.ScaleValue, Nullable: column.Nullable,
+			SourceOracleType: normalizeOracleType(actualColumn.DataType), ValueType: valueType,
+			Precision: int64Pointer(actualColumn.DataPrecision), Scale: int64Pointer(actualColumn.DataScale), Nullable: actualColumn.Nullable,
 			PreviewHeader: column.PreviewHeader, ExcelHeader: column.ExcelHeader,
 			DisplayOrder: column.DisplayOrder, ExportOrder: column.ExportOrder,
 			PreviewVisible: column.PreviewVisible, ExportVisible: column.ExportVisible,
@@ -716,6 +716,30 @@ func compileColumns(
 		normalized[index].DataType = normalizeOracleType(normalized[index].DataType)
 	}
 	return specs, normalized, nil
+}
+
+func int64Pointer(value *int64) *int {
+	if value == nil {
+		return nil
+	}
+	result := int(*value)
+	return &result
+}
+
+func resultValueTypeFromOracle(oracleType string) string {
+	normalized := normalizeOracleType(oracleType)
+	switch {
+	case normalized == "NUMBER" || normalized == "BINARY_FLOAT" || normalized == "BINARY_DOUBLE":
+		return reporting.LogicalTypeDecimal
+	case normalized == "DATE":
+		return reporting.LogicalTypeDate
+	case strings.HasPrefix(normalized, "TIMESTAMP"):
+		return reporting.LogicalTypeDateTime
+	case normalized == "BOOLEAN":
+		return reporting.LogicalTypeBoolean
+	default:
+		return reporting.LogicalTypeString
+	}
 }
 
 func compileGrants(grants []model.ReportGrant) ([]grantSpec, error) {
@@ -852,17 +876,6 @@ func normalizeOracleType(value string) string {
 
 func sameParameterShape(configured model.ReportParameter, actual reportoracle.ProcedureArgument) bool {
 	if configured.MaxLength != nil && (actual.DataLength == nil || int64(*configured.MaxLength) != *actual.DataLength) {
-		return false
-	}
-	if configured.PrecisionValue != nil &&
-		(actual.DataPrecision == nil || int64(*configured.PrecisionValue) != *actual.DataPrecision) {
-		return false
-	}
-	return configured.ScaleValue == nil || actual.DataScale != nil && int64(*configured.ScaleValue) == *actual.DataScale
-}
-
-func sameColumnShape(configured model.ReportColumn, actual reportoracle.ResultColumn) bool {
-	if configured.Nullable != actual.Nullable {
 		return false
 	}
 	if configured.PrecisionValue != nil &&

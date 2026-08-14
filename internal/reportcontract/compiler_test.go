@@ -1,6 +1,7 @@
 package reportcontract
 
 import (
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -181,6 +182,32 @@ func TestCompileRejectsResultAndExcelMappingDrift(t *testing.T) {
 	columns[1].ExcelHeader = columns[0].ExcelHeader
 	if _, err := Compile(version, parameters, columns, grants, arguments, result, contract); !errors.Is(err, ErrInvalidContract) {
 		t.Fatalf("duplicate header error = %v", err)
+	}
+}
+
+func TestCompileUsesLiveOracleMetadataForBoundResultColumns(t *testing.T) {
+	version, parameters, columns, grants, arguments, result := validContract()
+	columns[0].SourceOracleType = "NUMBER"
+	columns[0].Nullable = true
+	precision := 9
+	scale := 3
+	columns[0].PrecisionValue = &precision
+	columns[0].ScaleValue = &scale
+	contract := validSnapshotContract(t, version, result, columns)
+
+	compiled, err := Compile(version, parameters, columns, grants, arguments, result, contract)
+	if err != nil {
+		t.Fatalf("Compile() error = %v", err)
+	}
+	var spec contractSpec
+	if err := json.Unmarshal(compiled.SpecJSON, &spec); err != nil {
+		t.Fatalf("decode compiled spec: %v", err)
+	}
+	if spec.Columns[0].SourceOracleType != "VARCHAR2" || spec.Columns[0].ValueType != "string" || spec.Columns[0].Nullable || spec.Columns[0].Precision != nil || spec.Columns[0].Scale != nil {
+		t.Fatalf("compiled column metadata = %#v, want live Oracle metadata", spec.Columns[0])
+	}
+	if spec.Columns[1].SourceOracleType != "NUMBER" || spec.Columns[1].ValueType != "decimal" || spec.Columns[1].Nullable != result[3].Nullable {
+		t.Fatalf("compiled numeric column metadata = %#v, want live Oracle metadata", spec.Columns[1])
 	}
 }
 

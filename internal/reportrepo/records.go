@@ -144,7 +144,7 @@ func replaceCollections(
 		columnRows = append(columnRows, columnRecord{ReportColumn: column})
 	}
 	if len(columnRows) > 0 {
-		if err := tx.WithContext(ctx).Create(&columnRows).Error; err != nil {
+		if err := createColumnRecords(ctx, tx, columnRows); err != nil {
 			return fmt.Errorf("report draft: replace columns: create new set: %w", err)
 		}
 	}
@@ -191,7 +191,7 @@ func replaceVersionCollections(
 		columnRows = append(columnRows, columnRecord{ReportColumn: column})
 	}
 	if len(columnRows) > 0 {
-		if err := tx.WithContext(ctx).Create(&columnRows).Error; err != nil {
+		if err := createColumnRecords(ctx, tx, columnRows); err != nil {
 			return fmt.Errorf("report draft: copy columns: %w", err)
 		}
 	}
@@ -202,6 +202,41 @@ func replaceVersionCollections(
 		}
 	}
 	return nil
+}
+
+// createColumnRecords uses map inserts so false values are not replaced by
+// GORM's model-level default:true tags. Oracle metadata and visibility flags
+// are explicit report configuration and must survive a draft save unchanged.
+func createColumnRecords(ctx context.Context, tx *gorm.DB, rows []columnRecord) error {
+	values := make([]map[string]interface{}, 0, len(rows))
+	now := time.Now().UTC()
+	for index := range rows {
+		column := rows[index].ReportColumn
+		if column.CreatedAt.IsZero() {
+			column.CreatedAt = now
+		}
+		if column.UpdatedAt.IsZero() {
+			column.UpdatedAt = now
+		}
+		values = append(values, reportColumnInsertValues(column))
+	}
+	return tx.WithContext(ctx).Model(&columnRecord{}).Create(&values).Error
+}
+
+func reportColumnInsertValues(column model.ReportColumn) map[string]interface{} {
+	return map[string]interface{}{
+		"version_id": column.VersionID, "field_id": column.FieldID, "logical_code": column.LogicalCode,
+		"database_column": column.DatabaseColumn, "source_oracle_type": column.SourceOracleType,
+		"precision_value": column.PrecisionValue, "scale_value": column.ScaleValue, "nullable": column.Nullable,
+		"value_type": column.ValueType, "preview_header": column.PreviewHeader, "excel_header": column.ExcelHeader,
+		"display_order": column.DisplayOrder, "export_order": column.ExportOrder,
+		"preview_visible": column.PreviewVisible, "export_visible": column.ExportVisible,
+		"filterable": column.Filterable, "sortable": column.Sortable, "export_allowed": column.ExportAllowed,
+		"allowed_operators_json": column.AllowedOperatorsJSON, "format_json": column.FormatJSON,
+		"dictionary_version_json": column.DictionaryVersionJSON, "masking_policy_json": column.MaskingPolicyJSON,
+		"excel_width": column.ExcelWidth, "null_display": column.NullDisplay,
+		"created_at": column.CreatedAt, "updated_at": column.UpdatedAt,
+	}
 }
 
 func newGrantRecords(definitionID, versionID uint, grants []model.ReportGrant, now time.Time) []grantRecord {

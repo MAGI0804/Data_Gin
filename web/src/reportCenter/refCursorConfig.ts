@@ -137,6 +137,22 @@ export function reconcileReportColumnsWithResultSchema(columns: ReportResultTabl
   })
 }
 
+export function refreshReportColumnMetadata(columns: ReportResultTableColumn[], existingColumns: ReportColumn[]): ReportColumn[] {
+  const schemaByName = new Map(columns.map((column) => [column.name.toUpperCase(), column]))
+  return existingColumns.map((column) => {
+    const schema = schemaByName.get(column.databaseColumn.toUpperCase())
+    if (!schema) return column
+    return {
+      ...column,
+      sourceOracleType: schema.oracleType,
+      precision: schema.precision,
+      scale: schema.scale,
+      nullable: schema.nullable,
+      valueType: reportValueTypeFromOracle(schema.oracleType),
+    }
+  })
+}
+
 export function renameExcelMappingField(columns: ReportColumn[], currentField: string, nextField: string): ReportColumn[] {
   return columns.map((column) => column.databaseColumn === currentField ? { ...column, databaseColumn: nextField } : column)
 }
