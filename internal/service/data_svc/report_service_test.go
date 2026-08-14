@@ -144,6 +144,48 @@ func TestReportDraftServiceAcceptsEnumParameterContracts(t *testing.T) {
 	}
 }
 
+func TestReportDraftServiceAcceptsRefCursorInputSchemaWithDisplayName(t *testing.T) {
+	request := validReportDraftRequest()
+	request.ExecutionMode = model.ReportExecutionModeRefCursor
+	request.Procedure.JSONInputArgName = "p_payload"
+	request.Procedure.ResultCursorArgName = "p_result"
+	request.InputSchema = json.RawMessage(`{
+		"c_supplier_id":{"type":"varchar2","displayName":"供应商","control":"multi_select","required":true,"multiple":true,"example":["a","b"]},
+		"datein_begin":{"type":"date","displayName":"开始日期","control":"date","example":"20260504"}
+	}`)
+	request.Result = requestbody.ReportResultRequest{}
+	request.CallTemplate = ""
+	request.Parameters = nil
+
+	draft, err := reportDraftFromRequest(17, request)
+	if err != nil {
+		t.Fatalf("reportDraftFromRequest() error = %v", err)
+	}
+	if draft.Version.ExecutionMode != model.ReportExecutionModeRefCursor || draft.Version.JSONInputArgName != "P_PAYLOAD" || draft.Version.ResultCursorArgName != "P_RESULT" {
+		t.Fatalf("REF CURSOR contract = %#v", draft.Version)
+	}
+	if strings.Contains(string(draft.Version.InputSchemaJSON), `"label"`) || !strings.Contains(string(draft.Version.InputSchemaJSON), `"displayName":"供应商"`) {
+		t.Fatalf("canonical input schema = %s", draft.Version.InputSchemaJSON)
+	}
+	if len(draft.Parameters) != 0 || draft.Version.CallTemplate != "BEGIN REPORT_OWNER.PKG_SALES.BUILD_REPORT(P_PAYLOAD => :payload, P_RESULT => :resultCursor); END;" {
+		t.Fatalf("REF CURSOR draft = %#v", draft)
+	}
+}
+
+func TestReportDraftServiceRejectsRefCursorConditionWithoutDisplayName(t *testing.T) {
+	request := validReportDraftRequest()
+	request.ExecutionMode = model.ReportExecutionModeRefCursor
+	request.Procedure.JSONInputArgName = "p_payload"
+	request.Procedure.ResultCursorArgName = "p_result"
+	request.InputSchema = json.RawMessage(`{"store_id":{"type":"VARCHAR2"}}`)
+	request.Result = requestbody.ReportResultRequest{}
+	request.Parameters = nil
+
+	if _, err := reportDraftFromRequest(17, request); !errors.Is(err, ErrReportInvalid) {
+		t.Fatalf("reportDraftFromRequest() error = %v, want ErrReportInvalid", err)
+	}
+}
+
 func TestReportDraftServiceUpdateRequiresLockAndMapsMissingBeforeConflict(t *testing.T) {
 	request := validReportDraftRequest()
 	store := &fakeReportDraftStore{findErr: reportrepo.ErrDraftNotFound}

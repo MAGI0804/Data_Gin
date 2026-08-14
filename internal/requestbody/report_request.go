@@ -16,6 +16,8 @@ type ReportDraftSaveRequest struct {
 	DatasourceID        uint                     `json:"datasourceId"`
 	ExpectedLockVersion *uint64                  `json:"expectedLockVersion,omitempty"`
 	Procedure           ReportProcedureRequest   `json:"procedure"`
+	ExecutionMode       string                   `json:"executionMode"`
+	InputSchema         json.RawMessage          `json:"inputSchema,omitempty"`
 	Result              ReportResultRequest      `json:"result"`
 	CallTemplate        string                   `json:"callTemplate"`
 	Parameters          []ReportParameterRequest `json:"parameters"`
@@ -24,10 +26,12 @@ type ReportDraftSaveRequest struct {
 }
 
 type ReportProcedureRequest struct {
-	Owner    string `json:"owner"`
-	Package  string `json:"package,omitempty"`
-	Name     string `json:"name"`
-	Overload string `json:"overload,omitempty"`
+	Owner               string `json:"owner"`
+	Package             string `json:"package,omitempty"`
+	Name                string `json:"name"`
+	Overload            string `json:"overload,omitempty"`
+	JSONInputArgName    string `json:"jsonInputArgName,omitempty"`
+	ResultCursorArgName string `json:"resultCursorArgName,omitempty"`
 }
 
 type ReportResultRequest struct {

@@ -66,22 +66,24 @@ func NewReportDraftServiceWithStore(store reportDraftStore) *ReportDraftService 
 }
 
 type ReportDraftDTO struct {
-	ID           uint                 `json:"id"`
-	Code         string               `json:"code"`
-	Name         string               `json:"name"`
-	Category     string               `json:"category"`
-	Description  string               `json:"description"`
-	DatasourceID uint                 `json:"datasourceId"`
-	Status       string               `json:"status"`
-	LockVersion  uint64               `json:"lockVersion"`
-	Procedure    ReportProcedureDTO   `json:"procedure"`
-	Result       ReportResultDTO      `json:"result"`
-	CallTemplate string               `json:"callTemplate"`
-	Parameters   []ReportParameterDTO `json:"parameters"`
-	Columns      []ReportColumnDTO    `json:"columns"`
-	Grants       []ReportGrantDTO     `json:"grants"`
-	CreatedAt    time.Time            `json:"createdAt"`
-	UpdatedAt    time.Time            `json:"updatedAt"`
+	ID            uint                 `json:"id"`
+	Code          string               `json:"code"`
+	Name          string               `json:"name"`
+	Category      string               `json:"category"`
+	Description   string               `json:"description"`
+	DatasourceID  uint                 `json:"datasourceId"`
+	Status        string               `json:"status"`
+	LockVersion   uint64               `json:"lockVersion"`
+	Procedure     ReportProcedureDTO   `json:"procedure"`
+	ExecutionMode string               `json:"executionMode"`
+	InputSchema   json.RawMessage      `json:"inputSchema"`
+	Result        ReportResultDTO      `json:"result"`
+	CallTemplate  string               `json:"callTemplate"`
+	Parameters    []ReportParameterDTO `json:"parameters"`
+	Columns       []ReportColumnDTO    `json:"columns"`
+	Grants        []ReportGrantDTO     `json:"grants"`
+	CreatedAt     time.Time            `json:"createdAt"`
+	UpdatedAt     time.Time            `json:"updatedAt"`
 }
 
 type ReportDraftSummaryDTO struct {
@@ -99,10 +101,12 @@ type ReportDraftSummaryDTO struct {
 }
 
 type ReportProcedureDTO struct {
-	Owner    string `json:"owner"`
-	Package  string `json:"package,omitempty"`
-	Name     string `json:"name"`
-	Overload string `json:"overload,omitempty"`
+	Owner               string `json:"owner"`
+	Package             string `json:"package,omitempty"`
+	Name                string `json:"name"`
+	Overload            string `json:"overload,omitempty"`
+	JSONInputArgName    string `json:"jsonInputArgName,omitempty"`
+	ResultCursorArgName string `json:"resultCursorArgName,omitempty"`
 }
 
 type ReportResultDTO struct {
@@ -278,36 +282,79 @@ func reportDraftFromRequest(actor uint, request requestbody.ReportDraftSaveReque
 	if err != nil {
 		return nil, invalidReport("invalid Oracle procedure")
 	}
-	resultRef, err := reportoracle.NormalizeResultTableRef(reportoracle.ResultTableRef{Owner: request.Result.TableOwner, Name: request.Result.TableName})
-	if err != nil {
-		return nil, invalidReport("invalid Oracle result table")
+	mode := strings.ToUpper(strings.TrimSpace(request.ExecutionMode))
+	if mode == "" {
+		mode = model.ReportExecutionModeTableSnapshot
 	}
-	runIDColumn, err := normalizeReportIdentifier(request.Result.RunIDColumn)
-	if err != nil {
-		return nil, invalidReport("invalid result run id column")
-	}
-	rowIDColumn, err := normalizeReportIdentifier(request.Result.RowIDColumn)
-	if err != nil || runIDColumn == rowIDColumn {
-		return nil, invalidReport("invalid result row id column")
+	resultRef := reportoracle.ResultTableRef{}
+	runIDColumn, rowIDColumn := "", ""
+	jsonInputArgName, resultCursorArgName := "", ""
+	inputSchema := json.RawMessage(nil)
+	if mode == model.ReportExecutionModeRefCursor {
+		jsonInputArgName, err = normalizeReportIdentifier(request.Procedure.JSONInputArgName)
+		if err != nil {
+			return nil, invalidReport("invalid JSON input argument")
+		}
+		resultCursorArgName, err = normalizeReportIdentifier(request.Procedure.ResultCursorArgName)
+		if err != nil || jsonInputArgName == resultCursorArgName {
+			return nil, invalidReport("invalid result cursor argument")
+		}
+		inputSchema, err = canonicalReportInputSchema(request.InputSchema)
+		if err != nil {
+			return nil, err
+		}
+	} else if mode == model.ReportExecutionModeTableSnapshot {
+		resultRef, err = reportoracle.NormalizeResultTableRef(reportoracle.ResultTableRef{Owner: request.Result.TableOwner, Name: request.Result.TableName})
+		if err != nil {
+			return nil, invalidReport("invalid Oracle result table")
+		}
+		runIDColumn, err = normalizeReportIdentifier(request.Result.RunIDColumn)
+		if err != nil {
+			return nil, invalidReport("invalid result run id column")
+		}
+		rowIDColumn, err = normalizeReportIdentifier(request.Result.RowIDColumn)
+		if err != nil || runIDColumn == rowIDColumn {
+			return nil, invalidReport("invalid result row id column")
+		}
+	} else {
+		return nil, invalidReport("invalid report execution mode")
 	}
 	if len(procedure.Owner) > 128 || len(procedure.Package) > 128 || len(procedure.Name) > 128 || len(procedure.Overload) > 32 ||
 		len(resultRef.Owner) > 128 || len(resultRef.Name) > 128 {
 		return nil, invalidReport("Oracle object name is too long")
 	}
-	parameters, definitions, err := reportParametersFromRequest(request.Parameters)
-	if err != nil {
-		return nil, err
+	parameters := []model.ReportParameter{}
+	definitions := []reporting.ParameterDefinition{}
+	if mode == model.ReportExecutionModeTableSnapshot {
+		parameters, definitions, err = reportParametersFromRequest(request.Parameters)
+		if err != nil {
+			return nil, err
+		}
 	}
 	callTemplate := strings.TrimSpace(request.CallTemplate)
 	if len(callTemplate) > 64*1024 {
 		return nil, invalidReport("call template is too large")
 	}
-	if _, err := reporting.CompileCallTemplate(callTemplate, definitions); err != nil {
-		return nil, invalidReport("call template and parameters do not match")
+	if mode == model.ReportExecutionModeTableSnapshot {
+		if _, err := reporting.CompileCallTemplate(callTemplate, definitions); err != nil {
+			return nil, invalidReport("call template and parameters do not match")
+		}
+	} else {
+		target := procedure.Owner + "."
+		if procedure.Package != "" {
+			target += procedure.Package + "."
+		}
+		target += procedure.Name
+		callTemplate = fmt.Sprintf("BEGIN %s(%s => :payload, %s => :resultCursor); END;", target, jsonInputArgName, resultCursorArgName)
 	}
-	columns, err := reportColumnsFromRequest(request.Columns)
-	if err != nil {
-		return nil, err
+	columns := []model.ReportColumn{}
+	if len(request.Columns) > 0 {
+		columns, err = reportColumnsFromRequest(request.Columns)
+		if err != nil {
+			return nil, err
+		}
+	} else if mode == model.ReportExecutionModeTableSnapshot {
+		return nil, invalidReport("result columns are required")
 	}
 	grants, err := reportGrantsFromRequest(request.Grants, actor)
 	if err != nil {
@@ -322,6 +369,7 @@ func reportDraftFromRequest(actor uint, request requestbody.ReportDraftSaveReque
 		Version: model.ReportVersion{
 			Status: model.ReportVersionStatusDraft, DatasourceID: request.DatasourceID, ProcedureOwner: procedure.Owner, PackageName: procedure.Package,
 			ProcedureName: procedure.Name, ProcedureOverload: procedure.Overload,
+			ExecutionMode: mode, JSONInputArgName: jsonInputArgName, ResultCursorArgName: resultCursorArgName, InputSchemaJSON: model.JSONText(inputSchema),
 			ResultTableOwner: resultRef.Owner, ResultTableName: resultRef.Name,
 			ResultRunIDColumn: runIDColumn, ResultRowIDColumn: rowIDColumn,
 			CallTemplate: callTemplate, CreatedBy: actor,
@@ -651,6 +699,93 @@ func cloneJSON(raw []byte) json.RawMessage {
 	return append(json.RawMessage(nil), raw...)
 }
 
+type reportInputFieldSchema struct {
+	Type          string          `json:"type"`
+	DisplayName   string          `json:"displayName"`
+	Control       string          `json:"control,omitempty"`
+	Required      bool            `json:"required,omitempty"`
+	Multiple      bool            `json:"multiple,omitempty"`
+	Example       json.RawMessage `json:"example,omitempty"`
+	DefaultValue  json.RawMessage `json:"default,omitempty"`
+	AllowedValues json.RawMessage `json:"allowedValues,omitempty"`
+}
+
+func canonicalReportInputSchema(raw json.RawMessage) (json.RawMessage, error) {
+	if len(bytes.TrimSpace(raw)) == 0 || len(raw) > 64*1024 {
+		return nil, invalidReport("input schema is required and must not exceed 64 KiB")
+	}
+	var fields map[string]json.RawMessage
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	if err := decoder.Decode(&fields); err != nil || len(fields) == 0 || len(fields) > maxReportParameters {
+		return nil, invalidReport("input schema must be a non-empty JSON object with at most 128 fields")
+	}
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		return nil, invalidReport("input schema contains trailing JSON")
+	}
+	allowedTypes := map[string]struct{}{
+		"VARCHAR2": {}, "NVARCHAR2": {}, "CHAR": {}, "NCHAR": {}, "CLOB": {}, "NCLOB": {},
+		"NUMBER": {}, "DATE": {}, "TIMESTAMP": {}, "BOOLEAN": {},
+	}
+	canonical := make(map[string]reportInputFieldSchema, len(fields))
+	for code, encoded := range fields {
+		if !reportLogicalCodePattern.MatchString(code) {
+			return nil, invalidReport("input schema contains an invalid condition code")
+		}
+		var field reportInputFieldSchema
+		fieldDecoder := json.NewDecoder(bytes.NewReader(encoded))
+		fieldDecoder.DisallowUnknownFields()
+		if err := fieldDecoder.Decode(&field); err != nil {
+			return nil, invalidReport("input schema field configuration is invalid")
+		}
+		if err := fieldDecoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+			return nil, invalidReport("input schema field contains trailing JSON")
+		}
+		field.Type = strings.ToUpper(strings.Join(strings.Fields(field.Type), " "))
+		field.DisplayName = strings.TrimSpace(field.DisplayName)
+		field.Control = strings.ToUpper(strings.TrimSpace(field.Control))
+		if _, ok := allowedTypes[field.Type]; !ok || field.DisplayName == "" || utf8.RuneCountInString(field.DisplayName) > 128 {
+			return nil, invalidReport("input schema field type or displayName is invalid")
+		}
+		if field.Control != "" {
+			if _, ok := reportControlTypes[field.Control]; !ok {
+				return nil, invalidReport("input schema field control is invalid")
+			}
+		}
+		if len(bytes.TrimSpace(field.AllowedValues)) > 0 {
+			var allowed []interface{}
+			if err := decodeStrictReportJSON(field.AllowedValues, &allowed); err != nil || len(allowed) == 0 {
+				return nil, invalidReport("input schema allowedValues must be a non-empty JSON array")
+			}
+		}
+		for _, value := range []json.RawMessage{field.Example, field.DefaultValue} {
+			if len(bytes.TrimSpace(value)) > 0 {
+				var decoded interface{}
+				if err := decodeStrictReportJSON(value, &decoded); err != nil {
+					return nil, invalidReport("input schema example or default value is invalid")
+				}
+			}
+		}
+		canonical[code] = field
+	}
+	encoded, err := json.Marshal(canonical)
+	if err != nil {
+		return nil, invalidReport("input schema cannot be canonicalized")
+	}
+	return encoded, nil
+}
+
+func decodeStrictReportJSON(raw []byte, target interface{}) error {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	if err := decoder.Decode(target); err != nil {
+		return err
+	}
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		return errors.New("trailing JSON")
+	}
+	return nil
+}
+
 func reportDraftDTO(draft *reportrepo.Draft) *ReportDraftDTO {
 	if draft == nil {
 		return nil
@@ -659,7 +794,8 @@ func reportDraftDTO(draft *reportrepo.Draft) *ReportDraftDTO {
 		ID: draft.Definition.ID, Code: draft.Definition.Code, Name: draft.Definition.Name,
 		Category: draft.Definition.Category, Description: draft.Definition.Description,
 		DatasourceID: draft.Definition.DatasourceID, Status: draft.Definition.Status, LockVersion: draft.LockVersion,
-		Procedure:    ReportProcedureDTO{Owner: draft.Version.ProcedureOwner, Package: draft.Version.PackageName, Name: draft.Version.ProcedureName, Overload: draft.Version.ProcedureOverload},
+		Procedure:     ReportProcedureDTO{Owner: draft.Version.ProcedureOwner, Package: draft.Version.PackageName, Name: draft.Version.ProcedureName, Overload: draft.Version.ProcedureOverload, JSONInputArgName: draft.Version.JSONInputArgName, ResultCursorArgName: draft.Version.ResultCursorArgName},
+		ExecutionMode: draft.Version.ExecutionMode, InputSchema: cloneJSON([]byte(draft.Version.InputSchemaJSON)),
 		Result:       ReportResultDTO{TableOwner: draft.Version.ResultTableOwner, TableName: draft.Version.ResultTableName, RunIDColumn: draft.Version.ResultRunIDColumn, RowIDColumn: draft.Version.ResultRowIDColumn},
 		CallTemplate: draft.Version.CallTemplate, Parameters: make([]ReportParameterDTO, 0, len(draft.Parameters)),
 		Columns: make([]ReportColumnDTO, 0, len(draft.Columns)), Grants: make([]ReportGrantDTO, 0, len(draft.Grants)),

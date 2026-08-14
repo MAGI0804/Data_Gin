@@ -15,6 +15,9 @@ const (
 	ReportVersionStatusDraft     = "DRAFT"
 	ReportVersionStatusPublished = "PUBLISHED"
 
+	ReportExecutionModeTableSnapshot = "TABLE_SNAPSHOT"
+	ReportExecutionModeRefCursor     = "REF_CURSOR"
+
 	ReportRunStatusQueued          = "QUEUED"
 	ReportRunStatusRunning         = "RUNNING"
 	ReportRunStatusSucceeded       = "SUCCEEDED"
@@ -103,6 +106,10 @@ type ReportVersion struct {
 	PackageName            string     `gorm:"column:package_name;size:128" json:"packageName"`
 	ProcedureName          string     `gorm:"column:procedure_name;size:128;not null" json:"procedureName"`
 	ProcedureOverload      string     `gorm:"column:procedure_overload;size:32" json:"procedureOverload"`
+	ExecutionMode          string     `gorm:"column:execution_mode;size:32;not null;default:'TABLE_SNAPSHOT';index" json:"executionMode"`
+	JSONInputArgName       string     `gorm:"column:json_input_arg_name;size:128" json:"jsonInputArgName"`
+	ResultCursorArgName    string     `gorm:"column:result_cursor_arg_name;size:128" json:"resultCursorArgName"`
+	InputSchemaJSON        JSONText   `gorm:"column:input_schema_json;type:json" json:"inputSchema"`
 	ResultTableOwner       string     `gorm:"column:result_table_owner;size:128;not null" json:"resultTableOwner"`
 	ResultTableName        string     `gorm:"column:result_table_name;size:128;not null" json:"resultTableName"`
 	ResultRunIDColumn      string     `gorm:"column:result_run_id_column;size:128;not null;default:'RUN_ID'" json:"resultRunIdColumn"`
