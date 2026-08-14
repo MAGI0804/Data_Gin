@@ -1,0 +1,10 @@
+.editor { display: grid; gap: var(--space-3); border-bottom: 1px solid var(--color-border); padding-block-end: var(--space-5); }
+.heading { display: flex; align-items: end; justify-content: space-between; gap: var(--space-4); }
+.heading h3 { display: flex; align-items: center; gap: var(--space-2); margin: 0; font-size: 15px; }
+.heading h3 svg { width: 16px; height: 16px; color: var(--color-brand); }
+.heading p, .hint { margin: var(--space-1) 0 0; color: var(--color-text-secondary); font-size: 12px; line-height: 1.5; }
+.editor textarea { width: 100%; min-height: 220px; resize: vertical; border: 1px solid var(--color-border-strong); border-radius: var(--radius-control); background: var(--color-workspace); color: var(--color-text); padding: var(--space-3); font-family: var(--font-mono); font-size: 12px; line-height: 1.6; tab-size: 2; }
+.editor textarea[aria-invalid="true"] { border-color: var(--color-danger); background: var(--color-danger-soft); }
+.error { margin: 0; color: var(--color-danger); font-size: 12px; }
+.srOnly { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; clip-path: inset(50%); }
+@media (max-width: 479px) { .heading { align-items: stretch; flex-direction: column; } .heading button { align-self: start; } }

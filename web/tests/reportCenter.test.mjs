@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { getReportAudits, parsePublication, parseReportAuditPage, parseReportCatalogPage, parseReportDatasource, parseReportDatasources, parseReportDatasourceTest, parseReportDraft, parseReportExport, parseReportExportPage, parseReportResultPage, parseReportRun, parseReportRunContract, parseReportVersionDiff, parseReportVersionPage, testReportDatasourceConnection } from '../.test-dist/reportCenter/api.js'
+import { createReportRun, getReportAudits, getReportProcedureSignature, getReportProcedures, parsePublication, parseReportAuditPage, parseReportCatalogPage, parseReportDatasource, parseReportDatasources, parseReportDatasourceTest, parseReportDraft, parseReportExport, parseReportExportPage, parseReportProcedurePage, parseReportProcedureSignature, parseReportResultPage, parseReportRun, parseReportRunContract, parseReportVersionDiff, parseReportVersionPage, saveReportDraft, testReportDatasourceConnection } from '../.test-dist/reportCenter/api.js'
+import { applyExcelMapping, buildReportConditions, excelMappingFromColumns, initialReportConditionValues, parseExcelMappingDocument, parseReportInputSchemaDocument, renameExcelMappingField } from '../.test-dist/reportCenter/refCursorConfig.js'
 import { reportParameterControls, reportParameterFlagDisabled, updateReportParameterFlag, updateReportParameterLogicalType } from '../.test-dist/reportCenter/parameterConfig.js'
 import { buildNewReportRunState, canStartNewReportRun, initialReportParameterValues } from '../.test-dist/reportCenter/queryParameters.js'
 import { createLatestRequestGuard } from '../.test-dist/reportCenter/components/ReportVersionDrawer/requestGuard.js'
@@ -72,8 +73,42 @@ test('parseReportRunContract keeps typed published parameters', () => {
     ],
   } })
   assert.equal(contract.versionId, 23)
+  assert.equal(contract.executionMode, 'TABLE_SNAPSHOT')
   assert.equal(contract.parameters[1].controlType, 'SELECT')
   assert.deepEqual(contract.parameters[1].allowedValues, ['S001', 'S002'])
+})
+
+test('parseReportRunContract exposes REF CURSOR condition schema for the query form', () => {
+  const contract = parseReportRunContract({ data: {
+    definitionId: 9, versionId: 24, code: 'sales_report', name: '销售报表', executionMode: 'REF_CURSOR', parameters: [],
+    inputSchema: {
+      store_id: { type: 'VARCHAR2', displayName: '门店', required: true, allowedValues: ['S001', 'S002'] },
+      product_ids: { type: 'VARCHAR2', displayName: '商品', multiple: true, default: ['P001'] },
+    },
+  } })
+  assert.equal(contract.executionMode, 'REF_CURSOR')
+  assert.equal(contract.inputSchema.store_id.displayName, '门店')
+  assert.deepEqual(initialReportConditionValues(contract.inputSchema), { store_id: '', product_ids: ['P001'] })
+  assert.deepEqual(buildReportConditions(contract.inputSchema, { store_id: 'S001', product_ids: '["P001","P002"]' }), { ok: true, conditions: { store_id: 'S001', product_ids: ['P001', 'P002'] } })
+  assert.deepEqual(buildReportConditions(contract.inputSchema, { store_id: '' }), { ok: false, error: '门店 为必填筛选条件。' })
+})
+
+test('REF CURSOR numeric enum defaults keep their type for query selectors', () => {
+  const schema = parseReportInputSchemaDocument({ status: { type: 'NUMBER', displayName: '状态', default: 1, allowedValues: [1, 2] } })
+  assert.deepEqual(initialReportConditionValues(schema), { status: 1 })
+  assert.deepEqual(buildReportConditions(schema, { status: 1 }), { ok: true, conditions: { status: 1 } })
+})
+
+test('createReportRun sends conditions for REF CURSOR and keeps parameters for legacy reports', async () => {
+  const requests = []
+  const client = async (path, options) => {
+    requests.push({ path, options })
+    return { ok: true, data: { data: { id: requests.length, runUuid: 'run', definitionId: 9, versionId: 24, status: 'QUEUED' } } }
+  }
+  await createReportRun(client, 9, { store_id: 'S001' }, 'REF_CURSOR')
+  await createReportRun(client, 9, { storeCode: 'S001' }, 'TABLE_SNAPSHOT')
+  assert.deepEqual(requests[0].options.body, { conditions: { store_id: 'S001' } })
+  assert.deepEqual(requests[1].options.body, { parameters: { storeCode: 'S001' } })
 })
 
 test('report parameter defaults use the same editable shapes as their controls', () => {
@@ -223,6 +258,90 @@ test('parseReportDraft preserves parameter, field and excel mappings', () => {
   assert.deepEqual(draft.columns[0].dictionaryVersion, { version: 'v2' })
   assert.equal(draft.columns[0].excelHeader, '含税金额')
   assert.deepEqual(draft.grants[0].actions, ['QUERY', 'EXPORT'])
+  assert.equal(draft.executionMode, 'TABLE_SNAPSHOT')
+})
+
+test('REF CURSOR draft keeps JSON condition display names and automatic argument bindings', () => {
+  const draft = parseReportDraft({ data: {
+    id: 10, code: 'supplier_report', name: '供应商报表', datasourceId: 3, status: 'DRAFT', lockVersion: 2,
+    executionMode: 'REF_CURSOR',
+    procedure: { owner: 'BI', package: 'REPORT_PKG', name: 'SUPPLIER', jsonInputArgName: 'P_PAYLOAD', resultCursorArgName: 'P_RESULT' },
+    inputSchema: {
+      c_supplier_id: { type: 'varchar2', displayName: '供应商', control: 'multi_select', required: true, multiple: true, example: ['a', 'b'] },
+      datein_begin: { type: 'date', displayName: '开始日期', control: 'date', example: '20260504' },
+    },
+    columns: [], grants: [], parameters: [], result: {}, callTemplate: '',
+  } })
+  assert.equal(draft.executionMode, 'REF_CURSOR')
+  assert.equal(draft.procedure.jsonInputArgName, 'P_PAYLOAD')
+  assert.equal(draft.inputSchema.c_supplier_id.displayName, '供应商')
+  assert.equal(draft.inputSchema.c_supplier_id.control, 'MULTI_SELECT')
+  assert.deepEqual(draft.inputSchema.c_supplier_id.example, ['a', 'b'])
+})
+
+test('condition JSON requires a filter display name and normalizes supported types', () => {
+  const schema = parseReportInputSchemaDocument({ a: { type: 'varchar2', displayName: '门店', control: 'text', required: true, example: '01' } })
+  assert.deepEqual(schema.a, { type: 'VARCHAR2', displayName: '门店', control: 'TEXT', required: true, multiple: false, example: '01' })
+  assert.throws(() => parseReportInputSchemaDocument({ a: { type: 'VARCHAR2' } }), /筛选显示名/)
+  assert.throws(() => parseReportInputSchemaDocument({ a: { type: 'VARCHAR2', displayName: '门店', unknown: true } }), /未知配置/)
+})
+
+test('Excel JSON mapping and table edits share the existing columns contract', () => {
+  const mapping = parseExcelMappingDocument({ a: 'id', amount: '金额' })
+  const columns = applyExcelMapping([], mapping, (() => { let index = 0; return () => `00000000-0000-4000-8000-${String(++index).padStart(12, '0')}` })())
+  assert.equal(columns[0].databaseColumn, 'a')
+  assert.equal(columns[0].excelHeader, 'id')
+  assert.equal(columns[1].exportOrder, 1)
+  assert.deepEqual(excelMappingFromColumns(columns), mapping)
+  const edited = applyExcelMapping(columns, { a: '编号' }, () => { throw new Error('existing field must keep its stable id') })
+  assert.equal(edited[0].fieldId, columns[0].fieldId)
+  assert.equal(edited[0].excelHeader, '编号')
+  const renamed = renameExcelMappingField(columns, 'a', 'supplier_id')
+  assert.equal(renamed[0].fieldId, columns[0].fieldId)
+  assert.equal(renamed[0].databaseColumn, 'supplier_id')
+})
+
+test('procedure catalog and signature parsers enforce the JSON cursor protocol contract', () => {
+  const page = parseReportProcedurePage({ data: { items: [{ owner: 'REPORT', package: 'PKG', name: 'BUILD', overload: '1', argumentCount: 2, qualifiedName: 'REPORT.PKG.BUILD #1' }], hasMore: true, nextAfter: 'cursor' } })
+  assert.equal(page.items[0].qualifiedName, 'REPORT.PKG.BUILD #1')
+  const signature = parseReportProcedureSignature({ data: {
+    procedure: page.items[0], allSupported: true, protocolReady: true, inputArgName: 'P_PAYLOAD', outputArgName: 'P_RESULT', callTemplate: 'BEGIN ... END;', blockingReasons: [],
+    arguments: [
+      { name: 'P_PAYLOAD', position: 1, sequence: 1, direction: 'IN', oracleType: 'CLOB', dataLength: 4000, precision: null, scale: null, typeOwner: '', typeName: '', defaulted: false, supported: true, suggestedCode: 'payload', suggestedLogicalType: 'json', suggestedControlType: 'TEXTAREA', suggestedSystemValue: '', role: 'JSON_INPUT' },
+      { name: 'P_RESULT', position: 2, sequence: 2, direction: 'OUT', oracleType: 'REF CURSOR', dataLength: null, precision: null, scale: null, typeOwner: '', typeName: '', defaulted: false, supported: true, suggestedCode: 'result', suggestedLogicalType: 'cursor', suggestedControlType: '', suggestedSystemValue: '', role: 'RESULT_CURSOR' },
+    ],
+  } })
+  assert.equal(signature.protocolReady, true)
+  assert.equal(signature.outputArgName, 'P_RESULT')
+  assert.throws(() => parseReportProcedureSignature({ data: { ...signature, blockingReasons: ['blocked'] } }))
+})
+
+test('procedure API encodes discovery filters and REF CURSOR draft save omits legacy contracts', async () => {
+  const requests = []
+  const client = async (path, options) => {
+    requests.push({ path, options })
+    if (path.includes('procedure-signature')) return { ok: true, data: { data: {
+      procedure: { owner: 'REPORT', package: 'PKG', name: 'BUILD', overload: '', argumentCount: 0, qualifiedName: 'REPORT.PKG.BUILD' },
+      arguments: [], allSupported: false, protocolReady: false, inputArgName: '', outputArgName: '', callTemplate: '', blockingReasons: ['缺少参数'],
+    } } }
+    if (path.includes('/procedures?')) return { ok: true, data: { data: { items: [], hasMore: false, nextAfter: '' } } }
+    return { ok: true, data: { data: {
+      id: 12, code: 'json_report', name: 'JSON 报表', datasourceId: 3, status: 'DRAFT', lockVersion: 1, executionMode: 'REF_CURSOR',
+      procedure: { owner: 'REPORT', package: 'PKG', name: 'BUILD', jsonInputArgName: 'P_PAYLOAD', resultCursorArgName: 'P_RESULT' },
+      inputSchema: { store_id: { type: 'VARCHAR2', displayName: '门店' } }, parameters: [], columns: [], grants: [], result: {}, callTemplate: '',
+    } } }
+  }
+  await getReportProcedures(client, 3, { owner: ' REPORT ', search: ' daily ', limit: 200 })
+  await getReportProcedureSignature(client, 3, { owner: 'REPORT', package: 'PKG', name: 'BUILD', overload: '' })
+  const draft = parseReportDraft({ data: { id: 12, code: 'json_report', name: 'JSON 报表', datasourceId: 3, status: 'DRAFT', lockVersion: 1, executionMode: 'REF_CURSOR', procedure: { owner: 'REPORT', package: 'PKG', name: 'BUILD', jsonInputArgName: 'P_PAYLOAD', resultCursorArgName: 'P_RESULT' }, inputSchema: { store_id: { type: 'VARCHAR2', displayName: '门店' } }, parameters: [], columns: [], grants: [], result: {}, callTemplate: '' } })
+  await saveReportDraft(client, draft)
+  assert.equal(requests[0].path, '/v1/report-datasources/3/procedures?owner=REPORT&search=daily&limit=100')
+  assert.equal(requests[1].path, '/v1/report-datasources/3/procedure-signature?owner=REPORT&name=BUILD&package=PKG')
+  assert.equal(requests[2].options.body.executionMode, 'REF_CURSOR')
+  assert.deepEqual(requests[2].options.body.parameters, [])
+  assert.deepEqual(requests[2].options.body.result, {})
+  assert.equal(requests[2].options.body.callTemplate, '')
+  assert.equal(requests[2].options.body.inputSchema.store_id.displayName, '门店')
 })
 
 test('publication parser keeps only the safe Oracle validation summary', () => {
@@ -265,6 +384,7 @@ test('version parsers enforce cursor and structured summary differences', () => 
     { key: 'permissions', label: '权限', changes: [] },
   ]
   const diff = parseReportVersionDiff({ data: { base: version(11, 1), target: version(23, 2), sections } })
+  assert.equal(diff.sections[1].label, '筛选条件')
   assert.equal(diff.sections[1].changes[0].after, 3)
   assert.equal(diff.sections[3].changes[0].before, 'b'.repeat(12))
   assert.throws(() => parseReportVersionDiff({ data: { base: version(11, 1), target: version(23, 2), sections: sections.map((section) => section.key === 'excel' ? { ...section, changes: [{ ...section.changes[0], before: { leaked: true } }] } : section) } }))

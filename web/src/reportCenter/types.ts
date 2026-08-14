@@ -68,6 +68,73 @@ export type ReportDatasourceTest = {
   message: string
 }
 
+export type ReportProcedureRef = {
+  owner: string
+  package: string
+  name: string
+  overload: string
+}
+
+export type ReportProcedureSummary = ReportProcedureRef & {
+  argumentCount: number
+  qualifiedName: string
+}
+
+export type ReportProcedurePage = {
+  items: ReportProcedureSummary[]
+  hasMore: boolean
+  nextAfter: string
+}
+
+export type ReportProcedureArgument = {
+  name: string
+  position: number
+  sequence: number
+  direction: string
+  oracleType: string
+  dataLength: number | null
+  precision: number | null
+  scale: number | null
+  typeOwner: string
+  typeName: string
+  defaulted: boolean
+  supported: boolean
+  unsupportedReason: string
+  suggestedCode: string
+  suggestedLogicalType: string
+  suggestedControlType: string
+  suggestedSystemValue: string
+  role: string
+}
+
+export type ReportProcedureSignature = {
+  procedure: ReportProcedureSummary
+  arguments: ReportProcedureArgument[]
+  allSupported: boolean
+  protocolReady: boolean
+  inputArgName: string
+  outputArgName: string
+  callTemplate: string
+  blockingReasons: string[]
+}
+
+export type ReportExecutionMode = 'TABLE_SNAPSHOT' | 'REF_CURSOR'
+
+export type ReportInputControl = 'TEXT' | 'TEXTAREA' | 'NUMBER' | 'CHECKBOX' | 'DATE' | 'DATETIME' | 'SELECT' | 'MULTI_SELECT'
+
+export type ReportInputField = {
+  type: string
+  displayName: string
+  control: ReportInputControl | ''
+  required: boolean
+  multiple: boolean
+  example?: unknown
+  default?: unknown
+  allowedValues?: unknown[]
+}
+
+export type ReportInputSchema = Record<string, ReportInputField>
+
 export type ReportCenterSection = 'catalog' | 'configuration' | 'query' | 'exports'
 
 export type ReportParameter = {
@@ -135,7 +202,9 @@ export type ReportDraft = {
   datasourceId: number
   status: ReportDefinitionStatus
   lockVersion: number
-  procedure: { owner: string; package: string; name: string; overload: string }
+  executionMode: ReportExecutionMode
+  procedure: ReportProcedureRef & { jsonInputArgName: string; resultCursorArgName: string }
+  inputSchema: ReportInputSchema
   result: { tableOwner: string; tableName: string; runIdColumn: string; rowIdColumn: string }
   callTemplate: string
   parameters: ReportParameter[]
@@ -194,6 +263,8 @@ export type ReportRunContract = {
   code: string
   name: string
   description: string
+  executionMode: ReportExecutionMode
+  inputSchema: ReportInputSchema
   parameters: ReportParameter[]
 }
 

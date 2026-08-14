@@ -3,7 +3,8 @@ import { ChevronDown, ChevronLeft, ChevronRight, Download, Filter, Play, Plus, S
 import { Button, DataTable, Dialog, FeedbackState, FilterToolbar, PageCanvas, PageHeader, Section, StatusTag, type StatusTagTone } from '../../../ui'
 import { cancelReportRun, createReportExport, createReportRun, getReportExport, getReportExportDownload, queryReportResults, getReportRun, getReportRunContract, type ReportCenterClient } from '../../api'
 import { buildNewReportRunState, canStartNewReportRun, initialReportParameterValues, terminalReportExportStatuses, terminalReportRunStatuses, visibleReportParameters } from '../../queryParameters'
-import type { ReportExport, ReportFilterOperator, ReportParameter, ReportResultFilter, ReportResultPage, ReportResultQuery, ReportRun, ReportRunContract } from '../../types'
+import { buildReportConditions, initialReportConditionValues } from '../../refCursorConfig'
+import type { ReportExport, ReportFilterOperator, ReportInputField, ReportParameter, ReportResultFilter, ReportResultPage, ReportResultQuery, ReportRun, ReportRunContract } from '../../types'
 import { useReportCatalog } from '../../useReportCatalog'
 import styles from './ReportQueryPage.module.css'
 
@@ -55,7 +56,7 @@ export function ReportQueryPage({ client, navigation }: { client: ReportCenterCl
         return
       }
       setContract(response.data)
-      setValues(initialReportParameterValues(response.data.parameters))
+      setValues(response.data.executionMode === 'REF_CURSOR' ? initialReportConditionValues(response.data.inputSchema) : initialReportParameterValues(response.data.parameters))
       setContractState({ loading: false, error: '' })
     })
     return () => controller.abort()
@@ -64,13 +65,18 @@ export function ReportQueryPage({ client, navigation }: { client: ReportCenterCl
   async function submitRun(event: FormEvent) {
     event.preventDefault()
     if (!contract || operation.busy) return
-    const normalized = buildRunParameters(contract.parameters, values)
-    if (!normalized.ok) {
-      setOperation({ busy: false, error: normalized.error })
-      return
+    let runInput: Record<string, unknown>
+    if (contract.executionMode === 'REF_CURSOR') {
+      const normalized = buildReportConditions(contract.inputSchema, values)
+      if (!normalized.ok) { setOperation({ busy: false, error: normalized.error }); return }
+      runInput = normalized.conditions
+    } else {
+      const normalized = buildRunParameters(contract.parameters, values)
+      if (!normalized.ok) { setOperation({ busy: false, error: normalized.error }); return }
+      runInput = normalized.parameters
     }
     setOperation({ busy: true, error: '' })
-    const response = await createReportRun(client, contract.definitionId, normalized.parameters)
+    const response = await createReportRun(client, contract.definitionId, runInput, contract.executionMode)
     if (!response.ok) {
       setOperation({ busy: false, error: response.error })
       return
@@ -212,7 +218,7 @@ export function ReportQueryPage({ client, navigation }: { client: ReportCenterCl
     setCursorIndex(next.cursorIndex)
     setFiltersOpen(next.filtersOpen)
     setParametersOpen(next.parametersOpen)
-    setValues(next.values)
+    setValues(contract.executionMode === 'REF_CURSOR' ? initialReportConditionValues(contract.inputSchema) : next.values)
     setOperation(next.operation)
   }
 
@@ -221,24 +227,24 @@ export function ReportQueryPage({ client, navigation }: { client: ReportCenterCl
   return (
     <PageCanvas>
       {navigation}
-      <PageHeader eyebrow="ORACLE EXECUTION" title="报表查询" description="参数来自已发布的不可变契约；一次运行生成一个快照，分页和正式导出均复用该 run_id。" actions={run ? <div className={styles.pageActions}>{run.canCancel ? <button type="button" onClick={() => setCancelState({ open: true, busy: false, error: '' })}><Square aria-hidden="true" />取消运行</button> : null}<button type="button" onClick={startNewRun} disabled={!canStartNewRun}><Plus aria-hidden="true" />新建运行</button></div> : undefined} />
+      <PageHeader eyebrow="ORACLE EXECUTION" title="报表查询" description="筛选条件来自已发布的 JSON 契约；一次运行生成一个快照，分页和正式导出均复用该 run_id。" actions={run ? <div className={styles.pageActions}>{run.canCancel ? <button type="button" onClick={() => setCancelState({ open: true, busy: false, error: '' })}><Square aria-hidden="true" />取消运行</button> : null}<button type="button" onClick={startNewRun} disabled={!canStartNewRun}><Plus aria-hidden="true" />新建运行</button></div> : undefined} />
       <FilterToolbar summary={run ? <StatusTag tone={runTone(run)}>{runLabel(run.status)}</StatusTag> : <StatusTag tone="neutral">等待选择报表</StatusTag>}>
         <div className={styles.catalogSelector}><label className={styles.selector}>选择报表<select value={selectedId} onChange={(event) => setSelectedId(event.currentTarget.value)} disabled={loading || frozen || published.length === 0}><option value="">请选择已发布报表</option>{published.map((report) => <option value={report.id} key={report.id}>{report.name}</option>)}</select></label>{hasMore ? <button type="button" onClick={() => void loadMore()} disabled={loadingMore || frozen}>{loadingMore ? '正在加载…' : '加载更多'}</button> : null}</div>
       </FilterToolbar>
-      <Section title="运行参数" description={contract ? `发布版本 #${contract.versionId} · {{形参}} 仅作为 Oracle 绑定变量` : '选择报表后读取已发布参数契约。'} actions={<button type="button" aria-expanded={parametersOpen} onClick={() => setParametersOpen((open) => !open)}><ChevronDown className={parametersOpen ? styles.chevronOpen : undefined} aria-hidden="true" />{parametersOpen ? '收起参数' : '展开参数'}</button>}>
+      <Section title="筛选条件" description={contract ? `发布版本 #${contract.versionId} · 条件会统一写入存储过程 JSON` : '选择报表后读取已发布筛选契约。'} actions={<button type="button" aria-expanded={parametersOpen} onClick={() => setParametersOpen((open) => !open)}><ChevronDown className={parametersOpen ? styles.chevronOpen : undefined} aria-hidden="true" />{parametersOpen ? '收起条件' : '展开条件'}</button>}>
         {parametersOpen ? <>
-        {contractState.loading ? <FeedbackState kind="loading" title="正在读取已发布参数契约" /> : null}
-        {contractState.error ? <FeedbackState kind="error" title="参数契约加载失败" description={contractState.error} /> : null}
-        {contract ? <form className={styles.parameterForm} onSubmit={(event) => void submitRun(event)}>{visibleReportParameters(contract.parameters).map((parameter) => <ParameterField disabled={frozen || operation.busy} key={parameter.code} parameter={parameter} value={values[parameter.code]} onChange={(value) => setValues((current) => ({ ...current, [parameter.code]: value }))} />)}<div className={styles.runActions}><span>{frozen ? '本次条件已冻结；点击页头“新建运行”可恢复默认参数并重新查询。' : `${visibleReportParameters(contract.parameters).length} 个可填写参数，系统参数不会显示。`}</span><Button variant="primary" type="submit" disabled={frozen || operation.busy}><Play aria-hidden="true" />运行报表</Button></div></form> : null}
+        {contractState.loading ? <FeedbackState kind="loading" title="正在读取已发布筛选契约" /> : null}
+        {contractState.error ? <FeedbackState kind="error" title="筛选契约加载失败" description={contractState.error} /> : null}
+        {contract ? <form className={styles.parameterForm} onSubmit={(event) => void submitRun(event)}>{contract.executionMode === 'REF_CURSOR' ? Object.entries(contract.inputSchema).map(([code, field]) => <ConditionField code={code} disabled={frozen || operation.busy} field={field} key={code} value={values[code]} onChange={(value) => setValues((current) => ({ ...current, [code]: value }))} />) : visibleReportParameters(contract.parameters).map((parameter) => <ParameterField disabled={frozen || operation.busy} key={parameter.code} parameter={parameter} value={values[parameter.code]} onChange={(value) => setValues((current) => ({ ...current, [parameter.code]: value }))} />)}<div className={styles.runActions}><span>{frozen ? '本次条件已冻结；点击页头“新建运行”可恢复默认条件并重新查询。' : `${reportConditionCount(contract)} 个可填写筛选条件。`}</span><Button variant="primary" type="submit" disabled={frozen || operation.busy}><Play aria-hidden="true" />运行报表</Button></div></form> : null}
         {!contract && !contractState.loading && !contractState.error ? <FeedbackState kind="empty" title="尚未选择报表" description="请选择一份已发布且有查询权限的报表。" /> : null}
-        </> : <div className={styles.collapsedParameters}>{contract ? `${visibleReportParameters(contract.parameters).length} 个业务参数${frozen ? ' · 本次运行条件已冻结' : ''}` : '参数区已收起'}</div>}
+        </> : <div className={styles.collapsedParameters}>{contract ? `${reportConditionCount(contract)} 个筛选条件${frozen ? ' · 本次运行条件已冻结' : ''}` : '筛选区已收起'}</div>}
       </Section>
       {run ? <div className={styles.statusBar} role="status"><span><strong>{runLabel(run.status)}</strong><small>运行 #{run.id} · {run.rowCount.toLocaleString('zh-CN')} 行</small></span><span>{run.errorMessage || (run.resultExpiresAt ? `结果保留至 ${formatDate(run.resultExpiresAt)}` : '正在等待 Oracle 结果')}</span></div> : null}
       {operation.error ? <FeedbackState kind="error" title="操作未完成" description={operation.error} action={run && !terminalReportRunStatuses.has(run.status) ? <button type="button" onClick={() => void resumeRun()}>恢复状态查询</button> : undefined} /> : null}
-      <Section title="结果预览" description="使用签名 Cursor 进行 Oracle Keyset 分页，不会重新执行存储过程。" actions={run?.resultAvailable ? <div className={styles.resultActions}>{reportExport ? <StatusTag tone={exportTone(reportExport)}>{exportLabel(reportExport.status)}</StatusTag> : null}<button type="button" onClick={() => void startExport()} disabled={operation.busy || Boolean(reportExport)}><Download aria-hidden="true" />生成正式 Excel</button>{reportExport?.canDownload ? <Button variant="primary" onClick={() => void downloadExport()}>下载文件</Button> : null}</div> : undefined} flush>
-		{result ? <ResultQueryToolbar page={result} query={resultQuery} open={filtersOpen} disabled={operation.busy || Boolean(reportExport)} onToggle={() => setFiltersOpen((value) => !value)} onChange={setResultQuery} onApply={() => void applyResultQuery()} /> : null}
+      <Section title="结果预览" description={contract?.executionMode === 'REF_CURSOR' ? '读取本次运行的 REF CURSOR 快照；筛选统一在过程 JSON 中完成。' : '使用签名 Cursor 进行 Oracle Keyset 分页，不会重新执行存储过程。'} actions={run?.resultAvailable ? <div className={styles.resultActions}>{reportExport ? <StatusTag tone={exportTone(reportExport)}>{exportLabel(reportExport.status)}</StatusTag> : null}<button type="button" onClick={() => void startExport()} disabled={operation.busy || Boolean(reportExport)}><Download aria-hidden="true" />生成正式 Excel</button>{reportExport?.canDownload ? <Button variant="primary" onClick={() => void downloadExport()}>下载文件</Button> : null}</div> : undefined} flush>
+		{result && contract?.executionMode !== 'REF_CURSOR' ? <ResultQueryToolbar page={result} query={resultQuery} open={filtersOpen} disabled={operation.busy || Boolean(reportExport)} onToggle={() => setFiltersOpen((value) => !value)} onChange={setResultQuery} onApply={() => void applyResultQuery()} /> : null}
         {operation.busy && !result ? <FeedbackState kind="loading" title={reportExport ? '正在生成并校验正式 Excel' : '正在执行报表'} description={reportExport ? exportProgress(reportExport) : 'Oracle 存储过程只会执行一次，请稍候。'} /> : null}
-        {!run && !loading ? <FeedbackState kind="empty" title={published.length === 0 ? '暂无已发布报表' : '尚未执行报表'} description={published.length === 0 ? '发布版本可用后会出现在上方选择器。' : '填写参数并运行后，结果将在这里分页展示。'} /> : null}
+        {!run && !loading ? <FeedbackState kind="empty" title={published.length === 0 ? '暂无已发布报表' : '尚未执行报表'} description={published.length === 0 ? '发布版本可用后会出现在上方选择器。' : '填写筛选条件并运行后，结果将在这里分页展示。'} /> : null}
         {loading ? <FeedbackState kind="loading" title="正在读取可用报表" /> : error ? <FeedbackState kind="error" title="可用报表加载失败" description={error} action={<button type="button" onClick={reload}>重试</button>} /> : null}
         {result ? <ResultTable page={result} /> : null}
         {result ? <div className={styles.pagination}><span>第 {cursorIndex + 1} 页 · 每页 {result.pagination.pageSize} 行</span><div><button type="button" onClick={() => void previousPage()} disabled={operation.busy || cursorIndex === 0}><ChevronLeft aria-hidden="true" />上一页</button><button type="button" onClick={() => void nextPage()} disabled={operation.busy || !result.pagination.hasMore}>下一页<ChevronRight aria-hidden="true" /></button></div></div> : null}
@@ -257,6 +263,21 @@ function ParameterField({ parameter, value, disabled, onChange }: { parameter: R
   const rules = parameter.validation
   const common = { id, required: parameter.required, disabled, value: String(value ?? ''), minLength: safeIntegerRule(rules.minLength), maxLength: parameter.maxLength ?? safeIntegerRule(rules.maxLength), pattern: typeof rules.pattern === 'string' ? rules.pattern : undefined, onChange: (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => onChange(event.currentTarget.value) }
   return <label className={styles.field} htmlFor={id}><span>{parameter.label}{parameter.required ? ' *' : ''}</span>{parameter.controlType === 'TEXTAREA' ? <textarea {...common} rows={3} /> : <input {...common} type={type} inputMode={parameter.controlType === 'NUMBER' ? 'decimal' : undefined} />}<small>{parameter.errorMessage || hint}</small></label>
+}
+
+function ConditionField({ code, field, value, disabled, onChange }: { code: string; field: ReportInputField; value: unknown; disabled: boolean; onChange: (value: unknown) => void }) {
+  const id = `report-condition-${code}`
+  const label = `${field.displayName}${field.required ? ' *' : ''}`
+  const hint = [code, field.type, field.required ? '必填' : '选填', field.multiple ? '多值 JSON 数组' : '单值'].join(' · ')
+  if (field.allowedValues?.length) {
+    const options = field.allowedValues.map((item, index) => ({ key: String(index), value: item, label: displayConditionOption(item) }))
+    const selected = field.multiple ? options.filter((option) => (Array.isArray(value) ? value : []).some((item) => comparableConditionValue(item) === comparableConditionValue(option.value))).map((option) => option.key) : options.find((option) => comparableConditionValue(option.value) === comparableConditionValue(value))?.key ?? ''
+    return <label className={styles.field} htmlFor={id}><span>{label}</span><select id={id} multiple={field.multiple} required={field.required} disabled={disabled} value={selected} onChange={(event) => onChange(field.multiple ? Array.from(event.currentTarget.selectedOptions, (option) => option.value).filter(Boolean).map((key) => options[Number(key)]?.value).filter((item) => item !== undefined) : event.currentTarget.value === '' ? '' : options[Number(event.currentTarget.value)]?.value)}>{field.multiple ? null : <option value="" disabled={field.required}>请选择</option>}{options.map((option) => <option value={option.key} key={option.key}>{option.label}</option>)}</select><small>{hint}</small></label>
+  }
+  if (field.multiple) return <label className={styles.field} htmlFor={id}><span>{label}</span><textarea id={id} rows={3} required={field.required} disabled={disabled} value={Array.isArray(value) ? JSON.stringify(value) : String(value ?? '')} placeholder={'["a","b"]'} onChange={(event) => onChange(event.currentTarget.value)} /><small>{hint}</small></label>
+  if (field.type === 'BOOLEAN' || field.control === 'CHECKBOX') return <label className={styles.field} htmlFor={id}><span>{label}</span><select id={id} required={field.required} disabled={disabled} value={value === true ? 'true' : value === false ? 'false' : ''} onChange={(event) => onChange(event.currentTarget.value === '' ? '' : event.currentTarget.value === 'true')}><option value="">请选择</option><option value="true">是</option><option value="false">否</option></select><small>{hint}</small></label>
+  const common = { id, required: field.required, disabled, value: String(value ?? ''), placeholder: field.example === undefined ? undefined : String(field.example), onChange: (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => onChange(event.currentTarget.value) }
+  return <label className={styles.field} htmlFor={id}><span>{label}</span>{field.control === 'TEXTAREA' ? <textarea {...common} rows={3} /> : <input {...common} type="text" inputMode={field.type === 'NUMBER' || field.control === 'NUMBER' ? 'decimal' : undefined} />}<small>{hint}</small></label>
 }
 
 function ResultTable({ page }: { page: ReportResultPage }) {
@@ -318,6 +339,9 @@ function buildRunParameters(parameters: ReportParameter[], values: Record<string
   return { ok: true, parameters: result }
 }
 function toStringArray(value: unknown) { return Array.isArray(value) ? value.map(String) : [] }
+function reportConditionCount(contract: ReportRunContract) { return contract.executionMode === 'REF_CURSOR' ? Object.keys(contract.inputSchema).length : visibleReportParameters(contract.parameters).length }
+function displayConditionOption(value: unknown) { return typeof value === 'string' ? value : JSON.stringify(value) }
+function comparableConditionValue(value: unknown) { return JSON.stringify(value) }
 function displayCell(value: unknown, nullDisplay: string) { if (value === null || value === undefined) return nullDisplay || '-'; if (typeof value === 'object') return JSON.stringify(value); return String(value) }
 function wait(milliseconds: number, signal: AbortSignal) { return new Promise<void>((resolve) => { const finish = () => { window.clearTimeout(timer); signal.removeEventListener('abort', finish); resolve() }; const timer = window.setTimeout(finish, milliseconds); signal.addEventListener('abort', finish, { once: true }) }) }
 function runTone(run: ReportRun): StatusTagTone { return ['SUCCEEDED', 'EXPORTED', 'RESULT_PURGED'].includes(run.status) ? 'success' : run.status === 'FAILED' || run.status === 'CANCELLED' ? 'danger' : run.status === 'UNKNOWN' || run.status === 'RECONCILING' ? 'warning' : 'running' }

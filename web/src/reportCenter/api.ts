@@ -1,5 +1,6 @@
 import type { ClientResponse, HTTPMethod } from '../api/client'
-import type { ReportAudit, ReportAuditPage, ReportAuditQuery, ReportCatalogPage, ReportCatalogQuery, ReportColumn, ReportDatasource, ReportDatasourceInput, ReportDatasourceTest, ReportDefinitionStatus, ReportDraft, ReportExport, ReportExportPage, ReportFilterOperator, ReportGrant, ReportParameter, ReportPublication, ReportResultPage, ReportResultQuery, ReportRun, ReportRunContract, ReportRunStatus, ReportSummary, ReportVersionDiff, ReportVersionPage, ReportVersionSummary } from './types'
+import { parseReportInputSchemaDocument } from './refCursorConfig.js'
+import type { ReportAudit, ReportAuditPage, ReportAuditQuery, ReportCatalogPage, ReportCatalogQuery, ReportColumn, ReportDatasource, ReportDatasourceInput, ReportDatasourceTest, ReportDefinitionStatus, ReportDraft, ReportExport, ReportExportPage, ReportFilterOperator, ReportGrant, ReportParameter, ReportProcedureArgument, ReportProcedurePage, ReportProcedureRef, ReportProcedureSignature, ReportProcedureSummary, ReportPublication, ReportResultPage, ReportResultQuery, ReportRun, ReportRunContract, ReportRunStatus, ReportSummary, ReportVersionDiff, ReportVersionPage, ReportVersionSummary } from './types'
 
 type JsonRecord = Record<string, unknown>
 
@@ -76,6 +77,22 @@ export async function testReportDatasourceConnection(client: ReportCenterClient,
   } }, parseReportDatasourceTest, 'Oracle 连接测试失败。')
 }
 
+export async function getReportProcedures(client: ReportCenterClient, datasourceId: number, query: { owner?: string; search?: string; after?: string; limit?: number }, signal?: AbortSignal): Promise<ReportAPIResult<ReportProcedurePage>> {
+  const search = new URLSearchParams()
+  if (query.owner?.trim()) search.set('owner', query.owner.trim())
+  if (query.search?.trim()) search.set('search', query.search.trim())
+  if (query.after) search.set('after', query.after)
+  search.set('limit', String(Math.min(100, Math.max(1, query.limit ?? 50))))
+  return requestAndParse(client, `/v1/report-datasources/${datasourceId}/procedures?${search}`, { method: 'GET', signal }, parseReportProcedurePage, 'Oracle 存储过程目录加载失败。')
+}
+
+export async function getReportProcedureSignature(client: ReportCenterClient, datasourceId: number, procedure: ReportProcedureRef, signal?: AbortSignal): Promise<ReportAPIResult<ReportProcedureSignature>> {
+  const search = new URLSearchParams({ owner: procedure.owner, name: procedure.name })
+  if (procedure.package) search.set('package', procedure.package)
+  if (procedure.overload) search.set('overload', procedure.overload)
+  return requestAndParse(client, `/v1/report-datasources/${datasourceId}/procedure-signature?${search}`, { method: 'GET', signal }, parseReportProcedureSignature, 'Oracle 存储过程签名加载失败。')
+}
+
 export function parseReportDatasources(payload: unknown): ReportDatasource[] {
   const data = unwrapData(payload)
   const rawItems = firstArray(data.items)
@@ -128,6 +145,37 @@ export function parseReportDatasourceTest(payload: unknown): ReportDatasourceTes
   return { status, testedAt, latencyMs: nonNegativeInteger(data.latencyMs), errorCode: publicString(data.errorCode, 100), message }
 }
 
+export function parseReportProcedurePage(payload: unknown): ReportProcedurePage {
+  const data = unwrapData(payload)
+  if (!Array.isArray(data.items) || typeof data.hasMore !== 'boolean') throw new Error('invalid procedure page')
+  const items = data.items.map(parseReportProcedureSummary)
+  const nextAfter = publicString(data.nextAfter, 1024)
+  if (data.hasMore && (!items.length || !nextAfter)) throw new Error('invalid procedure cursor')
+  return { items, hasMore: data.hasMore, nextAfter }
+}
+
+export function parseReportProcedureSignature(payload: unknown): ReportProcedureSignature {
+  const data = unwrapData(payload)
+  const procedure = parseReportProcedureSummary(data.procedure)
+  if (!Array.isArray(data.arguments) || !Array.isArray(data.blockingReasons) || typeof data.protocolReady !== 'boolean' || typeof data.allSupported !== 'boolean') throw new Error('invalid procedure signature')
+  const argumentsList = data.arguments.map(parseReportProcedureArgument)
+  const blockingReasons = data.blockingReasons.map((value) => publicString(value, 300))
+  if (blockingReasons.some((value) => !value) || procedure.argumentCount !== argumentsList.length || data.protocolReady !== data.allSupported) throw new Error('invalid procedure signature')
+  const inputArgName = publicString(data.inputArgName, 128)
+  const outputArgName = publicString(data.outputArgName, 128)
+  if (data.protocolReady && (!inputArgName || !outputArgName || blockingReasons.length > 0)) throw new Error('invalid procedure protocol')
+  return {
+    procedure,
+    arguments: argumentsList,
+    allSupported: data.allSupported,
+    protocolReady: data.protocolReady,
+    inputArgName,
+    outputArgName,
+    callTemplate: typeof data.callTemplate === 'string' ? data.callTemplate.slice(0, 65536) : '',
+    blockingReasons,
+  }
+}
+
 export async function getReportDraft(client: ReportCenterClient, reportId: number, signal?: AbortSignal): Promise<ReportAPIResult<ReportDraft>> {
   return requestAndParse(client, `/v1/reports/${reportId}`, { method: 'GET', signal }, parseReportDraft, '报表草稿加载失败。')
 }
@@ -153,8 +201,9 @@ export async function getReportVersionDiff(client: ReportCenterClient, reportId:
   return requestAndParse(client, `/v1/reports/${reportId}/version-diff?${search}`, { method: 'GET', signal }, parseReportVersionDiff, '报表版本差异加载失败。')
 }
 
-export async function createReportRun(client: ReportCenterClient, reportId: number, parameters: Record<string, unknown>): Promise<ReportAPIResult<ReportRun>> {
-  return requestAndParse(client, `/v1/reports/${reportId}/runs`, { method: 'POST', body: { parameters } }, parseReportRun, '报表运行创建失败。')
+export async function createReportRun(client: ReportCenterClient, reportId: number, input: Record<string, unknown>, executionMode: ReportDraft['executionMode']): Promise<ReportAPIResult<ReportRun>> {
+  const body = executionMode === 'REF_CURSOR' ? { conditions: input } : { parameters: input }
+  return requestAndParse(client, `/v1/reports/${reportId}/runs`, { method: 'POST', body }, parseReportRun, '报表运行创建失败。')
 }
 
 export async function getReportRun(client: ReportCenterClient, runId: number, signal?: AbortSignal): Promise<ReportAPIResult<ReportRun>> {
@@ -213,12 +262,16 @@ export function parseReportRunContract(payload: unknown): ReportRunContract {
     return parameter ? [parameter] : []
   })
   if (parameters.length !== rawParameters.length) throw new Error('invalid run contract parameters')
+  const executionMode = data.executionMode === 'REF_CURSOR' ? 'REF_CURSOR' : 'TABLE_SNAPSHOT'
+  const inputSchema = executionMode === 'REF_CURSOR' ? parseReportInputSchemaDocument(data.inputSchema) : {}
   return {
     definitionId,
     versionId,
     code: publicString(data.code, 64),
     name: publicString(data.name, 128),
     description: publicString(data.description, 500),
+    executionMode,
+    inputSchema,
     parameters: parameters.sort((left, right) => left.displayOrder - right.displayOrder || left.position - right.position),
   }
 }
@@ -235,11 +288,19 @@ export function parseReportDraft(payload: unknown): ReportDraft {
   const columns = rawColumns.flatMap((value) => { const item = parseReportColumn(value); return item ? [item] : [] })
   const rawGrants = firstArray(data.grants)
   const grants = rawGrants.flatMap((value) => { const item = parseReportGrant(value); return item ? [item] : [] })
+  const executionMode = data.executionMode === 'REF_CURSOR' ? 'REF_CURSOR' : 'TABLE_SNAPSHOT'
+  let inputSchema: ReportDraft['inputSchema'] = {}
+  if (executionMode === 'REF_CURSOR') inputSchema = parseReportInputSchemaDocument(data.inputSchema)
   if (!id || !datasourceId || parameters.length !== rawParameters.length || columns.length !== rawColumns.length || grants.length !== rawGrants.length) throw new Error('invalid report draft')
   return {
     id, datasourceId, code: publicString(data.code, 64), name: publicString(data.name, 128), category: publicString(data.category, 64), description: publicString(data.description, 500),
     status: reportStatus(data.status), lockVersion: positiveInteger(data.lockVersion) ?? 0,
-    procedure: { owner: publicString(procedure.owner, 128), package: publicString(procedure.package, 128), name: publicString(procedure.name, 128), overload: publicString(procedure.overload, 32) },
+    executionMode,
+    procedure: {
+      owner: publicString(procedure.owner, 128), package: publicString(procedure.package, 128), name: publicString(procedure.name, 128), overload: publicString(procedure.overload, 32),
+      jsonInputArgName: publicString(procedure.jsonInputArgName, 128), resultCursorArgName: publicString(procedure.resultCursorArgName, 128),
+    },
+    inputSchema,
     result: { tableOwner: publicString(result.tableOwner, 128), tableName: publicString(result.tableName, 128), runIdColumn: publicString(result.runIdColumn, 128), rowIdColumn: publicString(result.rowIdColumn, 128) },
     callTemplate: typeof data.callTemplate === 'string' ? data.callTemplate.slice(0, 65536) : '', parameters, columns, grants,
     createdAt: publicDate(data.createdAt), updatedAt: publicDate(data.updatedAt),
@@ -425,6 +486,38 @@ function parseReportParameter(value: unknown): ReportParameter | null {
   }
 }
 
+function parseReportProcedureSummary(value: unknown): ReportProcedureSummary {
+  if (!isRecord(value)) throw new Error('invalid procedure')
+  const owner = publicString(value.owner, 128)
+  const packageName = publicString(value.package, 128)
+  const name = publicString(value.name, 128)
+  const overload = publicString(value.overload, 32)
+  const argumentCount = strictNonNegativeInteger(value.argumentCount)
+  const qualifiedName = publicString(value.qualifiedName, 520)
+  if (!owner || !name || !qualifiedName) throw new Error('invalid procedure')
+  return { owner, package: packageName, name, overload, argumentCount, qualifiedName }
+}
+
+function parseReportProcedureArgument(value: unknown): ReportProcedureArgument {
+  if (!isRecord(value)) throw new Error('invalid procedure argument')
+  const name = publicString(value.name, 128)
+  const position = positiveInteger(value.position)
+  const sequence = positiveInteger(value.sequence)
+  const direction = publicString(value.direction, 16)
+  const oracleType = publicString(value.oracleType, 64)
+  const role = publicString(value.role, 32)
+  if (!name || !position || !sequence || !direction || !oracleType || !role || typeof value.defaulted !== 'boolean' || typeof value.supported !== 'boolean') throw new Error('invalid procedure argument')
+  return {
+    name, position, sequence, direction, oracleType,
+    dataLength: nullableInteger(value.dataLength), precision: nullableInteger(value.precision), scale: nullableInteger(value.scale),
+    typeOwner: publicString(value.typeOwner, 128), typeName: publicString(value.typeName, 128),
+    defaulted: value.defaulted, supported: value.supported,
+    unsupportedReason: publicString(value.unsupportedReason, 300), suggestedCode: publicString(value.suggestedCode, 64),
+    suggestedLogicalType: publicString(value.suggestedLogicalType, 32), suggestedControlType: publicString(value.suggestedControlType, 32),
+    suggestedSystemValue: publicString(value.suggestedSystemValue, 32), role,
+  }
+}
+
 function parseReportColumn(value: unknown): ReportColumn | null {
   if (!isRecord(value)) return null
   const fieldId = publicString(value.fieldId, 36)
@@ -449,8 +542,11 @@ function parseReportGrant(value: unknown): ReportGrant | null {
 function serializeReportDraft(draft: ReportDraft, creating: boolean) {
   return {
     code: draft.code, name: draft.name, category: draft.category, description: draft.description, datasourceId: draft.datasourceId,
-    ...(creating ? {} : { expectedLockVersion: draft.lockVersion }), procedure: draft.procedure, result: draft.result, callTemplate: draft.callTemplate,
-    parameters: draft.parameters.map((parameter) => ({ ...parameter, defaultValue: parameter.sensitive ? undefined : parameter.defaultValue, allowedValues: parameter.allowedValues.length ? parameter.allowedValues : undefined, validation: Object.keys(parameter.validation).length ? parameter.validation : undefined, normalizer: Object.keys(parameter.normalizer).length ? parameter.normalizer : undefined, valueSource: Object.keys(parameter.valueSource).length ? parameter.valueSource : undefined, nullPolicy: parameter.nullPolicy || 'TYPED_NULL' })),
+    ...(creating ? {} : { expectedLockVersion: draft.lockVersion }), executionMode: draft.executionMode, procedure: draft.procedure,
+    inputSchema: draft.executionMode === 'REF_CURSOR' ? draft.inputSchema : undefined,
+    result: draft.executionMode === 'REF_CURSOR' ? {} : draft.result,
+    callTemplate: draft.executionMode === 'REF_CURSOR' ? '' : draft.callTemplate,
+    parameters: draft.executionMode === 'REF_CURSOR' ? [] : draft.parameters.map((parameter) => ({ ...parameter, defaultValue: parameter.sensitive ? undefined : parameter.defaultValue, allowedValues: parameter.allowedValues.length ? parameter.allowedValues : undefined, validation: Object.keys(parameter.validation).length ? parameter.validation : undefined, normalizer: Object.keys(parameter.normalizer).length ? parameter.normalizer : undefined, valueSource: Object.keys(parameter.valueSource).length ? parameter.valueSource : undefined, nullPolicy: parameter.nullPolicy || 'TYPED_NULL' })),
     columns: draft.columns,
     grants: draft.grants,
   }
@@ -539,7 +635,7 @@ function parseReportValidationSummary(value: unknown) {
 
 const reportVersionDiffContract = {
   procedure: { label: '存储过程', changes: { procedureSignatureHash: '过程签名' } },
-  parameters: { label: '{{形参}}', changes: { parameterCount: '参数数量', parameterSchemaHash: '参数 Schema' } },
+  parameters: { label: '筛选条件', legacyLabel: '{{形参}}', changes: { parameterCount: '条件数量', parameterSchemaHash: '条件 Schema' } },
   results: { label: '结果字段与 Excel', changes: { columnCount: '字段数量', resultSchemaHash: '结果 Schema' } },
   excel: { label: 'Excel 契约', changes: { exportSchemaHash: 'Excel Schema' } },
   permissions: { label: '权限', changes: { grantCount: '授权数量', permissionHash: '权限契约' } },
@@ -568,14 +664,16 @@ export function parseReportVersionDiff(payload: unknown): ReportVersionDiff {
     if (!isRecord(section) || !Array.isArray(section.changes)) throw new Error('invalid report version diff')
     const key = publicString(section.key, 64) as ReportVersionSectionKey
     const contract = reportVersionDiffContract[key]
-    if (!contract || seenSections.has(key) || section.label !== contract.label) throw new Error('invalid report version diff')
+    const labelMatches = contract && (section.label === contract.label || ('legacyLabel' in contract && section.label === contract.legacyLabel))
+    if (!contract || seenSections.has(key) || !labelMatches) throw new Error('invalid report version diff')
     seenSections.add(key)
     const seenChanges = new Set<string>()
     const changes = section.changes.map((change) => {
       if (!isRecord(change) || change.kind !== 'CHANGED') throw new Error('invalid report version change')
       const changeKey = publicString(change.key, 64)
       const changeLabel = contract.changes[changeKey as keyof typeof contract.changes]
-      if (!changeLabel || seenChanges.has(changeKey) || change.label !== changeLabel) throw new Error('invalid report version change')
+      const legacyChangeLabel = key === 'parameters' ? ({ parameterCount: '参数数量', parameterSchemaHash: '参数 Schema' } as const)[changeKey as 'parameterCount' | 'parameterSchemaHash'] : undefined
+      if (!changeLabel || seenChanges.has(changeKey) || (change.label !== changeLabel && change.label !== legacyChangeLabel)) throw new Error('invalid report version change')
       seenChanges.add(changeKey)
       const countChange = changeKey.endsWith('Count')
       const before = countChange ? strictNonNegativeInteger(change.before) : shortVersionHash(change.before)

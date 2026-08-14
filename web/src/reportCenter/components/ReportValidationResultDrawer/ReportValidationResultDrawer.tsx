@@ -19,7 +19,7 @@ export function ReportValidationResultDrawer({ publication, onClose }: { publica
         <ResultSection title="存储过程" rows={[
           ['过程', qualifiedName(result.procedure.owner, result.procedure.package, result.procedure.name)],
           ['Overload', result.procedure.overload || '—'],
-          ['参数数量', result.procedure.argumentCount],
+          ['过程参数数量', result.procedure.argumentCount],
           ['签名 Hash', result.procedure.signatureHash],
         ]} />
         <ResultSection title="结果表与快照" rows={[
