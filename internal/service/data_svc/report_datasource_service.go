@@ -395,7 +395,7 @@ func (service *ReportDatasourceService) GetProcedureSignature(ctx context.Contex
 	callTemplate := ""
 	if protocolReady {
 		target := qualifiedProcedureName(normalized)
-		callTemplate = fmt.Sprintf("BEGIN %s(%s => {{payload}}, %s => :resultCursor); END;", target, inputArgName, outputArgName)
+		callTemplate = fmt.Sprintf("BEGIN %s(%s => :payload, %s => :resultCursor); END;", target, inputArgName, outputArgName)
 	}
 	return &ReportProcedureSignatureDTO{
 		Procedure: procedureSummaryDTO(normalized, len(arguments)), Arguments: items,

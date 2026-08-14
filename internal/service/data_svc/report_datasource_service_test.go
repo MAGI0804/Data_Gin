@@ -242,7 +242,7 @@ func TestReportDatasourceServiceBuildsProcedureSignatureRecommendations(t *testi
 	if !signature.AllSupported || !signature.ProtocolReady || signature.InputArgName != "P_QUERY_JSON" || signature.OutputArgName != "P_RESULT" || signature.Arguments[0].Role != "JSON_INPUT" || signature.Arguments[1].Role != "RESULT_CURSOR" {
 		t.Fatalf("signature recommendations = %+v", signature)
 	}
-	want := "BEGIN REPORT.PKG_SALES.BUILD_DAILY(P_QUERY_JSON => {{payload}}, P_RESULT => :resultCursor); END;"
+	want := "BEGIN REPORT.PKG_SALES.BUILD_DAILY(P_QUERY_JSON => :payload, P_RESULT => :resultCursor); END;"
 	if signature.CallTemplate != want || connection.ref.Owner != "REPORT" || !connection.closed {
 		t.Fatalf("signature template=%q ref=%+v closed=%t", signature.CallTemplate, connection.ref, connection.closed)
 	}
