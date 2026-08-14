@@ -133,13 +133,18 @@ type ReportProcedureArgumentDTO struct {
 	SuggestedLogicalType string `json:"suggestedLogicalType"`
 	SuggestedControlType string `json:"suggestedControlType"`
 	SuggestedSystemValue string `json:"suggestedSystemValue,omitempty"`
+	Role                 string `json:"role"`
 }
 
 type ReportProcedureSignatureDTO struct {
-	Procedure    ReportProcedureSummaryDTO    `json:"procedure"`
-	Arguments    []ReportProcedureArgumentDTO `json:"arguments"`
-	AllSupported bool                         `json:"allSupported"`
-	CallTemplate string                       `json:"callTemplate"`
+	Procedure       ReportProcedureSummaryDTO    `json:"procedure"`
+	Arguments       []ReportProcedureArgumentDTO `json:"arguments"`
+	AllSupported    bool                         `json:"allSupported"`
+	ProtocolReady   bool                         `json:"protocolReady"`
+	InputArgName    string                       `json:"inputArgName"`
+	OutputArgName   string                       `json:"outputArgName"`
+	CallTemplate    string                       `json:"callTemplate"`
+	BlockingReasons []string                     `json:"blockingReasons"`
 }
 
 func NewReportDatasourceService() *ReportDatasourceService {
@@ -357,26 +362,45 @@ func (service *ReportDatasourceService) GetProcedureSignature(ctx context.Contex
 
 	usedCodes := make(map[string]int, len(arguments))
 	items := make([]ReportProcedureArgumentDTO, 0, len(arguments))
-	allSupported := true
-	bindings := make([]string, 0, len(arguments))
+	inputArgName := ""
+	outputArgName := ""
+	blockingReasons := make([]string, 0, 3)
 	for _, argument := range arguments {
 		item := procedureArgumentDTO(argument, usedCodes)
 		items = append(items, item)
-		allSupported = allSupported && item.Supported
-		bindings = append(bindings, fmt.Sprintf("%s => {{%s}}", item.Name, item.SuggestedCode))
-	}
-	callTemplate := ""
-	if allSupported {
-		target := qualifiedProcedureName(normalized)
-		if len(bindings) == 0 {
-			callTemplate = fmt.Sprintf("BEGIN %s(); END;", target)
-		} else {
-			callTemplate = fmt.Sprintf("BEGIN %s(%s); END;", target, strings.Join(bindings, ", "))
+		switch item.Role {
+		case "JSON_INPUT":
+			if inputArgName == "" {
+				inputArgName = item.Name
+			} else {
+				blockingReasons = append(blockingReasons, "存储过程只能有一个 JSON 输入参数")
+			}
+		case "RESULT_CURSOR":
+			if outputArgName == "" {
+				outputArgName = item.Name
+			} else {
+				blockingReasons = append(blockingReasons, "存储过程只能有一个 OUT REF CURSOR")
+			}
+		default:
+			blockingReasons = append(blockingReasons, fmt.Sprintf("参数 %s 不符合单 JSON 输入或 REF CURSOR 输出协议", item.Name))
 		}
+	}
+	if inputArgName == "" {
+		blockingReasons = append(blockingReasons, "缺少唯一的 IN CLOB/字符 JSON 输入参数")
+	}
+	if outputArgName == "" {
+		blockingReasons = append(blockingReasons, "缺少唯一的 OUT REF CURSOR 输出参数")
+	}
+	protocolReady := len(blockingReasons) == 0 && len(arguments) == 2
+	callTemplate := ""
+	if protocolReady {
+		target := qualifiedProcedureName(normalized)
+		callTemplate = fmt.Sprintf("BEGIN %s(%s => {{payload}}, %s => :resultCursor); END;", target, inputArgName, outputArgName)
 	}
 	return &ReportProcedureSignatureDTO{
 		Procedure: procedureSummaryDTO(normalized, len(arguments)), Arguments: items,
-		AllSupported: allSupported, CallTemplate: callTemplate,
+		AllSupported: protocolReady, ProtocolReady: protocolReady, InputArgName: inputArgName,
+		OutputArgName: outputArgName, CallTemplate: callTemplate, BlockingReasons: blockingReasons,
 	}, nil
 }
 
@@ -430,7 +454,7 @@ func displayProcedureName(ref reportoracle.ProcedureRef) string {
 
 func procedureArgumentDTO(argument reportoracle.ProcedureArgument, usedCodes map[string]int) ReportProcedureArgumentDTO {
 	oracleType := strings.ToUpper(strings.Join(strings.Fields(argument.DataType), " "))
-	logicalType, controlType, supported, reason := recommendedProcedureArgumentType(argument.Direction, oracleType, argument.TypeOwner, argument.TypeName, argument.DataScale)
+	logicalType, controlType, role, supported, reason := recommendedProcedureArgumentType(argument.Direction, oracleType, argument.TypeOwner, argument.TypeName, argument.DataScale)
 	code := suggestedProcedureParameterCode(argument.Name)
 	usedCodes[code]++
 	if usedCodes[code] > 1 {
@@ -447,31 +471,26 @@ func procedureArgumentDTO(argument reportoracle.ProcedureArgument, usedCodes map
 		TypeOwner: argument.TypeOwner, TypeName: argument.TypeName, Defaulted: argument.Defaulted,
 		Supported: supported, UnsupportedReason: reason, SuggestedCode: code,
 		SuggestedLogicalType: logicalType, SuggestedControlType: controlType, SuggestedSystemValue: systemValue,
+		Role: role,
 	}
 }
 
-func recommendedProcedureArgumentType(direction, oracleType, typeOwner, typeName string, scale *int64) (string, string, bool, string) {
-	if strings.ToUpper(strings.TrimSpace(direction)) != "IN" {
-		return "", "", false, "当前执行器仅支持 IN 参数"
+func recommendedProcedureArgumentType(direction, oracleType, typeOwner, typeName string, scale *int64) (string, string, string, bool, string) {
+	direction = strings.ToUpper(strings.TrimSpace(direction))
+	if direction == "OUT" && (oracleType == "REF CURSOR" || oracleType == "SYS_REFCURSOR" || strings.EqualFold(typeName, "SYS_REFCURSOR")) {
+		return "cursor", "", "RESULT_CURSOR", true, ""
+	}
+	if direction != "IN" {
+		return "", "", "UNSUPPORTED", false, "仅支持一个 JSON 输入参数和一个 OUT REF CURSOR"
 	}
 	if strings.TrimSpace(typeOwner) != "" || strings.TrimSpace(typeName) != "" {
-		return "", "", false, "暂不支持 Oracle 对象、集合或复合类型"
+		return "", "", "UNSUPPORTED", false, "暂不支持 Oracle 对象、集合或复合类型"
 	}
 	switch {
-	case oracleType == "VARCHAR2" || oracleType == "NVARCHAR2" || oracleType == "CHAR" || oracleType == "NCHAR":
-		return "string", "TEXT", true, ""
-	case oracleType == "CLOB" || oracleType == "NCLOB":
-		return "string", "TEXTAREA", true, ""
-	case oracleType == "NUMBER" && scale != nil && *scale == 0:
-		return "integer", "NUMBER", true, ""
-	case oracleType == "NUMBER":
-		return "decimal", "NUMBER", true, ""
-	case oracleType == "DATE" || strings.HasPrefix(oracleType, "TIMESTAMP"):
-		return "datetime", "DATETIME", true, ""
-	case oracleType == "BOOLEAN":
-		return "boolean", "CHECKBOX", true, ""
+	case oracleType == "VARCHAR2" || oracleType == "NVARCHAR2" || oracleType == "CHAR" || oracleType == "NCHAR" || oracleType == "CLOB" || oracleType == "NCLOB" || oracleType == "JSON":
+		return "json", "TEXTAREA", "JSON_INPUT", true, ""
 	default:
-		return "", "", false, "暂不支持该 Oracle 参数类型"
+		return "", "", "UNSUPPORTED", false, "JSON 输入参数必须是 CLOB、字符或 Oracle JSON 类型"
 	}
 }
 

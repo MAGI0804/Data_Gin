@@ -224,12 +224,10 @@ func TestReportDatasourceServiceListsVisibleProceduresWithOpaqueCursor(t *testin
 }
 
 func TestReportDatasourceServiceBuildsProcedureSignatureRecommendations(t *testing.T) {
-	length := int64(64)
-	zero := int64(0)
-	precision := int64(18)
+	length := int64(4000)
 	connection := &fakeReportDatasourceConnection{arguments: []reportoracle.ProcedureArgument{
-		{Name: "P_RUN_ID", Position: 1, Sequence: 1, Direction: "IN", DataType: "VARCHAR2", DataLength: &length},
-		{Name: "P_STORE_ID", Position: 2, Sequence: 2, Direction: "IN", DataType: "NUMBER", DataPrecision: &precision, DataScale: &zero, Defaulted: true},
+		{Name: "P_QUERY_JSON", Position: 1, Sequence: 1, Direction: "IN", DataType: "CLOB", DataLength: &length},
+		{Name: "P_RESULT", Position: 2, Sequence: 2, Direction: "OUT", DataType: "REF CURSOR"},
 	}}
 	store := &fakeReportDatasourceStore{item: model.ReportDatasource{
 		BaseModel: model.BaseModel{ID: 4}, Enabled: true, PasswordCiphertext: "ciphertext", CredentialKeyVersion: "key-v1", QueryTimeoutSeconds: 30,
@@ -241,10 +239,10 @@ func TestReportDatasourceServiceBuildsProcedureSignatureRecommendations(t *testi
 	if err != nil {
 		t.Fatalf("GetProcedureSignature() error = %v", err)
 	}
-	if !signature.AllSupported || signature.Arguments[0].SuggestedCode != "runId" || signature.Arguments[0].SuggestedSystemValue != "RUN_ID" || signature.Arguments[1].SuggestedLogicalType != "integer" || !signature.Arguments[1].Defaulted {
+	if !signature.AllSupported || !signature.ProtocolReady || signature.InputArgName != "P_QUERY_JSON" || signature.OutputArgName != "P_RESULT" || signature.Arguments[0].Role != "JSON_INPUT" || signature.Arguments[1].Role != "RESULT_CURSOR" {
 		t.Fatalf("signature recommendations = %+v", signature)
 	}
-	want := "BEGIN REPORT.PKG_SALES.BUILD_DAILY(P_RUN_ID => {{runId}}, P_STORE_ID => {{storeId}}); END;"
+	want := "BEGIN REPORT.PKG_SALES.BUILD_DAILY(P_QUERY_JSON => {{payload}}, P_RESULT => :resultCursor); END;"
 	if signature.CallTemplate != want || connection.ref.Owner != "REPORT" || !connection.closed {
 		t.Fatalf("signature template=%q ref=%+v closed=%t", signature.CallTemplate, connection.ref, connection.closed)
 	}
@@ -252,7 +250,8 @@ func TestReportDatasourceServiceBuildsProcedureSignatureRecommendations(t *testi
 
 func TestReportDatasourceServiceMarksUnsupportedProcedureArguments(t *testing.T) {
 	connection := &fakeReportDatasourceConnection{arguments: []reportoracle.ProcedureArgument{
-		{Name: "P_CURSOR", Position: 1, Sequence: 1, Direction: "OUT", DataType: "REF CURSOR"},
+		{Name: "P_QUERY_JSON", Position: 1, Sequence: 1, Direction: "IN", DataType: "CLOB"},
+		{Name: "P_STATUS", Position: 2, Sequence: 2, Direction: "OUT", DataType: "VARCHAR2"},
 	}}
 	store := &fakeReportDatasourceStore{item: model.ReportDatasource{
 		BaseModel: model.BaseModel{ID: 4}, Enabled: true, PasswordCiphertext: "ciphertext", CredentialKeyVersion: "key-v1", QueryTimeoutSeconds: 30,
@@ -264,7 +263,7 @@ func TestReportDatasourceServiceMarksUnsupportedProcedureArguments(t *testing.T)
 	if err != nil {
 		t.Fatalf("GetProcedureSignature() error = %v", err)
 	}
-	if signature.AllSupported || signature.CallTemplate != "" || signature.Arguments[0].Supported || signature.Arguments[0].UnsupportedReason == "" {
+	if signature.AllSupported || signature.ProtocolReady || signature.CallTemplate != "" || !signature.Arguments[0].Supported || signature.Arguments[1].Supported || signature.Arguments[1].UnsupportedReason == "" || len(signature.BlockingReasons) == 0 {
 		t.Fatalf("unsupported signature = %+v", signature)
 	}
 }
