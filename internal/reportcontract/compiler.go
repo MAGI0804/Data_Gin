@@ -246,6 +246,10 @@ func Compile(
 	if version.ExecutionMode == model.ReportExecutionModeRefCursor {
 		return compileRefCursor(version, columns, grants, procedureArguments)
 	}
+	if version.ExecutionMode == model.ReportExecutionModeTableSnapshot {
+		version.ResultRunIDColumn = reportoracle.SystemResultRunIDColumn
+		version.ResultRowIDColumn = reportoracle.SystemResultRecordColumn
+	}
 	if version.ExecutionMode == model.ReportExecutionModeTableSnapshot && strings.TrimSpace(version.JSONInputArgName) != "" {
 		return compileJSONTableSnapshot(version, parameters, columns, grants, procedureArguments, resultColumns, snapshotContract)
 	}

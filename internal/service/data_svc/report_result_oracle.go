@@ -44,12 +44,9 @@ func (oracleReportResultCleanupFactory) Open(ctx context.Context, runtime report
 			runUUID: runtime.Run.RunUUID, queryTimeout: queryTimeout,
 		}, nil
 	}
-	ref := reportoracle.ResultSnapshotRef{
-		Table:       reportoracle.ResultTableRef{Owner: runtime.Version.ResultTableOwner, Name: runtime.Version.ResultTableName},
-		RunIDColumn: runtime.Version.ResultRunIDColumn,
-		RowIDColumn: runtime.Version.ResultRowIDColumn,
-		Columns:     configuredColumns,
-	}
+	ref := reportoracle.SystemResultSnapshotRef(
+		reportoracle.ResultTableRef{Owner: runtime.Version.ResultTableOwner, Name: runtime.Version.ResultTableName}, configuredColumns,
+	)
 	resultColumns, err := adapter.InspectResultTable(queryCtx, ref.Table)
 	if err != nil {
 		return closeOnError(err)
@@ -68,6 +65,6 @@ func (oracleReportResultCleanupFactory) Open(ctx context.Context, runtime report
 		return closeOnError(err)
 	}
 	return &oracleReportExportSession{
-		adapter: adapter, purgePlan: purgePlan, runUUID: runtime.Run.RunUUID, queryTimeout: queryTimeout,
+		adapter: adapter, purgePlan: purgePlan, reportID: runtime.Run.DefinitionID, queryTimeout: queryTimeout,
 	}, nil
 }

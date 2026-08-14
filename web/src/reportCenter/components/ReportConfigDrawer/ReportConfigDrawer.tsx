@@ -42,12 +42,10 @@ export function ReportConfigDrawer({ client, report, datasources, datasourcesLoa
     if (datasources.find((item) => item.id === draft.datasourceId)?.enabled === false) return '当前 Oracle 数据源已停用，请先启用或更换数据源。'
     if (!draft.procedure.owner || !draft.procedure.name) return '请从 Oracle 查询结果中选择存储过程。'
     if (!draft.procedure.jsonInputArgName || draft.procedure.resultCursorArgName) return '所选过程必须只有一个 JSON 输入参数，且不能包含任何出参。'
-    if (!draft.result.tableOwner || !draft.result.tableName || !draft.result.runIdColumn || !draft.result.rowIdColumn) return '请完整绑定 Oracle 结果表、run_id 字段和行游标字段。'
-    if (![draft.procedure.owner, draft.procedure.name, draft.procedure.jsonInputArgName, draft.result.tableOwner, draft.result.tableName, draft.result.runIdColumn, draft.result.rowIdColumn].every((value) => oracleIdentifierPattern.test(value))) return 'Oracle 对象或字段名不合法，请从 Oracle 搜索结果中重新选择。'
+    if (!draft.result.tableOwner || !draft.result.tableName) return '请绑定包含 RUN_ID 和 ID 的 Oracle 结果表。'
+    if (![draft.procedure.owner, draft.procedure.name, draft.procedure.jsonInputArgName, draft.result.tableOwner, draft.result.tableName].every((value) => oracleIdentifierPattern.test(value))) return 'Oracle 对象或字段名不合法，请从 Oracle 搜索结果中重新选择。'
     if (draft.procedure.package && !oracleIdentifierPattern.test(draft.procedure.package)) return 'Oracle 包名不合法，请重新选择存储过程。'
-    if (draft.result.runIdColumn.toUpperCase() === draft.result.rowIdColumn.toUpperCase()) return 'run_id 字段和行游标字段不能相同。'
-    const resultKeyColumns = new Set([draft.result.runIdColumn, draft.result.rowIdColumn].map((column) => column.toUpperCase()))
-    if (draft.columns.some((column) => resultKeyColumns.has(column.databaseColumn.toUpperCase()))) return 'run_id 和行游标是系统字段，不能加入预览或 Excel 映射。'
+    if (draft.columns.some((column) => ['RUN_ID', 'ID'].includes(column.databaseColumn.toUpperCase()))) return 'RUN_ID 和 ID 是系统字段，不能加入预览或 Excel 映射。'
     try { parseReportInputSchemaDocument(draft.inputSchema) } catch (error) { return error instanceof Error ? error.message : '筛选条件配置不完整。' }
     try {
       const mapping = parseExcelMappingDocument(excelMappingFromColumns(draft.columns))
@@ -122,7 +120,7 @@ function PermissionEditor({ grants, onChange }: { grants: ReportGrant[]; onChang
 
 function Field({ label, wide, children }: { label: string; wide?: boolean; children: React.ReactNode }) { return <label className={wide ? styles.wide : ''}>{label}{children}</label> }
 function emptyProcedure(): ReportDraft['procedure'] { return { owner: '', package: '', name: '', overload: '', jsonInputArgName: '', resultCursorArgName: '' } }
-function emptyResult(): ReportDraft['result'] { return { tableOwner: '', tableName: '', runIdColumn: 'RUN_ID', rowIdColumn: 'ROW_NO' } }
+function emptyResult(): ReportDraft['result'] { return { tableOwner: '', tableName: '' } }
 function emptyDraft(): ReportDraft { const [code, field] = newReportInputField(0); return { id: 0, code: '', name: '', category: '', description: '', datasourceId: 0, status: 'DRAFT', lockVersion: 0, executionMode: 'TABLE_SNAPSHOT', procedure: emptyProcedure(), inputSchema: { [code]: field }, result: emptyResult(), callTemplate: '', parameters: [], columns: [], grants: [], createdAt: null, updatedAt: null } }
 function replaceAt<T>(items: T[], index: number, item: T) { return items.map((value, position) => position === index ? item : value) }
 function toggle(values: string[], value: string, checked: boolean) { return checked ? [...new Set([...values, value])] : values.filter((item) => item !== value) }

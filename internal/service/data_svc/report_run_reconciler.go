@@ -184,10 +184,9 @@ func (oracleReportResultEvidenceReader) CountCommittedRows(ctx context.Context, 
 	for _, column := range runtime.Columns {
 		configuredColumns = append(configuredColumns, column.DatabaseColumn)
 	}
-	contract, err := adapter.InspectResultSnapshotContract(queryCtx, reportoracle.ResultSnapshotRef{
-		Table:       reportoracle.ResultTableRef{Owner: runtime.Version.ResultTableOwner, Name: runtime.Version.ResultTableName},
-		RunIDColumn: runtime.Version.ResultRunIDColumn, RowIDColumn: runtime.Version.ResultRowIDColumn, Columns: configuredColumns,
-	})
+	contract, err := adapter.InspectResultSnapshotContract(queryCtx, reportoracle.SystemResultSnapshotRef(
+		reportoracle.ResultTableRef{Owner: runtime.Version.ResultTableOwner, Name: runtime.Version.ResultTableName}, configuredColumns,
+	))
 	if err != nil {
 		return 0, err
 	}
@@ -195,5 +194,5 @@ func (oracleReportResultEvidenceReader) CountCommittedRows(ctx context.Context, 
 	if err != nil {
 		return 0, err
 	}
-	return adapter.CountResultRows(queryCtx, plan, runtime.Run.RunUUID)
+	return adapter.CountResultRows(queryCtx, plan, runtime.Run.DefinitionID)
 }

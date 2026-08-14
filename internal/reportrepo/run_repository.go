@@ -22,6 +22,7 @@ var (
 	ErrPublishedReportNotFound = errors.New("report run: published report not found")
 	ErrReportActionDenied      = errors.New("report run: action denied")
 	ErrInvalidRun              = errors.New("report run: invalid input")
+	ErrReportRunBusy           = errors.New("report run: report snapshot is busy")
 )
 
 const (
@@ -61,6 +62,7 @@ func (repository *Repository) CreateRun(ctx context.Context, actor, definitionID
 	if repository == nil || repository.db == nil || ctx == nil || actor == 0 || definitionID == 0 || command == nil ||
 		repository.transact == nil || repository.loadPublished == nil || repository.createReportRun == nil ||
 		repository.createRunOutbox == nil || repository.writeAudit == nil || repository.validateRunSource == nil ||
+		repository.prepareRunSlot == nil ||
 		!validNewRun(command.Run, actor, definitionID) || !validRunOutbox(command.Outbox, command.Run.RunUUID) {
 		return invalidRun("repository, actor, report, run and outbox are required")
 	}
@@ -78,6 +80,10 @@ func (repository *Repository) CreateRun(ctx context.Context, actor, definitionID
 			published.Version.ProcedureSignatureHash != command.Run.ProcedureSignatureHash || published.Version.ResultSchemaHash != command.Run.ResultSchemaHash {
 			return ErrDraftVersionConflict
 		}
+		supersededRunIDs, err := repository.prepareRunSlot(ctx, tx, definitionID, outbox.AvailableAt)
+		if err != nil {
+			return err
+		}
 		exportAuthority, exportAllowed, err := actorCanRunReport(ctx, tx, actor, published.Definition.OwnerUserID, ReportActionExport, published.Grants)
 		if err != nil {
 			return err
@@ -94,6 +100,18 @@ func (repository *Repository) CreateRun(ctx context.Context, actor, definitionID
 		run.PresentationSnapshotJSON = presentationSnapshot
 		if err := repository.createReportRun(ctx, tx, &run); err != nil {
 			return err
+		}
+		for _, supersededRunID := range supersededRunIDs {
+			detail, detailErr := json.Marshal(map[string]interface{}{"replacedByRunId": run.ID})
+			if detailErr != nil {
+				return fmt.Errorf("report run: encode superseded audit: %w", detailErr)
+			}
+			if err := repository.writeAudit(ctx, tx, model.ReportAudit{
+				ActorUserID: actor, Action: "REPORT_RUN_SUPERSEDED", TargetType: "REPORT_RUN", TargetID: supersededRunID,
+				RequestID: uuid.NewString(), DetailJSON: model.JSONText(detail),
+			}); err != nil {
+				return err
+			}
 		}
 		outbox.PayloadJSON = model.JSONText(fmt.Sprintf(`{"run_id":%d}`, run.ID))
 		if err := repository.createRunOutbox(ctx, tx, &outbox); err != nil {
@@ -120,6 +138,70 @@ func (repository *Repository) CreateRun(ctx context.Context, actor, definitionID
 	command.Run = run
 	command.Outbox = outbox
 	return nil
+}
+
+func prepareReportRunSlot(ctx context.Context, tx *gorm.DB, definitionID uint, now time.Time) ([]uint, error) {
+	if ctx == nil || tx == nil || definitionID == 0 || now.IsZero() {
+		return nil, ErrInvalidRun
+	}
+	now = now.UTC().Truncate(time.Millisecond)
+	activeStatuses := []string{
+		model.ReportRunStatusQueued, model.ReportRunStatusRunning, model.ReportRunStatusCancelRequested,
+		model.ReportRunStatusUnknown, model.ReportRunStatusReconciling, model.ReportRunStatusExporting,
+		model.ReportRunStatusResultPurging,
+	}
+	var activeRuns []model.ReportRun
+	if err := tx.WithContext(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).
+		Select("id").Where("definition_id = ? AND status IN ?", definitionID, activeStatuses).Find(&activeRuns).Error; err != nil {
+		return nil, fmt.Errorf("report run: lock active snapshot slot: %w", err)
+	}
+	if len(activeRuns) > 0 {
+		return nil, ErrReportRunBusy
+	}
+	var snapshots []model.ReportRun
+	if err := tx.WithContext(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).
+		Select("id").Where("definition_id = ? AND status = ? AND result_purged_at IS NULL", definitionID, model.ReportRunStatusSucceeded).
+		Find(&snapshots).Error; err != nil {
+		return nil, fmt.Errorf("report run: lock current snapshot: %w", err)
+	}
+	if len(snapshots) == 0 {
+		return nil, nil
+	}
+	runIDs := make([]uint, 0, len(snapshots))
+	for _, snapshot := range snapshots {
+		runIDs = append(runIDs, snapshot.ID)
+	}
+	if err := tx.WithContext(ctx).Where("run_id IN ? AND expires_at <= ?", runIDs, now).Delete(&model.ReportResultReadLease{}).Error; err != nil {
+		return nil, fmt.Errorf("report run: clear expired snapshot readers: %w", err)
+	}
+	var activeReaders int64
+	if err := tx.WithContext(ctx).Model(&model.ReportResultReadLease{}).
+		Where("run_id IN ? AND expires_at > ?", runIDs, now).Count(&activeReaders).Error; err != nil {
+		return nil, fmt.Errorf("report run: count active snapshot readers: %w", err)
+	}
+	if activeReaders > 0 {
+		return nil, ErrReportRunBusy
+	}
+	var activeExports int64
+	if err := tx.WithContext(ctx).Model(&model.ReportExport{}).Where(
+		"run_id IN ? AND (status IN ? OR (status = ? AND purged_at IS NULL))",
+		runIDs, []string{model.ReportExportStatusPending, model.ReportExportStatusRunning}, model.ReportExportStatusReady,
+	).Count(&activeExports).Error; err != nil {
+		return nil, fmt.Errorf("report run: count active snapshot exports: %w", err)
+	}
+	if activeExports > 0 {
+		return nil, ErrReportRunBusy
+	}
+	result := tx.WithContext(ctx).Model(&model.ReportRun{}).
+		Where("id IN ? AND status = ? AND result_purged_at IS NULL", runIDs, model.ReportRunStatusSucceeded).
+		Updates(map[string]interface{}{"status": model.ReportRunStatusSuperseded, "updated_at": now})
+	if result.Error != nil {
+		return nil, fmt.Errorf("report run: supersede previous snapshot: %w", result.Error)
+	}
+	if result.RowsAffected != int64(len(runIDs)) {
+		return nil, ErrReportRunBusy
+	}
+	return runIDs, nil
 }
 
 func writeReportRun(ctx context.Context, tx *gorm.DB, run *model.ReportRun) error {
@@ -294,7 +376,7 @@ func loadPublishedReport(ctx context.Context, db *gorm.DB, actor, definitionID u
 	query := db.WithContext(ctx).Model(&definitionRecord{}).
 		Where("id = ? AND status = ? AND current_published_version_id <> 0", definitionID, model.ReportDefinitionStatusActive)
 	if lock {
-		query = query.Clauses(clause.Locking{Strength: "SHARE"})
+		query = query.Clauses(clause.Locking{Strength: "UPDATE"})
 	}
 	var definition definitionRecord
 	if err := query.First(&definition).Error; errors.Is(err, gorm.ErrRecordNotFound) {

@@ -72,7 +72,7 @@ func TestReportRunReconcilerKeepsUnavailableResultPending(t *testing.T) {
 func reconciliationRuntime() *reportrepo.RuntimeContract {
 	return &reportrepo.RuntimeContract{
 		Run:     model.ReportRun{BaseModel: model.BaseModel{ID: 31}, RunUUID: "11111111-1111-4111-8111-111111111111"},
-		Version: model.ReportVersion{ResultTableOwner: "REPORT_OWNER", ResultTableName: "SALES_RESULT", ResultRunIDColumn: "RUN_ID", ResultRowIDColumn: "ROW_NO"},
+		Version: model.ReportVersion{ResultTableOwner: "REPORT_OWNER", ResultTableName: "SALES_RESULT", ResultRunIDColumn: "RUN_ID", ResultRowIDColumn: "ID"},
 	}
 }
 

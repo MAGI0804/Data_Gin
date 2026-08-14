@@ -339,7 +339,7 @@ export function parseReportDraft(payload: unknown): ReportDraft {
       jsonInputArgName: publicString(procedure.jsonInputArgName, 128), resultCursorArgName: publicString(procedure.resultCursorArgName, 128),
     },
     inputSchema,
-    result: { tableOwner: publicString(result.tableOwner, 128), tableName: publicString(result.tableName, 128), runIdColumn: publicString(result.runIdColumn, 128), rowIdColumn: publicString(result.rowIdColumn, 128) },
+    result: { tableOwner: publicString(result.tableOwner, 128), tableName: publicString(result.tableName, 128) },
     callTemplate: typeof data.callTemplate === 'string' ? data.callTemplate.slice(0, 65536) : '', parameters, columns, grants,
     createdAt: publicDate(data.createdAt), updatedAt: publicDate(data.updatedAt),
   }
@@ -613,7 +613,7 @@ function serializeReportDraft(draft: ReportDraft, creating: boolean) {
     code: draft.code, name: draft.name, category: draft.category, description: draft.description, datasourceId: draft.datasourceId,
     ...(creating ? {} : { expectedLockVersion: draft.lockVersion }), executionMode: draft.executionMode, procedure: draft.procedure,
     inputSchema: jsonInput ? draft.inputSchema : undefined,
-    result: draft.executionMode === 'REF_CURSOR' ? {} : draft.result,
+    result: draft.executionMode === 'REF_CURSOR' ? {} : { tableOwner: draft.result.tableOwner, tableName: draft.result.tableName },
     callTemplate: jsonInput ? '' : draft.callTemplate,
     parameters: jsonInput ? [] : draft.parameters.map((parameter) => ({ ...parameter, defaultValue: parameter.sensitive ? undefined : parameter.defaultValue, allowedValues: parameter.allowedValues.length ? parameter.allowedValues : undefined, validation: Object.keys(parameter.validation).length ? parameter.validation : undefined, normalizer: Object.keys(parameter.normalizer).length ? parameter.normalizer : undefined, valueSource: Object.keys(parameter.valueSource).length ? parameter.valueSource : undefined, nullPolicy: parameter.nullPolicy || 'TYPED_NULL' })),
     columns: draft.columns,
@@ -671,9 +671,7 @@ function parseReportValidationSummary(value: unknown) {
   const name = publicString(procedure.name, 128)
   const tableOwner = publicString(result.tableOwner, 128)
   const tableName = publicString(result.tableName, 128)
-  const runIdColumn = publicString(snapshot.runIdColumn, 128)
-  const rowIdColumn = publicString(snapshot.rowIdColumn, 128)
-  if (!validatedAt || !procedureSignatureHash || !resultSchemaHash || !exportSchemaHash || !owner || !name || !tableOwner || !tableName || !runIdColumn || !rowIdColumn || argumentCount === null || columnCount === null || exportableColumnCount === null || snapshot.uniqueKeyValidated !== true) throw new Error('invalid publication validation')
+  if (!validatedAt || !procedureSignatureHash || !resultSchemaHash || !exportSchemaHash || !owner || !name || !tableOwner || !tableName || argumentCount === null || columnCount === null || exportableColumnCount === null || snapshot.uniqueKeyValidated !== true) throw new Error('invalid publication validation')
   return {
       validatedAt,
       procedure: {
@@ -691,8 +689,6 @@ function parseReportValidationSummary(value: unknown) {
         schemaHash: resultSchemaHash,
       },
       snapshot: {
-        runIdColumn,
-        rowIdColumn,
         uniqueKeyValidated: true,
       },
       export: {
@@ -857,7 +853,7 @@ function reportStatus(value: unknown): ReportDefinitionStatus {
 }
 
 function reportRunStatus(value: unknown): ReportRunStatus {
-  const allowed: ReportRunStatus[] = ['QUEUED', 'RUNNING', 'CANCEL_REQUESTED', 'SUCCEEDED', 'FAILED', 'CANCELLED', 'UNKNOWN', 'RECONCILING', 'EXPORTING', 'EXPORTED', 'RESULT_PURGING', 'RESULT_PURGED']
+  const allowed: ReportRunStatus[] = ['QUEUED', 'RUNNING', 'CANCEL_REQUESTED', 'SUCCEEDED', 'FAILED', 'CANCELLED', 'UNKNOWN', 'RECONCILING', 'EXPORTING', 'EXPORTED', 'RESULT_PURGING', 'RESULT_PURGED', 'SUPERSEDED']
   return typeof value === 'string' && allowed.includes(value as ReportRunStatus) ? value as ReportRunStatus : 'UNKNOWN'
 }
 

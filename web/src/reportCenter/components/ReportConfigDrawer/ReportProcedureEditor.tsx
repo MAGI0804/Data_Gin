@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState, type Dispatch, type SetStateAction } from 'react'
 import { RefreshCw, Search } from 'lucide-react'
 import { getReportProcedureSignature, getReportProcedures, getReportResultTableSchema, getReportResultTables, type ReportCenterClient } from '../../api'
-import { reconcileReportColumnsWithResultSchema, reportColumnsFromResultSchema, resultKeyColumnsFromSchema } from '../../refCursorConfig'
+import { reconcileReportColumnsWithResultSchema, reportColumnsFromResultSchema, resultTableHasSystemColumns } from '../../refCursorConfig'
 import type { ReportDraft, ReportProcedureSignature, ReportProcedureSummary, ReportResultTablePage, ReportResultTableSchema, ReportResultTableSummary } from '../../types'
 import styles from './ReportProcedureEditor.module.css'
 
@@ -58,8 +58,6 @@ export function ReportProcedureEditor({ client, draft, onChange }: { client: Rep
       result: {
         tableOwner: currentDraft.result.tableOwner || response.data.procedure.owner,
         tableName: currentDraft.result.tableName,
-        runIdColumn: currentDraft.result.runIdColumn || 'RUN_ID',
-        rowIdColumn: currentDraft.result.rowIdColumn || 'ROW_NO',
       },
       callTemplate: '',
       parameters: [],
@@ -213,29 +211,23 @@ export function ReportProcedureEditor({ client, draft, onChange }: { client: Rep
       setTableState((current) => ({ ...current, inspecting: false, error: response.error }))
       return
     }
+    if (!resultTableHasSystemColumns(response.data.columns)) {
+      setTableSchema(response.data)
+      setTableState((current) => ({ ...current, inspecting: false, error: '结果表必须包含固定系统字段 RUN_ID 和 ID。' }))
+      return
+    }
     setTableSchema(response.data)
     setTableState((current) => ({ ...current, inspecting: false }))
     onChange((currentDraft) => {
       const sameTable = resultTableKey(currentDraft.result) === resultTableKey(table)
-      const { runIdColumn, rowIdColumn } = resultKeyColumnsFromSchema(response.data.columns, currentDraft.result, sameTable)
       const columns = sameTable
-        ? reconcileReportColumnsWithResultSchema(response.data.columns, [runIdColumn, rowIdColumn], currentDraft.columns)
-        : reportColumnsFromResultSchema(response.data.columns, [runIdColumn, rowIdColumn])
+        ? reconcileReportColumnsWithResultSchema(response.data.columns, currentDraft.columns)
+        : reportColumnsFromResultSchema(response.data.columns)
       return {
         ...currentDraft,
-        result: { tableOwner: table.owner, tableName: table.name, runIdColumn, rowIdColumn },
+        result: { tableOwner: table.owner, tableName: table.name },
         columns,
       }
-    })
-  }
-
-  function updateResultColumn(key: 'runIdColumn' | 'rowIdColumn', value: string) {
-    onChange((currentDraft) => {
-      const result = { ...currentDraft.result, [key]: value }
-      const columns = tableSchema
-        ? reconcileReportColumnsWithResultSchema(tableSchema.columns, [result.runIdColumn, result.rowIdColumn], currentDraft.columns)
-        : currentDraft.columns
-      return { ...currentDraft, result, columns }
     })
   }
 
@@ -262,7 +254,7 @@ export function ReportProcedureEditor({ client, draft, onChange }: { client: Rep
       </> : <p className={styles.empty}>从上方 Oracle 查询结果中选择过程后，系统会自动绑定唯一 JSON 输入参数，不绑定任何出参。</p>}
     </section>
     <section className={styles.resultTable} aria-labelledby="report-result-table-title">
-      <div><h3 id="report-result-table-title">Oracle 结果表绑定</h3><p>过程按系统注入的 run_id 写入持久化中间表；预览、Excel 和清理均只处理本次 run_id。</p></div>
+      <div><h3 id="report-result-table-title">Oracle 结果表绑定</h3><p>系统直接把报表编号作为 report_id 传入；过程写入固定 RUN_ID，ID 仅用于内部分页，两项都无需配置。</p></div>
       <form className={styles.tableSearch} onSubmit={(event) => { event.preventDefault(); void loadResultTables(false) }}>
         <label>Owner<input className={styles.mono} value={tableFilters.owner} placeholder="可选，例如 REPORT" onChange={(event) => { const owner = event.currentTarget.value; setTableFilters((current) => ({ ...current, owner })) }} /></label>
         <label>结果表<input value={tableFilters.search} placeholder="搜索表名" onChange={(event) => { const search = event.currentTarget.value; setTableFilters((current) => ({ ...current, search })) }} /></label>
@@ -275,10 +267,6 @@ export function ReportProcedureEditor({ client, draft, onChange }: { client: Rep
         {tableCatalog.hasMore ? <button type="button" className={styles.more} disabled={tableState.loading} onClick={() => void loadResultTables(true)}><RefreshCw aria-hidden="true" />加载更多</button> : null}
       </div>
       <div className={styles.selectedTable}><strong>已选结果表</strong><code>{draft.result.tableOwner && draft.result.tableName ? `${draft.result.tableOwner}.${draft.result.tableName}` : '尚未选择'}</code>{tableState.inspecting ? <span role="status">正在读取字段…</span> : null}</div>
-      <div className={styles.resultFields}>
-        <label>run_id 字段<select className={styles.mono} value={draft.result.runIdColumn} disabled={!tableSchema} onChange={(event) => updateResultColumn('runIdColumn', event.currentTarget.value)}><option value="">请选择</option>{tableSchema?.columns.map((column) => <option value={column.name} key={column.name}>{column.name} · {column.oracleType}</option>)}</select></label>
-        <label>行游标字段<select className={styles.mono} value={draft.result.rowIdColumn} disabled={!tableSchema} onChange={(event) => updateResultColumn('rowIdColumn', event.currentTarget.value)}><option value="">请选择</option>{tableSchema?.columns.map((column) => <option value={column.name} key={column.name}>{column.name} · {column.oracleType}</option>)}</select></label>
-      </div>
       {tableSchema ? <div className={styles.columnSummary}><div><strong>结果表字段</strong><span>已自动生成 {draft.columns.length} 个 Excel 字段，可到“Excel 映射”继续修改表头。</span></div>{tableSchema.columns.map((column) => <div key={column.name}><code>{column.name}</code><span>{column.oracleType}</span><span>{column.nullable ? '可空' : '必填'}</span></div>)}</div> : null}
       {tableState.error ? <div className={styles.error} role="alert">{tableState.error}</div> : null}
     </section>

@@ -372,11 +372,9 @@ func validSnapshotContract(
 	for _, column := range columns {
 		columnNames = append(columnNames, column.DatabaseColumn)
 	}
-	contract, err := reportoracle.CompileResultSnapshotContract(reportoracle.ResultSnapshotRef{
-		Table:       reportoracle.ResultTableRef{Owner: version.ResultTableOwner, Name: version.ResultTableName},
-		RunIDColumn: version.ResultRunIDColumn, RowIDColumn: version.ResultRowIDColumn,
-		Columns: columnNames,
-	}, result, true)
+	contract, err := reportoracle.CompileResultSnapshotContract(reportoracle.SystemResultSnapshotRef(
+		reportoracle.ResultTableRef{Owner: version.ResultTableOwner, Name: version.ResultTableName}, columnNames,
+	), result, true)
 	if err != nil {
 		t.Fatalf("CompileResultSnapshotContract() error = %v", err)
 	}
@@ -397,7 +395,7 @@ func validContract() (
 		DatasourceID:   3,
 		ProcedureOwner: "report", PackageName: "pkg", ProcedureName: "sales",
 		ResultTableOwner: "report", ResultTableName: "sales_result",
-		ResultRunIDColumn: "run_id", ResultRowIDColumn: "row_no",
+		ResultRunIDColumn: "run_id", ResultRowIDColumn: "id",
 		CallTemplate: "BEGIN REPORT.PKG.SALES(P_RUN_ID => {{runId}}, P_FROM => {{from}}); END;",
 	}
 	parameters := []model.ReportParameter{
@@ -418,7 +416,7 @@ func validContract() (
 	}
 	result := []reportoracle.ResultColumn{
 		{Name: "RUN_ID", Position: 1, DataType: "VARCHAR2", Nullable: false},
-		{Name: "ROW_NO", Position: 2, DataType: "NUMBER", DataPrecision: &eighteen, DataScale: &zero, Nullable: false},
+		{Name: "ID", Position: 2, DataType: "NUMBER", DataPrecision: &eighteen, DataScale: &zero, Nullable: false},
 		{Name: "STORE_CODE", Position: 3, DataType: "VARCHAR2", Nullable: false},
 		{Name: "AMOUNT", Position: 4, DataType: "NUMBER", Nullable: true},
 	}

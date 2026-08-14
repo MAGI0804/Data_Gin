@@ -97,13 +97,14 @@ export function applyExcelMapping(columns: ReportColumn[], mapping: Record<strin
   })
 }
 
-export function reportColumnsFromResultSchema(columns: ReportResultTableColumn[], excludedColumns: string[], createFieldId: () => string = () => crypto.randomUUID()): ReportColumn[] {
-  return reconcileReportColumnsWithResultSchema(columns, excludedColumns, [], createFieldId)
+const resultSystemColumns = new Set(['RUN_ID', 'ID'])
+
+export function reportColumnsFromResultSchema(columns: ReportResultTableColumn[], createFieldId: () => string = () => crypto.randomUUID()): ReportColumn[] {
+  return reconcileReportColumnsWithResultSchema(columns, [], createFieldId)
 }
 
-export function reconcileReportColumnsWithResultSchema(columns: ReportResultTableColumn[], excludedColumns: string[], existingColumns: ReportColumn[], createFieldId: () => string = () => crypto.randomUUID()): ReportColumn[] {
-  const excluded = new Set(excludedColumns.map((column) => column.trim().toUpperCase()).filter(Boolean))
-  const exportColumns = columns.filter((column) => !excluded.has(column.name.toUpperCase()))
+export function reconcileReportColumnsWithResultSchema(columns: ReportResultTableColumn[], existingColumns: ReportColumn[], createFieldId: () => string = () => crypto.randomUUID()): ReportColumn[] {
+  const exportColumns = columns.filter((column) => !resultSystemColumns.has(column.name.toUpperCase()))
   const existingByName = new Map(existingColumns.map((column) => [column.databaseColumn.toUpperCase(), column]))
   const mapping = Object.fromEntries(exportColumns.map((column) => [column.name, existingByName.get(column.name.toUpperCase())?.excelHeader || column.name]))
   const initial = applyExcelMapping(existingColumns, mapping, createFieldId)
@@ -122,16 +123,9 @@ export function reconcileReportColumnsWithResultSchema(columns: ReportResultTabl
   })
 }
 
-export function resultKeyColumnsFromSchema(columns: ReportResultTableColumn[], current: { runIdColumn: string; rowIdColumn: string }, preserveCurrent: boolean) {
+export function resultTableHasSystemColumns(columns: ReportResultTableColumn[]) {
   const names = new Set(columns.map((column) => column.name.toUpperCase()))
-  const currentRun = current.runIdColumn.toUpperCase()
-  const currentRow = current.rowIdColumn.toUpperCase()
-  if (preserveCurrent && currentRun !== currentRow && names.has(currentRun) && names.has(currentRow)) {
-    return { runIdColumn: current.runIdColumn, rowIdColumn: current.rowIdColumn }
-  }
-  const runIdColumn = columns.find((column) => column.name.toUpperCase() === 'RUN_ID')?.name || ''
-  const rowIdColumn = columns.find((column) => ['ROW_NO', 'ROW_ID'].includes(column.name.toUpperCase()) && column.name.toUpperCase() !== runIdColumn.toUpperCase())?.name || ''
-  return { runIdColumn, rowIdColumn }
+  return names.has('RUN_ID') && names.has('ID')
 }
 
 export function renameExcelMappingField(columns: ReportColumn[], currentField: string, nextField: string): ReportColumn[] {

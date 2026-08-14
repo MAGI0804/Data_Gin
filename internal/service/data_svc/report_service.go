@@ -110,10 +110,8 @@ type ReportProcedureDTO struct {
 }
 
 type ReportResultDTO struct {
-	TableOwner  string `json:"tableOwner"`
-	TableName   string `json:"tableName"`
-	RunIDColumn string `json:"runIdColumn"`
-	RowIDColumn string `json:"rowIdColumn"`
+	TableOwner string `json:"tableOwner"`
+	TableName  string `json:"tableName"`
 }
 
 type ReportParameterDTO struct {
@@ -308,14 +306,8 @@ func reportDraftFromRequest(actor uint, request requestbody.ReportDraftSaveReque
 		if err != nil {
 			return nil, invalidReport("invalid Oracle result table")
 		}
-		runIDColumn, err = normalizeReportIdentifier(request.Result.RunIDColumn)
-		if err != nil {
-			return nil, invalidReport("invalid result run id column")
-		}
-		rowIDColumn, err = normalizeReportIdentifier(request.Result.RowIDColumn)
-		if err != nil || runIDColumn == rowIDColumn {
-			return nil, invalidReport("invalid result row id column")
-		}
+		runIDColumn = reportoracle.SystemResultRunIDColumn
+		rowIDColumn = reportoracle.SystemResultRecordColumn
 		if strings.TrimSpace(request.Procedure.JSONInputArgName) != "" {
 			jsonInputArgName, err = normalizeReportIdentifier(request.Procedure.JSONInputArgName)
 			if err != nil || strings.TrimSpace(request.Procedure.ResultCursorArgName) != "" {
@@ -831,7 +823,7 @@ func reportDraftDTO(draft *reportrepo.Draft) *ReportDraftDTO {
 		DatasourceID: draft.Definition.DatasourceID, Status: draft.Definition.Status, LockVersion: draft.LockVersion,
 		Procedure:     ReportProcedureDTO{Owner: draft.Version.ProcedureOwner, Package: draft.Version.PackageName, Name: draft.Version.ProcedureName, Overload: draft.Version.ProcedureOverload, JSONInputArgName: draft.Version.JSONInputArgName, ResultCursorArgName: draft.Version.ResultCursorArgName},
 		ExecutionMode: draft.Version.ExecutionMode, InputSchema: cloneJSON([]byte(draft.Version.InputSchemaJSON)),
-		Result:       ReportResultDTO{TableOwner: draft.Version.ResultTableOwner, TableName: draft.Version.ResultTableName, RunIDColumn: draft.Version.ResultRunIDColumn, RowIDColumn: draft.Version.ResultRowIDColumn},
+		Result:       ReportResultDTO{TableOwner: draft.Version.ResultTableOwner, TableName: draft.Version.ResultTableName},
 		CallTemplate: draft.Version.CallTemplate, Parameters: make([]ReportParameterDTO, 0, len(draft.Parameters)),
 		Columns: make([]ReportColumnDTO, 0, len(draft.Columns)), Grants: make([]ReportGrantDTO, 0, len(draft.Grants)),
 		CreatedAt: draft.Definition.CreatedAt, UpdatedAt: draft.Definition.UpdatedAt,

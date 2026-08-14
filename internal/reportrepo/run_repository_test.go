@@ -141,6 +141,19 @@ func TestCreateRunRollsBackAtEveryWriteBoundary(t *testing.T) {
 	}
 }
 
+func TestCreateRunRejectsBusyReportSnapshotSlot(t *testing.T) {
+	repository, transactionState := runTestRepository(t)
+	repository.prepareRunSlot = func(context.Context, *gorm.DB, uint, time.Time) ([]uint, error) {
+		return nil, ErrReportRunBusy
+	}
+	if err := repository.CreateRun(t.Context(), 17, 9, validRunCommand()); !errors.Is(err, ErrReportRunBusy) {
+		t.Fatalf("CreateRun() error = %v, want ErrReportRunBusy", err)
+	}
+	if transactionState.begins != 1 || transactionState.rollbacks != 1 || transactionState.commits != 0 {
+		t.Fatalf("transaction state = %#v", transactionState)
+	}
+}
+
 func TestRunSnapshotsContainNoCredentialFields(t *testing.T) {
 	permission, err := encodeRunPermissionSnapshot(17, ReportActionQuery, runAuthority{Source: "ROLE", Grants: []model.ReportGrant{{SubjectType: "ROLE", SubjectID: 2, ActionsJSON: model.JSONText(`["QUERY"]`)}}})
 	if err != nil || !json.Valid([]byte(permission)) {
@@ -262,5 +275,6 @@ func runTestRepository(t *testing.T) (*Repository, *transactionDriverState) {
 		}, nil
 	}
 	repository.validateRunSource = func(context.Context, *gorm.DB, uint) error { return nil }
+	repository.prepareRunSlot = func(context.Context, *gorm.DB, uint, time.Time) ([]uint, error) { return nil, nil }
 	return repository, transactionState
 }

@@ -55,6 +55,7 @@ func TestClassifyRunStartProtectsOracleExecutionFromBlindTakeover(t *testing.T) 
 		{name: "stale after oracle", run: model.ReportRun{BaseModel: model.BaseModel{ID: 1}, Status: model.ReportRunStatusRunning, OracleStartedAt: &oracleStarted}, want: RunDispositionReconcile},
 		{name: "unknown", run: model.ReportRun{BaseModel: model.BaseModel{ID: 1}, Status: model.ReportRunStatusUnknown}, want: RunDispositionReconcile},
 		{name: "terminal", run: model.ReportRun{BaseModel: model.BaseModel{ID: 1}, Status: model.ReportRunStatusSucceeded}, want: RunDispositionTerminal},
+		{name: "superseded", run: model.ReportRun{BaseModel: model.BaseModel{ID: 1}, Status: model.ReportRunStatusSuperseded}, want: RunDispositionTerminal},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {

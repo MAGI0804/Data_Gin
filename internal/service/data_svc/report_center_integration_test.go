@@ -46,7 +46,7 @@ type reportIntegrationConfig struct {
 type reportIntegrationOracleConfig struct {
 	host, serviceName, sid, username, password, timezone string
 	owner, packageName, procedure, resultTable           string
-	overload, runIDColumn, rowIDColumn, resultColumn     string
+	overload, resultColumn                               string
 	port                                                 int
 }
 
@@ -54,7 +54,6 @@ type reportIntegrationResources struct {
 	datasourceID uint
 	definitionID uint
 	runIDs       []uint
-	runUUIDs     []string
 	exportIDs    []uint
 	taskKeys     []string
 	objectKeys   []string
@@ -115,7 +114,7 @@ func TestReportCenterEndToEnd(t *testing.T) {
 		if storedRun.Status != model.ReportRunStatusSucceeded || storedRun.ResultPurgedAt != nil {
 			t.Fatalf("run was cleaned after failed upload: %#v", storedRun)
 		}
-		if count := countReportIntegrationOracleRows(t, ctx, cfg, fixture, run.RunUUID); count != run.RowCount {
+		if count := countReportIntegrationOracleRows(t, ctx, cfg, fixture, run.DefinitionID); count != run.RowCount {
 			t.Fatalf("Oracle rows after upload failure = %d, want %d", count, run.RowCount)
 		}
 		if len(failingOSS.attemptedKeys) != 1 || !strings.HasPrefix(failingOSS.attemptedKeys[0], cfg.ossBase+"/") {
@@ -152,7 +151,7 @@ func TestReportCenterEndToEnd(t *testing.T) {
 		if storedRun.Status != model.ReportRunStatusResultPurged || storedRun.ResultPurgedAt == nil {
 			t.Fatalf("purged run state = %#v", storedRun)
 		}
-		if count := countReportIntegrationOracleRows(t, ctx, cfg, fixture, run.RunUUID); count != 0 {
+		if count := countReportIntegrationOracleRows(t, ctx, cfg, fixture, run.DefinitionID); count != 0 {
 			t.Fatalf("Oracle rows after READY export = %d, want 0", count)
 		}
 		assertReportIntegrationWorkbook(t, ctx, realOSS, storedExport, fixture.excelHeader, expectedFirstValue, run.RowCount)
@@ -245,8 +244,6 @@ func requireReportIntegration(t *testing.T) reportIntegrationConfig {
 			owner:    required("REPORT_INTEGRATION_ORACLE_OWNER"), packageName: required("REPORT_INTEGRATION_ORACLE_PACKAGE"),
 			procedure: required("REPORT_INTEGRATION_ORACLE_PROCEDURE"), overload: strings.TrimSpace(os.Getenv("REPORT_INTEGRATION_ORACLE_OVERLOAD")),
 			resultTable:  required("REPORT_INTEGRATION_ORACLE_RESULT_TABLE"),
-			runIDColumn:  optional("REPORT_INTEGRATION_ORACLE_RUN_ID_COLUMN", "RUN_ID"),
-			rowIDColumn:  optional("REPORT_INTEGRATION_ORACLE_ROW_ID_COLUMN", "ROW_NO"),
 			resultColumn: optional("REPORT_INTEGRATION_ORACLE_RESULT_COLUMN", "ORDER_NO"),
 		},
 	}
@@ -330,9 +327,7 @@ func inspectReportIntegrationFixture(t *testing.T, ctx context.Context, cfg repo
 	if resultColumn == nil {
 		t.Fatalf("Oracle result column %q does not exist", cfg.oracle.resultColumn)
 	}
-	if _, err := adapter.InspectResultSnapshotContract(ctx, reportoracle.ResultSnapshotRef{
-		Table: resultRef, RunIDColumn: cfg.oracle.runIDColumn, RowIDColumn: cfg.oracle.rowIDColumn, Columns: []string{resultColumn.Name},
-	}); err != nil {
+	if _, err := adapter.InspectResultSnapshotContract(ctx, reportoracle.SystemResultSnapshotRef(resultRef, []string{resultColumn.Name})); err != nil {
 		t.Fatalf("inspect Oracle integration snapshot contract: %v", err)
 	}
 	logicalType, ok := reportIntegrationLogicalType(resultColumn.DataType)
@@ -454,7 +449,7 @@ func createReportIntegrationDraft(t *testing.T, ctx context.Context, repository 
 			DatasourceID: datasourceID, ProcedureOwner: cfg.oracle.owner, PackageName: cfg.oracle.packageName,
 			ProcedureName: cfg.oracle.procedure, ProcedureOverload: cfg.oracle.overload,
 			ResultTableOwner: cfg.oracle.owner, ResultTableName: cfg.oracle.resultTable,
-			ResultRunIDColumn: cfg.oracle.runIDColumn, ResultRowIDColumn: cfg.oracle.rowIDColumn,
+			ResultRunIDColumn: reportoracle.SystemResultRunIDColumn, ResultRowIDColumn: reportoracle.SystemResultRecordColumn,
 			CallTemplate: fmt.Sprintf("BEGIN %s(P_RUN_ID => {{runId}}); END;", target), CreatedBy: actor,
 		},
 		Parameters: []model.ReportParameter{fixture.parameter}, Columns: []model.ReportColumn{fixture.column}, Grants: []model.ReportGrant{},
@@ -485,7 +480,6 @@ func executeReportIntegrationRun(t *testing.T, ctx context.Context, db *gorm.DB,
 		t.Fatalf("create report integration run: %v", err)
 	}
 	resources.runIDs = append(resources.runIDs, created.ID)
-	resources.runUUIDs = append(resources.runUUIDs, created.RunUUID)
 	resources.taskKeys = append(resources.taskKeys, "report:run:"+created.RunUUID)
 	processor := NewReportRunProcessorWithDependencies(repository, credential, integrationParameterDecryptor{}, oracleReportProcedureExecutor{})
 	processor.heartbeatInterval = time.Hour
@@ -693,17 +687,16 @@ func loadReportIntegrationExport(t *testing.T, ctx context.Context, db *gorm.DB,
 	return export
 }
 
-func countReportIntegrationOracleRows(t *testing.T, ctx context.Context, cfg reportIntegrationConfig, fixture reportIntegrationFixture, runUUID string) int64 {
+func countReportIntegrationOracleRows(t *testing.T, ctx context.Context, cfg reportIntegrationConfig, fixture reportIntegrationFixture, reportID uint) int64 {
 	t.Helper()
 	adapter, err := reportoracle.Open(ctx, reportIntegrationOracleAdapterConfig(cfg.oracle))
 	if err != nil {
 		t.Fatalf("open Oracle for integration count: %v", err)
 	}
 	defer adapter.Close()
-	contract, err := adapter.InspectResultSnapshotContract(ctx, reportoracle.ResultSnapshotRef{
-		Table:       reportoracle.ResultTableRef{Owner: cfg.oracle.owner, Name: cfg.oracle.resultTable},
-		RunIDColumn: cfg.oracle.runIDColumn, RowIDColumn: cfg.oracle.rowIDColumn, Columns: []string{fixture.column.DatabaseColumn},
-	})
+	contract, err := adapter.InspectResultSnapshotContract(ctx, reportoracle.SystemResultSnapshotRef(
+		reportoracle.ResultTableRef{Owner: cfg.oracle.owner, Name: cfg.oracle.resultTable}, []string{fixture.column.DatabaseColumn},
+	))
 	if err != nil {
 		t.Fatalf("inspect Oracle contract for count: %v", err)
 	}
@@ -711,7 +704,7 @@ func countReportIntegrationOracleRows(t *testing.T, ctx context.Context, cfg rep
 	if err != nil {
 		t.Fatalf("build Oracle integration count: %v", err)
 	}
-	count, err := adapter.CountResultRows(ctx, plan, runUUID)
+	count, err := adapter.CountResultRows(ctx, plan, reportID)
 	if err != nil {
 		t.Fatalf("count Oracle integration rows: %v", err)
 	}
@@ -722,9 +715,9 @@ func cleanupReportIntegration(t *testing.T, cfg reportIntegrationConfig, db *gor
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 	defer cancel()
-	for _, runUUID := range resources.runUUIDs {
-		if err := purgeReportIntegrationOracleRows(ctx, cfg, fixture, runUUID); err != nil {
-			t.Errorf("clean Oracle rows for run %s: %v", runUUID, err)
+	if resources.definitionID != 0 {
+		if err := purgeReportIntegrationOracleRows(ctx, cfg, fixture, resources.definitionID); err != nil {
+			t.Errorf("clean Oracle rows for report %d: %v", resources.definitionID, err)
 		}
 	}
 	if len(resources.objectKeys) > 0 {
@@ -742,16 +735,15 @@ func cleanupReportIntegration(t *testing.T, cfg reportIntegrationConfig, db *gor
 	cleanupReportIntegrationMySQL(t, ctx, db, resources)
 }
 
-func purgeReportIntegrationOracleRows(ctx context.Context, cfg reportIntegrationConfig, fixture reportIntegrationFixture, runUUID string) error {
+func purgeReportIntegrationOracleRows(ctx context.Context, cfg reportIntegrationConfig, fixture reportIntegrationFixture, reportID uint) error {
 	adapter, err := reportoracle.Open(ctx, reportIntegrationOracleAdapterConfig(cfg.oracle))
 	if err != nil {
 		return err
 	}
 	defer adapter.Close()
-	contract, err := adapter.InspectResultSnapshotContract(ctx, reportoracle.ResultSnapshotRef{
-		Table:       reportoracle.ResultTableRef{Owner: cfg.oracle.owner, Name: cfg.oracle.resultTable},
-		RunIDColumn: cfg.oracle.runIDColumn, RowIDColumn: cfg.oracle.rowIDColumn, Columns: []string{fixture.column.DatabaseColumn},
-	})
+	contract, err := adapter.InspectResultSnapshotContract(ctx, reportoracle.SystemResultSnapshotRef(
+		reportoracle.ResultTableRef{Owner: cfg.oracle.owner, Name: cfg.oracle.resultTable}, []string{fixture.column.DatabaseColumn},
+	))
 	if err != nil {
 		return err
 	}
@@ -764,7 +756,7 @@ func purgeReportIntegrationOracleRows(ctx context.Context, cfg reportIntegration
 		if err != nil {
 			return err
 		}
-		deleted, err := adapter.PurgeResultBatch(ctx, tx, plan, runUUID, 1000)
+		deleted, err := adapter.PurgeResultBatch(ctx, tx, plan, reportID, 1000)
 		if err != nil {
 			_ = tx.Rollback()
 			return err

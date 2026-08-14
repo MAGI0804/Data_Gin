@@ -1,6 +1,6 @@
 import type { ReportExport, ReportExportStatus, ReportParameter, ReportResultPage, ReportResultQuery, ReportRun, ReportRunStatus } from './types'
 
-export const terminalReportRunStatuses = new Set<ReportRunStatus>(['SUCCEEDED', 'FAILED', 'CANCELLED', 'EXPORTED', 'RESULT_PURGED'])
+export const terminalReportRunStatuses = new Set<ReportRunStatus>(['SUCCEEDED', 'FAILED', 'CANCELLED', 'EXPORTED', 'RESULT_PURGED', 'SUPERSEDED'])
 export const terminalReportExportStatuses = new Set<ReportExportStatus>(['READY', 'FAILED', 'CANCELLED', 'EXPIRED'])
 
 export type NewReportRunState = {

@@ -501,10 +501,9 @@ func (oracleReportResultPageReader) Read(ctx context.Context, contract reportrep
 		}
 		return adapter.ReadJSONSnapshotPage(queryCtx, contract.Run.RunUUID, columns, afterRowID, limit)
 	}
-	ref := reportoracle.ResultSnapshotRef{
-		Table:       reportoracle.ResultTableRef{Owner: contract.Version.ResultTableOwner, Name: contract.Version.ResultTableName},
-		RunIDColumn: contract.Version.ResultRunIDColumn, RowIDColumn: contract.Version.ResultRowIDColumn, Columns: columns,
-	}
+	ref := reportoracle.SystemResultSnapshotRef(
+		reportoracle.ResultTableRef{Owner: contract.Version.ResultTableOwner, Name: contract.Version.ResultTableName}, columns,
+	)
 	resultColumns, err := adapter.InspectResultTable(queryCtx, ref.Table)
 	if err != nil {
 		return reportoracle.ResultPage{}, err
@@ -522,5 +521,5 @@ func (oracleReportResultPageReader) Read(ctx context.Context, contract reportrep
 	if err != nil {
 		return reportoracle.ResultPage{}, err
 	}
-	return adapter.ReadResultPage(queryCtx, plan, contract.Run.RunUUID, after, limit)
+	return adapter.ReadResultPage(queryCtx, plan, contract.Run.DefinitionID, after, limit)
 }

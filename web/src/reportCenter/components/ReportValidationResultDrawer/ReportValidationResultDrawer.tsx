@@ -26,9 +26,8 @@ export function ReportValidationResultDrawer({ publication, onClose }: { publica
           ['结果表', qualifiedName(result.result.tableOwner, '', result.result.tableName)],
           ['字段数量', result.result.columnCount],
           ['结果 Schema Hash', result.result.schemaHash],
-          ['run_id 字段', result.snapshot.runIdColumn],
-          ['行游标字段', result.snapshot.rowIdColumn],
-          ['唯一键校验', result.snapshot.uniqueKeyValidated ? '通过' : '未通过'],
+          ['系统字段', 'RUN_ID（报表编号）/ ID（内部分页）'],
+          ['记录 ID 唯一性', result.snapshot.uniqueKeyValidated ? '通过' : '未通过'],
         ]} />
         <ResultSection title="Excel 与发布契约" rows={[
           ['允许导出字段', result.export.exportableColumnCount],

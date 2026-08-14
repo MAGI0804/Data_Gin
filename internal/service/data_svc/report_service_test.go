@@ -212,7 +212,7 @@ func TestReportDraftServiceAcceptsJSONInputResultTable(t *testing.T) {
 		t.Fatalf("JSON result-table contract = %#v", draft.Version)
 	}
 	if draft.Version.ResultTableOwner != "REPORT_OWNER" || draft.Version.ResultTableName != "SALES_RESULT" ||
-		draft.Version.ResultRunIDColumn != "RUN_ID" || draft.Version.ResultRowIDColumn != "ROW_NO" {
+		draft.Version.ResultRunIDColumn != "RUN_ID" || draft.Version.ResultRowIDColumn != "ID" {
 		t.Fatalf("result table contract = %#v", draft.Version)
 	}
 	if got, want := draft.Version.CallTemplate, "BEGIN REPORT_OWNER.PKG_SALES.BUILD_REPORT(P_PAYLOAD => :payload); END;"; got != want {
@@ -224,7 +224,7 @@ func TestReportDraftServiceAcceptsJSONInputResultTable(t *testing.T) {
 }
 
 func TestReportDraftServiceRejectsResultKeyColumnsFromReportMapping(t *testing.T) {
-	for _, keyColumn := range []string{"RUN_ID", "ROW_NO"} {
+	for _, keyColumn := range []string{"RUN_ID", "ID"} {
 		t.Run(keyColumn, func(t *testing.T) {
 			request := validReportDraftRequest()
 			request.Columns[0].DatabaseColumn = keyColumn
@@ -354,7 +354,7 @@ func validReportDraftRequest() requestbody.ReportDraftSaveRequest {
 	return requestbody.ReportDraftSaveRequest{
 		Code: " Sales-Report ", Name: "销售报表", Category: "finance", DatasourceID: 3,
 		Procedure:    requestbody.ReportProcedureRequest{Owner: "report_owner", Package: "pkg_sales", Name: "build_report"},
-		Result:       requestbody.ReportResultRequest{TableOwner: "report_owner", TableName: "sales_result", RunIDColumn: "run_id", RowIDColumn: "row_no"},
+		Result:       requestbody.ReportResultRequest{TableOwner: "report_owner", TableName: "sales_result"},
 		CallTemplate: "BEGIN REPORT_OWNER.PKG_SALES.BUILD_REPORT(P_RUN_ID => {{runId}}); END;",
 		Parameters: []requestbody.ReportParameterRequest{{
 			Code: "runId", Label: "运行编号", DisplayOrder: 1, ControlType: "TEXT", LogicalType: "string",

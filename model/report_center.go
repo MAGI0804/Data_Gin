@@ -30,6 +30,7 @@ const (
 	ReportRunStatusExported        = "EXPORTED"
 	ReportRunStatusResultPurging   = "RESULT_PURGING"
 	ReportRunStatusResultPurged    = "RESULT_PURGED"
+	ReportRunStatusSuperseded      = "SUPERSEDED"
 
 	ReportExportStatusPending   = "PENDING"
 	ReportExportStatusRunning   = "RUNNING"
@@ -112,8 +113,8 @@ type ReportVersion struct {
 	InputSchemaJSON        JSONText   `gorm:"column:input_schema_json;type:json" json:"inputSchema"`
 	ResultTableOwner       string     `gorm:"column:result_table_owner;size:128;not null" json:"resultTableOwner"`
 	ResultTableName        string     `gorm:"column:result_table_name;size:128;not null" json:"resultTableName"`
-	ResultRunIDColumn      string     `gorm:"column:result_run_id_column;size:128;not null;default:'RUN_ID'" json:"resultRunIdColumn"`
-	ResultRowIDColumn      string     `gorm:"column:result_row_id_column;size:128;not null;default:'ROW_NO'" json:"resultRowIdColumn"`
+	ResultRunIDColumn      string     `gorm:"column:result_run_id_column;size:128;not null;default:'RUN_ID'" json:"-"`
+	ResultRowIDColumn      string     `gorm:"column:result_row_id_column;size:128;not null;default:'ID'" json:"-"`
 	CallTemplate           string     `gorm:"column:call_template;type:longtext;not null" json:"callTemplate"`
 	CompiledSpecJSON       JSONText   `gorm:"column:compiled_spec_json;type:json" json:"compiledSpec"`
 	ContractHash           string     `gorm:"column:contract_hash;type:char(64);index" json:"contractHash"`

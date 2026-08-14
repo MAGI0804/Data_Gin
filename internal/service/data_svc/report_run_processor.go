@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"strconv"
 	"time"
 
 	"gin-biz-web-api/internal/reportcontract"
@@ -250,8 +251,8 @@ func buildRefCursorPayload(run model.ReportRun, definitionID uint) (string, erro
 }
 
 func buildJSONTablePayload(run model.ReportRun, definitionID uint) (string, error) {
-	if definitionID == 0 || uuid.Validate(run.RunUUID) != nil {
-		return "", fmt.Errorf("report definition id or run id is missing")
+	if definitionID == 0 {
+		return "", fmt.Errorf("report definition id is missing")
 	}
 	conditions, err := decodeParameterSnapshot([]byte(run.NormalizedParametersJSON))
 	if err != nil {
@@ -259,9 +260,8 @@ func buildJSONTablePayload(run model.ReportRun, definitionID uint) (string, erro
 	}
 	payload, err := json.Marshal(struct {
 		ReportID   uint                       `json:"report_id"`
-		RunID      string                     `json:"run_id"`
 		Conditions map[string]json.RawMessage `json:"conditions"`
-	}{ReportID: definitionID, RunID: run.RunUUID, Conditions: conditions})
+	}{ReportID: definitionID, Conditions: conditions})
 	if err != nil {
 		return "", fmt.Errorf("encode JSON result-table payload: %w", err)
 	}
@@ -318,7 +318,7 @@ func (processor *ReportRunProcessor) restoreParameters(run model.ReportRun, defi
 			publicValues[code] = value
 		}
 	}
-	systemValues, err := reportSystemValues(definitions, run.RunUUID, run.RequestedBy)
+	systemValues, err := reportSystemValues(definitions, strconv.FormatUint(uint64(run.DefinitionID), 10), run.RequestedBy)
 	if err != nil {
 		return nil, err
 	}
@@ -438,13 +438,28 @@ func (oracleReportProcedureExecutor) Execute(ctx context.Context, request report
 	for _, column := range request.Runtime.Columns {
 		configuredColumns = append(configuredColumns, column.DatabaseColumn)
 	}
-	snapshot, err := adapter.InspectResultSnapshotContract(queryCtx, reportoracle.ResultSnapshotRef{Table: resultRef, RunIDColumn: request.Runtime.Version.ResultRunIDColumn, RowIDColumn: request.Runtime.Version.ResultRowIDColumn, Columns: configuredColumns})
+	snapshot, err := adapter.InspectResultSnapshotContract(queryCtx, reportoracle.SystemResultSnapshotRef(resultRef, configuredColumns))
 	if err != nil {
 		return 0, err
 	}
 	tx, err := adapter.BeginTx(queryCtx, &sql.TxOptions{})
 	if err != nil {
 		return 0, err
+	}
+	purgePlan, err := reportoracle.BuildPurgePlan(snapshot)
+	if err != nil {
+		_ = tx.Rollback()
+		return 0, err
+	}
+	for {
+		deleted, purgeErr := adapter.PurgeResultBatch(queryCtx, tx, purgePlan, request.Runtime.Run.DefinitionID, 0)
+		if purgeErr != nil {
+			_ = tx.Rollback()
+			return 0, purgeErr
+		}
+		if deleted == 0 {
+			break
+		}
 	}
 	var executionErr error
 	if isJSONTableSnapshot(request.Runtime.Version) {
@@ -473,7 +488,7 @@ func (oracleReportProcedureExecutor) Execute(ctx context.Context, request report
 		_ = tx.Rollback()
 		return 0, err
 	}
-	rowCount, err = adapter.CountResultRowsTx(queryCtx, tx, countPlan, request.Runtime.Run.RunUUID)
+	rowCount, err = adapter.CountResultRowsTx(queryCtx, tx, countPlan, request.Runtime.Run.DefinitionID)
 	if err != nil {
 		_ = tx.Rollback()
 		return 0, err

@@ -282,7 +282,7 @@ func classifyRunStart(run *model.ReportRun, now time.Time) (RunDisposition, erro
 	case model.ReportRunStatusUnknown, model.ReportRunStatusReconciling:
 		return RunDispositionReconcile, nil
 	case model.ReportRunStatusSucceeded, model.ReportRunStatusFailed, model.ReportRunStatusCancelled,
-		model.ReportRunStatusExported, model.ReportRunStatusResultPurged:
+		model.ReportRunStatusExported, model.ReportRunStatusResultPurged, model.ReportRunStatusSuperseded:
 		return RunDispositionTerminal, nil
 	case model.ReportRunStatusCancelRequested:
 		return RunDispositionTerminal, nil

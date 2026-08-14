@@ -236,7 +236,7 @@ export type ReportDraft = {
   executionMode: ReportExecutionMode
   procedure: ReportProcedureRef & { jsonInputArgName: string; resultCursorArgName: string }
   inputSchema: ReportInputSchema
-  result: { tableOwner: string; tableName: string; runIdColumn: string; rowIdColumn: string }
+  result: { tableOwner: string; tableName: string }
   callTemplate: string
   parameters: ReportParameter[]
   columns: ReportColumn[]
@@ -262,8 +262,6 @@ export type ReportValidationSummary = {
     schemaHash: string
   }
   snapshot: {
-    runIdColumn: string
-    rowIdColumn: string
     uniqueKeyValidated: boolean
   }
   export: {
@@ -300,7 +298,7 @@ export type ReportRunContract = {
   parameters: ReportParameter[]
 }
 
-export type ReportRunStatus = 'QUEUED' | 'RUNNING' | 'CANCEL_REQUESTED' | 'SUCCEEDED' | 'FAILED' | 'CANCELLED' | 'UNKNOWN' | 'RECONCILING' | 'EXPORTING' | 'EXPORTED' | 'RESULT_PURGING' | 'RESULT_PURGED'
+export type ReportRunStatus = 'QUEUED' | 'RUNNING' | 'CANCEL_REQUESTED' | 'SUCCEEDED' | 'FAILED' | 'CANCELLED' | 'UNKNOWN' | 'RECONCILING' | 'EXPORTING' | 'EXPORTED' | 'RESULT_PURGING' | 'RESULT_PURGED' | 'SUPERSEDED'
 
 export type ReportRun = {
   id: number

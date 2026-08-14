@@ -82,9 +82,7 @@ type ReportPublicationResultDTO struct {
 	SchemaHash  string `json:"schemaHash"`
 }
 type ReportPublicationSnapshotDTO struct {
-	RunIDColumn        string `json:"runIdColumn"`
-	RowIDColumn        string `json:"rowIdColumn"`
-	UniqueKeyValidated bool   `json:"uniqueKeyValidated"`
+	UniqueKeyValidated bool `json:"uniqueKeyValidated"`
 }
 type ReportPublicationExportDTO struct {
 	ExportableColumnCount int    `json:"exportableColumnCount"`
@@ -152,7 +150,7 @@ func (service *ReportPublishService) Publish(ctx context.Context, actor, definit
 			ValidatedAt: validatedAt,
 			Procedure:   ReportPublicationProcedureDTO{Owner: draft.Version.ProcedureOwner, Package: draft.Version.PackageName, Name: draft.Version.ProcedureName, Overload: draft.Version.ProcedureOverload, ArgumentCount: inspection.procedureArgumentCount, SignatureHash: inspection.compiled.Hashes.ProcedureSignature},
 			Result:      ReportPublicationResultDTO{TableOwner: draft.Version.ResultTableOwner, TableName: draft.Version.ResultTableName, ColumnCount: inspection.resultColumnCount, SchemaHash: inspection.compiled.Hashes.ResultSchema},
-			Snapshot:    ReportPublicationSnapshotDTO{RunIDColumn: draft.Version.ResultRunIDColumn, RowIDColumn: draft.Version.ResultRowIDColumn, UniqueKeyValidated: inspection.uniqueKeyValidated},
+			Snapshot:    ReportPublicationSnapshotDTO{UniqueKeyValidated: inspection.uniqueKeyValidated},
 			Export:      ReportPublicationExportDTO{ExportableColumnCount: exportableReportColumnCount(draft.Columns), SchemaHash: inspection.compiled.Hashes.ExportSchema},
 		},
 	}, nil
@@ -205,9 +203,7 @@ func (service *ReportPublishService) inspectContract(
 	for _, column := range draft.Columns {
 		configuredColumns = append(configuredColumns, column.DatabaseColumn)
 	}
-	snapshot, err := inspector.InspectResultSnapshotContract(inspectionCtx, reportoracle.ResultSnapshotRef{
-		Table: resultRef, RunIDColumn: draft.Version.ResultRunIDColumn, RowIDColumn: draft.Version.ResultRowIDColumn, Columns: configuredColumns,
-	})
+	snapshot, err := inspector.InspectResultSnapshotContract(inspectionCtx, reportoracle.SystemResultSnapshotRef(resultRef, configuredColumns))
 	if err != nil {
 		return inspection, classifyOracleInspectionError("result snapshot", err)
 	}

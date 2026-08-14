@@ -35,10 +35,8 @@ type ReportProcedureRequest struct {
 }
 
 type ReportResultRequest struct {
-	TableOwner  string `json:"tableOwner"`
-	TableName   string `json:"tableName"`
-	RunIDColumn string `json:"runIdColumn"`
-	RowIDColumn string `json:"rowIdColumn"`
+	TableOwner string `json:"tableOwner"`
+	TableName  string `json:"tableName"`
 }
 
 type ReportParameterRequest struct {

@@ -130,7 +130,7 @@ func (service *ReportRunService) Create(ctx context.Context, actor, definitionID
 	}
 	definitions := reportParameterDefinitions(published.Parameters)
 	runUUID := uuid.NewString()
-	systemValues, err := reportSystemValues(definitions, runUUID, actor)
+	systemValues, err := reportSystemValues(definitions, strconv.FormatUint(uint64(definitionID), 10), actor)
 	if err != nil {
 		return nil, fmt.Errorf("%w: published system parameters are invalid", ErrReportRunInvalid)
 	}
@@ -374,7 +374,7 @@ func reportParameterDefinitions(parameters []model.ReportParameter) []reporting.
 	return definitions
 }
 
-func reportSystemValues(definitions []reporting.ParameterDefinition, runUUID string, actor uint) (map[string]interface{}, error) {
+func reportSystemValues(definitions []reporting.ParameterDefinition, reportID string, actor uint) (map[string]interface{}, error) {
 	values := make(map[string]interface{})
 	for _, definition := range definitions {
 		source, err := reporting.SystemValueSource(definition)
@@ -383,7 +383,7 @@ func reportSystemValues(definitions []reporting.ParameterDefinition, runUUID str
 		}
 		switch source {
 		case reporting.ValueSourceRunID:
-			values[definition.Code] = runUUID
+			values[definition.Code] = reportID
 		case reporting.ValueSourceActorID:
 			values[definition.Code] = actor
 		}
@@ -418,6 +418,8 @@ func classifyReportRunStoreError(err error) error {
 	case errors.Is(err, reportrepo.ErrReportActionDenied):
 		return ErrReportRunDenied
 	case errors.Is(err, reportrepo.ErrDraftVersionConflict):
+		return ErrReportConflict
+	case errors.Is(err, reportrepo.ErrReportRunBusy):
 		return ErrReportConflict
 	case errors.Is(err, reportrepo.ErrInvalidRun):
 		return fmt.Errorf("%w: repository rejected run", ErrReportRunInvalid)

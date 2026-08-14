@@ -18,7 +18,7 @@ func TestReportRunProcessorExecutesProcedureOnceAndPersistsSuccess(t *testing.T)
 	if err := processor.Process(t.Context(), 31, true); err != nil {
 		t.Fatalf("Process() error = %v", err)
 	}
-	if executor.calls != 1 || store.succeeded != 1 || store.unknown != 0 || store.failed != 0 {
+	if executor.calls != 1 || executor.values["runId"] != "1234" || store.succeeded != 1 || store.unknown != 0 || store.failed != 0 {
 		t.Fatalf("calls=%d succeeded=%d unknown=%d failed=%d", executor.calls, store.succeeded, store.unknown, store.failed)
 	}
 }
@@ -53,7 +53,7 @@ func TestReportRunProcessorBuildsJSONResultTablePayloadWithRunID(t *testing.T) {
 	if err := processor.Process(t.Context(), 31, true); err != nil {
 		t.Fatalf("Process() error = %v", err)
 	}
-	if got, want := executor.jsonPayload, `{"report_id":1234,"run_id":"11111111-1111-4111-8111-111111111111","conditions":{"c_supplier_id":["a","b"],"datein_begin":"20260504"}}`; got != want {
+	if got, want := executor.jsonPayload, `{"report_id":1234,"conditions":{"c_supplier_id":["a","b"],"datein_begin":"20260504"}}`; got != want {
 		t.Fatalf("JSON payload = %s, want %s", got, want)
 	}
 }
@@ -150,7 +150,7 @@ func newFakeReportExecutionStore() *fakeReportExecutionStore {
 	return &fakeReportExecutionStore{
 		heartbeatControl: reportrepo.RunControlContinue,
 		runtime: &reportrepo.RuntimeContract{
-			Run: model.ReportRun{BaseModel: model.BaseModel{ID: 31}, RunUUID: "11111111-1111-4111-8111-111111111111", NormalizedParametersJSON: model.JSONText(`{"storeCode":"S001"}`)},
+			Run: model.ReportRun{BaseModel: model.BaseModel{ID: 31}, RunUUID: "11111111-1111-4111-8111-111111111111", DefinitionID: 1234, NormalizedParametersJSON: model.JSONText(`{"storeCode":"S001"}`)},
 			Parameters: []model.ReportParameter{
 				{ParameterCode: "runId", ProcedureArgName: "P_RUN_ID", Position: 1, Direction: "IN", LogicalType: "string", OracleType: "VARCHAR2", Cardinality: "SINGLE", Required: true, SystemInjected: true, NullPolicy: "TYPED_NULL"},
 				{ParameterCode: "storeCode", ProcedureArgName: "P_STORE_CODE", Position: 2, Direction: "IN", LogicalType: "string", OracleType: "VARCHAR2", Cardinality: "SINGLE", Required: true, NullPolicy: "TYPED_NULL"},
@@ -259,12 +259,14 @@ type fakeReportProcedureExecutor struct {
 	err           error
 	waitForCancel bool
 	jsonPayload   string
+	values        map[string]interface{}
 }
 
 func (executor *fakeReportProcedureExecutor) Execute(ctx context.Context, request reportProcedureExecutionRequest, password string) (int64, error) {
 	executor.mu.Lock()
 	executor.calls++
 	executor.jsonPayload = request.JSONPayload
+	executor.values = request.Values
 	executor.mu.Unlock()
 	if password != "password" {
 		return 0, errors.New("unexpected execution request")

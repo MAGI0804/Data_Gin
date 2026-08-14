@@ -4,7 +4,7 @@ import test from 'node:test'
 import ts from 'typescript'
 
 import { createReportRun, getReportAudits, getReportProcedureSignature, getReportProcedures, getReportResultTableSchema, getReportResultTables, parsePublication, parseReportAuditPage, parseReportCatalogPage, parseReportDatasource, parseReportDatasources, parseReportDatasourceTest, parseReportDraft, parseReportExport, parseReportExportPage, parseReportProcedurePage, parseReportProcedureSignature, parseReportResultPage, parseReportResultTablePage, parseReportResultTableSchema, parseReportRun, parseReportRunContract, parseReportVersionDiff, parseReportVersionPage, saveReportDraft, testReportDatasourceConnection } from '../.test-dist/reportCenter/api.js'
-import { applyExcelMapping, buildReportConditions, excelMappingFromColumns, initialReportConditionValues, parseExcelMappingDocument, parseReportInputSchemaDocument, reconcileReportColumnsWithResultSchema, renameExcelMappingField, reportColumnsFromResultSchema, resultKeyColumnsFromSchema } from '../.test-dist/reportCenter/refCursorConfig.js'
+import { applyExcelMapping, buildReportConditions, excelMappingFromColumns, initialReportConditionValues, parseExcelMappingDocument, parseReportInputSchemaDocument, reconcileReportColumnsWithResultSchema, renameExcelMappingField, reportColumnsFromResultSchema, resultTableHasSystemColumns } from '../.test-dist/reportCenter/refCursorConfig.js'
 import { reportParameterControls, reportParameterFlagDisabled, updateReportParameterFlag, updateReportParameterLogicalType } from '../.test-dist/reportCenter/parameterConfig.js'
 import { buildNewReportRunState, canStartNewReportRun, initialReportParameterValues } from '../.test-dist/reportCenter/queryParameters.js'
 import { createLatestRequestGuard } from '../.test-dist/reportCenter/components/ReportVersionDrawer/requestGuard.js'
@@ -228,9 +228,9 @@ test('report parameter logical types derive compatible control and collection sh
 })
 
 test('new report runs are allowed only after run and export processing finish', () => {
-  const runStatuses = ['QUEUED', 'RUNNING', 'CANCEL_REQUESTED', 'SUCCEEDED', 'FAILED', 'CANCELLED', 'UNKNOWN', 'RECONCILING', 'EXPORTING', 'EXPORTED', 'RESULT_PURGING', 'RESULT_PURGED']
+  const runStatuses = ['QUEUED', 'RUNNING', 'CANCEL_REQUESTED', 'SUCCEEDED', 'FAILED', 'CANCELLED', 'UNKNOWN', 'RECONCILING', 'EXPORTING', 'EXPORTED', 'RESULT_PURGING', 'RESULT_PURGED', 'SUPERSEDED']
   const exportStatuses = [null, 'PENDING', 'RUNNING', 'READY', 'FAILED', 'CANCELLED', 'EXPIRED']
-  const terminalRuns = new Set(['SUCCEEDED', 'FAILED', 'CANCELLED', 'EXPORTED', 'RESULT_PURGED'])
+  const terminalRuns = new Set(['SUCCEEDED', 'FAILED', 'CANCELLED', 'EXPORTED', 'RESULT_PURGED', 'SUPERSEDED'])
   const terminalExports = new Set([null, 'READY', 'FAILED', 'CANCELLED', 'EXPIRED'])
   for (const runStatus of runStatuses) {
     for (const exportStatus of exportStatuses) {
@@ -303,7 +303,7 @@ test('parseReportDraft preserves parameter, field and excel mappings', () => {
   const draft = parseReportDraft({ data: {
     id: 9, code: 'sales_report', name: '销售报表', datasourceId: 3, status: 'DRAFT', lockVersion: 4,
     procedure: { owner: 'BI', package: 'REPORT_PKG', name: 'SALES' },
-    result: { tableOwner: 'BI', tableName: 'REPORT_RESULT', runIdColumn: 'RUN_ID', rowIdColumn: 'ROW_NO' },
+    result: { tableOwner: 'BI', tableName: 'REPORT_RESULT' },
     callTemplate: 'BEGIN BI.REPORT_PKG.SALES({{runId}}, {{storeCode}}); END;',
     parameters: [{ code: 'runId', label: '运行编号', displayOrder: 0, controlType: 'TEXT', logicalType: 'string', procedureArgName: 'P_RUN_ID', position: 1, oracleType: 'VARCHAR2', precision: 38, scale: 0, required: true, systemInjected: true, normalizer: { trim: true }, valueSource: { source: 'run_id' }, nullPolicy: 'TYPED_NULL' }],
     columns: [{ fieldId: '11111111-1111-4111-8111-111111111111', logicalCode: 'amount', databaseColumn: 'AMOUNT', sourceOracleType: 'NUMBER', precision: 18, scale: 2, valueType: 'decimal', previewHeader: '金额', excelHeader: '含税金额', displayOrder: 2, exportOrder: 1, previewVisible: true, exportVisible: true, exportAllowed: true, dictionaryVersion: { version: 'v2' } }],
@@ -346,7 +346,7 @@ test('JSON result-table draft keeps one input binding and the Oracle snapshot ta
     executionMode: 'TABLE_SNAPSHOT',
     procedure: { owner: 'BI', package: 'REPORT_PKG', name: 'BUILD_RESULT', jsonInputArgName: 'P_PAYLOAD', resultCursorArgName: '' },
     inputSchema: { store_id: { type: 'VARCHAR2', displayName: '门店' } },
-    result: { tableOwner: 'BI', tableName: 'REPORT_RESULT', runIdColumn: 'RUN_ID', rowIdColumn: 'ROW_NO' },
+    result: { tableOwner: 'BI', tableName: 'REPORT_RESULT' },
     columns: [{ fieldId: '11111111-1111-4111-8111-111111111111', logicalCode: 'amount', databaseColumn: 'AMOUNT', sourceOracleType: 'NUMBER', valueType: 'decimal', previewHeader: '金额', excelHeader: '金额', displayOrder: 0, exportOrder: 0, previewVisible: true, exportVisible: true, exportAllowed: true }],
     grants: [], parameters: [], callTemplate: '',
   } }
@@ -360,7 +360,7 @@ test('JSON result-table draft keeps one input binding and the Oracle snapshot ta
   assert.equal(requests[0].options.body.executionMode, 'TABLE_SNAPSHOT')
   assert.deepEqual(requests[0].options.body.parameters, [])
   assert.equal(requests[0].options.body.inputSchema.store_id.displayName, '门店')
-  assert.deepEqual(requests[0].options.body.result, { tableOwner: 'BI', tableName: 'REPORT_RESULT', runIdColumn: 'RUN_ID', rowIdColumn: 'ROW_NO' })
+  assert.deepEqual(requests[0].options.body.result, { tableOwner: 'BI', tableName: 'REPORT_RESULT' })
   assert.equal(requests[0].options.body.callTemplate, '')
 })
 
@@ -386,44 +386,38 @@ test('Excel JSON mapping and table edits share the existing columns contract', (
   assert.equal(renamed[0].databaseColumn, 'supplier_id')
 })
 
-test('result table schema generates Excel fields and keeps edited headers when key columns change', () => {
+test('result table schema excludes fixed system fields and keeps edited headers', () => {
   let index = 0
   const createFieldId = () => `00000000-0000-4000-8000-${String(++index).padStart(12, '0')}`
   const schema = [
     { name: 'RUN_ID', position: 1, oracleType: 'VARCHAR2', dataLength: 36, precision: null, scale: null, nullable: false },
-    { name: 'ROW_NO', position: 2, oracleType: 'NUMBER', dataLength: 22, precision: 20, scale: 0, nullable: false },
+    { name: 'ID', position: 2, oracleType: 'NUMBER', dataLength: 22, precision: 18, scale: 0, nullable: false },
     { name: 'SUPPLIER_ID', position: 3, oracleType: 'VARCHAR2', dataLength: 64, precision: null, scale: null, nullable: true },
   ]
-  const generated = reportColumnsFromResultSchema(schema, ['RUN_ID', 'ROW_NO'], createFieldId)
+  const generated = reportColumnsFromResultSchema(schema, createFieldId)
   assert.deepEqual(generated.map((column) => column.databaseColumn), ['SUPPLIER_ID'])
   assert.equal(generated[0].sourceOracleType, 'VARCHAR2')
   const customized = [{ ...generated[0], excelHeader: '供应商编码', previewHeader: '供应商编码' }]
-  const reconciled = reconcileReportColumnsWithResultSchema(schema, ['RUN_ID', 'ROW_NO'], customized, () => { throw new Error('existing field must keep its stable id') })
+  const reconciled = reconcileReportColumnsWithResultSchema(schema, customized, () => { throw new Error('existing field must keep its stable id') })
   assert.equal(reconciled[0].fieldId, generated[0].fieldId)
   assert.equal(reconciled[0].excelHeader, '供应商编码')
 })
 
-test('reselecting the same result table preserves valid custom key columns', () => {
+test('result table requires fixed RUN_ID and ID system columns', () => {
   const schema = [
-    { name: 'BATCH_KEY', position: 1, oracleType: 'VARCHAR2', dataLength: 36, precision: null, scale: null, nullable: false },
-    { name: 'LINE_KEY', position: 2, oracleType: 'NUMBER', dataLength: 22, precision: 20, scale: 0, nullable: false },
+    { name: 'RUN_ID', position: 1, oracleType: 'NUMBER', dataLength: 22, precision: 18, scale: 0, nullable: false },
+    { name: 'ID', position: 2, oracleType: 'NUMBER', dataLength: 22, precision: 18, scale: 0, nullable: false },
     { name: 'AMOUNT', position: 3, oracleType: 'NUMBER', dataLength: 22, precision: 18, scale: 2, nullable: true },
   ]
-  assert.deepEqual(
-    resultKeyColumnsFromSchema(schema, { runIdColumn: 'BATCH_KEY', rowIdColumn: 'LINE_KEY' }, true),
-    { runIdColumn: 'BATCH_KEY', rowIdColumn: 'LINE_KEY' },
-  )
-  assert.deepEqual(
-    resultKeyColumnsFromSchema(schema, { runIdColumn: 'MISSING', rowIdColumn: 'LINE_KEY' }, true),
-    { runIdColumn: '', rowIdColumn: '' },
-  )
+  assert.equal(resultTableHasSystemColumns(schema), true)
+  assert.equal(resultTableHasSystemColumns(schema.filter((column) => column.name !== 'ID')), false)
 })
 
 test('result table metadata parsers and requests enforce the Oracle table contract', async () => {
   const table = { owner: 'REPORT', name: 'SALES_RESULT', qualifiedName: 'REPORT.SALES_RESULT', columnCount: 3 }
   const columns = [
     { name: 'RUN_ID', position: 1, oracleType: 'VARCHAR2', dataLength: 36, precision: null, scale: null, nullable: false },
-    { name: 'ROW_NO', position: 2, oracleType: 'NUMBER', dataLength: 22, precision: 20, scale: 0, nullable: false },
+    { name: 'ID', position: 2, oracleType: 'NUMBER', dataLength: 22, precision: 18, scale: 0, nullable: false },
     { name: 'AMOUNT', position: 3, oracleType: 'NUMBER', dataLength: 22, precision: 18, scale: 2, nullable: true },
   ]
   assert.equal(parseReportResultTablePage({ data: { items: [table], hasMore: true, nextAfter: 'opaque' } }).items[0].qualifiedName, table.qualifiedName)
@@ -505,7 +499,7 @@ test('publication parser keeps only the safe Oracle validation summary', () => {
       validatedAt: '2026-08-13T08:00:00Z',
       procedure: { owner: 'REPORT', package: 'PKG_SALES', name: 'BUILD_REPORT', overload: '', argumentCount: 2, signatureHash: hash, password: 'must-not-pass' },
       result: { tableOwner: 'REPORT', tableName: 'SALES_RESULT', columnCount: 12, schemaHash: hash, dsn: 'must-not-pass' },
-      snapshot: { runIdColumn: 'RUN_ID', rowIdColumn: 'ROW_NO', uniqueKeyValidated: true },
+      snapshot: { uniqueKeyValidated: true },
       export: { exportableColumnCount: 8, schemaHash: hash },
     },
   } })

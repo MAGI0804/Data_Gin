@@ -268,7 +268,7 @@ func publicationDraft() *reportrepo.Draft {
 		Definition: model.ReportDefinition{BaseModel: model.BaseModel{ID: 9}, Code: "sales", DatasourceID: 4, OwnerUserID: 17},
 		Version: model.ReportVersion{BaseModel: model.BaseModel{ID: 23}, DefinitionID: 9, DatasourceID: 4, VersionNumber: 3, Status: model.ReportVersionStatusDraft,
 			ProcedureOwner: "REPORT", PackageName: "PKG_SALES", ProcedureName: "BUILD_REPORT", ResultTableOwner: "REPORT", ResultTableName: "SALES_RESULT",
-			ResultRunIDColumn: "RUN_ID", ResultRowIDColumn: "ROW_NO", CallTemplate: "BEGIN REPORT.PKG_SALES.BUILD_REPORT(P_RUN_ID => {{runId}}); END;"},
+			ResultRunIDColumn: "RUN_ID", ResultRowIDColumn: "ID", CallTemplate: "BEGIN REPORT.PKG_SALES.BUILD_REPORT(P_RUN_ID => {{runId}}); END;"},
 		Parameters: []model.ReportParameter{{ParameterCode: "runId", Label: "运行编号", DisplayOrder: 1, ControlType: "TEXT", LogicalType: "string", Cardinality: "SINGLE", ProcedureArgName: "P_RUN_ID", Position: 1, Direction: "IN", OracleType: "VARCHAR2", Required: true, SystemInjected: true, NullPolicy: "TYPED_NULL"}},
 		Columns:    []model.ReportColumn{{FieldID: "11111111-1111-4111-8111-111111111111", LogicalCode: "orderNo", DatabaseColumn: "ORDER_NO", SourceOracleType: "VARCHAR2", ValueType: "string", PreviewHeader: "订单号", ExcelHeader: "订单号", DisplayOrder: 1, ExportOrder: 1, PreviewVisible: true, ExportVisible: true, ExportAllowed: true}},
 		Grants:     []model.ReportGrant{{SubjectType: "ROLE", SubjectID: 2, ActionsJSON: model.JSONText(`["QUERY","EXPORT"]`)}}, LockVersion: 3,
@@ -287,5 +287,5 @@ func publicationProcedure() []reportoracle.ProcedureArgument {
 func publicationResultColumns() []reportoracle.ResultColumn {
 	zero := int64(0)
 	eighteen := int64(18)
-	return []reportoracle.ResultColumn{{Name: "RUN_ID", Position: 1, DataType: "VARCHAR2", DataLength: 64}, {Name: "ROW_NO", Position: 2, DataType: "NUMBER", DataLength: 22, DataPrecision: &eighteen, DataScale: &zero}, {Name: "ORDER_NO", Position: 3, DataType: "VARCHAR2", DataLength: 128}}
+	return []reportoracle.ResultColumn{{Name: "RUN_ID", Position: 1, DataType: "VARCHAR2", DataLength: 64}, {Name: "ID", Position: 2, DataType: "NUMBER", DataLength: 22, DataPrecision: &eighteen, DataScale: &zero}, {Name: "ORDER_NO", Position: 3, DataType: "VARCHAR2", DataLength: 128}}
 }

@@ -90,7 +90,7 @@ func testReportExportRuntime(now time.Time) *reportrepo.ExportRuntime {
 	return &reportrepo.ExportRuntime{
 		Export:     model.ReportExport{BaseModel: model.BaseModel{ID: 41}, ExportUUID: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", RunID: 31, Status: model.ReportExportStatusRunning, FrozenColumnsJSON: model.JSONText(`[{"fieldId":"1","logicalCode":"orderNo","databaseColumn":"ORDER_NO","excelHeader":"订单号","valueType":"string","exportVisible":true,"exportAllowed":true}]`)},
 		Run:        model.ReportRun{BaseModel: model.BaseModel{ID: 31}, RunUUID: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", VersionID: 23, DefinitionID: 9, Status: model.ReportRunStatusSucceeded, RowCount: 1, ResultExpiresAt: &expires},
-		Version:    model.ReportVersion{BaseModel: model.BaseModel{ID: 23}, DatasourceID: 7, ResultTableOwner: "REPORT_OWNER", ResultTableName: "REPORT_RESULT", ResultRunIDColumn: "RUN_ID", ResultRowIDColumn: "ROW_NO"},
+		Version:    model.ReportVersion{BaseModel: model.BaseModel{ID: 23}, DatasourceID: 7, ResultTableOwner: "REPORT_OWNER", ResultTableName: "REPORT_RESULT", ResultRunIDColumn: "RUN_ID", ResultRowIDColumn: "ID"},
 		Datasource: model.ReportDatasource{BaseModel: model.BaseModel{ID: 7}, CredentialKeyVersion: "v1", PasswordCiphertext: "cipher"},
 	}
 }

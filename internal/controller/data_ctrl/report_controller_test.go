@@ -165,7 +165,7 @@ func TestReportControllerPublishUsesActorAndLockVersion(t *testing.T) {
 	publishService := &fakeReportPublishService{result: &data_svc.ReportPublicationDTO{DefinitionID: 7, VersionID: 23, Version: 3, Status: "PUBLISHED", ContractHash: hash, Validation: &data_svc.ReportPublicationValidationDTO{
 		Procedure: data_svc.ReportPublicationProcedureDTO{Owner: "REPORT", Name: "BUILD", ArgumentCount: 1, SignatureHash: hash},
 		Result:    data_svc.ReportPublicationResultDTO{TableOwner: "REPORT", TableName: "RESULT", ColumnCount: 3, SchemaHash: hash},
-		Snapshot:  data_svc.ReportPublicationSnapshotDTO{RunIDColumn: "RUN_ID", RowIDColumn: "ROW_NO", UniqueKeyValidated: true},
+		Snapshot:  data_svc.ReportPublicationSnapshotDTO{UniqueKeyValidated: true},
 		Export:    data_svc.ReportPublicationExportDTO{ExportableColumnCount: 1, SchemaHash: hash},
 	}}}
 	controller := NewReportControllerWithServices(service, publishService)

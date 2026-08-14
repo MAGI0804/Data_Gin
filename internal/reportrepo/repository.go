@@ -85,6 +85,7 @@ type publishedReportLoader func(context.Context, *gorm.DB, uint, uint, string, b
 type reportRunWriter func(context.Context, *gorm.DB, *model.ReportRun) error
 type reportRunOutboxWriter func(context.Context, *gorm.DB, *model.AsyncJobOutbox) error
 type enabledDatasourceValidator func(context.Context, *gorm.DB, uint) error
+type reportRunSlotPreparer func(context.Context, *gorm.DB, uint, time.Time) ([]uint, error)
 
 type Repository struct {
 	db                 *gorm.DB
@@ -103,6 +104,7 @@ type Repository struct {
 	createReportRun    reportRunWriter
 	createRunOutbox    reportRunOutboxWriter
 	validateRunSource  enabledDatasourceValidator
+	prepareRunSlot     reportRunSlotPreparer
 }
 
 func New(databases ...*gorm.DB) *Repository {
@@ -116,7 +118,7 @@ func New(databases ...*gorm.DB) *Repository {
 		loadCollections: loadCollections, publishVersion: writePublishedVersion, createVersion: createDraftVersion,
 		copyCollections: replaceVersionCollections, switchDefinition: switchPublishedDefinition,
 		loadPublished: loadPublishedReport, createReportRun: writeReportRun, createRunOutbox: writeReportRunOutbox,
-		validateRunSource: requireEnabledOracleDatasource,
+		validateRunSource: requireEnabledOracleDatasource, prepareRunSlot: prepareReportRunSlot,
 	}
 }
 

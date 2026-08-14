@@ -54,7 +54,7 @@ func testResultCleanupRuntime(now time.Time) *reportrepo.ResultCleanupRuntime {
 	expires := now.Add(-time.Hour)
 	return &reportrepo.ResultCleanupRuntime{
 		Run:        model.ReportRun{BaseModel: model.BaseModel{ID: 32}, RunUUID: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", Status: model.ReportRunStatusResultPurging, RowCount: 9, ResultExpiresAt: &expires},
-		Version:    model.ReportVersion{BaseModel: model.BaseModel{ID: 23}, ResultTableOwner: "REPORT_OWNER", ResultTableName: "REPORT_RESULT", ResultRunIDColumn: "RUN_ID", ResultRowIDColumn: "ROW_NO"},
+		Version:    model.ReportVersion{BaseModel: model.BaseModel{ID: 23}, ResultTableOwner: "REPORT_OWNER", ResultTableName: "REPORT_RESULT", ResultRunIDColumn: "RUN_ID", ResultRowIDColumn: "ID"},
 		Datasource: model.ReportDatasource{CredentialKeyVersion: "v1", PasswordCiphertext: "cipher"},
 	}
 }

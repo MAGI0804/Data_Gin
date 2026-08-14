@@ -263,7 +263,7 @@ func TestReportDatasourceServiceReturnsResultTableSchema(t *testing.T) {
 	precision, scale := int64(18), int64(0)
 	connection := &fakeReportDatasourceConnection{resultColumns: []reportoracle.ResultColumn{
 		{Name: "RUN_ID", Position: 1, DataType: "VARCHAR2", DataLength: 36, Nullable: false},
-		{Name: "ROW_NO", Position: 2, DataType: "NUMBER", DataLength: 22, DataPrecision: &precision, DataScale: &scale, Nullable: false},
+		{Name: "ID", Position: 2, DataType: "NUMBER", DataLength: 22, DataPrecision: &precision, DataScale: &scale, Nullable: false},
 		{Name: "STORE_NAME", Position: 3, DataType: "NVARCHAR2", DataLength: 400, Nullable: true},
 	}}
 	store := &fakeReportDatasourceStore{item: model.ReportDatasource{

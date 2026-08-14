@@ -22,7 +22,7 @@ func TestBuildResultQueryPlanUsesBoundFiltersAndStableSort(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildResultQueryPlan() error = %v", err)
 	}
-	for _, required := range []string{"STORE_CODE = :2", "ORDER BY AMOUNT DESC NULLS LAST, ROW_NO ASC", "FETCH NEXT :3 ROWS ONLY", "FETCH NEXT :10 ROWS ONLY"} {
+	for _, required := range []string{"STORE_CODE = :2", "ORDER BY AMOUNT DESC NULLS LAST, ID ASC", "FETCH NEXT :3 ROWS ONLY", "FETCH NEXT :10 ROWS ONLY"} {
 		if !strings.Contains(plan.initialStatement+plan.nextStatement, required) {
 			t.Fatalf("plan does not contain %q: %s / %s", required, plan.initialStatement, plan.nextStatement)
 		}
@@ -56,11 +56,11 @@ func TestBuildResultPagePlan(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildResultPagePlan() error = %v", err)
 	}
-	want := "SELECT ROW_NO, STORE_CODE, AMOUNT FROM REPORT_OWNER.SALES_RESULT WHERE RUN_ID = :1 AND ROW_NO > :2 ORDER BY ROW_NO ASC FETCH NEXT :3 ROWS ONLY"
+	want := "SELECT ID, STORE_CODE, AMOUNT FROM REPORT_OWNER.SALES_RESULT WHERE RUN_ID = :1 AND ID > :2 ORDER BY ID ASC FETCH NEXT :3 ROWS ONLY"
 	if plan.nextStatement != want {
 		t.Fatalf("statement = %q, want %q", plan.nextStatement, want)
 	}
-	if strings.Contains(plan.initialStatement, "ROW_NO >") {
+	if strings.Contains(plan.initialStatement, "ID >") {
 		t.Fatalf("initial statement unexpectedly assumes a minimum row id: %q", plan.initialStatement)
 	}
 	columns := plan.Columns()
@@ -72,7 +72,7 @@ func TestBuildResultPagePlan(t *testing.T) {
 
 func TestBuildPurgePlanIsScopedAndBounded(t *testing.T) {
 	contract := ResultSnapshotContract{
-		table: ResultTableRef{Owner: "REPORT", Name: "RESULT_ROWS"}, runIDColumn: "RUN_ID", rowIDColumn: "ROW_NO", columns: map[string]struct{}{"VALUE": {}},
+		table: ResultTableRef{Owner: "REPORT", Name: "RESULT_ROWS"}, runIDColumn: "RUN_ID", rowIDColumn: "ID", columns: map[string]struct{}{"VALUE": {}},
 	}
 	plan, err := BuildPurgePlan(contract)
 	if err != nil {
@@ -98,11 +98,11 @@ func TestBuildResultCountPlanIsRunScoped(t *testing.T) {
 
 func TestResultPlansRejectUnsafeOrAmbiguousColumns(t *testing.T) {
 	tests := []ResultSnapshotRef{
-		{Table: ResultTableRef{Owner: "REPORT", Name: "ROWS; DROP TABLE X"}, RunIDColumn: "RUN_ID", RowIDColumn: "ROW_NO", Columns: []string{"VALUE"}},
-		{Table: ResultTableRef{Owner: "REPORT", Name: "ROWS"}, RunIDColumn: "RUN_ID OR 1=1", RowIDColumn: "ROW_NO", Columns: []string{"VALUE"}},
+		{Table: ResultTableRef{Owner: "REPORT", Name: "ROWS; DROP TABLE X"}, RunIDColumn: "RUN_ID", RowIDColumn: "ID", Columns: []string{"VALUE"}},
+		{Table: ResultTableRef{Owner: "REPORT", Name: "ROWS"}, RunIDColumn: "RUN_ID OR 1=1", RowIDColumn: "ID", Columns: []string{"VALUE"}},
 		{Table: ResultTableRef{Owner: "REPORT", Name: "ROWS"}, RunIDColumn: "RUN_ID", RowIDColumn: "RUN_ID", Columns: []string{"VALUE"}},
-		{Table: ResultTableRef{Owner: "REPORT", Name: "ROWS"}, RunIDColumn: "RUN_ID", RowIDColumn: "ROW_NO", Columns: []string{"VALUE", "value"}},
-		{Table: ResultTableRef{Owner: "REPORT", Name: "ROWS"}, RunIDColumn: "RUN_ID", RowIDColumn: "ROW_NO", Columns: []string{"RUN_ID"}},
+		{Table: ResultTableRef{Owner: "REPORT", Name: "ROWS"}, RunIDColumn: "RUN_ID", RowIDColumn: "ID", Columns: []string{"VALUE", "value"}},
+		{Table: ResultTableRef{Owner: "REPORT", Name: "ROWS"}, RunIDColumn: "RUN_ID", RowIDColumn: "ID", Columns: []string{"RUN_ID"}},
 	}
 	for index, ref := range tests {
 		contract := ResultSnapshotContract{table: ref.Table, runIDColumn: ref.RunIDColumn, rowIDColumn: ref.RowIDColumn}
@@ -140,16 +140,21 @@ func TestResultPlanSupportsConfiguredMaximumColumns(t *testing.T) {
 	}
 }
 
-func TestSupportedRunIDType(t *testing.T) {
-	for _, dataType := range []string{"CHAR", "VARCHAR2", "NVARCHAR2"} {
-		if !supportedRunIDType(dataType) {
-			t.Fatalf("supportedRunIDType(%q) = false", dataType)
+func TestSupportedSystemResultIDTypes(t *testing.T) {
+	zero, two, eighteen := int64(0), int64(2), int64(18)
+	for _, column := range []ResultColumn{{DataType: "CHAR"}, {DataType: "VARCHAR2"}, {DataType: "NUMBER"}, {DataType: "NUMBER", DataScale: &zero}} {
+		if _, supported := supportedReportIDColumn(column); !supported {
+			t.Fatalf("supportedReportIDColumn(%#v) = false", column)
 		}
 	}
-	for _, dataType := range []string{"NUMBER", "BLOB", "BFILE"} {
-		if supportedRunIDType(dataType) {
-			t.Fatalf("supportedRunIDType(%q) = true", dataType)
-		}
+	if _, supported := supportedReportIDColumn(ResultColumn{DataType: "NUMBER", DataScale: &two}); supported {
+		t.Fatal("supportedReportIDColumn accepted a decimal report id")
+	}
+	if !supportedRecordIDColumn(ResultColumn{DataType: "NUMBER"}) || !supportedRecordIDColumn(ResultColumn{DataType: "NUMBER", DataPrecision: &eighteen, DataScale: &zero}) {
+		t.Fatal("supportedRecordIDColumn rejected an integer NUMBER")
+	}
+	if supportedRecordIDColumn(ResultColumn{DataType: "VARCHAR2"}) || supportedRecordIDColumn(ResultColumn{DataType: "NUMBER", DataScale: &two}) {
+		t.Fatal("supportedRecordIDColumn accepted an unsupported type")
 	}
 }
 
@@ -168,7 +173,7 @@ func TestOracleRowID(t *testing.T) {
 func testSnapshotContract() ResultSnapshotContract {
 	return ResultSnapshotContract{
 		table:       ResultTableRef{Owner: "REPORT_OWNER", Name: "SALES_RESULT"},
-		runIDColumn: "RUN_ID", rowIDColumn: "ROW_NO",
+		runIDColumn: "RUN_ID", rowIDColumn: "ID",
 		columns: map[string]struct{}{"STORE_CODE": {}, "AMOUNT": {}},
 	}
 }
