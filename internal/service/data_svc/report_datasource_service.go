@@ -19,9 +19,10 @@ import (
 )
 
 var (
-	ErrReportDatasourceInvalid  = errors.New("report datasource service: invalid input")
-	ErrReportDatasourceNotFound = errors.New("report datasource service: not found")
-	ErrReportDatasourceConflict = errors.New("report datasource service: conflict")
+	ErrReportDatasourceInvalid               = errors.New("report datasource service: invalid input")
+	ErrReportDatasourceNotFound              = errors.New("report datasource service: not found")
+	ErrReportDatasourceConflict              = errors.New("report datasource service: conflict")
+	ErrReportDatasourceCredentialUnavailable = errors.New("report datasource service: credential configuration unavailable")
 )
 
 const (
@@ -133,6 +134,9 @@ func (service *ReportDatasourceService) Create(ctx context.Context, actor uint, 
 	}
 	version, ciphertext, err := service.cipher.Encrypt(request.Password)
 	if err != nil {
+		if errors.Is(err, reportsecret.ErrInvalidCredential) {
+			return nil, fmt.Errorf("%w: %v", ErrReportDatasourceCredentialUnavailable, err)
+		}
 		return nil, fmt.Errorf("report datasource service: encrypt credential: %w", err)
 	}
 	datasource.CredentialKeyVersion = version
@@ -153,6 +157,9 @@ func (service *ReportDatasourceService) Update(ctx context.Context, actor, datas
 	if request.Password != "" {
 		version, ciphertext, encryptErr := service.cipher.Encrypt(request.Password)
 		if encryptErr != nil {
+			if errors.Is(encryptErr, reportsecret.ErrInvalidCredential) {
+				return nil, fmt.Errorf("%w: %v", ErrReportDatasourceCredentialUnavailable, encryptErr)
+			}
 			return nil, fmt.Errorf("report datasource service: encrypt credential: %w", encryptErr)
 		}
 		datasource.CredentialKeyVersion = version

@@ -35,6 +35,10 @@ func setupConfig() {
 		console.Exit("invalid mall weather configuration: %v", err)
 	}
 	global.MallWeatherEnabledAtStartup = pkgConfig.GetBool("cfg.mall_weather.enabled")
+	if err := validateReportCenterFlags(); err != nil {
+		console.Exit("invalid report center configuration: %v", err)
+	}
+	global.ReportCenterEnabledAtStartup = pkgConfig.GetBool("cfg.report_center.enabled")
 
 	credentials, err := credential.Load(credential.Requirements{
 		Production:         pkgConfig.GetString("cfg.app.env") == "prod",
@@ -47,6 +51,19 @@ func setupConfig() {
 	global.Credentials = credentials
 	logCredentialStatus(credentials)
 
+}
+
+func validateReportCenterFlags() error {
+	for _, name := range []string{appConfig.EnvReportCenterEnabled, appConfig.EnvReportWorkerEnabled} {
+		raw, exists := os.LookupEnv(name)
+		if !exists || strings.TrimSpace(raw) == "" {
+			continue
+		}
+		if _, err := strconv.ParseBool(strings.TrimSpace(raw)); err != nil {
+			return fmt.Errorf("%s must be a boolean", name)
+		}
+	}
+	return nil
 }
 
 func validateMallWeatherConfig() error {

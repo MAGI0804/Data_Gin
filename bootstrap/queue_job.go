@@ -33,7 +33,7 @@ func setupQueueJob() {
 	client := jobPkg.NewAsynqClient(redisAddr, redisUsername, redisPassword, redisDB)
 	global.QueueJobClient = client
 
-	reportWorkerEnabled := config.GetBool("cfg.queue_job.report_worker.enabled")
+	reportWorkerEnabled := global.ReportCenterEnabledAtStartup
 	queues := reportWorkerQueues(
 		config.Get("cfg.queue_job.config_opt.queues").(map[string]int),
 		reportWorkerEnabled,

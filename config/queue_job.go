@@ -1,10 +1,16 @@
 package config
 
 import (
+	"os"
+	"strconv"
+	"strings"
+
 	"gin-biz-web-api/pkg/config"
 
 	"github.com/spf13/cast"
 )
+
+const EnvReportWorkerEnabled = "REPORT_WORKER_ENABLED"
 
 func init() {
 
@@ -55,10 +61,32 @@ func init() {
 				"retry_max_seconds":    config.Get("QueueJob.Outbox.RetryMaxSeconds", 300),
 			},
 			"report_worker": map[string]interface{}{
-				"enabled":      config.Get("QueueJob.ReportWorker.Enabled", true),
-				"queue_weight": config.Get("QueueJob.ReportWorker.QueueWeight", 2),
+				"enabled":      reportWorkerEnabled(),
+				"queue_weight": reportWorkerQueueWeight(),
 			},
 		}
 	})
 
+}
+
+func reportWorkerEnabled() bool {
+	raw, exists := os.LookupEnv(EnvReportWorkerEnabled)
+	if exists && strings.TrimSpace(raw) != "" {
+		enabled, err := strconv.ParseBool(strings.TrimSpace(raw))
+		if err != nil {
+			return false
+		}
+		return enabled
+	}
+	if instance := config.Instance(); instance != nil && instance.IsSet("QueueJob.ReportWorker.Enabled") {
+		return instance.GetBool("QueueJob.ReportWorker.Enabled")
+	}
+	return true
+}
+
+func reportWorkerQueueWeight() int {
+	if instance := config.Instance(); instance != nil && instance.IsSet("QueueJob.ReportWorker.QueueWeight") {
+		return instance.GetInt("QueueJob.ReportWorker.QueueWeight")
+	}
+	return 2
 }

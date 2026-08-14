@@ -2,6 +2,7 @@ package data_ctrl
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -55,6 +56,25 @@ func TestReportDatasourceControllerTestsConnectionDraft(t *testing.T) {
 	}
 	if strings.Contains(recorder.Body.String(), "secret") {
 		t.Fatalf("connection test response leaked password: %s", recorder.Body)
+	}
+}
+
+func TestReportDatasourceControllerMapsCredentialConfigurationFailure(t *testing.T) {
+	code, message := classifyReportDatasourceError(data_svc.ErrReportDatasourceCredentialUnavailable)
+	if code.HttpStatusCode() != http.StatusServiceUnavailable || !strings.Contains(message, "凭据加密配置") {
+		t.Fatalf("classifyReportDatasourceError() = %d, %q", code.HttpStatusCode(), message)
+	}
+}
+
+func TestWriteReportDatasourceErrorRecordsPrivateCauseWithoutLeakingResponse(t *testing.T) {
+	recorder := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(recorder)
+	writeReportDatasourceError(context, errors.New("database password=secret unavailable"))
+	if recorder.Code != http.StatusInternalServerError || len(context.Errors.ByType(gin.ErrorTypePrivate)) != 1 {
+		t.Fatalf("response=%d errors=%v", recorder.Code, context.Errors)
+	}
+	if strings.Contains(recorder.Body.String(), "password") || strings.Contains(recorder.Body.String(), "secret") {
+		t.Fatalf("response leaked private cause: %s", recorder.Body)
 	}
 }
 

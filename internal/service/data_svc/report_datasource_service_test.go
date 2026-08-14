@@ -9,6 +9,7 @@ import (
 
 	"gin-biz-web-api/internal/reportoracle"
 	"gin-biz-web-api/internal/reportrepo"
+	"gin-biz-web-api/internal/reportsecret"
 	"gin-biz-web-api/internal/requestbody"
 	"gin-biz-web-api/model"
 )
@@ -26,6 +27,17 @@ func TestReportDatasourceServiceCreateEncryptsAndRedactsPassword(t *testing.T) {
 	}
 	if !result.HasPassword || strings.Contains(result.Host+result.Username+result.LastTestError, "secret-password") {
 		t.Fatalf("Create() leaked or lost password state: %+v", result)
+	}
+}
+
+func TestReportDatasourceServiceCreateClassifiesInvalidCredentialConfiguration(t *testing.T) {
+	store := &fakeReportDatasourceStore{}
+	service := NewReportDatasourceServiceWithDependencies(store, &fakeReportDatasourceCipher{err: reportsecret.ErrInvalidCredential}, func(context.Context, reportoracle.Config) (reportDatasourceConnection, error) { return nil, nil })
+	if _, err := service.Create(t.Context(), 7, validReportDatasourceRequest("secret-password")); !errors.Is(err, ErrReportDatasourceCredentialUnavailable) {
+		t.Fatalf("Create() error = %v, want ErrReportDatasourceCredentialUnavailable", err)
+	}
+	if store.created != nil {
+		t.Fatal("invalid credential configuration reached MySQL persistence")
 	}
 }
 
@@ -220,11 +232,14 @@ func (store *fakeReportDatasourceStore) RecordReportDatasourceTest(_ context.Con
 	return nil
 }
 
-type fakeReportDatasourceCipher struct{ encrypted string }
+type fakeReportDatasourceCipher struct {
+	encrypted string
+	err       error
+}
 
 func (cipher *fakeReportDatasourceCipher) Encrypt(plaintext string) (string, string, error) {
 	cipher.encrypted = plaintext
-	return "key-v1", "ciphertext", nil
+	return "key-v1", "ciphertext", cipher.err
 }
 func (*fakeReportDatasourceCipher) Decrypt(string, string) (string, error) {
 	return "secret-password", nil

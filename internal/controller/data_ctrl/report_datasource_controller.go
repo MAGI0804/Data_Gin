@@ -122,6 +122,9 @@ func (controller *ReportDatasourceController) TestConnection(c *gin.Context) {
 }
 
 func writeReportDatasourceError(c *gin.Context, err error) {
+	if c != nil && err != nil {
+		_ = c.Error(err).SetType(gin.ErrorTypePrivate)
+	}
 	code, message := classifyReportDatasourceError(err)
 	responses.New(c).ToSafeErrorResponse(code, message)
 }
@@ -134,6 +137,8 @@ func classifyReportDatasourceError(err error) (*errcode.Error, string) {
 		return errcode.Conflict, "报表数据源编码已存在，或连接仍被未清理的运行使用"
 	case errors.Is(err, data_svc.ErrReportDatasourceInvalid):
 		return errcode.UnprocessableEntity, "报表数据源参数校验失败"
+	case errors.Is(err, data_svc.ErrReportDatasourceCredentialUnavailable):
+		return errcode.ServiceUnavailable, "报表凭据加密配置不可用，请联系管理员"
 	default:
 		return errcode.InternalServerError, "报表数据源服务暂时不可用"
 	}

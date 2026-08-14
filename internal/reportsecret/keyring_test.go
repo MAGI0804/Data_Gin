@@ -79,6 +79,16 @@ func TestEnvironmentKeyringEncryptsWithConfiguredCurrentVersion(t *testing.T) {
 	}
 }
 
+func TestEnvironmentKeyringValidateRejectsMissingCurrentVersion(t *testing.T) {
+	key := base64.StdEncoding.EncodeToString([]byte("0123456789abcdef0123456789abcdef"))
+	t.Setenv("TEST_REPORT_KEYS", `{"key-v1":"`+key+`"}`)
+	t.Setenv("TEST_REPORT_KEY_VERSION", "key-v2")
+	environment := EnvironmentKeyring{Variable: "TEST_REPORT_KEYS", VersionVariable: "TEST_REPORT_KEY_VERSION"}
+	if err := environment.Validate(); !errors.Is(err, ErrInvalidCredential) {
+		t.Fatalf("Validate() error = %v, want ErrInvalidCredential", err)
+	}
+}
+
 func TestScopedCiphertextCannotCrossPurposeBoundary(t *testing.T) {
 	key := base64.StdEncoding.EncodeToString([]byte("0123456789abcdef0123456789abcdef"))
 	keyring, err := ParseKeyring(`{"key-v1":"` + key + `"}`)

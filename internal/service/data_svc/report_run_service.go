@@ -22,8 +22,9 @@ import (
 )
 
 var (
-	ErrReportRunInvalid = errors.New("report run service: invalid input")
-	ErrReportRunDenied  = errors.New("report run service: forbidden")
+	ErrReportRunInvalid               = errors.New("report run service: invalid input")
+	ErrReportRunDenied                = errors.New("report run service: forbidden")
+	ErrReportRunCredentialUnavailable = errors.New("report run service: credential configuration unavailable")
 )
 
 var refreshNoncePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`)
@@ -132,6 +133,9 @@ func (service *ReportRunService) Create(ctx context.Context, actor, definitionID
 	}
 	keyVersion, sensitiveCipher, err := encryptSensitiveParameters(service.cipher, normalized.SensitiveJSON)
 	if err != nil {
+		if errors.Is(err, reportsecret.ErrInvalidCredential) {
+			return nil, fmt.Errorf("%w: %v", ErrReportRunCredentialUnavailable, err)
+		}
 		return nil, fmt.Errorf("report run service: encrypt sensitive parameters: %w", err)
 	}
 	createdAt := service.now().UTC()

@@ -50,6 +50,7 @@ func TestReportControllerErrorContract(t *testing.T) {
 		{name: "conflict", err: data_svc.ErrReportConflict, wantStatus: http.StatusConflict},
 		{name: "invalid", err: data_svc.ErrReportInvalid, wantStatus: http.StatusUnprocessableEntity},
 		{name: "publication invalid", err: data_svc.ErrReportPublicationInvalid, wantStatus: http.StatusUnprocessableEntity},
+		{name: "parameter keyring unavailable", err: data_svc.ErrReportRunCredentialUnavailable, wantStatus: http.StatusServiceUnavailable},
 		{name: "internal", err: errors.New("database password=secret"), wantStatus: http.StatusInternalServerError},
 	}
 	for _, test := range tests {

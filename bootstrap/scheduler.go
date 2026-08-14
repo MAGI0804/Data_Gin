@@ -47,7 +47,7 @@ func setupScheduler() {
 
 	registerExcelMatchScheduledTasks(scheduler)
 
-	registerReportScheduledTasks(scheduler, config.GetBool("cfg.queue_job.report_worker.enabled"))
+	registerReportScheduledTasks(scheduler, global.ReportCenterEnabledAtStartup)
 
 	registerMallWeatherScheduledTasks(scheduler)
 

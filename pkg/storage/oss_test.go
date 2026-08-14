@@ -84,6 +84,50 @@ func TestNormalizeOSSRegion(t *testing.T) {
 	}
 }
 
+func TestValidateOSSConfigRequiresCompleteLocalConfiguration(t *testing.T) {
+	for _, name := range []string{
+		"ALIYUN_OSS_ACCESS_KEY_ID", "OSS_ACCESS_KEY_ID", "ALIBABA_CLOUD_ACCESS_KEY_ID",
+		"ALIYUN_OSS_ACCESS_KEY_SECRET", "OSS_ACCESS_KEY_SECRET", "ALIBABA_CLOUD_ACCESS_KEY_SECRET",
+	} {
+		t.Setenv(name, "")
+	}
+	valid := OSSConfig{
+		Enabled:  true,
+		Region:   "cn-shanghai",
+		Endpoint: "https://oss-cn-shanghai.aliyuncs.com",
+		Bucket:   "report-test",
+	}
+	tests := []struct {
+		name      string
+		mutate    func(*OSSConfig)
+		wantError string
+	}{
+		{name: "disabled", mutate: func(cfg *OSSConfig) { cfg.Enabled = false }, wantError: "未启用"},
+		{name: "region missing", mutate: func(cfg *OSSConfig) { cfg.Region = "" }, wantError: "region"},
+		{name: "bucket missing", mutate: func(cfg *OSSConfig) { cfg.Bucket = "" }, wantError: "bucket"},
+		{name: "endpoint missing", mutate: func(cfg *OSSConfig) { cfg.Endpoint = "" }, wantError: "endpoint"},
+		{name: "credentials missing", wantError: "access key"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := valid
+			if tt.mutate != nil {
+				tt.mutate(&cfg)
+			}
+			err := validateOSSConfig(cfg)
+			if err == nil || !strings.Contains(err.Error(), tt.wantError) {
+				t.Fatalf("validateOSSConfig() error = %v, want %q", err, tt.wantError)
+			}
+		})
+	}
+
+	t.Setenv("ALIYUN_OSS_ACCESS_KEY_ID", "test-access-key")
+	t.Setenv("ALIYUN_OSS_ACCESS_KEY_SECRET", "test-access-secret")
+	if err := validateOSSConfig(valid); err != nil {
+		t.Fatalf("validateOSSConfig() error = %v", err)
+	}
+}
+
 func TestOSSClientPublicURLUsesNormalizedRegionFallback(t *testing.T) {
 	client := &OSSClient{
 		cfg: OSSConfig{

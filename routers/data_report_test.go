@@ -53,6 +53,15 @@ func TestRegisterReportRoutesUsesExpectedMethodsAndPaths(t *testing.T) {
 	}
 }
 
+func TestRegisterReportCenterRoutesSkipsDisabledModule(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	registerReportCenterRoutes(router.Group("/api"), false)
+	if routes := router.Routes(); len(routes) != 0 {
+		t.Fatalf("disabled report center registered routes: %#v", routes)
+	}
+}
+
 func TestReportDatasourceDraftConnectionTestUsesDedicatedRateLimit(t *testing.T) {
 	source, err := os.ReadFile("data.go")
 	if err != nil {

@@ -45,6 +45,12 @@ QueueJob:
     Host: ${REDIS_HOST:-127.0.0.1}
     Port: ${REDIS_PORT:-6379}
     DB: 0
+  ReportWorker:
+    Enabled: ${REPORT_WORKER_ENABLED:-true}
+    QueueWeight: 2
+
+ReportCenter:
+  Enabled: ${REPORT_CENTER_ENABLED:-true}
 
 MallWeather:
   Enabled: ${MALL_WEATHER_ENABLED:-false}

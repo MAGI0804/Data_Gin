@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"gin-biz-web-api/internal/reportrepo"
+	"gin-biz-web-api/internal/reportsecret"
 	"gin-biz-web-api/internal/requestbody"
 	"gin-biz-web-api/model"
 )
@@ -100,6 +101,15 @@ func TestReportRunServiceDoesNotEncryptEmptySensitiveObject(t *testing.T) {
 	}
 	if cipher.calls != 0 || store.command.Run.SensitiveParametersCipher != "" || store.command.Run.SensitiveParametersKeyVersion != "" {
 		t.Fatalf("cipher calls=%d run=%#v", cipher.calls, store.command.Run)
+	}
+}
+
+func TestReportRunServiceClassifiesSensitiveParameterKeyringFailure(t *testing.T) {
+	store := &fakeReportRunStore{published: publishedRunFixture()}
+	service := NewReportRunServiceWithDependencies(store, &fakeReportParameterCipher{err: reportsecret.ErrInvalidCredential})
+	_, err := service.Create(t.Context(), 17, 9, requestbody.ReportRunCreateRequest{Parameters: map[string]json.RawMessage{"storeCode": json.RawMessage(`"S001"`), "secret": json.RawMessage(`"value"`)}})
+	if !errors.Is(err, ErrReportRunCredentialUnavailable) || store.command != nil {
+		t.Fatalf("Create() error = %v, command = %#v", err, store.command)
 	}
 }
 

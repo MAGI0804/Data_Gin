@@ -26,6 +26,31 @@ type EnvironmentKeyring struct {
 	VersionVariable string
 }
 
+// Validate verifies that the active credential key version is backed by a
+// configured AES-256 key without encrypting or exposing any credential.
+func (environment EnvironmentKeyring) Validate() error {
+	versionVariable := strings.TrimSpace(environment.VersionVariable)
+	if versionVariable == "" {
+		versionVariable = "REPORT_CREDENTIAL_KEY_VERSION"
+	}
+	version := strings.TrimSpace(os.Getenv(versionVariable))
+	if version == "" {
+		return credentialError("credential key version is unavailable")
+	}
+	variable := strings.TrimSpace(environment.Variable)
+	if variable == "" {
+		variable = "REPORT_CREDENTIAL_KEYS_JSON"
+	}
+	keyring, err := ParseKeyring(os.Getenv(variable))
+	if err != nil {
+		return fmt.Errorf("load report credential keyring: %w", err)
+	}
+	if _, err := keyring.aead(version); err != nil {
+		return err
+	}
+	return nil
+}
+
 func (environment EnvironmentKeyring) Encrypt(plaintext string) (string, string, error) {
 	variable := strings.TrimSpace(environment.Variable)
 	if variable == "" {

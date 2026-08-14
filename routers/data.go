@@ -1,6 +1,7 @@
 package routers
 
 import (
+	"gin-biz-web-api/global"
 	"gin-biz-web-api/internal/controller/data_ctrl"
 	"gin-biz-web-api/internal/middleware"
 	"gin-biz-web-api/model"
@@ -21,11 +22,7 @@ func apiData(api *gin.RouterGroup) {
 	registerMallWeatherSheetPushOptionRoutes(api, data_ctrl.NewMallWeatherSheetPushOptionController())
 	registerMallWeatherCapacityPlanRoutes(api, data_ctrl.NewMallWeatherCapacityPlanController())
 	registerMallWeatherMetricsRoutes(api, data_ctrl.NewMallWeatherMetricsController())
-	registerReportRoutes(api, data_ctrl.NewReportController())
-	registerReportDatasourceRoutes(api, data_ctrl.NewReportDatasourceController())
-	registerReportRunRoutes(api, data_ctrl.NewReportRunController())
-	registerReportExportRoutes(api, data_ctrl.NewReportExportController())
-	registerReportAuditRoutes(api, data_ctrl.NewReportAuditController())
+	registerReportCenterRoutes(api, global.ReportCenterEnabledAtStartup)
 
 	sourceGroup := api.Group("/v1/sources")
 	sourceGroup.Use(middleware.AuthJWT())
@@ -217,6 +214,17 @@ func apiData(api *gin.RouterGroup) {
 		dataGroup.GET("/clean-records/list", middleware.RequirePermission(model.PermissionDataRead), dataCtrl.QueryController.GetCleanRecordList)
 		dataGroup.GET("/statistics", middleware.RequirePermission(model.PermissionDataRead), dataCtrl.QueryController.GetStatistics)
 	}
+}
+
+func registerReportCenterRoutes(api *gin.RouterGroup, enabled bool) {
+	if !enabled {
+		return
+	}
+	registerReportRoutes(api, data_ctrl.NewReportController())
+	registerReportDatasourceRoutes(api, data_ctrl.NewReportDatasourceController())
+	registerReportRunRoutes(api, data_ctrl.NewReportRunController())
+	registerReportExportRoutes(api, data_ctrl.NewReportExportController())
+	registerReportAuditRoutes(api, data_ctrl.NewReportAuditController())
 }
 
 func registerReportDatasourceRoutes(api *gin.RouterGroup, controller *data_ctrl.ReportDatasourceController) {

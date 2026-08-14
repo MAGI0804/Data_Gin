@@ -92,17 +92,8 @@ func OSSStorageEnabled() bool {
 
 func NewOSSClientFromConfig() (*OSSClient, error) {
 	cfg := LoadOSSConfig()
-	if !cfg.Enabled {
-		return nil, errors.New("OSS 存储未启用")
-	}
-	if cfg.Region == "" {
-		return nil, errors.New("OSS region 未配置")
-	}
-	if cfg.Bucket == "" {
-		return nil, errors.New("OSS bucket 未配置")
-	}
-	if cfg.Endpoint == "" && !cfg.UseInternal {
-		return nil, errors.New("OSS endpoint 未配置")
+	if err := validateOSSConfig(cfg); err != nil {
+		return nil, err
 	}
 
 	credentialsProvider := credentialsProviderFromEnv()
@@ -140,6 +131,33 @@ func NewOSSClientFromConfig() (*OSSClient, error) {
 		return client.client.HeadObject(ctx, request)
 	}
 	return client, nil
+}
+
+// ValidateOSSConfig checks the local settings required to construct a usable
+// OSS client. It deliberately performs no network request.
+func ValidateOSSConfig() error {
+	return validateOSSConfig(LoadOSSConfig())
+}
+
+func validateOSSConfig(cfg OSSConfig) error {
+	if !cfg.Enabled {
+		return errors.New("OSS 存储未启用")
+	}
+	if cfg.Region == "" {
+		return errors.New("OSS region 未配置")
+	}
+	if cfg.Bucket == "" {
+		return errors.New("OSS bucket 未配置")
+	}
+	if cfg.Endpoint == "" && !cfg.UseInternal {
+		return errors.New("OSS endpoint 未配置")
+	}
+	id := firstEnv("ALIYUN_OSS_ACCESS_KEY_ID", "OSS_ACCESS_KEY_ID", "ALIBABA_CLOUD_ACCESS_KEY_ID")
+	secret := firstEnv("ALIYUN_OSS_ACCESS_KEY_SECRET", "OSS_ACCESS_KEY_SECRET", "ALIBABA_CLOUD_ACCESS_KEY_SECRET")
+	if id == "" || secret == "" {
+		return errors.New("OSS access key id 和 secret 未完整配置")
+	}
+	return nil
 }
 
 func LoadOSSConfig() OSSConfig {

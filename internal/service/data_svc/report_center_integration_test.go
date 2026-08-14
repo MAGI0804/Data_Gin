@@ -4,6 +4,7 @@ package data_svc
 
 import (
 	"context"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -20,6 +21,7 @@ import (
 	"gin-biz-web-api/internal/reportoracle"
 	"gin-biz-web-api/internal/reportquery"
 	"gin-biz-web-api/internal/reportrepo"
+	"gin-biz-web-api/internal/reportsecret"
 	"gin-biz-web-api/internal/requestbody"
 	"gin-biz-web-api/model"
 	pkgconfig "gin-biz-web-api/pkg/config"
@@ -67,7 +69,7 @@ func TestReportCenterEndToEnd(t *testing.T) {
 	migrateReportIntegrationModels(t, ctx, db)
 	configureReportIntegrationOSS(t)
 
-	credential := integrationCredentialDecryptor{password: cfg.oracle.password}
+	credential := configureReportIntegrationSecrets(t)
 	repository := reportrepo.New(db)
 	resources := &reportIntegrationResources{}
 	fixture := inspectReportIntegrationFixture(t, ctx, cfg)
@@ -76,7 +78,7 @@ func TestReportCenterEndToEnd(t *testing.T) {
 	})
 
 	actor := reportIntegrationActorID()
-	datasource := createReportIntegrationDatasource(t, ctx, repository, actor, cfg)
+	datasource := createReportIntegrationDatasource(t, ctx, repository, credential, actor, cfg)
 	resources.datasourceID = datasource.ID
 	draft := createReportIntegrationDraft(t, ctx, repository, actor, datasource.ID, cfg, fixture)
 	resources.definitionID = draft.Definition.ID
@@ -386,19 +388,61 @@ func reportIntegrationActorID() uint {
 	return uint(value[0])<<24 | uint(value[1])<<16 | uint(value[2])<<8 | uint(value[3]) | 1
 }
 
-func createReportIntegrationDatasource(t *testing.T, ctx context.Context, repository *reportrepo.Repository, actor uint, cfg reportIntegrationConfig) model.ReportDatasource {
+func configureReportIntegrationSecrets(t *testing.T) reportsecret.EnvironmentKeyring {
 	t.Helper()
-	datasource := model.ReportDatasource{
-		Code: "integration_" + strings.ReplaceAll(uuid.NewString(), "-", "")[:20], Name: "报表中心集成测试", Driver: model.ReportDatasourceDriverOracle,
+	credentialKey := base64.StdEncoding.EncodeToString([]byte("0123456789abcdef0123456789abcdef"))
+	parameterKey := base64.StdEncoding.EncodeToString([]byte("abcdef0123456789abcdef0123456789"))
+	t.Setenv("REPORT_CREDENTIAL_KEY_VERSION", "integration-v1")
+	t.Setenv("REPORT_CREDENTIAL_KEYS_JSON", `{"integration-v1":"`+credentialKey+`"}`)
+	t.Setenv("REPORT_PARAMETER_KEY_VERSION", "integration-v1")
+	t.Setenv("REPORT_PARAMETER_KEYS_JSON", `{"integration-v1":"`+parameterKey+`"}`)
+	if err := (reportsecret.EnvironmentKeyring{}).Validate(); err != nil {
+		t.Fatalf("validate integration credential keyring: %v", err)
+	}
+	if err := (reportsecret.EnvironmentParameterCipher{}).Validate(); err != nil {
+		t.Fatalf("validate integration parameter keyring: %v", err)
+	}
+	return reportsecret.EnvironmentKeyring{}
+}
+
+func createReportIntegrationDatasource(t *testing.T, ctx context.Context, repository *reportrepo.Repository, credential reportsecret.EnvironmentKeyring, actor uint, cfg reportIntegrationConfig) model.ReportDatasource {
+	t.Helper()
+	service := NewReportDatasourceServiceWithDependencies(repository, credential, func(ctx context.Context, config reportoracle.Config) (reportDatasourceConnection, error) {
+		return reportoracle.Open(ctx, config)
+	})
+	connection := requestbody.ReportDatasourceConnectionTestRequest{
 		Host: cfg.oracle.host, Port: cfg.oracle.port, ServiceName: cfg.oracle.serviceName, SID: cfg.oracle.sid,
-		Username: cfg.oracle.username, PasswordCiphertext: "integration-test-only", CredentialKeyVersion: "integration-v1",
-		SessionTimezone: cfg.oracle.timezone, ConnectTimeoutSeconds: 10, QueryTimeoutSeconds: 120,
-		MaxOpenConnections: 4, MaxIdleConnections: 1, PrefetchRows: 100, ArraySize: 100, Enabled: true,
+		Username: cfg.oracle.username, Password: cfg.oracle.password, SessionTimezone: cfg.oracle.timezone,
+		ConnectTimeoutSeconds: 10, QueryTimeoutSeconds: 120,
+		MaxOpenConnections: 4, MaxIdleConnections: 1, PrefetchRows: 100, ArraySize: 100,
 	}
-	if err := repository.CreateReportDatasource(ctx, actor, &datasource); err != nil {
-		t.Fatalf("create report integration datasource: %v", err)
+	tested, err := service.TestConnection(ctx, actor, connection)
+	if err != nil || tested.Status != reportDatasourceTestSuccess {
+		t.Fatalf("test report integration datasource draft: result=%#v error=%v", tested, err)
 	}
-	return datasource
+	created, err := service.Create(ctx, actor, requestbody.ReportDatasourceSaveRequest{
+		Code: "integration_" + strings.ReplaceAll(uuid.NewString(), "-", "")[:20], Name: "报表中心集成测试",
+		Host: connection.Host, Port: connection.Port, ServiceName: connection.ServiceName, SID: connection.SID,
+		Username: connection.Username, Password: connection.Password, SessionTimezone: connection.SessionTimezone,
+		ConnectTimeoutSeconds: connection.ConnectTimeoutSeconds, QueryTimeoutSeconds: connection.QueryTimeoutSeconds,
+		MaxOpenConnections: connection.MaxOpenConnections, MaxIdleConnections: connection.MaxIdleConnections,
+		PrefetchRows: connection.PrefetchRows, ArraySize: connection.ArraySize, Enabled: true,
+	})
+	if err != nil {
+		t.Fatalf("save report integration datasource: %v", err)
+	}
+	datasource, err := repository.GetReportDatasource(ctx, created.ID)
+	if err != nil {
+		t.Fatalf("reload report integration datasource: %v", err)
+	}
+	if datasource.PasswordCiphertext == "" || datasource.PasswordCiphertext == cfg.oracle.password || datasource.CredentialKeyVersion != "integration-v1" {
+		t.Fatal("integration datasource credential was not encrypted")
+	}
+	tested, err = service.Test(ctx, actor, datasource.ID)
+	if err != nil || tested.Status != reportDatasourceTestSuccess {
+		t.Fatalf("test saved report integration datasource: result=%#v error=%v", tested, err)
+	}
+	return *datasource
 }
 
 func createReportIntegrationDraft(t *testing.T, ctx context.Context, repository *reportrepo.Repository, actor, datasourceID uint, cfg reportIntegrationConfig, fixture reportIntegrationFixture) *reportrepo.Draft {
@@ -421,12 +465,6 @@ func createReportIntegrationDraft(t *testing.T, ctx context.Context, repository 
 	return draft
 }
 
-type integrationCredentialDecryptor struct{ password string }
-
-func (decryptor integrationCredentialDecryptor) Decrypt(_, _ string) (string, error) {
-	return decryptor.password, nil
-}
-
 type integrationParameterCipher struct{}
 
 func (integrationParameterCipher) Encrypt([]byte) (string, string, error) {
@@ -439,7 +477,7 @@ func (integrationParameterDecryptor) Decrypt(_, _ string) ([]byte, error) {
 	return nil, fmt.Errorf("integration test does not configure sensitive parameters")
 }
 
-func executeReportIntegrationRun(t *testing.T, ctx context.Context, db *gorm.DB, repository *reportrepo.Repository, credential integrationCredentialDecryptor, actor, definitionID uint, resources *reportIntegrationResources) model.ReportRun {
+func executeReportIntegrationRun(t *testing.T, ctx context.Context, db *gorm.DB, repository *reportrepo.Repository, credential reportDatasourceCredentialDecryptor, actor, definitionID uint, resources *reportIntegrationResources) model.ReportRun {
 	t.Helper()
 	service := NewReportRunServiceWithDependencies(repository, integrationParameterCipher{})
 	created, err := service.Create(ctx, actor, definitionID, requestbody.ReportRunCreateRequest{Parameters: map[string]json.RawMessage{}})
@@ -461,7 +499,7 @@ func executeReportIntegrationRun(t *testing.T, ctx context.Context, db *gorm.DB,
 	return run
 }
 
-func assertReportIntegrationQueries(t *testing.T, ctx context.Context, repository *reportrepo.Repository, credential integrationCredentialDecryptor, actor uint, run model.ReportRun, fieldID string) string {
+func assertReportIntegrationQueries(t *testing.T, ctx context.Context, repository *reportrepo.Repository, credential reportDatasourceCredentialDecryptor, actor uint, run model.ReportRun, fieldID string) string {
 	t.Helper()
 	service := NewReportRunQueryServiceWithDependencies(repository, credential, oracleReportResultPageReader{}, []byte("report-integration-cursor-key"))
 	defaultValues := readReportIntegrationQueryPages(t, ctx, service, actor, run.ID, reportquery.Input{}, run.RowCount, run.RowCount)
@@ -545,7 +583,7 @@ func createOrReuseReportIntegrationExport(t *testing.T, ctx context.Context, rep
 	return model.ReportExport{BaseModel: model.BaseModel{ID: created.ID}, ExportUUID: created.ExportUUID, RunID: created.RunID, Status: created.Status}
 }
 
-func newReportIntegrationExportProcessor(t *testing.T, repository *reportrepo.Repository, credential integrationCredentialDecryptor, ossBase string, objectStore func() (reportExportObjectStore, error), resources *reportIntegrationResources) *ReportExportProcessor {
+func newReportIntegrationExportProcessor(t *testing.T, repository *reportrepo.Repository, credential reportDatasourceCredentialDecryptor, ossBase string, objectStore func() (reportExportObjectStore, error), resources *reportIntegrationResources) *ReportExportProcessor {
 	t.Helper()
 	processor := NewReportExportProcessorWithDependencies(repository, credential, oracleReportExportSessionFactory{})
 	processor.workerID = "report-integration-" + uuid.NewString()
