@@ -23,6 +23,7 @@ const (
 	JSONSnapshotManifestTable = "REPORT_RUN_SNAPSHOTS"
 	JSONSnapshotRowsTable     = "REPORT_RUN_SNAPSHOT_ROWS"
 	jsonSnapshotReadyStatus   = "READY"
+	jsonSnapshotInsertBatch   = 200
 )
 
 type JSONCursorCallPlan struct {
@@ -172,15 +173,22 @@ func (adapter *Adapter) ExecuteJSONCursorSnapshot(
 		return snapshot, fmt.Errorf("create JSON cursor snapshot manifest: %w", err)
 	}
 
-	insert, err := tx.PrepareContext(ctx, "INSERT INTO "+JSONSnapshotRowsTable+" (RUN_ID, ROW_NO, VALUES_JSON) VALUES (:1, :2, :3)")
-	if err != nil {
-		return snapshot, fmt.Errorf("prepare JSON cursor snapshot row insert: %w", err)
-	}
-	defer insert.Close()
 	values := make([]interface{}, len(snapshot.Columns))
 	destinations := make([]interface{}, len(values))
 	for index := range destinations {
 		destinations[index] = &values[index]
+	}
+	batch := make([][]byte, 0, jsonSnapshotInsertBatch)
+	flush := func() error {
+		if len(batch) == 0 {
+			return nil
+		}
+		firstRow := snapshot.RowCount - int64(len(batch)) + 1
+		if err := insertJSONSnapshotBatch(ctx, tx, runID, firstRow, batch); err != nil {
+			return err
+		}
+		batch = batch[:0]
+		return nil
 	}
 	for rows.Next() {
 		for index := range values {
@@ -194,12 +202,18 @@ func (adapter *Adapter) ExecuteJSONCursorSnapshot(
 			return snapshot, err
 		}
 		snapshot.RowCount++
-		if _, err := insert.ExecContext(ctx, runID, snapshot.RowCount, godror.Lob{Reader: bytes.NewReader(encoded), IsClob: true}); err != nil {
-			return snapshot, fmt.Errorf("insert JSON cursor snapshot row %d: %w", snapshot.RowCount, err)
+		batch = append(batch, encoded)
+		if len(batch) == cap(batch) {
+			if err := flush(); err != nil {
+				return snapshot, err
+			}
 		}
 	}
 	if err := rows.Err(); err != nil {
 		return snapshot, fmt.Errorf("iterate JSON result cursor: %w", err)
+	}
+	if err := flush(); err != nil {
+		return snapshot, err
 	}
 	result, err := tx.ExecContext(ctx,
 		"UPDATE "+JSONSnapshotManifestTable+" SET ROW_COUNT = :1, STATUS = '"+jsonSnapshotReadyStatus+"' WHERE RUN_ID = :2 AND STATUS = 'WRITING'",
@@ -212,6 +226,26 @@ func (adapter *Adapter) ExecuteJSONCursorSnapshot(
 		return snapshot, fmt.Errorf("finalize JSON cursor snapshot: manifest state changed")
 	}
 	return snapshot, nil
+}
+
+func insertJSONSnapshotBatch(ctx context.Context, tx *sql.Tx, runID string, firstRow int64, rows [][]byte) error {
+	if tx == nil || len(rows) == 0 || len(rows) > jsonSnapshotInsertBatch || firstRow < 1 {
+		return fmt.Errorf("insert JSON cursor snapshot batch: invalid request")
+	}
+	var statement strings.Builder
+	statement.Grow(64 + len(rows)*96)
+	statement.WriteString("INSERT ALL")
+	arguments := make([]interface{}, 0, len(rows)*3)
+	for index, encoded := range rows {
+		base := index*3 + 1
+		fmt.Fprintf(&statement, " INTO %s (RUN_ID, ROW_NO, VALUES_JSON) VALUES (:%d, :%d, :%d)", JSONSnapshotRowsTable, base, base+1, base+2)
+		arguments = append(arguments, runID, firstRow+int64(index), godror.Lob{Reader: bytes.NewReader(encoded), IsClob: true})
+	}
+	statement.WriteString(" SELECT 1 FROM DUAL")
+	if _, err := tx.ExecContext(ctx, statement.String(), arguments...); err != nil {
+		return fmt.Errorf("insert JSON cursor snapshot rows %d-%d: %w", firstRow, firstRow+int64(len(rows))-1, err)
+	}
+	return nil
 }
 
 func (adapter *Adapter) ReadJSONSnapshotPage(ctx context.Context, runID string, columns []string, afterRowID int64, pageSize int) (ResultPage, error) {
