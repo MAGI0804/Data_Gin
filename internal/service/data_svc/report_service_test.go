@@ -156,6 +156,10 @@ func TestReportDraftServiceAcceptsRefCursorInputSchemaWithDisplayName(t *testing
 	request.Result = requestbody.ReportResultRequest{}
 	request.CallTemplate = ""
 	request.Parameters = nil
+	request.Columns[0].SourceOracleType = ""
+	request.Columns[0].ValueType = ""
+	request.Columns[0].Filterable = true
+	request.Columns[0].Sortable = true
 
 	draft, err := reportDraftFromRequest(17, request)
 	if err != nil {
@@ -169,6 +173,9 @@ func TestReportDraftServiceAcceptsRefCursorInputSchemaWithDisplayName(t *testing
 	}
 	if len(draft.Parameters) != 0 || draft.Version.CallTemplate != "BEGIN REPORT_OWNER.PKG_SALES.BUILD_REPORT(P_PAYLOAD => :payload, P_RESULT => :resultCursor); END;" {
 		t.Fatalf("REF CURSOR draft = %#v", draft)
+	}
+	if draft.Columns[0].SourceOracleType != "VARCHAR2" || draft.Columns[0].ValueType != "string" || draft.Columns[0].Filterable || draft.Columns[0].Sortable {
+		t.Fatalf("REF CURSOR column defaults = %#v", draft.Columns[0])
 	}
 }
 

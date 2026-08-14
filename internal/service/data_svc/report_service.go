@@ -349,7 +349,7 @@ func reportDraftFromRequest(actor uint, request requestbody.ReportDraftSaveReque
 	}
 	columns := []model.ReportColumn{}
 	if len(request.Columns) > 0 {
-		columns, err = reportColumnsFromRequest(request.Columns)
+		columns, err = reportColumnsFromRequest(request.Columns, mode)
 		if err != nil {
 			return nil, err
 		}
@@ -473,7 +473,7 @@ func reportParametersFromRequest(requests []requestbody.ReportParameterRequest) 
 	return parameters, definitions, nil
 }
 
-func reportColumnsFromRequest(requests []requestbody.ReportColumnRequest) ([]model.ReportColumn, error) {
+func reportColumnsFromRequest(requests []requestbody.ReportColumnRequest, executionMode string) ([]model.ReportColumn, error) {
 	if len(requests) == 0 || len(requests) > maxReportColumns {
 		return nil, invalidReport("columns must contain between 1 and 512 items")
 	}
@@ -491,6 +491,17 @@ func reportColumnsFromRequest(requests []requestbody.ReportColumnRequest) ([]mod
 		request.DatabaseColumn = strings.TrimSpace(request.DatabaseColumn)
 		request.SourceOracleType = strings.ToUpper(strings.Join(strings.Fields(request.SourceOracleType), " "))
 		request.ValueType = strings.ToLower(strings.TrimSpace(request.ValueType))
+		if executionMode == model.ReportExecutionModeRefCursor {
+			if request.SourceOracleType == "" {
+				request.SourceOracleType = "VARCHAR2"
+			}
+			if request.ValueType == "" {
+				request.ValueType = "string"
+			}
+			request.Filterable = false
+			request.Sortable = false
+			request.AllowedOperators = nil
+		}
 		request.PreviewHeader = strings.TrimSpace(request.PreviewHeader)
 		request.ExcelHeader = strings.TrimSpace(request.ExcelHeader)
 		request.NullDisplay = strings.TrimSpace(request.NullDisplay)
