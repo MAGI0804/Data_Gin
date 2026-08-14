@@ -8,7 +8,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -57,12 +59,14 @@ type ReportRunDTO struct {
 // query screen. It deliberately omits procedure and result-table metadata so
 // clients can render inputs without learning Oracle implementation details.
 type ReportRunContractDTO struct {
-	DefinitionID uint                 `json:"definitionId"`
-	VersionID    uint                 `json:"versionId"`
-	Code         string               `json:"code"`
-	Name         string               `json:"name"`
-	Description  string               `json:"description"`
-	Parameters   []ReportParameterDTO `json:"parameters"`
+	DefinitionID  uint                 `json:"definitionId"`
+	VersionID     uint                 `json:"versionId"`
+	Code          string               `json:"code"`
+	Name          string               `json:"name"`
+	Description   string               `json:"description"`
+	ExecutionMode string               `json:"executionMode"`
+	InputSchema   json.RawMessage      `json:"inputSchema,omitempty"`
+	Parameters    []ReportParameterDTO `json:"parameters"`
 }
 
 func NewReportRunService() *ReportRunService {
@@ -105,18 +109,22 @@ func (service *ReportRunService) Contract(ctx context.Context, actor, definition
 	return &ReportRunContractDTO{
 		DefinitionID: published.Definition.ID, VersionID: published.Version.ID,
 		Code: published.Definition.Code, Name: published.Definition.Name,
-		Description: published.Definition.Description, Parameters: parameters,
+		Description: published.Definition.Description, ExecutionMode: published.Version.ExecutionMode,
+		InputSchema: cloneJSON([]byte(published.Version.InputSchemaJSON)), Parameters: parameters,
 	}, nil
 }
 
 func (service *ReportRunService) Create(ctx context.Context, actor, definitionID uint, request requestbody.ReportRunCreateRequest) (*ReportRunDTO, error) {
 	if service == nil || service.store == nil || service.cipher == nil || ctx == nil || actor == 0 || definitionID == 0 ||
-		(request.RefreshNonce != "" && !refreshNoncePattern.MatchString(request.RefreshNonce)) || len(request.Parameters) > maxReportParameters {
+		(request.RefreshNonce != "" && !refreshNoncePattern.MatchString(request.RefreshNonce)) || len(request.Parameters) > maxReportParameters || len(request.Conditions) > maxReportParameters {
 		return nil, fmt.Errorf("%w: actor, report and parameters are required", ErrReportRunInvalid)
 	}
 	published, err := service.store.FindPublishedReport(ctx, actor, definitionID, reportrepo.ReportActionQuery)
 	if err != nil {
 		return nil, classifyReportRunStoreError(err)
+	}
+	if published.Version.ExecutionMode == model.ReportExecutionModeRefCursor {
+		return service.createRefCursorRun(ctx, actor, definitionID, request, published)
 	}
 	definitions := reportParameterDefinitions(published.Parameters)
 	runUUID := uuid.NewString()
@@ -157,6 +165,184 @@ func (service *ReportRunService) Create(ctx context.Context, actor, definitionID
 		ID: command.Run.ID, RunUUID: command.Run.RunUUID, DefinitionID: definitionID,
 		VersionID: command.Run.VersionID, Status: command.Run.Status, CreatedAt: command.Run.CreatedAt,
 	}, nil
+}
+
+type reportRunInputFieldSchema struct {
+	Type          string            `json:"type"`
+	DisplayName   string            `json:"displayName"`
+	Control       string            `json:"control,omitempty"`
+	Required      bool              `json:"required,omitempty"`
+	Multiple      bool              `json:"multiple,omitempty"`
+	Example       json.RawMessage   `json:"example,omitempty"`
+	DefaultValue  json.RawMessage   `json:"default,omitempty"`
+	AllowedValues []json.RawMessage `json:"allowedValues,omitempty"`
+}
+
+func (service *ReportRunService) createRefCursorRun(
+	ctx context.Context,
+	actor, definitionID uint,
+	request requestbody.ReportRunCreateRequest,
+	published *reportrepo.PublishedReport,
+) (*ReportRunDTO, error) {
+	if len(request.Parameters) > 0 && len(request.Conditions) > 0 {
+		return nil, fmt.Errorf("%w: use conditions for JSON cursor reports", ErrReportRunInvalid)
+	}
+	conditions := request.Conditions
+	if conditions == nil {
+		conditions = request.Parameters
+	}
+	canonical, fingerprint, err := normalizeRefCursorConditions([]byte(published.Version.InputSchemaJSON), conditions)
+	if err != nil {
+		return nil, fmt.Errorf("%w: conditions do not match the published JSON schema", ErrReportRunInvalid)
+	}
+	runUUID := uuid.NewString()
+	createdAt := service.now().UTC()
+	command := &reportrepo.CreateRunCommand{
+		Run: model.ReportRun{
+			RunUUID: runUUID, DefinitionID: definitionID, VersionID: published.Version.ID, RequestedBy: actor,
+			Status: model.ReportRunStatusQueued, ExecutionFingerprint: executionFingerprint(published.Version.ContractHash, fingerprint, request.RefreshNonce),
+			RefreshNonce: request.RefreshNonce, NormalizedParametersJSON: model.JSONText(canonical),
+			ContractHash: published.Version.ContractHash, ProcedureSignatureHash: published.Version.ProcedureSignatureHash,
+			ResultSchemaHash: published.Version.ResultSchemaHash,
+		},
+		Outbox: reportrepo.NewReportRunOutbox(runUUID, createdAt),
+	}
+	if err := service.store.CreateRun(ctx, actor, definitionID, command); err != nil {
+		return nil, classifyReportRunStoreError(err)
+	}
+	return &ReportRunDTO{
+		ID: command.Run.ID, RunUUID: command.Run.RunUUID, DefinitionID: definitionID,
+		VersionID: command.Run.VersionID, Status: command.Run.Status, CreatedAt: command.Run.CreatedAt,
+	}, nil
+}
+
+func normalizeRefCursorConditions(schemaJSON []byte, input map[string]json.RawMessage) ([]byte, string, error) {
+	var schema map[string]reportRunInputFieldSchema
+	decoder := json.NewDecoder(bytes.NewReader(schemaJSON))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&schema); err != nil || len(schema) == 0 || len(schema) > maxReportParameters {
+		return nil, "", ErrReportRunInvalid
+	}
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		return nil, "", ErrReportRunInvalid
+	}
+	for code := range input {
+		if _, ok := schema[code]; !ok {
+			return nil, "", ErrReportRunInvalid
+		}
+	}
+	normalized := make(map[string]json.RawMessage, len(schema))
+	for code, field := range schema {
+		value, supplied := input[code]
+		if !supplied || bytes.Equal(bytes.TrimSpace(value), []byte("null")) {
+			if len(bytes.TrimSpace(field.DefaultValue)) > 0 {
+				value, supplied = field.DefaultValue, true
+			} else if field.Required {
+				return nil, "", ErrReportRunInvalid
+			} else {
+				continue
+			}
+		}
+		canonical, decoded, err := canonicalConditionValue(value)
+		if err != nil || !conditionValueMatchesField(decoded, field) || !conditionValueAllowed(canonical, field.AllowedValues, field.Multiple) {
+			return nil, "", ErrReportRunInvalid
+		}
+		normalized[code] = canonical
+	}
+	encoded, err := json.Marshal(normalized)
+	if err != nil {
+		return nil, "", err
+	}
+	sum := sha256.Sum256(encoded)
+	return encoded, hex.EncodeToString(sum[:]), nil
+}
+
+func canonicalConditionValue(raw json.RawMessage) (json.RawMessage, interface{}, error) {
+	decoder := json.NewDecoder(bytes.NewReader(raw))
+	decoder.UseNumber()
+	var value interface{}
+	if err := decoder.Decode(&value); err != nil {
+		return nil, nil, err
+	}
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		return nil, nil, ErrReportRunInvalid
+	}
+	encoded, err := json.Marshal(value)
+	return encoded, value, err
+}
+
+func conditionValueMatchesField(value interface{}, field reportRunInputFieldSchema) bool {
+	if field.Multiple {
+		values, ok := value.([]interface{})
+		if !ok || (field.Required && len(values) == 0) {
+			return false
+		}
+		for _, item := range values {
+			if !conditionScalarMatchesType(item, field.Type) {
+				return false
+			}
+		}
+		return true
+	}
+	if _, isArray := value.([]interface{}); isArray {
+		return false
+	}
+	return conditionScalarMatchesType(value, field.Type)
+}
+
+func conditionScalarMatchesType(value interface{}, oracleType string) bool {
+	switch strings.ToUpper(strings.TrimSpace(oracleType)) {
+	case "NUMBER":
+		switch typed := value.(type) {
+		case json.Number:
+			return typed.String() != ""
+		case string:
+			_, err := strconv.ParseFloat(typed, 64)
+			return err == nil
+		default:
+			return false
+		}
+	case "BOOLEAN":
+		_, ok := value.(bool)
+		return ok
+	case "VARCHAR2", "NVARCHAR2", "CHAR", "NCHAR", "CLOB", "NCLOB", "DATE", "TIMESTAMP":
+		text, ok := value.(string)
+		return ok && text != ""
+	default:
+		return false
+	}
+}
+
+func conditionValueAllowed(value json.RawMessage, allowed []json.RawMessage, multiple bool) bool {
+	if len(allowed) == 0 {
+		return true
+	}
+	allowedSet := make(map[string]struct{}, len(allowed))
+	for _, item := range allowed {
+		canonical, _, err := canonicalConditionValue(item)
+		if err != nil {
+			return false
+		}
+		allowedSet[string(canonical)] = struct{}{}
+	}
+	if !multiple {
+		_, ok := allowedSet[string(value)]
+		return ok
+	}
+	var items []json.RawMessage
+	if err := json.Unmarshal(value, &items); err != nil {
+		return false
+	}
+	for _, item := range items {
+		canonical, _, err := canonicalConditionValue(item)
+		if err != nil {
+			return false
+		}
+		if _, ok := allowedSet[string(canonical)]; !ok {
+			return false
+		}
+	}
+	return true
 }
 
 func reportParameterDefinitions(parameters []model.ReportParameter) []reporting.ParameterDefinition {

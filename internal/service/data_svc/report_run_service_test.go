@@ -62,6 +62,60 @@ func TestReportRunServiceReturnsPublishedInputContractWithoutSensitiveDefault(t 
 	}
 }
 
+func TestReportRunServiceCreatesRefCursorRunFromJSONConditions(t *testing.T) {
+	published := publishedRunFixture()
+	published.Version.ExecutionMode = model.ReportExecutionModeRefCursor
+	published.Version.InputSchemaJSON = model.JSONText(`{
+		"c_store_id":{"type":"VARCHAR2","displayName":"门店","multiple":true,"required":true,"allowedValues":["S001","S002"]},
+		"datein_begin":{"type":"DATE","displayName":"开始日期","default":"20260504"}
+	}`)
+	published.Parameters = nil
+	store := &fakeReportRunStore{published: published}
+	cipher := &fakeReportParameterCipher{err: errors.New("must not encrypt JSON conditions")}
+	service := NewReportRunServiceWithDependencies(store, cipher)
+
+	result, err := service.Create(t.Context(), 17, 9, requestbody.ReportRunCreateRequest{Conditions: map[string]json.RawMessage{
+		"c_store_id": json.RawMessage(`["S001","S002"]`),
+	}})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	if result.Status != model.ReportRunStatusQueued || cipher.calls != 0 {
+		t.Fatalf("result=%#v cipher calls=%d", result, cipher.calls)
+	}
+	if got := string(store.command.Run.NormalizedParametersJSON); got != `{"c_store_id":["S001","S002"],"datein_begin":"20260504"}` {
+		t.Fatalf("conditions snapshot = %s", got)
+	}
+	contract, err := service.Contract(t.Context(), 17, 9)
+	if err != nil {
+		t.Fatalf("Contract() error = %v", err)
+	}
+	if contract.ExecutionMode != model.ReportExecutionModeRefCursor || !strings.Contains(string(contract.InputSchema), `"displayName":"门店"`) || len(contract.Parameters) != 0 {
+		t.Fatalf("contract = %#v", contract)
+	}
+}
+
+func TestReportRunServiceRejectsInvalidRefCursorConditions(t *testing.T) {
+	published := publishedRunFixture()
+	published.Version.ExecutionMode = model.ReportExecutionModeRefCursor
+	published.Version.InputSchemaJSON = model.JSONText(`{"store_id":{"type":"VARCHAR2","displayName":"门店","required":true,"allowedValues":["S001"]}}`)
+	published.Parameters = nil
+	for _, conditions := range []map[string]json.RawMessage{
+		{},
+		{"store_id": json.RawMessage(`"S999"`)},
+		{"unknown": json.RawMessage(`"S001"`)},
+	} {
+		store := &fakeReportRunStore{published: published}
+		service := NewReportRunServiceWithDependencies(store, &fakeReportParameterCipher{})
+		if _, err := service.Create(t.Context(), 17, 9, requestbody.ReportRunCreateRequest{Conditions: conditions}); !errors.Is(err, ErrReportRunInvalid) {
+			t.Fatalf("Create(%s) error = %v", conditions, err)
+		}
+		if store.command != nil {
+			t.Fatal("invalid conditions created a run")
+		}
+	}
+}
+
 func TestReportRunServiceRejectsSystemParameterAndInvalidAllowedValue(t *testing.T) {
 	for _, parameters := range []map[string]json.RawMessage{
 		{"runId": json.RawMessage(`"client-controlled"`), "storeCode": json.RawMessage(`"S001"`), "secret": json.RawMessage(`"value"`)},

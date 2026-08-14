@@ -107,6 +107,7 @@ type ReportPublishRequest struct {
 
 type ReportRunCreateRequest struct {
 	Parameters   map[string]json.RawMessage `json:"parameters"`
+	Conditions   map[string]json.RawMessage `json:"conditions"`
 	RefreshNonce string                     `json:"refreshNonce,omitempty"`
 }
 
