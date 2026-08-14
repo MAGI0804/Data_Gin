@@ -488,6 +488,19 @@ func (oracleReportResultPageReader) Read(ctx context.Context, contract reportrep
 		return reportoracle.ResultPage{}, err
 	}
 	defer func() { _ = adapter.Close() }()
+	if contract.Version.ExecutionMode == model.ReportExecutionModeRefCursor {
+		if len(query.Filters) != 0 || len(query.Sort) != 0 {
+			return reportoracle.ResultPage{}, fmt.Errorf("JSON cursor report result filtering is not supported; pass filters in conditions")
+		}
+		if err := adapter.ValidateJSONSnapshotStore(queryCtx); err != nil {
+			return reportoracle.ResultPage{}, err
+		}
+		afterRowID := int64(0)
+		if after != nil {
+			afterRowID = after.RowID
+		}
+		return adapter.ReadJSONSnapshotPage(queryCtx, contract.Run.RunUUID, columns, afterRowID, limit)
+	}
 	ref := reportoracle.ResultSnapshotRef{
 		Table:       reportoracle.ResultTableRef{Owner: contract.Version.ResultTableOwner, Name: contract.Version.ResultTableName},
 		RunIDColumn: contract.Version.ResultRunIDColumn, RowIDColumn: contract.Version.ResultRowIDColumn, Columns: columns,

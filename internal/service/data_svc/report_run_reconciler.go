@@ -9,6 +9,7 @@ import (
 	"gin-biz-web-api/internal/reportoracle"
 	"gin-biz-web-api/internal/reportrepo"
 	"gin-biz-web-api/internal/reportsecret"
+	"gin-biz-web-api/model"
 
 	"github.com/google/uuid"
 )
@@ -145,7 +146,7 @@ func (reconciler *ReportRunReconciler) reconcileOne(ctx context.Context, runID u
 	// A positive row count proves that Oracle committed the run-scoped result.
 	// Zero rows cannot distinguish a valid empty report from a transaction that
 	// never committed, so keep the run in UNKNOWN instead of risking a replay.
-	if rowCount == 0 {
+	if rowCount == 0 && runtime.Version.ExecutionMode != model.ReportExecutionModeRefCursor {
 		return reconciler.pending(ctx, runID, leaseToken, "ORACLE_RESULT_NOT_PROVEN", errors.New("committed result is not observable"))
 	}
 	finishedAt := reconciler.now().UTC()
@@ -173,6 +174,12 @@ func (oracleReportResultEvidenceReader) CountCommittedRows(ctx context.Context, 
 		return 0, err
 	}
 	defer func() { _ = adapter.Close() }()
+	if runtime.Version.ExecutionMode == model.ReportExecutionModeRefCursor {
+		if err := adapter.ValidateJSONSnapshotStore(queryCtx); err != nil {
+			return 0, err
+		}
+		return adapter.CountJSONSnapshotRows(queryCtx, runtime.Run.RunUUID)
+	}
 	configuredColumns := make([]string, 0, len(runtime.Columns))
 	for _, column := range runtime.Columns {
 		configuredColumns = append(configuredColumns, column.DatabaseColumn)

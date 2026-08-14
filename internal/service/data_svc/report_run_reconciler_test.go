@@ -39,6 +39,22 @@ func TestReportRunReconcilerKeepsEmptyAmbiguousResultPending(t *testing.T) {
 	}
 }
 
+func TestReportRunReconcilerAcceptsEmptyCommittedJSONSnapshot(t *testing.T) {
+	runtime := reconciliationRuntime()
+	runtime.Version.ExecutionMode = model.ReportExecutionModeRefCursor
+	store := &fakeReconciliationStore{runtime: runtime}
+	reconciler := NewReportRunReconcilerWithDependencies(store, fakeReportCredentialDecryptor{}, &fakeResultEvidenceReader{})
+	reconciler.now = func() time.Time { return time.Date(2026, 8, 13, 10, 0, 0, 0, time.UTC) }
+	reconciler.stateTimeout = time.Second
+
+	if err := reconciler.ReconcileOne(t.Context(), 31); err != nil {
+		t.Fatalf("ReconcileOne() error = %v", err)
+	}
+	if store.succeeded != 1 || store.rowCount != 0 || store.pending != 0 {
+		t.Fatalf("succeeded=%d rowCount=%d pending=%d", store.succeeded, store.rowCount, store.pending)
+	}
+}
+
 func TestReportRunReconcilerKeepsUnavailableResultPending(t *testing.T) {
 	store := &fakeReconciliationStore{runtime: reconciliationRuntime()}
 	reconciler := NewReportRunReconcilerWithDependencies(store, fakeReportCredentialDecryptor{}, &fakeResultEvidenceReader{err: errors.New("oracle unavailable")})

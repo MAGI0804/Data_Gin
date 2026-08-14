@@ -12,6 +12,7 @@ import (
 	"gin-biz-web-api/internal/reportoracle"
 	"gin-biz-web-api/internal/reportquery"
 	"gin-biz-web-api/internal/reportrepo"
+	"gin-biz-web-api/model"
 )
 
 type reportExportOracleSession interface {
@@ -28,6 +29,8 @@ type oracleReportExportSession struct {
 	adapter      *reportoracle.Adapter
 	pagePlan     reportoracle.ResultPagePlan
 	purgePlan    reportoracle.PurgePlan
+	jsonSnapshot bool
+	columns      []string
 	runUUID      string
 	queryTimeout time.Duration
 }
@@ -56,6 +59,26 @@ func (oracleReportExportSessionFactory) Open(ctx context.Context, runtime report
 	if err != nil {
 		return closeOnError(err)
 	}
+	query, err := reportquery.Decode([]byte(runtime.Export.FrozenFiltersJSON), []byte(runtime.Export.FrozenSortJSON))
+	if err != nil {
+		return closeOnError(err)
+	}
+	if runtime.Version.ExecutionMode == model.ReportExecutionModeRefCursor {
+		if len(query.Filters) != 0 || len(query.Sort) != 0 {
+			return closeOnError(fmt.Errorf("JSON cursor export filters must be passed to procedure conditions"))
+		}
+		if err := adapter.ValidateJSONSnapshotStore(queryCtx); err != nil {
+			return closeOnError(err)
+		}
+		queryTimeout := time.Duration(runtime.Datasource.QueryTimeoutSeconds) * time.Second
+		if queryTimeout <= 0 {
+			queryTimeout = defaultReportPublicationInspectionTimeout
+		}
+		return &oracleReportExportSession{
+			adapter: adapter, jsonSnapshot: true, columns: databaseColumns,
+			runUUID: runtime.Run.RunUUID, queryTimeout: queryTimeout,
+		}, nil
+	}
 	ref := reportoracle.ResultSnapshotRef{
 		Table:       reportoracle.ResultTableRef{Owner: runtime.Version.ResultTableOwner, Name: runtime.Version.ResultTableName},
 		RunIDColumn: runtime.Version.ResultRunIDColumn, RowIDColumn: runtime.Version.ResultRowIDColumn, Columns: queryDatabaseColumns(queryColumns, databaseColumns),
@@ -70,10 +93,6 @@ func (oracleReportExportSessionFactory) Open(ctx context.Context, runtime report
 		return closeOnError(err)
 	}
 	contract, err := adapter.InspectResultSnapshotContract(queryCtx, ref)
-	if err != nil {
-		return closeOnError(err)
-	}
-	query, err := reportquery.Decode([]byte(runtime.Export.FrozenFiltersJSON), []byte(runtime.Export.FrozenSortJSON))
 	if err != nil {
 		return closeOnError(err)
 	}
@@ -116,6 +135,9 @@ func (session *oracleReportExportSession) Read(ctx context.Context, columns []st
 		return reportoracle.ResultPage{}, fmt.Errorf("report export oracle: invalid read session")
 	}
 	planned := session.pagePlan.Columns()
+	if session.jsonSnapshot {
+		planned = session.columns
+	}
 	if len(columns) != len(planned) {
 		return reportoracle.ResultPage{}, fmt.Errorf("report export oracle: column contract changed")
 	}
@@ -126,6 +148,13 @@ func (session *oracleReportExportSession) Read(ctx context.Context, columns []st
 	}
 	queryCtx, cancel := context.WithTimeout(ctx, session.queryTimeout)
 	defer cancel()
+	if session.jsonSnapshot {
+		afterRowID := int64(0)
+		if after != nil {
+			afterRowID = after.RowID
+		}
+		return session.adapter.ReadJSONSnapshotPage(queryCtx, session.runUUID, planned, afterRowID, limit)
+	}
 	return session.adapter.ReadResultPage(queryCtx, session.pagePlan, session.runUUID, after, limit)
 }
 
@@ -146,7 +175,11 @@ func (session *oracleReportExportSession) Purge(ctx context.Context, batchSize i
 			}
 		}
 	}()
-	deleted, err = session.adapter.PurgeResultBatch(queryCtx, tx, session.purgePlan, session.runUUID, batchSize)
+	if session.jsonSnapshot {
+		deleted, err = session.adapter.PurgeJSONSnapshotBatch(queryCtx, tx, session.runUUID, batchSize)
+	} else {
+		deleted, err = session.adapter.PurgeResultBatch(queryCtx, tx, session.purgePlan, session.runUUID, batchSize)
+	}
 	if err != nil {
 		return 0, err
 	}
