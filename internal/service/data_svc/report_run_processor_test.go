@@ -3,6 +3,7 @@ package data_svc
 import (
 	"context"
 	"errors"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -190,7 +191,7 @@ func TestReportRunProcessorRejectsRuntimeContractBeforeOracleStart(t *testing.T)
 
 func TestReportRunProcessorPreservesOracleCauseForWorkerAndPersistsSafeFailure(t *testing.T) {
 	store := newFakeReportExecutionStore()
-	oracleErr := errors.New("ORA-06502: PL/SQL numeric or value error")
+	oracleErr := fmt.Errorf("execute oracle report procedure: %w", fakeReportOracleError{code: 20201, message: "报表查询出错，请联系it人员！"})
 	executor := &fakeReportProcedureExecutor{err: oracleErr}
 	processor := newTestReportRunProcessor(store, executor)
 
@@ -204,10 +205,48 @@ func TestReportRunProcessorPreservesOracleCauseForWorkerAndPersistsSafeFailure(t
 	if !strings.Contains(err.Error(), oracleErr.Error()) {
 		t.Fatalf("Process() error = %q, want Worker-visible Oracle details", err)
 	}
-	if store.failed != 1 || store.failedCode != "ORACLE_EXECUTION_FAILED" || store.failedMessage != "Oracle存储过程执行失败" {
+	if store.failed != 1 || store.failedCode != "ORACLE_EXECUTION_FAILED" || store.failedMessage != "ORA-20201：报表查询出错，请联系it人员！" {
 		t.Fatalf("failed=%d code=%q message=%q", store.failed, store.failedCode, store.failedMessage)
 	}
 }
+
+func TestSafeReportOracleExecutionMessage(t *testing.T) {
+	longMessage := strings.Repeat("界", 451)
+	tests := []struct {
+		name string
+		err  error
+		want string
+	}{
+		{name: "wrapped user defined Oracle error", err: fmt.Errorf("execute report: %w", fakeReportOracleError{code: 20201, message: "报表查询出错，请联系it人员！"}), want: "ORA-20201：报表查询出错，请联系it人员！"},
+		{name: "minimum application error", err: fakeReportOracleError{code: 20000, message: "最小错误码"}, want: "ORA-20000：最小错误码"},
+		{name: "maximum application error", err: fakeReportOracleError{code: 20999, message: "最大错误码"}, want: "ORA-20999：最大错误码"},
+		{name: "code below application range", err: fakeReportOracleError{code: 19999, message: "private detail"}, want: "Oracle存储过程执行失败"},
+		{name: "code above application range", err: fakeReportOracleError{code: 21000, message: "private detail"}, want: "Oracle存储过程执行失败"},
+		{name: "plain text cannot spoof Oracle type", err: errors.New("ORA-20201: private detail"), want: "Oracle存储过程执行失败"},
+		{name: "message uses first line and removes controls", err: fakeReportOracleError{code: 20201, message: " 对外\t提示\n内部对象名 "}, want: "ORA-20201：对外提示"},
+		{name: "empty public message", err: fakeReportOracleError{code: 20201, message: "\t\nprivate detail"}, want: "Oracle存储过程执行失败"},
+		{name: "long message is rune truncated", err: fakeReportOracleError{code: 20201, message: longMessage}, want: "ORA-20201：" + strings.Repeat("界", 450)},
+		{name: "nil error", err: nil, want: "Oracle存储过程执行失败"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := safeReportOracleExecutionMessage(test.err); got != test.want {
+				t.Fatalf("safeReportOracleExecutionMessage() = %q, want %q", got, test.want)
+			}
+		})
+	}
+}
+
+type fakeReportOracleError struct {
+	code    int
+	message string
+}
+
+func (err fakeReportOracleError) Error() string {
+	return fmt.Sprintf("ORA-%05d: %s", err.code, err.message)
+}
+func (err fakeReportOracleError) Code() int       { return err.code }
+func (err fakeReportOracleError) Message() string { return err.message }
 
 func newTestReportRunProcessor(store *fakeReportExecutionStore, executor *fakeReportProcedureExecutor) *ReportRunProcessor {
 	processor := NewReportRunProcessorWithDependencies(store, fakeReportCredentialDecryptor{}, fakeRunParameterDecryptor{}, executor)

@@ -214,7 +214,7 @@ func (processor *ReportRunProcessor) Process(ctx context.Context, runID uint, re
 		if errors.Is(executeErr, context.Canceled) && control == reportrepo.RunControlLeaseLost {
 			return nil
 		}
-		return processor.finishFailure(ctx, runID, leaseToken, "ORACLE_EXECUTION_FAILED", "Oracle存储过程执行失败", executeErr)
+		return processor.finishFailure(ctx, runID, leaseToken, "ORACLE_EXECUTION_FAILED", safeReportOracleExecutionMessage(executeErr), executeErr)
 	}
 	finishedAt := processor.now().UTC()
 	stateCtx, stateCancel = processor.stateContext(ctx)
@@ -438,6 +438,40 @@ func (processor *ReportRunProcessor) finishFailure(ctx context.Context, runID ui
 		ErrReportRunProcessNonRetryable,
 		fmt.Errorf("%s: %w", safeMessage, cause),
 	)
+}
+
+func safeReportOracleExecutionMessage(err error) string {
+	const fallback = "Oracle存储过程执行失败"
+	if err == nil {
+		return fallback
+	}
+	var oracleErr interface {
+		error
+		Code() int
+		Message() string
+	}
+	if !errors.As(err, &oracleErr) || oracleErr.Code() < 20000 || oracleErr.Code() > 20999 {
+		return fallback
+	}
+	message := oracleErr.Message()
+	if lineEnd := strings.IndexAny(message, "\r\n"); lineEnd >= 0 {
+		message = message[:lineEnd]
+	}
+	message = strings.TrimSpace(message)
+	message = strings.Map(func(value rune) rune {
+		if value < ' ' || value == '\u007f' {
+			return -1
+		}
+		return value
+	}, message)
+	if message == "" {
+		return fallback
+	}
+	runes := []rune(message)
+	if len(runes) > 450 {
+		message = string(runes[:450])
+	}
+	return fmt.Sprintf("ORA-%05d：%s", oracleErr.Code(), message)
 }
 
 func (processor *ReportRunProcessor) finishCancelled(ctx context.Context, runID uint, leaseToken string) error {
