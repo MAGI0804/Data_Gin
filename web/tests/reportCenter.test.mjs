@@ -425,7 +425,7 @@ test('condition JSON sends only configured canonical values and formats date con
     supplier: 'A001', amount: 12.5, enabled: true, stores: ['S001', 'S002'], levels: [1, 2], flags: [true, false], options: { active: true },
     dayCompact: '20260504', dayDashed: '2026-05-05', timeCompact: '20260504132500', timeReadable: '2026-05-04 13:25:06', timeISO: '2026-05-04T13:25:00',
   } })
-  assert.deepEqual(buildReportConditions(parseReportInputSchemaDocument({ day: { type: 'str', displayName: '日期', control: 'DATE' } }), { day: '2026-05-04' }), { ok: true, conditions: { day: '2026-05-04' } })
+  assert.deepEqual(buildReportConditions(parseReportInputSchemaDocument({ day: { type: 'str', displayName: '日期', control: 'DATE' } }), { day: '2026-05-04' }), { ok: true, conditions: { day: '20260504' } })
   assert.deepEqual(buildReportConditions(schema, { levels: '["1"]' }), { ok: false, error: '等级 与 list[number] 类型不匹配。' })
   assert.deepEqual(buildReportConditions(schema, { dayCompact: '2026-02-30' }), { ok: false, error: '业务日期 必须填写有效日期。' })
 })

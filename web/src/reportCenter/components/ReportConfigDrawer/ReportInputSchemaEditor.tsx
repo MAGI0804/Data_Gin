@@ -17,7 +17,7 @@ export function ReportInputSchemaEditor({ schema, onChange }: { schema: ReportIn
     onChange({ ...schema, [next[0]]: next[1] })
   }
   return <div className={styles.editor}>
-    <JSONDocumentEditor label="筛选条件 JSON" description="每个键就是传给存储过程 JSON 的一个 conditions 参数；系统仅自动传入 report_id（本次运行 ID），conditions 不附加其他字段。" value={reportInputSchemaDocument(schema)} parse={parseReportInputSchemaDocument} parseText={parseReportInputSchemaText} onChange={onChange} />
+    <JSONDocumentEditor label="筛选条件 JSON" description="每个键就是传给存储过程 JSON 的一个 conditions 参数；系统仅自动传入 report_id（本次运行 ID）。日期字段可用 format 选择 YYYYMMDD 或 YYYY-MM-DD。" value={reportInputSchemaDocument(schema)} parse={parseReportInputSchemaDocument} parseText={parseReportInputSchemaText} onChange={onChange} />
     <div className={styles.tableHeader}><div><h3>表格编辑</h3><p>表格修改会立即回写上方 JSON；日期只选择到日，日期时间选择到秒，最终传值仍是所选格式的字符串。</p></div><button type="button" onClick={add}><Plus aria-hidden="true" />新增筛选</button></div>
     <div className={styles.rows}>
       {entries.map(([code, field], index) => <InputFieldRow code={code} field={field} key={index} onRename={(nextCode) => onChange(renameReportInputField(schema, code, nextCode))} onChange={(nextField) => onChange({ ...schema, [code]: nextField })} onDelete={() => onChange(Object.fromEntries(entries.filter(([itemCode]) => itemCode !== code)))} />)}
@@ -32,7 +32,7 @@ function InputFieldRow({ code, field, onRename, onChange, onDelete }: { code: st
     <EditorField label="筛选显示名"><input value={field.displayName} onChange={(event) => onChange({ ...field, displayName: event.currentTarget.value })} /></EditorField>
     <EditorField label="JSON 类型"><select value={field.type} onChange={(event) => onChange(changeInputType(field, event.currentTarget.value as ReportInputType))}>{reportInputTypes.map((type) => <option key={type}>{type}</option>)}</select></EditorField>
     <EditorField label="查询控件"><select value={field.control} onChange={(event) => onChange(changeInputControl(field, event.currentTarget.value as ReportInputControl | ''))}>{reportInputControls.map((control) => <option value={control} key={control || 'AUTO'}>{inputControlLabel(control)}</option>)}</select></EditorField>
-    {field.control === 'DATE' || field.control === 'DATETIME' ? <EditorField label="字符串传值格式"><select value={field.format ?? defaultFormat(field.control)} onChange={(event) => onChange({ ...field, format: event.currentTarget.value as ReportInputFormat })}>{(field.control === 'DATE' ? reportDateFormats : reportDateTimeFormats).map((format) => <option value={format} key={format}>{inputFormatLabel(format)}</option>)}</select></EditorField> : null}
+    {field.control === 'DATE' || field.control === 'DATETIME' ? <EditorField label="存储过程传值格式"><select value={field.format ?? defaultFormat(field.control)} onChange={(event) => onChange({ ...field, format: event.currentTarget.value as ReportInputFormat })}>{(field.control === 'DATE' ? reportDateFormats : reportDateTimeFormats).map((format) => <option value={format} key={format}>{inputFormatLabel(format)}</option>)}</select></EditorField> : null}
     <JSONValueInput label="示例值" value={field.example} exists={Object.hasOwnProperty.call(field, 'example')} numeric={field.type === 'number' || field.type === 'list[number]'} onChange={(value, exists) => onChange(withOptional(field, 'example', value, exists))} />
     <JSONValueInput label="默认值" value={field.default} exists={Object.hasOwnProperty.call(field, 'default')} numeric={field.type === 'number' || field.type === 'list[number]'} onChange={(value, exists) => onChange(withOptional(field, 'default', value, exists))} />
     <JSONValueInput label="允许值" value={field.allowedValues} exists={Boolean(field.allowedValues)} array numeric={field.type === 'number' || field.type === 'list[number]'} onChange={(value, exists) => onChange(withOptional(field, 'allowedValues', value as unknown[], exists))} />
@@ -84,7 +84,7 @@ function changeInputControl(field: ReportInputField, control: ReportInputControl
 }
 
 function defaultFormat(control: 'DATE' | 'DATETIME'): ReportInputFormat {
-  return control === 'DATE' ? 'YYYY-MM-DD' : 'YYYY-MM-DD HH:mm:ss'
+  return control === 'DATE' ? 'YYYYMMDD' : 'YYYY-MM-DD HH:mm:ss'
 }
 
 function inputControlLabel(control: ReportInputControl | '') {

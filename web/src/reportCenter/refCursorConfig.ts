@@ -32,7 +32,7 @@ export function parseReportInputSchemaDocument(value: unknown, allowEmpty = fals
     const control = normalizeReportInputControl(rawField.control, normalizedType.legacyControl)
     const rawFormat = normalizedString(rawField.format)
     const parsedFormat = normalizeReportInputFormat(rawField.format)
-    const format = parsedFormat || (control === 'DATE' ? normalizedType.legacyFormat ?? 'YYYY-MM-DD' : control === 'DATETIME' ? normalizedType.legacyFormat ?? 'YYYY-MM-DD HH:mm:ss' : '')
+    const format = parsedFormat || (control === 'DATE' ? normalizedType.legacyFormat ?? 'YYYYMMDD' : control === 'DATETIME' ? normalizedType.legacyFormat ?? 'YYYY-MM-DD HH:mm:ss' : '')
     if (!displayName || displayName.length > 128) throw new Error(`筛选字段 ${code} 必须填写筛选显示名。`)
     if (control === null) throw new Error(`筛选字段 ${code} 的控件类型不受支持。`)
     if (rawFormat && !parsedFormat) throw new Error(`筛选字段 ${code} 的日期格式不受支持。`)
