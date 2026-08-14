@@ -236,6 +236,8 @@ func registerReportDatasourceRoutes(api *gin.RouterGroup, controller *data_ctrl.
 	group.POST("", middleware.RequirePermission(model.PermissionReportManage), controller.Create)
 	group.PUT("/:id", middleware.RequirePermission(model.PermissionReportManage), controller.Update)
 	group.POST("/:id/test", middleware.RequirePermission(model.PermissionReportManage), controller.Test)
+	group.GET("/:id/procedures", middleware.RequirePermission(model.PermissionReportManage), middleware.LimitRoute("120-M"), controller.ListProcedures)
+	group.GET("/:id/procedure-signature", middleware.RequirePermission(model.PermissionReportManage), middleware.LimitRoute("120-M"), controller.GetProcedureSignature)
 }
 
 const (

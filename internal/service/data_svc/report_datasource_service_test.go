@@ -187,6 +187,88 @@ func TestReportDatasourceWhitespacePasswordPolicyIsExplicit(t *testing.T) {
 	}
 }
 
+func TestReportDatasourceServiceListsVisibleProceduresWithOpaqueCursor(t *testing.T) {
+	refs := []reportoracle.ProcedureRef{
+		{Owner: "REPORT", Package: "PKG_SALES", Name: "BUILD_DAILY", Overload: "1"},
+		{Owner: "REPORT", Package: "PKG_SALES", Name: "BUILD_MONTHLY"},
+		{Owner: "REPORT", Name: "REFRESH_ALL"},
+	}
+	procedures := make([]reportoracle.ProcedureSummary, 0, len(refs))
+	for index, ref := range refs {
+		cursor, err := reportoracle.ProcedureCursorKey(ref)
+		if err != nil {
+			t.Fatal(err)
+		}
+		procedures = append(procedures, reportoracle.ProcedureSummary{ProcedureRef: ref, ArgumentCount: index + 1, CursorKey: cursor})
+	}
+	connection := &fakeReportDatasourceConnection{procedures: procedures}
+	store := &fakeReportDatasourceStore{item: model.ReportDatasource{
+		BaseModel: model.BaseModel{ID: 4}, Enabled: true, PasswordCiphertext: "ciphertext", CredentialKeyVersion: "key-v1", QueryTimeoutSeconds: 30,
+	}}
+	service := NewReportDatasourceServiceWithDependencies(store, &fakeReportDatasourceCipher{}, func(context.Context, reportoracle.Config) (reportDatasourceConnection, error) {
+		return connection, nil
+	})
+	page, err := service.ListProcedures(t.Context(), 7, 4, ReportProcedureCatalogQuery{Owner: "report", Search: "daily", Limit: 2})
+	if err != nil {
+		t.Fatalf("ListProcedures() error = %v", err)
+	}
+	if len(page.Items) != 2 || !page.HasMore || page.NextAfter == "" || page.Items[0].QualifiedName != "REPORT.PKG_SALES.BUILD_DAILY #1" {
+		t.Fatalf("ListProcedures() page = %+v", page)
+	}
+	if connection.query.Owner != "report" || connection.query.Search != "daily" || connection.query.Limit != 3 || !connection.closed {
+		t.Fatalf("metadata query = %+v closed=%t", connection.query, connection.closed)
+	}
+	if _, err := service.ListProcedures(t.Context(), 7, 4, ReportProcedureCatalogQuery{After: "not-base64***", Limit: 2}); !errors.Is(err, ErrReportDatasourceInvalid) {
+		t.Fatalf("invalid cursor error = %v", err)
+	}
+}
+
+func TestReportDatasourceServiceBuildsProcedureSignatureRecommendations(t *testing.T) {
+	length := int64(64)
+	zero := int64(0)
+	precision := int64(18)
+	connection := &fakeReportDatasourceConnection{arguments: []reportoracle.ProcedureArgument{
+		{Name: "P_RUN_ID", Position: 1, Sequence: 1, Direction: "IN", DataType: "VARCHAR2", DataLength: &length},
+		{Name: "P_STORE_ID", Position: 2, Sequence: 2, Direction: "IN", DataType: "NUMBER", DataPrecision: &precision, DataScale: &zero, Defaulted: true},
+	}}
+	store := &fakeReportDatasourceStore{item: model.ReportDatasource{
+		BaseModel: model.BaseModel{ID: 4}, Enabled: true, PasswordCiphertext: "ciphertext", CredentialKeyVersion: "key-v1", QueryTimeoutSeconds: 30,
+	}}
+	service := NewReportDatasourceServiceWithDependencies(store, &fakeReportDatasourceCipher{}, func(context.Context, reportoracle.Config) (reportDatasourceConnection, error) {
+		return connection, nil
+	})
+	signature, err := service.GetProcedureSignature(t.Context(), 7, 4, reportoracle.ProcedureRef{Owner: "report", Package: "pkg_sales", Name: "build_daily", Overload: "1"})
+	if err != nil {
+		t.Fatalf("GetProcedureSignature() error = %v", err)
+	}
+	if !signature.AllSupported || signature.Arguments[0].SuggestedCode != "runId" || signature.Arguments[0].SuggestedSystemValue != "RUN_ID" || signature.Arguments[1].SuggestedLogicalType != "integer" || !signature.Arguments[1].Defaulted {
+		t.Fatalf("signature recommendations = %+v", signature)
+	}
+	want := "BEGIN REPORT.PKG_SALES.BUILD_DAILY(P_RUN_ID => {{runId}}, P_STORE_ID => {{storeId}}); END;"
+	if signature.CallTemplate != want || connection.ref.Owner != "REPORT" || !connection.closed {
+		t.Fatalf("signature template=%q ref=%+v closed=%t", signature.CallTemplate, connection.ref, connection.closed)
+	}
+}
+
+func TestReportDatasourceServiceMarksUnsupportedProcedureArguments(t *testing.T) {
+	connection := &fakeReportDatasourceConnection{arguments: []reportoracle.ProcedureArgument{
+		{Name: "P_CURSOR", Position: 1, Sequence: 1, Direction: "OUT", DataType: "REF CURSOR"},
+	}}
+	store := &fakeReportDatasourceStore{item: model.ReportDatasource{
+		BaseModel: model.BaseModel{ID: 4}, Enabled: true, PasswordCiphertext: "ciphertext", CredentialKeyVersion: "key-v1", QueryTimeoutSeconds: 30,
+	}}
+	service := NewReportDatasourceServiceWithDependencies(store, &fakeReportDatasourceCipher{}, func(context.Context, reportoracle.Config) (reportDatasourceConnection, error) {
+		return connection, nil
+	})
+	signature, err := service.GetProcedureSignature(t.Context(), 7, 4, reportoracle.ProcedureRef{Owner: "REPORT", Name: "EXPORT_CURSOR"})
+	if err != nil {
+		t.Fatalf("GetProcedureSignature() error = %v", err)
+	}
+	if signature.AllSupported || signature.CallTemplate != "" || signature.Arguments[0].Supported || signature.Arguments[0].UnsupportedReason == "" {
+		t.Fatalf("unsupported signature = %+v", signature)
+	}
+}
+
 type fakeReportDatasourceStore struct {
 	item       model.ReportDatasource
 	created    *model.ReportDatasource
@@ -249,11 +331,28 @@ func validReportDatasourceRequest(password string) requestbody.ReportDatasourceS
 	return requestbody.ReportDatasourceSaveRequest{Code: "report_oracle", Name: "报表 Oracle", Host: "oracle.internal", Port: 1521, ServiceName: "REPORT", Username: "report_user", Password: password, SessionTimezone: "Asia/Shanghai", ConnectTimeoutSeconds: 5, QueryTimeoutSeconds: 300, MaxOpenConnections: 10, MaxIdleConnections: 2, PrefetchRows: 1000, ArraySize: 1000, Enabled: true}
 }
 
-type fakeReportDatasourceConnection struct{ closed bool }
+type fakeReportDatasourceConnection struct {
+	closed      bool
+	procedures  []reportoracle.ProcedureSummary
+	arguments   []reportoracle.ProcedureArgument
+	metadataErr error
+	query       reportoracle.ProcedureCatalogQuery
+	ref         reportoracle.ProcedureRef
+}
 
 func (connection *fakeReportDatasourceConnection) Close() error {
 	connection.closed = true
 	return nil
+}
+
+func (connection *fakeReportDatasourceConnection) ListProcedures(_ context.Context, query reportoracle.ProcedureCatalogQuery) ([]reportoracle.ProcedureSummary, error) {
+	connection.query = query
+	return connection.procedures, connection.metadataErr
+}
+
+func (connection *fakeReportDatasourceConnection) InspectProcedure(_ context.Context, ref reportoracle.ProcedureRef) ([]reportoracle.ProcedureArgument, error) {
+	connection.ref = ref
+	return connection.arguments, connection.metadataErr
 }
 
 func validReportDatasourceConnectionTestRequest(password string) requestbody.ReportDatasourceConnectionTestRequest {

@@ -2,6 +2,7 @@ package data_svc
 
 import (
 	"context"
+	"encoding/base64"
 	"errors"
 	"fmt"
 	"regexp"
@@ -23,6 +24,7 @@ var (
 	ErrReportDatasourceNotFound              = errors.New("report datasource service: not found")
 	ErrReportDatasourceConflict              = errors.New("report datasource service: conflict")
 	ErrReportDatasourceCredentialUnavailable = errors.New("report datasource service: credential configuration unavailable")
+	ErrReportDatasourceOracleUnavailable     = errors.New("report datasource service: oracle metadata unavailable")
 )
 
 const (
@@ -45,7 +47,11 @@ type reportDatasourceCipher interface {
 	Decrypt(string, string) (string, error)
 }
 
-type reportDatasourceConnection interface{ Close() error }
+type reportDatasourceConnection interface {
+	Close() error
+	ListProcedures(context.Context, reportoracle.ProcedureCatalogQuery) ([]reportoracle.ProcedureSummary, error)
+	InspectProcedure(context.Context, reportoracle.ProcedureRef) ([]reportoracle.ProcedureArgument, error)
+}
 type reportDatasourceOpener func(context.Context, reportoracle.Config) (reportDatasourceConnection, error)
 
 type ReportDatasourceService struct {
@@ -85,6 +91,55 @@ type ReportDatasourceTestDTO struct {
 	LatencyMS int64     `json:"latencyMs"`
 	ErrorCode string    `json:"errorCode,omitempty"`
 	Message   string    `json:"message"`
+}
+
+type ReportProcedureCatalogQuery struct {
+	Owner  string
+	Search string
+	After  string
+	Limit  int
+}
+
+type ReportProcedureSummaryDTO struct {
+	Owner         string `json:"owner"`
+	Package       string `json:"package"`
+	Name          string `json:"name"`
+	Overload      string `json:"overload"`
+	ArgumentCount int    `json:"argumentCount"`
+	QualifiedName string `json:"qualifiedName"`
+}
+
+type ReportProcedurePageDTO struct {
+	Items     []ReportProcedureSummaryDTO `json:"items"`
+	HasMore   bool                        `json:"hasMore"`
+	NextAfter string                      `json:"nextAfter"`
+}
+
+type ReportProcedureArgumentDTO struct {
+	Name                 string `json:"name"`
+	Position             int    `json:"position"`
+	Sequence             int    `json:"sequence"`
+	Direction            string `json:"direction"`
+	OracleType           string `json:"oracleType"`
+	DataLength           *int64 `json:"dataLength"`
+	Precision            *int64 `json:"precision"`
+	Scale                *int64 `json:"scale"`
+	TypeOwner            string `json:"typeOwner"`
+	TypeName             string `json:"typeName"`
+	Defaulted            bool   `json:"defaulted"`
+	Supported            bool   `json:"supported"`
+	UnsupportedReason    string `json:"unsupportedReason,omitempty"`
+	SuggestedCode        string `json:"suggestedCode"`
+	SuggestedLogicalType string `json:"suggestedLogicalType"`
+	SuggestedControlType string `json:"suggestedControlType"`
+	SuggestedSystemValue string `json:"suggestedSystemValue,omitempty"`
+}
+
+type ReportProcedureSignatureDTO struct {
+	Procedure    ReportProcedureSummaryDTO    `json:"procedure"`
+	Arguments    []ReportProcedureArgumentDTO `json:"arguments"`
+	AllSupported bool                         `json:"allSupported"`
+	CallTemplate string                       `json:"callTemplate"`
 }
 
 func NewReportDatasourceService() *ReportDatasourceService {
@@ -225,6 +280,216 @@ func (service *ReportDatasourceService) TestConnection(ctx context.Context, acto
 		}
 	}
 	return service.testConnection(ctx, *datasource, password), nil
+}
+
+func (service *ReportDatasourceService) ListProcedures(ctx context.Context, actor, datasourceID uint, query ReportProcedureCatalogQuery) (*ReportProcedurePageDTO, error) {
+	if service == nil || ctx == nil || actor == 0 || datasourceID == 0 {
+		return nil, ErrReportDatasourceInvalid
+	}
+	query.Owner = strings.TrimSpace(query.Owner)
+	query.Search = strings.TrimSpace(query.Search)
+	if utf8.RuneCountInString(query.Search) > 128 || query.Limit < 0 || query.Limit > 100 {
+		return nil, ErrReportDatasourceInvalid
+	}
+	if query.Limit == 0 {
+		query.Limit = 50
+	}
+	afterKey := ""
+	if query.After != "" {
+		decoded, err := base64.RawURLEncoding.DecodeString(query.After)
+		if err != nil || len(decoded) > 520 {
+			return nil, ErrReportDatasourceInvalid
+		}
+		afterKey = string(decoded)
+		if _, err := reportoracle.ParseProcedureCursorKey(afterKey); err != nil {
+			return nil, ErrReportDatasourceInvalid
+		}
+	}
+
+	connection, queryCtx, cancel, err := service.openMetadataConnection(ctx, datasourceID)
+	if err != nil {
+		return nil, err
+	}
+	defer cancel()
+	defer connection.Close()
+	procedures, err := connection.ListProcedures(queryCtx, reportoracle.ProcedureCatalogQuery{
+		Owner: query.Owner, Search: query.Search, AfterKey: afterKey, Limit: query.Limit + 1,
+	})
+	if err != nil {
+		return nil, fmt.Errorf("%w: list procedures: %v", ErrReportDatasourceOracleUnavailable, err)
+	}
+	hasMore := len(procedures) > query.Limit
+	if hasMore {
+		procedures = procedures[:query.Limit]
+	}
+	items := make([]ReportProcedureSummaryDTO, 0, len(procedures))
+	for _, procedure := range procedures {
+		items = append(items, procedureSummaryDTO(procedure.ProcedureRef, procedure.ArgumentCount))
+	}
+	nextAfter := ""
+	if hasMore && len(procedures) > 0 {
+		nextAfter = base64.RawURLEncoding.EncodeToString([]byte(procedures[len(procedures)-1].CursorKey))
+	}
+	return &ReportProcedurePageDTO{Items: items, HasMore: hasMore, NextAfter: nextAfter}, nil
+}
+
+func (service *ReportDatasourceService) GetProcedureSignature(ctx context.Context, actor, datasourceID uint, ref reportoracle.ProcedureRef) (*ReportProcedureSignatureDTO, error) {
+	if service == nil || ctx == nil || actor == 0 || datasourceID == 0 {
+		return nil, ErrReportDatasourceInvalid
+	}
+	normalized, err := reportoracle.NormalizeProcedureRef(ref)
+	if err != nil {
+		return nil, ErrReportDatasourceInvalid
+	}
+	connection, queryCtx, cancel, err := service.openMetadataConnection(ctx, datasourceID)
+	if err != nil {
+		return nil, err
+	}
+	defer cancel()
+	defer connection.Close()
+	arguments, err := connection.InspectProcedure(queryCtx, normalized)
+	if err != nil {
+		if errors.Is(err, reportoracle.ErrMetadataMismatch) {
+			return nil, ErrReportDatasourceNotFound
+		}
+		return nil, fmt.Errorf("%w: inspect procedure: %v", ErrReportDatasourceOracleUnavailable, err)
+	}
+
+	usedCodes := make(map[string]int, len(arguments))
+	items := make([]ReportProcedureArgumentDTO, 0, len(arguments))
+	allSupported := true
+	bindings := make([]string, 0, len(arguments))
+	for _, argument := range arguments {
+		item := procedureArgumentDTO(argument, usedCodes)
+		items = append(items, item)
+		allSupported = allSupported && item.Supported
+		bindings = append(bindings, fmt.Sprintf("%s => {{%s}}", item.Name, item.SuggestedCode))
+	}
+	callTemplate := ""
+	if allSupported {
+		target := qualifiedProcedureName(normalized)
+		if len(bindings) == 0 {
+			callTemplate = fmt.Sprintf("BEGIN %s(); END;", target)
+		} else {
+			callTemplate = fmt.Sprintf("BEGIN %s(%s); END;", target, strings.Join(bindings, ", "))
+		}
+	}
+	return &ReportProcedureSignatureDTO{
+		Procedure: procedureSummaryDTO(normalized, len(arguments)), Arguments: items,
+		AllSupported: allSupported, CallTemplate: callTemplate,
+	}, nil
+}
+
+func (service *ReportDatasourceService) openMetadataConnection(ctx context.Context, datasourceID uint) (reportDatasourceConnection, context.Context, context.CancelFunc, error) {
+	datasource, err := service.store.GetReportDatasource(ctx, datasourceID)
+	if err != nil {
+		return nil, nil, nil, classifyReportDatasourceStoreError(err)
+	}
+	if !datasource.Enabled {
+		return nil, nil, nil, ErrReportDatasourceOracleUnavailable
+	}
+	password, err := service.cipher.Decrypt(datasource.CredentialKeyVersion, datasource.PasswordCiphertext)
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("%w: decrypt credential", ErrReportDatasourceCredentialUnavailable)
+	}
+	connection, err := service.open(ctx, oracleConfigFromDatasource(*datasource, password))
+	if err != nil {
+		return nil, nil, nil, fmt.Errorf("%w: connect", ErrReportDatasourceOracleUnavailable)
+	}
+	timeout := time.Duration(datasource.QueryTimeoutSeconds) * time.Second
+	if timeout <= 0 {
+		timeout = 300 * time.Second
+	}
+	queryCtx, cancel := context.WithTimeout(ctx, timeout)
+	return connection, queryCtx, cancel, nil
+}
+
+func procedureSummaryDTO(ref reportoracle.ProcedureRef, argumentCount int) ReportProcedureSummaryDTO {
+	return ReportProcedureSummaryDTO{
+		Owner: ref.Owner, Package: ref.Package, Name: ref.Name, Overload: ref.Overload,
+		ArgumentCount: argumentCount, QualifiedName: displayProcedureName(ref),
+	}
+}
+
+func qualifiedProcedureName(ref reportoracle.ProcedureRef) string {
+	parts := []string{ref.Owner}
+	if ref.Package != "" {
+		parts = append(parts, ref.Package)
+	}
+	parts = append(parts, ref.Name)
+	return strings.Join(parts, ".")
+}
+
+func displayProcedureName(ref reportoracle.ProcedureRef) string {
+	qualified := qualifiedProcedureName(ref)
+	if ref.Overload != "" {
+		qualified += " #" + ref.Overload
+	}
+	return qualified
+}
+
+func procedureArgumentDTO(argument reportoracle.ProcedureArgument, usedCodes map[string]int) ReportProcedureArgumentDTO {
+	oracleType := strings.ToUpper(strings.Join(strings.Fields(argument.DataType), " "))
+	logicalType, controlType, supported, reason := recommendedProcedureArgumentType(argument.Direction, oracleType, argument.TypeOwner, argument.TypeName, argument.DataScale)
+	code := suggestedProcedureParameterCode(argument.Name)
+	usedCodes[code]++
+	if usedCodes[code] > 1 {
+		code = fmt.Sprintf("%s%d", code, argument.Position)
+	}
+	systemValue := ""
+	if code == "runId" && logicalType == "string" && supported {
+		systemValue = "RUN_ID"
+	}
+	return ReportProcedureArgumentDTO{
+		Name: argument.Name, Position: argument.Position, Sequence: argument.Sequence,
+		Direction: strings.ToUpper(strings.TrimSpace(argument.Direction)), OracleType: oracleType,
+		DataLength: argument.DataLength, Precision: argument.DataPrecision, Scale: argument.DataScale,
+		TypeOwner: argument.TypeOwner, TypeName: argument.TypeName, Defaulted: argument.Defaulted,
+		Supported: supported, UnsupportedReason: reason, SuggestedCode: code,
+		SuggestedLogicalType: logicalType, SuggestedControlType: controlType, SuggestedSystemValue: systemValue,
+	}
+}
+
+func recommendedProcedureArgumentType(direction, oracleType, typeOwner, typeName string, scale *int64) (string, string, bool, string) {
+	if strings.ToUpper(strings.TrimSpace(direction)) != "IN" {
+		return "", "", false, "当前执行器仅支持 IN 参数"
+	}
+	if strings.TrimSpace(typeOwner) != "" || strings.TrimSpace(typeName) != "" {
+		return "", "", false, "暂不支持 Oracle 对象、集合或复合类型"
+	}
+	switch {
+	case oracleType == "VARCHAR2" || oracleType == "NVARCHAR2" || oracleType == "CHAR" || oracleType == "NCHAR":
+		return "string", "TEXT", true, ""
+	case oracleType == "CLOB" || oracleType == "NCLOB":
+		return "string", "TEXTAREA", true, ""
+	case oracleType == "NUMBER" && scale != nil && *scale == 0:
+		return "integer", "NUMBER", true, ""
+	case oracleType == "NUMBER":
+		return "decimal", "NUMBER", true, ""
+	case oracleType == "DATE" || strings.HasPrefix(oracleType, "TIMESTAMP"):
+		return "datetime", "DATETIME", true, ""
+	case oracleType == "BOOLEAN":
+		return "boolean", "CHECKBOX", true, ""
+	default:
+		return "", "", false, "暂不支持该 Oracle 参数类型"
+	}
+}
+
+func suggestedProcedureParameterCode(name string) string {
+	parts := strings.FieldsFunc(strings.ToLower(strings.TrimSpace(name)), func(r rune) bool { return r == '_' })
+	if len(parts) > 1 && parts[0] == "p" {
+		parts = parts[1:]
+	}
+	if len(parts) == 0 {
+		return "param"
+	}
+	result := parts[0]
+	for _, part := range parts[1:] {
+		if part != "" {
+			result += strings.ToUpper(part[:1]) + part[1:]
+		}
+	}
+	return result
 }
 
 func (service *ReportDatasourceService) testConnection(ctx context.Context, datasource model.ReportDatasource, password string) *ReportDatasourceTestDTO {

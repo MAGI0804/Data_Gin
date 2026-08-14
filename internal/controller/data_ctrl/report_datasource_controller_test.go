@@ -11,6 +11,7 @@ import (
 	"github.com/gin-gonic/gin"
 
 	"gin-biz-web-api/constant"
+	"gin-biz-web-api/internal/reportoracle"
 	"gin-biz-web-api/internal/requestbody"
 	"gin-biz-web-api/internal/service/data_svc"
 )
@@ -78,6 +79,28 @@ func TestWriteReportDatasourceErrorRecordsPrivateCauseWithoutLeakingResponse(t *
 	}
 }
 
+func TestReportDatasourceControllerQueriesProcedureCatalogAndSignature(t *testing.T) {
+	service := &fakeReportDatasourceService{}
+	controller := NewReportDatasourceControllerWithService(service)
+	router := datasourceControllerRouter()
+	router.GET("/report-datasources/:id/procedures", controller.ListProcedures)
+	router.GET("/report-datasources/:id/procedure-signature", controller.GetProcedureSignature)
+
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequest(http.MethodGet, "/report-datasources/9/procedures?owner=REPORT&search=DAILY&after=cursor&limit=25", nil)
+	router.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK || service.datasourceID != 9 || service.procedureQuery.Owner != "REPORT" || service.procedureQuery.Search != "DAILY" || service.procedureQuery.After != "cursor" || service.procedureQuery.Limit != 25 {
+		t.Fatalf("catalog response=%d %s service=%+v", recorder.Code, recorder.Body, service)
+	}
+
+	recorder = httptest.NewRecorder()
+	request = httptest.NewRequest(http.MethodGet, "/report-datasources/9/procedure-signature?owner=REPORT&package=PKG_SALES&name=BUILD_DAILY&overload=2", nil)
+	router.ServeHTTP(recorder, request)
+	if recorder.Code != http.StatusOK || service.procedureRef.Owner != "REPORT" || service.procedureRef.Package != "PKG_SALES" || service.procedureRef.Name != "BUILD_DAILY" || service.procedureRef.Overload != "2" {
+		t.Fatalf("signature response=%d %s ref=%+v", recorder.Code, recorder.Body, service.procedureRef)
+	}
+}
+
 func datasourceControllerRouter() *gin.Engine {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
@@ -93,6 +116,9 @@ type fakeReportDatasourceService struct {
 	connectionTest      *data_svc.ReportDatasourceTestDTO
 	connectionRequest   requestbody.ReportDatasourceConnectionTestRequest
 	connectionTestCalls int
+	datasourceID        uint
+	procedureQuery      data_svc.ReportProcedureCatalogQuery
+	procedureRef        reportoracle.ProcedureRef
 }
 
 func (*fakeReportDatasourceService) List(context.Context, uint) ([]data_svc.ReportDatasourceDTO, error) {
@@ -116,4 +142,12 @@ func (service *fakeReportDatasourceService) TestConnection(_ context.Context, ac
 	service.actor, service.connectionRequest = actor, request
 	service.connectionTestCalls++
 	return service.connectionTest, nil
+}
+func (service *fakeReportDatasourceService) ListProcedures(_ context.Context, _ uint, datasourceID uint, query data_svc.ReportProcedureCatalogQuery) (*data_svc.ReportProcedurePageDTO, error) {
+	service.datasourceID, service.procedureQuery = datasourceID, query
+	return &data_svc.ReportProcedurePageDTO{}, nil
+}
+func (service *fakeReportDatasourceService) GetProcedureSignature(_ context.Context, _ uint, datasourceID uint, ref reportoracle.ProcedureRef) (*data_svc.ReportProcedureSignatureDTO, error) {
+	service.datasourceID, service.procedureRef = datasourceID, ref
+	return &data_svc.ReportProcedureSignatureDTO{}, nil
 }

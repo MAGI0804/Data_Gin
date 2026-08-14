@@ -67,6 +67,20 @@ type ProcedureArgument struct {
 	DataScale     *int64
 	TypeOwner     string
 	TypeName      string
+	Defaulted     bool
+}
+
+type ProcedureCatalogQuery struct {
+	Owner    string
+	Search   string
+	AfterKey string
+	Limit    int
+}
+
+type ProcedureSummary struct {
+	ProcedureRef
+	ArgumentCount int
+	CursorKey     string
 }
 
 type ResultColumn struct {
@@ -177,11 +191,11 @@ func (adapter *Adapter) InspectProcedure(ctx context.Context, ref ProcedureRef) 
 	arguments := make([]ProcedureArgument, 0, 16)
 	for rows.Next() {
 		var argument ProcedureArgument
-		var name, dataType, inOut, typeOwner, typeName sql.NullString
+		var name, dataType, inOut, typeOwner, typeName, defaulted sql.NullString
 		var dataLength, precision, scale sql.NullInt64
 		if err := rows.Scan(
 			&name, &argument.Position, &argument.Sequence, &inOut, &dataType,
-			&dataLength, &precision, &scale, &typeOwner, &typeName,
+			&dataLength, &precision, &scale, &typeOwner, &typeName, &defaulted,
 		); err != nil {
 			return nil, fmt.Errorf("scan oracle procedure argument: %w", err)
 		}
@@ -193,15 +207,102 @@ func (adapter *Adapter) InspectProcedure(ctx context.Context, ref ProcedureRef) 
 		argument.DataScale = nullableInt64(scale)
 		argument.TypeOwner = typeOwner.String
 		argument.TypeName = typeName.String
+		argument.Defaulted = defaulted.String == "Y"
 		arguments = append(arguments, argument)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, fmt.Errorf("iterate oracle procedure arguments: %w", err)
 	}
 	if len(arguments) == 0 {
-		return nil, fmt.Errorf("%w: no matching procedure", ErrMetadataMismatch)
+		var exists int
+		if err := adapter.db.QueryRowContext(ctx, procedureExistsSQL,
+			normalized.Owner, nullableQueryValue(normalized.Package), normalized.Name, nullableQueryValue(normalized.Overload),
+		).Scan(&exists); err != nil {
+			return nil, fmt.Errorf("inspect zero-argument oracle procedure: %w", err)
+		}
+		if exists == 0 {
+			return nil, fmt.Errorf("%w: no matching procedure", ErrMetadataMismatch)
+		}
 	}
 	return arguments, nil
+}
+
+// ListProcedures returns only procedures visible to the Oracle account used by
+// this adapter. Oracle metadata views enforce object grants; caller input is
+// used only as bound filter values.
+func (adapter *Adapter) ListProcedures(ctx context.Context, query ProcedureCatalogQuery) ([]ProcedureSummary, error) {
+	if adapter == nil || adapter.db == nil {
+		return nil, fmt.Errorf("list oracle procedures: adapter is closed")
+	}
+	owner := ""
+	var err error
+	if strings.TrimSpace(query.Owner) != "" {
+		owner, err = normalizeIdentifier(query.Owner, "procedure owner")
+		if err != nil {
+			return nil, err
+		}
+	}
+	search := strings.ToUpper(strings.TrimSpace(query.Search))
+	if len(search) > 128 {
+		return nil, configurationError("procedure search is too long")
+	}
+	if query.AfterKey != "" {
+		if _, err := ParseProcedureCursorKey(query.AfterKey); err != nil {
+			return nil, err
+		}
+	}
+	if query.Limit < 1 || query.Limit > 101 {
+		return nil, configurationError("procedure list limit is invalid")
+	}
+
+	rows, err := adapter.db.QueryContext(ctx, procedureCatalogSQL,
+		nullableQueryValue(owner), nullableQueryValue(search), nullableQueryValue(query.AfterKey), query.Limit,
+		godror.PrefetchCount(adapter.prefetchRows), godror.FetchArraySize(adapter.fetchArraySize),
+	)
+	if err != nil {
+		return nil, fmt.Errorf("list oracle procedures: %w", err)
+	}
+	defer rows.Close()
+
+	procedures := make([]ProcedureSummary, 0, query.Limit)
+	for rows.Next() {
+		var procedure ProcedureSummary
+		var packageName, overload sql.NullString
+		if err := rows.Scan(&procedure.Owner, &packageName, &procedure.Name, &overload, &procedure.ArgumentCount, &procedure.CursorKey); err != nil {
+			return nil, fmt.Errorf("scan oracle procedure catalog: %w", err)
+		}
+		procedure.Package = packageName.String
+		procedure.Overload = overload.String
+		procedures = append(procedures, procedure)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate oracle procedure catalog: %w", err)
+	}
+	return procedures, nil
+}
+
+func ProcedureCursorKey(ref ProcedureRef) (string, error) {
+	normalized, err := NormalizeProcedureRef(ref)
+	if err != nil {
+		return "", err
+	}
+	return strings.Join([]string{normalized.Owner, normalized.Package, normalized.Name, normalized.Overload}, "\x1f"), nil
+}
+
+func ParseProcedureCursorKey(value string) (ProcedureRef, error) {
+	parts := strings.Split(value, "\x1f")
+	if len(parts) != 4 {
+		return ProcedureRef{}, configurationError("procedure cursor is invalid")
+	}
+	normalized, err := NormalizeProcedureRef(ProcedureRef{Owner: parts[0], Package: parts[1], Name: parts[2], Overload: parts[3]})
+	if err != nil {
+		return ProcedureRef{}, configurationError("procedure cursor is invalid")
+	}
+	canonical, err := ProcedureCursorKey(normalized)
+	if err != nil || canonical != value {
+		return ProcedureRef{}, configurationError("procedure cursor is invalid")
+	}
+	return normalized, nil
 }
 
 func (adapter *Adapter) InspectResultTable(ctx context.Context, ref ResultTableRef) ([]ResultColumn, error) {
@@ -531,7 +632,7 @@ WITH filters AS (
 SELECT arguments.argument_name, arguments.position, arguments.sequence,
        arguments.in_out, arguments.data_type, arguments.data_length,
        arguments.data_precision, arguments.data_scale,
-       arguments.type_owner, arguments.type_name
+       arguments.type_owner, arguments.type_name, arguments.defaulted
 FROM all_arguments arguments
 CROSS JOIN filters
 WHERE arguments.owner = filters.owner_name
@@ -540,6 +641,91 @@ WHERE arguments.owner = filters.owner_name
   AND ((filters.overload IS NULL AND arguments.overload IS NULL) OR arguments.overload = filters.overload)
   AND arguments.data_level = 0
 ORDER BY arguments.sequence`
+
+const procedureExistsSQL = `
+WITH filters AS (
+    SELECT :1 AS owner_name, :2 AS package_name, :3 AS procedure_name, :4 AS overload
+    FROM dual
+)
+SELECT CASE WHEN EXISTS (
+    SELECT 1
+    FROM all_procedures procedures
+    CROSS JOIN filters
+    JOIN all_objects objects
+      ON objects.owner = procedures.owner
+     AND objects.object_name = procedures.object_name
+     AND objects.object_type = procedures.object_type
+     AND objects.status = 'VALID'
+    WHERE procedures.owner = filters.owner_name
+      AND ((filters.package_name IS NULL
+            AND procedures.object_type = 'PROCEDURE'
+            AND procedures.procedure_name IS NULL
+            AND procedures.object_name = filters.procedure_name)
+        OR (procedures.object_type = 'PACKAGE'
+            AND procedures.object_name = filters.package_name
+            AND procedures.procedure_name = filters.procedure_name))
+      AND ((filters.overload IS NULL AND procedures.overload IS NULL) OR procedures.overload = filters.overload)
+) THEN 1 ELSE 0 END
+FROM dual`
+
+const procedureCatalogSQL = `
+WITH filters AS (
+    SELECT :1 AS owner_name, :2 AS search_text, :3 AS after_key, :4 AS row_limit
+    FROM dual
+), visible_procedures AS (
+    SELECT procedures.owner,
+           CASE WHEN procedures.object_type = 'PACKAGE' THEN procedures.object_name END AS package_name,
+           CASE WHEN procedures.object_type = 'PACKAGE' THEN procedures.procedure_name ELSE procedures.object_name END AS procedure_name,
+           procedures.overload
+    FROM all_procedures procedures
+    JOIN all_objects objects
+      ON objects.owner = procedures.owner
+     AND objects.object_name = procedures.object_name
+     AND objects.object_type = procedures.object_type
+     AND objects.status = 'VALID'
+    WHERE ((procedures.object_type = 'PROCEDURE' AND procedures.procedure_name IS NULL)
+        OR (procedures.object_type = 'PACKAGE' AND procedures.procedure_name IS NOT NULL))
+      AND NOT EXISTS (
+          SELECT 1
+          FROM all_arguments return_values
+          WHERE return_values.owner = procedures.owner
+            AND NVL(return_values.package_name, CHR(1)) = NVL(CASE WHEN procedures.object_type = 'PACKAGE' THEN procedures.object_name END, CHR(1))
+            AND return_values.object_name = CASE WHEN procedures.object_type = 'PACKAGE' THEN procedures.procedure_name ELSE procedures.object_name END
+            AND NVL(return_values.overload, CHR(1)) = NVL(procedures.overload, CHR(1))
+            AND return_values.data_level = 0
+            AND return_values.position = 0
+      )
+), catalog AS (
+    SELECT DISTINCT visible.owner, visible.package_name, visible.procedure_name, visible.overload,
+           visible.owner || CHR(31) || NVL(visible.package_name, '') || CHR(31) || visible.procedure_name || CHR(31) || NVL(visible.overload, '') AS cursor_key
+    FROM visible_procedures visible
+), ordered_catalog AS (
+    SELECT catalog.owner, catalog.package_name, catalog.procedure_name, catalog.overload,
+           (
+               SELECT COUNT(*)
+               FROM all_arguments arguments
+               WHERE arguments.owner = catalog.owner
+                 AND NVL(arguments.package_name, CHR(1)) = NVL(catalog.package_name, CHR(1))
+                 AND arguments.object_name = catalog.procedure_name
+                 AND NVL(arguments.overload, CHR(1)) = NVL(catalog.overload, CHR(1))
+                 AND arguments.data_level = 0
+                 AND arguments.position > 0
+           ) AS argument_count,
+           catalog.cursor_key, filters.row_limit
+    FROM catalog
+    CROSS JOIN filters
+    WHERE (filters.owner_name IS NULL OR catalog.owner = filters.owner_name)
+      AND (filters.search_text IS NULL OR INSTR(
+           catalog.owner || '.' || CASE WHEN catalog.package_name IS NULL THEN '' ELSE catalog.package_name || '.' END || catalog.procedure_name ||
+           CASE WHEN catalog.overload IS NULL THEN '' ELSE '#' || catalog.overload END,
+           filters.search_text
+      ) > 0)
+      AND (filters.after_key IS NULL OR catalog.cursor_key > filters.after_key)
+    ORDER BY catalog.cursor_key
+)
+SELECT owner, package_name, procedure_name, overload, argument_count, cursor_key
+FROM ordered_catalog
+WHERE ROWNUM <= row_limit`
 
 const resultColumnsSQL = `
 SELECT column_name, column_id, data_type, data_length,

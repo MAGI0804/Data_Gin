@@ -50,6 +50,37 @@ func TestProcedureInspectionUsesEachBindOnce(t *testing.T) {
 	}
 }
 
+func TestProcedureCatalogUsesBoundFiltersAndVisibleMetadata(t *testing.T) {
+	for _, bind := range []string{":1", ":2", ":3", ":4"} {
+		if count := strings.Count(procedureCatalogSQL, bind); count != 1 {
+			t.Fatalf("bind %s occurs %d times, want once", bind, count)
+		}
+	}
+	for _, fragment := range []string{"all_procedures", "all_arguments", "all_objects", "objects.status = 'VALID'", "INSTR("} {
+		if !strings.Contains(procedureCatalogSQL, fragment) {
+			t.Fatalf("procedure catalog SQL is missing %q", fragment)
+		}
+	}
+}
+
+func TestProcedureCursorRoundTrip(t *testing.T) {
+	ref := ProcedureRef{Owner: "report_owner", Package: "report_pkg", Name: "run_report", Overload: "2"}
+	key, err := ProcedureCursorKey(ref)
+	if err != nil {
+		t.Fatalf("ProcedureCursorKey() error = %v", err)
+	}
+	parsed, err := ParseProcedureCursorKey(key)
+	if err != nil {
+		t.Fatalf("ParseProcedureCursorKey() error = %v", err)
+	}
+	if parsed.Owner != "REPORT_OWNER" || parsed.Package != "REPORT_PKG" || parsed.Name != "RUN_REPORT" || parsed.Overload != "2" {
+		t.Fatalf("parsed cursor = %+v", parsed)
+	}
+	if _, err := ParseProcedureCursorKey("REPORT_OWNER.RUN_REPORT"); !errors.Is(err, ErrInvalidConfiguration) {
+		t.Fatalf("invalid cursor error = %v", err)
+	}
+}
+
 func TestBuildConnectStringRejectsUnsafeConfiguration(t *testing.T) {
 	tests := []Config{
 		{Host: "db)(PORT=9999", Port: 1521, ServiceName: "REPORT"},
