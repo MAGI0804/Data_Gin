@@ -23,6 +23,23 @@ func TestReportRunProcessorExecutesProcedureOnceAndPersistsSuccess(t *testing.T)
 	}
 }
 
+func TestReportRunProcessorBuildsSingleJSONCursorPayload(t *testing.T) {
+	store := newFakeReportExecutionStore()
+	store.runtime.Definition.ID = 1234
+	store.runtime.Version.ExecutionMode = model.ReportExecutionModeRefCursor
+	store.runtime.Parameters = nil
+	store.runtime.Run.NormalizedParametersJSON = model.JSONText(`{"c_supplier_id":["a","b"],"datein_begin":"20260504"}`)
+	executor := &fakeReportProcedureExecutor{rowCount: 2}
+	processor := newTestReportRunProcessor(store, executor)
+
+	if err := processor.Process(t.Context(), 31, true); err != nil {
+		t.Fatalf("Process() error = %v", err)
+	}
+	if got, want := executor.jsonPayload, `{"report_id":1234,"conditions":{"c_supplier_id":["a","b"],"datein_begin":"20260504"}}`; got != want {
+		t.Fatalf("JSON payload = %s, want %s", got, want)
+	}
+}
+
 func TestReportRunProcessorMarksUnknownWithoutRetryingAfterCommitAmbiguity(t *testing.T) {
 	store := newFakeReportExecutionStore()
 	executor := &fakeReportProcedureExecutor{err: errOracleCommitOutcomeUnknown}
@@ -223,13 +240,22 @@ type fakeReportProcedureExecutor struct {
 	rowCount      int64
 	err           error
 	waitForCancel bool
+	jsonPayload   string
 }
 
 func (executor *fakeReportProcedureExecutor) Execute(ctx context.Context, request reportProcedureExecutionRequest, password string) (int64, error) {
 	executor.mu.Lock()
 	executor.calls++
+	executor.jsonPayload = request.JSONPayload
 	executor.mu.Unlock()
-	if password != "password" || request.Values["runId"] == nil || request.Values["storeCode"] != "S001" {
+	if password != "password" {
+		return 0, errors.New("unexpected execution request")
+	}
+	if request.Runtime.Version.ExecutionMode == model.ReportExecutionModeRefCursor {
+		if request.JSONPayload == "" || len(request.Values) != 0 {
+			return 0, errors.New("unexpected JSON cursor execution request")
+		}
+	} else if request.Values["runId"] == nil || request.Values["storeCode"] != "S001" {
 		return 0, errors.New("unexpected execution request")
 	}
 	if executor.waitForCancel {

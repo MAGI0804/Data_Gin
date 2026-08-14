@@ -57,6 +57,7 @@ type reportProcedureExecutionRequest struct {
 	Runtime     reportrepo.RuntimeContract
 	Definitions []reporting.ParameterDefinition
 	Values      map[string]interface{}
+	JSONPayload string
 }
 
 type reportProcedureExecutor interface {
@@ -157,7 +158,13 @@ func (processor *ReportRunProcessor) Process(ctx context.Context, runID uint, re
 		return processor.finishPreOracleFailure(ctx, runID, leaseToken, retryAllowed, err)
 	}
 	definitions := reportParameterDefinitions(runtime.Parameters)
-	values, err := processor.restoreParameters(runtime.Run, definitions)
+	values := map[string]interface{}{}
+	jsonPayload := ""
+	if runtime.Version.ExecutionMode == model.ReportExecutionModeRefCursor {
+		jsonPayload, err = buildRefCursorPayload(runtime.Run, runtime.Definition.ID)
+	} else {
+		values, err = processor.restoreParameters(runtime.Run, definitions)
+	}
 	if err != nil {
 		return processor.finishFailure(ctx, runID, leaseToken, "PARAMETER_SNAPSHOT_INVALID", "报表参数快照不可用", err)
 	}
@@ -187,7 +194,7 @@ func (processor *ReportRunProcessor) Process(ctx context.Context, runID uint, re
 		return processor.finishPreOracleFailure(ctx, runID, leaseToken, retryAllowed, err)
 	}
 	rowCount, executeErr := processor.executor.Execute(runCtx, reportProcedureExecutionRequest{
-		Runtime: *runtime, Definitions: definitions, Values: values,
+		Runtime: *runtime, Definitions: definitions, Values: values, JSONPayload: jsonPayload,
 	}, password)
 	if executeErr != nil {
 		control, inspectErr := processor.inspect(ctx, runID, leaseToken)
@@ -220,6 +227,24 @@ func (processor *ReportRunProcessor) Process(ctx context.Context, runID uint, re
 		return fmt.Errorf("%w: success state could not be confirmed", ErrReportRunProcessNonRetryable)
 	}
 	return unknownErr
+}
+
+func buildRefCursorPayload(run model.ReportRun, definitionID uint) (string, error) {
+	if definitionID == 0 {
+		return "", fmt.Errorf("report definition id is missing")
+	}
+	conditions, err := decodeParameterSnapshot([]byte(run.NormalizedParametersJSON))
+	if err != nil {
+		return "", err
+	}
+	payload, err := json.Marshal(struct {
+		ReportID   uint                       `json:"report_id"`
+		Conditions map[string]json.RawMessage `json:"conditions"`
+	}{ReportID: definitionID, Conditions: conditions})
+	if err != nil {
+		return "", fmt.Errorf("encode JSON cursor payload: %w", err)
+	}
+	return string(payload), nil
 }
 
 func (processor *ReportRunProcessor) finishPreOracleFailure(ctx context.Context, runID uint, leaseToken string, retryAllowed bool, cause error) error {
@@ -377,6 +402,9 @@ func (oracleReportProcedureExecutor) Execute(ctx context.Context, request report
 	if err != nil {
 		return 0, err
 	}
+	if request.Runtime.Version.ExecutionMode == model.ReportExecutionModeRefCursor {
+		return executeRefCursorReport(queryCtx, adapter, request, procedureRef, procedure)
+	}
 	resultRef := reportoracle.ResultTableRef{Owner: request.Runtime.Version.ResultTableOwner, Name: request.Runtime.Version.ResultTableName}
 	resultColumns, err := adapter.InspectResultTable(queryCtx, resultRef)
 	if err != nil {
@@ -421,4 +449,51 @@ func (oracleReportProcedureExecutor) Execute(ctx context.Context, request report
 		return 0, fmt.Errorf("%w: %v", errOracleCommitOutcomeUnknown, err)
 	}
 	return rowCount, nil
+}
+
+func executeRefCursorReport(
+	ctx context.Context,
+	adapter *reportoracle.Adapter,
+	request reportProcedureExecutionRequest,
+	procedureRef reportoracle.ProcedureRef,
+	procedure []reportoracle.ProcedureArgument,
+) (rowCount int64, resultErr error) {
+	if err := reportcontract.VerifyRuntimeProcedureMetadata(
+		[]byte(request.Runtime.Version.CompiledSpecJSON), request.Runtime.Run.ContractHash,
+		request.Runtime.Run.ProcedureSignatureHash, procedure,
+	); err != nil {
+		return 0, err
+	}
+	if err := adapter.ValidateJSONSnapshotStore(ctx); err != nil {
+		return 0, err
+	}
+	plan, err := reportoracle.BuildJSONCursorCallPlan(
+		procedureRef, procedure, request.Runtime.Version.JSONInputArgName, request.Runtime.Version.ResultCursorArgName,
+	)
+	if err != nil {
+		return 0, err
+	}
+	expectedColumns := make([]string, 0, len(request.Runtime.Columns))
+	for _, column := range request.Runtime.Columns {
+		expectedColumns = append(expectedColumns, column.DatabaseColumn)
+	}
+	tx, err := adapter.BeginTx(ctx, &sql.TxOptions{})
+	if err != nil {
+		return 0, err
+	}
+	defer func() {
+		if resultErr != nil {
+			if rollbackErr := tx.Rollback(); rollbackErr != nil && !errors.Is(rollbackErr, sql.ErrTxDone) {
+				resultErr = errors.Join(resultErr, fmt.Errorf("rollback JSON cursor report: %w", rollbackErr))
+			}
+		}
+	}()
+	snapshot, err := adapter.ExecuteJSONCursorSnapshot(ctx, tx, plan, request.Runtime.Run.RunUUID, request.JSONPayload, expectedColumns)
+	if err != nil {
+		return 0, err
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, fmt.Errorf("%w: %v", errOracleCommitOutcomeUnknown, err)
+	}
+	return snapshot.RowCount, nil
 }
