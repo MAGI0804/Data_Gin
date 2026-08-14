@@ -62,13 +62,17 @@ export function ReportAuditDrawer({ client, open, reports, onClose }: {
     })
   }
 
+  function updateDraft<K extends keyof ReportAuditQuery>(key: K, value: ReportAuditQuery[K]) {
+    setDraft((current) => ({ ...current, [key]: value }))
+  }
+
   return (
     <Drawer open={open} title="报表审计记录" description="查看配置、运行、查询、导出、下载及结果清理的安全审计元数据。" size="wide" onClose={onClose}>
       <form className={styles.filters} onSubmit={applyFilters}>
-        <label>动作<input value={draft.action ?? ''} maxLength={64} placeholder="例如 REPORT_RESULT_QUERY_SUCCESS" onChange={(event) => setDraft((current) => ({ ...current, action: event.currentTarget.value }))} /></label>
-        <label>目标类型<select value={draft.targetType ?? ''} onChange={(event) => setDraft((current) => ({ ...current, targetType: event.currentTarget.value }))}><option value="">全部类型</option><option value="REPORT_DATASOURCE">Oracle 数据源</option><option value="REPORT_DEFINITION">报表配置</option><option value="REPORT_RUN">报表运行</option><option value="REPORT_EXPORT">报表导出</option></select></label>
-        <label>目标 ID<input type="number" min="1" step="1" value={draft.targetId ?? ''} placeholder="可选，输入精确 ID" onChange={(event) => setDraft((current) => ({ ...current, targetId: Number(event.currentTarget.value) || undefined }))} /></label>
-        {draft.targetType === 'REPORT_DEFINITION' && reports.length > 0 ? <label>当前报表快捷选择<select value={draft.targetId ?? ''} onChange={(event) => setDraft((current) => ({ ...current, targetId: Number(event.currentTarget.value) || undefined }))}><option value="">手动输入 / 全部</option>{reports.map((report) => <option key={report.id} value={report.id}>{report.name}</option>)}</select></label> : null}
+        <label>动作<input value={draft.action ?? ''} maxLength={64} placeholder="例如 REPORT_RESULT_QUERY_SUCCESS" onChange={(event) => updateDraft('action', event.currentTarget.value)} /></label>
+        <label>目标类型<select value={draft.targetType ?? ''} onChange={(event) => updateDraft('targetType', event.currentTarget.value)}><option value="">全部类型</option><option value="REPORT_DATASOURCE">Oracle 数据源</option><option value="REPORT_DEFINITION">报表配置</option><option value="REPORT_RUN">报表运行</option><option value="REPORT_EXPORT">报表导出</option></select></label>
+        <label>目标 ID<input type="number" min="1" step="1" value={draft.targetId ?? ''} placeholder="可选，输入精确 ID" onChange={(event) => updateDraft('targetId', Number(event.currentTarget.value) || undefined)} /></label>
+        {draft.targetType === 'REPORT_DEFINITION' && reports.length > 0 ? <label>当前报表快捷选择<select value={draft.targetId ?? ''} onChange={(event) => updateDraft('targetId', Number(event.currentTarget.value) || undefined)}><option value="">手动输入 / 全部</option>{reports.map((report) => <option key={report.id} value={report.id}>{report.name}</option>)}</select></label> : null}
         <button type="submit" disabled={state.loading}><Search aria-hidden="true" />查询</button>
         <button type="button" disabled={state.loading} onClick={() => void load(filters)}><RefreshCw aria-hidden="true" />刷新</button>
       </form>

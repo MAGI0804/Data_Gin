@@ -566,7 +566,10 @@ export function ExcelMatchPage({
             <input
               type="checkbox"
               checked={pendingSchemeSave.overwriteConfirmed}
-              onChange={(event) => setPendingSchemeSave((current) => current ? { ...current, overwriteConfirmed: event.currentTarget.checked } : current)}
+              onChange={(event) => {
+                const overwriteConfirmed = event.currentTarget.checked
+                setPendingSchemeSave((current) => current ? { ...current, overwriteConfirmed } : current)
+              }}
             />
             覆盖同类型的“{pendingSchemeNameConflict.name}”方案
           </label>

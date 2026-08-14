@@ -120,10 +120,14 @@ export function ReportProcedureEditor({ client, draft, onChange }: { client: Rep
   const selectedLabel = useMemo(() => signature?.procedure.qualifiedName || qualifiedName(draft.procedure) || '尚未绑定存储过程', [draft.procedure, signature])
   if (!draft.datasourceId) return <div className={styles.empty} role="status">请先在“基本信息”中选择可用的 Oracle 数据源。</div>
 
+  function updateFilter(key: keyof typeof filters, value: string) {
+    setFilters((current) => ({ ...current, [key]: value }))
+  }
+
   return <div className={styles.editor}>
     <form className={styles.search} onSubmit={(event) => { event.preventDefault(); void load(false) }}>
-      <label>Owner<input className={styles.mono} value={filters.owner} placeholder="可选，例如 REPORT" onChange={(event) => setFilters((current) => ({ ...current, owner: event.currentTarget.value }))} /></label>
-      <label>过程名称<input value={filters.search} placeholder="搜索过程或包名" onChange={(event) => setFilters((current) => ({ ...current, search: event.currentTarget.value }))} /></label>
+      <label>Owner<input className={styles.mono} value={filters.owner} placeholder="可选，例如 REPORT" onChange={(event) => updateFilter('owner', event.currentTarget.value)} /></label>
+      <label>过程名称<input value={filters.search} placeholder="搜索过程或包名" onChange={(event) => updateFilter('search', event.currentTarget.value)} /></label>
       <button type="submit" disabled={state.loading}><Search aria-hidden="true" />{state.loading ? '查询中…' : '查询 Oracle'}</button>
     </form>
 

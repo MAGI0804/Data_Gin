@@ -1,5 +1,7 @@
 import assert from 'node:assert/strict'
+import { readdirSync, readFileSync } from 'node:fs'
 import test from 'node:test'
+import ts from 'typescript'
 
 import { createReportRun, getReportAudits, getReportProcedureSignature, getReportProcedures, parsePublication, parseReportAuditPage, parseReportCatalogPage, parseReportDatasource, parseReportDatasources, parseReportDatasourceTest, parseReportDraft, parseReportExport, parseReportExportPage, parseReportProcedurePage, parseReportProcedureSignature, parseReportResultPage, parseReportRun, parseReportRunContract, parseReportVersionDiff, parseReportVersionPage, saveReportDraft, testReportDatasourceConnection } from '../.test-dist/reportCenter/api.js'
 import { applyExcelMapping, buildReportConditions, excelMappingFromColumns, initialReportConditionValues, parseExcelMappingDocument, parseReportInputSchemaDocument, renameExcelMappingField } from '../.test-dist/reportCenter/refCursorConfig.js'
@@ -7,6 +9,41 @@ import { reportParameterControls, reportParameterFlagDisabled, updateReportParam
 import { buildNewReportRunState, canStartNewReportRun, initialReportParameterValues } from '../.test-dist/reportCenter/queryParameters.js'
 import { createLatestRequestGuard } from '../.test-dist/reportCenter/components/ReportVersionDrawer/requestGuard.js'
 import { normalizeDatasourceCode, validateDatasourceConnection, validateDatasourceSave } from '../.test-dist/reportCenter/datasourceValidation.js'
+
+test('functional state updates do not retain React DOM events', () => {
+  const sourceRoot = new URL('../src/', import.meta.url)
+  const violations = []
+  for (const file of typescriptFiles(sourceRoot)) {
+    const source = readFileSync(file, 'utf8')
+    const sourceFile = ts.createSourceFile(file.pathname, source, ts.ScriptTarget.Latest, true, file.pathname.endsWith('.tsx') ? ts.ScriptKind.TSX : ts.ScriptKind.TS)
+    inspect(sourceFile)
+
+    function inspect(node) {
+      if (ts.isCallExpression(node) && ts.isIdentifier(node.expression) && /^set[A-Z]/.test(node.expression.text)) {
+        const updater = node.arguments[0]
+        if (updater && (ts.isArrowFunction(updater) || ts.isFunctionExpression(updater))) inspectUpdater(updater.body)
+      }
+      ts.forEachChild(node, inspect)
+    }
+
+    function inspectUpdater(node) {
+      if (ts.isPropertyAccessExpression(node) && ['currentTarget', 'target', 'nativeEvent'].includes(node.name.text)) {
+        const position = sourceFile.getLineAndCharacterOfPosition(node.getStart(sourceFile))
+        violations.push(`${file.pathname}:${position.line + 1}:${position.character + 1}`)
+      }
+      ts.forEachChild(node, inspectUpdater)
+    }
+  }
+  assert.deepEqual(violations, [])
+})
+
+function typescriptFiles(directory) {
+  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+    const file = new URL(entry.name, directory)
+    if (entry.isDirectory()) return typescriptFiles(new URL(`${entry.name}/`, directory))
+    return /\.tsx?$/.test(entry.name) ? [file] : []
+  })
+}
 
 test('parseReportCatalogPage reads the standard API envelope', () => {
   const page = parseReportCatalogPage({
