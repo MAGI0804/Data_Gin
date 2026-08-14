@@ -31,6 +31,8 @@ var (
 
 var refreshNoncePattern = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9_-]{0,63}$`)
 
+const maxReportJSONConditionsBytes = 1024 * 1024
+
 type reportRunStore interface {
 	FindPublishedReport(context.Context, uint, uint, string) (*reportrepo.PublishedReport, error)
 	CreateRun(context.Context, uint, uint, *reportrepo.CreateRunCommand) error
@@ -217,6 +219,13 @@ func (service *ReportRunService) createRefCursorRun(
 }
 
 func normalizeRefCursorConditions(schemaJSON []byte, input map[string]json.RawMessage) ([]byte, string, error) {
+	totalBytes := 0
+	for code, value := range input {
+		totalBytes += len(code) + len(value)
+		if totalBytes > maxReportJSONConditionsBytes {
+			return nil, "", ErrReportRunInvalid
+		}
+	}
 	var schema map[string]reportRunInputFieldSchema
 	decoder := json.NewDecoder(bytes.NewReader(schemaJSON))
 	decoder.DisallowUnknownFields()
@@ -252,6 +261,9 @@ func normalizeRefCursorConditions(schemaJSON []byte, input map[string]json.RawMe
 	encoded, err := json.Marshal(normalized)
 	if err != nil {
 		return nil, "", err
+	}
+	if len(encoded) > maxReportJSONConditionsBytes {
+		return nil, "", ErrReportRunInvalid
 	}
 	sum := sha256.Sum256(encoded)
 	return encoded, hex.EncodeToString(sum[:]), nil
