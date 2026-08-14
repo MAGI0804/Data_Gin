@@ -41,4 +41,35 @@ func TestReportCenterMigrationVersionIncludesJSONProcedureContract(t *testing.T)
 	if schemaMigrationVersion != "2026-08-14-report-center-v9" {
 		t.Fatalf("schemaMigrationVersion = %q", schemaMigrationVersion)
 	}
+	if previousSchemaMigrationVersion != "2026-08-13-report-center-v8" {
+		t.Fatalf("previousSchemaMigrationVersion = %q", previousSchemaMigrationVersion)
+	}
+}
+
+func TestRunPendingSchemaMigrationUsesIncrementalPathFromPreviousVersion(t *testing.T) {
+	incrementalCalls, fullCalls := 0, 0
+	err := runPendingSchemaMigration(true, func() error {
+		incrementalCalls++
+		return nil
+	}, func() error {
+		fullCalls++
+		return nil
+	})
+	if err != nil || incrementalCalls != 1 || fullCalls != 0 {
+		t.Fatalf("runPendingSchemaMigration() error=%v incremental=%d full=%d", err, incrementalCalls, fullCalls)
+	}
+}
+
+func TestRunPendingSchemaMigrationUsesFullPathWithoutPreviousVersion(t *testing.T) {
+	incrementalCalls, fullCalls := 0, 0
+	err := runPendingSchemaMigration(false, func() error {
+		incrementalCalls++
+		return nil
+	}, func() error {
+		fullCalls++
+		return nil
+	})
+	if err != nil || incrementalCalls != 0 || fullCalls != 1 {
+		t.Fatalf("runPendingSchemaMigration() error=%v incremental=%d full=%d", err, incrementalCalls, fullCalls)
+	}
 }

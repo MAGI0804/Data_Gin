@@ -24,6 +24,7 @@ import (
 )
 
 const schemaMigrationVersion = "2026-08-14-report-center-v9"
+const previousSchemaMigrationVersion = "2026-08-13-report-center-v8"
 const schemaMigrationLockName = "data_gin_schema_migration_v1"
 
 type schemaMigrationRecord struct {
@@ -85,15 +86,26 @@ func ApplySchemaMigrations() (resultErr error) {
 	if err := db.AutoMigrate(&schemaMigrationRecord{}); err != nil {
 		return fmt.Errorf("prepare schema migration marker: %w", err)
 	}
-	var count int64
-	if err := db.Model(&schemaMigrationRecord{}).Where("version = ?", schemaMigrationVersion).Count(&count).Error; err != nil {
-		return fmt.Errorf("read schema migration marker: %w", err)
+	currentApplied, err := schemaMigrationApplied(db, schemaMigrationVersion)
+	if err != nil {
+		return err
 	}
-	if count == 1 {
+	if currentApplied {
 		console.Info("database schema is current: %s", schemaMigrationVersion)
 		return nil
 	}
-	if err := autoMigrateTables(); err != nil {
+	previousApplied, err := schemaMigrationApplied(db, previousSchemaMigrationVersion)
+	if err != nil {
+		return err
+	}
+	if previousApplied {
+		console.Info("applying incremental database schema migration: %s -> %s", previousSchemaMigrationVersion, schemaMigrationVersion)
+	}
+	if err := runPendingSchemaMigration(
+		previousApplied,
+		func() error { return prepareReportJSONProcedureContract(db) },
+		autoMigrateTables,
+	); err != nil {
 		return err
 	}
 	marker := schemaMigrationRecord{Version: schemaMigrationVersion, AppliedAt: time.Now().UTC()}
@@ -101,6 +113,21 @@ func ApplySchemaMigrations() (resultErr error) {
 		return fmt.Errorf("write schema migration marker: %w", err)
 	}
 	return nil
+}
+
+func schemaMigrationApplied(db *gorm.DB, version string) (bool, error) {
+	var count int64
+	if err := db.Model(&schemaMigrationRecord{}).Where("version = ?", version).Count(&count).Error; err != nil {
+		return false, fmt.Errorf("read schema migration marker %s: %w", version, err)
+	}
+	return count == 1, nil
+}
+
+func runPendingSchemaMigration(previousApplied bool, incremental, full func() error) error {
+	if previousApplied {
+		return incremental()
+	}
+	return full()
 }
 
 func acquireSchemaMigrationLock(ctx context.Context, conn *sql.Conn) (bool, error) {

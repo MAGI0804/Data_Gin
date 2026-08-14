@@ -1,6 +1,8 @@
 package bootstrap
 
 import (
+	"errors"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -39,4 +41,76 @@ func TestReportGrantMigrationPreservesPublishedAndDraftSnapshots(t *testing.T) {
 			t.Fatalf("draft copy SQL %q does not contain %q", copyReportGrantDraftVersionSQL, fragment)
 		}
 	}
+}
+
+func TestReportJSONProcedureContractMigrationAddsOnlyMissingColumns(t *testing.T) {
+	migrator := &fakeReportSchemaMigrator{
+		tableExists: true,
+		columns: map[string]bool{
+			"ExecutionMode":       true,
+			"JSONInputArgName":    true,
+			"ResultCursorArgName": false,
+			"InputSchemaJSON":     false,
+		},
+	}
+
+	if err := migrateReportJSONProcedureContract(migrator); err != nil {
+		t.Fatalf("migrateReportJSONProcedureContract() error = %v", err)
+	}
+	want := []string{"ResultCursorArgName", "InputSchemaJSON"}
+	if !reflect.DeepEqual(migrator.added, want) {
+		t.Fatalf("added columns = %#v, want %#v", migrator.added, want)
+	}
+}
+
+func TestReportJSONProcedureContractMigrationCanResumeAfterPartialFailure(t *testing.T) {
+	cause := errors.New("connection interrupted")
+	first := &fakeReportSchemaMigrator{tableExists: true, columns: map[string]bool{}, addErrorAt: "ResultCursorArgName", addError: cause}
+	if err := migrateReportJSONProcedureContract(first); !errors.Is(err, cause) {
+		t.Fatalf("first migration error = %v, want %v", err, cause)
+	}
+	if want := []string{"ExecutionMode", "JSONInputArgName"}; !reflect.DeepEqual(first.added, want) {
+		t.Fatalf("first added columns = %#v, want %#v", first.added, want)
+	}
+
+	second := &fakeReportSchemaMigrator{tableExists: true, columns: first.columns}
+	if err := migrateReportJSONProcedureContract(second); err != nil {
+		t.Fatalf("resumed migration error = %v", err)
+	}
+	if want := []string{"ResultCursorArgName", "InputSchemaJSON"}; !reflect.DeepEqual(second.added, want) {
+		t.Fatalf("resumed added columns = %#v, want %#v", second.added, want)
+	}
+}
+
+func TestReportJSONProcedureContractMigrationRequiresExistingBaselineTable(t *testing.T) {
+	err := migrateReportJSONProcedureContract(&fakeReportSchemaMigrator{})
+	if err == nil || !strings.Contains(err.Error(), "report_versions table is unavailable") {
+		t.Fatalf("migration error = %v", err)
+	}
+}
+
+type fakeReportSchemaMigrator struct {
+	tableExists bool
+	columns     map[string]bool
+	added       []string
+	addErrorAt  string
+	addError    error
+}
+
+func (migrator *fakeReportSchemaMigrator) HasTable(interface{}) bool { return migrator.tableExists }
+
+func (migrator *fakeReportSchemaMigrator) HasColumn(_ interface{}, field string) bool {
+	return migrator.columns[field]
+}
+
+func (migrator *fakeReportSchemaMigrator) AddColumn(_ interface{}, field string) error {
+	if field == migrator.addErrorAt {
+		return migrator.addError
+	}
+	if migrator.columns == nil {
+		migrator.columns = make(map[string]bool)
+	}
+	migrator.columns[field] = true
+	migrator.added = append(migrator.added, field)
+	return nil
 }

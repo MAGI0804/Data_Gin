@@ -8,6 +8,19 @@ import (
 	"gorm.io/gorm"
 )
 
+type reportSchemaMigrator interface {
+	HasTable(dst interface{}) bool
+	HasColumn(dst interface{}, field string) bool
+	AddColumn(dst interface{}, field string) error
+}
+
+var reportJSONProcedureContractColumns = []string{
+	"ExecutionMode",
+	"JSONInputArgName",
+	"ResultCursorArgName",
+	"InputSchemaJSON",
+}
+
 const (
 	addReportVersionDatasourceSQL      = "ALTER TABLE `report_versions` ADD COLUMN `datasource_id` BIGINT UNSIGNED NULL AFTER `definition_id`"
 	backfillReportVersionDatasourceSQL = `UPDATE report_versions AS versions
@@ -80,6 +93,29 @@ func prepareReportGrantVersionSnapshot(db *gorm.DB) error {
 	}
 	if err := db.Exec(copyReportGrantDraftVersionSQL).Error; err != nil {
 		return fmt.Errorf("report grant version migration: copy draft snapshots: %w", err)
+	}
+	return nil
+}
+
+func prepareReportJSONProcedureContract(db *gorm.DB) error {
+	if db == nil {
+		return fmt.Errorf("report json procedure contract migration: database is unavailable")
+	}
+	return migrateReportJSONProcedureContract(db.Migrator())
+}
+
+func migrateReportJSONProcedureContract(migrator reportSchemaMigrator) error {
+	version := &model.ReportVersion{}
+	if !migrator.HasTable(version) {
+		return fmt.Errorf("report json procedure contract migration: report_versions table is unavailable")
+	}
+	for _, field := range reportJSONProcedureContractColumns {
+		if migrator.HasColumn(version, field) {
+			continue
+		}
+		if err := migrator.AddColumn(version, field); err != nil {
+			return fmt.Errorf("report json procedure contract migration: add %s: %w", field, err)
+		}
 	}
 	return nil
 }
