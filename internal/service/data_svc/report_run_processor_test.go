@@ -8,8 +8,12 @@ import (
 	"testing"
 	"time"
 
+	"gin-biz-web-api/internal/reporting"
 	"gin-biz-web-api/internal/reportrepo"
 	"gin-biz-web-api/model"
+
+	"go.uber.org/zap"
+	"go.uber.org/zap/zaptest/observer"
 )
 
 func TestReportRunProcessorExecutesProcedureOnceAndPersistsSuccess(t *testing.T) {
@@ -56,6 +60,67 @@ func TestReportRunProcessorBuildsJSONResultTablePayloadWithRunID(t *testing.T) {
 	}
 	if got, want := executor.jsonPayload, `{"report_id":31,"conditions":{"c_supplier_id":["a","b"],"datein_begin":"20260504"}}`; got != want {
 		t.Fatalf("JSON payload = %s, want %s", got, want)
+	}
+}
+
+func TestLogReportOracleProcedureInputIncludesActualJSON(t *testing.T) {
+	core, observed := observer.New(zap.InfoLevel)
+	previous := zap.L()
+	zap.ReplaceGlobals(zap.New(core))
+	defer zap.ReplaceGlobals(previous)
+
+	request := reportProcedureExecutionRequest{
+		Runtime: reportrepo.RuntimeContract{
+			Run: model.ReportRun{BaseModel: model.BaseModel{ID: 31}, RunUUID: "11111111-1111-4111-8111-111111111111", DefinitionID: 13},
+			Version: model.ReportVersion{
+				ProcedureOwner: "YL_TEST", PackageName: "PKG_REPORT", ProcedureName: "BUILD_REPORT",
+				ExecutionMode: model.ReportExecutionModeTableSnapshot, JSONInputArgName: "P_JSON",
+			},
+		},
+		JSONPayload: `{"report_id":31,"conditions":{"store_id":["a1","b2"]}}`,
+	}
+
+	logReportOracleProcedureInput(request)
+	entries := observed.FilterMessage("调用Oracle报表存储过程").All()
+	if len(entries) != 1 {
+		t.Fatalf("log entries = %d", len(entries))
+	}
+	fields := entries[0].ContextMap()
+	if fields["oracle_procedure"] != "YL_TEST.PKG_REPORT.BUILD_REPORT" || fields["input_argument"] != "P_JSON" || fields["actual_input_json"] != request.JSONPayload {
+		t.Fatalf("log fields = %#v", fields)
+	}
+}
+
+func TestReportProcedureLogValuesRedactsSensitiveLegacyParameters(t *testing.T) {
+	values := map[string]interface{}{"storeCode": "S001", "secret": "plain-text"}
+	logged := reportProcedureLogValues([]reporting.ParameterDefinition{{Code: "secret", Sensitive: true}}, values)
+	if logged["storeCode"] != "S001" || logged["secret"] != "[REDACTED]" || values["secret"] != "plain-text" {
+		t.Fatalf("logged=%#v values=%#v", logged, values)
+	}
+}
+
+func TestLogReportOracleExecutionFailureIncludesCauseAndInput(t *testing.T) {
+	core, observed := observer.New(zap.ErrorLevel)
+	previous := zap.L()
+	zap.ReplaceGlobals(zap.New(core))
+	defer zap.ReplaceGlobals(previous)
+
+	oracleErr := errors.New("ORA-06502: PL/SQL numeric or value error")
+	request := reportProcedureExecutionRequest{
+		Runtime: reportrepo.RuntimeContract{
+			Run:     model.ReportRun{BaseModel: model.BaseModel{ID: 31}},
+			Version: model.ReportVersion{ProcedureOwner: "YL_TEST", ProcedureName: "BUILD_REPORT", JSONInputArgName: "P_JSON"},
+		},
+		JSONPayload: `{"report_id":31,"conditions":{}}`,
+	}
+	logReportOracleExecutionFailure(request, oracleErr)
+	entries := observed.FilterMessage("Oracle报表执行失败").All()
+	if len(entries) != 1 {
+		t.Fatalf("log entries = %d", len(entries))
+	}
+	fields := entries[0].ContextMap()
+	if fields["error"] != oracleErr.Error() || fields["actual_input_json"] != request.JSONPayload {
+		t.Fatalf("log fields = %#v", fields)
 	}
 }
 

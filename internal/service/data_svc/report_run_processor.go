@@ -9,6 +9,7 @@ import (
 	"fmt"
 	"io"
 	"strconv"
+	"strings"
 	"time"
 
 	"gin-biz-web-api/internal/reportcontract"
@@ -19,6 +20,7 @@ import (
 	"gin-biz-web-api/model"
 
 	"github.com/google/uuid"
+	"go.uber.org/zap"
 )
 
 const (
@@ -196,10 +198,12 @@ func (processor *ReportRunProcessor) Process(ctx context.Context, runID uint, re
 		}
 		return processor.finishPreOracleFailure(ctx, runID, leaseToken, retryAllowed, err)
 	}
-	rowCount, executeErr := processor.executor.Execute(runCtx, reportProcedureExecutionRequest{
+	executionRequest := reportProcedureExecutionRequest{
 		Runtime: *runtime, Definitions: definitions, Values: values, JSONPayload: jsonPayload,
-	}, password)
+	}
+	rowCount, executeErr := processor.executor.Execute(runCtx, executionRequest, password)
 	if executeErr != nil {
+		logReportOracleExecutionFailure(executionRequest, executeErr)
 		control, inspectErr := processor.inspect(ctx, runID, leaseToken)
 		if errors.Is(executeErr, errOracleCommitOutcomeUnknown) {
 			return processor.finishUnknown(ctx, runID, leaseToken, "ORACLE_COMMIT_OUTCOME_UNKNOWN", "Oracle提交结果需要对账", executeErr)
@@ -342,6 +346,55 @@ func decodeParameterSnapshot(raw []byte) (map[string]json.RawMessage, error) {
 	return result, nil
 }
 
+func logReportOracleProcedureInput(request reportProcedureExecutionRequest) {
+	zap.L().Info("调用Oracle报表存储过程", reportOracleExecutionLogFields(request)...)
+}
+
+func logReportOracleExecutionFailure(request reportProcedureExecutionRequest, cause error) {
+	fields := append(reportOracleExecutionLogFields(request), zap.Error(cause))
+	zap.L().Error("Oracle报表执行失败", fields...)
+}
+
+func reportOracleExecutionLogFields(request reportProcedureExecutionRequest) []zap.Field {
+	version := request.Runtime.Version
+	parts := []string{version.ProcedureOwner}
+	if version.PackageName != "" {
+		parts = append(parts, version.PackageName)
+	}
+	parts = append(parts, version.ProcedureName)
+	fields := []zap.Field{
+		zap.Uint("report_run_id", request.Runtime.Run.ID),
+		zap.String("report_run_uuid", request.Runtime.Run.RunUUID),
+		zap.Uint("report_definition_id", request.Runtime.Run.DefinitionID),
+		zap.String("oracle_procedure", strings.Join(parts, ".")),
+		zap.String("execution_mode", version.ExecutionMode),
+	}
+	if request.JSONPayload != "" {
+		fields = append(fields,
+			zap.String("input_argument", version.JSONInputArgName),
+			zap.String("actual_input_json", request.JSONPayload),
+		)
+	} else {
+		fields = append(fields, zap.Any("actual_input_parameters", reportProcedureLogValues(request.Definitions, request.Values)))
+	}
+	return fields
+}
+
+func reportProcedureLogValues(definitions []reporting.ParameterDefinition, values map[string]interface{}) map[string]interface{} {
+	logged := make(map[string]interface{}, len(values))
+	for key, value := range values {
+		logged[key] = value
+	}
+	for _, definition := range definitions {
+		if definition.Sensitive {
+			if _, exists := logged[definition.Code]; exists {
+				logged[definition.Code] = "[REDACTED]"
+			}
+		}
+	}
+	return logged
+}
+
 func (processor *ReportRunProcessor) startMonitor(ctx context.Context, cancel context.CancelFunc, runID uint, leaseToken string) <-chan struct{} {
 	done := make(chan struct{})
 	go func() {
@@ -414,6 +467,7 @@ var errOracleCommitOutcomeUnknown = errors.New("oracle report commit outcome unk
 type oracleReportProcedureExecutor struct{}
 
 func (oracleReportProcedureExecutor) Execute(ctx context.Context, request reportProcedureExecutionRequest, password string) (rowCount int64, resultErr error) {
+	logReportOracleProcedureInput(request)
 	queryCtx, cancel := reportOracleQueryContext(ctx, request.Runtime.Datasource)
 	defer cancel()
 	adapter, err := reportoracle.Open(queryCtx, oracleConfigFromDatasource(request.Runtime.Datasource, password))
