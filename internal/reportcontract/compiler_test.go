@@ -166,9 +166,20 @@ func TestVerifyRuntimeMetadataAcceptsPublishedContractAndRejectsDrift(t *testing
 	if err := VerifyRuntimeMetadata(compiled.SpecJSON, compiled.Hashes.Contract, compiled.Hashes.ProcedureSignature, compiled.Hashes.ResultSchema, procedure, result); err != nil {
 		t.Fatalf("VerifyRuntimeMetadata() error = %v", err)
 	}
+	originalProcedure := append([]reportoracle.ProcedureArgument(nil), procedure...)
 	procedure[0].Name = "P_WRONG"
-	if err := VerifyRuntimeMetadata(compiled.SpecJSON, compiled.Hashes.Contract, compiled.Hashes.ProcedureSignature, compiled.Hashes.ResultSchema, procedure, result); !errors.Is(err, ErrInvalidContract) {
+	if err := VerifyRuntimeMetadata(compiled.SpecJSON, compiled.Hashes.Contract, compiled.Hashes.ProcedureSignature, compiled.Hashes.ResultSchema, procedure, result); !errors.Is(err, ErrInvalidContract) ||
+		!strings.Contains(err.Error(), "live Oracle procedure signature hash mismatch") ||
+		!strings.Contains(err.Error(), "published="+compiled.Hashes.ProcedureSignature) {
 		t.Fatalf("procedure drift error = %v", err)
+	}
+
+	driftedResult := append([]reportoracle.ResultColumn(nil), result...)
+	driftedResult[0].DataType = "CLOB"
+	if err := VerifyRuntimeMetadata(compiled.SpecJSON, compiled.Hashes.Contract, compiled.Hashes.ProcedureSignature, compiled.Hashes.ResultSchema, originalProcedure, driftedResult); !errors.Is(err, ErrInvalidContract) ||
+		!strings.Contains(err.Error(), "live Oracle result schema hash mismatch") ||
+		!strings.Contains(err.Error(), "published="+compiled.Hashes.ResultSchema) {
+		t.Fatalf("result drift error = %v", err)
 	}
 }
 

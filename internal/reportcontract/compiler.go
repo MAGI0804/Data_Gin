@@ -49,8 +49,11 @@ func VerifyRuntimeMetadata(specJSON []byte, contractHash, procedureHash, resultH
 	if err != nil {
 		return err
 	}
-	if actualProcedureHash != procedureHash || actualResultHash != resultHash {
-		return contractError("live Oracle metadata does not match the published contract")
+	if actualProcedureHash != procedureHash {
+		return metadataHashMismatch("live Oracle procedure signature", procedureHash, actualProcedureHash)
+	}
+	if actualResultHash != resultHash {
+		return metadataHashMismatch("live Oracle result schema", resultHash, actualResultHash)
 	}
 	storedProcedureHash, err := hashJSON(spec.Procedure)
 	if err != nil {
@@ -60,8 +63,11 @@ func VerifyRuntimeMetadata(specJSON []byte, contractHash, procedureHash, resultH
 	if err != nil {
 		return err
 	}
-	if storedProcedureHash != procedureHash || storedResultHash != resultHash {
-		return contractError("stored Oracle metadata hashes do not match")
+	if storedProcedureHash != procedureHash {
+		return metadataHashMismatch("stored Oracle procedure signature", procedureHash, storedProcedureHash)
+	}
+	if storedResultHash != resultHash {
+		return metadataHashMismatch("stored Oracle result schema", resultHash, storedResultHash)
 	}
 	return nil
 }
@@ -83,8 +89,11 @@ func VerifyRuntimeProcedureMetadata(specJSON []byte, contractHash, procedureHash
 	if err != nil {
 		return err
 	}
-	if actualHash != procedureHash || storedHash != procedureHash {
-		return contractError("live Oracle procedure metadata does not match the published contract")
+	if actualHash != procedureHash {
+		return metadataHashMismatch("live Oracle procedure signature", procedureHash, actualHash)
+	}
+	if storedHash != procedureHash {
+		return metadataHashMismatch("stored Oracle procedure signature", procedureHash, storedHash)
 	}
 	return nil
 }
@@ -105,8 +114,11 @@ func VerifyRuntimeResultMetadata(specJSON []byte, contractHash, resultHash strin
 	if err != nil {
 		return err
 	}
-	if actualResultHash != resultHash || storedResultHash != resultHash {
-		return contractError("live Oracle result metadata does not match the published contract")
+	if actualResultHash != resultHash {
+		return metadataHashMismatch("live Oracle result schema", resultHash, actualResultHash)
+	}
+	if storedResultHash != resultHash {
+		return metadataHashMismatch("stored Oracle result schema", resultHash, storedResultHash)
 	}
 	return nil
 }
@@ -983,4 +995,13 @@ func characterOracleType(oracleType string) bool {
 
 func contractError(format string, arguments ...interface{}) error {
 	return fmt.Errorf("%w: %s", ErrInvalidContract, fmt.Sprintf(format, arguments...))
+}
+
+func metadataHashMismatch(component, publishedHash, actualHash string) error {
+	return contractError(
+		"%s hash mismatch (published=%s, actual=%s)",
+		component,
+		publishedHash,
+		actualHash,
+	)
 }
