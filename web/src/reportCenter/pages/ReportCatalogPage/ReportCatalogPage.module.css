@@ -13,7 +13,7 @@
 .datasource { display: inline-flex; gap: var(--space-1); align-items: baseline; color: var(--color-text-secondary); font-size: 12px; }
 .datasource code { color: var(--color-text); font-family: var(--font-mono); }
 .readOnly { color: var(--color-text-secondary); font-size: 12px; }
-.pagination { display: flex; justify-content: center; padding-block: var(--space-4); border-top: 1px solid var(--color-border); }
+.pagination { display: flex; justify-content: center; padding-block: var(--space-2); border-top: 1px solid var(--color-border); }
 .actions { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-2); }
 .dangerNotice { margin: 0; color: var(--color-text-secondary); line-height: 1.6; }
 .deleteError { margin: var(--space-3) 0 0; color: var(--color-danger); }

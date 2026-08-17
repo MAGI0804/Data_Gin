@@ -41,7 +41,7 @@
 .columnHeader button:hover { background: var(--color-canvas); color: var(--color-brand-active); }
 .columnHeader svg { width: 14px; height: 14px; }
 .numericCell { font-family: var(--font-mono); font-variant-numeric: tabular-nums; text-align: end; }
-.pagination { display: flex; gap: var(--space-3); align-items: center; justify-content: space-between; padding-block: var(--space-4); color: var(--color-text-secondary); font-size: 13px; }
+.pagination { display: flex; gap: var(--space-2); align-items: center; justify-content: space-between; padding-block: var(--space-2); color: var(--color-text-secondary); font-size: 13px; }
 .pagination > div { display: flex; gap: var(--space-2); }
 @media (max-width: 1023px) { .parameterForm { grid-template-columns: repeat(2, minmax(180px, 1fr)); } }
 @media (max-width: 767px) { .parameterForm { grid-template-columns: minmax(0, 1fr); } .runActions, .querySummary { align-items: stretch; flex-direction: column; } .filterRow { grid-template-columns: minmax(0, 1fr); } .runStages { grid-template-columns: repeat(4, 164px); } }
