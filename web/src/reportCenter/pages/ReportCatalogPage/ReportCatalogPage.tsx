@@ -38,7 +38,7 @@ export function ReportCatalogPage({ client, canManage, navigation }: { client: R
   }
 
   return (
-    <PageCanvas>
+    <PageCanvas density="compact">
       {navigation}
       <PageHeader eyebrow="REPORT CENTER" title="报表目录" description="从 MySQL 配置中心查看报表定义、发布状态和当前版本。" actions={<><button ref={refreshButtonRef} type="button" onClick={reload} disabled={loading}><RefreshCcw aria-hidden="true" />刷新</button><Button variant="primary" onClick={() => setDrawerState({ open: true, report: null })} disabled={!canManage}><Plus aria-hidden="true" />创建报表</Button></>} />
       <MetricStrip label="当前加载的报表概览" items={[

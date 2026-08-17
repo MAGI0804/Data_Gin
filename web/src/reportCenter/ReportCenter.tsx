@@ -36,7 +36,7 @@ export function ReportCenter({ client, permissions, section, onNavigate }: {
     })}
   </nav>
   let content: ReactNode
-  if (!allowed) content = <PageCanvas>
+  if (!allowed) content = <PageCanvas density="compact">
     <PageHeader eyebrow="REPORT CENTER" title="报表中心" description="统一管理 Oracle JSON 游标报表、条件查询和 Excel 导出任务。" />
     {navigation}
     <FeedbackState kind="error" title="当前账号无权访问此报表模块" description="请从侧栏选择已授权模块，或联系管理员补充报表中心权限。" />

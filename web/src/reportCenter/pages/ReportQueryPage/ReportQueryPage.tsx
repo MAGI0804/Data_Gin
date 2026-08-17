@@ -228,7 +228,7 @@ export function ReportQueryPage({ client, navigation }: { client: ReportCenterCl
   const canStartNewRun = run ? canStartNewReportRun(run.status, reportExport?.status ?? null, operation.busy) : false
   const activeStage = !selectedId ? 0 : !run ? 1 : !result ? 2 : 3
   return (
-    <PageCanvas>
+    <PageCanvas density="compact">
       {navigation}
       <PageHeader eyebrow="ORACLE EXECUTION" title="报表查询" description="系统自动传入 report_id（本次运行 ID），conditions 只包含已发布契约中配置的筛选字段；结果分页和正式导出复用同一次运行快照。" actions={run ? <div className={styles.pageActions}>{run.canCancel ? <button type="button" onClick={() => setCancelState({ open: true, busy: false, error: '' })}><Square aria-hidden="true" />取消运行</button> : null}<button type="button" onClick={startNewRun} disabled={!canStartNewRun}><Plus aria-hidden="true" />新建运行</button></div> : undefined} />
       <FilterToolbar summary={run ? <StatusTag tone={runTone(run)}>{runLabel(run.status)}</StatusTag> : <StatusTag tone="neutral">等待选择报表</StatusTag>}>

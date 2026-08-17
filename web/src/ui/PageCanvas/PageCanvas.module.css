@@ -7,24 +7,24 @@
   background: var(--color-canvas);
 }
 
-.canvas:has(> nav[aria-label="报表中心工作流"]) {
+.compact {
   padding-block: var(--space-4);
 }
 
-.canvas:has(> nav[aria-label="报表中心工作流"]) > [role="region"] {
+.compact > [role="region"] {
   padding-block: var(--space-2);
 }
 
-.canvas:has(> nav[aria-label="报表中心工作流"]) > section {
+.compact > section {
   padding-block: var(--space-4);
 }
 
-.canvas:has(> nav[aria-label="报表中心工作流"]) table th,
-.canvas:has(> nav[aria-label="报表中心工作流"]) table td {
+.compact table th,
+.compact table td {
   padding-block: var(--space-1);
 }
 
-.canvas:has(> nav[aria-label="报表中心工作流"]) table td {
+.compact table td {
   height: 40px;
 }
 
