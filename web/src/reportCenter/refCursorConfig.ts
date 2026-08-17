@@ -212,6 +212,7 @@ export function buildReportConditions(schema: ReportInputSchema, values: Record<
     const rawValue = values[code]
     if (rawValue === '' || rawValue === undefined || rawValue === null || (Array.isArray(rawValue) && rawValue.length === 0)) {
       if (field.required && !Object.prototype.hasOwnProperty.call(field, 'default')) return { ok: false, error: `${field.displayName} 为必填筛选条件。` }
+      conditions[code] = Object.prototype.hasOwnProperty.call(field, 'default') ? field.default : emptyReportConditionValue(field)
       continue
     }
     const normalized = normalizeConditionValue(rawValue, field)
@@ -225,6 +226,12 @@ export function buildReportConditions(schema: ReportInputSchema, values: Record<
     conditions[code] = value
   }
   return { ok: true, conditions }
+}
+
+function emptyReportConditionValue(field: ReportInputField): unknown {
+  if (isReportInputListType(field.type)) return []
+  if (field.type === 'str') return ''
+  return null
 }
 
 function normalizeReportInputType(value: unknown, legacyMultiple: boolean): { type: ReportInputType; legacyControl: ReportInputControl | ''; legacyFormat?: ReportInputFormat } | null {

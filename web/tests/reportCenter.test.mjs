@@ -490,6 +490,21 @@ test('condition JSON sends only configured canonical values and formats date con
   assert.deepEqual(buildReportConditions(schema, { dayCompact: '2026-02-30' }), { ok: false, error: '业务日期 必须填写有效日期。' })
 })
 
+test('optional conditions keep typed empty values instead of omitting fields', () => {
+  const schema = parseReportInputSchemaDocument({
+    supplier_ids: { type: 'list[str]', displayName: '供应商' },
+    store_id: { type: 'str', displayName: '门店' },
+    report_date: { type: 'str', displayName: '报表日期', control: 'DATE', format: 'YYYYMMDD' },
+    minimum: { type: 'number', displayName: '最小值' },
+    enabled: { type: 'bool', displayName: '启用' },
+    options: { type: 'json', displayName: '扩展条件' },
+    default_store: { type: 'str', displayName: '默认门店', default: 'S001' },
+  })
+  assert.deepEqual(buildReportConditions(schema, {}), { ok: true, conditions: {
+    supplier_ids: [], store_id: '', report_date: '', minimum: null, enabled: null, options: null, default_store: 'S001',
+  } })
+})
+
 test('number conditions reject values that JavaScript cannot preserve safely', () => {
   const schema = parseReportInputSchemaDocument({
     amount: { type: 'number', displayName: '金额' },
@@ -497,8 +512,8 @@ test('number conditions reject values that JavaScript cannot preserve safely', (
   })
   const unsafeMessage = ' 超出 JavaScript 安全数字范围或无法无损表示，请改用 str 类型。'
 
-  assert.deepEqual(buildReportConditions(schema, { amount: '9007199254740991' }), { ok: true, conditions: { amount: 9007199254740991 } })
-  assert.deepEqual(buildReportConditions(schema, { amount: '1.25e3' }), { ok: true, conditions: { amount: 1250 } })
+  assert.deepEqual(buildReportConditions(schema, { amount: '9007199254740991' }), { ok: true, conditions: { amount: 9007199254740991, levels: [] } })
+  assert.deepEqual(buildReportConditions(schema, { amount: '1.25e3' }), { ok: true, conditions: { amount: 1250, levels: [] } })
   assert.deepEqual(buildReportConditions(schema, { amount: '9007199254740993' }), { ok: false, error: `金额${unsafeMessage}` })
   assert.deepEqual(buildReportConditions(schema, { amount: '0.10000000000000001' }), { ok: false, error: `金额${unsafeMessage}` })
   assert.deepEqual(buildReportConditions(schema, { levels: '[1,9007199254740993]' }), { ok: false, error: `等级${unsafeMessage}` })

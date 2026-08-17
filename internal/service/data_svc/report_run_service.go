@@ -253,11 +253,28 @@ func normalizeRefCursorConditions(schemaJSON []byte, input map[string]json.RawMe
 			} else if field.Required {
 				return nil, "", ErrReportRunInvalid
 			} else {
+				normalized[code] = emptyReportConditionValue(field)
 				continue
 			}
 		}
 		canonical, decoded, err := canonicalConditionValue(value)
-		if err != nil || !conditionValueMatchesField(decoded, field) || !conditionValueAllowed(canonical, field.AllowedValues, conditionTypeIsList(field.Type, field.Multiple)) {
+		if err != nil {
+			return nil, "", ErrReportRunInvalid
+		}
+		if conditionValueIsEmpty(decoded, field) {
+			if len(bytes.TrimSpace(field.DefaultValue)) > 0 {
+				canonical, decoded, err = canonicalConditionValue(field.DefaultValue)
+				if err != nil {
+					return nil, "", ErrReportRunInvalid
+				}
+			} else if field.Required {
+				return nil, "", ErrReportRunInvalid
+			} else {
+				normalized[code] = canonical
+				continue
+			}
+		}
+		if !conditionValueMatchesField(decoded, field) || !conditionValueAllowed(canonical, field.AllowedValues, conditionTypeIsList(field.Type, field.Multiple)) {
 			return nil, "", ErrReportRunInvalid
 		}
 		normalized[code] = canonical
@@ -271,6 +288,28 @@ func normalizeRefCursorConditions(schemaJSON []byte, input map[string]json.RawMe
 	}
 	sum := sha256.Sum256(encoded)
 	return encoded, hex.EncodeToString(sum[:]), nil
+}
+
+func emptyReportConditionValue(field reportRunInputFieldSchema) json.RawMessage {
+	if conditionTypeIsList(field.Type, field.Multiple) {
+		return json.RawMessage(`[]`)
+	}
+	if normalizeJSONConditionType(field.Type, false) == "str" {
+		return json.RawMessage(`""`)
+	}
+	return json.RawMessage(`null`)
+}
+
+func conditionValueIsEmpty(value interface{}, field reportRunInputFieldSchema) bool {
+	if value == nil {
+		return true
+	}
+	if conditionTypeIsList(field.Type, field.Multiple) {
+		items, ok := value.([]interface{})
+		return ok && len(items) == 0
+	}
+	text, ok := value.(string)
+	return ok && normalizeJSONConditionType(field.Type, false) == "str" && text == ""
 }
 
 func canonicalConditionValue(raw json.RawMessage) (json.RawMessage, interface{}, error) {

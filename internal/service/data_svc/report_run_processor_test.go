@@ -34,14 +34,14 @@ func TestReportRunProcessorBuildsSingleJSONCursorPayload(t *testing.T) {
 	store.runtime.Definition.ID = 1234
 	store.runtime.Version.ExecutionMode = model.ReportExecutionModeRefCursor
 	store.runtime.Parameters = nil
-	store.runtime.Run.NormalizedParametersJSON = model.JSONText(`{"c_supplier_id":["a","b"],"datein_begin":"20260504"}`)
+	store.runtime.Run.NormalizedParametersJSON = model.JSONText(`{"c_store_id":[],"c_supplier_id":["a","b"],"datein_begin":"20260504","datein_end":""}`)
 	executor := &fakeReportProcedureExecutor{rowCount: 2}
 	processor := newTestReportRunProcessor(store, executor)
 
 	if err := processor.Process(t.Context(), 31, true); err != nil {
 		t.Fatalf("Process() error = %v", err)
 	}
-	if got, want := executor.jsonPayload, `{"report_id":31,"conditions":{"c_supplier_id":["a","b"],"datein_begin":"20260504"}}`; got != want {
+	if got, want := executor.jsonPayload, `{"report_id":31,"conditions":{"c_store_id":[],"c_supplier_id":["a","b"],"datein_begin":"20260504","datein_end":""}}`; got != want {
 		t.Fatalf("JSON payload = %s, want %s", got, want)
 	}
 }

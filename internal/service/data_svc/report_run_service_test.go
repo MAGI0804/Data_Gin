@@ -154,6 +154,29 @@ func TestJSONConditionsPreserveWireTypesAndConfiguredTimePrecision(t *testing.T)
 	}
 }
 
+func TestJSONConditionsIncludeTypedEmptyValuesForOptionalFields(t *testing.T) {
+	schema := []byte(`{
+		"supplier_ids":{"type":"list[str]","displayName":"供应商"},
+		"store_id":{"type":"str","displayName":"门店"},
+		"report_date":{"type":"str","displayName":"报表日期","control":"DATE","format":"YYYYMMDD"},
+		"minimum":{"type":"number","displayName":"最小值"},
+		"enabled":{"type":"bool","displayName":"启用"},
+		"options":{"type":"json","displayName":"扩展条件"},
+		"default_store":{"type":"str","displayName":"默认门店","default":"S001"}
+	}`)
+	canonical, _, err := normalizeRefCursorConditions(schema, map[string]json.RawMessage{
+		"supplier_ids":  json.RawMessage(`[]`),
+		"store_id":      json.RawMessage(`""`),
+		"default_store": json.RawMessage(`""`),
+	})
+	if err != nil {
+		t.Fatalf("normalizeRefCursorConditions() error = %v", err)
+	}
+	if got, want := string(canonical), `{"default_store":"S001","enabled":null,"minimum":null,"options":null,"report_date":"","store_id":"","supplier_ids":[]}`; got != want {
+		t.Fatalf("conditions = %s, want %s", got, want)
+	}
+}
+
 func TestReportRunServiceRejectsInvalidRefCursorConditions(t *testing.T) {
 	published := publishedRunFixture()
 	published.Version.ExecutionMode = model.ReportExecutionModeRefCursor
