@@ -100,7 +100,7 @@ func TestReportProcedureLogValuesRedactsSensitiveLegacyParameters(t *testing.T) 
 	}
 }
 
-func TestLogReportOracleExecutionFailureIncludesCauseAndInput(t *testing.T) {
+func TestLogReportOracleExecutionFailureDoesNotClaimInputWasReceived(t *testing.T) {
 	core, observed := observer.New(zap.ErrorLevel)
 	previous := zap.L()
 	zap.ReplaceGlobals(zap.New(core))
@@ -120,8 +120,11 @@ func TestLogReportOracleExecutionFailureIncludesCauseAndInput(t *testing.T) {
 		t.Fatalf("log entries = %d", len(entries))
 	}
 	fields := entries[0].ContextMap()
-	if fields["error"] != oracleErr.Error() || fields["actual_input_json"] != request.JSONPayload {
+	if fields["error"] != oracleErr.Error() {
 		t.Fatalf("log fields = %#v", fields)
+	}
+	if _, exists := fields["actual_input_json"]; exists {
+		t.Fatalf("failed execution log must not claim that Oracle received input: %#v", fields)
 	}
 }
 

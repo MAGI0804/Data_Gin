@@ -347,15 +347,15 @@ func decodeParameterSnapshot(raw []byte) (map[string]json.RawMessage, error) {
 }
 
 func logReportOracleProcedureInput(request reportProcedureExecutionRequest) {
-	zap.L().Info("调用Oracle报表存储过程", reportOracleExecutionLogFields(request)...)
+	zap.L().Info("调用Oracle报表存储过程", reportOracleExecutionLogFields(request, true)...)
 }
 
 func logReportOracleExecutionFailure(request reportProcedureExecutionRequest, cause error) {
-	fields := append(reportOracleExecutionLogFields(request), zap.Error(cause))
+	fields := append(reportOracleExecutionLogFields(request, false), zap.Error(cause))
 	zap.L().Error("Oracle报表执行失败", fields...)
 }
 
-func reportOracleExecutionLogFields(request reportProcedureExecutionRequest) []zap.Field {
+func reportOracleExecutionLogFields(request reportProcedureExecutionRequest, includeInput bool) []zap.Field {
 	version := request.Runtime.Version
 	parts := []string{version.ProcedureOwner}
 	if version.PackageName != "" {
@@ -368,6 +368,9 @@ func reportOracleExecutionLogFields(request reportProcedureExecutionRequest) []z
 		zap.Uint("report_definition_id", request.Runtime.Run.DefinitionID),
 		zap.String("oracle_procedure", strings.Join(parts, ".")),
 		zap.String("execution_mode", version.ExecutionMode),
+	}
+	if !includeInput {
+		return fields
 	}
 	if request.JSONPayload != "" {
 		fields = append(fields,
@@ -501,7 +504,6 @@ var errOracleCommitOutcomeUnknown = errors.New("oracle report commit outcome unk
 type oracleReportProcedureExecutor struct{}
 
 func (oracleReportProcedureExecutor) Execute(ctx context.Context, request reportProcedureExecutionRequest, password string) (rowCount int64, resultErr error) {
-	logReportOracleProcedureInput(request)
 	queryCtx, cancel := reportOracleQueryContext(ctx, request.Runtime.Datasource)
 	defer cancel()
 	adapter, err := reportoracle.Open(queryCtx, oracleConfigFromDatasource(request.Runtime.Datasource, password))
@@ -559,6 +561,7 @@ func (oracleReportProcedureExecutor) Execute(ctx context.Context, request report
 			_ = tx.Rollback()
 			return 0, planErr
 		}
+		logReportOracleProcedureInput(request)
 		executionErr = adapter.ExecuteJSONTable(queryCtx, tx, plan, request.JSONPayload)
 	} else {
 		plan, planErr := reportoracle.BuildCallPlan(procedureRef, request.Definitions)
@@ -566,6 +569,7 @@ func (oracleReportProcedureExecutor) Execute(ctx context.Context, request report
 			_ = tx.Rollback()
 			return 0, planErr
 		}
+		logReportOracleProcedureInput(request)
 		executionErr = adapter.Execute(queryCtx, tx, plan, request.Values)
 	}
 	if executionErr != nil {
@@ -627,6 +631,7 @@ func executeRefCursorReport(
 			}
 		}
 	}()
+	logReportOracleProcedureInput(request)
 	snapshot, err := adapter.ExecuteJSONCursorSnapshot(ctx, tx, plan, request.Runtime.Run.RunUUID, request.JSONPayload, expectedColumns)
 	if err != nil {
 		return 0, err
