@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
 import { ChevronDown, ChevronLeft, ChevronRight, Download, Filter, Play, Plus, Square, Trash2 } from 'lucide-react'
-import { Button, DataTable, Dialog, FeedbackState, FilterToolbar, PageCanvas, PageHeader, Section, StatusTag, type StatusTagTone } from '../../../ui'
+import { Button, DataTable, Dialog, FeedbackState, FilterToolbar, MetricStrip, PageCanvas, PageHeader, Section, StatusTag, type StatusTagTone } from '../../../ui'
 import { cancelReportRun, createReportExport, createReportRun, getReportExport, getReportExportDownload, queryReportResults, getReportRun, getReportRunContract, type ReportCenterClient } from '../../api'
 import { buildNewReportRunState, canStartNewReportRun, initialReportParameterValues, terminalReportExportStatuses, terminalReportRunStatuses, visibleReportParameters } from '../../queryParameters'
 import { buildReportConditions, editableReportConditionValue, initialReportConditionValues, isReportInputListType } from '../../refCursorConfig'
@@ -224,6 +224,7 @@ export function ReportQueryPage({ client, navigation }: { client: ReportCenterCl
 
   const frozen = Boolean(run)
   const canStartNewRun = run ? canStartNewReportRun(run.status, reportExport?.status ?? null, operation.busy) : false
+  const activeStage = !selectedId ? 0 : !run ? 1 : !result ? 2 : 3
   return (
     <PageCanvas>
       {navigation}
@@ -231,6 +232,9 @@ export function ReportQueryPage({ client, navigation }: { client: ReportCenterCl
       <FilterToolbar summary={run ? <StatusTag tone={runTone(run)}>{runLabel(run.status)}</StatusTag> : <StatusTag tone="neutral">等待选择报表</StatusTag>}>
         <div className={styles.catalogSelector}><label className={styles.selector}>选择报表<select value={selectedId} onChange={(event) => setSelectedId(event.currentTarget.value)} disabled={loading || frozen || published.length === 0}><option value="">请选择已发布报表</option>{published.map((report) => <option value={report.id} key={report.id}>{report.name}</option>)}</select></label>{hasMore ? <button type="button" onClick={() => void loadMore()} disabled={loadingMore || frozen}>{loadingMore ? '正在加载…' : '加载更多'}</button> : null}</div>
       </FilterToolbar>
+      <ol className={styles.runStages} aria-label="报表执行流程">
+        {['选择报表', '配置条件', 'Oracle 执行', '预览与导出'].map((label, index) => <li className={index === activeStage ? styles.currentStage : index < activeStage ? styles.completedStage : undefined} aria-current={index === activeStage ? 'step' : undefined} key={label}><span>{String(index + 1).padStart(2, '0')}</span><strong>{label}</strong><small>{index < activeStage ? '已完成' : index === activeStage ? '当前步骤' : '等待'}</small></li>)}
+      </ol>
       <Section title="筛选条件" description={contract ? `发布版本 #${contract.versionId} · 条件会统一写入存储过程 JSON` : '选择报表后读取已发布筛选契约。'} actions={<button type="button" aria-expanded={parametersOpen} onClick={() => setParametersOpen((open) => !open)}><ChevronDown className={parametersOpen ? styles.chevronOpen : undefined} aria-hidden="true" />{parametersOpen ? '收起条件' : '展开条件'}</button>}>
         {parametersOpen ? <>
         {contractState.loading ? <FeedbackState kind="loading" title="正在读取已发布筛选契约" /> : null}
@@ -239,7 +243,7 @@ export function ReportQueryPage({ client, navigation }: { client: ReportCenterCl
         {!contract && !contractState.loading && !contractState.error ? <FeedbackState kind="empty" title="尚未选择报表" description="请选择一份已发布且有查询权限的报表。" /> : null}
         </> : <div className={styles.collapsedParameters}>{contract ? `${reportConditionCount(contract)} 个筛选条件${frozen ? ' · 本次运行条件已冻结' : ''}` : '筛选区已收起'}</div>}
       </Section>
-      {run ? <div className={styles.statusBar} role="status"><span><strong>{runLabel(run.status)}</strong><small>运行 #{run.id} · {run.rowCount.toLocaleString('zh-CN')} 行</small></span><span>{run.errorMessage || (run.resultExpiresAt ? `结果保留至 ${formatDate(run.resultExpiresAt)}` : '正在等待 Oracle 结果')}</span></div> : null}
+      {run ? <MetricStrip role="status" label="本次报表运行概览" items={[{ key: 'status', label: '运行状态', value: runLabel(run.status), detail: operation.busy ? '状态同步中' : '已同步' }, { key: 'run', label: '运行编号', value: `#${run.id}`, detail: contract ? `版本 #${contract.versionId}` : undefined }, { key: 'rows', label: '结果行数', value: run.rowCount.toLocaleString('zh-CN'), detail: result ? `当前页 ${result.rows.length} 行` : '等待结果' }, { key: 'retention', label: '结果保留', value: run.resultExpiresAt ? formatDateShort(run.resultExpiresAt) : '-', detail: run.errorMessage || '按运行快照管理' }]} /> : null}
       {operation.error ? <FeedbackState kind="error" title="操作未完成" description={operation.error} action={run && !terminalReportRunStatuses.has(run.status) ? <button type="button" onClick={() => void resumeRun()}>恢复状态查询</button> : undefined} /> : null}
       <Section title="结果预览" description={contract?.jsonInput ? '读取存储过程写入的结果表快照；分页和导出不会重新执行存储过程。' : '使用签名 Cursor 进行 Oracle Keyset 分页，不会重新执行存储过程。'} actions={run?.resultAvailable ? <div className={styles.resultActions}>{reportExport ? <StatusTag tone={exportTone(reportExport)}>{exportLabel(reportExport.status)}</StatusTag> : null}<button type="button" onClick={() => void startExport()} disabled={operation.busy || Boolean(reportExport)}><Download aria-hidden="true" />生成正式 Excel</button>{reportExport?.canDownload ? <Button variant="primary" onClick={() => void downloadExport()}>下载文件</Button> : null}</div> : undefined} flush>
 		{result && contract?.executionMode !== 'REF_CURSOR' ? <ResultQueryToolbar page={result} query={resultQuery} open={filtersOpen} disabled={operation.busy || Boolean(reportExport)} onToggle={() => setFiltersOpen((value) => !value)} onChange={setResultQuery} onApply={() => void applyResultQuery()} /> : null}
@@ -351,7 +355,7 @@ function runLabel(status: ReportRun['status']) { return ({ QUEUED: '等待执行
 function exportTone(item: ReportExport): StatusTagTone { return item.status === 'READY' ? 'success' : item.status === 'FAILED' || item.status === 'CANCELLED' || item.status === 'EXPIRED' ? 'danger' : 'running' }
 function exportLabel(status: ReportExport['status']) { return ({ PENDING: '等待导出', RUNNING: '生成并上传 Excel', READY: '文件就绪', FAILED: '导出失败', CANCELLED: '导出取消', EXPIRED: '文件已过期' })[status] }
 function exportProgress(item: ReportExport) { return `${exportLabel(item.status)} · 已处理 ${item.processedRows.toLocaleString('zh-CN')} 行${item.currentSheet ? ` · ${item.currentSheet}` : ''}` }
-function formatDate(value: string) { const date = new Date(value); return Number.isNaN(date.getTime()) ? '-' : date.toLocaleString('zh-CN') }
+function formatDateShort(value: string) { const date = new Date(value); return Number.isNaN(date.getTime()) ? '-' : new Intl.DateTimeFormat('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }).format(date) }
 function safeIntegerRule(value: unknown) { return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : undefined }
 function zonedDateTimeToRFC3339(value: string, timezone: string) {
   if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2})?(?:Z|[+-]\d{2}:\d{2})$/.test(value)) {

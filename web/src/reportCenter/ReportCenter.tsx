@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import { BookOpenText, FileSpreadsheet, Play, Settings2, type LucideIcon } from 'lucide-react'
 import { ReportCatalogPage } from './pages/ReportCatalogPage/ReportCatalogPage'
 import { ReportConfigurationPage } from './pages/ReportConfigurationPage/ReportConfigurationPage'
 import { ReportQueryPage } from './pages/ReportQueryPage/ReportQueryPage'
@@ -8,11 +9,11 @@ import type { ReportCenterSection } from './types'
 import { FeedbackState, PageCanvas, PageHeader } from '../ui'
 import styles from './ReportCenter.module.css'
 
-const sections: Array<{ key: ReportCenterSection; label: string; permission: string }> = [
-  { key: 'catalog', label: '报表目录', permission: 'report.read' },
-  { key: 'configuration', label: '报表配置', permission: 'report.manage' },
-  { key: 'query', label: '报表查询', permission: 'report.execute' },
-  { key: 'exports', label: '导出中心', permission: 'report.export' },
+const sections: Array<{ key: ReportCenterSection; label: string; description: string; icon: LucideIcon }> = [
+  { key: 'catalog', label: '报表目录', description: '发现与维护', icon: BookOpenText },
+  { key: 'configuration', label: '报表配置', description: '数据源与契约', icon: Settings2 },
+  { key: 'query', label: '报表查询', description: '筛选与执行', icon: Play },
+  { key: 'exports', label: '导出中心', description: '文件与留存', icon: FileSpreadsheet },
 ]
 
 export function ReportCenter({ client, permissions, section, onNavigate }: {
@@ -23,8 +24,16 @@ export function ReportCenter({ client, permissions, section, onNavigate }: {
 }) {
   const visibleSections = sections.filter((item) => hasSectionPermission(permissions, item.key))
   const allowed = visibleSections.some((item) => item.key === section)
-  const navigation = <nav className={styles.tabs} aria-label="报表中心模块">
-    {visibleSections.map((item) => <button className={item.key === section ? styles.active : ''} type="button" aria-current={item.key === section ? 'page' : undefined} onClick={() => onNavigate(item.key)} key={item.key}>{item.label}</button>)}
+  const navigation = <nav className={styles.tabs} aria-label="报表中心工作流">
+    {visibleSections.map((item, index) => {
+      const Icon = item.icon
+      const active = item.key === section
+      return <button className={active ? styles.active : ''} type="button" aria-current={active ? 'page' : undefined} onClick={() => onNavigate(item.key)} key={item.key}>
+        <span className={styles.step} aria-hidden="true">{String(index + 1).padStart(2, '0')}</span>
+        <Icon aria-hidden="true" />
+        <span><strong>{item.label}</strong><small>{item.description}</small></span>
+      </button>
+    })}
   </nav>
   let content: ReactNode
   if (!allowed) content = <PageCanvas>
