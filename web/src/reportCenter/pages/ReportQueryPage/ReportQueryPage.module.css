@@ -2,7 +2,7 @@
 .selector { display: grid; gap: var(--space-1); min-width: min(100%, 380px); color: var(--color-text-secondary); font-size: 12px; font-weight: 650; }
 .catalogSelector { display: flex; align-items: end; gap: var(--space-2); min-width: 0; }
 .runStages { display: grid; grid-template-columns: repeat(4, minmax(144px, 1fr)); min-width: 0; margin: 0; padding: 0; overflow-x: auto; border-bottom: 1px solid var(--color-border); list-style: none; }
-.runStages li { position: relative; display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: 0 var(--space-2); align-items: center; min-height: 64px; border-inline-start: 1px solid var(--color-border); padding: var(--space-2) var(--space-3); color: var(--color-text-secondary); }
+.runStages li { position: relative; display: grid; grid-template-columns: 24px minmax(0, 1fr); gap: 0 var(--space-2); align-items: center; min-height: 52px; border-inline-start: 1px solid var(--color-border); padding: var(--space-1) var(--space-2); color: var(--color-text-secondary); }
 .runStages li:first-child { border-inline-start: 0; }
 .runStages li::after { position: absolute; inset: auto 0 0; height: 3px; background: transparent; content: ''; }
 .runStages li > span { grid-row: 1 / span 2; color: var(--color-text-disabled); font-family: var(--font-mono); font-size: 11px; }
@@ -15,7 +15,7 @@
 .runStages .currentStage > span { color: var(--color-brand-active); }
 .selector select, .field input, .field select, .field textarea { min-height: var(--control-height); border: 1px solid var(--color-border-strong); background: var(--color-canvas); padding-inline: var(--space-3); color: var(--color-text); }
 .field textarea { padding-block: var(--space-2); resize: vertical; }
-.parameterForm { display: grid; grid-template-columns: repeat(3, minmax(180px, 1fr)); gap: var(--space-4) var(--space-6); }
+.parameterForm { display: grid; grid-template-columns: repeat(3, minmax(180px, 1fr)); gap: var(--space-3) var(--space-4); }
 .field { display: grid; gap: var(--space-1); min-width: 0; color: var(--color-text-secondary); font-size: 12px; font-weight: 650; }
 .field small, .checkbox small { color: var(--color-text-secondary); font-family: var(--font-mono); font-size: 11px; font-weight: 400; overflow-wrap: anywhere; }
 .field select[multiple] { min-height: 112px; padding-block: var(--space-2); }
@@ -36,6 +36,11 @@
 .filterRow select, .filterRow input, .queryControls select { min-height: var(--control-height); border: 1px solid var(--color-border-strong); background: var(--color-canvas); padding-inline: var(--space-3); color: var(--color-text); }
 .noValue { min-height: var(--control-height); display: flex; align-items: center; color: var(--color-text-secondary); font-size: 12px; }
 .queryControls { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: end; padding-top: var(--space-2); border-top: 1px solid var(--color-border); }
+.columnHeader { display: inline-flex; gap: var(--space-1); align-items: center; }
+.columnHeader button { display: grid; width: 24px; min-width: 24px; height: 24px; place-items: center; border: 0; background: transparent; padding: 0; color: var(--color-text-secondary); }
+.columnHeader button:hover { background: var(--color-canvas); color: var(--color-brand-active); }
+.columnHeader svg { width: 14px; height: 14px; }
+.numericCell { font-family: var(--font-mono); font-variant-numeric: tabular-nums; text-align: end; }
 .pagination { display: flex; gap: var(--space-3); align-items: center; justify-content: space-between; padding-block: var(--space-4); color: var(--color-text-secondary); font-size: 13px; }
 .pagination > div { display: flex; gap: var(--space-2); }
 @media (max-width: 1023px) { .parameterForm { grid-template-columns: repeat(2, minmax(180px, 1fr)); } }

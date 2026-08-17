@@ -144,22 +144,28 @@ function ReportDatasourceDrawer({ client, datasource, onClose, onSaved }: { clie
   return (
     <Drawer open title={datasource ? '编辑 Oracle 数据源' : '新增 Oracle 数据源'} description="先用当前草稿发起真实 Oracle 连接测试；测试不会保存配置或密码。保存后凭据由服务端加密且不回显。" size="medium" closeDisabled={state.busy} onClose={onClose} footer={footer}>
       <form className={styles.form} onSubmit={(event) => { event.preventDefault(); void save() }}>
-        <Field label="数据源名称"><input required disabled={state.busy} maxLength={128} value={input.name} onChange={(event) => set('name', event.currentTarget.value)} /></Field>
-        <Field label="数据源编码" hint="以字母开头，可使用字母、数字和下划线；输入的大写字母会自动转为小写。"><input required disabled={state.busy} className={styles.mono} maxLength={64} pattern="[a-z][a-z0-9_]{2,63}" value={input.code} onChange={(event) => set('code', normalizeDatasourceCode(event.currentTarget.value))} placeholder="report_oracle" /></Field>
-        <Field label="主机地址"><input required disabled={state.busy} className={styles.mono} maxLength={255} value={input.host} onChange={(event) => set('host', event.currentTarget.value)} placeholder="oracle.internal" /></Field>
-        <Field label="端口"><input required disabled={state.busy} type="number" min="1" max="65535" value={input.port} onChange={(event) => set('port', Number(event.currentTarget.value))} /></Field>
-        <Field label="连接标识类型"><select disabled={state.busy} value={serviceMode} onChange={(event) => changeServiceMode(event.currentTarget.value as 'SERVICE_NAME' | 'SID')}><option value="SERVICE_NAME">Service Name</option><option value="SID">SID</option></select></Field>
-        <Field label={serviceMode === 'SID' ? 'SID' : 'Service Name'}><input required disabled={state.busy} className={styles.mono} maxLength={128} value={serviceMode === 'SID' ? input.sid : input.serviceName} onChange={(event) => { if (serviceMode === 'SID') { sidDraft.current = event.currentTarget.value; set('sid', event.currentTarget.value) } else { serviceNameDraft.current = event.currentTarget.value; set('serviceName', event.currentTarget.value) } }} /></Field>
-        <Field label="Oracle 用户名"><input required disabled={state.busy} className={styles.mono} maxLength={128} autoComplete="username" value={input.username} onChange={(event) => set('username', event.currentTarget.value)} /></Field>
-        <Field label={datasource ? '新密码（可选）' : '密码'} hint={datasource ? '留空将保留现有密码，不会从服务端回显。' : '创建时必填；保存后不会回显。'}><input required={!datasource} disabled={state.busy} maxLength={1024} type="password" autoComplete="new-password" value={input.password} onChange={(event) => set('password', event.currentTarget.value)} /></Field>
-        <Field label="会话时区"><input disabled={state.busy} maxLength={64} value={input.sessionTimezone} onChange={(event) => set('sessionTimezone', event.currentTarget.value)} /></Field>
-        <Field label="连接超时（秒）"><input disabled={state.busy} type="number" min="1" max="60" value={input.connectTimeoutSeconds} onChange={(event) => set('connectTimeoutSeconds', Number(event.currentTarget.value))} /></Field>
-        <Field label="查询超时（秒）"><input disabled={state.busy} type="number" min="1" max="86400" value={input.queryTimeoutSeconds} onChange={(event) => set('queryTimeoutSeconds', Number(event.currentTarget.value))} /></Field>
-        <Field label="最大连接数"><input disabled={state.busy} type="number" min="1" max="100" value={input.maxOpenConnections} onChange={(event) => set('maxOpenConnections', Number(event.currentTarget.value))} /></Field>
-        <Field label="最大空闲连接"><input disabled={state.busy} type="number" min="0" max={input.maxOpenConnections} value={input.maxIdleConnections} onChange={(event) => set('maxIdleConnections', Number(event.currentTarget.value))} /></Field>
-        <Field label="预取行数"><input disabled={state.busy} type="number" min="1" max="10000" value={input.prefetchRows} onChange={(event) => set('prefetchRows', Number(event.currentTarget.value))} /></Field>
-        <Field label="批量数组大小"><input disabled={state.busy} type="number" min="1" max="10000" value={input.arraySize} onChange={(event) => set('arraySize', Number(event.currentTarget.value))} /></Field>
-        <label className={styles.switch}><input disabled={state.busy} type="checkbox" checked={input.enabled} onChange={(event) => set('enabled', event.currentTarget.checked)} /><span>允许新报表绑定和运行</span></label>
+        <fieldset className={styles.group}><legend>连接标识</legend>
+          <Field label="数据源名称"><input required disabled={state.busy} maxLength={128} value={input.name} onChange={(event) => set('name', event.currentTarget.value)} /></Field>
+          <Field label="数据源编码" hint="以字母开头，可使用字母、数字和下划线；大写会自动转为小写。"><input required disabled={state.busy} className={styles.mono} maxLength={64} pattern="[a-z][a-z0-9_]{2,63}" value={input.code} onChange={(event) => set('code', normalizeDatasourceCode(event.currentTarget.value))} placeholder="report_oracle" /></Field>
+          <Field label="主机地址"><input required disabled={state.busy} className={styles.mono} maxLength={255} value={input.host} onChange={(event) => set('host', event.currentTarget.value)} placeholder="oracle.internal" /></Field>
+          <Field label="端口"><input required disabled={state.busy} type="number" min="1" max="65535" value={input.port} onChange={(event) => set('port', Number(event.currentTarget.value))} /></Field>
+          <Field label="连接标识类型"><select disabled={state.busy} value={serviceMode} onChange={(event) => changeServiceMode(event.currentTarget.value as 'SERVICE_NAME' | 'SID')}><option value="SERVICE_NAME">Service Name</option><option value="SID">SID</option></select></Field>
+          <Field label={serviceMode === 'SID' ? 'SID' : 'Service Name'}><input required disabled={state.busy} className={styles.mono} maxLength={128} value={serviceMode === 'SID' ? input.sid : input.serviceName} onChange={(event) => { if (serviceMode === 'SID') { sidDraft.current = event.currentTarget.value; set('sid', event.currentTarget.value) } else { serviceNameDraft.current = event.currentTarget.value; set('serviceName', event.currentTarget.value) } }} /></Field>
+        </fieldset>
+        <fieldset className={styles.group}><legend>认证与会话</legend>
+          <Field label="Oracle 用户名"><input required disabled={state.busy} className={styles.mono} maxLength={128} autoComplete="username" value={input.username} onChange={(event) => set('username', event.currentTarget.value)} /></Field>
+          <Field label={datasource ? '新密码（可选）' : '密码'} hint={datasource ? '留空保留现有密码，服务端不会回显。' : '创建时必填；保存后不会回显。'}><input required={!datasource} disabled={state.busy} maxLength={1024} type="password" autoComplete="new-password" value={input.password} onChange={(event) => set('password', event.currentTarget.value)} /></Field>
+          <Field label="会话时区"><input disabled={state.busy} maxLength={64} value={input.sessionTimezone} onChange={(event) => set('sessionTimezone', event.currentTarget.value)} /></Field>
+          <label className={styles.switch}><input disabled={state.busy} type="checkbox" checked={input.enabled} onChange={(event) => set('enabled', event.currentTarget.checked)} /><span>允许新报表绑定和运行</span></label>
+        </fieldset>
+        <fieldset className={styles.group}><legend>执行与连接池</legend>
+          <Field label="连接超时（秒）"><input disabled={state.busy} type="number" min="1" max="60" value={input.connectTimeoutSeconds} onChange={(event) => set('connectTimeoutSeconds', Number(event.currentTarget.value))} /></Field>
+          <Field label="查询超时（秒）"><input disabled={state.busy} type="number" min="1" max="86400" value={input.queryTimeoutSeconds} onChange={(event) => set('queryTimeoutSeconds', Number(event.currentTarget.value))} /></Field>
+          <Field label="最大连接数"><input disabled={state.busy} type="number" min="1" max="100" value={input.maxOpenConnections} onChange={(event) => set('maxOpenConnections', Number(event.currentTarget.value))} /></Field>
+          <Field label="最大空闲连接"><input disabled={state.busy} type="number" min="0" max={input.maxOpenConnections} value={input.maxIdleConnections} onChange={(event) => set('maxIdleConnections', Number(event.currentTarget.value))} /></Field>
+          <Field label="预取行数"><input disabled={state.busy} type="number" min="1" max="10000" value={input.prefetchRows} onChange={(event) => set('prefetchRows', Number(event.currentTarget.value))} /></Field>
+          <Field label="批量数组大小"><input disabled={state.busy} type="number" min="1" max="10000" value={input.arraySize} onChange={(event) => set('arraySize', Number(event.currentTarget.value))} /></Field>
+        </fieldset>
       </form>
       {state.notice ? <div className={styles.success} role="status">{state.notice}</div> : null}
       {state.error ? <div className={styles.error} role="alert"><Unplug aria-hidden="true" />{state.error}</div> : null}

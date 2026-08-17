@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
-import { ChevronDown, ChevronLeft, ChevronRight, Download, Filter, Play, Plus, Square, Trash2 } from 'lucide-react'
+import { ChevronDown, ChevronLeft, ChevronRight, Download, Filter, Info, Play, Plus, Square, Trash2 } from 'lucide-react'
 import { Button, DataTable, Dialog, FeedbackState, FilterToolbar, MetricStrip, PageCanvas, PageHeader, Section, StatusTag, type StatusTagTone } from '../../../ui'
 import { cancelReportRun, createReportExport, createReportRun, getReportExport, getReportExportDownload, queryReportResults, getReportRun, getReportRunContract, type ReportCenterClient } from '../../api'
 import { buildNewReportRunState, canStartNewReportRun, initialReportParameterValues, terminalReportExportStatuses, terminalReportRunStatuses, visibleReportParameters } from '../../queryParameters'
 import { buildReportConditions, editableReportConditionValue, initialReportConditionValues, isReportInputListType } from '../../refCursorConfig'
-import type { ReportExport, ReportFilterOperator, ReportInputField, ReportParameter, ReportResultFilter, ReportResultPage, ReportResultQuery, ReportRun, ReportRunContract } from '../../types'
+import type { ReportExport, ReportFilterOperator, ReportInputField, ReportParameter, ReportResultColumn, ReportResultFilter, ReportResultPage, ReportResultQuery, ReportRun, ReportRunContract } from '../../types'
+import { ReportFieldDetailDrawer } from '../../components/ReportFieldDetailDrawer/ReportFieldDetailDrawer'
 import { useReportCatalog } from '../../useReportCatalog'
 import styles from './ReportQueryPage.module.css'
 
@@ -29,6 +30,7 @@ export function ReportQueryPage({ client, navigation }: { client: ReportCenterCl
 	const [filtersOpen, setFiltersOpen] = useState(false)
   const [parametersOpen, setParametersOpen] = useState(true)
   const [cancelState, setCancelState] = useState({ open: false, busy: false, error: '' })
+  const [detailColumn, setDetailColumn] = useState<ReportResultColumn | null>(null)
   const pollAbortRef = useRef<AbortController | null>(null)
   const keepRunningRef = useRef<HTMLButtonElement>(null)
 
@@ -250,10 +252,11 @@ export function ReportQueryPage({ client, navigation }: { client: ReportCenterCl
         {operation.busy && !result ? <FeedbackState kind="loading" title={reportExport ? '正在生成并校验正式 Excel' : '正在执行报表'} description={reportExport ? exportProgress(reportExport) : 'Oracle 存储过程只会执行一次，请稍候。'} /> : null}
         {!run && !loading ? <FeedbackState kind="empty" title={published.length === 0 ? '暂无已发布报表' : '尚未执行报表'} description={published.length === 0 ? '发布版本可用后会出现在上方选择器。' : '填写筛选条件并运行后，结果将在这里分页展示。'} /> : null}
         {loading ? <FeedbackState kind="loading" title="正在读取可用报表" /> : error ? <FeedbackState kind="error" title="可用报表加载失败" description={error} action={<button type="button" onClick={reload}>重试</button>} /> : null}
-        {result ? <ResultTable page={result} /> : null}
+        {result ? <ResultTable page={result} onInspect={setDetailColumn} /> : null}
         {result ? <div className={styles.pagination}><span>第 {cursorIndex + 1} 页 · 每页 {result.pagination.pageSize} 行</span><div><button type="button" onClick={() => void previousPage()} disabled={operation.busy || cursorIndex === 0}><ChevronLeft aria-hidden="true" />上一页</button><button type="button" onClick={() => void nextPage()} disabled={operation.busy || !result.pagination.hasMore}>下一页<ChevronRight aria-hidden="true" /></button></div></div> : null}
       </Section>
       <Dialog open={cancelState.open && Boolean(run?.canCancel)} role="alertdialog" title="确认取消报表运行" description={run ? `运行 #${run.id} 的取消请求提交后不能撤回。` : undefined} closeDisabled={cancelState.busy} closeOnBackdrop={!cancelState.busy} initialFocusRef={keepRunningRef} onClose={() => setCancelState({ open: false, busy: false, error: '' })} footer={<><button ref={keepRunningRef} type="button" disabled={cancelState.busy} onClick={() => setCancelState({ open: false, busy: false, error: '' })}>继续运行</button><Button variant="danger" disabled={cancelState.busy} onClick={() => void cancelRun()}>{cancelState.busy ? '正在提交…' : '确认取消运行'}</Button></>}><p className={styles.cancelWarning}>系统会请求 Oracle 侧停止当前执行；已经写入结果表的数据仍按运行清理策略处理。</p>{cancelState.error ? <p className={styles.cancelError} role="alert">{cancelState.error}</p> : null}</Dialog>
+      <ReportFieldDetailDrawer column={detailColumn} onClose={() => setDetailColumn(null)} />
     </PageCanvas>
   )
 }
@@ -286,8 +289,8 @@ function ConditionField({ code, field, value, disabled, onChange }: { code: stri
   return <label className={styles.field} htmlFor={id}><span>{label}</span>{field.control === 'TEXTAREA' ? <textarea {...common} rows={3} /> : <input {...common} type={inputType} step={field.control === 'DATETIME' ? 1 : undefined} inputMode={field.type === 'number' || field.control === 'NUMBER' ? 'decimal' : undefined} />}<small>{hint}</small></label>
 }
 
-function ResultTable({ page }: { page: ReportResultPage }) {
-  return <DataTable scrollLabel="报表查询结果"><thead><tr>{page.columns.map((column) => <th key={column.fieldId} scope="col">{column.header}</th>)}</tr></thead><tbody>{page.rows.map((row) => <tr key={row.key}>{page.columns.map((column) => <td key={column.fieldId}>{displayCell(row.values[column.code], column.nullDisplay)}</td>)}</tr>)}</tbody></DataTable>
+function ResultTable({ page, onInspect }: { page: ReportResultPage; onInspect: (column: ReportResultColumn) => void }) {
+  return <DataTable scrollLabel="报表查询结果"><thead><tr>{page.columns.map((column) => <th key={column.fieldId} scope="col"><span className={styles.columnHeader}>{column.header}<button type="button" aria-label={`查看 ${column.header} 字段详情`} onClick={() => onInspect(column)}><Info aria-hidden="true" /></button></span></th>)}</tr></thead><tbody>{page.rows.map((row) => <tr key={row.key}>{page.columns.map((column) => <td className={numericValueType(column.valueType) ? styles.numericCell : undefined} key={column.fieldId}>{displayCell(row.values[column.code], column.nullDisplay)}</td>)}</tr>)}</tbody></DataTable>
 }
 
 function ResultQueryToolbar({ page, query, open, disabled, onToggle, onChange, onApply }: { page: ReportResultPage; query: ReportResultQuery; open: boolean; disabled: boolean; onToggle: () => void; onChange: (query: ReportResultQuery) => void; onApply: () => void }) {
@@ -349,6 +352,7 @@ function reportConditionCount(contract: ReportRunContract) { return contract.jso
 function displayConditionOption(value: unknown) { return typeof value === 'string' ? value : JSON.stringify(value) }
 function comparableConditionValue(value: unknown) { return JSON.stringify(value) }
 function displayCell(value: unknown, nullDisplay: string) { if (value === null || value === undefined) return nullDisplay || '-'; if (typeof value === 'object') return JSON.stringify(value); return String(value) }
+function numericValueType(valueType: string) { return valueType === 'integer' || valueType === 'decimal' || valueType === 'number' }
 function wait(milliseconds: number, signal: AbortSignal) { return new Promise<void>((resolve) => { const finish = () => { window.clearTimeout(timer); signal.removeEventListener('abort', finish); resolve() }; const timer = window.setTimeout(finish, milliseconds); signal.addEventListener('abort', finish, { once: true }) }) }
 function runTone(run: ReportRun): StatusTagTone { return ['SUCCEEDED', 'EXPORTED', 'RESULT_PURGED'].includes(run.status) ? 'success' : run.status === 'FAILED' || run.status === 'CANCELLED' ? 'danger' : run.status === 'UNKNOWN' || run.status === 'RECONCILING' || run.status === 'SUPERSEDED' ? 'warning' : 'running' }
 function runLabel(status: ReportRun['status']) { return ({ QUEUED: '等待执行', RUNNING: '正在执行', CANCEL_REQUESTED: '正在取消', SUCCEEDED: '运行成功', FAILED: '运行失败', CANCELLED: '已取消', UNKNOWN: '状态待确认', RECONCILING: '正在对账', EXPORTING: '正在导出', EXPORTED: '已导出', RESULT_PURGING: '正在清理结果', RESULT_PURGED: '结果已清理', SUPERSEDED: '已被新运行替代' })[status] }

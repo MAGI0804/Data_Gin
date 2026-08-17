@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, type Dispatch, type SetStateAction } from 'react'
 import { Plus, Trash2 } from 'lucide-react'
-import { Button, Drawer } from '../../../ui'
+import { Button, Dialog, Drawer } from '../../../ui'
 import { getReportDraft, publishReportDraft, saveAndPublishReportDraft, saveReportDraft, type ReportCenterClient } from '../../api'
 import { newReportInputField, parseExcelMappingDocument, parseReportInputSchemaDocument, excelMappingFromColumns } from '../../refCursorConfig'
 import type { ReportDatasource, ReportDraft, ReportGrant, ReportPublication, ReportSummary } from '../../types'
@@ -19,6 +19,7 @@ export function ReportConfigDrawer({ client, report, datasources, datasourcesLoa
   const [draft, setDraft] = useState<ReportDraft>(() => emptyDraft())
   const [savedFingerprint, setSavedFingerprint] = useState('')
   const [state, setState] = useState({ loading: Boolean(report), saving: false, error: '', notice: '' })
+  const [closeConfirmationOpen, setCloseConfirmationOpen] = useState(false)
 
   useEffect(() => {
     if (!report) return
@@ -96,15 +97,19 @@ export function ReportConfigDrawer({ client, report, datasources, datasourcesLoa
   }
 
   const dirty = draftFingerprint(draft) !== savedFingerprint
-  const footer = <><span className={styles.version}>版本锁 {draft.lockVersion || '新建'} · {dirty ? '有未发布修改' : '草稿已保存'}</span><button type="button" onClick={onClose}>取消</button><button type="button" onClick={() => void save()} disabled={state.loading || state.saving || !dirty}>{state.saving ? '处理中…' : '仅保存草稿'}</button><Button variant="primary" onClick={() => void publish()} disabled={state.loading || state.saving}>{state.saving ? '处理中…' : dirty || !draft.id ? '保存并核验发布' : '核验并发布'}</Button></>
-  return <Drawer open title={report ? '编辑报表配置' : '创建报表配置'} description="配置保存于 MySQL；Oracle 过程仅接收一份 JSON，系统整表读取运行结果并在导出成功后清理。" size="wide" closeDisabled={state.saving} onClose={onClose} footer={footer}>
-    <div className={styles.tabs} role="tablist" aria-label="报表配置步骤" onKeyDown={(event) => { const current = tabs.findIndex((item) => item.key === tab); const delta = event.key === 'ArrowRight' ? 1 : event.key === 'ArrowLeft' ? -1 : 0; if (!delta) return; event.preventDefault(); const next = tabs[(current + delta + tabs.length) % tabs.length]; setTab(next.key); document.getElementById(`report-config-tab-${next.key}`)?.focus() }}>{tabs.map((item) => <button id={`report-config-tab-${item.key}`} type="button" role="tab" aria-selected={tab === item.key} aria-controls="report-config-panel" tabIndex={tab === item.key ? 0 : -1} className={tab === item.key ? styles.active : ''} onClick={() => setTab(item.key)} key={item.key}>{item.label}</button>)}</div>
-    <div id="report-config-panel" role="tabpanel" aria-labelledby={`report-config-tab-${tab}`} tabIndex={0} ref={bodyRef} className={styles.body}>
-      {state.loading ? <p>正在读取草稿…</p> : <fieldset className={styles.editorFieldset} disabled={state.saving} aria-busy={state.saving || undefined}><Editor tab={tab} client={client} draft={draft} datasources={datasources} datasourcesLoading={datasourcesLoading} datasourcesError={datasourcesError} onChange={setDraft} /></fieldset>}
-      {state.error ? <div className={styles.error} role="alert">{state.error}</div> : null}
-      {state.notice ? <div className={styles.notice} role="status">{state.notice}</div> : null}
-    </div>
-  </Drawer>
+  const requestClose = () => dirty ? setCloseConfirmationOpen(true) : onClose()
+  const footer = <><span className={styles.version}>版本锁 {draft.lockVersion || '新建'} · {dirty ? '有未保存修改' : '草稿已保存'}</span><button type="button" onClick={requestClose}>关闭</button><button type="button" onClick={() => void save()} disabled={state.loading || state.saving || !dirty}>{state.saving ? '处理中…' : '仅保存草稿'}</button><Button variant="primary" onClick={() => void publish()} disabled={state.loading || state.saving}>{state.saving ? '处理中…' : dirty || !draft.id ? '保存并核验发布' : '核验并发布'}</Button></>
+  return <>
+    <Drawer open title={report ? '编辑报表配置' : '创建报表配置'} description="配置保存于 MySQL；Oracle 过程仅接收一份 JSON，系统整表读取运行结果并在导出成功后清理。" size="wide" closeDisabled={state.saving} onClose={requestClose} footer={footer}>
+      <div className={styles.tabs} role="tablist" aria-label="报表配置步骤" onKeyDown={(event) => { const current = tabs.findIndex((item) => item.key === tab); const delta = event.key === 'ArrowRight' ? 1 : event.key === 'ArrowLeft' ? -1 : 0; if (!delta) return; event.preventDefault(); const next = tabs[(current + delta + tabs.length) % tabs.length]; setTab(next.key); document.getElementById(`report-config-tab-${next.key}`)?.focus() }}>{tabs.map((item, index) => <button id={`report-config-tab-${item.key}`} type="button" role="tab" aria-selected={tab === item.key} aria-controls="report-config-panel" tabIndex={tab === item.key ? 0 : -1} className={tab === item.key ? styles.active : ''} onClick={() => setTab(item.key)} key={item.key}><span aria-hidden="true">{String(index + 1).padStart(2, '0')}</span>{item.label}</button>)}</div>
+      <div id="report-config-panel" role="tabpanel" aria-labelledby={`report-config-tab-${tab}`} tabIndex={0} ref={bodyRef} className={styles.body}>
+        {state.loading ? <p>正在读取草稿…</p> : <fieldset className={styles.editorFieldset} disabled={state.saving} aria-busy={state.saving || undefined}><Editor tab={tab} client={client} draft={draft} datasources={datasources} datasourcesLoading={datasourcesLoading} datasourcesError={datasourcesError} onChange={setDraft} /></fieldset>}
+        {state.error ? <div className={styles.error} role="alert">{state.error}</div> : null}
+        {state.notice ? <div className={styles.notice} role="status">{state.notice}</div> : null}
+      </div>
+    </Drawer>
+    <Dialog open={closeConfirmationOpen} role="alertdialog" title="放弃未保存修改？" description="当前报表配置仍有未保存修改，关闭后无法恢复。" onClose={() => setCloseConfirmationOpen(false)} footer={<><button type="button" onClick={() => setCloseConfirmationOpen(false)}>继续编辑</button><Button variant="danger" onClick={onClose}>放弃修改并关闭</Button></>}><p className={styles.closeWarning}>若需要保留当前内容，请返回配置并点击“仅保存草稿”。</p></Dialog>
+  </>
 }
 
 function Editor({ tab, client, draft, datasources, datasourcesLoading, datasourcesError, onChange }: { tab: Tab; client: ReportCenterClient; draft: ReportDraft; datasources: ReportDatasource[]; datasourcesLoading: boolean; datasourcesError: string; onChange: Dispatch<SetStateAction<ReportDraft>> }) {

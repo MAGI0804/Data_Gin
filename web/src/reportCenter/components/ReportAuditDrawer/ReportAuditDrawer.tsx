@@ -87,7 +87,7 @@ export function ReportAuditDrawer({ client, open, reports, onClose }: {
 }
 
 function AuditTable({ items }: { items: ReportAudit[] }) {
-  return <DataTable containerClassName={styles.table} density="compact" minWidth={920} scrollLabel="报表审计记录"><thead><tr><th scope="col">时间</th><th scope="col">动作</th><th scope="col">目标</th><th scope="col">操作人</th><th scope="col">请求标识</th><th scope="col">详情</th></tr></thead><tbody>{items.map((item) => <tr key={item.id}><td>{formatDate(item.createdAt)}</td><td><StatusTag tone={auditTone(item.action)}>{auditActionLabel(item.action)}</StatusTag></td><td><strong>{targetLabel(item.targetType)}</strong><small>#{item.targetId}</small></td><td>{item.actorType === 'SYSTEM' ? '系统任务' : `用户 #${item.actorUserId}`}</td><td><code>{item.requestId}</code></td><td><code className={styles.detail}>{JSON.stringify(item.detail)}</code></td></tr>)}</tbody></DataTable>
+  return <DataTable containerClassName={styles.table} density="compact" minWidth={920} scrollLabel="报表审计记录"><thead><tr><th scope="col">时间</th><th scope="col">动作</th><th scope="col">目标</th><th scope="col">操作人</th><th scope="col">请求标识</th><th scope="col">详情</th></tr></thead><tbody>{items.map((item) => <tr key={item.id}><td>{formatDate(item.createdAt)}</td><td><StatusTag tone={auditTone(item.action)}>{auditActionLabel(item.action)}</StatusTag></td><td><strong>{targetLabel(item.targetType)}</strong><small>#{item.targetId}</small></td><td>{item.actorType === 'SYSTEM' ? '系统任务' : `用户 #${item.actorUserId}`}</td><td><code>{item.requestId}</code></td><td><details className={styles.detail}><summary>{Object.keys(item.detail).length} 个字段</summary><pre>{JSON.stringify(item.detail, null, 2)}</pre></details></td></tr>)}</tbody></DataTable>
 }
 
 function auditTone(action: string) {

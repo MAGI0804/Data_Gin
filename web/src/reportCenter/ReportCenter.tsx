@@ -31,7 +31,7 @@ export function ReportCenter({ client, permissions, section, onNavigate }: {
       return <button className={active ? styles.active : ''} type="button" aria-current={active ? 'page' : undefined} onClick={() => onNavigate(item.key)} key={item.key}>
         <span className={styles.step} aria-hidden="true">{String(index + 1).padStart(2, '0')}</span>
         <Icon aria-hidden="true" />
-        <span><strong>{item.label}</strong><small>{item.description}</small></span>
+        <span><strong>{item.label}</strong></span>
       </button>
     })}
   </nav>

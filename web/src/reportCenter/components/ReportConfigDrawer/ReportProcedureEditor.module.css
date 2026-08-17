@@ -1,40 +1,40 @@
-.editor { display: grid; gap: var(--space-5); }
-.search { display: grid; grid-template-columns: minmax(150px, .6fr) minmax(220px, 1fr) auto; align-items: end; gap: var(--space-3); border-bottom: 1px solid var(--color-border); padding-block-end: var(--space-4); }
-.search label { display: grid; gap: var(--space-2); color: var(--color-text-secondary); font-size: 13px; font-weight: 650; }
+.editor { display: grid; gap: var(--space-3); }
+.search { display: grid; grid-template-columns: minmax(150px, .6fr) minmax(220px, 1fr) auto; align-items: end; gap: var(--space-2); border-bottom: 1px solid var(--color-border); padding-block-end: var(--space-3); }
+.search label { display: grid; gap: var(--space-1); color: var(--color-text-secondary); font-size: 12px; font-weight: 650; }
 .search input { width: 100%; min-width: 0; min-height: var(--control-height); border: 1px solid var(--color-border-strong); border-radius: var(--radius-control); background: var(--color-canvas); color: var(--color-text); padding: var(--space-2) var(--space-3); }
 .search button, .more { display: inline-flex; align-items: center; justify-content: center; gap: var(--space-2); }
 .search svg, .more svg { width: 16px; height: 16px; }
 .mono, .catalog code, .signature code, .arguments code, .binding code { font-family: var(--font-mono); }
-.catalog { display: grid; max-height: 280px; overflow-y: auto; border-block: 1px solid var(--color-border); }
+.catalog { display: grid; max-height: 220px; overflow-y: auto; border-block: 1px solid var(--color-border); }
 .catalogHeader { position: sticky; top: 0; z-index: 1; display: flex; align-items: center; justify-content: space-between; min-height: 42px; background: var(--color-canvas); color: var(--color-text-secondary); }
-.catalog > button:not(.more) { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--space-3); align-items: center; min-height: 42px; border: 0; border-top: 1px solid var(--color-border); border-radius: 0; background: transparent; padding-inline: var(--space-2); text-align: left; }
+.catalog > button:not(.more) { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--space-2); align-items: center; min-height: 38px; border: 0; border-top: 1px solid var(--color-border); border-radius: 0; background: transparent; padding-inline: var(--space-2); text-align: left; }
 .catalog > button:not(.more):hover { background: var(--color-workspace); }
 .catalog > button.selected { border-left: 3px solid var(--color-brand); background: var(--color-brand-soft); padding-inline-start: calc(var(--space-2) - 3px); }
 .catalog button span { color: var(--color-text-secondary); font-size: 12px; }
 .more { justify-self: end; margin-block: var(--space-2); }
-.signature { display: grid; gap: var(--space-3); }
-.resultTable { display: grid; gap: var(--space-3); border-top: 1px solid var(--color-border); padding-top: var(--space-4); }
+.signature { display: grid; gap: var(--space-2); }
+.resultTable { display: grid; gap: var(--space-2); border-top: 1px solid var(--color-border); padding-top: var(--space-3); }
 .resultTable h3 { margin: 0 0 var(--space-1); font-size: 15px; }
 .resultTable p { margin: 0; color: var(--color-text-secondary); font-size: 13px; }
-.tableSearch { display: grid; grid-template-columns: minmax(150px, .6fr) minmax(220px, 1fr) auto; align-items: end; gap: var(--space-3); }
-.tableSearch label { display: grid; gap: var(--space-2); color: var(--color-text-secondary); font-size: 13px; font-weight: 650; }
+.tableSearch { display: grid; grid-template-columns: minmax(150px, .6fr) minmax(220px, 1fr) auto; align-items: end; gap: var(--space-2); }
+.tableSearch label { display: grid; gap: var(--space-1); color: var(--color-text-secondary); font-size: 12px; font-weight: 650; }
 .tableSearch input, .resultFields select { width: 100%; min-width: 0; min-height: var(--control-height); border: 1px solid var(--color-border-strong); border-radius: var(--radius-control); background: var(--color-canvas); color: var(--color-text); padding: var(--space-2) var(--space-3); }
 .tableSearch button { display: inline-flex; align-items: center; justify-content: center; gap: var(--space-2); }
 .tableSearch svg { width: 16px; height: 16px; }
-.tableCatalog { display: grid; max-height: 220px; overflow-y: auto; border-block: 1px solid var(--color-border); }
-.tableCatalog > button:not(.more) { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--space-3); align-items: center; min-height: 42px; border: 0; border-top: 1px solid var(--color-border); border-radius: 0; background: transparent; padding-inline: var(--space-2); text-align: left; }
+.tableCatalog { display: grid; max-height: 180px; overflow-y: auto; border-block: 1px solid var(--color-border); }
+.tableCatalog > button:not(.more) { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--space-2); align-items: center; min-height: 38px; border: 0; border-top: 1px solid var(--color-border); border-radius: 0; background: transparent; padding-inline: var(--space-2); text-align: left; }
 .tableCatalog > button:not(.more):hover { background: var(--color-workspace); }
 .tableCatalog > button.selected { border-left: 3px solid var(--color-brand); background: var(--color-brand-soft); padding-inline-start: calc(var(--space-2) - 3px); }
 .tableCatalog button span { color: var(--color-text-secondary); font-size: 12px; }
 .tableCatalog code, .selectedTable code, .columnSummary code { font-family: var(--font-mono); }
 .selectedTable { display: flex; flex-wrap: wrap; gap: var(--space-2) var(--space-4); align-items: center; min-height: 40px; border-bottom: 1px solid var(--color-border); }
 .selectedTable span { color: var(--color-text-secondary); font-size: 12px; }
-.columnSummary { display: grid; max-height: 220px; overflow-y: auto; border-top: 1px solid var(--color-border); }
+.columnSummary { display: grid; max-height: 180px; overflow-y: auto; border-top: 1px solid var(--color-border); }
 .columnSummary > div { display: grid; grid-template-columns: minmax(0, 1fr) minmax(110px, .5fr) 50px; gap: var(--space-3); align-items: center; min-height: 38px; border-bottom: 1px solid var(--color-border); }
 .columnSummary > div:first-child { position: sticky; top: 0; grid-template-columns: auto minmax(0, 1fr); background: var(--color-canvas); }
 .columnSummary span { color: var(--color-text-secondary); font-size: 12px; }
-.resultFields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-3); }
-.resultFields label { display: grid; gap: var(--space-2); color: var(--color-text-secondary); font-size: 13px; font-weight: 650; }
+.resultFields { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-2); }
+.resultFields label { display: grid; gap: var(--space-1); color: var(--color-text-secondary); font-size: 12px; font-weight: 650; }
 .resultFields input { width: 100%; min-width: 0; min-height: var(--control-height); border: 1px solid var(--color-border-strong); border-radius: var(--radius-control); background: var(--color-canvas); color: var(--color-text); padding: var(--space-2) var(--space-3); }
 .signatureHeader { display: flex; align-items: start; justify-content: space-between; gap: var(--space-3); }
 .signatureHeader h3 { margin: 0 0 var(--space-1); font-size: 15px; }
@@ -42,7 +42,7 @@
 .ready { background: var(--color-success-soft); color: var(--color-success); }
 .blocked { background: var(--color-danger-soft); color: var(--color-danger); }
 .arguments { display: grid; border-top: 1px solid var(--color-border); }
-.arguments > div { display: grid; grid-template-columns: minmax(160px, 1fr) 70px minmax(120px, .7fr) minmax(100px, .6fr); gap: var(--space-3); align-items: center; min-height: 40px; border-bottom: 1px solid var(--color-border); }
+.arguments > div { display: grid; grid-template-columns: minmax(160px, 1fr) 70px minmax(120px, .7fr) minmax(100px, .6fr); gap: var(--space-2); align-items: center; min-height: 36px; border-bottom: 1px solid var(--color-border); }
 .arguments span { color: var(--color-text-secondary); font-size: 12px; }
 .binding { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); margin: 0; border-top: 1px solid var(--color-border); }
 .binding > div { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: var(--space-3); padding-block: var(--space-3); border-bottom: 1px solid var(--color-border); }

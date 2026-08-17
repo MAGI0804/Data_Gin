@@ -20,7 +20,7 @@ export function ReportInputSchemaEditor({ schema, onChange }: { schema: ReportIn
     <JSONDocumentEditor label="筛选条件 JSON" description="每个键就是传给存储过程 JSON 的一个 conditions 参数；系统仅自动传入 report_id（本次运行 ID）。日期字段可用 format 选择 YYYYMMDD 或 YYYY-MM-DD。" value={reportInputSchemaDocument(schema)} parse={parseReportInputSchemaDocument} parseText={parseReportInputSchemaText} onChange={onChange} />
     <div className={styles.tableHeader}><div><h3>表格编辑</h3><p>表格修改会立即回写上方 JSON；日期只选择到日，日期时间选择到秒，最终传值仍是所选格式的字符串。</p></div><button type="button" onClick={add}><Plus aria-hidden="true" />新增筛选</button></div>
     <div className={styles.rows}>
-      {entries.map(([code, field], index) => <InputFieldRow code={code} field={field} key={index} onRename={(nextCode) => onChange(renameReportInputField(schema, code, nextCode))} onChange={(nextField) => onChange({ ...schema, [code]: nextField })} onDelete={() => onChange(Object.fromEntries(entries.filter(([itemCode]) => itemCode !== code)))} />)}
+      {entries.map(([code, field]) => <InputFieldRow code={code} field={field} key={code} onRename={(nextCode) => onChange(renameReportInputField(schema, code, nextCode))} onChange={(nextField) => onChange({ ...schema, [code]: nextField })} onDelete={() => onChange(Object.fromEntries(entries.filter(([itemCode]) => itemCode !== code)))} />)}
       {entries.length === 0 ? <p className={styles.empty}>至少新增一个筛选条件，或在上方粘贴 JSON 后点击“应用 JSON”。</p> : null}
     </div>
   </div>
