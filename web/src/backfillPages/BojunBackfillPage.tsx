@@ -3,6 +3,7 @@ import { useRef, useState, type FormEvent } from 'react'
 import type { ClientResponse } from '../api/client'
 import { DataTable, Dialog, FeedbackState, MetricStrip, PageCanvas, PageHeader, Section, StatusTag } from '../ui'
 import styles from './BojunBackfillPage.module.css'
+import type { LegacyTaskRunResult } from './youzanDistributionSupport'
 
 type BackfillClient = (path: string, options: { method: 'POST'; body: unknown; showResult?: boolean }) => Promise<ClientResponse>
 
@@ -42,7 +43,7 @@ export function BojunBackfillPage({ client, loading, onCompletedRefresh }: { cli
   const previewVersionRef = useRef(0)
   const [payload, setPayload] = useState<{ start_time: string; end_time: string } | null>(null)
   const [preview, setPreview] = useState<BojunOrderBackfillResult | null>(null)
-  const [confirmed, setConfirmed] = useState<BojunOrderBackfillResult | null>(null)
+  const [queuedTask, setQueuedTask] = useState<LegacyTaskRunResult | null>(null)
   const [confirmingWrite, setConfirmingWrite] = useState(false)
   const [writing, setWriting] = useState(false)
   const [error, setError] = useState('')
@@ -51,7 +52,7 @@ export function BojunBackfillPage({ client, loading, onCompletedRefresh }: { cli
     previewVersionRef.current += 1
     setPayload(null)
     setPreview(null)
-    setConfirmed(null)
+    setQueuedTask(null)
     setConfirmingWrite(false)
     setError('')
   }
@@ -83,35 +84,35 @@ export function BojunBackfillPage({ client, loading, onCompletedRefresh }: { cli
     setError('')
     try {
       const response = await client('/v1/bojun-order-backfill/confirm', { method: 'POST', body: payload, showResult: false })
-      const result = response.ok ? readResult(response) : null
-      if (!result) {
-        setError(response.error?.message || '补拉写入失败，请重新预览后再试。')
+      const task = response.ok ? readTaskResult(response) : null
+      if (!task) {
+        setError(response.error?.message || '补拉任务投递失败，请重新预览后再试。')
         return
       }
-      setConfirmed(result)
+      setQueuedTask(task)
       setConfirmingWrite(false)
       await onCompletedRefresh()
     } catch {
-      setError('补拉写入失败，请稍后重试。')
+      setError('补拉任务投递失败，请稍后重试。')
     } finally {
       setWriting(false)
     }
   }
 
   return <PageCanvas>
-    <PageHeader eyebrow="DATA BACKFILL" title="伯俊订单补拉" description="先真实拉取并预览，再按相同时间范围确认写入；已有 docno 不覆盖。" />
+    <PageHeader eyebrow="DATA BACKFILL" title="伯俊订单补拉" description="先真实拉取并预览，再按相同时间范围投递后台补拉任务；已有 docno 不覆盖。" />
     <Section title="补拉范围" description="预览阶段不会写入数据库。" actions={<StatusTag tone={preview ? 'success' : 'neutral'}>{preview ? '预览已就绪' : '等待预览'}</StatusTag>}>
       <form className={styles.form} onSubmit={submit}>
         <Field label="开始时间" name="start_time" defaultValue={datetimeLocalMinutesAgo(60)} onChange={invalidatePreview} />
         <Field label="结束时间" name="end_time" defaultValue={datetimeLocalMinutesAgo(0)} onChange={invalidatePreview} />
-        <div className={styles.actions}><button className={styles.primary} type="submit" disabled={loading || writing}>{loading ? '预览中…' : '预览补拉'}</button><button type="button" disabled={loading || writing || !preview || preview.writable_count === 0} onClick={() => setConfirmingWrite(true)}>确认写入</button></div>
+        <div className={styles.actions}><button className={styles.primary} type="submit" disabled={loading || writing}>{loading ? '预览中…' : '预览补拉'}</button><button type="button" disabled={loading || writing || Boolean(queuedTask) || !preview || preview.writable_count === 0} onClick={() => setConfirmingWrite(true)}>投递补拉</button></div>
       </form>
-      <div className={styles.warning}><AlertTriangle aria-hidden="true" /><span><strong>写入前请确认</strong>确认时会重新拉取相同时间范围，请以可写入数量为核对依据。</span></div>
+      <div className={styles.warning}><AlertTriangle aria-hidden="true" /><span><strong>投递前请确认</strong>后台任务会重新拉取相同时间范围，请以可写入数量为核对依据。</span></div>
     </Section>
     {error ? <FeedbackState kind="error" title="伯俊补拉未完成" description={error} /> : null}
     {preview ? <BackfillResult title="预览结果" result={preview} /> : <FeedbackState kind="empty" title="等待补拉预览" description="选择时间范围并预览后，可在这里核对订单样例与写入数量。" />}
-    {confirmed ? <BackfillResult title="本次写入结果" result={confirmed} /> : null}
-    <Dialog open={confirmingWrite && Boolean(preview)} title="确认写入伯俊订单" role="alertdialog" closeDisabled={loading || writing} onClose={() => { if (!loading && !writing) setConfirmingWrite(false) }} footer={<><button type="button" disabled={loading || writing} onClick={() => setConfirmingWrite(false)}>取消</button><button className={styles.primary} type="button" disabled={loading || writing} onClick={() => void confirmWrite()}>{writing ? '写入中…' : '确认写入'}</button></>}><p>确认写入 {preview?.writable_count ?? 0} 条伯俊订单？系统会按 docno 判重，已有订单不会覆盖。</p></Dialog>
+    {queuedTask ? <FeedbackState kind="empty" title="补拉任务已投递" description={`任务 ID ${queuedTask.id}，队列 ${queuedTask.queue}，类型 ${queuedTask.type}。后台完成后可刷新数据查看结果。`} /> : null}
+    <Dialog open={confirmingWrite && Boolean(preview)} title="确认投递伯俊补拉任务" role="alertdialog" closeDisabled={loading || writing} onClose={() => { if (!loading && !writing) setConfirmingWrite(false) }} footer={<><button type="button" disabled={loading || writing} onClick={() => setConfirmingWrite(false)}>取消</button><button className={styles.primary} type="button" disabled={loading || writing} onClick={() => void confirmWrite()}>{writing ? '投递中…' : '确认并投递'}</button></>}><p>确认投递预计写入 {preview?.writable_count ?? 0} 条订单的后台任务？系统会按 docno 判重，已有订单不会覆盖。</p></Dialog>
   </PageCanvas>
 }
 
@@ -131,6 +132,17 @@ function readResult(response: ClientResponse) {
   if (!response.data || typeof response.data !== 'object') return null
   const data = (response.data as { data?: Record<string, unknown> }).data
   return data?.result && typeof data.result === 'object' ? data.result as BojunOrderBackfillResult : null
+}
+
+function readTaskResult(response: ClientResponse) {
+  if (!response.data || typeof response.data !== 'object') return null
+  const data = (response.data as { data?: Record<string, unknown> }).data
+  const result = data?.result
+  if (!result || typeof result !== 'object' || Array.isArray(result)) return null
+  const task = result as Record<string, unknown>
+  return typeof task.id === 'string' && task.id.trim() !== '' && typeof task.queue === 'string' && task.queue.trim() !== '' && typeof task.type === 'string' && task.type.trim() !== ''
+    ? { id: task.id, queue: task.queue, type: task.type }
+    : null
 }
 
 function formValue(form: FormData, key: string) { const value = form.get(key); return typeof value === 'string' ? value : '' }

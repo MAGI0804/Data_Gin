@@ -21,6 +21,7 @@ const (
 	defaultBojunOrderMethod        = "/retail/middleretail.query"
 	legacyBojunOrderMethod         = "/retail/retail.query"
 	bojunStandardOrderMethodPrefix = "/bos/standard"
+	bojunOrderRunFinishTimeout     = 5 * time.Second
 )
 
 type rawDataCreator interface {
@@ -139,6 +140,9 @@ func (s *BojunOrderService) runOrders(ctx context.Context, startTime, endTime st
 	}
 
 	for page := 1; page <= maxPages; page++ {
+		if err := ctx.Err(); err != nil {
+			return result, s.finishBojunOrderRunIfNeeded(ctx, runID, result, err)
+		}
 		payload, err := bojun.SendSignedRequest(ctx, method, buildBojunOrderRequestBody(page, pageSize, normalizedStart, normalizedEnd))
 		if err != nil {
 			result.FailedCount++
@@ -153,7 +157,12 @@ func (s *BojunOrderService) runOrders(ctx context.Context, startTime, endTime st
 		result.FetchPages++
 
 		for _, record := range records {
-			s.processBojunOrderRecord(ctx, record, method, normalizedStart, normalizedEnd, pageInfo.Current, confirmWrite, result, pushSkipConfig)
+			if err := ctx.Err(); err != nil {
+				return result, s.finishBojunOrderRunIfNeeded(ctx, runID, result, err)
+			}
+			if err := s.processBojunOrderRecord(ctx, record, method, normalizedStart, normalizedEnd, pageInfo.Current, confirmWrite, result, pushSkipConfig); err != nil {
+				return result, s.finishBojunOrderRunIfNeeded(ctx, runID, result, err)
+			}
 		}
 
 		if pageInfo.TotalPage <= 0 || pageInfo.Current >= pageInfo.TotalPage || len(records) == 0 {
@@ -161,6 +170,9 @@ func (s *BojunOrderService) runOrders(ctx context.Context, startTime, endTime st
 		}
 	}
 
+	if err := ctx.Err(); err != nil {
+		return result, s.finishBojunOrderRunIfNeeded(ctx, runID, result, err)
+	}
 	if err := s.finishBojunOrderRunIfNeeded(ctx, runID, result, nil); err != nil {
 		return result, err
 	}
@@ -177,7 +189,7 @@ func (s *BojunOrderService) processBojunOrderRecord(
 	confirmWrite bool,
 	result *BojunOrderSyncResult,
 	pushSkipConfig OrderPushSkipConfig,
-) {
+) error {
 	result.TotalCount++
 	sample := buildBojunOrderPreviewItem(record)
 	docNo := sample.DocNo
@@ -186,7 +198,7 @@ func (s *BojunOrderService) processBojunOrderRecord(
 		sample.Status = "invalid"
 		sample.Reason = "docno 为空"
 		addBojunOrderFailedSample(result, sample)
-		return
+		return nil
 	}
 	completedAt, err := parseBojunOrderCompletedAt(record["extendedFields1"])
 	if err != nil {
@@ -200,7 +212,7 @@ func (s *BojunOrderService) processBojunOrderRecord(
 		sample.Status = "failed"
 		sample.Reason = "查询是否存在失败: " + err.Error()
 		addBojunOrderFailedSample(result, sample)
-		return
+		return fmt.Errorf("check bojun order %s existence: %w", docNo, err)
 	}
 	if exists {
 		if confirmWrite && completedAt != nil {
@@ -210,14 +222,14 @@ func (s *BojunOrderService) processBojunOrderRecord(
 				sample.Status = "failed"
 				sample.Reason = "补充订单完成时间失败: " + updateErr.Error()
 				addBojunOrderFailedSample(result, sample)
-				return
+				return fmt.Errorf("update bojun order %s completed time: %w", docNo, updateErr)
 			}
 			if updated {
 				result.UpdatedCount++
 				sample.Status = "updated"
 				sample.Reason = "已补充订单完成时间"
 				addBojunOrderSample(result, sample)
-				return
+				return nil
 			}
 		}
 		result.SkippedCount++
@@ -225,7 +237,7 @@ func (s *BojunOrderService) processBojunOrderRecord(
 		sample.Status = "exists"
 		sample.Reason = "docno 已存在，不覆盖"
 		addBojunOrderSample(result, sample)
-		return
+		return nil
 	}
 
 	retailOrder, err := buildBojunRetailOrder(0, record)
@@ -234,7 +246,7 @@ func (s *BojunOrderService) processBojunOrderRecord(
 		sample.Status = "invalid"
 		sample.Reason = "构建伯俊零售单失败: " + err.Error()
 		addBojunOrderFailedSample(result, sample)
-		return
+		return nil
 	}
 
 	result.WritableCount++
@@ -243,7 +255,7 @@ func (s *BojunOrderService) processBojunOrderRecord(
 		sample.Status = "pending"
 		sample.Reason = "可写入，预览未落库"
 		addBojunOrderSample(result, sample)
-		return
+		return nil
 	}
 
 	rawData, err := buildBojunOrderRawData(record, method, startTime, endTime, page)
@@ -252,7 +264,7 @@ func (s *BojunOrderService) processBojunOrderRecord(
 		sample.Status = "failed"
 		sample.Reason = "构建 raw_data 失败: " + err.Error()
 		addBojunOrderFailedSample(result, sample)
-		return
+		return nil
 	}
 	rawDataID, err := s.rawDataDAO.Create(ctx, rawData)
 	if err != nil {
@@ -260,7 +272,7 @@ func (s *BojunOrderService) processBojunOrderRecord(
 		sample.Status = "failed"
 		sample.Reason = "写入 raw_data 失败: " + err.Error()
 		addBojunOrderFailedSample(result, sample)
-		return
+		return fmt.Errorf("create bojun order %s raw data: %w", docNo, err)
 	}
 	result.SavedCount++
 
@@ -271,7 +283,7 @@ func (s *BojunOrderService) processBojunOrderRecord(
 		sample.Status = "failed"
 		sample.Reason = "写入 bojun_retail_orders 失败: " + err.Error()
 		addBojunOrderFailedSample(result, sample)
-		return
+		return fmt.Errorf("create bojun retail order %s: %w", docNo, err)
 	}
 	if !created {
 		result.SkippedCount++
@@ -279,7 +291,7 @@ func (s *BojunOrderService) processBojunOrderRecord(
 		sample.Status = "exists"
 		sample.Reason = "写入前 docno 已存在，不覆盖"
 		addBojunOrderSample(result, sample)
-		return
+		return nil
 	}
 
 	result.RetailCount++
@@ -300,6 +312,7 @@ func (s *BojunOrderService) processBojunOrderRecord(
 			addBojunOrderFailedSample(result, failedSample)
 		}
 	}
+	return nil
 }
 
 func (r *BojunOrderSyncResult) nextPushPosition() int {
@@ -327,6 +340,10 @@ func normalizeBojunOrderTimeRange(startTime, endTime string) (string, string, er
 		return start.Format("2006-01-02 15:04:05"), end.Format("2006-01-02 15:04:05"), fmt.Errorf("start_time must be before end_time")
 	}
 	return start.Format("2006-01-02 15:04:05"), end.Format("2006-01-02 15:04:05"), nil
+}
+
+func NormalizeBojunOrderTimeRange(startTime, endTime string) (string, string, error) {
+	return normalizeBojunOrderTimeRange(startTime, endTime)
 }
 
 func parseBojunOrderTime(value string) (time.Time, error) {
@@ -386,8 +403,15 @@ func (s *BojunOrderService) finishBojunOrderRun(
 	result *BojunOrderSyncResult,
 	runErr error,
 ) error {
+	successCount := result.RetailCount + result.UpdatedCount + result.SkippedCount
 	status := "success"
-	if result.FailedCount > 0 && result.RetailCount > 0 {
+	if runErr != nil {
+		if successCount > 0 {
+			status = "partial_success"
+		} else {
+			status = "failed"
+		}
+	} else if result.FailedCount > 0 && result.RetailCount > 0 {
 		status = "partial_success"
 	} else if result.FailedCount > 0 {
 		status = "failed"
@@ -401,7 +425,7 @@ func (s *BojunOrderService) finishBojunOrderRun(
 		ctx,
 		runID,
 		status,
-		result.RetailCount+result.UpdatedCount+result.SkippedCount,
+		successCount,
 		result.FailedCount,
 		errorMessage,
 	); err != nil {
@@ -422,7 +446,9 @@ func (s *BojunOrderService) finishBojunOrderRunIfNeeded(
 	if runID == 0 {
 		return runErr
 	}
-	return s.finishBojunOrderRun(ctx, runID, result, runErr)
+	finishCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), bojunOrderRunFinishTimeout)
+	defer cancel()
+	return s.finishBojunOrderRun(finishCtx, runID, result, runErr)
 }
 
 type bojunOrderPageInfo struct {

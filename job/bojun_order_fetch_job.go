@@ -4,11 +4,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/hibiken/asynq"
 )
 
 const TypeBojunOrderFetch = "bojun:order:fetch"
+
+const bojunOrderFetchUniqueTTL = 30 * time.Minute
 
 type BojunOrderFetchPayload struct {
 	StartTime string `json:"start_time"`
@@ -31,5 +34,6 @@ func NewBojunOrderFetchTask(payload BojunOrderFetchPayload) (*asynq.Task, error)
 		data,
 		asynq.Queue(DefaultQueueName),
 		asynq.MaxRetry(1),
+		asynq.Unique(bojunOrderFetchUniqueTTL),
 	), nil
 }

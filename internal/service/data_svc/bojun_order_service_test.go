@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 	"time"
 
@@ -83,6 +84,31 @@ type fakeDeliveryLogCreator struct {
 	logs []model.DeliveryLog
 }
 
+type fakeBojunPipelineRunRecorder struct {
+	finishContextErr  error
+	finishHasDeadline bool
+	finishStatus      string
+	finishError       string
+}
+
+func (f *fakeBojunPipelineRunRecorder) Create(context.Context, *model.PipelineRun) (uint, error) {
+	return 1, nil
+}
+
+func (f *fakeBojunPipelineRunRecorder) Finish(
+	ctx context.Context,
+	_ uint,
+	status string,
+	_, _ int,
+	errorMessage string,
+) error {
+	f.finishContextErr = ctx.Err()
+	_, f.finishHasDeadline = ctx.Deadline()
+	f.finishStatus = status
+	f.finishError = errorMessage
+	return nil
+}
+
 func (f *fakeDeliveryLogCreator) Create(ctx context.Context, log *model.DeliveryLog) (uint, error) {
 	_ = ctx
 	f.logs = append(f.logs, *log)
@@ -105,6 +131,47 @@ func TestBuildBojunOrderRequestBody(t *testing.T) {
 	}
 	if body["startTime"] != "2026-07-03 12:00:00" || body["endTime"] != "2026-07-03 12:01:00" {
 		t.Fatalf("time range = %v/%v", body["startTime"], body["endTime"])
+	}
+}
+
+func TestFinishBojunOrderRunUsesCleanupContextAfterCancellation(t *testing.T) {
+	recorder := &fakeBojunPipelineRunRecorder{}
+	service := &BojunOrderService{pipelineRunDAO: recorder}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	err := service.finishBojunOrderRunIfNeeded(ctx, 17, &BojunOrderSyncResult{}, context.Canceled)
+
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("error=%v, want context canceled", err)
+	}
+	if recorder.finishContextErr != nil {
+		t.Fatalf("finish context error=%v, want active cleanup context", recorder.finishContextErr)
+	}
+	if !recorder.finishHasDeadline {
+		t.Fatal("finish context has no deadline")
+	}
+	if recorder.finishStatus != "failed" || recorder.finishError != context.Canceled.Error() {
+		t.Fatalf("finish status=%q error=%q", recorder.finishStatus, recorder.finishError)
+	}
+}
+
+func TestFinishBojunOrderRunMarksInterruptedWorkPartialSuccess(t *testing.T) {
+	recorder := &fakeBojunPipelineRunRecorder{}
+	service := &BojunOrderService{pipelineRunDAO: recorder}
+
+	err := service.finishBojunOrderRunIfNeeded(
+		context.Background(),
+		17,
+		&BojunOrderSyncResult{RetailCount: 1},
+		context.Canceled,
+	)
+
+	if !errors.Is(err, context.Canceled) {
+		t.Fatalf("error=%v, want context canceled", err)
+	}
+	if recorder.finishStatus != "partial_success" {
+		t.Fatalf("finish status=%q, want partial_success", recorder.finishStatus)
 	}
 }
 
@@ -296,6 +363,32 @@ func TestProcessBojunOrderRecordPreviewDoesNotWrite(t *testing.T) {
 	}
 	if len(result.Samples) != 1 || result.Samples[0].Status != "pending" {
 		t.Fatalf("samples = %+v, want pending preview sample", result.Samples)
+	}
+}
+
+func TestProcessBojunOrderRecordReturnsInfrastructureError(t *testing.T) {
+	service := &BojunOrderService{
+		retailOrderDAO: &fakeBojunRetailOrderWriter{failFind: true},
+	}
+	result := &BojunOrderSyncResult{}
+
+	err := service.processBojunOrderRecord(
+		context.Background(),
+		map[string]interface{}{"docno": "B001"},
+		defaultBojunOrderMethod,
+		"",
+		"",
+		1,
+		true,
+		result,
+		OrderPushSkipConfig{},
+	)
+
+	if err == nil || !strings.Contains(err.Error(), "find failed") {
+		t.Fatalf("error=%v, want infrastructure error", err)
+	}
+	if result.FailedCount != 1 || len(result.FailedSamples) != 1 {
+		t.Fatalf("result=%+v, want one recorded failure", result)
 	}
 }
 
