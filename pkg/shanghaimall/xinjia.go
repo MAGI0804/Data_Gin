@@ -67,13 +67,25 @@ func pushXinjiaCenter(ctx context.Context, cfg xinjiaCenterConfig, order RetailO
 		HTTPStatus:   resp.StatusCode,
 		RequestBody:  xinjiaCenterRequestLogBody(requestBody),
 		ResponseBody: string(responseBytes),
-		Success:      resp.StatusCode >= http.StatusOK && resp.StatusCode < http.StatusMultipleChoices,
 	}
 	_ = json.Unmarshal(responseBytes, &result.ResponseJSON)
+	result.Success = xinjiaCenterResponseSuccess(resp.StatusCode, result.ResponseJSON)
 	if !result.Success {
 		return result, fmt.Errorf("xinjia center sales push failed with status %d: %s", resp.StatusCode, result.ResponseBody)
 	}
 	return result, nil
+}
+
+func xinjiaCenterResponseSuccess(status int, response map[string]interface{}) bool {
+	if status < http.StatusOK || status >= http.StatusMultipleChoices {
+		return false
+	}
+	value, exists := response["success"]
+	if !exists {
+		return true
+	}
+	success, ok := value.(bool)
+	return ok && success
 }
 
 func xinjiaCenterRequestLogBody(body xinjiaCenterSalesRequest) map[string]interface{} {

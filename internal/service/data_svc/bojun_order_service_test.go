@@ -670,6 +670,15 @@ func TestBojunTargetForStoreMapsConfiguredXinjiaCenter(t *testing.T) {
 	}
 }
 
+func TestBojunTargetForStoreDoesNotOverrideBuiltinStore(t *testing.T) {
+	t.Setenv("SHANGHAI_XINJIA_CENTER_BOJUN_STORE_CODE", "ABCN001P012")
+
+	target, ok := bojunTargetForStore("ABCN001P012")
+	if !ok || target.Code != string(shanghaimall.TargetQiantan) {
+		t.Fatalf("target = %+v, resolved = %v", target, ok)
+	}
+}
+
 func TestRetailOrderForXinjiaCenterUsesCompletedAt(t *testing.T) {
 	completedAt := time.Date(2026, 8, 21, 14, 30, 45, 0, time.FixedZone("Asia/Shanghai", 8*60*60))
 	order := &model.BojunRetailOrder{

@@ -168,7 +168,6 @@ ShanghaiMall:
     URL: ${SHANGHAI_XINJIA_CENTER_URL:-}
     ProductCode: ${SHANGHAI_XINJIA_CENTER_PRODUCT_CODE:-}
     StoreCode: ${SHANGHAI_XINJIA_CENTER_STORE_CODE:-}
-    BojunStoreCode: ${SHANGHAI_XINJIA_CENTER_BOJUN_STORE_CODE:-}
 
 Storage:
   Driver: ${STORAGE_DRIVER:-local}

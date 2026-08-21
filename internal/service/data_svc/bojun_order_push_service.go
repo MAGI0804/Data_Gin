@@ -277,14 +277,6 @@ func (s *BojunOrderPushService) writePolicySkippedLog(ctx context.Context, order
 
 func bojunTargetForStore(storeCode string) (bojunOrderPushTarget, bool) {
 	normalizedStoreCode := strings.ToUpper(strings.TrimSpace(storeCode))
-	if configuredStoreCode := xinjiaCenterBojunStoreCode(); configuredStoreCode != "" && normalizedStoreCode == configuredStoreCode {
-		return bojunOrderPushTarget{
-			Code:  string(shanghaimall.TargetXinjiaCenter),
-			Name:  "新嘉中心",
-			Store: configuredStoreCode,
-		}, true
-	}
-
 	targets := map[string]bojunOrderPushTarget{
 		"ABCN001A001": {Code: string(shanghaimall.TargetShangsheng), Name: "上生新所", Store: "ABCN001A001"},
 		"ABCN001A004": {Code: string(shanghaimall.TargetJialiCheng), Name: "嘉里城", Store: "ABCN001A004"},
@@ -293,8 +285,17 @@ func bojunTargetForStore(storeCode string) (bojunOrderPushTarget, bool) {
 		"ABCN001P012": {Code: string(shanghaimall.TargetQiantan), Name: "前滩", Store: "ABCN001P012"},
 		"ABCN002A001": {Code: bojunPushTargetHangzhouHenglong, Name: "杭州恒隆", Store: "ABCN002A001"},
 	}
-	target, ok := targets[normalizedStoreCode]
-	return target, ok
+	if target, ok := targets[normalizedStoreCode]; ok {
+		return target, true
+	}
+	if configuredStoreCode := xinjiaCenterBojunStoreCode(); configuredStoreCode != "" && normalizedStoreCode == configuredStoreCode {
+		return bojunOrderPushTarget{
+			Code:  string(shanghaimall.TargetXinjiaCenter),
+			Name:  "新嘉中心",
+			Store: configuredStoreCode,
+		}, true
+	}
+	return bojunOrderPushTarget{}, false
 }
 
 func xinjiaCenterBojunStoreCode() string {
