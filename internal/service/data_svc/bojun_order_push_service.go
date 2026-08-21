@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"maps"
+	"os"
 	"strings"
 	"time"
 
@@ -136,7 +137,7 @@ func (s *BojunOrderPushService) pushToTarget(
 		return s.pushHangzhouHenglong(ctx, traceID, runID, order, target)
 	}
 
-	retailOrder := shanghaimall.RetailOrderFromBojun(*order)
+	retailOrder := retailOrderForTarget(order, target.Code)
 	result, err := shanghaimall.Push(ctx, shanghaimall.Target(target.Code), retailOrder)
 	requestBody := marshalLogJSON(resultRequestBody(result))
 	responseBody := ""
@@ -275,6 +276,15 @@ func (s *BojunOrderPushService) writePolicySkippedLog(ctx context.Context, order
 }
 
 func bojunTargetForStore(storeCode string) (bojunOrderPushTarget, bool) {
+	normalizedStoreCode := strings.ToUpper(strings.TrimSpace(storeCode))
+	if configuredStoreCode := xinjiaCenterBojunStoreCode(); configuredStoreCode != "" && normalizedStoreCode == configuredStoreCode {
+		return bojunOrderPushTarget{
+			Code:  string(shanghaimall.TargetXinjiaCenter),
+			Name:  "新嘉中心",
+			Store: configuredStoreCode,
+		}, true
+	}
+
 	targets := map[string]bojunOrderPushTarget{
 		"ABCN001A001": {Code: string(shanghaimall.TargetShangsheng), Name: "上生新所", Store: "ABCN001A001"},
 		"ABCN001A004": {Code: string(shanghaimall.TargetJialiCheng), Name: "嘉里城", Store: "ABCN001A004"},
@@ -283,8 +293,20 @@ func bojunTargetForStore(storeCode string) (bojunOrderPushTarget, bool) {
 		"ABCN001P012": {Code: string(shanghaimall.TargetQiantan), Name: "前滩", Store: "ABCN001P012"},
 		"ABCN002A001": {Code: bojunPushTargetHangzhouHenglong, Name: "杭州恒隆", Store: "ABCN002A001"},
 	}
-	target, ok := targets[strings.ToUpper(strings.TrimSpace(storeCode))]
+	target, ok := targets[normalizedStoreCode]
 	return target, ok
+}
+
+func xinjiaCenterBojunStoreCode() string {
+	return strings.ToUpper(strings.TrimSpace(os.Getenv("SHANGHAI_XINJIA_CENTER_BOJUN_STORE_CODE")))
+}
+
+func retailOrderForTarget(order *model.BojunRetailOrder, targetCode string) shanghaimall.RetailOrder {
+	retailOrder := shanghaimall.RetailOrderFromBojun(*order)
+	if targetCode == string(shanghaimall.TargetXinjiaCenter) && order.CompletedAt != nil {
+		retailOrder.SaleTime = order.CompletedAt.Format("2006-01-02 15:04:05")
+	}
+	return retailOrder
 }
 
 func resultRequestBody(result *shanghaimall.PushResult) map[string]interface{} {

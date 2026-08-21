@@ -628,6 +628,8 @@ func TestBuildBojunRetailOrderMapsExchangeOrder(t *testing.T) {
 }
 
 func TestBojunTargetForStoreMapsPushUnits(t *testing.T) {
+	t.Setenv("SHANGHAI_XINJIA_CENTER_BOJUN_STORE_CODE", "")
+
 	cases := map[string]string{
 		"ABCN001A001": string(shanghaimall.TargetShangsheng),
 		"ABCN001A004": string(shanghaimall.TargetJialiCheng),
@@ -649,8 +651,43 @@ func TestBojunTargetForStoreMapsPushUnits(t *testing.T) {
 }
 
 func TestBojunTargetForStoreRejectsUnknownStore(t *testing.T) {
+	t.Setenv("SHANGHAI_XINJIA_CENTER_BOJUN_STORE_CODE", "")
+
 	if _, ok := bojunTargetForStore("UNKNOWN"); ok {
 		t.Fatal("unknown store unexpectedly resolved target")
+	}
+}
+
+func TestBojunTargetForStoreMapsConfiguredXinjiaCenter(t *testing.T) {
+	t.Setenv("SHANGHAI_XINJIA_CENTER_BOJUN_STORE_CODE", " abcn001p014 ")
+
+	target, ok := bojunTargetForStore("ABCN001P014")
+	if !ok {
+		t.Fatal("configured xinjia center store did not resolve target")
+	}
+	if target.Code != string(shanghaimall.TargetXinjiaCenter) || target.Name != "新嘉中心" || target.Store != "ABCN001P014" {
+		t.Fatalf("target = %+v", target)
+	}
+}
+
+func TestRetailOrderForXinjiaCenterUsesCompletedAt(t *testing.T) {
+	completedAt := time.Date(2026, 8, 21, 14, 30, 45, 0, time.FixedZone("Asia/Shanghai", 8*60*60))
+	order := &model.BojunRetailOrder{
+		DocNo:          "SALE-001",
+		BillDate:       20260821,
+		CompletedAt:    &completedAt,
+		OrderTypeCode:  "CMR",
+		TotalAmtActual: 128.50,
+	}
+
+	got := retailOrderForTarget(order, string(shanghaimall.TargetXinjiaCenter))
+	if got.SaleTime != "2026-08-21 14:30:45" {
+		t.Fatalf("sale time = %q", got.SaleTime)
+	}
+
+	legacy := retailOrderForTarget(order, string(shanghaimall.TargetQiantan))
+	if legacy.SaleTime != "2026-08-21 00:00:00" {
+		t.Fatalf("legacy sale time = %q", legacy.SaleTime)
 	}
 }
 

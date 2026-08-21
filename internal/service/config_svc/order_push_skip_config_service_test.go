@@ -39,6 +39,9 @@ func TestListTargetsMergesBuiltinAndConfiguredDestinations(t *testing.T) {
 	if !hasTarget(targets, orderpush.TargetBojunHangzhouHenglong) {
 		t.Fatal("targets missing bojun hangzhou")
 	}
+	if !hasTarget(targets, "xinjia_center") {
+		t.Fatal("targets missing xinjia center")
+	}
 	if !hasTarget(targets, "custom_target") {
 		t.Fatal("targets missing custom destination")
 	}

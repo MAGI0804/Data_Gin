@@ -21,9 +21,10 @@ func init() {
 				"url": config.Get("ShanghaiMall.Shangsheng.URL", ""),
 			},
 			"xinjia_center": map[string]interface{}{
-				"url":          config.Get("ShanghaiMall.XinjiaCenter.URL", ""),
-				"product_code": config.Get("ShanghaiMall.XinjiaCenter.ProductCode", ""),
-				"store_code":   config.Get("ShanghaiMall.XinjiaCenter.StoreCode", ""),
+				"url":              config.Get("ShanghaiMall.XinjiaCenter.URL", ""),
+				"product_code":     config.Get("ShanghaiMall.XinjiaCenter.ProductCode", ""),
+				"store_code":       config.Get("ShanghaiMall.XinjiaCenter.StoreCode", ""),
+				"bojun_store_code": config.Get("ShanghaiMall.XinjiaCenter.BojunStoreCode", ""),
 			},
 		}
 	})

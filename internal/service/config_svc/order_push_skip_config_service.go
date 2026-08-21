@@ -83,6 +83,7 @@ func builtinOrderPushTargets() []orderpush.TargetOption {
 	targets = appendOrderPushTarget(targets, "panlong", "伯俊-蟠龙")
 	targets = appendOrderPushTarget(targets, "qiantan", "伯俊-前滩")
 	targets = appendOrderPushTarget(targets, "shangsheng", "伯俊-上生新所")
+	targets = appendOrderPushTarget(targets, "xinjia_center", "伯俊-新嘉中心")
 	targets = appendOrderPushTarget(targets, "xintiandi", "伯俊-新天地")
 	targets = appendOrderPushTarget(targets, orderpush.TargetBojunHangzhouHenglong, "伯俊-杭州恒隆")
 	return targets
