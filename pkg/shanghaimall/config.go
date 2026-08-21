@@ -55,10 +55,13 @@ type kerryConfig struct {
 }
 
 type xinjiaCenterConfig struct {
-	URL         string
-	ProductCode string
-	StoreCode   string
-	Client      *http.Client
+	URL           string
+	ProductCode   string
+	StoreCode     string
+	TenantCode    string
+	Authorization string
+	Client        *http.Client
+	Now           func() time.Time
 }
 
 func defaultClient() *http.Client {
@@ -124,10 +127,12 @@ func kerryConfigFromEnv() kerryConfig {
 
 func xinjiaCenterConfigFromEnv() xinjiaCenterConfig {
 	return xinjiaCenterConfig{
-		URL:         envString("SHANGHAI_XINJIA_CENTER_URL", config.GetString("ShanghaiMall.XinjiaCenter.URL", "")),
-		ProductCode: envString("SHANGHAI_XINJIA_CENTER_PRODUCT_CODE", config.GetString("ShanghaiMall.XinjiaCenter.ProductCode", "")),
-		StoreCode:   envString("SHANGHAI_XINJIA_CENTER_STORE_CODE", config.GetString("ShanghaiMall.XinjiaCenter.StoreCode", "")),
-		Client:      defaultClient(),
+		URL:           envString("SHANGHAI_XINJIA_CENTER_URL", config.GetString("ShanghaiMall.XinjiaCenter.URL", "")),
+		ProductCode:   envString("SHANGHAI_XINJIA_CENTER_PRODUCT_CODE", config.GetString("ShanghaiMall.XinjiaCenter.ProductCode", "")),
+		StoreCode:     envString("SHANGHAI_XINJIA_CENTER_STORE_CODE", config.GetString("ShanghaiMall.XinjiaCenter.StoreCode", "")),
+		TenantCode:    envString("SHANGHAI_XINJIA_CENTER_TENANT_CODE", config.GetString("ShanghaiMall.XinjiaCenter.TenantCode", "")),
+		Authorization: envString("SHANGHAI_XINJIA_CENTER_AUTHORIZATION", config.GetString("ShanghaiMall.XinjiaCenter.Authorization", "")),
+		Client:        defaultClient(),
 	}
 }
 

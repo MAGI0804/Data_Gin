@@ -24,6 +24,7 @@ func init() {
 				"url":          config.Get("ShanghaiMall.XinjiaCenter.URL", ""),
 				"product_code": config.Get("ShanghaiMall.XinjiaCenter.ProductCode", ""),
 				"store_code":   config.Get("ShanghaiMall.XinjiaCenter.StoreCode", ""),
+				"tenant_code":  config.Get("ShanghaiMall.XinjiaCenter.TenantCode", ""),
 			},
 		}
 	})
