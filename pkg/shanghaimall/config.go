@@ -54,6 +54,13 @@ type kerryConfig struct {
 	Client         *http.Client
 }
 
+type xinjiaCenterConfig struct {
+	URL         string
+	ProductCode string
+	StoreCode   string
+	Client      *http.Client
+}
+
 func defaultClient() *http.Client {
 	timeoutSeconds := envInt("SHANGHAI_MALL_TIMEOUT_SECONDS", config.GetInt("ShanghaiMall.TimeoutSeconds", 10))
 	if timeoutSeconds <= 0 {
@@ -112,6 +119,15 @@ func kerryConfigFromEnv() kerryConfig {
 		StaffCode:      envString("SHANGHAI_JIALICHENG_KERRY_STAFF_CODE", ""),
 		TenderCode:     envString("SHANGHAI_JIALICHENG_KERRY_TENDER_CODE", "OT"),
 		Client:         defaultClient(),
+	}
+}
+
+func xinjiaCenterConfigFromEnv() xinjiaCenterConfig {
+	return xinjiaCenterConfig{
+		URL:         envString("SHANGHAI_XINJIA_CENTER_URL", config.GetString("ShanghaiMall.XinjiaCenter.URL", "")),
+		ProductCode: envString("SHANGHAI_XINJIA_CENTER_PRODUCT_CODE", config.GetString("ShanghaiMall.XinjiaCenter.ProductCode", "")),
+		StoreCode:   envString("SHANGHAI_XINJIA_CENTER_STORE_CODE", config.GetString("ShanghaiMall.XinjiaCenter.StoreCode", "")),
+		Client:      defaultClient(),
 	}
 }
 

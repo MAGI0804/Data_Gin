@@ -164,6 +164,10 @@ ShanghaiMall:
     PostURL: ${SHANGHAI_QIANTAN_XIAN_POST_URL:-}
   Shangsheng:
     URL: ${SHANGHAI_SHANGSHENG_URL:-}
+  XinjiaCenter:
+    URL: ${SHANGHAI_XINJIA_CENTER_URL:-}
+    ProductCode: ${SHANGHAI_XINJIA_CENTER_PRODUCT_CODE:-}
+    StoreCode: ${SHANGHAI_XINJIA_CENTER_STORE_CODE:-}
 
 Storage:
   Driver: ${STORAGE_DRIVER:-local}

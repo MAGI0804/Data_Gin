@@ -10,11 +10,12 @@ import (
 type Target string
 
 const (
-	TargetJialiCheng Target = "jialicheng"
-	TargetPanlong    Target = "panlong"
-	TargetQiantan    Target = "qiantan"
-	TargetShangsheng Target = "shangsheng"
-	TargetXintiandi  Target = "xintiandi"
+	TargetJialiCheng   Target = "jialicheng"
+	TargetPanlong      Target = "panlong"
+	TargetQiantan      Target = "qiantan"
+	TargetShangsheng   Target = "shangsheng"
+	TargetXinjiaCenter Target = "xinjia_center"
+	TargetXintiandi    Target = "xintiandi"
 )
 
 type RetailOrder struct {

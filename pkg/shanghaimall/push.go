@@ -15,6 +15,8 @@ func Push(ctx context.Context, target Target, order RetailOrder) (*PushResult, e
 		return PushQiantan(ctx, order)
 	case TargetShangsheng:
 		return PushShangsheng(ctx, order)
+	case TargetXinjiaCenter:
+		return PushXinjiaCenter(ctx, order)
 	case TargetXintiandi:
 		return PushXintiandi(ctx, order)
 	default:
