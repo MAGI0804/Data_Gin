@@ -1,6 +1,6 @@
 import type { ClientResponse, HTTPMethod } from '../api/client'
 import { parseReportInputSchemaDocument, reportInputSchemaDocument } from './refCursorConfig.js'
-import type { ReportAudit, ReportAuditPage, ReportAuditQuery, ReportCatalogPage, ReportCatalogQuery, ReportColumn, ReportDatasource, ReportDatasourceInput, ReportDatasourceTest, ReportDefinitionStatus, ReportDraft, ReportExport, ReportExportPage, ReportFilterOperator, ReportGrant, ReportInputOption, ReportParameter, ReportProcedureArgument, ReportProcedurePage, ReportProcedureRef, ReportProcedureSignature, ReportProcedureSummary, ReportPublication, ReportResultPage, ReportResultQuery, ReportResultTableColumn, ReportResultTablePage, ReportResultTableRef, ReportResultTableSchema, ReportResultTableSummary, ReportRun, ReportRunContract, ReportRunStatus, ReportSummary, ReportVersionDiff, ReportVersionPage, ReportVersionSummary } from './types'
+import type { ReportAudit, ReportAuditPage, ReportAuditQuery, ReportCatalogPage, ReportCatalogQuery, ReportColumn, ReportDatasource, ReportDatasourceInput, ReportDatasourceTest, ReportDefinitionStatus, ReportDraft, ReportExport, ReportExportPage, ReportFilterOperator, ReportGrant, ReportInputOption, ReportInputQueryDefinition, ReportInputQueryDefinitionInput, ReportInputQueryTestResult, ReportParameter, ReportProcedureArgument, ReportProcedurePage, ReportProcedureRef, ReportProcedureSignature, ReportProcedureSummary, ReportPublication, ReportResultPage, ReportResultQuery, ReportResultTableColumn, ReportResultTablePage, ReportResultTableRef, ReportResultTableSchema, ReportResultTableSummary, ReportRun, ReportRunContract, ReportRunStatus, ReportSummary, ReportVersionDiff, ReportVersionPage, ReportVersionSummary } from './types'
 
 type JsonRecord = Record<string, unknown>
 
@@ -55,6 +55,33 @@ export async function getReportInputQueries(client: ReportCenterClient, signal?:
 	return requestAndParse(client, '/v1/report-input-queries', { method: 'GET', signal }, parseReportInputQueries, '报表输入查询配置加载失败。')
 }
 
+export async function getReportInputQueryDefinitions(client: ReportCenterClient, signal?: AbortSignal): Promise<ReportAPIResult<ReportInputQueryDefinition[]>> {
+	return requestAndParse(client, '/v1/report-input-query-definitions', { method: 'GET', signal }, parseReportInputQueryDefinitions, '输入选项查询配置加载失败。')
+}
+
+export async function createReportInputQueryDefinition(client: ReportCenterClient, input: ReportInputQueryDefinitionInput): Promise<ReportAPIResult<ReportInputQueryDefinition>> {
+	return requestAndParse(client, '/v1/report-input-query-definitions', { method: 'POST', body: input }, parseReportInputQueryDefinition, '输入选项查询创建失败。')
+}
+
+export async function updateReportInputQueryDefinition(client: ReportCenterClient, id: number, input: ReportInputQueryDefinitionInput): Promise<ReportAPIResult<ReportInputQueryDefinition>> {
+	return requestAndParse(client, `/v1/report-input-query-definitions/${id}`, { method: 'PUT', body: input }, parseReportInputQueryDefinition, '输入选项查询更新失败。')
+}
+
+export async function deleteReportInputQueryDefinition(client: ReportCenterClient, id: number, expectedLockVersion: number): Promise<ReportAPIResult<{ id: number }>> {
+	const search = new URLSearchParams({ expectedLockVersion: String(expectedLockVersion) })
+	return requestAndParse(client, `/v1/report-input-query-definitions/${id}?${search}`, { method: 'DELETE' }, (payload) => {
+		const deletedId = positiveInteger(unwrapData(payload).id)
+		if (!deletedId) throw new Error('invalid deleted report input query')
+		return { id: deletedId }
+	}, '输入选项查询删除失败。')
+}
+
+export async function testReportInputQueryDefinition(client: ReportCenterClient, definitionId: number | null, selectSql: string, name = ''): Promise<ReportAPIResult<ReportInputQueryTestResult>> {
+	const path = definitionId ? `/v1/report-input-query-definitions/${definitionId}/test` : '/v1/report-input-query-definition-tests'
+	const body = definitionId ? { ...(name.trim() ? { name: name.trim() } : {}) } : { selectSql, ...(name.trim() ? { name: name.trim() } : {}) }
+	return requestAndParse(client, path, { method: 'POST', body }, parseReportInputQueryTestResult, '输入选项查询测试失败。')
+}
+
 export async function getReportInputOptions(client: ReportCenterClient, reportId: number, conditionCode: string, name = '', signal?: AbortSignal): Promise<ReportAPIResult<ReportInputOption[]>> {
 	const search = new URLSearchParams()
 	if (name.trim()) search.set('name', name.trim())
@@ -69,6 +96,52 @@ export function parseReportInputQueries(payload: unknown): string[] {
 	const items = data.items.filter((item): item is string => typeof item === 'string' && /^[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(item))
 	if (items.length !== data.items.length || new Set(items).size !== items.length) throw new Error('invalid report input queries')
 	return items
+}
+
+export function parseReportInputQueryDefinitions(payload: unknown): ReportInputQueryDefinition[] {
+	const data = unwrapData(payload)
+	if (!Array.isArray(data.items)) throw new Error('invalid report input query definitions')
+	return data.items.map(parseReportInputQueryDefinition)
+}
+
+export function parseReportInputQueryDefinition(payload: unknown): ReportInputQueryDefinition {
+	const data = unwrapData(payload)
+	const id = positiveInteger(data.id)
+	const name = publicString(data.name, 64)
+	const selectSql = typeof data.selectSql === 'string' ? data.selectSql.trim().slice(0, 65536) : ''
+	const lockVersion = positiveInteger(data.lockVersion)
+	const lastTestStatus = data.lastTestStatus === 'SUCCESS' || data.lastTestStatus === 'FAILED' ? data.lastTestStatus : 'NOT_TESTED'
+	if (!id || !name || !/^[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(name) || !selectSql || !lockVersion || typeof data.enabled !== 'boolean') throw new Error('invalid report input query definition')
+	return {
+		id, name, selectSql, lockVersion, enabled: data.enabled,
+		lastTestStatus,
+		lastTestError: publicString(data.lastTestError, 500),
+		lastTestedAt: publicDate(data.lastTestedAt),
+		createdAt: publicDate(data.createdAt),
+		updatedAt: publicDate(data.updatedAt),
+	}
+}
+
+export function parseReportInputQueryTestResult(payload: unknown): ReportInputQueryTestResult {
+	const data = unwrapData(payload)
+	if (data.status !== 'SUCCESS' && data.status !== 'FAILED') throw new Error('invalid report input query test result')
+	if (!Array.isArray(data.items)) throw new Error('invalid report input query test items')
+	const items = data.items.flatMap((item) => {
+		if (!isRecord(item) || (typeof item.id !== 'string' && typeof item.id !== 'number')) return []
+		const id = String(item.id)
+		const name = publicString(item.name, 256)
+		return id && name ? [{ id, name }] : []
+	})
+	if (items.length !== data.items.length) throw new Error('invalid report input query test items')
+	return {
+		status: data.status,
+		testedAt: publicDate(data.testedAt),
+		latencyMs: nonNegativeInteger(data.latencyMs),
+		rowCount: nonNegativeInteger(data.rowCount),
+		items,
+		errorCode: publicString(data.errorCode, 64),
+		message: publicString(data.message, 500),
+	}
 }
 
 export function parseReportInputOptions(payload: unknown): ReportInputOption[] {

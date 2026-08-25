@@ -1,0 +1,33 @@
+.root { display: grid; min-width: 0; }
+.toolbar { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); padding-block: var(--space-2); border-bottom: 1px solid var(--color-border); }
+.toolbar > div { display: grid; gap: var(--space-1); }
+.toolbar span, .muted { color: var(--color-text-secondary); font-size: 13px; }
+.toolbar button, .actions, .actions button, .identity { display: inline-flex; align-items: center; gap: var(--space-2); }
+.toolbar svg, .actions svg, .identity svg { width: 16px; height: 16px; }
+.identity svg { color: var(--color-brand-active); }
+.identity code, .sql, .mono, .sqlField textarea, .preview code { font-family: var(--font-mono); }
+.sql { display: -webkit-box; max-width: 520px; overflow: hidden; color: var(--color-text-secondary); font-size: 12px; -webkit-box-orient: vertical; -webkit-line-clamp: 2; white-space: normal; }
+.actions { flex-wrap: wrap; }
+.actions button { border: 0; background: transparent; padding: var(--space-1); color: var(--color-brand-active); }
+.actions button.delete { color: var(--color-danger); }
+.actions button:disabled { color: var(--color-text-secondary); }
+.guide { display: flex; gap: var(--space-2); margin-block: var(--space-2); border-left: 3px solid var(--color-brand); background: var(--color-brand-soft); padding: var(--space-2) var(--space-3); color: var(--color-text-secondary); font-size: 13px; }
+.guide strong { flex: 0 0 auto; color: var(--color-text); }
+.notice { margin: 0 0 var(--space-2); border-left: 3px solid var(--color-success); background: var(--color-success-soft); padding: var(--space-2) var(--space-3); color: var(--color-success); font-size: 13px; }
+.testStatus { display: grid; justify-items: start; gap: var(--space-1); }
+.testStatus small { color: var(--color-text-secondary); }
+.form { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-3); }
+.field, .sqlField { display: grid; align-content: start; gap: var(--space-1); color: var(--color-text-secondary); font-size: 12px; font-weight: 650; }
+.field input, .sqlField textarea { width: 100%; min-width: 0; border: 1px solid var(--color-border-strong); border-radius: var(--radius-control); background: var(--color-canvas); color: var(--color-text); padding: var(--space-2) var(--space-3); }
+.field input { min-height: var(--control-height); }
+.sqlField { grid-column: 1 / -1; }
+.sqlField textarea { resize: vertical; line-height: 1.6; }
+.field small, .sqlField small { color: var(--color-text-secondary); font-weight: 400; line-height: 1.5; }
+.switch { display: inline-flex; align-items: center; gap: var(--space-2); min-height: var(--control-height); color: var(--color-text); font-size: 13px; }
+.switch input { width: 16px; height: 16px; accent-color: var(--color-brand); }
+.preview { display: grid; gap: var(--space-2); margin-top: var(--space-4); border-left: 3px solid var(--color-success); background: var(--color-success-soft); padding: var(--space-3); color: var(--color-text-secondary); font-size: 13px; }
+.preview strong { color: var(--color-success); }
+.preview ul { display: grid; gap: var(--space-1); margin: 0; padding: 0; list-style: none; }
+.preview li { display: grid; grid-template-columns: minmax(80px, .35fr) minmax(0, 1fr); gap: var(--space-3); }
+.error, .dangerNotice { border-left: 3px solid var(--color-danger); background: var(--color-danger-soft); padding: var(--space-3); color: var(--color-danger); font-size: 13px; }
+@media (max-width: 767px) { .toolbar { align-items: flex-start; flex-direction: column; } .guide { align-items: flex-start; flex-direction: column; } .form { grid-template-columns: 1fr; } .sqlField { grid-column: auto; } }

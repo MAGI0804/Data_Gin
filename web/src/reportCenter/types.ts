@@ -174,6 +174,36 @@ export type ReportInputOption = {
 	name: string
 }
 
+export type ReportInputQueryDefinition = {
+	id: number
+	name: string
+	selectSql: string
+	enabled: boolean
+	lockVersion: number
+	lastTestStatus: 'NOT_TESTED' | 'SUCCESS' | 'FAILED'
+	lastTestError: string
+	lastTestedAt: string | null
+	createdAt: string | null
+	updatedAt: string | null
+}
+
+export type ReportInputQueryDefinitionInput = {
+	name: string
+	selectSql: string
+	enabled: boolean
+	expectedLockVersion?: number
+}
+
+export type ReportInputQueryTestResult = {
+	status: 'SUCCESS' | 'FAILED'
+	testedAt: string | null
+	latencyMs: number
+	rowCount: number
+	items: ReportInputOption[]
+	errorCode: string
+	message: string
+}
+
 export type ReportInputSchema = Record<string, ReportInputField>
 
 export type ReportCenterSection = 'catalog' | 'configuration' | 'query' | 'exports'

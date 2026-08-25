@@ -3,7 +3,7 @@ import { readdirSync, readFileSync } from 'node:fs'
 import test from 'node:test'
 import ts from 'typescript'
 
-import { createReportRun, deleteReportDraft, getReportAudits, getReportInputOptions, getReportInputQueries, getReportProcedureSignature, getReportProcedures, getReportResultTableSchema, getReportResultTables, parsePublication, parseReportAuditPage, parseReportCatalogPage, parseReportDatasource, parseReportDatasources, parseReportDatasourceTest, parseReportDraft, parseReportExport, parseReportExportPage, parseReportProcedurePage, parseReportProcedureSignature, parseReportResultPage, parseReportResultTablePage, parseReportResultTableSchema, parseReportRun, parseReportRunContract, parseReportVersionDiff, parseReportVersionPage, saveAndPublishReportDraft, saveReportDraft, testReportDatasourceConnection } from '../.test-dist/reportCenter/api.js'
+import { createReportInputQueryDefinition, createReportRun, deleteReportDraft, getReportAudits, getReportInputOptions, getReportInputQueries, getReportInputQueryDefinitions, getReportProcedureSignature, getReportProcedures, getReportResultTableSchema, getReportResultTables, parsePublication, parseReportAuditPage, parseReportCatalogPage, parseReportDatasource, parseReportDatasources, parseReportDatasourceTest, parseReportDraft, parseReportExport, parseReportExportPage, parseReportInputQueryDefinitions, parseReportInputQueryTestResult, parseReportProcedurePage, parseReportProcedureSignature, parseReportResultPage, parseReportResultTablePage, parseReportResultTableSchema, parseReportRun, parseReportRunContract, parseReportVersionDiff, parseReportVersionPage, saveAndPublishReportDraft, saveReportDraft, testReportDatasourceConnection, testReportInputQueryDefinition } from '../.test-dist/reportCenter/api.js'
 import { applyExcelMapping, buildReportConditions, excelMappingFromColumns, initialReportConditionValues, parseExcelMappingDocument, parseReportInputSchemaDocument, parseReportInputSchemaText, reconcileReportColumnsWithResultSchema, renameExcelMappingField, reportColumnsFromResultSchema } from '../.test-dist/reportCenter/refCursorConfig.js'
 import { reportParameterControls, reportParameterFlagDisabled, updateReportParameterFlag, updateReportParameterLogicalType } from '../.test-dist/reportCenter/parameterConfig.js'
 import { buildNewReportRunState, canStartNewReportRun, initialReportParameterValues } from '../.test-dist/reportCenter/queryParameters.js'
@@ -130,6 +130,25 @@ test('report input query clients use configured names and exact-name search', as
 	assert.deepEqual(await getReportInputOptions(client, 9, 'store_id', '上海店'), { ok: true, data: [{ id: 'S001', name: '上海店' }] })
 	assert.equal(requests[1].path, '/v1/reports/9/input-options/store_id?name=%E4%B8%8A%E6%B5%B7%E5%BA%97')
 	assert.equal(requests[1].options.method, 'GET')
+})
+
+test('report input query definitions support frontend management and safe test previews', async () => {
+	const definition = { id: 4, name: 'product', selectSql: 'SELECT id, name FROM products', enabled: true, lockVersion: 2, lastTestStatus: 'SUCCESS', lastTestError: '', lastTestedAt: '2026-08-25T08:00:00Z', createdAt: '2026-08-25T07:00:00Z', updatedAt: '2026-08-25T08:00:00Z' }
+	assert.deepEqual(parseReportInputQueryDefinitions({ data: { items: [definition] } }), [definition])
+	assert.deepEqual(parseReportInputQueryTestResult({ data: { status: 'SUCCESS', testedAt: '2026-08-25T08:00:00Z', latencyMs: 12, rowCount: 1, items: [{ id: 'P001', name: '款号一' }], message: 'ok' } }).items, [{ id: 'P001', name: '款号一' }])
+
+	const requests = []
+	const client = async (path, options) => {
+		requests.push({ path, options })
+		if (path.endsWith('tests')) return { ok: true, data: { data: { status: 'SUCCESS', testedAt: '2026-08-25T08:00:00Z', latencyMs: 12, rowCount: 1, items: [{ id: 'P001', name: '款号一' }], message: 'ok' } } }
+		if (options?.method === 'POST') return { ok: true, data: { data: definition } }
+		return { ok: true, data: { data: { items: [definition] } } }
+	}
+	assert.deepEqual(await getReportInputQueryDefinitions(client), { ok: true, data: [definition] })
+	assert.equal((await createReportInputQueryDefinition(client, { name: 'product', selectSql: definition.selectSql, enabled: true })).ok, true)
+	assert.equal((await testReportInputQueryDefinition(client, null, definition.selectSql, '款号一')).ok, true)
+	assert.equal(requests[2].path, '/v1/report-input-query-definition-tests')
+	assert.deepEqual(requests[2].options.body, { selectSql: definition.selectSql, name: '款号一' })
 })
 
 test('remote input options retain the selected item across later searches', () => {
