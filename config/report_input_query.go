@@ -3,6 +3,7 @@ package config
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"regexp"
 	"strconv"
@@ -143,6 +144,9 @@ func loadReportInputQueries() (map[string]ReportInputQuery, error) {
 	decoder := json.NewDecoder(strings.NewReader(raw))
 	if err := decoder.Decode(&configured); err != nil {
 		return nil, fmt.Errorf("%s must be a JSON object of query name to SELECT statement", EnvReportInputQueriesJSON)
+	}
+	if err := decoder.Decode(&struct{}{}); err != io.EOF {
+		return nil, fmt.Errorf("%s must contain exactly one JSON object", EnvReportInputQueriesJSON)
 	}
 	if len(configured) == 0 {
 		return nil, fmt.Errorf("%s must not be empty when configured", EnvReportInputQueriesJSON)

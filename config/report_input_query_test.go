@@ -38,6 +38,21 @@ func TestLoadReportInputQueryConfigRejectsUnsafeSelect(t *testing.T) {
 	}
 }
 
+func TestLoadReportInputQueryConfigRejectsTrailingJSON(t *testing.T) {
+	setReportInputOracleEnvironment(t)
+	for _, value := range []string{
+		`{"stores":"SELECT id, name FROM report_stores"} trailing`,
+		`{"stores":"SELECT id, name FROM report_stores"} {}`,
+	} {
+		t.Run(value, func(t *testing.T) {
+			t.Setenv(EnvReportInputQueriesJSON, value)
+			if _, err := LoadReportInputQueryConfig(); err == nil {
+				t.Fatal("LoadReportInputQueryConfig() error = nil")
+			}
+		})
+	}
+}
+
 func TestLoadReportInputQueryConfigRequiresOracleWhenQueriesExist(t *testing.T) {
 	t.Setenv(EnvReportInputQueriesJSON, `{"stores":"SELECT id, name FROM report_stores"}`)
 	if _, err := LoadReportInputQueryConfig(); err == nil {
