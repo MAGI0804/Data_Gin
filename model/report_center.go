@@ -73,6 +73,24 @@ type ReportDatasource struct {
 
 func (ReportDatasource) TableName() string { return "report_datasources" }
 
+// ReportInputQueryDefinition stores a named SELECT used by report input
+// controls. Oracle connection details remain process environment configuration.
+type ReportInputQueryDefinition struct {
+	BaseModel
+	Name              string     `gorm:"column:name;size:64;not null;uniqueIndex" json:"name"`
+	SelectSQL         string     `gorm:"column:select_sql;type:longtext;not null" json:"selectSql"`
+	Enabled           bool       `gorm:"column:enabled;not null;default:true;index" json:"enabled"`
+	LockVersion       uint64     `gorm:"column:lock_version;not null;default:1" json:"lockVersion"`
+	LastTestStatus    string     `gorm:"column:last_test_status;size:16" json:"lastTestStatus"`
+	LastTestErrorSafe string     `gorm:"column:last_test_error_safe;size:500" json:"lastTestErrorSafe"`
+	LastTestedAt      *time.Time `gorm:"column:last_tested_at;type:datetime(3)" json:"lastTestedAt"`
+	CreatedBy         uint       `gorm:"column:created_by;not null;default:0" json:"createdBy"`
+	UpdatedBy         uint       `gorm:"column:updated_by;not null;default:0" json:"updatedBy"`
+	WeatherTimestamps
+}
+
+func (ReportInputQueryDefinition) TableName() string { return "report_input_query_definitions" }
+
 // ReportResultTableBinding makes a physical Oracle result table exclusive to
 // one report definition. ConnectionFingerprint identifies the Oracle database
 // and CDB/PDB container without persisting credentials in the registry.

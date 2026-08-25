@@ -23,8 +23,8 @@ import (
 	"go.uber.org/zap"
 )
 
-const schemaMigrationVersion = "2026-08-14-report-center-v10"
-const previousSchemaMigrationVersion = "2026-08-14-report-center-v9"
+const schemaMigrationVersion = "2026-08-25-report-center-v11"
+const previousSchemaMigrationVersion = "2026-08-14-report-center-v10"
 const schemaMigrationLockName = "data_gin_schema_migration_v1"
 
 type schemaMigrationRecord struct {
@@ -103,7 +103,7 @@ func ApplySchemaMigrations() (resultErr error) {
 	}
 	if err := runPendingSchemaMigration(
 		previousApplied,
-		func() error { return prepareReportResultTableBindings(db) },
+		func() error { return db.AutoMigrate(&model.ReportInputQueryDefinition{}) },
 		autoMigrateTables,
 	); err != nil {
 		return err
@@ -311,6 +311,7 @@ func autoMigrateTables() error {
 func reportCenterMigrationModels() []interface{} {
 	return []interface{}{
 		&model.ReportDatasource{},
+		&model.ReportInputQueryDefinition{},
 		&model.ReportResultTableBinding{},
 		&model.ReportDefinition{},
 		&model.ReportVersion{},

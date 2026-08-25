@@ -23,8 +23,8 @@ func TestMallWeatherMigrationModelsAreUnique(t *testing.T) {
 
 func TestReportCenterMigrationModelsAreUnique(t *testing.T) {
 	models := reportCenterMigrationModels()
-	if len(models) != 11 {
-		t.Fatalf("reportCenterMigrationModels() count = %d, want 11", len(models))
+	if len(models) != 12 {
+		t.Fatalf("reportCenterMigrationModels() count = %d, want 12", len(models))
 	}
 
 	seen := make(map[reflect.Type]struct{}, len(models))
@@ -37,11 +37,11 @@ func TestReportCenterMigrationModelsAreUnique(t *testing.T) {
 	}
 }
 
-func TestReportCenterMigrationVersionIncludesJSONProcedureContract(t *testing.T) {
-	if schemaMigrationVersion != "2026-08-14-report-center-v10" {
+func TestReportCenterMigrationVersionIncludesInputQueryDefinitions(t *testing.T) {
+	if schemaMigrationVersion != "2026-08-25-report-center-v11" {
 		t.Fatalf("schemaMigrationVersion = %q", schemaMigrationVersion)
 	}
-	if previousSchemaMigrationVersion != "2026-08-14-report-center-v9" {
+	if previousSchemaMigrationVersion != "2026-08-14-report-center-v10" {
 		t.Fatalf("previousSchemaMigrationVersion = %q", previousSchemaMigrationVersion)
 	}
 }
