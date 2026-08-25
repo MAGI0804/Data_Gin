@@ -16,6 +16,7 @@ import (
 	appConfig "gin-biz-web-api/config"
 	"gin-biz-web-api/internal/reportoracle"
 	"gin-biz-web-api/internal/reportrepo"
+	"gin-biz-web-api/model"
 )
 
 var ErrReportInputQueryUnavailable = errors.New("report input query service: unavailable")
@@ -26,6 +27,16 @@ type reportInputQueryStore interface {
 	FindPublishedReport(context.Context, uint, uint, string) (*reportrepo.PublishedReport, error)
 }
 
+type reportInputQueryDefinitionStore interface {
+	ListReportInputQueryDefinitions(context.Context) ([]model.ReportInputQueryDefinition, error)
+	GetReportInputQueryDefinition(context.Context, uint) (*model.ReportInputQueryDefinition, error)
+	FindReportInputQueryByName(context.Context, string) (*model.ReportInputQueryDefinition, error)
+	CreateReportInputQueryDefinition(context.Context, uint, *model.ReportInputQueryDefinition) error
+	UpdateReportInputQueryDefinition(context.Context, uint, *model.ReportInputQueryDefinition, uint64) error
+	DeleteReportInputQueryDefinition(context.Context, uint, uint, uint64) error
+	RecordReportInputQueryTest(context.Context, uint, uint, string, string, time.Time) error
+}
+
 type reportInputOracleConnection interface {
 	QueryInputOptions(context.Context, string, string, int) ([]reportoracle.InputOption, error)
 	Close() error
@@ -34,11 +45,13 @@ type reportInputOracleConnection interface {
 type reportInputOracleOpener func(context.Context, reportoracle.Config) (reportInputOracleConnection, error)
 
 type ReportInputQueryService struct {
-	store  reportInputQueryStore
-	config appConfig.ReportInputQueryConfig
-	open   reportInputOracleOpener
-	mu     sync.Mutex
-	oracle reportInputOracleConnection
+	store       reportInputQueryStore
+	definitions reportInputQueryDefinitionStore
+	config      appConfig.ReportInputQueryConfig
+	open        reportInputOracleOpener
+	now         func() time.Time
+	mu          sync.Mutex
+	oracle      reportInputOracleConnection
 }
 
 type ReportInputQueryListDTO struct {
@@ -54,28 +67,53 @@ func NewReportInputQueryService() (*ReportInputQueryService, error) {
 	if err != nil {
 		return nil, err
 	}
-	return NewReportInputQueryServiceWithDependencies(reportrepo.New(), configured, func(ctx context.Context, config reportoracle.Config) (reportInputOracleConnection, error) {
+	repository := reportrepo.New()
+	return NewReportInputQueryServiceWithStores(repository, repository, configured, func(ctx context.Context, config reportoracle.Config) (reportInputOracleConnection, error) {
 		return reportoracle.Open(ctx, config)
 	}), nil
 }
 
 func NewReportInputQueryServiceWithDependencies(store reportInputQueryStore, configured appConfig.ReportInputQueryConfig, opener reportInputOracleOpener) *ReportInputQueryService {
+	return NewReportInputQueryServiceWithStores(store, nil, configured, opener)
+}
+
+func NewReportInputQueryServiceWithStores(store reportInputQueryStore, definitions reportInputQueryDefinitionStore, configured appConfig.ReportInputQueryConfig, opener reportInputOracleOpener) *ReportInputQueryService {
 	if store == nil || opener == nil {
 		panic("report input query service: dependencies are required")
 	}
 	if configured.Queries == nil {
 		configured.Queries = map[string]appConfig.ReportInputQuery{}
 	}
-	return &ReportInputQueryService{store: store, config: configured, open: opener}
+	return &ReportInputQueryService{store: store, definitions: definitions, config: configured, open: opener, now: func() time.Time { return time.Now().UTC() }}
 }
 
-func (service *ReportInputQueryService) List() *ReportInputQueryListDTO {
-	names := make([]string, 0, len(service.config.Queries))
+func (service *ReportInputQueryService) List(ctx context.Context, actor uint) (*ReportInputQueryListDTO, error) {
+	if service == nil || ctx == nil || actor == 0 {
+		return nil, fmt.Errorf("%w: invalid list request", ErrReportInputQueryUnavailable)
+	}
+	unique := make(map[string]struct{}, len(service.config.Queries))
 	for name := range service.config.Queries {
+		unique[name] = struct{}{}
+	}
+	if service.definitions != nil {
+		definitions, err := service.definitions.ListReportInputQueryDefinitions(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("%w: list definitions: %v", ErrReportInputQueryUnavailable, err)
+		}
+		for _, definition := range definitions {
+			if definition.Enabled {
+				unique[definition.Name] = struct{}{}
+			} else {
+				delete(unique, definition.Name)
+			}
+		}
+	}
+	names := make([]string, 0, len(unique))
+	for name := range unique {
 		names = append(names, name)
 	}
 	sort.Strings(names)
-	return &ReportInputQueryListDTO{Items: names}
+	return &ReportInputQueryListDTO{Items: names}, nil
 }
 
 func (service *ReportInputQueryService) Options(ctx context.Context, actor, definitionID uint, conditionCode, exactName string) (*ReportInputOptionListDTO, error) {
@@ -93,8 +131,24 @@ func (service *ReportInputQueryService) Options(ctx context.Context, actor, defi
 	if err != nil {
 		return nil, fmt.Errorf("%w: report input query binding is invalid", ErrReportRunInvalid)
 	}
-	query, exists := service.config.Queries[queryName]
-	if !exists {
+	statement := ""
+	if service.definitions != nil {
+		definition, definitionErr := service.definitions.FindReportInputQueryByName(ctx, queryName)
+		switch {
+		case definitionErr == nil && definition.Enabled:
+			statement = definition.SelectSQL
+		case definitionErr == nil:
+			return nil, fmt.Errorf("%w: configured query is disabled", ErrReportInputQueryUnavailable)
+		case !errors.Is(definitionErr, reportrepo.ErrInputQueryNotFound):
+			return nil, fmt.Errorf("%w: load configured query: %v", ErrReportInputQueryUnavailable, definitionErr)
+		}
+	}
+	if statement == "" {
+		if query, exists := service.config.Queries[queryName]; exists {
+			statement = query.Select
+		}
+	}
+	if statement == "" {
 		return nil, fmt.Errorf("%w: configured query is missing", ErrReportInputQueryUnavailable)
 	}
 	queryTimeout := service.config.Oracle.QueryTimeout
@@ -107,7 +161,7 @@ func (service *ReportInputQueryService) Options(ctx context.Context, actor, defi
 	if err != nil {
 		return nil, err
 	}
-	options, err := connection.QueryInputOptions(queryCtx, query.Select, exactName, reportInputOptionLimit)
+	options, err := connection.QueryInputOptions(queryCtx, statement, exactName, reportInputOptionLimit)
 	if err != nil {
 		return nil, fmt.Errorf("%w: query Oracle options: %v", ErrReportInputQueryUnavailable, err)
 	}

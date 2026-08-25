@@ -194,10 +194,10 @@ func (adapter *Adapter) Close() error {
 	return adapter.db.Close()
 }
 
-// QueryInputOptions runs a server-configured SELECT that returns id and name.
-// The HTTP layer never supplies the SELECT statement. Wrapping the configured
-// statement keeps the exact-name predicate valid when the base query already
-// contains filtering or ordering.
+// QueryInputOptions runs a validated SELECT that returns id and name. Runtime
+// option requests never accept SQL; management test requests validate SQL
+// before reaching this adapter. Wrapping keeps the exact-name predicate valid
+// when the base query already contains filtering or ordering.
 func (adapter *Adapter) QueryInputOptions(ctx context.Context, configuredSelect, exactName string, limit int) ([]InputOption, error) {
 	if adapter == nil || adapter.db == nil {
 		return nil, fmt.Errorf("query oracle input options: adapter is closed")

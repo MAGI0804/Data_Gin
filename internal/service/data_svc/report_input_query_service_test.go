@@ -43,6 +43,40 @@ func TestReportInputQueryServiceEnforcesPublishedReportAccess(t *testing.T) {
 	}
 }
 
+func TestReportInputQueryServicePrefersDatabaseDefinition(t *testing.T) {
+	store := &fakeReportInputQueryStore{published: &reportrepo.PublishedReport{Version: model.ReportVersion{
+		InputSchemaJSON: model.JSONText(`{"store":{"type":"str","displayName":"门店","control":"SELECT","queryName":"stores"}}`),
+	}}}
+	definitions := &fakeReportInputQueryDefinitionStore{definitions: []model.ReportInputQueryDefinition{{Name: "stores", SelectSQL: "SELECT id, name FROM db_stores", Enabled: true}}}
+	connection := &fakeReportInputOracle{}
+	service := NewReportInputQueryServiceWithStores(store, definitions, reportInputQueryConfig(), func(context.Context, reportoracle.Config) (reportInputOracleConnection, error) {
+		return connection, nil
+	})
+	if _, err := service.Options(t.Context(), 17, 9, "store", ""); err != nil {
+		t.Fatalf("Options() error = %v", err)
+	}
+	if connection.statement != "SELECT id, name FROM db_stores" {
+		t.Fatalf("statement = %q", connection.statement)
+	}
+}
+
+func TestReportInputQueryServiceDisabledDatabaseDefinitionSuppressesLegacyFallback(t *testing.T) {
+	store := &fakeReportInputQueryStore{published: &reportrepo.PublishedReport{Version: model.ReportVersion{
+		InputSchemaJSON: model.JSONText(`{"store":{"type":"str","displayName":"门店","control":"SELECT","queryName":"stores"}}`),
+	}}}
+	definitions := &fakeReportInputQueryDefinitionStore{definitions: []model.ReportInputQueryDefinition{{Name: "stores", Enabled: false}}}
+	service := NewReportInputQueryServiceWithStores(store, definitions, reportInputQueryConfig(), func(context.Context, reportoracle.Config) (reportInputOracleConnection, error) {
+		return nil, errors.New("must not open")
+	})
+	if _, err := service.Options(t.Context(), 17, 9, "store", ""); !errors.Is(err, ErrReportInputQueryUnavailable) {
+		t.Fatalf("Options() error = %v", err)
+	}
+	list, err := service.List(t.Context(), 17)
+	if err != nil || len(list.Items) != 0 {
+		t.Fatalf("List() = %#v, %v", list, err)
+	}
+}
+
 func reportInputQueryConfig() appConfig.ReportInputQueryConfig {
 	return appConfig.ReportInputQueryConfig{
 		Oracle:  appConfig.ReportInputOracleConfig{Host: "oracle", Port: 1521, ServiceName: "REPORT", Username: "user", Password: "secret", QueryTimeout: time.Second},
@@ -53,6 +87,67 @@ func reportInputQueryConfig() appConfig.ReportInputQueryConfig {
 type fakeReportInputQueryStore struct {
 	published *reportrepo.PublishedReport
 	err       error
+}
+
+type fakeReportInputQueryDefinitionStore struct {
+	definitions []model.ReportInputQueryDefinition
+	created     *model.ReportInputQueryDefinition
+	updated     *model.ReportInputQueryDefinition
+	deletedID   uint
+	testStatus  string
+}
+
+func (store *fakeReportInputQueryDefinitionStore) ListReportInputQueryDefinitions(context.Context) ([]model.ReportInputQueryDefinition, error) {
+	return store.definitions, nil
+}
+
+func (store *fakeReportInputQueryDefinitionStore) GetReportInputQueryDefinition(_ context.Context, id uint) (*model.ReportInputQueryDefinition, error) {
+	for _, definition := range store.definitions {
+		if definition.ID == id {
+			copy := definition
+			return &copy, nil
+		}
+	}
+	return nil, reportrepo.ErrInputQueryNotFound
+}
+
+func (store *fakeReportInputQueryDefinitionStore) FindReportInputQueryByName(_ context.Context, name string) (*model.ReportInputQueryDefinition, error) {
+	for _, definition := range store.definitions {
+		if definition.Name == name {
+			copy := definition
+			return &copy, nil
+		}
+	}
+	return nil, reportrepo.ErrInputQueryNotFound
+}
+
+func (store *fakeReportInputQueryDefinitionStore) CreateReportInputQueryDefinition(_ context.Context, _ uint, definition *model.ReportInputQueryDefinition) error {
+	definition.ID = 7
+	definition.LockVersion = 1
+	store.created = definition
+	store.definitions = append(store.definitions, *definition)
+	return nil
+}
+
+func (store *fakeReportInputQueryDefinitionStore) UpdateReportInputQueryDefinition(_ context.Context, _ uint, definition *model.ReportInputQueryDefinition, expected uint64) error {
+	definition.LockVersion = expected + 1
+	store.updated = definition
+	for index := range store.definitions {
+		if store.definitions[index].ID == definition.ID {
+			store.definitions[index] = *definition
+		}
+	}
+	return nil
+}
+
+func (store *fakeReportInputQueryDefinitionStore) DeleteReportInputQueryDefinition(_ context.Context, _ uint, definitionID uint, _ uint64) error {
+	store.deletedID = definitionID
+	return nil
+}
+
+func (store *fakeReportInputQueryDefinitionStore) RecordReportInputQueryTest(_ context.Context, _ uint, _ uint, status, _ string, _ time.Time) error {
+	store.testStatus = status
+	return nil
 }
 
 func (store *fakeReportInputQueryStore) FindPublishedReport(context.Context, uint, uint, string) (*reportrepo.PublishedReport, error) {

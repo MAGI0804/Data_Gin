@@ -79,7 +79,7 @@ type ReportInputQueryDefinition struct {
 	BaseModel
 	Name              string     `gorm:"column:name;size:64;not null;uniqueIndex" json:"name"`
 	SelectSQL         string     `gorm:"column:select_sql;type:longtext;not null" json:"selectSql"`
-	Enabled           bool       `gorm:"column:enabled;not null;default:true;index" json:"enabled"`
+	Enabled           bool       `gorm:"column:enabled;not null;index" json:"enabled"`
 	LockVersion       uint64     `gorm:"column:lock_version;not null;default:1" json:"lockVersion"`
 	LastTestStatus    string     `gorm:"column:last_test_status;size:16" json:"lastTestStatus"`
 	LastTestErrorSafe string     `gorm:"column:last_test_error_safe;size:500" json:"lastTestErrorSafe"`

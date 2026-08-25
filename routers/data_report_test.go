@@ -15,6 +15,7 @@ func TestRegisterReportRoutesUsesExpectedMethodsAndPaths(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	router := gin.New()
 	registerReportRoutes(router.Group("/api"), &data_ctrl.ReportController{})
+	registerReportInputQueryRoutes(router.Group("/api"), &data_ctrl.ReportInputQueryController{})
 	registerReportDatasourceRoutes(router.Group("/api"), &data_ctrl.ReportDatasourceController{})
 	registerReportRunRoutes(router.Group("/api"), &data_ctrl.ReportRunController{})
 	registerReportExportRoutes(router.Group("/api"), &data_ctrl.ReportExportController{})
@@ -34,6 +35,15 @@ func TestRegisterReportRoutesUsesExpectedMethodsAndPaths(t *testing.T) {
 		http.MethodGet + " /api/v1/reports/:id/version-diff",
 		http.MethodGet + " /api/v1/reports/:id/run-contract",
 		http.MethodPost + " /api/v1/reports/:id/runs",
+		http.MethodGet + " /api/v1/report-input-queries",
+		http.MethodPost + " /api/v1/report-input-query-definition-tests",
+		http.MethodGet + " /api/v1/report-input-query-definitions",
+		http.MethodPost + " /api/v1/report-input-query-definitions",
+		http.MethodGet + " /api/v1/report-input-query-definitions/:id",
+		http.MethodPut + " /api/v1/report-input-query-definitions/:id",
+		http.MethodDelete + " /api/v1/report-input-query-definitions/:id",
+		http.MethodPost + " /api/v1/report-input-query-definitions/:id/test",
+		http.MethodGet + " /api/v1/reports/:id/input-options/:condition_code",
 		http.MethodGet + " /api/v1/report-datasources",
 		http.MethodGet + " /api/v1/report-datasources/:id",
 		http.MethodPost + " /api/v1/report-datasources",

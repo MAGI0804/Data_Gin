@@ -230,6 +230,15 @@ func registerReportCenterRoutes(api *gin.RouterGroup, enabled bool) {
 
 func registerReportInputQueryRoutes(api *gin.RouterGroup, controller *data_ctrl.ReportInputQueryController) {
 	api.GET("/v1/report-input-queries", middleware.AuthJWT(), middleware.RequirePermission(model.PermissionReportManage), controller.List)
+	api.POST("/v1/report-input-query-definition-tests", middleware.AuthJWT(), middleware.RequirePermission(model.PermissionReportManage), middleware.LimitRoute("30-M"), controller.TestDefinitionDraft)
+	group := api.Group("/v1/report-input-query-definitions")
+	group.Use(middleware.AuthJWT(), middleware.RequirePermission(model.PermissionReportManage))
+	group.GET("", controller.ListDefinitions)
+	group.POST("", controller.CreateDefinition)
+	group.GET("/:id", controller.GetDefinition)
+	group.PUT("/:id", controller.UpdateDefinition)
+	group.DELETE("/:id", controller.DeleteDefinition)
+	group.POST("/:id/test", middleware.LimitRoute("30-M"), controller.TestDefinition)
 	api.GET("/v1/reports/:id/input-options/:condition_code", middleware.AuthJWT(), middleware.RequirePermission(model.PermissionReportExecute), middleware.LimitRoute("120-M"), controller.Options)
 }
 

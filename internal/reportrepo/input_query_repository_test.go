@@ -14,7 +14,7 @@ func TestInputQueryReferenceScopeUsesCurrentVersionsAndExactJSONPath(t *testing.
 	for _, fragment := range []string{
 		"definitions.current_draft_version_id = versions.id",
 		"definitions.current_published_version_id = versions.id",
-		"JSON_SEARCH(versions.input_schema_json, 'one', ?, NULL, '$.*.queryName') IS NOT NULL",
+		"JSON_CONTAINS(JSON_EXTRACT(versions.input_schema_json, '$.*.queryName'), JSON_QUOTE(?))",
 	} {
 		if !strings.Contains(sqlText, fragment) {
 			t.Fatalf("reference SQL %q does not contain %q", sqlText, fragment)

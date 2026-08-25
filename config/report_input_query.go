@@ -60,9 +60,9 @@ type ReportInputQueryConfig struct {
 	Queries map[string]ReportInputQuery
 }
 
-// LoadReportInputQueryConfig reads the single Oracle datasource and the named
-// input queries from environment variables. Query SQL is configuration only;
-// it is never accepted from an HTTP request.
+// LoadReportInputQueryConfig reads the default Oracle datasource and legacy
+// named queries from environment variables. New definitions are persisted in
+// MySQL through authenticated report-management APIs.
 func LoadReportInputQueryConfig() (ReportInputQueryConfig, error) {
 	oracle, err := loadReportInputOracleConfig()
 	if err != nil {
@@ -163,7 +163,7 @@ func loadReportInputQueries() (map[string]ReportInputQuery, error) {
 		if _, exists := seen[lowerName]; exists {
 			return nil, fmt.Errorf("%s contains duplicate query names", EnvReportInputQueriesJSON)
 		}
-		if !validReportInputSelect(statement) {
+		if !ValidateReportInputSelect(statement) {
 			return nil, fmt.Errorf("%s query %q must contain one SELECT statement without comments or semicolons", EnvReportInputQueriesJSON, name)
 		}
 		seen[lowerName] = struct{}{}
@@ -172,7 +172,9 @@ func loadReportInputQueries() (map[string]ReportInputQuery, error) {
 	return queries, nil
 }
 
-func validReportInputSelect(statement string) bool {
+// ValidateReportInputSelect applies the common safety boundary used by both
+// legacy environment configuration and MySQL-managed query definitions.
+func ValidateReportInputSelect(statement string) bool {
 	lower := strings.ToLower(strings.TrimSpace(statement))
 	return strings.HasPrefix(lower, "select ") && !strings.Contains(lower, ";") &&
 		!strings.Contains(lower, "--") && !strings.Contains(lower, "/*") && !strings.Contains(lower, "*/")

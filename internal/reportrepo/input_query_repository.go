@@ -63,6 +63,21 @@ func (repository *Repository) FindEnabledReportInputQueryByName(ctx context.Cont
 	return &definition, nil
 }
 
+func (repository *Repository) FindReportInputQueryByName(ctx context.Context, name string) (*model.ReportInputQueryDefinition, error) {
+	if repository == nil || repository.db == nil || ctx == nil || name == "" {
+		return nil, ErrInputQueryNotFound
+	}
+	var definition model.ReportInputQueryDefinition
+	err := repository.db.WithContext(ctx).Where("name = ?", name).First(&definition).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, ErrInputQueryNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("report input query: find definition: %w", err)
+	}
+	return &definition, nil
+}
+
 func (repository *Repository) CreateReportInputQueryDefinition(ctx context.Context, actor uint, definition *model.ReportInputQueryDefinition) error {
 	if repository == nil || repository.db == nil || ctx == nil || actor == 0 || definition == nil {
 		return fmt.Errorf("report input query: repository, actor and definition are required")
@@ -198,7 +213,7 @@ func buildReportInputQueryReferenceQuery(db *gorm.DB, name string) *gorm.DB {
 	return db.Table("report_versions AS versions").
 		Joins(`JOIN report_definitions AS definitions ON
 			definitions.current_draft_version_id = versions.id OR definitions.current_published_version_id = versions.id`).
-		Where("JSON_SEARCH(versions.input_schema_json, 'one', ?, NULL, '$.*.queryName') IS NOT NULL", name)
+		Where("JSON_CONTAINS(JSON_EXTRACT(versions.input_schema_json, '$.*.queryName'), JSON_QUOTE(?))", name)
 }
 
 func createInputQueryAudit(ctx context.Context, tx *gorm.DB, actor uint, definition *model.ReportInputQueryDefinition, action string) error {
