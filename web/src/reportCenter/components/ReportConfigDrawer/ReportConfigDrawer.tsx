@@ -42,7 +42,7 @@ export function ReportConfigDrawer({ client, report, datasources, datasourcesLoa
     if (draft.category.trim().length > 64 || draft.description.trim().length > 500) return '分类最多 64 字，说明最多 500 字。'
     if (datasources.find((item) => item.id === draft.datasourceId)?.enabled === false) return '当前 Oracle 数据源已停用，请先启用或更换数据源。'
     if (!draft.procedure.owner || !draft.procedure.name) return '请从 Oracle 查询结果中选择存储过程。'
-    if (!draft.procedure.jsonInputArgName || draft.procedure.resultCursorArgName) return '所选过程必须只有一个 JSON 输入参数，且不能包含任何出参。'
+    if (!draft.procedure.jsonInputArgName || draft.procedure.resultCursorArgName) return '所选过程必须包含可绑定的 JSON 输入参数；允许附带字符类型的 R_ERROR OUT 参数。'
     if (!draft.result.tableOwner || !draft.result.tableName) return '请绑定 Oracle 结果表。'
     if (![draft.procedure.owner, draft.procedure.name, draft.procedure.jsonInputArgName, draft.result.tableOwner, draft.result.tableName].every((value) => oracleIdentifierPattern.test(value))) return 'Oracle 对象或字段名不合法，请从 Oracle 搜索结果中重新选择。'
     if (draft.procedure.package && !oracleIdentifierPattern.test(draft.procedure.package)) return 'Oracle 包名不合法，请重新选择存储过程。'

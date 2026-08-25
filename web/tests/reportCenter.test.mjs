@@ -459,7 +459,7 @@ test('JSON result-table draft keeps one input binding and the Oracle snapshot ta
     inputSchema: { store_id: { type: 'VARCHAR2', displayName: '门店' } },
     result: { tableOwner: 'BI', tableName: 'REPORT_RESULT' },
     columns: [{ fieldId: '11111111-1111-4111-8111-111111111111', logicalCode: 'amount', databaseColumn: 'AMOUNT', sourceOracleType: 'NUMBER', valueType: 'decimal', previewHeader: '金额', excelHeader: '金额', displayOrder: 0, exportOrder: 0, previewVisible: true, exportVisible: true, exportAllowed: true }],
-    grants: [], parameters: [], callTemplate: '',
+    grants: [], parameters: [], callTemplate: 'BEGIN BI.REPORT_PKG.BUILD_RESULT(P_PAYLOAD => :payload); END;',
   } }
   const draft = parseReportDraft(payload)
   assert.equal(draft.procedure.resultCursorArgName, '')
@@ -473,7 +473,7 @@ test('JSON result-table draft keeps one input binding and the Oracle snapshot ta
   assert.deepEqual(requests[0].options.body.parameters, [])
   assert.deepEqual(requests[0].options.body.inputSchema.store_id, { type: 'list[str]', displayName: '门店筛选', required: true, control: 'SELECT', allowedValues: ['S001', 'S002'] })
   assert.deepEqual(requests[0].options.body.result, { tableOwner: 'BI', tableName: 'REPORT_RESULT' })
-  assert.equal(requests[0].options.body.callTemplate, '')
+  assert.equal(requests[0].options.body.callTemplate, 'BEGIN BI.REPORT_PKG.BUILD_RESULT(P_PAYLOAD => :payload); END;')
 })
 
 test('dirty report configuration saves the selected date format before publication', async () => {
@@ -484,7 +484,7 @@ test('dirty report configuration saves the selected date format before publicati
     inputSchema: { datein_begin: { type: 'str', displayName: '开始日期', control: 'DATE', format: 'YYYYMMDD' } },
     result: { tableOwner: 'BI', tableName: 'REPORT_RESULT' },
     columns: [{ fieldId: '11111111-1111-4111-8111-111111111111', logicalCode: 'amount', databaseColumn: 'AMOUNT', sourceOracleType: 'NUMBER', valueType: 'decimal', previewHeader: '金额', excelHeader: '金额', displayOrder: 0, exportOrder: 0, previewVisible: true, exportVisible: true, exportAllowed: true }],
-    grants: [], parameters: [], callTemplate: '',
+    grants: [], parameters: [], callTemplate: 'BEGIN BI.REPORT_PKG.BUILD_RESULT(P_PAYLOAD => :payload); END;',
   } }
   const draft = parseReportDraft(savedPayload)
   draft.lockVersion = 3
@@ -684,15 +684,19 @@ test('procedure catalog and signature parsers enforce the JSON cursor protocol c
   assert.throws(() => parseReportProcedureSignature({ data: { ...signature, blockingReasons: ['blocked'] } }))
 })
 
-test('procedure signature accepts one JSON input without an output cursor', () => {
+test('procedure signature accepts one JSON input with an R_ERROR output', () => {
   const signature = parseReportProcedureSignature({ data: {
-    procedure: { owner: 'REPORT', package: 'PKG', name: 'BUILD', overload: '', argumentCount: 1, qualifiedName: 'REPORT.PKG.BUILD' },
-    allSupported: true, protocolReady: true, inputArgName: 'P_PAYLOAD', outputArgName: '', callTemplate: 'BEGIN REPORT.PKG.BUILD(P_PAYLOAD => :payload); END;', blockingReasons: [],
-    arguments: [{ name: 'P_PAYLOAD', position: 1, sequence: 1, direction: 'IN', oracleType: 'CLOB', dataLength: null, precision: null, scale: null, typeOwner: '', typeName: '', defaulted: false, supported: true, suggestedCode: 'payload', suggestedLogicalType: 'json', suggestedControlType: 'TEXTAREA', suggestedSystemValue: '', role: 'JSON_INPUT' }],
+    procedure: { owner: 'REPORT', package: 'PKG', name: 'BUILD', overload: '', argumentCount: 2, qualifiedName: 'REPORT.PKG.BUILD' },
+    allSupported: true, protocolReady: true, inputArgName: 'P_PAYLOAD', outputArgName: '', callTemplate: 'DECLARE error_output_2 VARCHAR2(32767); BEGIN REPORT.PKG.BUILD(P_PAYLOAD => :payload, R_ERROR => error_output_2); IF error_output_2 IS NOT NULL THEN RAISE_APPLICATION_ERROR(-20001, SUBSTR(error_output_2, 1, 500)); END IF; END;', blockingReasons: [],
+    arguments: [
+      { name: 'P_PAYLOAD', position: 1, sequence: 1, direction: 'IN', oracleType: 'CLOB', dataLength: null, precision: null, scale: null, typeOwner: '', typeName: '', defaulted: false, supported: true, suggestedCode: 'payload', suggestedLogicalType: 'json', suggestedControlType: 'TEXTAREA', suggestedSystemValue: '', role: 'JSON_INPUT' },
+      { name: 'R_ERROR', position: 2, sequence: 2, direction: 'OUT', oracleType: 'VARCHAR2', dataLength: null, precision: null, scale: null, typeOwner: '', typeName: '', defaulted: false, supported: true, suggestedCode: 'rError', suggestedLogicalType: '', suggestedControlType: '', suggestedSystemValue: '', role: 'ERROR_OUTPUT' },
+    ],
   } })
   assert.equal(signature.protocolReady, true)
   assert.equal(signature.inputArgName, 'P_PAYLOAD')
   assert.equal(signature.outputArgName, '')
+  assert.equal(signature.arguments[1].role, 'ERROR_OUTPUT')
 })
 
 test('procedure API encodes discovery filters and REF CURSOR draft save omits legacy contracts', async () => {

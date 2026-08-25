@@ -391,6 +391,9 @@ func compileJSONTableSnapshot(
 	if err != nil {
 		return Compiled{}, contractError("compile JSON result-table call: %v", err)
 	}
+	if strings.TrimSpace(version.CallTemplate) != plan.Statement() {
+		return Compiled{}, contractError("configured JSON result-table call differs from the canonical procedure call")
+	}
 	inputSchema := canonicalJSON(version.InputSchemaJSON)
 	if len(inputSchema) == 0 || bytes.Equal(inputSchema, []byte("null")) || bytes.Equal(inputSchema, []byte("{}")) {
 		return Compiled{}, contractError("JSON input schema is required")

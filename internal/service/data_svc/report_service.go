@@ -359,17 +359,15 @@ func reportDraftFromRequest(actor uint, request requestbody.ReportDraftSaveReque
 		if _, err := reporting.CompileCallTemplate(callTemplate, definitions); err != nil {
 			return nil, invalidReport("call template and parameters do not match")
 		}
-	} else {
+	} else if mode == model.ReportExecutionModeRefCursor {
 		target := procedure.Owner + "."
 		if procedure.Package != "" {
 			target += procedure.Package + "."
 		}
 		target += procedure.Name
-		if mode == model.ReportExecutionModeRefCursor {
-			callTemplate = fmt.Sprintf("BEGIN %s(%s => :payload, %s => :resultCursor); END;", target, jsonInputArgName, resultCursorArgName)
-		} else {
-			callTemplate = fmt.Sprintf("BEGIN %s(%s => :payload); END;", target, jsonInputArgName)
-		}
+		callTemplate = fmt.Sprintf("BEGIN %s(%s => :payload, %s => :resultCursor); END;", target, jsonInputArgName, resultCursorArgName)
+	} else if callTemplate == "" {
+		return nil, invalidReport("JSON result-table call template is required")
 	}
 	columns := []model.ReportColumn{}
 	if len(request.Columns) > 0 {

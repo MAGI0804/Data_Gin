@@ -383,7 +383,7 @@ func TestReportDatasourceServiceBuildsProcedureSignatureRecommendations(t *testi
 	}
 }
 
-func TestReportDatasourceServiceAcceptsJSONInputWithIgnoredOutput(t *testing.T) {
+func TestReportDatasourceServiceAcceptsJSONInputWithErrorOutput(t *testing.T) {
 	connection := &fakeReportDatasourceConnection{arguments: []reportoracle.ProcedureArgument{
 		{Name: "P_QUERY_JSON", Position: 1, Sequence: 1, Direction: "IN", DataType: "CLOB"},
 		{Name: "R_ERROR", Position: 2, Sequence: 2, Direction: "OUT", DataType: "VARCHAR2"},
@@ -398,8 +398,8 @@ func TestReportDatasourceServiceAcceptsJSONInputWithIgnoredOutput(t *testing.T) 
 	if err != nil {
 		t.Fatalf("GetProcedureSignature() error = %v", err)
 	}
-	want := "DECLARE ignored_output_2 VARCHAR2(32767); BEGIN REPORT.EXPORT_CURSOR(P_QUERY_JSON => :payload, R_ERROR => ignored_output_2); END;"
-	if !signature.AllSupported || !signature.ProtocolReady || signature.CallTemplate != want || !signature.Arguments[0].Supported || !signature.Arguments[1].Supported || signature.Arguments[1].Role != "IGNORED_OUTPUT" || len(signature.BlockingReasons) != 0 {
+	want := "DECLARE error_output_2 VARCHAR2(32767); BEGIN REPORT.EXPORT_CURSOR(P_QUERY_JSON => :payload, R_ERROR => error_output_2); IF error_output_2 IS NOT NULL THEN RAISE_APPLICATION_ERROR(-20001, SUBSTR(error_output_2, 1, 500)); END IF; END;"
+	if !signature.AllSupported || !signature.ProtocolReady || signature.CallTemplate != want || !signature.Arguments[0].Supported || !signature.Arguments[1].Supported || signature.Arguments[1].Role != "ERROR_OUTPUT" || len(signature.BlockingReasons) != 0 {
 		t.Fatalf("signature = %+v", signature)
 	}
 }

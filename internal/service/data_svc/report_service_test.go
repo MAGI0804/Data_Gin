@@ -291,7 +291,7 @@ func TestReportDraftServiceAcceptsJSONInputResultTable(t *testing.T) {
 		"datein_begin":{"type":"str","displayName":"开始日期","control":"DATE","format":"YYYYMMDD"}
 	}`)
 	request.Parameters = nil
-	request.CallTemplate = ""
+	request.CallTemplate = "BEGIN REPORT_OWNER.PKG_SALES.BUILD_REPORT(P_PAYLOAD => :payload); END;"
 
 	draft, err := reportDraftFromRequest(17, request)
 	if err != nil {

@@ -411,9 +411,8 @@ func (service *ReportDatasourceService) GetProcedureSignature(ctx context.Contex
 			} else {
 				blockingReasons = append(blockingReasons, "存储过程只能有一个 JSON 输入参数")
 			}
-		case "IGNORED_OUTPUT":
-			// Table-snapshot procedures may expose status or error outputs. The
-			// Oracle call plan binds them to local variables and discards them.
+		case "ERROR_OUTPUT":
+			// R_ERROR is checked by the generated PL/SQL block before commit.
 		default:
 			blockingReasons = append(blockingReasons, fmt.Sprintf("参数 %s 不是可支持的 JSON 输入或普通输出参数", item.Name))
 		}
@@ -579,7 +578,7 @@ func displayProcedureName(ref reportoracle.ProcedureRef) string {
 
 func procedureArgumentDTO(argument reportoracle.ProcedureArgument, usedCodes map[string]int) ReportProcedureArgumentDTO {
 	oracleType := strings.ToUpper(strings.Join(strings.Fields(argument.DataType), " "))
-	logicalType, controlType, role, supported, reason := recommendedProcedureArgumentType(argument.Direction, oracleType, argument.TypeOwner, argument.TypeName, argument.DataScale)
+	logicalType, controlType, role, supported, reason := recommendedProcedureArgumentType(argument.Name, argument.Direction, oracleType, argument.TypeOwner, argument.TypeName, argument.DataScale)
 	code := suggestedProcedureParameterCode(argument.Name)
 	usedCodes[code]++
 	if usedCodes[code] > 1 {
@@ -600,12 +599,12 @@ func procedureArgumentDTO(argument reportoracle.ProcedureArgument, usedCodes map
 	}
 }
 
-func recommendedProcedureArgumentType(direction, oracleType, typeOwner, typeName string, scale *int64) (string, string, string, bool, string) {
+func recommendedProcedureArgumentType(name, direction, oracleType, typeOwner, typeName string, scale *int64) (string, string, string, bool, string) {
 	direction = strings.ToUpper(strings.TrimSpace(direction))
 	if direction == "OUT" {
-		argument := reportoracle.ProcedureArgument{Direction: direction, DataType: oracleType, TypeOwner: typeOwner, TypeName: typeName, DataScale: scale}
-		if reportoracle.SupportsIgnoredJSONTableOutput(argument) {
-			return "", "", "IGNORED_OUTPUT", true, ""
+		argument := reportoracle.ProcedureArgument{Name: name, Direction: direction, DataType: oracleType, TypeOwner: typeOwner, TypeName: typeName, DataScale: scale}
+		if reportoracle.SupportsJSONTableErrorOutput(argument) {
+			return "", "", "ERROR_OUTPUT", true, ""
 		}
 		return "", "", "UNSUPPORTED", false, "暂不支持该 Oracle OUT 参数类型"
 	}

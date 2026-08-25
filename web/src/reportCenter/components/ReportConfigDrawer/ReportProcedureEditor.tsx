@@ -45,7 +45,7 @@ export function ReportProcedureEditor({ client, draft, onChange }: { client: Rep
     setSignature(response.data)
     setState((current) => ({ ...current, inspecting: false }))
     if (!response.data.protocolReady) {
-      setState((current) => ({ ...current, error: response.data.blockingReasons[0] || '所选过程不符合唯一 JSON 输入协议。' }))
+      setState((current) => ({ ...current, error: response.data.blockingReasons[0] || '所选过程缺少可绑定的 JSON 输入参数。' }))
       return
     }
     onChange((currentDraft) => ({
@@ -63,7 +63,7 @@ export function ReportProcedureEditor({ client, draft, onChange }: { client: Rep
         tableOwner: currentDraft.result.tableOwner || response.data.procedure.owner,
         tableName: currentDraft.result.tableName,
       },
-      callTemplate: '',
+      callTemplate: response.data.callTemplate,
       parameters: [],
     }))
   }, [client, draft, onChange])
@@ -252,9 +252,9 @@ export function ReportProcedureEditor({ client, draft, onChange }: { client: Rep
       <div className={styles.signatureHeader}><div><h3 id="report-procedure-signature-title">已绑定过程</h3><code>{selectedLabel}</code></div>{signature ? <span className={signature.protocolReady ? styles.ready : styles.blocked}>{signature.protocolReady ? '协议可用' : '协议不兼容'}</span> : null}</div>
       {state.inspecting ? <p role="status">正在读取 Oracle 参数签名…</p> : null}
       {signature ? <>
-        <div className={styles.arguments}>{signature.arguments.map((argument) => <div key={`${argument.position}-${argument.name}`}><code>{argument.name}</code><span>{argument.direction}</span><span>{argument.oracleType}</span><span>{argument.role === 'JSON_INPUT' ? 'JSON 输入' : '不支持'}</span></div>)}</div>
+        <div className={styles.arguments}>{signature.arguments.map((argument) => <div key={`${argument.position}-${argument.name}`}><code>{argument.name}</code><span>{argument.direction}</span><span>{argument.oracleType}</span><span>{argument.role === 'JSON_INPUT' ? 'JSON 输入' : argument.role === 'ERROR_OUTPUT' ? '错误输出' : '不支持'}</span></div>)}</div>
         {signature.protocolReady ? <dl className={styles.binding}><div><dt>JSON 输入参数</dt><dd><code>{signature.inputArgName}</code></dd></div><div><dt>结果获取方式</dt><dd>读取绑定结果表</dd></div></dl> : <ul className={styles.reasons}>{signature.blockingReasons.map((reason) => <li key={reason}>{reason}</li>)}</ul>}
-      </> : <p className={styles.empty}>从上方 Oracle 查询结果中选择过程后，系统会自动绑定唯一 JSON 输入参数，不绑定任何出参。</p>}
+      </> : <p className={styles.empty}>从上方 Oracle 查询结果中选择过程后，系统会自动绑定 JSON 输入参数；R_ERROR 输出非空时运行会失败并回滚。</p>}
     </section>
     <section className={styles.resultTable} aria-labelledby="report-result-table-title">
       <div><h3 id="report-result-table-title">Oracle 结果表绑定</h3><p>可绑定其他 Schema 已授权的物理表；系统读取完整结果并在 Excel 导出成功后清理数据，因此数据源账号需要 SELECT、DELETE 权限和稳定 ROWID。</p></div>

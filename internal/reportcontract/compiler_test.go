@@ -139,12 +139,12 @@ func TestVerifyRuntimeMetadataAcceptsMySQLNormalizedNestedJSON(t *testing.T) {
 	}
 }
 
-func TestCompileJSONInputResultTableAcceptsIgnoredOutput(t *testing.T) {
+func TestCompileJSONInputResultTableAcceptsErrorOutput(t *testing.T) {
 	version, _, columns, grants, _, result := validContract()
 	version.ExecutionMode = model.ReportExecutionModeTableSnapshot
 	version.JSONInputArgName = "P_JSON"
 	version.InputSchemaJSON = model.JSONText(`{"store_id":{"type":"VARCHAR2","displayName":"门店"}}`)
-	version.CallTemplate = "BEGIN REPORT.PKG.SALES(P_JSON => :payload); END;"
+	version.CallTemplate = "DECLARE error_output_2 VARCHAR2(32767); BEGIN REPORT.PKG.SALES(P_JSON => :payload, R_ERROR => error_output_2); IF error_output_2 IS NOT NULL THEN RAISE_APPLICATION_ERROR(-20001, SUBSTR(error_output_2, 1, 500)); END IF; END;"
 	arguments := []reportoracle.ProcedureArgument{
 		{Name: "P_JSON", Position: 1, Sequence: 1, Direction: "IN", DataType: "CLOB"},
 		{Name: "R_ERROR", Position: 2, Sequence: 2, Direction: "OUT", DataType: "VARCHAR2"},
@@ -154,7 +154,7 @@ func TestCompileJSONInputResultTableAcceptsIgnoredOutput(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Compile() error = %v", err)
 	}
-	if !strings.Contains(string(compiled.SpecJSON), `ignored_output_2 VARCHAR2(32767)`) {
+	if !strings.Contains(string(compiled.SpecJSON), `error_output_2 VARCHAR2(32767)`) {
 		t.Fatalf("compiled spec = %s", compiled.SpecJSON)
 	}
 }

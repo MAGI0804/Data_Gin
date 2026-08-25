@@ -743,7 +743,7 @@ function serializeReportDraft(draft: ReportDraft, creating: boolean) {
     ...(creating ? {} : { expectedLockVersion: draft.lockVersion }), executionMode: draft.executionMode, procedure: draft.procedure,
     inputSchema: jsonInput ? reportInputSchemaDocument(draft.inputSchema) : undefined,
     result: draft.executionMode === 'REF_CURSOR' ? {} : { tableOwner: draft.result.tableOwner, tableName: draft.result.tableName },
-    callTemplate: jsonInput ? '' : draft.callTemplate,
+    callTemplate: jsonTableSnapshot ? draft.callTemplate : jsonInput ? '' : draft.callTemplate,
     parameters: jsonInput ? [] : draft.parameters.map((parameter) => ({ ...parameter, defaultValue: parameter.sensitive ? undefined : parameter.defaultValue, allowedValues: parameter.allowedValues.length ? parameter.allowedValues : undefined, validation: Object.keys(parameter.validation).length ? parameter.validation : undefined, normalizer: Object.keys(parameter.normalizer).length ? parameter.normalizer : undefined, valueSource: Object.keys(parameter.valueSource).length ? parameter.valueSource : undefined, nullPolicy: parameter.nullPolicy || 'TYPED_NULL' })),
     columns: draft.columns,
     grants: draft.grants,

@@ -33,7 +33,7 @@ func BuildJSONTableCallPlan(ref ProcedureRef, arguments []ProcedureArgument, inp
 	sort.Slice(ordered, func(i, j int) bool { return ordered[i].Position < ordered[j].Position })
 	bindings := make([]string, 0, len(ordered))
 	declarations := make([]string, 0, len(ordered))
-	cursorCleanup := make([]string, 0, 1)
+	outputChecks := make([]string, 0, 1)
 	inputFound, payloadIsCLOB := false, false
 	for index, argument := range ordered {
 		name, err := normalizeIdentifier(argument.Name, "procedure argument")
@@ -54,16 +54,14 @@ func BuildJSONTableCallPlan(ref ProcedureRef, arguments []ProcedureArgument, inp
 		if direction != "OUT" {
 			return JSONTableCallPlan{}, fmt.Errorf("%w: procedure contains an unsupported non-output argument %q", ErrUnsupportedBinding, name)
 		}
-		declarationType, cursor, ok := ignoredJSONTableOutputType(argument)
+		declarationType, messageExpression, ok := jsonTableErrorOutputType(argument)
 		if !ok {
 			return JSONTableCallPlan{}, fmt.Errorf("%w: procedure output argument %q has unsupported type %q", ErrUnsupportedBinding, name, dataType)
 		}
-		variable := fmt.Sprintf("ignored_output_%d", index+1)
+		variable := fmt.Sprintf("error_output_%d", index+1)
 		declarations = append(declarations, variable+" "+declarationType+";")
 		bindings = append(bindings, name+" => "+variable)
-		if cursor {
-			cursorCleanup = append(cursorCleanup, "IF "+variable+"%ISOPEN THEN CLOSE "+variable+"; END IF;")
-		}
+		outputChecks = append(outputChecks, "IF "+variable+" IS NOT NULL THEN RAISE_APPLICATION_ERROR(-20001, "+strings.ReplaceAll(messageExpression, "$VALUE", variable)+"); END IF;")
 	}
 	if !inputFound {
 		return JSONTableCallPlan{}, fmt.Errorf("%w: procedure must contain the configured JSON input", ErrUnsupportedBinding)
@@ -76,46 +74,38 @@ func BuildJSONTableCallPlan(ref ProcedureRef, arguments []ProcedureArgument, inp
 	statement := fmt.Sprintf("BEGIN %s(%s); END;", target, strings.Join(bindings, ", "))
 	if len(declarations) > 0 {
 		body := fmt.Sprintf("BEGIN %s(%s);", target, strings.Join(bindings, ", "))
-		if len(cursorCleanup) > 0 {
-			body += " " + strings.Join(cursorCleanup, " ")
+		if len(outputChecks) > 0 {
+			body += " " + strings.Join(outputChecks, " ")
 		}
 		statement = "DECLARE " + strings.Join(declarations, " ") + " " + body + " END;"
 	}
 	return JSONTableCallPlan{statement: statement, payloadIsCLOB: payloadIsCLOB}, nil
 }
 
-// SupportsIgnoredJSONTableOutput reports whether an OUT argument can be bound
-// to a local PL/SQL variable and safely discarded by the table-snapshot mode.
-func SupportsIgnoredJSONTableOutput(argument ProcedureArgument) bool {
+// SupportsJSONTableErrorOutput reports whether an R_ERROR OUT argument can be
+// checked by the table-snapshot call before the transaction is committed.
+func SupportsJSONTableErrorOutput(argument ProcedureArgument) bool {
 	if strings.ToUpper(strings.TrimSpace(argument.Direction)) != "OUT" {
 		return false
 	}
-	_, _, ok := ignoredJSONTableOutputType(argument)
+	_, _, ok := jsonTableErrorOutputType(argument)
 	return ok
 }
 
-func ignoredJSONTableOutputType(argument ProcedureArgument) (declaration string, cursor, ok bool) {
+func jsonTableErrorOutputType(argument ProcedureArgument) (declaration, messageExpression string, ok bool) {
+	if strings.ToUpper(strings.TrimSpace(argument.Name)) != "R_ERROR" || strings.TrimSpace(argument.TypeOwner) != "" || strings.TrimSpace(argument.TypeName) != "" {
+		return "", "", false
+	}
 	dataType := normalizeOracleMetadataType(argument.DataType)
-	typeName := normalizeOracleMetadataType(argument.TypeName)
 	switch dataType {
 	case "VARCHAR2", "CHAR", "LONG":
-		return "VARCHAR2(32767)", false, true
+		return "VARCHAR2(32767)", "SUBSTR($VALUE, 1, 500)", true
 	case "NVARCHAR2", "NCHAR":
-		return "NVARCHAR2(32767)", false, true
-	case "RAW", "LONG RAW":
-		return "RAW(32767)", false, true
-	case "NUMBER", "FLOAT", "DECIMAL", "INTEGER", "BINARY_INTEGER", "PLS_INTEGER":
-		return "NUMBER", false, true
-	case "BINARY_FLOAT", "BINARY_DOUBLE", "DATE", "TIMESTAMP", "TIMESTAMP WITH TIME ZONE", "TIMESTAMP WITH LOCAL TIME ZONE",
-		"INTERVAL YEAR TO MONTH", "INTERVAL DAY TO SECOND", "CLOB", "NCLOB", "BLOB", "BFILE", "BOOLEAN", "ROWID", "UROWID":
-		return dataType, false, true
-	case "REF CURSOR", "SYS_REFCURSOR":
-		return "SYS_REFCURSOR", true, true
+		return "NVARCHAR2(32767)", "SUBSTR($VALUE, 1, 500)", true
+	case "CLOB", "NCLOB":
+		return dataType, "DBMS_LOB.SUBSTR($VALUE, 500, 1)", true
 	default:
-		if typeName == "SYS_REFCURSOR" {
-			return "SYS_REFCURSOR", true, true
-		}
-		return "", false, false
+		return "", "", false
 	}
 }
 
