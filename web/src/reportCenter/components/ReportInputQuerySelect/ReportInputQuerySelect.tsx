@@ -1,11 +1,11 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import Select from 'antd/es/select'
 import { getReportInputOptions, type ReportCenterClient } from '../../api'
-import { mergeReportInputOptions } from '../../inputOptions'
+import { mergeReportInputOptions, reportInputSelectionKeys, reportInputSelectionValue } from '../../inputOptions'
 import type { ReportInputOption } from '../../types'
 import styles from './ReportInputQuerySelect.module.css'
 
-export function ReportInputQuerySelect({ client, reportId, conditionCode, inputId, value, required, disabled, onChange }: {
+export function ReportInputQuerySelect({ client, reportId, conditionCode, inputId, value, required, disabled, multiple, numeric, onChange }: {
 	client: ReportCenterClient
 	reportId: number
 	conditionCode: string
@@ -13,13 +13,18 @@ export function ReportInputQuerySelect({ client, reportId, conditionCode, inputI
 	value: unknown
 	required: boolean
 	disabled: boolean
-	onChange: (value: string) => void
+	multiple: boolean
+	numeric: boolean
+	onChange: (value: unknown) => void
 }) {
 	const [search, setSearch] = useState('')
 	const [options, setOptions] = useState<ReportInputOption[]>([])
 	const [state, setState] = useState({ loading: false, error: '' })
 	const selected = useRef(new Map<string, ReportInputOption>())
-	const selectedKey = value === undefined || value === null || value === '' ? undefined : String(value)
+	const selectedKeys = useMemo(
+		() => reportInputSelectionKeys(value, multiple),
+		[value, multiple],
+	)
 
 	useEffect(() => {
 		selected.current.clear()
@@ -29,9 +34,13 @@ export function ReportInputQuerySelect({ client, reportId, conditionCode, inputI
 	}, [reportId, conditionCode])
 
 	useEffect(() => {
-		const current = selectedKey ? options.find((option) => option.id === selectedKey) : undefined
-		if (current) selected.current.set(current.id, current)
-	}, [options, selectedKey])
+		const active = new Set(selectedKeys)
+		for (const key of selected.current.keys()) if (!active.has(key)) selected.current.delete(key)
+		for (const key of selectedKeys) {
+			const current = options.find((option) => option.id === key)
+			if (current) selected.current.set(current.id, current)
+		}
+	}, [options, selectedKeys])
 
 	useEffect(() => {
 		const controller = new AbortController()
@@ -64,18 +73,18 @@ export function ReportInputQuerySelect({ client, reportId, conditionCode, inputI
 			filterOption={false}
 			id={inputId}
 			loading={state.loading}
+			mode={multiple ? 'multiple' : undefined}
 			notFoundContent={state.loading ? '正在查询…' : state.error || '没有匹配选项'}
 			options={options.map((option) => ({ value: option.id, label: option.name }))}
 			placeholder="输入名称精确查询"
 			searchValue={search}
 			showSearch
-			value={selectedKey}
-			onClear={() => onChange('')}
+			value={multiple ? selectedKeys : selectedKeys[0]}
+			onChange={(next) => onChange(reportInputSelectionValue(next, multiple, numeric))}
 			onSearch={setSearch}
 			onSelect={(key) => {
 				const option = options.find((item) => item.id === key)
 				if (option) selected.current.set(option.id, option)
-				onChange(key)
 				setSearch('')
 			}}
 		/>

@@ -278,7 +278,7 @@ function ConditionField({ client, reportId, code, field, value, disabled, onChan
   const label = `${field.displayName}${field.required ? ' *' : ''}`
   const list = isReportInputListType(field.type)
   const hint = [code, field.type, field.format, field.required ? '必填' : '选填'].filter(Boolean).join(' · ')
-	if (field.queryName) return <label className={styles.field} htmlFor={id}><span>{label}</span><ReportInputQuerySelect client={client} reportId={reportId} conditionCode={code} inputId={id} value={value} required={field.required} disabled={disabled} onChange={onChange} /><small>{hint} · 显示 name，提交 id</small></label>
+	if (field.queryName) return <label className={styles.field} htmlFor={id}><span>{label}</span><ReportInputQuerySelect client={client} reportId={reportId} conditionCode={code} inputId={id} value={value} required={field.required} disabled={disabled} multiple={list} numeric={field.type === 'number' || field.type === 'list[number]'} onChange={onChange} /><small>{hint} · 显示 name，提交 id{list ? ' 列表' : ''}</small></label>
   if (field.allowedValues?.length) {
     const options = field.allowedValues.map((item, index) => ({ key: String(index), value: editableReportConditionValue(item, { ...field, allowedValues: undefined }), label: displayConditionOption(item) }))
     const selected = list ? options.filter((option) => (Array.isArray(value) ? value : []).some((item) => comparableConditionValue(item) === comparableConditionValue(option.value))).map((option) => option.key) : options.find((option) => comparableConditionValue(option.value) === comparableConditionValue(value))?.key ?? ''

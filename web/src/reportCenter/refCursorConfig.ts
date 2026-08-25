@@ -11,29 +11,6 @@ export const reportInputControls: Array<ReportInputControl | ''> = ['', 'TEXT', 
 export const reportDateFormats: ReportInputFormat[] = ['YYYYMMDD', 'YYYY-MM-DD']
 export const reportDateTimeFormats: ReportInputFormat[] = ['YYYYMMDDHHmmss', 'YYYY-MM-DD HH:mm:ss', 'ISO8601']
 
-export type ReportInputSource = 'MANUAL' | 'STATIC' | 'QUERY'
-
-export function reportInputSource(field: ReportInputField): ReportInputSource {
-	if (field.queryName) return 'QUERY'
-	if (field.control === 'SELECT') return 'STATIC'
-	return 'MANUAL'
-}
-
-export function changeReportInputSource(field: ReportInputField, source: ReportInputSource, queries: string[]): ReportInputField {
-	const next = { ...field }
-	delete next.queryName
-	delete next.allowedValues
-	if (source === 'QUERY') {
-		next.control = 'SELECT'
-		if (queries[0]) next.queryName = queries[0]
-	} else if (source === 'STATIC') {
-		next.control = 'SELECT'
-	} else if (next.control === 'SELECT') {
-		next.control = next.type === 'number' ? 'NUMBER' : 'TEXT'
-	}
-	return next
-}
-
 export function parseReportInputSchemaText(source: string): ReportInputSchema {
   if (reportJSONContainsUnsafeNumber(source)) throw new Error(`筛选条件 JSON 中的数字${unsafeNumberError}`)
   return parseReportInputSchemaDocument(JSON.parse(source) as unknown)
@@ -65,7 +42,7 @@ export function parseReportInputSchemaDocument(value: unknown, allowEmpty = fals
     if ((control === 'DATE' || control === 'DATETIME') && normalizedType.type !== 'str') throw new Error(`筛选字段 ${code} 的日期控件必须使用 str 类型。`)
     if (rawField.required !== undefined && typeof rawField.required !== 'boolean') throw new Error(`筛选字段 ${code} 的 required 必须是布尔值。`)
     if (rawField.allowedValues !== undefined && (!Array.isArray(rawField.allowedValues) || rawField.allowedValues.length === 0)) throw new Error(`筛选字段 ${code} 的 allowedValues 必须是非空数组。`)
-		if (rawField.queryName !== undefined && (!queryName || !inputQueryNamePattern.test(queryName) || control !== 'SELECT' || !['str', 'number'].includes(normalizedType.type))) throw new Error(`筛选字段 ${code} 的 queryName 必须绑定在单选文本或数字字段上。`)
+		if (rawField.queryName !== undefined && (!queryName || !inputQueryNamePattern.test(queryName) || control !== 'SELECT' || !['str', 'number', 'list[str]', 'list[number]'].includes(normalizedType.type))) throw new Error(`筛选字段 ${code} 的 queryName 必须绑定在文本、数字或对应列表字段上。`)
 		if (queryName && rawField.allowedValues !== undefined) throw new Error(`筛选字段 ${code} 的 queryName 不能与 allowedValues 同时配置。`)
     const field = compactInputField({
       type: normalizedType.type,
