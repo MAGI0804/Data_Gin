@@ -780,7 +780,7 @@ func canonicalReportInputSchema(raw json.RawMessage) (json.RawMessage, error) {
 		field.Control = strings.ToUpper(strings.TrimSpace(field.Control))
 		field.Format = strings.TrimSpace(field.Format)
 		field.QueryName = strings.TrimSpace(field.QueryName)
-		field.Multiple = false
+		field.Multiple = conditionTypeIsList(field.Type, false)
 		if field.Type == "" || field.DisplayName == "" || utf8.RuneCountInString(field.DisplayName) > 128 {
 			return nil, invalidReport("input schema field type or displayName is invalid")
 		}
@@ -792,7 +792,7 @@ func canonicalReportInputSchema(raw json.RawMessage) (json.RawMessage, error) {
 		if !validJSONConditionFormat(field.Type, field.Control, field.Format) {
 			return nil, invalidReport("input schema field format is invalid")
 		}
-		if field.QueryName != "" && (field.Control != "SELECT" || !reportInputQueryNamePattern.MatchString(field.QueryName) || field.Type != "str" && field.Type != "number") {
+		if field.QueryName != "" && (field.Control != "SELECT" || !reportInputQueryNamePattern.MatchString(field.QueryName) || !reportInputQueryTypeSupported(field.Type)) {
 			return nil, invalidReport("input schema field queryName is invalid")
 		}
 		if field.QueryName != "" && len(bytes.TrimSpace(field.AllowedValues)) > 0 {
@@ -814,6 +814,15 @@ func canonicalReportInputSchema(raw json.RawMessage) (json.RawMessage, error) {
 		return nil, invalidReport("input schema cannot be canonicalized")
 	}
 	return encoded, nil
+}
+
+func reportInputQueryTypeSupported(valueType string) bool {
+	switch valueType {
+	case "str", "number", "list[str]", "list[number]":
+		return true
+	default:
+		return false
+	}
 }
 
 func validateReportInputFieldValues(field reportInputFieldSchema) error {

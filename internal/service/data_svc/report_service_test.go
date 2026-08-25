@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -233,16 +234,38 @@ func TestCanonicalReportInputSchemaKeepsDateAndDateTimeAsFormattedStrings(t *tes
 }
 
 func TestCanonicalReportInputSchemaKeepsQueryBinding(t *testing.T) {
-	canonical, err := canonicalReportInputSchema(json.RawMessage(`{"store":{"type":"str","displayName":"门店","control":"SELECT","queryName":"stores"}}`))
-	if err != nil {
-		t.Fatalf("canonicalReportInputSchema() error = %v", err)
+	accepted := []struct {
+		name      string
+		valueType string
+		multiple  bool
+	}{
+		{name: "string", valueType: "str"},
+		{name: "number", valueType: "number"},
+		{name: "string list", valueType: "list[str]", multiple: true},
+		{name: "number list", valueType: "list[number]", multiple: true},
 	}
-	if !strings.Contains(string(canonical), `"queryName":"stores"`) {
-		t.Fatalf("canonical schema = %s", canonical)
+	for _, test := range accepted {
+		t.Run(test.name, func(t *testing.T) {
+			schema := fmt.Sprintf(`{"store":{"type":%q,"displayName":"门店","control":"SELECT","queryName":"stores"}}`, test.valueType)
+			canonical, err := canonicalReportInputSchema(json.RawMessage(schema))
+			if err != nil {
+				t.Fatalf("canonicalReportInputSchema() error = %v", err)
+			}
+			var fields map[string]reportInputFieldSchema
+			if err := json.Unmarshal(canonical, &fields); err != nil {
+				t.Fatalf("decode canonical schema: %v", err)
+			}
+			field := fields["store"]
+			if field.Type != test.valueType || field.QueryName != "stores" || field.Multiple != test.multiple {
+				t.Fatalf("canonical field = %#v", field)
+			}
+		})
 	}
+
 	for _, schema := range []string{
 		`{"store":{"type":"str","displayName":"门店","control":"TEXT","queryName":"stores"}}`,
-		`{"stores":{"type":"list[str]","displayName":"门店","control":"SELECT","queryName":"stores"}}`,
+		`{"stores":{"type":"list[bool]","displayName":"门店","control":"SELECT","queryName":"stores"}}`,
+		`{"stores":{"type":"json","displayName":"门店","control":"SELECT","queryName":"stores"}}`,
 		`{"store":{"type":"str","displayName":"门店","control":"SELECT","queryName":"bad name"}}`,
 		`{"store":{"type":"str","displayName":"门店","control":"SELECT","queryName":"stores","allowedValues":["S001"]}}`,
 	} {
