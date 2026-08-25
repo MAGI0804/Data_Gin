@@ -3,6 +3,7 @@ package data_svc
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -30,6 +31,28 @@ func TestReportInputQueryServiceUsesPublishedBindingAndCachesOracle(t *testing.T
 	}
 	if openCalls != 1 || connection.queryName != "上海店" || connection.statement != "SELECT id, name FROM stores" {
 		t.Fatalf("openCalls=%d connection=%#v", openCalls, connection)
+	}
+}
+
+func TestReportInputQueryServiceSupportsListBindings(t *testing.T) {
+	for _, valueType := range []string{"list[str]", "list[number]"} {
+		t.Run(valueType, func(t *testing.T) {
+			store := &fakeReportInputQueryStore{published: &reportrepo.PublishedReport{Version: model.ReportVersion{
+				InputSchemaJSON: model.JSONText(fmt.Sprintf(`{"store":{"type":%q,"displayName":"门店","control":"SELECT","queryName":"stores"}}`, valueType)),
+			}}}
+			connection := &fakeReportInputOracle{options: []reportoracle.InputOption{{ID: "S001", Name: "上海店"}}}
+			service := NewReportInputQueryServiceWithDependencies(store, reportInputQueryConfig(), func(context.Context, reportoracle.Config) (reportInputOracleConnection, error) {
+				return connection, nil
+			})
+
+			result, err := service.Options(t.Context(), 17, 9, "store", "上海店")
+			if err != nil || len(result.Items) != 1 || result.Items[0].ID != "S001" || result.Items[0].Name != "上海店" {
+				t.Fatalf("Options() = %#v, %v", result, err)
+			}
+			if connection.queryName != "上海店" || connection.statement != "SELECT id, name FROM stores" {
+				t.Fatalf("connection = %#v", connection)
+			}
+		})
 	}
 }
 

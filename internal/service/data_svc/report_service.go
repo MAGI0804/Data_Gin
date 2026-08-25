@@ -780,7 +780,7 @@ func canonicalReportInputSchema(raw json.RawMessage) (json.RawMessage, error) {
 		field.Control = strings.ToUpper(strings.TrimSpace(field.Control))
 		field.Format = strings.TrimSpace(field.Format)
 		field.QueryName = strings.TrimSpace(field.QueryName)
-		field.Multiple = conditionTypeIsList(field.Type, false)
+		field.Multiple = false
 		if field.Type == "" || field.DisplayName == "" || utf8.RuneCountInString(field.DisplayName) > 128 {
 			return nil, invalidReport("input schema field type or displayName is invalid")
 		}

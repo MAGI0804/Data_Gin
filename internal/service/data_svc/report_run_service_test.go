@@ -66,7 +66,7 @@ func TestReportRunServiceCreatesRefCursorRunFromJSONConditions(t *testing.T) {
 	published := publishedRunFixture()
 	published.Version.ExecutionMode = model.ReportExecutionModeRefCursor
 	published.Version.InputSchemaJSON = model.JSONText(`{
-		"c_store_id":{"type":"list[str]","displayName":"门店","required":true,"allowedValues":["S001","S002"]},
+		"c_store_id":{"type":"list[str]","displayName":"门店","control":"SELECT","required":true,"queryName":"stores"},
 		"datein_begin":{"type":"str","displayName":"开始日期","control":"DATE","format":"YYYYMMDD","default":"20260504"}
 	}`)
 	published.Parameters = nil
@@ -90,8 +90,19 @@ func TestReportRunServiceCreatesRefCursorRunFromJSONConditions(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Contract() error = %v", err)
 	}
-	if contract.ExecutionMode != model.ReportExecutionModeRefCursor || !strings.Contains(string(contract.InputSchema), `"displayName":"门店"`) || len(contract.Parameters) != 0 {
+	if contract.ExecutionMode != model.ReportExecutionModeRefCursor || len(contract.Parameters) != 0 {
 		t.Fatalf("contract = %#v", contract)
+	}
+	var fields map[string]reportRunInputFieldSchema
+	if err := json.Unmarshal(contract.InputSchema, &fields); err != nil {
+		t.Fatalf("decode contract input schema: %v", err)
+	}
+	storeField := fields["c_store_id"]
+	if storeField.Type != "list[str]" || storeField.QueryName != "stores" || storeField.Multiple {
+		t.Fatalf("contract store field = %#v", storeField)
+	}
+	if strings.Contains(string(contract.InputSchema), `"multiple"`) {
+		t.Fatalf("contract contains legacy multiple flag: %s", contract.InputSchema)
 	}
 }
 
