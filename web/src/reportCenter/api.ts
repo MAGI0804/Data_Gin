@@ -1,4 +1,5 @@
 import type { ClientResponse, HTTPMethod } from '../api/client'
+import { isReportInputQueryName } from './inputQueryName.js'
 import { parseReportInputSchemaDocument, reportInputSchemaDocument } from './refCursorConfig.js'
 import type { ReportAudit, ReportAuditPage, ReportAuditQuery, ReportCatalogPage, ReportCatalogQuery, ReportColumn, ReportDatasource, ReportDatasourceInput, ReportDatasourceTest, ReportDefinitionStatus, ReportDraft, ReportExport, ReportExportPage, ReportFilterOperator, ReportGrant, ReportInputOption, ReportInputQueryDefinition, ReportInputQueryDefinitionInput, ReportInputQueryTestResult, ReportParameter, ReportProcedureArgument, ReportProcedurePage, ReportProcedureRef, ReportProcedureSignature, ReportProcedureSummary, ReportPublication, ReportResultPage, ReportResultQuery, ReportResultTableColumn, ReportResultTablePage, ReportResultTableRef, ReportResultTableSchema, ReportResultTableSummary, ReportRun, ReportRunContract, ReportRunStatus, ReportSummary, ReportVersionDiff, ReportVersionPage, ReportVersionSummary } from './types'
 
@@ -93,7 +94,7 @@ export async function getReportInputOptions(client: ReportCenterClient, reportId
 export function parseReportInputQueries(payload: unknown): string[] {
 	const data = unwrapData(payload)
 	if (!Array.isArray(data.items)) throw new Error('invalid report input queries')
-	const items = data.items.filter((item): item is string => typeof item === 'string' && /^[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(item))
+	const items = data.items.filter((item): item is string => typeof item === 'string' && isReportInputQueryName(item))
 	if (items.length !== data.items.length || new Set(items).size !== items.length) throw new Error('invalid report input queries')
 	return items
 }
@@ -111,7 +112,7 @@ export function parseReportInputQueryDefinition(payload: unknown): ReportInputQu
 	const selectSql = typeof data.selectSql === 'string' ? data.selectSql.trim().slice(0, 65536) : ''
 	const lockVersion = positiveInteger(data.lockVersion)
 	const lastTestStatus = data.lastTestStatus === 'SUCCESS' || data.lastTestStatus === 'FAILED' ? data.lastTestStatus : 'NOT_TESTED'
-	if (!id || !name || !/^[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(name) || !selectSql || !lockVersion || typeof data.enabled !== 'boolean') throw new Error('invalid report input query definition')
+	if (!id || !name || !isReportInputQueryName(name) || !selectSql || !lockVersion || typeof data.enabled !== 'boolean') throw new Error('invalid report input query definition')
 	return {
 		id, name, selectSql, lockVersion, enabled: data.enabled,
 		lastTestStatus,

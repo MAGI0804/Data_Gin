@@ -183,7 +183,7 @@ func (service *ReportInputQueryService) testInputQuery(ctx context.Context, sele
 func reportInputQueryDefinitionFromRequest(request requestbody.ReportInputQueryDefinitionSaveRequest, update bool) (*model.ReportInputQueryDefinition, error) {
 	name := strings.TrimSpace(request.Name)
 	selectSQL := strings.TrimSpace(request.SelectSQL)
-	if !reportInputQueryNamePattern.MatchString(name) || !validReportInputQuerySelect(selectSQL) || (update && request.ExpectedLockVersion == 0) || (!update && request.ExpectedLockVersion != 0) {
+	if !appConfig.ValidateReportInputQueryName(name) || !validReportInputQuerySelect(selectSQL) || (update && request.ExpectedLockVersion == 0) || (!update && request.ExpectedLockVersion != 0) {
 		return nil, ErrReportInputQueryInvalid
 	}
 	return &model.ReportInputQueryDefinition{Name: name, SelectSQL: selectSQL, Enabled: request.Enabled}, nil

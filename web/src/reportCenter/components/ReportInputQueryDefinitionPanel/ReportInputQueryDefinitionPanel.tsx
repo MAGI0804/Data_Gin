@@ -10,6 +10,7 @@ import {
 	type ReportCenterClient,
 } from '../../api'
 import type { ReportInputQueryDefinition, ReportInputQueryDefinitionInput, ReportInputQueryTestResult } from '../../types'
+import { isReportInputQueryName, reportInputQueryNamePatternSource } from '../../inputQueryName'
 import styles from './ReportInputQueryDefinitionPanel.module.css'
 
 type EditorState = { open: false } | { open: true; definition: ReportInputQueryDefinition | null }
@@ -69,7 +70,7 @@ export function ReportInputQueryDefinitionPanel({ client }: { client: ReportCent
 			<div><strong>输入选项查询</strong><span>维护查询名称和 SELECT。所有查询都使用环境变量中的默认 Oracle 连接，并且必须返回 id、name 两列。</span></div>
 			<button type="button" onClick={() => setEditor({ open: true, definition: null })}><Plus aria-hidden="true" />新增查询</button>
 		</div>
-		<div className={styles.guide}><strong>使用步骤</strong><span>① 新增并测试查询；② 编辑报表筛选字段；③ 将“输入方式”改为“Oracle 查询选择”；④ 选择查询名称；⑤ 保存并发布报表。</span></div>
+		<div className={styles.guide}><strong>使用步骤</strong><span>① 新增并测试查询；② 编辑报表筛选字段；③ 选择 Oracle 查询名称；④ 保存并发布报表。</span></div>
 		{state.notice ? <p className={styles.notice} role="status">{state.notice}</p> : null}
 		{state.loading ? <FeedbackState kind="loading" title="正在读取输入选项查询" /> : null}
 		{state.error ? <FeedbackState kind="error" title="输入选项查询不可用" description={state.error} action={<button type="button" onClick={() => void load()}>重试</button>} /> : null}
@@ -125,7 +126,7 @@ function ReportInputQueryDefinitionDrawer({ client, definition, onClose, onSaved
 	const footer = <><button type="button" disabled={state.busy} onClick={onClose}>取消</button><button type="button" disabled={state.busy} onClick={() => void testQuery()}><FlaskConical aria-hidden="true" />{state.busy ? '处理中…' : '测试查询'}</button><Button variant="primary" disabled={state.busy} onClick={() => void save()}>{state.busy ? '处理中…' : '保存查询'}</Button></>
 	return <Drawer open title={definition ? '编辑输入选项查询' : '新增输入选项查询'} description="查询保存在 MySQL，但始终通过环境变量配置的默认 Oracle 执行。SELECT 必须输出 id 和 name；不要填写分号或 SQL 注释。" size="wide" closeDisabled={state.busy} onClose={onClose} footer={footer}>
 		<form className={styles.form} onSubmit={(event) => { event.preventDefault(); void save() }}>
-			<label className={styles.field}><span>查询名称</span><input required disabled={state.busy} className={styles.mono} maxLength={64} pattern="[A-Za-z][A-Za-z0-9_-]{0,63}" value={input.name} onChange={(event) => set('name', event.currentTarget.value)} placeholder="product" /><small>报表字段通过这个名称绑定，例如 product、product_color。</small></label>
+			<label className={styles.field}><span>查询名称</span><input required disabled={state.busy} className={styles.mono} maxLength={64} pattern={reportInputQueryNamePatternSource} value={input.name} onChange={(event) => set('name', event.currentTarget.value)} placeholder="款号" /><small>报表字段通过这个名称绑定，例如“款号”“款色”或 product_color。</small></label>
 			<label className={styles.sqlField}><span>SELECT 语句</span><textarea required disabled={state.busy} maxLength={65536} rows={9} value={input.selectSql} onChange={(event) => set('selectSql', event.currentTarget.value)} placeholder="SELECT a.id AS id, a.name AS name FROM BOSNDS3.M_PRODUCT@LINK_TO_BOJUN a" /><small>必须只返回 id、name 两列。用户输入名称时，系统在外层安全追加 WHERE name = :name。</small></label>
 			<label className={styles.field}><span>测试名称（可选）</span><input disabled={state.busy} maxLength={128} value={exactName} onChange={(event) => setExactName(event.currentTarget.value)} placeholder="输入一个真实 name 做精确查询" /></label>
 			<label className={styles.switch}><input disabled={state.busy} type="checkbox" checked={input.enabled} onChange={(event) => set('enabled', event.currentTarget.checked)} /><span>启用并允许报表字段绑定</span></label>
@@ -152,7 +153,7 @@ function definitionInput(definition: ReportInputQueryDefinition | null): ReportI
 function validateDefinition(input: ReportInputQueryDefinitionInput) {
 	const name = input.name.trim()
 	const sql = input.selectSql.trim()
-	if (!/^[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(name)) return '查询名称必须以字母开头，只能包含字母、数字、下划线或连字符。'
+	if (!isReportInputQueryName(name)) return '查询名称必须以文字开头，只能包含文字、数字、下划线或连字符。'
 	if (!/^select\s/i.test(sql) || sql.length > 65536 || sql.includes(';') || sql.includes('--') || sql.includes('/*') || sql.includes('*/')) return '请输入单条无分号、无注释的 SELECT 语句。'
 	return ''
 }

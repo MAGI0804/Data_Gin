@@ -212,7 +212,7 @@ func reportInputQueryName(schemaJSON []byte, conditionCode string) (string, erro
 	}
 	field.Control = strings.ToUpper(strings.TrimSpace(field.Control))
 	field.QueryName = strings.TrimSpace(field.QueryName)
-	if field.Control != "SELECT" || !reportInputQueryNamePattern.MatchString(field.QueryName) {
+	if field.Control != "SELECT" || !appConfig.ValidateReportInputQueryName(field.QueryName) {
 		return "", errors.New("input condition is not query-backed")
 	}
 	return field.QueryName, nil

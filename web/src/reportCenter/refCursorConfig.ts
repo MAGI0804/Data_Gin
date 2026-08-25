@@ -1,7 +1,7 @@
 import type { ReportColumn, ReportInputControl, ReportInputField, ReportInputFormat, ReportInputSchema, ReportInputType, ReportResultTableColumn } from './types'
+import { isReportInputQueryName } from './inputQueryName.js'
 
 const conditionCodePattern = /^[A-Za-z][A-Za-z0-9_]{0,63}$/
-const inputQueryNamePattern = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/
 const oracleFieldPattern = /^[A-Za-z][A-Za-z0-9_$#]{0,127}$/
 const jsonNumberPattern = /^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?$/
 const unsafeNumberError = ' 超出 JavaScript 安全数字范围或无法无损表示，请改用 str 类型。'
@@ -42,7 +42,7 @@ export function parseReportInputSchemaDocument(value: unknown, allowEmpty = fals
     if ((control === 'DATE' || control === 'DATETIME') && normalizedType.type !== 'str') throw new Error(`筛选字段 ${code} 的日期控件必须使用 str 类型。`)
     if (rawField.required !== undefined && typeof rawField.required !== 'boolean') throw new Error(`筛选字段 ${code} 的 required 必须是布尔值。`)
     if (rawField.allowedValues !== undefined && (!Array.isArray(rawField.allowedValues) || rawField.allowedValues.length === 0)) throw new Error(`筛选字段 ${code} 的 allowedValues 必须是非空数组。`)
-		if (rawField.queryName !== undefined && (!queryName || !inputQueryNamePattern.test(queryName) || control !== 'SELECT' || !['str', 'number', 'list[str]', 'list[number]'].includes(normalizedType.type))) throw new Error(`筛选字段 ${code} 的 queryName 必须绑定在文本、数字或对应列表字段上。`)
+		if (rawField.queryName !== undefined && (!queryName || !isReportInputQueryName(queryName) || control !== 'SELECT' || !['str', 'number', 'list[str]', 'list[number]'].includes(normalizedType.type))) throw new Error(`筛选字段 ${code} 的 queryName 必须绑定在文本、数字或对应列表字段上。`)
 		if (queryName && rawField.allowedValues !== undefined) throw new Error(`筛选字段 ${code} 的 queryName 不能与 allowedValues 同时配置。`)
     const field = compactInputField({
       type: normalizedType.type,

@@ -68,9 +68,9 @@ func TestReportInputQueryServiceEnforcesPublishedReportAccess(t *testing.T) {
 
 func TestReportInputQueryServicePrefersDatabaseDefinition(t *testing.T) {
 	store := &fakeReportInputQueryStore{published: &reportrepo.PublishedReport{Version: model.ReportVersion{
-		InputSchemaJSON: model.JSONText(`{"store":{"type":"str","displayName":"门店","control":"SELECT","queryName":"stores"}}`),
+		InputSchemaJSON: model.JSONText(`{"store":{"type":"str","displayName":"门店","control":"SELECT","queryName":"门店查询-2026_华东"}}`),
 	}}}
-	definitions := &fakeReportInputQueryDefinitionStore{definitions: []model.ReportInputQueryDefinition{{Name: "stores", SelectSQL: "SELECT id, name FROM db_stores", Enabled: true}}}
+	definitions := &fakeReportInputQueryDefinitionStore{definitions: []model.ReportInputQueryDefinition{{Name: "门店查询-2026_华东", SelectSQL: "SELECT id, name FROM db_stores", Enabled: true}}}
 	connection := &fakeReportInputOracle{}
 	service := NewReportInputQueryServiceWithStores(store, definitions, reportInputQueryConfig(), func(context.Context, reportoracle.Config) (reportInputOracleConnection, error) {
 		return connection, nil

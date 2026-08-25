@@ -1,13 +1,14 @@
 package config
 
 import (
+	"strings"
 	"testing"
 	"time"
 )
 
 func TestLoadReportInputQueryConfigUsesDefaultsAndNamedSelects(t *testing.T) {
 	setReportInputOracleEnvironment(t)
-	t.Setenv(EnvReportInputQueriesJSON, `{"stores":"SELECT id, name FROM report_stores"}`)
+	t.Setenv(EnvReportInputQueriesJSON, `{"门店查询-2026_华东":"SELECT id, name FROM report_stores"}`)
 
 	config, err := LoadReportInputQueryConfig()
 	if err != nil {
@@ -16,9 +17,22 @@ func TestLoadReportInputQueryConfigUsesDefaultsAndNamedSelects(t *testing.T) {
 	if config.Oracle.Port != 1521 || config.Oracle.QueryTimeout != 30*time.Second || config.Oracle.MaxOpenConnections != 20 {
 		t.Fatalf("Oracle defaults = %#v", config.Oracle)
 	}
-	query, exists := config.Queries["stores"]
+	query, exists := config.Queries["门店查询-2026_华东"]
 	if !exists || query.Select != "SELECT id, name FROM report_stores" {
 		t.Fatalf("Queries = %#v", config.Queries)
+	}
+}
+
+func TestValidateReportInputQueryNameSupportsUnicodeAndLimitsCharacters(t *testing.T) {
+	for _, name := range []string{"门店查询-2026_华东", "É店9", strings.Repeat("店", 64)} {
+		if !ValidateReportInputQueryName(name) {
+			t.Errorf("ValidateReportInputQueryName(%q) = false", name)
+		}
+	}
+	for _, name := range []string{"1门店", "_门店", "门店 查询", strings.Repeat("店", 65)} {
+		if ValidateReportInputQueryName(name) {
+			t.Errorf("ValidateReportInputQueryName(%q) = true", name)
+		}
 	}
 }
 

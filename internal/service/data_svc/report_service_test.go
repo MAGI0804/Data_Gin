@@ -239,17 +239,18 @@ func TestCanonicalReportInputSchemaKeepsQueryBinding(t *testing.T) {
 		valueType     string
 		multiple      bool
 		canonicalType string
+		queryName     string
 	}{
-		{name: "string", valueType: "str", canonicalType: "str"},
-		{name: "number", valueType: "number", canonicalType: "number"},
-		{name: "string list", valueType: "list[str]", canonicalType: "list[str]"},
-		{name: "number list", valueType: "list[number]", canonicalType: "list[number]"},
-		{name: "legacy string list", valueType: "VARCHAR2", multiple: true, canonicalType: "list[str]"},
-		{name: "legacy number list", valueType: "NUMBER", multiple: true, canonicalType: "list[number]"},
+		{name: "string", valueType: "str", canonicalType: "str", queryName: "stores"},
+		{name: "number", valueType: "number", canonicalType: "number", queryName: "stores"},
+		{name: "string list", valueType: "list[str]", canonicalType: "list[str]", queryName: "门店查询-2026_华东"},
+		{name: "number list", valueType: "list[number]", canonicalType: "list[number]", queryName: "stores"},
+		{name: "legacy string list", valueType: "VARCHAR2", multiple: true, canonicalType: "list[str]", queryName: "stores"},
+		{name: "legacy number list", valueType: "NUMBER", multiple: true, canonicalType: "list[number]", queryName: "stores"},
 	}
 	for _, test := range accepted {
 		t.Run(test.name, func(t *testing.T) {
-			schema := fmt.Sprintf(`{"store":{"type":%q,"displayName":"门店","control":"SELECT","queryName":"stores","multiple":%t}}`, test.valueType, test.multiple)
+			schema := fmt.Sprintf(`{"store":{"type":%q,"displayName":"门店","control":"SELECT","queryName":%q,"multiple":%t}}`, test.valueType, test.queryName, test.multiple)
 			canonical, err := canonicalReportInputSchema(json.RawMessage(schema))
 			if err != nil {
 				t.Fatalf("canonicalReportInputSchema() error = %v", err)
@@ -259,7 +260,7 @@ func TestCanonicalReportInputSchemaKeepsQueryBinding(t *testing.T) {
 				t.Fatalf("decode canonical schema: %v", err)
 			}
 			field := fields["store"]
-			if field.Type != test.canonicalType || field.QueryName != "stores" || field.Multiple {
+			if field.Type != test.canonicalType || field.QueryName != test.queryName || field.Multiple {
 				t.Fatalf("canonical field = %#v", field)
 			}
 			if strings.Contains(string(canonical), `"multiple"`) {

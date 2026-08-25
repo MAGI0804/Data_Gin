@@ -30,7 +30,7 @@ const (
 	EnvReportInputQueriesJSON                 = "REPORT_INPUT_QUERIES_JSON"
 )
 
-var reportInputQueryNamePattern = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_-]{0,63}$`)
+var reportInputQueryNamePattern = regexp.MustCompile(`^\p{L}[\p{L}\p{N}_-]{0,63}$`)
 
 type ReportInputOracleConfig struct {
 	Host               string
@@ -157,7 +157,7 @@ func loadReportInputQueries() (map[string]ReportInputQuery, error) {
 		name := strings.TrimSpace(rawName)
 		statement := strings.TrimSpace(rawSelect)
 		lowerName := strings.ToLower(name)
-		if !reportInputQueryNamePattern.MatchString(name) {
+		if !ValidateReportInputQueryName(name) {
 			return nil, fmt.Errorf("%s contains an invalid query name", EnvReportInputQueriesJSON)
 		}
 		if _, exists := seen[lowerName]; exists {
@@ -170,6 +170,12 @@ func loadReportInputQueries() (map[string]ReportInputQuery, error) {
 		queries[name] = ReportInputQuery{Name: name, Select: statement}
 	}
 	return queries, nil
+}
+
+// ValidateReportInputQueryName applies the shared query-name rule used by
+// environment configuration, managed definitions, and report input schemas.
+func ValidateReportInputQueryName(name string) bool {
+	return reportInputQueryNamePattern.MatchString(name)
 }
 
 // ValidateReportInputSelect applies the common safety boundary used by both

@@ -16,6 +16,7 @@ import (
 	mysqlDriver "github.com/go-sql-driver/mysql"
 	"github.com/google/uuid"
 
+	appConfig "gin-biz-web-api/config"
 	"gin-biz-web-api/internal/reporting"
 	"gin-biz-web-api/internal/reportoracle"
 	"gin-biz-web-api/internal/reportrepo"
@@ -37,12 +38,11 @@ var (
 	ErrReportConflict       = errors.New("report draft service: conflict")
 	ErrReportDeleteConflict = errors.New("report draft service: report cannot be deleted")
 
-	reportCodePattern           = regexp.MustCompile(`^[a-z][a-z0-9_-]{2,63}$`)
-	reportLogicalCodePattern    = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_]{0,63}$`)
-	reportInputQueryNamePattern = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_-]{0,63}$`)
-	reportControlTypes          = map[string]struct{}{"TEXT": {}, "TEXTAREA": {}, "NUMBER": {}, "CHECKBOX": {}, "DATE": {}, "DATETIME": {}, "SELECT": {}, "MULTI_SELECT": {}}
-	reportValueTypes            = map[string]struct{}{"string": {}, "integer": {}, "decimal": {}, "boolean": {}, "date": {}, "datetime": {}, "enum": {}, "multi_enum": {}, "json": {}}
-	reportGrantActions          = map[string]struct{}{"QUERY": {}, "EXPORT": {}}
+	reportCodePattern        = regexp.MustCompile(`^[a-z][a-z0-9_-]{2,63}$`)
+	reportLogicalCodePattern = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_]{0,63}$`)
+	reportControlTypes       = map[string]struct{}{"TEXT": {}, "TEXTAREA": {}, "NUMBER": {}, "CHECKBOX": {}, "DATE": {}, "DATETIME": {}, "SELECT": {}, "MULTI_SELECT": {}}
+	reportValueTypes         = map[string]struct{}{"string": {}, "integer": {}, "decimal": {}, "boolean": {}, "date": {}, "datetime": {}, "enum": {}, "multi_enum": {}, "json": {}}
+	reportGrantActions       = map[string]struct{}{"QUERY": {}, "EXPORT": {}}
 )
 
 type reportDraftStore interface {
@@ -792,7 +792,7 @@ func canonicalReportInputSchema(raw json.RawMessage) (json.RawMessage, error) {
 		if !validJSONConditionFormat(field.Type, field.Control, field.Format) {
 			return nil, invalidReport("input schema field format is invalid")
 		}
-		if field.QueryName != "" && (field.Control != "SELECT" || !reportInputQueryNamePattern.MatchString(field.QueryName) || !reportInputQueryTypeSupported(field.Type)) {
+		if field.QueryName != "" && (field.Control != "SELECT" || !appConfig.ValidateReportInputQueryName(field.QueryName) || !reportInputQueryTypeSupported(field.Type)) {
 			return nil, invalidReport("input schema field queryName is invalid")
 		}
 		if field.QueryName != "" && len(bytes.TrimSpace(field.AllowedValues)) > 0 {

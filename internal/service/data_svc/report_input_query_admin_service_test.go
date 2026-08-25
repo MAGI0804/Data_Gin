@@ -17,13 +17,13 @@ func TestReportInputQueryDefinitionCRUDValidatesAndPersists(t *testing.T) {
 		return &fakeReportInputOracle{}, nil
 	})
 	created, err := service.CreateDefinition(t.Context(), 17, requestbody.ReportInputQueryDefinitionSaveRequest{
-		Name: " stores ", SelectSQL: " SELECT id, name FROM stores ", Enabled: true,
+		Name: " 门店查询-2026_华东 ", SelectSQL: " SELECT id, name FROM stores ", Enabled: true,
 	})
-	if err != nil || created.ID != 7 || created.Name != "stores" || created.LockVersion != 1 || definitions.created == nil {
+	if err != nil || created.ID != 7 || created.Name != "门店查询-2026_华东" || created.LockVersion != 1 || definitions.created == nil {
 		t.Fatalf("CreateDefinition() = %#v, %v store=%#v", created, err, definitions)
 	}
 	updated, err := service.UpdateDefinition(t.Context(), 17, 7, requestbody.ReportInputQueryDefinitionSaveRequest{
-		Name: "stores", SelectSQL: "SELECT id, name FROM current_stores", Enabled: false, ExpectedLockVersion: 1,
+		Name: "门店查询-2026_华东", SelectSQL: "SELECT id, name FROM current_stores", Enabled: false, ExpectedLockVersion: 1,
 	})
 	if err != nil || updated.LockVersion != 2 || updated.Enabled || definitions.updated == nil {
 		t.Fatalf("UpdateDefinition() = %#v, %v store=%#v", updated, err, definitions)
