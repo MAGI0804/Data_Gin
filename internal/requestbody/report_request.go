@@ -158,3 +158,15 @@ type ReportDatasourceConnectionTestRequest struct {
 	PrefetchRows          int    `json:"prefetchRows"`
 	ArraySize             int    `json:"arraySize"`
 }
+
+type ReportInputQueryDefinitionSaveRequest struct {
+	Name                string `json:"name"`
+	SelectSQL           string `json:"selectSql"`
+	Enabled             bool   `json:"enabled"`
+	ExpectedLockVersion uint64 `json:"expectedLockVersion,omitempty"`
+}
+
+type ReportInputQueryDefinitionTestRequest struct {
+	SelectSQL string `json:"selectSql,omitempty"`
+	Name      string `json:"name,omitempty"`
+}

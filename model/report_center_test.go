@@ -17,6 +17,7 @@ func TestReportCenterTableNames(t *testing.T) {
 		want string
 	}{
 		{name: "datasources", got: (ReportDatasource{}).TableName(), want: "report_datasources"},
+		{name: "input query definitions", got: (ReportInputQueryDefinition{}).TableName(), want: "report_input_query_definitions"},
 		{name: "result table bindings", got: (ReportResultTableBinding{}).TableName(), want: "report_result_table_bindings"},
 		{name: "definitions", got: (ReportDefinition{}).TableName(), want: "report_definitions"},
 		{name: "versions", got: (ReportVersion{}).TableName(), want: "report_versions"},
