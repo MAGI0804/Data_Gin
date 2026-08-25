@@ -1,4 +1,5 @@
 import { type FormEvent, useEffect, useState } from 'react'
+import { classifyAuthResponse } from '../api/auth'
 import { apiURL as buildApiURL } from '../apiURL'
 import { Brand } from '../components/Brand'
 import styles from './LoginScreen.module.css'
@@ -42,8 +43,10 @@ export function LoginScreen({ onLogin, checking }: { onLogin: (token: string) =>
         method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ phone: phone.trim(), purpose }),
       })
-      if (!response.ok) {
-        setError(loginFailureMessage(response.status, 'code'))
+      const data: unknown = await response.json().catch(() => null)
+      const result = classifyAuthResponse(response.ok, response.status, data)
+      if (!result.successful) {
+        setError(loginFailureMessage(result.status, 'code'))
         return
       }
       setCountdown(60)
@@ -72,19 +75,19 @@ export function LoginScreen({ onLogin, checking }: { onLogin: (token: string) =>
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify(body),
       })
-      const data: unknown = await response.json().catch(() => ({}))
-      if (mode === 'reset' && response.ok) {
+      const data: unknown = await response.json().catch(() => null)
+      const result = classifyAuthResponse(response.ok, response.status, data)
+      if (mode === 'reset' && result.successful) {
         setMode('password')
         setNotice('密码已重置，请使用新密码登录。')
         setCountdown(0)
         return
       }
-      const token = readToken(data)
-      if (!response.ok || !token) {
-        setError(loginFailureMessage(response.status, mode))
+      if (!result.token) {
+        setError(loginFailureMessage(result.status, mode))
         return
       }
-      onLogin(token)
+      onLogin(result.token)
     } catch {
       setError('无法连接登录服务，请检查后端服务或代理配置。')
     } finally {
@@ -158,13 +161,6 @@ function apiURL(path: string) {
 
 function formValue(form: FormData, key: string) {
   const value = form.get(key)
-  return typeof value === 'string' ? value : ''
-}
-
-function readToken(data: unknown) {
-  if (!data || typeof data !== 'object') return ''
-  const envelope = data as { data?: Record<string, unknown> }
-  const value = envelope.data?.token
   return typeof value === 'string' ? value : ''
 }
 

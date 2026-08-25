@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { isSuccessfulPayload, readEnvelopeToken, readSessionUser, readTokenInfo, verifySessionResponses } from '../.test-dist/api/auth.js'
+import { classifyAuthResponse, isSuccessfulPayload, readEnvelopeToken, readSessionUser, readTokenInfo, verifySessionResponses } from '../.test-dist/api/auth.js'
 
 test('accepts both supported successful API envelope codes', () => {
   assert.equal(isSuccessfulPayload({ code: 0, data: {} }), true)
@@ -14,6 +14,21 @@ test('reads a refresh token only from a valid response envelope', () => {
   assert.equal(readEnvelopeToken({ code: 200, data: { token: 'new-token' } }), 'new-token')
   assert.equal(readEnvelopeToken({ code: 200, data: { token: '  ' } }), '')
   assert.equal(readEnvelopeToken({ code: 200, token: 'wrong-level' }), '')
+})
+
+test('classifies authentication responses using both HTTP and application status', () => {
+  assert.deepEqual(classifyAuthResponse(true, 200, { code: 200, data: { token: 'session-token' } }), {
+    status: 200,
+    successful: true,
+    token: 'session-token',
+  })
+  assert.deepEqual(classifyAuthResponse(true, 200, { code: 100500, data: { token: 'must-not-use' } }), {
+    status: 500,
+    successful: false,
+    token: '',
+  })
+  assert.equal(classifyAuthResponse(false, 503, { code: 200, data: { token: 'must-not-use' } }).successful, false)
+  assert.equal(classifyAuthResponse(true, 200, null).successful, false)
 })
 
 test('parses complete authenticated-session details', () => {

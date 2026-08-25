@@ -1,3 +1,5 @@
+import { effectiveApiStatus } from '../apiResponse'
+
 type JsonRecord = Record<string, unknown>
 
 export type SessionUser = {
@@ -55,6 +57,16 @@ export function isSuccessfulPayload(payload: unknown) {
 export function readEnvelopeToken(payload: unknown) {
   const token = dataRecord(payload)?.token
   return typeof token === 'string' && token.trim() ? token : ''
+}
+
+export function classifyAuthResponse(httpOK: boolean, httpStatus: number, payload: unknown) {
+  const status = effectiveApiStatus(httpStatus, payload)
+  const successful = httpOK && status < 400 && isSuccessfulPayload(payload)
+  return {
+    status,
+    successful,
+    token: successful ? readEnvelopeToken(payload) : '',
+  }
 }
 
 export function readSessionUser(payload: unknown): SessionUser | null {
