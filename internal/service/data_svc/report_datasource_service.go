@@ -411,19 +411,26 @@ func (service *ReportDatasourceService) GetProcedureSignature(ctx context.Contex
 			} else {
 				blockingReasons = append(blockingReasons, "存储过程只能有一个 JSON 输入参数")
 			}
+		case "IGNORED_OUTPUT":
+			// Table-snapshot procedures may expose status or error outputs. The
+			// Oracle call plan binds them to local variables and discards them.
 		default:
-			blockingReasons = append(blockingReasons, fmt.Sprintf("参数 %s 不符合单 JSON 输入协议", item.Name))
+			blockingReasons = append(blockingReasons, fmt.Sprintf("参数 %s 不是可支持的 JSON 输入或普通输出参数", item.Name))
 		}
 	}
 	if inputArgName == "" {
-		blockingReasons = append(blockingReasons, "缺少唯一的 IN CLOB/字符 JSON 输入参数")
+		blockingReasons = append(blockingReasons, "缺少 IN CLOB/字符 JSON 输入参数")
 	}
-	protocolReady := len(blockingReasons) == 0 && len(arguments) == 1
 	callTemplate := ""
-	if protocolReady {
-		target := qualifiedProcedureName(normalized)
-		callTemplate = fmt.Sprintf("BEGIN %s(%s => :payload); END;", target, inputArgName)
+	if len(blockingReasons) == 0 {
+		plan, planErr := reportoracle.BuildJSONTableCallPlan(normalized, arguments, inputArgName)
+		if planErr != nil {
+			blockingReasons = append(blockingReasons, "存储过程参数无法生成安全调用")
+		} else {
+			callTemplate = plan.Statement()
+		}
 	}
+	protocolReady := len(blockingReasons) == 0
 	return &ReportProcedureSignatureDTO{
 		Procedure: procedureSummaryDTO(normalized, len(arguments)), Arguments: items,
 		AllSupported: protocolReady, ProtocolReady: protocolReady, InputArgName: inputArgName,
@@ -595,8 +602,15 @@ func procedureArgumentDTO(argument reportoracle.ProcedureArgument, usedCodes map
 
 func recommendedProcedureArgumentType(direction, oracleType, typeOwner, typeName string, scale *int64) (string, string, string, bool, string) {
 	direction = strings.ToUpper(strings.TrimSpace(direction))
+	if direction == "OUT" {
+		argument := reportoracle.ProcedureArgument{Direction: direction, DataType: oracleType, TypeOwner: typeOwner, TypeName: typeName, DataScale: scale}
+		if reportoracle.SupportsIgnoredJSONTableOutput(argument) {
+			return "", "", "IGNORED_OUTPUT", true, ""
+		}
+		return "", "", "UNSUPPORTED", false, "暂不支持该 Oracle OUT 参数类型"
+	}
 	if direction != "IN" {
-		return "", "", "UNSUPPORTED", false, "仅支持一个 JSON 输入参数"
+		return "", "", "UNSUPPORTED", false, "暂不支持 IN OUT 参数"
 	}
 	if strings.TrimSpace(typeOwner) != "" || strings.TrimSpace(typeName) != "" {
 		return "", "", "UNSUPPORTED", false, "暂不支持 Oracle 对象、集合或复合类型"

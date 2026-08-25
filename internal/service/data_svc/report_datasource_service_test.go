@@ -383,10 +383,10 @@ func TestReportDatasourceServiceBuildsProcedureSignatureRecommendations(t *testi
 	}
 }
 
-func TestReportDatasourceServiceMarksUnsupportedProcedureArguments(t *testing.T) {
+func TestReportDatasourceServiceAcceptsJSONInputWithIgnoredOutput(t *testing.T) {
 	connection := &fakeReportDatasourceConnection{arguments: []reportoracle.ProcedureArgument{
 		{Name: "P_QUERY_JSON", Position: 1, Sequence: 1, Direction: "IN", DataType: "CLOB"},
-		{Name: "P_STATUS", Position: 2, Sequence: 2, Direction: "OUT", DataType: "VARCHAR2"},
+		{Name: "R_ERROR", Position: 2, Sequence: 2, Direction: "OUT", DataType: "VARCHAR2"},
 	}}
 	store := &fakeReportDatasourceStore{item: model.ReportDatasource{
 		BaseModel: model.BaseModel{ID: 4}, Enabled: true, PasswordCiphertext: "ciphertext", CredentialKeyVersion: "key-v1", QueryTimeoutSeconds: 30,
@@ -398,8 +398,9 @@ func TestReportDatasourceServiceMarksUnsupportedProcedureArguments(t *testing.T)
 	if err != nil {
 		t.Fatalf("GetProcedureSignature() error = %v", err)
 	}
-	if signature.AllSupported || signature.ProtocolReady || signature.CallTemplate != "" || !signature.Arguments[0].Supported || signature.Arguments[1].Supported || signature.Arguments[1].UnsupportedReason == "" || len(signature.BlockingReasons) == 0 {
-		t.Fatalf("unsupported signature = %+v", signature)
+	want := "DECLARE ignored_output_2 VARCHAR2(32767); BEGIN REPORT.EXPORT_CURSOR(P_QUERY_JSON => :payload, R_ERROR => ignored_output_2); END;"
+	if !signature.AllSupported || !signature.ProtocolReady || signature.CallTemplate != want || !signature.Arguments[0].Supported || !signature.Arguments[1].Supported || signature.Arguments[1].Role != "IGNORED_OUTPUT" || len(signature.BlockingReasons) != 0 {
+		t.Fatalf("signature = %+v", signature)
 	}
 }
 
