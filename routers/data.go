@@ -221,10 +221,16 @@ func registerReportCenterRoutes(api *gin.RouterGroup, enabled bool) {
 		return
 	}
 	registerReportRoutes(api, data_ctrl.NewReportController())
+	registerReportInputQueryRoutes(api, data_ctrl.NewReportInputQueryController())
 	registerReportDatasourceRoutes(api, data_ctrl.NewReportDatasourceController())
 	registerReportRunRoutes(api, data_ctrl.NewReportRunController())
 	registerReportExportRoutes(api, data_ctrl.NewReportExportController())
 	registerReportAuditRoutes(api, data_ctrl.NewReportAuditController())
+}
+
+func registerReportInputQueryRoutes(api *gin.RouterGroup, controller *data_ctrl.ReportInputQueryController) {
+	api.GET("/v1/report-input-queries", middleware.AuthJWT(), middleware.RequirePermission(model.PermissionReportManage), controller.List)
+	api.GET("/v1/reports/:id/input-options/:condition_code", middleware.AuthJWT(), middleware.RequirePermission(model.PermissionReportExecute), middleware.LimitRoute("120-M"), controller.Options)
 }
 
 func registerReportDatasourceRoutes(api *gin.RouterGroup, controller *data_ctrl.ReportDatasourceController) {

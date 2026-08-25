@@ -333,6 +333,8 @@ func classifyReportError(err error) (*errcode.Error, string) {
 		return errcode.Forbidden, "没有该报表的查询权限"
 	case errors.Is(err, data_svc.ErrReportRunCredentialUnavailable):
 		return errcode.ServiceUnavailable, "报表敏感参数加密配置不可用，请联系管理员"
+	case errors.Is(err, data_svc.ErrReportInputQueryUnavailable):
+		return errcode.ServiceUnavailable, "报表输入选项暂时不可用，请稍后重试"
 	default:
 		return errcode.InternalServerError, "报表配置服务暂时不可用"
 	}
@@ -354,6 +356,7 @@ func reportDraftValidationMessage(err error) string {
 		"input schema field configuration is invalid":                          "筛选条件字段配置不完整",
 		"input schema field type or displayName is invalid":                    "筛选条件的 Oracle 类型或显示名不合法",
 		"input schema field control is invalid":                                "筛选条件的控件类型不受支持",
+		"input schema field queryName is invalid":                              "查询选择字段必须配置有效的查询名称",
 		"result columns are required":                                          "请先选择 Oracle 结果表并生成 Excel 字段映射",
 		"columns must contain between 1 and 512 items":                         "Excel 字段映射需要 1 至 512 项",
 		"invalid result column configuration":                                  "Excel 字段映射不完整，请重新从结果表字段生成",

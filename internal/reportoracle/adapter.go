@@ -107,6 +107,11 @@ type ResultColumn struct {
 	Nullable      bool
 }
 
+type InputOption struct {
+	ID   interface{} `json:"id"`
+	Name string      `json:"name"`
+}
+
 type Adapter struct {
 	db             *sql.DB
 	prefetchRows   int
@@ -186,6 +191,101 @@ func (adapter *Adapter) Close() error {
 		return nil
 	}
 	return adapter.db.Close()
+}
+
+// QueryInputOptions runs a server-configured SELECT that returns id and name.
+// The HTTP layer never supplies the SELECT statement. Wrapping the configured
+// statement keeps the exact-name predicate valid when the base query already
+// contains filtering or ordering.
+func (adapter *Adapter) QueryInputOptions(ctx context.Context, configuredSelect, exactName string, limit int) ([]InputOption, error) {
+	if adapter == nil || adapter.db == nil {
+		return nil, fmt.Errorf("query oracle input options: adapter is closed")
+	}
+	statement, arguments, err := buildInputOptionQuery(configuredSelect, exactName, limit)
+	if err != nil {
+		return nil, err
+	}
+	rows, err := adapter.db.QueryContext(ctx, statement, arguments...)
+	if err != nil {
+		return nil, fmt.Errorf("query oracle input options: %w", err)
+	}
+	defer rows.Close()
+	columns, err := rows.Columns()
+	if err != nil {
+		return nil, fmt.Errorf("read oracle input option columns: %w", err)
+	}
+	if len(columns) != 2 || !strings.EqualFold(columns[0], "id") || !strings.EqualFold(columns[1], "name") {
+		return nil, fmt.Errorf("%w: input option query must return id and name", ErrMetadataMismatch)
+	}
+	options := make([]InputOption, 0)
+	for rows.Next() {
+		var rawID interface{}
+		var rawName interface{}
+		if err := rows.Scan(&rawID, &rawName); err != nil {
+			return nil, fmt.Errorf("scan oracle input option: %w", err)
+		}
+		id, err := normalizeInputOptionID(rawID)
+		if err != nil {
+			return nil, err
+		}
+		name, err := normalizeInputOptionName(rawName)
+		if err != nil {
+			return nil, err
+		}
+		options = append(options, InputOption{ID: id, Name: name})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate oracle input options: %w", err)
+	}
+	return options, nil
+}
+
+func buildInputOptionQuery(configuredSelect, exactName string, limit int) (string, []interface{}, error) {
+	statement := strings.TrimSpace(configuredSelect)
+	lower := strings.ToLower(statement)
+	if !strings.HasPrefix(lower, "select ") || strings.Contains(statement, ";") ||
+		strings.Contains(statement, "--") || strings.Contains(statement, "/*") || strings.Contains(statement, "*/") {
+		return "", nil, configurationError("input option query is invalid")
+	}
+	if limit < 1 || limit > 500 {
+		return "", nil, configurationError("input option query limit is invalid")
+	}
+	query := "SELECT id, name FROM (" + statement + ") REPORT_INPUT_SOURCE"
+	arguments := make([]interface{}, 0, 1)
+	if exactName != "" {
+		query += " WHERE name = :name"
+		arguments = append(arguments, sql.Named("name", exactName))
+	}
+	query += fmt.Sprintf(" FETCH FIRST %d ROWS ONLY", limit)
+	return query, arguments, nil
+}
+
+func normalizeInputOptionID(value interface{}) (interface{}, error) {
+	switch typed := value.(type) {
+	case string:
+		return typed, nil
+	case []byte:
+		return string(typed), nil
+	case int64:
+		return typed, nil
+	case float64:
+		return typed, nil
+	case godror.Number:
+		return string(typed), nil
+	default:
+		return nil, fmt.Errorf("%w: input option id must be text or number", ErrMetadataMismatch)
+	}
+}
+
+func normalizeInputOptionName(value interface{}) (string, error) {
+	switch typed := value.(type) {
+	case string:
+		return typed, nil
+	case []byte:
+		return string(typed), nil
+	default:
+		return "", fmt.Errorf("%w: input option name must be text", ErrMetadataMismatch)
+	}
 }
 
 func (adapter *Adapter) InspectProcedure(ctx context.Context, ref ProcedureRef) ([]ProcedureArgument, error) {

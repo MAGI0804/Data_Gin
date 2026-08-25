@@ -232,6 +232,25 @@ func TestCanonicalReportInputSchemaKeepsDateAndDateTimeAsFormattedStrings(t *tes
 	}
 }
 
+func TestCanonicalReportInputSchemaKeepsQueryBinding(t *testing.T) {
+	canonical, err := canonicalReportInputSchema(json.RawMessage(`{"store":{"type":"str","displayName":"门店","control":"SELECT","queryName":"stores"}}`))
+	if err != nil {
+		t.Fatalf("canonicalReportInputSchema() error = %v", err)
+	}
+	if !strings.Contains(string(canonical), `"queryName":"stores"`) {
+		t.Fatalf("canonical schema = %s", canonical)
+	}
+	for _, schema := range []string{
+		`{"store":{"type":"str","displayName":"门店","control":"TEXT","queryName":"stores"}}`,
+		`{"stores":{"type":"list[str]","displayName":"门店","control":"SELECT","queryName":"stores"}}`,
+		`{"store":{"type":"str","displayName":"门店","control":"SELECT","queryName":"bad name"}}`,
+	} {
+		if _, err := canonicalReportInputSchema(json.RawMessage(schema)); !errors.Is(err, ErrReportInvalid) {
+			t.Fatalf("canonicalReportInputSchema(%s) error = %v", schema, err)
+		}
+	}
+}
+
 func TestReportDraftServiceAcceptsJSONInputResultTable(t *testing.T) {
 	request := validReportDraftRequest()
 	request.ExecutionMode = model.ReportExecutionModeTableSnapshot

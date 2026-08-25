@@ -37,11 +37,12 @@ var (
 	ErrReportConflict       = errors.New("report draft service: conflict")
 	ErrReportDeleteConflict = errors.New("report draft service: report cannot be deleted")
 
-	reportCodePattern        = regexp.MustCompile(`^[a-z][a-z0-9_-]{2,63}$`)
-	reportLogicalCodePattern = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_]{0,63}$`)
-	reportControlTypes       = map[string]struct{}{"TEXT": {}, "TEXTAREA": {}, "NUMBER": {}, "CHECKBOX": {}, "DATE": {}, "DATETIME": {}, "SELECT": {}, "MULTI_SELECT": {}}
-	reportValueTypes         = map[string]struct{}{"string": {}, "integer": {}, "decimal": {}, "boolean": {}, "date": {}, "datetime": {}, "enum": {}, "multi_enum": {}, "json": {}}
-	reportGrantActions       = map[string]struct{}{"QUERY": {}, "EXPORT": {}}
+	reportCodePattern           = regexp.MustCompile(`^[a-z][a-z0-9_-]{2,63}$`)
+	reportLogicalCodePattern    = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_]{0,63}$`)
+	reportInputQueryNamePattern = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_-]{0,63}$`)
+	reportControlTypes          = map[string]struct{}{"TEXT": {}, "TEXTAREA": {}, "NUMBER": {}, "CHECKBOX": {}, "DATE": {}, "DATETIME": {}, "SELECT": {}, "MULTI_SELECT": {}}
+	reportValueTypes            = map[string]struct{}{"string": {}, "integer": {}, "decimal": {}, "boolean": {}, "date": {}, "datetime": {}, "enum": {}, "multi_enum": {}, "json": {}}
+	reportGrantActions          = map[string]struct{}{"QUERY": {}, "EXPORT": {}}
 )
 
 type reportDraftStore interface {
@@ -745,6 +746,7 @@ type reportInputFieldSchema struct {
 	Example       json.RawMessage `json:"example,omitempty"`
 	DefaultValue  json.RawMessage `json:"default,omitempty"`
 	AllowedValues json.RawMessage `json:"allowedValues,omitempty"`
+	QueryName     string          `json:"queryName,omitempty"`
 }
 
 func canonicalReportInputSchema(raw json.RawMessage) (json.RawMessage, error) {
@@ -777,6 +779,7 @@ func canonicalReportInputSchema(raw json.RawMessage) (json.RawMessage, error) {
 		field.DisplayName = strings.TrimSpace(field.DisplayName)
 		field.Control = strings.ToUpper(strings.TrimSpace(field.Control))
 		field.Format = strings.TrimSpace(field.Format)
+		field.QueryName = strings.TrimSpace(field.QueryName)
 		field.Multiple = false
 		if field.Type == "" || field.DisplayName == "" || utf8.RuneCountInString(field.DisplayName) > 128 {
 			return nil, invalidReport("input schema field type or displayName is invalid")
@@ -788,6 +791,9 @@ func canonicalReportInputSchema(raw json.RawMessage) (json.RawMessage, error) {
 		}
 		if !validJSONConditionFormat(field.Type, field.Control, field.Format) {
 			return nil, invalidReport("input schema field format is invalid")
+		}
+		if field.QueryName != "" && (field.Control != "SELECT" || !reportInputQueryNamePattern.MatchString(field.QueryName) || conditionTypeIsList(field.Type, false)) {
+			return nil, invalidReport("input schema field queryName is invalid")
 		}
 		if len(bytes.TrimSpace(field.AllowedValues)) > 0 {
 			var allowed []json.RawMessage

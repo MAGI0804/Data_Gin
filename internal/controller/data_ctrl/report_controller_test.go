@@ -54,6 +54,7 @@ func TestReportControllerErrorContract(t *testing.T) {
 		{name: "publication invalid", err: data_svc.ErrReportPublicationInvalid, wantStatus: http.StatusUnprocessableEntity},
 		{name: "temporary result table", err: fmt.Errorf("%w: %w", data_svc.ErrReportPublicationInvalid, data_svc.ErrReportPublicationTemporaryTable), wantStatus: http.StatusUnprocessableEntity},
 		{name: "parameter keyring unavailable", err: data_svc.ErrReportRunCredentialUnavailable, wantStatus: http.StatusServiceUnavailable},
+		{name: "input query unavailable", err: data_svc.ErrReportInputQueryUnavailable, wantStatus: http.StatusServiceUnavailable},
 		{name: "internal", err: errors.New("database password=secret"), wantStatus: http.StatusInternalServerError},
 	}
 	for _, test := range tests {

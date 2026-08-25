@@ -182,6 +182,7 @@ type reportRunInputFieldSchema struct {
 	Example       json.RawMessage   `json:"example,omitempty"`
 	DefaultValue  json.RawMessage   `json:"default,omitempty"`
 	AllowedValues []json.RawMessage `json:"allowedValues,omitempty"`
+	QueryName     string            `json:"queryName,omitempty"`
 }
 
 func (service *ReportRunService) createJSONInputRun(

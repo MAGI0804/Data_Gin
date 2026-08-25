@@ -4,6 +4,7 @@ package bootstrap
 import (
 	"fmt"
 
+	appConfig "gin-biz-web-api/config"
 	"gin-biz-web-api/global"
 	"gin-biz-web-api/internal/reportsecret"
 	"gin-biz-web-api/pkg/config"
@@ -63,6 +64,9 @@ func validateReportCenterRuntime() error {
 	}
 	if err := storage.ValidateOSSConfig(); err != nil {
 		return fmt.Errorf("report export storage: %w", err)
+	}
+	if _, err := appConfig.LoadReportInputQueryConfig(); err != nil {
+		return fmt.Errorf("report input query configuration: %w", err)
 	}
 	return nil
 }
