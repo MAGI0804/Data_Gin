@@ -244,6 +244,7 @@ func TestCanonicalReportInputSchemaKeepsQueryBinding(t *testing.T) {
 		`{"store":{"type":"str","displayName":"门店","control":"TEXT","queryName":"stores"}}`,
 		`{"stores":{"type":"list[str]","displayName":"门店","control":"SELECT","queryName":"stores"}}`,
 		`{"store":{"type":"str","displayName":"门店","control":"SELECT","queryName":"bad name"}}`,
+		`{"store":{"type":"str","displayName":"门店","control":"SELECT","queryName":"stores","allowedValues":["S001"]}}`,
 	} {
 		if _, err := canonicalReportInputSchema(json.RawMessage(schema)); !errors.Is(err, ErrReportInvalid) {
 			t.Fatalf("canonicalReportInputSchema(%s) error = %v", schema, err)

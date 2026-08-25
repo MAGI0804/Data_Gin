@@ -116,6 +116,7 @@ test('input schema keeps a configured query binding on scalar selectors', () => 
 	assert.equal(schema.store.queryName, 'stores')
 	assert.throws(() => parseReportInputSchemaDocument({ stores: { type: 'list[str]', displayName: '门店', control: 'SELECT', queryName: 'stores' } }), /queryName/)
 	assert.throws(() => parseReportInputSchemaDocument({ store: { type: 'str', displayName: '门店', control: 'TEXT', queryName: 'stores' } }), /queryName/)
+	assert.throws(() => parseReportInputSchemaDocument({ store: { type: 'str', displayName: '门店', control: 'SELECT', queryName: 'stores', allowedValues: ['S001'] } }), /allowedValues/)
 })
 
 test('report input query clients use configured names and exact-name search', async () => {

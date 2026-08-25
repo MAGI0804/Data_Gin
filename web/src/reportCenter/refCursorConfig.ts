@@ -43,6 +43,7 @@ export function parseReportInputSchemaDocument(value: unknown, allowEmpty = fals
     if (rawField.required !== undefined && typeof rawField.required !== 'boolean') throw new Error(`筛选字段 ${code} 的 required 必须是布尔值。`)
     if (rawField.allowedValues !== undefined && (!Array.isArray(rawField.allowedValues) || rawField.allowedValues.length === 0)) throw new Error(`筛选字段 ${code} 的 allowedValues 必须是非空数组。`)
 		if (rawField.queryName !== undefined && (!queryName || !inputQueryNamePattern.test(queryName) || control !== 'SELECT' || !['str', 'number'].includes(normalizedType.type))) throw new Error(`筛选字段 ${code} 的 queryName 必须绑定在单选文本或数字字段上。`)
+		if (queryName && rawField.allowedValues !== undefined) throw new Error(`筛选字段 ${code} 的 queryName 不能与 allowedValues 同时配置。`)
     const field = compactInputField({
       type: normalizedType.type,
       displayName,

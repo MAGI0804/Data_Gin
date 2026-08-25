@@ -795,6 +795,9 @@ func canonicalReportInputSchema(raw json.RawMessage) (json.RawMessage, error) {
 		if field.QueryName != "" && (field.Control != "SELECT" || !reportInputQueryNamePattern.MatchString(field.QueryName) || field.Type != "str" && field.Type != "number") {
 			return nil, invalidReport("input schema field queryName is invalid")
 		}
+		if field.QueryName != "" && len(bytes.TrimSpace(field.AllowedValues)) > 0 {
+			return nil, invalidReport("input schema field queryName and allowedValues are mutually exclusive")
+		}
 		if len(bytes.TrimSpace(field.AllowedValues)) > 0 {
 			var allowed []json.RawMessage
 			if err := decodeStrictReportJSON(field.AllowedValues, &allowed); err != nil || len(allowed) == 0 {
