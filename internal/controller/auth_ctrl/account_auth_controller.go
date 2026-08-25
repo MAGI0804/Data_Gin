@@ -11,8 +11,11 @@ import (
 	"gin-biz-web-api/internal/service/auth_svc"
 	"gin-biz-web-api/pkg/auth"
 	"gin-biz-web-api/pkg/errcode"
+	"gin-biz-web-api/pkg/logger"
 	"gin-biz-web-api/pkg/phonecode"
 	"gin-biz-web-api/pkg/responses"
+	"gin-biz-web-api/pkg/sms"
+	"go.uber.org/zap"
 )
 
 type AccountAuthController struct {
@@ -119,6 +122,7 @@ func (ctrl *AccountAuthController) Profile(c *gin.Context) {
 
 func writeAccountAuthError(c *gin.Context, err error) {
 	response := responses.New(c)
+	logSMSProviderError(err)
 	switch {
 	case errors.Is(err, auth_svc.ErrInvalidCredentials), errors.Is(err, auth_svc.ErrAccountUnavailable):
 		response.ToSafeErrorResponse(errcode.Unauthorized, "身份凭证无效或账号不可用")
@@ -129,4 +133,20 @@ func writeAccountAuthError(c *gin.Context, err error) {
 	default:
 		response.ToSafeErrorResponse(errcode.ServiceUnavailable, "认证服务暂时不可用")
 	}
+}
+
+func logSMSProviderError(err error) {
+	if logger.Logger == nil {
+		return
+	}
+	var providerErr *sms.ProviderError
+	if !errors.As(err, &providerErr) {
+		return
+	}
+	logger.Warn("短信服务商拒绝发送请求",
+		zap.String("provider", "aliyun"),
+		zap.String("code", providerErr.Code),
+		zap.String("message", providerErr.Message),
+		zap.String("request_id", providerErr.RequestID),
+	)
 }

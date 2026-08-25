@@ -10,9 +10,11 @@ import (
 	"gin-biz-web-api/internal/service/auth_svc"
 	"gin-biz-web-api/model"
 	"gin-biz-web-api/pkg/config"
+	"gin-biz-web-api/pkg/logger"
 	"gin-biz-web-api/pkg/phonecode"
 	redisclient "gin-biz-web-api/pkg/redis"
 	"gin-biz-web-api/pkg/sms"
+	"go.uber.org/zap"
 )
 
 // RegisterAPIRoutes 注册 api 相关路由
@@ -86,10 +88,16 @@ func apiAuth(api *gin.RouterGroup) {
 				smsClient,
 			)
 			accountAuthService = auth_svc.NewDatabaseAccountAuthService(codes)
+			if logger.Logger != nil {
+				logger.Info("短信服务已接入", zap.String("provider", "aliyun"))
+			}
 		} else {
 			// SMS configuration is optional: password login remains available,
 			// while phone-code endpoints fail closed with HTTP 503.
 			accountAuthService = auth_svc.NewDatabaseAccountAuthService(nil)
+			if logger.Logger != nil {
+				logger.Warn("短信服务未接入", zap.Error(err))
+			}
 		}
 		accountAuthCtrl := auth_ctrl.NewAccountAuthController(accountAuthService)
 		authGroup.POST("/login/password", accountAuthCtrl.LoginPassword)

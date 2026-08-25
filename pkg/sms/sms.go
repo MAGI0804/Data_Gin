@@ -10,7 +10,6 @@ import (
 	"time"
 
 	openapi "github.com/alibabacloud-go/darabonba-openapi/v2/client"
-	openapiutil "github.com/alibabacloud-go/darabonba-openapi/v2/utils"
 	dysmsapi20170525 "github.com/alibabacloud-go/dysmsapi-20170525/v5/client"
 	"github.com/alibabacloud-go/tea/dara"
 )
@@ -30,6 +29,24 @@ var (
 	ErrNotConfigured    = errors.New("sms: provider is not configured")
 	ErrProviderRejected = errors.New("sms: provider rejected request")
 )
+
+// ProviderError contains only the non-sensitive diagnostic fields returned by
+// Alibaba Cloud. Phone numbers, verification codes, and credentials are never
+// stored in this error.
+type ProviderError struct {
+	Code      string
+	Message   string
+	RequestID string
+}
+
+func (e *ProviderError) Error() string {
+	if e == nil {
+		return ErrProviderRejected.Error()
+	}
+	return fmt.Sprintf("%s: code=%s request_id=%s message=%s", ErrProviderRejected, e.Code, e.RequestID, e.Message)
+}
+
+func (*ProviderError) Unwrap() error { return ErrProviderRejected }
 
 // Config keeps SMS credentials private to prevent accidental serialization.
 // LoadConfig reads all values directly from the process environment.
@@ -85,7 +102,9 @@ type providerRequest struct {
 }
 
 type providerResponse struct {
-	code string
+	code      string
+	message   string
+	requestID string
 }
 
 type provider interface {
@@ -147,38 +166,23 @@ func (c *Client) SendCode(ctx context.Context, phoneNumber, code string) error {
 		return fmt.Errorf("sms: send verification code: %w", err)
 	}
 	if response.code != "OK" {
-		return fmt.Errorf("%w: code=%s", ErrProviderRejected, response.code)
+		return &ProviderError{Code: response.code, Message: response.message, RequestID: response.requestID}
 	}
 	return nil
 }
 
+type aliyunClient interface {
+	SendSmsWithContext(ctx context.Context, request *dysmsapi20170525.SendSmsRequest, runtime *dara.RuntimeOptions) (*dysmsapi20170525.SendSmsResponse, error)
+}
+
 type aliyunProvider struct {
-	client *dysmsapi20170525.Client
+	client aliyunClient
 }
 
 func (p *aliyunProvider) Send(ctx context.Context, request providerRequest) (providerResponse, error) {
-	query := map[string]interface{}{
-		"PhoneNumbers": dara.String(request.phoneNumber),
-		"SignName":     dara.String(request.signName),
-		"TemplateCode": dara.String(request.templateCode),
-		"TemplateParam": dara.String(fmt.Sprintf(
-			`{"code":%q}`,
-			request.code,
-		)),
+	if p == nil || p.client == nil {
+		return providerResponse{}, fmt.Errorf("sms: invalid aliyun provider")
 	}
-	openAPIRequest := &openapiutil.OpenApiRequest{Query: openapiutil.Query(query)}
-	params := &openapiutil.Params{
-		Action:      dara.String("SendSms"),
-		Version:     dara.String("2017-05-25"),
-		Protocol:    dara.String("HTTPS"),
-		Pathname:    dara.String("/"),
-		Method:      dara.String("POST"),
-		AuthType:    dara.String("AK"),
-		Style:       dara.String("RPC"),
-		ReqBodyType: dara.String("formData"),
-		BodyType:    dara.String("json"),
-	}
-
 	timeoutMillis := defaultTimeout.Milliseconds()
 	if deadline, ok := ctx.Deadline(); ok {
 		remaining := time.Until(deadline)
@@ -190,19 +194,27 @@ func (p *aliyunProvider) Send(ctx context.Context, request providerRequest) (pro
 			timeoutMillis = 1
 		}
 	}
-	body, err := p.client.Client.CallApiWithCtx(ctx, params, openAPIRequest, &dara.RuntimeOptions{
+	response, err := p.client.SendSmsWithContext(ctx, &dysmsapi20170525.SendSmsRequest{
+		PhoneNumbers: dara.String(request.phoneNumber),
+		SignName:     dara.String(request.signName),
+		TemplateCode: dara.String(request.templateCode),
+		TemplateParam: dara.String(fmt.Sprintf(
+			`{"code":%q}`,
+			request.code,
+		)),
+	}, &dara.RuntimeOptions{
 		ConnectTimeout: dara.Int(int(timeoutMillis)),
 		ReadTimeout:    dara.Int(int(timeoutMillis)),
 	})
 	if err != nil {
 		return providerResponse{}, err
 	}
-	response := new(dysmsapi20170525.SendSmsResponse)
-	if err := dara.Convert(body, response); err != nil {
-		return providerResponse{}, fmt.Errorf("decode provider response: %w", err)
-	}
 	if response.Body == nil || response.Body.Code == nil {
 		return providerResponse{}, fmt.Errorf("provider returned an empty response")
 	}
-	return providerResponse{code: dara.StringValue(response.Body.Code)}, nil
+	return providerResponse{
+		code:      dara.StringValue(response.Body.Code),
+		message:   dara.StringValue(response.Body.Message),
+		requestID: dara.StringValue(response.Body.RequestId),
+	}, nil
 }
