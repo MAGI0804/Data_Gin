@@ -4,7 +4,7 @@ import test from 'node:test'
 import ts from 'typescript'
 
 import { createReportInputQueryDefinition, createReportRun, deleteReportDraft, getReportAudits, getReportInputOptions, getReportInputQueries, getReportInputQueryDefinitions, getReportProcedureSignature, getReportProcedures, getReportResultTableSchema, getReportResultTables, parsePublication, parseReportAuditPage, parseReportCatalogPage, parseReportDatasource, parseReportDatasources, parseReportDatasourceTest, parseReportDraft, parseReportExport, parseReportExportPage, parseReportInputQueryDefinitions, parseReportInputQueryTestResult, parseReportProcedurePage, parseReportProcedureSignature, parseReportResultPage, parseReportResultTablePage, parseReportResultTableSchema, parseReportRun, parseReportRunContract, parseReportVersionDiff, parseReportVersionPage, saveAndPublishReportDraft, saveReportDraft, testReportDatasourceConnection, testReportInputQueryDefinition } from '../.test-dist/reportCenter/api.js'
-import { applyExcelMapping, buildReportConditions, excelMappingFromColumns, initialReportConditionValues, parseExcelMappingDocument, parseReportInputSchemaDocument, parseReportInputSchemaText, reconcileReportColumnsWithResultSchema, renameExcelMappingField, reportColumnsFromResultSchema } from '../.test-dist/reportCenter/refCursorConfig.js'
+import { applyExcelMapping, buildReportConditions, changeReportInputSource, excelMappingFromColumns, initialReportConditionValues, parseExcelMappingDocument, parseReportInputSchemaDocument, parseReportInputSchemaText, reconcileReportColumnsWithResultSchema, renameExcelMappingField, reportColumnsFromResultSchema, reportInputSource } from '../.test-dist/reportCenter/refCursorConfig.js'
 import { reportParameterControls, reportParameterFlagDisabled, updateReportParameterFlag, updateReportParameterLogicalType } from '../.test-dist/reportCenter/parameterConfig.js'
 import { buildNewReportRunState, canStartNewReportRun, initialReportParameterValues } from '../.test-dist/reportCenter/queryParameters.js'
 import { createLatestRequestGuard } from '../.test-dist/reportCenter/components/ReportVersionDrawer/requestGuard.js'
@@ -117,6 +117,18 @@ test('input schema keeps a configured query binding on scalar selectors', () => 
 	assert.throws(() => parseReportInputSchemaDocument({ stores: { type: 'list[str]', displayName: '门店', control: 'SELECT', queryName: 'stores' } }), /queryName/)
 	assert.throws(() => parseReportInputSchemaDocument({ store: { type: 'str', displayName: '门店', control: 'TEXT', queryName: 'stores' } }), /queryName/)
 	assert.throws(() => parseReportInputSchemaDocument({ store: { type: 'str', displayName: '门店', control: 'SELECT', queryName: 'stores', allowedValues: ['S001'] } }), /allowedValues/)
+})
+
+test('input source remains static while allowed values are being configured', () => {
+	const field = { type: 'str', displayName: '状态', control: 'TEXT', required: false }
+	const staticField = changeReportInputSource(field, 'STATIC', [])
+	assert.equal(staticField.control, 'SELECT')
+	assert.equal(reportInputSource(staticField), 'STATIC')
+
+	const queryField = changeReportInputSource(field, 'QUERY', ['product'])
+	assert.equal(queryField.queryName, 'product')
+	assert.equal(reportInputSource(queryField), 'QUERY')
+	assert.equal(reportInputSource(changeReportInputSource(queryField, 'MANUAL', [])), 'MANUAL')
 })
 
 test('report input query clients use configured names and exact-name search', async () => {

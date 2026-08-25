@@ -11,6 +11,29 @@ export const reportInputControls: Array<ReportInputControl | ''> = ['', 'TEXT', 
 export const reportDateFormats: ReportInputFormat[] = ['YYYYMMDD', 'YYYY-MM-DD']
 export const reportDateTimeFormats: ReportInputFormat[] = ['YYYYMMDDHHmmss', 'YYYY-MM-DD HH:mm:ss', 'ISO8601']
 
+export type ReportInputSource = 'MANUAL' | 'STATIC' | 'QUERY'
+
+export function reportInputSource(field: ReportInputField): ReportInputSource {
+	if (field.queryName) return 'QUERY'
+	if (field.control === 'SELECT') return 'STATIC'
+	return 'MANUAL'
+}
+
+export function changeReportInputSource(field: ReportInputField, source: ReportInputSource, queries: string[]): ReportInputField {
+	const next = { ...field }
+	delete next.queryName
+	delete next.allowedValues
+	if (source === 'QUERY') {
+		next.control = 'SELECT'
+		if (queries[0]) next.queryName = queries[0]
+	} else if (source === 'STATIC') {
+		next.control = 'SELECT'
+	} else if (next.control === 'SELECT') {
+		next.control = next.type === 'number' ? 'NUMBER' : 'TEXT'
+	}
+	return next
+}
+
 export function parseReportInputSchemaText(source: string): ReportInputSchema {
   if (reportJSONContainsUnsafeNumber(source)) throw new Error(`筛选条件 JSON 中的数字${unsafeNumberError}`)
   return parseReportInputSchemaDocument(JSON.parse(source) as unknown)

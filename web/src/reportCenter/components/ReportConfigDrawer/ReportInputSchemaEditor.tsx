@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { Plus, Trash2 } from 'lucide-react'
-import { newReportInputField, parseReportInputSchemaDocument, parseReportInputSchemaText, renameReportInputField, reportDateFormats, reportDateTimeFormats, reportInputControls, reportInputSchemaDocument, reportInputTypes, reportJSONContainsUnsafeNumber } from '../../refCursorConfig'
+import { changeReportInputSource, newReportInputField, parseReportInputSchemaDocument, parseReportInputSchemaText, renameReportInputField, reportDateFormats, reportDateTimeFormats, reportInputControls, reportInputSchemaDocument, reportInputSource, reportInputTypes, reportJSONContainsUnsafeNumber, type ReportInputSource } from '../../refCursorConfig'
 import type { ReportInputControl, ReportInputField, ReportInputFormat, ReportInputSchema, ReportInputType } from '../../types'
 import { JSONDocumentEditor } from './JSONDocumentEditor'
 import { getReportInputQueries, type ReportCenterClient } from '../../api'
@@ -46,7 +46,7 @@ function InputFieldRow({ code, field, queries, queryState, onRename, onChange, o
     <EditorField label="筛选显示名"><input value={field.displayName} onChange={(event) => onChange({ ...field, displayName: event.currentTarget.value })} /></EditorField>
     <EditorField label="JSON 类型"><select value={field.type} onChange={(event) => onChange(changeInputType(field, event.currentTarget.value as ReportInputType))}>{reportInputTypes.map((type) => <option key={type}>{type}</option>)}</select></EditorField>
     <EditorField label="查询控件"><select value={field.control} onChange={(event) => onChange(changeInputControl(field, event.currentTarget.value as ReportInputControl | ''))}>{reportInputControls.map((control) => <option value={control} key={control || 'AUTO'}>{inputControlLabel(control)}</option>)}</select></EditorField>
-		{field.type === 'str' || field.type === 'number' ? <EditorField className={source === 'QUERY' ? styles.queryField : ''} label="输入方式"><select value={source} onChange={(event) => onChange(changeInputSource(field, event.currentTarget.value as ReportInputSource, queries))}><option value="MANUAL">手工输入</option><option value="STATIC">静态选项</option><option value="QUERY">Oracle 查询选择</option></select>{source === 'QUERY' ? <small>页面显示 name，提交给存储过程的是 id；保存并发布后生效。</small> : null}</EditorField> : null}
+		{field.type === 'str' || field.type === 'number' ? <EditorField className={source === 'QUERY' ? styles.queryField : ''} label="输入方式"><select value={source} onChange={(event) => onChange(changeReportInputSource(field, event.currentTarget.value as ReportInputSource, queries))}><option value="MANUAL">手工输入</option><option value="STATIC">静态选项</option><option value="QUERY">Oracle 查询选择</option></select>{source === 'QUERY' ? <small>页面显示 name，提交给存储过程的是 id；保存并发布后生效。</small> : null}</EditorField> : null}
 		{source === 'QUERY' ? <EditorField className={styles.queryField} label="选项查询"><select value={field.queryName ?? ''} disabled={queryState.loading} onChange={(event) => onChange(withQueryName(field, event.currentTarget.value))}><option value="">{queryState.loading ? '正在加载查询…' : queries.length ? '请选择查询' : '请先在报表配置页新增查询'}</option>{field.queryName && !queries.includes(field.queryName) ? <option value={field.queryName}>{field.queryName}（当前未启用）</option> : null}{queries.map((query) => <option value={query} key={query}>{query}</option>)}</select>{queryState.error ? <small className={styles.queryError}>{queryState.error}</small> : null}</EditorField> : null}
     {field.control === 'DATE' || field.control === 'DATETIME' ? <EditorField className={styles.formatField} label="日期传值格式（必选）"><select className={styles.mono} value={field.format ?? defaultFormat(field.control)} onChange={(event) => onChange({ ...field, format: event.currentTarget.value as ReportInputFormat })}>{(field.control === 'DATE' ? reportDateFormats : reportDateTimeFormats).map((format) => <option value={format} key={format}>{inputFormatLabel(format)}</option>)}</select><small>传入示例：{inputFormatExample(field.format ?? defaultFormat(field.control))}</small></EditorField> : null}
     <JSONValueInput label="示例值" value={field.example} exists={Object.hasOwnProperty.call(field, 'example')} numeric={field.type === 'number' || field.type === 'list[number]'} onChange={(value, exists) => onChange(withOptional(field, 'example', value, exists))} />
@@ -55,29 +55,6 @@ function InputFieldRow({ code, field, queries, queryState, onRename, onChange, o
     <div className={styles.flags}><label><input type="checkbox" checked={field.required} onChange={(event) => onChange({ ...field, required: event.currentTarget.checked })} />必填</label></div>
     <button className={styles.delete} type="button" aria-label={`删除筛选条件 ${field.displayName || code}`} onClick={onDelete}><Trash2 aria-hidden="true" /></button>
   </div>
-}
-
-type ReportInputSource = 'MANUAL' | 'STATIC' | 'QUERY'
-
-function reportInputSource(field: ReportInputField): ReportInputSource {
-	if (field.queryName) return 'QUERY'
-	if (field.allowedValues?.length) return 'STATIC'
-	return 'MANUAL'
-}
-
-function changeInputSource(field: ReportInputField, source: ReportInputSource, queries: string[]): ReportInputField {
-	const next = { ...field }
-	delete next.queryName
-	delete next.allowedValues
-	if (source === 'QUERY') {
-		next.control = 'SELECT'
-		if (queries[0]) next.queryName = queries[0]
-	} else if (source === 'STATIC') {
-		next.control = 'SELECT'
-	} else if (next.control === 'SELECT') {
-		next.control = next.type === 'number' ? 'NUMBER' : 'TEXT'
-	}
-	return next
 }
 
 function EditorField({ label, className = '', children }: { label: string; className?: string; children: React.ReactNode }) {
