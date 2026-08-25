@@ -8,15 +8,19 @@ import styles from './ReportProcedureEditor.module.css'
 export function ReportProcedureEditor({ client, draft, onChange }: { client: ReportCenterClient; draft: ReportDraft; onChange: Dispatch<SetStateAction<ReportDraft>> }) {
   const [filters, setFilters] = useState({ owner: draft.procedure.owner, search: '' })
   const [catalog, setCatalog] = useState<{ items: ReportProcedureSummary[]; hasMore: boolean; nextAfter: string }>({ items: [], hasMore: false, nextAfter: '' })
+  const [catalogSearched, setCatalogSearched] = useState(false)
   const [signature, setSignature] = useState<ReportProcedureSignature | null>(null)
   const [state, setState] = useState({ loading: false, inspecting: false, error: '' })
   const [tableFilters, setTableFilters] = useState({ owner: draft.result.tableOwner || draft.procedure.owner, search: '' })
   const [tableCatalog, setTableCatalog] = useState<ReportResultTablePage>({ items: [], hasMore: false, nextAfter: '' })
+  const [tableCatalogSearched, setTableCatalogSearched] = useState(false)
   const [tableSchema, setTableSchema] = useState<ReportResultTableSchema | null>(null)
   const [tableState, setTableState] = useState({ loading: false, inspecting: false, error: '' })
   const catalogRequest = useRef(0)
+  const catalogAbort = useRef<AbortController | null>(null)
   const signatureRequest = useRef(0)
   const tableCatalogRequest = useRef(0)
+  const tableCatalogAbort = useRef<AbortController | null>(null)
   const tableSchemaRequest = useRef(0)
   const signatureCache = useRef<ReportProcedureSignature | null>(null)
   const selectedKey = procedureKey(draft.procedure)
@@ -64,17 +68,22 @@ export function ReportProcedureEditor({ client, draft, onChange }: { client: Rep
     }))
   }, [client, draft, onChange])
 
-  const load = useCallback(async (append = false, signal?: AbortSignal) => {
+  const load = useCallback(async (append = false) => {
     if (!draft.datasourceId) return
+    catalogAbort.current?.abort()
+    const controller = new AbortController()
+    catalogAbort.current = controller
     const request = ++catalogRequest.current
+    setCatalogSearched(true)
     setState((current) => ({ ...current, loading: true, error: '' }))
     const response = await getReportProcedures(client, draft.datasourceId, {
       owner: filters.owner,
       search: filters.search,
       after: append ? catalog.nextAfter : '',
       limit: 30,
-    }, signal)
-    if (signal?.aborted || request !== catalogRequest.current) return
+    }, controller.signal)
+    if (controller.signal.aborted || request !== catalogRequest.current) return
+    catalogAbort.current = null
     if (!response.ok) {
       setState((current) => ({ ...current, loading: false, error: response.error }))
       return
@@ -89,38 +98,28 @@ export function ReportProcedureEditor({ client, draft, onChange }: { client: Rep
 
   useEffect(() => {
     if (!draft.datasourceId) return
+    catalogAbort.current?.abort()
+    catalogAbort.current = null
     signatureCache.current = null
     setSignature(null)
     setFilters({ owner: '', search: '' })
-    const controller = new AbortController()
-    const request = ++catalogRequest.current
-    setState((current) => ({ ...current, loading: true, error: '' }))
-    void getReportProcedures(client, draft.datasourceId, { limit: 30 }, controller.signal).then((response) => {
-      if (controller.signal.aborted || request !== catalogRequest.current) return
-      if (response.ok) {
-        setCatalog(response.data)
-        setState((current) => ({ ...current, loading: false }))
-      } else setState((current) => ({ ...current, loading: false, error: response.error }))
-    })
-    return () => { controller.abort(); catalogRequest.current += 1 }
-  }, [client, draft.datasourceId])
+    setCatalog({ items: [], hasMore: false, nextAfter: '' })
+    setCatalogSearched(false)
+    setState((current) => ({ ...current, loading: false, error: '' }))
+    return () => { catalogAbort.current?.abort(); catalogRequest.current += 1 }
+  }, [draft.datasourceId])
 
   useEffect(() => {
     if (!draft.datasourceId) return
+    tableCatalogAbort.current?.abort()
+    tableCatalogAbort.current = null
     setTableFilters({ owner: '', search: '' })
+    setTableCatalog({ items: [], hasMore: false, nextAfter: '' })
+    setTableCatalogSearched(false)
     setTableSchema(null)
-    const controller = new AbortController()
-    const request = ++tableCatalogRequest.current
-    setTableState((current) => ({ ...current, loading: true, error: '' }))
-    void getReportResultTables(client, draft.datasourceId, { limit: 30 }, controller.signal).then((response) => {
-      if (controller.signal.aborted || request !== tableCatalogRequest.current) return
-      if (response.ok) {
-        setTableCatalog(response.data)
-        setTableState((current) => ({ ...current, loading: false }))
-      } else setTableState((current) => ({ ...current, loading: false, error: response.error }))
-    })
-    return () => { controller.abort(); tableCatalogRequest.current += 1 }
-  }, [client, draft.datasourceId])
+    setTableState((current) => ({ ...current, loading: false, error: '' }))
+    return () => { tableCatalogAbort.current?.abort(); tableCatalogRequest.current += 1 }
+  }, [draft.datasourceId])
 
   useEffect(() => {
     if (!draft.datasourceId || !selectedOwner || !selectedName) {
@@ -181,17 +180,22 @@ export function ReportProcedureEditor({ client, draft, onChange }: { client: Rep
     setFilters((current) => ({ ...current, [key]: value }))
   }
 
-  async function loadResultTables(append = false, signal?: AbortSignal) {
+  async function loadResultTables(append = false) {
     if (!draft.datasourceId) return
+    tableCatalogAbort.current?.abort()
+    const controller = new AbortController()
+    tableCatalogAbort.current = controller
     const request = ++tableCatalogRequest.current
+    setTableCatalogSearched(true)
     setTableState((current) => ({ ...current, loading: true, error: '' }))
     const response = await getReportResultTables(client, draft.datasourceId, {
       owner: tableFilters.owner,
       search: tableFilters.search,
       after: append ? tableCatalog.nextAfter : '',
       limit: 30,
-    }, signal)
-    if (signal?.aborted || request !== tableCatalogRequest.current) return
+    }, controller.signal)
+    if (controller.signal.aborted || request !== tableCatalogRequest.current) return
+    tableCatalogAbort.current = null
     if (!response.ok) {
       setTableState((current) => ({ ...current, loading: false, error: response.error }))
       return
@@ -239,7 +243,7 @@ export function ReportProcedureEditor({ client, draft, onChange }: { client: Rep
 
     <div className={styles.catalog} aria-label="Oracle 存储过程查询结果">
       <div className={styles.catalogHeader}><strong>可见存储过程</strong><span>{catalog.items.length} 项</span></div>
-      {catalog.items.length === 0 && !state.loading ? <p className={styles.empty}>当前条件下未查询到已授权过程，请核对真实 Owner、EXECUTE 权限或同义词。</p> : null}
+      {catalog.items.length === 0 && !state.loading ? <p className={styles.empty}>{catalogSearched ? '当前条件下未查询到已授权过程，请核对真实 Owner、EXECUTE 权限或同义词。' : '请输入过程、包或同义词后查询；也可以直接点击查询浏览全部已授权过程。'}</p> : null}
       {catalog.items.map((item) => <button type="button" className={procedureKey(item) === selectedKey ? styles.selected : ''} aria-pressed={procedureKey(item) === selectedKey} onClick={() => void inspect(item)} key={procedureKey(item)}><code>{item.qualifiedName}</code><span>{item.argumentCount} 个参数</span></button>)}
       {catalog.hasMore ? <button type="button" className={styles.more} disabled={state.loading} onClick={() => void load(true)}><RefreshCw aria-hidden="true" />加载更多</button> : null}
     </div>
@@ -261,7 +265,7 @@ export function ReportProcedureEditor({ client, draft, onChange }: { client: Rep
       </form>
       <div className={styles.tableCatalog} aria-label="Oracle 结果表查询结果">
         <div className={styles.catalogHeader}><strong>可见结果表</strong><span>{tableCatalog.items.length} 项</span></div>
-        {tableCatalog.items.length === 0 && !tableState.loading ? <p className={styles.empty}>当前条件下未查询到已授权物理表，请核对真实 Owner、SELECT/DELETE 权限或同义词。</p> : null}
+        {tableCatalog.items.length === 0 && !tableState.loading ? <p className={styles.empty}>{tableCatalogSearched ? '当前条件下未查询到已授权物理表，请核对真实 Owner、SELECT/DELETE 权限或同义词。' : '请输入物理表或同义词后查询；也可以直接点击查询浏览全部已授权物理表。'}</p> : null}
         {tableCatalog.items.map((item) => <button type="button" className={resultTableKey(item) === selectedTableKey ? styles.selected : ''} aria-pressed={resultTableKey(item) === selectedTableKey} onClick={() => void selectResultTable(item)} key={resultTableKey(item)}><code>{item.qualifiedName}</code><span>{item.columnCount} 个字段</span></button>)}
         {tableCatalog.hasMore ? <button type="button" className={styles.more} disabled={tableState.loading} onClick={() => void loadResultTables(true)}><RefreshCw aria-hidden="true" />加载更多</button> : null}
       </div>

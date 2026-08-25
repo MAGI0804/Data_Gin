@@ -67,6 +67,16 @@ test('report configuration locks its editor while save and publication are in fl
   assert.match(source, /<fieldset[^>]*disabled=\{state\.saving\}[^>]*aria-busy=\{state\.saving \|\| undefined\}/)
 })
 
+test('Oracle object editor searches on demand and cancels superseded catalog requests', () => {
+  const source = readFileSync(new URL('../src/reportCenter/components/ReportConfigDrawer/ReportProcedureEditor.tsx', import.meta.url), 'utf8')
+  assert.match(source, /catalogAbort\.current\?\.abort\(\)/)
+  assert.match(source, /tableCatalogAbort\.current\?\.abort\(\)/)
+  assert.match(source, /getReportProcedures\([\s\S]*?controller\.signal\)/)
+  assert.match(source, /getReportResultTables\([\s\S]*?controller\.signal\)/)
+  assert.doesNotMatch(source, /getReportProcedures\(client, draft\.datasourceId, \{ limit: 30 \}/)
+  assert.doesNotMatch(source, /getReportResultTables\(client, draft\.datasourceId, \{ limit: 30 \}/)
+})
+
 function typescriptFiles(directory) {
   return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
     const file = new URL(entry.name, directory)

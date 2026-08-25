@@ -842,11 +842,6 @@ SELECT CASE WHEN EXISTS (
     SELECT 1
     FROM all_procedures procedures
     CROSS JOIN filters
-    JOIN all_objects objects
-      ON objects.owner = procedures.owner
-     AND objects.object_name = procedures.object_name
-     AND objects.object_type = procedures.object_type
-     AND objects.status = 'VALID'
     WHERE procedures.owner = filters.owner_name
       AND ((filters.package_name IS NULL
             AND procedures.object_type = 'PROCEDURE'
@@ -874,71 +869,98 @@ WITH filters AS (
           WHERE private_synonyms.owner = USER
             AND private_synonyms.synonym_name = synonyms.synonym_name
       ))
-), visible_procedures AS (
+), candidate_procedures AS (
     SELECT procedures.owner,
            CASE WHEN procedures.object_type = 'PACKAGE' THEN procedures.object_name END AS package_name,
            CASE WHEN procedures.object_type = 'PACKAGE' THEN procedures.procedure_name ELSE procedures.object_name END AS procedure_name,
-           procedures.overload
+           procedures.overload,
+           procedures.owner || CHR(31) ||
+           NVL(CASE WHEN procedures.object_type = 'PACKAGE' THEN procedures.object_name END, '') || CHR(31) ||
+           CASE WHEN procedures.object_type = 'PACKAGE' THEN procedures.procedure_name ELSE procedures.object_name END || CHR(31) ||
+           NVL(procedures.overload, '') AS cursor_key
     FROM all_procedures procedures
-    JOIN all_objects objects
-      ON objects.owner = procedures.owner
-     AND objects.object_name = procedures.object_name
-     AND objects.object_type = procedures.object_type
-     AND objects.status = 'VALID'
+    CROSS JOIN filters
     WHERE ((procedures.object_type = 'PROCEDURE' AND procedures.procedure_name IS NULL)
         OR (procedures.object_type = 'PACKAGE' AND procedures.procedure_name IS NOT NULL))
-      AND NOT EXISTS (
+      AND (filters.owner_name IS NULL OR procedures.owner = filters.owner_name)
+      AND (filters.search_text IS NULL OR INSTR(
+          procedures.owner || '.' ||
+          CASE WHEN procedures.object_type = 'PACKAGE' THEN procedures.object_name || '.' || procedures.procedure_name ELSE procedures.object_name END ||
+          CASE WHEN procedures.overload IS NULL THEN '' ELSE '#' || procedures.overload END,
+          filters.search_text
+      ) > 0)
+      AND (filters.after_key IS NULL OR
+          procedures.owner || CHR(31) ||
+          NVL(CASE WHEN procedures.object_type = 'PACKAGE' THEN procedures.object_name END, '') || CHR(31) ||
+          CASE WHEN procedures.object_type = 'PACKAGE' THEN procedures.procedure_name ELSE procedures.object_name END || CHR(31) ||
+          NVL(procedures.overload, '') > filters.after_key)
+    UNION ALL
+    SELECT procedures.owner,
+           CASE WHEN procedures.object_type = 'PACKAGE' THEN procedures.object_name END AS package_name,
+           CASE WHEN procedures.object_type = 'PACKAGE' THEN procedures.procedure_name ELSE procedures.object_name END AS procedure_name,
+           procedures.overload,
+           procedures.owner || CHR(31) ||
+           NVL(CASE WHEN procedures.object_type = 'PACKAGE' THEN procedures.object_name END, '') || CHR(31) ||
+           CASE WHEN procedures.object_type = 'PACKAGE' THEN procedures.procedure_name ELSE procedures.object_name END || CHR(31) ||
+           NVL(procedures.overload, '') AS cursor_key
+    FROM all_procedures procedures
+    JOIN local_synonyms synonyms
+      ON synonyms.table_owner = procedures.owner
+     AND synonyms.table_name = procedures.object_name
+    CROSS JOIN filters
+    WHERE filters.search_text IS NOT NULL
+      AND ((procedures.object_type = 'PROCEDURE' AND procedures.procedure_name IS NULL)
+        OR (procedures.object_type = 'PACKAGE' AND procedures.procedure_name IS NOT NULL))
+      AND (filters.owner_name IS NULL OR procedures.owner = filters.owner_name)
+      AND INSTR(
+          synonyms.owner || '.' || synonyms.synonym_name ||
+          CASE WHEN procedures.object_type = 'PACKAGE' THEN '.' || procedures.procedure_name ELSE '' END ||
+          CASE WHEN procedures.overload IS NULL THEN '' ELSE '#' || procedures.overload END,
+          filters.search_text
+      ) > 0
+      AND (filters.after_key IS NULL OR
+          procedures.owner || CHR(31) ||
+          NVL(CASE WHEN procedures.object_type = 'PACKAGE' THEN procedures.object_name END, '') || CHR(31) ||
+          CASE WHEN procedures.object_type = 'PACKAGE' THEN procedures.procedure_name ELSE procedures.object_name END || CHR(31) ||
+          NVL(procedures.overload, '') > filters.after_key)
+), catalog AS (
+    SELECT DISTINCT candidates.owner, candidates.package_name, candidates.procedure_name, candidates.overload, candidates.cursor_key
+    FROM candidate_procedures candidates
+    WHERE NOT EXISTS (
           SELECT 1
           FROM all_arguments return_values
-          WHERE return_values.owner = procedures.owner
-            AND NVL(return_values.package_name, CHR(1)) = NVL(CASE WHEN procedures.object_type = 'PACKAGE' THEN procedures.object_name END, CHR(1))
-            AND return_values.object_name = CASE WHEN procedures.object_type = 'PACKAGE' THEN procedures.procedure_name ELSE procedures.object_name END
-            AND NVL(return_values.overload, CHR(1)) = NVL(procedures.overload, CHR(1))
+          WHERE return_values.owner = candidates.owner
+            AND NVL(return_values.package_name, CHR(1)) = NVL(candidates.package_name, CHR(1))
+            AND return_values.object_name = candidates.procedure_name
+            AND NVL(return_values.overload, CHR(1)) = NVL(candidates.overload, CHR(1))
             AND return_values.data_level = 0
             AND return_values.position = 0
       )
-), catalog AS (
-    SELECT DISTINCT visible.owner, visible.package_name, visible.procedure_name, visible.overload,
-           visible.owner || CHR(31) || NVL(visible.package_name, '') || CHR(31) || visible.procedure_name || CHR(31) || NVL(visible.overload, '') AS cursor_key
-    FROM visible_procedures visible
 ), ordered_catalog AS (
     SELECT catalog.owner, catalog.package_name, catalog.procedure_name, catalog.overload,
-           (
-               SELECT COUNT(*)
-               FROM all_arguments arguments
-               WHERE arguments.owner = catalog.owner
-                 AND NVL(arguments.package_name, CHR(1)) = NVL(catalog.package_name, CHR(1))
-                 AND arguments.object_name = catalog.procedure_name
-                 AND NVL(arguments.overload, CHR(1)) = NVL(catalog.overload, CHR(1))
-                 AND arguments.data_level = 0
-                 AND arguments.position > 0
-           ) AS argument_count,
            catalog.cursor_key, filters.row_limit
     FROM catalog
     CROSS JOIN filters
-    WHERE (filters.owner_name IS NULL OR catalog.owner = filters.owner_name)
-      AND (filters.search_text IS NULL OR INSTR(
-           catalog.owner || '.' || CASE WHEN catalog.package_name IS NULL THEN '' ELSE catalog.package_name || '.' END || catalog.procedure_name ||
-           CASE WHEN catalog.overload IS NULL THEN '' ELSE '#' || catalog.overload END,
-           filters.search_text
-      ) > 0 OR EXISTS (
-          SELECT 1
-          FROM local_synonyms synonyms
-          WHERE synonyms.table_owner = catalog.owner
-            AND synonyms.table_name = NVL(catalog.package_name, catalog.procedure_name)
-            AND INSTR(
-                synonyms.owner || '.' || synonyms.synonym_name ||
-                CASE WHEN catalog.package_name IS NULL THEN '' ELSE '.' || catalog.procedure_name END ||
-                CASE WHEN catalog.overload IS NULL THEN '' ELSE '#' || catalog.overload END,
-                filters.search_text
-            ) > 0
-      ))
-      AND (filters.after_key IS NULL OR catalog.cursor_key > filters.after_key)
     ORDER BY catalog.cursor_key
+), page_catalog AS (
+    SELECT owner, package_name, procedure_name, overload, cursor_key
+    FROM ordered_catalog
+    WHERE ROWNUM <= row_limit
 )
-SELECT owner, package_name, procedure_name, overload, argument_count, cursor_key
-FROM ordered_catalog
-WHERE ROWNUM <= row_limit`
+SELECT page_catalog.owner, page_catalog.package_name, page_catalog.procedure_name, page_catalog.overload,
+       (
+           SELECT COUNT(*)
+           FROM all_arguments arguments
+           WHERE arguments.owner = page_catalog.owner
+             AND NVL(arguments.package_name, CHR(1)) = NVL(page_catalog.package_name, CHR(1))
+             AND arguments.object_name = page_catalog.procedure_name
+             AND NVL(arguments.overload, CHR(1)) = NVL(page_catalog.overload, CHR(1))
+             AND arguments.data_level = 0
+             AND arguments.position > 0
+       ) AS argument_count,
+       page_catalog.cursor_key
+FROM page_catalog
+ORDER BY page_catalog.cursor_key`
 
 const resultColumnsSQL = `
 SELECT column_name, column_id, data_type, data_length,
@@ -962,35 +984,50 @@ WITH filters AS (
           WHERE private_synonyms.owner = USER
             AND private_synonyms.synonym_name = synonyms.synonym_name
       ))
-), catalog AS (
-    SELECT tables.owner, tables.table_name
+), candidate_tables AS (
+    SELECT tables.owner, tables.table_name,
+           tables.owner || CHR(31) || tables.table_name AS cursor_key
     FROM all_tables tables
+    CROSS JOIN filters
     WHERE REGEXP_LIKE(tables.owner, '^[A-Z][A-Z0-9_$#]*$')
       AND REGEXP_LIKE(tables.table_name, '^[A-Z][A-Z0-9_$#]*$')
+      AND (filters.owner_name IS NULL OR tables.owner = filters.owner_name)
+      AND (filters.search_text IS NULL OR INSTR(tables.owner || '.' || tables.table_name, filters.search_text) > 0)
+      AND (filters.after_key IS NULL OR tables.owner || CHR(31) || tables.table_name > filters.after_key)
+    UNION ALL
+    SELECT tables.owner, tables.table_name,
+           tables.owner || CHR(31) || tables.table_name AS cursor_key
+    FROM all_tables tables
+    JOIN local_synonyms synonyms
+      ON synonyms.table_owner = tables.owner
+     AND synonyms.table_name = tables.table_name
+    CROSS JOIN filters
+    WHERE filters.search_text IS NOT NULL
+      AND REGEXP_LIKE(tables.owner, '^[A-Z][A-Z0-9_$#]*$')
+      AND REGEXP_LIKE(tables.table_name, '^[A-Z][A-Z0-9_$#]*$')
+      AND (filters.owner_name IS NULL OR tables.owner = filters.owner_name)
+      AND INSTR(synonyms.owner || '.' || synonyms.synonym_name, filters.search_text) > 0
+      AND (filters.after_key IS NULL OR tables.owner || CHR(31) || tables.table_name > filters.after_key)
+), catalog AS (
+    SELECT DISTINCT candidates.owner, candidates.table_name, candidates.cursor_key
+    FROM candidate_tables candidates
 ), ordered_catalog AS (
-    SELECT catalog.owner,
-           catalog.table_name,
-           (
-               SELECT COUNT(*)
-               FROM all_tab_columns columns
-               WHERE columns.owner = catalog.owner
-                 AND columns.table_name = catalog.table_name
-           ) AS column_count,
-           catalog.owner || CHR(31) || catalog.table_name AS cursor_key,
-           filters.row_limit
+    SELECT catalog.owner, catalog.table_name, catalog.cursor_key, filters.row_limit
     FROM catalog
     CROSS JOIN filters
-    WHERE (filters.owner_name IS NULL OR catalog.owner = filters.owner_name)
-      AND (filters.search_text IS NULL OR INSTR(catalog.owner || '.' || catalog.table_name, filters.search_text) > 0 OR EXISTS (
-          SELECT 1
-          FROM local_synonyms synonyms
-          WHERE synonyms.table_owner = catalog.owner
-            AND synonyms.table_name = catalog.table_name
-            AND INSTR(synonyms.owner || '.' || synonyms.synonym_name, filters.search_text) > 0
-      ))
-      AND (filters.after_key IS NULL OR catalog.owner || CHR(31) || catalog.table_name > filters.after_key)
-    ORDER BY cursor_key
+    ORDER BY catalog.cursor_key
+), page_catalog AS (
+    SELECT owner, table_name, cursor_key
+    FROM ordered_catalog
+    WHERE ROWNUM <= row_limit
 )
-SELECT owner, table_name, column_count, cursor_key
-FROM ordered_catalog
-WHERE ROWNUM <= row_limit`
+SELECT page_catalog.owner, page_catalog.table_name,
+       (
+           SELECT COUNT(*)
+           FROM all_tab_columns columns
+           WHERE columns.owner = page_catalog.owner
+             AND columns.table_name = page_catalog.table_name
+       ) AS column_count,
+       page_catalog.cursor_key
+FROM page_catalog
+ORDER BY page_catalog.cursor_key`

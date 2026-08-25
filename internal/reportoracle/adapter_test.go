@@ -50,6 +50,19 @@ func TestProcedureInspectionUsesEachBindOnce(t *testing.T) {
 	}
 }
 
+func TestProcedureExistsUsesAuthorizedMetadataRegardlessOfCompileStatus(t *testing.T) {
+	for _, fragment := range []string{"all_procedures", "procedures.owner = filters.owner_name", "procedures.object_type = 'PROCEDURE'", "procedures.object_type = 'PACKAGE'"} {
+		if !strings.Contains(procedureExistsSQL, fragment) {
+			t.Fatalf("procedure existence SQL is missing %q", fragment)
+		}
+	}
+	for _, forbidden := range []string{"all_objects", "objects.status = 'VALID'", "dba_procedures"} {
+		if strings.Contains(procedureExistsSQL, forbidden) {
+			t.Fatalf("procedure existence SQL must not use %q", forbidden)
+		}
+	}
+}
+
 func TestProcedureCatalogUsesBoundFiltersAndVisibleMetadata(t *testing.T) {
 	for _, bind := range []string{":1", ":2", ":3", ":4"} {
 		if count := strings.Count(procedureCatalogSQL, bind); count != 1 {
@@ -57,23 +70,26 @@ func TestProcedureCatalogUsesBoundFiltersAndVisibleMetadata(t *testing.T) {
 		}
 	}
 	for _, fragment := range []string{
-		"all_procedures", "all_arguments", "all_objects", "objects.status = 'VALID'", "all_synonyms",
+		"all_procedures", "all_arguments", "candidate_procedures", "page_catalog", "all_synonyms",
 		"synonyms.owner IN (USER, 'PUBLIC')", "synonyms.db_link IS NULL",
 		"synonyms.owner = USER OR NOT EXISTS", "private_synonyms.owner = USER", "private_synonyms.synonym_name = synonyms.synonym_name",
-		"synonyms.table_owner = catalog.owner", "synonyms.table_name = NVL(catalog.package_name, catalog.procedure_name)", "INSTR(",
+		"synonyms.table_owner = procedures.owner", "synonyms.table_name = procedures.object_name", "UNION ALL", "INSTR(",
 	} {
 		if !strings.Contains(procedureCatalogSQL, fragment) {
 			t.Fatalf("procedure catalog SQL is missing %q", fragment)
 		}
 	}
-	for _, forbidden := range []string{"dba_procedures", "dba_arguments", "dba_objects", "dba_synonyms"} {
+	for _, forbidden := range []string{"all_objects", "objects.status = 'VALID'", "dba_procedures", "dba_arguments", "dba_objects", "dba_synonyms"} {
 		if strings.Contains(procedureCatalogSQL, forbidden) {
 			t.Fatalf("procedure catalog SQL must not use %q", forbidden)
 		}
 	}
-	if !strings.Contains(procedureCatalogSQL, "filters.owner_name IS NULL OR catalog.owner = filters.owner_name") ||
-		!strings.Contains(procedureCatalogSQL, "catalog.cursor_key > filters.after_key") {
+	if !strings.Contains(procedureCatalogSQL, "filters.owner_name IS NULL OR procedures.owner = filters.owner_name") ||
+		!strings.Contains(procedureCatalogSQL, "NVL(procedures.overload, '') > filters.after_key") {
 		t.Fatal("procedure owner filtering and pagination must use the physical catalog reference")
+	}
+	if candidateAt, argumentsAt, pageAt, countAt := strings.Index(procedureCatalogSQL, "), candidate_procedures AS ("), strings.Index(procedureCatalogSQL, "FROM all_arguments return_values"), strings.Index(procedureCatalogSQL, "), page_catalog AS ("), strings.Index(procedureCatalogSQL, "SELECT COUNT(*)"); candidateAt < 0 || argumentsAt < candidateAt || pageAt < 0 || countAt < pageAt {
+		t.Fatal("procedure search must precede signature filtering and argument counts must follow pagination")
 	}
 }
 
@@ -102,9 +118,9 @@ func TestResultTableCatalogUsesBoundFiltersAndVisibleTables(t *testing.T) {
 		}
 	}
 	for _, fragment := range []string{
-		"all_tables", "all_tab_columns", "all_synonyms", "synonyms.owner IN (USER, 'PUBLIC')", "synonyms.db_link IS NULL",
+		"all_tables", "all_tab_columns", "candidate_tables", "page_catalog", "all_synonyms", "synonyms.owner IN (USER, 'PUBLIC')", "synonyms.db_link IS NULL",
 		"synonyms.owner = USER OR NOT EXISTS", "private_synonyms.owner = USER", "private_synonyms.synonym_name = synonyms.synonym_name",
-		"synonyms.table_owner = catalog.owner", "synonyms.table_name = catalog.table_name", "INSTR(", "REGEXP_LIKE", "CHR(31)",
+		"synonyms.table_owner = tables.owner", "synonyms.table_name = tables.table_name", "UNION ALL", "INSTR(", "REGEXP_LIKE", "CHR(31)",
 	} {
 		if !strings.Contains(resultTableCatalogSQL, fragment) {
 			t.Fatalf("result table catalog SQL is missing %q", fragment)
@@ -115,9 +131,12 @@ func TestResultTableCatalogUsesBoundFiltersAndVisibleTables(t *testing.T) {
 			t.Fatalf("result table catalog SQL must not include %q", forbidden)
 		}
 	}
-	if !strings.Contains(resultTableCatalogSQL, "filters.owner_name IS NULL OR catalog.owner = filters.owner_name") ||
-		!strings.Contains(resultTableCatalogSQL, "catalog.owner || CHR(31) || catalog.table_name > filters.after_key") {
+	if !strings.Contains(resultTableCatalogSQL, "filters.owner_name IS NULL OR tables.owner = filters.owner_name") ||
+		!strings.Contains(resultTableCatalogSQL, "tables.owner || CHR(31) || tables.table_name > filters.after_key") {
 		t.Fatal("result table owner filtering and pagination must use the physical catalog reference")
+	}
+	if pageAt, countAt := strings.Index(resultTableCatalogSQL, "), page_catalog AS ("), strings.Index(resultTableCatalogSQL, "SELECT COUNT(*)"); pageAt < 0 || countAt < pageAt {
+		t.Fatal("result table column counts must run only after physical candidates are paginated")
 	}
 }
 
