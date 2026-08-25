@@ -1,6 +1,6 @@
 import type { ClientResponse, HTTPMethod } from '../api/client'
 import { parseReportInputSchemaDocument, reportInputSchemaDocument } from './refCursorConfig.js'
-import type { ReportAudit, ReportAuditPage, ReportAuditQuery, ReportCatalogPage, ReportCatalogQuery, ReportColumn, ReportDatasource, ReportDatasourceInput, ReportDatasourceTest, ReportDefinitionStatus, ReportDraft, ReportExport, ReportExportPage, ReportFilterOperator, ReportGrant, ReportParameter, ReportProcedureArgument, ReportProcedurePage, ReportProcedureRef, ReportProcedureSignature, ReportProcedureSummary, ReportPublication, ReportResultPage, ReportResultQuery, ReportResultTableColumn, ReportResultTablePage, ReportResultTableRef, ReportResultTableSchema, ReportResultTableSummary, ReportRun, ReportRunContract, ReportRunStatus, ReportSummary, ReportVersionDiff, ReportVersionPage, ReportVersionSummary } from './types'
+import type { ReportAudit, ReportAuditPage, ReportAuditQuery, ReportCatalogPage, ReportCatalogQuery, ReportColumn, ReportDatasource, ReportDatasourceInput, ReportDatasourceTest, ReportDefinitionStatus, ReportDraft, ReportExport, ReportExportPage, ReportFilterOperator, ReportGrant, ReportInputOption, ReportParameter, ReportProcedureArgument, ReportProcedurePage, ReportProcedureRef, ReportProcedureSignature, ReportProcedureSummary, ReportPublication, ReportResultPage, ReportResultQuery, ReportResultTableColumn, ReportResultTablePage, ReportResultTableRef, ReportResultTableSchema, ReportResultTableSummary, ReportRun, ReportRunContract, ReportRunStatus, ReportSummary, ReportVersionDiff, ReportVersionPage, ReportVersionSummary } from './types'
 
 type JsonRecord = Record<string, unknown>
 
@@ -49,6 +49,39 @@ export function parseReportCatalogPage(payload: unknown): ReportCatalogPage {
 
 export async function getReportRunContract(client: ReportCenterClient, reportId: number, signal?: AbortSignal): Promise<ReportAPIResult<ReportRunContract>> {
   return requestAndParse(client, `/v1/reports/${reportId}/run-contract`, { method: 'GET', signal }, parseReportRunContract, '报表运行参数加载失败。')
+}
+
+export async function getReportInputQueries(client: ReportCenterClient, signal?: AbortSignal): Promise<ReportAPIResult<string[]>> {
+	return requestAndParse(client, '/v1/report-input-queries', { method: 'GET', signal }, parseReportInputQueries, '报表输入查询配置加载失败。')
+}
+
+export async function getReportInputOptions(client: ReportCenterClient, reportId: number, conditionCode: string, name = '', signal?: AbortSignal): Promise<ReportAPIResult<ReportInputOption[]>> {
+	const search = new URLSearchParams()
+	if (name.trim()) search.set('name', name.trim())
+	const encodedSearch = search.toString()
+	const suffix = encodedSearch ? `?${encodedSearch}` : ''
+	return requestAndParse(client, `/v1/reports/${reportId}/input-options/${encodeURIComponent(conditionCode)}${suffix}`, { method: 'GET', signal }, parseReportInputOptions, '报表输入选项加载失败。')
+}
+
+export function parseReportInputQueries(payload: unknown): string[] {
+	const data = unwrapData(payload)
+	if (!Array.isArray(data.items)) throw new Error('invalid report input queries')
+	const items = data.items.filter((item): item is string => typeof item === 'string' && /^[A-Za-z][A-Za-z0-9_-]{0,63}$/.test(item))
+	if (items.length !== data.items.length || new Set(items).size !== items.length) throw new Error('invalid report input queries')
+	return items
+}
+
+export function parseReportInputOptions(payload: unknown): ReportInputOption[] {
+	const data = unwrapData(payload)
+	if (!Array.isArray(data.items)) throw new Error('invalid report input options')
+	const items = data.items.flatMap((item) => {
+		if (!isRecord(item) || (typeof item.id !== 'string' && typeof item.id !== 'number')) return []
+		const id = String(item.id)
+		const name = publicString(item.name, 256)
+		return id && name ? [{ id, name }] : []
+	})
+	if (items.length !== data.items.length) throw new Error('invalid report input options')
+	return items
 }
 
 export async function getReportDatasources(client: ReportCenterClient, signal?: AbortSignal): Promise<ReportAPIResult<ReportDatasource[]>> {

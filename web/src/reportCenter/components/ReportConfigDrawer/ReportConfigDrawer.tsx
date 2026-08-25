@@ -129,7 +129,7 @@ function Editor({ tab, client, draft, datasources, datasourcesLoading, datasourc
     </div>
   }
   if (tab === 'procedure') return <ReportProcedureEditor client={client} draft={draft} onChange={onChange} />
-  if (tab === 'conditions') return <ReportInputSchemaEditor schema={draft.inputSchema} onChange={(inputSchema) => set('inputSchema', inputSchema)} />
+  if (tab === 'conditions') return <ReportInputSchemaEditor client={client} schema={draft.inputSchema} onChange={(inputSchema) => set('inputSchema', inputSchema)} />
   if (tab === 'excel') return <ReportExcelMappingEditor columns={draft.columns} onChange={(columns) => set('columns', columns)} />
   return <PermissionEditor grants={draft.grants} onChange={(grants) => set('grants', grants)} />
 }

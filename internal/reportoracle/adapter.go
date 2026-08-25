@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"time"
 
@@ -205,6 +206,7 @@ func (adapter *Adapter) QueryInputOptions(ctx context.Context, configuredSelect,
 	if err != nil {
 		return nil, err
 	}
+	arguments = append(arguments, godror.PrefetchCount(adapter.prefetchRows), godror.FetchArraySize(adapter.fetchArraySize))
 	rows, err := adapter.db.QueryContext(ctx, statement, arguments...)
 	if err != nil {
 		return nil, fmt.Errorf("query oracle input options: %w", err)
@@ -267,9 +269,9 @@ func normalizeInputOptionID(value interface{}) (interface{}, error) {
 	case []byte:
 		return string(typed), nil
 	case int64:
-		return typed, nil
+		return strconv.FormatInt(typed, 10), nil
 	case float64:
-		return typed, nil
+		return strconv.FormatFloat(typed, 'g', -1, 64), nil
 	case godror.Number:
 		return string(typed), nil
 	default:

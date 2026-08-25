@@ -1,0 +1,5 @@
+.wrapper { display: grid; gap: var(--space-1); min-width: 0; }
+.select { width: 100%; }
+.select:global(.ant-select) :global(.ant-select-selector) { min-height: var(--control-height); border-color: var(--color-border-strong); border-radius: var(--radius-control); background: var(--color-canvas); color: var(--color-text); }
+.select:global(.ant-select-focused) :global(.ant-select-selector) { border-color: var(--color-brand); box-shadow: 0 0 0 2px var(--color-brand-soft); }
+.error { color: var(--color-danger); font-family: var(--font-sans); }

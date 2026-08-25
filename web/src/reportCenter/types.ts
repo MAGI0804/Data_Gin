@@ -166,6 +166,12 @@ export type ReportInputField = {
   example?: unknown
   default?: unknown
   allowedValues?: unknown[]
+	queryName?: string
+}
+
+export type ReportInputOption = {
+	id: string
+	name: string
 }
 
 export type ReportInputSchema = Record<string, ReportInputField>

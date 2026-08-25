@@ -37,6 +37,9 @@ func TestNormalizeInputOptionValues(t *testing.T) {
 			t.Fatalf("normalizeInputOptionID(%#v) error = %v", value, err)
 		}
 	}
+	if id, err := normalizeInputOptionID(int64(9007199254740993)); err != nil || id != "9007199254740993" {
+		t.Fatalf("large numeric id = %#v, %v", id, err)
+	}
 	if _, err := normalizeInputOptionID(nil); err == nil {
 		t.Fatal("normalizeInputOptionID(nil) error = nil")
 	}

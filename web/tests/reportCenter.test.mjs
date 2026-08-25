@@ -3,12 +3,13 @@ import { readdirSync, readFileSync } from 'node:fs'
 import test from 'node:test'
 import ts from 'typescript'
 
-import { createReportRun, deleteReportDraft, getReportAudits, getReportProcedureSignature, getReportProcedures, getReportResultTableSchema, getReportResultTables, parsePublication, parseReportAuditPage, parseReportCatalogPage, parseReportDatasource, parseReportDatasources, parseReportDatasourceTest, parseReportDraft, parseReportExport, parseReportExportPage, parseReportProcedurePage, parseReportProcedureSignature, parseReportResultPage, parseReportResultTablePage, parseReportResultTableSchema, parseReportRun, parseReportRunContract, parseReportVersionDiff, parseReportVersionPage, saveAndPublishReportDraft, saveReportDraft, testReportDatasourceConnection } from '../.test-dist/reportCenter/api.js'
+import { createReportRun, deleteReportDraft, getReportAudits, getReportInputOptions, getReportInputQueries, getReportProcedureSignature, getReportProcedures, getReportResultTableSchema, getReportResultTables, parsePublication, parseReportAuditPage, parseReportCatalogPage, parseReportDatasource, parseReportDatasources, parseReportDatasourceTest, parseReportDraft, parseReportExport, parseReportExportPage, parseReportProcedurePage, parseReportProcedureSignature, parseReportResultPage, parseReportResultTablePage, parseReportResultTableSchema, parseReportRun, parseReportRunContract, parseReportVersionDiff, parseReportVersionPage, saveAndPublishReportDraft, saveReportDraft, testReportDatasourceConnection } from '../.test-dist/reportCenter/api.js'
 import { applyExcelMapping, buildReportConditions, excelMappingFromColumns, initialReportConditionValues, parseExcelMappingDocument, parseReportInputSchemaDocument, parseReportInputSchemaText, reconcileReportColumnsWithResultSchema, renameExcelMappingField, reportColumnsFromResultSchema } from '../.test-dist/reportCenter/refCursorConfig.js'
 import { reportParameterControls, reportParameterFlagDisabled, updateReportParameterFlag, updateReportParameterLogicalType } from '../.test-dist/reportCenter/parameterConfig.js'
 import { buildNewReportRunState, canStartNewReportRun, initialReportParameterValues } from '../.test-dist/reportCenter/queryParameters.js'
 import { createLatestRequestGuard } from '../.test-dist/reportCenter/components/ReportVersionDrawer/requestGuard.js'
 import { normalizeDatasourceCode, validateDatasourceConnection, validateDatasourceSave } from '../.test-dist/reportCenter/datasourceValidation.js'
+import { mergeReportInputOptions } from '../.test-dist/reportCenter/inputOptions.js'
 
 test('functional state updates do not retain React DOM events', () => {
   const sourceRoot = new URL('../src/', import.meta.url)
@@ -108,6 +109,32 @@ test('input schema rejects payloads beyond the backend 64 KiB boundary', () => {
     () => parseReportInputSchemaDocument({ condition1: { type: 'VARCHAR2', displayName: '条件', example: '测'.repeat(22_000) } }),
     /64 KiB/,
   )
+})
+
+test('input schema keeps a configured query binding on scalar selectors', () => {
+	const schema = parseReportInputSchemaDocument({ store: { type: 'str', displayName: '门店', control: 'SELECT', queryName: 'stores' } })
+	assert.equal(schema.store.queryName, 'stores')
+	assert.throws(() => parseReportInputSchemaDocument({ stores: { type: 'list[str]', displayName: '门店', control: 'SELECT', queryName: 'stores' } }), /queryName/)
+	assert.throws(() => parseReportInputSchemaDocument({ store: { type: 'str', displayName: '门店', control: 'TEXT', queryName: 'stores' } }), /queryName/)
+})
+
+test('report input query clients use configured names and exact-name search', async () => {
+	const requests = []
+	const client = async (path, options) => {
+		requests.push({ path, options })
+		if (path === '/v1/report-input-queries') return { ok: true, data: { data: { items: ['stores'] } } }
+		return { ok: true, data: { data: { items: [{ id: 'S001', name: '上海店' }] } } }
+	}
+	assert.deepEqual(await getReportInputQueries(client), { ok: true, data: ['stores'] })
+	assert.deepEqual(await getReportInputOptions(client, 9, 'store_id', '上海店'), { ok: true, data: [{ id: 'S001', name: '上海店' }] })
+	assert.equal(requests[1].path, '/v1/reports/9/input-options/store_id?name=%E4%B8%8A%E6%B5%B7%E5%BA%97')
+	assert.equal(requests[1].options.method, 'GET')
+})
+
+test('remote input options retain the selected item across later searches', () => {
+	const selected = [{ id: 'S001', name: '上海店' }]
+	const nextSearch = [{ id: 'B001', name: '北京店' }]
+	assert.deepEqual(mergeReportInputOptions(selected, nextSearch), [...selected, ...nextSearch])
 })
 
 test('parseReportCatalogPage drops malformed rows and normalizes unsafe fields', () => {

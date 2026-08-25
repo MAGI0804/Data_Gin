@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 	"unicode/utf8"
 
 	appConfig "gin-biz-web-api/config"
@@ -96,7 +97,11 @@ func (service *ReportInputQueryService) Options(ctx context.Context, actor, defi
 	if !exists {
 		return nil, fmt.Errorf("%w: configured query is missing", ErrReportInputQueryUnavailable)
 	}
-	queryCtx, cancel := context.WithTimeout(ctx, service.config.Oracle.QueryTimeout)
+	queryTimeout := service.config.Oracle.QueryTimeout
+	if queryTimeout <= 0 {
+		queryTimeout = 30 * time.Second
+	}
+	queryCtx, cancel := context.WithTimeout(ctx, queryTimeout)
 	defer cancel()
 	connection, err := service.connection(queryCtx)
 	if err != nil {

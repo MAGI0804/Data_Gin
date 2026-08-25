@@ -792,7 +792,7 @@ func canonicalReportInputSchema(raw json.RawMessage) (json.RawMessage, error) {
 		if !validJSONConditionFormat(field.Type, field.Control, field.Format) {
 			return nil, invalidReport("input schema field format is invalid")
 		}
-		if field.QueryName != "" && (field.Control != "SELECT" || !reportInputQueryNamePattern.MatchString(field.QueryName) || conditionTypeIsList(field.Type, false)) {
+		if field.QueryName != "" && (field.Control != "SELECT" || !reportInputQueryNamePattern.MatchString(field.QueryName) || field.Type != "str" && field.Type != "number") {
 			return nil, invalidReport("input schema field queryName is invalid")
 		}
 		if len(bytes.TrimSpace(field.AllowedValues)) > 0 {

@@ -3,10 +3,23 @@ import { Plus, Trash2 } from 'lucide-react'
 import { newReportInputField, parseReportInputSchemaDocument, parseReportInputSchemaText, renameReportInputField, reportDateFormats, reportDateTimeFormats, reportInputControls, reportInputSchemaDocument, reportInputTypes, reportJSONContainsUnsafeNumber } from '../../refCursorConfig'
 import type { ReportInputControl, ReportInputField, ReportInputFormat, ReportInputSchema, ReportInputType } from '../../types'
 import { JSONDocumentEditor } from './JSONDocumentEditor'
+import { getReportInputQueries, type ReportCenterClient } from '../../api'
 import styles from './ReportInputSchemaEditor.module.css'
 
-export function ReportInputSchemaEditor({ schema, onChange }: { schema: ReportInputSchema; onChange: (schema: ReportInputSchema) => void }) {
+export function ReportInputSchemaEditor({ client, schema, onChange }: { client: ReportCenterClient; schema: ReportInputSchema; onChange: (schema: ReportInputSchema) => void }) {
   const entries = Object.entries(schema)
+	const [queries, setQueries] = useState<string[]>([])
+	const [queryState, setQueryState] = useState({ loading: true, error: '' })
+	useEffect(() => {
+		const controller = new AbortController()
+		void getReportInputQueries(client, controller.signal).then((response) => {
+			if (controller.signal.aborted) return
+			if (!response.ok) { setQueryState({ loading: false, error: response.error }); return }
+			setQueries(response.data)
+			setQueryState({ loading: false, error: '' })
+		})
+		return () => controller.abort()
+	}, [client])
   function add() {
     let index = entries.length
     let next = newReportInputField(index)
@@ -20,22 +33,23 @@ export function ReportInputSchemaEditor({ schema, onChange }: { schema: ReportIn
     <JSONDocumentEditor label="筛选条件 JSON" description="每个键就是传给存储过程 JSON 的一个 conditions 参数；系统仅自动传入 report_id（本次运行 ID）。日期字段可用 format 选择 YYYYMMDD 或 YYYY-MM-DD。" value={reportInputSchemaDocument(schema)} parse={parseReportInputSchemaDocument} parseText={parseReportInputSchemaText} onChange={onChange} />
     <div className={styles.tableHeader}><div><h3>表格编辑</h3><p>表格修改会立即回写上方 JSON；日期只选择到日，日期时间选择到秒，最终传值仍是所选格式的字符串。</p></div><button type="button" onClick={add}><Plus aria-hidden="true" />新增筛选</button></div>
     <div className={styles.rows}>
-      {entries.map(([code, field]) => <InputFieldRow code={code} field={field} key={code} onRename={(nextCode) => onChange(renameReportInputField(schema, code, nextCode))} onChange={(nextField) => onChange({ ...schema, [code]: nextField })} onDelete={() => onChange(Object.fromEntries(entries.filter(([itemCode]) => itemCode !== code)))} />)}
+      {entries.map(([code, field]) => <InputFieldRow code={code} field={field} queries={queries} queryState={queryState} key={code} onRename={(nextCode) => onChange(renameReportInputField(schema, code, nextCode))} onChange={(nextField) => onChange({ ...schema, [code]: nextField })} onDelete={() => onChange(Object.fromEntries(entries.filter(([itemCode]) => itemCode !== code)))} />)}
       {entries.length === 0 ? <p className={styles.empty}>至少新增一个筛选条件，或在上方粘贴 JSON 后点击“应用 JSON”。</p> : null}
     </div>
   </div>
 }
 
-function InputFieldRow({ code, field, onRename, onChange, onDelete }: { code: string; field: ReportInputField; onRename: (code: string) => void; onChange: (field: ReportInputField) => void; onDelete: () => void }) {
+function InputFieldRow({ code, field, queries, queryState, onRename, onChange, onDelete }: { code: string; field: ReportInputField; queries: string[]; queryState: { loading: boolean; error: string }; onRename: (code: string) => void; onChange: (field: ReportInputField) => void; onDelete: () => void }) {
   return <div className={styles.row}>
     <EditorField label="条件字段"><input className={styles.mono} value={code} onChange={(event) => onRename(event.currentTarget.value)} /></EditorField>
     <EditorField label="筛选显示名"><input value={field.displayName} onChange={(event) => onChange({ ...field, displayName: event.currentTarget.value })} /></EditorField>
     <EditorField label="JSON 类型"><select value={field.type} onChange={(event) => onChange(changeInputType(field, event.currentTarget.value as ReportInputType))}>{reportInputTypes.map((type) => <option key={type}>{type}</option>)}</select></EditorField>
     <EditorField label="查询控件"><select value={field.control} onChange={(event) => onChange(changeInputControl(field, event.currentTarget.value as ReportInputControl | ''))}>{reportInputControls.map((control) => <option value={control} key={control || 'AUTO'}>{inputControlLabel(control)}</option>)}</select></EditorField>
+		{field.control === 'SELECT' && (field.type === 'str' || field.type === 'number') ? <EditorField label="选项查询"><select value={field.queryName ?? ''} disabled={queryState.loading} onChange={(event) => onChange(withQueryName(field, event.currentTarget.value))}><option value="">{queryState.loading ? '正在加载查询…' : '静态允许值 / 不绑定查询'}</option>{field.queryName && !queries.includes(field.queryName) ? <option value={field.queryName}>{field.queryName}（当前未配置）</option> : null}{queries.map((query) => <option value={query} key={query}>{query}</option>)}</select>{queryState.error ? <small className={styles.queryError}>{queryState.error}</small> : null}</EditorField> : null}
     {field.control === 'DATE' || field.control === 'DATETIME' ? <EditorField className={styles.formatField} label="日期传值格式（必选）"><select className={styles.mono} value={field.format ?? defaultFormat(field.control)} onChange={(event) => onChange({ ...field, format: event.currentTarget.value as ReportInputFormat })}>{(field.control === 'DATE' ? reportDateFormats : reportDateTimeFormats).map((format) => <option value={format} key={format}>{inputFormatLabel(format)}</option>)}</select><small>传入示例：{inputFormatExample(field.format ?? defaultFormat(field.control))}</small></EditorField> : null}
     <JSONValueInput label="示例值" value={field.example} exists={Object.hasOwnProperty.call(field, 'example')} numeric={field.type === 'number' || field.type === 'list[number]'} onChange={(value, exists) => onChange(withOptional(field, 'example', value, exists))} />
     <JSONValueInput label="默认值" value={field.default} exists={Object.hasOwnProperty.call(field, 'default')} numeric={field.type === 'number' || field.type === 'list[number]'} onChange={(value, exists) => onChange(withOptional(field, 'default', value, exists))} />
-    <JSONValueInput label="允许值" value={field.allowedValues} exists={Boolean(field.allowedValues)} array numeric={field.type === 'number' || field.type === 'list[number]'} onChange={(value, exists) => onChange(withOptional(field, 'allowedValues', value as unknown[], exists))} />
+		{field.queryName ? null : <JSONValueInput label="允许值" value={field.allowedValues} exists={Boolean(field.allowedValues)} array numeric={field.type === 'number' || field.type === 'list[number]'} onChange={(value, exists) => onChange(withOptional(field, 'allowedValues', value as unknown[], exists))} />}
     <div className={styles.flags}><label><input type="checkbox" checked={field.required} onChange={(event) => onChange({ ...field, required: event.currentTarget.checked })} />必填</label></div>
     <button className={styles.delete} type="button" aria-label={`删除筛选条件 ${field.displayName || code}`} onClick={onDelete}><Trash2 aria-hidden="true" /></button>
   </div>
@@ -70,7 +84,11 @@ function withOptional<K extends 'example' | 'default' | 'allowedValues'>(field: 
 }
 
 function changeInputType(field: ReportInputField, type: ReportInputType): ReportInputField {
-  if (field.control !== 'DATE' && field.control !== 'DATETIME') return { ...field, type }
+	if (field.control !== 'DATE' && field.control !== 'DATETIME') {
+		const next = { ...field, type }
+		if (type !== 'str' && type !== 'number') delete next.queryName
+		return next
+	}
   const control: ReportInputControl = type === 'number' ? 'NUMBER' : type === 'bool' ? 'CHECKBOX' : type === 'str' ? field.control : 'TEXTAREA'
   const next = { ...field, type, control }
   if (control !== 'DATE' && control !== 'DATETIME') delete next.format
@@ -80,7 +98,19 @@ function changeInputType(field: ReportInputField, type: ReportInputType): Report
 function changeInputControl(field: ReportInputField, control: ReportInputControl | ''): ReportInputField {
   const next = { ...field, control, ...((control === 'DATE' || control === 'DATETIME') ? { type: 'str' as const, format: defaultFormat(control) } : {}) }
   if (control !== 'DATE' && control !== 'DATETIME') delete next.format
+	if (control !== 'SELECT') delete next.queryName
   return next
+}
+
+function withQueryName(field: ReportInputField, value: string): ReportInputField {
+	const next = { ...field }
+	const queryName = value.trim()
+	if (!queryName) delete next.queryName
+	else {
+		next.queryName = queryName
+		delete next.allowedValues
+	}
+	return next
 }
 
 function defaultFormat(control: 'DATE' | 'DATETIME'): ReportInputFormat {

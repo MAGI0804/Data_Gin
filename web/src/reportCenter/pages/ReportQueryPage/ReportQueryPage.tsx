@@ -6,6 +6,7 @@ import { buildNewReportRunState, canStartNewReportRun, initialReportParameterVal
 import { buildReportConditions, editableReportConditionValue, initialReportConditionValues, isReportInputListType } from '../../refCursorConfig'
 import type { ReportExport, ReportFilterOperator, ReportInputField, ReportParameter, ReportResultColumn, ReportResultFilter, ReportResultPage, ReportResultQuery, ReportRun, ReportRunContract } from '../../types'
 import { ReportFieldDetailDrawer } from '../../components/ReportFieldDetailDrawer/ReportFieldDetailDrawer'
+import { ReportInputQuerySelect } from '../../components/ReportInputQuerySelect/ReportInputQuerySelect'
 import { useReportCatalog } from '../../useReportCatalog'
 import styles from './ReportQueryPage.module.css'
 
@@ -241,7 +242,7 @@ export function ReportQueryPage({ client, navigation }: { client: ReportCenterCl
         {parametersOpen ? <>
         {contractState.loading ? <FeedbackState kind="loading" title="正在读取已发布筛选契约" /> : null}
         {contractState.error ? <FeedbackState kind="error" title="筛选契约加载失败" description={contractState.error} /> : null}
-        {contract ? <form className={styles.parameterForm} onSubmit={(event) => void submitRun(event)}>{contract.jsonInput ? Object.entries(contract.inputSchema).map(([code, field]) => <ConditionField code={code} disabled={frozen || operation.busy} field={field} key={code} value={values[code]} onChange={(value) => setValues((current) => ({ ...current, [code]: value }))} />) : visibleReportParameters(contract.parameters).map((parameter) => <ParameterField disabled={frozen || operation.busy} key={parameter.code} parameter={parameter} value={values[parameter.code]} onChange={(value) => setValues((current) => ({ ...current, [parameter.code]: value }))} />)}<div className={styles.runActions}><span>{frozen ? '本次条件已冻结；点击页头“新建运行”可恢复默认条件并重新查询。' : `${reportConditionCount(contract)} 个可填写筛选条件。`}</span><Button variant="primary" type="submit" disabled={frozen || operation.busy}><Play aria-hidden="true" />运行报表</Button></div></form> : null}
+        {contract ? <form className={styles.parameterForm} onSubmit={(event) => void submitRun(event)}>{contract.jsonInput ? Object.entries(contract.inputSchema).map(([code, field]) => <ConditionField client={client} reportId={contract.definitionId} code={code} disabled={frozen || operation.busy} field={field} key={code} value={values[code]} onChange={(value) => setValues((current) => ({ ...current, [code]: value }))} />) : visibleReportParameters(contract.parameters).map((parameter) => <ParameterField disabled={frozen || operation.busy} key={parameter.code} parameter={parameter} value={values[parameter.code]} onChange={(value) => setValues((current) => ({ ...current, [parameter.code]: value }))} />)}<div className={styles.runActions}><span>{frozen ? '本次条件已冻结；点击页头“新建运行”可恢复默认条件并重新查询。' : `${reportConditionCount(contract)} 个可填写筛选条件。`}</span><Button variant="primary" type="submit" disabled={frozen || operation.busy}><Play aria-hidden="true" />运行报表</Button></div></form> : null}
         {!contract && !contractState.loading && !contractState.error ? <FeedbackState kind="empty" title="尚未选择报表" description="请选择一份已发布且有查询权限的报表。" /> : null}
         </> : <div className={styles.collapsedParameters}>{contract ? `${reportConditionCount(contract)} 个筛选条件${frozen ? ' · 本次运行条件已冻结' : ''}` : '筛选区已收起'}</div>}
       </Section>
@@ -272,11 +273,12 @@ function ParameterField({ parameter, value, disabled, onChange }: { parameter: R
   return <label className={styles.field} htmlFor={id}><span>{parameter.label}{parameter.required ? ' *' : ''}</span>{parameter.controlType === 'TEXTAREA' ? <textarea {...common} rows={3} /> : <input {...common} type={type} inputMode={parameter.controlType === 'NUMBER' ? 'decimal' : undefined} />}<small>{parameter.errorMessage || hint}</small></label>
 }
 
-function ConditionField({ code, field, value, disabled, onChange }: { code: string; field: ReportInputField; value: unknown; disabled: boolean; onChange: (value: unknown) => void }) {
+function ConditionField({ client, reportId, code, field, value, disabled, onChange }: { client: ReportCenterClient; reportId: number; code: string; field: ReportInputField; value: unknown; disabled: boolean; onChange: (value: unknown) => void }) {
   const id = `report-condition-${code}`
   const label = `${field.displayName}${field.required ? ' *' : ''}`
   const list = isReportInputListType(field.type)
   const hint = [code, field.type, field.format, field.required ? '必填' : '选填'].filter(Boolean).join(' · ')
+	if (field.queryName) return <label className={styles.field} htmlFor={id}><span>{label}</span><ReportInputQuerySelect client={client} reportId={reportId} conditionCode={code} inputId={id} value={value} required={field.required} disabled={disabled} onChange={onChange} /><small>{hint} · 显示 name，提交 id</small></label>
   if (field.allowedValues?.length) {
     const options = field.allowedValues.map((item, index) => ({ key: String(index), value: editableReportConditionValue(item, { ...field, allowedValues: undefined }), label: displayConditionOption(item) }))
     const selected = list ? options.filter((option) => (Array.isArray(value) ? value : []).some((item) => comparableConditionValue(item) === comparableConditionValue(option.value))).map((option) => option.key) : options.find((option) => comparableConditionValue(option.value) === comparableConditionValue(value))?.key ?? ''

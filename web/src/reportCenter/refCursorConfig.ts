@@ -1,6 +1,7 @@
 import type { ReportColumn, ReportInputControl, ReportInputField, ReportInputFormat, ReportInputSchema, ReportInputType, ReportResultTableColumn } from './types'
 
 const conditionCodePattern = /^[A-Za-z][A-Za-z0-9_]{0,63}$/
+const inputQueryNamePattern = /^[A-Za-z][A-Za-z0-9_-]{0,63}$/
 const oracleFieldPattern = /^[A-Za-z][A-Za-z0-9_$#]{0,127}$/
 const jsonNumberPattern = /^-?(?:0|[1-9]\d*)(?:\.\d+)?(?:[eE][+-]?\d+)?$/
 const unsafeNumberError = ' 超出 JavaScript 安全数字范围或无法无损表示，请改用 str 类型。'
@@ -23,7 +24,7 @@ export function parseReportInputSchemaDocument(value: unknown, allowEmpty = fals
   for (const [code, rawField] of Object.entries(value)) {
     if (!conditionCodePattern.test(code)) throw new Error(`筛选字段 ${code || '（空）'} 的编码不合法。`)
     if (!isRecord(rawField)) throw new Error(`筛选字段 ${code} 必须使用 JSON 对象配置。`)
-    const unknownKeys = Object.keys(rawField).filter((key) => !['type', 'displayName', 'control', 'format', 'required', 'multiple', 'example', 'default', 'allowedValues'].includes(key))
+    const unknownKeys = Object.keys(rawField).filter((key) => !['type', 'displayName', 'control', 'format', 'required', 'multiple', 'example', 'default', 'allowedValues', 'queryName'].includes(key))
     if (unknownKeys.length) throw new Error(`筛选字段 ${code} 含有未知配置：${unknownKeys.join('、')}。`)
     if (rawField.multiple !== undefined && typeof rawField.multiple !== 'boolean') throw new Error(`筛选字段 ${code} 的 multiple 必须是布尔值。`)
     const normalizedType = normalizeReportInputType(rawField.type, rawField.multiple === true)
@@ -32,6 +33,7 @@ export function parseReportInputSchemaDocument(value: unknown, allowEmpty = fals
     const control = normalizeReportInputControl(rawField.control, normalizedType.legacyControl)
     const rawFormat = normalizedString(rawField.format)
     const parsedFormat = normalizeReportInputFormat(rawField.format)
+		const queryName = normalizedString(rawField.queryName)
     const format = parsedFormat || (control === 'DATE' ? normalizedType.legacyFormat ?? 'YYYYMMDD' : control === 'DATETIME' ? normalizedType.legacyFormat ?? 'YYYY-MM-DD HH:mm:ss' : '')
     if (!displayName || displayName.length > 128) throw new Error(`筛选字段 ${code} 必须填写筛选显示名。`)
     if (control === null) throw new Error(`筛选字段 ${code} 的控件类型不受支持。`)
@@ -40,6 +42,7 @@ export function parseReportInputSchemaDocument(value: unknown, allowEmpty = fals
     if ((control === 'DATE' || control === 'DATETIME') && normalizedType.type !== 'str') throw new Error(`筛选字段 ${code} 的日期控件必须使用 str 类型。`)
     if (rawField.required !== undefined && typeof rawField.required !== 'boolean') throw new Error(`筛选字段 ${code} 的 required 必须是布尔值。`)
     if (rawField.allowedValues !== undefined && (!Array.isArray(rawField.allowedValues) || rawField.allowedValues.length === 0)) throw new Error(`筛选字段 ${code} 的 allowedValues 必须是非空数组。`)
+		if (rawField.queryName !== undefined && (!queryName || !inputQueryNamePattern.test(queryName) || control !== 'SELECT' || !['str', 'number'].includes(normalizedType.type))) throw new Error(`筛选字段 ${code} 的 queryName 必须绑定在单选文本或数字字段上。`)
     const field = compactInputField({
       type: normalizedType.type,
       displayName,
@@ -49,6 +52,7 @@ export function parseReportInputSchemaDocument(value: unknown, allowEmpty = fals
       ...(Object.prototype.hasOwnProperty.call(rawField, 'example') ? { example: rawField.example } : {}),
       ...(Object.prototype.hasOwnProperty.call(rawField, 'default') ? { default: rawField.default } : {}),
       ...(Array.isArray(rawField.allowedValues) ? { allowedValues: [...rawField.allowedValues] } : {}),
+			...(queryName ? { queryName } : {}),
     })
     validateReportInputFieldMetadata(code, field)
     result[code] = field
@@ -421,6 +425,7 @@ function compactInputField(field: ReportInputField): ReportInputField {
     ...(Object.prototype.hasOwnProperty.call(field, 'example') ? { example: field.example } : {}),
     ...(Object.prototype.hasOwnProperty.call(field, 'default') ? { default: field.default } : {}),
     ...(field.allowedValues ? { allowedValues: [...field.allowedValues] } : {}),
+		...(field.queryName ? { queryName: field.queryName } : {}),
   }
 }
 
