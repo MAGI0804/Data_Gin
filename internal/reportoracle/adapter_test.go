@@ -56,10 +56,24 @@ func TestProcedureCatalogUsesBoundFiltersAndVisibleMetadata(t *testing.T) {
 			t.Fatalf("bind %s occurs %d times, want once", bind, count)
 		}
 	}
-	for _, fragment := range []string{"all_procedures", "all_arguments", "all_objects", "objects.status = 'VALID'", "INSTR("} {
+	for _, fragment := range []string{
+		"all_procedures", "all_arguments", "all_objects", "objects.status = 'VALID'", "all_synonyms",
+		"synonyms.owner IN (USER, 'PUBLIC')", "synonyms.db_link IS NULL",
+		"synonyms.owner = USER OR NOT EXISTS", "private_synonyms.owner = USER", "private_synonyms.synonym_name = synonyms.synonym_name",
+		"synonyms.table_owner = catalog.owner", "synonyms.table_name = NVL(catalog.package_name, catalog.procedure_name)", "INSTR(",
+	} {
 		if !strings.Contains(procedureCatalogSQL, fragment) {
 			t.Fatalf("procedure catalog SQL is missing %q", fragment)
 		}
+	}
+	for _, forbidden := range []string{"dba_procedures", "dba_arguments", "dba_objects", "dba_synonyms"} {
+		if strings.Contains(procedureCatalogSQL, forbidden) {
+			t.Fatalf("procedure catalog SQL must not use %q", forbidden)
+		}
+	}
+	if !strings.Contains(procedureCatalogSQL, "filters.owner_name IS NULL OR catalog.owner = filters.owner_name") ||
+		!strings.Contains(procedureCatalogSQL, "catalog.cursor_key > filters.after_key") {
+		t.Fatal("procedure owner filtering and pagination must use the physical catalog reference")
 	}
 }
 
@@ -87,13 +101,23 @@ func TestResultTableCatalogUsesBoundFiltersAndVisibleTables(t *testing.T) {
 			t.Fatalf("bind %s occurs %d times, want once", bind, count)
 		}
 	}
-	for _, fragment := range []string{"all_tables", "all_tab_columns", "INSTR(", "REGEXP_LIKE", "CHR(31)"} {
+	for _, fragment := range []string{
+		"all_tables", "all_tab_columns", "all_synonyms", "synonyms.owner IN (USER, 'PUBLIC')", "synonyms.db_link IS NULL",
+		"synonyms.owner = USER OR NOT EXISTS", "private_synonyms.owner = USER", "private_synonyms.synonym_name = synonyms.synonym_name",
+		"synonyms.table_owner = catalog.owner", "synonyms.table_name = catalog.table_name", "INSTR(", "REGEXP_LIKE", "CHR(31)",
+	} {
 		if !strings.Contains(resultTableCatalogSQL, fragment) {
 			t.Fatalf("result table catalog SQL is missing %q", fragment)
 		}
 	}
-	if strings.Contains(resultTableCatalogSQL, "all_views") {
-		t.Fatal("result table catalog must not include Oracle views")
+	for _, forbidden := range []string{"all_views", "dba_tables", "dba_tab_columns", "dba_synonyms"} {
+		if strings.Contains(resultTableCatalogSQL, forbidden) {
+			t.Fatalf("result table catalog SQL must not include %q", forbidden)
+		}
+	}
+	if !strings.Contains(resultTableCatalogSQL, "filters.owner_name IS NULL OR catalog.owner = filters.owner_name") ||
+		!strings.Contains(resultTableCatalogSQL, "catalog.owner || CHR(31) || catalog.table_name > filters.after_key") {
+		t.Fatal("result table owner filtering and pagination must use the physical catalog reference")
 	}
 }
 

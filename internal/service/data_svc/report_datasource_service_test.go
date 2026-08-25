@@ -259,6 +259,53 @@ func TestReportDatasourceServiceListsVisibleResultTablesWithOpaqueCursor(t *test
 	}
 }
 
+func TestReportDatasourceServiceReturnsPhysicalRefsForCrossSchemaSynonymSearch(t *testing.T) {
+	procedureRef := reportoracle.ProcedureRef{Owner: "APP_OWNER", Package: "PKG_REPORT", Name: "BUILD_DAILY"}
+	procedureCursor, err := reportoracle.ProcedureCursorKey(procedureRef)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tableRef := reportoracle.ResultTableRef{Owner: "APP_OWNER", Name: "DAILY_RESULT_ROWS"}
+	tableCursor, err := reportoracle.ResultTableCursorKey(tableRef)
+	if err != nil {
+		t.Fatal(err)
+	}
+	connection := &fakeReportDatasourceConnection{
+		procedures:   []reportoracle.ProcedureSummary{{ProcedureRef: procedureRef, ArgumentCount: 1, CursorKey: procedureCursor}},
+		resultTables: []reportoracle.ResultTableSummary{{ResultTableRef: tableRef, ColumnCount: 3, CursorKey: tableCursor}},
+	}
+	store := &fakeReportDatasourceStore{item: model.ReportDatasource{
+		BaseModel: model.BaseModel{ID: 4}, Enabled: true, PasswordCiphertext: "ciphertext", CredentialKeyVersion: "key-v1", QueryTimeoutSeconds: 30,
+	}}
+	service := NewReportDatasourceServiceWithDependencies(store, &fakeReportDatasourceCipher{}, func(context.Context, reportoracle.Config) (reportDatasourceConnection, error) {
+		return connection, nil
+	})
+
+	procedures, err := service.ListProcedures(t.Context(), 7, 4, ReportProcedureCatalogQuery{Owner: "APP_OWNER", Search: "REPORT_ALIAS.BUILD_DAILY", Limit: 10})
+	if err != nil {
+		t.Fatalf("ListProcedures() error = %v", err)
+	}
+	if len(procedures.Items) != 1 || procedures.Items[0].Owner != "APP_OWNER" || procedures.Items[0].Package != "PKG_REPORT" ||
+		procedures.Items[0].Name != "BUILD_DAILY" || procedures.Items[0].QualifiedName != "APP_OWNER.PKG_REPORT.BUILD_DAILY" {
+		t.Fatalf("physical procedure result = %+v", procedures)
+	}
+	if connection.query.Owner != "APP_OWNER" || connection.query.Search != "REPORT_ALIAS.BUILD_DAILY" {
+		t.Fatalf("procedure query = %+v", connection.query)
+	}
+
+	tables, err := service.ListResultTables(t.Context(), 7, 4, ReportResultTableCatalogQuery{Owner: "APP_OWNER", Search: "RESULT_ALIAS", Limit: 10})
+	if err != nil {
+		t.Fatalf("ListResultTables() error = %v", err)
+	}
+	if len(tables.Items) != 1 || tables.Items[0].Owner != "APP_OWNER" || tables.Items[0].Name != "DAILY_RESULT_ROWS" ||
+		tables.Items[0].QualifiedName != "APP_OWNER.DAILY_RESULT_ROWS" {
+		t.Fatalf("physical result table = %+v", tables)
+	}
+	if connection.resultTableQuery.Owner != "APP_OWNER" || connection.resultTableQuery.Search != "RESULT_ALIAS" {
+		t.Fatalf("result table query = %+v", connection.resultTableQuery)
+	}
+}
+
 func TestReportDatasourceServiceReturnsResultTableSchema(t *testing.T) {
 	precision, scale := int64(18), int64(0)
 	connection := &fakeReportDatasourceConnection{resultColumns: []reportoracle.ResultColumn{

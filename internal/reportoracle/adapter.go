@@ -863,6 +863,17 @@ const procedureCatalogSQL = `
 WITH filters AS (
     SELECT :1 AS owner_name, :2 AS search_text, :3 AS after_key, :4 AS row_limit
     FROM dual
+), local_synonyms AS (
+    SELECT synonyms.owner, synonyms.synonym_name, synonyms.table_owner, synonyms.table_name
+    FROM all_synonyms synonyms
+    WHERE synonyms.owner IN (USER, 'PUBLIC')
+      AND synonyms.db_link IS NULL
+      AND (synonyms.owner = USER OR NOT EXISTS (
+          SELECT 1
+          FROM all_synonyms private_synonyms
+          WHERE private_synonyms.owner = USER
+            AND private_synonyms.synonym_name = synonyms.synonym_name
+      ))
 ), visible_procedures AS (
     SELECT procedures.owner,
            CASE WHEN procedures.object_type = 'PACKAGE' THEN procedures.object_name END AS package_name,
@@ -910,7 +921,18 @@ WITH filters AS (
            catalog.owner || '.' || CASE WHEN catalog.package_name IS NULL THEN '' ELSE catalog.package_name || '.' END || catalog.procedure_name ||
            CASE WHEN catalog.overload IS NULL THEN '' ELSE '#' || catalog.overload END,
            filters.search_text
-      ) > 0)
+      ) > 0 OR EXISTS (
+          SELECT 1
+          FROM local_synonyms synonyms
+          WHERE synonyms.table_owner = catalog.owner
+            AND synonyms.table_name = NVL(catalog.package_name, catalog.procedure_name)
+            AND INSTR(
+                synonyms.owner || '.' || synonyms.synonym_name ||
+                CASE WHEN catalog.package_name IS NULL THEN '' ELSE '.' || catalog.procedure_name END ||
+                CASE WHEN catalog.overload IS NULL THEN '' ELSE '#' || catalog.overload END,
+                filters.search_text
+            ) > 0
+      ))
       AND (filters.after_key IS NULL OR catalog.cursor_key > filters.after_key)
     ORDER BY catalog.cursor_key
 )
@@ -929,24 +951,44 @@ const resultTableCatalogSQL = `
 WITH filters AS (
     SELECT :1 AS owner_name, :2 AS search_text, :3 AS after_key, :4 AS row_limit
     FROM dual
+), local_synonyms AS (
+    SELECT synonyms.owner, synonyms.synonym_name, synonyms.table_owner, synonyms.table_name
+    FROM all_synonyms synonyms
+    WHERE synonyms.owner IN (USER, 'PUBLIC')
+      AND synonyms.db_link IS NULL
+      AND (synonyms.owner = USER OR NOT EXISTS (
+          SELECT 1
+          FROM all_synonyms private_synonyms
+          WHERE private_synonyms.owner = USER
+            AND private_synonyms.synonym_name = synonyms.synonym_name
+      ))
+), catalog AS (
+    SELECT tables.owner, tables.table_name
+    FROM all_tables tables
+    WHERE REGEXP_LIKE(tables.owner, '^[A-Z][A-Z0-9_$#]*$')
+      AND REGEXP_LIKE(tables.table_name, '^[A-Z][A-Z0-9_$#]*$')
 ), ordered_catalog AS (
-    SELECT tables.owner,
-           tables.table_name,
+    SELECT catalog.owner,
+           catalog.table_name,
            (
                SELECT COUNT(*)
                FROM all_tab_columns columns
-               WHERE columns.owner = tables.owner
-                 AND columns.table_name = tables.table_name
+               WHERE columns.owner = catalog.owner
+                 AND columns.table_name = catalog.table_name
            ) AS column_count,
-           tables.owner || CHR(31) || tables.table_name AS cursor_key,
+           catalog.owner || CHR(31) || catalog.table_name AS cursor_key,
            filters.row_limit
-    FROM all_tables tables
+    FROM catalog
     CROSS JOIN filters
-    WHERE REGEXP_LIKE(tables.owner, '^[A-Z][A-Z0-9_$#]*$')
-      AND REGEXP_LIKE(tables.table_name, '^[A-Z][A-Z0-9_$#]*$')
-      AND (filters.owner_name IS NULL OR tables.owner = filters.owner_name)
-      AND (filters.search_text IS NULL OR INSTR(tables.owner || '.' || tables.table_name, filters.search_text) > 0)
-      AND (filters.after_key IS NULL OR tables.owner || CHR(31) || tables.table_name > filters.after_key)
+    WHERE (filters.owner_name IS NULL OR catalog.owner = filters.owner_name)
+      AND (filters.search_text IS NULL OR INSTR(catalog.owner || '.' || catalog.table_name, filters.search_text) > 0 OR EXISTS (
+          SELECT 1
+          FROM local_synonyms synonyms
+          WHERE synonyms.table_owner = catalog.owner
+            AND synonyms.table_name = catalog.table_name
+            AND INSTR(synonyms.owner || '.' || synonyms.synonym_name, filters.search_text) > 0
+      ))
+      AND (filters.after_key IS NULL OR catalog.owner || CHR(31) || catalog.table_name > filters.after_key)
     ORDER BY cursor_key
 )
 SELECT owner, table_name, column_count, cursor_key

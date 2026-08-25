@@ -230,15 +230,16 @@ export function ReportProcedureEditor({ client, draft, onChange }: { client: Rep
   }
 
   return <div className={styles.editor}>
+    <p className={styles.accessHint}>使用所选数据源的普通 Oracle 账号查询全部已授权对象；Owner 留空会跨 Schema 搜索，也可输入本地同义词。选中后统一绑定真实 OWNER 和对象名，不需要管理员账号密码。</p>
     <form className={styles.search} onSubmit={(event) => { event.preventDefault(); void load(false) }}>
-      <label>Owner<input className={styles.mono} value={filters.owner} placeholder="可选，例如 REPORT" onChange={(event) => updateFilter('owner', event.currentTarget.value)} /></label>
-      <label>过程名称<input value={filters.search} placeholder="搜索过程或包名" onChange={(event) => updateFilter('search', event.currentTarget.value)} /></label>
+      <label>真实 Owner（可选）<input className={styles.mono} value={filters.owner} placeholder="留空搜索全部授权 Schema" onChange={(event) => updateFilter('owner', event.currentTarget.value)} /></label>
+      <label>过程名称<input value={filters.search} placeholder="搜索过程、包或同义词" onChange={(event) => updateFilter('search', event.currentTarget.value)} /></label>
       <button type="submit" disabled={state.loading}><Search aria-hidden="true" />{state.loading ? '查询中…' : '查询 Oracle'}</button>
     </form>
 
     <div className={styles.catalog} aria-label="Oracle 存储过程查询结果">
       <div className={styles.catalogHeader}><strong>可见存储过程</strong><span>{catalog.items.length} 项</span></div>
-      {catalog.items.length === 0 && !state.loading ? <p className={styles.empty}>当前条件下未查询到可见过程。</p> : null}
+      {catalog.items.length === 0 && !state.loading ? <p className={styles.empty}>当前条件下未查询到已授权过程，请核对真实 Owner、EXECUTE 权限或同义词。</p> : null}
       {catalog.items.map((item) => <button type="button" className={procedureKey(item) === selectedKey ? styles.selected : ''} aria-pressed={procedureKey(item) === selectedKey} onClick={() => void inspect(item)} key={procedureKey(item)}><code>{item.qualifiedName}</code><span>{item.argumentCount} 个参数</span></button>)}
       {catalog.hasMore ? <button type="button" className={styles.more} disabled={state.loading} onClick={() => void load(true)}><RefreshCw aria-hidden="true" />加载更多</button> : null}
     </div>
@@ -252,15 +253,15 @@ export function ReportProcedureEditor({ client, draft, onChange }: { client: Rep
       </> : <p className={styles.empty}>从上方 Oracle 查询结果中选择过程后，系统会自动绑定唯一 JSON 输入参数，不绑定任何出参。</p>}
     </section>
     <section className={styles.resultTable} aria-labelledby="report-result-table-title">
-      <div><h3 id="report-result-table-title">Oracle 结果表绑定</h3><p>存储过程仅接收已绑定的唯一 JSON 入参；系统将绑定表作为完整结果读取，Excel 导出成功后清理表中数据。</p></div>
+      <div><h3 id="report-result-table-title">Oracle 结果表绑定</h3><p>可绑定其他 Schema 已授权的物理表；系统读取完整结果并在 Excel 导出成功后清理数据，因此数据源账号需要 SELECT、DELETE 权限和稳定 ROWID。</p></div>
       <form className={styles.tableSearch} onSubmit={(event) => { event.preventDefault(); void loadResultTables(false) }}>
-        <label>Owner<input className={styles.mono} value={tableFilters.owner} placeholder="可选，例如 REPORT" onChange={(event) => { const owner = event.currentTarget.value; setTableFilters((current) => ({ ...current, owner })) }} /></label>
-        <label>结果表<input value={tableFilters.search} placeholder="搜索表名" onChange={(event) => { const search = event.currentTarget.value; setTableFilters((current) => ({ ...current, search })) }} /></label>
+        <label>真实 Owner（可选）<input className={styles.mono} value={tableFilters.owner} placeholder="留空搜索全部授权 Schema" onChange={(event) => { const owner = event.currentTarget.value; setTableFilters((current) => ({ ...current, owner })) }} /></label>
+        <label>结果表<input value={tableFilters.search} placeholder="搜索物理表或同义词" onChange={(event) => { const search = event.currentTarget.value; setTableFilters((current) => ({ ...current, search })) }} /></label>
         <button type="submit" disabled={tableState.loading}><Search aria-hidden="true" />{tableState.loading ? '查询中…' : '查询 Oracle'}</button>
       </form>
       <div className={styles.tableCatalog} aria-label="Oracle 结果表查询结果">
         <div className={styles.catalogHeader}><strong>可见结果表</strong><span>{tableCatalog.items.length} 项</span></div>
-        {tableCatalog.items.length === 0 && !tableState.loading ? <p className={styles.empty}>当前条件下未查询到可见表。</p> : null}
+        {tableCatalog.items.length === 0 && !tableState.loading ? <p className={styles.empty}>当前条件下未查询到已授权物理表，请核对真实 Owner、SELECT/DELETE 权限或同义词。</p> : null}
         {tableCatalog.items.map((item) => <button type="button" className={resultTableKey(item) === selectedTableKey ? styles.selected : ''} aria-pressed={resultTableKey(item) === selectedTableKey} onClick={() => void selectResultTable(item)} key={resultTableKey(item)}><code>{item.qualifiedName}</code><span>{item.columnCount} 个字段</span></button>)}
         {tableCatalog.hasMore ? <button type="button" className={styles.more} disabled={tableState.loading} onClick={() => void loadResultTables(true)}><RefreshCw aria-hidden="true" />加载更多</button> : null}
       </div>
