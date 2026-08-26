@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -41,6 +42,24 @@ func (repository *Repository) GetReportDatasource(ctx context.Context, datasourc
 	}
 	if err != nil {
 		return nil, fmt.Errorf("report datasource: get: %w", err)
+	}
+	return &datasource, nil
+}
+
+func (repository *Repository) FindEnabledReportDatasourceByCode(ctx context.Context, code string) (*model.ReportDatasource, error) {
+	code = strings.TrimSpace(code)
+	if repository == nil || repository.db == nil || ctx == nil || code == "" {
+		return nil, ErrDatasourceNotFound
+	}
+	var datasource model.ReportDatasource
+	err := repository.db.WithContext(ctx).
+		Where("code = ? AND driver = ? AND enabled = ?", code, model.ReportDatasourceDriverOracle, true).
+		First(&datasource).Error
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return nil, ErrDatasourceNotFound
+	}
+	if err != nil {
+		return nil, fmt.Errorf("report datasource: find enabled by code: %w", err)
 	}
 	return &datasource, nil
 }

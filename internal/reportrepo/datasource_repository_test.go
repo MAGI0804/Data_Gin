@@ -1,12 +1,23 @@
 package reportrepo
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"strings"
 	"testing"
 
 	"gin-biz-web-api/model"
 )
+
+func TestFindEnabledReportDatasourceByCodeRejectsMissingDependencies(t *testing.T) {
+	if _, err := (*Repository)(nil).FindEnabledReportDatasourceByCode(context.Background(), "etl01"); !errors.Is(err, ErrDatasourceNotFound) {
+		t.Fatalf("nil repository error = %v", err)
+	}
+	if _, err := New(newDryRunDB(t)).FindEnabledReportDatasourceByCode(context.Background(), "  "); !errors.Is(err, ErrDatasourceNotFound) {
+		t.Fatalf("empty code error = %v", err)
+	}
+}
 
 func TestDatasourceAuditDetailExcludesCredentialAndConnectionSecrets(t *testing.T) {
 	detail := datasourceAuditDetailFrom(model.ReportDatasource{

@@ -27,6 +27,7 @@ var migrateDataTablesCmd = &cobra.Command{
 			&model.ProcessedData{},
 			&model.DataStatistics{},
 			&model.BojunRetailOrder{},
+			&model.BojunOracleSyncState{},
 			&model.SourceDefinition{},
 			&model.RawRecord{},
 			&model.CleanTableDefinition{},
