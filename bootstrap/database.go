@@ -25,6 +25,7 @@ import (
 
 const schemaMigrationVersion = "2026-08-26-bojun-oracle-v13"
 const previousSchemaMigrationVersion = "2026-08-26-bojun-oracle-v12"
+const bojunOracleMigrationBaselineVersion = "2026-08-25-report-center-v11"
 const schemaMigrationLockName = "data_gin_schema_migration_v1"
 
 type schemaMigrationRecord struct {
@@ -94,20 +95,20 @@ func ApplySchemaMigrations() (resultErr error) {
 		console.Info("database schema is current: %s", schemaMigrationVersion)
 		return nil
 	}
-	previousApplied, err := schemaMigrationApplied(db, previousSchemaMigrationVersion)
+	baselineVersion, baselineApplied, err := appliedSchemaMigrationBaseline(
+		db,
+		bojunOracleIncrementalMigrationBaselines(),
+	)
 	if err != nil {
 		return err
 	}
-	if previousApplied {
-		console.Info("applying incremental database schema migration: %s -> %s", previousSchemaMigrationVersion, schemaMigrationVersion)
+	if baselineApplied {
+		console.Info("applying incremental database schema migration: %s -> %s", baselineVersion, schemaMigrationVersion)
 	}
 	if err := runPendingSchemaMigration(
-		previousApplied,
+		baselineApplied,
 		func() error {
-			return db.AutoMigrate(
-				&model.BojunRetailOrder{},
-				&model.BojunOracleSyncState{},
-			)
+			return db.AutoMigrate(bojunOracleMigrationModels()...)
 		},
 		autoMigrateTables,
 	); err != nil {
@@ -126,6 +127,44 @@ func schemaMigrationApplied(db *gorm.DB, version string) (bool, error) {
 		return false, fmt.Errorf("read schema migration marker %s: %w", version, err)
 	}
 	return count == 1, nil
+}
+
+func bojunOracleIncrementalMigrationBaselines() []string {
+	return []string{
+		previousSchemaMigrationVersion,
+		bojunOracleMigrationBaselineVersion,
+	}
+}
+
+func bojunOracleMigrationModels() []interface{} {
+	return []interface{}{
+		&model.BojunRetailOrder{},
+		&model.BojunOracleSyncState{},
+	}
+}
+
+func appliedSchemaMigrationBaseline(db *gorm.DB, candidates []string) (string, bool, error) {
+	var appliedVersions []string
+	if err := db.Model(&schemaMigrationRecord{}).
+		Where("version IN ?", candidates).
+		Pluck("version", &appliedVersions).Error; err != nil {
+		return "", false, fmt.Errorf("read compatible schema migration markers: %w", err)
+	}
+	version, applied := preferredSchemaMigrationBaseline(candidates, appliedVersions)
+	return version, applied, nil
+}
+
+func preferredSchemaMigrationBaseline(candidates, appliedVersions []string) (string, bool) {
+	applied := make(map[string]struct{}, len(appliedVersions))
+	for _, version := range appliedVersions {
+		applied[version] = struct{}{}
+	}
+	for _, candidate := range candidates {
+		if _, exists := applied[candidate]; exists {
+			return candidate, true
+		}
+	}
+	return "", false
 }
 
 func runPendingSchemaMigration(previousApplied bool, incremental, full func() error) error {

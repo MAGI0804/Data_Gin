@@ -3,6 +3,8 @@ package bootstrap
 import (
 	"reflect"
 	"testing"
+
+	"gin-biz-web-api/model"
 )
 
 func TestMallWeatherMigrationModelsAreUnique(t *testing.T) {
@@ -43,6 +45,79 @@ func TestSchemaMigrationVersionIncludesBojunOracleModels(t *testing.T) {
 	}
 	if previousSchemaMigrationVersion != "2026-08-26-bojun-oracle-v12" {
 		t.Fatalf("previousSchemaMigrationVersion = %q", previousSchemaMigrationVersion)
+	}
+	if bojunOracleMigrationBaselineVersion != "2026-08-25-report-center-v11" {
+		t.Fatalf("bojunOracleMigrationBaselineVersion = %q", bojunOracleMigrationBaselineVersion)
+	}
+}
+
+func TestBojunOracleMigrationModelsAreLimitedToBojunTables(t *testing.T) {
+	models := bojunOracleMigrationModels()
+	want := []reflect.Type{
+		reflect.TypeOf(&model.BojunRetailOrder{}),
+		reflect.TypeOf(&model.BojunOracleSyncState{}),
+	}
+	if len(models) != len(want) {
+		t.Fatalf("bojunOracleMigrationModels() count = %d, want %d", len(models), len(want))
+	}
+	for index, migrationModel := range models {
+		if gotType := reflect.TypeOf(migrationModel); gotType != want[index] {
+			t.Fatalf("bojunOracleMigrationModels()[%d] = %v, want %v", index, gotType, want[index])
+		}
+	}
+}
+
+func TestPreferredSchemaMigrationBaseline(t *testing.T) {
+	tests := []struct {
+		name            string
+		appliedVersions []string
+		wantVersion     string
+		wantApplied     bool
+	}{
+		{
+			name:            "v12 direct upgrade",
+			appliedVersions: []string{"2026-08-26-bojun-oracle-v12"},
+			wantVersion:     "2026-08-26-bojun-oracle-v12",
+			wantApplied:     true,
+		},
+		{
+			name:            "v11 skips v12",
+			appliedVersions: []string{"2026-08-25-report-center-v11"},
+			wantVersion:     "2026-08-25-report-center-v11",
+			wantApplied:     true,
+		},
+		{
+			name: "latest compatible baseline wins",
+			appliedVersions: []string{
+				"2026-08-25-report-center-v11",
+				"2026-08-26-bojun-oracle-v12",
+			},
+			wantVersion: "2026-08-26-bojun-oracle-v12",
+			wantApplied: true,
+		},
+		{
+			name:            "unsupported older version uses full migration",
+			appliedVersions: []string{"2026-08-14-report-center-v10"},
+		},
+		{
+			name: "fresh database uses full migration",
+		},
+	}
+
+	candidates := bojunOracleIncrementalMigrationBaselines()
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			gotVersion, gotApplied := preferredSchemaMigrationBaseline(candidates, tt.appliedVersions)
+			if gotVersion != tt.wantVersion || gotApplied != tt.wantApplied {
+				t.Fatalf(
+					"preferredSchemaMigrationBaseline() = (%q, %t), want (%q, %t)",
+					gotVersion,
+					gotApplied,
+					tt.wantVersion,
+					tt.wantApplied,
+				)
+			}
+		})
 	}
 }
 
