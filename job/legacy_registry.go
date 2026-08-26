@@ -69,9 +69,8 @@ func LegacyTaskDefinitions() []LegacyTaskDefinition {
 			Description: "从有赞拉取订单，默认拉取最近 5 分钟数据并写入 youzan_order_data；自动触发已停用，可手动执行。",
 			Editable:    true,
 			DefaultPayload: map[string]interface{}{
-				"source_mode": "api",
-				"start_time":  "",
-				"end_time":    "",
+				"start_time": "",
+				"end_time":   "",
 			},
 		},
 		{
@@ -123,12 +122,13 @@ func LegacyTaskDefinitions() []LegacyTaskDefinition {
 			CronExpr:    "",
 			InputTable:  "伯俊 middleretail.query / YL_OBS.BJ_REPORT_RETAIL_SF",
 			OutputTable: "raw_data / bojun_retail_orders",
-			Handler:     "internal/service/data_svc/bojun_order_service.go",
+			Handler:     "internal/service/data_svc/bojun_order_source_router.go",
 			Description: "API 模式按接口时间补拉；Oracle 模式按 MODIFIEDDATE 范围补拉且不推进增量水位；docno 已存在的数据不覆盖。",
 			Editable:    true,
 			DefaultPayload: map[string]interface{}{
-				"start_time": "",
-				"end_time":   "",
+				"source_mode": "api",
+				"start_time":  "",
+				"end_time":    "",
 			},
 		},
 		{

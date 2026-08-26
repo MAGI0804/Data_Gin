@@ -17,6 +17,11 @@ func init() {
 			"order_lookback_minutes": config.GetInt("Bojun.OrderLookbackMinutes", 1),
 			"order_max_pages":        config.GetInt("Bojun.OrderMaxPages", 20),
 			"order_cron_expr":        config.Get("Bojun.OrderCronExpr", "0 */1 * * * *"),
+			"order_source_mode":      config.Get("Bojun.OrderSourceMode", "api"),
+			"oracle_sync_enabled":    config.GetBool("Bojun.OracleSyncEnabled", false),
+			"oracle_batch_size":      config.GetInt("Bojun.OracleBatchSize", 100),
+			"oracle_max_pages":       config.GetInt("Bojun.OracleMaxPages", 20),
+			"oracle_lease_seconds":   config.GetInt("Bojun.OracleLeaseSeconds", 120),
 		}
 	})
 }

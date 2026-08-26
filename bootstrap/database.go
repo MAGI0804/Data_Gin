@@ -23,8 +23,8 @@ import (
 	"go.uber.org/zap"
 )
 
-const schemaMigrationVersion = "2026-08-26-bojun-oracle-v12"
-const previousSchemaMigrationVersion = "2026-08-25-report-center-v11"
+const schemaMigrationVersion = "2026-08-26-bojun-oracle-v13"
+const previousSchemaMigrationVersion = "2026-08-26-bojun-oracle-v12"
 const schemaMigrationLockName = "data_gin_schema_migration_v1"
 
 type schemaMigrationRecord struct {

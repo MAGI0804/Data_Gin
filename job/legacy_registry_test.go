@@ -101,6 +101,20 @@ func TestNewLegacyTaskBuildsBojunOrderFetchTask(t *testing.T) {
 	}
 }
 
+func TestBojunLegacyTaskDefaultsToAPIWithoutChangingYouzanPayload(t *testing.T) {
+	definitions := LegacyTaskDefinitions()
+	byCode := make(map[string]LegacyTaskDefinition, len(definitions))
+	for _, definition := range definitions {
+		byCode[definition.Code] = definition
+	}
+	if got := byCode["bojun_order_fetch"].DefaultPayload["source_mode"]; got != "api" {
+		t.Fatalf("bojun source_mode default = %v, want api", got)
+	}
+	if _, exists := byCode["youzan_order_fetch"].DefaultPayload["source_mode"]; exists {
+		t.Fatal("youzan payload unexpectedly contains bojun source_mode")
+	}
+}
+
 func TestNewLegacyTaskBuildsYouzanDistributionFetchTask(t *testing.T) {
 	task, err := NewLegacyTask("youzan_distribution_order_fetch", map[string]interface{}{
 		"time_filter": "success",
