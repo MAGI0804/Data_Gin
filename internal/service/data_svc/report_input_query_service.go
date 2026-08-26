@@ -21,7 +21,7 @@ import (
 
 var ErrReportInputQueryUnavailable = errors.New("report input query service: unavailable")
 
-const reportInputOptionLimit = 100
+const reportInputOptionLimit = 500
 
 type reportInputQueryStore interface {
 	FindPublishedReport(context.Context, uint, uint, string) (*reportrepo.PublishedReport, error)
@@ -161,7 +161,10 @@ func (service *ReportInputQueryService) Options(ctx context.Context, actor, defi
 	if err != nil {
 		return nil, err
 	}
-	options, err := connection.QueryInputOptions(queryCtx, statement, exactName, reportInputOptionLimit)
+	// Runtime selectors load the configured query once and perform fuzzy search
+	// in the browser. Keep accepting exactName for backwards-compatible request
+	// validation, but never turn it into an Oracle WHERE predicate here.
+	options, err := connection.QueryInputOptions(queryCtx, statement, "", reportInputOptionLimit)
 	if err != nil {
 		return nil, fmt.Errorf("%w: query Oracle options: %v", ErrReportInputQueryUnavailable, err)
 	}

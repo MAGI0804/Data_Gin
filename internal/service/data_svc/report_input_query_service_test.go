@@ -29,7 +29,7 @@ func TestReportInputQueryServiceUsesPublishedBindingAndCachesOracle(t *testing.T
 			t.Fatalf("Options() = %#v, %v", result, err)
 		}
 	}
-	if openCalls != 1 || connection.queryName != "上海店" || connection.statement != "SELECT id, name FROM stores" {
+	if openCalls != 1 || connection.queryName != "" || connection.limit != reportInputOptionLimit || connection.statement != "SELECT id, name FROM stores" {
 		t.Fatalf("openCalls=%d connection=%#v", openCalls, connection)
 	}
 }
@@ -49,7 +49,7 @@ func TestReportInputQueryServiceSupportsListBindings(t *testing.T) {
 			if err != nil || len(result.Items) != 1 || result.Items[0].ID != "S001" || result.Items[0].Name != "上海店" {
 				t.Fatalf("Options() = %#v, %v", result, err)
 			}
-			if connection.queryName != "上海店" || connection.statement != "SELECT id, name FROM stores" {
+			if connection.queryName != "" || connection.limit != reportInputOptionLimit || connection.statement != "SELECT id, name FROM stores" {
 				t.Fatalf("connection = %#v", connection)
 			}
 		})
@@ -181,10 +181,11 @@ type fakeReportInputOracle struct {
 	options   []reportoracle.InputOption
 	statement string
 	queryName string
+	limit     int
 }
 
-func (oracle *fakeReportInputOracle) QueryInputOptions(_ context.Context, statement, name string, _ int) ([]reportoracle.InputOption, error) {
-	oracle.statement, oracle.queryName = statement, name
+func (oracle *fakeReportInputOracle) QueryInputOptions(_ context.Context, statement, name string, limit int) ([]reportoracle.InputOption, error) {
+	oracle.statement, oracle.queryName, oracle.limit = statement, name, limit
 	return oracle.options, nil
 }
 
