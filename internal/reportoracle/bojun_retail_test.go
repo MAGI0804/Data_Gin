@@ -10,7 +10,7 @@ import (
 func TestBojunRetailSQLUsesFixedTableAndBoundFilters(t *testing.T) {
 	for name, statement := range map[string]string{
 		"incremental": bojunRetailAfterIDSQL,
-		"time range":  bojunRetailTimeRangeSQL,
+		"time range":  bojunRetailModifiedTimeRangeSQL,
 		"maximum id":  bojunRetailMaxIDSQL,
 		"push status": bojunRetailPushStatusSQL,
 	} {
@@ -28,8 +28,8 @@ func TestBojunRetailSQLUsesFixedTableAndBoundFilters(t *testing.T) {
 			t.Fatalf("incremental SQL is missing %q", fragment)
 		}
 	}
-	for _, fragment := range []string{"STATUSTIME >= :1", "STATUSTIME < :2", "M_RETAIL_ID > :3", "ROWNUM <= :4"} {
-		if !strings.Contains(bojunRetailTimeRangeSQL, fragment) {
+	for _, fragment := range []string{"MODIFIEDDATE >= :1", "MODIFIEDDATE < :2", "M_RETAIL_ID > :3", "ROWNUM <= :4"} {
+		if !strings.Contains(bojunRetailModifiedTimeRangeSQL, fragment) {
 			t.Fatalf("time range SQL is missing %q", fragment)
 		}
 	}
@@ -67,7 +67,7 @@ func TestBojunRetailAdapterRejectsClosedConnection(t *testing.T) {
 	if _, err := adapter.MaxBojunRetailID(t.Context()); err == nil {
 		t.Fatal("MaxBojunRetailID() unexpectedly succeeded")
 	}
-	if err := adapter.UpdateBojunRetailPushStatus(t.Context(), 1, true, "20260826"); err == nil {
+	if err := adapter.UpdateBojunRetailPushStatus(t.Context(), 1, true, 20260826); err == nil {
 		t.Fatal("UpdateBojunRetailPushStatus() unexpectedly succeeded")
 	}
 }

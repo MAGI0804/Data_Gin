@@ -27,14 +27,13 @@ type BojunRetailRow struct {
 	PushAmount     float64
 	IsToShop       string
 	PushStatus     int
-	PushDate       string
 	ItemsJSON      string
 }
 
 const bojunRetailColumns = `
 M_RETAIL_ID, STORE_CODE, DOCNO, RETAILSALETYPE, STATUSTIME,
 DM_VP_C_VIP_MOBILE, TOT_AMT_SF, TOT_AMT_TS, IS_TOSHOP,
-NVL(STATUS, 0), PUSH_DATE, JSON_ITEM`
+NVL(STATUS, 0), JSON_ITEM`
 
 const bojunRetailAfterIDSQL = `
 SELECT ` + bojunRetailColumns + `
@@ -47,13 +46,13 @@ FROM (
 WHERE ROWNUM <= :2
 ORDER BY M_RETAIL_ID`
 
-const bojunRetailTimeRangeSQL = `
+const bojunRetailModifiedTimeRangeSQL = `
 SELECT ` + bojunRetailColumns + `
 FROM (
     SELECT ` + bojunRetailColumns + `
     FROM ` + BojunRetailTable + `
-    WHERE STATUSTIME >= :1
-      AND STATUSTIME < :2
+    WHERE MODIFIEDDATE >= :1
+      AND MODIFIEDDATE < :2
       AND M_RETAIL_ID > :3
     ORDER BY M_RETAIL_ID
 )
@@ -77,7 +76,7 @@ func (adapter *Adapter) QueryBojunRetailAfterID(ctx context.Context, afterID uin
 	return adapter.queryBojunRetailRows(ctx, bojunRetailAfterIDSQL, afterID, limit)
 }
 
-func (adapter *Adapter) QueryBojunRetailByStatusTime(
+func (adapter *Adapter) QueryBojunRetailByModifiedTime(
 	ctx context.Context,
 	start time.Time,
 	end time.Time,
@@ -93,7 +92,7 @@ func (adapter *Adapter) QueryBojunRetailByStatusTime(
 	if err := validateBojunRetailBatchSize(limit); err != nil {
 		return nil, err
 	}
-	return adapter.queryBojunRetailRows(ctx, bojunRetailTimeRangeSQL, start, end, afterID, limit)
+	return adapter.queryBojunRetailRows(ctx, bojunRetailModifiedTimeRangeSQL, start, end, afterID, limit)
 }
 
 func (adapter *Adapter) MaxBojunRetailID(ctx context.Context) (uint64, error) {
@@ -110,15 +109,14 @@ func (adapter *Adapter) MaxBojunRetailID(ctx context.Context) (uint64, error) {
 	return uint64(value), nil
 }
 
-func (adapter *Adapter) UpdateBojunRetailPushStatus(ctx context.Context, retailID uint64, success bool, pushDate string) error {
+func (adapter *Adapter) UpdateBojunRetailPushStatus(ctx context.Context, retailID uint64, success bool, pushDate int) error {
 	if adapter == nil || adapter.db == nil {
 		return fmt.Errorf("update bojun Oracle push status: adapter is closed")
 	}
 	if retailID == 0 {
 		return fmt.Errorf("update bojun Oracle push status: retail id is required")
 	}
-	pushDate = strings.TrimSpace(pushDate)
-	if len(pushDate) != 8 {
+	if pushDate < 10000101 || pushDate > 99991231 {
 		return fmt.Errorf("update bojun Oracle push status: push date must use yyyyMMdd")
 	}
 	status := 0
@@ -171,18 +169,18 @@ type bojunRetailScanner interface {
 
 func scanBojunRetailRow(scanner bojunRetailScanner) (BojunRetailRow, error) {
 	var (
-		retailID                       int64
-		storeCode, docNo, retailType   sql.NullString
-		statusTime                     sql.NullTime
-		orderPhone, isToShop, pushDate sql.NullString
-		paidAmount, pushAmount         sql.NullFloat64
-		pushStatus                     sql.NullInt64
-		itemsJSON                      interface{}
+		retailID                     int64
+		storeCode, docNo, retailType sql.NullString
+		statusTime                   sql.NullTime
+		orderPhone, isToShop         sql.NullString
+		paidAmount, pushAmount       sql.NullFloat64
+		pushStatus                   sql.NullInt64
+		itemsJSON                    interface{}
 	)
 	if err := scanner.Scan(
 		&retailID, &storeCode, &docNo, &retailType, &statusTime,
 		&orderPhone, &paidAmount, &pushAmount, &isToShop,
-		&pushStatus, &pushDate, &itemsJSON,
+		&pushStatus, &itemsJSON,
 	); err != nil {
 		return BojunRetailRow{}, fmt.Errorf("scan bojun Oracle retail order: %w", err)
 	}
@@ -198,7 +196,7 @@ func scanBojunRetailRow(scanner bojunRetailScanner) (BojunRetailRow, error) {
 		RetailSaleType: strings.TrimSpace(retailType.String), StatusTime: statusTime.Time,
 		OrderPhone: strings.TrimSpace(orderPhone.String), PaidAmount: paidAmount.Float64, PushAmount: pushAmount.Float64,
 		IsToShop: strings.ToUpper(strings.TrimSpace(isToShop.String)), PushStatus: int(pushStatus.Int64),
-		PushDate: strings.TrimSpace(pushDate.String), ItemsJSON: strings.TrimSpace(jsonText),
+		ItemsJSON: strings.TrimSpace(jsonText),
 	}, nil
 }
 
