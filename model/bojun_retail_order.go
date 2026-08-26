@@ -63,9 +63,12 @@ func (BojunRetailOrder) TableName() string {
 // initialized; adding this table does not activate the Oracle order source.
 type BojunOracleSyncState struct {
 	BaseModel
-	SourceCode   string `gorm:"column:source_code;size:64;not null;uniqueIndex" json:"source_code"`
-	LastRetailID uint64 `gorm:"column:last_retail_id;not null;default:0" json:"last_retail_id"`
-	Initialized  bool   `gorm:"column:initialized;not null;default:false" json:"initialized"`
+	SourceCode      string     `gorm:"column:source_code;size:64;not null;uniqueIndex" json:"source_code"`
+	LastRetailID    uint64     `gorm:"column:last_retail_id;not null;default:0" json:"last_retail_id"`
+	Initialized     bool       `gorm:"column:initialized;not null;default:false" json:"initialized"`
+	LeaseToken      string     `gorm:"column:lease_token;size:64;not null;default:'';index" json:"-"`
+	LeaseExpiresAt  *time.Time `gorm:"column:lease_expires_at;type:datetime(3);index" json:"lease_expires_at,omitempty"`
+	LastSucceededAt *time.Time `gorm:"column:last_succeeded_at;type:datetime(3)" json:"last_succeeded_at,omitempty"`
 	CommonTimestampsField
 }
 
