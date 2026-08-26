@@ -1,6 +1,10 @@
 package job
 
-import "testing"
+import (
+	"testing"
+
+	"gin-biz-web-api/internal/reportoracle"
+)
 
 func TestLegacyTaskDefinitionsExposeConfiguredFetchAndDeliveryJobs(t *testing.T) {
 	definitions := LegacyTaskDefinitions()
@@ -39,6 +43,9 @@ func TestLegacyTaskDefinitionsExposeConfiguredFetchAndDeliveryJobs(t *testing.T)
 	}
 	if byCode["bojun_order_fetch"].TaskType != TypeBojunOrderFetch {
 		t.Fatalf("bojun_order_fetch task type = %s, want %s", byCode["bojun_order_fetch"].TaskType, TypeBojunOrderFetch)
+	}
+	if got, want := byCode["bojun_order_fetch"].InputTable, "伯俊 middleretail.query / "+reportoracle.BojunRetailTable; got != want {
+		t.Fatalf("bojun_order_fetch input table = %q, want %q", got, want)
 	}
 	if byCode["qimai_sales_push"].Category != "delivery" {
 		t.Fatalf("qimai_sales_push category = %s, want delivery", byCode["qimai_sales_push"].Category)

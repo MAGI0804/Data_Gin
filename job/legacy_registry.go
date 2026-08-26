@@ -3,6 +3,7 @@ package job
 import (
 	"fmt"
 
+	"gin-biz-web-api/internal/reportoracle"
 	"gin-biz-web-api/pkg/config"
 	"gin-biz-web-api/pkg/youzan"
 
@@ -120,7 +121,7 @@ func LegacyTaskDefinitions() []LegacyTaskDefinition {
 			TaskType:    TypeBojunOrderFetch,
 			Queue:       DefaultQueueName,
 			CronExpr:    "",
-			InputTable:  "伯俊 middleretail.query / YL_OBS.BJ_REPORT_RETAIL_SF",
+			InputTable:  "伯俊 middleretail.query / " + reportoracle.BojunRetailTable,
 			OutputTable: "raw_data / bojun_retail_orders",
 			Handler:     "internal/service/data_svc/bojun_order_source_router.go",
 			Description: "API 模式按接口时间补拉；Oracle 模式按 MODIFIEDDATE 范围补拉且不推进增量水位；docno 已存在的数据不覆盖。",

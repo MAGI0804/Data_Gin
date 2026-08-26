@@ -12,7 +12,7 @@ import (
 )
 
 const (
-	BojunRetailTable        = "YL_OBS.BJ_REPORT_RETAIL_SF"
+	BojunRetailTable        = "YL_DBS.BJ_REPORT_RETAIL_SF"
 	maxBojunRetailBatchSize = 1000
 )
 

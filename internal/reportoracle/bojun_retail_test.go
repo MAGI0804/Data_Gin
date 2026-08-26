@@ -8,6 +8,11 @@ import (
 )
 
 func TestBojunRetailSQLUsesFixedTableAndBoundFilters(t *testing.T) {
+	const expectedTable = "YL_DBS.BJ_REPORT_RETAIL_SF"
+	if BojunRetailTable != expectedTable {
+		t.Fatalf("BojunRetailTable = %q, want %q", BojunRetailTable, expectedTable)
+	}
+
 	for name, statement := range map[string]string{
 		"incremental": bojunRetailAfterIDSQL,
 		"time range":  bojunRetailModifiedTimeRangeSQL,
