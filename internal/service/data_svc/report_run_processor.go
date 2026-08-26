@@ -539,21 +539,7 @@ func (oracleReportProcedureExecutor) Execute(ctx context.Context, request report
 	if err != nil {
 		return 0, err
 	}
-	purgePlan, err := reportoracle.BuildPurgePlan(snapshot)
-	if err != nil {
-		_ = tx.Rollback()
-		return 0, err
-	}
-	for {
-		deleted, purgeErr := adapter.PurgeResultBatch(queryCtx, tx, purgePlan, 0)
-		if purgeErr != nil {
-			_ = tx.Rollback()
-			return 0, purgeErr
-		}
-		if deleted == 0 {
-			break
-		}
-	}
+	// 结果表由存储过程在写入前自行清空，执行器不再提前删除数据。
 	var executionErr error
 	if isJSONTableSnapshot(request.Runtime.Version) {
 		plan, planErr := reportoracle.BuildJSONTableCallPlan(procedureRef, procedure, request.Runtime.Version.JSONInputArgName)
