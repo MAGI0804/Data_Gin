@@ -30,15 +30,20 @@ type BojunRetailRow struct {
 	ItemsJSON      string
 }
 
-const bojunRetailColumns = `
+const bojunRetailProjectedColumns = `
 M_RETAIL_ID, STORE_CODE, DOCNO, RETAILSALETYPE, STATUSTIME,
 DM_VP_C_VIP_MOBILE, TOT_AMT_SF, TOT_AMT_TS, IS_TOSHOP,
-NVL(STATUS, 0), JSON_ITEM`
+STATUS, JSON_ITEM`
+
+const bojunRetailSourceColumns = `
+M_RETAIL_ID, STORE_CODE, DOCNO, RETAILSALETYPE, STATUSTIME,
+DM_VP_C_VIP_MOBILE, TOT_AMT_SF, TOT_AMT_TS, IS_TOSHOP,
+NVL(STATUS, '0') AS STATUS, JSON_ITEM`
 
 const bojunRetailAfterIDSQL = `
-SELECT ` + bojunRetailColumns + `
+SELECT ` + bojunRetailProjectedColumns + `
 FROM (
-    SELECT ` + bojunRetailColumns + `
+    SELECT ` + bojunRetailSourceColumns + `
     FROM ` + BojunRetailTable + `
     WHERE M_RETAIL_ID > :1
     ORDER BY M_RETAIL_ID
@@ -47,9 +52,9 @@ WHERE ROWNUM <= :2
 ORDER BY M_RETAIL_ID`
 
 const bojunRetailModifiedTimeRangeSQL = `
-SELECT ` + bojunRetailColumns + `
+SELECT ` + bojunRetailProjectedColumns + `
 FROM (
-    SELECT ` + bojunRetailColumns + `
+    SELECT ` + bojunRetailSourceColumns + `
     FROM ` + BojunRetailTable + `
     WHERE MODIFIEDDATE >= :1
       AND MODIFIEDDATE < :2

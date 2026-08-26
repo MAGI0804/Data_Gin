@@ -38,6 +38,16 @@ func TestBojunRetailSQLUsesFixedTableAndBoundFilters(t *testing.T) {
 			t.Fatalf("time range SQL is missing %q", fragment)
 		}
 	}
+	for _, statement := range []string{bojunRetailAfterIDSQL, bojunRetailModifiedTimeRangeSQL} {
+		for _, fragment := range []string{
+			"DM_VP_C_VIP_MOBILE", "TOT_AMT_SF", "TOT_AMT_TS", "IS_TOSHOP",
+			"NVL(STATUS, '0') AS STATUS", "JSON_ITEM",
+		} {
+			if !strings.Contains(statement, fragment) {
+				t.Fatalf("retail SQL is missing %q", fragment)
+			}
+		}
+	}
 }
 
 func TestBojunRetailBatchSizeValidation(t *testing.T) {
