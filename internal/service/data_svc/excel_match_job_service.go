@@ -291,7 +291,7 @@ type ExcelImportUpdater interface {
 		allowPendingToShop bool,
 		keys []string,
 	) (map[string]struct{}, error)
-	BatchUpdateFieldsByKeys(ctx context.Context, matchField string, valuesByField map[string]map[string]string) (int64, error)
+	BatchUpdateFieldsByKeys(ctx context.Context, matchField string, valuesByField map[string]map[string]string, clearMatchedDocNo bool) (int64, error)
 }
 
 type databaseExcelMatchLookup struct {
@@ -321,8 +321,9 @@ func (u bojunExcelImportUpdater) BatchUpdateFieldsByKeys(
 	ctx context.Context,
 	matchField string,
 	valuesByField map[string]map[string]string,
+	clearMatchedDocNo bool,
 ) (int64, error) {
-	return u.dao.BatchUpdateBojunFieldsByKeys(ctx, matchField, valuesByField)
+	return u.dao.BatchUpdateBojunFieldsByKeysWithMode(ctx, matchField, valuesByField, clearMatchedDocNo)
 }
 
 type excelJobSource struct {
@@ -1324,7 +1325,7 @@ func processExcelImportUpdateFileWithProgress(
 			}
 		}
 		if !config.DryRun && len(updatesByField) > 0 {
-			if _, err := updater.BatchUpdateFieldsByKeys(ctx, config.DBMatchField, updatesByField); err != nil {
+			if _, err := updater.BatchUpdateFieldsByKeys(ctx, config.DBMatchField, updatesByField, config.Operation == excelOperationClearMatched); err != nil {
 				return err
 			}
 		}

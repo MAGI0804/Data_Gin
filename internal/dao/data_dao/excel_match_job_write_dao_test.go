@@ -92,6 +92,41 @@ func TestExcelMatchJobDAOBatchUpdateBojunWritesMultipleFieldsInOneStatement(t *t
 	}
 }
 
+func TestExcelMatchJobDAOMatchedDocNoOnlyClearsInExplicitMode(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name          string
+		explicitClear bool
+		wantCondition string
+	}{
+		{name: "regular import keeps empty protection", wantCondition: "(matched_docno IS NULL OR matched_docno = '')"},
+		{name: "clear operation bypasses empty protection", explicitClear: true, wantCondition: "1 = 1"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			db := dryRunWeatherDAOTestDB(t)
+			var statement string
+			if err := db.Callback().Raw().After("gorm:raw").Register("test:capture_excel_bojun_clear_mode_sql", func(tx *gorm.DB) {
+				statement = tx.Statement.SQL.String()
+			}); err != nil {
+				t.Fatalf("register SQL capture callback: %v", err)
+			}
+			_, err := (&ExcelMatchJobDAO{db: db}).BatchUpdateBojunFieldsByKeysWithMode(
+				t.Context(),
+				"docno",
+				map[string]map[string]string{"matched_docno": {"B001": ""}},
+				tt.explicitClear,
+			)
+			if err != nil {
+				t.Fatalf("BatchUpdateBojunFieldsByKeysWithMode() error=%v", err)
+			}
+			if !strings.Contains(statement, tt.wantCondition) {
+				t.Fatalf("statement missing %q: %s", tt.wantCondition, statement)
+			}
+		})
+	}
+}
+
 func TestExcelMatchJobDAOBatchUpdateBojunCompletedAtRejectsInvalidValueAndMatchField(t *testing.T) {
 	t.Parallel()
 	dao := &ExcelMatchJobDAO{db: dryRunWeatherDAOTestDB(t)}

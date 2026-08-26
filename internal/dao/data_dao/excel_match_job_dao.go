@@ -670,6 +670,15 @@ func (dao *ExcelMatchJobDAO) BatchUpdateBojunFieldsByKeys(
 	matchField string,
 	valuesByField map[string]map[string]string,
 ) (int64, error) {
+	return dao.BatchUpdateBojunFieldsByKeysWithMode(ctx, matchField, valuesByField, false)
+}
+
+func (dao *ExcelMatchJobDAO) BatchUpdateBojunFieldsByKeysWithMode(
+	ctx context.Context,
+	matchField string,
+	valuesByField map[string]map[string]string,
+	clearMatchedDocNo bool,
+) (int64, error) {
 	if len(valuesByField) == 0 {
 		return 0, nil
 	}
@@ -727,15 +736,15 @@ func (dao *ExcelMatchJobDAO) BatchUpdateBojunFieldsByKeys(
 		if writeField == "oracle_retail_id" && updatingToShop {
 			emptyCondition = "oracle_retail_id IS NULL AND (is_to_shop IN ('Y', 'N') OR is_to_shop IS NULL OR is_to_shop = '')"
 		}
-		allEmpty := writeField == "matched_docno"
+		clearField := clearMatchedDocNo && writeField == "matched_docno"
 		for _, value := range values {
 			if value != "" {
-				allEmpty = false
+				clearField = false
 				break
 			}
 		}
 		caseExpression := fmt.Sprintf("CASE `%s`%s ELSE `%s` END", matchField, caseSQL.String(), writeField)
-		if !allEmpty {
+		if !clearField {
 			caseExpression = fmt.Sprintf("CASE WHEN %s THEN %s ELSE `%s` END", emptyCondition, caseExpression, writeField)
 		} else {
 			emptyCondition = "1 = 1"

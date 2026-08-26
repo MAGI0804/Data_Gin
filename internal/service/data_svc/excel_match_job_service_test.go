@@ -43,6 +43,7 @@ type fakeExcelImportUpdater struct {
 	keys              []string
 	writes            int
 	batchWrites       int
+	clearMatchedDocNo bool
 }
 
 type fakeExcelMatchSchemaValidator struct {
@@ -250,8 +251,10 @@ func (f *fakeExcelImportUpdater) BatchUpdateFieldsByKeys(
 	ctx context.Context,
 	matchField string,
 	valuesByField map[string]map[string]string,
+	clearMatchedDocNo bool,
 ) (int64, error) {
 	f.batchWrites++
+	f.clearMatchedDocNo = clearMatchedDocNo
 	if f.updatedByField == nil {
 		f.updatedByField = map[string]map[string]string{}
 	}
@@ -2273,6 +2276,9 @@ func TestProcessExcelImportUpdateFileClearsMatchedDocNo(t *testing.T) {
 	}
 	if !reflect.DeepEqual(updater.updated, map[string]string{"B001": "", "B002": ""}) {
 		t.Fatalf("updated = %#v, want matched_docno cleared", updater.updated)
+	}
+	if !updater.clearMatchedDocNo {
+		t.Fatal("clearMatchedDocNo=false, want explicit clear mode")
 	}
 }
 
