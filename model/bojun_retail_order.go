@@ -6,7 +6,12 @@ import "time"
 type BojunRetailOrder struct {
 	BaseModel
 
-	RawDataID uint `gorm:"column:raw_data_id;not null;index" json:"raw_data_id"`
+	RawDataID      uint    `gorm:"column:raw_data_id;not null;index" json:"raw_data_id"`
+	OracleRetailID *uint64 `gorm:"column:oracle_retail_id;uniqueIndex" json:"oracle_retail_id,omitempty"`
+	OrderPhone     string  `gorm:"column:order_phone;size:64;index" json:"order_phone"`
+	PaidAmount     float64 `gorm:"column:paid_amount;type:decimal(18,2);default:0" json:"paid_amount"`
+	PushAmount     float64 `gorm:"column:push_amount;type:decimal(18,2);default:0" json:"push_amount"`
+	IsToShop       string  `gorm:"column:is_to_shop;size:1;index" json:"is_to_shop"`
 
 	OtherDocNo      string     `gorm:"column:otherdocno;size:255" json:"otherdocno"`
 	DocNo           string     `gorm:"column:docno;size:255;not null;uniqueIndex" json:"docno"`
@@ -51,4 +56,19 @@ type BojunRetailOrder struct {
 
 func (BojunRetailOrder) TableName() string {
 	return "bojun_retail_orders"
+}
+
+// BojunOracleSyncState records the committed M_RETAIL_ID watermark for one
+// Oracle source. A state row is created only when the Oracle sync is explicitly
+// initialized; adding this table does not activate the Oracle order source.
+type BojunOracleSyncState struct {
+	BaseModel
+	SourceCode   string `gorm:"column:source_code;size:64;not null;uniqueIndex" json:"source_code"`
+	LastRetailID uint64 `gorm:"column:last_retail_id;not null;default:0" json:"last_retail_id"`
+	Initialized  bool   `gorm:"column:initialized;not null;default:false" json:"initialized"`
+	CommonTimestampsField
+}
+
+func (BojunOracleSyncState) TableName() string {
+	return "bojun_oracle_sync_states"
 }

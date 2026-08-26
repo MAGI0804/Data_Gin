@@ -37,11 +37,11 @@ func TestReportCenterMigrationModelsAreUnique(t *testing.T) {
 	}
 }
 
-func TestReportCenterMigrationVersionIncludesInputQueryDefinitions(t *testing.T) {
-	if schemaMigrationVersion != "2026-08-25-report-center-v11" {
+func TestSchemaMigrationVersionIncludesBojunOracleModels(t *testing.T) {
+	if schemaMigrationVersion != "2026-08-26-bojun-oracle-v12" {
 		t.Fatalf("schemaMigrationVersion = %q", schemaMigrationVersion)
 	}
-	if previousSchemaMigrationVersion != "2026-08-14-report-center-v10" {
+	if previousSchemaMigrationVersion != "2026-08-25-report-center-v11" {
 		t.Fatalf("previousSchemaMigrationVersion = %q", previousSchemaMigrationVersion)
 	}
 }

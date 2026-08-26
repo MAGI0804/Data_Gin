@@ -23,8 +23,8 @@ import (
 	"go.uber.org/zap"
 )
 
-const schemaMigrationVersion = "2026-08-25-report-center-v11"
-const previousSchemaMigrationVersion = "2026-08-14-report-center-v10"
+const schemaMigrationVersion = "2026-08-26-bojun-oracle-v12"
+const previousSchemaMigrationVersion = "2026-08-25-report-center-v11"
 const schemaMigrationLockName = "data_gin_schema_migration_v1"
 
 type schemaMigrationRecord struct {
@@ -103,7 +103,12 @@ func ApplySchemaMigrations() (resultErr error) {
 	}
 	if err := runPendingSchemaMigration(
 		previousApplied,
-		func() error { return db.AutoMigrate(&model.ReportInputQueryDefinition{}) },
+		func() error {
+			return db.AutoMigrate(
+				&model.BojunRetailOrder{},
+				&model.BojunOracleSyncState{},
+			)
+		},
 		autoMigrateTables,
 	); err != nil {
 		return err
@@ -247,6 +252,7 @@ func autoMigrateTables() error {
 		&model.YOUZAN_ORDER_DATA{},     //有赞订单表
 		&model.YOUZAN_RETURN_DATA{},    //有赞退款订单表
 		&model.BojunRetailOrder{},      //伯俊零售单表
+		&model.BojunOracleSyncState{},  //伯俊 Oracle 增量水位表
 		&model.SourceDefinition{},      //通用数据源配置表
 		&model.RawRecord{},             //通用原始记录表
 		&model.CleanTableDefinition{},  //清洗表配置表
