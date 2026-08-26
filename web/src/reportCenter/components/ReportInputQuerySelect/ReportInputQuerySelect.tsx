@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import Select from 'antd/es/select'
+import { RefreshCw } from 'lucide-react'
 import { getReportInputOptions, type ReportCenterClient } from '../../api'
-import { mergeReportInputOptions, reportInputSelectionKeys, reportInputSelectionValue } from '../../inputOptions'
+import { mergeReportInputOptions, reportInputOptionMatches, reportInputSelectionKeys, reportInputSelectionValue } from '../../inputOptions'
 import type { ReportInputOption } from '../../types'
 import styles from './ReportInputQuerySelect.module.css'
 
@@ -17,77 +18,69 @@ export function ReportInputQuerySelect({ client, reportId, conditionCode, inputI
 	numeric: boolean
 	onChange: (value: unknown) => void
 }) {
-	const [search, setSearch] = useState('')
 	const [options, setOptions] = useState<ReportInputOption[]>([])
 	const [state, setState] = useState({ loading: false, error: '' })
-	const selected = useRef(new Map<string, ReportInputOption>())
+	const requestAbort = useRef<AbortController | null>(null)
 	const selectedKeys = useMemo(
 		() => reportInputSelectionKeys(value, multiple),
 		[value, multiple],
 	)
 
 	useEffect(() => {
-		selected.current.clear()
-		setSearch('')
-		setOptions([])
-		setState({ loading: false, error: '' })
-	}, [reportId, conditionCode])
-
-	useEffect(() => {
-		const active = new Set(selectedKeys)
-		for (const key of selected.current.keys()) if (!active.has(key)) selected.current.delete(key)
-		for (const key of selectedKeys) {
-			const current = options.find((option) => option.id === key)
-			if (current) selected.current.set(current.id, current)
-		}
-	}, [options, selectedKeys])
-
-	useEffect(() => {
+		requestAbort.current?.abort()
 		const controller = new AbortController()
-		const timer = window.setTimeout(() => {
-			setState({ loading: true, error: '' })
-			void getReportInputOptions(client, reportId, conditionCode, search, controller.signal).then((response) => {
-				if (controller.signal.aborted) return
-				if (!response.ok) {
-					setState({ loading: false, error: response.error })
-					return
-				}
-				const cached = [...selected.current.values()]
-				setOptions(mergeReportInputOptions(cached, response.data))
-				setState({ loading: false, error: '' })
-			})
-		}, 300)
-		return () => {
-			window.clearTimeout(timer)
-			controller.abort()
+		requestAbort.current = controller
+		setOptions([])
+		setState({ loading: true, error: '' })
+		void getReportInputOptions(client, reportId, conditionCode, controller.signal).then((response) => {
+			if (controller.signal.aborted) return
+			if (!response.ok) {
+				setState({ loading: false, error: response.error })
+				return
+			}
+			const normalized = mergeReportInputOptions([], response.data)
+			setOptions(normalized)
+			setState({ loading: false, error: '' })
+		})
+		return () => requestAbort.current?.abort()
+	}, [client, conditionCode, reportId])
+
+	async function refreshOptions() {
+		requestAbort.current?.abort()
+		const controller = new AbortController()
+		requestAbort.current = controller
+		setState({ loading: true, error: '' })
+		const response = await getReportInputOptions(client, reportId, conditionCode, controller.signal)
+		if (controller.signal.aborted) return
+		if (!response.ok) {
+			setState({ loading: false, error: options.length ? `${response.error} 当前继续使用上次缓存。` : response.error })
+			return
 		}
-	}, [client, reportId, conditionCode, search])
+		const normalized = mergeReportInputOptions([], response.data)
+		setOptions(normalized)
+		setState({ loading: false, error: '' })
+	}
 
 	return <div className={styles.wrapper}>
-		<Select
+		<div className={styles.controlRow}><Select
 			aria-label={`搜索并选择${conditionCode}`}
 			aria-required={required}
 			allowClear={!required}
 			className={styles.select}
 			disabled={disabled}
-			filterOption={false}
+			filterOption={(search, option) => reportInputOptionMatches({ id: String(option?.value ?? ''), name: String(option?.label ?? '') }, search)}
 			id={inputId}
 			loading={state.loading}
 			mode={multiple ? 'multiple' : undefined}
 			notFoundContent={state.loading ? '正在查询…' : state.error || '没有匹配选项'}
 			options={options.map((option) => ({ value: option.id, label: option.name }))}
-			placeholder="输入名称精确查询"
-			searchValue={search}
+			placeholder="输入名称或 ID 模糊搜索"
 			showSearch
 			value={multiple ? selectedKeys : selectedKeys[0]}
 			onChange={(next) => onChange(reportInputSelectionValue(next, multiple, numeric))}
-			onSearch={setSearch}
-			onSelect={(key) => {
-				const option = options.find((item) => item.id === key)
-				if (option) selected.current.set(option.id, option)
-				setSearch('')
-			}}
 		/>
+		<button className={styles.refreshButton} type="button" aria-label={`刷新${conditionCode}本地选项`} disabled={disabled || state.loading} onClick={() => void refreshOptions()}><RefreshCw aria-hidden="true" /></button></div>
+		<small className={state.error ? styles.cacheWarning : styles.cacheStatus}>{state.loading ? '正在执行查询语句…' : state.error ? options.length ? `当前页面保留 ${options.length} 条可用选项` : '当前页面暂无可用选项' : options.length >= 500 ? '当前页面已缓存前 500 条，可直接模糊搜索' : `当前页面已缓存 ${options.length} 条，可直接模糊搜索`}</small>
 		{state.error ? <small className={styles.error} role="status">{state.error}</small> : null}
 	</div>
 }

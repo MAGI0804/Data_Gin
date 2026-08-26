@@ -1,5 +1,10 @@
 .wrapper { display: grid; gap: var(--space-1); min-width: 0; }
+.controlRow { display: grid; grid-template-columns: minmax(0, 1fr) var(--control-height); gap: var(--space-2); align-items: stretch; }
 .select { width: 100%; }
 .select:global(.ant-select) :global(.ant-select-selector) { min-height: var(--control-height); border-color: var(--color-border-strong); border-radius: var(--radius-control); background: var(--color-canvas); color: var(--color-text); }
 .select:global(.ant-select-focused) :global(.ant-select-selector) { border-color: var(--color-brand); box-shadow: 0 0 0 2px var(--color-brand-soft); }
+.refreshButton { width: var(--control-height); min-width: var(--control-height); min-height: var(--control-height); padding: 0; }
+.refreshButton svg { width: 16px; height: 16px; }
+.cacheStatus { color: var(--color-success-text); font-family: var(--font-sans); font-weight: 500; }
+.cacheWarning { color: var(--color-warning-text); font-family: var(--font-sans); font-weight: 500; }
 .error { color: var(--color-danger); font-family: var(--font-sans); }

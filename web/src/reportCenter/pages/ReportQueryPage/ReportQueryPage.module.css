@@ -15,6 +15,12 @@
 .runStages .currentStage > span { color: var(--color-brand-active); }
 .selector select, .field input, .field select, .field textarea { min-height: var(--control-height); border: 1px solid var(--color-border-strong); background: var(--color-canvas); padding-inline: var(--space-3); color: var(--color-text); }
 .field textarea { padding-block: var(--space-2); resize: vertical; }
+.dateField { position: relative; }
+.datePicker:global(.ant-picker) { width: 100%; min-height: var(--control-height); border-color: var(--color-border-strong); border-radius: var(--radius-control); background: var(--color-canvas); padding-inline: var(--space-3); }
+.datePicker:global(.ant-picker:hover) { border-color: var(--color-brand-hover); }
+.datePicker:global(.ant-picker-focused) { border-color: var(--color-brand); box-shadow: 0 0 0 2px var(--color-brand-soft); }
+.datePicker:global(.ant-picker) :global(.ant-picker-input > input) { color: var(--color-text); font-size: 13px; }
+.datePicker:global(.ant-picker) :global(.ant-picker-suffix) { color: var(--color-brand-active); }
 .parameterForm { display: grid; grid-template-columns: repeat(3, minmax(180px, 1fr)); gap: var(--space-3) var(--space-4); }
 .field { display: grid; gap: var(--space-1); min-width: 0; color: var(--color-text-secondary); font-size: 12px; font-weight: 650; }
 .field small, .checkbox small { color: var(--color-text-secondary); font-family: var(--font-mono); font-size: 11px; font-weight: 400; overflow-wrap: anywhere; }

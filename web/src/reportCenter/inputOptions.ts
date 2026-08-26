@@ -16,3 +16,13 @@ export function reportInputSelectionValue(value: string | string[], multiple: bo
 	const keys = Array.isArray(value) ? value : value ? [value] : []
 	return numeric ? keys.map(Number) : keys
 }
+
+export function reportInputOptionMatches(option: ReportInputOption, search: string): boolean {
+	const query = normalizedSearchText(search)
+	if (!query) return true
+	return normalizedSearchText(option.name).includes(query) || normalizedSearchText(option.id).includes(query)
+}
+
+function normalizedSearchText(value: string): string {
+	return value.normalize('NFKC').trim().toLocaleLowerCase('zh-CN')
+}

@@ -83,12 +83,8 @@ export async function testReportInputQueryDefinition(client: ReportCenterClient,
 	return requestAndParse(client, path, { method: 'POST', body }, parseReportInputQueryTestResult, '输入选项查询测试失败。')
 }
 
-export async function getReportInputOptions(client: ReportCenterClient, reportId: number, conditionCode: string, name = '', signal?: AbortSignal): Promise<ReportAPIResult<ReportInputOption[]>> {
-	const search = new URLSearchParams()
-	if (name.trim()) search.set('name', name.trim())
-	const encodedSearch = search.toString()
-	const suffix = encodedSearch ? `?${encodedSearch}` : ''
-	return requestAndParse(client, `/v1/reports/${reportId}/input-options/${encodeURIComponent(conditionCode)}${suffix}`, { method: 'GET', signal }, parseReportInputOptions, '报表输入选项加载失败。')
+export async function getReportInputOptions(client: ReportCenterClient, reportId: number, conditionCode: string, signal?: AbortSignal): Promise<ReportAPIResult<ReportInputOption[]>> {
+	return requestAndParse(client, `/v1/reports/${reportId}/input-options/${encodeURIComponent(conditionCode)}`, { method: 'GET', signal }, parseReportInputOptions, '报表输入选项加载失败。')
 }
 
 export function parseReportInputQueries(payload: unknown): string[] {

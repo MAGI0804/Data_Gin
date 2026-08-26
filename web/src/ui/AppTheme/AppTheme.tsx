@@ -1,4 +1,5 @@
 import ConfigProvider from 'antd/es/config-provider'
+import zhCN from 'antd/es/locale/zh_CN'
 import type { ThemeConfig } from 'antd/es/config-provider/context'
 import type { ReactNode } from 'react'
 import { consoleColors } from '../../styles/themeTokens'
@@ -45,5 +46,5 @@ const consoleTheme: ThemeConfig = {
 }
 
 export function AppTheme({ children }: { children: ReactNode }) {
-  return <ConfigProvider theme={consoleTheme}>{children}</ConfigProvider>
+  return <ConfigProvider locale={zhCN} theme={consoleTheme}>{children}</ConfigProvider>
 }

@@ -98,7 +98,6 @@ export function ReportInputQueryDefinitionPanel({ client }: { client: ReportCent
 
 function ReportInputQueryDefinitionDrawer({ client, definition, onClose, onSaved }: { client: ReportCenterClient; definition: ReportInputQueryDefinition | null; onClose: () => void; onSaved: () => void }) {
 	const [input, setInput] = useState<ReportInputQueryDefinitionInput>(() => definitionInput(definition))
-	const [exactName, setExactName] = useState('')
 	const [state, setState] = useState<{ busy: boolean; error: string; test: ReportInputQueryTestResult | null }>({ busy: false, error: '', test: null })
 	const set = useCallback(<K extends keyof ReportInputQueryDefinitionInput>(key: K, value: ReportInputQueryDefinitionInput[K]) => setInput((current) => ({ ...current, [key]: value })), [])
 
@@ -118,7 +117,7 @@ function ReportInputQueryDefinitionDrawer({ client, definition, onClose, onSaved
 		if (error) { setState({ busy: false, error, test: null }); return }
 		setState({ busy: true, error: '', test: null })
 		const unchanged = definition && definition.selectSql.trim() === input.selectSql.trim()
-		const response = await testReportInputQueryDefinition(client, unchanged ? definition.id : null, input.selectSql, exactName)
+		const response = await testReportInputQueryDefinition(client, unchanged ? definition.id : null, input.selectSql)
 		if (!response.ok) { setState({ busy: false, error: response.error, test: null }); return }
 		setState({ busy: false, error: response.data.status === 'FAILED' ? response.data.message : '', test: response.data })
 	}
@@ -127,8 +126,7 @@ function ReportInputQueryDefinitionDrawer({ client, definition, onClose, onSaved
 	return <Drawer open title={definition ? '编辑输入选项查询' : '新增输入选项查询'} description="查询保存在 MySQL，但始终通过环境变量配置的默认 Oracle 执行。SELECT 必须输出 id 和 name；不要填写分号或 SQL 注释。" size="wide" closeDisabled={state.busy} onClose={onClose} footer={footer}>
 		<form className={styles.form} onSubmit={(event) => { event.preventDefault(); void save() }}>
 			<label className={styles.field}><span>查询名称</span><input required disabled={state.busy} className={styles.mono} maxLength={64} pattern={reportInputQueryNamePatternSource} value={input.name} onChange={(event) => set('name', event.currentTarget.value)} placeholder="款号" /><small>报表字段通过这个名称绑定，例如“款号”“款色”或 product_color。</small></label>
-			<label className={styles.sqlField}><span>SELECT 语句</span><textarea required disabled={state.busy} maxLength={65536} rows={9} value={input.selectSql} onChange={(event) => set('selectSql', event.currentTarget.value)} placeholder="SELECT a.id AS id, a.name AS name FROM BOSNDS3.M_PRODUCT@LINK_TO_BOJUN a" /><small>必须只返回 id、name 两列。用户输入名称时，系统在外层安全追加 WHERE name = :name。</small></label>
-			<label className={styles.field}><span>测试名称（可选）</span><input disabled={state.busy} maxLength={128} value={exactName} onChange={(event) => setExactName(event.currentTarget.value)} placeholder="输入一个真实 name 做精确查询" /></label>
+			<label className={styles.sqlField}><span>SELECT 语句</span><textarea required disabled={state.busy} maxLength={65536} rows={9} value={input.selectSql} onChange={(event) => set('selectSql', event.currentTarget.value)} placeholder="SELECT a.id AS id, a.name AS name FROM BOSNDS3.M_PRODUCT@LINK_TO_BOJUN a" /><small>必须只返回 id、name 两列。运行时一次读取最多 500 条并缓存到当前浏览器会话，输入名称或 ID 时直接在本地模糊搜索。</small></label>
 			<label className={styles.switch}><input disabled={state.busy} type="checkbox" checked={input.enabled} onChange={(event) => set('enabled', event.currentTarget.checked)} /><span>启用并允许报表字段绑定</span></label>
 		</form>
 		{state.test ? <QueryPreview result={state.test} /> : null}

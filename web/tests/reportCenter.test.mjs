@@ -9,7 +9,7 @@ import { reportParameterControls, reportParameterFlagDisabled, updateReportParam
 import { buildNewReportRunState, canStartNewReportRun, initialReportParameterValues } from '../.test-dist/reportCenter/queryParameters.js'
 import { createLatestRequestGuard } from '../.test-dist/reportCenter/components/ReportVersionDrawer/requestGuard.js'
 import { normalizeDatasourceCode, validateDatasourceConnection, validateDatasourceSave } from '../.test-dist/reportCenter/datasourceValidation.js'
-import { mergeReportInputOptions, reportInputSelectionKeys, reportInputSelectionValue } from '../.test-dist/reportCenter/inputOptions.js'
+import { mergeReportInputOptions, reportInputOptionMatches, reportInputSelectionKeys, reportInputSelectionValue } from '../.test-dist/reportCenter/inputOptions.js'
 import { isReportInputQueryName } from '../.test-dist/reportCenter/inputQueryName.js'
 
 test('functional state updates do not retain React DOM events', () => {
@@ -140,7 +140,7 @@ test('report input query names accept Unicode letters consistently', () => {
 	assert.equal(isReportInputQueryName('款号 查询'), false)
 })
 
-test('report input query clients use configured names and exact-name search', async () => {
+test('report input query clients load the configured option set once without remote search', async () => {
 	const requests = []
 	const client = async (path, options) => {
 		requests.push({ path, options })
@@ -148,8 +148,8 @@ test('report input query clients use configured names and exact-name search', as
 		return { ok: true, data: { data: { items: [{ id: 'S001', name: '上海店' }] } } }
 	}
 	assert.deepEqual(await getReportInputQueries(client), { ok: true, data: ['门店查询'] })
-	assert.deepEqual(await getReportInputOptions(client, 9, 'store_id', '上海店'), { ok: true, data: [{ id: 'S001', name: '上海店' }] })
-	assert.equal(requests[1].path, '/v1/reports/9/input-options/store_id?name=%E4%B8%8A%E6%B5%B7%E5%BA%97')
+	assert.deepEqual(await getReportInputOptions(client, 9, 'store_id'), { ok: true, data: [{ id: 'S001', name: '上海店' }] })
+	assert.equal(requests[1].path, '/v1/reports/9/input-options/store_id')
 	assert.equal(requests[1].options.method, 'GET')
 })
 
@@ -172,13 +172,20 @@ test('report input query definitions support frontend management and safe test p
 	assert.deepEqual(requests[2].options.body, { selectSql: definition.selectSql, name: '款号一' })
 })
 
-test('remote input options retain the selected item across later searches', () => {
-	const selected = [{ id: 'S001', name: '上海店' }]
-	const nextSearch = [{ id: 'B001', name: '北京店' }]
-	assert.deepEqual(mergeReportInputOptions(selected, nextSearch), [...selected, ...nextSearch])
+test('input options match names and ids locally with normalized fuzzy text', () => {
+	const option = { id: ' SKU-001 ', name: '上海旗舰店' }
+	assert.equal(reportInputOptionMatches(option, '旗舰'), true)
+	assert.equal(reportInputOptionMatches(option, 'sku-001'), true)
+	assert.equal(reportInputOptionMatches(option, '北京'), false)
 })
 
-test('remote input selections preserve scalar and list id shapes', () => {
+test('local input options keep unique selections', () => {
+	const selected = [{ id: 'S001', name: '上海店' }]
+	const nextSearch = [{ id: 'B001', name: '北京店' }, { id: 'S001', name: '上海旗舰店' }]
+	assert.deepEqual(mergeReportInputOptions(selected, nextSearch), [{ id: 'S001', name: '上海旗舰店' }, { id: 'B001', name: '北京店' }])
+})
+
+test('local input selections preserve scalar and list id shapes', () => {
 	assert.deepEqual(reportInputSelectionKeys(['P001', 'P002'], true), ['P001', 'P002'])
 	assert.deepEqual(reportInputSelectionValue(['1', '2'], true, true), [1, 2])
 	assert.deepEqual(reportInputSelectionValue(['P001', 'P002'], true, false), ['P001', 'P002'])

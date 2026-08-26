@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from 'react'
+import DatePicker from 'antd/es/date-picker'
+import dayjs from 'dayjs'
 import { ChevronDown, ChevronLeft, ChevronRight, Download, Filter, Info, Play, Plus, Square, Trash2 } from 'lucide-react'
 import { Button, DataTable, Dialog, FeedbackState, FilterToolbar, MetricStrip, PageCanvas, PageHeader, Section, StatusTag, type StatusTagTone } from '../../../ui'
 import { cancelReportRun, createReportExport, createReportRun, getReportExport, getReportExportDownload, queryReportResults, getReportRun, getReportRunContract, type ReportCenterClient } from '../../api'
@@ -267,7 +269,8 @@ function ParameterField({ parameter, value, disabled, onChange }: { parameter: R
   const hint = [`{{${parameter.code}}}`, parameter.oracleType, parameter.required ? '必填' : '选填', parameter.sensitive ? '敏感' : ''].filter(Boolean).join(' · ')
   if (parameter.controlType === 'CHECKBOX') return <label className={styles.field} htmlFor={id}><span>{parameter.label}{parameter.required ? ' *' : ''}</span><select id={id} required={parameter.required} disabled={disabled} value={value === true ? 'true' : value === false ? 'false' : ''} onChange={(event) => onChange(event.currentTarget.value === '' ? '' : event.currentTarget.value === 'true')}><option value="">{parameter.required ? '请选择' : '不传入 / NULL'}</option><option value="true">是</option><option value="false">否</option></select><small>{hint}</small></label>
   if (parameter.controlType === 'SELECT' || parameter.controlType === 'MULTI_SELECT') return <label className={styles.field} htmlFor={id}><span>{parameter.label}{parameter.required ? ' *' : ''}</span><select id={id} multiple={parameter.controlType === 'MULTI_SELECT'} required={parameter.required} disabled={disabled} value={parameter.controlType === 'MULTI_SELECT' ? toStringArray(value) : String(value ?? '')} onChange={(event) => onChange(parameter.controlType === 'MULTI_SELECT' ? Array.from(event.currentTarget.selectedOptions, (option) => option.value) : event.currentTarget.value)}><option value="" disabled={parameter.required}>请选择</option>{parameter.allowedValues.map((option) => <option value={String(option)} key={String(option)}>{String(option)}</option>)}</select><small>{hint}</small></label>
-  const type = parameter.controlType === 'DATE' ? 'date' : parameter.controlType === 'DATETIME' ? 'datetime-local' : parameter.sensitive ? 'password' : 'text'
+  if (parameter.controlType === 'DATE' || parameter.controlType === 'DATETIME') return <ReportDateField id={id} label={`${parameter.label}${parameter.required ? ' *' : ''}`} hint={parameter.errorMessage || hint} value={value} disabled={disabled} required={parameter.required} dateTime={parameter.controlType === 'DATETIME'} onChange={onChange} />
+  const type = parameter.sensitive ? 'password' : 'text'
   const rules = parameter.validation
   const common = { id, required: parameter.required, disabled, value: String(value ?? ''), minLength: safeIntegerRule(rules.minLength), maxLength: parameter.maxLength ?? safeIntegerRule(rules.maxLength), pattern: typeof rules.pattern === 'string' ? rules.pattern : undefined, onChange: (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => onChange(event.currentTarget.value) }
   return <label className={styles.field} htmlFor={id}><span>{parameter.label}{parameter.required ? ' *' : ''}</span>{parameter.controlType === 'TEXTAREA' ? <textarea {...common} rows={3} /> : <input {...common} type={type} inputMode={parameter.controlType === 'NUMBER' ? 'decimal' : undefined} />}<small>{parameter.errorMessage || hint}</small></label>
@@ -286,9 +289,16 @@ function ConditionField({ client, reportId, code, field, value, disabled, onChan
   }
   if (list || field.type === 'json') return <label className={styles.field} htmlFor={id}><span>{label}</span><textarea id={id} rows={3} required={field.required} disabled={disabled} value={Array.isArray(value) || (field.type === 'json' && value && typeof value === 'object') ? JSON.stringify(value) : String(value ?? '')} placeholder={list ? '["a","b"]' : '{"key":"value"}'} onChange={(event) => onChange(event.currentTarget.value)} /><small>{hint}</small></label>
   if (field.type === 'bool' || field.control === 'CHECKBOX') return <label className={styles.field} htmlFor={id}><span>{label}</span><select id={id} required={field.required} disabled={disabled} value={value === true ? 'true' : value === false ? 'false' : ''} onChange={(event) => onChange(event.currentTarget.value === '' ? '' : event.currentTarget.value === 'true')}><option value="">请选择</option><option value="true">是</option><option value="false">否</option></select><small>{hint}</small></label>
+	if (field.control === 'DATE' || field.control === 'DATETIME') return <ReportDateField id={id} label={label} hint={hint} value={value} disabled={disabled} required={field.required} dateTime={field.control === 'DATETIME'} onChange={onChange} />
   const common = { id, required: field.required, disabled, value: String(value ?? ''), placeholder: field.example === undefined ? undefined : String(field.example), onChange: (event: React.ChangeEvent<HTMLInputElement | HTMLTextAreaElement>) => onChange(event.currentTarget.value) }
-  const inputType = field.control === 'DATE' ? 'date' : field.control === 'DATETIME' ? 'datetime-local' : 'text'
-  return <label className={styles.field} htmlFor={id}><span>{label}</span>{field.control === 'TEXTAREA' ? <textarea {...common} rows={3} /> : <input {...common} type={inputType} step={field.control === 'DATETIME' ? 1 : undefined} inputMode={field.type === 'number' || field.control === 'NUMBER' ? 'decimal' : undefined} />}<small>{hint}</small></label>
+  return <label className={styles.field} htmlFor={id}><span>{label}</span>{field.control === 'TEXTAREA' ? <textarea {...common} rows={3} /> : <input {...common} type="text" inputMode={field.type === 'number' || field.control === 'NUMBER' ? 'decimal' : undefined} />}<small>{hint}</small></label>
+}
+
+function ReportDateField({ id, label, hint, value, disabled, required, dateTime, onChange }: { id: string; label: string; hint: string; value: unknown; disabled: boolean; required: boolean; dateTime: boolean; onChange: (value: unknown) => void }) {
+	const text = String(value ?? '')
+	const parsed = text ? dayjs(text) : null
+	const pickerValue = parsed?.isValid() ? parsed : null
+	return <label className={`${styles.field} ${styles.dateField}`} htmlFor={id}><span>{label}</span><DatePicker id={id} aria-required={required} className={styles.datePicker} allowClear={!required} disabled={disabled} format={dateTime ? 'YYYY-MM-DD HH:mm:ss' : 'YYYY-MM-DD'} placeholder={dateTime ? '选择日期和时间' : '选择日期'} showTime={dateTime ? { format: 'HH:mm:ss' } : false} value={pickerValue} onChange={(next) => onChange(next ? next.format(dateTime ? 'YYYY-MM-DDTHH:mm:ss' : 'YYYY-MM-DD') : '')} /><small>{hint}</small></label>
 }
 
 function ResultTable({ page, onInspect }: { page: ReportResultPage; onInspect: (column: ReportResultColumn) => void }) {
@@ -332,7 +342,10 @@ function buildRunParameters(parameters: ReportParameter[], values: Record<string
   const result: Record<string, unknown> = {}
   for (const parameter of visibleReportParameters(parameters)) {
     const value = values[parameter.code]
-    if (value === '' || value === undefined || (Array.isArray(value) && value.length === 0)) continue
+    if (value === '' || value === undefined || (Array.isArray(value) && value.length === 0)) {
+      if (parameter.required) return { ok: false, error: `${parameter.label} 为必填筛选条件。` }
+      continue
+    }
     if ((parameter.logicalType === 'integer' || parameter.logicalType === 'decimal') && (typeof value !== 'string' || !/^-?\d+(?:\.\d+)?$/.test(value))) return { ok: false, error: `${parameter.label} 必须填写有效数字。` }
     if (parameter.logicalType === 'integer' && typeof value === 'string' && !/^-?\d+$/.test(value)) return { ok: false, error: `${parameter.label} 必须填写整数。` }
     if (parameter.logicalType === 'datetime' && typeof value === 'string') {
