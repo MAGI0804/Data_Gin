@@ -39,11 +39,15 @@ type pipelineRunRecorder interface {
 	Finish(ctx context.Context, id uint, status string, successCount, failedCount int, errorMessage string) error
 }
 
+type bojunOrderPusher interface {
+	PushNewOrderWithPolicy(ctx context.Context, order *model.BojunRetailOrder, position int, policy OrderPushSkipPolicy) bojunOrderPushResult
+}
+
 type BojunOrderService struct {
 	rawDataDAO     rawDataCreator
 	retailOrderDAO bojunRetailOrderWriter
 	pipelineRunDAO pipelineRunRecorder
-	pushService    *BojunOrderPushService
+	pushService    bojunOrderPusher
 	skipPolicy     orderPushSkipConfigGetter
 }
 
@@ -65,6 +69,10 @@ type BojunOrderSyncResult struct {
 	FailedCount             int                     `json:"failed_count"`
 	Samples                 []BojunOrderPreviewItem `json:"samples"`
 	FailedSamples           []BojunOrderPreviewItem `json:"failed_samples"`
+	WatermarkBefore         uint64                  `json:"watermark_before,omitempty"`
+	WatermarkAfter          uint64                  `json:"watermark_after,omitempty"`
+	WatermarkInitialized    bool                    `json:"watermark_initialized,omitempty"`
+	LeaseAcquired           bool                    `json:"lease_acquired,omitempty"`
 	pushPosition            int
 }
 

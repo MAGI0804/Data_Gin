@@ -1,0 +1,410 @@
+package data_svc
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"strings"
+	"time"
+
+	"gin-biz-web-api/internal/dao/data_dao"
+	"gin-biz-web-api/internal/reportoracle"
+	"gin-biz-web-api/internal/reportrepo"
+	"gin-biz-web-api/internal/reportsecret"
+	"gin-biz-web-api/internal/service/config_svc"
+	"gin-biz-web-api/model"
+	"gin-biz-web-api/pkg/config"
+
+	"github.com/google/uuid"
+)
+
+const (
+	bojunOracleDatasourceCode   = "etl01"
+	bojunOracleOrderSource      = "bojun_order_oracle"
+	bojunOracleDefaultBatchSize = 100
+	bojunOracleDefaultMaxPages  = 20
+	bojunOracleDefaultLeaseTTL  = 2 * time.Minute
+)
+
+type bojunOracleDatasourceStore interface {
+	FindEnabledReportDatasourceByCode(context.Context, string) (*model.ReportDatasource, error)
+}
+
+type bojunOracleCredentialDecryptor interface {
+	Decrypt(version, ciphertext string) (string, error)
+}
+
+type bojunOracleConnection interface {
+	QueryBojunRetailAfterID(context.Context, uint64, int) ([]reportoracle.BojunRetailRow, error)
+	QueryBojunRetailByModifiedTime(context.Context, time.Time, time.Time, uint64, int) ([]reportoracle.BojunRetailRow, error)
+	MaxBojunRetailID(context.Context) (uint64, error)
+	UpdateBojunRetailPushStatus(context.Context, uint64, bool, int) error
+	Close() error
+}
+
+type bojunOracleConnectionOpener func(context.Context, reportoracle.Config) (bojunOracleConnection, error)
+
+type bojunOracleSyncStateStore interface {
+	Get(context.Context, string) (*model.BojunOracleSyncState, error)
+	Initialize(context.Context, string, uint64, time.Time) (*model.BojunOracleSyncState, bool, error)
+	AcquireLease(context.Context, string, string, time.Time, time.Duration) (*model.BojunOracleSyncState, bool, error)
+	Advance(context.Context, string, string, uint64, uint64, time.Time, time.Duration) error
+	ReleaseLease(context.Context, string, string, time.Time) error
+}
+
+type BojunOracleOrderService struct {
+	datasourceStore bojunOracleDatasourceStore
+	decryptor       bojunOracleCredentialDecryptor
+	openOracle      bojunOracleConnectionOpener
+	stateStore      bojunOracleSyncStateStore
+	rawDataDAO      rawDataCreator
+	retailOrderDAO  bojunRetailOrderWriter
+	pushService     bojunOrderPusher
+	skipPolicy      orderPushSkipConfigGetter
+	now             func() time.Time
+	newLeaseToken   func() string
+	batchSize       int
+	maxPages        int
+	leaseTTL        time.Duration
+}
+
+func NewBojunOracleOrderService() *BojunOracleOrderService {
+	return &BojunOracleOrderService{
+		datasourceStore: reportrepo.New(),
+		decryptor:       reportsecret.EnvironmentKeyring{},
+		openOracle: func(ctx context.Context, oracleConfig reportoracle.Config) (bojunOracleConnection, error) {
+			return reportoracle.Open(ctx, oracleConfig)
+		},
+		stateStore:     data_dao.NewBojunOracleSyncStateDAO(),
+		rawDataDAO:     data_dao.NewRawDataDAO(),
+		retailOrderDAO: data_dao.NewBojunRetailOrderDAO(),
+		pushService:    NewBojunOrderPushService(),
+		skipPolicy:     config_svc.NewOrderPushSkipConfigService(),
+		now:            time.Now,
+		newLeaseToken:  uuid.NewString,
+		batchSize: positiveBojunInt(
+			bojunEnvInt("BOJUN_ORACLE_BATCH_SIZE", config.GetInt("Bojun.OracleBatchSize", bojunOracleDefaultBatchSize)),
+			bojunOracleDefaultBatchSize,
+		),
+		maxPages: positiveBojunInt(
+			bojunEnvInt("BOJUN_ORACLE_MAX_PAGES", config.GetInt("Bojun.OracleMaxPages", bojunOracleDefaultMaxPages)),
+			bojunOracleDefaultMaxPages,
+		),
+		leaseTTL: time.Duration(positiveBojunInt(
+			bojunEnvInt("BOJUN_ORACLE_LEASE_SECONDS", config.GetInt("Bojun.OracleLeaseSeconds", int(bojunOracleDefaultLeaseTTL/time.Second))),
+			int(bojunOracleDefaultLeaseTTL/time.Second),
+		)) * time.Second,
+	}
+}
+
+func (service *BojunOracleOrderService) SyncIncremental(ctx context.Context) (result *BojunOrderSyncResult, resultErr error) {
+	result = &BojunOrderSyncResult{PageSize: service.batchSize, MaxPages: service.maxPages}
+	connection, datasource, err := service.open(ctx)
+	if err != nil {
+		return result, err
+	}
+	defer func() {
+		if closeErr := connection.Close(); closeErr != nil {
+			resultErr = errors.Join(resultErr, fmt.Errorf("close bojun Oracle connection: %w", closeErr))
+		}
+	}()
+
+	state, err := service.stateStore.Get(ctx, bojunOracleDatasourceCode)
+	if errors.Is(err, data_dao.ErrBojunOracleSyncStateNotInitialized) {
+		queryCtx, cancel := reportOracleQueryContext(ctx, *datasource)
+		maxRetailID, maxErr := connection.MaxBojunRetailID(queryCtx)
+		cancel()
+		if maxErr != nil {
+			return result, maxErr
+		}
+		state, result.WatermarkInitialized, err = service.stateStore.Initialize(
+			ctx, bojunOracleDatasourceCode, maxRetailID, service.now(),
+		)
+		if err != nil {
+			return result, err
+		}
+		result.WatermarkBefore = state.LastRetailID
+		result.WatermarkAfter = state.LastRetailID
+		return result, nil
+	}
+	if err != nil {
+		return result, err
+	}
+
+	result.WatermarkBefore = state.LastRetailID
+	result.WatermarkAfter = state.LastRetailID
+	token := service.newLeaseToken()
+	state, acquired, err := service.stateStore.AcquireLease(
+		ctx, bojunOracleDatasourceCode, token, service.now(), service.leaseTTL,
+	)
+	if err != nil {
+		return result, err
+	}
+	result.LeaseAcquired = acquired
+	if !acquired {
+		return result, nil
+	}
+	defer func() {
+		releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), bojunOrderRunFinishTimeout)
+		defer cancel()
+		if releaseErr := service.stateStore.ReleaseLease(releaseCtx, bojunOracleDatasourceCode, token, service.now()); releaseErr != nil &&
+			!errors.Is(releaseErr, data_dao.ErrBojunOracleSyncLeaseLost) {
+			resultErr = errors.Join(resultErr, releaseErr)
+		}
+	}()
+
+	pushSkipConfig, err := service.bojunPushSkipConfig(ctx, true)
+	if err != nil {
+		return result, err
+	}
+	watermark := state.LastRetailID
+	for page := 1; page <= service.maxPages; page++ {
+		if err := ctx.Err(); err != nil {
+			return result, err
+		}
+		queryCtx, cancel := reportOracleQueryContext(ctx, *datasource)
+		rows, queryErr := connection.QueryBojunRetailAfterID(queryCtx, watermark, service.batchSize)
+		cancel()
+		if queryErr != nil {
+			return result, queryErr
+		}
+		result.FetchPages++
+		if len(rows) == 0 {
+			break
+		}
+		for _, row := range rows {
+			if err := service.processRow(ctx, row, page, true, result, pushSkipConfig); err != nil {
+				return result, err
+			}
+		}
+		nextWatermark := rows[len(rows)-1].RetailID
+		if err := service.stateStore.Advance(
+			ctx, bojunOracleDatasourceCode, token, watermark, nextWatermark, service.now(), service.leaseTTL,
+		); err != nil {
+			return result, err
+		}
+		watermark = nextWatermark
+		result.WatermarkAfter = watermark
+		if len(rows) < service.batchSize {
+			break
+		}
+	}
+	return result, nil
+}
+
+func (service *BojunOracleOrderService) open(ctx context.Context) (bojunOracleConnection, *model.ReportDatasource, error) {
+	if service == nil || service.datasourceStore == nil || service.decryptor == nil || service.openOracle == nil ||
+		service.stateStore == nil || service.rawDataDAO == nil || service.retailOrderDAO == nil || service.now == nil ||
+		service.newLeaseToken == nil || service.batchSize <= 0 || service.maxPages <= 0 || service.leaseTTL <= 0 {
+		return nil, nil, fmt.Errorf("bojun Oracle order service dependencies are unavailable")
+	}
+	datasource, err := service.datasourceStore.FindEnabledReportDatasourceByCode(ctx, bojunOracleDatasourceCode)
+	if err != nil {
+		return nil, nil, fmt.Errorf("load bojun Oracle datasource %s: %w", bojunOracleDatasourceCode, err)
+	}
+	password, err := service.decryptor.Decrypt(datasource.CredentialKeyVersion, datasource.PasswordCiphertext)
+	if err != nil {
+		return nil, nil, fmt.Errorf("decrypt bojun Oracle datasource credential: %w", err)
+	}
+	connection, err := service.openOracle(ctx, oracleConfigFromDatasource(*datasource, password))
+	if err != nil {
+		return nil, nil, fmt.Errorf("open bojun Oracle datasource: %w", err)
+	}
+	return connection, datasource, nil
+}
+
+func (service *BojunOracleOrderService) processRow(
+	ctx context.Context,
+	row reportoracle.BojunRetailRow,
+	page int,
+	confirmWrite bool,
+	result *BojunOrderSyncResult,
+	pushSkipConfig OrderPushSkipConfig,
+) error {
+	result.TotalCount++
+	order, err := buildBojunRetailOrderFromOracle(row)
+	if err != nil {
+		result.FailedCount++
+		return fmt.Errorf("build bojun Oracle retail order %d: %w", row.RetailID, err)
+	}
+	sample := bojunOraclePreviewItem(order)
+	exists, err := service.retailOrderDAO.ExistsByDocNo(ctx, order.DocNo)
+	if err != nil {
+		result.FailedCount++
+		return fmt.Errorf("check bojun Oracle order %s existence: %w", order.DocNo, err)
+	}
+	if exists {
+		result.ExistingCount++
+		result.SkippedCount++
+		sample.Status = "exists"
+		sample.Reason = "docno 已存在，不覆盖"
+		addBojunOrderSample(result, sample)
+		return nil
+	}
+	result.WritableCount++
+	if !confirmWrite {
+		result.PreviewCount++
+		sample.Status = "pending"
+		sample.Reason = "可写入，预览未落库"
+		addBojunOrderSample(result, sample)
+		return nil
+	}
+
+	rawData, err := buildBojunOracleRawData(row, page)
+	if err != nil {
+		result.FailedCount++
+		return fmt.Errorf("build bojun Oracle raw data %d: %w", row.RetailID, err)
+	}
+	rawDataID, err := service.rawDataDAO.Create(ctx, rawData)
+	if err != nil {
+		result.FailedCount++
+		return fmt.Errorf("create bojun Oracle order %s raw data: %w", order.DocNo, err)
+	}
+	result.SavedCount++
+	order.RawDataID = rawDataID
+	created, err := service.retailOrderDAO.CreateIfNotExists(ctx, order)
+	if err != nil {
+		result.FailedCount++
+		return fmt.Errorf("create bojun Oracle retail order %s: %w", order.DocNo, err)
+	}
+	if !created {
+		result.ExistingCount++
+		result.SkippedCount++
+		return nil
+	}
+	result.RetailCount++
+	sample.Status = "created"
+	sample.Reason = "已写入"
+	addBojunOrderSample(result, sample)
+
+	if order.IsToShop != "Y" || row.PushStatus == 1 || service.pushService == nil {
+		return nil
+	}
+	policy := OrderPushSkipPolicy{}
+	if target, ok := bojunTargetForStore(order.StoreCode); ok {
+		policy = pushSkipConfig.PolicyForTarget(target.Code)
+	}
+	pushResult := service.pushService.PushNewOrderWithPolicy(ctx, order, result.nextPushPosition(), policy)
+	if pushResult.Error != nil && !pushResult.Skipped {
+		result.FailedCount++
+		return fmt.Errorf("push bojun Oracle retail order %s: %w", order.DocNo, pushResult.Error)
+	}
+	return nil
+}
+
+func (service *BojunOracleOrderService) bojunPushSkipConfig(ctx context.Context, confirmWrite bool) (OrderPushSkipConfig, error) {
+	if !confirmWrite || service.skipPolicy == nil {
+		return OrderPushSkipConfig{}, nil
+	}
+	return service.skipPolicy.Get(ctx)
+}
+
+func buildBojunRetailOrderFromOracle(row reportoracle.BojunRetailRow) (*model.BojunRetailOrder, error) {
+	if row.RetailID == 0 || strings.TrimSpace(row.DocNo) == "" || row.StatusTime.IsZero() {
+		return nil, fmt.Errorf("M_RETAIL_ID, DOCNO and STATUSTIME are required")
+	}
+	retailSaleType := strings.ToUpper(strings.TrimSpace(row.RetailSaleType))
+	if retailSaleType == "" {
+		retailSaleType = "CMR"
+	}
+	orderTypeCode, orderTypeName := bojunOrderType(retailSaleType)
+	quantity := 1
+	if orderTypeCode == "RET" {
+		quantity = -1
+	}
+	itemsJSON := strings.TrimSpace(row.ItemsJSON)
+	if itemsJSON == "" {
+		itemsJSON = "[]"
+	}
+	var items []interface{}
+	if err := json.Unmarshal([]byte(itemsJSON), &items); err != nil {
+		return nil, fmt.Errorf("JSON_ITEM must be a JSON array: %w", err)
+	}
+	rawContent, err := json.Marshal(bojunOracleRawPayload(row))
+	if err != nil {
+		return nil, err
+	}
+	retailID := row.RetailID
+	completedAt := row.StatusTime
+	return &model.BojunRetailOrder{
+		OracleRetailID: &retailID,
+		DocNo:          row.DocNo, BillDate: statusTimeBillDate(row.StatusTime), CompletedAt: &completedAt,
+		StoreCode: strings.TrimSpace(row.StoreCode), RetailSaleType: retailSaleType,
+		OrderTypeCode: orderTypeCode, OrderTypeName: orderTypeName,
+		OrderPhone: strings.TrimSpace(row.OrderPhone), PaidAmount: row.PaidAmount, PushAmount: row.PushAmount,
+		IsToShop:   strings.ToUpper(strings.TrimSpace(row.IsToShop)),
+		TotalLines: len(items), TotalQty: quantity,
+		TotalAmtList: row.PaidAmount, TotalAmtActual: row.PaidAmount,
+		TotalAmtAcc: row.PaidAmount, TotalAmtAcc1: row.PaidAmount,
+		ItemsJSON: itemsJSON, PayItemsJSON: "{}", RawContentJSON: string(rawContent),
+		Synced: bojunOracleInitialSyncStatus(row),
+	}, nil
+}
+
+func bojunOracleInitialSyncStatus(row reportoracle.BojunRetailRow) int {
+	if strings.ToUpper(strings.TrimSpace(row.IsToShop)) != "Y" || row.PushStatus == 1 {
+		return 1
+	}
+	return 0
+}
+
+func statusTimeBillDate(value time.Time) int {
+	return value.Year()*10000 + int(value.Month())*100 + value.Day()
+}
+
+type bojunOracleRawRecord struct {
+	RetailID       uint64          `json:"M_RETAIL_ID"`
+	StoreCode      string          `json:"STORE_CODE"`
+	DocNo          string          `json:"DOCNO"`
+	RetailSaleType string          `json:"RETAILSALETYPE"`
+	StatusTime     time.Time       `json:"STATUSTIME"`
+	OrderPhone     string          `json:"DM_VP_C_VIP_MOBILE"`
+	PaidAmount     float64         `json:"TOT_AMT_SF"`
+	PushAmount     float64         `json:"TOT_AMT_TS"`
+	IsToShop       string          `json:"IS_TOSHOP"`
+	PushStatus     int             `json:"STATUS"`
+	ItemsJSON      json.RawMessage `json:"JSON_ITEM"`
+}
+
+func bojunOracleRawPayload(row reportoracle.BojunRetailRow) bojunOracleRawRecord {
+	itemsJSON := strings.TrimSpace(row.ItemsJSON)
+	if itemsJSON == "" {
+		itemsJSON = "[]"
+	}
+	return bojunOracleRawRecord{
+		RetailID: row.RetailID, StoreCode: row.StoreCode, DocNo: row.DocNo,
+		RetailSaleType: row.RetailSaleType, StatusTime: row.StatusTime, OrderPhone: row.OrderPhone,
+		PaidAmount: row.PaidAmount, PushAmount: row.PushAmount, IsToShop: row.IsToShop,
+		PushStatus: row.PushStatus, ItemsJSON: json.RawMessage(itemsJSON),
+	}
+}
+
+func buildBojunOracleRawData(row reportoracle.BojunRetailRow, page int) (*model.RawData, error) {
+	rawContent, err := json.Marshal(bojunOracleRawPayload(row))
+	if err != nil {
+		return nil, err
+	}
+	ingestedAt := time.Now()
+	metadata, err := json.Marshal(map[string]interface{}{
+		"source": bojunOracleOrderSource, "datasource_code": bojunOracleDatasourceCode,
+		"table": reportoracle.BojunRetailTable, "m_retail_id": row.RetailID,
+		"page": page, "ingested_at": ingestedAt.Format(time.RFC3339),
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &model.RawData{
+		DataSourceID: 0, ExternalID: row.DocNo, DataType: "order",
+		RawContent: string(rawContent), Metadata: string(metadata), Status: "pending",
+		Remark: bojunOracleOrderSource, Source: bojunOracleOrderSource, IngestedAt: &ingestedAt,
+	}, nil
+}
+
+func bojunOraclePreviewItem(order *model.BojunRetailOrder) BojunOrderPreviewItem {
+	return BojunOrderPreviewItem{
+		DocNo: order.DocNo, StoreCode: order.StoreCode,
+		OrderTypeCode: order.OrderTypeCode, OrderTypeName: order.OrderTypeName,
+		BillDate: order.BillDate, TotalQty: order.TotalQty, TotalAmtActual: order.TotalAmtActual,
+	}
+}
