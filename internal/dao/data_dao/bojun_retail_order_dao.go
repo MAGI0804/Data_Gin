@@ -118,6 +118,33 @@ func (dao *BojunRetailOrderDAO) UpdateSyncStatus(ctx context.Context, id uint, s
 		Error
 }
 
+func (dao *BojunRetailOrderDAO) SupplementOracleFieldsIfMissing(
+	ctx context.Context,
+	localOrderID uint,
+	order *model.BojunRetailOrder,
+) (bool, error) {
+	if dao == nil || dao.db == nil || ctx == nil || localOrderID == 0 || order == nil ||
+		order.DocNo == "" || order.OracleRetailID == nil || *order.OracleRetailID == 0 {
+		return false, gorm.ErrInvalidData
+	}
+	result := dao.db.WithContext(ctx).
+		Model(&model.BojunRetailOrder{}).
+		Where("id = ? AND docno = ? AND oracle_retail_id IS NULL", localOrderID, order.DocNo).
+		Updates(map[string]interface{}{
+			"oracle_retail_id": order.OracleRetailID,
+			"order_phone":      order.OrderPhone,
+			"paid_amount":      order.PaidAmount,
+			"push_amount":      order.PushAmount,
+			"is_to_shop":       order.IsToShop,
+			"tot_amt_list":     order.TotalAmtList,
+			"tot_amt_actual":   order.TotalAmtActual,
+			"tot_amt_acc":      order.TotalAmtAcc,
+			"tot_amt_acc1":     order.TotalAmtAcc1,
+			"updated_at":       time.Now().Unix(),
+		})
+	return result.RowsAffected > 0, result.Error
+}
+
 func (dao *BojunRetailOrderDAO) UpdateCompletedAtIfEmpty(
 	ctx context.Context,
 	docNo string,

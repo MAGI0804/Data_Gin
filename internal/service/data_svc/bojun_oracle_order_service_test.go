@@ -85,9 +85,11 @@ type fakeBojunOracleStateStore struct {
 }
 
 type fakeBojunOracleRetailStore struct {
-	orders  map[string]*model.BojunRetailOrder
-	nextID  uint
-	updates map[uint]int
+	orders          map[string]*model.BojunRetailOrder
+	nextID          uint
+	updates         map[uint]int
+	supplementCalls int
+	supplementNoop  bool
 }
 
 func (store *fakeBojunOracleRetailStore) ExistsByDocNo(_ context.Context, docNo string) (bool, error) {
@@ -117,6 +119,23 @@ func (store *fakeBojunOracleRetailStore) CreateIfNotExists(_ context.Context, or
 	return true, nil
 }
 
+func (store *fakeBojunOracleRetailStore) SupplementOracleFieldsIfMissing(
+	_ context.Context,
+	localOrderID uint,
+	order *model.BojunRetailOrder,
+) (bool, error) {
+	store.supplementCalls++
+	if store.supplementNoop {
+		return false, nil
+	}
+	existing, exists := store.orders[order.DocNo]
+	if !exists || existing.ID != localOrderID || existing.OracleRetailID != nil {
+		return false, nil
+	}
+	applyBojunOracleSupplement(existing, order)
+	return true, nil
+}
+
 func (store *fakeBojunOracleRetailStore) UpdateSyncStatus(_ context.Context, id uint, synced int) error {
 	if store.updates == nil {
 		store.updates = make(map[uint]int)
@@ -133,10 +152,17 @@ func (store *fakeBojunOracleRetailStore) UpdateSyncStatus(_ context.Context, id 
 type fakeBojunOraclePusher struct {
 	result bojunOrderPushResult
 	calls  int
+	orders []model.BojunRetailOrder
 }
 
-func (pusher *fakeBojunOraclePusher) PushNewOrderWithPolicy(context.Context, *model.BojunRetailOrder, int, OrderPushSkipPolicy) bojunOrderPushResult {
+func (pusher *fakeBojunOraclePusher) PushNewOrderWithPolicy(
+	_ context.Context,
+	order *model.BojunRetailOrder,
+	_ int,
+	_ OrderPushSkipPolicy,
+) bojunOrderPushResult {
 	pusher.calls++
+	pusher.orders = append(pusher.orders, *order)
 	return pusher.result
 }
 
@@ -298,6 +324,140 @@ func TestBojunOracleExistingSuccessfulOrderRetriesOnlyWriteBack(t *testing.T) {
 	}
 	if store.updates[77] != 1 || result.WatermarkAfter != retailID {
 		t.Fatalf("updates=%v result=%+v", store.updates, result)
+	}
+}
+
+func TestBojunOracleExistingAPIOrderSupplementsFieldsAndOnlyWritesBack(t *testing.T) {
+	statusTime := time.Date(2026, 8, 25, 15, 42, 21, 0, time.Local)
+	connection := &fakeBojunOracleConnection{rows: []reportoracle.BojunRetailRow{{
+		RetailID: 130, StoreCode: "ORACLE-STORE", DocNo: "API-ORDER-130", StatusTime: statusTime,
+		OrderPhone: "18616613488", PaidAmount: 88.8, PushAmount: 80, IsToShop: "Y",
+	}}}
+	state := &fakeBojunOracleStateStore{
+		state:         model.BojunOracleSyncState{SourceCode: bojunOracleDatasourceCode, LastRetailID: 129, Initialized: true},
+		leaseAcquired: true,
+	}
+	service := newTestBojunOracleOrderService(connection, state)
+	service.batchSize = 2
+	pusher := &fakeBojunOraclePusher{result: bojunOrderPushResult{Success: true}}
+	service.pushService = pusher
+	store := service.retailOrderDAO.(*fakeBojunOracleRetailStore)
+	completedAt := statusTime.Add(-time.Hour)
+	store.orders["API-ORDER-130"] = &model.BojunRetailOrder{
+		BaseModel: model.BaseModel{ID: 1300}, DocNo: "API-ORDER-130", StoreCode: "API-STORE",
+		CompletedAt: &completedAt, ItemsJSON: `[{"sku":"API-SKU"}]`, RawDataID: 99, Synced: 1,
+	}
+
+	result, err := service.SyncIncremental(t.Context())
+	if err != nil {
+		t.Fatalf("SyncIncremental() error = %v", err)
+	}
+	updated := store.orders["API-ORDER-130"]
+	if store.supplementCalls != 1 || updated.OracleRetailID == nil || *updated.OracleRetailID != 130 {
+		t.Fatalf("supplement calls=%d updated=%+v", store.supplementCalls, updated)
+	}
+	if updated.OrderPhone != "18616613488" || updated.PaidAmount != 88.8 || updated.PushAmount != 80 || updated.IsToShop != "Y" {
+		t.Fatalf("supplemented Oracle fields=%+v", updated)
+	}
+	if updated.TotalAmtList != 88.8 || updated.TotalAmtActual != 88.8 || updated.TotalAmtAcc != 88.8 || updated.TotalAmtAcc1 != 88.8 {
+		t.Fatalf("supplemented amount fields=%+v", updated)
+	}
+	if updated.StoreCode != "API-STORE" || updated.RawDataID != 99 || updated.ItemsJSON != `[{"sku":"API-SKU"}]` ||
+		updated.CompletedAt == nil || !updated.CompletedAt.Equal(completedAt) {
+		t.Fatalf("existing base fields were overwritten: %+v", updated)
+	}
+	if pusher.calls != 0 || len(connection.writeBackIDs) != 1 || connection.writeBackIDs[0] != 130 || result.WatermarkAfter != 130 {
+		t.Fatalf("push/write-back/result = calls:%d ids:%v result:%+v", pusher.calls, connection.writeBackIDs, result)
+	}
+	if result.UpdatedCount != 1 {
+		t.Fatalf("updated count=%d, want 1", result.UpdatedCount)
+	}
+}
+
+func TestBojunOracleExistingUnpushedOrderUsesSupplementedPushAmount(t *testing.T) {
+	statusTime := time.Date(2026, 8, 25, 15, 42, 21, 0, time.Local)
+	connection := &fakeBojunOracleConnection{rows: []reportoracle.BojunRetailRow{{
+		RetailID: 131, StoreCode: "ABCN001A001", DocNo: "API-ORDER-131", StatusTime: statusTime,
+		PaidAmount: 100, PushAmount: 0, IsToShop: "Y",
+	}}}
+	state := &fakeBojunOracleStateStore{
+		state:         model.BojunOracleSyncState{SourceCode: bojunOracleDatasourceCode, LastRetailID: 130, Initialized: true},
+		leaseAcquired: true,
+	}
+	service := newTestBojunOracleOrderService(connection, state)
+	service.batchSize = 2
+	pusher := &fakeBojunOraclePusher{result: bojunOrderPushResult{Success: true}}
+	service.pushService = pusher
+	store := service.retailOrderDAO.(*fakeBojunOracleRetailStore)
+	store.orders["API-ORDER-131"] = &model.BojunRetailOrder{
+		BaseModel: model.BaseModel{ID: 1310}, DocNo: "API-ORDER-131", StoreCode: "ABCN001A001", Synced: 0,
+	}
+
+	result, err := service.SyncIncremental(t.Context())
+	if err != nil {
+		t.Fatalf("SyncIncremental() error = %v", err)
+	}
+	if pusher.calls != 1 || len(pusher.orders) != 1 || pusher.orders[0].PushAmount != 0 ||
+		pusher.orders[0].OracleRetailID == nil || *pusher.orders[0].OracleRetailID != 131 {
+		t.Fatalf("pushed orders=%+v calls=%d", pusher.orders, pusher.calls)
+	}
+	if len(connection.writeBackIDs) != 1 || connection.writeBackIDs[0] != 131 || store.updates[1310] != 1 || result.WatermarkAfter != 131 {
+		t.Fatalf("write-back=%v updates=%v result=%+v", connection.writeBackIDs, store.updates, result)
+	}
+}
+
+func TestBojunOracleSupplementCASNoopDoesNotAdvanceWatermark(t *testing.T) {
+	statusTime := time.Date(2026, 8, 25, 15, 42, 21, 0, time.Local)
+	connection := &fakeBojunOracleConnection{rows: []reportoracle.BojunRetailRow{{
+		RetailID: 133, DocNo: "API-ORDER-133", StatusTime: statusTime,
+		PaidAmount: 100, PushAmount: 60, IsToShop: "Y",
+	}}}
+	state := &fakeBojunOracleStateStore{
+		state:         model.BojunOracleSyncState{SourceCode: bojunOracleDatasourceCode, LastRetailID: 132, Initialized: true},
+		leaseAcquired: true,
+	}
+	service := newTestBojunOracleOrderService(connection, state)
+	service.batchSize = 2
+	store := service.retailOrderDAO.(*fakeBojunOracleRetailStore)
+	store.supplementNoop = true
+	store.orders["API-ORDER-133"] = &model.BojunRetailOrder{BaseModel: model.BaseModel{ID: 1330}, DocNo: "API-ORDER-133"}
+
+	result, err := service.SyncIncremental(t.Context())
+	if err == nil {
+		t.Fatal("SyncIncremental() unexpectedly succeeded")
+	}
+	if state.advancedTo != 0 || result.WatermarkAfter != 132 || result.FailedCount != 1 {
+		t.Fatalf("watermark advanced after incomplete supplement: state=%+v result=%+v", state, result)
+	}
+}
+
+func TestBojunOraclePreviewDoesNotSupplementExistingAPIOrder(t *testing.T) {
+	statusTime := time.Date(2026, 8, 25, 15, 42, 21, 0, time.Local)
+	connection := &fakeBojunOracleConnection{rows: []reportoracle.BojunRetailRow{{
+		RetailID: 132, DocNo: "API-ORDER-132", StatusTime: statusTime,
+		PaidAmount: 100, PushAmount: 60, IsToShop: "Y",
+	}}}
+	service := newTestBojunOracleOrderService(connection, &fakeBojunOracleStateStore{})
+	service.batchSize = 2
+	pusher := &fakeBojunOraclePusher{result: bojunOrderPushResult{Success: true}}
+	service.pushService = pusher
+	store := service.retailOrderDAO.(*fakeBojunOracleRetailStore)
+	store.orders["API-ORDER-132"] = &model.BojunRetailOrder{BaseModel: model.BaseModel{ID: 1320}, DocNo: "API-ORDER-132"}
+
+	result, err := service.PreviewByModifiedTime(t.Context(), "2026-08-25T10:00", "2026-08-25T11:00")
+	if err != nil {
+		t.Fatalf("PreviewByModifiedTime() error = %v", err)
+	}
+	if store.supplementCalls != 0 || store.orders["API-ORDER-132"].OracleRetailID != nil || result.PreviewCount != 1 ||
+		pusher.calls != 0 || len(connection.writeBackIDs) != 0 {
+		t.Fatalf(
+			"preview mutated existing order: supplements=%d order=%+v pushes=%d write-backs=%v result=%+v",
+			store.supplementCalls,
+			store.orders["API-ORDER-132"],
+			pusher.calls,
+			connection.writeBackIDs,
+			result,
+		)
 	}
 }
 

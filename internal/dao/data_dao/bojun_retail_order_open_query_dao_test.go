@@ -5,8 +5,71 @@ import (
 	"testing"
 	"time"
 
+	"gin-biz-web-api/model"
+
 	"gorm.io/gorm"
 )
+
+func TestBojunRetailOrderDAOSupplementOracleFieldsUsesNarrowCASUpdate(t *testing.T) {
+	t.Parallel()
+	db := dryRunWeatherDAOTestDB(t)
+	var statement string
+	if err := db.Callback().Update().After("gorm:update").Register("test:capture_bojun_oracle_supplement_sql", func(tx *gorm.DB) {
+		statement = tx.Statement.SQL.String()
+	}); err != nil {
+		t.Fatalf("register SQL capture callback: %v", err)
+	}
+	retailID := uint64(45077)
+	updated, err := NewBojunRetailOrderDAO(db).SupplementOracleFieldsIfMissing(
+		t.Context(),
+		77,
+		&model.BojunRetailOrder{
+			OracleRetailID: &retailID,
+			DocNo:          "SALE-45077",
+			OrderPhone:     "18616613488",
+			PaidAmount:     88.8,
+			PushAmount:     80,
+			IsToShop:       "Y",
+			TotalAmtList:   88.8,
+			TotalAmtActual: 88.8,
+			TotalAmtAcc:    88.8,
+			TotalAmtAcc1:   88.8,
+		},
+	)
+	if err != nil {
+		t.Fatalf("SupplementOracleFieldsIfMissing() error=%v", err)
+	}
+	if updated {
+		t.Fatal("dry-run supplement unexpectedly reported rows affected")
+	}
+	for _, fragment := range []string{
+		"UPDATE `bojun_retail_orders`",
+		"`oracle_retail_id`=?",
+		"`order_phone`=?",
+		"`paid_amount`=?",
+		"`push_amount`=?",
+		"`is_to_shop`=?",
+		"`tot_amt_list`=?",
+		"`tot_amt_actual`=?",
+		"`tot_amt_acc`=?",
+		"`tot_amt_acc1`=?",
+		"id = ? AND docno = ? AND oracle_retail_id IS NULL",
+	} {
+		if !strings.Contains(statement, fragment) {
+			t.Fatalf("statement missing %q: %s", fragment, statement)
+		}
+	}
+	for _, forbidden := range []string{
+		"`completed_at`=", "`c_store_code`=", "`items_json`=", "`raw_content_json`=", "`raw_data_id`=", "`synced`=",
+	} {
+		if strings.Contains(statement, forbidden) {
+			t.Fatalf("statement updates %q: %s", forbidden, statement)
+		}
+	}
+	if strings.Contains(statement, "SALE-45077") || strings.Contains(statement, "18616613488") {
+		t.Fatalf("statement interpolates Oracle supplement values: %s", statement)
+	}
+}
 
 func TestBojunRetailOrderDAOUpdateCompletedAtIfEmptyUsesNarrowUpdate(t *testing.T) {
 	t.Parallel()

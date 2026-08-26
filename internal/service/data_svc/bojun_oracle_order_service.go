@@ -58,6 +58,7 @@ type bojunOracleRetailOrderStore interface {
 	ExistsByDocNo(context.Context, string) (bool, error)
 	FindByDocNo(context.Context, string) (*model.BojunRetailOrder, error)
 	CreateIfNotExists(context.Context, *model.BojunRetailOrder) (bool, error)
+	SupplementOracleFieldsIfMissing(context.Context, uint, *model.BojunRetailOrder) (bool, error)
 	UpdateSyncStatus(context.Context, uint, int) error
 }
 
@@ -321,7 +322,18 @@ func (service *BojunOracleOrderService) processRow(
 			result.FailedCount++
 			return fmt.Errorf("load existing bojun Oracle order %s: %w", order.DocNo, findErr)
 		}
-		return service.processExistingRow(ctx, connection, row, existing, result, pushSkipConfig, sample)
+		if !confirmWrite {
+			result.PreviewCount++
+			sample.Status = "exists"
+			if existing.OracleRetailID == nil {
+				sample.Reason = "docno 已存在，将补充 Oracle 字段"
+			} else {
+				sample.Reason = "docno 已存在，不覆盖"
+			}
+			addBojunOrderSample(result, sample)
+			return nil
+		}
+		return service.processExistingRow(ctx, connection, row, order, existing, result, pushSkipConfig, sample)
 	}
 	result.WritableCount++
 	if !confirmWrite {
@@ -369,12 +381,42 @@ func (service *BojunOracleOrderService) processExistingRow(
 	ctx context.Context,
 	connection bojunOracleConnection,
 	row reportoracle.BojunRetailRow,
+	incoming *model.BojunRetailOrder,
 	existing *model.BojunRetailOrder,
 	result *BojunOrderSyncResult,
 	pushSkipConfig OrderPushSkipConfig,
 	sample BojunOrderPreviewItem,
 ) error {
-	if existing == nil || existing.OracleRetailID == nil || *existing.OracleRetailID != row.RetailID {
+	if existing == nil || incoming == nil {
+		result.SkippedCount++
+		return nil
+	}
+	if existing.OracleRetailID == nil {
+		updated, err := service.retailOrderDAO.SupplementOracleFieldsIfMissing(ctx, existing.ID, incoming)
+		if err != nil {
+			result.FailedCount++
+			return fmt.Errorf("supplement existing bojun Oracle order %s: %w", incoming.DocNo, err)
+		}
+		if !updated {
+			reloaded, reloadErr := service.retailOrderDAO.FindByDocNo(ctx, incoming.DocNo)
+			if reloadErr != nil {
+				result.FailedCount++
+				return fmt.Errorf("reload supplemented bojun Oracle order %s: %w", incoming.DocNo, reloadErr)
+			}
+			if reloaded == nil || reloaded.OracleRetailID == nil {
+				result.FailedCount++
+				return fmt.Errorf("supplement existing bojun Oracle order %s: Oracle retail ID remains empty", incoming.DocNo)
+			}
+			existing = reloaded
+		} else {
+			applyBojunOracleSupplement(existing, incoming)
+			result.UpdatedCount++
+			sample.Status = "updated"
+			sample.Reason = "已补充 Oracle 字段"
+			addBojunOrderSample(result, sample)
+		}
+	}
+	if existing.OracleRetailID == nil || *existing.OracleRetailID != row.RetailID {
 		result.SkippedCount++
 		sample.Status = "exists"
 		sample.Reason = "docno 已存在，不覆盖"
@@ -398,6 +440,18 @@ func (service *BojunOracleOrderService) processExistingRow(
 		return nil
 	}
 	return service.pushAndWriteBack(ctx, connection, row, existing, result, pushSkipConfig)
+}
+
+func applyBojunOracleSupplement(existing, incoming *model.BojunRetailOrder) {
+	existing.OracleRetailID = incoming.OracleRetailID
+	existing.OrderPhone = incoming.OrderPhone
+	existing.PaidAmount = incoming.PaidAmount
+	existing.PushAmount = incoming.PushAmount
+	existing.IsToShop = incoming.IsToShop
+	existing.TotalAmtList = incoming.TotalAmtList
+	existing.TotalAmtActual = incoming.TotalAmtActual
+	existing.TotalAmtAcc = incoming.TotalAmtAcc
+	existing.TotalAmtAcc1 = incoming.TotalAmtAcc1
 }
 
 func (service *BojunOracleOrderService) pushAndWriteBack(
