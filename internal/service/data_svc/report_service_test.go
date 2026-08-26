@@ -312,6 +312,29 @@ func TestReportDraftServiceAcceptsJSONInputResultTable(t *testing.T) {
 	}
 }
 
+func TestCanonicalReportInputSchemaPreservesDisplayOrder(t *testing.T) {
+	canonical, err := canonicalReportInputSchema(json.RawMessage(`{
+		"store":{"type":"str","displayName":"门店","displayOrder":1},
+		"date":{"type":"str","displayName":"日期","displayOrder":0}
+	}`))
+	if err != nil {
+		t.Fatalf("canonicalReportInputSchema() error = %v", err)
+	}
+	if !strings.Contains(string(canonical), `"store":{"type":"str","displayName":"门店","displayOrder":1`) ||
+		!strings.Contains(string(canonical), `"date":{"type":"str","displayName":"日期","displayOrder":0`) {
+		t.Fatalf("canonical schema = %s", canonical)
+	}
+	for _, schema := range []string{
+		`{"a":{"type":"str","displayName":"A","displayOrder":0},"b":{"type":"str","displayName":"B"}}`,
+		`{"a":{"type":"str","displayName":"A","displayOrder":0},"b":{"type":"str","displayName":"B","displayOrder":0}}`,
+		`{"a":{"type":"str","displayName":"A","displayOrder":2},"b":{"type":"str","displayName":"B","displayOrder":0}}`,
+	} {
+		if _, err := canonicalReportInputSchema(json.RawMessage(schema)); !errors.Is(err, ErrReportInvalid) {
+			t.Fatalf("canonicalReportInputSchema(%s) error = %v, want ErrReportInvalid", schema, err)
+		}
+	}
+}
+
 func TestReportDraftServiceTreatsFormerResultKeyNamesAsBusinessColumns(t *testing.T) {
 	for _, keyColumn := range []string{"RUN_ID", "ID"} {
 		t.Run(keyColumn, func(t *testing.T) {

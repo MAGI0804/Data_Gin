@@ -66,8 +66,8 @@ func TestReportRunServiceCreatesRefCursorRunFromJSONConditions(t *testing.T) {
 	published := publishedRunFixture()
 	published.Version.ExecutionMode = model.ReportExecutionModeRefCursor
 	published.Version.InputSchemaJSON = model.JSONText(`{
-		"c_store_id":{"type":"list[str]","displayName":"门店","control":"SELECT","required":true,"queryName":"stores"},
-		"datein_begin":{"type":"str","displayName":"开始日期","control":"DATE","format":"YYYYMMDD","default":"20260504"}
+		"c_store_id":{"type":"list[str]","displayName":"门店","displayOrder":1,"control":"SELECT","required":true,"queryName":"stores"},
+		"datein_begin":{"type":"str","displayName":"开始日期","displayOrder":0,"control":"DATE","format":"YYYYMMDD","default":"20260504"}
 	}`)
 	published.Parameters = nil
 	store := &fakeReportRunStore{published: published}
@@ -98,7 +98,7 @@ func TestReportRunServiceCreatesRefCursorRunFromJSONConditions(t *testing.T) {
 		t.Fatalf("decode contract input schema: %v", err)
 	}
 	storeField := fields["c_store_id"]
-	if storeField.Type != "list[str]" || storeField.QueryName != "stores" || storeField.Multiple {
+	if storeField.Type != "list[str]" || storeField.QueryName != "stores" || storeField.DisplayOrder == nil || *storeField.DisplayOrder != 1 || storeField.Multiple {
 		t.Fatalf("contract store field = %#v", storeField)
 	}
 	if strings.Contains(string(contract.InputSchema), `"multiple"`) {

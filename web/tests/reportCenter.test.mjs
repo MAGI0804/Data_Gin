@@ -4,7 +4,7 @@ import test from 'node:test'
 import ts from 'typescript'
 
 import { createReportInputQueryDefinition, createReportRun, deleteReportDraft, getReportAudits, getReportInputOptions, getReportInputQueries, getReportInputQueryDefinitions, getReportProcedureSignature, getReportProcedures, getReportResultTableSchema, getReportResultTables, parsePublication, parseReportAuditPage, parseReportCatalogPage, parseReportDatasource, parseReportDatasources, parseReportDatasourceTest, parseReportDraft, parseReportExport, parseReportExportPage, parseReportInputQueryDefinitions, parseReportInputQueryTestResult, parseReportProcedurePage, parseReportProcedureSignature, parseReportResultPage, parseReportResultTablePage, parseReportResultTableSchema, parseReportRun, parseReportRunContract, parseReportVersionDiff, parseReportVersionPage, saveAndPublishReportDraft, saveReportDraft, testReportDatasourceConnection, testReportInputQueryDefinition } from '../.test-dist/reportCenter/api.js'
-import { applyExcelMapping, buildReportConditions, excelMappingFromColumns, initialReportConditionValues, parseExcelMappingDocument, parseReportInputSchemaDocument, parseReportInputSchemaText, reconcileReportColumnsWithResultSchema, renameExcelMappingField, reportColumnsFromResultSchema } from '../.test-dist/reportCenter/refCursorConfig.js'
+import { applyExcelMapping, buildReportConditions, excelMappingFromColumns, initialReportConditionValues, moveReportInputField, orderedReportInputEntries, parseExcelMappingDocument, parseReportInputSchemaDocument, parseReportInputSchemaText, reconcileReportColumnsWithResultSchema, renameExcelMappingField, reportColumnsFromResultSchema } from '../.test-dist/reportCenter/refCursorConfig.js'
 import { reportParameterControls, reportParameterFlagDisabled, updateReportParameterFlag, updateReportParameterLogicalType } from '../.test-dist/reportCenter/parameterConfig.js'
 import { buildNewReportRunState, canStartNewReportRun, initialReportParameterValues } from '../.test-dist/reportCenter/queryParameters.js'
 import { createLatestRequestGuard } from '../.test-dist/reportCenter/components/ReportVersionDrawer/requestGuard.js'
@@ -526,6 +526,20 @@ test('condition JSON requires a filter display name and normalizes supported typ
   assert.deepEqual(schema.a, { type: 'str', displayName: '门店', control: 'TEXT', required: true, example: '01' })
   assert.throws(() => parseReportInputSchemaDocument({ a: { type: 'VARCHAR2' } }), /筛选显示名/)
   assert.throws(() => parseReportInputSchemaDocument({ a: { type: 'VARCHAR2', displayName: '门店', unknown: true } }), /未知配置/)
+})
+
+test('condition JSON keeps a configurable display order across save and reload', () => {
+	const schema = parseReportInputSchemaDocument({
+		store: { type: 'str', displayName: '门店' },
+		date: { type: 'str', displayName: '日期' },
+		product: { type: 'str', displayName: '商品' },
+	})
+	const moved = moveReportInputField(schema, 'product', -1)
+	assert.deepEqual(orderedReportInputEntries(moved).map(([code]) => code), ['store', 'product', 'date'])
+	assert.deepEqual(Object.values(moved).map((field) => field.displayOrder), [0, 1, 2])
+	const reloaded = parseReportInputSchemaDocument(JSON.parse(JSON.stringify(moved)))
+	assert.deepEqual(orderedReportInputEntries(reloaded).map(([code]) => code), ['store', 'product', 'date'])
+	assert.throws(() => parseReportInputSchemaDocument({ store: { type: 'str', displayName: '门店', displayOrder: 0 }, date: { type: 'str', displayName: '日期' } }), /displayOrder/)
 })
 
 test('condition JSON validates metadata types, date precision and exact numeric literals before save', () => {

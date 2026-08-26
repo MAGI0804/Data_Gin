@@ -160,6 +160,7 @@ export type ReportInputFormat = 'YYYYMMDD' | 'YYYY-MM-DD' | 'YYYYMMDDHHmmss' | '
 export type ReportInputField = {
   type: ReportInputType
   displayName: string
+	displayOrder?: number
   control: ReportInputControl | ''
   required: boolean
   format?: ReportInputFormat

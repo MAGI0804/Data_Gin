@@ -1,13 +1,13 @@
 import { useEffect, useState } from 'react'
-import { Plus, Trash2 } from 'lucide-react'
-import { newReportInputField, parseReportInputSchemaDocument, parseReportInputSchemaText, renameReportInputField, reportDateFormats, reportDateTimeFormats, reportInputControls, reportInputSchemaDocument, reportInputTypes, reportJSONContainsUnsafeNumber } from '../../refCursorConfig'
+import { ArrowDown, ArrowUp, Plus, Trash2 } from 'lucide-react'
+import { appendReportInputField, moveReportInputField, newReportInputField, orderedReportInputEntries, parseReportInputSchemaDocument, parseReportInputSchemaText, removeReportInputField, renameReportInputField, reportDateFormats, reportDateTimeFormats, reportInputControls, reportInputSchemaDocument, reportInputTypes, reportJSONContainsUnsafeNumber } from '../../refCursorConfig'
 import type { ReportInputControl, ReportInputField, ReportInputFormat, ReportInputSchema, ReportInputType } from '../../types'
 import { JSONDocumentEditor } from './JSONDocumentEditor'
 import { getReportInputQueries, type ReportCenterClient } from '../../api'
 import styles from './ReportInputSchemaEditor.module.css'
 
 export function ReportInputSchemaEditor({ client, schema, onChange }: { client: ReportCenterClient; schema: ReportInputSchema; onChange: (schema: ReportInputSchema) => void }) {
-  const entries = Object.entries(schema)
+  const entries = orderedReportInputEntries(schema)
 	const [queries, setQueries] = useState<string[]>([])
 	const [queryState, setQueryState] = useState({ loading: true, error: '' })
 	useEffect(() => {
@@ -27,19 +27,19 @@ export function ReportInputSchemaEditor({ client, schema, onChange }: { client: 
       index += 1
       next = newReportInputField(index)
     }
-    onChange({ ...schema, [next[0]]: next[1] })
+    onChange(appendReportInputField(schema, next[0], next[1]))
   }
   return <div className={styles.editor}>
     <JSONDocumentEditor label="筛选条件 JSON" description="每个键就是传给存储过程 JSON 的一个 conditions 参数；系统仅自动传入 report_id（本次运行 ID）。日期字段可用 format 选择 YYYYMMDD 或 YYYY-MM-DD。" value={reportInputSchemaDocument(schema)} parse={parseReportInputSchemaDocument} parseText={parseReportInputSchemaText} onChange={onChange} />
     <div className={styles.tableHeader}><div><h3>表格编辑</h3><p>表格修改会立即回写上方 JSON；日期只选择到日，日期时间选择到秒，最终传值仍是所选格式的字符串。</p></div><button type="button" onClick={add}><Plus aria-hidden="true" />新增筛选</button></div>
     <div className={styles.rows}>
-      {entries.map(([code, field]) => <InputFieldRow code={code} field={field} queries={queries} queryState={queryState} key={code} onRename={(nextCode) => onChange(renameReportInputField(schema, code, nextCode))} onChange={(nextField) => onChange({ ...schema, [code]: nextField })} onDelete={() => onChange(Object.fromEntries(entries.filter(([itemCode]) => itemCode !== code)))} />)}
+      {entries.map(([code, field], index) => <InputFieldRow code={code} field={field} queries={queries} queryState={queryState} key={code} canMoveUp={index > 0} canMoveDown={index < entries.length - 1} onMove={(offset) => onChange(moveReportInputField(schema, code, offset))} onRename={(nextCode) => onChange(renameReportInputField(schema, code, nextCode))} onChange={(nextField) => onChange({ ...schema, [code]: nextField })} onDelete={() => onChange(removeReportInputField(schema, code))} />)}
       {entries.length === 0 ? <p className={styles.empty}>至少新增一个筛选条件，或在上方粘贴 JSON 后点击“应用 JSON”。</p> : null}
     </div>
   </div>
 }
 
-function InputFieldRow({ code, field, queries, queryState, onRename, onChange, onDelete }: { code: string; field: ReportInputField; queries: string[]; queryState: { loading: boolean; error: string }; onRename: (code: string) => void; onChange: (field: ReportInputField) => void; onDelete: () => void }) {
+function InputFieldRow({ code, field, queries, queryState, canMoveUp, canMoveDown, onMove, onRename, onChange, onDelete }: { code: string; field: ReportInputField; queries: string[]; queryState: { loading: boolean; error: string }; canMoveUp: boolean; canMoveDown: boolean; onMove: (offset: -1 | 1) => void; onRename: (code: string) => void; onChange: (field: ReportInputField) => void; onDelete: () => void }) {
 	const queryCompatible = ['str', 'number', 'list[str]', 'list[number]'].includes(field.type)
   return <div className={styles.row}>
     <EditorField label="条件字段"><input className={styles.mono} value={code} onChange={(event) => onRename(event.currentTarget.value)} /></EditorField>
@@ -52,7 +52,7 @@ function InputFieldRow({ code, field, queries, queryState, onRename, onChange, o
     <JSONValueInput label="默认值" value={field.default} exists={Object.hasOwnProperty.call(field, 'default')} numeric={field.type === 'number' || field.type === 'list[number]'} onChange={(value, exists) => onChange(withOptional(field, 'default', value, exists))} />
 		{field.queryName ? null : <JSONValueInput label="允许值" value={field.allowedValues} exists={Boolean(field.allowedValues)} array numeric={field.type === 'number' || field.type === 'list[number]'} onChange={(value, exists) => onChange(withOptional(field, 'allowedValues', value as unknown[], exists))} />}
     <div className={styles.flags}><label><input type="checkbox" checked={field.required} onChange={(event) => onChange({ ...field, required: event.currentTarget.checked })} />必填</label></div>
-    <button className={styles.delete} type="button" aria-label={`删除筛选条件 ${field.displayName || code}`} onClick={onDelete}><Trash2 aria-hidden="true" /></button>
+		<div className={styles.actions}><button type="button" disabled={!canMoveUp} aria-label={`上移筛选条件 ${field.displayName || code}`} onClick={() => onMove(-1)}><ArrowUp aria-hidden="true" /></button><button type="button" disabled={!canMoveDown} aria-label={`下移筛选条件 ${field.displayName || code}`} onClick={() => onMove(1)}><ArrowDown aria-hidden="true" /></button><button className={styles.delete} type="button" aria-label={`删除筛选条件 ${field.displayName || code}`} onClick={onDelete}><Trash2 aria-hidden="true" /></button></div>
   </div>
 }
 

@@ -175,6 +175,7 @@ func (service *ReportRunService) Create(ctx context.Context, actor, definitionID
 type reportRunInputFieldSchema struct {
 	Type          string            `json:"type"`
 	DisplayName   string            `json:"displayName"`
+	DisplayOrder  *int              `json:"displayOrder,omitempty"`
 	Control       string            `json:"control,omitempty"`
 	Format        string            `json:"format,omitempty"`
 	Required      bool              `json:"required,omitempty"`

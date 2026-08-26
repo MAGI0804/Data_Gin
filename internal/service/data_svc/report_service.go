@@ -737,6 +737,7 @@ func cloneJSON(raw []byte) json.RawMessage {
 type reportInputFieldSchema struct {
 	Type          string          `json:"type"`
 	DisplayName   string          `json:"displayName"`
+	DisplayOrder  *int            `json:"displayOrder,omitempty"`
 	Control       string          `json:"control,omitempty"`
 	Format        string          `json:"format,omitempty"`
 	Required      bool            `json:"required,omitempty"`
@@ -760,6 +761,7 @@ func canonicalReportInputSchema(raw json.RawMessage) (json.RawMessage, error) {
 		return nil, invalidReport("input schema contains trailing JSON")
 	}
 	canonical := make(map[string]reportInputFieldSchema, len(fields))
+	displayOrders := make(map[int]string, len(fields))
 	for code, encoded := range fields {
 		if !reportLogicalCodePattern.MatchString(code) {
 			return nil, invalidReport("input schema contains an invalid condition code")
@@ -781,6 +783,16 @@ func canonicalReportInputSchema(raw json.RawMessage) (json.RawMessage, error) {
 		field.Multiple = false
 		if field.Type == "" || field.DisplayName == "" || utf8.RuneCountInString(field.DisplayName) > 128 {
 			return nil, invalidReport("input schema field type or displayName is invalid")
+		}
+		if field.DisplayOrder != nil {
+			order := *field.DisplayOrder
+			if order < 0 || order >= len(fields) {
+				return nil, invalidReport("input schema field displayOrder is invalid")
+			}
+			if _, exists := displayOrders[order]; exists {
+				return nil, invalidReport("input schema field displayOrder is duplicated")
+			}
+			displayOrders[order] = code
 		}
 		if field.Control != "" {
 			if _, ok := reportControlTypes[field.Control]; !ok {
@@ -806,6 +818,9 @@ func canonicalReportInputSchema(raw json.RawMessage) (json.RawMessage, error) {
 			return nil, err
 		}
 		canonical[code] = field
+	}
+	if len(displayOrders) != 0 && len(displayOrders) != len(fields) {
+		return nil, invalidReport("input schema field displayOrder must be configured for every field")
 	}
 	encoded, err := json.Marshal(canonical)
 	if err != nil {
