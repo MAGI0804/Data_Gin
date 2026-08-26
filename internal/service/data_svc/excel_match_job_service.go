@@ -1388,6 +1388,9 @@ func processExcelImportUpdateFileWithProgress(
 			if config.Operation != excelOperationClearMatched {
 				value = strings.TrimSpace(normalized[writeColumnIndexes[mapping.DBWriteField]])
 			}
+			if mapping.DBWriteField == "order_phone" && value == "" {
+				continue
+			}
 			value, err = normalizeExcelImportWriteValue(mapping.DBWriteField, value)
 			if err != nil {
 				return stats, fmt.Errorf("Excel 第 %d 行字段 %s 写入值无效: %w", rowNumber, mapping.DBWriteField, err)

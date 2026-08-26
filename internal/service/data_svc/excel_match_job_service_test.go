@@ -1929,6 +1929,7 @@ func TestProcessExcelImportUpdateFileWritesMultipleEligibleColumnsOnce(t *testin
 	rows := [][]interface{}{
 		{"订单号", "订单手机号", "实付金额", "推送金额", "是否到店", "Oracle零售ID"},
 		{"B001", "18616613488", "470.83", "80", "y", "45077"},
+		{"B002", "", "88.50", "10", "n", "45078"},
 	}
 	for i, row := range rows {
 		cell, _ := excelize.CoordinatesToCellName(1, i+1)
@@ -1957,20 +1958,20 @@ func TestProcessExcelImportUpdateFileWritesMultipleEligibleColumnsOnce(t *testin
 	if err != nil {
 		t.Fatal(err)
 	}
-	updater := &fakeExcelImportUpdater{existing: map[string]struct{}{"B001": {}}}
+	updater := &fakeExcelImportUpdater{existing: map[string]struct{}{"B001": {}, "B002": {}}}
 	stats, err := processExcelImportUpdateFileWithProgress(t.Context(), inputPath, cfg, updater, nil)
 	if err != nil {
 		t.Fatalf("processExcelImportUpdateFileWithProgress() error=%v", err)
 	}
-	if stats.MatchedRows != 1 || stats.UnmatchedRows != 0 || updater.batchWrites != 1 {
+	if stats.MatchedRows != 2 || stats.UnmatchedRows != 0 || updater.batchWrites != 1 {
 		t.Fatalf("stats=%+v batchWrites=%d", stats, updater.batchWrites)
 	}
 	want := map[string]map[string]string{
 		"order_phone":      {"B001": "18616613488"},
-		"paid_amount":      {"B001": "470.83"},
-		"push_amount":      {"B001": "80"},
-		"is_to_shop":       {"B001": "Y"},
-		"oracle_retail_id": {"B001": "45077"},
+		"paid_amount":      {"B001": "470.83", "B002": "88.50"},
+		"push_amount":      {"B001": "80", "B002": "10"},
+		"is_to_shop":       {"B001": "Y", "B002": "N"},
+		"oracle_retail_id": {"B001": "45077", "B002": "45078"},
 	}
 	if !reflect.DeepEqual(updater.updatedByField, want) {
 		t.Fatalf("updatedByField=%#v want=%#v", updater.updatedByField, want)
