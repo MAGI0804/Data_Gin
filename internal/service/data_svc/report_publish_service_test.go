@@ -119,9 +119,12 @@ func TestReportPublishServicePublishesJSONInputResultTableContract(t *testing.T)
 	draft.Version.ExecutionMode = model.ReportExecutionModeTableSnapshot
 	draft.Version.JSONInputArgName = "P_PAYLOAD"
 	draft.Version.InputSchemaJSON = model.JSONText(`{"store_id":{"type":"str","displayName":"门店"}}`)
-	draft.Version.CallTemplate = "BEGIN REPORT.PKG_SALES.BUILD_REPORT(P_PAYLOAD => :payload); END;"
+	draft.Version.CallTemplate = "DECLARE error_output_2 VARCHAR2(32767); BEGIN REPORT.PKG_SALES.BUILD_REPORT(P_PAYLOAD => :payload, R_ERROR => error_output_2); IF error_output_2 IS NOT NULL THEN RAISE_APPLICATION_ERROR(-20001, SUBSTR(error_output_2, 1, 500)); END IF; END;"
 	draft.Parameters = nil
-	procedure := []reportoracle.ProcedureArgument{{Name: "P_PAYLOAD", Position: 1, Sequence: 1, Direction: "IN", DataType: "CLOB"}}
+	procedure := []reportoracle.ProcedureArgument{
+		{Name: "P_PAYLOAD", Position: 1, Sequence: 1, Direction: "IN", DataType: "CLOB"},
+		{Name: "R_ERROR", Position: 2, Sequence: 2, Direction: "OUT", DataType: "VARCHAR2"},
+	}
 	store := &fakePublicationStore{draft: draft, datasource: publicationDatasource()}
 	inspector := &fakeReportOracleInspector{procedure: procedure, columns: []reportoracle.ResultColumn{{Name: "ORDER_NO", Position: 1, DataType: "VARCHAR2", DataLength: 128}}}
 	service := NewReportPublishService(store, &fakePublicationDecryptor{password: "password"}, func(context.Context, reportoracle.Config) (reportOracleInspector, error) {
@@ -132,9 +135,12 @@ func TestReportPublishServicePublishesJSONInputResultTableContract(t *testing.T)
 	if err != nil {
 		t.Fatalf("Publish() error = %v", err)
 	}
-	if result.Validation == nil || result.Validation.Procedure.ArgumentCount != 1 || result.Validation.Result.ColumnCount != 1 ||
+	if result.Validation == nil || result.Validation.Procedure.ArgumentCount != 2 || result.Validation.Result.ColumnCount != 1 ||
 		!strings.Contains(string(store.publication.CompiledSpecJSON), `"jsonInputArgName":"P_PAYLOAD"`) {
 		t.Fatalf("result=%#v publication=%#v", result, store.publication)
+	}
+	if !strings.Contains(store.publication.CallTemplate, "<> '执行成功'") || draft.Version.CallTemplate != store.publication.CallTemplate {
+		t.Fatalf("canonical call template was not refreshed: draft=%q publication=%q", draft.Version.CallTemplate, store.publication.CallTemplate)
 	}
 }
 

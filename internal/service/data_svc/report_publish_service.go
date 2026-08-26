@@ -138,7 +138,7 @@ func (service *ReportPublishService) Publish(ctx context.Context, actor, definit
 	}
 	validatedAt := service.now().UTC()
 	published, err := service.store.PublishDraft(ctx, actor, definitionID, expectedLockVersion, reportrepo.Publication{
-		CompiledSpecJSON: model.JSONText(inspection.compiled.SpecJSON), ContractHash: inspection.compiled.Hashes.Contract,
+		CallTemplate: draft.Version.CallTemplate, CompiledSpecJSON: model.JSONText(inspection.compiled.SpecJSON), ContractHash: inspection.compiled.Hashes.Contract,
 		ParameterSchemaHash: inspection.compiled.Hashes.ParameterSchema, ProcedureSignatureHash: inspection.compiled.Hashes.ProcedureSignature,
 		ResultSchemaHash: inspection.compiled.Hashes.ResultSchema, PermissionHash: inspection.compiled.Hashes.Permission,
 		ExportSchemaHash: inspection.compiled.Hashes.ExportSchema, SchemaProbeToken: uuid.NewString(), SchemaValidatedAt: validatedAt,
@@ -203,6 +203,13 @@ func (service *ReportPublishService) inspectContract(
 	procedure, err := inspector.InspectProcedure(inspectionCtx, procedureRef)
 	if err != nil {
 		return inspection, classifyOracleInspectionError("procedure", err)
+	}
+	if isJSONTableSnapshot(draft.Version) {
+		plan, planErr := reportoracle.BuildJSONTableCallPlan(procedureRef, procedure, draft.Version.JSONInputArgName)
+		if planErr != nil {
+			return inspection, fmt.Errorf("%w: compile JSON result-table call: %v", ErrReportPublicationInvalid, planErr)
+		}
+		draft.Version.CallTemplate = plan.Statement()
 	}
 	if draft.Version.ExecutionMode == model.ReportExecutionModeRefCursor {
 		if err := inspector.ValidateJSONSnapshotStore(inspectionCtx); err != nil {

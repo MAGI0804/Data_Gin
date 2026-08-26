@@ -306,6 +306,7 @@ func TestFinalizeReportMutationPropagatesAuditFailure(t *testing.T) {
 
 func TestValidPublicationRequiresCompleteImmutableContract(t *testing.T) {
 	publication := Publication{
+		CallTemplate:     "BEGIN REPORT.PKG.RUN; END;",
 		CompiledSpecJSON: model.JSONText(`{"version":{}}`),
 		ContractHash:     strings.Repeat("a", 64), ParameterSchemaHash: strings.Repeat("b", 64),
 		ProcedureSignatureHash: strings.Repeat("c", 64), ResultSchemaHash: strings.Repeat("d", 64),
@@ -412,7 +413,7 @@ func TestPublishDraftFreezesContractAndCreatesCleanNextDraft(t *testing.T) {
 		t.Fatalf("PublishDraft() error = %v", err)
 	}
 	for key, want := range map[string]interface{}{
-		"compiled_spec_json": publication.CompiledSpecJSON, "contract_hash": publication.ContractHash,
+		"call_template": publication.CallTemplate, "compiled_spec_json": publication.CompiledSpecJSON, "contract_hash": publication.ContractHash,
 		"parameter_schema_hash": publication.ParameterSchemaHash, "procedure_signature_hash": publication.ProcedureSignatureHash,
 		"result_schema_hash": publication.ResultSchemaHash, "permission_hash": publication.PermissionHash,
 		"export_schema_hash": publication.ExportSchemaHash, "schema_probe_token": publication.SchemaProbeToken,
@@ -421,7 +422,7 @@ func TestPublishDraftFreezesContractAndCreatesCleanNextDraft(t *testing.T) {
 			t.Fatalf("published update %s = %#v, want %#v", key, got, want)
 		}
 	}
-	if next.ID != 0 || next.DefinitionID != 7 || next.DatasourceID != 3 || next.VersionNumber != 5 || next.Status != model.ReportVersionStatusDraft ||
+	if next.ID != 0 || next.DefinitionID != 7 || next.DatasourceID != 3 || next.VersionNumber != 5 || next.Status != model.ReportVersionStatusDraft || next.CallTemplate != publication.CallTemplate ||
 		next.CompiledSpecJSON != "" || next.ContractHash != "" || next.ParameterSchemaHash != "" || next.ProcedureSignatureHash != "" ||
 		next.ResultSchemaHash != "" || next.PermissionHash != "" || next.ExportSchemaHash != "" || next.SchemaProbeToken != "" ||
 		next.PublishedBy != 0 || next.PublishedAt != nil || next.SchemaValidatedAt != nil || next.CreatedBy != 8 {
@@ -569,6 +570,7 @@ func publicationTestRepository(t *testing.T) (*Repository, *transactionDriverSta
 
 func validPublicationFixture() Publication {
 	return Publication{
+		CallTemplate:     "BEGIN REPORT.PKG.RUN; END;",
 		CompiledSpecJSON: model.JSONText(`{"version":{}}`), ContractHash: strings.Repeat("a", 64),
 		ParameterSchemaHash: strings.Repeat("b", 64), ProcedureSignatureHash: strings.Repeat("c", 64),
 		ResultSchemaHash: strings.Repeat("d", 64), PermissionHash: strings.Repeat("e", 64), ExportSchemaHash: strings.Repeat("f", 64),

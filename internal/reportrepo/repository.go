@@ -64,6 +64,7 @@ type DraftPage struct {
 }
 
 type Publication struct {
+	CallTemplate                  string
 	CompiledSpecJSON              model.JSONText
 	ContractHash                  string
 	ParameterSchemaHash           string
@@ -340,6 +341,7 @@ func (repository *Repository) PublishDraft(ctx context.Context, ownerUserID, def
 		if current.VersionNumber != expectedLockVersion {
 			return ErrDraftVersionConflict
 		}
+		current.CallTemplate = publication.CallTemplate
 		published = Draft{Definition: definition.ReportDefinition, Version: current.ReportVersion, LockVersion: current.VersionNumber}
 		if err := repository.loadCollections(ctx, tx, ownerUserID, definitionID, current.ID, &published); err != nil {
 			return err
@@ -358,7 +360,7 @@ func (repository *Repository) PublishDraft(ctx context.Context, ownerUserID, def
 		}
 		publishedAt = time.Now().UTC()
 		publishedUpdates := map[string]interface{}{
-			"status": model.ReportVersionStatusPublished, "compiled_spec_json": publication.CompiledSpecJSON,
+			"status": model.ReportVersionStatusPublished, "call_template": publication.CallTemplate, "compiled_spec_json": publication.CompiledSpecJSON,
 			"contract_hash": publication.ContractHash, "parameter_schema_hash": publication.ParameterSchemaHash,
 			"procedure_signature_hash": publication.ProcedureSignatureHash, "result_schema_hash": publication.ResultSchemaHash,
 			"permission_hash": publication.PermissionHash, "export_schema_hash": publication.ExportSchemaHash,
@@ -395,6 +397,7 @@ func (repository *Repository) PublishDraft(ctx context.Context, ownerUserID, def
 		return nil, err
 	}
 	published.Version.Status = model.ReportVersionStatusPublished
+	published.Version.CallTemplate = publication.CallTemplate
 	published.Version.CompiledSpecJSON = publication.CompiledSpecJSON
 	published.Version.ContractHash = publication.ContractHash
 	published.Version.ParameterSchemaHash = publication.ParameterSchemaHash
@@ -458,7 +461,7 @@ func switchPublishedDefinition(ctx context.Context, tx *gorm.DB, ownerUserID, de
 }
 
 func validPublication(value Publication) bool {
-	return json.Valid([]byte(value.CompiledSpecJSON)) && len(value.ContractHash) == 64 && len(value.ParameterSchemaHash) == 64 &&
+	return strings.TrimSpace(value.CallTemplate) != "" && json.Valid([]byte(value.CompiledSpecJSON)) && len(value.ContractHash) == 64 && len(value.ParameterSchemaHash) == 64 &&
 		len(value.ProcedureSignatureHash) == 64 && len(value.ResultSchemaHash) == 64 && len(value.PermissionHash) == 64 &&
 		len(value.ExportSchemaHash) == 64 && len(value.SchemaProbeToken) == 36 && !value.SchemaValidatedAt.IsZero() &&
 		len(value.ConnectionFingerprint) == 64 && value.ConnectionIdentitySource == reportidentity.BindingIdentitySourceOracle &&
