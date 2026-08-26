@@ -2,6 +2,8 @@ import assert from 'node:assert/strict'
 import test from 'node:test'
 
 import {
+  bojunImportWriteConfirmation,
+  bojunImportWriteFieldOptions,
   buildExcelExportConfig,
   cloneExcelEmptyCellFills,
   excelMatchSchemePath,
@@ -10,6 +12,16 @@ import {
   migrateExcelMatchSteps,
   selectExcelMatchStepModel,
 } from '../.test-dist/excelMatchConfig.js'
+
+test('Bojun Excel import exposes Oracle backfill fields with safe confirmation copy', () => {
+  assert.deepEqual(
+    bojunImportWriteFieldOptions.slice(2).map((option) => option.value),
+    ['oracle_retail_id', 'order_phone', 'paid_amount', 'push_amount', 'is_to_shop'],
+  )
+  assert.match(bojunImportWriteConfirmation('oracle_retail_id'), /正整数/)
+  assert.match(bojunImportWriteConfirmation('paid_amount'), /当前为 0/)
+  assert.match(bojunImportWriteConfirmation('is_to_shop'), /Y 或 N/)
+})
 
 test('excelMatchSchemePath only builds a positive scheme resource path', () => {
   assert.equal(excelMatchSchemePath(42), '/v1/excel-match-jobs/schemes/42')
