@@ -154,8 +154,34 @@ export function applyExcelMapping(columns: ReportColumn[], mapping: Record<strin
   })
 }
 
+export function replaceExcelMappingFieldWithResultSchema(columns: ReportColumn[], currentField: string, nextField: string, resultColumns: ReportResultTableColumn[]): ReportColumn[] {
+  const currentKey = currentField.toUpperCase()
+  const nextKey = nextField.toUpperCase()
+  const schema = resultColumns.find((column) => column.name.toUpperCase() === nextKey)
+  if (!schema) throw new Error(`Oracle 结果字段 ${nextField} 不在当前结果表中。`)
+  if (columns.some((column) => column.databaseColumn.toUpperCase() !== currentKey && column.databaseColumn.toUpperCase() === nextKey)) {
+    throw new Error(`Oracle 结果字段 ${schema.name} 重复。`)
+  }
+  return columns.map((column) => column.databaseColumn.toUpperCase() === currentKey ? refreshReportColumn(column, schema) : column)
+}
+
+export function renameExcelMappingField(columns: ReportColumn[], currentField: string, nextField: string): ReportColumn[] {
+  return columns.map((column) => column.databaseColumn === currentField ? { ...column, databaseColumn: nextField } : column)
+}
+
 export function reportColumnsFromResultSchema(columns: ReportResultTableColumn[], createFieldId: () => string = () => crypto.randomUUID()): ReportColumn[] {
   return reconcileReportColumnsWithResultSchema(columns, [], createFieldId)
+}
+
+export function appendReportColumnFromResultSchema(existingColumns: ReportColumn[], schema: ReportResultTableColumn, createFieldId: () => string = () => crypto.randomUUID()): ReportColumn[] {
+  const column = reportColumnsFromResultSchema([schema], createFieldId)[0]
+  const usedLogicalCodes = new Set(existingColumns.map((item) => item.logicalCode.toUpperCase()))
+  return [...existingColumns, {
+    ...column,
+    logicalCode: uniqueLogicalCode(column.logicalCode, usedLogicalCodes),
+    displayOrder: existingColumns.reduce((maximum, item) => Math.max(maximum, item.displayOrder), -1) + 1,
+    exportOrder: existingColumns.reduce((maximum, item) => Math.max(maximum, item.exportOrder), -1) + 1,
+  }]
 }
 
 export function reconcileReportColumnsWithResultSchema(columns: ReportResultTableColumn[], existingColumns: ReportColumn[], createFieldId: () => string = () => crypto.randomUUID()): ReportColumn[] {
@@ -163,43 +189,40 @@ export function reconcileReportColumnsWithResultSchema(columns: ReportResultTabl
   const mapping = Object.fromEntries(columns.map((column) => [column.name, existingByName.get(column.name.toUpperCase())?.excelHeader || column.name]))
   const initial = applyExcelMapping(existingColumns, mapping, createFieldId)
   const schemaByName = new Map(columns.map((column) => [column.name.toUpperCase(), column]))
-  return initial.map((column) => {
-    const schema = schemaByName.get(column.databaseColumn.toUpperCase())
-    if (!schema) return column
-    const valueType = reportValueTypeCompatible(column.valueType, schema.oracleType, schema.scale)
-      ? column.valueType
-      : reportValueTypeFromOracle(schema.oracleType, schema.scale)
-    return {
-      ...column,
-      sourceOracleType: schema.oracleType,
-      precision: schema.precision,
-      scale: schema.scale,
-      nullable: schema.nullable,
-      valueType,
-    }
-  })
+  return initial.map((column) => refreshReportColumn(column, schemaByName.get(column.databaseColumn.toUpperCase())!))
 }
 
 export function refreshReportColumnMetadata(columns: ReportResultTableColumn[], existingColumns: ReportColumn[]): ReportColumn[] {
   const schemaByName = new Map(columns.map((column) => [column.name.toUpperCase(), column]))
-  return existingColumns.filter((column) => schemaByName.has(column.databaseColumn.toUpperCase())).map((column) => {
-    const schema = schemaByName.get(column.databaseColumn.toUpperCase())!
-    const valueType = reportValueTypeCompatible(column.valueType, schema.oracleType, schema.scale)
-      ? column.valueType
-      : reportValueTypeFromOracle(schema.oracleType, schema.scale)
-    return {
-      ...column,
-      sourceOracleType: schema.oracleType,
-      precision: schema.precision,
-      scale: schema.scale,
-      nullable: schema.nullable,
-      valueType,
-    }
+  return existingColumns.filter((column) => schemaByName.has(column.databaseColumn.toUpperCase())).map((column) => refreshReportColumn(column, schemaByName.get(column.databaseColumn.toUpperCase())!))
+}
+
+export function refreshReportColumnMetadataPreservingUnknown(columns: ReportResultTableColumn[], existingColumns: ReportColumn[]): ReportColumn[] {
+  const schemaByName = new Map(columns.map((column) => [column.name.toUpperCase(), column]))
+  return existingColumns.map((column) => {
+    const schema = schemaByName.get(column.databaseColumn.toUpperCase())
+    return schema ? refreshReportColumn(column, schema) : column
   })
 }
 
-export function renameExcelMappingField(columns: ReportColumn[], currentField: string, nextField: string): ReportColumn[] {
-  return columns.map((column) => column.databaseColumn === currentField ? { ...column, databaseColumn: nextField } : column)
+export function countReportColumnsMissingFromResultSchema(columns: ReportColumn[], resultColumns: ReportResultTableColumn[]) {
+  const validFields = new Set(resultColumns.map((column) => column.name.toUpperCase()))
+  return columns.filter((column) => !validFields.has(column.databaseColumn.toUpperCase())).length
+}
+
+function refreshReportColumn(column: ReportColumn, schema: ReportResultTableColumn): ReportColumn {
+  const valueType = reportValueTypeCompatible(column.valueType, schema.oracleType, schema.scale)
+    ? column.valueType
+    : reportValueTypeFromOracle(schema.oracleType, schema.scale)
+  return {
+    ...column,
+    databaseColumn: schema.name,
+    sourceOracleType: schema.oracleType,
+    precision: schema.precision,
+    scale: schema.scale,
+    nullable: schema.nullable,
+    valueType,
+  }
 }
 
 export function newReportInputField(index: number): [string, ReportInputField] {

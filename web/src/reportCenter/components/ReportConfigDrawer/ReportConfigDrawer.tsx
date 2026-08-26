@@ -1,10 +1,10 @@
 import { useEffect, useRef, useState, type Dispatch, type SetStateAction } from 'react'
 import { Plus, Trash2 } from 'lucide-react'
 import { Button, Dialog, Drawer } from '../../../ui'
-import { getReportDraft, publishReportDraft, saveAndPublishReportDraft, saveReportDraft, type ReportCenterClient } from '../../api'
-import { newReportInputField, parseExcelMappingDocument, parseReportInputSchemaDocument, excelMappingFromColumns } from '../../refCursorConfig'
-import type { ReportDatasource, ReportDraft, ReportGrant, ReportPublication, ReportSummary } from '../../types'
-import { ReportExcelMappingEditor } from './ReportExcelMappingEditor'
+import { getReportDraft, getReportResultTableSchema, publishReportDraft, saveAndPublishReportDraft, saveReportDraft, type ReportCenterClient } from '../../api'
+import { countReportColumnsMissingFromResultSchema, newReportInputField, parseExcelMappingDocument, parseReportInputSchemaDocument, excelMappingFromColumns, refreshReportColumnMetadataPreservingUnknown } from '../../refCursorConfig'
+import type { ReportDatasource, ReportDraft, ReportGrant, ReportPublication, ReportResultTableColumn, ReportSummary } from '../../types'
+import { ReportExcelMappingEditor, type ExcelMappingSchemaState } from './ReportExcelMappingEditor'
 import { ReportInputSchemaEditor } from './ReportInputSchemaEditor'
 import { ReportProcedureEditor } from './ReportProcedureEditor'
 import styles from './ReportConfigDrawer.module.css'
@@ -20,6 +20,9 @@ export function ReportConfigDrawer({ client, report, datasources, datasourcesLoa
   const [savedFingerprint, setSavedFingerprint] = useState('')
   const [state, setState] = useState({ loading: Boolean(report), saving: false, error: '', notice: '' })
   const [closeConfirmationOpen, setCloseConfirmationOpen] = useState(false)
+  const [excelSchemaState, setExcelSchemaState] = useState<ExcelMappingSchemaState>({ status: 'idle', error: '' })
+  const [excelSchema, setExcelSchema] = useState<ReportResultTableColumn[] | null>(null)
+  const [excelSchemaReload, setExcelSchemaReload] = useState(0)
 
   useEffect(() => {
     if (!report) return
@@ -36,8 +39,37 @@ export function ReportConfigDrawer({ client, report, datasources, datasourcesLoa
     return () => controller.abort()
   }, [client, report])
 
+  useEffect(() => {
+    if (!draft.datasourceId || !draft.result.tableOwner || !draft.result.tableName) {
+      setExcelSchema(null)
+      setExcelSchemaState({ status: 'idle', error: '' })
+      return
+    }
+    const datasourceId = draft.datasourceId
+    const tableOwner = draft.result.tableOwner
+    const tableName = draft.result.tableName
+    const controller = new AbortController()
+    setExcelSchema(null)
+    setExcelSchemaState({ status: 'loading', error: '' })
+    void getReportResultTableSchema(client, datasourceId, { owner: tableOwner, name: tableName }, controller.signal).then((response) => {
+      if (controller.signal.aborted) return
+      if (!response.ok) {
+        setExcelSchemaState({ status: 'error', error: response.error })
+        return
+      }
+      setExcelSchema(response.data.columns)
+      setExcelSchemaState({ status: 'ready', error: '' })
+      setDraft((current) => {
+        if (current.datasourceId !== datasourceId || current.result.tableOwner !== tableOwner || current.result.tableName !== tableName) return current
+        const columns = refreshReportColumnMetadataPreservingUnknown(response.data.columns, current.columns)
+        return JSON.stringify(columns) === JSON.stringify(current.columns) ? current : { ...current, columns }
+      })
+    })
+    return () => controller.abort()
+  }, [client, draft.datasourceId, draft.result.tableName, draft.result.tableOwner, excelSchemaReload])
+
   function validationError() {
-    if (bodyRef.current?.querySelector('[aria-invalid="true"]')) return '请先修正标红的 JSON 配置。'
+    if (bodyRef.current?.querySelector('[aria-invalid="true"]')) return '请先修正标红的配置项。'
     if (!draft.name.trim() || draft.name.trim().length > 128 || !/^[A-Za-z][A-Za-z0-9_-]{2,63}$/.test(draft.code.trim()) || !draft.datasourceId) return '请完整填写报表名称、合法编码和 Oracle 数据源。'
     if (draft.category.trim().length > 64 || draft.description.trim().length > 500) return '分类最多 64 字，说明最多 500 字。'
     if (datasources.find((item) => item.id === draft.datasourceId)?.enabled === false) return '当前 Oracle 数据源已停用，请先启用或更换数据源。'
@@ -46,6 +78,9 @@ export function ReportConfigDrawer({ client, report, datasources, datasourcesLoa
     if (!draft.result.tableOwner || !draft.result.tableName) return '请绑定 Oracle 结果表。'
     if (![draft.procedure.owner, draft.procedure.name, draft.procedure.jsonInputArgName, draft.result.tableOwner, draft.result.tableName].every((value) => oracleIdentifierPattern.test(value))) return 'Oracle 对象或字段名不合法，请从 Oracle 搜索结果中重新选择。'
     if (draft.procedure.package && !oracleIdentifierPattern.test(draft.procedure.package)) return 'Oracle 包名不合法，请重新选择存储过程。'
+    if (excelSchemaState.status === 'idle' || excelSchemaState.status === 'loading') return '正在读取 Oracle 结果表字段，请稍后再保存或发布。'
+    if (excelSchemaState.status === 'error') return excelSchemaState.error || 'Oracle 结果表字段读取失败，请重试。'
+    if (excelSchema && countReportColumnsMissingFromResultSchema(draft.columns, excelSchema) > 0) return 'Excel 映射中有字段不属于当前 Oracle 结果表，请重新选择或删除。'
     try { parseReportInputSchemaDocument(draft.inputSchema) } catch (error) { return error instanceof Error ? error.message : '筛选条件配置不完整。' }
     try {
       const mapping = parseExcelMappingDocument(excelMappingFromColumns(draft.columns))
@@ -103,7 +138,7 @@ export function ReportConfigDrawer({ client, report, datasources, datasourcesLoa
     <Drawer open title={report ? '编辑报表配置' : '创建报表配置'} description="配置保存于 MySQL；Oracle 过程仅接收一份 JSON，系统整表读取运行结果并在导出成功后清理。" size="wide" closeDisabled={state.saving} onClose={requestClose} footer={footer}>
       <div className={styles.tabs} role="tablist" aria-label="报表配置步骤" onKeyDown={(event) => { const current = tabs.findIndex((item) => item.key === tab); const delta = event.key === 'ArrowRight' ? 1 : event.key === 'ArrowLeft' ? -1 : 0; if (!delta) return; event.preventDefault(); const next = tabs[(current + delta + tabs.length) % tabs.length]; setTab(next.key); document.getElementById(`report-config-tab-${next.key}`)?.focus() }}>{tabs.map((item, index) => <button id={`report-config-tab-${item.key}`} type="button" role="tab" aria-selected={tab === item.key} aria-controls="report-config-panel" tabIndex={tab === item.key ? 0 : -1} className={tab === item.key ? styles.active : ''} onClick={() => setTab(item.key)} key={item.key}><span aria-hidden="true">{String(index + 1).padStart(2, '0')}</span>{item.label}</button>)}</div>
       <div id="report-config-panel" role="tabpanel" aria-labelledby={`report-config-tab-${tab}`} tabIndex={0} ref={bodyRef} className={styles.body}>
-        {state.loading ? <p>正在读取草稿…</p> : <fieldset className={styles.editorFieldset} disabled={state.saving} aria-busy={state.saving || undefined}><Editor tab={tab} client={client} draft={draft} datasources={datasources} datasourcesLoading={datasourcesLoading} datasourcesError={datasourcesError} onChange={setDraft} /></fieldset>}
+        {state.loading ? <p>正在读取草稿…</p> : <fieldset className={styles.editorFieldset} disabled={state.saving} aria-busy={state.saving || undefined}><Editor tab={tab} client={client} draft={draft} datasources={datasources} datasourcesLoading={datasourcesLoading} datasourcesError={datasourcesError} onChange={setDraft} excelSchema={excelSchema} excelSchemaState={excelSchemaState} onExcelSchemaRetry={() => setExcelSchemaReload((value) => value + 1)} /></fieldset>}
         {state.error ? <div className={styles.error} role="alert">{state.error}</div> : null}
         {state.notice ? <div className={styles.notice} role="status">{state.notice}</div> : null}
       </div>
@@ -112,7 +147,7 @@ export function ReportConfigDrawer({ client, report, datasources, datasourcesLoa
   </>
 }
 
-function Editor({ tab, client, draft, datasources, datasourcesLoading, datasourcesError, onChange }: { tab: Tab; client: ReportCenterClient; draft: ReportDraft; datasources: ReportDatasource[]; datasourcesLoading: boolean; datasourcesError: string; onChange: Dispatch<SetStateAction<ReportDraft>> }) {
+function Editor({ tab, client, draft, datasources, datasourcesLoading, datasourcesError, onChange, excelSchema, excelSchemaState, onExcelSchemaRetry }: { tab: Tab; client: ReportCenterClient; draft: ReportDraft; datasources: ReportDatasource[]; datasourcesLoading: boolean; datasourcesError: string; onChange: Dispatch<SetStateAction<ReportDraft>>; excelSchema: ReportResultTableColumn[] | null; excelSchemaState: ExcelMappingSchemaState; onExcelSchemaRetry: () => void }) {
   const set = <K extends keyof ReportDraft>(key: K, value: ReportDraft[K]) => onChange((current) => ({ ...current, [key]: value }))
   if (tab === 'basic') {
     const selected = datasources.find((item) => item.id === draft.datasourceId)
@@ -130,7 +165,7 @@ function Editor({ tab, client, draft, datasources, datasourcesLoading, datasourc
   }
   if (tab === 'procedure') return <ReportProcedureEditor client={client} draft={draft} onChange={onChange} />
   if (tab === 'conditions') return <ReportInputSchemaEditor client={client} schema={draft.inputSchema} onChange={(inputSchema) => set('inputSchema', inputSchema)} />
-  if (tab === 'excel') return <ReportExcelMappingEditor columns={draft.columns} onChange={(columns) => set('columns', columns)} />
+  if (tab === 'excel') return <ReportExcelMappingEditor result={draft.result} columns={draft.columns} schema={excelSchema} schemaState={excelSchemaState} onChange={(columns) => set('columns', columns)} onRetry={onExcelSchemaRetry} />
   return <PermissionEditor grants={draft.grants} onChange={(grants) => set('grants', grants)} />
 }
 
