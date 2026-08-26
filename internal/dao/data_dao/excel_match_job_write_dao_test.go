@@ -1,6 +1,7 @@
 package data_dao
 
 import (
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -71,6 +72,60 @@ func TestExcelMatchJobDAOBatchUpdateBojunCompletedAtRejectsInvalidValueAndMatchF
 			)
 			if err == nil {
 				t.Fatal("BatchUpdateBojunFieldByKeys() error=nil")
+			}
+		})
+	}
+}
+
+func TestBojunExcelImportWriteFieldsUseTypedValuesAndEmptyOnlyConditions(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name          string
+		writeField    string
+		value         string
+		wantValue     interface{}
+		wantCondition string
+	}{
+		{name: "oracle retail id", writeField: "oracle_retail_id", value: "45077", wantValue: uint64(45077), wantCondition: "oracle_retail_id IS NULL"},
+		{name: "order phone", writeField: "order_phone", value: "18616613488", wantValue: "18616613488", wantCondition: "(order_phone IS NULL OR order_phone = '')"},
+		{name: "paid amount", writeField: "paid_amount", value: "470.83", wantValue: 470.83, wantCondition: "paid_amount = 0"},
+		{name: "push amount", writeField: "push_amount", value: "80", wantValue: float64(80), wantCondition: "push_amount = 0"},
+		{name: "shop flag", writeField: "is_to_shop", value: "y", wantValue: "Y", wantCondition: "(is_to_shop IS NULL OR is_to_shop = '')"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			writeValue, err := bojunExcelWriteValue(tt.writeField, tt.value)
+			if err != nil {
+				t.Fatalf("bojunExcelWriteValue() error=%v", err)
+			}
+			if !reflect.DeepEqual(writeValue, tt.wantValue) {
+				t.Fatalf("bojunExcelWriteValue()=%#v want=%#v", writeValue, tt.wantValue)
+			}
+			condition, ok := bojunExcelEmptyWriteCondition(tt.writeField)
+			if !ok || condition != tt.wantCondition {
+				t.Fatalf("bojunExcelEmptyWriteCondition()=(%q, %t) want=(%q, true)", condition, ok, tt.wantCondition)
+			}
+		})
+	}
+}
+
+func TestBojunExcelImportWriteFieldsRejectInvalidValues(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name       string
+		writeField string
+		value      string
+	}{
+		{name: "oracle retail id zero", writeField: "oracle_retail_id", value: "0"},
+		{name: "order phone empty", writeField: "order_phone", value: ""},
+		{name: "paid amount text", writeField: "paid_amount", value: "invalid"},
+		{name: "push amount infinity", writeField: "push_amount", value: "+Inf"},
+		{name: "shop flag unknown", writeField: "is_to_shop", value: "yes"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if _, err := bojunExcelWriteValue(tt.writeField, tt.value); err == nil {
+				t.Fatal("bojunExcelWriteValue() error=nil")
 			}
 		})
 	}

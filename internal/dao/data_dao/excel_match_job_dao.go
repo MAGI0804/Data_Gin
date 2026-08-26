@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"math"
 	"regexp"
 	"sort"
 	"strconv"
@@ -616,14 +617,11 @@ func (dao *ExcelMatchJobDAO) FindWritableBojunKeys(
 		matchField,
 	)
 	if onlyEmpty {
-		switch writeField {
-		case "matched_docno":
-			query += " AND (matched_docno IS NULL OR matched_docno = '')"
-		case "completed_at":
-			query += " AND completed_at IS NULL"
-		default:
+		emptyCondition, ok := bojunExcelEmptyWriteCondition(writeField)
+		if !ok {
 			return nil, fmt.Errorf("bojun update field is not allowed")
 		}
+		query += " AND " + emptyCondition
 	} else if writeField != "matched_docno" {
 		return nil, fmt.Errorf("bojun update field is not allowed")
 	}
@@ -655,6 +653,10 @@ func (dao *ExcelMatchJobDAO) BatchUpdateBojunFieldByKeys(ctx context.Context, ma
 	if !isAllowedBojunExcelField(matchField) {
 		return 0, fmt.Errorf("bojun update field is not allowed")
 	}
+	emptyCondition, writeFieldAllowed := bojunExcelEmptyWriteCondition(writeField)
+	if !writeFieldAllowed {
+		return 0, fmt.Errorf("bojun update field is not allowed")
+	}
 
 	keys := make([]string, 0, len(values))
 	for key := range values {
@@ -665,15 +667,9 @@ func (dao *ExcelMatchJobDAO) BatchUpdateBojunFieldByKeys(ctx context.Context, ma
 	args := make([]interface{}, 0, len(values)*2+2)
 	for _, key := range keys {
 		value := values[key]
-		var writeValue interface{} = value
-		if writeField == "completed_at" {
-			completedAt, err := parseBojunExcelCompletedAt(value)
-			if err != nil {
-				return 0, err
-			}
-			writeValue = completedAt
-		} else if writeField != "matched_docno" {
-			return 0, fmt.Errorf("bojun update field is not allowed")
+		writeValue, err := bojunExcelWriteValue(writeField, value)
+		if err != nil {
+			return 0, err
 		}
 		caseSQL.WriteString(" WHEN ? THEN ?")
 		args = append(args, key, writeValue)
@@ -688,9 +684,7 @@ func (dao *ExcelMatchJobDAO) BatchUpdateBojunFieldByKeys(ctx context.Context, ma
 		writeField,
 		matchField,
 	)
-	if writeField == "completed_at" {
-		query += " AND completed_at IS NULL"
-	} else {
+	if writeField == "matched_docno" {
 		allEmpty := true
 		for _, value := range values {
 			if value != "" {
@@ -699,8 +693,10 @@ func (dao *ExcelMatchJobDAO) BatchUpdateBojunFieldByKeys(ctx context.Context, ma
 			}
 		}
 		if !allEmpty {
-			query += " AND (matched_docno IS NULL OR matched_docno = '')"
+			query += " AND " + emptyCondition
 		}
+	} else {
+		query += " AND " + emptyCondition
 	}
 	result := dao.db.WithContext(ctx).Exec(query, args...)
 	return result.RowsAffected, result.Error
@@ -721,6 +717,62 @@ func parseBojunExcelCompletedAt(value string) (time.Time, error) {
 		return time.Time{}, fmt.Errorf("bojun completed_at value must use yyyy-mm-dd hh:mm:ss")
 	}
 	return parsed, nil
+}
+
+func bojunExcelEmptyWriteCondition(writeField string) (string, bool) {
+	switch writeField {
+	case "matched_docno":
+		return "(matched_docno IS NULL OR matched_docno = '')", true
+	case "completed_at":
+		return "completed_at IS NULL", true
+	case "oracle_retail_id":
+		return "oracle_retail_id IS NULL", true
+	case "order_phone":
+		return "(order_phone IS NULL OR order_phone = '')", true
+	case "paid_amount":
+		return "paid_amount = 0", true
+	case "push_amount":
+		return "push_amount = 0", true
+	case "is_to_shop":
+		return "(is_to_shop IS NULL OR is_to_shop = '')", true
+	default:
+		return "", false
+	}
+}
+
+func bojunExcelWriteValue(writeField, value string) (interface{}, error) {
+	value = strings.TrimSpace(value)
+	switch writeField {
+	case "matched_docno":
+		return value, nil
+	case "completed_at":
+		return parseBojunExcelCompletedAt(value)
+	case "oracle_retail_id":
+		parsed, err := strconv.ParseUint(value, 10, 64)
+		if err != nil || parsed == 0 {
+			return nil, fmt.Errorf("bojun oracle_retail_id value must be a positive integer")
+		}
+		return parsed, nil
+	case "order_phone":
+		if value == "" {
+			return nil, fmt.Errorf("bojun order_phone value is required")
+		}
+		return value, nil
+	case "paid_amount", "push_amount":
+		parsed, err := strconv.ParseFloat(value, 64)
+		if err != nil || math.IsNaN(parsed) || math.IsInf(parsed, 0) {
+			return nil, fmt.Errorf("bojun %s value must be a number", writeField)
+		}
+		return parsed, nil
+	case "is_to_shop":
+		normalized := strings.ToUpper(value)
+		if normalized != "Y" && normalized != "N" {
+			return nil, fmt.Errorf("bojun is_to_shop value must be Y or N")
+		}
+		return normalized, nil
+	default:
+		return nil, fmt.Errorf("bojun update field is not allowed")
+	}
 }
 
 func isAllowedBojunExcelField(field string) bool {

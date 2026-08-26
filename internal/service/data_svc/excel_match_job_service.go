@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"math"
 	"mime/multipart"
 	"os"
 	"path/filepath"
@@ -104,8 +105,13 @@ var allowedBojunImportMatchFields = map[string]struct{}{
 }
 
 var allowedBojunImportWriteFields = map[string]struct{}{
-	"matched_docno": {},
-	"completed_at":  {},
+	"matched_docno":    {},
+	"completed_at":     {},
+	"oracle_retail_id": {},
+	"order_phone":      {},
+	"paid_amount":      {},
+	"push_amount":      {},
+	"is_to_shop":       {},
 }
 
 var allowedExcelExportColumnFormats = map[string]struct{}{
@@ -1311,16 +1317,43 @@ func processExcelImportUpdateFileWithProgress(
 }
 
 func normalizeExcelImportWriteValue(writeField, value string) (string, error) {
-	if writeField != "completed_at" {
+	switch writeField {
+	case "matched_docno":
 		return value, nil
+	case "completed_at":
+		const layout = "2006-01-02 15:04:05"
+		location := time.FixedZone("Asia/Shanghai", 8*60*60)
+		parsed, err := time.ParseInLocation(layout, value, location)
+		if err != nil || parsed.Format(layout) != value {
+			return "", errors.New("订单完成时间必须使用 yyyy-mm-dd hh:mm:ss 格式")
+		}
+		return parsed.Format(layout), nil
+	case "oracle_retail_id":
+		parsed, err := strconv.ParseUint(value, 10, 64)
+		if err != nil || parsed == 0 {
+			return "", errors.New("Oracle 零售单 ID 必须为正整数")
+		}
+		return strconv.FormatUint(parsed, 10), nil
+	case "order_phone":
+		if value == "" {
+			return "", errors.New("订单手机号不能为空")
+		}
+		return value, nil
+	case "paid_amount", "push_amount":
+		number, err := strconv.ParseFloat(strings.ReplaceAll(value, ",", ""), 64)
+		if err != nil || math.IsNaN(number) || math.IsInf(number, 0) {
+			return "", errors.New("金额必须为有效数字")
+		}
+		return strconv.FormatFloat(number, 'f', -1, 64), nil
+	case "is_to_shop":
+		normalized := strings.ToUpper(value)
+		if normalized != "Y" && normalized != "N" {
+			return "", errors.New("是否到店必须为 Y 或 N")
+		}
+		return normalized, nil
+	default:
+		return "", fmt.Errorf("暂不支持导入写入字段: %s", writeField)
 	}
-	const layout = "2006-01-02 15:04:05"
-	location := time.FixedZone("Asia/Shanghai", 8*60*60)
-	parsed, err := time.ParseInLocation(layout, value, location)
-	if err != nil || parsed.Format(layout) != value {
-		return "", errors.New("订单完成时间必须使用 yyyy-mm-dd hh:mm:ss 格式")
-	}
-	return parsed.Format(layout), nil
 }
 
 func initExcelMatchWriter(output *excelize.File) (*excelize.StreamWriter, string, error) {

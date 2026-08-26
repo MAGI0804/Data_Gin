@@ -304,6 +304,67 @@ func TestNormalizeExcelImportConfigAllowsCompletedAtWrite(t *testing.T) {
 	}
 }
 
+func TestNormalizeExcelImportConfigAllowsBojunOracleFields(t *testing.T) {
+	writeFields := []string{
+		"oracle_retail_id",
+		"order_phone",
+		"paid_amount",
+		"push_amount",
+		"is_to_shop",
+	}
+	for _, writeField := range writeFields {
+		t.Run(writeField, func(t *testing.T) {
+			cfg, err := normalizeExcelMatchConfig(ExcelMatchConfig{
+				Operation:        excelOperationImportUpdate,
+				TableName:        "bojun_retail_orders",
+				DBMatchField:     "docno",
+				MatchExcelColumn: "订单号",
+				DBWriteField:     writeField,
+				WriteExcelColumn: writeField,
+			})
+			if err != nil {
+				t.Fatalf("normalizeExcelMatchConfig() error=%v", err)
+			}
+			if cfg.DBWriteField != writeField || !cfg.DryRun {
+				t.Fatalf("config=%+v", cfg)
+			}
+		})
+	}
+}
+
+func TestNormalizeExcelImportWriteValueValidatesBojunOracleFields(t *testing.T) {
+	tests := []struct {
+		name       string
+		writeField string
+		value      string
+		want       string
+		wantError  bool
+	}{
+		{name: "oracle retail id", writeField: "oracle_retail_id", value: "45077", want: "45077"},
+		{name: "oracle retail id rejects zero", writeField: "oracle_retail_id", value: "0", wantError: true},
+		{name: "order phone", writeField: "order_phone", value: "18616613488", want: "18616613488"},
+		{name: "order phone rejects empty", writeField: "order_phone", wantError: true},
+		{name: "paid amount removes grouping", writeField: "paid_amount", value: "1,234.50", want: "1234.5"},
+		{name: "push amount rejects text", writeField: "push_amount", value: "invalid", wantError: true},
+		{name: "shop flag normalizes case", writeField: "is_to_shop", value: "y", want: "Y"},
+		{name: "shop flag rejects unknown", writeField: "is_to_shop", value: "yes", wantError: true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, err := normalizeExcelImportWriteValue(tt.writeField, tt.value)
+			if tt.wantError {
+				if err == nil {
+					t.Fatalf("normalizeExcelImportWriteValue()=(%q, nil), want error", got)
+				}
+				return
+			}
+			if err != nil || got != tt.want {
+				t.Fatalf("normalizeExcelImportWriteValue()=(%q, %v), want (%q, nil)", got, err, tt.want)
+			}
+		})
+	}
+}
+
 func TestNormalizeExcelImportConfigRejectsUnknownWriteField(t *testing.T) {
 	_, err := normalizeExcelMatchConfig(ExcelMatchConfig{
 		Operation:        excelOperationImportUpdate,
