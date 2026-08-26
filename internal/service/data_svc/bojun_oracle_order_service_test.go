@@ -28,11 +28,15 @@ type fakeBojunOracleDecryptor struct{}
 func (fakeBojunOracleDecryptor) Decrypt(string, string) (string, error) { return "password", nil }
 
 type fakeBojunOracleConnection struct {
-	rows       []reportoracle.BojunRetailRow
-	maxID      uint64
-	queryAfter uint64
-	queryCalls int
-	closed     int
+	rows          []reportoracle.BojunRetailRow
+	maxID         uint64
+	queryAfter    uint64
+	queryCalls    int
+	closed        int
+	writeBackIDs  []uint64
+	writeBackOK   []bool
+	writeBackDate []int
+	writeBackErr  error
 }
 
 func (connection *fakeBojunOracleConnection) QueryBojunRetailAfterID(_ context.Context, afterID uint64, _ int) ([]reportoracle.BojunRetailRow, error) {
@@ -49,8 +53,11 @@ func (connection *fakeBojunOracleConnection) MaxBojunRetailID(context.Context) (
 	return connection.maxID, nil
 }
 
-func (*fakeBojunOracleConnection) UpdateBojunRetailPushStatus(context.Context, uint64, bool, int) error {
-	return nil
+func (connection *fakeBojunOracleConnection) UpdateBojunRetailPushStatus(_ context.Context, retailID uint64, success bool, pushDate int) error {
+	connection.writeBackIDs = append(connection.writeBackIDs, retailID)
+	connection.writeBackOK = append(connection.writeBackOK, success)
+	connection.writeBackDate = append(connection.writeBackDate, pushDate)
+	return connection.writeBackErr
 }
 
 func (connection *fakeBojunOracleConnection) Close() error {
@@ -66,6 +73,62 @@ type fakeBojunOracleStateStore struct {
 	advancedFrom  uint64
 	advancedTo    uint64
 	releaseCalls  int
+}
+
+type fakeBojunOracleRetailStore struct {
+	orders  map[string]*model.BojunRetailOrder
+	nextID  uint
+	updates map[uint]int
+}
+
+func (store *fakeBojunOracleRetailStore) ExistsByDocNo(_ context.Context, docNo string) (bool, error) {
+	_, exists := store.orders[docNo]
+	return exists, nil
+}
+
+func (store *fakeBojunOracleRetailStore) FindByDocNo(_ context.Context, docNo string) (*model.BojunRetailOrder, error) {
+	order, exists := store.orders[docNo]
+	if !exists {
+		return nil, errors.New("order not found")
+	}
+	copyOrder := *order
+	return &copyOrder, nil
+}
+
+func (store *fakeBojunOracleRetailStore) CreateIfNotExists(_ context.Context, order *model.BojunRetailOrder) (bool, error) {
+	if _, exists := store.orders[order.DocNo]; exists {
+		return false, nil
+	}
+	if store.nextID == 0 {
+		store.nextID = 101
+	}
+	order.ID = store.nextID
+	copyOrder := *order
+	store.orders[order.DocNo] = &copyOrder
+	return true, nil
+}
+
+func (store *fakeBojunOracleRetailStore) UpdateSyncStatus(_ context.Context, id uint, synced int) error {
+	if store.updates == nil {
+		store.updates = make(map[uint]int)
+	}
+	store.updates[id] = synced
+	for _, order := range store.orders {
+		if order.ID == id {
+			order.Synced = synced
+		}
+	}
+	return nil
+}
+
+type fakeBojunOraclePusher struct {
+	result bojunOrderPushResult
+	calls  int
+}
+
+func (pusher *fakeBojunOraclePusher) PushNewOrderWithPolicy(context.Context, *model.BojunRetailOrder, int, OrderPushSkipPolicy) bojunOrderPushResult {
+	pusher.calls++
+	return pusher.result
 }
 
 func (store *fakeBojunOracleStateStore) Get(context.Context, string) (*model.BojunOracleSyncState, error) {
@@ -164,6 +227,96 @@ func TestBojunOracleIncrementalAdvancesAfterPersistingBatch(t *testing.T) {
 	}
 }
 
+func TestBojunOracleIncrementalWritesSuccessfulPushBackToOracle(t *testing.T) {
+	statusTime := time.Date(2026, 8, 25, 15, 42, 21, 0, time.Local)
+	connection := &fakeBojunOracleConnection{rows: []reportoracle.BojunRetailRow{{
+		RetailID: 12, StoreCode: "ABCN001A001", DocNo: "SALE-12", StatusTime: statusTime,
+		PaidAmount: 88.8, PushAmount: 0, IsToShop: "Y",
+	}}}
+	state := &fakeBojunOracleStateStore{
+		state:         model.BojunOracleSyncState{SourceCode: bojunOracleDatasourceCode, LastRetailID: 11, Initialized: true},
+		leaseAcquired: true,
+	}
+	service := newTestBojunOracleOrderService(connection, state)
+	service.batchSize = 2
+	pusher := &fakeBojunOraclePusher{result: bojunOrderPushResult{Success: true}}
+	service.pushService = pusher
+	store := service.retailOrderDAO.(*fakeBojunOracleRetailStore)
+
+	result, err := service.SyncIncremental(t.Context())
+	if err != nil {
+		t.Fatalf("SyncIncremental() error = %v", err)
+	}
+	if pusher.calls != 1 || len(connection.writeBackIDs) != 1 || connection.writeBackIDs[0] != 12 || !connection.writeBackOK[0] || connection.writeBackDate[0] != 20260826 {
+		t.Fatalf("push/write-back = calls:%d ids:%v status:%v dates:%v", pusher.calls, connection.writeBackIDs, connection.writeBackOK, connection.writeBackDate)
+	}
+	if result.WatermarkAfter != 12 || store.updates[101] != 1 {
+		t.Fatalf("result=%+v local updates=%v", result, store.updates)
+	}
+}
+
+func TestBojunOracleExistingSuccessfulOrderRetriesOnlyWriteBack(t *testing.T) {
+	retailID := uint64(13)
+	statusTime := time.Date(2026, 8, 25, 15, 42, 21, 0, time.Local)
+	connection := &fakeBojunOracleConnection{rows: []reportoracle.BojunRetailRow{{
+		RetailID: retailID, StoreCode: "ABCN001A001", DocNo: "SALE-13", StatusTime: statusTime,
+		PaidAmount: 20, PushAmount: 20, IsToShop: "Y", PushStatus: 0,
+	}}}
+	state := &fakeBojunOracleStateStore{
+		state:         model.BojunOracleSyncState{SourceCode: bojunOracleDatasourceCode, LastRetailID: 12, Initialized: true},
+		leaseAcquired: true,
+	}
+	service := newTestBojunOracleOrderService(connection, state)
+	service.batchSize = 2
+	pusher := &fakeBojunOraclePusher{result: bojunOrderPushResult{Success: true}}
+	service.pushService = pusher
+	store := service.retailOrderDAO.(*fakeBojunOracleRetailStore)
+	store.orders["SALE-13"] = &model.BojunRetailOrder{
+		BaseModel: model.BaseModel{ID: 77}, OracleRetailID: &retailID, DocNo: "SALE-13", Synced: 3,
+	}
+
+	result, err := service.SyncIncremental(t.Context())
+	if err != nil {
+		t.Fatalf("SyncIncremental() error = %v", err)
+	}
+	if pusher.calls != 0 || len(connection.writeBackIDs) != 1 || connection.writeBackIDs[0] != retailID {
+		t.Fatalf("pusher calls=%d write-backs=%v", pusher.calls, connection.writeBackIDs)
+	}
+	if store.updates[77] != 1 || result.WatermarkAfter != retailID {
+		t.Fatalf("updates=%v result=%+v", store.updates, result)
+	}
+}
+
+func TestBojunOracleSuccessfulPushWithFailedWriteBackDoesNotAdvance(t *testing.T) {
+	statusTime := time.Date(2026, 8, 25, 15, 42, 21, 0, time.Local)
+	connection := &fakeBojunOracleConnection{
+		rows: []reportoracle.BojunRetailRow{{
+			RetailID: 14, StoreCode: "ABCN001A001", DocNo: "SALE-14", StatusTime: statusTime,
+			PaidAmount: 20, PushAmount: 20, IsToShop: "Y",
+		}},
+		writeBackErr: errors.New("Oracle update failed"),
+	}
+	state := &fakeBojunOracleStateStore{
+		state:         model.BojunOracleSyncState{SourceCode: bojunOracleDatasourceCode, LastRetailID: 13, Initialized: true},
+		leaseAcquired: true,
+	}
+	service := newTestBojunOracleOrderService(connection, state)
+	service.batchSize = 2
+	service.pushService = &fakeBojunOraclePusher{result: bojunOrderPushResult{Success: true}}
+	store := service.retailOrderDAO.(*fakeBojunOracleRetailStore)
+
+	result, err := service.SyncIncremental(t.Context())
+	if err == nil {
+		t.Fatal("SyncIncremental() unexpectedly succeeded")
+	}
+	if state.advancedTo != 0 || result.WatermarkAfter != 13 {
+		t.Fatalf("watermark advanced after failed write-back: state=%+v result=%+v", state, result)
+	}
+	if store.updates[101] != 3 {
+		t.Fatalf("local sync status = %d, want pending write-back 3", store.updates[101])
+	}
+}
+
 func newTestBojunOracleOrderService(connection bojunOracleConnection, state bojunOracleSyncStateStore) *BojunOracleOrderService {
 	return &BojunOracleOrderService{
 		datasourceStore: &fakeBojunOracleDatasourceStore{datasource: model.ReportDatasource{
@@ -174,7 +327,7 @@ func newTestBojunOracleOrderService(connection bojunOracleConnection, state boju
 		openOracle:     func(context.Context, reportoracle.Config) (bojunOracleConnection, error) { return connection, nil },
 		stateStore:     state,
 		rawDataDAO:     &fakeBojunRawDataCreator{nextID: 100},
-		retailOrderDAO: &fakeBojunRetailOrderWriter{existing: map[string]bool{}},
+		retailOrderDAO: &fakeBojunOracleRetailStore{orders: map[string]*model.BojunRetailOrder{}},
 		now:            func() time.Time { return time.Date(2026, 8, 26, 10, 0, 0, 0, time.Local) },
 		newLeaseToken:  func() string { return "lease-token" },
 		batchSize:      100, maxPages: 20, leaseTTL: 2 * time.Minute,

@@ -38,12 +38,18 @@ type PushResult struct {
 
 func RetailOrderFromBojun(order model.BojunRetailOrder) RetailOrder {
 	saleTime := billDateToSaleTime(order.BillDate)
+	amount := order.TotalAmtActual
+	listAmount := order.TotalAmtList
+	if order.OracleRetailID != nil {
+		amount = order.PushAmount
+		listAmount = order.PushAmount
+	}
 	return RetailOrder{
 		DocNo:         order.DocNo,
 		OrderTypeCode: order.OrderTypeCode,
 		SaleTime:      saleTime,
-		Amount:        signedAmount(order.OrderTypeCode, order.TotalAmtActual),
-		ListAmount:    signedAmount(order.OrderTypeCode, order.TotalAmtList),
+		Amount:        signedAmount(order.OrderTypeCode, amount),
+		ListAmount:    signedAmount(order.OrderTypeCode, listAmount),
 		Quantity:      order.TotalQty,
 	}
 }

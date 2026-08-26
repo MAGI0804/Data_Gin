@@ -53,13 +53,20 @@ type bojunOracleSyncStateStore interface {
 	ReleaseLease(context.Context, string, string, time.Time) error
 }
 
+type bojunOracleRetailOrderStore interface {
+	ExistsByDocNo(context.Context, string) (bool, error)
+	FindByDocNo(context.Context, string) (*model.BojunRetailOrder, error)
+	CreateIfNotExists(context.Context, *model.BojunRetailOrder) (bool, error)
+	UpdateSyncStatus(context.Context, uint, int) error
+}
+
 type BojunOracleOrderService struct {
 	datasourceStore bojunOracleDatasourceStore
 	decryptor       bojunOracleCredentialDecryptor
 	openOracle      bojunOracleConnectionOpener
 	stateStore      bojunOracleSyncStateStore
 	rawDataDAO      rawDataCreator
-	retailOrderDAO  bojunRetailOrderWriter
+	retailOrderDAO  bojunOracleRetailOrderStore
 	pushService     bojunOrderPusher
 	skipPolicy      orderPushSkipConfigGetter
 	now             func() time.Time
@@ -174,7 +181,7 @@ func (service *BojunOracleOrderService) SyncIncremental(ctx context.Context) (re
 			break
 		}
 		for _, row := range rows {
-			if err := service.processRow(ctx, row, page, true, result, pushSkipConfig); err != nil {
+			if err := service.processRow(ctx, connection, row, page, true, result, pushSkipConfig); err != nil {
 				return result, err
 			}
 		}
@@ -216,6 +223,7 @@ func (service *BojunOracleOrderService) open(ctx context.Context) (bojunOracleCo
 
 func (service *BojunOracleOrderService) processRow(
 	ctx context.Context,
+	connection bojunOracleConnection,
 	row reportoracle.BojunRetailRow,
 	page int,
 	confirmWrite bool,
@@ -236,11 +244,12 @@ func (service *BojunOracleOrderService) processRow(
 	}
 	if exists {
 		result.ExistingCount++
-		result.SkippedCount++
-		sample.Status = "exists"
-		sample.Reason = "docno 已存在，不覆盖"
-		addBojunOrderSample(result, sample)
-		return nil
+		existing, findErr := service.retailOrderDAO.FindByDocNo(ctx, order.DocNo)
+		if findErr != nil {
+			result.FailedCount++
+			return fmt.Errorf("load existing bojun Oracle order %s: %w", order.DocNo, findErr)
+		}
+		return service.processExistingRow(ctx, connection, row, existing, result, pushSkipConfig, sample)
 	}
 	result.WritableCount++
 	if !confirmWrite {
@@ -281,16 +290,99 @@ func (service *BojunOracleOrderService) processRow(
 	if order.IsToShop != "Y" || row.PushStatus == 1 || service.pushService == nil {
 		return nil
 	}
+	return service.pushAndWriteBack(ctx, connection, row, order, result, pushSkipConfig)
+}
+
+func (service *BojunOracleOrderService) processExistingRow(
+	ctx context.Context,
+	connection bojunOracleConnection,
+	row reportoracle.BojunRetailRow,
+	existing *model.BojunRetailOrder,
+	result *BojunOrderSyncResult,
+	pushSkipConfig OrderPushSkipConfig,
+	sample BojunOrderPreviewItem,
+) error {
+	if existing == nil || existing.OracleRetailID == nil || *existing.OracleRetailID != row.RetailID {
+		result.SkippedCount++
+		sample.Status = "exists"
+		sample.Reason = "docno 已存在，不覆盖"
+		addBojunOrderSample(result, sample)
+		return nil
+	}
+	if strings.ToUpper(strings.TrimSpace(row.IsToShop)) != "Y" || row.PushStatus == 1 {
+		if existing.Synced != 1 {
+			if err := service.retailOrderDAO.UpdateSyncStatus(ctx, existing.ID, 1); err != nil {
+				return err
+			}
+		}
+		result.SkippedCount++
+		return nil
+	}
+	if existing.Synced == 1 || existing.Synced == 3 {
+		return service.writeBackSuccessfulPush(ctx, connection, row.RetailID, existing.ID)
+	}
+	if service.pushService == nil {
+		result.SkippedCount++
+		return nil
+	}
+	return service.pushAndWriteBack(ctx, connection, row, existing, result, pushSkipConfig)
+}
+
+func (service *BojunOracleOrderService) pushAndWriteBack(
+	ctx context.Context,
+	connection bojunOracleConnection,
+	row reportoracle.BojunRetailRow,
+	order *model.BojunRetailOrder,
+	result *BojunOrderSyncResult,
+	pushSkipConfig OrderPushSkipConfig,
+) error {
 	policy := OrderPushSkipPolicy{}
 	if target, ok := bojunTargetForStore(order.StoreCode); ok {
 		policy = pushSkipConfig.PolicyForTarget(target.Code)
 	}
 	pushResult := service.pushService.PushNewOrderWithPolicy(ctx, order, result.nextPushPosition(), policy)
-	if pushResult.Error != nil && !pushResult.Skipped {
-		result.FailedCount++
-		return fmt.Errorf("push bojun Oracle retail order %s: %w", order.DocNo, pushResult.Error)
+	if pushResult.Skipped && !pushResult.Success {
+		result.SkippedCount++
+		return nil
 	}
-	return nil
+	pushDate := bojunOraclePushDate(service.now())
+	if !pushResult.Success {
+		result.FailedCount++
+		pushErr := pushResult.Error
+		if pushErr == nil {
+			pushErr = errors.New("mall push returned an unsuccessful result")
+		}
+		statusErr := service.retailOrderDAO.UpdateSyncStatus(ctx, order.ID, 2)
+		writeBackErr := connection.UpdateBojunRetailPushStatus(ctx, row.RetailID, false, pushDate)
+		return errors.Join(
+			fmt.Errorf("push bojun Oracle retail order %s: %w", order.DocNo, pushErr),
+			statusErr,
+			writeBackErr,
+		)
+	}
+	if err := connection.UpdateBojunRetailPushStatus(ctx, row.RetailID, true, pushDate); err != nil {
+		result.FailedCount++
+		statusErr := service.retailOrderDAO.UpdateSyncStatus(ctx, order.ID, 3)
+		return errors.Join(fmt.Errorf("write back successful bojun Oracle push %s: %w", order.DocNo, err), statusErr)
+	}
+	return service.retailOrderDAO.UpdateSyncStatus(ctx, order.ID, 1)
+}
+
+func (service *BojunOracleOrderService) writeBackSuccessfulPush(
+	ctx context.Context,
+	connection bojunOracleConnection,
+	retailID uint64,
+	localOrderID uint,
+) error {
+	if err := connection.UpdateBojunRetailPushStatus(ctx, retailID, true, bojunOraclePushDate(service.now())); err != nil {
+		statusErr := service.retailOrderDAO.UpdateSyncStatus(ctx, localOrderID, 3)
+		return errors.Join(fmt.Errorf("retry bojun Oracle successful push write-back: %w", err), statusErr)
+	}
+	return service.retailOrderDAO.UpdateSyncStatus(ctx, localOrderID, 1)
+}
+
+func bojunOraclePushDate(value time.Time) int {
+	return value.Year()*10000 + int(value.Month())*100 + value.Day()
 }
 
 func (service *BojunOracleOrderService) bojunPushSkipConfig(ctx context.Context, confirmWrite bool) (OrderPushSkipConfig, error) {
