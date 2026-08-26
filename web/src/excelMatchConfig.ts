@@ -9,6 +9,11 @@ export type ExcelEmptyCellFillConfig = {
   sourceColumn: string
 }
 
+export type ExcelImportWriteMappingConfig = {
+  dbWriteField: string
+  writeExcelColumn: string
+}
+
 export type ExcelMatchMode = 'field' | 'order_item_sku'
 
 export type ExcelMatchStepConfig = {
@@ -57,20 +62,22 @@ export const bojunImportWriteFieldOptions = [
   { value: 'paid_amount', label: '实付金额 paid_amount' },
   { value: 'push_amount', label: '推送金额 push_amount' },
   { value: 'is_to_shop', label: '是否到店 is_to_shop' },
-  { value: 'oracle_retail_id', label: 'Oracle 零售单 ID oracle_retail_id（最后导入）' },
+  { value: 'oracle_retail_id', label: 'Oracle 零售单 ID oracle_retail_id' },
 ] as const
 
-export function bojunImportWriteConfirmation(writeField: string) {
+export function bojunImportWriteConfirmation(writeFields: string | string[]) {
   const descriptions: Record<string, string> = {
     matched_docno: '空的 matched_docno，不会覆盖已有匹配单号',
     completed_at: '为空的 completed_at，值必须使用 yyyy-mm-dd hh:mm:ss 格式',
-    oracle_retail_id: '为空的 oracle_retail_id，值必须为正整数；请先导入其他 Oracle 字段，最后导入本字段',
+    oracle_retail_id: '为空且到店状态有效的 oracle_retail_id，值必须为正整数',
     order_phone: '为空的 order_phone',
     paid_amount: '当前为 0 的 paid_amount，值必须为数字',
     push_amount: '当前为 0 的 push_amount，值必须为数字',
     is_to_shop: '为空的 is_to_shop，值必须为 Y 或 N',
   }
-  return `确认写入数据库？本次只会填充${descriptions[writeField] ?? '目标空字段'}。`
+  const fields = Array.isArray(writeFields) ? writeFields : [writeFields]
+  const details = fields.map((field) => descriptions[field] ?? `${field || '目标'}的空字段`)
+  return `确认写入数据库？本次会按列填充：${details.join('；')}。不会覆盖已有值。`
 }
 
 type ExcelMatchSchemeSource = {
@@ -82,6 +89,12 @@ type ExcelMatchSchemeSource = {
   outputColumnName?: string
   steps?: Array<Partial<ExcelMatchStepConfig>>
   emptyCellFills?: Array<Partial<ExcelEmptyCellFillConfig>>
+}
+
+type ExcelImportSchemeSource = {
+  dbWriteField?: string
+  writeExcelColumn?: string
+  writeMappings?: Array<Partial<ExcelImportWriteMappingConfig>>
 }
 
 function normalizeMatchMode(value: unknown): ExcelMatchMode {
@@ -118,6 +131,24 @@ export function cloneExcelEmptyCellFills(fills: Array<Partial<ExcelEmptyCellFill
     targetColumn: fill.targetColumn ?? '',
     sourceColumn: fill.sourceColumn ?? '',
   }))
+}
+
+export function cloneExcelImportWriteMappings(mappings: Array<Partial<ExcelImportWriteMappingConfig>> | undefined): ExcelImportWriteMappingConfig[] {
+  if (!Array.isArray(mappings)) return []
+  return mappings.map((mapping) => ({
+    dbWriteField: mapping.dbWriteField ?? '',
+    writeExcelColumn: mapping.writeExcelColumn ?? '',
+  }))
+}
+
+export function migrateExcelImportWriteMappings(config: ExcelImportSchemeSource, fallback: ExcelImportWriteMappingConfig): ExcelImportWriteMappingConfig[] {
+  if (Array.isArray(config.writeMappings) && config.writeMappings.length > 0) {
+    return cloneExcelImportWriteMappings(config.writeMappings)
+  }
+  return [{
+    dbWriteField: config.dbWriteField || fallback.dbWriteField,
+    writeExcelColumn: config.writeExcelColumn || fallback.writeExcelColumn,
+  }]
 }
 
 export function excelMatchSchemePath(schemeID: number) {

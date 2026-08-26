@@ -72,6 +72,8 @@
 .dialog .stepFilterEditor { display: grid; gap: var(--space-2); border-top: 1px solid var(--color-border); padding-top: var(--space-3); }
 .stepFilterRow,
 .dialog .stepFilterRow { display: grid; grid-template-columns: minmax(140px, 1fr) 120px minmax(140px, 1fr) auto; align-items: end; gap: var(--space-2); }
+.importWriteRow,
+.dialog .importWriteRow { grid-template-columns: minmax(180px, 1fr) minmax(180px, 1fr) auto; }
 .stepFilterEmpty,
 .modeNote,
 .dialog .stepFilterEmpty,

@@ -2,7 +2,7 @@ import { type FormEvent, useCallback, useEffect, useRef, useState } from 'react'
 import { Database, Download, FileJson, ListChecks, RefreshCcw, Search, Upload } from 'lucide-react'
 import type { ClientResponse } from '../api/client'
 import { Dialog, Drawer, FeedbackState, FilterToolbar, MetricStrip, PageCanvas, PageHeader, PaginationControls, Section } from '../ui'
-import { bojunImportWriteConfirmation, bojunImportWriteFieldOptions, buildExcelExportConfig, cloneExcelEmptyCellFills, cloneExcelMatchSteps, excelMatchSchemePath, selectExcelMatchStepModel, type ExcelMatchFilterConfig, type ExcelEmptyCellFillConfig, type ExcelMatchModel, type ExcelMatchStepConfig } from '../excelMatchConfig'
+import { bojunImportWriteConfirmation, bojunImportWriteFieldOptions, buildExcelExportConfig, cloneExcelEmptyCellFills, cloneExcelImportWriteMappings, cloneExcelMatchSteps, excelMatchSchemePath, selectExcelMatchStepModel, type ExcelMatchFilterConfig, type ExcelEmptyCellFillConfig, type ExcelImportWriteMappingConfig, type ExcelMatchModel, type ExcelMatchStepConfig } from '../excelMatchConfig'
 import { bojunMatchFieldOptions, canDownloadExcelJob, defaultExcelExportScheme, defaultExcelImportScheme, excelJobStatusLabel, excelMatchFilterOperatorOptions, exportSchemeDefaults, filterSensitiveExcelModels, formValue, importSchemeDefaults, isExcelMatchStepComplete, parseExportColumnFormats, readDataField, readObject, type ExcelDialogMode, type ExcelExportSchemeConfig, type ExcelImportSchemeConfig, type ExcelMatchJob, type ExcelMatchPreviewResult, type ExcelMatchScheme, type PendingSchemeSave } from './excelPageSupport'
 import { ExcelJobDetailContent, ExcelJobHistoryTable, ExcelMatchPreviewPanel, ExcelModelFieldSelector, ExcelModelSelector, ExcelSchemeList, Field, Metric, Panel, SelectFilter } from './ExcelMatchPageParts'
 import { buildExcelUploadPayload, useExcelUploads, type ExcelPageClient } from './useExcelUploads'
@@ -46,6 +46,7 @@ export function ExcelMatchPage({
   const [excelModelsLoading, setExcelModelsLoading] = useState(false)
   const [excelModelsError, setExcelModelsError] = useState('')
   const [importDefaults, setImportDefaults] = useState<ExcelImportSchemeConfig>(defaultExcelImportScheme)
+  const [importWriteMappings, setImportWriteMappings] = useState<ExcelImportWriteMappingConfig[]>(cloneExcelImportWriteMappings(defaultExcelImportScheme.writeMappings))
   const [exportFormKey, setExportFormKey] = useState(0)
   const [importFormKey, setImportFormKey] = useState(0)
   const [selectedExportSchemeID, setSelectedExportSchemeID] = useState('')
@@ -170,18 +171,38 @@ export function ExcelMatchPage({
   }
 
   function buildImportConfig(form: FormData, confirmWrite: boolean) {
+    const writeMappings = importWriteMappings.map((mapping) => ({
+      dbWriteField: mapping.dbWriteField.trim(),
+      writeExcelColumn: mapping.writeExcelColumn.trim(),
+    }))
+    const firstMapping = writeMappings[0]
     return {
       operation: 'import_update',
       sheetName: formValue(form, 'sheetName').trim() || 'Sheet1',
       tableName: formValue(form, 'tableName').trim(),
       dbMatchField: formValue(form, 'dbMatchField').trim(),
       matchExcelColumn: formValue(form, 'matchExcelColumn').trim(),
-      dbWriteField: formValue(form, 'dbWriteField').trim(),
-      writeExcelColumn: formValue(form, 'writeExcelColumn').trim(),
+      writeMappings,
+      dbWriteField: firstMapping?.dbWriteField ?? '',
+      writeExcelColumn: firstMapping?.writeExcelColumn ?? '',
       batchSize: Number(formValue(form, 'batchSize') || 1000),
       dryRun: !confirmWrite,
       confirmWrite,
     }
+  }
+
+  function updateImportWriteMapping(index: number, key: keyof ExcelImportWriteMappingConfig, value: string) {
+    setImportWriteMappings((current) => current.map((mapping, mappingIndex) => mappingIndex === index ? { ...mapping, [key]: value } : mapping))
+  }
+
+  function addImportWriteMapping() {
+    setImportWriteMappings((current) => current.length >= bojunImportWriteFieldOptions.length
+      ? current
+      : [...current, { dbWriteField: '', writeExcelColumn: '' }])
+  }
+
+  function removeImportWriteMapping(index: number) {
+    setImportWriteMappings((current) => current.length === 1 ? current : current.filter((_, mappingIndex) => mappingIndex !== index))
   }
 
   const fetchSchemes = useCallback(async (operation: 'export_match' | 'import_update') => {
@@ -363,6 +384,7 @@ export function ExcelMatchPage({
     setSelectedImportSchemeID(schemeID)
     if (!schemeID) {
       setImportDefaults(defaultExcelImportScheme)
+      setImportWriteMappings(cloneExcelImportWriteMappings(defaultExcelImportScheme.writeMappings))
       setImportFormKey((value) => value + 1)
       setSelectedImportFileName('')
       clearUploadRef('import')
@@ -370,7 +392,9 @@ export function ExcelMatchPage({
     }
     const scheme = importSchemes.find((item) => String(item.id) === schemeID)
     if (!scheme) return
-    setImportDefaults(importSchemeDefaults(scheme.config))
+    const defaults = importSchemeDefaults(scheme.config)
+    setImportDefaults(defaults)
+    setImportWriteMappings(cloneExcelImportWriteMappings(defaults.writeMappings))
     setImportFormKey((value) => value + 1)
     setSelectedImportFileName('')
     clearUploadRef('import')
@@ -477,8 +501,7 @@ export function ExcelMatchPage({
     }
 
     const confirmWrite = form.get('confirmWrite') === 'on'
-    const writeField = formValue(form, 'dbWriteField').trim()
-    const confirmMessage = bojunImportWriteConfirmation(writeField)
+    const confirmMessage = bojunImportWriteConfirmation(importWriteMappings.map((mapping) => mapping.dbWriteField.trim()))
     const config = buildImportConfig(form, confirmWrite)
     if (confirmWrite) {
       setPendingWrite({ slot: 'import', file, config, message: confirmMessage })
@@ -631,9 +654,24 @@ export function ExcelMatchPage({
       <label>已保存方案<select name="importSchemeID" value={selectedImportSchemeID} onChange={(event) => applyImportScheme(event.currentTarget.value)}><option value="">选择方案</option>{importSchemes.map((scheme) => <option value={scheme.id} key={scheme.id}>{scheme.name}</option>)}</select></label>
       <button type="button" disabled={!selectedImportSchemeID || loading} onClick={(event) => { const form = event.currentTarget.form; if (form?.reportValidity()) beginSchemeSave(form, 'import_update', 'current') }}>保存到当前方案</button><button type="button" disabled={loading} onClick={(event) => { const form = event.currentTarget.form; if (form?.reportValidity()) beginSchemeSave(form, 'import_update', 'new') }}>另存为新方案</button>
       <label className={styles.fileInputLabel}>Excel 文件<input name="file" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={(event) => { setSelectedImportFileName(event.currentTarget.files?.[0]?.name ?? ''); clearUploadRef('import') }} /><span>{selectedImportFileName || '请选择需要导入更新的 .xlsx 文件'}</span></label>
-      <Field label="Sheet 页名称" name="sheetName" defaultValue={importDefaults.sheetName} /><label>匹配表名<select name="tableName" defaultValue={importDefaults.tableName}><option value="bojun_retail_orders">伯俊零售单 bojun_retail_orders</option></select></label><label>数据库匹配字段<select name="dbMatchField" defaultValue={importDefaults.dbMatchField}>{bojunMatchFieldOptions.map((option) => <option value={option.value} key={option.value}>{option.label}</option>)}</select></label><Field label="Excel 匹配列名" name="matchExcelColumn" defaultValue={importDefaults.matchExcelColumn} /><label>写入字段<select name="dbWriteField" defaultValue={importDefaults.dbWriteField}>{bojunImportWriteFieldOptions.map((option) => <option value={option.value} key={option.value}>{option.label}</option>)}</select></label><Field label="Excel 写入值列名" name="writeExcelColumn" defaultValue={importDefaults.writeExcelColumn} /><Field label="批量更新大小" name="batchSize" defaultValue={importDefaults.batchSize} />
-      <label className={styles.checkboxLabel}><input name="confirmWrite" type="checkbox" />确认写入数据库</label><p className={styles.modeNote}>不勾选时只预检匹配数量，不写库；新增 Oracle 字段必须用 docno 匹配并只填目标空值，金额字段仅填当前为 0 的记录；请最后导入 oracle_retail_id。</p>{uploadProgress && <p className={styles.modeNote} role="status" aria-live="polite">{uploadProgress}</p>}<div className={styles.formActions}><button className={styles.primary} type="submit" disabled={loading}><Upload aria-hidden="true" />创建预检/导入任务</button></div>
+      <Field label="Sheet 页名称" name="sheetName" defaultValue={importDefaults.sheetName} /><label>匹配表名<select name="tableName" defaultValue={importDefaults.tableName}><option value="bojun_retail_orders">伯俊零售单 bojun_retail_orders</option></select></label><label>数据库匹配字段<select name="dbMatchField" defaultValue={importDefaults.dbMatchField}>{bojunMatchFieldOptions.map((option) => <option value={option.value} key={option.value}>{option.label}</option>)}</select></label><Field label="Excel 匹配列名" name="matchExcelColumn" defaultValue={importDefaults.matchExcelColumn} />{renderImportWriteMappings()}<Field label="批量更新大小" name="batchSize" defaultValue={importDefaults.batchSize} />
+      <label className={styles.checkboxLabel}><input name="confirmWrite" type="checkbox" />确认写入数据库</label><p className={styles.modeNote}>不勾选时只预检匹配数量，不写库；每个目标列独立判断是否为空，金额字段仅填当前为 0 的记录；Oracle 字段必须用 docno 匹配。</p>{uploadProgress && <p className={styles.modeNote} role="status" aria-live="polite">{uploadProgress}</p>}<div className={styles.formActions}><button className={styles.primary} type="submit" disabled={loading}><Upload aria-hidden="true" />创建预检/导入任务</button></div>
     </form>
+  }
+
+  function renderImportWriteMappings() {
+    const selectedFields = new Set(importWriteMappings.map((mapping) => mapping.dbWriteField))
+    return <div className={styles.stepFilterEditor}>
+      <div className={styles.stepFilterHeading}>
+        <div><strong>写入列映射</strong><span>一行可同时写入多个符合条件的目标列，每列都不会覆盖已有值。</span></div>
+        <button type="button" onClick={addImportWriteMapping} disabled={importWriteMappings.length >= bojunImportWriteFieldOptions.length}>添加写入列</button>
+      </div>
+      {importWriteMappings.map((mapping, index) => <div className={`${styles.stepFilterRow} ${styles.importWriteRow}`} key={`${importFormKey}-import-write-${index}`}>
+        <label>写入字段 {index + 1}<select name={`dbWriteField_${index}`} value={mapping.dbWriteField} onChange={(event) => updateImportWriteMapping(index, 'dbWriteField', event.currentTarget.value)} required><option value="">选择字段</option>{bojunImportWriteFieldOptions.map((option) => <option value={option.value} key={option.value} disabled={option.value !== mapping.dbWriteField && selectedFields.has(option.value)}>{option.label}</option>)}</select></label>
+        <Field label="Excel 写入值列名" name={`writeExcelColumn_${index}`} value={mapping.writeExcelColumn} onChange={(value) => updateImportWriteMapping(index, 'writeExcelColumn', value)} required />
+        <button type="button" onClick={() => removeImportWriteMapping(index)} disabled={importWriteMappings.length === 1} aria-label={`删除写入列 ${index + 1}`}>删除</button>
+      </div>)}
+    </div>
   }
 
   function renderClearWriteForm() {
@@ -988,20 +1026,14 @@ export function ExcelMatchPage({
               </select>
             </label>
             <Field label="Excel 匹配列名" name="matchExcelColumn" defaultValue={importDefaults.matchExcelColumn} />
-            <label>
-              写入字段
-              <select name="dbWriteField" defaultValue={importDefaults.dbWriteField}>
-                {bojunImportWriteFieldOptions.map((option) => <option value={option.value} key={option.value}>{option.label}</option>)}
-              </select>
-            </label>
-            <Field label="Excel 写入值列名" name="writeExcelColumn" defaultValue={importDefaults.writeExcelColumn} />
+            {renderImportWriteMappings()}
             <Field label="批量更新大小" name="batchSize" defaultValue={importDefaults.batchSize} />
             <label className={styles.checkboxLabel}>
               <input name="confirmWrite" type="checkbox" />
               确认写入数据库
             </label>
             <p className={styles.modeNote}>
-              不勾选时只预检匹配数量，不写库；新增 Oracle 字段必须用 docno 匹配并只填目标空值，金额字段仅填当前为 0 的记录；请最后导入 oracle_retail_id。
+              不勾选时只预检匹配数量，不写库；每个目标列独立判断是否为空，金额字段仅填当前为 0 的记录；Oracle 字段必须用 docno 匹配。
             </p>
             {uploadProgress && <p className={styles.modeNote}>{uploadProgress}</p>}
             <div className={styles.formActions}>

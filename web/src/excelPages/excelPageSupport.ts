@@ -1,9 +1,11 @@
 import { apiURL as buildApiURL } from '../apiURL'
 import {
   cloneExcelEmptyCellFills,
+  migrateExcelImportWriteMappings,
   migrateExcelMatchSteps,
   type ExcelEmptyCellFillConfig,
   type ExcelMatchFilterConfig,
+  type ExcelImportWriteMappingConfig,
   type ExcelMatchModel,
   type ExcelMatchStepConfig,
 } from '../excelMatchConfig'
@@ -17,8 +19,8 @@ export type ExcelUploadSession = { uploadId: string; fileName: string; totalChun
 export type ExcelUploadRef = { uploadId: string; fileName: string; size: number; lastModified: number; totalChunks: number }
 export type ExcelExportColumnFormat = { column: string; format: string }
 export type ExcelExportSchemeConfig = { sheetName: string; steps: ExcelMatchStepConfig[]; emptyCellFills: ExcelEmptyCellFillConfig[]; exportColumnFormats: string; batchSize: string }
-export type ExcelImportSchemeConfig = { sheetName: string; tableName: string; dbMatchField: string; matchExcelColumn: string; dbWriteField: string; writeExcelColumn: string; batchSize: string }
-export type ExcelMatchSchemeConfig = { operation?: string; sheetName?: string; filters?: Array<Partial<ExcelMatchFilterConfig>>; matchExcelColumn?: string; dbTemplate?: string; dbMatchField?: string; dbValueField?: string; tableName?: string; dbWriteField?: string; writeExcelColumn?: string; outputColumnName?: string; steps?: ExcelMatchStepConfig[]; emptyCellFills?: Array<Partial<ExcelEmptyCellFillConfig>>; exportColumnFormats?: ExcelExportColumnFormat[]; batchSize?: number; dryRun?: boolean; confirmWrite?: boolean }
+export type ExcelImportSchemeConfig = { sheetName: string; tableName: string; dbMatchField: string; matchExcelColumn: string; writeMappings: ExcelImportWriteMappingConfig[]; batchSize: string }
+export type ExcelMatchSchemeConfig = { operation?: string; sheetName?: string; filters?: Array<Partial<ExcelMatchFilterConfig>>; matchExcelColumn?: string; dbTemplate?: string; dbMatchField?: string; dbValueField?: string; tableName?: string; dbWriteField?: string; writeExcelColumn?: string; writeMappings?: Array<Partial<ExcelImportWriteMappingConfig>>; outputColumnName?: string; steps?: ExcelMatchStepConfig[]; emptyCellFills?: Array<Partial<ExcelEmptyCellFillConfig>>; exportColumnFormats?: ExcelExportColumnFormat[]; batchSize?: number; dryRun?: boolean; confirmWrite?: boolean }
 export type ExcelMatchScheme = { id: number; name: string; operation: string; config: ExcelMatchSchemeConfig; config_json: string; created_at: number; updated_at: number }
 export type PendingSchemeSave = { operation: 'export_match' | 'import_update'; config: unknown; name: string; overwriteConfirmed: boolean }
 export type ExcelMatchPreviewStats = { TotalRows?: number; ProcessedRows?: number; FilteredRows?: number; MatchedRows?: number; UnmatchedRows?: number }
@@ -44,7 +46,7 @@ export const defaultExcelExportScheme: ExcelExportSchemeConfig = {
   steps: [{ name: '匹配伯俊门店', filters: [{ column: '店铺', op: 'eq', value: '幼岚-有赞' }], matchMode: 'field', tableName: 'bojun_retail_orders', matchExcelColumn: '原始线上订单号', dbMatchField: 'matched_docno', dbValueField: 'c_store_name', outputColumnName: '线下店名称', specExcelColumn: '', priceExcelColumn: '', qtyExcelColumn: '' }],
   emptyCellFills: [], exportColumnFormats: '', batchSize: '1000',
 }
-export const defaultExcelImportScheme: ExcelImportSchemeConfig = { sheetName: 'Sheet1', tableName: 'bojun_retail_orders', dbMatchField: 'docno', matchExcelColumn: '外部订单编号', dbWriteField: 'matched_docno', writeExcelColumn: '订单号', batchSize: '1000' }
+export const defaultExcelImportScheme: ExcelImportSchemeConfig = { sheetName: 'Sheet1', tableName: 'bojun_retail_orders', dbMatchField: 'docno', matchExcelColumn: '外部订单编号', writeMappings: [{ dbWriteField: 'matched_docno', writeExcelColumn: '订单号' }], batchSize: '1000' }
 
 export function isExcelMatchStepComplete(step: ExcelMatchStepConfig) { if (!step.name.trim() || !step.tableName.trim() || !step.matchExcelColumn.trim() || !step.dbMatchField.trim() || !step.dbValueField.trim() || !step.outputColumnName.trim()) return false; return step.matchMode !== 'order_item_sku' || Boolean(step.specExcelColumn.trim() && step.priceExcelColumn.trim() && step.qtyExcelColumn.trim()) }
 export function excelJobProgressPercent(job: ExcelMatchJob) { return job.total_rows <= 0 ? 0 : Math.min(100, Math.max(0, Math.round(job.processed_rows / job.total_rows * 100))) }
@@ -58,7 +60,7 @@ export function parseExportColumnFormats(raw: string): ExcelExportColumnFormat[]
 export function exportColumnFormatsText(formats: ExcelExportColumnFormat[] | undefined) { return Array.isArray(formats) ? formats.filter((item) => item.column && item.format).map((item) => `${item.column}=${item.format}`).join('\n') : '' }
 export function sameExcelFile(file: File, ref: ExcelUploadRef) { return file.name === ref.fileName && file.size === ref.size && file.lastModified === ref.lastModified }
 export function exportSchemeDefaults(config: ExcelMatchSchemeConfig): ExcelExportSchemeConfig { const steps = migrateExcelMatchSteps(config, defaultExcelExportScheme.steps[0]); return { sheetName: config.sheetName || defaultExcelExportScheme.sheetName, steps, emptyCellFills: cloneExcelEmptyCellFills(config.emptyCellFills), exportColumnFormats: exportColumnFormatsText(config.exportColumnFormats) || defaultExcelExportScheme.exportColumnFormats, batchSize: config.batchSize ? String(config.batchSize) : defaultExcelExportScheme.batchSize } }
-export function importSchemeDefaults(config: ExcelMatchSchemeConfig): ExcelImportSchemeConfig { return { sheetName: config.sheetName || defaultExcelImportScheme.sheetName, tableName: config.tableName || defaultExcelImportScheme.tableName, dbMatchField: config.dbMatchField || defaultExcelImportScheme.dbMatchField, matchExcelColumn: config.matchExcelColumn || defaultExcelImportScheme.matchExcelColumn, dbWriteField: config.dbWriteField || defaultExcelImportScheme.dbWriteField, writeExcelColumn: config.writeExcelColumn || defaultExcelImportScheme.writeExcelColumn, batchSize: config.batchSize ? String(config.batchSize) : defaultExcelImportScheme.batchSize } }
+export function importSchemeDefaults(config: ExcelMatchSchemeConfig): ExcelImportSchemeConfig { return { sheetName: config.sheetName || defaultExcelImportScheme.sheetName, tableName: config.tableName || defaultExcelImportScheme.tableName, dbMatchField: config.dbMatchField || defaultExcelImportScheme.dbMatchField, matchExcelColumn: config.matchExcelColumn || defaultExcelImportScheme.matchExcelColumn, writeMappings: migrateExcelImportWriteMappings(config, defaultExcelImportScheme.writeMappings[0]), batchSize: config.batchSize ? String(config.batchSize) : defaultExcelImportScheme.batchSize } }
 export function excelJobStatusLabel(value: string) { return ({ pending: '等待处理', running: '处理中', success: '成功', failed: '失败', expired: '已过期' } as Record<string, string>)[value] ?? (value || '-') }
 export function parseMaybeJson(value: unknown) { if (!value) return null; if (typeof value === 'object') return value; if (typeof value !== 'string') return null; try { return JSON.parse(value) as unknown } catch { return null } }
 export function excelJobOperation(job: ExcelMatchJob) { if (job.operation) return job.operation; const config = parseMaybeJson(job.config_json ?? ''); return config && typeof config === 'object' && typeof (config as Record<string, unknown>).operation === 'string' ? String((config as Record<string, unknown>).operation) : '' }

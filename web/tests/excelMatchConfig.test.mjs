@@ -6,10 +6,12 @@ import {
   bojunImportWriteFieldOptions,
   buildExcelExportConfig,
   cloneExcelEmptyCellFills,
+  cloneExcelImportWriteMappings,
   excelMatchSchemePath,
   excelFieldSelectOptions,
   excelModelSelectOptions,
   migrateExcelMatchSteps,
+  migrateExcelImportWriteMappings,
   selectExcelMatchStepModel,
 } from '../.test-dist/excelMatchConfig.js'
 
@@ -19,9 +21,41 @@ test('Bojun Excel import exposes Oracle backfill fields with safe confirmation c
     ['order_phone', 'paid_amount', 'push_amount', 'is_to_shop', 'oracle_retail_id'],
   )
   assert.match(bojunImportWriteConfirmation('oracle_retail_id'), /正整数/)
-  assert.match(bojunImportWriteConfirmation('oracle_retail_id'), /最后导入/)
+  assert.match(bojunImportWriteConfirmation(['is_to_shop', 'oracle_retail_id']), /按列填充/)
+  assert.match(bojunImportWriteConfirmation(['is_to_shop', 'oracle_retail_id']), /不会覆盖已有值/)
   assert.match(bojunImportWriteConfirmation('paid_amount'), /当前为 0/)
   assert.match(bojunImportWriteConfirmation('is_to_shop'), /Y 或 N/)
+})
+
+test('migrateExcelImportWriteMappings upgrades a legacy single-column scheme', () => {
+  const mappings = migrateExcelImportWriteMappings({
+    dbWriteField: 'paid_amount',
+    writeExcelColumn: '实付金额',
+  }, { dbWriteField: 'matched_docno', writeExcelColumn: '订单号' })
+
+  assert.deepEqual(mappings, [{ dbWriteField: 'paid_amount', writeExcelColumn: '实付金额' }])
+})
+
+test('migrateExcelImportWriteMappings preserves and clones multiple mappings', () => {
+  const source = {
+    writeMappings: [
+      { dbWriteField: 'order_phone', writeExcelColumn: '订单手机号' },
+      { dbWriteField: 'paid_amount', writeExcelColumn: '实付金额' },
+    ],
+  }
+  const mappings = migrateExcelImportWriteMappings(source, { dbWriteField: 'matched_docno', writeExcelColumn: '订单号' })
+  mappings[0].writeExcelColumn = '已修改'
+
+  assert.equal(source.writeMappings[0].writeExcelColumn, '订单手机号')
+  assert.equal(mappings[1].dbWriteField, 'paid_amount')
+  assert.notEqual(mappings, source.writeMappings)
+})
+
+test('cloneExcelImportWriteMappings returns independent mapping objects', () => {
+  const source = [{ dbWriteField: 'push_amount', writeExcelColumn: '推送金额' }]
+  const cloned = cloneExcelImportWriteMappings(source)
+  cloned[0].dbWriteField = 'paid_amount'
+  assert.equal(source[0].dbWriteField, 'push_amount')
 })
 
 test('excelMatchSchemePath only builds a positive scheme resource path', () => {
