@@ -476,7 +476,7 @@ func handleBojunOrderFetch(ctx context.Context, task *asynq.Task) error {
 		return err
 	}
 
-	_, err := data_svc.NewBojunOrderService().SyncOrders(ctx, payload.StartTime, payload.EndTime)
+	_, err := data_svc.NewBojunOrderSourceRouterForMode(payload.SourceMode).SyncOrders(ctx, payload.StartTime, payload.EndTime)
 	return err
 }
 

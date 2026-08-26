@@ -37,6 +37,10 @@ type fakeBojunOracleConnection struct {
 	writeBackOK   []bool
 	writeBackDate []int
 	writeBackErr  error
+	modifiedStart time.Time
+	modifiedEnd   time.Time
+	modifiedAfter uint64
+	modifiedCalls int
 }
 
 func (connection *fakeBojunOracleConnection) QueryBojunRetailAfterID(_ context.Context, afterID uint64, _ int) ([]reportoracle.BojunRetailRow, error) {
@@ -45,8 +49,12 @@ func (connection *fakeBojunOracleConnection) QueryBojunRetailAfterID(_ context.C
 	return append([]reportoracle.BojunRetailRow(nil), connection.rows...), nil
 }
 
-func (*fakeBojunOracleConnection) QueryBojunRetailByModifiedTime(context.Context, time.Time, time.Time, uint64, int) ([]reportoracle.BojunRetailRow, error) {
-	return nil, nil
+func (connection *fakeBojunOracleConnection) QueryBojunRetailByModifiedTime(_ context.Context, start, end time.Time, afterID uint64, _ int) ([]reportoracle.BojunRetailRow, error) {
+	connection.modifiedStart = start
+	connection.modifiedEnd = end
+	connection.modifiedAfter = afterID
+	connection.modifiedCalls++
+	return append([]reportoracle.BojunRetailRow(nil), connection.rows...), nil
 }
 
 func (connection *fakeBojunOracleConnection) MaxBojunRetailID(context.Context) (uint64, error) {
@@ -314,6 +322,29 @@ func TestBojunOracleSuccessfulPushWithFailedWriteBackDoesNotAdvance(t *testing.T
 	}
 	if store.updates[101] != 3 {
 		t.Fatalf("local sync status = %d, want pending write-back 3", store.updates[101])
+	}
+}
+
+func TestBojunOraclePreviewQueriesModifiedTimeWithoutWritingOrAdvancing(t *testing.T) {
+	statusTime := time.Date(2026, 8, 25, 15, 42, 21, 0, time.Local)
+	connection := &fakeBojunOracleConnection{rows: []reportoracle.BojunRetailRow{{
+		RetailID: 15, StoreCode: "ABCN001A001", DocNo: "SALE-15", StatusTime: statusTime,
+		PaidAmount: 20, PushAmount: 20, IsToShop: "Y",
+	}}}
+	state := &fakeBojunOracleStateStore{}
+	service := newTestBojunOracleOrderService(connection, state)
+	service.batchSize = 2
+	rawStore := service.rawDataDAO.(*fakeBojunRawDataCreator)
+
+	result, err := service.PreviewByModifiedTime(t.Context(), "2026-08-25T10:00", "2026-08-25T11:00")
+	if err != nil {
+		t.Fatalf("PreviewByModifiedTime() error = %v", err)
+	}
+	if connection.modifiedCalls != 1 || connection.modifiedStart.Hour() != 10 || connection.modifiedEnd.Hour() != 11 || connection.modifiedAfter != 0 {
+		t.Fatalf("modified query start=%v end=%v after=%d calls=%d", connection.modifiedStart, connection.modifiedEnd, connection.modifiedAfter, connection.modifiedCalls)
+	}
+	if result.PreviewCount != 1 || result.WritableCount != 1 || rawStore.created != 0 || state.advancedTo != 0 {
+		t.Fatalf("result=%+v raw writes=%d state=%+v", result, rawStore.created, state)
 	}
 }
 

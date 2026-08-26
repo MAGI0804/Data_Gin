@@ -69,8 +69,9 @@ func LegacyTaskDefinitions() []LegacyTaskDefinition {
 			Description: "从有赞拉取订单，默认拉取最近 5 分钟数据并写入 youzan_order_data；自动触发已停用，可手动执行。",
 			Editable:    true,
 			DefaultPayload: map[string]interface{}{
-				"start_time": "",
-				"end_time":   "",
+				"source_mode": "api",
+				"start_time":  "",
+				"end_time":    "",
 			},
 		},
 		{
@@ -120,10 +121,10 @@ func LegacyTaskDefinitions() []LegacyTaskDefinition {
 			TaskType:    TypeBojunOrderFetch,
 			Queue:       DefaultQueueName,
 			CronExpr:    "",
-			InputTable:  "伯俊 middleretail.query",
+			InputTable:  "伯俊 middleretail.query / YL_OBS.BJ_REPORT_RETAIL_SF",
 			OutputTable: "raw_data / bojun_retail_orders",
 			Handler:     "internal/service/data_svc/bojun_order_service.go",
-			Description: "按开始时间和结束时间补拉伯俊订单；docno 已存在的数据不覆盖，未存在的数据写入并触发后续推送。",
+			Description: "API 模式按接口时间补拉；Oracle 模式按 MODIFIEDDATE 范围补拉且不推进增量水位；docno 已存在的数据不覆盖。",
 			Editable:    true,
 			DefaultPayload: map[string]interface{}{
 				"start_time": "",
@@ -345,8 +346,9 @@ func NewLegacyTask(code string, payload map[string]interface{}) (*asynq.Task, er
 		})
 	case "bojun_order_fetch":
 		return NewBojunOrderFetchTask(BojunOrderFetchPayload{
-			StartTime: stringValue(payload, "start_time"),
-			EndTime:   stringValue(payload, "end_time"),
+			SourceMode: stringValue(payload, "source_mode"),
+			StartTime:  stringValue(payload, "start_time"),
+			EndTime:    stringValue(payload, "end_time"),
 		})
 	case "youzan_sales_push":
 		return NewYouzanSalesSyncTask(YouzanSalesSyncPayload{

@@ -21,7 +21,7 @@ func (b BojunOrderCrontab) Run() {
 	}
 	defer bojunOrderCronRunning.Store(false)
 
-	result, err := data_svc.NewBojunOrderService().SyncRecentOrders(context.Background())
+	result, err := data_svc.NewBojunOrderSourceRouter().SyncRecentOrders(context.Background())
 	if err != nil {
 		logger.Error("伯俊订单拉取失败", zap.Error(err))
 		return
@@ -29,11 +29,16 @@ func (b BojunOrderCrontab) Run() {
 
 	logger.Info(
 		"伯俊订单拉取完成",
+		zap.String("source_mode", result.SourceMode),
 		zap.String("start_time", result.StartTime),
 		zap.String("end_time", result.EndTime),
 		zap.Int("fetch_pages", result.FetchPages),
 		zap.Int("saved_count", result.SavedCount),
 		zap.Int("retail_count", result.RetailCount),
 		zap.Int("failed_count", result.FailedCount),
+		zap.Uint64("watermark_before", result.WatermarkBefore),
+		zap.Uint64("watermark_after", result.WatermarkAfter),
+		zap.Bool("watermark_initialized", result.WatermarkInitialized),
+		zap.Bool("lease_acquired", result.LeaseAcquired),
 	)
 }

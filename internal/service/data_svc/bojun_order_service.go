@@ -52,6 +52,7 @@ type BojunOrderService struct {
 }
 
 type BojunOrderSyncResult struct {
+	SourceMode              string                  `json:"source_mode,omitempty"`
 	StartTime               string                  `json:"start_time"`
 	EndTime                 string                  `json:"end_time"`
 	PageSize                int                     `json:"page_size"`

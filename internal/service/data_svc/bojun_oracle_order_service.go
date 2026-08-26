@@ -200,6 +200,72 @@ func (service *BojunOracleOrderService) SyncIncremental(ctx context.Context) (re
 	return result, nil
 }
 
+func (service *BojunOracleOrderService) PreviewByModifiedTime(ctx context.Context, startTime, endTime string) (*BojunOrderSyncResult, error) {
+	return service.runByModifiedTime(ctx, startTime, endTime, false)
+}
+
+func (service *BojunOracleOrderService) SyncByModifiedTime(ctx context.Context, startTime, endTime string) (*BojunOrderSyncResult, error) {
+	return service.runByModifiedTime(ctx, startTime, endTime, true)
+}
+
+func (service *BojunOracleOrderService) runByModifiedTime(
+	ctx context.Context,
+	startTime string,
+	endTime string,
+	confirmWrite bool,
+) (result *BojunOrderSyncResult, resultErr error) {
+	normalizedStart, normalizedEnd, err := normalizeBojunOrderTimeRange(startTime, endTime)
+	result = &BojunOrderSyncResult{
+		StartTime: normalizedStart, EndTime: normalizedEnd,
+		PageSize: service.batchSize, MaxPages: service.maxPages,
+	}
+	if err != nil {
+		return result, err
+	}
+	start, _ := parseBojunOrderTime(normalizedStart)
+	end, _ := parseBojunOrderTime(normalizedEnd)
+	connection, datasource, err := service.open(ctx)
+	if err != nil {
+		return result, err
+	}
+	defer func() {
+		if closeErr := connection.Close(); closeErr != nil {
+			resultErr = errors.Join(resultErr, fmt.Errorf("close bojun Oracle connection: %w", closeErr))
+		}
+	}()
+	pushSkipConfig, err := service.bojunPushSkipConfig(ctx, confirmWrite)
+	if err != nil {
+		return result, err
+	}
+
+	var afterID uint64
+	for page := 1; page <= service.maxPages; page++ {
+		if err := ctx.Err(); err != nil {
+			return result, err
+		}
+		queryCtx, cancel := reportOracleQueryContext(ctx, *datasource)
+		rows, queryErr := connection.QueryBojunRetailByModifiedTime(queryCtx, start, end, afterID, service.batchSize)
+		cancel()
+		if queryErr != nil {
+			return result, queryErr
+		}
+		result.FetchPages++
+		if len(rows) == 0 {
+			break
+		}
+		for _, row := range rows {
+			if err := service.processRow(ctx, connection, row, page, confirmWrite, result, pushSkipConfig); err != nil {
+				return result, err
+			}
+		}
+		afterID = rows[len(rows)-1].RetailID
+		if len(rows) < service.batchSize {
+			break
+		}
+	}
+	return result, nil
+}
+
 func (service *BojunOracleOrderService) open(ctx context.Context) (bojunOracleConnection, *model.ReportDatasource, error) {
 	if service == nil || service.datasourceStore == nil || service.decryptor == nil || service.openOracle == nil ||
 		service.stateStore == nil || service.rawDataDAO == nil || service.retailOrderDAO == nil || service.now == nil ||

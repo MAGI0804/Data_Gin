@@ -36,6 +36,7 @@ func TestBojunOrderBackfillControllerConfirmEnqueuesBackgroundTask(t *testing.T)
 		t.Fatalf("status=%d body=%s, want %d", recorder.Code, recorder.Body.String(), http.StatusAccepted)
 	}
 	if taskService.code != bojunOrderBackfillTaskCode ||
+		taskService.payload["source_mode"] != "api" ||
 		taskService.payload["start_time"] != "2026-08-10 00:00:00" ||
 		taskService.payload["end_time"] != "2026-08-15 00:00:00" {
 		t.Fatalf("enqueued code=%q payload=%v", taskService.code, taskService.payload)

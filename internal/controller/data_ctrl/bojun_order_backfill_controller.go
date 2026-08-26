@@ -23,6 +23,7 @@ type bojunOrderTaskService interface {
 type BojunOrderBackfillController struct {
 	previewService bojunOrderPreviewService
 	taskService    bojunOrderTaskService
+	sourceMode     string
 }
 
 type bojunOrderBackfillRequest struct {
@@ -31,17 +32,23 @@ type bojunOrderBackfillRequest struct {
 }
 
 func NewBojunOrderBackfillController() *BojunOrderBackfillController {
-	return newBojunOrderBackfillController(
-		data_svc.NewBojunOrderService(),
+	router := data_svc.NewBojunOrderSourceRouter()
+	controller := newBojunOrderBackfillController(
+		router,
 		data_svc.NewLegacyTaskService(),
 	)
+	controller.sourceMode = router.SourceMode()
+	return controller
 }
 
 func newBojunOrderBackfillController(
 	previewService bojunOrderPreviewService,
 	taskService bojunOrderTaskService,
 ) *BojunOrderBackfillController {
-	return &BojunOrderBackfillController{previewService: previewService, taskService: taskService}
+	return &BojunOrderBackfillController{
+		previewService: previewService, taskService: taskService,
+		sourceMode: string(data_svc.BojunOrderSourceAPI),
+	}
 }
 
 func (ctrl *BojunOrderBackfillController) Preview(c *gin.Context) {
@@ -75,8 +82,9 @@ func (ctrl *BojunOrderBackfillController) Confirm(c *gin.Context) {
 	}
 
 	result, err := ctrl.taskService.Enqueue(c.Request.Context(), bojunOrderBackfillTaskCode, map[string]interface{}{
-		"start_time": startTime,
-		"end_time":   endTime,
+		"source_mode": ctrl.sourceMode,
+		"start_time":  startTime,
+		"end_time":    endTime,
 	})
 	if err != nil {
 		c.JSON(http.StatusInternalServerError, msg.ErrResponse("伯俊补拉任务投递失败", err))
