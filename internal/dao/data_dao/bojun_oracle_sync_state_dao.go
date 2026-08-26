@@ -162,6 +162,34 @@ func (dao *BojunOracleSyncStateDAO) Advance(
 	return nil
 }
 
+func (dao *BojunOracleSyncStateDAO) RenewLease(
+	ctx context.Context,
+	sourceCode string,
+	token string,
+	now time.Time,
+	ttl time.Duration,
+) error {
+	sourceCode = strings.TrimSpace(sourceCode)
+	token = strings.TrimSpace(token)
+	if dao == nil || dao.db == nil || ctx == nil || sourceCode == "" || token == "" || now.IsZero() || ttl <= 0 {
+		return gorm.ErrInvalidData
+	}
+	result := dao.db.WithContext(ctx).
+		Model(&model.BojunOracleSyncState{}).
+		Where("source_code = ? AND initialized = ? AND lease_token = ? AND lease_expires_at > ?", sourceCode, true, token, now).
+		Updates(map[string]interface{}{
+			"lease_expires_at": now.Add(ttl),
+			"updated_at":       now.Unix(),
+		})
+	if result.Error != nil {
+		return fmt.Errorf("renew bojun Oracle sync lease: %w", result.Error)
+	}
+	if result.RowsAffected != 1 {
+		return ErrBojunOracleSyncLeaseLost
+	}
+	return nil
+}
+
 func (dao *BojunOracleSyncStateDAO) ReleaseLease(ctx context.Context, sourceCode string, token string, now time.Time) error {
 	sourceCode = strings.TrimSpace(sourceCode)
 	token = strings.TrimSpace(token)

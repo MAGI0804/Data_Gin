@@ -80,6 +80,7 @@ type fakeBojunOracleStateStore struct {
 	leaseAcquired bool
 	advancedFrom  uint64
 	advancedTo    uint64
+	renewCalls    int
 	releaseCalls  int
 }
 
@@ -164,6 +165,11 @@ func (store *fakeBojunOracleStateStore) Advance(_ context.Context, _ string, _ s
 	return nil
 }
 
+func (store *fakeBojunOracleStateStore) RenewLease(context.Context, string, string, time.Time, time.Duration) error {
+	store.renewCalls++
+	return nil
+}
+
 func (store *fakeBojunOracleStateStore) ReleaseLease(context.Context, string, string, time.Time) error {
 	store.releaseCalls++
 	return nil
@@ -227,8 +233,8 @@ func TestBojunOracleIncrementalAdvancesAfterPersistingBatch(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SyncIncremental() error = %v", err)
 	}
-	if connection.queryAfter != 10 || state.advancedFrom != 10 || state.advancedTo != 11 || state.releaseCalls != 1 {
-		t.Fatalf("query/state = after:%d from:%d to:%d releases:%d", connection.queryAfter, state.advancedFrom, state.advancedTo, state.releaseCalls)
+	if connection.queryAfter != 10 || state.advancedFrom != 10 || state.advancedTo != 11 || state.renewCalls != 1 || state.releaseCalls != 1 {
+		t.Fatalf("query/state = after:%d from:%d to:%d renews:%d releases:%d", connection.queryAfter, state.advancedFrom, state.advancedTo, state.renewCalls, state.releaseCalls)
 	}
 	if result.RetailCount != 1 || result.WatermarkAfter != 11 || !result.LeaseAcquired {
 		t.Fatalf("result = %+v", result)

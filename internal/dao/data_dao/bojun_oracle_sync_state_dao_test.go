@@ -18,6 +18,9 @@ func TestBojunOracleSyncStateDAORejectsInvalidLeaseInput(t *testing.T) {
 	if err := dao.Advance(context.Background(), "etl01", "token", 10, 9, now, time.Minute); !errors.Is(err, gorm.ErrInvalidData) {
 		t.Fatalf("Advance() error = %v", err)
 	}
+	if err := dao.RenewLease(context.Background(), "etl01", "token", now, time.Minute); !errors.Is(err, gorm.ErrInvalidData) {
+		t.Fatalf("RenewLease() error = %v", err)
+	}
 	if err := dao.ReleaseLease(context.Background(), "", "token", now); !errors.Is(err, gorm.ErrInvalidData) {
 		t.Fatalf("ReleaseLease() error = %v", err)
 	}

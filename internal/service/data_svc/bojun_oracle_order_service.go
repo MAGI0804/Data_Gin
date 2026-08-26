@@ -49,6 +49,7 @@ type bojunOracleSyncStateStore interface {
 	Get(context.Context, string) (*model.BojunOracleSyncState, error)
 	Initialize(context.Context, string, uint64, time.Time) (*model.BojunOracleSyncState, bool, error)
 	AcquireLease(context.Context, string, string, time.Time, time.Duration) (*model.BojunOracleSyncState, bool, error)
+	RenewLease(context.Context, string, string, time.Time, time.Duration) error
 	Advance(context.Context, string, string, uint64, uint64, time.Time, time.Duration) error
 	ReleaseLease(context.Context, string, string, time.Time) error
 }
@@ -182,6 +183,11 @@ func (service *BojunOracleOrderService) SyncIncremental(ctx context.Context) (re
 		}
 		for _, row := range rows {
 			if err := service.processRow(ctx, connection, row, page, true, result, pushSkipConfig); err != nil {
+				return result, err
+			}
+			if err := service.stateStore.RenewLease(
+				ctx, bojunOracleDatasourceCode, token, service.now(), service.leaseTTL,
+			); err != nil {
 				return result, err
 			}
 		}
