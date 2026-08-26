@@ -2,6 +2,7 @@ package reportoracle
 
 import (
 	"errors"
+	"strings"
 	"testing"
 )
 
@@ -47,9 +48,27 @@ func TestBuildJSONTableCallPlanAcceptsErrorOutput(t *testing.T) {
 	if err != nil {
 		t.Fatalf("BuildJSONTableCallPlan() error = %v", err)
 	}
-	want := "DECLARE error_output_2 VARCHAR2(32767); BEGIN REPORT.PKG_SALES.BUILD_REPORT(P_PAYLOAD => :payload, R_ERROR => error_output_2); IF error_output_2 IS NOT NULL THEN RAISE_APPLICATION_ERROR(-20001, SUBSTR(error_output_2, 1, 500)); END IF; END;"
+	want := "DECLARE error_output_2 VARCHAR2(32767); BEGIN REPORT.PKG_SALES.BUILD_REPORT(P_PAYLOAD => :payload, R_ERROR => error_output_2); IF error_output_2 IS NOT NULL AND TRIM(SUBSTR(error_output_2, 1, 500)) <> '执行成功' THEN RAISE_APPLICATION_ERROR(-20001, SUBSTR(error_output_2, 1, 500)); END IF; END;"
 	if plan.Statement() != want {
 		t.Fatalf("Statement() = %q, want %q", plan.Statement(), want)
+	}
+}
+
+func TestBuildJSONTableCallPlanChecksCLOBErrorOutput(t *testing.T) {
+	plan, err := BuildJSONTableCallPlan(
+		ProcedureRef{Owner: "report", Name: "build_report"},
+		[]ProcedureArgument{
+			{Name: "p_payload", Position: 1, Direction: "IN", DataType: "CLOB"},
+			{Name: "r_error", Position: 2, Direction: "OUT", DataType: "CLOB"},
+		},
+		"p_payload",
+	)
+	if err != nil {
+		t.Fatalf("BuildJSONTableCallPlan() error = %v", err)
+	}
+	want := "IF error_output_2 IS NOT NULL AND TRIM(DBMS_LOB.SUBSTR(error_output_2, 500, 1)) <> '执行成功' THEN RAISE_APPLICATION_ERROR(-20001, DBMS_LOB.SUBSTR(error_output_2, 500, 1)); END IF;"
+	if !strings.Contains(plan.Statement(), want) {
+		t.Fatalf("Statement() = %q, want fragment %q", plan.Statement(), want)
 	}
 }
 

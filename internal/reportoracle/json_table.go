@@ -11,6 +11,8 @@ import (
 	"github.com/godror/godror"
 )
 
+const jsonTableSuccessOutput = "执行成功"
+
 // JSONTableCallPlan is the validated call contract for a procedure that
 // accepts one JSON document and writes rows into a run-scoped result table.
 type JSONTableCallPlan struct {
@@ -61,7 +63,8 @@ func BuildJSONTableCallPlan(ref ProcedureRef, arguments []ProcedureArgument, inp
 		variable := fmt.Sprintf("error_output_%d", index+1)
 		declarations = append(declarations, variable+" "+declarationType+";")
 		bindings = append(bindings, name+" => "+variable)
-		outputChecks = append(outputChecks, "IF "+variable+" IS NOT NULL THEN RAISE_APPLICATION_ERROR(-20001, "+strings.ReplaceAll(messageExpression, "$VALUE", variable)+"); END IF;")
+		messageExpression = strings.ReplaceAll(messageExpression, "$VALUE", variable)
+		outputChecks = append(outputChecks, "IF "+variable+" IS NOT NULL AND TRIM("+messageExpression+") <> '"+jsonTableSuccessOutput+"' THEN RAISE_APPLICATION_ERROR(-20001, "+messageExpression+"); END IF;")
 	}
 	if !inputFound {
 		return JSONTableCallPlan{}, fmt.Errorf("%w: procedure must contain the configured JSON input", ErrUnsupportedBinding)

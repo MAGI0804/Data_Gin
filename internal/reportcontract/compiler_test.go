@@ -144,7 +144,7 @@ func TestCompileJSONInputResultTableAcceptsErrorOutput(t *testing.T) {
 	version.ExecutionMode = model.ReportExecutionModeTableSnapshot
 	version.JSONInputArgName = "P_JSON"
 	version.InputSchemaJSON = model.JSONText(`{"store_id":{"type":"VARCHAR2","displayName":"门店"}}`)
-	version.CallTemplate = "DECLARE error_output_2 VARCHAR2(32767); BEGIN REPORT.PKG.SALES(P_JSON => :payload, R_ERROR => error_output_2); IF error_output_2 IS NOT NULL THEN RAISE_APPLICATION_ERROR(-20001, SUBSTR(error_output_2, 1, 500)); END IF; END;"
+	version.CallTemplate = "DECLARE error_output_2 VARCHAR2(32767); BEGIN REPORT.PKG.SALES(P_JSON => :payload, R_ERROR => error_output_2); IF error_output_2 IS NOT NULL AND TRIM(SUBSTR(error_output_2, 1, 500)) <> '执行成功' THEN RAISE_APPLICATION_ERROR(-20001, SUBSTR(error_output_2, 1, 500)); END IF; END;"
 	arguments := []reportoracle.ProcedureArgument{
 		{Name: "P_JSON", Position: 1, Sequence: 1, Direction: "IN", DataType: "CLOB"},
 		{Name: "R_ERROR", Position: 2, Sequence: 2, Direction: "OUT", DataType: "VARCHAR2"},

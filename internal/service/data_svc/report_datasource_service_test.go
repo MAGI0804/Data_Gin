@@ -398,7 +398,7 @@ func TestReportDatasourceServiceAcceptsJSONInputWithErrorOutput(t *testing.T) {
 	if err != nil {
 		t.Fatalf("GetProcedureSignature() error = %v", err)
 	}
-	want := "DECLARE error_output_2 VARCHAR2(32767); BEGIN REPORT.EXPORT_CURSOR(P_QUERY_JSON => :payload, R_ERROR => error_output_2); IF error_output_2 IS NOT NULL THEN RAISE_APPLICATION_ERROR(-20001, SUBSTR(error_output_2, 1, 500)); END IF; END;"
+	want := "DECLARE error_output_2 VARCHAR2(32767); BEGIN REPORT.EXPORT_CURSOR(P_QUERY_JSON => :payload, R_ERROR => error_output_2); IF error_output_2 IS NOT NULL AND TRIM(SUBSTR(error_output_2, 1, 500)) <> '执行成功' THEN RAISE_APPLICATION_ERROR(-20001, SUBSTR(error_output_2, 1, 500)); END IF; END;"
 	if !signature.AllSupported || !signature.ProtocolReady || signature.CallTemplate != want || !signature.Arguments[0].Supported || !signature.Arguments[1].Supported || signature.Arguments[1].Role != "ERROR_OUTPUT" || len(signature.BlockingReasons) != 0 {
 		t.Fatalf("signature = %+v", signature)
 	}
