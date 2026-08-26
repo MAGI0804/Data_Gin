@@ -173,6 +173,13 @@ type ExcelEmptyCellFill struct {
 	SourceColumn string `json:"sourceColumn"`
 }
 
+// ExcelImportWriteMapping maps one Excel column to one Bojun database field.
+// Legacy single-field configs are normalized into this shape.
+type ExcelImportWriteMapping struct {
+	DBWriteField     string `json:"dbWriteField"`
+	WriteExcelColumn string `json:"writeExcelColumn"`
+}
+
 type ExcelMatchStep struct {
 	Name             string             `json:"name"`
 	Filters          []ExcelMatchFilter `json:"filters,omitempty"`
@@ -198,6 +205,7 @@ type ExcelMatchConfig struct {
 	TableName           string                    `json:"tableName"`
 	DBWriteField        string                    `json:"dbWriteField"`
 	WriteExcelColumn    string                    `json:"writeExcelColumn"`
+	WriteMappings       []ExcelImportWriteMapping `json:"writeMappings,omitempty"`
 	OutputColumnName    string                    `json:"outputColumnName"`
 	Steps               []ExcelMatchStep          `json:"steps,omitempty"`
 	EmptyCellFills      []ExcelEmptyCellFill      `json:"emptyCellFills,omitempty"`
@@ -280,9 +288,10 @@ type ExcelImportUpdater interface {
 		matchField string,
 		writeField string,
 		onlyEmpty bool,
+		allowPendingToShop bool,
 		keys []string,
 	) (map[string]struct{}, error)
-	BatchUpdateByKeys(ctx context.Context, matchField, writeField string, values map[string]string) (int64, error)
+	BatchUpdateFieldsByKeys(ctx context.Context, matchField string, valuesByField map[string]map[string]string) (int64, error)
 }
 
 type databaseExcelMatchLookup struct {
@@ -302,18 +311,18 @@ func (u bojunExcelImportUpdater) FindWritableKeys(
 	matchField string,
 	writeField string,
 	onlyEmpty bool,
+	allowPendingToShop bool,
 	keys []string,
 ) (map[string]struct{}, error) {
-	return u.dao.FindWritableBojunKeys(ctx, matchField, writeField, onlyEmpty, keys)
+	return u.dao.FindWritableBojunKeysForBatch(ctx, matchField, writeField, onlyEmpty, allowPendingToShop, keys)
 }
 
-func (u bojunExcelImportUpdater) BatchUpdateByKeys(
+func (u bojunExcelImportUpdater) BatchUpdateFieldsByKeys(
 	ctx context.Context,
 	matchField string,
-	writeField string,
-	values map[string]string,
+	valuesByField map[string]map[string]string,
 ) (int64, error) {
-	return u.dao.BatchUpdateBojunFieldByKeys(ctx, matchField, writeField, values)
+	return u.dao.BatchUpdateBojunFieldsByKeys(ctx, matchField, valuesByField)
 }
 
 type excelJobSource struct {
@@ -1158,23 +1167,62 @@ func normalizeExcelImportConfig(config ExcelMatchConfig) (ExcelMatchConfig, erro
 	if config.MatchExcelColumn == "" {
 		return config, errors.New("匹配Excel列名不能为空")
 	}
-	if config.DBWriteField == "" {
-		config.DBWriteField = "matched_docno"
-	}
-	if _, ok := allowedBojunImportWriteFields[config.DBWriteField]; !ok {
-		return config, fmt.Errorf("导入写入字段不在白名单: %s", config.DBWriteField)
-	}
-	if _, oracleField := bojunOracleImportWriteFields[config.DBWriteField]; oracleField && config.DBMatchField != "docno" {
-		return config, fmt.Errorf("伯俊 Oracle 字段导入必须使用唯一订单号 docno 匹配")
-	}
 	if config.Operation == excelOperationClearMatched {
 		config.DBWriteField = "matched_docno"
 		config.WriteExcelColumn = ""
-	} else if config.WriteExcelColumn == "" {
-		return config, errors.New("写入值Excel列名不能为空")
+		config.WriteMappings = []ExcelImportWriteMapping{{DBWriteField: "matched_docno"}}
+	} else {
+		mappings, err := normalizeExcelImportWriteMappings(config)
+		if err != nil {
+			return config, err
+		}
+		config.WriteMappings = mappings
+		config.DBWriteField = mappings[0].DBWriteField
+		config.WriteExcelColumn = mappings[0].WriteExcelColumn
 	}
 	config.DryRun = !config.ConfirmWrite
 	return config, nil
+}
+
+func normalizeExcelImportWriteMappings(config ExcelMatchConfig) ([]ExcelImportWriteMapping, error) {
+	mappings := config.WriteMappings
+	if len(mappings) == 0 {
+		writeField := config.DBWriteField
+		if writeField == "" {
+			writeField = "matched_docno"
+		}
+		mappings = []ExcelImportWriteMapping{{
+			DBWriteField:     writeField,
+			WriteExcelColumn: config.WriteExcelColumn,
+		}}
+	}
+	if len(mappings) > len(allowedBojunImportWriteFields) {
+		return nil, fmt.Errorf("导入写入映射不能超过 %d 个", len(allowedBojunImportWriteFields))
+	}
+	normalized := make([]ExcelImportWriteMapping, 0, len(mappings))
+	seenFields := make(map[string]struct{}, len(mappings))
+	hasOracleField := false
+	for index, mapping := range mappings {
+		mapping.DBWriteField = strings.TrimSpace(mapping.DBWriteField)
+		mapping.WriteExcelColumn = strings.TrimSpace(mapping.WriteExcelColumn)
+		if mapping.DBWriteField == "" || mapping.WriteExcelColumn == "" {
+			return nil, fmt.Errorf("第 %d 个写入映射配置不完整", index+1)
+		}
+		if _, ok := allowedBojunImportWriteFields[mapping.DBWriteField]; !ok {
+			return nil, fmt.Errorf("导入写入字段不在白名单: %s", mapping.DBWriteField)
+		}
+		if _, exists := seenFields[mapping.DBWriteField]; exists {
+			return nil, fmt.Errorf("导入写入字段重复: %s", mapping.DBWriteField)
+		}
+		seenFields[mapping.DBWriteField] = struct{}{}
+		_, oracleField := bojunOracleImportWriteFields[mapping.DBWriteField]
+		hasOracleField = hasOracleField || oracleField
+		normalized = append(normalized, mapping)
+	}
+	if hasOracleField && config.DBMatchField != "docno" {
+		return nil, fmt.Errorf("伯俊 Oracle 字段导入必须使用唯一订单号 docno 匹配")
+	}
+	return normalized, nil
 }
 
 func processExcelImportUpdateFileWithProgress(
@@ -1206,12 +1254,12 @@ func processExcelImportUpdateFileWithProgress(
 	var headers []string
 	columnIndexes := map[string]int{}
 	matchColumnIndex := -1
-	writeColumnIndex := -1
+	writeColumnIndexes := make(map[string]int, len(config.WriteMappings))
 	stats := ExcelMatchJobStats{}
 
 	type importRow struct {
-		key   string
-		value string
+		key    string
+		values map[string]string
 	}
 	var buffered []importRow
 
@@ -1219,38 +1267,64 @@ func processExcelImportUpdateFileWithProgress(
 		if len(buffered) == 0 {
 			return nil
 		}
-		uniqueValues := make(map[string]string, len(buffered))
+		uniqueValues := make(map[string]map[string]string, len(buffered))
 		for _, row := range buffered {
-			if previous, exists := uniqueValues[row.key]; exists && previous != row.value {
-				return fmt.Errorf("Excel 匹配键 %q 在同一批次存在冲突写入值", row.key)
+			if previous, exists := uniqueValues[row.key]; exists {
+				for field, value := range row.values {
+					if previous[field] != value {
+						return fmt.Errorf("Excel 匹配键 %q 的字段 %s 在同一批次存在冲突写入值", row.key, field)
+					}
+				}
+				continue
 			}
-			uniqueValues[row.key] = row.value
+			uniqueValues[row.key] = row.values
 		}
 		keys := make([]string, 0, len(uniqueValues))
 		for key := range uniqueValues {
 			keys = append(keys, key)
 		}
-		writable, err := updater.FindWritableKeys(
-			ctx,
-			config.DBMatchField,
-			config.DBWriteField,
-			config.Operation != excelOperationClearMatched,
-			keys,
-		)
-		if err != nil {
-			return err
+		writableByField := make(map[string]map[string]struct{}, len(config.WriteMappings))
+		hasPendingToShop := false
+		for _, mapping := range config.WriteMappings {
+			hasPendingToShop = hasPendingToShop || mapping.DBWriteField == "is_to_shop"
 		}
-		updates := make(map[string]string, len(buffered))
+		for _, mapping := range config.WriteMappings {
+			writable, err := updater.FindWritableKeys(
+				ctx,
+				config.DBMatchField,
+				mapping.DBWriteField,
+				config.Operation != excelOperationClearMatched,
+				hasPendingToShop && mapping.DBWriteField == "oracle_retail_id",
+				keys,
+			)
+			if err != nil {
+				return err
+			}
+			writableByField[mapping.DBWriteField] = writable
+		}
+		updatesByField := make(map[string]map[string]string, len(config.WriteMappings))
 		for _, row := range buffered {
-			if _, ok := writable[row.key]; ok {
+			matched := false
+			for field, value := range row.values {
+				if _, ok := writableByField[field][row.key]; !ok {
+					continue
+				}
+				updates := updatesByField[field]
+				if updates == nil {
+					updates = make(map[string]string)
+					updatesByField[field] = updates
+				}
+				updates[row.key] = value
+				matched = true
+			}
+			if matched {
 				stats.MatchedRows++
-				updates[row.key] = row.value
 			} else {
 				stats.UnmatchedRows++
 			}
 		}
-		if !config.DryRun && len(updates) > 0 {
-			if _, err := updater.BatchUpdateByKeys(ctx, config.DBMatchField, config.DBWriteField, updates); err != nil {
+		if !config.DryRun && len(updatesByField) > 0 {
+			if _, err := updater.BatchUpdateFieldsByKeys(ctx, config.DBMatchField, updatesByField); err != nil {
 				return err
 			}
 		}
@@ -1287,9 +1361,12 @@ func processExcelImportUpdateFileWithProgress(
 				return stats, fmt.Errorf("Excel 缺少匹配列: %s", config.MatchExcelColumn)
 			}
 			if config.Operation != excelOperationClearMatched {
-				writeColumnIndex, ok = columnIndexes[config.WriteExcelColumn]
-				if !ok {
-					return stats, fmt.Errorf("Excel 缺少写入值列: %s", config.WriteExcelColumn)
+				for _, mapping := range config.WriteMappings {
+					writeColumnIndex, ok := columnIndexes[mapping.WriteExcelColumn]
+					if !ok {
+						return stats, fmt.Errorf("Excel 缺少写入值列: %s", mapping.WriteExcelColumn)
+					}
+					writeColumnIndexes[mapping.DBWriteField] = writeColumnIndex
 				}
 			}
 			headerRead = true
@@ -1299,20 +1376,24 @@ func processExcelImportUpdateFileWithProgress(
 		stats.TotalRows++
 		normalized := normalizeExcelRow(columns, len(headers))
 		key := strings.TrimSpace(normalized[matchColumnIndex])
-		value := ""
-		if config.Operation != excelOperationClearMatched {
-			value = strings.TrimSpace(normalized[writeColumnIndex])
-		}
 		if key == "" {
 			stats.UnmatchedRows++
 			stats.ProcessedRows++
 			continue
 		}
-		value, err = normalizeExcelImportWriteValue(config.DBWriteField, value)
-		if err != nil {
-			return stats, fmt.Errorf("Excel 第 %d 行写入值无效: %w", rowNumber, err)
+		values := make(map[string]string, len(config.WriteMappings))
+		for _, mapping := range config.WriteMappings {
+			value := ""
+			if config.Operation != excelOperationClearMatched {
+				value = strings.TrimSpace(normalized[writeColumnIndexes[mapping.DBWriteField]])
+			}
+			value, err = normalizeExcelImportWriteValue(mapping.DBWriteField, value)
+			if err != nil {
+				return stats, fmt.Errorf("Excel 第 %d 行字段 %s 写入值无效: %w", rowNumber, mapping.DBWriteField, err)
+			}
+			values[mapping.DBWriteField] = value
 		}
-		buffered = append(buffered, importRow{key: key, value: value})
+		buffered = append(buffered, importRow{key: key, values: values})
 		if len(buffered) >= config.BatchSize {
 			if err := flush(); err != nil {
 				return stats, err

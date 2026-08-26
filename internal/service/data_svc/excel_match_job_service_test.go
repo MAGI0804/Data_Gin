@@ -35,11 +35,14 @@ func (f *fakeExcelMatchLookup) Lookup(ctx context.Context, step ExcelMatchStep, 
 }
 
 type fakeExcelImportUpdater struct {
-	existing   map[string]struct{}
-	unwritable map[string]struct{}
-	updated    map[string]string
-	keys       []string
-	writes     int
+	existing          map[string]struct{}
+	unwritable        map[string]struct{}
+	unwritableByField map[string]map[string]struct{}
+	updated           map[string]string
+	updatedByField    map[string]map[string]string
+	keys              []string
+	writes            int
+	batchWrites       int
 }
 
 type fakeExcelMatchSchemaValidator struct {
@@ -222,6 +225,7 @@ func (f *fakeExcelImportUpdater) FindWritableKeys(
 	matchField string,
 	writeField string,
 	onlyEmpty bool,
+	allowPendingToShop bool,
 	keys []string,
 ) (map[string]struct{}, error) {
 	f.keys = append(f.keys, keys...)
@@ -232,6 +236,9 @@ func (f *fakeExcelImportUpdater) FindWritableKeys(
 				if _, blocked := f.unwritable[key]; blocked {
 					continue
 				}
+				if _, blocked := f.unwritableByField[writeField][key]; blocked {
+					continue
+				}
 			}
 			result[key] = struct{}{}
 		}
@@ -239,20 +246,33 @@ func (f *fakeExcelImportUpdater) FindWritableKeys(
 	return result, nil
 }
 
-func (f *fakeExcelImportUpdater) BatchUpdateByKeys(
+func (f *fakeExcelImportUpdater) BatchUpdateFieldsByKeys(
 	ctx context.Context,
 	matchField string,
-	writeField string,
-	values map[string]string,
+	valuesByField map[string]map[string]string,
 ) (int64, error) {
-	if f.updated == nil {
-		f.updated = map[string]string{}
+	f.batchWrites++
+	if f.updatedByField == nil {
+		f.updatedByField = map[string]map[string]string{}
 	}
-	for key, value := range values {
-		f.updated[key] = value
-		f.writes++
+	var affected int64
+	for writeField, values := range valuesByField {
+		if f.updatedByField[writeField] == nil {
+			f.updatedByField[writeField] = map[string]string{}
+		}
+		if f.updated == nil && len(valuesByField) == 1 {
+			f.updated = map[string]string{}
+		}
+		for key, value := range values {
+			f.updatedByField[writeField][key] = value
+			if len(valuesByField) == 1 {
+				f.updated[key] = value
+			}
+			f.writes++
+			affected++
+		}
 	}
-	return int64(len(values)), nil
+	return affected, nil
 }
 
 func TestNormalizeExcelMatchConfigRejectsUnknownBojunField(t *testing.T) {
@@ -329,6 +349,92 @@ func TestNormalizeExcelImportConfigAllowsBojunOracleFields(t *testing.T) {
 				t.Fatalf("config=%+v", cfg)
 			}
 		})
+	}
+}
+
+func TestNormalizeExcelImportConfigSupportsMultipleWriteMappings(t *testing.T) {
+	cfg, err := normalizeExcelMatchConfig(ExcelMatchConfig{
+		Operation:        excelOperationImportUpdate,
+		TableName:        bojunRetailOrdersTable,
+		DBMatchField:     "docno",
+		MatchExcelColumn: "订单号",
+		WriteMappings: []ExcelImportWriteMapping{
+			{DBWriteField: "order_phone", WriteExcelColumn: "订单手机号"},
+			{DBWriteField: "paid_amount", WriteExcelColumn: "实付金额"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("normalizeExcelMatchConfig() error=%v", err)
+	}
+	if len(cfg.WriteMappings) != 2 || cfg.DBWriteField != "order_phone" || cfg.WriteExcelColumn != "订单手机号" {
+		t.Fatalf("config=%+v", cfg)
+	}
+}
+
+func TestNormalizeExcelImportConfigMigratesLegacyWriteMapping(t *testing.T) {
+	cfg, err := normalizeExcelMatchConfig(ExcelMatchConfig{
+		Operation:        excelOperationImportUpdate,
+		DBMatchField:     "docno",
+		MatchExcelColumn: "订单号",
+		DBWriteField:     "paid_amount",
+		WriteExcelColumn: "实付金额",
+	})
+	if err != nil {
+		t.Fatalf("normalizeExcelMatchConfig() error=%v", err)
+	}
+	want := []ExcelImportWriteMapping{{DBWriteField: "paid_amount", WriteExcelColumn: "实付金额"}}
+	if !reflect.DeepEqual(cfg.WriteMappings, want) {
+		t.Fatalf("writeMappings=%#v want=%#v", cfg.WriteMappings, want)
+	}
+}
+
+func TestNormalizeExcelImportConfigRejectsInvalidMultipleWriteMappings(t *testing.T) {
+	tests := []struct {
+		name     string
+		mappings []ExcelImportWriteMapping
+		want     string
+	}{
+		{
+			name: "duplicate target field",
+			mappings: []ExcelImportWriteMapping{
+				{DBWriteField: "paid_amount", WriteExcelColumn: "实付金额"},
+				{DBWriteField: "paid_amount", WriteExcelColumn: "支付金额"},
+			},
+			want: "字段重复",
+		},
+		{
+			name:     "incomplete mapping",
+			mappings: []ExcelImportWriteMapping{{DBWriteField: "paid_amount"}},
+			want:     "配置不完整",
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := normalizeExcelMatchConfig(ExcelMatchConfig{
+				Operation:        excelOperationImportUpdate,
+				DBMatchField:     "docno",
+				MatchExcelColumn: "订单号",
+				WriteMappings:    tt.mappings,
+			})
+			if err == nil || !strings.Contains(err.Error(), tt.want) {
+				t.Fatalf("error=%v want substring %q", err, tt.want)
+			}
+		})
+	}
+}
+
+func TestNormalizeExcelImportConfigAllowsOracleRetailIDWithShopFlag(t *testing.T) {
+	_, err := normalizeExcelMatchConfig(ExcelMatchConfig{
+		Operation:        excelOperationImportUpdate,
+		DBMatchField:     "docno",
+		MatchExcelColumn: "订单号",
+		WriteMappings: []ExcelImportWriteMapping{
+			{DBWriteField: "is_to_shop", WriteExcelColumn: "是否到店"},
+			{DBWriteField: "oracle_retail_id", WriteExcelColumn: "Oracle零售ID"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("normalizeExcelMatchConfig() error=%v", err)
 	}
 }
 
@@ -1812,6 +1918,113 @@ func TestProcessExcelImportUpdateFileUpdatesMatchedRowsOnly(t *testing.T) {
 	}
 }
 
+func TestProcessExcelImportUpdateFileWritesMultipleEligibleColumnsOnce(t *testing.T) {
+	dir := t.TempDir()
+	inputPath := filepath.Join(dir, "source.xlsx")
+	f := excelize.NewFile()
+	sheet := f.GetSheetName(0)
+	rows := [][]interface{}{
+		{"订单号", "订单手机号", "实付金额", "推送金额", "是否到店", "Oracle零售ID"},
+		{"B001", "18616613488", "470.83", "80", "y", "45077"},
+	}
+	for i, row := range rows {
+		cell, _ := excelize.CoordinatesToCellName(1, i+1)
+		if err := f.SetSheetRow(sheet, cell, &row); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := f.SaveAs(inputPath); err != nil {
+		t.Fatal(err)
+	}
+
+	cfg, err := normalizeExcelMatchConfig(ExcelMatchConfig{
+		Operation:        excelOperationImportUpdate,
+		SheetName:        "Sheet1",
+		DBMatchField:     "docno",
+		MatchExcelColumn: "订单号",
+		ConfirmWrite:     true,
+		WriteMappings: []ExcelImportWriteMapping{
+			{DBWriteField: "order_phone", WriteExcelColumn: "订单手机号"},
+			{DBWriteField: "paid_amount", WriteExcelColumn: "实付金额"},
+			{DBWriteField: "push_amount", WriteExcelColumn: "推送金额"},
+			{DBWriteField: "is_to_shop", WriteExcelColumn: "是否到店"},
+			{DBWriteField: "oracle_retail_id", WriteExcelColumn: "Oracle零售ID"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	updater := &fakeExcelImportUpdater{existing: map[string]struct{}{"B001": {}}}
+	stats, err := processExcelImportUpdateFileWithProgress(t.Context(), inputPath, cfg, updater, nil)
+	if err != nil {
+		t.Fatalf("processExcelImportUpdateFileWithProgress() error=%v", err)
+	}
+	if stats.MatchedRows != 1 || stats.UnmatchedRows != 0 || updater.batchWrites != 1 {
+		t.Fatalf("stats=%+v batchWrites=%d", stats, updater.batchWrites)
+	}
+	want := map[string]map[string]string{
+		"order_phone":      {"B001": "18616613488"},
+		"paid_amount":      {"B001": "470.83"},
+		"push_amount":      {"B001": "80"},
+		"is_to_shop":       {"B001": "Y"},
+		"oracle_retail_id": {"B001": "45077"},
+	}
+	if !reflect.DeepEqual(updater.updatedByField, want) {
+		t.Fatalf("updatedByField=%#v want=%#v", updater.updatedByField, want)
+	}
+}
+
+func TestProcessExcelImportUpdateFileCountsRowWhenAnyColumnIsWritable(t *testing.T) {
+	dir := t.TempDir()
+	inputPath := filepath.Join(dir, "source.xlsx")
+	f := excelize.NewFile()
+	sheet := f.GetSheetName(0)
+	rows := [][]interface{}{
+		{"订单号", "订单手机号", "实付金额"},
+		{"B001", "18616613488", "470.83"},
+	}
+	for i, row := range rows {
+		cell, _ := excelize.CoordinatesToCellName(1, i+1)
+		if err := f.SetSheetRow(sheet, cell, &row); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := f.SaveAs(inputPath); err != nil {
+		t.Fatal(err)
+	}
+	cfg, err := normalizeExcelMatchConfig(ExcelMatchConfig{
+		Operation:        excelOperationImportUpdate,
+		SheetName:        "Sheet1",
+		DBMatchField:     "docno",
+		MatchExcelColumn: "订单号",
+		ConfirmWrite:     true,
+		WriteMappings: []ExcelImportWriteMapping{
+			{DBWriteField: "order_phone", WriteExcelColumn: "订单手机号"},
+			{DBWriteField: "paid_amount", WriteExcelColumn: "实付金额"},
+		},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	updater := &fakeExcelImportUpdater{
+		existing: map[string]struct{}{"B001": {}},
+		unwritableByField: map[string]map[string]struct{}{
+			"order_phone": {"B001": {}},
+		},
+	}
+	stats, err := processExcelImportUpdateFileWithProgress(t.Context(), inputPath, cfg, updater, nil)
+	if err != nil {
+		t.Fatalf("processExcelImportUpdateFileWithProgress() error=%v", err)
+	}
+	if stats.MatchedRows != 1 || stats.UnmatchedRows != 0 {
+		t.Fatalf("stats=%+v", stats)
+	}
+	want := map[string]map[string]string{"paid_amount": {"B001": "470.83"}}
+	if !reflect.DeepEqual(updater.updatedByField, want) {
+		t.Fatalf("updatedByField=%#v want=%#v", updater.updatedByField, want)
+	}
+}
+
 func TestProcessExcelImportUpdateFileDryRunDoesNotWrite(t *testing.T) {
 	dir := t.TempDir()
 	inputPath := filepath.Join(dir, "source.xlsx")
@@ -1965,7 +2178,7 @@ func TestProcessExcelImportUpdateFileRejectsInvalidOrConflictingCompletedAt(t *t
 				{"订单号", "订单完成时间"},
 				{"B001", "2026/07/11 10:31:22"},
 			},
-			wantError: "第 2 行写入值无效",
+			wantError: "第 2 行字段 completed_at 写入值无效",
 		},
 		{
 			name: "same key conflicting values",
@@ -1974,7 +2187,7 @@ func TestProcessExcelImportUpdateFileRejectsInvalidOrConflictingCompletedAt(t *t
 				{"B001", "2026-07-11 10:31:22"},
 				{"B001", "2026-07-11 10:31:23"},
 			},
-			wantError: "匹配键 \"B001\" 在同一批次存在冲突写入值",
+			wantError: "匹配键 \"B001\" 的字段 completed_at 在同一批次存在冲突写入值",
 		},
 	}
 	for _, test := range tests {

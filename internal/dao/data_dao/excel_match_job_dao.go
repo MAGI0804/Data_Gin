@@ -604,6 +604,17 @@ func (dao *ExcelMatchJobDAO) FindWritableBojunKeys(
 	onlyEmpty bool,
 	keys []string,
 ) (map[string]struct{}, error) {
+	return dao.FindWritableBojunKeysForBatch(ctx, matchField, writeField, onlyEmpty, false, keys)
+}
+
+func (dao *ExcelMatchJobDAO) FindWritableBojunKeysForBatch(
+	ctx context.Context,
+	matchField string,
+	writeField string,
+	onlyEmpty bool,
+	allowPendingToShop bool,
+	keys []string,
+) (map[string]struct{}, error) {
 	result := make(map[string]struct{}, len(keys))
 	if len(keys) == 0 {
 		return result, nil
@@ -621,6 +632,9 @@ func (dao *ExcelMatchJobDAO) FindWritableBojunKeys(
 		emptyCondition, ok := bojunExcelEmptyWriteCondition(writeField)
 		if !ok {
 			return nil, fmt.Errorf("bojun update field is not allowed")
+		}
+		if writeField == "oracle_retail_id" && allowPendingToShop {
+			emptyCondition = "oracle_retail_id IS NULL AND (is_to_shop IN ('Y', 'N') OR is_to_shop IS NULL OR is_to_shop = '')"
 		}
 		query += " AND " + emptyCondition
 	} else if writeField != "matched_docno" {
@@ -648,57 +662,96 @@ func (dao *ExcelMatchJobDAO) FindWritableBojunKeys(
 }
 
 func (dao *ExcelMatchJobDAO) BatchUpdateBojunFieldByKeys(ctx context.Context, matchField, writeField string, values map[string]string) (int64, error) {
-	if len(values) == 0 {
+	return dao.BatchUpdateBojunFieldsByKeys(ctx, matchField, map[string]map[string]string{writeField: values})
+}
+
+func (dao *ExcelMatchJobDAO) BatchUpdateBojunFieldsByKeys(
+	ctx context.Context,
+	matchField string,
+	valuesByField map[string]map[string]string,
+) (int64, error) {
+	if len(valuesByField) == 0 {
 		return 0, nil
 	}
 	if !isAllowedBojunExcelField(matchField) {
 		return 0, fmt.Errorf("bojun update field is not allowed")
 	}
-	emptyCondition, writeFieldAllowed := bojunExcelEmptyWriteCondition(writeField)
-	if !writeFieldAllowed {
-		return 0, fmt.Errorf("bojun update field is not allowed")
-	}
-
-	keys := make([]string, 0, len(values))
-	for key := range values {
-		keys = append(keys, key)
-	}
-	sort.Strings(keys)
-	caseSQL := strings.Builder{}
-	args := make([]interface{}, 0, len(values)*2+2)
-	for _, key := range keys {
-		value := values[key]
-		writeValue, err := bojunExcelWriteValue(writeField, value)
-		if err != nil {
-			return 0, err
+	writeFields := make([]string, 0, len(valuesByField))
+	allKeys := make(map[string]struct{})
+	for writeField, values := range valuesByField {
+		if len(values) == 0 {
+			continue
 		}
-		caseSQL.WriteString(" WHEN ? THEN ?")
-		args = append(args, key, writeValue)
+		if _, allowed := bojunExcelEmptyWriteCondition(writeField); !allowed {
+			return 0, fmt.Errorf("bojun update field is not allowed")
+		}
+		writeFields = append(writeFields, writeField)
+		for key := range values {
+			allKeys[key] = struct{}{}
+		}
 	}
-	args = append(args, time.Now().Unix(), keys)
-
-	query := fmt.Sprintf(
-		"UPDATE bojun_retail_orders SET `%s` = CASE `%s`%s ELSE `%s` END, updated_at = ? WHERE `%s` IN ?",
-		writeField,
-		matchField,
-		caseSQL.String(),
-		writeField,
-		matchField,
-	)
-	if writeField == "matched_docno" {
-		allEmpty := true
+	if len(writeFields) == 0 {
+		return 0, nil
+	}
+	sort.Slice(writeFields, func(i, j int) bool {
+		if writeFields[i] == "oracle_retail_id" {
+			return false
+		}
+		if writeFields[j] == "oracle_retail_id" {
+			return true
+		}
+		return writeFields[i] < writeFields[j]
+	})
+	assignments := make([]string, 0, len(writeFields)+1)
+	args := make([]interface{}, 0, len(allKeys)*len(writeFields)*2+2)
+	whereClauses := make([]string, 0, len(writeFields))
+	whereArgs := make([]interface{}, 0, len(writeFields))
+	_, updatingToShop := valuesByField["is_to_shop"]
+	for _, writeField := range writeFields {
+		values := valuesByField[writeField]
+		keys := make([]string, 0, len(values))
+		for key := range values {
+			keys = append(keys, key)
+		}
+		sort.Strings(keys)
+		caseSQL := strings.Builder{}
+		for _, key := range keys {
+			writeValue, err := bojunExcelWriteValue(writeField, values[key])
+			if err != nil {
+				return 0, err
+			}
+			caseSQL.WriteString(" WHEN ? THEN ?")
+			args = append(args, key, writeValue)
+		}
+		emptyCondition, _ := bojunExcelEmptyWriteCondition(writeField)
+		if writeField == "oracle_retail_id" && updatingToShop {
+			emptyCondition = "oracle_retail_id IS NULL AND (is_to_shop IN ('Y', 'N') OR is_to_shop IS NULL OR is_to_shop = '')"
+		}
+		allEmpty := writeField == "matched_docno"
 		for _, value := range values {
 			if value != "" {
 				allEmpty = false
 				break
 			}
 		}
+		caseExpression := fmt.Sprintf("CASE `%s`%s ELSE `%s` END", matchField, caseSQL.String(), writeField)
 		if !allEmpty {
-			query += " AND " + emptyCondition
+			caseExpression = fmt.Sprintf("CASE WHEN %s THEN %s ELSE `%s` END", emptyCondition, caseExpression, writeField)
+		} else {
+			emptyCondition = "1 = 1"
 		}
-	} else {
-		query += " AND " + emptyCondition
+		assignments = append(assignments, fmt.Sprintf("`%s` = %s", writeField, caseExpression))
+		whereClauses = append(whereClauses, fmt.Sprintf("(`%s` IN ? AND %s)", matchField, emptyCondition))
+		whereArgs = append(whereArgs, keys)
 	}
+	assignments = append(assignments, "updated_at = ?")
+	args = append(args, time.Now().Unix())
+	args = append(args, whereArgs...)
+	query := fmt.Sprintf(
+		"UPDATE bojun_retail_orders SET %s WHERE %s",
+		strings.Join(assignments, ", "),
+		strings.Join(whereClauses, " OR "),
+	)
 	result := dao.db.WithContext(ctx).Exec(query, args...)
 	return result.RowsAffected, result.Error
 }

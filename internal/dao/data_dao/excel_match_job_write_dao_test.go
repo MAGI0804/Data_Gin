@@ -32,9 +32,9 @@ func TestExcelMatchJobDAOBatchUpdateBojunCompletedAtUsesTypedNullOnlyUpdate(t *t
 	}
 	for _, fragment := range []string{
 		"UPDATE bojun_retail_orders",
-		"SET `completed_at` = CASE `docno` WHEN ? THEN ? ELSE `completed_at` END",
+		"SET `completed_at` = CASE WHEN completed_at IS NULL THEN CASE `docno` WHEN ? THEN ? ELSE `completed_at` END ELSE `completed_at` END",
 		"updated_at = ?",
-		"WHERE `docno` IN (?)",
+		"WHERE (`docno` IN (?) AND completed_at IS NULL)",
 		"completed_at IS NULL",
 	} {
 		if !strings.Contains(statement, fragment) {
@@ -48,6 +48,47 @@ func TestExcelMatchJobDAOBatchUpdateBojunCompletedAtUsesTypedNullOnlyUpdate(t *t
 	if !ok || completedAt.Format("2006-01-02 15:04:05") != "2026-07-11 10:31:22" ||
 		completedAt.Location().String() != "Asia/Shanghai" {
 		t.Fatalf("completed_at var=%#v", statementVars[1])
+	}
+}
+
+func TestExcelMatchJobDAOBatchUpdateBojunWritesMultipleFieldsInOneStatement(t *testing.T) {
+	t.Parallel()
+	db := dryRunWeatherDAOTestDB(t)
+	var statement string
+	var statementVars []interface{}
+	if err := db.Callback().Raw().After("gorm:raw").Register("test:capture_excel_bojun_multi_write_sql", func(tx *gorm.DB) {
+		statement = tx.Statement.SQL.String()
+		statementVars = append([]interface{}{}, tx.Statement.Vars...)
+	}); err != nil {
+		t.Fatalf("register SQL capture callback: %v", err)
+	}
+
+	_, err := (&ExcelMatchJobDAO{db: db}).BatchUpdateBojunFieldsByKeys(
+		t.Context(),
+		"docno",
+		map[string]map[string]string{
+			"is_to_shop":       {"B001": "Y"},
+			"oracle_retail_id": {"B001": "45077"},
+		},
+	)
+	if err != nil {
+		t.Fatalf("BatchUpdateBojunFieldsByKeys() error=%v", err)
+	}
+	for _, fragment := range []string{
+		"UPDATE bojun_retail_orders SET",
+		"`is_to_shop` = CASE WHEN (is_to_shop IS NULL OR is_to_shop = '')",
+		"`oracle_retail_id` = CASE WHEN oracle_retail_id IS NULL AND (is_to_shop IN ('Y', 'N') OR is_to_shop IS NULL OR is_to_shop = '')",
+		"WHERE (`docno` IN (?) AND (is_to_shop IS NULL OR is_to_shop = '')) OR (`docno` IN (?) AND oracle_retail_id IS NULL",
+	} {
+		if !strings.Contains(statement, fragment) {
+			t.Fatalf("statement missing %q: %s", fragment, statement)
+		}
+	}
+	if strings.Count(statement, "UPDATE bojun_retail_orders") != 1 {
+		t.Fatalf("statement=%s", statement)
+	}
+	if len(statementVars) != 7 || statementVars[1] != "Y" || statementVars[3] != uint64(45077) {
+		t.Fatalf("vars=%#v", statementVars)
 	}
 }
 
