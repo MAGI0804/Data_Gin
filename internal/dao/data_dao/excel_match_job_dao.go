@@ -5,12 +5,12 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
-	"math"
 	"regexp"
 	"sort"
 	"strconv"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"gin-biz-web-api/model"
 	"gin-biz-web-api/pkg/database"
@@ -57,6 +57,7 @@ var allowedBojunExcelFields = map[string]struct{}{
 }
 
 var excelSQLIdentifierPattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+var bojunExcelDecimalValuePattern = regexp.MustCompile(`^[+-]?(?:0|[1-9][0-9]{0,15})(?:\.[0-9]{1,2})?$`)
 
 func NewExcelMatchJobDAO() *ExcelMatchJobDAO {
 	return &ExcelMatchJobDAO{db: database.DB}
@@ -726,7 +727,7 @@ func bojunExcelEmptyWriteCondition(writeField string) (string, bool) {
 	case "completed_at":
 		return "completed_at IS NULL", true
 	case "oracle_retail_id":
-		return "oracle_retail_id IS NULL", true
+		return "oracle_retail_id IS NULL AND is_to_shop IN ('Y', 'N')", true
 	case "order_phone":
 		return "(order_phone IS NULL OR order_phone = '')", true
 	case "paid_amount":
@@ -757,13 +758,15 @@ func bojunExcelWriteValue(writeField, value string) (interface{}, error) {
 		if value == "" {
 			return nil, fmt.Errorf("bojun order_phone value is required")
 		}
+		if utf8.RuneCountInString(value) > 64 {
+			return nil, fmt.Errorf("bojun order_phone value exceeds 64 characters")
+		}
 		return value, nil
 	case "paid_amount", "push_amount":
-		parsed, err := strconv.ParseFloat(value, 64)
-		if err != nil || math.IsNaN(parsed) || math.IsInf(parsed, 0) {
-			return nil, fmt.Errorf("bojun %s value must be a number", writeField)
+		if !bojunExcelDecimalValuePattern.MatchString(value) {
+			return nil, fmt.Errorf("bojun %s value must fit decimal(18,2)", writeField)
 		}
-		return parsed, nil
+		return strings.TrimPrefix(value, "+"), nil
 	case "is_to_shop":
 		normalized := strings.ToUpper(value)
 		if normalized != "Y" && normalized != "N" {

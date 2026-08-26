@@ -332,6 +332,20 @@ func TestNormalizeExcelImportConfigAllowsBojunOracleFields(t *testing.T) {
 	}
 }
 
+func TestNormalizeExcelImportConfigRequiresDocNoForBojunOracleFields(t *testing.T) {
+	_, err := normalizeExcelMatchConfig(ExcelMatchConfig{
+		Operation:        excelOperationImportUpdate,
+		TableName:        "bojun_retail_orders",
+		DBMatchField:     "otherdocno",
+		MatchExcelColumn: "外部订单号",
+		DBWriteField:     "oracle_retail_id",
+		WriteExcelColumn: "M_RETAIL_ID",
+	})
+	if err == nil || !strings.Contains(err.Error(), "docno") {
+		t.Fatalf("normalizeExcelMatchConfig() error=%v, want docno requirement", err)
+	}
+}
+
 func TestNormalizeExcelImportWriteValueValidatesBojunOracleFields(t *testing.T) {
 	tests := []struct {
 		name       string
@@ -344,7 +358,11 @@ func TestNormalizeExcelImportWriteValueValidatesBojunOracleFields(t *testing.T) 
 		{name: "oracle retail id rejects zero", writeField: "oracle_retail_id", value: "0", wantError: true},
 		{name: "order phone", writeField: "order_phone", value: "18616613488", want: "18616613488"},
 		{name: "order phone rejects empty", writeField: "order_phone", wantError: true},
-		{name: "paid amount removes grouping", writeField: "paid_amount", value: "1,234.50", want: "1234.5"},
+		{name: "order phone rejects overlong value", writeField: "order_phone", value: strings.Repeat("1", 65), wantError: true},
+		{name: "paid amount removes grouping", writeField: "paid_amount", value: "1,234.50", want: "1234.50"},
+		{name: "paid amount rejects malformed grouping", writeField: "paid_amount", value: "1,00", wantError: true},
+		{name: "paid amount rejects excess scale", writeField: "paid_amount", value: "12.345", wantError: true},
+		{name: "paid amount rejects excess precision", writeField: "paid_amount", value: "12345678901234567.89", wantError: true},
 		{name: "push amount rejects text", writeField: "push_amount", value: "invalid", wantError: true},
 		{name: "shop flag normalizes case", writeField: "is_to_shop", value: "y", want: "Y"},
 		{name: "shop flag rejects unknown", writeField: "is_to_shop", value: "yes", wantError: true},

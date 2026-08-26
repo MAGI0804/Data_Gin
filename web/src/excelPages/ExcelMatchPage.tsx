@@ -632,7 +632,7 @@ export function ExcelMatchPage({
       <button type="button" disabled={!selectedImportSchemeID || loading} onClick={(event) => { const form = event.currentTarget.form; if (form?.reportValidity()) beginSchemeSave(form, 'import_update', 'current') }}>保存到当前方案</button><button type="button" disabled={loading} onClick={(event) => { const form = event.currentTarget.form; if (form?.reportValidity()) beginSchemeSave(form, 'import_update', 'new') }}>另存为新方案</button>
       <label className={styles.fileInputLabel}>Excel 文件<input name="file" type="file" accept=".xlsx,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" onChange={(event) => { setSelectedImportFileName(event.currentTarget.files?.[0]?.name ?? ''); clearUploadRef('import') }} /><span>{selectedImportFileName || '请选择需要导入更新的 .xlsx 文件'}</span></label>
       <Field label="Sheet 页名称" name="sheetName" defaultValue={importDefaults.sheetName} /><label>匹配表名<select name="tableName" defaultValue={importDefaults.tableName}><option value="bojun_retail_orders">伯俊零售单 bojun_retail_orders</option></select></label><label>数据库匹配字段<select name="dbMatchField" defaultValue={importDefaults.dbMatchField}>{bojunMatchFieldOptions.map((option) => <option value={option.value} key={option.value}>{option.label}</option>)}</select></label><Field label="Excel 匹配列名" name="matchExcelColumn" defaultValue={importDefaults.matchExcelColumn} /><label>写入字段<select name="dbWriteField" defaultValue={importDefaults.dbWriteField}>{bojunImportWriteFieldOptions.map((option) => <option value={option.value} key={option.value}>{option.label}</option>)}</select></label><Field label="Excel 写入值列名" name="writeExcelColumn" defaultValue={importDefaults.writeExcelColumn} /><Field label="批量更新大小" name="batchSize" defaultValue={importDefaults.batchSize} />
-      <label className={styles.checkboxLabel}><input name="confirmWrite" type="checkbox" />确认写入数据库</label><p className={styles.modeNote}>不勾选时只预检匹配数量，不写库；导入只填充目标空值，金额字段仅填当前为 0 的记录；金额必须为数字，是否到店必须为 Y 或 N。</p>{uploadProgress && <p className={styles.modeNote} role="status" aria-live="polite">{uploadProgress}</p>}<div className={styles.formActions}><button className={styles.primary} type="submit" disabled={loading}><Upload aria-hidden="true" />创建预检/导入任务</button></div>
+      <label className={styles.checkboxLabel}><input name="confirmWrite" type="checkbox" />确认写入数据库</label><p className={styles.modeNote}>不勾选时只预检匹配数量，不写库；新增 Oracle 字段必须用 docno 匹配并只填目标空值，金额字段仅填当前为 0 的记录；请最后导入 oracle_retail_id。</p>{uploadProgress && <p className={styles.modeNote} role="status" aria-live="polite">{uploadProgress}</p>}<div className={styles.formActions}><button className={styles.primary} type="submit" disabled={loading}><Upload aria-hidden="true" />创建预检/导入任务</button></div>
     </form>
   }
 
@@ -1001,7 +1001,7 @@ export function ExcelMatchPage({
               确认写入数据库
             </label>
             <p className={styles.modeNote}>
-              不勾选时只预检匹配数量，不写库；导入只填充目标空值，金额字段仅填当前为 0 的记录；金额必须为数字，是否到店必须为 Y 或 N。
+              不勾选时只预检匹配数量，不写库；新增 Oracle 字段必须用 docno 匹配并只填目标空值，金额字段仅填当前为 0 的记录；请最后导入 oracle_retail_id。
             </p>
             {uploadProgress && <p className={styles.modeNote}>{uploadProgress}</p>}
             <div className={styles.formActions}>

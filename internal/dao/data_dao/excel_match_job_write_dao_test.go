@@ -86,10 +86,10 @@ func TestBojunExcelImportWriteFieldsUseTypedValuesAndEmptyOnlyConditions(t *test
 		wantValue     interface{}
 		wantCondition string
 	}{
-		{name: "oracle retail id", writeField: "oracle_retail_id", value: "45077", wantValue: uint64(45077), wantCondition: "oracle_retail_id IS NULL"},
+		{name: "oracle retail id", writeField: "oracle_retail_id", value: "45077", wantValue: uint64(45077), wantCondition: "oracle_retail_id IS NULL AND is_to_shop IN ('Y', 'N')"},
 		{name: "order phone", writeField: "order_phone", value: "18616613488", wantValue: "18616613488", wantCondition: "(order_phone IS NULL OR order_phone = '')"},
-		{name: "paid amount", writeField: "paid_amount", value: "470.83", wantValue: 470.83, wantCondition: "paid_amount = 0"},
-		{name: "push amount", writeField: "push_amount", value: "80", wantValue: float64(80), wantCondition: "push_amount = 0"},
+		{name: "paid amount", writeField: "paid_amount", value: "470.83", wantValue: "470.83", wantCondition: "paid_amount = 0"},
+		{name: "push amount", writeField: "push_amount", value: "80", wantValue: "80", wantCondition: "push_amount = 0"},
 		{name: "shop flag", writeField: "is_to_shop", value: "y", wantValue: "Y", wantCondition: "(is_to_shop IS NULL OR is_to_shop = '')"},
 	}
 	for _, tt := range tests {
@@ -118,8 +118,10 @@ func TestBojunExcelImportWriteFieldsRejectInvalidValues(t *testing.T) {
 	}{
 		{name: "oracle retail id zero", writeField: "oracle_retail_id", value: "0"},
 		{name: "order phone empty", writeField: "order_phone", value: ""},
+		{name: "order phone overlong", writeField: "order_phone", value: strings.Repeat("1", 65)},
 		{name: "paid amount text", writeField: "paid_amount", value: "invalid"},
-		{name: "push amount infinity", writeField: "push_amount", value: "+Inf"},
+		{name: "paid amount excess scale", writeField: "paid_amount", value: "12.345"},
+		{name: "push amount excess precision", writeField: "push_amount", value: "12345678901234567.89"},
 		{name: "shop flag unknown", writeField: "is_to_shop", value: "yes"},
 	}
 	for _, tt := range tests {
@@ -128,5 +130,34 @@ func TestBojunExcelImportWriteFieldsRejectInvalidValues(t *testing.T) {
 				t.Fatal("bojunExcelWriteValue() error=nil")
 			}
 		})
+	}
+}
+
+func TestExcelMatchJobDAOBatchUpdateBojunPaidAmountUsesDecimalString(t *testing.T) {
+	t.Parallel()
+	db := dryRunWeatherDAOTestDB(t)
+	var statement string
+	var statementVars []interface{}
+	if err := db.Callback().Raw().After("gorm:raw").Register("test:capture_excel_bojun_paid_amount_sql", func(tx *gorm.DB) {
+		statement = tx.Statement.SQL.String()
+		statementVars = append([]interface{}{}, tx.Statement.Vars...)
+	}); err != nil {
+		t.Fatalf("register SQL capture callback: %v", err)
+	}
+
+	_, err := (&ExcelMatchJobDAO{db: db}).BatchUpdateBojunFieldByKeys(
+		t.Context(),
+		"docno",
+		"paid_amount",
+		map[string]string{"B001": "470.83"},
+	)
+	if err != nil {
+		t.Fatalf("BatchUpdateBojunFieldByKeys() error=%v", err)
+	}
+	if !strings.Contains(statement, "paid_amount = 0") {
+		t.Fatalf("statement=%s", statement)
+	}
+	if len(statementVars) != 4 || statementVars[1] != "470.83" {
+		t.Fatalf("vars=%#v", statementVars)
 	}
 }

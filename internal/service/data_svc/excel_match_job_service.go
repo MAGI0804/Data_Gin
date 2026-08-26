@@ -8,14 +8,15 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"math"
 	"mime/multipart"
 	"os"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
+	"unicode/utf8"
 
 	"gin-biz-web-api/global"
 	"gin-biz-web-api/internal/dao/data_dao"
@@ -113,6 +114,17 @@ var allowedBojunImportWriteFields = map[string]struct{}{
 	"push_amount":      {},
 	"is_to_shop":       {},
 }
+
+var bojunOracleImportWriteFields = map[string]struct{}{
+	"oracle_retail_id": {},
+	"order_phone":      {},
+	"paid_amount":      {},
+	"push_amount":      {},
+	"is_to_shop":       {},
+}
+
+var bojunExcelDecimalPattern = regexp.MustCompile(`^[+-]?(?:0|[1-9][0-9]{0,15})(?:\.[0-9]{1,2})?$`)
+var bojunExcelGroupedDecimalPattern = regexp.MustCompile(`^[+-]?[1-9][0-9]{0,2}(?:,[0-9]{3})+(?:\.[0-9]{1,2})?$`)
 
 var allowedExcelExportColumnFormats = map[string]struct{}{
 	"text":    {},
@@ -1152,6 +1164,9 @@ func normalizeExcelImportConfig(config ExcelMatchConfig) (ExcelMatchConfig, erro
 	if _, ok := allowedBojunImportWriteFields[config.DBWriteField]; !ok {
 		return config, fmt.Errorf("导入写入字段不在白名单: %s", config.DBWriteField)
 	}
+	if _, oracleField := bojunOracleImportWriteFields[config.DBWriteField]; oracleField && config.DBMatchField != "docno" {
+		return config, fmt.Errorf("伯俊 Oracle 字段导入必须使用唯一订单号 docno 匹配")
+	}
 	if config.Operation == excelOperationClearMatched {
 		config.DBWriteField = "matched_docno"
 		config.WriteExcelColumn = ""
@@ -1338,13 +1353,16 @@ func normalizeExcelImportWriteValue(writeField, value string) (string, error) {
 		if value == "" {
 			return "", errors.New("订单手机号不能为空")
 		}
+		if utf8.RuneCountInString(value) > 64 {
+			return "", errors.New("订单手机号不能超过 64 个字符")
+		}
 		return value, nil
 	case "paid_amount", "push_amount":
-		number, err := strconv.ParseFloat(strings.ReplaceAll(value, ",", ""), 64)
-		if err != nil || math.IsNaN(number) || math.IsInf(number, 0) {
-			return "", errors.New("金额必须为有效数字")
+		normalized, ok := normalizeBojunExcelDecimal(value)
+		if !ok {
+			return "", errors.New("金额必须为最多 16 位整数、2 位小数的有效数字")
 		}
-		return strconv.FormatFloat(number, 'f', -1, 64), nil
+		return normalized, nil
 	case "is_to_shop":
 		normalized := strings.ToUpper(value)
 		if normalized != "Y" && normalized != "N" {
@@ -1354,6 +1372,19 @@ func normalizeExcelImportWriteValue(writeField, value string) (string, error) {
 	default:
 		return "", fmt.Errorf("暂不支持导入写入字段: %s", writeField)
 	}
+}
+
+func normalizeBojunExcelDecimal(value string) (string, bool) {
+	if strings.Contains(value, ",") {
+		if !bojunExcelGroupedDecimalPattern.MatchString(value) {
+			return "", false
+		}
+		value = strings.ReplaceAll(value, ",", "")
+	}
+	if !bojunExcelDecimalPattern.MatchString(value) {
+		return "", false
+	}
+	return strings.TrimPrefix(value, "+"), true
 }
 
 func initExcelMatchWriter(output *excelize.File) (*excelize.StreamWriter, string, error) {

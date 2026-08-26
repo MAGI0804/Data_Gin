@@ -53,18 +53,18 @@ export type ExcelCatalogSelectOption = {
 export const bojunImportWriteFieldOptions = [
   { value: 'matched_docno', label: '匹配单号 matched_docno' },
   { value: 'completed_at', label: '订单完成时间 completed_at' },
-  { value: 'oracle_retail_id', label: 'Oracle 零售单 ID oracle_retail_id' },
   { value: 'order_phone', label: '订单手机号 order_phone' },
   { value: 'paid_amount', label: '实付金额 paid_amount' },
   { value: 'push_amount', label: '推送金额 push_amount' },
   { value: 'is_to_shop', label: '是否到店 is_to_shop' },
+  { value: 'oracle_retail_id', label: 'Oracle 零售单 ID oracle_retail_id（最后导入）' },
 ] as const
 
 export function bojunImportWriteConfirmation(writeField: string) {
   const descriptions: Record<string, string> = {
     matched_docno: '空的 matched_docno，不会覆盖已有匹配单号',
     completed_at: '为空的 completed_at，值必须使用 yyyy-mm-dd hh:mm:ss 格式',
-    oracle_retail_id: '为空的 oracle_retail_id，值必须为正整数',
+    oracle_retail_id: '为空的 oracle_retail_id，值必须为正整数；请先导入其他 Oracle 字段，最后导入本字段',
     order_phone: '为空的 order_phone',
     paid_amount: '当前为 0 的 paid_amount，值必须为数字',
     push_amount: '当前为 0 的 push_amount，值必须为数字',
