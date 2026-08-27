@@ -2,6 +2,7 @@ package data_svc
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -204,7 +205,7 @@ func (store *fakeBojunOracleStateStore) ReleaseLease(context.Context, string, st
 func TestBuildBojunRetailOrderFromOracleMapsConfirmedFields(t *testing.T) {
 	statusTime := time.Date(2026, 8, 25, 15, 42, 21, 0, time.FixedZone("Asia/Shanghai", 8*60*60))
 	order, err := buildBojunRetailOrderFromOracle(reportoracle.BojunRetailRow{
-		RetailID: 45077, StoreCode: "ABCN001A001", DocNo: "SALE-45077", RetailSaleType: "RET",
+		RetailID: 45077, StoreCode: "ABCN001A001", StoreName: " 商场一店 ", DocNo: "SALE-45077", RetailSaleType: " ret ",
 		StatusTime: statusTime, OrderPhone: "18616613488", PaidAmount: 470.83, PushAmount: 0,
 		IsToShop: "Y", ItemsJSON: "",
 	})
@@ -222,6 +223,16 @@ func TestBuildBojunRetailOrderFromOracleMapsConfirmedFields(t *testing.T) {
 	}
 	if order.OrderTypeCode != "RET" || order.TotalQty != -1 || order.BillDate != 20260825 || order.ItemsJSON != "[]" {
 		t.Fatalf("type/date/items mapping = %+v", order)
+	}
+	if order.RetailBillType != "ret" || order.RetailSaleType != "RET" || order.StoreName != "商场一店" {
+		t.Fatalf("retail bill type/store name mapping = %+v", order)
+	}
+	var rawPayload map[string]interface{}
+	if err := json.Unmarshal([]byte(order.RawContentJSON), &rawPayload); err != nil {
+		t.Fatalf("unmarshal raw content: %v", err)
+	}
+	if rawPayload["STORE_NAME"] != " 商场一店 " || rawPayload["RETAILSALETYPE"] != " ret " {
+		t.Fatalf("raw payload mapping = %+v", rawPayload)
 	}
 }
 
@@ -330,7 +341,7 @@ func TestBojunOracleExistingSuccessfulOrderRetriesOnlyWriteBack(t *testing.T) {
 func TestBojunOracleExistingAPIOrderSupplementsFieldsAndOnlyWritesBack(t *testing.T) {
 	statusTime := time.Date(2026, 8, 25, 15, 42, 21, 0, time.Local)
 	connection := &fakeBojunOracleConnection{rows: []reportoracle.BojunRetailRow{{
-		RetailID: 130, StoreCode: "ORACLE-STORE", DocNo: "API-ORDER-130", StatusTime: statusTime,
+		RetailID: 130, StoreCode: "ORACLE-STORE", StoreName: "Oracle 商场", DocNo: "API-ORDER-130", RetailSaleType: "RET", StatusTime: statusTime,
 		OrderPhone: "18616613488", PaidAmount: 88.8, PushAmount: 80, IsToShop: "Y",
 	}}}
 	state := &fakeBojunOracleStateStore{
@@ -345,7 +356,8 @@ func TestBojunOracleExistingAPIOrderSupplementsFieldsAndOnlyWritesBack(t *testin
 	completedAt := statusTime.Add(-time.Hour)
 	store.orders["API-ORDER-130"] = &model.BojunRetailOrder{
 		BaseModel: model.BaseModel{ID: 1300}, DocNo: "API-ORDER-130", StoreCode: "API-STORE",
-		CompletedAt: &completedAt, ItemsJSON: `[{"sku":"API-SKU"}]`, RawDataID: 99, Synced: 1,
+		StoreName: "API 商场", RetailSaleType: "API-TYPE", CompletedAt: &completedAt,
+		ItemsJSON: `[{"sku":"API-SKU"}]`, RawDataID: 99, Synced: 1,
 	}
 
 	result, err := service.SyncIncremental(t.Context())
@@ -359,10 +371,13 @@ func TestBojunOracleExistingAPIOrderSupplementsFieldsAndOnlyWritesBack(t *testin
 	if updated.OrderPhone != "18616613488" || updated.PaidAmount != 88.8 || updated.PushAmount != 80 || updated.IsToShop != "Y" {
 		t.Fatalf("supplemented Oracle fields=%+v", updated)
 	}
+	if updated.RetailBillType != "RET" || updated.StoreName != "Oracle 商场" {
+		t.Fatalf("supplemented retail bill type/store name=%+v", updated)
+	}
 	if updated.TotalAmtList != 88.8 || updated.TotalAmtActual != 88.8 || updated.TotalAmtAcc != 88.8 || updated.TotalAmtAcc1 != 88.8 {
 		t.Fatalf("supplemented amount fields=%+v", updated)
 	}
-	if updated.StoreCode != "API-STORE" || updated.RawDataID != 99 || updated.ItemsJSON != `[{"sku":"API-SKU"}]` ||
+	if updated.StoreCode != "API-STORE" || updated.RetailSaleType != "API-TYPE" || updated.RawDataID != 99 || updated.ItemsJSON != `[{"sku":"API-SKU"}]` ||
 		updated.CompletedAt == nil || !updated.CompletedAt.Equal(completedAt) {
 		t.Fatalf("existing base fields were overwritten: %+v", updated)
 	}

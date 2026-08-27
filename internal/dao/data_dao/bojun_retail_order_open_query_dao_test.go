@@ -26,6 +26,8 @@ func TestBojunRetailOrderDAOSupplementOracleFieldsUsesNarrowCASUpdate(t *testing
 		&model.BojunRetailOrder{
 			OracleRetailID: &retailID,
 			DocNo:          "SALE-45077",
+			RetailBillType: "RET",
+			StoreName:      "商场一店",
 			OrderPhone:     "18616613488",
 			PaidAmount:     88.8,
 			PushAmount:     80,
@@ -45,6 +47,8 @@ func TestBojunRetailOrderDAOSupplementOracleFieldsUsesNarrowCASUpdate(t *testing
 	for _, fragment := range []string{
 		"UPDATE `bojun_retail_orders`",
 		"`oracle_retail_id`=?",
+		"`retailbilltype`=?",
+		"`c_store_name`=?",
 		"`order_phone`=?",
 		"`paid_amount`=?",
 		"`push_amount`=?",
@@ -60,7 +64,8 @@ func TestBojunRetailOrderDAOSupplementOracleFieldsUsesNarrowCASUpdate(t *testing
 		}
 	}
 	for _, forbidden := range []string{
-		"`completed_at`=", "`c_store_code`=", "`items_json`=", "`raw_content_json`=", "`raw_data_id`=", "`synced`=",
+		"`completed_at`=", "`c_store_code`=", "`retailsaletype`=", "`order_type_code`=", "`order_type_name`=",
+		"`items_json`=", "`raw_content_json`=", "`raw_data_id`=", "`synced`=",
 	} {
 		if strings.Contains(statement, forbidden) {
 			t.Fatalf("statement updates %q: %s", forbidden, statement)

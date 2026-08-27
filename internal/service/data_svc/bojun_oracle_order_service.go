@@ -444,6 +444,8 @@ func (service *BojunOracleOrderService) processExistingRow(
 
 func applyBojunOracleSupplement(existing, incoming *model.BojunRetailOrder) {
 	existing.OracleRetailID = incoming.OracleRetailID
+	existing.RetailBillType = incoming.RetailBillType
+	existing.StoreName = incoming.StoreName
 	existing.OrderPhone = incoming.OrderPhone
 	existing.PaidAmount = incoming.PaidAmount
 	existing.PushAmount = incoming.PushAmount
@@ -522,7 +524,8 @@ func buildBojunRetailOrderFromOracle(row reportoracle.BojunRetailRow) (*model.Bo
 	if row.RetailID == 0 || strings.TrimSpace(row.DocNo) == "" || row.StatusTime.IsZero() {
 		return nil, fmt.Errorf("M_RETAIL_ID, DOCNO and STATUSTIME are required")
 	}
-	retailSaleType := strings.ToUpper(strings.TrimSpace(row.RetailSaleType))
+	retailBillType := strings.TrimSpace(row.RetailSaleType)
+	retailSaleType := strings.ToUpper(retailBillType)
 	if retailSaleType == "" {
 		retailSaleType = "CMR"
 	}
@@ -548,7 +551,8 @@ func buildBojunRetailOrderFromOracle(row reportoracle.BojunRetailRow) (*model.Bo
 	return &model.BojunRetailOrder{
 		OracleRetailID: &retailID,
 		DocNo:          row.DocNo, BillDate: statusTimeBillDate(row.StatusTime), CompletedAt: &completedAt,
-		StoreCode: strings.TrimSpace(row.StoreCode), RetailSaleType: retailSaleType,
+		RetailBillType: retailBillType, StoreCode: strings.TrimSpace(row.StoreCode),
+		StoreName: strings.TrimSpace(row.StoreName), RetailSaleType: retailSaleType,
 		OrderTypeCode: orderTypeCode, OrderTypeName: orderTypeName,
 		OrderPhone: strings.TrimSpace(row.OrderPhone), PaidAmount: row.PaidAmount, PushAmount: row.PushAmount,
 		IsToShop:   strings.ToUpper(strings.TrimSpace(row.IsToShop)),
@@ -574,6 +578,7 @@ func statusTimeBillDate(value time.Time) int {
 type bojunOracleRawRecord struct {
 	RetailID       uint64          `json:"M_RETAIL_ID"`
 	StoreCode      string          `json:"STORE_CODE"`
+	StoreName      string          `json:"STORE_NAME"`
 	DocNo          string          `json:"DOCNO"`
 	RetailSaleType string          `json:"RETAILSALETYPE"`
 	StatusTime     time.Time       `json:"STATUSTIME"`
@@ -591,7 +596,7 @@ func bojunOracleRawPayload(row reportoracle.BojunRetailRow) bojunOracleRawRecord
 		itemsJSON = "[]"
 	}
 	return bojunOracleRawRecord{
-		RetailID: row.RetailID, StoreCode: row.StoreCode, DocNo: row.DocNo,
+		RetailID: row.RetailID, StoreCode: row.StoreCode, StoreName: row.StoreName, DocNo: row.DocNo,
 		RetailSaleType: row.RetailSaleType, StatusTime: row.StatusTime, OrderPhone: row.OrderPhone,
 		PaidAmount: row.PaidAmount, PushAmount: row.PushAmount, IsToShop: row.IsToShop,
 		PushStatus: row.PushStatus, ItemsJSON: json.RawMessage(itemsJSON),

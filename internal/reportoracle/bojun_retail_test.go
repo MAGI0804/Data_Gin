@@ -1,8 +1,11 @@
 package reportoracle
 
 import (
+	"database/sql"
+	"fmt"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/godror/godror"
 )
@@ -40,13 +43,47 @@ func TestBojunRetailSQLUsesFixedTableAndBoundFilters(t *testing.T) {
 	}
 	for _, statement := range []string{bojunRetailAfterIDSQL, bojunRetailModifiedTimeRangeSQL} {
 		for _, fragment := range []string{
-			"DM_VP_C_VIP_MOBILE", "TOT_AMT_SF", "TOT_AMT_TS", "IS_TOSHOP",
+			"STORE_NAME", "DM_VP_C_VIP_MOBILE", "TOT_AMT_SF", "TOT_AMT_TS", "IS_TOSHOP",
 			"NVL(STATUS, '0') AS STATUS", "JSON_ITEM",
 		} {
 			if !strings.Contains(statement, fragment) {
 				t.Fatalf("retail SQL is missing %q", fragment)
 			}
 		}
+	}
+}
+
+type bojunRetailScannerFunc func(dest ...interface{}) error
+
+func (scan bojunRetailScannerFunc) Scan(dest ...interface{}) error {
+	return scan(dest...)
+}
+
+func TestScanBojunRetailRowMapsStoreName(t *testing.T) {
+	statusTime := time.Date(2026, 8, 27, 10, 30, 0, 0, time.Local)
+	row, err := scanBojunRetailRow(bojunRetailScannerFunc(func(dest ...interface{}) error {
+		if len(dest) != 12 {
+			return fmt.Errorf("scan destinations = %d, want 12", len(dest))
+		}
+		*dest[0].(*int64) = 45077
+		*dest[1].(*sql.NullString) = sql.NullString{String: " STORE-01 ", Valid: true}
+		*dest[2].(*sql.NullString) = sql.NullString{String: " 商场一店 ", Valid: true}
+		*dest[3].(*sql.NullString) = sql.NullString{String: " SALE-45077 ", Valid: true}
+		*dest[4].(*sql.NullString) = sql.NullString{String: " CMR ", Valid: true}
+		*dest[5].(*sql.NullTime) = sql.NullTime{Time: statusTime, Valid: true}
+		*dest[6].(*sql.NullString) = sql.NullString{String: "18616613488", Valid: true}
+		*dest[7].(*sql.NullFloat64) = sql.NullFloat64{Float64: 88.8, Valid: true}
+		*dest[8].(*sql.NullFloat64) = sql.NullFloat64{Float64: 80, Valid: true}
+		*dest[9].(*sql.NullString) = sql.NullString{String: "Y", Valid: true}
+		*dest[10].(*sql.NullInt64) = sql.NullInt64{Int64: 0, Valid: true}
+		*dest[11].(*interface{}) = `[{"no":"SKU-1"}]`
+		return nil
+	}))
+	if err != nil {
+		t.Fatalf("scanBojunRetailRow() error = %v", err)
+	}
+	if row.StoreCode != "STORE-01" || row.StoreName != "商场一店" || row.DocNo != "SALE-45077" {
+		t.Fatalf("store/order mapping = %+v", row)
 	}
 }
 

@@ -132,6 +132,8 @@ func (dao *BojunRetailOrderDAO) SupplementOracleFieldsIfMissing(
 		Where("id = ? AND docno = ? AND oracle_retail_id IS NULL", localOrderID, order.DocNo).
 		Updates(map[string]interface{}{
 			"oracle_retail_id": order.OracleRetailID,
+			"retailbilltype":   order.RetailBillType,
+			"c_store_name":     order.StoreName,
 			"order_phone":      order.OrderPhone,
 			"paid_amount":      order.PaidAmount,
 			"push_amount":      order.PushAmount,

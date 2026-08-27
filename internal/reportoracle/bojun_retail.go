@@ -19,6 +19,7 @@ const (
 type BojunRetailRow struct {
 	RetailID       uint64
 	StoreCode      string
+	StoreName      string
 	DocNo          string
 	RetailSaleType string
 	StatusTime     time.Time
@@ -31,12 +32,12 @@ type BojunRetailRow struct {
 }
 
 const bojunRetailProjectedColumns = `
-M_RETAIL_ID, STORE_CODE, DOCNO, RETAILSALETYPE, STATUSTIME,
+M_RETAIL_ID, STORE_CODE, STORE_NAME, DOCNO, RETAILSALETYPE, STATUSTIME,
 DM_VP_C_VIP_MOBILE, TOT_AMT_SF, TOT_AMT_TS, IS_TOSHOP,
 STATUS, JSON_ITEM`
 
 const bojunRetailSourceColumns = `
-M_RETAIL_ID, STORE_CODE, DOCNO, RETAILSALETYPE, STATUSTIME,
+M_RETAIL_ID, STORE_CODE, STORE_NAME, DOCNO, RETAILSALETYPE, STATUSTIME,
 DM_VP_C_VIP_MOBILE, TOT_AMT_SF, TOT_AMT_TS, IS_TOSHOP,
 NVL(STATUS, '0') AS STATUS, JSON_ITEM`
 
@@ -174,16 +175,16 @@ type bojunRetailScanner interface {
 
 func scanBojunRetailRow(scanner bojunRetailScanner) (BojunRetailRow, error) {
 	var (
-		retailID                     int64
-		storeCode, docNo, retailType sql.NullString
-		statusTime                   sql.NullTime
-		orderPhone, isToShop         sql.NullString
-		paidAmount, pushAmount       sql.NullFloat64
-		pushStatus                   sql.NullInt64
-		itemsJSON                    interface{}
+		retailID                                int64
+		storeCode, storeName, docNo, retailType sql.NullString
+		statusTime                              sql.NullTime
+		orderPhone, isToShop                    sql.NullString
+		paidAmount, pushAmount                  sql.NullFloat64
+		pushStatus                              sql.NullInt64
+		itemsJSON                               interface{}
 	)
 	if err := scanner.Scan(
-		&retailID, &storeCode, &docNo, &retailType, &statusTime,
+		&retailID, &storeCode, &storeName, &docNo, &retailType, &statusTime,
 		&orderPhone, &paidAmount, &pushAmount, &isToShop,
 		&pushStatus, &itemsJSON,
 	); err != nil {
@@ -197,7 +198,8 @@ func scanBojunRetailRow(scanner bojunRetailScanner) (BojunRetailRow, error) {
 		return BojunRetailRow{}, fmt.Errorf("scan bojun Oracle retail order JSON_ITEM: %w", err)
 	}
 	return BojunRetailRow{
-		RetailID: uint64(retailID), StoreCode: strings.TrimSpace(storeCode.String), DocNo: strings.TrimSpace(docNo.String),
+		RetailID: uint64(retailID), StoreCode: strings.TrimSpace(storeCode.String), StoreName: strings.TrimSpace(storeName.String),
+		DocNo:          strings.TrimSpace(docNo.String),
 		RetailSaleType: strings.TrimSpace(retailType.String), StatusTime: statusTime.Time,
 		OrderPhone: strings.TrimSpace(orderPhone.String), PaidAmount: paidAmount.Float64, PushAmount: pushAmount.Float64,
 		IsToShop: strings.ToUpper(strings.TrimSpace(isToShop.String)), PushStatus: int(pushStatus.Int64),
