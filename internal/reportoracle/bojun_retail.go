@@ -137,7 +137,7 @@ func (adapter *Adapter) UpdateBojunRetailPushStatus(ctx context.Context, retailI
 	if err != nil {
 		return fmt.Errorf("update bojun Oracle push status rows affected: %w", err)
 	}
-	if rowsAffected != 1 {
+	if rowsAffected == 0 {
 		return fmt.Errorf("update bojun Oracle push status: retail id %d not found", retailID)
 	}
 	return nil

@@ -1,9 +1,13 @@
 package reportoracle
 
 import (
+	"context"
 	"database/sql"
+	"database/sql/driver"
 	"fmt"
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -121,5 +125,80 @@ func TestBojunRetailAdapterRejectsClosedConnection(t *testing.T) {
 	}
 	if err := adapter.UpdateBojunRetailPushStatus(t.Context(), 1, true, 20260826); err == nil {
 		t.Fatal("UpdateBojunRetailPushStatus() unexpectedly succeeded")
+	}
+}
+
+const bojunRetailUpdateTestDriverName = "bojun-retail-update-test"
+
+var registerBojunRetailUpdateTestDriver sync.Once
+
+type bojunRetailUpdateTestDriver struct{}
+
+func (bojunRetailUpdateTestDriver) Open(name string) (driver.Conn, error) {
+	rowsAffected, err := strconv.ParseInt(name, 10, 64)
+	if err != nil {
+		return nil, err
+	}
+	return &bojunRetailUpdateTestConn{rowsAffected: rowsAffected}, nil
+}
+
+type bojunRetailUpdateTestConn struct {
+	rowsAffected int64
+}
+
+func (*bojunRetailUpdateTestConn) Prepare(string) (driver.Stmt, error) { return nil, driver.ErrSkip }
+func (*bojunRetailUpdateTestConn) Close() error                        { return nil }
+func (*bojunRetailUpdateTestConn) Begin() (driver.Tx, error)           { return nil, driver.ErrSkip }
+
+func (connection *bojunRetailUpdateTestConn) ExecContext(
+	_ context.Context,
+	query string,
+	arguments []driver.NamedValue,
+) (driver.Result, error) {
+	if query != bojunRetailPushStatusSQL {
+		return nil, fmt.Errorf("unexpected statement: %s", query)
+	}
+	if len(arguments) != 3 {
+		return nil, fmt.Errorf("update arguments = %d, want 3", len(arguments))
+	}
+	return driver.RowsAffected(connection.rowsAffected), nil
+}
+
+func TestUpdateBojunRetailPushStatusAcceptsAllMatchingRows(t *testing.T) {
+	registerBojunRetailUpdateTestDriver.Do(func() {
+		sql.Register(bojunRetailUpdateTestDriverName, bojunRetailUpdateTestDriver{})
+	})
+
+	tests := []struct {
+		name         string
+		rowsAffected int64
+		wantError    bool
+	}{
+		{name: "no matching row", rowsAffected: 0, wantError: true},
+		{name: "one matching row", rowsAffected: 1},
+		{name: "duplicate matching rows", rowsAffected: 7},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			db, err := sql.Open(bojunRetailUpdateTestDriverName, strconv.FormatInt(test.rowsAffected, 10))
+			if err != nil {
+				t.Fatalf("open test database: %v", err)
+			}
+			defer db.Close()
+
+			adapter := &Adapter{db: db}
+			err = adapter.UpdateBojunRetailPushStatus(t.Context(), 46038, true, 20260829)
+			if test.wantError {
+				if err == nil {
+					t.Fatal("UpdateBojunRetailPushStatus() unexpectedly succeeded")
+				}
+				if !strings.Contains(err.Error(), "retail id 46038 not found") {
+					t.Fatalf("UpdateBojunRetailPushStatus() error = %v", err)
+				}
+			}
+			if !test.wantError && err != nil {
+				t.Fatalf("UpdateBojunRetailPushStatus() error = %v", err)
+			}
+		})
 	}
 }
