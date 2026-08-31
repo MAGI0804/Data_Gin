@@ -1,7 +1,10 @@
 package routers
 
 import (
+	"context"
+	"errors"
 	"net/http"
+	"time"
 
 	"github.com/gin-gonic/gin"
 
@@ -10,6 +13,7 @@ import (
 	"gin-biz-web-api/internal/service/auth_svc"
 	"gin-biz-web-api/model"
 	"gin-biz-web-api/pkg/config"
+	"gin-biz-web-api/pkg/database"
 	"gin-biz-web-api/pkg/logger"
 	"gin-biz-web-api/pkg/phonecode"
 	redisclient "gin-biz-web-api/pkg/redis"
@@ -45,6 +49,9 @@ func registerHealthRoutes(root, api gin.IRoutes) {
 		routes.GET("/health", healthCheck)
 		routes.HEAD("/health", healthCheck)
 	}
+	ready := databaseReadiness(pingApplicationDatabase)
+	api.GET("/ready", ready)
+	api.HEAD("/ready", ready)
 }
 
 func healthCheck(c *gin.Context) {
@@ -63,6 +70,42 @@ func healthCheck(c *gin.Context) {
 			"sms": smsStatus,
 		},
 	})
+}
+
+type databasePing func(context.Context) error
+
+func pingApplicationDatabase(ctx context.Context) error {
+	if database.SQLDB == nil {
+		return errors.New("database is unavailable")
+	}
+	return database.SQLDB.PingContext(ctx)
+}
+
+func databaseReadiness(ping databasePing) gin.HandlerFunc {
+	return func(c *gin.Context) {
+		ctx, cancel := context.WithTimeout(c.Request.Context(), time.Second)
+		defer cancel()
+
+		status := http.StatusOK
+		readinessStatus := "ok"
+		databaseStatus := "ok"
+		if ping == nil || ping(ctx) != nil {
+			status = http.StatusServiceUnavailable
+			readinessStatus = "unavailable"
+			databaseStatus = "unavailable"
+		}
+		if c.Request.Method == http.MethodHead {
+			c.Status(status)
+			return
+		}
+		c.JSON(status, gin.H{
+			"status":  readinessStatus,
+			"service": "gin-biz-web-api",
+			"components": gin.H{
+				"database": databaseStatus,
+			},
+		})
+	}
 }
 
 // setStaticURL 设置静态资源访问

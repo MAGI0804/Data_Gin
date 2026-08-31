@@ -1,6 +1,8 @@
 package routers
 
 import (
+	"context"
+	"errors"
 	"go/ast"
 	"go/parser"
 	"go/token"
@@ -61,6 +63,41 @@ func TestHealthRoutesAcceptDockerHeadProbe(t *testing.T) {
 			}
 			if response.Body.Len() != 0 {
 				t.Fatalf("HEAD %s body = %q, want empty", path, response.Body.String())
+			}
+		})
+	}
+}
+
+func TestDatabaseReadiness(t *testing.T) {
+	tests := []struct {
+		name       string
+		method     string
+		ping       databasePing
+		wantStatus int
+		wantBody   bool
+	}{
+		{name: "database available", method: http.MethodGet, ping: func(context.Context) error { return nil }, wantStatus: http.StatusOK, wantBody: true},
+		{name: "database unavailable", method: http.MethodGet, ping: func(context.Context) error { return errors.New("connection refused") }, wantStatus: http.StatusServiceUnavailable, wantBody: true},
+		{name: "missing database", method: http.MethodGet, wantStatus: http.StatusServiceUnavailable, wantBody: true},
+		{name: "head omits body", method: http.MethodHead, ping: func(context.Context) error { return nil }, wantStatus: http.StatusOK},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			router := gin.New()
+			router.Handle(tt.method, "/api/ready", databaseReadiness(tt.ping))
+			request := httptest.NewRequest(tt.method, "/api/ready", nil)
+			response := httptest.NewRecorder()
+
+			router.ServeHTTP(response, request)
+
+			if response.Code != tt.wantStatus {
+				t.Fatalf("status = %d, want %d", response.Code, tt.wantStatus)
+			}
+			if tt.wantBody && response.Body.Len() == 0 {
+				t.Fatal("response body is empty")
+			}
+			if !tt.wantBody && response.Body.Len() != 0 {
+				t.Fatalf("response body = %q, want empty", response.Body.String())
 			}
 		})
 	}
