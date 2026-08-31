@@ -46,3 +46,63 @@ DB:
 		t.Fatal("reject_read_only = true, want false")
 	}
 }
+
+func TestDatabaseRejectReadOnlyConfiguration(t *testing.T) {
+	tests := []struct {
+		name       string
+		configLine string
+		envValue   string
+		setEnv     bool
+		want       bool
+	}{
+		{
+			name: "配置缺省时使用安全默认值",
+			want: true,
+		},
+		{
+			name:       "占位符缺省时使用true",
+			configLine: "  RejectReadOnly: ${DB_REJECT_READ_ONLY:-true}\n",
+			want:       true,
+		},
+		{
+			name:       "环境变量显式启用",
+			configLine: "  RejectReadOnly: ${DB_REJECT_READ_ONLY:-true}\n",
+			envValue:   "true",
+			setEnv:     true,
+			want:       true,
+		},
+		{
+			name:       "环境变量显式禁用",
+			configLine: "  RejectReadOnly: ${DB_REJECT_READ_ONLY:-true}\n",
+			envValue:   "false",
+			setEnv:     true,
+			want:       false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if !tt.setEnv {
+				t.Setenv("DB_REJECT_READ_ONLY", "")
+				if err := os.Unsetenv("DB_REJECT_READ_ONLY"); err != nil {
+					t.Fatalf("unset DB_REJECT_READ_ONLY: %v", err)
+				}
+			} else {
+				t.Setenv("DB_REJECT_READ_ONLY", tt.envValue)
+			}
+
+			configDir := t.TempDir()
+			configFile := filepath.Join(configDir, "config.yaml")
+			contents := []byte("DB:\n" + tt.configLine)
+			if err := os.WriteFile(configFile, contents, 0o600); err != nil {
+				t.Fatalf("write test config: %v", err)
+			}
+
+			pkgConfig.NewConfig("", configDir+string(os.PathSeparator))
+			const path = "cfg.database.mysql.default.reject_read_only"
+			if got := pkgConfig.GetBool(path); got != tt.want {
+				t.Fatalf("reject_read_only = %t, want %t", got, tt.want)
+			}
+		})
+	}
+}

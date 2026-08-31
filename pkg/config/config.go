@@ -99,15 +99,15 @@ func NewConfig(env string, configs ...string) {
 	err := vp.ReadInConfig()
 	console.ExitIf(err)
 
-	// 将读取的配置文件信息覆写自定义配置
-	LoadConfig()
-
-	// 展开配置文件中的环境变量
+	// 先展开配置文件中的环境变量，确保动态配置回调读取到的是最终值。
 	allSettings := vp.AllSettings()
 	expanded := expandEnvVarsInMap(allSettings)
 	for k, v := range expanded {
 		vp.Set(k, v)
 	}
+
+	// 将读取的配置文件信息覆写自定义配置
+	LoadConfig()
 
 	WatchConfigurationChange()
 }
