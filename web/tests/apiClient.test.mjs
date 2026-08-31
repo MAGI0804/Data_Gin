@@ -199,7 +199,112 @@ test('does not restore a token or replay a request after logout during refresh',
   assert.equal(refreshed, 0)
   assert.equal(protectedRequests, 1)
   assert.equal(result.ok, false)
-  assert.equal(result.error?.kind, 'unauthorized')
+  assert.equal(result.error?.kind, 'aborted')
+})
+
+test('pending refresh results cannot overwrite or reject a newer token', async (t) => {
+  for (const refreshStatus of [200, 401]) {
+    await t.test(`refresh returns ${refreshStatus}`, async () => {
+      let token = 'token-a'
+      let refreshed = 0
+      let unauthorized = 0
+      let releaseRefresh
+      const refreshGate = new Promise((resolve) => { releaseRefresh = resolve })
+      const client = createApiClient(clientOptions({
+        getToken: () => token,
+        onTokenRefreshed: () => { refreshed += 1 },
+        onUnauthorized: () => { unauthorized += 1 },
+        fetch: async () => {
+          await refreshGate
+          return refreshStatus === 200
+            ? response(200, payload({ token: 'stale-refreshed-token' }))
+            : response(401, { code: 100401, data: {} })
+        },
+      }))
+
+      const pending = client.refresh()
+      await new Promise((resolve) => setImmediate(resolve))
+      token = 'token-b'
+      releaseRefresh()
+      const result = await pending
+
+      assert.deepEqual(result, { kind: 'superseded' })
+      assert.equal(token, 'token-b')
+      assert.equal(refreshed, 0)
+      assert.equal(unauthorized, 0)
+    })
+  }
+})
+
+test('a stale GET 401 cannot refresh or clear the newer session', async () => {
+  let token = 'token-a'
+  let refreshes = 0
+  let unauthorized = 0
+  let releaseRequest
+  const requestGate = new Promise((resolve) => { releaseRequest = resolve })
+  const client = createApiClient(clientOptions({
+    getToken: () => token,
+    onUnauthorized: () => { unauthorized += 1 },
+    fetch: async (input) => {
+      if (String(input).endsWith('/auth/token/refresh')) {
+        refreshes += 1
+        return response(401, { code: 100401, data: {} })
+      }
+      await requestGate
+      return response(401, { code: 100401, data: {} })
+    },
+  }))
+
+  const pending = client.request('/v1/runs', { method: 'GET' })
+  await new Promise((resolve) => setImmediate(resolve))
+  token = 'token-b'
+  releaseRequest()
+  const result = await pending
+
+  assert.equal(token, 'token-b')
+  assert.equal(refreshes, 0)
+  assert.equal(unauthorized, 0)
+  assert.equal(result.error?.kind, 'aborted')
+})
+
+test('a GET whose refresh becomes stale cannot clear a newer session', async (t) => {
+  for (const refreshStatus of [200, 401]) {
+    await t.test(`refresh returns ${refreshStatus}`, async () => {
+      let token = 'token-a'
+      let refreshed = 0
+      let unauthorized = 0
+      let releaseRefresh
+      const refreshGate = new Promise((resolve) => { releaseRefresh = resolve })
+      const client = createApiClient(clientOptions({
+        getToken: () => token,
+        onTokenRefreshed: (nextToken) => {
+          refreshed += 1
+          token = nextToken
+        },
+        onUnauthorized: () => { unauthorized += 1 },
+        fetch: async (input) => {
+          if (!String(input).endsWith('/auth/token/refresh')) {
+            return response(401, { code: 100401, data: {} })
+          }
+          await refreshGate
+          return refreshStatus === 200
+            ? response(200, payload({ token: 'stale-refreshed-token' }))
+            : response(401, { code: 100401, data: {} })
+        },
+      }))
+
+      const pending = client.request('/v1/runs', { method: 'GET' })
+      await new Promise((resolve) => setImmediate(resolve))
+      token = 'token-b'
+      releaseRefresh()
+      const result = await pending
+
+      assert.equal(token, 'token-b')
+      assert.equal(refreshed, 0)
+      assert.equal(unauthorized, 0)
+      assert.equal(result.error?.kind, 'aborted')
+    })
+  }
 })
 
 test('failed refresh exits the session and does not loop', async () => {

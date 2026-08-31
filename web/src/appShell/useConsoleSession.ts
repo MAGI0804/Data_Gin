@@ -143,6 +143,7 @@ export function useConsoleSession(baseURL: string) {
           setSessionValidationError('')
           return
         }
+        if (result.kind === 'superseded') return
         if (result.kind === 'unauthorized') {
           clearSession()
           return

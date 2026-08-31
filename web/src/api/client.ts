@@ -20,6 +20,7 @@ export type ClientResponse = {
 export type TokenRefreshResult =
   | { kind: 'refreshed' }
   | { kind: 'unauthorized' }
+  | { kind: 'superseded' }
   | { kind: 'transient'; response: ClientResponse }
 
 export type ApiRequestOptions = {
@@ -161,7 +162,7 @@ export function createApiClient(options: ApiClientOptions) {
   const maxGetRetries = options.maxGetRetries ?? 2
   const random = options.random ?? Math.random
   const wait = options.wait ?? defaultWait
-  let refreshPromise: Promise<TokenRefreshResult> | null = null
+  const refreshPromises = new Map<string, Promise<TokenRefreshResult>>()
 
   async function waitForRetry(milliseconds: number, signal: AbortSignal | undefined) {
     if (signal?.aborted) return false
@@ -182,22 +183,24 @@ export function createApiClient(options: ApiClientOptions) {
     return !signal?.aborted
   }
 
-  async function refreshToken() {
-    if (refreshPromise) return refreshPromise
-    const currentToken = options.getToken()
-    if (!currentToken) return { kind: 'unauthorized' } as const
-    refreshPromise = (async () => {
+  async function refreshToken(expectedToken = options.getToken()) {
+    if (!expectedToken) return { kind: 'unauthorized' } as const
+    if (options.getToken() !== expectedToken) return { kind: 'superseded' } as const
+    const existingRefresh = refreshPromises.get(expectedToken)
+    if (existingRefresh) return existingRefresh
+    const refreshPromise: Promise<TokenRefreshResult> = (async () => {
       const request = createRequestSignal(undefined, timeoutMs)
       try {
         const response = await fetchImpl(apiURL('/auth/token/refresh', options.baseURL), {
           method: 'POST',
           signal: request.signal,
-          headers: authorizedHeaders(currentToken, undefined, true),
+          headers: authorizedHeaders(expectedToken, undefined, true),
           body: JSON.stringify({ token_type: 'refreshable' }),
         })
         const payload: unknown = await response.json().catch(() => null)
+        if (options.getToken() !== expectedToken) return { kind: 'superseded' }
         const status = effectiveApiStatus(response.status, payload)
-        if (status === 401) return { kind: 'unauthorized' } as const
+        if (status === 401) return { kind: 'unauthorized' }
         const token = response.ok && status < 400 && isSuccessfulPayload(payload) ? readEnvelopeToken(payload) : ''
         if (!token) {
           const retryAfter = retryAfterSeconds(response.headers)
@@ -205,29 +208,34 @@ export function createApiClient(options: ApiClientOptions) {
           return {
             kind: 'transient',
             response: { ok: false, status, data: { message: error.message }, error },
-          } as const
+          }
         }
-        if (options.getToken() !== currentToken) return { kind: 'unauthorized' } as const
+        if (options.getToken() !== expectedToken) return { kind: 'superseded' }
         options.onTokenRefreshed(token)
-        return { kind: 'refreshed' } as const
+        return { kind: 'refreshed' }
       } catch {
+        if (options.getToken() !== expectedToken) return { kind: 'superseded' }
         if (request.wasTimedOut()) {
           const message = '请求超时，请稍后重试。'
           return {
             kind: 'transient',
             response: { ok: false, status: 0, data: { message }, error: { kind: 'timeout', message } },
-          } as const
+          }
         }
         const offline = typeof navigator !== 'undefined' && navigator.onLine === false
         const message = offline ? '当前处于离线状态，已保留最近一次数据。' : '网络连接异常，请检查网络后重试。'
         return {
           kind: 'transient',
           response: { ok: false, status: 0, data: { message }, error: { kind: offline ? 'offline' : 'network', message } },
-        } as const
+        }
       } finally {
         request.cleanup()
       }
-    })().finally(() => { refreshPromise = null })
+    })()
+    refreshPromises.set(expectedToken, refreshPromise)
+    void refreshPromise.finally(() => {
+      if (refreshPromises.get(expectedToken) === refreshPromise) refreshPromises.delete(expectedToken)
+    })
     return refreshPromise
   }
 
@@ -242,10 +250,11 @@ export function createApiClient(options: ApiClientOptions) {
       try {
         const canSendBody = method !== 'GET' && body !== undefined
         const formDataBody = canSendBody && isFormData(body)
+        const requestToken = options.getToken()
         const response = await fetchImpl(apiURL(path, options.baseURL), {
           method,
           signal: requestSignal.signal,
-          headers: authorizedHeaders(options.getToken(), headers, canSendBody && !formDataBody, formDataBody || method === 'GET'),
+          headers: authorizedHeaders(requestToken, headers, canSendBody && !formDataBody, formDataBody || method === 'GET'),
           body: !canSendBody ? undefined : formDataBody ? body : JSON.stringify(body),
         })
         const payload: unknown = await response.json().catch(() => null)
@@ -254,12 +263,15 @@ export function createApiClient(options: ApiClientOptions) {
         if (response.ok && status < 400 && successfulPayload) return { ok: true, status, data: payload }
 
         if (status === 401) {
+          if (options.getToken() !== requestToken) return abortedResponse()
           if (retryable && !replayedAfterRefresh) {
             replayedAfterRefresh = true
-            const refreshResult = await refreshToken()
+            const refreshResult = await refreshToken(requestToken)
             if (refreshResult.kind === 'refreshed') continue
+            if (refreshResult.kind === 'superseded') return abortedResponse()
             if (refreshResult.kind === 'transient') return refreshResult.response
           }
+          if (options.getToken() !== requestToken) return abortedResponse()
           options.onUnauthorized()
         }
 
