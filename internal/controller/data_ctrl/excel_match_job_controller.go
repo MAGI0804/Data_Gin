@@ -7,11 +7,14 @@ import (
 	"strings"
 
 	"github.com/gin-gonic/gin"
+	"go.uber.org/zap"
 
 	"gin-biz-web-api/internal/dao/data_dao"
 	"gin-biz-web-api/internal/msg"
 	"gin-biz-web-api/internal/service/data_svc"
 	"gin-biz-web-api/model"
+	"gin-biz-web-api/pkg/errcode"
+	"gin-biz-web-api/pkg/responses"
 )
 
 type excelUploadSessionRequest struct {
@@ -188,7 +191,8 @@ func (ctrl *ExcelMatchJobController) CompleteUpload(c *gin.Context) {
 func (ctrl *ExcelMatchJobController) ListModels(c *gin.Context) {
 	models, err := ctrl.service.ListModels(c.Request.Context())
 	if err != nil {
-		c.JSON(500, msg.ErrResponse("查询 Excel 可选模型失败", err))
+		zap.L().Error("Excel model catalog unavailable", zap.Error(err))
+		responses.New(c).ToSafeErrorResponse(errcode.ServiceUnavailable, "模型目录暂时不可用")
 		return
 	}
 	c.JSON(200, msg.SuccessResponse("查询 Excel 可选模型成功", &map[string]any{

@@ -2,11 +2,42 @@ package data_ctrl
 
 import (
 	"encoding/json"
+	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
+	"github.com/gin-gonic/gin"
+
+	"gin-biz-web-api/internal/service/data_svc"
 	"gin-biz-web-api/model"
+	"gin-biz-web-api/pkg/errcode"
+	"gin-biz-web-api/pkg/responses"
 )
+
+func TestListModelsReturnsSafeServiceUnavailable(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	recorder := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(recorder)
+	context.Request = httptest.NewRequest(http.MethodGet, "/api/v1/excel-match-jobs/models", nil)
+	controller := &ExcelMatchJobController{service: &data_svc.ExcelMatchJobService{}}
+
+	controller.ListModels(context)
+
+	if recorder.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want %d", recorder.Code, http.StatusServiceUnavailable)
+	}
+	var body responses.ResponseData
+	if err := json.Unmarshal(recorder.Body.Bytes(), &body); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if body.Code != errcode.ServiceUnavailable.Code() || body.Msg != "模型目录暂时不可用" {
+		t.Fatalf("response = %#v", body)
+	}
+	if strings.Contains(recorder.Body.String(), "database") {
+		t.Fatalf("response leaked internal error: %s", recorder.Body.String())
+	}
+}
 
 func TestSafeExcelMatchJobResponseDoesNotExposePrivateFields(t *testing.T) {
 	job := model.ExcelMatchJob{

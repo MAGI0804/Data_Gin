@@ -6,6 +6,7 @@ import (
 	"sort"
 	"strings"
 	"sync"
+	"time"
 
 	"gin-biz-web-api/internal/dao/data_dao"
 	"gin-biz-web-api/model"
@@ -123,15 +124,75 @@ var excelMatchCommonFieldLabels = map[string]excelMatchFieldLabel{
 
 var excelMatchModelDefinitions = buildExcelMatchModelDefinitions()
 
+const excelMatchModelCatalogTTL = 5 * time.Minute
+
+type excelMatchModelColumnSource interface {
+	ListModelColumns(context.Context) ([]data_dao.ExcelMatchModelColumn, error)
+}
+
+type excelMatchModelCatalogCache struct {
+	mu        sync.Mutex
+	source    excelMatchModelColumnSource
+	ttl       time.Duration
+	now       func() time.Time
+	models    []ExcelMatchModel
+	expiresAt time.Time
+}
+
+func newExcelMatchModelCatalogCache(source excelMatchModelColumnSource, ttl time.Duration) *excelMatchModelCatalogCache {
+	return &excelMatchModelCatalogCache{source: source, ttl: ttl, now: time.Now}
+}
+
 // ListModels returns every current database table and column with its Go model
 // mapping when one exists. Database-only custom tables receive explicit
 // fallback names and explanations instead of disappearing from the selector.
 func (s *ExcelMatchJobService) ListModels(ctx context.Context) ([]ExcelMatchModel, error) {
+	if s == nil || ctx == nil {
+		return nil, fmt.Errorf("excel model catalog is unavailable")
+	}
+	if s.modelCatalog != nil {
+		return s.modelCatalog.List(ctx)
+	}
+	if s.jobDAO == nil {
+		return nil, fmt.Errorf("excel model catalog database is unavailable")
+	}
 	columns, err := s.jobDAO.ListModelColumns(ctx)
 	if err != nil {
 		return nil, err
 	}
 	return buildExcelMatchModelCatalog(columns), nil
+}
+
+func (cache *excelMatchModelCatalogCache) List(ctx context.Context) ([]ExcelMatchModel, error) {
+	if cache == nil || cache.source == nil || cache.now == nil || cache.ttl <= 0 || ctx == nil {
+		return nil, fmt.Errorf("excel model catalog cache is unavailable")
+	}
+	cache.mu.Lock()
+	defer cache.mu.Unlock()
+
+	now := cache.now()
+	if !cache.expiresAt.IsZero() && now.Before(cache.expiresAt) {
+		return cloneExcelMatchModels(cache.models), nil
+	}
+	columns, err := cache.source.ListModelColumns(ctx)
+	if err != nil {
+		return nil, err
+	}
+	cache.models = buildExcelMatchModelCatalog(columns)
+	cache.expiresAt = now.Add(cache.ttl)
+	return cloneExcelMatchModels(cache.models), nil
+}
+
+func cloneExcelMatchModels(models []ExcelMatchModel) []ExcelMatchModel {
+	if models == nil {
+		return nil
+	}
+	cloned := make([]ExcelMatchModel, len(models))
+	copy(cloned, models)
+	for index := range cloned {
+		cloned[index].Fields = append([]ExcelMatchModelField(nil), models[index].Fields...)
+	}
+	return cloned
 }
 
 func buildExcelMatchModelDefinitions() map[string]excelMatchModelDefinition {

@@ -1,11 +1,48 @@
 package data_svc
 
 import (
+	"context"
+	"errors"
 	"strings"
+	"sync"
 	"testing"
+	"time"
 
 	"gin-biz-web-api/internal/dao/data_dao"
 )
+
+type fakeExcelMatchModelColumnSource struct {
+	mu        sync.Mutex
+	startOnce sync.Once
+	columns   []data_dao.ExcelMatchModelColumn
+	err       error
+	calls     int
+	started   chan struct{}
+	release   <-chan struct{}
+}
+
+func (source *fakeExcelMatchModelColumnSource) ListModelColumns(context.Context) ([]data_dao.ExcelMatchModelColumn, error) {
+	source.mu.Lock()
+	source.calls++
+	columns := append([]data_dao.ExcelMatchModelColumn(nil), source.columns...)
+	err := source.err
+	started := source.started
+	release := source.release
+	source.mu.Unlock()
+	if started != nil {
+		source.startOnce.Do(func() { close(started) })
+	}
+	if release != nil {
+		<-release
+	}
+	return columns, err
+}
+
+func (source *fakeExcelMatchModelColumnSource) callCount() int {
+	source.mu.Lock()
+	defer source.mu.Unlock()
+	return source.calls
+}
 
 func TestBuildExcelMatchModelCatalogAddsReadableMappings(t *testing.T) {
 	rows := []data_dao.ExcelMatchModelColumn{
@@ -120,5 +157,83 @@ func TestBuildExcelMatchModelCatalogExplainsUnknownTablesWithoutComments(t *test
 		!strings.Contains(field.Description, "varchar(64)") ||
 		!strings.Contains(field.Description, "custom_store_mappings.source_code") {
 		t.Fatalf("fallback explanations: model=%q field=%q", model.Description, field.Description)
+	}
+}
+
+func TestExcelMatchModelCatalogCache(t *testing.T) {
+	now := time.Date(2026, time.August, 31, 10, 0, 0, 0, time.UTC)
+	source := &fakeExcelMatchModelColumnSource{columns: []data_dao.ExcelMatchModelColumn{{
+		TableName: "qimai_order_data", ColumnName: "order_no", ColumnType: "varchar(100)", OrdinalPosition: 1,
+	}}}
+	cache := newExcelMatchModelCatalogCache(source, 5*time.Minute)
+	cache.now = func() time.Time { return now }
+
+	first, err := cache.List(context.Background())
+	if err != nil || len(first) != 1 {
+		t.Fatalf("first List() models=%#v error=%v", first, err)
+	}
+	first[0].Fields[0].Name = "mutated"
+	second, err := cache.List(context.Background())
+	if err != nil || second[0].Fields[0].Name == "mutated" {
+		t.Fatalf("cached List() models=%#v error=%v", second, err)
+	}
+	if calls := source.callCount(); calls != 1 {
+		t.Fatalf("source calls = %d, want 1", calls)
+	}
+
+	now = now.Add(6 * time.Minute)
+	if _, err := cache.List(context.Background()); err != nil {
+		t.Fatalf("expired List() error = %v", err)
+	}
+	if calls := source.callCount(); calls != 2 {
+		t.Fatalf("source calls after expiry = %d, want 2", calls)
+	}
+}
+
+func TestExcelMatchModelCatalogCacheDoesNotCacheFailures(t *testing.T) {
+	source := &fakeExcelMatchModelColumnSource{err: errors.New("database unavailable")}
+	cache := newExcelMatchModelCatalogCache(source, time.Minute)
+	if _, err := cache.List(context.Background()); err == nil {
+		t.Fatal("first List() error = nil")
+	}
+	source.mu.Lock()
+	source.err = nil
+	source.columns = []data_dao.ExcelMatchModelColumn{{TableName: "orders", ColumnName: "id", OrdinalPosition: 1}}
+	source.mu.Unlock()
+	models, err := cache.List(context.Background())
+	if err != nil || len(models) != 1 {
+		t.Fatalf("second List() models=%#v error=%v", models, err)
+	}
+	if calls := source.callCount(); calls != 2 {
+		t.Fatalf("source calls = %d, want 2", calls)
+	}
+}
+
+func TestExcelMatchModelCatalogCacheCollapsesConcurrentMisses(t *testing.T) {
+	started := make(chan struct{})
+	release := make(chan struct{})
+	source := &fakeExcelMatchModelColumnSource{
+		columns: []data_dao.ExcelMatchModelColumn{{TableName: "orders", ColumnName: "id", OrdinalPosition: 1}},
+		started: started,
+		release: release,
+	}
+	cache := newExcelMatchModelCatalogCache(source, time.Minute)
+	const callers = 8
+	errorsByCaller := make(chan error, callers)
+	for range callers {
+		go func() {
+			_, err := cache.List(context.Background())
+			errorsByCaller <- err
+		}()
+	}
+	<-started
+	close(release)
+	for range callers {
+		if err := <-errorsByCaller; err != nil {
+			t.Fatalf("List() error = %v", err)
+		}
+	}
+	if calls := source.callCount(); calls != 1 {
+		t.Fatalf("source calls = %d, want 1", calls)
 	}
 }

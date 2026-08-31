@@ -146,12 +146,15 @@ var allowedExcelMatchFilterOps = map[string]struct{}{
 }
 
 type ExcelMatchJobService struct {
-	jobDAO *data_dao.ExcelMatchJobDAO
+	jobDAO       *data_dao.ExcelMatchJobDAO
+	modelCatalog *excelMatchModelCatalogCache
 }
 
 func NewExcelMatchJobService() *ExcelMatchJobService {
+	jobDAO := data_dao.NewExcelMatchJobDAO()
 	return &ExcelMatchJobService{
-		jobDAO: data_dao.NewExcelMatchJobDAO(),
+		jobDAO:       jobDAO,
+		modelCatalog: newExcelMatchModelCatalogCache(jobDAO, excelMatchModelCatalogTTL),
 	}
 }
 
