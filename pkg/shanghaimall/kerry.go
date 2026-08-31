@@ -11,6 +11,13 @@ import (
 	"time"
 )
 
+const kerrySalesDocAlreadyExistsCode = 551510
+
+type kerrySalesResponse struct {
+	Error     *bool `json:"error"`
+	ErrorCode int   `json:"errorCode"`
+}
+
 func PushJialiCheng(ctx context.Context, order RetailOrder) (*PushResult, error) {
 	return pushKerry(ctx, kerryConfigFromEnv(), order)
 }
@@ -145,7 +152,12 @@ func postKerrySales(ctx context.Context, cfg kerryConfig, body map[string]interf
 		ResponseBody: string(respBytes),
 	}
 	_ = json.Unmarshal(respBytes, &result.ResponseJSON)
-	result.Success = result.ResponseJSON["error"] == false
+	var response kerrySalesResponse
+	_ = json.Unmarshal(respBytes, &response)
+	result.Success = response.Error != nil && !*response.Error
+	if response.ErrorCode == kerrySalesDocAlreadyExistsCode {
+		result.Success = true
+	}
 	if !result.Success {
 		return result, fmt.Errorf("kerry sales push failed: %s", result.ResponseBody)
 	}
