@@ -1,7 +1,9 @@
 package database
 
 import (
+	"context"
 	"database/sql"
+	"fmt"
 	"sync"
 	"time"
 
@@ -19,6 +21,10 @@ type DBClientConfig struct {
 	MaxOpenConns    int
 	MaxIdleConns    int
 	ConnMaxLifetime time.Duration
+	ConnMaxIdleTime time.Duration
+	ConnectTimeout  time.Duration
+	ReadTimeout     time.Duration
+	WriteTimeout    time.Duration
 }
 
 type MySQLClient struct {
@@ -28,6 +34,7 @@ type MySQLClient struct {
 
 var (
 	once             sync.Once
+	mysqlInitErr     error
 	mysqlCollections map[string]*MySQLClient
 	DB               *gorm.DB // 默认 mysql 连接的 DB 对象
 	SQLDB            *sql.DB  // 默认 mysql 连接中的 database/sql 包里的 *sql.DB 对象
@@ -44,69 +51,113 @@ func Instance(group ...string) *MySQLClient {
 	return mysqlCollections["default"]
 }
 
-func ConnectMySQL(configs map[string]*DBClientConfig) {
+func ConnectMySQL(configs map[string]*DBClientConfig) error {
 	once.Do(func() {
-
-		if mysqlCollections == nil {
-			mysqlCollections = make(map[string]*MySQLClient)
-		}
-
-		for group, cfg := range configs {
-			var client = NewMysqlClient(cfg.DBConfig, cfg.LG)
-
-			// 检查连接是否成功
-			if client.SQLDB != nil {
-				// ================ 连接池设置 =================
-				// 设置最大连接数，0 表示无限制，默认为 0
-				// 在高并发的情况下，将值设为大于 10，可以获得比设置为 1 接近六倍的性能提升。而设置为 10 跟设置为 0（也就是无限制），在高并发的情况下，性能差距不明显
-				// 最大连接数不要大于数据库系统设置的最大连接数 show variables like 'max_connections';
-				// 这个值是整个系统的，如有其他应用程序也在共享这个数据库，这个可以合理地控制小一点
-				client.SQLDB.SetMaxOpenConns(cfg.MaxOpenConns)
-				// 设置最大空闲连接数，0 表示不设置空闲连接数，默认为 2
-				// 在高并发的情况下，将值设为大于 0，可以获得比设置为 0 超过 20 倍的性能提升
-				// 这是因为设置为 0 的情况下，每一个 SQL 连接执行任务以后就销毁掉了，执行新任务时又需要重新建立连接。很明显，重新建立连接是很消耗资源的一个动作
-				// 此值不能大于 SetMaxOpenConns 的值，大于的情况下 mysql 驱动会自动将其纠正
-				client.SQLDB.SetMaxIdleConns(cfg.MaxIdleConns)
-				// 设置每个连接的过期时间
-				// 设置连接池里每一个连接的过期时间，过期会自动关闭。理论上来讲，在并发的情况下，此值越小，连接就会越快被关闭，也意味着更多的连接会被创建。
-				// 设置的值不应该超过 MySQL 的 wait_timeout 设置项（默认情况下是 8 个小时）
-				// 此值也不宜设置过短，关闭和创建都是极耗系统资源的操作。
-				// 设置此值时，需要特别注意 SetMaxIdleConns 空闲连接数的设置。假如设置了 100 个空闲连接，过期时间设置了 1 分钟，在没有任何应用的 SQL 操作情况下，数据库连接每 1.6 秒就销毁和新建一遍。
-				// 这里的推荐，比较保守的做法是设置五分钟
-				client.SQLDB.SetConnMaxLifetime(cfg.ConnMaxLifetime)
-			}
-
-			mysqlCollections[group] = client
-		}
-
-		setSimpleHelper()
+		mysqlInitErr = connectMySQL(configs)
 	})
+	return mysqlInitErr
 }
 
-func NewMysqlClient(dbConfig gorm.Dialector, lg gormLogger.Interface) *MySQLClient {
+func connectMySQL(configs map[string]*DBClientConfig) error {
+	if len(configs) == 0 {
+		return fmt.Errorf("mysql configuration is empty")
+	}
+	clients := make(map[string]*MySQLClient, len(configs))
+	for group, cfg := range configs {
+		if cfg == nil {
+			closeMySQLClients(clients)
+			return fmt.Errorf("mysql group %s configuration is nil", group)
+		}
+		if err := validateDBClientConfig(cfg); err != nil {
+			closeMySQLClients(clients)
+			return fmt.Errorf("mysql group %s: %w", group, err)
+		}
+		client, err := NewMysqlClient(cfg.DBConfig, cfg.LG)
+		if err != nil {
+			closeMySQLClients(clients)
+			return fmt.Errorf("connect mysql group %s: %w", group, err)
+		}
+		configureConnectionPool(client.SQLDB, cfg)
+		clients[group] = client
+	}
+	if clients["default"] == nil {
+		closeMySQLClients(clients)
+		return fmt.Errorf("default mysql group is missing")
+	}
+	mysqlCollections = clients
+	setSimpleHelper()
+	return nil
+}
+
+func validateDBClientConfig(cfg *DBClientConfig) error {
+	if cfg.DBConfig == nil {
+		return fmt.Errorf("dialector is nil")
+	}
+	if cfg.MaxOpenConns <= 0 {
+		return fmt.Errorf("max open connections must be positive")
+	}
+	if cfg.MaxIdleConns < 0 || cfg.MaxIdleConns > cfg.MaxOpenConns {
+		return fmt.Errorf("max idle connections must be between zero and max open connections")
+	}
+	if cfg.ConnMaxLifetime <= 0 {
+		return fmt.Errorf("connection max lifetime must be positive")
+	}
+	if cfg.ConnMaxIdleTime <= 0 || cfg.ConnMaxIdleTime > cfg.ConnMaxLifetime {
+		return fmt.Errorf("connection max idle time must be positive and not exceed max lifetime")
+	}
+	if cfg.ConnectTimeout <= 0 {
+		return fmt.Errorf("connection timeout must be positive")
+	}
+	if cfg.ReadTimeout <= 0 {
+		return fmt.Errorf("read timeout must be positive")
+	}
+	if cfg.WriteTimeout <= 0 {
+		return fmt.Errorf("write timeout must be positive")
+	}
+	return nil
+}
+
+func configureConnectionPool(sqlDB *sql.DB, cfg *DBClientConfig) {
+	sqlDB.SetMaxOpenConns(cfg.MaxOpenConns)
+	sqlDB.SetMaxIdleConns(cfg.MaxIdleConns)
+	sqlDB.SetConnMaxLifetime(cfg.ConnMaxLifetime)
+	sqlDB.SetConnMaxIdleTime(cfg.ConnMaxIdleTime)
+}
+
+func NewMysqlClient(dbConfig gorm.Dialector, lg gormLogger.Interface) (*MySQLClient, error) {
 	mysql := &MySQLClient{}
 
 	var err error
 	mysql.DB, err = gorm.Open(dbConfig, &gorm.Config{Logger: lg})
 	if err != nil {
-		console.Warning("Failed to connect to MySQL: %v", err)
-		return mysql
+		return nil, fmt.Errorf("open gorm connection: %w", err)
 	}
 
 	// 获取底层的 sqlDB
 	// *gorm.DB 对象的 DB() 方法，可以直接获取到 database/sql 包里的 *sql.DB 对象
 	mysql.SQLDB, err = mysql.DB.DB()
 	if err != nil {
-		console.Warning("Failed to get SQL DB: %v", err)
-		return mysql
+		return nil, fmt.Errorf("get sql connection: %w", err)
 	}
-
-	return mysql
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := mysql.SQLDB.PingContext(ctx); err != nil {
+		_ = mysql.SQLDB.Close()
+		return nil, fmt.Errorf("ping database: %w", err)
+	}
+	return mysql, nil
 }
 
 // Close 关闭所有数据库连接
 func Close() {
-	for group, mysql := range mysqlCollections {
+	closeMySQLClients(mysqlCollections)
+}
+
+func closeMySQLClients(clients map[string]*MySQLClient) {
+	for group, mysql := range clients {
+		if mysql == nil || mysql.SQLDB == nil {
+			continue
+		}
 		if err := mysql.SQLDB.Close(); err != nil {
 			zap.L().Error("MySQL", zap.String("group", group), zap.Error(err))
 		}

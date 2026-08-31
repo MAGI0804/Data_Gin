@@ -22,9 +22,14 @@ func init() {
 					"charset":  config.Get("DB.Charset", "utf8mb4"),
 
 					// 连接池配置
-					"max_open_connections": config.Get("DB.MaxOpenConnections", 25),  // 最大连接数
-					"max_idle_connections": config.Get("DB.MaxIdleConnections", 100), // 最大空闲连接数
-					"max_life_seconds":     config.Get("DB.MaxLifeSeconds", 5*60),    // 每个链接的过期时间
+					"max_open_connections":    config.Get("DB.MaxOpenConnections", 25),
+					"max_idle_connections":    config.Get("DB.MaxIdleConnections", 10),
+					"max_life_seconds":        config.Get("DB.MaxLifeSeconds", 5*60),
+					"max_idle_seconds":        config.Get("DB.MaxIdleSeconds", 90),
+					"connect_timeout_seconds": config.Get("DB.ConnectTimeoutSeconds", 5),
+					"read_timeout_seconds":    config.Get("DB.ReadTimeoutSeconds", 30),
+					"write_timeout_seconds":   config.Get("DB.WriteTimeoutSeconds", 30),
+					"reject_read_only":        databaseBool("DB.RejectReadOnly", true),
 				},
 
 				// 如果有多个数据库连接，可以模仿 default 配置信息再增加一个，比如：
@@ -46,4 +51,12 @@ func init() {
 			},
 		}
 	})
+}
+
+func databaseBool(path string, defaultValue bool) bool {
+	instance := config.Instance()
+	if instance == nil || !instance.IsSet(path) {
+		return defaultValue
+	}
+	return instance.GetBool(path)
 }

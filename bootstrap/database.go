@@ -5,11 +5,13 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"net"
 	"os"
 	"strings"
 	"time"
 
 	// GORM 的 MySQL 数据库驱动导入
+	mysqlDriver "github.com/go-sql-driver/mysql"
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 
@@ -199,20 +201,30 @@ func setupDBConnection() {
 
 	switch config.GetString("cfg.database.driver") {
 	case "mysql":
-		setupDBMySQL()
+		if err := setupDBMySQL(); err != nil {
+			console.Exit("database initialization failed: %v", err)
+		}
 	default:
 		console.Exit("database driver not supported")
 	}
 
 }
 
-func setupDBMySQL() {
+func setupDBMySQL() error {
 
 	configs := config.Get("cfg.database.mysql")
 
 	dbConfigs := make(map[string]*database.DBClientConfig)
 
-	for group := range configs.(map[string]interface{}) {
+	groups, ok := configs.(map[string]interface{})
+	if !ok || len(groups) == 0 {
+		return fmt.Errorf("mysql configuration is empty")
+	}
+	location, err := time.LoadLocation("Asia/Shanghai")
+	if err != nil {
+		return fmt.Errorf("load mysql timezone: %w", err)
+	}
+	for group := range groups {
 		cfgPrefix := "cfg.database.mysql." + group + "."
 		username := config.GetString(cfgPrefix + "username")
 		password := config.GetString(cfgPrefix + "password")
@@ -220,16 +232,27 @@ func setupDBMySQL() {
 		port := config.GetString(cfgPrefix + "port")
 		db := config.GetString(cfgPrefix + "database")
 		charset := config.GetString(cfgPrefix + "charset")
+		connectTimeout := time.Duration(config.GetInt(cfgPrefix+"connect_timeout_seconds")) * time.Second
+		readTimeout := time.Duration(config.GetInt(cfgPrefix+"read_timeout_seconds")) * time.Second
+		writeTimeout := time.Duration(config.GetInt(cfgPrefix+"write_timeout_seconds")) * time.Second
 
-		// 构建 dsn 信息。DSN 全称为 Data Source Name，表示【数据源信息】
-		// user:pass@tcp(127.0.0.1:3306)/dbname?charset=utf8mb4&parseTime=True&loc=Asia%2FShanghai
-		dsn := fmt.Sprintf(
-			"%s:%s@tcp(%s:%s)/%s?charset=%s&parseTime=True&loc=Asia%%2FShanghai",
-			username, password, host, port, db, charset)
+		driverConfig := mysqlDriver.NewConfig()
+		driverConfig.User = username
+		driverConfig.Passwd = password
+		driverConfig.Net = "tcp"
+		driverConfig.Addr = net.JoinHostPort(host, port)
+		driverConfig.DBName = db
+		driverConfig.Params = map[string]string{"charset": charset}
+		driverConfig.ParseTime = true
+		driverConfig.Loc = location
+		driverConfig.Timeout = connectTimeout
+		driverConfig.ReadTimeout = readTimeout
+		driverConfig.WriteTimeout = writeTimeout
+		driverConfig.RejectReadOnly = config.GetBool(cfgPrefix + "reject_read_only")
 
 		var dbConfig gorm.Dialector
 		dbConfig = mysql.New(mysql.Config{
-			DSN: dsn,
+			DSN: driverConfig.FormatDSN(),
 		})
 
 		var cfg database.DBClientConfig
@@ -238,11 +261,18 @@ func setupDBMySQL() {
 		cfg.MaxOpenConns = config.GetInt(cfgPrefix + "max_open_connections")
 		cfg.MaxIdleConns = config.GetInt(cfgPrefix + "max_idle_connections")
 		cfg.ConnMaxLifetime = time.Duration(config.GetInt(cfgPrefix+"max_life_seconds")) * time.Second
+		cfg.ConnMaxIdleTime = time.Duration(config.GetInt(cfgPrefix+"max_idle_seconds")) * time.Second
+		cfg.ConnectTimeout = connectTimeout
+		cfg.ReadTimeout = readTimeout
+		cfg.WriteTimeout = writeTimeout
 
 		dbConfigs[group] = &cfg
 	}
 
-	database.ConnectMySQL(dbConfigs)
+	if err := database.ConnectMySQL(dbConfigs); err != nil {
+		return err
+	}
+	return nil
 }
 
 // autoMigrateTables 自动迁移数据存储相关表
