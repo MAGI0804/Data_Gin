@@ -17,6 +17,11 @@ export type ClientResponse = {
   }
 }
 
+export type TokenRefreshResult =
+  | { kind: 'refreshed' }
+  | { kind: 'unauthorized' }
+  | { kind: 'transient'; response: ClientResponse }
+
 export type ApiRequestOptions = {
   method: HTTPMethod
   body?: unknown
@@ -38,6 +43,7 @@ export type ApiClientOptions = {
   fetch?: FetchLike
   timeoutMs?: number
   maxGetRetries?: number
+  random?: () => number
   wait?: (milliseconds: number, signal?: AbortSignal) => Promise<void>
 }
 
@@ -93,8 +99,15 @@ function retryAfterSeconds(headers: Headers) {
   return Number.isFinite(seconds) && seconds >= 0 ? Math.ceil(seconds) : undefined
 }
 
-function getRetryDelay(attempt: number) {
-  return Math.min(2_000, 250 * 2 ** attempt)
+function getRetryDelay(attempt: number, random: () => number, retryAfter?: number) {
+  const exponentialDelay = Math.min(2_000, 250 * 2 ** attempt)
+  const randomValue = Math.min(1, Math.max(0, random()))
+  const jitteredDelay = Math.round(exponentialDelay * (0.8 + randomValue * 0.4))
+  return retryAfter === undefined ? jitteredDelay : Math.max(jitteredDelay, retryAfter * 1_000)
+}
+
+function isRetryableStatus(status: number) {
+  return status === 502 || status === 503 || status === 504
 }
 
 function defaultWait(milliseconds: number, signal?: AbortSignal) {
@@ -146,8 +159,9 @@ export function createApiClient(options: ApiClientOptions) {
   const fetchImpl = options.fetch ?? globalThis.fetch.bind(globalThis)
   const timeoutMs = options.timeoutMs ?? 15_000
   const maxGetRetries = options.maxGetRetries ?? 2
+  const random = options.random ?? Math.random
   const wait = options.wait ?? defaultWait
-  let refreshPromise: Promise<boolean> | null = null
+  let refreshPromise: Promise<TokenRefreshResult> | null = null
 
   async function waitForRetry(milliseconds: number, signal: AbortSignal | undefined) {
     if (signal?.aborted) return false
@@ -171,7 +185,7 @@ export function createApiClient(options: ApiClientOptions) {
   async function refreshToken() {
     if (refreshPromise) return refreshPromise
     const currentToken = options.getToken()
-    if (!currentToken) return false
+    if (!currentToken) return { kind: 'unauthorized' } as const
     refreshPromise = (async () => {
       const request = createRequestSignal(undefined, timeoutMs)
       try {
@@ -183,13 +197,33 @@ export function createApiClient(options: ApiClientOptions) {
         })
         const payload: unknown = await response.json().catch(() => null)
         const status = effectiveApiStatus(response.status, payload)
+        if (status === 401) return { kind: 'unauthorized' } as const
         const token = response.ok && status < 400 && isSuccessfulPayload(payload) ? readEnvelopeToken(payload) : ''
-        if (!token) return false
-        if (options.getToken() !== currentToken) return false
+        if (!token) {
+          const retryAfter = retryAfterSeconds(response.headers)
+          const error = publicFailure(status, retryAfter)
+          return {
+            kind: 'transient',
+            response: { ok: false, status, data: { message: error.message }, error },
+          } as const
+        }
+        if (options.getToken() !== currentToken) return { kind: 'unauthorized' } as const
         options.onTokenRefreshed(token)
-        return true
+        return { kind: 'refreshed' } as const
       } catch {
-        return false
+        if (request.wasTimedOut()) {
+          const message = '请求超时，请稍后重试。'
+          return {
+            kind: 'transient',
+            response: { ok: false, status: 0, data: { message }, error: { kind: 'timeout', message } },
+          } as const
+        }
+        const offline = typeof navigator !== 'undefined' && navigator.onLine === false
+        const message = offline ? '当前处于离线状态，已保留最近一次数据。' : '网络连接异常，请检查网络后重试。'
+        return {
+          kind: 'transient',
+          response: { ok: false, status: 0, data: { message }, error: { kind: offline ? 'offline' : 'network', message } },
+        } as const
       } finally {
         request.cleanup()
       }
@@ -222,14 +256,16 @@ export function createApiClient(options: ApiClientOptions) {
         if (status === 401) {
           if (retryable && !replayedAfterRefresh) {
             replayedAfterRefresh = true
-            if (await refreshToken()) continue
+            const refreshResult = await refreshToken()
+            if (refreshResult.kind === 'refreshed') continue
+            if (refreshResult.kind === 'transient') return refreshResult.response
           }
           options.onUnauthorized()
         }
 
         const retryAfter = retryAfterSeconds(response.headers)
-        if (retryable && !replayedAfterRefresh && attempt < maxGetRetries && (status === 0 || status >= 500)) {
-          if (!await waitForRetry(getRetryDelay(attempt++), signal)) return abortedResponse()
+        if (retryable && !replayedAfterRefresh && attempt < maxGetRetries && isRetryableStatus(status)) {
+          if (!await waitForRetry(getRetryDelay(attempt++, random, retryAfter), signal)) return abortedResponse()
           continue
         }
         const error = publicFailure(status, retryAfter)
@@ -238,10 +274,16 @@ export function createApiClient(options: ApiClientOptions) {
         return { ok: false, status, data: { message: error.message }, error }
       } catch {
         if (signal?.aborted) return abortedResponse()
-        if (requestSignal.wasTimedOut()) return { ok: false, status: 0, data: { message: '请求超时，请稍后重试。' }, error: { kind: 'timeout', message: '请求超时，请稍后重试。' } }
+        if (requestSignal.wasTimedOut()) {
+          if (retryable && !replayedAfterRefresh && attempt < maxGetRetries) {
+            if (!await waitForRetry(getRetryDelay(attempt++, random), signal)) return abortedResponse()
+            continue
+          }
+          return { ok: false, status: 0, data: { message: '请求超时，请稍后重试。' }, error: { kind: 'timeout', message: '请求超时，请稍后重试。' } }
+        }
         const offline = typeof navigator !== 'undefined' && navigator.onLine === false
         if (retryable && !replayedAfterRefresh && attempt < maxGetRetries) {
-          if (!await waitForRetry(getRetryDelay(attempt++), signal)) return abortedResponse()
+          if (!await waitForRetry(getRetryDelay(attempt++, random), signal)) return abortedResponse()
           continue
         }
         const message = offline ? '当前处于离线状态，已保留最近一次数据。' : '网络连接异常，请检查网络后重试。'

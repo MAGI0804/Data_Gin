@@ -130,21 +130,34 @@ export function useConsoleSession(baseURL: string) {
     }
 
     let timer = 0
-    const scheduleRefresh = () => {
+    let current = true
+    const refreshSession = () => {
       const remaining = sessionExpiresAt - Date.now()
       if (remaining <= 0) {
         clearSession()
         return
       }
-      const refreshDelay = Math.max(0, remaining - 60_000)
-      timer = window.setTimeout(() => {
-        void apiClient.refresh().then((refreshed) => {
-          if (!refreshed) clearSession()
-        })
-      }, Math.min(refreshDelay, 2_147_000_000))
+      void apiClient.refresh().then((result) => {
+        if (!current) return
+        if (result.kind === 'refreshed') {
+          setSessionValidationError('')
+          return
+        }
+        if (result.kind === 'unauthorized') {
+          clearSession()
+          return
+        }
+        setSessionValidationError('会话续期暂不可用，登录状态已保留。')
+        const retryDelay = Math.min(30_000, Math.max(1_000, sessionExpiresAt - Date.now()))
+        timer = window.setTimeout(refreshSession, retryDelay)
+      })
     }
-    scheduleRefresh()
-    return () => window.clearTimeout(timer)
+    const refreshDelay = Math.max(0, sessionExpiresAt - Date.now() - 60_000)
+    timer = window.setTimeout(refreshSession, Math.min(refreshDelay, 2_147_000_000))
+    return () => {
+      current = false
+      window.clearTimeout(timer)
+    }
   }, [apiClient, clearSession, sessionExpiresAt, token])
 
   useEffect(() => {
@@ -154,6 +167,7 @@ export function useConsoleSession(baseURL: string) {
   useEffect(() => {
     if (!token) return
     let current = true
+    let retryTimer = 0
     const controller = new AbortController()
     const preserveAuthenticatedSession = authenticatedSessionRef.current
     if (!preserveAuthenticatedSession) setSessionState('checking')
@@ -168,8 +182,15 @@ export function useConsoleSession(baseURL: string) {
           clearSession()
           return
         }
-        if (preserveAuthenticatedSession) setSessionValidationError('会话校验暂不可用，当前数据可能已过期。')
-        else clearSession()
+        setSessionValidationError(preserveAuthenticatedSession
+          ? '会话校验暂不可用，当前数据可能已过期。'
+          : '会话校验暂不可用，已保留本地登录状态。')
+        if (!preserveAuthenticatedSession && !loadStoredSessionUser(browserLocalStorage)) {
+          setSessionState('checking')
+          retryTimer = window.setTimeout(() => setSessionValidationAttempt((attempt) => attempt + 1), 30_000)
+        } else {
+          setSessionState('authenticated')
+        }
         return
       }
       const { user, tokenInfo } = verification
@@ -184,6 +205,7 @@ export function useConsoleSession(baseURL: string) {
     return () => {
       current = false
       controller.abort()
+      window.clearTimeout(retryTimer)
     }
   }, [apiClient, clearSession, sessionValidationAttempt, token])
 

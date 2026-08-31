@@ -223,6 +223,52 @@ test('failed refresh exits the session and does not loop', async () => {
   assert.equal(result.error?.kind, 'unauthorized')
 })
 
+test('temporary refresh failures preserve the session and surface the service failure', async () => {
+  let unauthorized = 0
+  let refreshes = 0
+  const client = createApiClient(clientOptions({
+    onUnauthorized: () => { unauthorized += 1 },
+    fetch: async (input) => {
+      if (String(input).endsWith('/auth/token/refresh')) {
+        refreshes += 1
+        return response(503, { code: 100503, data: {} })
+      }
+      return response(401, { code: 100401, data: {} })
+    },
+  }))
+
+  const result = await client.request('/v1/runs', { method: 'GET' })
+
+  assert.equal(refreshes, 1)
+  assert.equal(unauthorized, 0)
+  assert.equal(result.status, 503)
+  assert.equal(result.error?.kind, 'server')
+})
+
+test('explicit refresh distinguishes rejected credentials from temporary outages', async () => {
+  let nextResponse = response(503, { code: 100503, data: {} })
+  let refreshed = 0
+  let unauthorized = 0
+  const client = createApiClient(clientOptions({
+    onTokenRefreshed: () => { refreshed += 1 },
+    onUnauthorized: () => { unauthorized += 1 },
+    fetch: async () => nextResponse,
+  }))
+
+  const unavailable = await client.refresh()
+  assert.equal(unavailable.kind, 'transient')
+  assert.equal(unavailable.response.status, 503)
+  assert.equal(unavailable.response.error?.kind, 'server')
+  assert.equal(refreshed, 0)
+  assert.equal(unauthorized, 0)
+
+  nextResponse = response(401, { code: 100401, data: {} })
+  const rejected = await client.refresh()
+  assert.deepEqual(rejected, { kind: 'unauthorized' })
+  assert.equal(refreshed, 0)
+  assert.equal(unauthorized, 0)
+})
+
 test('unauthorized POST is not refreshed or replayed', async () => {
   let calls = 0
   let refreshes = 0
@@ -315,6 +361,84 @@ test('classifies network and caller cancellation failures', async () => {
   const cancelled = await cancelledClient.request('/v1/runs', { method: 'GET', signal: controller.signal })
   assert.equal(cancelled.error?.kind, 'aborted')
   assert.doesNotMatch(JSON.stringify(cancelled), /secret-token-that-must-not-leak/i)
+})
+
+test('GET retries only network failures and 502, 503, or 504 responses', async (t) => {
+  const cases = [
+    { name: 'network', first: () => { throw new TypeError('connection reset') }, retries: true },
+    { name: 'bad gateway', first: () => response(502, { code: 100502, data: {} }), retries: true },
+    { name: 'service unavailable', first: () => response(503, { code: 100503, data: {} }), retries: true },
+    { name: 'gateway timeout', first: () => response(504, { code: 100504, data: {} }), retries: true },
+    { name: 'internal error', first: () => response(500, { code: 100500, data: {} }), retries: false },
+    { name: 'not implemented', first: () => response(501, { code: 501, data: {} }), retries: false },
+  ]
+
+  for (const entry of cases) {
+    await t.test(entry.name, async () => {
+      let calls = 0
+      const client = createApiClient(clientOptions({
+        maxGetRetries: 1,
+        random: () => 0.5,
+        fetch: async () => {
+          calls += 1
+          return calls === 1 ? entry.first() : response(200, payload({ records: [] }))
+        },
+      }))
+
+      const result = await client.request('/v1/runs', { method: 'GET' })
+
+      assert.equal(calls, entry.retries ? 2 : 1)
+      assert.equal(result.ok, entry.retries)
+    })
+  }
+})
+
+test('GET uses Retry-After with deterministic jitter injection', async () => {
+  const waits = []
+  let calls = 0
+  const client = createApiClient(clientOptions({
+    maxGetRetries: 1,
+    random: () => 0,
+    wait: async (milliseconds) => { waits.push(milliseconds) },
+    fetch: async () => {
+      calls += 1
+      return calls === 1
+        ? response(503, { code: 100503, data: {} }, { 'Retry-After': '2' })
+        : response(200, payload({ records: [] }))
+    },
+  }))
+
+  const result = await client.request('/v1/runs', { method: 'GET' })
+
+  assert.equal(result.ok, true)
+  assert.deepEqual(waits, [2_000])
+})
+
+test('GET retries a timeout without refreshing or clearing the session', async () => {
+  let calls = 0
+  let refreshes = 0
+  let unauthorized = 0
+  const client = createApiClient(clientOptions({
+    maxGetRetries: 1,
+    timeoutMs: 5,
+    random: () => 0.5,
+    onUnauthorized: () => { unauthorized += 1 },
+    fetch: async (input, init) => {
+      if (String(input).endsWith('/auth/token/refresh')) refreshes += 1
+      calls += 1
+      if (calls > 1) return response(200, payload({ records: [] }))
+      await new Promise((_, reject) => {
+        init.signal.addEventListener('abort', () => reject(init.signal.reason), { once: true })
+      })
+    },
+  }))
+
+  const result = await client.request('/v1/runs', { method: 'GET' })
+
+  assert.equal(result.ok, true)
+  assert.equal(calls, 2)
+  assert.equal(refreshes, 0)
+  assert.equal(unauthorized, 0)
 })
 
 test('cancels GET retry backoff without issuing a second request', async () => {
