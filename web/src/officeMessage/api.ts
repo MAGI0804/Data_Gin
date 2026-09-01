@@ -4,13 +4,15 @@ import {
   parseOfficeMessages,
   parseOfficeFeishuBots,
   parseOfficeRuns,
+  parseOfficeSchedule,
+  parseOfficeSchedules,
   parseOfficeTargets,
   parseProcedureSummaries,
   parseResultColumns,
   parseResultTableSummaries,
   parseSelectColumns,
 } from './contracts'
-import type { OfficeMessageDraft, OfficePushTarget, OfficeQueryParameter } from './types'
+import type { OfficeMessageDraft, OfficePushSchedule, OfficePushTarget, OfficeQueryParameter } from './types'
 
 type OfficeResult<T> = { ok: true; data: T } | { ok: false; error: string }
 
@@ -64,6 +66,20 @@ export async function deleteOfficeTarget(client: WorkspaceApiClient, id: number,
 
 export function getOfficeRuns(client: WorkspaceApiClient, signal?: AbortSignal) {
   return request(() => client('/v1/office-push-runs?limit=100', { method: 'GET', signal, ...quiet }), parseOfficeRuns, '推送记录加载失败。')
+}
+
+export function getOfficeSchedules(client: WorkspaceApiClient, signal?: AbortSignal) {
+  return request(() => client('/v1/office-push-schedules', { method: 'GET', signal, ...quiet }), parseOfficeSchedules, '定时计划加载失败。')
+}
+
+export function saveOfficeSchedule(client: WorkspaceApiClient, schedule: { id?: number | null }, body: unknown): Promise<OfficeResult<OfficePushSchedule>> {
+  return request(() => client(schedule.id ? `/v1/office-push-schedules/${schedule.id}` : '/v1/office-push-schedules', { method: schedule.id ? 'PUT' : 'POST', body, ...quiet }), parseOfficeSchedule, '定时计划保存失败。')
+}
+
+export async function deleteOfficeSchedule(client: WorkspaceApiClient, id: number, lockVersion: number): Promise<OfficeResult<{ id: number }>> {
+  const query = new URLSearchParams({ expectedLockVersion: String(lockVersion) })
+  const response = await client(`/v1/office-push-schedules/${id}?${query}`, { method: 'DELETE', ...quiet })
+  return response.ok ? { ok: true, data: { id } } : { ok: false, error: response.error?.message || '定时计划删除失败。' }
 }
 
 export async function createOfficeRun(client: WorkspaceApiClient, targetId: number, requestId: string, parameters: Record<string, string>): Promise<OfficeResult<{ id: number }>> {

@@ -7,6 +7,8 @@ import {
   mappingsFromColumns,
   parseOfficeFeishuBots,
   parseOfficeMessages,
+  parseOfficeRuns,
+  parseOfficeSchedules,
   parseOfficeTargets,
 } from '../.test-dist/officeMessage/contracts.js'
 
@@ -19,6 +21,39 @@ test('office Feishu bot contract projects public App ID metadata', () => {
     receiveIdType: 'chat_id', receiveId: 'oc_sales', enabled: true, lockVersion: 1, updatedAt: '2026-09-01T08:00:00Z',
   }] } })
   assert.equal(target.botAppId, 'cli_office')
+})
+
+test('office push schedule contract keeps Cron, time zone and scheduled date parameters', () => {
+  const [schedule] = parseOfficeSchedules({ data: { items: [{
+    id: 12, name: '每日销售日报', targetId: 3, cronExpr: '0 9 * * *', timeZone: 'Asia/Shanghai',
+    parameters: {
+      bill_date: { mode: 'SCHEDULED_DATE', offsetDays: -1 },
+      store_code: { mode: 'LITERAL', value: 'SH001' },
+    },
+    enabled: true, nextRunAt: '2026-09-02T01:00:00Z', lastScheduledAt: '2026-09-01T01:00:00Z',
+    lastError: '', lockVersion: 2, updatedAt: '2026-09-01T08:00:00Z',
+  }] } })
+
+  assert.equal(schedule.cronExpr, '0 9 * * *')
+  assert.equal(schedule.timeZone, 'Asia/Shanghai')
+  assert.deepEqual(schedule.parameters.bill_date, { mode: 'SCHEDULED_DATE', value: '', offsetDays: -1 })
+  assert.deepEqual(schedule.parameters.store_code, { mode: 'LITERAL', value: 'SH001', offsetDays: 0 })
+})
+
+test('office push run contract distinguishes manual and scheduled triggers', () => {
+  const runs = parseOfficeRuns({ data: { items: [{
+    id: 21, runUuid: 'schedule-run', targetId: 3, messageId: 8, status: 'SUCCEEDED', attemptCount: 1, rowCount: 14,
+    errorMessage: '', triggerType: 'SCHEDULE', scheduleId: 12, scheduledFor: '2026-09-01T01:00:00Z',
+    createdAt: '2026-09-01T01:00:01Z', finishedAt: '2026-09-01T01:00:02Z',
+  }, {
+    id: 22, runUuid: 'manual-run', targetId: 3, messageId: 8, status: 'QUEUED', attemptCount: 0, rowCount: 0,
+    errorMessage: '', triggerType: 'MANUAL', createdAt: '2026-09-01T02:00:00Z', finishedAt: '',
+  }] } })
+
+  assert.deepEqual(runs.map(({ triggerType, scheduleId, scheduledFor }) => ({ triggerType, scheduleId, scheduledFor })), [
+    { triggerType: 'SCHEDULE', scheduleId: 12, scheduledFor: '2026-09-01T01:00:00Z' },
+    { triggerType: 'MANUAL', scheduleId: 0, scheduledFor: '' },
+  ])
 })
 
 test('office message contract keeps yyyyMMdd query parameters and column mappings', () => {

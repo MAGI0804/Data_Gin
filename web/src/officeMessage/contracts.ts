@@ -9,6 +9,8 @@ import type {
   OfficeProcedureSummary,
   OfficePushRun,
   OfficePushRunStatus,
+  OfficePushSchedule,
+  OfficeScheduleParameter,
   OfficePushTarget,
   OfficeQueryParameter,
   OfficeResultColumn,
@@ -72,9 +74,39 @@ export function parseOfficeRuns(payload: unknown): OfficePushRun[] {
       id: positiveInteger(value.id), runUuid: text(value.runUuid), targetId: positiveInteger(value.targetId), messageId: positiveInteger(value.messageId),
       status: enumValue(value.status, ['QUEUED', 'RUNNING', 'SUCCEEDED', 'FAILED', 'UNKNOWN'] as const) as OfficePushRunStatus,
       attemptCount: nonNegativeInteger(value.attemptCount), rowCount: nonNegativeInteger(value.rowCount), errorMessage: text(value.errorMessage),
+      triggerType: enumValue(value.triggerType, ['MANUAL', 'SCHEDULE'] as const), scheduleId: optionalNonNegativeInteger(value.scheduleId),
+      scheduledFor: text(value.scheduledFor),
       createdAt: text(value.createdAt), finishedAt: text(value.finishedAt),
     }
   })
+}
+
+export function parseOfficeSchedules(payload: unknown): OfficePushSchedule[] {
+  return items(payload).map(parseOfficeScheduleValue)
+}
+
+export function parseOfficeSchedule(payload: unknown): OfficePushSchedule {
+  return parseOfficeScheduleValue(unwrapOfficeData(payload))
+}
+
+function parseOfficeScheduleValue(raw: unknown): OfficePushSchedule {
+  const value = record(raw)
+  return {
+    id: positiveInteger(value.id), name: text(value.name), targetId: positiveInteger(value.targetId), cronExpr: text(value.cronExpr),
+    timeZone: enumValue(value.timeZone, ['Asia/Shanghai'] as const), parameters: parseScheduleParameters(value.parameters),
+    enabled: booleanValue(value.enabled), nextRunAt: text(value.nextRunAt), lastScheduledAt: text(value.lastScheduledAt),
+    lastError: text(value.lastError), lockVersion: nonNegativeInteger(value.lockVersion), updatedAt: text(value.updatedAt),
+  }
+}
+
+function parseScheduleParameters(raw: unknown): Record<string, OfficeScheduleParameter> {
+  const values = record(raw)
+  return Object.fromEntries(Object.entries(values).map(([code, parameter]) => {
+    const value = record(parameter)
+    return [code, {
+      mode: enumValue(value.mode, ['LITERAL', 'SCHEDULED_DATE'] as const), value: text(value.value), offsetDays: optionalInteger(value.offsetDays),
+    }]
+  }))
 }
 
 export function parseProcedureSummaries(payload: unknown): OfficeProcedureSummary[] {
@@ -221,6 +253,9 @@ function booleanValue(value: unknown): boolean { if (typeof value !== 'boolean')
 function numberValue(value: unknown): number { const parsed = Number(value); if (!Number.isFinite(parsed) || parsed < 0) throw new Error('办公消息数字字段无效'); return parsed }
 function positiveInteger(value: unknown): number { const parsed = numberValue(value); if (!Number.isInteger(parsed) || parsed <= 0) throw new Error('办公消息 ID 无效'); return parsed }
 function nonNegativeInteger(value: unknown): number { const parsed = numberValue(value); if (!Number.isInteger(parsed)) throw new Error('办公消息数字字段无效'); return parsed }
+function integer(value: unknown): number { const parsed = Number(value); if (!Number.isInteger(parsed)) throw new Error('办公消息数字字段无效'); return parsed }
+function optionalInteger(value: unknown): number { return value === undefined || value === null ? 0 : integer(value) }
+function optionalNonNegativeInteger(value: unknown): number { return value === undefined || value === null ? 0 : nonNegativeInteger(value) }
 function enumValue<const T extends readonly string[]>(value: unknown, allowed: T): T[number] { if (typeof value !== 'string' || !allowed.includes(value)) throw new Error('办公消息枚举字段无效'); return value as T[number] }
 
 export const officeSourceLabels: Record<OfficeMessageSourceType, string> = { EDITED: '自编辑消息', ORACLE_PROCEDURE: '存储过程结果 Excel', ORACLE_QUERY: 'SELECT 结果 Excel' }

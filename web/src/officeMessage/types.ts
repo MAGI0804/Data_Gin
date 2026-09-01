@@ -71,8 +71,32 @@ export type OfficePushRun = {
   attemptCount: number
   rowCount: number
   errorMessage: string
+  triggerType: 'MANUAL' | 'SCHEDULE'
+  scheduleId: number
+  scheduledFor: string
   createdAt: string
   finishedAt: string
+}
+
+export type OfficeScheduleParameter = {
+  mode: 'LITERAL' | 'SCHEDULED_DATE'
+  value: string
+  offsetDays: number
+}
+
+export type OfficePushSchedule = {
+  id: number
+  name: string
+  targetId: number
+  cronExpr: string
+  timeZone: 'Asia/Shanghai'
+  parameters: Record<string, OfficeScheduleParameter>
+  enabled: boolean
+  nextRunAt: string
+  lastScheduledAt: string
+  lastError: string
+  lockVersion: number
+  updatedAt: string
 }
 
 export type OfficeProcedureSummary = {
