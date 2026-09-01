@@ -117,6 +117,23 @@ func (dao *MallDAO) List(ctx context.Context, filter MallListFilter) ([]model.Ma
 	return malls, nil
 }
 
+func (dao *MallDAO) ListBusinessOverviewMallsAfterID(ctx context.Context, actorUserID, afterID uint, limit int) ([]model.Mall, error) {
+	var malls []model.Mall
+	query := applyMallScopeQuery(
+		dao.db.WithContext(ctx).Model(&model.Mall{}).Select("id", "mall_code", "name_cn"),
+		dao.db.WithContext(ctx),
+		actorUserID,
+		"malls.id",
+	)
+	if afterID > 0 {
+		query = query.Where("id > ?", afterID)
+	}
+	if err := query.Order("id ASC").Limit(normalizePageSize(limit)).Find(&malls).Error; err != nil {
+		return nil, fmt.Errorf("mall: list business overview malls: %w", err)
+	}
+	return malls, nil
+}
+
 func (dao *MallDAO) ListEnabledWeatherAfterID(ctx context.Context, afterID uint, limit int) ([]model.Mall, error) {
 	confirmed := "confirmed"
 	enabled := true

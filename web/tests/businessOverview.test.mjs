@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { businessOverviewPaymentsPath, createMockBusinessSummaries, emptyBusinessSummary, filterBusinessSummary, parseBusinessOverviewPayments, queryMockBusinessOverview, recordPaymentDetail, recordTotal } from '../.test-dist/businessOverview.js'
+import { businessOverviewMallsPath, businessOverviewPaymentsPath, createMockBusinessSummaries, emptyBusinessSummary, filterBusinessSummary, mergeBusinessOverviewMalls, parseBusinessOverviewMalls, parseBusinessOverviewPayments, queryMockBusinessOverview, recordPaymentDetail, recordTotal } from '../.test-dist/businessOverview.js'
 import { canViewNavigationItem, resolveAccessibleNavigationItem } from '../.test-dist/appShell/navigationPermissions.js'
 import { canCommitOverviewResponse, overviewRequestPlan, overviewSignalAccess, restrictOverviewData } from '../.test-dist/appShell/overviewWorkspacePolicy.js'
 
@@ -147,6 +147,20 @@ test('builds the payment query path from ISO date and mall code', () => {
   )
   assert.throws(() => businessOverviewPaymentsPath('2026-02-30', 'ABCN001A002'))
   assert.throws(() => businessOverviewPaymentsPath('2026-09-01', "A' OR 1=1--"))
+})
+
+test('parses and paginates the dedicated business overview mall list', () => {
+  assert.equal(businessOverviewMallsPath(), '/v1/business-overview/malls?limit=50')
+  assert.equal(businessOverviewMallsPath(8, 25), '/v1/business-overview/malls?limit=25&afterId=8')
+  assert.deepEqual(parseBusinessOverviewMalls({ code: 0, data: {
+    items: [{ id: 8, mallCode: 'ABCN001A002', nameCn: ' 徐汇万科 ' }],
+    nextAfterId: 8,
+  } }), { items: [{ id: 8, mallCode: 'ABCN001A002', nameCn: '徐汇万科' }], nextAfterId: 8 })
+  assert.equal(parseBusinessOverviewMalls({ code: 0, data: { items: [{ id: 0, mallCode: 'BAD', nameCn: '商场' }], nextAfterId: 0 } }), null)
+  assert.deepEqual(mergeBusinessOverviewMalls(
+    [{ id: 1, mallCode: 'MALL-001', nameCn: '旧名称' }],
+    [{ id: 1, mallCode: 'MALL-001', nameCn: '新名称' }, { id: 2, mallCode: 'MALL-002', nameCn: '二号商场' }],
+  ), [{ id: 1, mallCode: 'MALL-001', nameCn: '新名称' }, { id: 2, mallCode: 'MALL-002', nameCn: '二号商场' }])
 })
 
 test('maps Oracle payment rows into the existing business summary', () => {

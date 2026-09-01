@@ -10,8 +10,10 @@ import (
 	"time"
 
 	appConfig "gin-biz-web-api/config"
+	"gin-biz-web-api/internal/dao/data_dao"
 	"gin-biz-web-api/internal/reportoracle"
 	"gin-biz-web-api/internal/service/auth_svc"
+	"gin-biz-web-api/model"
 	"gin-biz-web-api/pkg/database"
 )
 
@@ -34,12 +36,18 @@ type businessOverviewMallScope interface {
 	ConstrainMallCodes(context.Context, uint, []string) ([]string, error)
 }
 
+type businessOverviewMallLister interface {
+	ListBusinessOverviewMallsAfterID(context.Context, uint, uint, int) ([]model.Mall, error)
+}
+
 type BusinessOverviewService struct {
-	config    appConfig.ReportInputOracleConfig
-	open      businessOverviewOracleOpener
-	mallScope businessOverviewMallScope
-	mu        sync.Mutex
-	oracle    businessOverviewOracle
+	config          appConfig.ReportInputOracleConfig
+	oracleConfigErr error
+	open            businessOverviewOracleOpener
+	mallScope       businessOverviewMallScope
+	malls           businessOverviewMallLister
+	mu              sync.Mutex
+	oracle          businessOverviewOracle
 }
 
 type BusinessOverviewPaymentDTO struct {
@@ -58,32 +66,52 @@ type BusinessOverviewPaymentResult struct {
 	Items    []BusinessOverviewPaymentDTO `json:"items"`
 }
 
+type BusinessOverviewMallDTO struct {
+	ID       uint   `json:"id"`
+	MallCode string `json:"mallCode"`
+	NameCN   string `json:"nameCn"`
+}
+
+type BusinessOverviewMallListResult struct {
+	Items       []BusinessOverviewMallDTO `json:"items"`
+	NextAfterID uint                      `json:"nextAfterId"`
+}
+
 func NewBusinessOverviewService() (*BusinessOverviewService, error) {
-	configured, err := appConfig.LoadReportInputQueryConfig()
-	if err != nil {
-		return nil, err
-	}
-	if !validBusinessOverviewOracleConfig(configured.Oracle) {
-		return nil, fmt.Errorf("%w: default Oracle configuration is incomplete", ErrBusinessOverviewUnavailable)
-	}
-	return newBusinessOverviewService(
+	configured, configErr := appConfig.LoadReportInputQueryConfig()
+	service := newBusinessOverviewService(
 		configured.Oracle,
 		func(ctx context.Context, config reportoracle.Config) (businessOverviewOracle, error) {
 			return reportoracle.Open(ctx, config)
 		},
 		auth_svc.NewMallScopeService(database.DB),
-	), nil
+		data_dao.NewMallDAO(database.DB),
+	)
+	if configErr != nil {
+		service.oracleConfigErr = fmt.Errorf("%w: load default Oracle configuration: %v", ErrBusinessOverviewUnavailable, configErr)
+	} else if !validBusinessOverviewOracleConfig(configured.Oracle) {
+		service.oracleConfigErr = fmt.Errorf("%w: default Oracle configuration is incomplete", ErrBusinessOverviewUnavailable)
+	}
+	return service, nil
 }
 
 func newBusinessOverviewService(
 	config appConfig.ReportInputOracleConfig,
 	opener businessOverviewOracleOpener,
 	mallScope businessOverviewMallScope,
+	mallListers ...businessOverviewMallLister,
 ) *BusinessOverviewService {
 	if opener == nil || mallScope == nil {
 		panic("business overview service: dependencies are required")
 	}
-	return &BusinessOverviewService{config: config, open: opener, mallScope: mallScope}
+	malls := businessOverviewMallLister(data_dao.NewMallDAO(database.DB))
+	if len(mallListers) > 0 {
+		if mallListers[0] == nil {
+			panic("business overview service: mall lister is required")
+		}
+		malls = mallListers[0]
+	}
+	return &BusinessOverviewService{config: config, open: opener, mallScope: mallScope, malls: malls}
 }
 
 func (service *BusinessOverviewService) QueryPayments(
@@ -97,6 +125,9 @@ func (service *BusinessOverviewService) QueryPayments(
 	billDate, err := parseBusinessOverviewDate(date)
 	if service == nil || ctx == nil || actor == 0 || err != nil || !businessOverviewMallCodePattern.MatchString(mallCode) {
 		return nil, ErrBusinessOverviewInvalid
+	}
+	if service.oracleConfigErr != nil {
+		return nil, service.oracleConfigErr
 	}
 	allowed, err := service.mallScope.ConstrainMallCodes(ctx, actor, []string{mallCode})
 	if err != nil {
@@ -128,6 +159,29 @@ func (service *BusinessOverviewService) QueryPayments(
 			BillDate: row.BillDate, StoreID: row.StoreID, StoreName: row.StoreName, StoreCode: row.StoreCode,
 			PaywayID: row.PaywayID, PayAmount: row.PayAmount, PaywayName: row.PaywayName,
 		})
+	}
+	return result, nil
+}
+
+func (service *BusinessOverviewService) ListMalls(
+	ctx context.Context,
+	actor uint,
+	afterID uint,
+	limit int,
+) (*BusinessOverviewMallListResult, error) {
+	if service == nil || ctx == nil || actor == 0 || limit < 1 || limit > 200 {
+		return nil, ErrBusinessOverviewInvalid
+	}
+	rows, err := service.malls.ListBusinessOverviewMallsAfterID(ctx, actor, afterID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("%w: list scoped malls: %v", ErrBusinessOverviewUnavailable, err)
+	}
+	result := &BusinessOverviewMallListResult{Items: make([]BusinessOverviewMallDTO, 0, len(rows))}
+	for _, mall := range rows {
+		result.Items = append(result.Items, BusinessOverviewMallDTO{ID: mall.ID, MallCode: mall.MallCode, NameCN: mall.NameCN})
+	}
+	if len(rows) > 0 {
+		result.NextAfterID = rows[len(rows)-1].ID
 	}
 	return result, nil
 }

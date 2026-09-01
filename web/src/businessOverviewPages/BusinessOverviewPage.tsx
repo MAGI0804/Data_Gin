@@ -2,14 +2,17 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { CalendarDays, Maximize2, Minimize2, Save } from 'lucide-react'
 import {
   emptyBusinessSummary,
+  businessOverviewMallsPath,
   businessOverviewPaymentsPath,
+  mergeBusinessOverviewMalls,
+  parseBusinessOverviewMalls,
   parseBusinessOverviewPayments,
   recordPaymentDetail,
   recordTotal,
   shiftBusinessDate,
   type CashierID,
+  type BusinessOverviewMall,
 } from '../businessOverview'
-import { mergeMallWeatherMalls, parseMallWeatherMallList, type MallWeatherMall } from '../mallWeather'
 import type { WorkspaceApiClient } from '../appShell/WorkspaceRouter'
 import { PageCanvas } from '../ui'
 import styles from './BusinessOverviewPage.module.css'
@@ -29,8 +32,8 @@ export function BusinessOverviewPage({ client }: { client: WorkspaceApiClient })
   const mallController = useRef<AbortController | null>(null)
   const paymentRequestSequence = useRef(0)
   const paymentController = useRef<AbortController | null>(null)
-  const mallsRef = useRef<MallWeatherMall[]>([])
-  const [malls, setMalls] = useState<MallWeatherMall[]>([])
+  const mallsRef = useRef<BusinessOverviewMall[]>([])
+  const [malls, setMalls] = useState<BusinessOverviewMall[]>([])
   const [mallCode, setMallCode] = useState('')
   const [mallLoadState, setMallLoadState] = useState<MallLoadState>('loading')
   const [mallError, setMallError] = useState('')
@@ -81,23 +84,21 @@ export function BusinessOverviewPage({ client }: { client: WorkspaceApiClient })
     mallController.current = controller
     setMallLoadState('loading')
     setMallError('')
-    const search = new URLSearchParams({ limit: '50' })
-    if (afterID > 0) search.set('afterId', String(afterID))
     try {
-      const response = await client(`/v1/malls?${search.toString()}`, { method: 'GET', showResult: false, silentLoading: true, signal: controller.signal })
+      const response = await client(businessOverviewMallsPath(afterID), { method: 'GET', showResult: false, silentLoading: true, signal: controller.signal })
       if (controller.signal.aborted || sequence !== mallRequestSequence.current) return
       if (!response.ok) {
         setMallLoadState('error')
         setMallError(response.status === 403 ? '当前账号无权读取商场列表。' : '商场列表加载失败，请稍后重试。')
         return
       }
-      const parsed = parseMallWeatherMallList(response.data)
+      const parsed = parseBusinessOverviewMalls(response.data)
       if (!parsed || (parsed.items.length === 50 && parsed.nextAfterId <= afterID)) {
         setMallLoadState('error')
         setMallError('商场列表响应格式不正确，请联系管理员。')
         return
       }
-      const nextMalls = afterID > 0 ? mergeMallWeatherMalls(mallsRef.current, parsed.items) : parsed.items
+      const nextMalls = afterID > 0 ? mergeBusinessOverviewMalls(mallsRef.current, parsed.items) : parsed.items
       mallsRef.current = nextMalls
       setMalls(nextMalls)
       setMallCode((current) => nextMalls.some((mall) => mall.mallCode === current) ? current : nextMalls[0]?.mallCode ?? '')

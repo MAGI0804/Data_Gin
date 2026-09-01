@@ -220,6 +220,13 @@ func apiData(api *gin.RouterGroup) {
 
 func registerBusinessOverviewRoutes(api *gin.RouterGroup, controller *data_ctrl.BusinessOverviewController) {
 	api.GET(
+		"/v1/business-overview/malls",
+		middleware.AuthJWT(),
+		middleware.RequirePermission(model.PermissionBusinessOverviewRead),
+		middleware.LimitRoute("120-M"),
+		controller.ListMalls,
+	)
+	api.GET(
 		"/v1/business-overview/payments",
 		middleware.AuthJWT(),
 		middleware.RequirePermission(model.PermissionBusinessOverviewRead),

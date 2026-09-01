@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"gin-biz-web-api/internal/service/data_svc"
@@ -17,6 +18,49 @@ import (
 
 type BusinessOverviewQueryService interface {
 	QueryPayments(context.Context, uint, string, string) (*data_svc.BusinessOverviewPaymentResult, error)
+	ListMalls(context.Context, uint, uint, int) (*data_svc.BusinessOverviewMallListResult, error)
+}
+
+func (controller *BusinessOverviewController) ListMalls(c *gin.Context) {
+	query := c.Request.URL.Query()
+	if len(query) > 2 || len(query["limit"]) > 1 || len(query["afterId"]) > 1 {
+		writeBusinessOverviewMallListError(c, data_svc.ErrBusinessOverviewInvalid)
+		return
+	}
+	for key := range query {
+		if key != "limit" && key != "afterId" {
+			writeBusinessOverviewMallListError(c, data_svc.ErrBusinessOverviewInvalid)
+			return
+		}
+	}
+	limit := 50
+	if values, exists := query["limit"]; exists {
+		parsed, err := strconv.ParseUint(strings.TrimSpace(values[0]), 10, 16)
+		if err != nil || parsed < 1 || parsed > 200 {
+			writeBusinessOverviewMallListError(c, data_svc.ErrBusinessOverviewInvalid)
+			return
+		}
+		limit = int(parsed)
+	}
+	var afterID uint
+	if values, exists := query["afterId"]; exists {
+		parsed, err := strconv.ParseUint(strings.TrimSpace(values[0]), 10, strconv.IntSize)
+		if err != nil || parsed < 1 {
+			writeBusinessOverviewMallListError(c, data_svc.ErrBusinessOverviewInvalid)
+			return
+		}
+		afterID = uint(parsed)
+	}
+	if controller.initErr != nil || controller.service == nil {
+		writeBusinessOverviewMallListError(c, fmt.Errorf("%w: initialization failed", data_svc.ErrBusinessOverviewUnavailable))
+		return
+	}
+	result, err := controller.service.ListMalls(c.Request.Context(), auth.CurrentUserID(c), afterID, limit)
+	if err != nil {
+		writeBusinessOverviewMallListError(c, err)
+		return
+	}
+	responses.New(c).ToResponseWithStatus(http.StatusOK, result)
 }
 
 type BusinessOverviewController struct {
@@ -68,4 +112,15 @@ func writeBusinessOverviewError(c *gin.Context, err error) {
 	default:
 		responses.New(c).ToSafeErrorResponse(errcode.InternalServerError, "营业数据查询服务暂时不可用")
 	}
+}
+
+func writeBusinessOverviewMallListError(c *gin.Context, err error) {
+	if c != nil && err != nil {
+		_ = c.Error(err).SetType(gin.ErrorTypePrivate)
+	}
+	if errors.Is(err, data_svc.ErrBusinessOverviewInvalid) {
+		responses.New(c).ToSafeErrorResponse(errcode.UnprocessableEntity, "商场列表查询参数校验失败")
+		return
+	}
+	responses.New(c).ToSafeErrorResponse(errcode.InternalServerError, "商场列表服务暂时不可用")
 }

@@ -9,6 +9,7 @@ import (
 	appConfig "gin-biz-web-api/config"
 	"gin-biz-web-api/internal/reportoracle"
 	"gin-biz-web-api/internal/service/auth_svc"
+	"gin-biz-web-api/model"
 )
 
 type fakeBusinessOverviewOracle struct {
@@ -38,6 +39,26 @@ type fakeBusinessOverviewMallScope struct {
 	actor   uint
 	codes   []string
 }
+
+type fakeBusinessOverviewMallLister struct {
+	rows    []model.Mall
+	err     error
+	actor   uint
+	afterID uint
+	limit   int
+}
+
+func (lister *fakeBusinessOverviewMallLister) ListBusinessOverviewMallsAfterID(
+	_ context.Context,
+	actor uint,
+	afterID uint,
+	limit int,
+) ([]model.Mall, error) {
+	lister.actor, lister.afterID, lister.limit = actor, afterID, limit
+	return lister.rows, lister.err
+}
+
+var _ businessOverviewMallLister = (*fakeBusinessOverviewMallLister)(nil)
 
 func (scope *fakeBusinessOverviewMallScope) ConstrainMallCodes(
 	_ context.Context,
@@ -115,5 +136,29 @@ func TestBusinessOverviewServiceRejectsMallOutsideScope(t *testing.T) {
 	)
 	if _, err := service.QueryPayments(t.Context(), 17, "20260901", "ABCN001A002"); !errors.Is(err, ErrBusinessOverviewForbidden) {
 		t.Fatalf("QueryPayments() error = %v", err)
+	}
+}
+
+func TestBusinessOverviewServiceListsOnlyScopedMallIdentity(t *testing.T) {
+	lister := &fakeBusinessOverviewMallLister{rows: []model.Mall{
+		{BaseModel: model.BaseModel{ID: 3}, MallCode: "MALL-003", NameCN: "三号商场"},
+		{BaseModel: model.BaseModel{ID: 8}, MallCode: "MALL-008", NameCN: "八号商场"},
+	}}
+	service := newBusinessOverviewService(
+		businessOverviewOracleConfig(),
+		func(context.Context, reportoracle.Config) (businessOverviewOracle, error) {
+			return nil, errors.New("must not open")
+		},
+		&fakeBusinessOverviewMallScope{},
+		lister,
+	)
+	service.oracleConfigErr = errors.New("Oracle unavailable")
+	result, err := service.ListMalls(t.Context(), 17, 2, 50)
+	if err != nil {
+		t.Fatalf("ListMalls() error = %v", err)
+	}
+	if lister.actor != 17 || lister.afterID != 2 || lister.limit != 50 || result.NextAfterID != 8 || len(result.Items) != 2 ||
+		result.Items[0].ID != 3 || result.Items[0].MallCode != "MALL-003" || result.Items[0].NameCN != "三号商场" {
+		t.Fatalf("lister=%#v result=%#v", lister, result)
 	}
 }

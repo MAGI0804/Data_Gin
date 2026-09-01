@@ -8,6 +8,10 @@ export type BusinessOverviewQuery = {
 
 export type PaymentSummary = { name: string; amount: number }
 
+export type BusinessOverviewMall = { id: number; mallCode: string; nameCn: string }
+
+export type BusinessOverviewMallList = { items: BusinessOverviewMall[]; nextAfterId: number }
+
 export type ReconciliationRecord = {
   id: string
   date: string
@@ -79,6 +83,34 @@ export function businessOverviewPaymentsPath(date: string, mallCode: string) {
   if (!/^[A-Z0-9][A-Z0-9_-]{1,63}$/.test(normalizedMallCode)) throw new Error('invalid mall code')
   const query = new URLSearchParams({ date: date.replace(/-/g, ''), mallCode: normalizedMallCode })
   return `/v1/business-overview/payments?${query.toString()}`
+}
+
+export function businessOverviewMallsPath(afterID = 0, limit = 50) {
+  if (!Number.isSafeInteger(afterID) || afterID < 0 || !Number.isSafeInteger(limit) || limit < 1 || limit > 200) {
+    throw new Error('invalid business overview mall pagination')
+  }
+  const query = new URLSearchParams({ limit: String(limit) })
+  if (afterID > 0) query.set('afterId', String(afterID))
+  return `/v1/business-overview/malls?${query.toString()}`
+}
+
+export function parseBusinessOverviewMalls(payload: unknown): BusinessOverviewMallList | null {
+  if (!isRecord(payload) || (payload.code !== 0 && payload.code !== 200) || !isRecord(payload.data) ||
+    !Array.isArray(payload.data.items) || !Number.isSafeInteger(payload.data.nextAfterId) || Number(payload.data.nextAfterId) < 0) return null
+  const items: BusinessOverviewMall[] = []
+  for (const item of payload.data.items) {
+    if (!isRecord(item) || !Number.isSafeInteger(item.id) || Number(item.id) < 1 ||
+      typeof item.mallCode !== 'string' || !/^[A-Z0-9][A-Z0-9_-]{1,63}$/.test(item.mallCode) ||
+      typeof item.nameCn !== 'string' || !item.nameCn.trim()) return null
+    items.push({ id: Number(item.id), mallCode: item.mallCode, nameCn: item.nameCn.trim() })
+  }
+  return { items, nextAfterId: Number(payload.data.nextAfterId) }
+}
+
+export function mergeBusinessOverviewMalls(current: BusinessOverviewMall[], incoming: BusinessOverviewMall[]) {
+  const byID = new Map(current.map((mall) => [mall.id, mall]))
+  incoming.forEach((mall) => byID.set(mall.id, mall))
+  return Array.from(byID.values())
 }
 
 export function parseBusinessOverviewPayments(
