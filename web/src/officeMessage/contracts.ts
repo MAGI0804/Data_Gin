@@ -179,14 +179,19 @@ export function buildOfficeMessagePayload(draft: OfficeMessageDraft) {
 }
 
 function validOfficeWorkbookFileNameTemplate(value: string) {
-  if (!value || new TextEncoder().encode(value).length > 255 || /[/\\\u0000-\u001f\u007f-\u009f]/.test(value) || !value.toLowerCase().endsWith('.xlsx')) return false
+  if (!value || new TextEncoder().encode(value).length > 255 || Array.from(value).some(isUnsafeWorkbookFileNameCharacter) || !value.toLowerCase().endsWith('.xlsx')) return false
   const remaining = value.replace(/\{\{date(?::(?:yyyyMMdd|yyyy-MM-dd))?\}\}/g, '')
   return !remaining.includes('{{') && !remaining.includes('}}')
 }
 
 function legacyOfficeWorkbookFileName(name: string) {
-  const sanitized = Array.from(name.trim()).map((character) => /[/\\\0-\x1f\x7f]/.test(character) ? '-' : character).join('') || '办公消息'
+  const sanitized = Array.from(name.trim()).map((character) => isUnsafeWorkbookFileNameCharacter(character) ? '-' : character).join('') || '办公消息'
   return `${Array.from(sanitized).slice(0, 80).join('')}.xlsx`
+}
+
+function isUnsafeWorkbookFileNameCharacter(character: string) {
+  const codePoint = character.codePointAt(0) ?? 0
+  return character === '/' || character === '\\' || codePoint <= 31 || (codePoint >= 127 && codePoint <= 159)
 }
 
 export function mappingsFromColumns(columns: Array<{ name: string; dataType?: string }>): OfficeColumnMapping[] {
