@@ -31,6 +31,14 @@
 .forms form { display: grid; align-content: start; gap: var(--space-2); padding-block: var(--space-3); border-top: 1px solid var(--color-border); }
 .forms h4 { margin: 0 0 var(--space-1); }
 .check { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: var(--space-2); align-items: center; color: var(--color-text); font-size: 13px; font-weight: 500; }
+.check small { grid-column: 2; margin-block-start: calc(-1 * var(--space-1)); color: var(--color-text-secondary); font-size: 11px; font-weight: 500; }
+.roleSelectionHeader { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; justify-content: space-between; }
+.roleSelectionHeader h4 { margin: 0; }
+.roleSelectionHeader button { min-height: 32px; padding: var(--space-1) var(--space-2); font-size: 12px; }
+.roleSelectionHeader svg { width: 14px; height: 14px; }
+.roleUnavailable { display: grid; align-content: start; gap: var(--space-2); padding-block: var(--space-3); border-top: 1px solid var(--color-border); }
+.roleUnavailable h4, .roleUnavailable p { margin: 0; }
+.roleUnavailable p { color: var(--color-text-secondary); font-size: 13px; }
 .masterTitle { display: flex; gap: var(--space-2); align-items: center; min-height: var(--button-height); }
 .permissionMatrix { display: grid; gap: var(--space-4); margin-block-start: var(--space-4); }
 .permissionMatrix fieldset, .drawerForm fieldset { display: grid; gap: 0; margin: 0; border: 1px solid var(--color-border); padding: var(--space-2) var(--space-3); }
@@ -41,6 +49,7 @@
 .permissionMatrix label small, .permissionMatrix label em { color: var(--color-text-secondary); font-size: 11px; font-style: normal; font-weight: 500; }
 .saveRow { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--space-2); align-items: end; }
 .drawerForm { display: grid; gap: var(--space-3); }
+.srOnly { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; clip-path: inset(50%); }
 .danger { border-color: var(--color-danger); color: var(--color-danger); background: var(--color-canvas); }
 .dangerNotice { margin: 0; border-inline-start: 3px solid var(--color-danger); background: var(--color-notice-danger); padding: var(--space-3); color: var(--color-danger); }
 .auditFilter { display: flex; flex: 1 1 auto; flex-wrap: wrap; gap: var(--space-2); align-items: end; }

@@ -1,5 +1,44 @@
 export type AccessAccountRole = { code: string; name: string }
 
+export type AccessRole = {
+  id: number
+  code: string
+  name: string
+  description: string
+  status: string
+  isSystem: boolean
+  isSuper: boolean
+  permissions: string[]
+}
+
+export type AccessPermission = {
+  code: string
+  name: string
+  module: string
+  description: string
+  riskLevel: string
+}
+
+export type RoleCatalogStatus = 'idle' | 'loading' | 'ready' | 'error'
+
+export function accessManagementCapabilities(permissions: readonly string[]) {
+  return {
+    canAccountRead: permissions.includes('system.account.read'),
+    canAccountManage: permissions.includes('system.account.manage'),
+    canRoleRead: permissions.includes('system.role.read'),
+    canRoleManage: permissions.includes('system.role.manage'),
+    canAuditRead: permissions.includes('system.audit.read'),
+  }
+}
+
+export function canReplaceAccountRoles(status: RoleCatalogStatus) {
+  return status === 'ready'
+}
+
+export function updateRoleSelection(current: readonly number[], roleID: number, checked: boolean): number[] {
+  return checked ? [...new Set([...current, roleID])] : current.filter((id) => id !== roleID)
+}
+
 export type AccessAccount = {
   id: number
   account: string
@@ -40,4 +79,32 @@ export function parseAccessAccounts(payload: unknown): AccessAccount[] {
       mallIds,
     }]
   })
+}
+
+export function parseCreatedAccessRole(payload: unknown): AccessRole | null {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return null
+  const data = (payload as Record<string, unknown>).data
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return null
+  const role = (data as Record<string, unknown>).role
+  if (!role || typeof role !== 'object' || Array.isArray(role)) return null
+  const item = role as Record<string, unknown>
+  if (!Number.isSafeInteger(item.id) || Number(item.id) <= 0 || typeof item.code !== 'string' || typeof item.name !== 'string' ||
+    typeof item.description !== 'string' || typeof item.status !== 'string' || typeof item.isSystem !== 'boolean' || typeof item.isSuper !== 'boolean' ||
+    !Array.isArray(item.permissions) || !item.permissions.every((permission) => typeof permission === 'string')) return null
+  return {
+    id: Number(item.id),
+    code: item.code,
+    name: item.name,
+    description: item.description,
+    status: item.status,
+    isSystem: item.isSystem,
+    isSuper: item.isSuper,
+    permissions: item.permissions as string[],
+  }
+}
+
+export function accountRoleIDs(account: AccessAccount | undefined, roles: readonly AccessRole[]): number[] {
+  if (!account) return []
+  const assignedCodes = new Set(account.roles.map((role) => role.code))
+  return roles.filter((role) => assignedCodes.has(role.code)).map((role) => role.id)
 }
