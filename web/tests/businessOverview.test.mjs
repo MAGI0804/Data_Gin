@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { createMockBusinessSummaries, emptyBusinessSummary, filterBusinessSummary, queryMockBusinessOverview, recordPaymentDetail, recordTotal } from '../.test-dist/businessOverview.js'
+import { businessOverviewPaymentsPath, createMockBusinessSummaries, emptyBusinessSummary, filterBusinessSummary, parseBusinessOverviewPayments, queryMockBusinessOverview, recordPaymentDetail, recordTotal } from '../.test-dist/businessOverview.js'
 import { canViewNavigationItem } from '../.test-dist/appShell/navigationPermissions.js'
 
 test('aggregates the full day from cashier-level payment records', () => {
@@ -46,4 +46,44 @@ test('guards business overview navigation with mall permissions', () => {
   assert.equal(canViewNavigationItem('business_overview', []), false)
   assert.equal(canViewNavigationItem('business_overview', ['mall.read']), true)
   assert.equal(canViewNavigationItem('business_overview', ['mall.manage']), true)
+})
+
+test('builds the payment query path from ISO date and mall code', () => {
+  assert.equal(
+    businessOverviewPaymentsPath('2026-09-01', 'abcn001a002'),
+    '/v1/business-overview/payments?date=20260901&mallCode=ABCN001A002',
+  )
+  assert.throws(() => businessOverviewPaymentsPath('2026-02-30', 'ABCN001A002'))
+  assert.throws(() => businessOverviewPaymentsPath('2026-09-01', "A' OR 1=1--"))
+})
+
+test('maps Oracle payment rows into the existing business summary', () => {
+  const summary = parseBusinessOverviewPayments({ code: 0, data: {
+    date: '20260901',
+    mallCode: 'ABCN001A002',
+    items: [
+      { billDate: 20260901, storeId: 462, storeName: 'ALLBLU（上海徐汇区徐汇万科广场店）', storeCode: 'ABCN001A002', paywayId: 24, payAmount: 3164.76, paywayName: '微信' },
+      { billDate: 20260901, storeId: 462, storeName: 'ALLBLU（上海徐汇区徐汇万科广场店）', storeCode: 'ABCN001A002', paywayId: 25, payAmount: 1836.22, paywayName: '支付宝' },
+      { billDate: 20260901, storeId: 462, storeName: 'ALLBLU（上海徐汇区徐汇万科广场店）', storeCode: 'ABCN001A002', paywayId: 28, payAmount: 1627.2, paywayName: '刷卡POS支付' },
+    ],
+  } }, '2026-09-01', 'ABCN001A002')
+  assert.ok(summary)
+  assert.equal(summary.storeAmount, 6628.18)
+  assert.equal(summary.actualAmount, 6628.18)
+  assert.deepEqual(summary.payments, [
+    { name: '微信', amount: 3164.76 },
+    { name: '支付宝', amount: 1836.22 },
+    { name: '刷卡POS支付', amount: 1627.2 },
+  ])
+  assert.equal(summary.records[0].cashierName, '全部收银机')
+})
+
+test('accepts empty payment data and rejects mismatched or malformed rows', () => {
+  const empty = parseBusinessOverviewPayments({ code: 0, data: { date: '20260901', mallCode: 'ABCN001A002', items: [] } }, '2026-09-01', 'ABCN001A002')
+  assert.ok(empty)
+  assert.equal(empty.records.length, 0)
+  assert.equal(parseBusinessOverviewPayments({ code: 0, data: { date: '20260902', mallCode: 'ABCN001A002', items: [] } }, '2026-09-01', 'ABCN001A002'), null)
+  assert.equal(parseBusinessOverviewPayments({ code: 0, data: { date: '20260901', mallCode: 'ABCN001A002', items: [
+    { billDate: 20260901, storeId: 462, storeName: 'store', storeCode: 'ABCN001A002', paywayId: 24, payAmount: '3164.76', paywayName: '微信' },
+  ] } }, '2026-09-01', 'ABCN001A002'), null)
 })

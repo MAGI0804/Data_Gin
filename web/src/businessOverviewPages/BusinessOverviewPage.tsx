@@ -1,8 +1,9 @@
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { BadgeDollarSign, CalendarDays, Maximize2, Minimize2, Save } from 'lucide-react'
 import {
   emptyBusinessSummary,
-  queryMockBusinessOverview,
+  businessOverviewPaymentsPath,
+  parseBusinessOverviewPayments,
   recordPaymentDetail,
   recordTotal,
   shiftBusinessDate,
@@ -15,11 +16,10 @@ import styles from './BusinessOverviewPage.module.css'
 
 const cashierOptions: Array<{ id: CashierID; label: string }> = [
   { id: 'all', label: '全部' },
-  { id: 'counter-01', label: '收银机 01' },
-  { id: 'counter-02', label: '收银机 02' },
 ]
 
 type MallLoadState = 'loading' | 'success' | 'error'
+type PaymentLoadState = 'idle' | 'loading' | 'success' | 'error'
 
 export function BusinessOverviewPage({ client }: { client: WorkspaceApiClient }) {
   const today = shanghaiDate(new Date())
@@ -27,6 +27,8 @@ export function BusinessOverviewPage({ client }: { client: WorkspaceApiClient })
   const fullscreenSurfaceRef = useRef<HTMLDivElement>(null)
   const mallRequestSequence = useRef(0)
   const mallController = useRef<AbortController | null>(null)
+  const paymentRequestSequence = useRef(0)
+  const paymentController = useRef<AbortController | null>(null)
   const mallsRef = useRef<MallWeatherMall[]>([])
   const [malls, setMalls] = useState<MallWeatherMall[]>([])
   const [mallCode, setMallCode] = useState('')
@@ -35,21 +37,24 @@ export function BusinessOverviewPage({ client }: { client: WorkspaceApiClient })
   const [nextAfterID, setNextAfterID] = useState(0)
   const [selectedDate, setSelectedDate] = useState(today)
   const [cashierID, setCashierID] = useState<CashierID>('all')
+  const [summary, setSummary] = useState(() => emptyBusinessSummary(today))
+  const [paymentLoadState, setPaymentLoadState] = useState<PaymentLoadState>('idle')
+  const [paymentError, setPaymentError] = useState('')
   const [savedMessage, setSavedMessage] = useState('')
   const [fullscreenError, setFullscreenError] = useState('')
   const [isFullscreen, setIsFullscreen] = useState(false)
-  const summary = useMemo(() => mallCode
-    ? queryMockBusinessOverview({ mallCode, date: selectedDate, cashierID }, today)
-    : emptyBusinessSummary(selectedDate), [cashierID, mallCode, selectedDate, today])
   const selectedMall = malls.find((mall) => mall.mallCode === mallCode)
 
   const saveReconciliation = useCallback(() => {
-    if (!selectedMall) return
+    if (!selectedMall || paymentLoadState !== 'success') return
     setSavedMessage(`${selectedMall.nameCn} ${selectedDate} 的对账数据已保存（模拟）`)
-  }, [selectedDate, selectedMall])
+  }, [paymentLoadState, selectedDate, selectedMall])
 
   function changeDate(date: string) {
     setSelectedDate(date)
+    setSummary(emptyBusinessSummary(date))
+    setPaymentLoadState(mallCode ? 'loading' : 'idle')
+    setPaymentError('')
     setSavedMessage('')
   }
 
@@ -62,6 +67,9 @@ export function BusinessOverviewPage({ client }: { client: WorkspaceApiClient })
   function changeMall(value: string) {
     if (!malls.some((mall) => mall.mallCode === value)) return
     setMallCode(value)
+    setSummary(emptyBusinessSummary(selectedDate))
+    setPaymentLoadState('loading')
+    setPaymentError('')
     setSavedMessage('')
   }
 
@@ -103,6 +111,39 @@ export function BusinessOverviewPage({ client }: { client: WorkspaceApiClient })
     }
   }, [client])
 
+  const loadPayments = useCallback(async (date: string, code: string) => {
+    const sequence = ++paymentRequestSequence.current
+    paymentController.current?.abort()
+    const controller = new AbortController()
+    paymentController.current = controller
+    setSummary(emptyBusinessSummary(date))
+    setPaymentLoadState('loading')
+    setPaymentError('')
+    try {
+      const response = await client(businessOverviewPaymentsPath(date, code), { method: 'GET', showResult: false, silentLoading: true, signal: controller.signal })
+      if (controller.signal.aborted || sequence !== paymentRequestSequence.current) return
+      if (!response.ok) {
+        setPaymentLoadState('error')
+        setPaymentError(response.status === 403 ? '当前账号无权查询该商场营业数据。' : '营业数据加载失败，请稍后重试。')
+        return
+      }
+      const parsed = parseBusinessOverviewPayments(response.data, date, code)
+      if (!parsed) {
+        setPaymentLoadState('error')
+        setPaymentError('营业数据响应格式不正确，请联系管理员。')
+        return
+      }
+      setSummary(parsed)
+      setPaymentLoadState('success')
+    } catch {
+      if (controller.signal.aborted || sequence !== paymentRequestSequence.current) return
+      setPaymentLoadState('error')
+      setPaymentError('营业数据加载异常，请检查网络后重试。')
+    } finally {
+      if (paymentController.current === controller) paymentController.current = null
+    }
+  }, [client])
+
   const toggleFullscreen = useCallback(async () => {
     const surface = fullscreenSurfaceRef.current
     if (!surface) return
@@ -123,6 +164,18 @@ export function BusinessOverviewPage({ client }: { client: WorkspaceApiClient })
     void loadMalls()
     return () => mallController.current?.abort()
   }, [loadMalls])
+
+  useEffect(() => {
+    if (!mallCode) {
+      paymentController.current?.abort()
+      setSummary(emptyBusinessSummary(selectedDate))
+      setPaymentLoadState('idle')
+      setPaymentError('')
+      return
+    }
+    void loadPayments(selectedDate, mallCode)
+    return () => paymentController.current?.abort()
+  }, [loadPayments, mallCode, selectedDate])
 
   useEffect(() => {
     const handleShortcut = (event: KeyboardEvent) => {
@@ -176,7 +229,7 @@ export function BusinessOverviewPage({ client }: { client: WorkspaceApiClient })
         {!isFullscreen && mallLoadState === 'success' && malls.length === 0 ? <div className={styles.mallEmpty} role="status">当前账号暂无可查看的商场。</div> : null}
         {fullscreenError ? <div className={styles.fullscreenError} role="alert">{fullscreenError}</div> : null}
 
-        <section className={styles.overviewPanel} aria-label={`${selectedMall?.nameCn ?? '当前商场'}营业概况日结核对`}>
+        <section className={styles.overviewPanel} aria-label={`${selectedMall?.nameCn ?? '当前商场'}营业概况日结核对`} aria-busy={paymentLoadState === 'loading'}>
         <div className={styles.filterBar}>
           <strong className={styles.filterTitle}>销售日期：</strong>
           <div className={styles.quickDates} aria-label="快捷选择销售日期">
@@ -190,16 +243,18 @@ export function BusinessOverviewPage({ client }: { client: WorkspaceApiClient })
               <CalendarDays aria-hidden="true" />
             </span>
           </label>
-          <button className={styles.saveButton} type="button" onClick={saveReconciliation}><Save aria-hidden="true" />保存 F2</button>
+          <button className={styles.saveButton} type="button" onClick={saveReconciliation} disabled={!selectedMall || paymentLoadState !== 'success'}><Save aria-hidden="true" />保存 F2</button>
           <label className={styles.cashierField}>
             <span>收银机号：</span>
-            <select value={cashierID} onChange={(event) => changeCashier(event.currentTarget.value)}>
+            <select value={cashierID} onChange={(event) => changeCashier(event.currentTarget.value)} disabled>
               {cashierOptions.map((option) => <option key={option.id} value={option.id}>{option.label}</option>)}
             </select>
           </label>
         </div>
 
         {savedMessage ? <div className={styles.savedMessage} role="status" aria-live="polite">{savedMessage}</div> : null}
+        {paymentLoadState === 'loading' ? <div className={styles.mallEmpty} role="status">正在加载营业数据…</div> : null}
+        {paymentLoadState === 'error' ? <div className={styles.mallError} role="alert"><span>{paymentError}</span><button type="button" onClick={() => void loadPayments(selectedDate, mallCode)}>重新加载</button></div> : null}
 
         <div className={styles.summaryArea}>
           <div className={styles.amountSummary}>

@@ -11,7 +11,7 @@ export type PaymentSummary = { name: string; amount: number }
 export type ReconciliationRecord = {
   id: string
   date: string
-  cashierID: Exclude<CashierID, 'all'>
+  cashierID: CashierID
   cashierName: string
   payments: PaymentSummary[]
   received: number
@@ -19,6 +19,16 @@ export type ReconciliationRecord = {
   publicExpense: number
   depositAmount: number
   presaleAmount: number
+}
+
+type BusinessOverviewPaymentItem = {
+  billDate: number
+  storeId: number
+  storeName: string
+  storeCode: string
+  paywayId: number
+  payAmount: number
+  paywayName: string
 }
 
 export type DailyBusinessSummary = {
@@ -61,6 +71,72 @@ export function queryMockBusinessOverview(query: BusinessOverviewQuery, today: s
     summaries[query.date] ?? emptyBusinessSummary(query.date),
     query.cashierID,
   )
+}
+
+export function businessOverviewPaymentsPath(date: string, mallCode: string) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(date) || !validISODate(date)) throw new Error('invalid business date')
+  const normalizedMallCode = mallCode.trim().toUpperCase()
+  if (!/^[A-Z0-9][A-Z0-9_-]{1,63}$/.test(normalizedMallCode)) throw new Error('invalid mall code')
+  const query = new URLSearchParams({ date: date.replace(/-/g, ''), mallCode: normalizedMallCode })
+  return `/v1/business-overview/payments?${query.toString()}`
+}
+
+export function parseBusinessOverviewPayments(
+  payload: unknown,
+  expectedDate: string,
+  expectedMallCode: string,
+): DailyBusinessSummary | null {
+  if (!isRecord(payload) || (payload.code !== 0 && payload.code !== 200) || !isRecord(payload.data)) return null
+  const data = payload.data
+  const expectedBillDate = expectedDate.replace(/-/g, '')
+  const normalizedMallCode = expectedMallCode.trim().toUpperCase()
+  if (data.date !== expectedBillDate || data.mallCode !== normalizedMallCode || !Array.isArray(data.items)) return null
+
+  const items: BusinessOverviewPaymentItem[] = []
+  for (const value of data.items) {
+    if (!isRecord(value) || value.billDate !== Number(expectedBillDate) || value.storeCode !== normalizedMallCode ||
+      !Number.isSafeInteger(value.storeId) || !Number.isSafeInteger(value.paywayId) ||
+      typeof value.storeName !== 'string' || !value.storeName.trim() || typeof value.paywayName !== 'string' || !value.paywayName.trim() ||
+      typeof value.payAmount !== 'number' || !Number.isFinite(value.payAmount)) return null
+    items.push({
+      billDate: Number(value.billDate),
+      storeId: Number(value.storeId),
+      storeName: value.storeName.trim(),
+      storeCode: value.storeCode,
+      paywayId: Number(value.paywayId),
+      payAmount: value.payAmount,
+      paywayName: value.paywayName.trim(),
+    })
+  }
+
+  const paymentTotals = new Map<string, number>()
+  items.forEach((item) => paymentTotals.set(item.paywayName, sum([paymentTotals.get(item.paywayName) ?? 0, item.payAmount])))
+  const payments = Array.from(paymentTotals, ([name, amount]) => ({ name, amount }))
+  const total = sum(payments.map((payment) => payment.amount))
+  const records: ReconciliationRecord[] = items.length === 0 ? [] : [{
+    id: `${normalizedMallCode}-${expectedBillDate}-all`,
+    date: expectedDate,
+    cashierID: 'all',
+    cashierName: '全部收银机',
+    payments,
+    received: total,
+    unsettled: total,
+    publicExpense: 0,
+    depositAmount: 0,
+    presaleAmount: 0,
+  }]
+  return {
+    date: expectedDate,
+    payments,
+    storeAmount: total,
+    cloudAmount: 0,
+    unsettledAmount: total,
+    actualAmount: total,
+    publicExpense: 0,
+    depositAmount: 0,
+    presaleAmount: 0,
+    records,
+  }
 }
 
 export function emptyBusinessSummary(date: string): DailyBusinessSummary {
@@ -141,6 +217,15 @@ function sum(values: number[]) {
 
 function formatPlainAmount(value: number) {
   return new Intl.NumberFormat('zh-CN', { minimumFractionDigits: 0, maximumFractionDigits: 2 }).format(value)
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return value !== null && typeof value === 'object' && !Array.isArray(value)
+}
+
+function validISODate(value: string) {
+  const parsed = new Date(`${value}T00:00:00Z`)
+  return !Number.isNaN(parsed.getTime()) && parsed.toISOString().slice(0, 10) === value
 }
 
 function shanghaiDate(date: Date) {
