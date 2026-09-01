@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
-import { createMockBusinessSummaries, emptyBusinessSummary, filterBusinessSummary, recordPaymentDetail, recordTotal } from '../.test-dist/businessOverview.js'
+import { createMockBusinessSummaries, emptyBusinessSummary, filterBusinessSummary, queryMockBusinessOverview, recordPaymentDetail, recordTotal } from '../.test-dist/businessOverview.js'
 import { canViewNavigationItem } from '../.test-dist/appShell/navigationPermissions.js'
 
 test('aggregates the full day from cashier-level payment records', () => {
@@ -27,6 +27,19 @@ test('builds mock data relative to the supplied business date', () => {
   const summaries = createMockBusinessSummaries('2027-01-01')
   assert.deepEqual(Object.keys(summaries), ['2027-01-01', '2026-12-31'])
   assert.equal(emptyBusinessSummary('2027-01-02').records.length, 0)
+})
+
+test('uses mall code as the mock business overview query input', () => {
+  const firstMallCode = 'SH-PD-001'
+  const secondMallCode = 'SH-JA-001'
+  const firstMall = queryMockBusinessOverview({ mallCode: firstMallCode, date: '2026-09-01', cashierID: 'all' }, '2026-09-01')
+  const secondMall = queryMockBusinessOverview({ mallCode: secondMallCode, date: '2026-09-01', cashierID: 'all' }, '2026-09-01')
+  assert.equal(firstMall.storeAmount, 1379.7)
+  assert.equal(secondMall.storeAmount, 1131.36)
+  assert.equal(secondMall.unsettledAmount, secondMall.storeAmount)
+  assert.equal(Math.round(secondMall.records.reduce((total, record) => total + record.unsettled, 0) * 100) / 100, secondMall.unsettledAmount)
+  assert.notEqual(firstMall.records[0].id, secondMall.records[0].id)
+  assert.match(secondMall.records[0].id, new RegExp(`^${secondMallCode}-`))
 })
 
 test('guards business overview navigation with mall permissions', () => {

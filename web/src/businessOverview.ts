@@ -1,5 +1,11 @@
 export type CashierID = 'all' | 'counter-01' | 'counter-02'
 
+export type BusinessOverviewQuery = {
+  mallCode: string
+  date: string
+  cashierID: CashierID
+}
+
 export type PaymentSummary = { name: string; amount: number }
 
 export type ReconciliationRecord = {
@@ -40,12 +46,21 @@ const yesterdayRecords: RecordTemplate[] = [
   { id: 'REC-YESTERDAY-02', cashierID: 'counter-02', cashierName: '收银机 02', payments: [{ name: '支付宝', amount: 262 }, { name: '微信', amount: 299.9 }], received: 551.9, unsettled: 561.9, publicExpense: 5, depositAmount: 0, presaleAmount: 0 },
 ]
 
-export function createMockBusinessSummaries(today: string): Record<string, DailyBusinessSummary> {
+export function createMockBusinessSummaries(today: string, mallCode = 'SH-PD-001'): Record<string, DailyBusinessSummary> {
   const yesterday = shiftBusinessDate(today, -1)
+  const factor = mallMockFactor(mallCode)
   return {
-    [today]: summarizeBusinessDay(today, recordsForDate(todayRecords, today)),
-    [yesterday]: summarizeBusinessDay(yesterday, recordsForDate(yesterdayRecords, yesterday)),
+    [today]: summarizeBusinessDay(today, recordsForDate(todayRecords, today, mallCode, factor)),
+    [yesterday]: summarizeBusinessDay(yesterday, recordsForDate(yesterdayRecords, yesterday, mallCode, factor)),
   }
+}
+
+export function queryMockBusinessOverview(query: BusinessOverviewQuery, today: string): DailyBusinessSummary {
+  const summaries = createMockBusinessSummaries(today, query.mallCode)
+  return filterBusinessSummary(
+    summaries[query.date] ?? emptyBusinessSummary(query.date),
+    query.cashierID,
+  )
 }
 
 export function emptyBusinessSummary(date: string): DailyBusinessSummary {
@@ -88,12 +103,40 @@ function summarizeBusinessDay(date: string, records: ReconciliationRecord[], clo
   }
 }
 
-function recordsForDate(records: RecordTemplate[], date: string) {
-  return records.map((record) => ({ ...record, date, payments: record.payments.map((payment) => ({ ...payment })) }))
+function recordsForDate(records: RecordTemplate[], date: string, mallCode: string, factor: number) {
+  return records.map((record) => {
+    const payments = record.payments.map((payment) => ({ ...payment, amount: scaledAmount(payment.amount, factor) }))
+    return {
+      ...record,
+      id: `${mallCode}-${record.id}`,
+      date,
+      payments,
+      received: scaledAmount(record.received, factor),
+      unsettled: sum(payments.map((payment) => payment.amount)),
+      publicExpense: scaledAmount(record.publicExpense, factor),
+      depositAmount: scaledAmount(record.depositAmount, factor),
+      presaleAmount: scaledAmount(record.presaleAmount, factor),
+    }
+  })
+}
+
+function mallMockFactor(mallCode: string) {
+  const factors: Record<string, number> = {
+    'SH-PD-001': 1,
+    'SH-JA-001': 0.82,
+    'SH-XH-001': 1.16,
+  }
+  if (factors[mallCode]) return factors[mallCode]
+  const hash = Array.from(mallCode).reduce((total, character) => (total * 31 + character.charCodeAt(0)) % 35, 0)
+  return 0.82 + hash / 100
+}
+
+function scaledAmount(value: number, factor: number) {
+  return Math.round(value * factor * 100) / 100
 }
 
 function sum(values: number[]) {
-  return values.reduce((total, value) => total + value, 0)
+  return Math.round(values.reduce((total, value) => total + value, 0) * 100) / 100
 }
 
 function formatPlainAmount(value: number) {

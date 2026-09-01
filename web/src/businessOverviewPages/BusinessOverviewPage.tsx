@@ -1,14 +1,15 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
-import { BadgeDollarSign, CalendarDays, Save } from 'lucide-react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { BadgeDollarSign, CalendarDays, Maximize2, Minimize2, Save } from 'lucide-react'
 import {
-  createMockBusinessSummaries,
   emptyBusinessSummary,
-  filterBusinessSummary,
+  queryMockBusinessOverview,
   recordPaymentDetail,
   recordTotal,
   shiftBusinessDate,
   type CashierID,
 } from '../businessOverview'
+import { mergeMallWeatherMalls, parseMallWeatherMallList, type MallWeatherMall } from '../mallWeather'
+import type { WorkspaceApiClient } from '../appShell/WorkspaceRouter'
 import { PageCanvas } from '../ui'
 import styles from './BusinessOverviewPage.module.css'
 
@@ -18,21 +19,34 @@ const cashierOptions: Array<{ id: CashierID; label: string }> = [
   { id: 'counter-02', label: '收银机 02' },
 ]
 
-export function BusinessOverviewPage() {
+type MallLoadState = 'loading' | 'success' | 'error'
+
+export function BusinessOverviewPage({ client }: { client: WorkspaceApiClient }) {
   const today = shanghaiDate(new Date())
   const yesterday = shiftBusinessDate(today, -1)
+  const fullscreenSurfaceRef = useRef<HTMLDivElement>(null)
+  const mallRequestSequence = useRef(0)
+  const mallController = useRef<AbortController | null>(null)
+  const mallsRef = useRef<MallWeatherMall[]>([])
+  const [malls, setMalls] = useState<MallWeatherMall[]>([])
+  const [mallCode, setMallCode] = useState('')
+  const [mallLoadState, setMallLoadState] = useState<MallLoadState>('loading')
+  const [mallError, setMallError] = useState('')
+  const [nextAfterID, setNextAfterID] = useState(0)
   const [selectedDate, setSelectedDate] = useState(today)
   const [cashierID, setCashierID] = useState<CashierID>('all')
   const [savedMessage, setSavedMessage] = useState('')
-  const mockSummaries = useMemo(() => createMockBusinessSummaries(today), [today])
-  const summary = useMemo(() => filterBusinessSummary(
-    mockSummaries[selectedDate] ?? emptyBusinessSummary(selectedDate),
-    cashierID,
-  ), [cashierID, mockSummaries, selectedDate])
+  const [fullscreenError, setFullscreenError] = useState('')
+  const [isFullscreen, setIsFullscreen] = useState(false)
+  const summary = useMemo(() => mallCode
+    ? queryMockBusinessOverview({ mallCode, date: selectedDate, cashierID }, today)
+    : emptyBusinessSummary(selectedDate), [cashierID, mallCode, selectedDate, today])
+  const selectedMall = malls.find((mall) => mall.mallCode === mallCode)
 
   const saveReconciliation = useCallback(() => {
-    setSavedMessage(`${selectedDate} 的对账数据已保存（模拟）`)
-  }, [selectedDate])
+    if (!selectedMall) return
+    setSavedMessage(`${selectedMall.nameCn} ${selectedDate} 的对账数据已保存（模拟）`)
+  }, [selectedDate, selectedMall])
 
   function changeDate(date: string) {
     setSelectedDate(date)
@@ -45,6 +59,71 @@ export function BusinessOverviewPage() {
     setSavedMessage('')
   }
 
+  function changeMall(value: string) {
+    if (!malls.some((mall) => mall.mallCode === value)) return
+    setMallCode(value)
+    setSavedMessage('')
+  }
+
+  const loadMalls = useCallback(async (afterID = 0) => {
+    const sequence = ++mallRequestSequence.current
+    mallController.current?.abort()
+    const controller = new AbortController()
+    mallController.current = controller
+    setMallLoadState('loading')
+    setMallError('')
+    const search = new URLSearchParams({ limit: '50' })
+    if (afterID > 0) search.set('afterId', String(afterID))
+    try {
+      const response = await client(`/v1/malls?${search.toString()}`, { method: 'GET', showResult: false, silentLoading: true, signal: controller.signal })
+      if (controller.signal.aborted || sequence !== mallRequestSequence.current) return
+      if (!response.ok) {
+        setMallLoadState('error')
+        setMallError(response.status === 403 ? '当前账号无权读取商场列表。' : '商场列表加载失败，请稍后重试。')
+        return
+      }
+      const parsed = parseMallWeatherMallList(response.data)
+      if (!parsed || (parsed.items.length === 50 && parsed.nextAfterId <= afterID)) {
+        setMallLoadState('error')
+        setMallError('商场列表响应格式不正确，请联系管理员。')
+        return
+      }
+      const nextMalls = afterID > 0 ? mergeMallWeatherMalls(mallsRef.current, parsed.items) : parsed.items
+      mallsRef.current = nextMalls
+      setMalls(nextMalls)
+      setMallCode((current) => nextMalls.some((mall) => mall.mallCode === current) ? current : nextMalls[0]?.mallCode ?? '')
+      setNextAfterID(parsed.items.length === 50 ? parsed.nextAfterId : 0)
+      setMallLoadState('success')
+    } catch {
+      if (controller.signal.aborted || sequence !== mallRequestSequence.current) return
+      setMallLoadState('error')
+      setMallError('商场列表加载异常，请检查网络后重试。')
+    } finally {
+      if (mallController.current === controller) mallController.current = null
+    }
+  }, [client])
+
+  const toggleFullscreen = useCallback(async () => {
+    const surface = fullscreenSurfaceRef.current
+    if (!surface) return
+    setFullscreenError('')
+    const exiting = document.fullscreenElement === surface
+    try {
+      if (exiting) {
+        await document.exitFullscreen()
+        return
+      }
+      await surface.requestFullscreen()
+    } catch {
+      setFullscreenError(exiting ? '无法退出全屏，请再次按 Esc。' : '无法进入全屏，请检查浏览器是否允许全屏显示。')
+    }
+  }, [])
+
+  useEffect(() => {
+    void loadMalls()
+    return () => mallController.current?.abort()
+  }, [loadMalls])
+
   useEffect(() => {
     const handleShortcut = (event: KeyboardEvent) => {
       if (event.key !== 'F2') return
@@ -55,11 +134,49 @@ export function BusinessOverviewPage() {
     return () => window.removeEventListener('keydown', handleShortcut)
   }, [saveReconciliation])
 
-  return (
-    <PageCanvas className={styles.page}>
-      <header className={styles.titleBar}><h1>营业概况</h1></header>
+  useEffect(() => {
+    const syncFullscreenState = () => {
+      setIsFullscreen(document.fullscreenElement === fullscreenSurfaceRef.current)
+      setFullscreenError('')
+    }
+    document.addEventListener('fullscreenchange', syncFullscreenState)
+    return () => document.removeEventListener('fullscreenchange', syncFullscreenState)
+  }, [])
 
-      <section className={styles.overviewPanel} aria-label="营业概况日结核对">
+  useEffect(() => {
+    const handleEscape = (event: KeyboardEvent) => {
+      if (event.key !== 'Escape' || document.fullscreenElement !== fullscreenSurfaceRef.current) return
+      void document.exitFullscreen().catch(() => setFullscreenError('无法退出全屏，请再次按 Esc 或点击退出全屏。'))
+    }
+    window.addEventListener('keydown', handleEscape)
+    return () => window.removeEventListener('keydown', handleEscape)
+  }, [])
+
+  return (
+    <div className={styles.fullscreenSurface} ref={fullscreenSurfaceRef}>
+      <PageCanvas className={styles.page}>
+        <header className={styles.titleBar}><h1>营业概况</h1></header>
+
+        <div className={styles.pageControls}>
+          {!isFullscreen && <label className={styles.mallField}>
+            <span>选择商场：</span>
+            <select name="businessOverviewMallCode" value={selectedMall ? mallCode : ''} onChange={(event) => changeMall(event.currentTarget.value)} disabled={malls.length === 0}>
+              {malls.length === 0 && <option value="">{mallLoadState === 'loading' ? '正在加载商场' : '没有可选商场'}</option>}
+              {malls.map((mall) => <option key={mall.id} value={mall.mallCode}>{mall.nameCn}（{mall.mallCode}）</option>)}
+            </select>
+          </label>}
+          {!isFullscreen && nextAfterID > 0 && <button className={styles.loadMoreButton} type="button" onClick={() => void loadMalls(nextAfterID)} disabled={mallLoadState === 'loading'}>加载更多</button>}
+          <button className={styles.fullscreenButton} type="button" onClick={() => void toggleFullscreen()} aria-pressed={isFullscreen}>
+            {isFullscreen ? <Minimize2 aria-hidden="true" /> : <Maximize2 aria-hidden="true" />}
+            {isFullscreen ? '退出全屏' : '全屏'}
+          </button>
+        </div>
+
+        {!isFullscreen && mallLoadState === 'error' ? <div className={styles.mallError} role="alert"><span>{mallError}</span><button type="button" onClick={() => void loadMalls()}>重新加载</button></div> : null}
+        {!isFullscreen && mallLoadState === 'success' && malls.length === 0 ? <div className={styles.mallEmpty} role="status">当前账号暂无可查看的商场。</div> : null}
+        {fullscreenError ? <div className={styles.fullscreenError} role="alert">{fullscreenError}</div> : null}
+
+        <section className={styles.overviewPanel} aria-label={`${selectedMall?.nameCn ?? '当前商场'}营业概况日结核对`}>
         <div className={styles.filterBar}>
           <strong className={styles.filterTitle}>销售日期：</strong>
           <div className={styles.quickDates} aria-label="快捷选择销售日期">
@@ -127,8 +244,9 @@ export function BusinessOverviewPage() {
             </table>
           </div>
         </section>
-      </section>
-    </PageCanvas>
+        </section>
+      </PageCanvas>
+    </div>
   )
 }
 
