@@ -31,6 +31,7 @@ export type OfficeMessage = {
   resultTableOwner: string
   resultTableName: string
   selectSql: string
+  fileNameTemplate: string
   parameters: OfficeQueryParameter[]
   columnMapping: OfficeColumnMapping[]
   enabled: boolean

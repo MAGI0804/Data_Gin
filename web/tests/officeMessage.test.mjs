@@ -34,6 +34,7 @@ test('office message contract keeps yyyyMMdd query parameters and column mapping
     resultTableOwner: '',
     resultTableName: '',
     selectSql: 'SELECT ORDER_NO FROM SALES WHERE BILL_DATE = :bill_date',
+    fileNameTemplate: '销售日报_{{date:yyyyMMdd}}.xlsx',
     parameters: [{ code: 'bill_date', label: '业务日期', valueType: 'date', format: 'yyyyMMdd', required: true }],
     columnMapping: [{ sourceColumn: 'ORDER_NO', header: '单号', valueType: 'string', order: 0, width: 18 }],
     enabled: true,
@@ -43,6 +44,30 @@ test('office message contract keeps yyyyMMdd query parameters and column mapping
 
   assert.equal(message.parameters[0].format, 'yyyyMMdd')
   assert.equal(message.columnMapping[0].header, '单号')
+  assert.equal(message.fileNameTemplate, '销售日报_{{date:yyyyMMdd}}.xlsx')
+})
+
+test('legacy Oracle messages keep the message-name workbook fallback', () => {
+  const [message] = parseOfficeMessages({ data: { items: [{
+    id: 9, name: '销售/日报', sourceType: 'ORACLE_PROCEDURE', content: '',
+    procedureOwner: 'REPORT', packageName: '', procedureName: 'BUILD_REPORT', procedureOverload: '',
+    resultTableOwner: 'REPORT', resultTableName: 'DAILY_RESULT', selectSql: '',
+    parameters: [], columnMapping: [{ sourceColumn: 'ORDER_NO', header: '单号', valueType: 'string', order: 0, width: 18 }],
+    enabled: true, lockVersion: 1, updatedAt: '2026-09-01T08:00:00Z',
+  }] } })
+
+  assert.equal(message.fileNameTemplate, '销售-日报.xlsx')
+})
+
+test('legacy edited messages preserve an empty workbook template for source switching', () => {
+  const [message] = parseOfficeMessages({ data: { items: [{
+    id: 10, name: '待切换消息', sourceType: 'EDITED', content: '消息正文',
+    procedureOwner: '', packageName: '', procedureName: '', procedureOverload: '',
+    resultTableOwner: '', resultTableName: '', selectSql: '',
+    parameters: [], columnMapping: [], enabled: true, lockVersion: 1, updatedAt: '2026-09-01T08:00:00Z',
+  }] } })
+
+  assert.equal(message.fileNameTemplate, '')
 })
 
 test('query payload requires configured names to match SELECT binds', () => {
@@ -77,4 +102,28 @@ test('Oracle column metadata creates ordered Excel mappings', () => {
     { sourceColumn: 'AMOUNT', valueType: 'decimal', order: 0 },
     { sourceColumn: 'CREATED_AT', valueType: 'datetime', order: 1 },
   ])
+})
+
+test('Oracle message payload includes a daily Excel file name template', () => {
+  const draft = {
+    ...emptyOfficeMessageDraft(),
+    name: '销售日报',
+    sourceType: 'ORACLE_QUERY',
+    selectSql: 'SELECT ORDER_NO FROM SALES',
+    fileNameTemplate: '销售日报_{{date:yyyyMMdd}}.xlsx',
+    columnMapping: [{ sourceColumn: 'ORDER_NO', header: '单号', valueType: 'string', order: 0, width: 18 }],
+  }
+  assert.equal(buildOfficeMessagePayload(draft).fileNameTemplate, '销售日报_{{date:yyyyMMdd}}.xlsx')
+})
+
+test('Oracle message payload rejects unsafe or unknown file name templates', () => {
+  const draft = {
+    ...emptyOfficeMessageDraft(),
+    name: '销售日报',
+    sourceType: 'ORACLE_QUERY',
+    selectSql: 'SELECT ORDER_NO FROM SALES',
+    columnMapping: [{ sourceColumn: 'ORDER_NO', header: '单号', valueType: 'string', order: 0, width: 18 }],
+  }
+  assert.throws(() => buildOfficeMessagePayload({ ...draft, fileNameTemplate: '../sales.xlsx' }), /Excel 文件名模板/)
+  assert.throws(() => buildOfficeMessagePayload({ ...draft, fileNameTemplate: 'sales_{{unknown}}.xlsx' }), /Excel 文件名模板/)
 })

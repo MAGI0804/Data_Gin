@@ -30,11 +30,13 @@ export function parseOfficeMessages(payload: unknown): OfficeMessage[] {
 export function parseOfficeMessage(payload: unknown): OfficeMessage {
   const value = unwrapOfficeData(payload)
   const sourceType = enumValue(value.sourceType, ['EDITED', 'ORACLE_PROCEDURE', 'ORACLE_QUERY'] as const)
+  const name = text(value.name)
   return {
-    id: positiveInteger(value.id), name: text(value.name), sourceType,
+    id: positiveInteger(value.id), name, sourceType,
     content: text(value.content), procedureOwner: text(value.procedureOwner), packageName: text(value.packageName),
     procedureName: text(value.procedureName), procedureOverload: text(value.procedureOverload),
     resultTableOwner: text(value.resultTableOwner), resultTableName: text(value.resultTableName), selectSql: text(value.selectSql),
+    fileNameTemplate: text(value.fileNameTemplate) || (sourceType === 'EDITED' ? '' : legacyOfficeWorkbookFileName(name)),
     parameters: array(value.parameters).map(parseParameter), columnMapping: array(value.columnMapping).map(parseMapping),
     enabled: booleanValue(value.enabled), lockVersion: positiveInteger(value.lockVersion), updatedAt: text(value.updatedAt),
   }
@@ -107,6 +109,7 @@ export function emptyOfficeMessageDraft(): OfficeMessageDraft {
   return {
     id: null, name: '', sourceType: 'EDITED', content: '', procedureOwner: '', packageName: '', procedureName: '', procedureOverload: '',
     resultTableOwner: '', resultTableName: '', selectSql: 'SELECT\n  \nFROM\n  \nWHERE 1 = 1', parameters: [], columnMapping: [],
+    fileNameTemplate: '办公消息_{{date:yyyyMMdd}}.xlsx',
     enabled: true, lockVersion: 0,
   }
 }
@@ -116,7 +119,7 @@ export function officeMessageDraftFrom(message: OfficeMessage): OfficeMessageDra
     id: message.id, name: message.name, sourceType: message.sourceType, content: message.content,
     procedureOwner: message.procedureOwner, packageName: message.packageName, procedureName: message.procedureName,
     procedureOverload: message.procedureOverload, resultTableOwner: message.resultTableOwner, resultTableName: message.resultTableName,
-    selectSql: message.selectSql, parameters: message.parameters, columnMapping: message.columnMapping,
+    selectSql: message.selectSql, fileNameTemplate: message.fileNameTemplate, parameters: message.parameters, columnMapping: message.columnMapping,
     enabled: message.enabled, lockVersion: message.lockVersion,
   }
 }
@@ -128,16 +131,30 @@ export function buildOfficeMessagePayload(draft: OfficeMessageDraft) {
   if (draft.sourceType === 'ORACLE_PROCEDURE' && (!draft.procedureOwner.trim() || !draft.procedureName.trim() || !draft.resultTableOwner.trim() || !draft.resultTableName.trim())) throw new Error('请完整配置存储过程和结果表。')
   if (draft.sourceType === 'ORACLE_QUERY' && !draft.selectSql.trim()) throw new Error('请填写 SELECT 语句。')
   if (draft.sourceType !== 'EDITED' && draft.columnMapping.length === 0) throw new Error('请至少配置一个导出列。')
+  const fileNameTemplate = draft.fileNameTemplate.trim()
+  if (draft.sourceType !== 'EDITED' && !validOfficeWorkbookFileNameTemplate(fileNameTemplate)) throw new Error('请填写有效的 Excel 文件名模板。')
   if (draft.sourceType === 'ORACLE_QUERY') validateQueryParameters(draft.selectSql, draft.parameters)
   return {
     name, sourceType: draft.sourceType, content: draft.sourceType === 'EDITED' ? draft.content.trim() : '',
     procedureOwner: draft.sourceType === 'ORACLE_PROCEDURE' ? draft.procedureOwner.trim() : '', packageName: draft.sourceType === 'ORACLE_PROCEDURE' ? draft.packageName.trim() : '',
     procedureName: draft.sourceType === 'ORACLE_PROCEDURE' ? draft.procedureName.trim() : '', procedureOverload: draft.sourceType === 'ORACLE_PROCEDURE' ? draft.procedureOverload.trim() : '',
     resultTableOwner: draft.sourceType === 'ORACLE_PROCEDURE' ? draft.resultTableOwner.trim() : '', resultTableName: draft.sourceType === 'ORACLE_PROCEDURE' ? draft.resultTableName.trim() : '',
-    selectSql: draft.sourceType === 'ORACLE_QUERY' ? draft.selectSql.trim() : '', parameters: draft.sourceType === 'ORACLE_QUERY' ? draft.parameters : [],
+    selectSql: draft.sourceType === 'ORACLE_QUERY' ? draft.selectSql.trim() : '', fileNameTemplate: draft.sourceType === 'EDITED' ? '' : fileNameTemplate,
+    parameters: draft.sourceType === 'ORACLE_QUERY' ? draft.parameters : [],
     columnMapping: draft.sourceType === 'EDITED' ? [] : draft.columnMapping.map((mapping, order) => ({ ...mapping, sourceColumn: mapping.sourceColumn.trim().toUpperCase(), header: mapping.header.trim(), order })),
     enabled: draft.enabled, expectedLockVersion: draft.id ? draft.lockVersion : 0,
   }
+}
+
+function validOfficeWorkbookFileNameTemplate(value: string) {
+  if (!value || Array.from(value).length > 255 || /[/\\\0\r\n]/.test(value) || !value.toLowerCase().endsWith('.xlsx')) return false
+  const remaining = value.replace(/\{\{date(?::(?:yyyyMMdd|yyyy-MM-dd))?\}\}/g, '')
+  return !remaining.includes('{{') && !remaining.includes('}}')
+}
+
+function legacyOfficeWorkbookFileName(name: string) {
+  const sanitized = Array.from(name.trim()).map((character) => /[/\\\0-\x1f\x7f]/.test(character) ? '-' : character).join('') || '办公消息'
+  return `${Array.from(sanitized).slice(0, 80).join('')}.xlsx`
 }
 
 export function mappingsFromColumns(columns: Array<{ name: string; dataType?: string }>): OfficeColumnMapping[] {

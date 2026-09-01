@@ -104,6 +104,11 @@
 
 .form textarea { resize: vertical; line-height: 1.6; }
 
+.form label small {
+  color: var(--color-text-secondary);
+  line-height: 1.6;
+}
+
 .twoColumns,
 .sourceGrid {
   display: grid;
