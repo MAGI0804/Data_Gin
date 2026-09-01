@@ -8,6 +8,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -98,6 +99,28 @@ func TestBotClientUploadsAndSendsFile(t *testing.T) {
 	}
 	if !uploadSeen || !messageSeen {
 		t.Fatalf("uploadSeen=%t messageSeen=%t", uploadSeen, messageSeen)
+	}
+}
+
+func TestValidBotUploadFileNameUsesUTF8ByteLimitAndRejectsControls(t *testing.T) {
+	for _, value := range []string{
+		"daily.xlsx",
+		strings.Repeat("a", 250) + ".xlsx",
+		strings.Repeat("销", 83) + ".xlsx",
+	} {
+		if !validBotUploadFileName(value) {
+			t.Fatalf("validBotUploadFileName(%q) = false", value)
+		}
+	}
+	for _, value := range []string{
+		strings.Repeat("销", 84) + ".xlsx",
+		"daily\treport.xlsx",
+		"../daily.xlsx",
+		"daily.csv",
+	} {
+		if validBotUploadFileName(value) {
+			t.Fatalf("validBotUploadFileName(%q) = true", value)
+		}
 	}
 }
 

@@ -133,8 +133,8 @@ func normalizeOfficeWorkbookFileNameTemplate(value, messageName string) (string,
 }
 
 func validateOfficeWorkbookFileNameTemplate(value string) error {
-	if value == "" || len([]rune(value)) > 255 || strings.TrimSpace(value) != value ||
-		strings.ContainsAny(value, "/\\\x00\r\n") || !strings.HasSuffix(strings.ToLower(value), ".xlsx") {
+	if value == "" || len(value) > 255 || strings.TrimSpace(value) != value || strings.ContainsAny(value, "/\\") ||
+		strings.IndexFunc(value, unicode.IsControl) >= 0 || !strings.HasSuffix(strings.ToLower(value), ".xlsx") {
 		return fmt.Errorf("office message file name: invalid template")
 	}
 	remaining := officeFileNameDateTokenPattern.ReplaceAllString(value, "")

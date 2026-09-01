@@ -147,7 +147,7 @@ export function buildOfficeMessagePayload(draft: OfficeMessageDraft) {
 }
 
 function validOfficeWorkbookFileNameTemplate(value: string) {
-  if (!value || Array.from(value).length > 255 || /[/\\\0\r\n]/.test(value) || !value.toLowerCase().endsWith('.xlsx')) return false
+  if (!value || new TextEncoder().encode(value).length > 255 || /[/\\\u0000-\u001f\u007f-\u009f]/.test(value) || !value.toLowerCase().endsWith('.xlsx')) return false
   const remaining = value.replace(/\{\{date(?::(?:yyyyMMdd|yyyy-MM-dd))?\}\}/g, '')
   return !remaining.includes('{{') && !remaining.includes('}}')
 }

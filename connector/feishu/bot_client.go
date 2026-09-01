@@ -14,6 +14,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"unicode"
+	"unicode/utf8"
 
 	"gin-biz-web-api/pkg/providerhttp"
 )
@@ -89,8 +91,8 @@ func (client *BotClient) UploadFile(ctx context.Context, path, fileName string) 
 	if err != nil || !info.Mode().IsRegular() || info.Size() <= 0 || info.Size() > maxBotFileBytes {
 		return "", fmt.Errorf("feishu bot: invalid upload file")
 	}
-	fileName = filepath.Base(strings.TrimSpace(fileName))
-	if fileName == "." || fileName == "" || len(fileName) > 255 || !strings.HasSuffix(strings.ToLower(fileName), ".xlsx") {
+	fileName = strings.TrimSpace(fileName)
+	if !validBotUploadFileName(fileName) {
 		return "", fmt.Errorf("feishu bot: invalid upload file name")
 	}
 	token, err := client.tokens.Token(ctx)
@@ -109,6 +111,12 @@ func (client *BotClient) UploadFile(ctx context.Context, path, fileName string) 
 		return fileKey, requestErr
 	}
 	return "", &BotError{Class: providerhttp.ErrorClassAuth, HTTPCode: http.StatusUnauthorized}
+}
+
+func validBotUploadFileName(fileName string) bool {
+	return fileName != "" && fileName != "." && filepath.Base(fileName) == fileName &&
+		utf8.ValidString(fileName) && len(fileName) <= 255 && !strings.ContainsAny(fileName, "/\\") &&
+		strings.IndexFunc(fileName, unicode.IsControl) < 0 && strings.HasSuffix(strings.ToLower(fileName), ".xlsx")
 }
 
 func (client *BotClient) SendText(ctx context.Context, receiveIDType, receiveID, text, requestUUID string) (string, error) {

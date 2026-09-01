@@ -192,7 +192,14 @@ func TestRenderOfficeWorkbookFileNameSupportsLegacyFallback(t *testing.T) {
 }
 
 func TestNormalizeOfficeWorkbookFileNameTemplateRejectsUnsafeValues(t *testing.T) {
-	for _, value := range []string{"../secret.xlsx", "sales.csv", "sales_{{unknown}}.xlsx", "sales_{{date:yyyy/MM/dd}}.xlsx"} {
+	for _, value := range []string{
+		"../secret.xlsx",
+		"sales.csv",
+		"sales_{{unknown}}.xlsx",
+		"sales_{{date:yyyy/MM/dd}}.xlsx",
+		"sales\treport.xlsx",
+		strings.Repeat("销", 84) + ".xlsx",
+	} {
 		if _, err := normalizeOfficeWorkbookFileNameTemplate(value, "销售日报"); err == nil {
 			t.Fatalf("normalizeOfficeWorkbookFileNameTemplate(%q) accepted invalid value", value)
 		}

@@ -126,4 +126,6 @@ test('Oracle message payload rejects unsafe or unknown file name templates', () 
   }
   assert.throws(() => buildOfficeMessagePayload({ ...draft, fileNameTemplate: '../sales.xlsx' }), /Excel 文件名模板/)
   assert.throws(() => buildOfficeMessagePayload({ ...draft, fileNameTemplate: 'sales_{{unknown}}.xlsx' }), /Excel 文件名模板/)
+  assert.throws(() => buildOfficeMessagePayload({ ...draft, fileNameTemplate: 'sales\treport.xlsx' }), /Excel 文件名模板/)
+  assert.throws(() => buildOfficeMessagePayload({ ...draft, fileNameTemplate: `${'销'.repeat(84)}.xlsx` }), /Excel 文件名模板/)
 })
