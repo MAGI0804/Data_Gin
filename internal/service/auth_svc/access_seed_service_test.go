@@ -29,6 +29,7 @@ func TestPermissionCatalogIsUniqueAndComplete(t *testing.T) {
 		}
 	}
 	for _, required := range []string{
+		model.PermissionBusinessOverviewRead,
 		model.PermissionReportRead,
 		model.PermissionReportManage,
 		model.PermissionReportExecute,

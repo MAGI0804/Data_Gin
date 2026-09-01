@@ -42,10 +42,10 @@ test('uses mall code as the mock business overview query input', () => {
   assert.match(secondMall.records[0].id, new RegExp(`^${secondMallCode}-`))
 })
 
-test('guards business overview navigation with mall permissions', () => {
+test('guards business overview navigation with its dedicated permission', () => {
   assert.equal(canViewNavigationItem('business_overview', []), false)
-  assert.equal(canViewNavigationItem('business_overview', ['mall.read']), true)
-  assert.equal(canViewNavigationItem('business_overview', ['mall.manage']), true)
+  assert.equal(canViewNavigationItem('business_overview', ['mall.read']), false)
+  assert.equal(canViewNavigationItem('business_overview', ['business_overview.read']), true)
 })
 
 test('builds the payment query path from ISO date and mall code', () => {

@@ -24,6 +24,7 @@ var accessPermissionSeeds = []permissionSeed{
 	{model.PermissionSystemRoleRead, "查看角色", "系统管理", "查看角色和权限矩阵", "MEDIUM", false, 30},
 	{model.PermissionSystemRoleManage, "管理角色", "系统管理", "创建和维护自定义角色", "HIGH", false, 40},
 	{model.PermissionSystemAuditRead, "查看权限审计", "系统管理", "查看账号及权限变更记录", "HIGH", false, 50},
+	{model.PermissionBusinessOverviewRead, "查看营业概况", "营业概况", "查看销售日结、收款构成与门店对账记录", "MEDIUM", false, 90},
 	{model.PermissionMallRead, "查看商场", "商场", "查看授权范围内的商场", "LOW", false, 100},
 	{model.PermissionMallWrite, "管理商场", "商场", "创建和编辑授权范围内的商场", "HIGH", false, 110},
 	{model.PermissionMallGeocodeConfirm, "确认商场定位", "商场", "确认商场地理编码结果", "HIGH", false, 120},
@@ -104,7 +105,7 @@ func SyncAccessControlSeeds(ctx context.Context, db *gorm.DB) error {
 }
 
 func syncSystemRolePermissions(tx *gorm.DB, roles map[string]model.Role, permissions []model.Permission) error {
-	readOnly := map[string]struct{}{model.PermissionMallRead: {}, model.PermissionWeatherRead: {}, model.PermissionSourceRead: {}, model.PermissionPipelineRead: {}, model.PermissionDeliveryRead: {}, model.PermissionDataRead: {}, model.PermissionExcelRead: {}, model.PermissionReportRead: {}, model.PermissionOfficeMessageRead: {}}
+	readOnly := map[string]struct{}{model.PermissionBusinessOverviewRead: {}, model.PermissionMallRead: {}, model.PermissionWeatherRead: {}, model.PermissionSourceRead: {}, model.PermissionPipelineRead: {}, model.PermissionDeliveryRead: {}, model.PermissionDataRead: {}, model.PermissionExcelRead: {}, model.PermissionReportRead: {}, model.PermissionOfficeMessageRead: {}}
 	for _, roleCode := range []string{model.RoleCodeSuperAdmin, model.RoleCodeAdmin, model.RoleCodeOperator, model.RoleCodeViewer} {
 		role := roles[roleCode]
 		if err := tx.Where("role_id = ?", role.ID).Delete(&model.RolePermission{}).Error; err != nil {
