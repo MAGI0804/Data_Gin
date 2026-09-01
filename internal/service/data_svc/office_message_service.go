@@ -285,14 +285,23 @@ func (service *OfficeMessageService) DeleteTarget(ctx context.Context, targetID 
 	if targetID == 0 || expectedLockVersion == 0 {
 		return fmt.Errorf("%w: target id and lock version are required", ErrOfficeMessageInvalid)
 	}
-	result := service.db.WithContext(ctx).Where("id = ? AND lock_version = ?", targetID, expectedLockVersion).Delete(&model.OfficePushTarget{})
-	if result.Error != nil {
-		return fmt.Errorf("office message: delete push target: %w", result.Error)
-	}
-	if result.RowsAffected != 1 {
-		return ErrOfficeMessageConflict
-	}
-	return nil
+	return service.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var schedules int64
+		if err := tx.Model(&model.OfficePushSchedule{}).Where("target_id = ?", targetID).Count(&schedules).Error; err != nil {
+			return fmt.Errorf("office message: count target schedules: %w", err)
+		}
+		if schedules > 0 {
+			return fmt.Errorf("%w: push target is used by schedules", ErrOfficeMessageConflict)
+		}
+		result := tx.Where("id = ? AND lock_version = ?", targetID, expectedLockVersion).Delete(&model.OfficePushTarget{})
+		if result.Error != nil {
+			return fmt.Errorf("office message: delete push target: %w", result.Error)
+		}
+		if result.RowsAffected != 1 {
+			return ErrOfficeMessageConflict
+		}
+		return nil
+	})
 }
 
 func (service *OfficeMessageService) CreateRun(ctx context.Context, actorID, targetID uint, input OfficePushRunInput) (*model.OfficePushRun, error) {
@@ -335,7 +344,8 @@ func (service *OfficeMessageService) CreateRun(ctx context.Context, actorID, tar
 		}
 		created = model.OfficePushRun{
 			RunUUID: input.RequestID, TargetID: target.ID, MessageID: message.ID,
-			Status: model.OfficePushRunStatusQueued, RequestedBy: actorID, ParametersJSON: parameters, SnapshotJSON: snapshot,
+			Status: model.OfficePushRunStatusQueued, TriggerType: model.OfficePushTriggerManual,
+			RequestedBy: actorID, ParametersJSON: parameters, SnapshotJSON: snapshot,
 		}
 		if err := tx.Create(&created).Error; err != nil {
 			return fmt.Errorf("office message: create push run: %w", err)

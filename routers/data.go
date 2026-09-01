@@ -245,6 +245,13 @@ func registerOfficeMessageRoutes(api *gin.RouterGroup, controller *data_ctrl.Off
 	targets.DELETE("/:id", middleware.RequirePermission(model.PermissionOfficeMessageManage), controller.DeleteTarget)
 	targets.POST("/:id/runs", middleware.RequirePermission(model.PermissionOfficeMessagePush), middleware.LimitRoute("30-M"), controller.CreateRun)
 
+	schedules := api.Group("/v1/office-push-schedules")
+	schedules.Use(middleware.AuthJWT())
+	schedules.GET("", middleware.RequirePermission(model.PermissionOfficeMessageRead), controller.ListSchedules)
+	schedules.POST("", middleware.RequirePermission(model.PermissionOfficeMessageManage), controller.CreateSchedule)
+	schedules.PUT("/:id", middleware.RequirePermission(model.PermissionOfficeMessageManage), controller.UpdateSchedule)
+	schedules.DELETE("/:id", middleware.RequirePermission(model.PermissionOfficeMessageManage), controller.DeleteSchedule)
+
 	api.GET("/v1/office-push-runs", middleware.AuthJWT(), middleware.RequirePermission(model.PermissionOfficeMessageRead), controller.ListRuns)
 	oracle := api.Group("/v1/office-oracle")
 	oracle.Use(middleware.AuthJWT(), middleware.RequirePermission(model.PermissionOfficeMessageManage), middleware.LimitRoute("120-M"))

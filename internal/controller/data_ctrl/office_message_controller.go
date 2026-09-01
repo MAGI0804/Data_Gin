@@ -187,6 +187,66 @@ func (controller *OfficeMessageController) ListRuns(c *gin.Context) {
 	responses.New(c).ToResponse(gin.H{"items": items})
 }
 
+func (controller *OfficeMessageController) ListSchedules(c *gin.Context) {
+	items, err := controller.service.ListSchedules(c.Request.Context())
+	if err != nil {
+		writeOfficeMessageError(c, err)
+		return
+	}
+	responses.New(c).ToResponse(gin.H{"items": items})
+}
+
+func (controller *OfficeMessageController) CreateSchedule(c *gin.Context) {
+	var input data_svc.OfficePushScheduleInput
+	if err := bindOfficeJSON(c, &input); err != nil {
+		writeOfficeMessageError(c, data_svc.ErrOfficeMessageInvalid)
+		return
+	}
+	item, err := controller.service.CreateSchedule(c.Request.Context(), auth.CurrentUserID(c), input)
+	if err != nil {
+		writeOfficeMessageError(c, err)
+		return
+	}
+	responses.New(c).ToResponseWithStatus(http.StatusCreated, item)
+}
+
+func (controller *OfficeMessageController) UpdateSchedule(c *gin.Context) {
+	id, err := officeUint(c.Param("id"))
+	if err != nil {
+		writeOfficeMessageError(c, err)
+		return
+	}
+	var input data_svc.OfficePushScheduleInput
+	if err := bindOfficeJSON(c, &input); err != nil {
+		writeOfficeMessageError(c, data_svc.ErrOfficeMessageInvalid)
+		return
+	}
+	item, err := controller.service.UpdateSchedule(c.Request.Context(), auth.CurrentUserID(c), id, input)
+	if err != nil {
+		writeOfficeMessageError(c, err)
+		return
+	}
+	responses.New(c).ToResponse(item)
+}
+
+func (controller *OfficeMessageController) DeleteSchedule(c *gin.Context) {
+	id, err := officeUint(c.Param("id"))
+	if err != nil {
+		writeOfficeMessageError(c, err)
+		return
+	}
+	lockVersion, err := officeUint64(c.Query("expectedLockVersion"))
+	if err != nil {
+		writeOfficeMessageError(c, err)
+		return
+	}
+	if err := controller.service.DeleteSchedule(c.Request.Context(), id, lockVersion); err != nil {
+		writeOfficeMessageError(c, err)
+		return
+	}
+	responses.New(c).ToResponse(gin.H{"id": id})
+}
+
 func (controller *OfficeMessageController) ListProcedures(c *gin.Context) {
 	items, err := controller.metadata.ListProcedures(c.Request.Context(), c.Query("owner"), c.Query("search"), officeLimit(c))
 	if err != nil {
