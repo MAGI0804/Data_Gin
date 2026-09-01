@@ -286,6 +286,12 @@ func (service *OfficeMessageService) DeleteTarget(ctx context.Context, targetID 
 		return fmt.Errorf("%w: target id and lock version are required", ErrOfficeMessageInvalid)
 	}
 	return service.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var target model.OfficePushTarget
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ?", targetID).First(&target).Error; errors.Is(err, gorm.ErrRecordNotFound) {
+			return ErrOfficeMessageNotFound
+		} else if err != nil {
+			return fmt.Errorf("office message: lock push target for delete: %w", err)
+		}
 		var schedules int64
 		if err := tx.Model(&model.OfficePushSchedule{}).Where("target_id = ?", targetID).Count(&schedules).Error; err != nil {
 			return fmt.Errorf("office message: count target schedules: %w", err)
