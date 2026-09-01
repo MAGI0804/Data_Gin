@@ -40,10 +40,10 @@ func TestReportCenterMigrationModelsAreUnique(t *testing.T) {
 }
 
 func TestSchemaMigrationVersionIncludesBojunOracleModels(t *testing.T) {
-	if schemaMigrationVersion != "2026-09-01-office-message-v14" {
+	if schemaMigrationVersion != "2026-09-01-office-message-ha-v15" {
 		t.Fatalf("schemaMigrationVersion = %q", schemaMigrationVersion)
 	}
-	if previousSchemaMigrationVersion != "2026-08-26-bojun-oracle-v13" {
+	if previousSchemaMigrationVersion != "2026-09-01-office-message-v14" {
 		t.Fatalf("previousSchemaMigrationVersion = %q", previousSchemaMigrationVersion)
 	}
 	if bojunOracleMigrationBaselineVersion != "2026-08-25-report-center-v11" {
@@ -57,6 +57,7 @@ func TestOfficeMessageMigrationModelsAreLimitedToOfficeMessageTables(t *testing.
 		reflect.TypeOf(&model.OfficeMessage{}),
 		reflect.TypeOf(&model.OfficePushTarget{}),
 		reflect.TypeOf(&model.OfficePushRun{}),
+		reflect.TypeOf(&model.OfficeProcedureExportLock{}),
 	}
 	if len(models) != len(want) {
 		t.Fatalf("officeMessageMigrationModels() count = %d, want %d", len(models), len(want))

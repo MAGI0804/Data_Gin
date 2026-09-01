@@ -53,6 +53,7 @@ type OfficePushTargetInput struct {
 
 type OfficePushRunInput struct {
 	Parameters map[string]string `json:"parameters"`
+	RequestID  string            `json:"requestId"`
 }
 
 type OfficeMessageService struct {
@@ -125,6 +126,12 @@ func (service *OfficeMessageService) DeleteMessage(ctx context.Context, messageI
 		return fmt.Errorf("%w: message id and lock version are required", ErrOfficeMessageInvalid)
 	}
 	return service.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var message model.OfficeMessage
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ?", messageID).First(&message).Error; errors.Is(err, gorm.ErrRecordNotFound) {
+			return ErrOfficeMessageNotFound
+		} else if err != nil {
+			return fmt.Errorf("office message: lock message for delete: %w", err)
+		}
 		var targets int64
 		if err := tx.Model(&model.OfficePushTarget{}).Where("message_id = ?", messageID).Count(&targets).Error; err != nil {
 			return fmt.Errorf("office message: count message targets: %w", err)
@@ -156,12 +163,17 @@ func (service *OfficeMessageService) CreateTarget(ctx context.Context, actorID u
 	if err != nil {
 		return nil, err
 	}
-	if _, err := service.getMessage(ctx, target.MessageID); err != nil {
-		return nil, err
-	}
 	target.CreatedBy = actorID
 	target.UpdatedBy = actorID
-	if err := service.db.WithContext(ctx).Create(&target).Error; err != nil {
+	if err := service.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var message model.OfficeMessage
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ?", target.MessageID).First(&message).Error; errors.Is(err, gorm.ErrRecordNotFound) {
+			return ErrOfficeMessageNotFound
+		} else if err != nil {
+			return fmt.Errorf("office message: lock target message: %w", err)
+		}
+		return tx.Create(&target).Error
+	}); err != nil {
 		return nil, fmt.Errorf("office message: create push target: %w", err)
 	}
 	return &target, nil
@@ -175,21 +187,28 @@ func (service *OfficeMessageService) UpdateTarget(ctx context.Context, actorID, 
 	if err != nil {
 		return nil, err
 	}
-	if _, err := service.getMessage(ctx, target.MessageID); err != nil {
-		return nil, err
-	}
-	result := service.db.WithContext(ctx).Model(&model.OfficePushTarget{}).
-		Where("id = ? AND lock_version = ?", targetID, input.ExpectedLockVersion).
-		Updates(map[string]interface{}{
+	err = service.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var message model.OfficeMessage
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ?", target.MessageID).First(&message).Error; errors.Is(err, gorm.ErrRecordNotFound) {
+			return ErrOfficeMessageNotFound
+		} else if err != nil {
+			return fmt.Errorf("office message: lock target message: %w", err)
+		}
+		result := tx.Model(&model.OfficePushTarget{}).Where("id = ? AND lock_version = ?", targetID, input.ExpectedLockVersion).Updates(map[string]interface{}{
 			"name": target.Name, "message_id": target.MessageID, "channel": model.OfficePushChannelFeishu,
 			"receive_id_type": target.ReceiveIDType, "receive_id": target.ReceiveID, "enabled": target.Enabled,
 			"updated_by": actorID, "lock_version": gorm.Expr("lock_version + 1"), "updated_at": service.now().UTC(),
 		})
-	if result.Error != nil {
-		return nil, fmt.Errorf("office message: update push target: %w", result.Error)
-	}
-	if result.RowsAffected != 1 {
-		return nil, ErrOfficeMessageConflict
+		if result.Error != nil {
+			return fmt.Errorf("office message: update push target: %w", result.Error)
+		}
+		if result.RowsAffected != 1 {
+			return ErrOfficeMessageConflict
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 	return service.getTarget(ctx, targetID)
 }
@@ -209,35 +228,42 @@ func (service *OfficeMessageService) DeleteTarget(ctx context.Context, targetID 
 }
 
 func (service *OfficeMessageService) CreateRun(ctx context.Context, actorID, targetID uint, input OfficePushRunInput) (*model.OfficePushRun, error) {
-	if actorID == 0 || targetID == 0 {
+	requestID, err := canonicalOfficeUUID(input.RequestID)
+	if actorID == 0 || targetID == 0 || err != nil {
 		return nil, fmt.Errorf("%w: actor and target are required", ErrOfficeMessageInvalid)
 	}
+	input.RequestID = requestID
 	var created model.OfficePushRun
-	err := service.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+	err = service.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var existing model.OfficePushRun
+		if err := tx.Where("run_uuid = ?", input.RequestID).First(&existing).Error; err == nil {
+			if err := validateOfficeRunReplay(existing, actorID, targetID, input.Parameters); err != nil {
+				return err
+			}
+			created = existing
+			return nil
+		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
+			return fmt.Errorf("office message: read idempotent push run: %w", err)
+		}
 		var target model.OfficePushTarget
-		if err := tx.Clauses(clause.Locking{Strength: "SHARE"}).Where("id = ? AND enabled = ?", targetID, true).First(&target).Error; err != nil {
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ? AND enabled = ?", targetID, true).First(&target).Error; err != nil {
 			return fmt.Errorf("%w: push target is unavailable", ErrOfficeMessageNotFound)
 		}
 		var message model.OfficeMessage
-		if err := tx.Clauses(clause.Locking{Strength: "SHARE"}).Where("id = ? AND enabled = ?", target.MessageID, true).First(&message).Error; err != nil {
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ? AND enabled = ?", target.MessageID, true).First(&message).Error; err != nil {
 			return fmt.Errorf("%w: message is unavailable", ErrOfficeMessageNotFound)
 		}
-		parameters := model.JSONText("{}")
-		if message.SourceType == model.OfficeMessageSourceOracleQuery {
-			schema, _, err := normalizeOfficeQueryParameters(message.SelectSQL, message.ParameterSchemaJSON)
-			if err != nil {
-				return err
-			}
-			parameters, _, err = normalizeOfficeParameterValues(schema, input.Parameters)
-			if err != nil {
-				return fmt.Errorf("%w: %v", ErrOfficeMessageInvalid, err)
-			}
-		} else if len(input.Parameters) > 0 {
-			return fmt.Errorf("%w: this message source does not accept parameters", ErrOfficeMessageInvalid)
+		parameters, err := normalizeOfficeRunParameters(message, input.Parameters)
+		if err != nil {
+			return err
+		}
+		snapshot, err := newOfficePushSnapshot(target, message)
+		if err != nil {
+			return err
 		}
 		created = model.OfficePushRun{
-			RunUUID: uuid.NewString(), TargetID: target.ID, MessageID: message.ID,
-			Status: model.OfficePushRunStatusQueued, RequestedBy: actorID, ParametersJSON: parameters,
+			RunUUID: input.RequestID, TargetID: target.ID, MessageID: message.ID,
+			Status: model.OfficePushRunStatusQueued, RequestedBy: actorID, ParametersJSON: parameters, SnapshotJSON: snapshot,
 		}
 		if err := tx.Create(&created).Error; err != nil {
 			return fmt.Errorf("office message: create push run: %w", err)
@@ -252,9 +278,66 @@ func (service *OfficeMessageService) CreateRun(ctx context.Context, actorID, tar
 		return nil
 	})
 	if err != nil {
+		var existing model.OfficePushRun
+		if lookupErr := service.db.WithContext(ctx).Where("run_uuid = ?", input.RequestID).First(&existing).Error; lookupErr == nil {
+			if replayErr := validateOfficeRunReplay(existing, actorID, targetID, input.Parameters); replayErr != nil {
+				return nil, replayErr
+			}
+			return &existing, nil
+		}
 		return nil, err
 	}
 	return &created, nil
+}
+
+func validateOfficeRunReplay(existing model.OfficePushRun, actorID, targetID uint, input map[string]string) error {
+	if existing.TargetID != targetID || existing.RequestedBy != actorID {
+		return ErrOfficeMessageConflict
+	}
+	snapshot, err := decodeOfficePushSnapshot(existing.SnapshotJSON)
+	if err != nil {
+		return fmt.Errorf("office message: validate idempotent push snapshot: %w", err)
+	}
+	message := snapshot.messageModel()
+	parameters, err := normalizeOfficeRunParameters(message, input)
+	if err != nil {
+		return ErrOfficeMessageConflict
+	}
+	storedInput := make(map[string]string)
+	if err := decodeOfficeJSON(existing.ParametersJSON, &storedInput); err != nil {
+		return fmt.Errorf("office message: validate idempotent push parameters: %w", err)
+	}
+	storedParameters, err := normalizeOfficeRunParameters(message, storedInput)
+	if err != nil || string(parameters) != string(storedParameters) {
+		return ErrOfficeMessageConflict
+	}
+	return nil
+}
+
+func normalizeOfficeRunParameters(message model.OfficeMessage, input map[string]string) (model.JSONText, error) {
+	if message.SourceType != model.OfficeMessageSourceOracleQuery {
+		if len(input) > 0 {
+			return "", fmt.Errorf("%w: this message source does not accept parameters", ErrOfficeMessageInvalid)
+		}
+		return model.JSONText("{}"), nil
+	}
+	schema, _, err := normalizeOfficeQueryParameters(message.SelectSQL, message.ParameterSchemaJSON)
+	if err != nil {
+		return "", err
+	}
+	parameters, _, err := normalizeOfficeParameterValues(schema, input)
+	if err != nil {
+		return "", fmt.Errorf("%w: %v", ErrOfficeMessageInvalid, err)
+	}
+	return parameters, nil
+}
+
+func canonicalOfficeUUID(value string) (string, error) {
+	parsed, err := uuid.Parse(strings.TrimSpace(value))
+	if err != nil {
+		return "", err
+	}
+	return parsed.String(), nil
 }
 
 func (service *OfficeMessageService) ListRuns(ctx context.Context, limit int) ([]model.OfficePushRun, error) {
@@ -302,12 +385,15 @@ func normalizeOfficeMessageInput(input OfficeMessageInput) (model.OfficeMessage,
 	switch input.SourceType {
 	case model.OfficeMessageSourceEdited:
 		message.Content = strings.TrimSpace(input.Content)
-		if message.Content == "" || len(message.Content) > 150_000 || len(input.Parameters) != 0 || len(input.ColumnMapping) != 0 {
+		if message.Content == "" || len(message.Content) > 60_000 || len(input.Parameters) != 0 || len(input.ColumnMapping) != 0 || strings.TrimSpace(input.SelectSQL) != "" || hasOfficeProcedureInput(input) {
 			return model.OfficeMessage{}, fmt.Errorf("%w: edited message content is invalid", ErrOfficeMessageInvalid)
 		}
 		message.ParameterSchemaJSON = model.JSONText("[]")
 		message.ColumnMappingJSON = model.JSONText("[]")
 	case model.OfficeMessageSourceOracleProcedure:
+		if strings.TrimSpace(input.Content) != "" || strings.TrimSpace(input.SelectSQL) != "" || len(input.Parameters) != 0 {
+			return model.OfficeMessage{}, fmt.Errorf("%w: procedure message contains unrelated fields", ErrOfficeMessageInvalid)
+		}
 		procedure, err := reportoracle.NormalizeProcedureRef(reportoracle.ProcedureRef{
 			Owner: input.ProcedureOwner, Package: input.PackageName, Name: input.ProcedureName, Overload: input.ProcedureOverload,
 		})
@@ -327,6 +413,9 @@ func normalizeOfficeMessageInput(input OfficeMessageInput) (model.OfficeMessage,
 		message.ParameterSchemaJSON, message.ColumnMappingJSON = model.JSONText("[]"), mappingJSON
 	case model.OfficeMessageSourceOracleQuery:
 		message.SelectSQL = strings.TrimSpace(input.SelectSQL)
+		if len(message.SelectSQL) == 0 || len(message.SelectSQL) > 60_000 || strings.TrimSpace(input.Content) != "" || hasOfficeProcedureInput(input) {
+			return model.OfficeMessage{}, fmt.Errorf("%w: SELECT message contains invalid fields", ErrOfficeMessageInvalid)
+		}
 		parameterJSON, err := json.Marshal(input.Parameters)
 		if err != nil {
 			return model.OfficeMessage{}, fmt.Errorf("%w: query parameters are invalid", ErrOfficeMessageInvalid)
@@ -344,6 +433,11 @@ func normalizeOfficeMessageInput(input OfficeMessageInput) (model.OfficeMessage,
 		return model.OfficeMessage{}, fmt.Errorf("%w: message source type is unsupported", ErrOfficeMessageInvalid)
 	}
 	return message, nil
+}
+
+func hasOfficeProcedureInput(input OfficeMessageInput) bool {
+	return strings.TrimSpace(input.ProcedureOwner) != "" || strings.TrimSpace(input.PackageName) != "" || strings.TrimSpace(input.ProcedureName) != "" ||
+		strings.TrimSpace(input.ProcedureOverload) != "" || strings.TrimSpace(input.ResultTableOwner) != "" || strings.TrimSpace(input.ResultTableName) != ""
 }
 
 func normalizeOfficeInputMappings(mappings []OfficeColumnMapping) ([]OfficeColumnMapping, model.JSONText, error) {
@@ -382,7 +476,8 @@ func validOfficeReceiveIDType(value string) bool {
 }
 
 func newOfficePushOutbox(runID uint, runUUID string, availableAt time.Time) (model.AsyncJobOutbox, error) {
-	if runID == 0 || uuid.Validate(runUUID) != nil || availableAt.IsZero() {
+	canonicalRunUUID, err := canonicalOfficeUUID(runUUID)
+	if runID == 0 || err != nil || availableAt.IsZero() {
 		return model.AsyncJobOutbox{}, fmt.Errorf("office message: invalid push outbox identity")
 	}
 	payload, err := json.Marshal(job.OfficePushTaskPayload{RunID: runID})
@@ -393,7 +488,7 @@ func newOfficePushOutbox(runID uint, runUUID string, availableAt time.Time) (mod
 		return model.AsyncJobOutbox{}, err
 	}
 	return model.AsyncJobOutbox{
-		TaskKey: "office:push:" + runUUID, TaskType: job.TypeOfficePush,
+		TaskKey: "office:push:" + canonicalRunUUID, TaskType: job.TypeOfficePush,
 		PayloadJSON: model.JSONText(payload), QueueName: job.OfficePushQueueName, AvailableAt: availableAt.UTC(),
 	}, nil
 }

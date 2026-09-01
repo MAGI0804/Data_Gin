@@ -35,6 +35,35 @@ type OfficeSelectColumn struct {
 	Nullable     bool   `json:"nullable"`
 }
 
+type OfficeProcedureSummary struct {
+	Owner         string `json:"owner"`
+	PackageName   string `json:"packageName"`
+	Name          string `json:"name"`
+	Overload      string `json:"overload"`
+	ArgumentCount int    `json:"argumentCount"`
+}
+
+type OfficeProcedureArgument struct {
+	Name      string `json:"name"`
+	Position  int    `json:"position"`
+	Direction string `json:"direction"`
+	DataType  string `json:"dataType"`
+	Defaulted bool   `json:"defaulted"`
+}
+
+type OfficeResultTableSummary struct {
+	Owner       string `json:"owner"`
+	Name        string `json:"name"`
+	ColumnCount int    `json:"columnCount"`
+}
+
+type OfficeResultColumn struct {
+	Name     string `json:"name"`
+	Position int    `json:"position"`
+	DataType string `json:"dataType"`
+	Nullable bool   `json:"nullable"`
+}
+
 type OfficeOracleMetadataService struct {
 	open officeOracleMetadataOpener
 }
@@ -45,50 +74,77 @@ func NewOfficeOracleMetadataService() *OfficeOracleMetadataService {
 	}}
 }
 
-func (service *OfficeOracleMetadataService) ListProcedures(ctx context.Context, owner, search string, limit int) ([]reportoracle.ProcedureSummary, error) {
+func (service *OfficeOracleMetadataService) ListProcedures(ctx context.Context, owner, search string, limit int) ([]OfficeProcedureSummary, error) {
+	limit = normalizeOfficeMetadataLimit(limit)
+	var result []OfficeProcedureSummary
+	err := service.withConnection(ctx, func(queryCtx context.Context, connection officeOracleMetadataConnection) error {
+		items, err := connection.ListProcedures(queryCtx, reportoracle.ProcedureCatalogQuery{Owner: owner, Search: search, Limit: limit})
+		if err != nil {
+			return err
+		}
+		result = make([]OfficeProcedureSummary, 0, len(items))
+		for _, item := range items {
+			result = append(result, OfficeProcedureSummary{Owner: item.Owner, PackageName: item.Package, Name: item.Name, Overload: item.Overload, ArgumentCount: item.ArgumentCount})
+		}
+		return nil
+	})
+	return result, err
+}
+
+func (service *OfficeOracleMetadataService) ProcedureSignature(ctx context.Context, ref reportoracle.ProcedureRef) ([]OfficeProcedureArgument, error) {
+	var result []OfficeProcedureArgument
+	err := service.withConnection(ctx, func(queryCtx context.Context, connection officeOracleMetadataConnection) error {
+		items, err := connection.InspectProcedure(queryCtx, ref)
+		if err != nil {
+			return err
+		}
+		result = make([]OfficeProcedureArgument, 0, len(items))
+		for _, item := range items {
+			result = append(result, OfficeProcedureArgument{Name: item.Name, Position: item.Position, Direction: item.Direction, DataType: item.DataType, Defaulted: item.Defaulted})
+		}
+		return nil
+	})
+	return result, err
+}
+
+func (service *OfficeOracleMetadataService) ListResultTables(ctx context.Context, owner, search string, limit int) ([]OfficeResultTableSummary, error) {
+	limit = normalizeOfficeMetadataLimit(limit)
+	var result []OfficeResultTableSummary
+	err := service.withConnection(ctx, func(queryCtx context.Context, connection officeOracleMetadataConnection) error {
+		items, err := connection.ListResultTables(queryCtx, reportoracle.ResultTableCatalogQuery{Owner: owner, Search: search, Limit: limit})
+		if err != nil {
+			return err
+		}
+		result = make([]OfficeResultTableSummary, 0, len(items))
+		for _, item := range items {
+			result = append(result, OfficeResultTableSummary{Owner: item.Owner, Name: item.Name, ColumnCount: item.ColumnCount})
+		}
+		return nil
+	})
+	return result, err
+}
+
+func (service *OfficeOracleMetadataService) ResultTableSchema(ctx context.Context, ref reportoracle.ResultTableRef) ([]OfficeResultColumn, error) {
+	var result []OfficeResultColumn
+	err := service.withConnection(ctx, func(queryCtx context.Context, connection officeOracleMetadataConnection) error {
+		items, err := connection.InspectResultTable(queryCtx, ref)
+		if err != nil {
+			return err
+		}
+		result = make([]OfficeResultColumn, 0, len(items))
+		for _, item := range items {
+			result = append(result, OfficeResultColumn{Name: item.Name, Position: item.Position, DataType: item.DataType, Nullable: item.Nullable})
+		}
+		return nil
+	})
+	return result, err
+}
+
+func normalizeOfficeMetadataLimit(limit int) int {
 	if limit <= 0 || limit > 100 {
-		limit = 50
+		return 50
 	}
-	var result []reportoracle.ProcedureSummary
-	err := service.withConnection(ctx, func(queryCtx context.Context, connection officeOracleMetadataConnection) error {
-		var err error
-		result, err = connection.ListProcedures(queryCtx, reportoracle.ProcedureCatalogQuery{Owner: owner, Search: search, Limit: limit})
-		return err
-	})
-	return result, err
-}
-
-func (service *OfficeOracleMetadataService) ProcedureSignature(ctx context.Context, ref reportoracle.ProcedureRef) ([]reportoracle.ProcedureArgument, error) {
-	var result []reportoracle.ProcedureArgument
-	err := service.withConnection(ctx, func(queryCtx context.Context, connection officeOracleMetadataConnection) error {
-		var err error
-		result, err = connection.InspectProcedure(queryCtx, ref)
-		return err
-	})
-	return result, err
-}
-
-func (service *OfficeOracleMetadataService) ListResultTables(ctx context.Context, owner, search string, limit int) ([]reportoracle.ResultTableSummary, error) {
-	if limit <= 0 || limit > 100 {
-		limit = 50
-	}
-	var result []reportoracle.ResultTableSummary
-	err := service.withConnection(ctx, func(queryCtx context.Context, connection officeOracleMetadataConnection) error {
-		var err error
-		result, err = connection.ListResultTables(queryCtx, reportoracle.ResultTableCatalogQuery{Owner: owner, Search: search, Limit: limit})
-		return err
-	})
-	return result, err
-}
-
-func (service *OfficeOracleMetadataService) ResultTableSchema(ctx context.Context, ref reportoracle.ResultTableRef) ([]reportoracle.ResultColumn, error) {
-	var result []reportoracle.ResultColumn
-	err := service.withConnection(ctx, func(queryCtx context.Context, connection officeOracleMetadataConnection) error {
-		var err error
-		result, err = connection.InspectResultTable(queryCtx, ref)
-		return err
-	})
-	return result, err
+	return limit
 }
 
 func (service *OfficeOracleMetadataService) TestSelect(ctx context.Context, input OfficeSelectTestInput) ([]OfficeSelectColumn, error) {

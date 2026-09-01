@@ -75,6 +75,10 @@ type OfficePushRun struct {
 	ErrorMessageSafe string     `gorm:"column:error_message_safe;size:500" json:"errorMessage,omitempty"`
 	RequestedBy      uint       `gorm:"column:requested_by;not null;index" json:"requestedBy"`
 	ParametersJSON   JSONText   `gorm:"column:parameters_json;type:json" json:"-"`
+	SnapshotJSON     JSONText   `gorm:"column:snapshot_json;type:json" json:"-"`
+	LeaseToken       string     `gorm:"column:lease_token;size:64;not null;default:'';index" json:"-"`
+	LeaseExpiresAt   *time.Time `gorm:"column:lease_expires_at;type:datetime(3);index" json:"-"`
+	HeartbeatAt      *time.Time `gorm:"column:heartbeat_at;type:datetime(3)" json:"-"`
 	StartedAt        *time.Time `gorm:"column:started_at;type:datetime(3)" json:"startedAt,omitempty"`
 	FinishedAt       *time.Time `gorm:"column:finished_at;type:datetime(3)" json:"finishedAt,omitempty"`
 	CreatedAt        time.Time  `gorm:"column:created_at;type:datetime(3);not null;autoCreateTime;index" json:"createdAt"`
@@ -82,3 +86,14 @@ type OfficePushRun struct {
 }
 
 func (OfficePushRun) TableName() string { return "office_push_runs" }
+
+// OfficeProcedureExportLock serializes procedure/result-table exports across
+// worker instances so a shared result table cannot be overwritten mid-read.
+type OfficeProcedureExportLock struct {
+	LockKey        string    `gorm:"column:lock_key;size:255;primaryKey" json:"-"`
+	LeaseToken     string    `gorm:"column:lease_token;size:64;not null;index" json:"-"`
+	LeaseExpiresAt time.Time `gorm:"column:lease_expires_at;type:datetime(3);not null;index" json:"-"`
+	UpdatedAt      time.Time `gorm:"column:updated_at;type:datetime(3);not null;autoUpdateTime" json:"-"`
+}
+
+func (OfficeProcedureExportLock) TableName() string { return "office_procedure_export_locks" }

@@ -21,13 +21,25 @@ import (
 	"gin-biz-web-api/pkg/database"
 	projectredis "gin-biz-web-api/pkg/redis"
 
+	"github.com/google/uuid"
 	"gorm.io/gorm"
 	"gorm.io/gorm/clause"
 )
 
-const officePushMaximumRows = int64(100_000)
+const (
+	officePushMaximumRows  = int64(100_000)
+	officePushLeaseTTL     = 5 * time.Minute
+	officePushHeartbeat    = time.Minute
+	officePushStateTimeout = 5 * time.Second
+	officeProcedureLockTTL = 2 * officePushLeaseTTL
+)
 
 var ErrOfficePushProcessNonRetryable = errors.New("office push processor: non-retryable")
+
+var (
+	errOfficePushLeaseLost     = errors.New("office push processor: lease lost")
+	errOfficeProcedureLockBusy = errors.New("office push processor: procedure result table is busy")
+)
 
 type officeBot interface {
 	UploadFile(context.Context, string, string) (string, error)
@@ -37,11 +49,8 @@ type officeBot interface {
 
 type officeOracleConnection interface {
 	InspectProcedure(context.Context, reportoracle.ProcedureRef) ([]reportoracle.ProcedureArgument, error)
-	InspectResultSnapshotContract(context.Context, reportoracle.ResultSnapshotRef) (reportoracle.ResultSnapshotContract, error)
 	BeginTx(context.Context, *sql.TxOptions) (*sql.Tx, error)
 	Execute(context.Context, *sql.Tx, reportoracle.CallPlan, map[string]interface{}) error
-	CountResultRowsTx(context.Context, *sql.Tx, reportoracle.ResultCountPlan) (int64, error)
-	ReadResultPage(context.Context, reportoracle.ResultPagePlan, *reportoracle.ResultCursor, int) (reportoracle.ResultPage, error)
 	QuerySelect(context.Context, string, ...interface{}) (*sql.Rows, error)
 	Close() error
 }
@@ -54,6 +63,10 @@ type OfficePushProcessor struct {
 	newBot     officeBotFactory
 	openOracle officeOracleOpener
 	now        func() time.Time
+	newToken   func() string
+	leaseTTL   time.Duration
+	heartbeat  time.Duration
+	stateLimit time.Duration
 }
 
 func NewOfficePushProcessor() *OfficePushProcessor {
@@ -85,105 +98,227 @@ func newOfficePushProcessor(db *gorm.DB, newBot officeBotFactory, openOracle off
 	if db == nil || newBot == nil || openOracle == nil {
 		panic("office push processor: dependencies are required")
 	}
-	return &OfficePushProcessor{db: db, newBot: newBot, openOracle: openOracle, now: func() time.Time { return time.Now().UTC() }}
+	return &OfficePushProcessor{
+		db: db, newBot: newBot, openOracle: openOracle, now: func() time.Time { return time.Now().UTC() }, newToken: uuid.NewString,
+		leaseTTL: officePushLeaseTTL, heartbeat: officePushHeartbeat, stateLimit: officePushStateTimeout,
+	}
 }
 
 func (processor *OfficePushProcessor) Process(ctx context.Context, runID uint, retryAllowed bool) error {
-	if processor == nil || processor.db == nil || processor.newBot == nil || processor.openOracle == nil || ctx == nil || runID == 0 {
+	if processor == nil || processor.db == nil || processor.newBot == nil || processor.openOracle == nil || processor.newToken == nil ||
+		processor.now == nil || processor.leaseTTL <= 0 || processor.heartbeat <= 0 || processor.stateLimit <= 0 || ctx == nil || runID == 0 {
 		return fmt.Errorf("%w: invalid processor request", ErrOfficePushProcessNonRetryable)
 	}
-	run, target, message, err := processor.claim(ctx, runID)
+	leaseToken, err := canonicalOfficeUUID(processor.newToken())
+	if err != nil {
+		return fmt.Errorf("%w: invalid lease token", ErrOfficePushProcessNonRetryable)
+	}
+	claim, err := processor.claim(ctx, runID, leaseToken)
 	if err != nil {
 		return err
 	}
-	if run.Status == model.OfficePushRunStatusSucceeded || run.Status == model.OfficePushRunStatusUnknown {
+	if !claim.acquired {
 		return nil
 	}
+	run, target, message := claim.run, claim.target, claim.message
+	executionCtx, cancelExecution := context.WithCancel(ctx)
+	monitorDone := processor.startMonitor(executionCtx, cancelExecution, run.ID, leaseToken)
+	defer func() {
+		cancelExecution()
+		<-monitorDone
+	}()
 	bot, err := processor.newBot()
 	if err != nil {
-		return processor.fail(ctx, run.ID, retryAllowed, "FEISHU_CONFIGURATION_INVALID", "飞书机器人配置不可用", err)
+		return processor.fail(ctx, run.ID, leaseToken, retryAllowed, "FEISHU_CONFIGURATION_INVALID", "飞书机器人配置不可用", err)
 	}
 
 	var messageID string
 	var rowCount int64
 	if message.SourceType == model.OfficeMessageSourceEdited {
-		messageID, err = bot.SendText(ctx, target.ReceiveIDType, target.ReceiveID, message.Content, run.RunUUID)
+		messageID, err = bot.SendText(executionCtx, target.ReceiveIDType, target.ReceiveID, message.Content, run.RunUUID)
 	} else {
-		path, fileName, exportedRows, exportErr := processor.exportWorkbook(ctx, message, run.ParametersJSON)
+		path, fileName, exportedRows, exportErr := processor.exportWorkbook(executionCtx, message, run.ParametersJSON, leaseToken)
 		if exportErr != nil {
-			return processor.fail(ctx, run.ID, retryAllowed, "ORACLE_EXPORT_FAILED", "Oracle 数据导出失败", exportErr)
+			return processor.fail(ctx, run.ID, leaseToken, retryAllowed, "ORACLE_EXPORT_FAILED", "Oracle 数据导出失败", exportErr)
 		}
 		defer os.Remove(path)
 		rowCount = exportedRows
-		fileKey, uploadErr := bot.UploadFile(ctx, path, fileName)
+		fileKey, uploadErr := bot.UploadFile(executionCtx, path, fileName)
 		if uploadErr != nil {
-			return processor.fail(ctx, run.ID, retryAllowed, "FEISHU_FILE_UPLOAD_FAILED", "飞书文件上传失败", uploadErr)
+			return processor.fail(ctx, run.ID, leaseToken, retryAllowed, "FEISHU_FILE_UPLOAD_FAILED", "飞书文件上传失败", uploadErr)
 		}
-		messageID, err = bot.SendFile(ctx, target.ReceiveIDType, target.ReceiveID, fileKey, run.RunUUID)
+		messageID, err = bot.SendFile(executionCtx, target.ReceiveIDType, target.ReceiveID, fileKey, run.RunUUID)
 	}
 	if err != nil {
-		return processor.fail(ctx, run.ID, retryAllowed, "FEISHU_MESSAGE_FAILED", "飞书消息发送失败", err)
+		return processor.fail(ctx, run.ID, leaseToken, retryAllowed, "FEISHU_MESSAGE_FAILED", "飞书消息发送失败", err)
 	}
 	finishedAt := processor.now().UTC()
-	result := processor.db.WithContext(ctx).Model(&model.OfficePushRun{}).
-		Where("id = ? AND status = ?", run.ID, model.OfficePushRunStatusRunning).
+	stateCtx, cancelState := processor.stateContext(ctx)
+	defer cancelState()
+	result := processor.ownedRun(stateCtx, run.ID, leaseToken).
 		Updates(map[string]interface{}{
 			"status": model.OfficePushRunStatusSucceeded, "row_count": rowCount,
 			"feishu_message_id": messageID, "error_code": "", "error_message_safe": "",
-			"finished_at": finishedAt, "updated_at": finishedAt,
+			"finished_at": finishedAt, "lease_token": "", "lease_expires_at": nil, "heartbeat_at": nil, "updated_at": finishedAt,
 		})
-	if result.Error != nil || result.RowsAffected != 1 {
+	if result.Error != nil {
 		return fmt.Errorf("office push processor: persist success: %w", result.Error)
+	}
+	if result.RowsAffected != 1 {
+		return errOfficePushLeaseLost
 	}
 	return nil
 }
 
-func (processor *OfficePushProcessor) claim(ctx context.Context, runID uint) (model.OfficePushRun, model.OfficePushTarget, model.OfficeMessage, error) {
-	var run model.OfficePushRun
-	var target model.OfficePushTarget
-	var message model.OfficeMessage
+type officePushClaim struct {
+	run      model.OfficePushRun
+	target   model.OfficePushTarget
+	message  model.OfficeMessage
+	acquired bool
+}
+
+func (processor *OfficePushProcessor) claim(ctx context.Context, runID uint, leaseToken string) (officePushClaim, error) {
+	var claim officePushClaim
 	err := processor.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ?", runID).First(&run).Error; err != nil {
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ?", runID).First(&claim.run).Error; errors.Is(err, gorm.ErrRecordNotFound) {
+			return fmt.Errorf("%w: push run does not exist", ErrOfficePushProcessNonRetryable)
+		} else if err != nil {
 			return fmt.Errorf("office push processor: load run: %w", err)
 		}
-		if run.Status == model.OfficePushRunStatusSucceeded || run.Status == model.OfficePushRunStatusUnknown {
+		if claim.run.Status == model.OfficePushRunStatusSucceeded || claim.run.Status == model.OfficePushRunStatusUnknown || claim.run.Status == model.OfficePushRunStatusFailed {
 			return nil
 		}
-		if err := tx.Where("id = ? AND enabled = ?", run.TargetID, true).First(&target).Error; err != nil {
-			return fmt.Errorf("%w: push target is unavailable", ErrOfficePushProcessNonRetryable)
-		}
-		if err := tx.Where("id = ? AND enabled = ?", run.MessageID, true).First(&message).Error; err != nil {
-			return fmt.Errorf("%w: message is unavailable", ErrOfficePushProcessNonRetryable)
-		}
 		now := processor.now().UTC()
-		if err := tx.Model(&run).Updates(map[string]interface{}{
+		if !officePushClaimable(claim.run, now) {
+			return nil
+		}
+		snapshot, snapshotErr := decodeOfficePushSnapshot(claim.run.SnapshotJSON)
+		if snapshotErr != nil {
+			if strings.TrimSpace(string(claim.run.SnapshotJSON)) != "" {
+				return processor.markInvalidSnapshot(tx, &claim.run, now)
+			}
+			var target model.OfficePushTarget
+			if err := tx.Where("id = ? AND enabled = ?", claim.run.TargetID, true).First(&target).Error; errors.Is(err, gorm.ErrRecordNotFound) {
+				return processor.markInvalidSnapshot(tx, &claim.run, now)
+			} else if err != nil {
+				return fmt.Errorf("office push processor: load legacy target: %w", err)
+			}
+			var message model.OfficeMessage
+			if err := tx.Where("id = ? AND enabled = ?", claim.run.MessageID, true).First(&message).Error; errors.Is(err, gorm.ErrRecordNotFound) {
+				return processor.markInvalidSnapshot(tx, &claim.run, now)
+			} else if err != nil {
+				return fmt.Errorf("office push processor: load legacy message: %w", err)
+			}
+			raw, err := newOfficePushSnapshot(target, message)
+			if err != nil {
+				return err
+			}
+			claim.run.SnapshotJSON = raw
+			snapshot, snapshotErr = decodeOfficePushSnapshot(raw)
+			if snapshotErr != nil {
+				return snapshotErr
+			}
+		}
+		claim.target, claim.message = snapshot.targetModel(), snapshot.messageModel()
+		expiresAt := now.Add(processor.leaseTTL)
+		if err := tx.Model(&claim.run).Updates(map[string]interface{}{
 			"status": model.OfficePushRunStatusRunning, "attempt_count": gorm.Expr("attempt_count + 1"),
-			"started_at": now, "finished_at": nil, "error_code": "", "error_message_safe": "", "updated_at": now,
+			"snapshot_json": claim.run.SnapshotJSON, "started_at": now, "finished_at": nil, "error_code": "", "error_message_safe": "",
+			"lease_token": leaseToken, "lease_expires_at": expiresAt, "heartbeat_at": now, "updated_at": now,
 		}).Error; err != nil {
 			return fmt.Errorf("office push processor: claim run: %w", err)
 		}
-		run.Status = model.OfficePushRunStatusRunning
+		claim.run.Status, claim.run.LeaseToken, claim.run.LeaseExpiresAt = model.OfficePushRunStatusRunning, leaseToken, &expiresAt
+		claim.run.AttemptCount++
+		claim.acquired = true
 		return nil
 	})
-	return run, target, message, err
+	return claim, err
 }
 
-func (processor *OfficePushProcessor) fail(ctx context.Context, runID uint, retryAllowed bool, code, safeMessage string, cause error) error {
+func (processor *OfficePushProcessor) markInvalidSnapshot(tx *gorm.DB, run *model.OfficePushRun, now time.Time) error {
+	if err := tx.Model(run).Updates(map[string]interface{}{
+		"status": model.OfficePushRunStatusFailed, "error_code": "EXECUTION_SNAPSHOT_INVALID", "error_message_safe": "推送任务执行快照不可用",
+		"finished_at": now, "lease_token": "", "lease_expires_at": nil, "heartbeat_at": nil, "updated_at": now,
+	}).Error; err != nil {
+		return fmt.Errorf("office push processor: reject invalid snapshot: %w", err)
+	}
+	return nil
+}
+
+func (processor *OfficePushProcessor) fail(ctx context.Context, runID uint, leaseToken string, retryAllowed bool, code, safeMessage string, cause error) error {
 	now := processor.now().UTC()
 	status := model.OfficePushRunStatusFailed
 	if retryAllowed && officePushRetryable(cause) {
 		status = model.OfficePushRunStatusQueued
 	}
-	updateErr := processor.db.WithContext(ctx).Model(&model.OfficePushRun{}).Where("id = ?", runID).Updates(map[string]interface{}{
-		"status": status, "error_code": code, "error_message_safe": safeMessage, "finished_at": now, "updated_at": now,
-	}).Error
-	if updateErr != nil {
-		return errors.Join(cause, fmt.Errorf("office push processor: persist failure: %w", updateErr))
+	finishedAt := interface{}(now)
+	if status == model.OfficePushRunStatusQueued {
+		finishedAt = nil
+	}
+	stateCtx, cancel := processor.stateContext(ctx)
+	defer cancel()
+	result := processor.ownedRun(stateCtx, runID, leaseToken).
+		Updates(map[string]interface{}{
+			"status": status, "error_code": code, "error_message_safe": safeMessage, "finished_at": finishedAt,
+			"lease_token": "", "lease_expires_at": nil, "heartbeat_at": nil, "updated_at": now,
+		})
+	if result.Error != nil {
+		return errors.Join(cause, fmt.Errorf("office push processor: persist failure: %w", result.Error))
+	}
+	if result.RowsAffected != 1 {
+		return nil
 	}
 	if status == model.OfficePushRunStatusQueued {
 		return cause
 	}
 	return fmt.Errorf("%w: %s", ErrOfficePushProcessNonRetryable, safeMessage)
+}
+
+func (processor *OfficePushProcessor) startMonitor(ctx context.Context, cancelExecution context.CancelFunc, runID uint, leaseToken string) <-chan struct{} {
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		ticker := time.NewTicker(processor.heartbeat)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				heartbeatAt := processor.now().UTC()
+				stateCtx, cancel := processor.stateContext(ctx)
+				result := processor.ownedActiveRun(stateCtx, runID, leaseToken, heartbeatAt).
+					Updates(map[string]interface{}{"lease_expires_at": heartbeatAt.UTC().Add(processor.leaseTTL), "heartbeat_at": heartbeatAt.UTC(), "updated_at": heartbeatAt.UTC()})
+				cancel()
+				if result.Error != nil || result.RowsAffected != 1 {
+					cancelExecution()
+					return
+				}
+			}
+		}
+	}()
+	return done
+}
+
+func (processor *OfficePushProcessor) stateContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.WithoutCancel(ctx), processor.stateLimit)
+}
+
+func (processor *OfficePushProcessor) ownedRun(ctx context.Context, runID uint, leaseToken string) *gorm.DB {
+	return processor.db.WithContext(ctx).Model(&model.OfficePushRun{}).
+		Where("id = ? AND status = ? AND lease_token = ?", runID, model.OfficePushRunStatusRunning, leaseToken)
+}
+
+func (processor *OfficePushProcessor) ownedActiveRun(ctx context.Context, runID uint, leaseToken string, heartbeatAt time.Time) *gorm.DB {
+	return processor.ownedRun(ctx, runID, leaseToken).Where("lease_expires_at > ?", heartbeatAt)
+}
+
+func officePushClaimable(run model.OfficePushRun, now time.Time) bool {
+	if run.Status == model.OfficePushRunStatusQueued {
+		return true
+	}
+	return run.Status == model.OfficePushRunStatusRunning && (run.LeaseToken == "" || run.LeaseExpiresAt == nil || !now.Before(run.LeaseExpiresAt.UTC()))
 }
 
 func officePushRetryable(err error) bool {
@@ -194,10 +329,25 @@ func officePushRetryable(err error) bool {
 	return true
 }
 
-func (processor *OfficePushProcessor) exportWorkbook(ctx context.Context, message model.OfficeMessage, rawParameters model.JSONText) (string, string, int64, error) {
+func (processor *OfficePushProcessor) exportWorkbook(ctx context.Context, message model.OfficeMessage, rawParameters model.JSONText, leaseToken string) (string, string, int64, error) {
 	mappings, _, err := normalizeOfficeColumnMappings(message.ColumnMappingJSON)
 	if err != nil {
 		return "", "", 0, err
+	}
+	procedureLockKey := ""
+	if message.SourceType == model.OfficeMessageSourceOracleProcedure {
+		procedureLockKey = officeProcedureLockKey(message)
+		if err := processor.acquireProcedureLock(ctx, procedureLockKey, leaseToken); err != nil {
+			return "", "", 0, err
+		}
+		procedureCtx, cancelProcedure := context.WithCancel(ctx)
+		procedureMonitorDone := processor.startProcedureLockMonitor(procedureCtx, cancelProcedure, procedureLockKey, leaseToken)
+		defer func() {
+			cancelProcedure()
+			<-procedureMonitorDone
+			processor.releaseProcedureLock(ctx, procedureLockKey, leaseToken)
+		}()
+		ctx = procedureCtx
 	}
 	oracleConfig, queryTimeout, err := officeOracleConfigFromEnvironment()
 	if err != nil {
@@ -251,6 +401,98 @@ func (processor *OfficePushProcessor) exportWorkbook(ctx context.Context, messag
 	return stablePath, fileName, result.ProcessedRows, nil
 }
 
+func (processor *OfficePushProcessor) acquireProcedureLock(ctx context.Context, lockKey, leaseToken string) error {
+	if lockKey == "." || len(lockKey) > 255 {
+		return fmt.Errorf("office push processor: invalid procedure lock")
+	}
+	canonicalLeaseToken, err := canonicalOfficeUUID(leaseToken)
+	if err != nil || canonicalLeaseToken != leaseToken {
+		return fmt.Errorf("office push processor: invalid procedure lock")
+	}
+	for {
+		err := processor.tryAcquireProcedureLock(ctx, lockKey, leaseToken)
+		if !errors.Is(err, errOfficeProcedureLockBusy) {
+			return err
+		}
+		timer := time.NewTimer(2 * time.Second)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		case <-timer.C:
+		}
+	}
+}
+
+func (processor *OfficePushProcessor) startProcedureLockMonitor(ctx context.Context, cancelExecution context.CancelFunc, lockKey, leaseToken string) <-chan struct{} {
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		ticker := time.NewTicker(processor.heartbeat)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-ctx.Done():
+				return
+			case <-ticker.C:
+				heartbeatAt := processor.now().UTC()
+				stateCtx, cancel := processor.stateContext(ctx)
+				result := processor.ownedProcedureLock(stateCtx, lockKey, leaseToken, heartbeatAt.UTC()).
+					Updates(map[string]interface{}{"lease_expires_at": heartbeatAt.UTC().Add(officeProcedureLockTTL), "updated_at": heartbeatAt.UTC()})
+				cancel()
+				if result.Error != nil || result.RowsAffected != 1 {
+					cancelExecution()
+					return
+				}
+			}
+		}
+	}()
+	return done
+}
+
+func (processor *OfficePushProcessor) ownedProcedureLock(ctx context.Context, lockKey, leaseToken string, heartbeatAt time.Time) *gorm.DB {
+	return processor.db.WithContext(ctx).Model(&model.OfficeProcedureExportLock{}).
+		Where("lock_key = ? AND lease_token = ? AND lease_expires_at > ?", lockKey, leaseToken, heartbeatAt)
+}
+
+func (processor *OfficePushProcessor) tryAcquireProcedureLock(ctx context.Context, lockKey, leaseToken string) error {
+	now := processor.now().UTC()
+	return processor.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var lock model.OfficeProcedureExportLock
+		err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("lock_key = ?", lockKey).First(&lock).Error
+		if errors.Is(err, gorm.ErrRecordNotFound) {
+			lock = model.OfficeProcedureExportLock{LockKey: lockKey, LeaseToken: leaseToken, LeaseExpiresAt: now.Add(officeProcedureLockTTL), UpdatedAt: now}
+			if err := tx.Create(&lock).Error; err != nil {
+				return fmt.Errorf("%w: %v", errOfficeProcedureLockBusy, err)
+			}
+			return nil
+		}
+		if err != nil {
+			return fmt.Errorf("office push processor: load procedure lock: %w", err)
+		}
+		if lock.LeaseToken != leaseToken && now.Before(lock.LeaseExpiresAt.UTC()) {
+			return errOfficeProcedureLockBusy
+		}
+		if err := tx.Model(&lock).Updates(map[string]interface{}{"lease_token": leaseToken, "lease_expires_at": now.Add(officeProcedureLockTTL), "updated_at": now}).Error; err != nil {
+			return fmt.Errorf("office push processor: acquire procedure lock: %w", err)
+		}
+		return nil
+	})
+}
+
+func officeProcedureLockKey(message model.OfficeMessage) string {
+	if message.SourceType != model.OfficeMessageSourceOracleProcedure {
+		return ""
+	}
+	return strings.ToUpper(strings.TrimSpace(message.ResultTableOwner)) + "." + strings.ToUpper(strings.TrimSpace(message.ResultTableName))
+}
+
+func (processor *OfficePushProcessor) releaseProcedureLock(ctx context.Context, lockKey, leaseToken string) {
+	stateCtx, cancel := processor.stateContext(ctx)
+	defer cancel()
+	_ = processor.db.WithContext(stateCtx).Where("lock_key = ? AND lease_token = ?", lockKey, leaseToken).Delete(&model.OfficeProcedureExportLock{}).Error
+}
+
 func officeOracleConfigFromEnvironment() (reportoracle.Config, time.Duration, error) {
 	configured, err := appconfig.LoadReportInputQueryConfig()
 	if err != nil {
@@ -269,7 +511,7 @@ func officeOracleConfigFromEnvironment() (reportoracle.Config, time.Duration, er
 	}, oracle.QueryTimeout, nil
 }
 
-func newOfficeProcedurePager(ctx context.Context, connection officeOracleConnection, message model.OfficeMessage, mappings []OfficeColumnMapping) (*officeProcedurePager, error) {
+func newOfficeProcedurePager(ctx context.Context, connection officeOracleConnection, message model.OfficeMessage, mappings []OfficeColumnMapping) (*officeSelectPager, error) {
 	ref := reportoracle.ProcedureRef{Owner: message.ProcedureOwner, Package: message.PackageName, Name: message.ProcedureName, Overload: message.ProcedureOverload}
 	arguments, err := connection.InspectProcedure(ctx, ref)
 	if err != nil {
@@ -282,21 +524,6 @@ func newOfficeProcedurePager(ctx context.Context, connection officeOracleConnect
 	if err != nil {
 		return nil, err
 	}
-	columns := officeSourceColumns(mappings)
-	contract, err := connection.InspectResultSnapshotContract(ctx, reportoracle.ResultTableSnapshotRef(
-		reportoracle.ResultTableRef{Owner: message.ResultTableOwner, Name: message.ResultTableName}, columns,
-	))
-	if err != nil {
-		return nil, err
-	}
-	pagePlan, err := reportoracle.BuildResultPagePlan(contract, columns)
-	if err != nil {
-		return nil, err
-	}
-	countPlan, err := reportoracle.BuildResultCountPlan(contract)
-	if err != nil {
-		return nil, err
-	}
 	tx, err := connection.BeginTx(ctx, &sql.TxOptions{})
 	if err != nil {
 		return nil, err
@@ -305,31 +532,25 @@ func newOfficeProcedurePager(ctx context.Context, connection officeOracleConnect
 		_ = tx.Rollback()
 		return nil, err
 	}
-	rowCount, err := connection.CountResultRowsTx(ctx, tx, countPlan)
-	if err != nil {
-		_ = tx.Rollback()
-		return nil, err
-	}
-	if rowCount > officePushMaximumRows {
-		_ = tx.Rollback()
-		return nil, fmt.Errorf("office push processor: Oracle result exceeds %d rows", officePushMaximumRows)
-	}
 	if err := tx.Commit(); err != nil {
 		return nil, fmt.Errorf("office push processor: commit Oracle procedure: %w", err)
 	}
-	return &officeProcedurePager{connection: connection, plan: pagePlan}, nil
+	table, err := reportoracle.NormalizeResultTableRef(reportoracle.ResultTableRef{Owner: message.ResultTableOwner, Name: message.ResultTableName})
+	if err != nil {
+		return nil, err
+	}
+	columns := officeSourceColumns(mappings)
+	quotedColumns := make([]string, len(columns))
+	for index, column := range columns {
+		quotedColumns[index] = `"` + column + `"`
+	}
+	statement := `SELECT ` + strings.Join(quotedColumns, ", ") + ` FROM "` + table.Owner + `"."` + table.Name + `"`
+	rows, err := connection.QuerySelect(ctx, statement)
+	if err != nil {
+		return nil, err
+	}
+	return newOfficeRowsPager(rows, mappings)
 }
-
-type officeProcedurePager struct {
-	connection officeOracleConnection
-	plan       reportoracle.ResultPagePlan
-}
-
-func (pager *officeProcedurePager) Read(ctx context.Context, _ []string, after *reportoracle.ResultCursor, limit int) (reportoracle.ResultPage, error) {
-	return pager.connection.ReadResultPage(ctx, pager.plan, after, limit)
-}
-
-func (*officeProcedurePager) Close() error { return nil }
 
 type officeSelectPager struct {
 	rows          *sql.Rows
@@ -351,6 +572,13 @@ func newOfficeSelectPager(ctx context.Context, connection officeOracleConnection
 	rows, err := connection.QuerySelect(ctx, message.SelectSQL, arguments...)
 	if err != nil {
 		return nil, err
+	}
+	return newOfficeRowsPager(rows, mappings)
+}
+
+func newOfficeRowsPager(rows *sql.Rows, mappings []OfficeColumnMapping) (*officeSelectPager, error) {
+	if rows == nil {
+		return nil, fmt.Errorf("office push processor: SELECT rows are unavailable")
 	}
 	columns, err := rows.Columns()
 	if err != nil {

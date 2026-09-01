@@ -46,6 +46,74 @@ type OfficeQueryParameter struct {
 	Required  bool   `json:"required"`
 }
 
+type officePushSnapshot struct {
+	Target  officePushTargetSnapshot  `json:"target"`
+	Message officePushMessageSnapshot `json:"message"`
+}
+
+type officePushTargetSnapshot struct {
+	ReceiveIDType string `json:"receiveIdType"`
+	ReceiveID     string `json:"receiveId"`
+}
+
+type officePushMessageSnapshot struct {
+	ID                  uint            `json:"id"`
+	Name                string          `json:"name"`
+	SourceType          string          `json:"sourceType"`
+	Content             string          `json:"content"`
+	ProcedureOwner      string          `json:"procedureOwner"`
+	PackageName         string          `json:"packageName"`
+	ProcedureName       string          `json:"procedureName"`
+	ProcedureOverload   string          `json:"procedureOverload"`
+	ResultTableOwner    string          `json:"resultTableOwner"`
+	ResultTableName     string          `json:"resultTableName"`
+	SelectSQL           string          `json:"selectSql"`
+	ParameterSchemaJSON json.RawMessage `json:"parameters"`
+	ColumnMappingJSON   json.RawMessage `json:"columnMapping"`
+}
+
+func newOfficePushSnapshot(target model.OfficePushTarget, message model.OfficeMessage) (model.JSONText, error) {
+	snapshot := officePushSnapshot{
+		Target: officePushTargetSnapshot{ReceiveIDType: target.ReceiveIDType, ReceiveID: target.ReceiveID},
+		Message: officePushMessageSnapshot{
+			ID: message.ID, Name: message.Name, SourceType: message.SourceType, Content: message.Content,
+			ProcedureOwner: message.ProcedureOwner, PackageName: message.PackageName, ProcedureName: message.ProcedureName,
+			ProcedureOverload: message.ProcedureOverload, ResultTableOwner: message.ResultTableOwner, ResultTableName: message.ResultTableName,
+			SelectSQL: message.SelectSQL, ParameterSchemaJSON: json.RawMessage(message.ParameterSchemaJSON), ColumnMappingJSON: json.RawMessage(message.ColumnMappingJSON),
+		},
+	}
+	encoded, err := json.Marshal(snapshot)
+	if err != nil {
+		return "", fmt.Errorf("office message snapshot: encode: %w", err)
+	}
+	return model.JSONText(encoded), nil
+}
+
+func decodeOfficePushSnapshot(raw model.JSONText) (officePushSnapshot, error) {
+	var snapshot officePushSnapshot
+	if err := decodeOfficeJSON(raw, &snapshot); err != nil {
+		return officePushSnapshot{}, fmt.Errorf("office message snapshot: decode: %w", err)
+	}
+	if !validOfficeReceiveIDType(snapshot.Target.ReceiveIDType) || strings.TrimSpace(snapshot.Target.ReceiveID) == "" || snapshot.Message.ID == 0 {
+		return officePushSnapshot{}, fmt.Errorf("office message snapshot: invalid identity")
+	}
+	return snapshot, nil
+}
+
+func (snapshot officePushSnapshot) targetModel() model.OfficePushTarget {
+	return model.OfficePushTarget{ReceiveIDType: snapshot.Target.ReceiveIDType, ReceiveID: snapshot.Target.ReceiveID}
+}
+
+func (snapshot officePushSnapshot) messageModel() model.OfficeMessage {
+	message := snapshot.Message
+	return model.OfficeMessage{
+		BaseModel: model.BaseModel{ID: message.ID}, Name: message.Name, SourceType: message.SourceType, Content: message.Content,
+		ProcedureOwner: message.ProcedureOwner, PackageName: message.PackageName, ProcedureName: message.ProcedureName,
+		ProcedureOverload: message.ProcedureOverload, ResultTableOwner: message.ResultTableOwner, ResultTableName: message.ResultTableName,
+		SelectSQL: message.SelectSQL, ParameterSchemaJSON: model.JSONText(message.ParameterSchemaJSON), ColumnMappingJSON: model.JSONText(message.ColumnMappingJSON),
+	}
+}
+
 func normalizeOfficeColumnMappings(raw model.JSONText) ([]OfficeColumnMapping, model.JSONText, error) {
 	var mappings []OfficeColumnMapping
 	if err := decodeOfficeJSON(raw, &mappings); err != nil {
@@ -86,6 +154,9 @@ func normalizeOfficeColumnMappings(raw model.JSONText) ([]OfficeColumnMapping, m
 func normalizeOfficeQueryParameters(statement string, raw model.JSONText) ([]OfficeQueryParameter, model.JSONText, error) {
 	if !reportoracle.ValidateSelect(statement) {
 		return nil, "", fmt.Errorf("office message query: only one SELECT statement is allowed")
+	}
+	if officeHasPositionalBind(statement) {
+		return nil, "", fmt.Errorf("office message query parameters: positional binds are not allowed")
 	}
 	var parameters []OfficeQueryParameter
 	if len(bytes.TrimSpace([]byte(raw))) == 0 {
@@ -132,12 +203,20 @@ func normalizeOfficeParameterValues(schema []OfficeQueryParameter, input map[str
 	if input == nil {
 		input = map[string]string{}
 	}
+	normalizedInput := make(map[string]string, len(input))
+	for code, value := range input {
+		normalizedCode := strings.ToLower(strings.TrimSpace(code))
+		if _, exists := normalizedInput[normalizedCode]; exists {
+			return "", nil, fmt.Errorf("office message query parameter %q is duplicated", code)
+		}
+		normalizedInput[normalizedCode] = value
+	}
 	known := make(map[string]struct{}, len(schema))
 	stored := make(map[string]string, len(schema))
 	arguments := make([]interface{}, 0, len(schema))
 	for _, parameter := range schema {
 		known[parameter.Code] = struct{}{}
-		raw, exists := input[parameter.Code]
+		raw, exists := normalizedInput[parameter.Code]
 		value := strings.TrimSpace(raw)
 		if (!exists || value == "") && parameter.Required {
 			return "", nil, fmt.Errorf("office message query parameter %q is required", parameter.Code)
@@ -153,8 +232,8 @@ func normalizeOfficeParameterValues(schema []OfficeQueryParameter, input map[str
 		}
 		arguments = append(arguments, sql.Named(parameter.Code, bound))
 	}
-	for code := range input {
-		if _, exists := known[strings.ToLower(code)]; !exists {
+	for code := range normalizedInput {
+		if _, exists := known[code]; !exists {
 			return "", nil, fmt.Errorf("office message query parameter %q is not configured", code)
 		}
 	}
@@ -234,6 +313,25 @@ func officeSelectBinds(statement string) map[string]struct{} {
 		index = end
 	}
 	return binds
+}
+
+func officeHasPositionalBind(statement string) bool {
+	inString := false
+	for index := 0; index < len(statement); index++ {
+		character := statement[index]
+		if character == '\'' {
+			if inString && index+1 < len(statement) && statement[index+1] == '\'' {
+				index++
+				continue
+			}
+			inString = !inString
+			continue
+		}
+		if !inString && character == ':' && index+1 < len(statement) && statement[index+1] >= '0' && statement[index+1] <= '9' {
+			return true
+		}
+	}
+	return false
 }
 
 func officeParameterStart(character byte) bool {

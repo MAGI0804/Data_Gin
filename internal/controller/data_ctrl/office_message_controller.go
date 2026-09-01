@@ -1,7 +1,10 @@
 package data_ctrl
 
 import (
+	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
 	"net/http"
 	"strconv"
 
@@ -34,7 +37,7 @@ func (controller *OfficeMessageController) ListMessages(c *gin.Context) {
 
 func (controller *OfficeMessageController) CreateMessage(c *gin.Context) {
 	var input data_svc.OfficeMessageInput
-	if err := c.ShouldBindJSON(&input); err != nil {
+	if err := bindOfficeJSON(c, &input); err != nil {
 		writeOfficeMessageError(c, data_svc.ErrOfficeMessageInvalid)
 		return
 	}
@@ -53,7 +56,7 @@ func (controller *OfficeMessageController) UpdateMessage(c *gin.Context) {
 		return
 	}
 	var input data_svc.OfficeMessageInput
-	if err := c.ShouldBindJSON(&input); err != nil {
+	if err := bindOfficeJSON(c, &input); err != nil {
 		writeOfficeMessageError(c, data_svc.ErrOfficeMessageInvalid)
 		return
 	}
@@ -94,7 +97,7 @@ func (controller *OfficeMessageController) ListTargets(c *gin.Context) {
 
 func (controller *OfficeMessageController) CreateTarget(c *gin.Context) {
 	var input data_svc.OfficePushTargetInput
-	if err := c.ShouldBindJSON(&input); err != nil {
+	if err := bindOfficeJSON(c, &input); err != nil {
 		writeOfficeMessageError(c, data_svc.ErrOfficeMessageInvalid)
 		return
 	}
@@ -113,7 +116,7 @@ func (controller *OfficeMessageController) UpdateTarget(c *gin.Context) {
 		return
 	}
 	var input data_svc.OfficePushTargetInput
-	if err := c.ShouldBindJSON(&input); err != nil {
+	if err := bindOfficeJSON(c, &input); err != nil {
 		writeOfficeMessageError(c, data_svc.ErrOfficeMessageInvalid)
 		return
 	}
@@ -150,7 +153,7 @@ func (controller *OfficeMessageController) CreateRun(c *gin.Context) {
 		return
 	}
 	var input data_svc.OfficePushRunInput
-	if err := c.ShouldBindJSON(&input); err != nil {
+	if err := bindOfficeJSON(c, &input); err != nil {
 		writeOfficeMessageError(c, data_svc.ErrOfficeMessageInvalid)
 		return
 	}
@@ -220,7 +223,7 @@ func (controller *OfficeMessageController) ResultTableSchema(c *gin.Context) {
 
 func (controller *OfficeMessageController) TestSelect(c *gin.Context) {
 	var input data_svc.OfficeSelectTestInput
-	if err := c.ShouldBindJSON(&input); err != nil {
+	if err := bindOfficeJSON(c, &input); err != nil {
 		writeOfficeMessageError(c, data_svc.ErrOfficeMessageInvalid)
 		return
 	}
@@ -254,6 +257,22 @@ func officeUint64(value string) (uint64, error) {
 		return 0, data_svc.ErrOfficeMessageInvalid
 	}
 	return parsed, nil
+}
+
+func bindOfficeJSON(c *gin.Context, destination interface{}) error {
+	if c == nil || c.Request == nil || destination == nil {
+		return fmt.Errorf("office message request is invalid")
+	}
+	c.Request.Body = http.MaxBytesReader(c.Writer, c.Request.Body, 1<<20)
+	decoder := json.NewDecoder(c.Request.Body)
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(destination); err != nil {
+		return err
+	}
+	if err := decoder.Decode(&struct{}{}); !errors.Is(err, io.EOF) {
+		return fmt.Errorf("office message request contains trailing JSON")
+	}
+	return nil
 }
 
 func writeOfficeMessageError(c *gin.Context, err error) {

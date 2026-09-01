@@ -25,8 +25,8 @@ import (
 	"go.uber.org/zap"
 )
 
-const schemaMigrationVersion = "2026-09-01-office-message-v14"
-const previousSchemaMigrationVersion = "2026-08-26-bojun-oracle-v13"
+const schemaMigrationVersion = "2026-09-01-office-message-ha-v15"
+const previousSchemaMigrationVersion = "2026-09-01-office-message-v14"
 const bojunOraclePreviousMigrationVersion = "2026-08-26-bojun-oracle-v12"
 const bojunOracleMigrationBaselineVersion = "2026-08-25-report-center-v11"
 const schemaMigrationLockName = "data_gin_schema_migration_v1"
@@ -155,6 +155,7 @@ func officeMessageMigrationModels() []interface{} {
 		&model.OfficeMessage{},
 		&model.OfficePushTarget{},
 		&model.OfficePushRun{},
+		&model.OfficeProcedureExportLock{},
 	}
 }
 

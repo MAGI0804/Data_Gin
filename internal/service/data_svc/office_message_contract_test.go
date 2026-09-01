@@ -50,6 +50,12 @@ func TestNormalizeOfficeQueryParametersRejectsUnconfiguredBind(t *testing.T) {
 	}
 }
 
+func TestNormalizeOfficeQueryParametersRejectsPositionalBind(t *testing.T) {
+	if _, _, err := normalizeOfficeQueryParameters("SELECT * FROM SALES WHERE SHOP = :1", model.JSONText(`[]`)); err == nil {
+		t.Fatal("normalizeOfficeQueryParameters() accepted a positional bind")
+	}
+}
+
 func TestNormalizeOfficeParameterValuesBindsNumbers(t *testing.T) {
 	schema := []OfficeQueryParameter{
 		{Code: "quantity", Label: "数量", ValueType: "integer", Required: true},
@@ -63,5 +69,16 @@ func TestNormalizeOfficeParameterValuesBindsNumbers(t *testing.T) {
 	amount := arguments[1].(sql.NamedArg)
 	if quantity.Value != int64(12) || amount.Value != godror.Number("19.95") {
 		t.Fatalf("arguments = %#v", arguments)
+	}
+}
+
+func TestNormalizeOfficeParameterValuesNormalizesInputKeys(t *testing.T) {
+	schema := []OfficeQueryParameter{{Code: "shop", Label: "店铺", ValueType: "string", Required: true}}
+	stored, arguments, err := normalizeOfficeParameterValues(schema, map[string]string{"SHOP": "S001"})
+	if err != nil || string(stored) != `{"shop":"S001"}` || arguments[0].(sql.NamedArg).Value != "S001" {
+		t.Fatalf("normalizeOfficeParameterValues() stored=%s arguments=%#v error=%v", stored, arguments, err)
+	}
+	if _, _, err := normalizeOfficeParameterValues(schema, map[string]string{"shop": "S001", "SHOP": "S002"}); err == nil {
+		t.Fatal("normalizeOfficeParameterValues() accepted duplicate case-insensitive keys")
 	}
 }
