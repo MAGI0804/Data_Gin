@@ -40,14 +40,81 @@ func TestReportCenterMigrationModelsAreUnique(t *testing.T) {
 }
 
 func TestSchemaMigrationVersionIncludesBojunOracleModels(t *testing.T) {
-	if schemaMigrationVersion != "2026-09-01-office-message-ha-v15" {
+	if schemaMigrationVersion != "2026-09-01-office-message-compat-v16" {
 		t.Fatalf("schemaMigrationVersion = %q", schemaMigrationVersion)
 	}
-	if previousSchemaMigrationVersion != "2026-09-01-office-message-v14" {
+	if previousSchemaMigrationVersion != "2026-09-01-office-message-ha-v15" {
 		t.Fatalf("previousSchemaMigrationVersion = %q", previousSchemaMigrationVersion)
+	}
+	if officeMessagePreviousMigrationVersion != "2026-09-01-office-message-v14" {
+		t.Fatalf("officeMessagePreviousMigrationVersion = %q", officeMessagePreviousMigrationVersion)
+	}
+	if officeMessageMigrationBaselineVersion != "2026-08-26-bojun-oracle-v13" {
+		t.Fatalf("officeMessageMigrationBaselineVersion = %q", officeMessageMigrationBaselineVersion)
 	}
 	if bojunOracleMigrationBaselineVersion != "2026-08-25-report-center-v11" {
 		t.Fatalf("bojunOracleMigrationBaselineVersion = %q", bojunOracleMigrationBaselineVersion)
+	}
+}
+
+func TestOfficeMessagePreferredMigrationBaseline(t *testing.T) {
+	tests := []struct {
+		name            string
+		appliedVersions []string
+		wantVersion     string
+		wantApplied     bool
+	}{
+		{
+			name:            "v15 direct upgrade",
+			appliedVersions: []string{"2026-09-01-office-message-ha-v15"},
+			wantVersion:     "2026-09-01-office-message-ha-v15",
+			wantApplied:     true,
+		},
+		{
+			name:            "v14 skips v15",
+			appliedVersions: []string{"2026-09-01-office-message-v14"},
+			wantVersion:     "2026-09-01-office-message-v14",
+			wantApplied:     true,
+		},
+		{
+			name:            "v13 skips v14 and v15",
+			appliedVersions: []string{"2026-08-26-bojun-oracle-v13"},
+			wantVersion:     "2026-08-26-bojun-oracle-v13",
+			wantApplied:     true,
+		},
+		{
+			name: "latest compatible baseline wins",
+			appliedVersions: []string{
+				"2026-08-26-bojun-oracle-v13",
+				"2026-09-01-office-message-v14",
+				"2026-09-01-office-message-ha-v15",
+			},
+			wantVersion: "2026-09-01-office-message-ha-v15",
+			wantApplied: true,
+		},
+		{
+			name:            "v11 remains unsupported",
+			appliedVersions: []string{"2026-08-25-report-center-v11"},
+		},
+	}
+
+	candidates := officeMessageIncrementalMigrationBaselines()
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			gotVersion, gotApplied := preferredSchemaMigrationBaseline(candidates, test.appliedVersions)
+			if gotVersion != test.wantVersion || gotApplied != test.wantApplied {
+				t.Fatalf("preferredSchemaMigrationBaseline() = (%q, %t), want (%q, %t)", gotVersion, gotApplied, test.wantVersion, test.wantApplied)
+			}
+		})
+	}
+}
+
+func TestOfficeMessageLegacySourceMigrationContract(t *testing.T) {
+	if legacyOfficeMessageSourceOracle != "ORACLE" {
+		t.Fatalf("legacyOfficeMessageSourceOracle = %q", legacyOfficeMessageSourceOracle)
+	}
+	if model.OfficeMessageSourceOracleProcedure != "ORACLE_PROCEDURE" {
+		t.Fatalf("OfficeMessageSourceOracleProcedure = %q", model.OfficeMessageSourceOracleProcedure)
 	}
 }
 

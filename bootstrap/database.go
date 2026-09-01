@@ -25,8 +25,11 @@ import (
 	"go.uber.org/zap"
 )
 
-const schemaMigrationVersion = "2026-09-01-office-message-ha-v15"
-const previousSchemaMigrationVersion = "2026-09-01-office-message-v14"
+const schemaMigrationVersion = "2026-09-01-office-message-compat-v16"
+const previousSchemaMigrationVersion = "2026-09-01-office-message-ha-v15"
+const officeMessagePreviousMigrationVersion = "2026-09-01-office-message-v14"
+const officeMessageMigrationBaselineVersion = "2026-08-26-bojun-oracle-v13"
+const legacyOfficeMessageSourceOracle = "ORACLE"
 const bojunOraclePreviousMigrationVersion = "2026-08-26-bojun-oracle-v12"
 const bojunOracleMigrationBaselineVersion = "2026-08-25-report-center-v11"
 const schemaMigrationLockName = "data_gin_schema_migration_v1"
@@ -117,10 +120,31 @@ func ApplySchemaMigrations() (resultErr error) {
 	); err != nil {
 		return err
 	}
+	if err := finalizeOfficeMessageMigration(db); err != nil {
+		return err
+	}
 	marker := schemaMigrationRecord{Version: schemaMigrationVersion, AppliedAt: time.Now().UTC()}
 	if err := db.Create(&marker).Error; err != nil {
 		return fmt.Errorf("write schema migration marker: %w", err)
 	}
+	return nil
+}
+
+func finalizeOfficeMessageMigration(db *gorm.DB) error {
+	if db == nil {
+		return fmt.Errorf("finalize office message migration: database is unavailable")
+	}
+	if err := db.Model(&model.OfficeMessage{}).
+		Where("source_type = ?", legacyOfficeMessageSourceOracle).
+		Update("source_type", model.OfficeMessageSourceOracleProcedure).Error; err != nil {
+		return fmt.Errorf("migrate legacy office message source type: %w", err)
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	if err := auth_svc.SyncAccessControlSeeds(ctx, db); err != nil {
+		return fmt.Errorf("sync access control seeds: %w", err)
+	}
+	console.Success("账号权限种子同步完成")
 	return nil
 }
 
@@ -147,7 +171,11 @@ func bojunOracleMigrationModels() []interface{} {
 }
 
 func officeMessageIncrementalMigrationBaselines() []string {
-	return []string{previousSchemaMigrationVersion}
+	return []string{
+		previousSchemaMigrationVersion,
+		officeMessagePreviousMigrationVersion,
+		officeMessageMigrationBaselineVersion,
+	}
 }
 
 func officeMessageMigrationModels() []interface{} {
@@ -390,11 +418,6 @@ func autoMigrateTables() error {
 	} else {
 		console.Info("admin 尚未完成控制台身份初始化，首次控制台登录时将同步天气权限")
 	}
-	if err := auth_svc.SyncAccessControlSeeds(ctx, db); err != nil {
-		logger.Error("同步账号权限种子失败", zap.Error(err))
-		return fmt.Errorf("sync access control seeds: %w", err)
-	}
-	console.Success("账号权限种子同步完成")
 	return nil
 }
 
