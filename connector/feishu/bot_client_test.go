@@ -39,8 +39,11 @@ func TestBotClientUploadsAndSendsFile(t *testing.T) {
 			if err := request.ParseMultipartForm(maxBotFileBytes); err != nil {
 				t.Fatalf("ParseMultipartForm() error = %v", err)
 			}
-			if got := request.FormValue("file_type"); got != "xls" {
+			if got := request.FormValue("file_type"); got != "stream" {
 				t.Fatalf("file_type = %q", got)
+			}
+			if got := request.FormValue("file_name"); got != "销售日报_20260901.xlsx" {
+				t.Fatalf("file_name = %q", got)
 			}
 			file, header, err := request.FormFile("file")
 			if err != nil {
@@ -48,7 +51,7 @@ func TestBotClientUploadsAndSendsFile(t *testing.T) {
 			}
 			defer file.Close()
 			body, _ := io.ReadAll(file)
-			if header.Filename != "daily.xlsx" || string(body) != "xlsx-data" {
+			if header.Filename != "销售日报_20260901.xlsx" || string(body) != "xlsx-data" {
 				t.Fatalf("upload = %q %q", header.Filename, body)
 			}
 			_, _ = response.Write([]byte(`{"code":0,"data":{"file_key":"file-key-123"}}`))
@@ -85,7 +88,7 @@ func TestBotClientUploadsAndSendsFile(t *testing.T) {
 	if err := os.WriteFile(path, []byte("xlsx-data"), 0o600); err != nil {
 		t.Fatalf("WriteFile() error = %v", err)
 	}
-	fileKey, err := client.UploadFile(t.Context(), path, "daily.xlsx")
+	fileKey, err := client.UploadFile(t.Context(), path, "销售日报_20260901.xlsx")
 	if err != nil || fileKey != "file-key-123" {
 		t.Fatalf("UploadFile() = %q, %v", fileKey, err)
 	}

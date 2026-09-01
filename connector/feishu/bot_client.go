@@ -173,8 +173,11 @@ func (client *BotClient) uploadFileOnce(ctx context.Context, token, path, fileNa
 	defer file.Close()
 	var body bytes.Buffer
 	writer := multipart.NewWriter(&body)
-	if err := writer.WriteField("file_type", "xls"); err != nil {
+	if err := writer.WriteField("file_type", "stream"); err != nil {
 		return "", 0, fmt.Errorf("feishu bot: write file type: %w", err)
+	}
+	if err := writer.WriteField("file_name", fileName); err != nil {
+		return "", 0, fmt.Errorf("feishu bot: write file name: %w", err)
 	}
 	part, err := writer.CreateFormFile("file", fileName)
 	if err != nil {
