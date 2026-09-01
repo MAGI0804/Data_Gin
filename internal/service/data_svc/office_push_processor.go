@@ -330,7 +330,7 @@ func officePushRetryable(err error) bool {
 }
 
 func (processor *OfficePushProcessor) exportWorkbook(ctx context.Context, message model.OfficeMessage, rawParameters model.JSONText, leaseToken string) (string, string, int64, error) {
-	mappings, _, err := normalizeOfficeColumnMappings(message.ColumnMappingJSON)
+	mappings, _, err := normalizeOfficeColumnMappings(message.ColumnMappingJSON, message.SourceType)
 	if err != nil {
 		return "", "", 0, err
 	}

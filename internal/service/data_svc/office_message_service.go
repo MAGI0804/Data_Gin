@@ -404,7 +404,7 @@ func normalizeOfficeMessageInput(input OfficeMessageInput) (model.OfficeMessage,
 		if err != nil {
 			return model.OfficeMessage{}, fmt.Errorf("%w: Oracle result table is invalid", ErrOfficeMessageInvalid)
 		}
-		_, mappingJSON, err := normalizeOfficeInputMappings(input.ColumnMapping)
+		_, mappingJSON, err := normalizeOfficeInputMappings(input.ColumnMapping, input.SourceType)
 		if err != nil {
 			return model.OfficeMessage{}, fmt.Errorf("%w: %v", ErrOfficeMessageInvalid, err)
 		}
@@ -424,7 +424,7 @@ func normalizeOfficeMessageInput(input OfficeMessageInput) (model.OfficeMessage,
 		if err != nil {
 			return model.OfficeMessage{}, fmt.Errorf("%w: %v", ErrOfficeMessageInvalid, err)
 		}
-		_, mappingJSON, err := normalizeOfficeInputMappings(input.ColumnMapping)
+		_, mappingJSON, err := normalizeOfficeInputMappings(input.ColumnMapping, input.SourceType)
 		if err != nil {
 			return model.OfficeMessage{}, fmt.Errorf("%w: %v", ErrOfficeMessageInvalid, err)
 		}
@@ -440,12 +440,12 @@ func hasOfficeProcedureInput(input OfficeMessageInput) bool {
 		strings.TrimSpace(input.ProcedureOverload) != "" || strings.TrimSpace(input.ResultTableOwner) != "" || strings.TrimSpace(input.ResultTableName) != ""
 }
 
-func normalizeOfficeInputMappings(mappings []OfficeColumnMapping) ([]OfficeColumnMapping, model.JSONText, error) {
+func normalizeOfficeInputMappings(mappings []OfficeColumnMapping, sourceType string) ([]OfficeColumnMapping, model.JSONText, error) {
 	raw, err := json.Marshal(mappings)
 	if err != nil {
 		return nil, "", err
 	}
-	return normalizeOfficeColumnMappings(model.JSONText(raw))
+	return normalizeOfficeColumnMappings(model.JSONText(raw), sourceType)
 }
 
 func normalizeOfficePushTargetInput(input OfficePushTargetInput) (model.OfficePushTarget, error) {

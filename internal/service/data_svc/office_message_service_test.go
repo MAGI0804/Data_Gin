@@ -30,6 +30,40 @@ func TestNormalizeOfficeMessageInputQuery(t *testing.T) {
 	}
 }
 
+func TestNormalizeOfficeMessageInputQueryAcceptsExpressionColumnLabel(t *testing.T) {
+	message, err := normalizeOfficeMessageInput(OfficeMessageInput{
+		Name:       "线下店销售数据",
+		SourceType: model.OfficeMessageSourceOracleQuery,
+		SelectSQL:  "SELECT SUM(A.PAYAMOUNT) FROM YL_DBS.BJ_REPORT_RETAIL_DAY_SF A",
+		ColumnMapping: []OfficeColumnMapping{
+			{SourceColumn: "SUM(A.PAYAMOUNT)", Header: "销售额", ValueType: "decimal", Order: 0, Width: 18},
+		},
+	})
+	if err != nil {
+		t.Fatalf("normalizeOfficeMessageInput() error = %v", err)
+	}
+	if !strings.Contains(string(message.ColumnMappingJSON), `"sourceColumn":"SUM(A.PAYAMOUNT)"`) {
+		t.Fatalf("column mapping = %s", message.ColumnMappingJSON)
+	}
+}
+
+func TestNormalizeOfficeMessageInputProcedureRejectsExpressionColumnLabel(t *testing.T) {
+	_, err := normalizeOfficeMessageInput(OfficeMessageInput{
+		Name:             "销售日报",
+		SourceType:       model.OfficeMessageSourceOracleProcedure,
+		ProcedureOwner:   "REPORT",
+		ProcedureName:    "BUILD_DAILY",
+		ResultTableOwner: "REPORT",
+		ResultTableName:  "DAILY_RESULT",
+		ColumnMapping: []OfficeColumnMapping{
+			{SourceColumn: "SUM(A.PAYAMOUNT)", Header: "销售额", ValueType: "decimal", Order: 0, Width: 18},
+		},
+	})
+	if !errors.Is(err, ErrOfficeMessageInvalid) {
+		t.Fatalf("normalizeOfficeMessageInput() error = %v", err)
+	}
+}
+
 func TestNormalizeOfficeMessageInputEditedClearsOracleContract(t *testing.T) {
 	message, err := normalizeOfficeMessageInput(OfficeMessageInput{Name: "通知", SourceType: model.OfficeMessageSourceEdited, Content: "系统维护完成"})
 	if err != nil {

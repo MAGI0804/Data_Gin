@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 	"time"
+	"unicode"
 
 	"gin-biz-web-api/internal/reportoracle"
 	"gin-biz-web-api/model"
@@ -114,7 +115,7 @@ func (snapshot officePushSnapshot) messageModel() model.OfficeMessage {
 	}
 }
 
-func normalizeOfficeColumnMappings(raw model.JSONText) ([]OfficeColumnMapping, model.JSONText, error) {
+func normalizeOfficeColumnMappings(raw model.JSONText, sourceType string) ([]OfficeColumnMapping, model.JSONText, error) {
 	var mappings []OfficeColumnMapping
 	if err := decodeOfficeJSON(raw, &mappings); err != nil {
 		return nil, "", fmt.Errorf("office message columns: %w", err)
@@ -128,7 +129,7 @@ func normalizeOfficeColumnMappings(raw model.JSONText) ([]OfficeColumnMapping, m
 		mapping.SourceColumn = strings.ToUpper(strings.TrimSpace(mapping.SourceColumn))
 		mapping.Header = strings.TrimSpace(mapping.Header)
 		mapping.ValueType = strings.ToLower(strings.TrimSpace(mapping.ValueType))
-		if !officeIdentifierPattern.MatchString(mapping.SourceColumn) || mapping.Header == "" || len(mapping.Header) > 128 ||
+		if !validOfficeSourceColumn(sourceType, mapping.SourceColumn) || mapping.Header == "" || len(mapping.Header) > 128 ||
 			!validOfficeValueType(mapping.ValueType) || mapping.Order < 0 || mapping.Width < 0 || mapping.Width > reportExcelMaximumWidth {
 			return nil, "", fmt.Errorf("office message columns: invalid column mapping")
 		}
@@ -149,6 +150,17 @@ func normalizeOfficeColumnMappings(raw model.JSONText) ([]OfficeColumnMapping, m
 		return nil, "", fmt.Errorf("office message columns: encode mappings: %w", err)
 	}
 	return mappings, model.JSONText(canonical), nil
+}
+
+func validOfficeSourceColumn(sourceType, value string) bool {
+	switch sourceType {
+	case model.OfficeMessageSourceOracleProcedure:
+		return officeIdentifierPattern.MatchString(value)
+	case model.OfficeMessageSourceOracleQuery:
+		return value != "" && len(value) <= 128 && !strings.ContainsFunc(value, unicode.IsControl)
+	default:
+		return false
+	}
 }
 
 func normalizeOfficeQueryParameters(statement string, raw model.JSONText) ([]OfficeQueryParameter, model.JSONText, error) {
