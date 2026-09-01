@@ -1,6 +1,8 @@
 package data_ctrl
 
 import (
+	"errors"
+	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
@@ -29,5 +31,19 @@ func TestBindOfficeJSONRejectsUnknownAndTrailingFields(t *testing.T) {
 				t.Fatalf("bindOfficeJSON() accepted %s", test.body)
 			}
 		})
+	}
+}
+
+func TestWriteOfficeMessageErrorRecordsPrivateCauseWithoutLeakingResponse(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	response := httptest.NewRecorder()
+	context, _ := gin.CreateTestContext(response)
+	writeOfficeMessageError(context, errors.New("query oracle: password=secret-private ORA-00904"))
+
+	if response.Code != http.StatusInternalServerError || len(context.Errors.ByType(gin.ErrorTypePrivate)) != 1 {
+		t.Fatalf("response=%d errors=%v", response.Code, context.Errors)
+	}
+	if strings.Contains(response.Body.String(), "password") || strings.Contains(response.Body.String(), "secret-private") || strings.Contains(response.Body.String(), "ORA-00904") {
+		t.Fatalf("response leaked private cause: %s", response.Body)
 	}
 }

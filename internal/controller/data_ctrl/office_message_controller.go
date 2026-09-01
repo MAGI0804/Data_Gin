@@ -276,6 +276,9 @@ func bindOfficeJSON(c *gin.Context, destination interface{}) error {
 }
 
 func writeOfficeMessageError(c *gin.Context, err error) {
+	if c != nil && err != nil {
+		_ = c.Error(err).SetType(gin.ErrorTypePrivate)
+	}
 	switch {
 	case errors.Is(err, data_svc.ErrOfficeMessageInvalid), errors.Is(err, reportoracle.ErrInvalidConfiguration):
 		responses.New(c).ToSafeErrorResponse(errcode.BadRequest, "办公消息参数无效")
