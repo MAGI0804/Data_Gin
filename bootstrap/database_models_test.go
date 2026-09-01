@@ -40,14 +40,31 @@ func TestReportCenterMigrationModelsAreUnique(t *testing.T) {
 }
 
 func TestSchemaMigrationVersionIncludesBojunOracleModels(t *testing.T) {
-	if schemaMigrationVersion != "2026-08-26-bojun-oracle-v13" {
+	if schemaMigrationVersion != "2026-09-01-office-message-v14" {
 		t.Fatalf("schemaMigrationVersion = %q", schemaMigrationVersion)
 	}
-	if previousSchemaMigrationVersion != "2026-08-26-bojun-oracle-v12" {
+	if previousSchemaMigrationVersion != "2026-08-26-bojun-oracle-v13" {
 		t.Fatalf("previousSchemaMigrationVersion = %q", previousSchemaMigrationVersion)
 	}
 	if bojunOracleMigrationBaselineVersion != "2026-08-25-report-center-v11" {
 		t.Fatalf("bojunOracleMigrationBaselineVersion = %q", bojunOracleMigrationBaselineVersion)
+	}
+}
+
+func TestOfficeMessageMigrationModelsAreLimitedToOfficeMessageTables(t *testing.T) {
+	models := officeMessageMigrationModels()
+	want := []reflect.Type{
+		reflect.TypeOf(&model.OfficeMessage{}),
+		reflect.TypeOf(&model.OfficePushTarget{}),
+		reflect.TypeOf(&model.OfficePushRun{}),
+	}
+	if len(models) != len(want) {
+		t.Fatalf("officeMessageMigrationModels() count = %d, want %d", len(models), len(want))
+	}
+	for index, migrationModel := range models {
+		if gotType := reflect.TypeOf(migrationModel); gotType != want[index] {
+			t.Fatalf("officeMessageMigrationModels()[%d] = %v, want %v", index, gotType, want[index])
+		}
 	}
 }
 

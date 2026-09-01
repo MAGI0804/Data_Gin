@@ -43,6 +43,9 @@ const (
 	PermissionReportManage        = "report.manage"
 	PermissionReportExecute       = "report.execute"
 	PermissionReportExport        = "report.export"
+	PermissionOfficeMessageRead   = "office_message.read"
+	PermissionOfficeMessageManage = "office_message.manage"
+	PermissionOfficeMessagePush   = "office_message.push"
 )
 
 type Permission struct {

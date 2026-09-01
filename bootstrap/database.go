@@ -25,8 +25,9 @@ import (
 	"go.uber.org/zap"
 )
 
-const schemaMigrationVersion = "2026-08-26-bojun-oracle-v13"
-const previousSchemaMigrationVersion = "2026-08-26-bojun-oracle-v12"
+const schemaMigrationVersion = "2026-09-01-office-message-v14"
+const previousSchemaMigrationVersion = "2026-08-26-bojun-oracle-v13"
+const bojunOraclePreviousMigrationVersion = "2026-08-26-bojun-oracle-v12"
 const bojunOracleMigrationBaselineVersion = "2026-08-25-report-center-v11"
 const schemaMigrationLockName = "data_gin_schema_migration_v1"
 
@@ -99,7 +100,7 @@ func ApplySchemaMigrations() (resultErr error) {
 	}
 	baselineVersion, baselineApplied, err := appliedSchemaMigrationBaseline(
 		db,
-		bojunOracleIncrementalMigrationBaselines(),
+		officeMessageIncrementalMigrationBaselines(),
 	)
 	if err != nil {
 		return err
@@ -110,7 +111,7 @@ func ApplySchemaMigrations() (resultErr error) {
 	if err := runPendingSchemaMigration(
 		baselineApplied,
 		func() error {
-			return db.AutoMigrate(bojunOracleMigrationModels()...)
+			return db.AutoMigrate(officeMessageMigrationModels()...)
 		},
 		autoMigrateTables,
 	); err != nil {
@@ -133,7 +134,7 @@ func schemaMigrationApplied(db *gorm.DB, version string) (bool, error) {
 
 func bojunOracleIncrementalMigrationBaselines() []string {
 	return []string{
-		previousSchemaMigrationVersion,
+		bojunOraclePreviousMigrationVersion,
 		bojunOracleMigrationBaselineVersion,
 	}
 }
@@ -142,6 +143,18 @@ func bojunOracleMigrationModels() []interface{} {
 	return []interface{}{
 		&model.BojunRetailOrder{},
 		&model.BojunOracleSyncState{},
+	}
+}
+
+func officeMessageIncrementalMigrationBaselines() []string {
+	return []string{previousSchemaMigrationVersion}
+}
+
+func officeMessageMigrationModels() []interface{} {
+	return []interface{}{
+		&model.OfficeMessage{},
+		&model.OfficePushTarget{},
+		&model.OfficePushRun{},
 	}
 }
 
@@ -347,6 +360,7 @@ func autoMigrateTables() error {
 	}
 	models = append(models, mallWeatherMigrationModels()...)
 	models = append(models, reportCenterMigrationModels()...)
+	models = append(models, officeMessageMigrationModels()...)
 	err := db.AutoMigrate(models...)
 
 	if err != nil {
