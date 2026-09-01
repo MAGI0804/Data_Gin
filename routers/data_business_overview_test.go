@@ -1,0 +1,20 @@
+package routers
+
+import (
+	"net/http"
+	"testing"
+
+	"gin-biz-web-api/internal/controller/data_ctrl"
+
+	"github.com/gin-gonic/gin"
+)
+
+func TestRegisterBusinessOverviewRoutesUsesExpectedMethodAndPath(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	router := gin.New()
+	registerBusinessOverviewRoutes(router.Group("/api"), &data_ctrl.BusinessOverviewController{})
+	routes := router.Routes()
+	if len(routes) != 1 || routes[0].Method != http.MethodGet || routes[0].Path != "/api/v1/business-overview/payments" {
+		t.Fatalf("routes = %#v", routes)
+	}
+}

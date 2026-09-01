@@ -11,6 +11,7 @@ import (
 
 func apiData(api *gin.RouterGroup) {
 	registerMallRoutes(api, data_ctrl.NewMallController())
+	registerBusinessOverviewRoutes(api, data_ctrl.NewBusinessOverviewController())
 	weatherCtrl := data_ctrl.NewMallWeatherController()
 	registerMallWeatherRoutes(api, weatherCtrl)
 	registerOpenWeatherRoutes(api, weatherCtrl, data_ctrl.NewOpenWeatherMallController())
@@ -215,6 +216,16 @@ func apiData(api *gin.RouterGroup) {
 		dataGroup.GET("/clean-records/list", middleware.RequirePermission(model.PermissionDataRead), dataCtrl.QueryController.GetCleanRecordList)
 		dataGroup.GET("/statistics", middleware.RequirePermission(model.PermissionDataRead), dataCtrl.QueryController.GetStatistics)
 	}
+}
+
+func registerBusinessOverviewRoutes(api *gin.RouterGroup, controller *data_ctrl.BusinessOverviewController) {
+	api.GET(
+		"/v1/business-overview/payments",
+		middleware.AuthJWT(),
+		middleware.RequirePermission(model.PermissionMallRead),
+		middleware.LimitRoute("120-M"),
+		controller.QueryPayments,
+	)
 }
 
 func registerOfficeMessageRoutes(api *gin.RouterGroup, controller *data_ctrl.OfficeMessageController) {

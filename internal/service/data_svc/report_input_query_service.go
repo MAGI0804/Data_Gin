@@ -178,13 +178,7 @@ func (service *ReportInputQueryService) connection(ctx context.Context) (reportI
 		return service.oracle, nil
 	}
 	configured := service.config.Oracle
-	connection, err := service.open(ctx, reportoracle.Config{
-		Host: configured.Host, Port: configured.Port, ServiceName: configured.ServiceName, SID: configured.SID,
-		Username: configured.Username, Password: configured.Password, Timezone: configured.Timezone,
-		ConnectTimeout: configured.ConnectTimeout, MaxOpenConnections: configured.MaxOpenConnections,
-		MaxIdleConnections: configured.MaxIdleConnections, ConnectionLifetime: configured.ConnectionLifetime,
-		ConnectionIdleTime: configured.ConnectionIdleTime, PrefetchRows: configured.PrefetchRows, FetchArraySize: configured.ArraySize,
-	})
+	connection, err := service.open(ctx, defaultOracleAdapterConfig(configured))
 	if err != nil {
 		return nil, fmt.Errorf("%w: open default Oracle: %v", ErrReportInputQueryUnavailable, err)
 	}
