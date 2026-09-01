@@ -61,7 +61,7 @@ function App() {
     navigationOpen={navigation.mobileNavOpen}
     onDismissNavigation={() => navigation.setMobileNavOpen(false)}
     flushWorkspace={compactWorkspace}
-    header={navigation.activeNav === 'business_overview' ? undefined : <ConsoleHeader compact={compactWorkspace} activeNav={navigation.activeNav} loading={session.loading || workspace.refreshing} sessionUser={session.sessionUser} onOpenNavigation={() => navigation.setMobileNavOpen(true)} onRefresh={() => void workspace.refresh(true)} onLogout={session.logout} refreshing={workspace.refreshing} mobileNavTriggerRef={navigation.mobileNavTriggerRef} />}
+    header={<ConsoleHeader compact={compactWorkspace} activeNav={navigation.activeNav} loading={session.loading || workspace.refreshing} sessionUser={session.sessionUser} onOpenNavigation={() => navigation.setMobileNavOpen(true)} onRefresh={() => void workspace.refresh(true)} onLogout={session.logout} refreshing={workspace.refreshing} mobileNavTriggerRef={navigation.mobileNavTriggerRef} />}
     notices={<>
       {session.sessionValidationError ? <div className={styles.notice} role="status" aria-live="polite">{session.sessionValidationError} <button type="button" onClick={session.retrySessionValidation}>重试校验</button></div> : null}
       {workspace.workspaceError ? <div className={styles.notice} role="alert">{workspace.workspaceError} <button type="button" onClick={() => void workspace.refresh(false)} disabled={workspace.refreshing}>重试</button></div> : null}

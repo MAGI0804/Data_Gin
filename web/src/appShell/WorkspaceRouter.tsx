@@ -26,7 +26,9 @@ import { PushManagementPage } from '../officeMessage/PushManagementPage'
 import type { DeliveryLog, PipelineRun } from '../monitoringPages/types'
 import { ReportCenter } from '../reportCenter/ReportCenter'
 import type { ApiRequestOptions, ClientResponse, HTTPMethod } from '../api/client'
+import { FeedbackState, PageCanvas } from '../ui'
 import { reportCenterNavKey, reportCenterSection, type NavKey } from './navigation'
+import { canViewNavigationItem } from './navigationPermissions'
 
 export type WorkspaceApiClientOptions = Omit<ApiRequestOptions, 'method'> & {
   method?: HTTPMethod
@@ -86,7 +88,9 @@ export function WorkspaceRouter(props: WorkspaceRouterProps) {
   const reportSection = reportCenterSection(activeNav)
   const canManageDelivery = permissions.includes('delivery.manage')
 
-  if (activeNav === 'business_overview') return <BusinessOverviewPage />
+  if (activeNav === 'business_overview') return canViewNavigationItem(activeNav, permissions)
+    ? <BusinessOverviewPage />
+    : <PageCanvas><FeedbackState kind="error" title="无权查看营业概况" description="当前账号缺少店铺读取权限。" /></PageCanvas>
   if (activeNav === 'overview') return <RunOverviewPage runs={runs} deliveryLogs={deliveryLogs} monitoring={monitoring} stale={monitoringStale} overviewTotals={overviewTotals} onLoadSteps={onLoadSteps} />
   if (activeNav === 'runs') return <PipelineRunsPage client={client} pipelines={pipelines} onLoadSteps={onLoadSteps} onPipelineRunCompleted={() => void onRefresh()} refreshVersion={refreshVersion} />
   if (activeNav === 'delivery_logs') return <DeliveryLogsPage client={client} onRetryLog={onRetryDeliveryLog} />

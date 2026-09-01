@@ -242,8 +242,10 @@
 }
 
 .reconciliationTip p {
+  border-left: 4px solid var(--overview-orange);
   margin: 0;
-  color: var(--overview-orange);
+  color: #985400;
+  padding-left: 12px;
   font-size: 21px;
   line-height: 1.2;
 }
@@ -278,7 +280,7 @@
   display: grid;
   min-height: 220px;
   place-items: center;
-  color: #8a929e;
+  color: #596271;
   font-size: 16px;
 }
 
@@ -306,7 +308,7 @@
   border: 1px solid #d4d7dc;
   border-radius: 5px;
   background: #fafafa;
-  color: #8a929e;
+  color: #596271;
   padding: 7px 12px;
   text-align: center;
 }
@@ -370,7 +372,7 @@
 
 .emptyTable {
   height: 214px !important;
-  color: #8a929e;
+  color: #596271;
 }
 
 @media (max-width: 1380px) {
