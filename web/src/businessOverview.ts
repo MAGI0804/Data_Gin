@@ -20,6 +20,7 @@ export type DailyBusinessSummary = {
   payments: PaymentSummary[]
   storeAmount: number
   cloudAmount: number
+  unsettledAmount: number
   actualAmount: number
   publicExpense: number
   depositAmount: number
@@ -30,13 +31,13 @@ export type DailyBusinessSummary = {
 type RecordTemplate = Omit<ReconciliationRecord, 'date'>
 
 const todayRecords: RecordTemplate[] = [
-  { id: 'REC-TODAY-01', cashierID: 'counter-01', cashierName: '收银机 01', payments: [{ name: '支付宝', amount: 358.3 }, { name: '微信', amount: 377.9 }], received: 720.2, unsettled: 16, publicExpense: 8, depositAmount: 0, presaleAmount: 0 },
-  { id: 'REC-TODAY-02', cashierID: 'counter-02', cashierName: '收银机 02', payments: [{ name: '支付宝', amount: 305 }, { name: '微信', amount: 338.5 }], received: 628.5, unsettled: 15, publicExpense: 7, depositAmount: 0, presaleAmount: 0 },
+  { id: 'REC-TODAY-01', cashierID: 'counter-01', cashierName: '收银机 01', payments: [{ name: '支付宝', amount: 358.3 }, { name: '微信', amount: 377.9 }], received: 720.2, unsettled: 736.2, publicExpense: 8, depositAmount: 0, presaleAmount: 0 },
+  { id: 'REC-TODAY-02', cashierID: 'counter-02', cashierName: '收银机 02', payments: [{ name: '支付宝', amount: 305 }, { name: '微信', amount: 338.5 }], received: 628.5, unsettled: 643.5, publicExpense: 7, depositAmount: 0, presaleAmount: 0 },
 ]
 
 const yesterdayRecords: RecordTemplate[] = [
-  { id: 'REC-YESTERDAY-01', cashierID: 'counter-01', cashierName: '收银机 01', payments: [{ name: '支付宝', amount: 320.5 }, { name: '微信', amount: 349.9 }], received: 658.4, unsettled: 12, publicExpense: 6, depositAmount: 0, presaleAmount: 0 },
-  { id: 'REC-YESTERDAY-02', cashierID: 'counter-02', cashierName: '收银机 02', payments: [{ name: '支付宝', amount: 262 }, { name: '微信', amount: 299.9 }], received: 551.9, unsettled: 10, publicExpense: 5, depositAmount: 0, presaleAmount: 0 },
+  { id: 'REC-YESTERDAY-01', cashierID: 'counter-01', cashierName: '收银机 01', payments: [{ name: '支付宝', amount: 320.5 }, { name: '微信', amount: 349.9 }], received: 658.4, unsettled: 670.4, publicExpense: 6, depositAmount: 0, presaleAmount: 0 },
+  { id: 'REC-YESTERDAY-02', cashierID: 'counter-02', cashierName: '收银机 02', payments: [{ name: '支付宝', amount: 262 }, { name: '微信', amount: 299.9 }], received: 551.9, unsettled: 561.9, publicExpense: 5, depositAmount: 0, presaleAmount: 0 },
 ]
 
 export function createMockBusinessSummaries(today: string): Record<string, DailyBusinessSummary> {
@@ -78,6 +79,7 @@ function summarizeBusinessDay(date: string, records: ReconciliationRecord[], clo
     payments: Array.from(paymentTotals, ([name, amount]) => ({ name, amount })),
     storeAmount: sum(records.map(recordTotal)),
     cloudAmount,
+    unsettledAmount: sum(records.map((record) => record.unsettled)) + cloudAmount,
     actualAmount: sum(records.map((record) => record.received)),
     publicExpense: sum(records.map((record) => record.publicExpense)),
     depositAmount: sum(records.map((record) => record.depositAmount)),

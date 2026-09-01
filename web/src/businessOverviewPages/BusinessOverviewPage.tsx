@@ -29,7 +29,6 @@ export function BusinessOverviewPage() {
     mockSummaries[selectedDate] ?? emptyBusinessSummary(selectedDate),
     cashierID,
   ), [cashierID, mockSummaries, selectedDate])
-  const totalAmount = summary.storeAmount + summary.cloudAmount
 
   const saveReconciliation = useCallback(() => {
     setSavedMessage(`${selectedDate} 的对账数据已保存（模拟）`)
@@ -87,7 +86,7 @@ export function BusinessOverviewPage() {
 
         <div className={styles.summaryArea}>
           <div className={styles.amountSummary}>
-            <div className={styles.unsettledAmount}><strong>{formatAmount(totalAmount)}</strong><span>末日结金额（元）</span></div>
+            <div className={styles.unsettledAmount}><strong>{formatAmount(summary.unsettledAmount)}</strong><span>末日结金额（元）</span></div>
             <div className={styles.channelAmounts}>
               <div><span>门店： </span><strong>{formatAmount(summary.storeAmount)}（元）</strong></div>
               <div><span>云仓： </span><strong>{formatAmount(summary.cloudAmount)}（元）</strong></div>

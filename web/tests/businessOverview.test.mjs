@@ -9,12 +9,15 @@ test('aggregates the full day from cashier-level payment records', () => {
   assert.deepEqual(summary.payments, [{ name: '支付宝', amount: 663.3 }, { name: '微信', amount: 716.4 }])
   assert.equal(summary.actualAmount, 1348.7)
   assert.equal(summary.records.reduce((total, record) => total + recordTotal(record), 0), summary.storeAmount)
+  assert.equal(summary.records.reduce((total, record) => total + record.unsettled, 0), summary.unsettledAmount)
+  assert.equal(summary.unsettledAmount, 1379.7)
 })
 
 test('keeps cashier payment totals and detail text on one source of truth', () => {
   const summary = createMockBusinessSummaries('2026-09-01')['2026-09-01']
   const cashier = filterBusinessSummary(summary, 'counter-01')
   assert.equal(cashier.storeAmount, 736.2)
+  assert.equal(cashier.unsettledAmount, 736.2)
   assert.deepEqual(cashier.payments, [{ name: '支付宝', amount: 358.3 }, { name: '微信', amount: 377.9 }])
   assert.equal(cashier.publicExpense, 8)
   assert.equal(recordPaymentDetail(cashier.records[0]), '支付宝 358.3 / 微信 377.9')
