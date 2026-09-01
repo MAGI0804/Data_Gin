@@ -5,8 +5,21 @@ import {
   buildOfficeMessagePayload,
   emptyOfficeMessageDraft,
   mappingsFromColumns,
+  parseOfficeFeishuBots,
   parseOfficeMessages,
+  parseOfficeTargets,
 } from '../.test-dist/officeMessage/contracts.js'
+
+test('office Feishu bot contract projects public App ID metadata', () => {
+  const [bot] = parseOfficeFeishuBots({ data: { items: [{ id: 'cli_office', name: '办公消息机器人', source: 'ENVIRONMENT' }] } })
+  assert.deepEqual(bot, { id: 'cli_office', name: '办公消息机器人', source: 'ENVIRONMENT' })
+
+  const [target] = parseOfficeTargets({ data: { items: [{
+    id: 3, name: '销售日报推送', messageId: 8, channel: 'FEISHU', botAppId: 'cli_office',
+    receiveIdType: 'chat_id', receiveId: 'oc_sales', enabled: true, lockVersion: 1, updatedAt: '2026-09-01T08:00:00Z',
+  }] } })
+  assert.equal(target.botAppId, 'cli_office')
+})
 
 test('office message contract keeps yyyyMMdd query parameters and column mappings', () => {
   const [message] = parseOfficeMessages({ data: { items: [{

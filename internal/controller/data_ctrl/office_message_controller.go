@@ -95,6 +95,10 @@ func (controller *OfficeMessageController) ListTargets(c *gin.Context) {
 	responses.New(c).ToResponse(gin.H{"items": items})
 }
 
+func (controller *OfficeMessageController) ListFeishuBots(c *gin.Context) {
+	responses.New(c).ToResponse(gin.H{"items": controller.service.ListFeishuBots(c.Request.Context())})
+}
+
 func (controller *OfficeMessageController) CreateTarget(c *gin.Context) {
 	var input data_svc.OfficePushTargetInput
 	if err := bindOfficeJSON(c, &input); err != nil {

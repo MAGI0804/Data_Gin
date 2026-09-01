@@ -48,6 +48,7 @@ type OfficePushTarget struct {
 	Name          string    `gorm:"column:name;size:128;not null;index" json:"name"`
 	MessageID     uint      `gorm:"column:message_id;not null;index" json:"messageId"`
 	Channel       string    `gorm:"column:channel;size:16;not null;default:'FEISHU';index" json:"channel"`
+	BotAppID      string    `gorm:"column:bot_app_id;size:128;not null;default:''" json:"botAppId"`
 	ReceiveIDType string    `gorm:"column:receive_id_type;size:32;not null" json:"receiveIdType"`
 	ReceiveID     string    `gorm:"column:receive_id;size:255;not null" json:"receiveId"`
 	Enabled       bool      `gorm:"column:enabled;not null;default:true;index" json:"enabled"`

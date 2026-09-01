@@ -53,6 +53,7 @@ type officePushSnapshot struct {
 }
 
 type officePushTargetSnapshot struct {
+	BotAppID      string `json:"botAppId,omitempty"`
 	ReceiveIDType string `json:"receiveIdType"`
 	ReceiveID     string `json:"receiveId"`
 }
@@ -75,7 +76,7 @@ type officePushMessageSnapshot struct {
 
 func newOfficePushSnapshot(target model.OfficePushTarget, message model.OfficeMessage) (model.JSONText, error) {
 	snapshot := officePushSnapshot{
-		Target: officePushTargetSnapshot{ReceiveIDType: target.ReceiveIDType, ReceiveID: target.ReceiveID},
+		Target: officePushTargetSnapshot{BotAppID: target.BotAppID, ReceiveIDType: target.ReceiveIDType, ReceiveID: target.ReceiveID},
 		Message: officePushMessageSnapshot{
 			ID: message.ID, Name: message.Name, SourceType: message.SourceType, Content: message.Content,
 			ProcedureOwner: message.ProcedureOwner, PackageName: message.PackageName, ProcedureName: message.ProcedureName,
@@ -102,7 +103,7 @@ func decodeOfficePushSnapshot(raw model.JSONText) (officePushSnapshot, error) {
 }
 
 func (snapshot officePushSnapshot) targetModel() model.OfficePushTarget {
-	return model.OfficePushTarget{ReceiveIDType: snapshot.Target.ReceiveIDType, ReceiveID: snapshot.Target.ReceiveID}
+	return model.OfficePushTarget{BotAppID: snapshot.Target.BotAppID, ReceiveIDType: snapshot.Target.ReceiveIDType, ReceiveID: snapshot.Target.ReceiveID}
 }
 
 func (snapshot officePushSnapshot) messageModel() model.OfficeMessage {

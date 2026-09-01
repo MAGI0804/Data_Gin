@@ -90,7 +90,7 @@ func TestNewOfficePushOutboxContainsOnlyRunID(t *testing.T) {
 }
 
 func TestOfficePushSnapshotFreezesReceiverAndMessage(t *testing.T) {
-	target := model.OfficePushTarget{ReceiveIDType: "chat_id", ReceiveID: "oc_original"}
+	target := model.OfficePushTarget{BotAppID: "cli_original", ReceiveIDType: "chat_id", ReceiveID: "oc_original"}
 	message := model.OfficeMessage{
 		BaseModel: model.BaseModel{ID: 7}, Name: "销售日报", SourceType: model.OfficeMessageSourceOracleQuery,
 		SelectSQL:           "SELECT ORDER_NO FROM SALES WHERE BILL_DATE = :bill_date",
@@ -101,13 +101,59 @@ func TestOfficePushSnapshotFreezesReceiverAndMessage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newOfficePushSnapshot() error = %v", err)
 	}
-	target.ReceiveID, message.SelectSQL = "oc_changed", "SELECT 1 FROM DUAL"
+	target.BotAppID, target.ReceiveID, message.SelectSQL = "cli_changed", "oc_changed", "SELECT 1 FROM DUAL"
 	snapshot, err := decodeOfficePushSnapshot(raw)
 	if err != nil {
 		t.Fatalf("decodeOfficePushSnapshot() error = %v", err)
 	}
-	if snapshot.targetModel().ReceiveID != "oc_original" || snapshot.messageModel().SelectSQL == message.SelectSQL {
+	if snapshot.targetModel().BotAppID != "cli_original" || snapshot.targetModel().ReceiveID != "oc_original" || snapshot.messageModel().SelectSQL == message.SelectSQL {
 		t.Fatalf("snapshot = %#v", snapshot)
+	}
+}
+
+func TestOfficeMessageServiceListsOnlyConfiguredFeishuBot(t *testing.T) {
+	tests := []struct {
+		name       string
+		config     officeFeishuBotConfig
+		wantLength int
+	}{
+		{name: "configured", config: officeFeishuBotConfig{appID: "cli_office", configured: true}, wantLength: 1},
+		{name: "missing secret", config: officeFeishuBotConfig{appID: "cli_office"}, wantLength: 0},
+		{name: "missing app id", config: officeFeishuBotConfig{configured: true}, wantLength: 0},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			service := &OfficeMessageService{feishuBot: test.config}
+			items := service.ListFeishuBots(t.Context())
+			if len(items) != test.wantLength {
+				t.Fatalf("ListFeishuBots() length = %d, want %d", len(items), test.wantLength)
+			}
+			if len(items) == 1 && (items[0].ID != "cli_office" || items[0].Source != officeFeishuBotSourceEnvironment) {
+				t.Fatalf("ListFeishuBots() = %#v", items)
+			}
+		})
+	}
+}
+
+func TestOfficeFeishuBotOptionJSONContainsOnlyPublicMetadata(t *testing.T) {
+	payload, err := json.Marshal(OfficeFeishuBotOption{ID: "cli_office", Name: "办公消息机器人", Source: officeFeishuBotSourceEnvironment})
+	if err != nil {
+		t.Fatalf("marshal OfficeFeishuBotOption: %v", err)
+	}
+	if got, want := string(payload), `{"id":"cli_office","name":"办公消息机器人","source":"ENVIRONMENT"}`; got != want {
+		t.Fatalf("OfficeFeishuBotOption JSON = %s, want %s", got, want)
+	}
+}
+
+func TestResolveOfficeFeishuBotDefaultsAndRejectsUnknownBot(t *testing.T) {
+	service := &OfficeMessageService{feishuBot: officeFeishuBotConfig{appID: "cli_office", configured: true}}
+	for _, requested := range []string{"", "cli_office"} {
+		if got, err := service.resolveOfficeFeishuBot(requested); err != nil || got != "cli_office" {
+			t.Fatalf("resolveOfficeFeishuBot(%q) = %q, %v", requested, got, err)
+		}
+	}
+	if _, err := service.resolveOfficeFeishuBot("cli_other"); !errors.Is(err, ErrOfficeMessageInvalid) {
+		t.Fatalf("resolveOfficeFeishuBot() error = %v", err)
 	}
 }
 

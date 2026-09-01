@@ -224,6 +224,7 @@ func registerOfficeMessageRoutes(api *gin.RouterGroup, controller *data_ctrl.Off
 	messages.POST("", middleware.RequirePermission(model.PermissionOfficeMessageManage), controller.CreateMessage)
 	messages.PUT("/:id", middleware.RequirePermission(model.PermissionOfficeMessageManage), controller.UpdateMessage)
 	messages.DELETE("/:id", middleware.RequirePermission(model.PermissionOfficeMessageManage), controller.DeleteMessage)
+	api.GET("/v1/office-feishu-bots", middleware.AuthJWT(), middleware.RequirePermission(model.PermissionOfficeMessageRead), controller.ListFeishuBots)
 
 	targets := api.Group("/v1/office-push-targets")
 	targets.Use(middleware.AuthJWT())

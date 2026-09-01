@@ -8,10 +8,12 @@ import (
 	"strings"
 	"time"
 
+	"gin-biz-web-api/global"
 	"gin-biz-web-api/internal/dao/data_dao"
 	"gin-biz-web-api/internal/reportoracle"
 	"gin-biz-web-api/job"
 	"gin-biz-web-api/model"
+	"gin-biz-web-api/pkg/credential"
 	"gin-biz-web-api/pkg/database"
 
 	"github.com/google/uuid"
@@ -45,6 +47,7 @@ type OfficeMessageInput struct {
 type OfficePushTargetInput struct {
 	Name                string `json:"name"`
 	MessageID           uint   `json:"messageId"`
+	BotAppID            string `json:"botAppId"`
 	ReceiveIDType       string `json:"receiveIdType"`
 	ReceiveID           string `json:"receiveId"`
 	Enabled             *bool  `json:"enabled"`
@@ -56,20 +59,69 @@ type OfficePushRunInput struct {
 	RequestID  string            `json:"requestId"`
 }
 
+const officeFeishuBotSourceEnvironment = "ENVIRONMENT"
+
+type OfficeFeishuBotOption struct {
+	ID     string `json:"id"`
+	Name   string `json:"name"`
+	Source string `json:"source"`
+}
+
+type officeFeishuBotConfig struct {
+	appID      string
+	configured bool
+}
+
 type OfficeMessageService struct {
-	db  *gorm.DB
-	now func() time.Time
+	db        *gorm.DB
+	now       func() time.Time
+	feishuBot officeFeishuBotConfig
 }
 
 func NewOfficeMessageService() *OfficeMessageService {
-	return newOfficeMessageService(database.DB)
+	return newOfficeMessageService(database.DB, officeFeishuBotConfig{
+		appID: strings.TrimSpace(global.Credentials.FeishuAppID()),
+		configured: global.Credentials.Configured(credential.EnvFeishuAppID) &&
+			global.Credentials.Configured(credential.EnvFeishuAppSecret),
+	})
 }
 
-func newOfficeMessageService(db *gorm.DB) *OfficeMessageService {
+func newOfficeMessageService(db *gorm.DB, botConfigs ...officeFeishuBotConfig) *OfficeMessageService {
 	if db == nil {
 		panic("office message service: database is required")
 	}
-	return &OfficeMessageService{db: db, now: func() time.Time { return time.Now().UTC() }}
+	var botConfig officeFeishuBotConfig
+	if len(botConfigs) > 0 {
+		botConfig = botConfigs[0]
+	}
+	return &OfficeMessageService{db: db, now: func() time.Time { return time.Now().UTC() }, feishuBot: botConfig}
+}
+
+func (service *OfficeMessageService) ListFeishuBots(_ context.Context) []OfficeFeishuBotOption {
+	if service == nil || !service.feishuBot.configured || strings.TrimSpace(service.feishuBot.appID) == "" {
+		return []OfficeFeishuBotOption{}
+	}
+	return []OfficeFeishuBotOption{{
+		ID: service.feishuBot.appID, Name: "默认飞书机器人", Source: officeFeishuBotSourceEnvironment,
+	}}
+}
+
+func (service *OfficeMessageService) resolveOfficeFeishuBot(requested string) (string, error) {
+	if service == nil {
+		return "", fmt.Errorf("%w: feishu bot is not configured", ErrOfficeMessageInvalid)
+	}
+	requested = strings.TrimSpace(requested)
+	configured := strings.TrimSpace(service.feishuBot.appID)
+	if !service.feishuBot.configured || configured == "" {
+		return "", fmt.Errorf("%w: feishu bot is not configured", ErrOfficeMessageInvalid)
+	}
+	if requested == "" {
+		return configured, nil
+	}
+	if requested != configured {
+		return "", fmt.Errorf("%w: feishu bot is unavailable", ErrOfficeMessageInvalid)
+	}
+	return configured, nil
 }
 
 func (service *OfficeMessageService) ListMessages(ctx context.Context) ([]model.OfficeMessage, error) {
@@ -155,11 +207,20 @@ func (service *OfficeMessageService) ListTargets(ctx context.Context) ([]model.O
 	if err := service.db.WithContext(ctx).Order("id DESC").Limit(500).Find(&targets).Error; err != nil {
 		return nil, fmt.Errorf("office message: list push targets: %w", err)
 	}
+	for index := range targets {
+		if targets[index].BotAppID == "" && service.feishuBot.configured {
+			targets[index].BotAppID = service.feishuBot.appID
+		}
+	}
 	return targets, nil
 }
 
 func (service *OfficeMessageService) CreateTarget(ctx context.Context, actorID uint, input OfficePushTargetInput) (*model.OfficePushTarget, error) {
 	target, err := normalizeOfficePushTargetInput(input)
+	if err != nil {
+		return nil, err
+	}
+	target.BotAppID, err = service.resolveOfficeFeishuBot(target.BotAppID)
 	if err != nil {
 		return nil, err
 	}
@@ -187,6 +248,10 @@ func (service *OfficeMessageService) UpdateTarget(ctx context.Context, actorID, 
 	if err != nil {
 		return nil, err
 	}
+	target.BotAppID, err = service.resolveOfficeFeishuBot(target.BotAppID)
+	if err != nil {
+		return nil, err
+	}
 	err = service.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		var message model.OfficeMessage
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ?", target.MessageID).First(&message).Error; errors.Is(err, gorm.ErrRecordNotFound) {
@@ -196,6 +261,7 @@ func (service *OfficeMessageService) UpdateTarget(ctx context.Context, actorID, 
 		}
 		result := tx.Model(&model.OfficePushTarget{}).Where("id = ? AND lock_version = ?", targetID, input.ExpectedLockVersion).Updates(map[string]interface{}{
 			"name": target.Name, "message_id": target.MessageID, "channel": model.OfficePushChannelFeishu,
+			"bot_app_id":      target.BotAppID,
 			"receive_id_type": target.ReceiveIDType, "receive_id": target.ReceiveID, "enabled": target.Enabled,
 			"updated_by": actorID, "lock_version": gorm.Expr("lock_version + 1"), "updated_at": service.now().UTC(),
 		})
@@ -248,6 +314,10 @@ func (service *OfficeMessageService) CreateRun(ctx context.Context, actorID, tar
 		var target model.OfficePushTarget
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ? AND enabled = ?", targetID, true).First(&target).Error; err != nil {
 			return fmt.Errorf("%w: push target is unavailable", ErrOfficeMessageNotFound)
+		}
+		target.BotAppID, err = service.resolveOfficeFeishuBot(target.BotAppID)
+		if err != nil {
+			return err
 		}
 		var message model.OfficeMessage
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ? AND enabled = ?", target.MessageID, true).First(&message).Error; err != nil {
@@ -450,6 +520,7 @@ func normalizeOfficeInputMappings(mappings []OfficeColumnMapping, sourceType str
 
 func normalizeOfficePushTargetInput(input OfficePushTargetInput) (model.OfficePushTarget, error) {
 	input.Name = strings.TrimSpace(input.Name)
+	input.BotAppID = strings.TrimSpace(input.BotAppID)
 	input.ReceiveIDType = strings.ToLower(strings.TrimSpace(input.ReceiveIDType))
 	input.ReceiveID = strings.TrimSpace(input.ReceiveID)
 	if input.Name == "" || len(input.Name) > 128 || input.MessageID == 0 || !validOfficeReceiveIDType(input.ReceiveIDType) ||
@@ -462,6 +533,7 @@ func normalizeOfficePushTargetInput(input OfficePushTargetInput) (model.OfficePu
 	}
 	return model.OfficePushTarget{
 		Name: input.Name, MessageID: input.MessageID, Channel: model.OfficePushChannelFeishu,
+		BotAppID:      input.BotAppID,
 		ReceiveIDType: input.ReceiveIDType, ReceiveID: input.ReceiveID, Enabled: enabled, LockVersion: 1,
 	}, nil
 }

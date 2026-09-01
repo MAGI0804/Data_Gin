@@ -22,6 +22,7 @@ func TestRegisterOfficeMessageRoutes(t *testing.T) {
 		http.MethodPost + " /api/v1/office-messages",
 		http.MethodPut + " /api/v1/office-messages/:id",
 		http.MethodDelete + " /api/v1/office-messages/:id",
+		http.MethodGet + " /api/v1/office-feishu-bots",
 		http.MethodGet + " /api/v1/office-push-targets",
 		http.MethodPost + " /api/v1/office-push-targets",
 		http.MethodPost + " /api/v1/office-push-targets/:id/runs",

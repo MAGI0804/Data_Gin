@@ -1,6 +1,7 @@
 import type {
   OfficeColumnMapping,
   OfficeColumnValueType,
+  OfficeFeishuBot,
   OfficeMessage,
   OfficeMessageDraft,
   OfficeMessageSourceType,
@@ -44,8 +45,20 @@ export function parseOfficeTargets(payload: unknown): OfficePushTarget[] {
     const value = record(raw)
     return {
       id: positiveInteger(value.id), name: text(value.name), messageId: positiveInteger(value.messageId), channel: 'FEISHU',
+      botAppId: text(value.botAppId),
       receiveIdType: enumValue(value.receiveIdType, ['chat_id', 'open_id', 'user_id', 'union_id', 'email'] as const),
       receiveId: text(value.receiveId), enabled: booleanValue(value.enabled), lockVersion: positiveInteger(value.lockVersion), updatedAt: text(value.updatedAt),
+    }
+  })
+}
+
+export function parseOfficeFeishuBots(payload: unknown): OfficeFeishuBot[] {
+  return items(payload).map((raw) => {
+    const value = record(raw)
+    return {
+      id: text(value.id),
+      name: text(value.name),
+      source: enumValue(value.source, ['ENVIRONMENT'] as const),
     }
   })
 }

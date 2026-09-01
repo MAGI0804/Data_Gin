@@ -15,18 +15,21 @@ import (
 	"gorm.io/driver/mysql"
 	"gorm.io/gorm"
 
+	"gin-biz-web-api/global"
 	"gin-biz-web-api/internal/service/auth_svc"
 	"gin-biz-web-api/model"
 	"gin-biz-web-api/pkg/config"
 	"gin-biz-web-api/pkg/console"
+	"gin-biz-web-api/pkg/credential"
 	"gin-biz-web-api/pkg/database"
 	"gin-biz-web-api/pkg/logger"
 
 	"go.uber.org/zap"
 )
 
-const schemaMigrationVersion = "2026-09-01-office-message-compat-v16"
-const previousSchemaMigrationVersion = "2026-09-01-office-message-ha-v15"
+const schemaMigrationVersion = "2026-09-01-office-message-bot-v17"
+const previousSchemaMigrationVersion = "2026-09-01-office-message-compat-v16"
+const officeMessageHACompatMigrationVersion = "2026-09-01-office-message-ha-v15"
 const officeMessagePreviousMigrationVersion = "2026-09-01-office-message-v14"
 const officeMessageMigrationBaselineVersion = "2026-08-26-bojun-oracle-v13"
 const legacyOfficeMessageSourceOracle = "ORACLE"
@@ -139,6 +142,13 @@ func finalizeOfficeMessageMigration(db *gorm.DB) error {
 		Update("source_type", model.OfficeMessageSourceOracleProcedure).Error; err != nil {
 		return fmt.Errorf("migrate legacy office message source type: %w", err)
 	}
+	if appID := strings.TrimSpace(global.Credentials.FeishuAppID()); appID != "" && global.Credentials.Configured(credential.EnvFeishuAppSecret) {
+		if err := db.Model(&model.OfficePushTarget{}).
+			Where("bot_app_id = ?", "").
+			Update("bot_app_id", appID).Error; err != nil {
+			return fmt.Errorf("backfill office push target bot app id: %w", err)
+		}
+	}
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 	if err := auth_svc.SyncAccessControlSeeds(ctx, db); err != nil {
@@ -173,6 +183,7 @@ func bojunOracleMigrationModels() []interface{} {
 func officeMessageIncrementalMigrationBaselines() []string {
 	return []string{
 		previousSchemaMigrationVersion,
+		officeMessageHACompatMigrationVersion,
 		officeMessagePreviousMigrationVersion,
 		officeMessageMigrationBaselineVersion,
 	}

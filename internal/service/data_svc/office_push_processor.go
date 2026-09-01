@@ -61,6 +61,7 @@ type officeOracleOpener func(context.Context, reportoracle.Config) (officeOracle
 type OfficePushProcessor struct {
 	db         *gorm.DB
 	newBot     officeBotFactory
+	botAppID   string
 	openOracle officeOracleOpener
 	now        func() time.Time
 	newToken   func() string
@@ -91,17 +92,21 @@ func NewOfficePushProcessor() *OfficePushProcessor {
 	}
 	return newOfficePushProcessor(database.DB, newBot, func(ctx context.Context, config reportoracle.Config) (officeOracleConnection, error) {
 		return reportoracle.Open(ctx, config)
-	})
+	}, global.Credentials.FeishuAppID())
 }
 
-func newOfficePushProcessor(db *gorm.DB, newBot officeBotFactory, openOracle officeOracleOpener) *OfficePushProcessor {
+func newOfficePushProcessor(db *gorm.DB, newBot officeBotFactory, openOracle officeOracleOpener, botAppIDs ...string) *OfficePushProcessor {
 	if db == nil || newBot == nil || openOracle == nil {
 		panic("office push processor: dependencies are required")
 	}
-	return &OfficePushProcessor{
+	processor := &OfficePushProcessor{
 		db: db, newBot: newBot, openOracle: openOracle, now: func() time.Time { return time.Now().UTC() }, newToken: uuid.NewString,
 		leaseTTL: officePushLeaseTTL, heartbeat: officePushHeartbeat, stateLimit: officePushStateTimeout,
 	}
+	if len(botAppIDs) > 0 {
+		processor.botAppID = strings.TrimSpace(botAppIDs[0])
+	}
+	return processor
 }
 
 func (processor *OfficePushProcessor) Process(ctx context.Context, runID uint, retryAllowed bool) error {
@@ -127,6 +132,9 @@ func (processor *OfficePushProcessor) Process(ctx context.Context, runID uint, r
 		cancelExecution()
 		<-monitorDone
 	}()
+	if !officePushBotMatches(target.BotAppID, processor.botAppID) {
+		return processor.fail(ctx, run.ID, leaseToken, false, "FEISHU_BOT_MISMATCH", "飞书机器人配置已变更，请重新创建推送任务", ErrOfficePushProcessNonRetryable)
+	}
 	bot, err := processor.newBot()
 	if err != nil {
 		return processor.fail(ctx, run.ID, leaseToken, retryAllowed, "FEISHU_CONFIGURATION_INVALID", "飞书机器人配置不可用", err)
@@ -327,6 +335,12 @@ func officePushRetryable(err error) bool {
 		return botError.Retryable
 	}
 	return true
+}
+
+func officePushBotMatches(targetAppID, configuredAppID string) bool {
+	targetAppID = strings.TrimSpace(targetAppID)
+	configuredAppID = strings.TrimSpace(configuredAppID)
+	return targetAppID == "" || configuredAppID != "" && targetAppID == configuredAppID
 }
 
 func (processor *OfficePushProcessor) exportWorkbook(ctx context.Context, message model.OfficeMessage, rawParameters model.JSONText, leaseToken string) (string, string, int64, error) {

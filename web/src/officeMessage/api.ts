@@ -2,6 +2,7 @@ import type { WorkspaceApiClient } from '../appShell/WorkspaceRouter'
 import {
   parseOfficeMessage,
   parseOfficeMessages,
+  parseOfficeFeishuBots,
   parseOfficeRuns,
   parseOfficeTargets,
   parseProcedureSummaries,
@@ -41,6 +42,10 @@ export async function deleteOfficeMessage(client: WorkspaceApiClient, id: number
 
 export function getOfficeTargets(client: WorkspaceApiClient, signal?: AbortSignal) {
   return request(() => client('/v1/office-push-targets', { method: 'GET', signal, ...quiet }), parseOfficeTargets, '推送配置加载失败。')
+}
+
+export function getOfficeFeishuBots(client: WorkspaceApiClient, signal?: AbortSignal) {
+  return request(() => client('/v1/office-feishu-bots', { method: 'GET', signal, ...quiet }), parseOfficeFeishuBots, '飞书机器人加载失败。')
 }
 
 export async function saveOfficeTarget(client: WorkspaceApiClient, target: { id?: number | null }, body: unknown): Promise<OfficeResult<OfficePushTarget>> {

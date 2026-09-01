@@ -147,3 +147,24 @@ func TestOfficePushProcessGeneratesOneLeaseToken(t *testing.T) {
 		t.Fatalf("newToken() calls = %d, want 1", tokenCalls)
 	}
 }
+
+func TestOfficePushBotMatchesConfiguredAndLegacyTargets(t *testing.T) {
+	tests := []struct {
+		name         string
+		target       string
+		configured   string
+		wantMatching bool
+	}{
+		{name: "same bot", target: "cli_office", configured: "cli_office", wantMatching: true},
+		{name: "legacy snapshot", configured: "cli_office", wantMatching: true},
+		{name: "changed bot", target: "cli_old", configured: "cli_new"},
+		{name: "configured bot missing", target: "cli_office"},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := officePushBotMatches(test.target, test.configured); got != test.wantMatching {
+				t.Fatalf("officePushBotMatches(%q, %q) = %t, want %t", test.target, test.configured, got, test.wantMatching)
+			}
+		})
+	}
+}

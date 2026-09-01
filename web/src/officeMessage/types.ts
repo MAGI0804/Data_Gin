@@ -40,11 +40,18 @@ export type OfficeMessage = {
 
 export type OfficeMessageDraft = Omit<OfficeMessage, 'id' | 'updatedAt'> & { id: number | null }
 
+export type OfficeFeishuBot = {
+  id: string
+  name: string
+  source: 'ENVIRONMENT'
+}
+
 export type OfficePushTarget = {
   id: number
   name: string
   messageId: number
   channel: 'FEISHU'
+  botAppId: string
   receiveIdType: 'chat_id' | 'open_id' | 'user_id' | 'union_id' | 'email'
   receiveId: string
   enabled: boolean
