@@ -21,6 +21,8 @@ import { DeliveryLogsPage } from '../monitoringPages/DeliveryLogsPage/DeliveryLo
 import { PipelineRunsPage } from '../monitoringPages/PipelineRunsPage/PipelineRunsPage'
 import { RunOverviewPage } from '../monitoringPages/RunOverviewPage/RunOverviewPage'
 import { StepRunsPage } from '../monitoringPages/StepRunsPage/StepRunsPage'
+import { MessageManagementPage } from '../officeMessage/MessageManagementPage'
+import { PushManagementPage } from '../officeMessage/PushManagementPage'
 import type { DeliveryLog, PipelineRun } from '../monitoringPages/types'
 import { ReportCenter } from '../reportCenter/ReportCenter'
 import type { ApiRequestOptions, ClientResponse, HTTPMethod } from '../api/client'
@@ -91,6 +93,8 @@ export function WorkspaceRouter(props: WorkspaceRouterProps) {
   if (activeNav === 'step_runs') return <StepRunsPage client={client} focusRunID={stepRunFocusID} />
   if (activeNav === 'store_info') return <StoreInfoPage actorID={actorID} client={client} downloadFile={downloadFile} />
   if (activeNav === 'mall_weather') return <MallWeatherPage actorID={actorID} client={client} downloadFile={downloadFile} />
+  if (activeNav === 'office_messages') return <MessageManagementPage client={client} permissions={permissions} />
+  if (activeNav === 'office_push') return <PushManagementPage client={client} permissions={permissions} />
   if (reportSection) return <ReportCenter client={client} permissions={permissions} section={reportSection} onNavigate={(section) => navigate(reportCenterNavKey(section))} />
   if (activeNav === 'access_management') return <AccessManagementPage client={client} permissions={permissions} />
   if (activeNav === 'sources') return <SourcesPage client={client} onFetchSource={onFetchSource} onTestSource={onTestSource} refreshVersion={refreshVersion} />

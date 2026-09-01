@@ -50,6 +50,8 @@ export type NavKey =
   | 'report_configuration'
   | 'report_query'
   | 'report_exports'
+  | 'office_messages'
+  | 'office_push'
 
 export type NavItem = { key: NavKey; label: string; description: string; icon: ReactNode }
 export type NavGroup = { label: string; items: NavItem[] }
@@ -91,6 +93,13 @@ export const navGroups: NavGroup[] = [
       { key: 'report_exports', label: '导出中心', description: 'Excel 与结果清理状态', icon: <Download aria-hidden="true" /> },
     ],
   },
+  {
+    label: '办公消息',
+    items: [
+      { key: 'office_messages', label: '消息管理', description: '文本与 Oracle Excel 来源', icon: <FileSpreadsheet aria-hidden="true" /> },
+      { key: 'office_push', label: '推送管理', description: '飞书目标与发送记录', icon: <Send aria-hidden="true" /> },
+    ],
+  },
   { label: '账号与权限', items: [{ key: 'access_management', label: '账号与权限', description: '控制台账号、角色与审计', icon: <Users aria-hidden="true" /> }] },
   {
     label: '数据处理',
@@ -124,6 +133,7 @@ const compactWorkspaceKeys = new Set<NavKey>([
   'methods', 'destinations', 'tasks', 'push_policy', 'overview', 'runs', 'delivery_logs', 'step_runs', 'business_overview', 'store_info',
   'mall_weather', 'report_catalog', 'report_configuration', 'report_query', 'report_exports', 'excel_jobs',
   'excel_schemes', 'excel_write',
+  'office_messages', 'office_push',
 ])
 
 export function navGroupFor(key: NavKey) {

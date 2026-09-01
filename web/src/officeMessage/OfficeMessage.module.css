@@ -1,0 +1,228 @@
+.primary,
+.danger {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-2);
+  color: var(--color-canvas);
+}
+.primary {
+  border-color: var(--color-brand-active);
+  background: var(--color-brand-active);
+}
+
+.danger {
+  border-color: var(--color-danger);
+  background: var(--color-danger);
+}
+
+.primary svg,
+.danger svg,
+.actions svg,
+.editorHeading svg,
+.testBar svg {
+  width: 15px;
+  height: 15px;
+}
+
+.notice,
+.errorNotice {
+  margin: 0;
+  padding-block: var(--space-3);
+  border-bottom: 1px solid var(--color-border);
+  font-size: 13px;
+}
+
+.notice { color: var(--color-success); }
+.errorNotice { color: var(--color-danger); }
+
+.table th:last-child,
+.table td:last-child {
+  background: var(--color-canvas);
+}
+
+.identity {
+  display: inline-flex;
+  gap: var(--space-2);
+  align-items: flex-start;
+}
+
+.identity > svg {
+  flex: 0 0 auto;
+  width: 17px;
+  height: 17px;
+  margin-block-start: 2px;
+  color: var(--color-brand-active);
+}
+
+.identity > span,
+.runForm {
+  display: grid;
+  gap: var(--space-1);
+}
+
+.identity code,
+.cellHint {
+  display: block;
+  color: var(--color-text-secondary);
+  font-size: 11px;
+}
+
+.mono,
+.table code,
+.editorBlock code,
+.runForm code,
+.sqlEditor {
+  font-family: var(--font-mono);
+}
+
+.actions,
+.iconActions,
+.testBar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--space-2);
+  align-items: center;
+}
+
+.actions { min-width: max-content; }
+
+.form {
+  display: grid;
+  gap: var(--space-5);
+}
+
+.form > label,
+.sourceGrid label,
+.mappingRow label,
+.parameterRow label,
+.runForm label {
+  display: grid;
+  gap: var(--space-1);
+  color: var(--color-text-secondary);
+  font-size: 12px;
+}
+
+.form textarea { resize: vertical; line-height: 1.6; }
+
+.twoColumns,
+.sourceGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: var(--space-3);
+}
+
+.checkbox {
+  display: flex !important;
+  flex-direction: row;
+  gap: var(--space-2) !important;
+  align-items: center;
+}
+
+.checkbox input { width: auto; }
+
+.lookupPanel,
+.editorBlock {
+  display: grid;
+  gap: var(--space-3);
+  padding: var(--space-4);
+  border: 1px solid var(--color-border);
+  border-radius: var(--radius-panel);
+  background: var(--color-surface-subtle);
+}
+
+.lookupPanel h3,
+.editorHeading h3 {
+  margin: 0;
+  color: var(--color-text);
+  font-size: 14px;
+}
+
+.editorHeading {
+  display: flex;
+  justify-content: space-between;
+  gap: var(--space-3);
+  align-items: flex-start;
+}
+
+.editorHeading p,
+.inlineEmpty,
+.contractNote,
+.testBar span,
+.runForm p,
+.runForm small,
+.dialogCopy {
+  margin: 0;
+  color: var(--color-text-secondary);
+  font-size: 12px;
+  line-height: 1.6;
+}
+
+.mappingList,
+.parameterList {
+  display: grid;
+  gap: var(--space-2);
+}
+
+.mappingRow {
+  display: grid;
+  grid-template-columns: minmax(130px, 1.2fr) minmax(140px, 1.4fr) minmax(100px, 1fr) 80px auto;
+  gap: var(--space-2);
+  align-items: end;
+}
+
+.parameterRow {
+  display: grid;
+  grid-template-columns: minmax(120px, 1fr) minmax(130px, 1fr) 100px minmax(140px, 1fr) minmax(130px, 1fr) auto auto;
+  gap: var(--space-2);
+  align-items: end;
+}
+
+.iconActions { flex-wrap: nowrap; }
+
+.iconActions button,
+.iconButton {
+  width: var(--button-height);
+  padding-inline: 0;
+}
+
+.iconActions svg,
+.iconButton svg { width: 15px; height: 15px; }
+
+.sqlEditor { min-height: 210px; tab-size: 2; }
+
+.contractNote,
+.formError {
+  padding: var(--space-3);
+  border-inline-start: 3px solid var(--color-brand);
+  background: var(--color-brand-soft);
+}
+
+.formError {
+  margin: 0;
+  color: var(--color-danger);
+  border-inline-start-color: var(--color-danger);
+  background: var(--color-danger-soft);
+  font-size: 12px;
+}
+
+.testBar { justify-content: space-between; }
+.runForm p { font-size: 13px; }
+
+@media (max-width: 899px) {
+  .sourceGrid,
+  .twoColumns { grid-template-columns: 1fr; }
+
+  .mappingRow,
+  .parameterRow { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+
+  .iconActions,
+  .iconButton { align-self: end; }
+}
+
+@media (max-width: 599px) {
+  .mappingRow,
+  .parameterRow { grid-template-columns: 1fr; }
+  .editorHeading { display: grid; }
+  .editorHeading button,
+  .testBar button { width: 100%; }
+}
