@@ -14,6 +14,13 @@ const (
 	OfficePushRunStatusSucceeded = "SUCCEEDED"
 	OfficePushRunStatusFailed    = "FAILED"
 	OfficePushRunStatusUnknown   = "UNKNOWN"
+
+	OfficePushTriggerManual   = "MANUAL"
+	OfficePushTriggerSchedule = "SCHEDULE"
+
+	OfficeScheduleParameterLiteral       = "LITERAL"
+	OfficeScheduleParameterScheduledDate = "SCHEDULED_DATE"
+	OfficeScheduleTimeZone               = "Asia/Shanghai"
 )
 
 // OfficeMessage describes either operator-authored text or an Oracle result
@@ -62,6 +69,28 @@ type OfficePushTarget struct {
 
 func (OfficePushTarget) TableName() string { return "office_push_targets" }
 
+// OfficePushSchedule stores one independently managed cron trigger for a push
+// target. The due index is used by the database-backed planner across replicas.
+type OfficePushSchedule struct {
+	BaseModel
+	Name            string     `gorm:"column:name;size:128;not null;index" json:"name"`
+	TargetID        uint       `gorm:"column:target_id;not null;index" json:"targetId"`
+	CronExpr        string     `gorm:"column:cron_expr;size:128;not null" json:"cronExpr"`
+	TimeZone        string     `gorm:"column:time_zone;size:64;not null;default:'Asia/Shanghai'" json:"timeZone"`
+	ParametersJSON  JSONText   `gorm:"column:parameters_json;type:json" json:"parameters"`
+	Enabled         bool       `gorm:"column:enabled;not null;default:true;index:idx_office_push_schedules_due,priority:1" json:"enabled"`
+	NextRunAt       time.Time  `gorm:"column:next_run_at;type:datetime(3);not null;index:idx_office_push_schedules_due,priority:2" json:"nextRunAt"`
+	LastScheduledAt *time.Time `gorm:"column:last_scheduled_at;type:datetime(3)" json:"lastScheduledAt,omitempty"`
+	LastErrorSafe   string     `gorm:"column:last_error_safe;size:500" json:"lastError,omitempty"`
+	LockVersion     uint64     `gorm:"column:lock_version;not null;default:1" json:"lockVersion"`
+	CreatedBy       uint       `gorm:"column:created_by;not null;index" json:"createdBy"`
+	UpdatedBy       uint       `gorm:"column:updated_by;not null" json:"updatedBy"`
+	CreatedAt       time.Time  `gorm:"column:created_at;type:datetime(3);not null;autoCreateTime" json:"createdAt"`
+	UpdatedAt       time.Time  `gorm:"column:updated_at;type:datetime(3);not null;autoUpdateTime" json:"updatedAt"`
+}
+
+func (OfficePushSchedule) TableName() string { return "office_push_schedules" }
+
 // OfficePushRun is the durable, idempotent execution record consumed by the
 // asynchronous worker. RunUUID is also sent to Feishu as its idempotency key.
 type OfficePushRun struct {
@@ -75,6 +104,9 @@ type OfficePushRun struct {
 	FeishuMessageID  string     `gorm:"column:feishu_message_id;size:128" json:"feishuMessageId,omitempty"`
 	ErrorCode        string     `gorm:"column:error_code;size:64" json:"errorCode,omitempty"`
 	ErrorMessageSafe string     `gorm:"column:error_message_safe;size:500" json:"errorMessage,omitempty"`
+	TriggerType      string     `gorm:"column:trigger_type;size:16;not null;default:'MANUAL';index" json:"triggerType"`
+	ScheduleID       *uint      `gorm:"column:schedule_id;index" json:"scheduleId,omitempty"`
+	ScheduledFor     *time.Time `gorm:"column:scheduled_for;type:datetime(3);index" json:"scheduledFor,omitempty"`
 	RequestedBy      uint       `gorm:"column:requested_by;not null;index" json:"requestedBy"`
 	ParametersJSON   JSONText   `gorm:"column:parameters_json;type:json" json:"-"`
 	SnapshotJSON     JSONText   `gorm:"column:snapshot_json;type:json" json:"-"`

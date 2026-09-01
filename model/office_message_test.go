@@ -14,6 +14,7 @@ func TestOfficeMessageTableNames(t *testing.T) {
 	}{
 		{name: "messages", got: (OfficeMessage{}).TableName(), want: "office_messages"},
 		{name: "targets", got: (OfficePushTarget{}).TableName(), want: "office_push_targets"},
+		{name: "schedules", got: (OfficePushSchedule{}).TableName(), want: "office_push_schedules"},
 		{name: "runs", got: (OfficePushRun{}).TableName(), want: "office_push_runs"},
 		{name: "procedure locks", got: (OfficeProcedureExportLock{}).TableName(), want: "office_procedure_export_locks"},
 	}

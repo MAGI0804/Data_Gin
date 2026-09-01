@@ -40,11 +40,14 @@ func TestReportCenterMigrationModelsAreUnique(t *testing.T) {
 }
 
 func TestSchemaMigrationVersionIncludesBojunOracleModels(t *testing.T) {
-	if schemaMigrationVersion != "2026-09-01-office-message-file-v18" {
+	if schemaMigrationVersion != "2026-09-01-office-message-schedule-v19" {
 		t.Fatalf("schemaMigrationVersion = %q", schemaMigrationVersion)
 	}
-	if previousSchemaMigrationVersion != "2026-09-01-office-message-bot-v17" {
+	if previousSchemaMigrationVersion != "2026-09-01-office-message-file-v18" {
 		t.Fatalf("previousSchemaMigrationVersion = %q", previousSchemaMigrationVersion)
+	}
+	if officeMessageBotMigrationVersion != "2026-09-01-office-message-bot-v17" {
+		t.Fatalf("officeMessageBotMigrationVersion = %q", officeMessageBotMigrationVersion)
 	}
 	if officeMessageCompatMigrationVersion != "2026-09-01-office-message-compat-v16" {
 		t.Fatalf("officeMessageCompatMigrationVersion = %q", officeMessageCompatMigrationVersion)
@@ -67,6 +70,12 @@ func TestOfficeMessagePreferredMigrationBaseline(t *testing.T) {
 		wantVersion     string
 		wantApplied     bool
 	}{
+		{
+			name:            "v18 direct upgrade",
+			appliedVersions: []string{"2026-09-01-office-message-file-v18"},
+			wantVersion:     "2026-09-01-office-message-file-v18",
+			wantApplied:     true,
+		},
 		{
 			name:            "v17 direct upgrade",
 			appliedVersions: []string{"2026-09-01-office-message-bot-v17"},
@@ -105,8 +114,9 @@ func TestOfficeMessagePreferredMigrationBaseline(t *testing.T) {
 				"2026-09-01-office-message-ha-v15",
 				"2026-09-01-office-message-compat-v16",
 				"2026-09-01-office-message-bot-v17",
+				"2026-09-01-office-message-file-v18",
 			},
-			wantVersion: "2026-09-01-office-message-bot-v17",
+			wantVersion: "2026-09-01-office-message-file-v18",
 			wantApplied: true,
 		},
 		{
@@ -140,6 +150,7 @@ func TestOfficeMessageMigrationModelsAreLimitedToOfficeMessageTables(t *testing.
 	want := []reflect.Type{
 		reflect.TypeOf(&model.OfficeMessage{}),
 		reflect.TypeOf(&model.OfficePushTarget{}),
+		reflect.TypeOf(&model.OfficePushSchedule{}),
 		reflect.TypeOf(&model.OfficePushRun{}),
 		reflect.TypeOf(&model.OfficeProcedureExportLock{}),
 	}
