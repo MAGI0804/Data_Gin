@@ -1,0 +1,503 @@
+.page {
+  --overview-yellow: #ffc52d;
+  --overview-blue: #1859a8;
+  --overview-blue-hover: #124b91;
+  --overview-red: #f04a3d;
+  --overview-orange: #f5a238;
+  --overview-border: #d8dbe1;
+  --overview-header: #f4f5f8;
+  --overview-text: #222b38;
+  min-width: 0;
+  min-height: calc(100dvh - 73px);
+  padding: 0 36px 44px;
+  color: var(--overview-text);
+  background: #fff;
+}
+
+.titleBar {
+  margin-inline: -36px;
+  border-top: 8px solid var(--overview-yellow);
+  border-bottom: 1px solid #e8e9ec;
+  background: var(--overview-header);
+  padding: 18px 24px 20px;
+  text-align: center;
+}
+
+.titleBar h1 {
+  margin: 0;
+  font-size: clamp(26px, 2.6vw, 42px);
+  font-weight: 750;
+  letter-spacing: 0.12em;
+  line-height: 1.3;
+}
+
+.overviewPanel {
+  margin-top: 30px;
+  overflow: hidden;
+  border: 1px solid var(--overview-border);
+  border-radius: 14px;
+  background: #fff;
+}
+
+.filterBar {
+  display: flex;
+  min-height: 88px;
+  gap: 12px;
+  align-items: center;
+  border-bottom: 1px solid var(--overview-border);
+  padding: 16px 28px;
+}
+
+.filterTitle {
+  flex: 0 0 auto;
+  font-size: 18px;
+  font-weight: 500;
+}
+
+.quickDates {
+  display: flex;
+  gap: 8px;
+}
+
+.quickDates button,
+.saveButton {
+  min-width: 112px;
+  min-height: 52px;
+  border: 1px solid #8a9099;
+  border-radius: 7px;
+  background: #fff;
+  color: var(--overview-text);
+  font-size: 20px;
+  font-weight: 500;
+}
+
+.quickDates button:hover:not(:disabled) {
+  border-color: var(--overview-blue);
+  background: #f2f6fb;
+}
+
+.quickDates .active,
+.quickDates .active:hover:not(:disabled),
+.saveButton,
+.saveButton:hover:not(:disabled) {
+  border-color: var(--overview-blue);
+  background: var(--overview-blue);
+  color: #fff;
+}
+
+.saveButton:hover:not(:disabled) {
+  background: var(--overview-blue-hover);
+}
+
+.saveButton svg {
+  width: 19px;
+  height: 19px;
+}
+
+.dateField,
+.cashierField {
+  display: flex;
+  min-width: 0;
+  gap: 12px;
+  align-items: center;
+  color: var(--overview-text);
+  font-size: 17px;
+  font-weight: 400;
+}
+
+.dateInputWrap {
+  position: relative;
+  display: block;
+  width: 270px;
+}
+
+.dateInputWrap input,
+.cashierField select {
+  height: 52px;
+  border: 1px solid #b8bdc5;
+  border-radius: 7px;
+  background: #fff;
+  color: #4e5662;
+  font-size: 18px;
+  padding: 0 48px 0 14px;
+}
+
+.dateInputWrap input::-webkit-calendar-picker-indicator {
+  position: absolute;
+  inset: 0;
+  width: auto;
+  height: auto;
+  cursor: pointer;
+  opacity: 0;
+}
+
+.dateInputWrap svg {
+  position: absolute;
+  top: 50%;
+  right: 14px;
+  width: 25px;
+  height: 25px;
+  transform: translateY(-50%);
+  color: var(--overview-blue);
+  pointer-events: none;
+}
+
+.cashierField {
+  margin-left: auto;
+}
+
+.cashierField select {
+  width: 164px;
+  padding-right: 34px;
+}
+
+.savedMessage {
+  border-bottom: 1px solid var(--overview-border);
+  background: #eef5fd;
+  color: var(--overview-blue);
+  padding: 8px 28px;
+  font-size: 14px;
+  text-align: center;
+}
+
+.summaryArea {
+  display: grid;
+  grid-template-columns: minmax(420px, 35%) minmax(0, 65%);
+  min-height: 550px;
+  border-bottom: 1px solid var(--overview-border);
+}
+
+.amountSummary {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(160px, 1fr);
+  grid-template-rows: minmax(360px, 1fr) 150px;
+  border-right: 1px solid var(--overview-border);
+}
+
+.unsettledAmount {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-direction: column;
+  gap: 14px;
+  border-right: 1px solid var(--overview-border);
+}
+
+.unsettledAmount strong {
+  color: var(--overview-red);
+  font-size: clamp(54px, 5vw, 80px);
+  font-weight: 400;
+  line-height: 1;
+}
+
+.unsettledAmount span {
+  font-size: 22px;
+  font-weight: 650;
+}
+
+.channelAmounts {
+  display: grid;
+  grid-template-rows: 1fr 1fr;
+}
+
+.channelAmounts > div {
+  display: flex;
+  align-items: center;
+  padding: 24px 18px;
+  font-size: 17px;
+}
+
+.channelAmounts > div:first-child {
+  border-bottom: 1px solid var(--overview-border);
+}
+
+.channelAmounts strong {
+  font-weight: 600;
+}
+
+.reconciliationTip {
+  display: flex;
+  grid-column: 1 / -1;
+  gap: 20px;
+  align-items: center;
+  border-top: 1px solid var(--overview-border);
+  padding: 22px 34px;
+}
+
+.tipIcon {
+  display: grid;
+  width: 84px;
+  height: 84px;
+  flex: 0 0 84px;
+  place-items: center;
+  border-radius: 50%;
+  background: #eef4fb;
+  color: var(--overview-blue);
+}
+
+.tipIcon svg {
+  width: 48px;
+  height: 48px;
+  stroke-width: 1.5;
+}
+
+.reconciliationTip p {
+  margin: 0;
+  color: var(--overview-orange);
+  font-size: 21px;
+  line-height: 1.2;
+}
+
+.paymentSummary {
+  display: grid;
+  min-width: 0;
+  grid-template-rows: minmax(360px, 1fr) 150px;
+}
+
+.paymentList {
+  padding: 52px 92px;
+}
+
+.paymentRow {
+  display: grid;
+  grid-template-columns: 150px minmax(0, 1fr);
+  align-items: center;
+  font-size: 20px;
+}
+
+.paymentRow output {
+  min-height: 42px;
+  border: 1px solid #ccd0d6;
+  border-radius: 5px;
+  color: #4e5662;
+  padding: 7px 16px;
+  font-size: 18px;
+}
+
+.emptyPayments {
+  display: grid;
+  min-height: 220px;
+  place-items: center;
+  color: #8a929e;
+  font-size: 16px;
+}
+
+.adjustments {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 14px 30px;
+  align-content: center;
+  border-top: 1px solid var(--overview-border);
+  padding: 20px 42px;
+}
+
+.metricField {
+  display: grid;
+  grid-template-columns: auto minmax(90px, 1fr);
+  gap: 10px;
+  align-items: center;
+  color: var(--overview-text);
+  font-size: 18px;
+  font-weight: 400;
+}
+
+.metricField output {
+  min-height: 42px;
+  border: 1px solid #d4d7dc;
+  border-radius: 5px;
+  background: #fafafa;
+  color: #8a929e;
+  padding: 7px 12px;
+  text-align: center;
+}
+
+.reconciliationSection {
+  padding: 28px 26px 16px;
+}
+
+.reconciliationSection h2 {
+  margin: 0 0 14px 16px;
+  color: var(--overview-blue);
+  font-size: 19px;
+  font-weight: 650;
+}
+
+.tableWrap {
+  min-height: 272px;
+  overflow-x: auto;
+  border: 1px solid var(--overview-border);
+}
+
+.tableWrap:focus-visible {
+  outline: 2px solid var(--overview-blue);
+  outline-offset: 2px;
+}
+
+.tableWrap table {
+  width: 100%;
+  min-width: 980px;
+  border-collapse: collapse;
+  font-size: 16px;
+  text-align: center;
+}
+
+.tableWrap th,
+.tableWrap td {
+  height: 54px;
+  border-right: 1px solid var(--overview-border);
+  border-bottom: 1px solid var(--overview-border);
+  padding: 10px 14px;
+  font-weight: 400;
+}
+
+.tableWrap th {
+  background: #fafafa;
+  color: #555e69;
+}
+
+.tableWrap th:last-child,
+.tableWrap td:last-child {
+  border-right: 0;
+}
+
+.tableWrap tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.tableWrap tbody tr:hover {
+  background: #f4f7fb;
+}
+
+.emptyTable {
+  height: 214px !important;
+  color: #8a929e;
+}
+
+@media (max-width: 1380px) {
+  .filterBar {
+    flex-wrap: wrap;
+  }
+
+  .cashierField {
+    margin-left: 0;
+  }
+
+  .summaryArea {
+    grid-template-columns: minmax(360px, 42%) minmax(0, 58%);
+  }
+
+  .paymentList {
+    padding-inline: 42px;
+  }
+
+  .adjustments {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+}
+
+@media (max-width: 980px) {
+  .page {
+    padding-inline: 20px;
+  }
+
+  .titleBar {
+    margin-inline: -20px;
+  }
+
+  .summaryArea {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .amountSummary {
+    border-right: 0;
+    border-bottom: 1px solid var(--overview-border);
+  }
+}
+
+@media (max-width: 620px) {
+  .page {
+    padding-inline: 12px;
+  }
+
+  .titleBar {
+    margin-inline: -12px;
+  }
+
+  .overviewPanel {
+    margin-top: 16px;
+    border-radius: 8px;
+  }
+
+  .filterBar {
+    align-items: stretch;
+    padding: 16px;
+  }
+
+  .filterTitle,
+  .quickDates,
+  .dateField,
+  .saveButton,
+  .cashierField {
+    width: 100%;
+  }
+
+  .quickDates button {
+    flex: 1;
+  }
+
+  .dateField,
+  .cashierField {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .dateInputWrap,
+  .cashierField select {
+    width: 100%;
+  }
+
+  .summaryArea {
+    min-height: 0;
+  }
+
+  .amountSummary {
+    grid-template-columns: minmax(0, 1fr);
+    grid-template-rows: auto auto auto;
+  }
+
+  .unsettledAmount {
+    min-height: 260px;
+    border-right: 0;
+    border-bottom: 1px solid var(--overview-border);
+  }
+
+  .channelAmounts,
+  .reconciliationTip {
+    grid-column: 1;
+  }
+
+  .reconciliationTip {
+    padding-inline: 20px;
+  }
+
+  .paymentSummary {
+    grid-template-rows: auto auto;
+  }
+
+  .paymentList {
+    padding: 32px 20px;
+  }
+
+  .paymentRow {
+    grid-template-columns: 100px minmax(0, 1fr);
+  }
+
+  .adjustments {
+    grid-template-columns: minmax(0, 1fr);
+    padding: 20px;
+  }
+
+  .reconciliationSection {
+    padding-inline: 16px;
+  }
+}

@@ -5,6 +5,7 @@ import {
   ArrowUpFromLine,
   BookOpen,
   Building2,
+  ChartColumn,
   CheckCircle2,
   CloudSun,
   Database,
@@ -23,6 +24,7 @@ import {
 import type { ReportCenterSection } from '../reportCenter/types'
 
 export type NavKey =
+  | 'business_overview'
   | 'overview'
   | 'runs'
   | 'delivery_logs'
@@ -53,7 +55,13 @@ export type NavItem = { key: NavKey; label: string; description: string; icon: R
 export type NavGroup = { label: string; items: NavItem[] }
 
 export const navGroups: NavGroup[] = [
-  { label: '基础信息', items: [{ key: 'store_info', label: '店铺信息', description: '店铺资料与坐标维护', icon: <Building2 aria-hidden="true" /> }] },
+  {
+    label: '基础信息',
+    items: [
+      { key: 'business_overview', label: '营业概况', description: '销售日结与门店对账', icon: <ChartColumn aria-hidden="true" /> },
+      { key: 'store_info', label: '店铺信息', description: '店铺资料与坐标维护', icon: <Building2 aria-hidden="true" /> },
+    ],
+  },
   {
     label: '运行监控',
     items: [
@@ -113,7 +121,7 @@ export const navGroups: NavGroup[] = [
 const navItems = navGroups.flatMap((group) => group.items)
 const compactWorkspaceKeys = new Set<NavKey>([
   'access_management', 'sources', 'receive', 'pull_records', 'backfill', 'youzan_distribution', 'rules', 'processed',
-  'methods', 'destinations', 'tasks', 'push_policy', 'overview', 'runs', 'delivery_logs', 'step_runs', 'store_info',
+  'methods', 'destinations', 'tasks', 'push_policy', 'overview', 'runs', 'delivery_logs', 'step_runs', 'business_overview', 'store_info',
   'mall_weather', 'report_catalog', 'report_configuration', 'report_query', 'report_exports', 'excel_jobs',
   'excel_schemes', 'excel_write',
 ])
@@ -166,7 +174,7 @@ function canViewNavigationItem(key: NavKey, permissions: readonly string[]) {
 
 function navPermission(key: NavKey) {
   const permissions: Partial<Record<NavKey, string>> = {
-    store_info: 'mall.read', mall_weather: 'weather.read', sources: 'source.read', receive: 'data.read', pull_records: 'data.read',
+    business_overview: 'mall.read', store_info: 'mall.read', mall_weather: 'weather.read', sources: 'source.read', receive: 'data.read', pull_records: 'data.read',
     backfill: 'data.manage', youzan_distribution: 'data.manage', rules: 'pipeline.read', processed: 'data.read', methods: 'pipeline.read',
     destinations: 'delivery.read', tasks: 'delivery.read', push_policy: 'delivery.read', runs: 'pipeline.read', step_runs: 'pipeline.read',
     delivery_logs: 'delivery.read', excel_jobs: 'excel.read', excel_schemes: 'excel.read', excel_write: 'excel.manage',

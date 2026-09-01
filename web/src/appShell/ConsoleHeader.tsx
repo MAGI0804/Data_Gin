@@ -18,6 +18,7 @@ interface ConsoleHeaderProps {
 }
 
 const titles: Record<NavKey, { title: string; subtitle: string }> = {
+  business_overview: { title: '营业概况', subtitle: '查看销售日结、收款构成与门店对账记录。' },
   overview: { title: '运行总览', subtitle: '只看当前运行与交付健康度，快速定位失败。' },
   runs: { title: '流水线运行', subtitle: '按状态、运行类型和 Trace ID 查询执行记录。' },
   delivery_logs: { title: '推送日志', subtitle: '按成功状态、门店和业务键查询外部交付结果。' },
@@ -88,6 +89,7 @@ export function ConsoleHeader({
 }
 
 function headerContext(activeNav: NavKey) {
+  if (activeNav === 'business_overview') return 'STORE OPERATIONS'
   if (activeNav === 'access_management') return 'ACCESS CONTROL'
   if (['sources', 'rules', 'destinations'].includes(activeNav)) return 'DATA CONFIGURATION'
   if (['overview', 'runs', 'delivery_logs', 'step_runs'].includes(activeNav)) return 'OPERATIONS'

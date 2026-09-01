@@ -3,6 +3,7 @@ import { AccessManagementPage } from '../AccessManagementPage'
 import { BojunBackfillPage } from '../backfillPages/BojunBackfillPage'
 import { YouzanDistributionPage } from '../backfillPages/YouzanDistributionPage'
 import type { LegacyTask } from '../backfillPages/youzanDistributionSupport'
+import { BusinessOverviewPage } from '../businessOverviewPages/BusinessOverviewPage'
 import { DeliveryTasksPage } from '../configurationPages/DeliveryTasksPage/DeliveryTasksPage'
 import { DestinationsPage } from '../configurationPages/DestinationsPage/DestinationsPage'
 import { MethodsPage } from '../configurationPages/MethodsPage/MethodsPage'
@@ -83,6 +84,7 @@ export function WorkspaceRouter(props: WorkspaceRouterProps) {
   const reportSection = reportCenterSection(activeNav)
   const canManageDelivery = permissions.includes('delivery.manage')
 
+  if (activeNav === 'business_overview') return <BusinessOverviewPage />
   if (activeNav === 'overview') return <RunOverviewPage runs={runs} deliveryLogs={deliveryLogs} monitoring={monitoring} stale={monitoringStale} overviewTotals={overviewTotals} onLoadSteps={onLoadSteps} />
   if (activeNav === 'runs') return <PipelineRunsPage client={client} pipelines={pipelines} onLoadSteps={onLoadSteps} onPipelineRunCompleted={() => void onRefresh()} refreshVersion={refreshVersion} />
   if (activeNav === 'delivery_logs') return <DeliveryLogsPage client={client} onRetryLog={onRetryDeliveryLog} />
