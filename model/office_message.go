@@ -30,6 +30,7 @@ type OfficeMessage struct {
 	ResultTableOwner    string    `gorm:"column:result_table_owner;size:128" json:"resultTableOwner"`
 	ResultTableName     string    `gorm:"column:result_table_name;size:128" json:"resultTableName"`
 	SelectSQL           string    `gorm:"column:select_sql;type:text" json:"selectSql"`
+	FileNameTemplate    string    `gorm:"column:file_name_template;size:255" json:"fileNameTemplate"`
 	ParameterSchemaJSON JSONText  `gorm:"column:parameter_schema_json;type:json" json:"parameters"`
 	ColumnMappingJSON   JSONText  `gorm:"column:column_mapping_json;type:json" json:"columnMapping"`
 	Enabled             bool      `gorm:"column:enabled;not null;default:true;index" json:"enabled"`

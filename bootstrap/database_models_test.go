@@ -40,11 +40,14 @@ func TestReportCenterMigrationModelsAreUnique(t *testing.T) {
 }
 
 func TestSchemaMigrationVersionIncludesBojunOracleModels(t *testing.T) {
-	if schemaMigrationVersion != "2026-09-01-office-message-bot-v17" {
+	if schemaMigrationVersion != "2026-09-01-office-message-file-v18" {
 		t.Fatalf("schemaMigrationVersion = %q", schemaMigrationVersion)
 	}
-	if previousSchemaMigrationVersion != "2026-09-01-office-message-compat-v16" {
+	if previousSchemaMigrationVersion != "2026-09-01-office-message-bot-v17" {
 		t.Fatalf("previousSchemaMigrationVersion = %q", previousSchemaMigrationVersion)
+	}
+	if officeMessageCompatMigrationVersion != "2026-09-01-office-message-compat-v16" {
+		t.Fatalf("officeMessageCompatMigrationVersion = %q", officeMessageCompatMigrationVersion)
 	}
 	if officeMessagePreviousMigrationVersion != "2026-09-01-office-message-v14" {
 		t.Fatalf("officeMessagePreviousMigrationVersion = %q", officeMessagePreviousMigrationVersion)
@@ -64,6 +67,12 @@ func TestOfficeMessagePreferredMigrationBaseline(t *testing.T) {
 		wantVersion     string
 		wantApplied     bool
 	}{
+		{
+			name:            "v17 direct upgrade",
+			appliedVersions: []string{"2026-09-01-office-message-bot-v17"},
+			wantVersion:     "2026-09-01-office-message-bot-v17",
+			wantApplied:     true,
+		},
 		{
 			name:            "v16 direct upgrade",
 			appliedVersions: []string{"2026-09-01-office-message-compat-v16"},
@@ -95,8 +104,9 @@ func TestOfficeMessagePreferredMigrationBaseline(t *testing.T) {
 				"2026-09-01-office-message-v14",
 				"2026-09-01-office-message-ha-v15",
 				"2026-09-01-office-message-compat-v16",
+				"2026-09-01-office-message-bot-v17",
 			},
-			wantVersion: "2026-09-01-office-message-compat-v16",
+			wantVersion: "2026-09-01-office-message-bot-v17",
 			wantApplied: true,
 		},
 		{

@@ -348,6 +348,10 @@ func (processor *OfficePushProcessor) exportWorkbook(ctx context.Context, messag
 	if err != nil {
 		return "", "", 0, err
 	}
+	fileName, err := renderOfficeWorkbookFileName(message.FileNameTemplate, message.Name, processor.now())
+	if err != nil {
+		return "", "", 0, err
+	}
 	procedureLockKey := ""
 	if message.SourceType == model.OfficeMessageSourceOracleProcedure {
 		procedureLockKey = officeProcedureLockKey(message)
@@ -399,7 +403,6 @@ func (processor *OfficePushProcessor) exportWorkbook(ctx context.Context, messag
 		return "", "", 0, fmt.Errorf("office push processor: create temporary directory: %w", err)
 	}
 	defer os.RemoveAll(tempDir)
-	fileName := officeWorkbookFileName(message.Name)
 	outputPath := filepath.Join(tempDir, fileName)
 	renderer := NewReportExportRenderer(pager)
 	renderer.maxSheets = 1

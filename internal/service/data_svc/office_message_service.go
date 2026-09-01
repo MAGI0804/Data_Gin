@@ -38,6 +38,7 @@ type OfficeMessageInput struct {
 	ResultTableOwner    string                 `json:"resultTableOwner"`
 	ResultTableName     string                 `json:"resultTableName"`
 	SelectSQL           string                 `json:"selectSql"`
+	FileNameTemplate    string                 `json:"fileNameTemplate"`
 	Parameters          []OfficeQueryParameter `json:"parameters"`
 	ColumnMapping       []OfficeColumnMapping  `json:"columnMapping"`
 	Enabled             *bool                  `json:"enabled"`
@@ -158,8 +159,9 @@ func (service *OfficeMessageService) UpdateMessage(ctx context.Context, actorID,
 		"procedure_owner": normalized.ProcedureOwner, "package_name": normalized.PackageName,
 		"procedure_name": normalized.ProcedureName, "procedure_overload": normalized.ProcedureOverload,
 		"result_table_owner": normalized.ResultTableOwner, "result_table_name": normalized.ResultTableName,
-		"select_sql": normalized.SelectSQL, "parameter_schema_json": normalized.ParameterSchemaJSON,
-		"column_mapping_json": normalized.ColumnMappingJSON, "enabled": normalized.Enabled,
+		"select_sql": normalized.SelectSQL, "file_name_template": normalized.FileNameTemplate,
+		"parameter_schema_json": normalized.ParameterSchemaJSON,
+		"column_mapping_json":   normalized.ColumnMappingJSON, "enabled": normalized.Enabled,
 		"updated_by": actorID, "lock_version": gorm.Expr("lock_version + 1"), "updated_at": service.now().UTC(),
 	}
 	result := service.db.WithContext(ctx).Model(&model.OfficeMessage{}).
@@ -480,6 +482,10 @@ func normalizeOfficeMessageInput(input OfficeMessageInput) (model.OfficeMessage,
 		}
 		message.ProcedureOwner, message.PackageName, message.ProcedureName, message.ProcedureOverload = procedure.Owner, procedure.Package, procedure.Name, procedure.Overload
 		message.ResultTableOwner, message.ResultTableName = table.Owner, table.Name
+		message.FileNameTemplate, err = normalizeOfficeWorkbookFileNameTemplate(input.FileNameTemplate, input.Name)
+		if err != nil {
+			return model.OfficeMessage{}, fmt.Errorf("%w: %v", ErrOfficeMessageInvalid, err)
+		}
 		message.ParameterSchemaJSON, message.ColumnMappingJSON = model.JSONText("[]"), mappingJSON
 	case model.OfficeMessageSourceOracleQuery:
 		message.SelectSQL = strings.TrimSpace(input.SelectSQL)
@@ -499,6 +505,10 @@ func normalizeOfficeMessageInput(input OfficeMessageInput) (model.OfficeMessage,
 			return model.OfficeMessage{}, fmt.Errorf("%w: %v", ErrOfficeMessageInvalid, err)
 		}
 		message.ParameterSchemaJSON, message.ColumnMappingJSON = canonicalParameters, mappingJSON
+		message.FileNameTemplate, err = normalizeOfficeWorkbookFileNameTemplate(input.FileNameTemplate, input.Name)
+		if err != nil {
+			return model.OfficeMessage{}, fmt.Errorf("%w: %v", ErrOfficeMessageInvalid, err)
+		}
 	default:
 		return model.OfficeMessage{}, fmt.Errorf("%w: message source type is unsupported", ErrOfficeMessageInvalid)
 	}

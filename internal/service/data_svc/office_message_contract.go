@@ -26,9 +26,11 @@ const (
 )
 
 var (
-	officeIdentifierPattern = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_$#]{0,127}$`)
-	officeParameterPattern  = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_]{0,63}$`)
-	officeDecimalPattern    = regexp.MustCompile(`^[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)$`)
+	officeIdentifierPattern        = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_$#]{0,127}$`)
+	officeParameterPattern         = regexp.MustCompile(`^[A-Za-z][A-Za-z0-9_]{0,63}$`)
+	officeDecimalPattern           = regexp.MustCompile(`^[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)$`)
+	officeFileNameDateTokenPattern = regexp.MustCompile(`\{\{date(?::(yyyyMMdd|yyyy-MM-dd))?\}\}`)
+	officeShanghaiLocation         = time.FixedZone("Asia/Shanghai", 8*60*60)
 )
 
 type OfficeColumnMapping struct {
@@ -70,6 +72,7 @@ type officePushMessageSnapshot struct {
 	ResultTableOwner    string          `json:"resultTableOwner"`
 	ResultTableName     string          `json:"resultTableName"`
 	SelectSQL           string          `json:"selectSql"`
+	FileNameTemplate    string          `json:"fileNameTemplate,omitempty"`
 	ParameterSchemaJSON json.RawMessage `json:"parameters"`
 	ColumnMappingJSON   json.RawMessage `json:"columnMapping"`
 }
@@ -81,7 +84,8 @@ func newOfficePushSnapshot(target model.OfficePushTarget, message model.OfficeMe
 			ID: message.ID, Name: message.Name, SourceType: message.SourceType, Content: message.Content,
 			ProcedureOwner: message.ProcedureOwner, PackageName: message.PackageName, ProcedureName: message.ProcedureName,
 			ProcedureOverload: message.ProcedureOverload, ResultTableOwner: message.ResultTableOwner, ResultTableName: message.ResultTableName,
-			SelectSQL: message.SelectSQL, ParameterSchemaJSON: json.RawMessage(message.ParameterSchemaJSON), ColumnMappingJSON: json.RawMessage(message.ColumnMappingJSON),
+			SelectSQL: message.SelectSQL, FileNameTemplate: message.FileNameTemplate,
+			ParameterSchemaJSON: json.RawMessage(message.ParameterSchemaJSON), ColumnMappingJSON: json.RawMessage(message.ColumnMappingJSON),
 		},
 	}
 	encoded, err := json.Marshal(snapshot)
@@ -112,8 +116,51 @@ func (snapshot officePushSnapshot) messageModel() model.OfficeMessage {
 		BaseModel: model.BaseModel{ID: message.ID}, Name: message.Name, SourceType: message.SourceType, Content: message.Content,
 		ProcedureOwner: message.ProcedureOwner, PackageName: message.PackageName, ProcedureName: message.ProcedureName,
 		ProcedureOverload: message.ProcedureOverload, ResultTableOwner: message.ResultTableOwner, ResultTableName: message.ResultTableName,
-		SelectSQL: message.SelectSQL, ParameterSchemaJSON: model.JSONText(message.ParameterSchemaJSON), ColumnMappingJSON: model.JSONText(message.ColumnMappingJSON),
+		SelectSQL: message.SelectSQL, FileNameTemplate: message.FileNameTemplate,
+		ParameterSchemaJSON: model.JSONText(message.ParameterSchemaJSON), ColumnMappingJSON: model.JSONText(message.ColumnMappingJSON),
 	}
+}
+
+func normalizeOfficeWorkbookFileNameTemplate(value, messageName string) (string, error) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		value = officeWorkbookFileName(messageName)
+	}
+	if err := validateOfficeWorkbookFileNameTemplate(value); err != nil {
+		return "", err
+	}
+	return value, nil
+}
+
+func validateOfficeWorkbookFileNameTemplate(value string) error {
+	if value == "" || len([]rune(value)) > 255 || strings.TrimSpace(value) != value ||
+		strings.ContainsAny(value, "/\\\x00\r\n") || !strings.HasSuffix(strings.ToLower(value), ".xlsx") {
+		return fmt.Errorf("office message file name: invalid template")
+	}
+	remaining := officeFileNameDateTokenPattern.ReplaceAllString(value, "")
+	if strings.Contains(remaining, "{{") || strings.Contains(remaining, "}}") {
+		return fmt.Errorf("office message file name: invalid template")
+	}
+	return nil
+}
+
+func renderOfficeWorkbookFileName(template, messageName string, now time.Time) (string, error) {
+	template, err := normalizeOfficeWorkbookFileNameTemplate(template, messageName)
+	if err != nil || now.IsZero() {
+		return "", fmt.Errorf("office message file name: invalid render context")
+	}
+	rendered := officeFileNameDateTokenPattern.ReplaceAllStringFunc(template, func(token string) string {
+		format := officeFileNameDateTokenPattern.FindStringSubmatch(token)[1]
+		layout := "20060102"
+		if format == "yyyy-MM-dd" {
+			layout = "2006-01-02"
+		}
+		return now.In(officeShanghaiLocation).Format(layout)
+	})
+	if err := validateOfficeWorkbookFileNameTemplate(rendered); err != nil {
+		return "", fmt.Errorf("office message file name: invalid rendered name")
+	}
+	return rendered, nil
 }
 
 func normalizeOfficeColumnMappings(raw model.JSONText, sourceType string) ([]OfficeColumnMapping, model.JSONText, error) {

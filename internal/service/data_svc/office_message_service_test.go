@@ -15,8 +15,9 @@ func TestNormalizeOfficeMessageInputQuery(t *testing.T) {
 	enabled := true
 	message, err := normalizeOfficeMessageInput(OfficeMessageInput{
 		Name: "销售日报", SourceType: model.OfficeMessageSourceOracleQuery,
-		SelectSQL:  "SELECT ORDER_NO, AMOUNT FROM SALES WHERE BILL_DATE = :bill_date",
-		Parameters: []OfficeQueryParameter{{Code: "bill_date", Label: "业务日期", ValueType: "date", Format: "yyyyMMdd", Required: true}},
+		FileNameTemplate: "销售日报_{{date:yyyyMMdd}}.xlsx",
+		SelectSQL:        "SELECT ORDER_NO, AMOUNT FROM SALES WHERE BILL_DATE = :bill_date",
+		Parameters:       []OfficeQueryParameter{{Code: "bill_date", Label: "业务日期", ValueType: "date", Format: "yyyyMMdd", Required: true}},
 		ColumnMapping: []OfficeColumnMapping{
 			{SourceColumn: "ORDER_NO", Header: "单号", ValueType: "string", Order: 1, Width: 20},
 			{SourceColumn: "AMOUNT", Header: "金额", ValueType: "decimal", Order: 2, Width: 16},
@@ -25,7 +26,8 @@ func TestNormalizeOfficeMessageInputQuery(t *testing.T) {
 	if err != nil {
 		t.Fatalf("normalizeOfficeMessageInput() error = %v", err)
 	}
-	if message.SourceType != model.OfficeMessageSourceOracleQuery || message.SelectSQL == "" || string(message.ParameterSchemaJSON) == "[]" {
+	if message.SourceType != model.OfficeMessageSourceOracleQuery || message.SelectSQL == "" || string(message.ParameterSchemaJSON) == "[]" ||
+		message.FileNameTemplate != "销售日报_{{date:yyyyMMdd}}.xlsx" {
 		t.Fatalf("message = %#v", message)
 	}
 }
@@ -94,6 +96,7 @@ func TestOfficePushSnapshotFreezesReceiverAndMessage(t *testing.T) {
 	message := model.OfficeMessage{
 		BaseModel: model.BaseModel{ID: 7}, Name: "销售日报", SourceType: model.OfficeMessageSourceOracleQuery,
 		SelectSQL:           "SELECT ORDER_NO FROM SALES WHERE BILL_DATE = :bill_date",
+		FileNameTemplate:    "销售日报_{{date:yyyyMMdd}}.xlsx",
 		ParameterSchemaJSON: model.JSONText(`[{"code":"bill_date","label":"业务日期","valueType":"date","format":"yyyyMMdd","required":true}]`),
 		ColumnMappingJSON:   model.JSONText(`[{"sourceColumn":"ORDER_NO","header":"单号","valueType":"string","order":0,"width":18}]`),
 	}
@@ -101,12 +104,13 @@ func TestOfficePushSnapshotFreezesReceiverAndMessage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newOfficePushSnapshot() error = %v", err)
 	}
-	target.BotAppID, target.ReceiveID, message.SelectSQL = "cli_changed", "oc_changed", "SELECT 1 FROM DUAL"
+	target.BotAppID, target.ReceiveID, message.SelectSQL, message.FileNameTemplate = "cli_changed", "oc_changed", "SELECT 1 FROM DUAL", "changed.xlsx"
 	snapshot, err := decodeOfficePushSnapshot(raw)
 	if err != nil {
 		t.Fatalf("decodeOfficePushSnapshot() error = %v", err)
 	}
-	if snapshot.targetModel().BotAppID != "cli_original" || snapshot.targetModel().ReceiveID != "oc_original" || snapshot.messageModel().SelectSQL == message.SelectSQL {
+	if snapshot.targetModel().BotAppID != "cli_original" || snapshot.targetModel().ReceiveID != "oc_original" ||
+		snapshot.messageModel().SelectSQL == message.SelectSQL || snapshot.messageModel().FileNameTemplate == message.FileNameTemplate {
 		t.Fatalf("snapshot = %#v", snapshot)
 	}
 }

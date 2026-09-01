@@ -168,3 +168,33 @@ func TestOfficePushBotMatchesConfiguredAndLegacyTargets(t *testing.T) {
 		})
 	}
 }
+
+func TestRenderOfficeWorkbookFileNameUsesShanghaiDate(t *testing.T) {
+	name, err := renderOfficeWorkbookFileName(
+		"销售日报_{{date:yyyyMMdd}}.xlsx",
+		"销售日报",
+		time.Date(2026, 8, 31, 16, 30, 0, 0, time.UTC),
+	)
+	if err != nil || name != "销售日报_20260901.xlsx" {
+		t.Fatalf("renderOfficeWorkbookFileName() = %q, %v", name, err)
+	}
+	name, err = renderOfficeWorkbookFileName("销售日报_{{date:yyyy-MM-dd}}.xlsx", "销售日报", time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC))
+	if err != nil || name != "销售日报_2026-09-01.xlsx" {
+		t.Fatalf("renderOfficeWorkbookFileName() = %q, %v", name, err)
+	}
+}
+
+func TestRenderOfficeWorkbookFileNameSupportsLegacyFallback(t *testing.T) {
+	name, err := renderOfficeWorkbookFileName("", "线下/销售", time.Date(2026, 9, 1, 0, 0, 0, 0, time.UTC))
+	if err != nil || name != "线下-销售.xlsx" {
+		t.Fatalf("renderOfficeWorkbookFileName() = %q, %v", name, err)
+	}
+}
+
+func TestNormalizeOfficeWorkbookFileNameTemplateRejectsUnsafeValues(t *testing.T) {
+	for _, value := range []string{"../secret.xlsx", "sales.csv", "sales_{{unknown}}.xlsx", "sales_{{date:yyyy/MM/dd}}.xlsx"} {
+		if _, err := normalizeOfficeWorkbookFileNameTemplate(value, "销售日报"); err == nil {
+			t.Fatalf("normalizeOfficeWorkbookFileNameTemplate(%q) accepted invalid value", value)
+		}
+	}
+}
