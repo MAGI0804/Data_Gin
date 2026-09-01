@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import { BadgeDollarSign, CalendarDays, Maximize2, Minimize2, Save } from 'lucide-react'
+import { CalendarDays, Maximize2, Minimize2, Save } from 'lucide-react'
 import {
   emptyBusinessSummary,
   businessOverviewPaymentsPath,
@@ -265,8 +265,8 @@ export function BusinessOverviewPage({ client }: { client: WorkspaceApiClient })
               <div><span>云仓： </span><strong>{formatAmount(summary.cloudAmount)}（元）</strong></div>
             </div>
             <div className={styles.reconciliationTip}>
-              <span className={styles.tipIcon}><BadgeDollarSign aria-hidden="true" /></span>
-              <p>亲，日结时请核对收款金额<br />是否正确哦～</p>
+              <span className={styles.tipIcon}><img src="/business-overview-reconciliation-tip.png" alt="" /></span>
+              <p><span>亲，日结时请核对收款金额</span><br />是否正确哦～</p>
             </div>
           </div>
 
