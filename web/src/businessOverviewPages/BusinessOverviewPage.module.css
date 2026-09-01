@@ -332,6 +332,7 @@
   grid-column: 1 / -1;
   gap: 12px;
   align-items: center;
+  justify-content: center;
   border-top: 1px solid var(--overview-border);
   padding: 22px 20px;
 }
