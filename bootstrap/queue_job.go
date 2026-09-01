@@ -53,6 +53,8 @@ func setupQueueJob() {
 	mux.Use(jobLoggingMiddleware)
 
 	addQueueJob(mux)
+	officePushProcessor := data_svc.NewOfficePushProcessor()
+	mux.HandleFunc(job.TypeOfficePush, newOfficePushHandler(officePushProcessor))
 	if reportWorkerEnabled {
 		reportProcessor := data_svc.NewReportRunProcessor()
 		mux.HandleFunc(job.TypeReportRun, newReportRunHandler(reportProcessor))
@@ -160,6 +162,29 @@ type reportExportCleaner interface {
 
 type reportResultCleaner interface {
 	Cleanup(context.Context) (data_svc.ReportResultCleanupResult, error)
+}
+
+type officePushProcessor interface {
+	Process(context.Context, uint, bool) error
+}
+
+func newOfficePushHandler(processor officePushProcessor) asynq.HandlerFunc {
+	return func(ctx context.Context, task *asynq.Task) error {
+		if processor == nil || task == nil || task.Type() != job.TypeOfficePush {
+			return fmt.Errorf("%w: invalid office push task", asynq.SkipRetry)
+		}
+		payload, err := job.DecodeOfficePushTaskPayload(task.Payload())
+		if err != nil {
+			return fmt.Errorf("%w: %v", asynq.SkipRetry, err)
+		}
+		if err := processor.Process(ctx, payload.RunID, mallWeatherExportRetryAllowed(ctx)); err != nil {
+			if errors.Is(err, data_svc.ErrOfficePushProcessNonRetryable) {
+				return fmt.Errorf("%w: %v", asynq.SkipRetry, err)
+			}
+			return err
+		}
+		return nil
+	}
 }
 
 func reportWorkerQueues(configured map[string]int, enabled bool, weight int) map[string]int {

@@ -3,8 +3,9 @@ package model
 import "time"
 
 const (
-	OfficeMessageSourceEdited = "EDITED"
-	OfficeMessageSourceOracle = "ORACLE"
+	OfficeMessageSourceEdited          = "EDITED"
+	OfficeMessageSourceOracleProcedure = "ORACLE_PROCEDURE"
+	OfficeMessageSourceOracleQuery     = "ORACLE_QUERY"
 
 	OfficePushChannelFeishu = "FEISHU"
 
@@ -19,22 +20,24 @@ const (
 // table that is exported when a push starts.
 type OfficeMessage struct {
 	BaseModel
-	Name              string    `gorm:"column:name;size:128;not null;index" json:"name"`
-	SourceType        string    `gorm:"column:source_type;size:16;not null;index" json:"sourceType"`
-	Content           string    `gorm:"column:content;type:text" json:"content"`
-	ProcedureOwner    string    `gorm:"column:procedure_owner;size:128" json:"procedureOwner"`
-	PackageName       string    `gorm:"column:package_name;size:128" json:"packageName"`
-	ProcedureName     string    `gorm:"column:procedure_name;size:128" json:"procedureName"`
-	ProcedureOverload string    `gorm:"column:procedure_overload;size:32" json:"procedureOverload"`
-	ResultTableOwner  string    `gorm:"column:result_table_owner;size:128" json:"resultTableOwner"`
-	ResultTableName   string    `gorm:"column:result_table_name;size:128" json:"resultTableName"`
-	ColumnMappingJSON JSONText  `gorm:"column:column_mapping_json;type:json" json:"columnMapping"`
-	Enabled           bool      `gorm:"column:enabled;not null;default:true;index" json:"enabled"`
-	LockVersion       uint64    `gorm:"column:lock_version;not null;default:1" json:"lockVersion"`
-	CreatedBy         uint      `gorm:"column:created_by;not null;index" json:"createdBy"`
-	UpdatedBy         uint      `gorm:"column:updated_by;not null" json:"updatedBy"`
-	CreatedAt         time.Time `gorm:"column:created_at;type:datetime(3);not null;autoCreateTime" json:"createdAt"`
-	UpdatedAt         time.Time `gorm:"column:updated_at;type:datetime(3);not null;autoUpdateTime" json:"updatedAt"`
+	Name                string    `gorm:"column:name;size:128;not null;index" json:"name"`
+	SourceType          string    `gorm:"column:source_type;size:16;not null;index" json:"sourceType"`
+	Content             string    `gorm:"column:content;type:text" json:"content"`
+	ProcedureOwner      string    `gorm:"column:procedure_owner;size:128" json:"procedureOwner"`
+	PackageName         string    `gorm:"column:package_name;size:128" json:"packageName"`
+	ProcedureName       string    `gorm:"column:procedure_name;size:128" json:"procedureName"`
+	ProcedureOverload   string    `gorm:"column:procedure_overload;size:32" json:"procedureOverload"`
+	ResultTableOwner    string    `gorm:"column:result_table_owner;size:128" json:"resultTableOwner"`
+	ResultTableName     string    `gorm:"column:result_table_name;size:128" json:"resultTableName"`
+	SelectSQL           string    `gorm:"column:select_sql;type:text" json:"selectSql"`
+	ParameterSchemaJSON JSONText  `gorm:"column:parameter_schema_json;type:json" json:"parameters"`
+	ColumnMappingJSON   JSONText  `gorm:"column:column_mapping_json;type:json" json:"columnMapping"`
+	Enabled             bool      `gorm:"column:enabled;not null;default:true;index" json:"enabled"`
+	LockVersion         uint64    `gorm:"column:lock_version;not null;default:1" json:"lockVersion"`
+	CreatedBy           uint      `gorm:"column:created_by;not null;index" json:"createdBy"`
+	UpdatedBy           uint      `gorm:"column:updated_by;not null" json:"updatedBy"`
+	CreatedAt           time.Time `gorm:"column:created_at;type:datetime(3);not null;autoCreateTime" json:"createdAt"`
+	UpdatedAt           time.Time `gorm:"column:updated_at;type:datetime(3);not null;autoUpdateTime" json:"updatedAt"`
 }
 
 func (OfficeMessage) TableName() string { return "office_messages" }
@@ -71,6 +74,7 @@ type OfficePushRun struct {
 	ErrorCode        string     `gorm:"column:error_code;size:64" json:"errorCode,omitempty"`
 	ErrorMessageSafe string     `gorm:"column:error_message_safe;size:500" json:"errorMessage,omitempty"`
 	RequestedBy      uint       `gorm:"column:requested_by;not null;index" json:"requestedBy"`
+	ParametersJSON   JSONText   `gorm:"column:parameters_json;type:json" json:"-"`
 	StartedAt        *time.Time `gorm:"column:started_at;type:datetime(3)" json:"startedAt,omitempty"`
 	FinishedAt       *time.Time `gorm:"column:finished_at;type:datetime(3)" json:"finishedAt,omitempty"`
 	CreatedAt        time.Time  `gorm:"column:created_at;type:datetime(3);not null;autoCreateTime;index" json:"createdAt"`

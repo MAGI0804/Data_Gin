@@ -47,6 +47,7 @@ func startOutboxDispatcher(reportWorkerEnabled bool) {
 		maxAttempts = 1
 	}
 	definitions := make([]job.OutboxTaskDefinition, 0)
+	definitions = append(definitions, job.OfficePushOutboxTaskDefinitions()...)
 	if reportWorkerEnabled {
 		definitions = append(definitions, job.ReportOutboxTaskDefinitions(job.ReportRunMaxRetry)...)
 		definitions = append(definitions, job.ReportExportOutboxTaskDefinitions(job.ReportRunMaxRetry)...)
