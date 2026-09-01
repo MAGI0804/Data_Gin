@@ -1,6 +1,10 @@
 package model
 
-import "testing"
+import (
+	"encoding/json"
+	"strings"
+	"testing"
+)
 
 func TestOfficeMessageTableNames(t *testing.T) {
 	tests := []struct {
@@ -18,5 +22,15 @@ func TestOfficeMessageTableNames(t *testing.T) {
 				t.Fatalf("TableName() = %q, want %q", test.got, test.want)
 			}
 		})
+	}
+}
+
+func TestOfficePushRunDoesNotMarshalQueryParameters(t *testing.T) {
+	encoded, err := json.Marshal(OfficePushRun{ParametersJSON: JSONText(`{"bill_date":"20260901","secret":"private"}`)})
+	if err != nil {
+		t.Fatalf("Marshal() error = %v", err)
+	}
+	if strings.Contains(string(encoded), "20260901") || strings.Contains(string(encoded), "private") {
+		t.Fatalf("OfficePushRun leaked query parameters: %s", encoded)
 	}
 }

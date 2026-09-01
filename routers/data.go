@@ -23,6 +23,7 @@ func apiData(api *gin.RouterGroup) {
 	registerMallWeatherCapacityPlanRoutes(api, data_ctrl.NewMallWeatherCapacityPlanController())
 	registerMallWeatherMetricsRoutes(api, data_ctrl.NewMallWeatherMetricsController())
 	registerReportCenterRoutes(api, global.ReportCenterEnabledAtStartup)
+	registerOfficeMessageRoutes(api, data_ctrl.NewOfficeMessageController())
 
 	sourceGroup := api.Group("/v1/sources")
 	sourceGroup.Use(middleware.AuthJWT())
@@ -214,6 +215,32 @@ func apiData(api *gin.RouterGroup) {
 		dataGroup.GET("/clean-records/list", middleware.RequirePermission(model.PermissionDataRead), dataCtrl.QueryController.GetCleanRecordList)
 		dataGroup.GET("/statistics", middleware.RequirePermission(model.PermissionDataRead), dataCtrl.QueryController.GetStatistics)
 	}
+}
+
+func registerOfficeMessageRoutes(api *gin.RouterGroup, controller *data_ctrl.OfficeMessageController) {
+	messages := api.Group("/v1/office-messages")
+	messages.Use(middleware.AuthJWT())
+	messages.GET("", middleware.RequirePermission(model.PermissionOfficeMessageRead), controller.ListMessages)
+	messages.POST("", middleware.RequirePermission(model.PermissionOfficeMessageManage), controller.CreateMessage)
+	messages.PUT("/:id", middleware.RequirePermission(model.PermissionOfficeMessageManage), controller.UpdateMessage)
+	messages.DELETE("/:id", middleware.RequirePermission(model.PermissionOfficeMessageManage), controller.DeleteMessage)
+
+	targets := api.Group("/v1/office-push-targets")
+	targets.Use(middleware.AuthJWT())
+	targets.GET("", middleware.RequirePermission(model.PermissionOfficeMessageRead), controller.ListTargets)
+	targets.POST("", middleware.RequirePermission(model.PermissionOfficeMessageManage), controller.CreateTarget)
+	targets.PUT("/:id", middleware.RequirePermission(model.PermissionOfficeMessageManage), controller.UpdateTarget)
+	targets.DELETE("/:id", middleware.RequirePermission(model.PermissionOfficeMessageManage), controller.DeleteTarget)
+	targets.POST("/:id/runs", middleware.RequirePermission(model.PermissionOfficeMessagePush), middleware.LimitRoute("30-M"), controller.CreateRun)
+
+	api.GET("/v1/office-push-runs", middleware.AuthJWT(), middleware.RequirePermission(model.PermissionOfficeMessageRead), controller.ListRuns)
+	oracle := api.Group("/v1/office-oracle")
+	oracle.Use(middleware.AuthJWT(), middleware.RequirePermission(model.PermissionOfficeMessageManage), middleware.LimitRoute("120-M"))
+	oracle.GET("/procedures", controller.ListProcedures)
+	oracle.GET("/procedure-signature", controller.ProcedureSignature)
+	oracle.GET("/result-tables", controller.ListResultTables)
+	oracle.GET("/result-table-schema", controller.ResultTableSchema)
+	oracle.POST("/select-tests", controller.TestSelect)
 }
 
 func registerReportCenterRoutes(api *gin.RouterGroup, enabled bool) {
