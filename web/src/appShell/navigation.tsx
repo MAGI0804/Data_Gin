@@ -22,7 +22,7 @@ import {
   Wrench,
 } from 'lucide-react'
 import type { ReportCenterSection } from '../reportCenter/types'
-import { canViewNavigationItem } from './navigationPermissions'
+import { canViewNavigationItem, resolveAccessibleNavigationItem } from './navigationPermissions'
 
 export type NavKey =
   | 'business_overview'
@@ -129,6 +129,7 @@ export const navGroups: NavGroup[] = [
 ]
 
 const navItems = navGroups.flatMap((group) => group.items)
+const navKeys = navItems.map((item) => item.key)
 const compactWorkspaceKeys = new Set<NavKey>([
   'access_management', 'sources', 'receive', 'pull_records', 'backfill', 'youzan_distribution', 'rules', 'processed',
   'methods', 'destinations', 'tasks', 'push_policy', 'overview', 'runs', 'delivery_logs', 'step_runs', 'business_overview', 'store_info',
@@ -144,6 +145,10 @@ export function navGroupFor(key: NavKey) {
 export function navFromHash(hash = window.location.hash): NavKey {
   const value = hash.replace(/^#\/?/, '') as NavKey
   return navItems.some((item) => item.key === value) ? value : 'overview'
+}
+
+export function accessibleNavFromHash(permissions: readonly string[], hash = window.location.hash): NavKey | null {
+  return resolveAccessibleNavigationItem(navFromHash(hash), navKeys, permissions)
 }
 
 export function visibleNavigationGroups(permissions: readonly string[]) {

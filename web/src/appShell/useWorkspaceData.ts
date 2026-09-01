@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type Dispatch, type SetStateAction } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, type Dispatch, type SetStateAction } from 'react'
 import type { ClientResponse } from '../api/client'
 import type { LegacyTask } from '../backfillPages/youzanDistributionSupport'
 import type { TransformRule } from '../configurationPages/ruleContracts'
@@ -11,32 +11,50 @@ import { pipelineListPath } from '../pipelineRun'
 import type { NavKey } from './navigation'
 import type { ConsoleSessionState } from './useConsoleSession'
 import type { MonitoringSnapshot, PipelineDefinition, WorkspaceApiClient } from './WorkspaceRouter'
+import { canViewNavigationItem } from './navigationPermissions'
+import { canCommitOverviewResponse, overviewRequestPlan, restrictOverviewData, type OverviewDataState } from './overviewWorkspacePolicy'
+
+type WorkspaceOverviewData = OverviewDataState<
+  PipelineRun,
+  DeliveryLog,
+  MonitoringSnapshot['statistics'],
+  MonitoringSnapshot['weather'],
+  MonitoringSnapshot['health']
+>
+
+function emptyOverviewData(): WorkspaceOverviewData {
+  return {
+    runs: [],
+    deliveryLogs: [],
+    overviewTotals: { runs: null, deliveryLogs: null },
+    monitoring: { statistics: null, weather: null, health: null },
+  }
+}
 
 export function useWorkspaceData(
   activeNav: NavKey,
   client: WorkspaceApiClient,
   token: string,
   sessionState: ConsoleSessionState,
+  permissions: readonly string[],
   setResult: Dispatch<SetStateAction<ClientResponse | null>>,
 ) {
   const [refreshing, setRefreshing] = useState(false)
   const [refreshVersion, setRefreshVersion] = useState(0)
   const [workspaceError, setWorkspaceError] = useState('')
-  const [runs, setRuns] = useState<PipelineRun[]>([])
+  const [overviewData, setOverviewData] = useState<WorkspaceOverviewData>(emptyOverviewData)
   const [stepRunFocusID, setStepRunFocusID] = useState<number | null>(null)
   const requestRef = useRef<AbortController | null>(null)
+  const monitoringRequestRef = useRef<AbortController | null>(null)
   const [pipelines, setPipelines] = useState<PipelineDefinition[]>([])
   const [sources, setSources] = useState<SourceDefinition[]>([])
   const [transformRules, setTransformRules] = useState<TransformRule[]>([])
   const [destinations, setDestinations] = useState<DestinationDefinition[]>([])
-  const [deliveryLogs, setDeliveryLogs] = useState<DeliveryLog[]>([])
-  const [overviewTotals, setOverviewTotals] = useState({ runs: null as number | null, deliveryLogs: null as number | null })
-  const [monitoring, setMonitoring] = useState<MonitoringSnapshot>({ statistics: null, weather: null, health: null })
   const [monitoringStale, setMonitoringStale] = useState(false)
   const [legacyTasks, setLegacyTasks] = useState<LegacyTask[]>([])
 
   const refresh = useCallback(async (showResult = false) => {
-    if (!token) return
+    if (!token || !canViewNavigationItem(activeNav, permissions)) return
     requestRef.current?.abort()
     const controller = new AbortController()
     requestRef.current = controller
@@ -45,34 +63,43 @@ export function useWorkspaceData(
     try {
       const get = (path: string) => client(path, { method: 'GET', signal: controller.signal, showResult: false, silentLoading: true })
       if (activeNav === 'overview') {
-        const startTime = monitoringDayStartTime()
+        const plan = overviewRequestPlan(permissions, monitoringDayStartTime())
         const [runResult, logResult] = await Promise.all([
-          get(`/v1/runs?page=1&page_size=100&start_time=${encodeURIComponent(startTime)}`),
-          get(`/v1/delivery-logs?page=1&page_size=100&start_time=${encodeURIComponent(startTime)}`),
+          plan.runs ? get(plan.runs) : null,
+          plan.deliveryLogs ? get(plan.deliveryLogs) : null,
         ])
-        if (!controller.signal.aborted) {
-          const runPage = runResult.ok ? parseMonitoringPage<unknown>(runResult.data, 'runs') : null
+        if (canCommitOverviewResponse(controller.signal)) {
+          const runPage = runResult?.ok ? parseMonitoringPage<unknown>(runResult.data, 'runs') : null
           const parsedRuns = runPage?.list.map(parsePipelineRun) ?? []
           if (runPage && parsedRuns.every((run): run is PipelineRun => run !== null)) {
-            setRuns(parsedRuns)
-            setOverviewTotals((current) => ({ ...current, runs: runPage.pagination.total }))
-          } else if (runResult.ok) {
-            setRuns(readList<PipelineRun>(runResult, 'runs'))
-            setOverviewTotals((current) => ({ ...current, runs: null }))
+            setOverviewData((current) => ({
+              ...current,
+              runs: parsedRuns,
+              overviewTotals: { ...current.overviewTotals, runs: runPage.pagination.total },
+            }))
+          } else if (runResult?.ok) {
+            setOverviewData((current) => ({
+              ...current,
+              runs: readList<PipelineRun>(runResult, 'runs'),
+              overviewTotals: { ...current.overviewTotals, runs: null },
+            }))
           }
-          const logPage = logResult.ok ? parseMonitoringPage<unknown>(logResult.data, 'logs') : null
+          const logPage = logResult?.ok ? parseMonitoringPage<unknown>(logResult.data, 'logs') : null
           const parsedLogs = logPage?.list.map(parseDeliveryLog) ?? []
           if (logPage && parsedLogs.every((log): log is DeliveryLog => log !== null)) {
-            setDeliveryLogs(parsedLogs)
-            setOverviewTotals((current) => ({ ...current, deliveryLogs: logPage.pagination.total }))
-          } else if (logResult.ok) {
-            setDeliveryLogs(readList<DeliveryLog>(logResult, 'logs'))
-            setOverviewTotals((current) => ({ ...current, deliveryLogs: null }))
+            setOverviewData((current) => ({
+              ...current,
+              deliveryLogs: parsedLogs,
+              overviewTotals: { ...current.overviewTotals, deliveryLogs: logPage.pagination.total },
+            }))
+          } else if (logResult?.ok) {
+            setOverviewData((current) => ({
+              ...current,
+              deliveryLogs: readList<DeliveryLog>(logResult, 'logs'),
+              overviewTotals: { ...current.overviewTotals, deliveryLogs: null },
+            }))
           }
         }
-      } else if (activeNav === 'step_runs') {
-        const response = await get('/v1/runs?limit=50')
-        if (!controller.signal.aborted && response.ok) setRuns(readList<PipelineRun>(response, 'runs'))
       } else if (activeNav === 'runs') {
         const response = await get(pipelineListPath())
         if (!controller.signal.aborted) {
@@ -106,7 +133,28 @@ export function useWorkspaceData(
         if (!controller.signal.aborted) setRefreshVersion((version) => version + 1)
       }
     }
-  }, [activeNav, client, setResult, token])
+  }, [activeNav, client, permissions, setResult, token])
+
+  useLayoutEffect(() => {
+    requestRef.current?.abort()
+    monitoringRequestRef.current?.abort()
+    setOverviewData(emptyOverviewData())
+    setStepRunFocusID(null)
+    setPipelines([])
+    setSources([])
+    setTransformRules([])
+    setDestinations([])
+    setMonitoringStale(false)
+    setLegacyTasks([])
+    setWorkspaceError('')
+  }, [token])
+
+  useLayoutEffect(() => {
+    requestRef.current?.abort()
+    monitoringRequestRef.current?.abort()
+    setOverviewData((current) => restrictOverviewData(current, permissions, activeNav === 'overview'))
+    setMonitoringStale(false)
+  }, [activeNav, permissions])
 
   useEffect(() => {
     if (sessionState === 'authenticated') void refresh(false)
@@ -116,24 +164,36 @@ export function useWorkspaceData(
   useEffect(() => {
     if (sessionState !== 'authenticated' || activeNav !== 'overview') return
     const controller = new AbortController()
+    monitoringRequestRef.current = controller
+    const plan = overviewRequestPlan(permissions, monitoringDayStartTime())
     void Promise.all([
-      client('/v1/data/statistics', { method: 'GET', signal: controller.signal, showResult: false, silentLoading: true }),
-      client('/v1/mall-weather/metrics', { method: 'GET', signal: controller.signal, showResult: false, silentLoading: true }),
-      client('/health', { method: 'GET', signal: controller.signal, showResult: false, silentLoading: true, acceptBareJSONSuccess: true }),
+      plan.statistics ? client(plan.statistics, { method: 'GET', signal: controller.signal, showResult: false, silentLoading: true }) : null,
+      plan.weather ? client(plan.weather, { method: 'GET', signal: controller.signal, showResult: false, silentLoading: true }) : null,
+      client(plan.health, { method: 'GET', signal: controller.signal, showResult: false, silentLoading: true, acceptBareJSONSuccess: true }),
     ]).then(([statisticsResponse, weatherResponse, healthResponse]) => {
-      if (controller.signal.aborted) return
-      const nextStatistics = statisticsResponse.ok ? parseDataStatisticsSummary(statisticsResponse.data) : null
-      const nextWeather = weatherResponse.ok ? parseMallWeatherMetricsSummary(weatherResponse.data) : null
+      if (!canCommitOverviewResponse(controller.signal)) return
+      const nextStatistics = statisticsResponse?.ok ? parseDataStatisticsSummary(statisticsResponse.data) : null
+      const nextWeather = weatherResponse?.ok ? parseMallWeatherMetricsSummary(weatherResponse.data) : null
       const nextHealth = healthResponse.ok ? parseHealthSummary(healthResponse.data) : null
-      setMonitoring((current) => ({
-        statistics: nextStatistics ?? current.statistics,
-        weather: nextWeather ?? current.weather,
-        health: nextHealth ?? current.health,
+      setOverviewData((current) => ({
+        ...current,
+        monitoring: {
+          statistics: statisticsResponse ? nextStatistics ?? current.monitoring.statistics : null,
+          weather: weatherResponse ? nextWeather ?? current.monitoring.weather : null,
+          health: nextHealth ?? current.monitoring.health,
+        },
       }))
-      setMonitoringStale(!nextStatistics || !nextWeather || !nextHealth)
+      setMonitoringStale(Boolean(statisticsResponse && !nextStatistics || weatherResponse && !nextWeather || !nextHealth))
+    }).finally(() => {
+      if (monitoringRequestRef.current === controller) monitoringRequestRef.current = null
     })
-    return () => controller.abort()
-  }, [activeNav, client, sessionState])
+    return () => {
+      controller.abort()
+      if (monitoringRequestRef.current === controller) monitoringRequestRef.current = null
+    }
+  }, [activeNav, client, permissions, sessionState, token])
+
+  const { deliveryLogs, monitoring, overviewTotals, runs } = overviewData
 
   return {
     deliveryLogs, destinations, legacyTasks, monitoring, monitoringStale, overviewTotals, pipelines,

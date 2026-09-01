@@ -21,8 +21,8 @@ export class AppErrorBoundary extends Component<AppErrorBoundaryProps, AppErrorB
     window.location.reload()
   }
 
-  private returnToOverview = () => {
-    window.location.hash = 'overview'
+  private returnToAccessiblePage = () => {
+    window.location.hash = ''
     window.location.reload()
   }
 
@@ -39,11 +39,11 @@ export class AppErrorBoundary extends Component<AppErrorBoundaryProps, AppErrorB
             <AlertTriangle aria-hidden="true" />
             <div>
               <h1 id="app-recovery-title">页面加载遇到问题</h1>
-              <p>当前操作没有继续执行。可以重试当前页面，或返回运行总览后再进入。</p>
+              <p>当前操作没有继续执行。可以重试当前页面，或返回当前账号可访问的页面。</p>
             </div>
           </div>
           <div className={styles.actions}>
-            <button type="button" onClick={this.returnToOverview}>返回运行总览</button>
+            <button type="button" onClick={this.returnToAccessiblePage}>返回可访问页面</button>
             <button className={styles.primary} type="button" onClick={this.reloadCurrentPage}>
               <RefreshCcw aria-hidden="true" />重试当前页面
             </button>

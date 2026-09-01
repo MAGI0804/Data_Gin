@@ -1,7 +1,8 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 import { businessOverviewPaymentsPath, createMockBusinessSummaries, emptyBusinessSummary, filterBusinessSummary, parseBusinessOverviewPayments, queryMockBusinessOverview, recordPaymentDetail, recordTotal } from '../.test-dist/businessOverview.js'
-import { canViewNavigationItem } from '../.test-dist/appShell/navigationPermissions.js'
+import { canViewNavigationItem, resolveAccessibleNavigationItem } from '../.test-dist/appShell/navigationPermissions.js'
+import { canCommitOverviewResponse, overviewRequestPlan, overviewSignalAccess, restrictOverviewData } from '../.test-dist/appShell/overviewWorkspacePolicy.js'
 
 test('aggregates the full day from cashier-level payment records', () => {
   const summary = createMockBusinessSummaries('2026-09-01')['2026-09-01']
@@ -46,6 +47,97 @@ test('guards business overview navigation with its dedicated permission', () => 
   assert.equal(canViewNavigationItem('business_overview', []), false)
   assert.equal(canViewNavigationItem('business_overview', ['mall.read']), false)
   assert.equal(canViewNavigationItem('business_overview', ['business_overview.read']), true)
+})
+
+test('resolves an inaccessible landing page to the first permitted navigation item', () => {
+  const orderedItems = ['business_overview', 'store_info', 'overview', 'runs']
+  assert.equal(resolveAccessibleNavigationItem('overview', orderedItems, ['business_overview.read']), 'business_overview')
+  assert.equal(resolveAccessibleNavigationItem('runs', orderedItems, ['pipeline.read']), 'runs')
+  assert.equal(resolveAccessibleNavigationItem('overview', orderedItems, []), null)
+})
+
+test('only exposes the operations overview when at least one overview signal is readable', () => {
+  assert.equal(canViewNavigationItem('overview', []), false)
+  assert.equal(canViewNavigationItem('overview', ['business_overview.read']), false)
+  assert.equal(canViewNavigationItem('overview', ['data.read']), true)
+  assert.equal(canViewNavigationItem('overview', ['pipeline.manage']), true)
+  assert.deepEqual(overviewSignalAccess(['delivery.manage', 'data.read']), {
+    runs: false,
+    deliveryLogs: true,
+    statistics: true,
+    weather: false,
+  })
+})
+
+test('only applies manage-to-read inference supported by the backend authorizer', () => {
+  assert.equal(canViewNavigationItem('sources', ['source.manage']), true)
+  assert.equal(canViewNavigationItem('runs', ['pipeline.manage']), true)
+  assert.equal(canViewNavigationItem('delivery_logs', ['delivery.manage']), true)
+  assert.equal(canViewNavigationItem('receive', ['data.manage']), false)
+  assert.equal(canViewNavigationItem('excel_jobs', ['excel.manage']), false)
+  assert.equal(canViewNavigationItem('office_messages', ['office_message.manage']), false)
+})
+
+test('builds overview requests only for readable signals', () => {
+  assert.deepEqual(overviewRequestPlan(['pipeline.read', 'data.read'], '2026-09-01T00:00'), {
+    runs: '/v1/runs?page=1&page_size=100&start_time=2026-09-01T00%3A00',
+    deliveryLogs: null,
+    statistics: '/v1/data/statistics',
+    weather: null,
+    health: '/health',
+  })
+})
+
+test('clears overview data when permissions are reduced or removed', () => {
+  const current = {
+    runs: [{ id: 1 }],
+    deliveryLogs: [{ id: 2 }],
+    overviewTotals: { runs: 1, deliveryLogs: 1 },
+    monitoring: { statistics: { total: 3 }, weather: { total: 4 }, health: { status: 'ok' } },
+  }
+  assert.deepEqual(restrictOverviewData(current, ['delivery.read', 'weather.read']), {
+    runs: [],
+    deliveryLogs: [{ id: 2 }],
+    overviewTotals: { runs: null, deliveryLogs: 1 },
+    monitoring: { statistics: null, weather: { total: 4 }, health: { status: 'ok' } },
+  })
+  assert.deepEqual(restrictOverviewData(current, []), {
+    runs: [],
+    deliveryLogs: [],
+    overviewTotals: { runs: null, deliveryLogs: null },
+    monitoring: { statistics: null, weather: null, health: { status: 'ok' } },
+  })
+})
+
+test('clears overview data across navigation away and does not restore stale data on return', () => {
+  const current = {
+    runs: [{ id: 1 }],
+    deliveryLogs: [{ id: 2 }],
+    overviewTotals: { runs: 1, deliveryLogs: 1 },
+    monitoring: { statistics: { total: 3 }, weather: { total: 4 }, health: { status: 'ok' } },
+  }
+  const afterLeavingOverview = restrictOverviewData(current, ['pipeline.read', 'delivery.read', 'data.read', 'weather.read'], false)
+  assert.deepEqual(afterLeavingOverview, {
+    runs: [],
+    deliveryLogs: [],
+    overviewTotals: { runs: null, deliveryLogs: null },
+    monitoring: { statistics: null, weather: null, health: null },
+  })
+  assert.strictEqual(
+    restrictOverviewData(afterLeavingOverview, ['pipeline.read', 'delivery.read', 'data.read', 'weather.read'], true),
+    afterLeavingOverview,
+  )
+})
+
+test('rejects a late overview response after its request is aborted', async () => {
+  const controller = new AbortController()
+  let applied = false
+  const lateResponse = Promise.resolve().then(() => {
+    if (canCommitOverviewResponse(controller.signal)) applied = true
+  })
+  controller.abort()
+  await lateResponse
+  assert.equal(applied, false)
 })
 
 test('builds the payment query path from ISO date and mall code', () => {

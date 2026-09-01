@@ -88,9 +88,11 @@ export function WorkspaceRouter(props: WorkspaceRouterProps) {
   const reportSection = reportCenterSection(activeNav)
   const canManageDelivery = permissions.includes('delivery.manage')
 
-  if (activeNav === 'business_overview') return canViewNavigationItem(activeNav, permissions)
-    ? <BusinessOverviewPage client={client} />
-    : <PageCanvas><FeedbackState kind="error" title="无权查看营业概况" description="当前账号缺少营业概况查看权限。" /></PageCanvas>
+  if (!canViewNavigationItem(activeNav, permissions)) {
+    return <PageCanvas><FeedbackState kind="error" title="当前账号无可访问页面" description="请联系管理员为账号分配至少一项页面查看权限。" /></PageCanvas>
+  }
+
+  if (activeNav === 'business_overview') return <BusinessOverviewPage client={client} />
   if (activeNav === 'overview') return <RunOverviewPage runs={runs} deliveryLogs={deliveryLogs} monitoring={monitoring} stale={monitoringStale} overviewTotals={overviewTotals} onLoadSteps={onLoadSteps} />
   if (activeNav === 'runs') return <PipelineRunsPage client={client} pipelines={pipelines} onLoadSteps={onLoadSteps} onPipelineRunCompleted={() => void onRefresh()} refreshVersion={refreshVersion} />
   if (activeNav === 'delivery_logs') return <DeliveryLogsPage client={client} onRetryLog={onRetryDeliveryLog} />

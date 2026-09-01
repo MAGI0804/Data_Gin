@@ -15,8 +15,9 @@ const defaultApiBaseURL = import.meta.env.VITE_API_BASE_URL ?? ''
 
 function App() {
   const session = useConsoleSession(defaultApiBaseURL)
-  const navigation = useConsoleNavigation(session.sessionState)
-  const workspace = useWorkspaceData(navigation.activeNav, session.client, session.token, session.sessionState, session.setResult)
+  const permissions = session.sessionUser?.permissions ?? []
+  const navigation = useConsoleNavigation(session.sessionState, permissions)
+  const workspace = useWorkspaceData(navigation.activeNav, session.client, session.token, session.sessionState, permissions, session.setResult)
 
   function openStepRuns(runID: number) {
     workspace.setStepRunFocusID(runID)
@@ -46,7 +47,7 @@ function App() {
   const shellNavigation = <ConsoleNavigation
     activeNav={navigation.activeNav}
     mobileOpen={navigation.mobileNavOpen}
-    permissions={session.sessionUser?.permissions ?? []}
+    permissions={permissions}
     refreshing={workspace.refreshing}
     onLogout={session.logout}
     onNavigate={navigation.navigate}
@@ -86,7 +87,7 @@ function App() {
       onRetryDeliveryLog={retryDeliveryLog}
       onTestSource={testSource}
       overviewTotals={workspace.overviewTotals}
-      permissions={session.sessionUser?.permissions ?? []}
+      permissions={permissions}
       pipelines={workspace.pipelines}
       refreshing={workspace.refreshing}
       refreshVersion={workspace.refreshVersion}

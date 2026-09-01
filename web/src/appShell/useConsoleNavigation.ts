@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react'
-import { navFromHash, type NavKey } from './navigation'
+import { accessibleNavFromHash, navFromHash, type NavKey } from './navigation'
 import type { ConsoleSessionState } from './useConsoleSession'
 
 const focusableSelector = 'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])'
 
-export function useConsoleNavigation(sessionState: ConsoleSessionState) {
-  const [activeNav, setActiveNav] = useState<NavKey>(navFromHash)
+export function useConsoleNavigation(sessionState: ConsoleSessionState, permissions: readonly string[]) {
+  const [requestedNav, setRequestedNav] = useState<NavKey>(navFromHash)
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
   const mobileNavTriggerRef = useRef<HTMLButtonElement>(null)
   const mobileNavRef = useRef<HTMLElement>(null)
@@ -63,14 +63,23 @@ export function useConsoleNavigation(sessionState: ConsoleSessionState) {
   }, [mobileNavOpen, sessionState])
 
   useEffect(() => {
-    const handleHashChange = () => setActiveNav(navFromHash())
+    const handleHashChange = () => setRequestedNav(navFromHash())
     window.addEventListener('hashchange', handleHashChange)
     return () => window.removeEventListener('hashchange', handleHashChange)
   }, [])
 
+  const accessibleNav = sessionState === 'authenticated' ? accessibleNavFromHash(permissions, `#${requestedNav}`) : requestedNav
+  const activeNav = accessibleNav ?? requestedNav
+
+  useEffect(() => {
+    if (sessionState !== 'authenticated' || !accessibleNav || accessibleNav === requestedNav) return
+    window.location.hash = accessibleNav
+    setRequestedNav(accessibleNav)
+  }, [accessibleNav, requestedNav, sessionState])
+
   const navigate = useCallback((key: NavKey) => {
     window.location.hash = key
-    setActiveNav(key)
+    setRequestedNav(key)
     setMobileNavOpen(false)
   }, [])
 
