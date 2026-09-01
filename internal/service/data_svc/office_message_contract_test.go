@@ -40,6 +40,16 @@ func TestNormalizeOfficeQueryParametersIgnoresColonInStringLiteral(t *testing.T)
 	}
 }
 
+func TestNormalizeOfficeQueryParametersSupportsComments(t *testing.T) {
+	statement := "\tselect *\n\tfrom BJ_REPORT_RETAIL_DAY_SF a\n\twhere a.billdate=20260901  --单据日期\n\tand a.c_store_id=23        --店仓\n\tand a.c_payway_id=1"
+	if _, _, err := normalizeOfficeQueryParameters(statement, model.JSONText(`[]`)); err != nil {
+		t.Fatalf("normalizeOfficeQueryParameters() error = %v", err)
+	}
+	if _, _, err := normalizeOfficeQueryParameters("SELECT * FROM SALES -- :not_a_bind", model.JSONText(`[]`)); err != nil {
+		t.Fatalf("normalizeOfficeQueryParameters() treated comment as bind: %v", err)
+	}
+}
+
 func TestNormalizeOfficeQueryParametersRejectsUnconfiguredBind(t *testing.T) {
 	_, _, err := normalizeOfficeQueryParameters(
 		"SELECT * FROM SALES WHERE BILL_DATE = :bill_date AND SHOP = :shop",

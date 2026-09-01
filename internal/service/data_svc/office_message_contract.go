@@ -152,10 +152,11 @@ func normalizeOfficeColumnMappings(raw model.JSONText) ([]OfficeColumnMapping, m
 }
 
 func normalizeOfficeQueryParameters(statement string, raw model.JSONText) ([]OfficeQueryParameter, model.JSONText, error) {
-	if !reportoracle.ValidateSelect(statement) {
+	analysis, valid := reportoracle.AnalyzeSelect(statement)
+	if !valid {
 		return nil, "", fmt.Errorf("office message query: only one SELECT statement is allowed")
 	}
-	if officeHasPositionalBind(statement) {
+	if analysis.HasPositionalBind {
 		return nil, "", fmt.Errorf("office message query parameters: positional binds are not allowed")
 	}
 	var parameters []OfficeQueryParameter
@@ -183,7 +184,7 @@ func normalizeOfficeQueryParameters(statement string, raw model.JSONText) ([]Off
 		}
 		configured[parameter.Code] = struct{}{}
 	}
-	bound := officeSelectBinds(statement)
+	bound := analysis.NamedBinds
 	if len(bound) != len(configured) {
 		return nil, "", fmt.Errorf("office message query parameters: SELECT binds do not match configured parameters")
 	}
@@ -285,61 +286,6 @@ func officeParameterValue(parameter OfficeQueryParameter, value string) (interfa
 	default:
 		return nil, "", fmt.Errorf("office message query parameter %q has an unsupported type", parameter.Code)
 	}
-}
-
-func officeSelectBinds(statement string) map[string]struct{} {
-	binds := make(map[string]struct{})
-	inString := false
-	for index := 0; index < len(statement); {
-		character := statement[index]
-		if character == '\'' {
-			if inString && index+1 < len(statement) && statement[index+1] == '\'' {
-				index += 2
-				continue
-			}
-			inString = !inString
-			index++
-			continue
-		}
-		if inString || character != ':' || index+1 >= len(statement) || !officeParameterStart(statement[index+1]) {
-			index++
-			continue
-		}
-		end := index + 2
-		for end < len(statement) && officeParameterPart(statement[end]) {
-			end++
-		}
-		binds[strings.ToLower(statement[index+1:end])] = struct{}{}
-		index = end
-	}
-	return binds
-}
-
-func officeHasPositionalBind(statement string) bool {
-	inString := false
-	for index := 0; index < len(statement); index++ {
-		character := statement[index]
-		if character == '\'' {
-			if inString && index+1 < len(statement) && statement[index+1] == '\'' {
-				index++
-				continue
-			}
-			inString = !inString
-			continue
-		}
-		if !inString && character == ':' && index+1 < len(statement) && statement[index+1] >= '0' && statement[index+1] <= '9' {
-			return true
-		}
-	}
-	return false
-}
-
-func officeParameterStart(character byte) bool {
-	return character >= 'A' && character <= 'Z' || character >= 'a' && character <= 'z'
-}
-
-func officeParameterPart(character byte) bool {
-	return officeParameterStart(character) || character >= '0' && character <= '9' || character == '_'
 }
 
 func officeDateLayout(format string) (string, bool) {
