@@ -55,6 +55,11 @@ func setupQueueJob() {
 	addQueueJob(mux)
 	officePushProcessor := data_svc.NewOfficePushProcessor()
 	mux.HandleFunc(job.TypeOfficePush, newOfficePushHandler(officePushProcessor))
+	officePushSchedulePlanner, err := data_svc.NewOfficePushSchedulePlanner()
+	if err != nil {
+		console.Exit("Office Push Schedule Planner Init Failed %v", err)
+	}
+	mux.HandleFunc(job.TypeOfficePushSchedule, newOfficePushScheduleHandler(officePushSchedulePlanner))
 	if reportWorkerEnabled {
 		reportProcessor := data_svc.NewReportRunProcessor()
 		mux.HandleFunc(job.TypeReportRun, newReportRunHandler(reportProcessor))
@@ -166,6 +171,22 @@ type reportResultCleaner interface {
 
 type officePushProcessor interface {
 	Process(context.Context, uint, bool) error
+}
+
+type officePushSchedulePlanner interface {
+	Plan(context.Context) error
+}
+
+func newOfficePushScheduleHandler(planner officePushSchedulePlanner) asynq.HandlerFunc {
+	return func(ctx context.Context, task *asynq.Task) error {
+		if planner == nil || task == nil || task.Type() != job.TypeOfficePushSchedule {
+			return fmt.Errorf("%w: invalid office push schedule task", asynq.SkipRetry)
+		}
+		if err := job.DecodeOfficePushScheduleTaskPayload(task.Payload()); err != nil {
+			return fmt.Errorf("%w: %v", asynq.SkipRetry, err)
+		}
+		return planner.Plan(ctx)
+	}
 }
 
 func newOfficePushHandler(processor officePushProcessor) asynq.HandlerFunc {

@@ -51,6 +51,8 @@ func setupScheduler() {
 
 	registerMallWeatherScheduledTasks(scheduler)
 
+	registerOfficePushScheduledTasks(scheduler)
+
 	go func(scheduler *asynq.Scheduler) {
 		if err := scheduler.Run(); err != nil {
 			console.Warning("Scheduler Failed: %v", err)
@@ -65,6 +67,20 @@ func setupScheduler() {
 
 type scheduledTaskRegistrar interface {
 	Register(string, *asynq.Task, ...asynq.Option) (string, error)
+}
+
+func registerOfficePushScheduledTasks(scheduler scheduledTaskRegistrar) {
+	if scheduler == nil {
+		return
+	}
+	task, err := job.NewOfficePushScheduleTask()
+	if err != nil {
+		console.Warning("Failed to create office push schedule task: %v", err)
+		return
+	}
+	if _, err := scheduler.Register(job.OfficePushScheduleCron, task, asynq.Unique(job.OfficePushScheduleUniquePeriod)); err != nil {
+		console.Warning("Failed to register office push schedule planner: %v", err)
+	}
 }
 
 func registerReportScheduledTasks(scheduler scheduledTaskRegistrar, enabled bool) {

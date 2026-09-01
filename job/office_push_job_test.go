@@ -13,3 +13,18 @@ func TestDecodeOfficePushTaskPayload(t *testing.T) {
 		}
 	}
 }
+
+func TestOfficePushScheduleTaskUsesStrictEmptyPayload(t *testing.T) {
+	task, err := NewOfficePushScheduleTask()
+	if err != nil {
+		t.Fatalf("NewOfficePushScheduleTask() error = %v", err)
+	}
+	if task.Type() != TypeOfficePushSchedule || string(task.Payload()) != "{}" {
+		t.Fatalf("schedule task = %s %s", task.Type(), task.Payload())
+	}
+	for _, invalid := range [][]byte{nil, []byte(`null`), []byte(`{"secret":"x"}`), []byte(`{}{}`)} {
+		if err := DecodeOfficePushScheduleTaskPayload(invalid); err == nil {
+			t.Fatalf("DecodeOfficePushScheduleTaskPayload(%s) accepted invalid payload", invalid)
+		}
+	}
+}

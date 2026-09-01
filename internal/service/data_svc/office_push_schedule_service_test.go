@@ -26,6 +26,18 @@ func TestNextOfficeScheduleTimeUsesFiveFieldsAndShanghai(t *testing.T) {
 	}
 }
 
+func TestNextOfficeScheduleTimeCompensatesOnlyOneMissedRun(t *testing.T) {
+	scheduledFor := time.Date(2026, 8, 28, 1, 0, 0, 0, time.UTC)
+	now := time.Date(2026, 9, 1, 1, 5, 0, 0, time.UTC)
+	next, err := nextOfficeScheduleTime("0 9 * * *", now)
+	if err != nil {
+		t.Fatalf("nextOfficeScheduleTime() error = %v", err)
+	}
+	if !next.After(now) || !next.Equal(time.Date(2026, 9, 2, 1, 0, 0, 0, time.UTC)) {
+		t.Fatalf("missed %s advanced to %s", scheduledFor, next)
+	}
+}
+
 func TestRenderOfficeScheduleParametersUsesScheduledDateAndOffset(t *testing.T) {
 	message := officeScheduleQueryMessage()
 	configuration := map[string]OfficeScheduleParameterValue{
@@ -84,5 +96,16 @@ func officeScheduleQueryMessage() model.OfficeMessage {
 			{"code":"bill_date","label":"业务日期","valueType":"date","format":"yyyyMMdd","required":true},
 			{"code":"store_id","label":"门店","valueType":"integer","required":true}
 		]`),
+	}
+}
+
+func TestOfficeScheduledRunUUIDIsDeterministicPerOccurrence(t *testing.T) {
+	firstTime := time.Date(2026, 9, 1, 1, 0, 0, 0, time.UTC)
+	first := officeScheduledRunUUID(17, firstTime)
+	if first == "" || first != officeScheduledRunUUID(17, firstTime) {
+		t.Fatalf("officeScheduledRunUUID() is not deterministic: %q", first)
+	}
+	if first == officeScheduledRunUUID(18, firstTime) || first == officeScheduledRunUUID(17, firstTime.Add(time.Minute)) {
+		t.Fatal("officeScheduledRunUUID() reused an identity")
 	}
 }
