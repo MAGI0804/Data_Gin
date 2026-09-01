@@ -51,6 +51,7 @@ export function BusinessOverviewPage({ client }: { client: WorkspaceApiClient })
   }, [paymentLoadState, selectedDate, selectedMall])
 
   function changeDate(date: string) {
+    if (date === selectedDate) return
     setSelectedDate(date)
     setSummary(emptyBusinessSummary(date))
     setPaymentLoadState(mallCode ? 'loading' : 'idle')
