@@ -39,6 +39,18 @@ export function updateRoleSelection(current: readonly number[], roleID: number, 
   return checked ? [...new Set([...current, roleID])] : current.filter((id) => id !== roleID)
 }
 
+export type AccessMallScopeRequest = {
+  mallScopeMode: 'ALL' | 'SELECTED'
+  mallIds: number[]
+}
+
+export function accessMallScopeRequest(mode: string, rawMallIDs: string): AccessMallScopeRequest | null {
+  if (mode === 'ALL') return { mallScopeMode: 'ALL', mallIds: [] }
+  if (mode !== 'SELECTED') return null
+  const mallIds = [...new Set(rawMallIDs.split(',').map((item) => Number(item.trim())).filter((id) => Number.isSafeInteger(id) && id > 0))]
+  return mallIds.length > 0 ? { mallScopeMode: 'SELECTED', mallIds } : null
+}
+
 export type AccessAccount = {
   id: number
   account: string

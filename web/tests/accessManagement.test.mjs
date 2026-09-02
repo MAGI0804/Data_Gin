@@ -3,12 +3,20 @@ import test from 'node:test'
 
 import {
   accountRoleIDs,
+  accessMallScopeRequest,
   accessManagementCapabilities,
   canReplaceAccountRoles,
   parseAccessAccounts,
   parseCreatedAccessRole,
   updateRoleSelection,
 } from '../.test-dist/accessManagement.js'
+
+test('builds a valid account mall scope request', () => {
+  assert.deepEqual(accessMallScopeRequest('ALL', '7,8'), { mallScopeMode: 'ALL', mallIds: [] })
+  assert.deepEqual(accessMallScopeRequest('SELECTED', '9, 2,9'), { mallScopeMode: 'SELECTED', mallIds: [9, 2] })
+  assert.equal(accessMallScopeRequest('SELECTED', ''), null)
+  assert.equal(accessMallScopeRequest('SELECTED', '0,invalid'), null)
+})
 
 test('normalizes null account roles and mall ids to empty arrays', () => {
   const accounts = parseAccessAccounts({ data: { accounts: [{

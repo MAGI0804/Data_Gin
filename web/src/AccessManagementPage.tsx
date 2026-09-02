@@ -4,6 +4,7 @@ import { AccessRoleCreateDrawer, type AccessRoleCreateInput } from './AccessRole
 import { DataAuthorizationPage } from './DataAuthorizationPage'
 import {
   accountRoleIDs,
+  accessMallScopeRequest,
   accessManagementCapabilities,
   canReplaceAccountRoles,
   parseAccessAccounts,
@@ -34,10 +35,6 @@ function list<T>(payload: unknown, key?: string): T[] {
   const data = envelopeValue(payload)
   const result = key && data && typeof data === 'object' && !Array.isArray(data) ? (data as Record<string, unknown>)[key] : data
   return Array.isArray(result) ? result as T[] : []
-}
-
-function ids(raw: string) {
-  return [...new Set(raw.split(',').map((item) => Number(item.trim())).filter((item) => Number.isSafeInteger(item) && item > 0))]
 }
 
 export function AccessManagementPage({ client, permissions }: { client: ApiClient; permissions: string[] }) {
@@ -135,15 +132,31 @@ function AccountPanel({ client, canManage, canManageRoles, canReadRoles, grantab
       setMessage('角色目录尚未加载完成，暂时无法创建账号。')
       return
     }
-    setBusy(true); setMessage('')
     const form = new FormData(event.currentTarget)
+    const mallScope = accessMallScopeRequest(value(form, 'mallScopeMode'), value(form, 'mallIds'))
+    if (!mallScope) {
+      setMessage('选择指定商场时，请至少填写一个有效的商场 ID。')
+      return
+    }
+    setBusy(true); setMessage('')
     const response = await client('/v1/access/accounts', { method: 'POST', headers: headers(), body: {
       account: value(form, 'account'), phone: value(form, 'phone'), nickname: value(form, 'nickname'), password: value(form, 'password'),
-      roleIds: createRoleIDs, mallScopeMode: value(form, 'mallScopeMode'), mallIds: ids(value(form, 'mallIds')), reason: value(form, 'reason'),
+      roleIds: createRoleIDs, ...mallScope, reason: value(form, 'reason'),
     }, showResult: false, silentLoading: true })
     setMessage(response.ok ? '控制台账号已创建。' : '账号创建失败，请检查手机号、角色和商场范围。')
     if (response.ok) { setCreating(false); setCreateRoleIDs([]); await load() }
     setBusy(false)
+  }
+
+  function updateMallScope(event: FormEvent<HTMLFormElement>, targetID: number) {
+    event.preventDefault()
+    const form = new FormData(event.currentTarget)
+    const mallScope = accessMallScopeRequest(value(form, 'mallScopeMode'), value(form, 'mallIds'))
+    if (!mallScope) {
+      setMessage('选择指定商场时，请至少填写一个有效的商场 ID。')
+      return
+    }
+    void mutate(`/v1/access/accounts/${targetID}/mall-scope`, { ...mallScope, reason: value(form, 'reason') })
   }
 
   async function createRole(input: AccessRoleCreateInput) {
@@ -179,7 +192,7 @@ function AccountPanel({ client, canManage, canManageRoles, canReadRoles, grantab
     <MasterDetail className={styles.masterDetail} masterWidth={312} masterLabel="控制台账号列表" detailLabel="控制台账号详情"
       master={<div className={styles.masterPane}>
         <form className={styles.search} onSubmit={(event) => { event.preventDefault(); void load() }}><label><span>搜索账号</span><input name="accountKeyword" autoComplete="off" value={keyword} onChange={(event) => setKeyword(event.target.value)} placeholder="账号、昵称或手机号" /></label><button type="submit" disabled={busy}>查询</button></form>
-        {canManage && <button className={styles.fullPrimary} type="button" disabled={busy || !canReplaceAccountRoles(roleCatalogStatus)} onClick={() => { setCreateRoleIDs([]); setCreating(true) }}><Plus aria-hidden="true" />创建子账号</button>}
+        {canManage && <button className={styles.fullPrimary} type="button" disabled={busy || !canReplaceAccountRoles(roleCatalogStatus)} onClick={() => { setMessage(''); setCreateRoleIDs([]); setCreating(true) }}><Plus aria-hidden="true" />创建子账号</button>}
         {canManage && roleCatalogStatus !== 'ready' && <p className={styles.message} role="status">{roleCatalogStatus === 'error' ? '角色目录加载失败，账号角色暂不可编辑。' : '正在加载角色目录…'}</p>}
         <div className={styles.list}>{accounts.map((account) => <button type="button" className={selected?.id === account.id ? styles.selectedItem : undefined} key={account.id} onClick={() => selectAccount(account)}><span><strong>{account.nickname}</strong><small>{account.account} · {account.phone || '未绑定'}</small></span><StatusTag tone={account.status === 'ACTIVE' ? 'success' : 'neutral'}>{account.status === 'ACTIVE' ? '启用' : '停用'}</StatusTag></button>)}</div>
       </div>}
@@ -193,17 +206,18 @@ function AccountPanel({ client, canManage, canManageRoles, canReadRoles, grantab
             {canReplaceAccountRoles(roleCatalogStatus)
               ? <form onSubmit={(event) => { event.preventDefault(); const form = new FormData(event.currentTarget); void mutate(`/v1/access/accounts/${selected.id}/roles`, { roleIds: editRoleIDs, reason: value(form, 'reason') }) }}><div className={styles.roleSelectionHeader}><h4>角色全量替换</h4>{canManageRoles && grantableCatalog.length > 0 && <button type="button" disabled={busy} onClick={() => { setRoleCreatorError(''); setRoleCreatorTarget('edit') }}><Plus aria-hidden="true" />自定义角色与权限</button>}</div>{activeRoles.map((role) => <label className={styles.check} key={role.id}><input type="checkbox" name="roleIds" value={role.id} checked={editRoleIDs.includes(role.id)} onChange={(event) => toggleRole(role.id, event.currentTarget.checked, 'edit')} />{role.name}<small>{role.permissions.length} 项权限</small></label>)}<Field label="变更原因"><input name="reason" required /></Field><button type="submit" disabled={busy}>保存角色</button></form>
               : <div className={styles.roleUnavailable} role="status"><h4>角色全量替换</h4><p>{roleCatalogStatus === 'error' ? '角色目录加载失败，为避免清空现有角色，暂时禁止保存。' : '角色目录加载完成后即可编辑。'}</p></div>}
-            <form onSubmit={(event) => { event.preventDefault(); const form = new FormData(event.currentTarget); void mutate(`/v1/access/accounts/${selected.id}/mall-scope`, { mallScopeMode: value(form, 'mallScopeMode'), mallIds: ids(value(form, 'mallIds')), reason: value(form, 'reason') }) }}><h4>商场范围</h4><Field label="范围模式"><select name="mallScopeMode" defaultValue={selected.mallScopeMode}><option value="ALL">全部商场</option><option value="SELECTED">指定商场</option></select></Field><Field label="商场 ID"><input name="mallIds" defaultValue={selected.mallIds.join(',')} placeholder="逗号分隔" /></Field><Field label="变更原因"><input name="reason" required /></Field><button type="submit" disabled={busy}>保存范围</button></form>
+            <form onSubmit={(event) => updateMallScope(event, selected.id)}><h4>商场范围</h4><Field label="范围模式"><select name="mallScopeMode" defaultValue={selected.mallScopeMode}><option value="ALL">全部商场</option><option value="SELECTED">指定商场</option></select></Field><Field label="商场 ID"><input name="mallIds" defaultValue={selected.mallIds.join(',')} placeholder="指定商场时填写，多个 ID 用逗号分隔" /></Field><Field label="变更原因"><input name="reason" required /></Field><button type="submit" disabled={busy}>保存范围</button></form>
             <form onSubmit={(event) => { event.preventDefault(); const form = new FormData(event.currentTarget); void mutate(`/v1/access/accounts/${selected.id}/password`, { password: value(form, 'password'), reason: value(form, 'reason') }) }}><h4>重置密码</h4><Field label="新密码"><input type="password" name="password" minLength={10} maxLength={72} required autoComplete="new-password" placeholder="10–72 位" /></Field><Field label="重置原因"><input name="reason" required /></Field><button type="submit" disabled={busy}><KeyRound aria-hidden="true" />重置密码</button></form>
           </div>}
         </>}
       </div>}
     />
     <Drawer open={creating} title="创建控制台账号" description="创建可登录内部控制台的子账号。" size="medium" closeDisabled={busy} onClose={() => setCreating(false)}><form className={styles.drawerForm} onSubmit={create}>
+      {message && <p className={styles.message} role="status">{message}</p>}
       <Field label="账号"><input name="account" required minLength={3} maxLength={40} pattern="[A-Za-z0-9][A-Za-z0-9_-]{2,39}" autoComplete="username" /></Field><Field label="手机号"><input name="phone" required pattern="1[3-9][0-9]{9}" autoComplete="tel" /></Field><Field label="昵称"><input name="nickname" required autoComplete="off" /></Field><Field label="初始密码"><input name="password" required type="password" minLength={10} maxLength={72} autoComplete="new-password" /></Field>
       <div className={styles.roleSelectionHeader}><strong>角色</strong>{canManageRoles && roleCatalogStatus === 'ready' && grantableCatalog.length > 0 && <button type="button" disabled={busy} onClick={() => { setRoleCreatorError(''); setRoleCreatorTarget('create') }}><Plus aria-hidden="true" />自定义角色与权限</button>}</div>
       <fieldset><legend className={styles.srOnly}>选择角色</legend>{activeRoles.map((role) => <label className={styles.check} key={role.id}><input type="checkbox" name="roleIds" value={role.id} checked={createRoleIDs.includes(role.id)} onChange={(event) => toggleRole(role.id, event.currentTarget.checked, 'create')} />{role.name}<small>{role.permissions.length} 项权限</small></label>)}</fieldset>
-      <Field label="商场范围"><select name="mallScopeMode" defaultValue="SELECTED"><option value="SELECTED">指定商场</option><option value="ALL">全部商场</option></select></Field><Field label="商场 ID"><input name="mallIds" placeholder="逗号分隔" /></Field><Field label="创建原因"><textarea name="reason" required rows={4} /></Field><button className={styles.primary} type="submit" disabled={busy || !canReplaceAccountRoles(roleCatalogStatus)}>创建账号</button>
+      <Field label="商场范围"><select name="mallScopeMode" defaultValue="ALL"><option value="ALL">全部商场</option><option value="SELECTED">指定商场</option></select></Field><Field label="商场 ID"><input name="mallIds" placeholder="指定商场时填写，多个 ID 用逗号分隔" /></Field><Field label="创建原因"><textarea name="reason" required rows={4} /></Field><button className={styles.primary} type="submit" disabled={busy || !canReplaceAccountRoles(roleCatalogStatus)}>创建账号</button>
     </form></Drawer>
     <AccessRoleCreateDrawer open={roleCreatorTarget !== null} busy={busy} catalog={grantableCatalog} error={roleCreatorError} onClose={() => { setRoleCreatorError(''); setRoleCreatorTarget(null) }} onSubmit={createRole} />
   </Section>
