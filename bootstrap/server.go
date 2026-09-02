@@ -138,11 +138,13 @@ func initServer(router *gin.Engine) *http.Server {
 	}
 
 	return &http.Server{
-		Addr:           addr, // 服务启动的地址和端口
-		Handler:        withMallWeatherExportDownloadWriteDeadline(router, mallWeatherExportDownloadWriteTimeout),
-		ReadTimeout:    time.Second * time.Duration(config.GetInt64("cfg.app.read_timeout")),  // 允许读取的最大时间
-		WriteTimeout:   time.Second * time.Duration(config.GetInt64("cfg.app.write_timeout")), // 允许写入的最大时间
-		MaxHeaderBytes: 1 << 20,                                                               // 请求头的最大字节数
+		Addr:              addr,
+		Handler:           withMallWeatherExportDownloadWriteDeadline(router, mallWeatherExportDownloadWriteTimeout),
+		ReadTimeout:       time.Second * time.Duration(config.GetInt64("cfg.app.read_timeout")),
+		ReadHeaderTimeout: time.Second * time.Duration(config.GetInt64("cfg.app.read_header_timeout")),
+		WriteTimeout:      time.Second * time.Duration(config.GetInt64("cfg.app.write_timeout")),
+		IdleTimeout:       time.Second * time.Duration(config.GetInt64("cfg.app.idle_timeout")),
+		MaxHeaderBytes:    1 << 20,
 	}
 }
 

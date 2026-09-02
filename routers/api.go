@@ -2,7 +2,6 @@ package routers
 
 import (
 	"context"
-	"errors"
 	"net/http"
 	"time"
 
@@ -29,6 +28,10 @@ func RegisterAPIRoutes(r *gin.Engine) {
 	var api *gin.RouterGroup
 	api = r.Group("/api")
 	registerHealthRoutes(r, api)
+
+	// Health routes are registered before this guard so liveness and readiness
+	// remain observable while database-backed business routes fail fast.
+	api.Use(middleware.RequireDatabaseAvailability())
 
 	// 全局限流中间件
 	// 作为参考 Github API 每小时最多 60 个请求（根据 IP）
@@ -75,10 +78,7 @@ func healthCheck(c *gin.Context) {
 type databasePing func(context.Context) error
 
 func pingApplicationDatabase(ctx context.Context) error {
-	if database.SQLDB == nil {
-		return errors.New("database is unavailable")
-	}
-	return database.SQLDB.PingContext(ctx)
+	return database.PingContext(ctx)
 }
 
 func databaseReadiness(ping databasePing) gin.HandlerFunc {

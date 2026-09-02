@@ -68,7 +68,7 @@ services:
       - REPORT_CENTER_ENABLED=${REPORT_CENTER_ENABLED:-true}
       - REPORT_WORKER_ENABLED=${REPORT_WORKER_ENABLED:-true}
     healthcheck:
-      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:8501/health"]
+      test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:8501/api/ready"]
       interval: 3s
       timeout: 2s
       retries: 20

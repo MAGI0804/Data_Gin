@@ -14,6 +14,7 @@ import (
 	"gorm.io/gorm"
 	gormLogger "gorm.io/gorm/logger"
 
+	"gin-biz-web-api/pkg/database"
 	"gin-biz-web-api/pkg/helper/strx"
 )
 
@@ -57,6 +58,7 @@ func (l GormLogger) Error(ctx context.Context, str string, args ...interface{}) 
 // Trace 实现 gormLogger.Interface 的 Trace 方法
 // 跟踪打印 sql 信息
 func (l GormLogger) Trace(ctx context.Context, begin time.Time, fc func() (string, int64), err error) {
+	database.RecordResult(err)
 
 	// 获取运行时间
 	elapsed := time.Since(begin)
@@ -70,9 +72,19 @@ func (l GormLogger) Trace(ctx context.Context, begin time.Time, fc func() (strin
 		zap.String("took time", strx.StrMicroseconds(elapsed)),
 		zap.Int64("affected rows", rows), // 受影响的行数
 	}
+	connectivityFailure := database.IsConnectivityError(err)
 
 	// gorm 错误
 	if err != nil {
+		if stats, ok := database.ConnectionStats(); ok {
+			logFields = append(logFields,
+				zap.Int("db_open_connections", stats.OpenConnections),
+				zap.Int("db_in_use_connections", stats.InUse),
+				zap.Int("db_idle_connections", stats.Idle),
+				zap.Int64("db_wait_count", stats.WaitCount),
+				zap.Duration("db_wait_duration", stats.WaitDuration),
+			)
+		}
 		// 记录未找到的错误使用 warning 等级
 		if errors.Is(err, gorm.ErrRecordNotFound) {
 			l.logger().Warn("Database ErrRecordNotFound", logFields...)
@@ -84,7 +96,7 @@ func (l GormLogger) Trace(ctx context.Context, begin time.Time, fc func() (strin
 	}
 
 	// 慢查询日志
-	if l.SlowThreshold != 0 && elapsed > l.SlowThreshold {
+	if !connectivityFailure && l.SlowThreshold != 0 && elapsed > l.SlowThreshold {
 		l.logger().Warn("Database Slow Log", logFields...)
 	}
 

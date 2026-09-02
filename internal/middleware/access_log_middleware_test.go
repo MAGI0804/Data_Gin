@@ -3,6 +3,7 @@ package middleware
 import (
 	"bytes"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
@@ -73,6 +74,34 @@ func TestAccessLogWriterBoundsTextualResponsePreview(t *testing.T) {
 	}
 	if got := recorder.Body.Len(); got != len(payload) {
 		t.Fatalf("response bytes=%d, want %d", got, len(payload))
+	}
+}
+
+func TestAccessLogRequestBodyKeepsHandlerPayloadBounded(t *testing.T) {
+	tests := []struct {
+		name          string
+		contentLength int64
+		body          []byte
+		wantCaptured  bool
+	}{
+		{name: "small body", contentLength: 4, body: []byte("test"), wantCaptured: true},
+		{name: "large known body", contentLength: maxAccessLogRequestBodyBytes + 1, body: bytes.Repeat([]byte("x"), maxAccessLogRequestBodyBytes+1)},
+		{name: "large chunked body", contentLength: -1, body: bytes.Repeat([]byte("x"), maxAccessLogRequestBodyBytes+1)},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			request := httptest.NewRequest(http.MethodPost, "/resource", bytes.NewReader(test.body))
+			request.ContentLength = test.contentLength
+
+			captured := accessLogRequestBody(request)
+			remaining, err := io.ReadAll(request.Body)
+			if err != nil || !bytes.Equal(remaining, test.body) {
+				t.Fatalf("remaining=%d err=%v, want original=%d", len(remaining), err, len(test.body))
+			}
+			if (len(captured) > 0) != test.wantCaptured {
+				t.Fatalf("captured=%d, want captured=%t", len(captured), test.wantCaptured)
+			}
+		})
 	}
 }
 

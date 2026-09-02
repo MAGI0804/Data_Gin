@@ -22,6 +22,8 @@ import (
 
 const maxAccessLogResponseBodyBytes = 64 << 10
 
+const maxAccessLogRequestBodyBytes = 64 << 10
+
 const accessLogRedactedValue = "[REDACTED]"
 
 type AccessLogWriter struct {
@@ -92,13 +94,7 @@ func AccessLog() gin.HandlerFunc {
 		c.Writer = responseBodyWriter
 
 		// 获取请求数据
-		var requestBody []byte
-		if c.Request.Body != nil {
-			// c.Request.Body 是一个 buffer 对象，只能读取一次
-			requestBody, _ = io.ReadAll(c.Request.Body)
-			// 读取后，重新赋值 c.Request.Body ，以供后续的其他操作
-			c.Request.Body = io.NopCloser(bytes.NewBuffer(requestBody))
-		}
+		requestBody := accessLogRequestBody(c.Request)
 
 		// 设置开始时间
 		start := time.Now()
@@ -147,6 +143,21 @@ func AccessLog() gin.HandlerFunc {
 		logger.Info("HTTP Access Log [ "+cast.ToString(responseStatus)+" ]", logFields...)
 
 	}
+}
+
+// accessLogRequestBody only captures a bounded preview and restores every
+// consumed byte so downstream handlers receive the original request body.
+func accessLogRequestBody(request *http.Request) []byte {
+	if request == nil || request.Body == nil || request.ContentLength > maxAccessLogRequestBodyBytes {
+		return nil
+	}
+	body, err := io.ReadAll(io.LimitReader(request.Body, maxAccessLogRequestBodyBytes+1))
+	if err != nil || len(body) > maxAccessLogRequestBodyBytes {
+		request.Body = io.NopCloser(io.MultiReader(bytes.NewReader(body), request.Body))
+		return nil
+	}
+	request.Body = io.NopCloser(bytes.NewReader(body))
+	return body
 }
 
 func sanitizedAccessLogPrivateErrors(c *gin.Context) string {

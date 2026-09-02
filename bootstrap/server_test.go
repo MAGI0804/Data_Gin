@@ -90,6 +90,9 @@ func TestInitServerWiresMallWeatherExportWriteDeadline(t *testing.T) {
 		c.Status(http.StatusNoContent)
 	})
 	server := initServer(router)
+	if server.ReadHeaderTimeout <= 0 || server.IdleTimeout <= 0 {
+		t.Fatalf("ReadHeaderTimeout=%s IdleTimeout=%s must both be positive", server.ReadHeaderTimeout, server.IdleTimeout)
+	}
 	recorder := &writeDeadlineRecorder{ResponseRecorder: httptest.NewRecorder()}
 	before := time.Now().Add(mallWeatherExportDownloadWriteTimeout)
 
