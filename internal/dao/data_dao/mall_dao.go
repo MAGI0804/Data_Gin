@@ -117,7 +117,7 @@ func (dao *MallDAO) List(ctx context.Context, filter MallListFilter) ([]model.Ma
 	return malls, nil
 }
 
-func (dao *MallDAO) ListBusinessOverviewMallsAfterID(ctx context.Context, actorUserID, afterID uint, limit int) ([]model.Mall, error) {
+func (dao *MallDAO) ListScopedIdentitiesAfterID(ctx context.Context, actorUserID, afterID uint, limit int) ([]model.Mall, error) {
 	var malls []model.Mall
 	query := applyMallScopeQuery(
 		dao.db.WithContext(ctx).Model(&model.Mall{}).Select("id", "mall_code", "name_cn"),
@@ -129,7 +129,7 @@ func (dao *MallDAO) ListBusinessOverviewMallsAfterID(ctx context.Context, actorU
 		query = query.Where("id > ?", afterID)
 	}
 	if err := query.Order("id ASC").Limit(normalizePageSize(limit)).Find(&malls).Error; err != nil {
-		return nil, fmt.Errorf("mall: list business overview malls: %w", err)
+		return nil, fmt.Errorf("mall: list scoped identities: %w", err)
 	}
 	return malls, nil
 }

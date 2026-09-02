@@ -3,19 +3,41 @@ import test from 'node:test'
 
 import {
   accountRoleIDs,
+  accessMallCatalogPath,
   accessMallScopeRequest,
   accessManagementCapabilities,
   canReplaceAccountRoles,
+  mergeAccessMalls,
+  parseAccessMallCatalog,
   parseAccessAccounts,
   parseCreatedAccessRole,
   updateRoleSelection,
 } from '../.test-dist/accessManagement.js'
 
 test('builds a valid account mall scope request', () => {
-  assert.deepEqual(accessMallScopeRequest('ALL', '7,8'), { mallScopeMode: 'ALL', mallIds: [] })
-  assert.deepEqual(accessMallScopeRequest('SELECTED', '9, 2,9'), { mallScopeMode: 'SELECTED', mallIds: [9, 2] })
-  assert.equal(accessMallScopeRequest('SELECTED', ''), null)
-  assert.equal(accessMallScopeRequest('SELECTED', '0,invalid'), null)
+  assert.deepEqual(accessMallScopeRequest('ALL', [7, 8]), { mallScopeMode: 'ALL', mallIds: [] })
+  assert.deepEqual(accessMallScopeRequest('SELECTED', [9, 2, 9]), { mallScopeMode: 'SELECTED', mallIds: [9, 2] })
+  assert.equal(accessMallScopeRequest('SELECTED', []), null)
+  assert.equal(accessMallScopeRequest('SELECTED', [0, Number.NaN]), null)
+})
+
+test('parses and merges the grantable mall catalog', () => {
+  assert.equal(accessMallCatalogPath(), '/v1/access/malls?limit=200')
+  assert.equal(accessMallCatalogPath(8, 25), '/v1/access/malls?limit=25&afterId=8')
+  assert.throws(() => accessMallCatalogPath(0, 201), /invalid access mall pagination/)
+  const page = parseAccessMallCatalog({ data: { items: [
+    { id: 8, mallCode: 'SH-008', nameCn: ' 浦东商场 ' },
+    { id: 3, mallCode: 'SH-003', nameCn: '徐汇商场' },
+  ], nextAfterId: 8 } })
+  assert.deepEqual(page, { items: [
+    { id: 8, mallCode: 'SH-008', nameCn: '浦东商场' },
+    { id: 3, mallCode: 'SH-003', nameCn: '徐汇商场' },
+  ], nextAfterId: 8 })
+  assert.deepEqual(mergeAccessMalls([{ id: 3, mallCode: 'OLD', nameCn: '旧名称' }], page.items), [
+    { id: 3, mallCode: 'SH-003', nameCn: '徐汇商场' },
+    { id: 8, mallCode: 'SH-008', nameCn: '浦东商场' },
+  ])
+  assert.equal(parseAccessMallCatalog({ data: { items: [{ id: 0 }], nextAfterId: 0 } }), null)
 })
 
 test('normalizes null account roles and mall ids to empty arrays', () => {

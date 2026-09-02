@@ -44,10 +44,53 @@ export type AccessMallScopeRequest = {
   mallIds: number[]
 }
 
-export function accessMallScopeRequest(mode: string, rawMallIDs: string): AccessMallScopeRequest | null {
+export type AccessMall = {
+  id: number
+  mallCode: string
+  nameCn: string
+}
+
+export type AccessMallCatalog = {
+  items: AccessMall[]
+  nextAfterId: number
+}
+
+export function accessMallCatalogPath(afterID = 0, limit = 200) {
+  if (!Number.isSafeInteger(afterID) || afterID < 0 || !Number.isSafeInteger(limit) || limit < 1 || limit > 200) {
+    throw new Error('invalid access mall pagination')
+  }
+  const query = new URLSearchParams({ limit: String(limit) })
+  if (afterID > 0) query.set('afterId', String(afterID))
+  return `/v1/access/malls?${query.toString()}`
+}
+
+export function parseAccessMallCatalog(payload: unknown): AccessMallCatalog | null {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return null
+  const data = (payload as Record<string, unknown>).data
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return null
+  const record = data as Record<string, unknown>
+  if (!Array.isArray(record.items) || !Number.isSafeInteger(record.nextAfterId) || Number(record.nextAfterId) < 0) return null
+  const items: AccessMall[] = []
+  for (const value of record.items) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+    const mall = value as Record<string, unknown>
+    if (!Number.isSafeInteger(mall.id) || Number(mall.id) < 1 || typeof mall.mallCode !== 'string' || !mall.mallCode.trim() ||
+      typeof mall.nameCn !== 'string' || !mall.nameCn.trim()) return null
+    items.push({ id: Number(mall.id), mallCode: mall.mallCode.trim(), nameCn: mall.nameCn.trim() })
+  }
+  return { items, nextAfterId: Number(record.nextAfterId) }
+}
+
+export function mergeAccessMalls(current: readonly AccessMall[], incoming: readonly AccessMall[]): AccessMall[] {
+  const byID = new Map(current.map((mall) => [mall.id, mall]))
+  for (const mall of incoming) byID.set(mall.id, mall)
+  return [...byID.values()].sort((left, right) => left.id - right.id)
+}
+
+export function accessMallScopeRequest(mode: string, rawMallIDs: readonly number[]): AccessMallScopeRequest | null {
   if (mode === 'ALL') return { mallScopeMode: 'ALL', mallIds: [] }
   if (mode !== 'SELECTED') return null
-  const mallIds = [...new Set(rawMallIDs.split(',').map((item) => Number(item.trim())).filter((id) => Number.isSafeInteger(id) && id > 0))]
+  const mallIds = [...new Set(rawMallIDs.filter((id) => Number.isSafeInteger(id) && id > 0))]
   return mallIds.length > 0 ? { mallScopeMode: 'SELECTED', mallIds } : null
 }
 

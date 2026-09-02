@@ -35,6 +35,21 @@ func TestAccountDTOUsesEmptyArraysForAllMallScope(t *testing.T) {
 	}
 }
 
+func TestBuildAccessMallQueryResult(t *testing.T) {
+	result := buildAccessMallQueryResult([]model.Mall{
+		{BaseModel: model.BaseModel{ID: 3}, MallCode: "SH-003", NameCN: "徐汇商场"},
+		{BaseModel: model.BaseModel{ID: 8}, MallCode: "SH-008", NameCN: "浦东商场"},
+	})
+	if len(result.Items) != 2 || result.Items[0].ID != 3 || result.Items[0].NameCN != "徐汇商场" ||
+		result.Items[1].MallCode != "SH-008" || result.NextAfterID != 8 {
+		t.Fatalf("buildAccessMallQueryResult() = %#v", result)
+	}
+	empty := buildAccessMallQueryResult(nil)
+	if empty.Items == nil || len(empty.Items) != 0 || empty.NextAfterID != 0 {
+		t.Fatalf("empty buildAccessMallQueryResult() = %#v", empty)
+	}
+}
+
 func TestUniqueIDsDeduplicatesAndDropsZero(t *testing.T) {
 	got := uniqueIDs([]uint{3, 0, 3, 2})
 	if len(got) != 2 || got[0] != 3 || got[1] != 2 {

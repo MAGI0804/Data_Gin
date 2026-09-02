@@ -10,6 +10,12 @@
 .field { display: grid; gap: var(--space-1); min-width: 0; color: var(--color-text-secondary); font-size: 12px; font-weight: 650; }
 .field :is(input, select, textarea), .search input { width: 100%; border: 1px solid var(--color-border-strong); background: var(--color-canvas); padding-inline: var(--space-3); }
 .field textarea { padding-block: var(--space-2); resize: vertical; }
+.mallSelect { width: 100%; }
+.mallSelect:global(.ant-select) :global(.ant-select-selector) { min-height: var(--control-height); border-color: var(--color-border-strong); border-radius: var(--radius-control); background: var(--color-canvas); color: var(--color-text); }
+.mallSelect:global(.ant-select-focused) :global(.ant-select-selector) { border-color: var(--color-brand); box-shadow: 0 0 0 2px var(--color-brand-soft); }
+.fieldHint { color: var(--color-text-secondary); font-weight: 500; }
+.inlineError { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; color: var(--color-danger); font-weight: 500; }
+.inlineError button { min-height: 28px; padding: 0 var(--space-2); }
 .fullPrimary, .primary { border-color: var(--color-brand-active); color: var(--color-on-brand); background: var(--color-brand-active); }
 .fullPrimary { width: 100%; margin-block-start: var(--space-3); }
 .list { display: grid; margin-block-start: var(--space-3); border-top: 1px solid var(--color-border); }

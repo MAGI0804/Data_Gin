@@ -48,7 +48,7 @@ type fakeBusinessOverviewMallLister struct {
 	limit   int
 }
 
-func (lister *fakeBusinessOverviewMallLister) ListBusinessOverviewMallsAfterID(
+func (lister *fakeBusinessOverviewMallLister) ListScopedIdentitiesAfterID(
 	_ context.Context,
 	actor uint,
 	afterID uint,

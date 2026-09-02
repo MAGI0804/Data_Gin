@@ -37,7 +37,7 @@ type businessOverviewMallScope interface {
 }
 
 type businessOverviewMallLister interface {
-	ListBusinessOverviewMallsAfterID(context.Context, uint, uint, int) ([]model.Mall, error)
+	ListScopedIdentitiesAfterID(context.Context, uint, uint, int) ([]model.Mall, error)
 }
 
 type BusinessOverviewService struct {
@@ -172,7 +172,7 @@ func (service *BusinessOverviewService) ListMalls(
 	if service == nil || ctx == nil || actor == 0 || limit < 1 || limit > 200 {
 		return nil, ErrBusinessOverviewInvalid
 	}
-	rows, err := service.malls.ListBusinessOverviewMallsAfterID(ctx, actor, afterID, limit)
+	rows, err := service.malls.ListScopedIdentitiesAfterID(ctx, actor, afterID, limit)
 	if err != nil {
 		return nil, fmt.Errorf("%w: list scoped malls: %v", ErrBusinessOverviewUnavailable, err)
 	}

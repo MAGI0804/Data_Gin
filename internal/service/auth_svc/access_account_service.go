@@ -57,8 +57,44 @@ type AccessAccountQueryResult struct {
 	HasMore      bool               `json:"hasMore"`
 }
 
+type AccessMallDTO struct {
+	ID       uint   `json:"id"`
+	MallCode string `json:"mallCode"`
+	NameCN   string `json:"nameCn"`
+}
+
+type AccessMallQueryResult struct {
+	Items       []AccessMallDTO `json:"items"`
+	NextAfterID uint            `json:"nextAfterId"`
+}
+
 func NewAccessAccountService() *AccessAccountService {
 	return &AccessAccountService{db: database.DB, now: time.Now}
+}
+
+func (service *AccessAccountService) ListGrantableMalls(ctx context.Context, actorID, afterID uint, limit int) (*AccessMallQueryResult, error) {
+	if limit < 1 || limit > 200 {
+		return nil, ErrAccessAccountInvalid
+	}
+	if err := service.requireActorPermission(ctx, actorID, model.PermissionSystemAccountManage); err != nil {
+		return nil, err
+	}
+	rows, err := data_dao.NewMallDAO(service.db).ListScopedIdentitiesAfterID(ctx, actorID, afterID, limit)
+	if err != nil {
+		return nil, fmt.Errorf("access account: list grantable malls: %w", err)
+	}
+	return buildAccessMallQueryResult(rows), nil
+}
+
+func buildAccessMallQueryResult(rows []model.Mall) *AccessMallQueryResult {
+	result := &AccessMallQueryResult{Items: make([]AccessMallDTO, 0, len(rows))}
+	for _, mall := range rows {
+		result.Items = append(result.Items, AccessMallDTO{ID: mall.ID, MallCode: mall.MallCode, NameCN: mall.NameCN})
+	}
+	if len(rows) > 0 {
+		result.NextAfterID = rows[len(rows)-1].ID
+	}
+	return result
 }
 
 func (service *AccessAccountService) Query(ctx context.Context, actorID uint, request auth_request.AccessAccountQueryRequest) (*AccessAccountQueryResult, error) {

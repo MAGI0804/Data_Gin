@@ -1,16 +1,21 @@
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import Select from 'antd/es/select'
 import { KeyRound, Plus, RefreshCcw, ShieldCheck } from 'lucide-react'
 import { AccessRoleCreateDrawer, type AccessRoleCreateInput } from './AccessRoleCreateDrawer'
 import { DataAuthorizationPage } from './DataAuthorizationPage'
 import {
   accountRoleIDs,
+  accessMallCatalogPath,
   accessMallScopeRequest,
   accessManagementCapabilities,
   canReplaceAccountRoles,
+  mergeAccessMalls,
   parseAccessAccounts,
+  parseAccessMallCatalog,
   parseCreatedAccessRole,
   updateRoleSelection,
   type AccessAccount as Account,
+  type AccessMall,
   type AccessPermission as Permission,
   type AccessRole as Role,
   type RoleCatalogStatus,
@@ -22,6 +27,7 @@ type ApiResult = { ok: boolean; status: number; data: unknown }
 type ApiClient = (path: string, options?: { method?: 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE'; body?: unknown; headers?: Record<string, string>; showResult?: boolean; silentLoading?: boolean; signal?: AbortSignal }) => Promise<ApiResult>
 type Tab = 'accounts' | 'roles' | 'open-api' | 'audits'
 type Audit = { id: number; actorUserId: number; action: string; targetType: string; targetId: number; reason: string; createdAt: string }
+type MallCatalogStatus = 'idle' | 'loading' | 'ready' | 'error'
 
 const headers = () => ({ 'Idempotency-Key': `access:${globalThis.crypto.randomUUID()}` })
 const tabLabels: Record<Tab, string> = { accounts: '控制台账号', roles: '角色管理', 'open-api': '开放 API', audits: '权限审计' }
@@ -74,9 +80,15 @@ function AccountPanel({ client, canManage, canManageRoles, canReadRoles, grantab
   const [accounts, setAccounts] = useState<Account[]>([])
   const [roles, setRoles] = useState<Role[]>([])
   const [catalog, setCatalog] = useState<Permission[]>([])
+  const [malls, setMalls] = useState<AccessMall[]>([])
+  const [mallCatalogStatus, setMallCatalogStatus] = useState<MallCatalogStatus>('idle')
   const [roleCatalogStatus, setRoleCatalogStatus] = useState<RoleCatalogStatus>('idle')
   const [createRoleIDs, setCreateRoleIDs] = useState<number[]>([])
   const [editRoleIDs, setEditRoleIDs] = useState<number[]>([])
+  const [createMallScopeMode, setCreateMallScopeMode] = useState<'ALL' | 'SELECTED'>('ALL')
+  const [createMallIDs, setCreateMallIDs] = useState<number[]>([])
+  const [editMallScopeMode, setEditMallScopeMode] = useState<'ALL' | 'SELECTED'>('ALL')
+  const [editMallIDs, setEditMallIDs] = useState<number[]>([])
   const [roleCreatorTarget, setRoleCreatorTarget] = useState<'create' | 'edit' | null>(null)
   const [roleCreatorError, setRoleCreatorError] = useState('')
   const [selectedID, setSelectedID] = useState(0)
@@ -105,10 +117,15 @@ function AccountPanel({ client, canManage, canManageRoles, canReadRoles, grantab
     const nextRoles = roleResponse.ok ? list<Role>(roleResponse.data) : null
     if (nextAccounts) {
       const nextSelectedID = nextAccounts.some((item) => item.id === selectedIDRef.current) ? selectedIDRef.current : nextAccounts[0]?.id ?? 0
+      const nextSelected = nextAccounts.find((item) => item.id === nextSelectedID)
       selectedIDRef.current = nextSelectedID
       setAccounts(nextAccounts)
       setSelectedID(nextSelectedID)
-      if (nextRoles) setEditRoleIDs(accountRoleIDs(nextAccounts.find((item) => item.id === nextSelectedID), nextRoles.filter((role) => role.status === 'ACTIVE')))
+      if (nextSelected) {
+        setEditMallScopeMode(nextSelected.mallScopeMode === 'SELECTED' ? 'SELECTED' : 'ALL')
+        setEditMallIDs(nextSelected.mallIds)
+      }
+      if (nextRoles) setEditRoleIDs(accountRoleIDs(nextSelected, nextRoles.filter((role) => role.status === 'ACTIVE')))
     } else setMessage('控制台账号加载失败。')
     if (nextRoles) { setRoles(nextRoles); setRoleCatalogStatus('ready') }
     else if (canReadRoles) { setRoleCatalogStatus('error'); setMessage('角色目录加载失败，请刷新后重试。') }
@@ -117,6 +134,33 @@ function AccountPanel({ client, canManage, canManageRoles, canReadRoles, grantab
     setBusy(false)
   }, [canManageRoles, canReadRoles, client, keyword])
   useEffect(() => { void load() }, [load])
+
+  const loadMalls = useCallback(async () => {
+    if (!canManage) return
+    setMallCatalogStatus('loading')
+    let afterID = 0
+    let loaded: AccessMall[] = []
+    for (;;) {
+      const response = await client(accessMallCatalogPath(afterID), { method: 'GET', showResult: false, silentLoading: true })
+      const page = response.ok ? parseAccessMallCatalog(response.data) : null
+      if (!page) {
+        setMalls(loaded)
+        setMallCatalogStatus('error')
+        return
+      }
+      loaded = mergeAccessMalls(loaded, page.items)
+      if (page.items.length < 200 || page.nextAfterId === 0) break
+      if (page.nextAfterId <= afterID) {
+        setMalls(loaded)
+        setMallCatalogStatus('error')
+        return
+      }
+      afterID = page.nextAfterId
+    }
+    setMalls(loaded)
+    setMallCatalogStatus('ready')
+  }, [canManage, client])
+  useEffect(() => { void loadMalls() }, [loadMalls])
 
   async function mutate(path: string, body: unknown) {
     setBusy(true); setMessage('')
@@ -133,9 +177,9 @@ function AccountPanel({ client, canManage, canManageRoles, canReadRoles, grantab
       return
     }
     const form = new FormData(event.currentTarget)
-    const mallScope = accessMallScopeRequest(value(form, 'mallScopeMode'), value(form, 'mallIds'))
+    const mallScope = accessMallScopeRequest(createMallScopeMode, createMallIDs)
     if (!mallScope) {
-      setMessage('选择指定商场时，请至少填写一个有效的商场 ID。')
+      setMessage('选择指定商场时，请至少选择一个商场。')
       return
     }
     setBusy(true); setMessage('')
@@ -151,9 +195,9 @@ function AccountPanel({ client, canManage, canManageRoles, canReadRoles, grantab
   function updateMallScope(event: FormEvent<HTMLFormElement>, targetID: number) {
     event.preventDefault()
     const form = new FormData(event.currentTarget)
-    const mallScope = accessMallScopeRequest(value(form, 'mallScopeMode'), value(form, 'mallIds'))
+    const mallScope = accessMallScopeRequest(editMallScopeMode, editMallIDs)
     if (!mallScope) {
-      setMessage('选择指定商场时，请至少填写一个有效的商场 ID。')
+      setMessage('选择指定商场时，请至少选择一个商场。')
       return
     }
     void mutate(`/v1/access/accounts/${targetID}/mall-scope`, { ...mallScope, reason: value(form, 'reason') })
@@ -186,13 +230,15 @@ function AccountPanel({ client, canManage, canManageRoles, canReadRoles, grantab
     selectedIDRef.current = account.id
     setSelectedID(account.id)
     setEditRoleIDs(accountRoleIDs(account, activeRoles))
+    setEditMallScopeMode(account.mallScopeMode === 'SELECTED' ? 'SELECTED' : 'ALL')
+    setEditMallIDs(account.mallIds)
   }
 
   return <Section title="控制台账号" description="查询账号并在右侧维护基础信息、角色、商场范围和登录凭证。" flush>
     <MasterDetail className={styles.masterDetail} masterWidth={312} masterLabel="控制台账号列表" detailLabel="控制台账号详情"
       master={<div className={styles.masterPane}>
         <form className={styles.search} onSubmit={(event) => { event.preventDefault(); void load() }}><label><span>搜索账号</span><input name="accountKeyword" autoComplete="off" value={keyword} onChange={(event) => setKeyword(event.target.value)} placeholder="账号、昵称或手机号" /></label><button type="submit" disabled={busy}>查询</button></form>
-        {canManage && <button className={styles.fullPrimary} type="button" disabled={busy || !canReplaceAccountRoles(roleCatalogStatus)} onClick={() => { setMessage(''); setCreateRoleIDs([]); setCreating(true) }}><Plus aria-hidden="true" />创建子账号</button>}
+        {canManage && <button className={styles.fullPrimary} type="button" disabled={busy || !canReplaceAccountRoles(roleCatalogStatus)} onClick={() => { setMessage(''); setCreateRoleIDs([]); setCreateMallScopeMode('ALL'); setCreateMallIDs([]); setCreating(true) }}><Plus aria-hidden="true" />创建子账号</button>}
         {canManage && roleCatalogStatus !== 'ready' && <p className={styles.message} role="status">{roleCatalogStatus === 'error' ? '角色目录加载失败，账号角色暂不可编辑。' : '正在加载角色目录…'}</p>}
         <div className={styles.list}>{accounts.map((account) => <button type="button" className={selected?.id === account.id ? styles.selectedItem : undefined} key={account.id} onClick={() => selectAccount(account)}><span><strong>{account.nickname}</strong><small>{account.account} · {account.phone || '未绑定'}</small></span><StatusTag tone={account.status === 'ACTIVE' ? 'success' : 'neutral'}>{account.status === 'ACTIVE' ? '启用' : '停用'}</StatusTag></button>)}</div>
       </div>}
@@ -206,7 +252,7 @@ function AccountPanel({ client, canManage, canManageRoles, canReadRoles, grantab
             {canReplaceAccountRoles(roleCatalogStatus)
               ? <form onSubmit={(event) => { event.preventDefault(); const form = new FormData(event.currentTarget); void mutate(`/v1/access/accounts/${selected.id}/roles`, { roleIds: editRoleIDs, reason: value(form, 'reason') }) }}><div className={styles.roleSelectionHeader}><h4>角色全量替换</h4>{canManageRoles && grantableCatalog.length > 0 && <button type="button" disabled={busy} onClick={() => { setRoleCreatorError(''); setRoleCreatorTarget('edit') }}><Plus aria-hidden="true" />自定义角色与权限</button>}</div>{activeRoles.map((role) => <label className={styles.check} key={role.id}><input type="checkbox" name="roleIds" value={role.id} checked={editRoleIDs.includes(role.id)} onChange={(event) => toggleRole(role.id, event.currentTarget.checked, 'edit')} />{role.name}<small>{role.permissions.length} 项权限</small></label>)}<Field label="变更原因"><input name="reason" required /></Field><button type="submit" disabled={busy}>保存角色</button></form>
               : <div className={styles.roleUnavailable} role="status"><h4>角色全量替换</h4><p>{roleCatalogStatus === 'error' ? '角色目录加载失败，为避免清空现有角色，暂时禁止保存。' : '角色目录加载完成后即可编辑。'}</p></div>}
-            <form onSubmit={(event) => updateMallScope(event, selected.id)}><h4>商场范围</h4><Field label="范围模式"><select name="mallScopeMode" defaultValue={selected.mallScopeMode}><option value="ALL">全部商场</option><option value="SELECTED">指定商场</option></select></Field><Field label="商场 ID"><input name="mallIds" defaultValue={selected.mallIds.join(',')} placeholder="指定商场时填写，多个 ID 用逗号分隔" /></Field><Field label="变更原因"><input name="reason" required /></Field><button type="submit" disabled={busy}>保存范围</button></form>
+            <form onSubmit={(event) => updateMallScope(event, selected.id)}><h4>商场范围</h4><MallScopeFields mode={editMallScopeMode} mallIDs={editMallIDs} malls={malls} catalogStatus={mallCatalogStatus} disabled={busy} onModeChange={setEditMallScopeMode} onMallIDsChange={setEditMallIDs} onRetry={loadMalls} /><Field label="变更原因"><input name="reason" required /></Field><button type="submit" disabled={busy || editMallScopeMode === 'SELECTED' && mallCatalogStatus !== 'ready'}>保存范围</button></form>
             <form onSubmit={(event) => { event.preventDefault(); const form = new FormData(event.currentTarget); void mutate(`/v1/access/accounts/${selected.id}/password`, { password: value(form, 'password'), reason: value(form, 'reason') }) }}><h4>重置密码</h4><Field label="新密码"><input type="password" name="password" minLength={10} maxLength={72} required autoComplete="new-password" placeholder="10–72 位" /></Field><Field label="重置原因"><input name="reason" required /></Field><button type="submit" disabled={busy}><KeyRound aria-hidden="true" />重置密码</button></form>
           </div>}
         </>}
@@ -217,10 +263,27 @@ function AccountPanel({ client, canManage, canManageRoles, canReadRoles, grantab
       <Field label="账号"><input name="account" required minLength={3} maxLength={40} pattern="[A-Za-z0-9][A-Za-z0-9_-]{2,39}" autoComplete="username" /></Field><Field label="手机号"><input name="phone" required pattern="1[3-9][0-9]{9}" autoComplete="tel" /></Field><Field label="昵称"><input name="nickname" required autoComplete="off" /></Field><Field label="初始密码"><input name="password" required type="password" minLength={10} maxLength={72} autoComplete="new-password" /></Field>
       <div className={styles.roleSelectionHeader}><strong>角色</strong>{canManageRoles && roleCatalogStatus === 'ready' && grantableCatalog.length > 0 && <button type="button" disabled={busy} onClick={() => { setRoleCreatorError(''); setRoleCreatorTarget('create') }}><Plus aria-hidden="true" />自定义角色与权限</button>}</div>
       <fieldset><legend className={styles.srOnly}>选择角色</legend>{activeRoles.map((role) => <label className={styles.check} key={role.id}><input type="checkbox" name="roleIds" value={role.id} checked={createRoleIDs.includes(role.id)} onChange={(event) => toggleRole(role.id, event.currentTarget.checked, 'create')} />{role.name}<small>{role.permissions.length} 项权限</small></label>)}</fieldset>
-      <Field label="商场范围"><select name="mallScopeMode" defaultValue="ALL"><option value="ALL">全部商场</option><option value="SELECTED">指定商场</option></select></Field><Field label="商场 ID"><input name="mallIds" placeholder="指定商场时填写，多个 ID 用逗号分隔" /></Field><Field label="创建原因"><textarea name="reason" required rows={4} /></Field><button className={styles.primary} type="submit" disabled={busy || !canReplaceAccountRoles(roleCatalogStatus)}>创建账号</button>
+      <MallScopeFields mode={createMallScopeMode} mallIDs={createMallIDs} malls={malls} catalogStatus={mallCatalogStatus} disabled={busy} onModeChange={setCreateMallScopeMode} onMallIDsChange={setCreateMallIDs} onRetry={loadMalls} /><Field label="创建原因"><textarea name="reason" required rows={4} /></Field><button className={styles.primary} type="submit" disabled={busy || !canReplaceAccountRoles(roleCatalogStatus) || createMallScopeMode === 'SELECTED' && mallCatalogStatus !== 'ready'}>创建账号</button>
     </form></Drawer>
     <AccessRoleCreateDrawer open={roleCreatorTarget !== null} busy={busy} catalog={grantableCatalog} error={roleCreatorError} onClose={() => { setRoleCreatorError(''); setRoleCreatorTarget(null) }} onSubmit={createRole} />
   </Section>
+}
+
+function MallScopeFields({ mode, mallIDs, malls, catalogStatus, disabled, onModeChange, onMallIDsChange, onRetry }: {
+  mode: 'ALL' | 'SELECTED'
+  mallIDs: number[]
+  malls: AccessMall[]
+  catalogStatus: MallCatalogStatus
+  disabled: boolean
+  onModeChange: (mode: 'ALL' | 'SELECTED') => void
+  onMallIDsChange: (ids: number[]) => void
+  onRetry: () => Promise<void>
+}) {
+  const selected = mode === 'SELECTED'
+  return <>
+    <Field label="商场范围"><select value={mode} disabled={disabled} onChange={(event) => { const next = event.currentTarget.value === 'SELECTED' ? 'SELECTED' : 'ALL'; onModeChange(next); if (next === 'ALL') onMallIDsChange([]) }}><option value="ALL">全部商场</option><option value="SELECTED">指定商场</option></select></Field>
+    {selected && <Field label="选择商场"><Select className={styles.mallSelect} mode="multiple" showSearch optionFilterProp="label" maxTagCount="responsive" aria-label="搜索并选择商场" aria-required="true" disabled={disabled || catalogStatus !== 'ready'} loading={catalogStatus === 'loading'} value={mallIDs} options={malls.map((mall) => ({ value: mall.id, label: `${mall.nameCn} · ${mall.mallCode}` }))} placeholder="搜索商场名称或编码" notFoundContent={catalogStatus === 'loading' ? '正在加载商场…' : catalogStatus === 'error' ? '商场目录加载失败' : '没有匹配的商场'} onChange={onMallIDsChange} />{catalogStatus === 'ready' && <small className={styles.fieldHint}>已加载 {malls.length} 个可授权商场，当前选择 {mallIDs.length} 个。</small>}{catalogStatus === 'error' && <span className={styles.inlineError} role="status">商场目录加载失败。<button type="button" disabled={disabled} onClick={() => void onRetry()}>重新加载</button></span>}</Field>}
+  </>
 }
 
 function RolePanel({ client, canManage, grantablePermissionCodes }: { client: ApiClient; canManage: boolean; grantablePermissionCodes: string[] }) {

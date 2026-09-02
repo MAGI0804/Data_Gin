@@ -12,6 +12,7 @@ func TestAccessRoutesRegistered(t *testing.T) {
 	router := gin.New()
 	registerAccessRoutes(router.Group("/api"))
 	want := map[string]struct{}{
+		http.MethodGet + " /api/v1/access/malls":                   {},
 		http.MethodPost + " /api/v1/access/accounts/query":         {},
 		http.MethodPost + " /api/v1/access/accounts":               {},
 		http.MethodPut + " /api/v1/access/accounts/:id/status":     {},

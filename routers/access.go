@@ -13,6 +13,8 @@ func registerAccessRoutes(api *gin.RouterGroup) {
 	group.Use(middleware.AuthInternalBearerJWT())
 
 	accounts := auth_ctrl.NewAccessAccountController()
+	malls := auth_ctrl.NewAccessMallCatalogController()
+	group.GET("/malls", middleware.RequirePermission(model.PermissionSystemAccountManage), malls.List)
 	group.POST("/accounts/query", middleware.RequirePermission(model.PermissionSystemAccountRead), accounts.Query)
 	group.POST("/accounts", middleware.RequirePermission(model.PermissionSystemAccountManage), accounts.Create)
 	group.PUT("/accounts/:id", middleware.RequirePermission(model.PermissionSystemAccountManage), accounts.Update)
