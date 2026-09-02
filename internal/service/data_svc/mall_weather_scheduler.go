@@ -18,7 +18,7 @@ import (
 
 const (
 	mallWeatherSchedulePageSize = 200
-	defaultRepairQueryTimeout   = 30 * time.Second
+	defaultScheduleDBTimeout    = 8 * time.Second
 )
 
 type mallWeatherScheduleStore interface {
@@ -51,9 +51,9 @@ type MallWeatherSchedulePlanner struct {
 	now      func() time.Time
 	location *time.Location
 
-	repairMaxRounds    int
-	repairSpread       time.Duration
-	repairQueryTimeout time.Duration
+	repairMaxRounds int
+	repairSpread    time.Duration
+	databaseTimeout time.Duration
 }
 
 func NewMallWeatherSchedulePlanner() (*MallWeatherSchedulePlanner, error) {
@@ -70,9 +70,9 @@ func NewMallWeatherSchedulePlanner() (*MallWeatherSchedulePlanner, error) {
 	}
 	planner.repairMaxRounds = config.GetInt("cfg.mall_weather.repair_max_rounds")
 	planner.repairSpread = time.Duration(config.GetInt("cfg.mall_weather.repair_spread_seconds")) * time.Second
-	planner.repairQueryTimeout = time.Duration(config.GetInt("cfg.mall_weather.repair_query_timeout_seconds")) * time.Second
+	planner.databaseTimeout = time.Duration(config.GetInt("cfg.mall_weather.schedule_db_timeout_seconds")) * time.Second
 	if planner.repairMaxRounds < 1 || planner.repairMaxRounds > 10 || planner.repairSpread < 0 || planner.repairSpread > time.Hour ||
-		planner.repairQueryTimeout < time.Second || planner.repairQueryTimeout > 5*time.Minute {
+		planner.databaseTimeout < time.Second || planner.databaseTimeout > time.Minute {
 		return nil, fmt.Errorf("mall weather scheduler: invalid repair configuration")
 	}
 	return planner, nil
@@ -84,7 +84,7 @@ func newMallWeatherSchedulePlanner(store mallWeatherScheduleStore, now func() ti
 	}
 	return &MallWeatherSchedulePlanner{
 		store: store, now: now, location: location,
-		repairMaxRounds: 3, repairSpread: 15 * time.Minute, repairQueryTimeout: defaultRepairQueryTimeout,
+		repairMaxRounds: 3, repairSpread: 15 * time.Minute, databaseTimeout: defaultScheduleDBTimeout,
 	}, nil
 }
 
@@ -106,7 +106,9 @@ func (planner *MallWeatherSchedulePlanner) Plan(ctx context.Context, payload job
 	}
 	var afterID uint
 	for {
-		malls, err := planner.store.ListEnabledMalls(ctx, afterID, mallWeatherSchedulePageSize)
+		queryCtx, cancel := planner.databaseContext(ctx)
+		malls, err := planner.store.ListEnabledMalls(queryCtx, afterID, mallWeatherSchedulePageSize)
+		cancel()
 		if err != nil {
 			return fmt.Errorf("mall weather scheduler: list enabled malls: %w", err)
 		}
@@ -122,7 +124,10 @@ func (planner *MallWeatherSchedulePlanner) Plan(ctx context.Context, payload job
 			}
 			rows = append(rows, row)
 		}
-		if _, err := planner.store.CreateOutboxes(ctx, rows); err != nil {
+		writeCtx, cancel := planner.databaseContext(ctx)
+		_, err = planner.store.CreateOutboxes(writeCtx, rows)
+		cancel()
+		if err != nil {
 			return fmt.Errorf("mall weather scheduler: store outboxes: %w", err)
 		}
 		if len(malls) < mallWeatherSchedulePageSize {
@@ -136,15 +141,18 @@ func (planner *MallWeatherSchedulePlanner) Plan(ctx context.Context, payload job
 }
 
 func (planner *MallWeatherSchedulePlanner) planRepairs(ctx context.Context, scheduledAt time.Time) error {
-	if planner.repairMaxRounds < 1 || planner.repairSpread < 0 || planner.repairQueryTimeout <= 0 || scheduledAt.IsZero() {
+	if planner.repairMaxRounds < 1 || planner.repairSpread < 0 || planner.databaseTimeout <= 0 || scheduledAt.IsZero() {
 		return fmt.Errorf("mall weather scheduler: invalid repair plan")
 	}
-	if _, err := planner.store.ReconcileLatestFreshness(ctx, scheduledAt); err != nil {
+	reconcileCtx, cancel := planner.databaseContext(ctx)
+	_, err := planner.store.ReconcileLatestFreshness(reconcileCtx, scheduledAt)
+	cancel()
+	if err != nil {
 		return fmt.Errorf("mall weather scheduler: reconcile freshness: %w", err)
 	}
 	var afterID uint
 	for {
-		queryCtx, cancel := context.WithTimeout(ctx, planner.repairQueryTimeout)
+		queryCtx, cancel := planner.databaseContext(ctx)
 		candidates, err := planner.store.ListRepairCandidates(queryCtx, afterID, mallWeatherSchedulePageSize)
 		cancel()
 		if err != nil {
@@ -160,7 +168,10 @@ func (planner *MallWeatherSchedulePlanner) planRepairs(ctx context.Context, sche
 				rows = append(rows, row)
 			}
 		}
-		if _, err := planner.store.CreateOutboxes(ctx, rows); err != nil {
+		writeCtx, cancel := planner.databaseContext(ctx)
+		_, err = planner.store.CreateOutboxes(writeCtx, rows)
+		cancel()
+		if err != nil {
 			return fmt.Errorf("mall weather scheduler: store repair outboxes: %w", err)
 		}
 		if len(candidates) < mallWeatherSchedulePageSize {
@@ -171,6 +182,10 @@ func (planner *MallWeatherSchedulePlanner) planRepairs(ctx context.Context, sche
 			return fmt.Errorf("mall weather scheduler: invalid repair cursor")
 		}
 	}
+}
+
+func (planner *MallWeatherSchedulePlanner) databaseContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(ctx, planner.databaseTimeout)
 }
 
 func (planner *MallWeatherSchedulePlanner) repairOutbox(run *model.MallWeatherFetchRun, scheduledAt time.Time) (model.AsyncJobOutbox, bool, error) {

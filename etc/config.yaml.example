@@ -82,6 +82,7 @@ MallWeather:
   OutboxBatchSize: 100
   OutboxRetryBaseSeconds: 5
   OutboxRetryMaxSeconds: 300
+  ScheduleDBTimeoutSeconds: ${MALL_WEATHER_SCHEDULE_DB_TIMEOUT_SECONDS:-8}
   RawRetentionDays: 30
   ForecastVersionRetentionDays: 30
 

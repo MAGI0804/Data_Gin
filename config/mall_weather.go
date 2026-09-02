@@ -42,7 +42,7 @@ func init() {
 			"outbox_retry_max_seconds":        config.Get("MallWeather.OutboxRetryMaxSeconds", 300),
 			"repair_max_rounds":               config.Get("MallWeather.RepairMaxRounds", 3),
 			"repair_spread_seconds":           config.Get("MallWeather.RepairSpreadSeconds", 900),
-			"repair_query_timeout_seconds":    config.Get("MallWeather.RepairQueryTimeoutSeconds", 30),
+			"schedule_db_timeout_seconds":     config.Get("MallWeather.ScheduleDBTimeoutSeconds", config.Get("MallWeather.RepairQueryTimeoutSeconds", 8)),
 			"raw_retention_days":              config.Get("MallWeather.RawRetentionDays", 30),
 			"forecast_version_retention_days": config.Get("MallWeather.ForecastVersionRetentionDays", 30),
 		}

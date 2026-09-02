@@ -132,8 +132,8 @@ func validateMallWeatherConfig() error {
 	if repairSpread := pkgConfig.GetInt("cfg.mall_weather.repair_spread_seconds"); repairSpread < 0 || repairSpread > 3600 {
 		return fmt.Errorf("weather repair spread must be between 0 and 3600 seconds")
 	}
-	if repairQueryTimeout := pkgConfig.GetInt("cfg.mall_weather.repair_query_timeout_seconds"); repairQueryTimeout < 1 || repairQueryTimeout > 300 {
-		return fmt.Errorf("weather repair query timeout must be between 1 and 300 seconds")
+	if scheduleDBTimeout := pkgConfig.GetInt("cfg.mall_weather.schedule_db_timeout_seconds"); scheduleDBTimeout < 1 || scheduleDBTimeout > 60 {
+		return fmt.Errorf("weather repair query timeout must be between 1 and 60 seconds")
 	}
 	queues, ok := pkgConfig.Get("cfg.queue_job.config_opt.queues").(map[string]int)
 	if !ok || queues["weather"] <= 0 {

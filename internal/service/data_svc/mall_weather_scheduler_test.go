@@ -109,7 +109,7 @@ func TestMallWeatherSchedulePlannerTimesOutRepairCandidateQuery(t *testing.T) {
 	if err != nil {
 		t.Fatalf("newMallWeatherSchedulePlanner() error=%v", err)
 	}
-	planner.repairQueryTimeout = 10 * time.Millisecond
+	planner.databaseTimeout = 10 * time.Millisecond
 
 	err = planner.Plan(t.Context(), job.MallWeatherSchedulePayload{TaskType: job.TypeMallWeatherRepair})
 	if !errors.Is(err, context.DeadlineExceeded) {
