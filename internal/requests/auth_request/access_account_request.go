@@ -44,3 +44,10 @@ type AccessAccountMallScopeRequest struct {
 	MallIDs       []uint `json:"mallIds"`
 	Reason        string `json:"reason"`
 }
+
+type AccessAccountReportCategoryRequest struct {
+	Category            string   `json:"category"`
+	ExpectedLockVersion uint64   `json:"expectedLockVersion"`
+	Actions             []string `json:"actions"`
+	Reason              string   `json:"reason"`
+}

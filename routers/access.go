@@ -22,6 +22,8 @@ func registerAccessRoutes(api *gin.RouterGroup) {
 	group.PUT("/accounts/:id/password", middleware.RequirePermission(model.PermissionSystemAccountManage), accounts.ResetPassword)
 	group.PUT("/accounts/:id/roles", middleware.RequirePermission(model.PermissionSystemAccountManage), accounts.ReplaceRoles)
 	group.PUT("/accounts/:id/mall-scope", middleware.RequirePermission(model.PermissionSystemAccountManage), accounts.ReplaceMallScope)
+	group.GET("/accounts/:id/report-categories", middleware.RequirePermission(model.PermissionSystemAccountManage), middleware.RequirePermission(model.PermissionReportManage), accounts.ListReportCategories)
+	group.PUT("/accounts/:id/report-categories", middleware.RequirePermission(model.PermissionSystemAccountManage), middleware.RequirePermission(model.PermissionReportManage), accounts.ReplaceReportCategory)
 
 	roles := auth_ctrl.NewAccessRoleController()
 	group.GET("/permissions", middleware.RequirePermission(model.PermissionSystemRoleRead), roles.PermissionCatalog)

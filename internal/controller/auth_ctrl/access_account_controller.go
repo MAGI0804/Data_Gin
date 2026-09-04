@@ -112,6 +112,29 @@ func (controller *AccessAccountController) ReplaceMallScope(c *gin.Context) {
 	writeAccessAccountResult(c, gin.H{"changed": err == nil}, err, http.StatusOK)
 }
 
+func (controller *AccessAccountController) ListReportCategories(c *gin.Context) {
+	id, ok := accessAccountID(c)
+	if !ok {
+		return
+	}
+	result, err := controller.service.ListReportCategories(c.Request.Context(), auth.CurrentUserID(c), id)
+	writeAccessAccountResult(c, result, err, http.StatusOK)
+}
+
+func (controller *AccessAccountController) ReplaceReportCategory(c *gin.Context) {
+	id, ok := accessAccountID(c)
+	if !ok {
+		return
+	}
+	var request auth_request.AccessAccountReportCategoryRequest
+	if decodeDataAuthorizationJSON(c, &request) != nil {
+		writeAccessAccountError(c, auth_svc.ErrAccessAccountInvalid)
+		return
+	}
+	err := controller.service.ReplaceReportCategory(c.Request.Context(), auth.CurrentUserID(c), id, c.GetHeader("Idempotency-Key"), request)
+	writeAccessAccountResult(c, gin.H{"changed": err == nil}, err, http.StatusOK)
+}
+
 func accessAccountID(c *gin.Context) (uint, bool) {
 	id, err := parseDataAuthorizationID(c.Param("id"))
 	if err != nil {
