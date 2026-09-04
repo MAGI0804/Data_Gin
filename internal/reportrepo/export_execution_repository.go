@@ -60,6 +60,57 @@ type ExportRuntime struct {
 	Datasource model.ReportDatasource
 }
 
+func (repository *Repository) ListExportsMissingDelivery(ctx context.Context, now time.Time, limit int) ([]uint, error) {
+	if repository == nil || repository.db == nil || ctx == nil || now.IsZero() || limit < 1 || limit > 100 {
+		return nil, fmt.Errorf("report export recovery: invalid candidate query")
+	}
+	var exportIDs []uint
+	err := exportDeliveryRecoveryQuery(repository.db.WithContext(ctx), now, limit).Pluck("id", &exportIDs).Error
+	if err != nil {
+		return nil, fmt.Errorf("report export recovery: list candidates: %w", err)
+	}
+	return exportIDs, nil
+}
+
+func exportDeliveryRecoveryQuery(db *gorm.DB, now time.Time, limit int) *gorm.DB {
+	now = now.UTC().Truncate(time.Millisecond)
+	return db.Model(&model.ReportExport{}).
+		Where("updated_at <= ?", now.Add(-30*time.Second)).
+		Where("status = ? OR (status = ? AND (lease_expires_at IS NULL OR lease_expires_at <= ?))",
+			model.ReportExportStatusPending, model.ReportExportStatusRunning, now).
+		Order("id ASC").Limit(limit)
+}
+
+func (repository *Repository) EnsureExportQueued(ctx context.Context, exportID uint, now time.Time) error {
+	if repository == nil || repository.db == nil || ctx == nil || exportID == 0 || now.IsZero() {
+		return fmt.Errorf("report export recovery: invalid queue request")
+	}
+	now = now.UTC().Truncate(time.Millisecond)
+	return repository.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var export model.ReportExport
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Select("id", "export_uuid", "status", "lease_expires_at").First(&export, exportID).Error; err != nil {
+			return fmt.Errorf("report export recovery: lock export: %w", err)
+		}
+		if export.Status != model.ReportExportStatusPending &&
+			(export.Status != model.ReportExportStatusRunning || export.LeaseExpiresAt != nil && now.Before(export.LeaseExpiresAt.UTC())) {
+			return nil
+		}
+		result := tx.Model(&model.AsyncJobOutbox{}).
+			Where("task_key = ? AND task_type = ?", "report:export:"+export.ExportUUID, "report:export").
+			Updates(map[string]interface{}{
+				"published_at": nil, "available_at": now, "attempts": 0, "last_error_safe": "",
+				"locked_by": "", "locked_at": nil, "updated_at": now,
+			})
+		if result.Error != nil {
+			return fmt.Errorf("report export recovery: reset outbox: %w", result.Error)
+		}
+		if result.RowsAffected != 1 {
+			return fmt.Errorf("report export recovery: outbox count changed")
+		}
+		return nil
+	})
+}
+
 func (repository *Repository) BeginExport(ctx context.Context, exportID uint, workerID, leaseToken string, now time.Time, leaseTTL time.Duration) (*ExportLease, error) {
 	if repository == nil || repository.db == nil || ctx == nil || exportID == 0 || strings.TrimSpace(workerID) == "" ||
 		len(workerID) > 128 || uuid.Validate(leaseToken) != nil || now.IsZero() || leaseTTL <= 0 {

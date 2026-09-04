@@ -70,6 +70,24 @@ func TestClassifyExportStartUsesLeaseExpiry(t *testing.T) {
 	}
 }
 
+func TestExportDeliveryRecoveryQueryIncludesPendingAndExpiredRunning(t *testing.T) {
+	now := time.Date(2026, 9, 4, 18, 0, 0, 0, time.UTC)
+	query := exportDeliveryRecoveryQuery(newDryRunDB(t), now, 20).Pluck("id", &[]uint{})
+	if query.Error != nil {
+		t.Fatalf("build export recovery query: %v", query.Error)
+	}
+	statement := query.Statement.SQL.String()
+	for _, fragment := range []string{"updated_at <= ?", "status = ? OR", "lease_expires_at IS NULL", "lease_expires_at <= ?", "ORDER BY id ASC", "LIMIT"} {
+		if !strings.Contains(statement, fragment) {
+			t.Fatalf("export recovery query %q does not contain %q", statement, fragment)
+		}
+	}
+	if !containsSQLVariable(query.Statement.Vars, model.ReportExportStatusPending) ||
+		!containsSQLVariable(query.Statement.Vars, model.ReportExportStatusRunning) {
+		t.Fatalf("export recovery vars = %#v", query.Statement.Vars)
+	}
+}
+
 func TestOwnedExportUsesDedicatedLeaseFence(t *testing.T) {
 	repository := New(newDryRunDB(t))
 	query := repository.ownedExport(t.Context(), 41, "11111111-1111-4111-8111-111111111111").

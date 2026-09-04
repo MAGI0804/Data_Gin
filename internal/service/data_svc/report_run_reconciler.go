@@ -31,6 +31,8 @@ type reportReconciliationStore interface {
 	MarkQueuedExecutionFailed(context.Context, uint, string, string, time.Time) error
 	ListQueuedRunsMissingDelivery(context.Context, int) ([]uint, error)
 	EnsureRunQueued(context.Context, uint, time.Time) error
+	ListExportsMissingDelivery(context.Context, time.Time, int) ([]uint, error)
+	EnsureExportQueued(context.Context, uint, time.Time) error
 }
 
 type reportResultEvidenceReader interface {
@@ -122,6 +124,15 @@ func (reconciler *ReportRunReconciler) Reconcile(ctx context.Context) error {
 	}
 	for _, runID := range queuedIDs {
 		if err := reconciler.store.EnsureRunQueued(ctx, runID, reconciler.now().UTC()); err != nil {
+			return err
+		}
+	}
+	exportIDs, err := reconciler.store.ListExportsMissingDelivery(ctx, now, reconciler.batchSize)
+	if err != nil {
+		return err
+	}
+	for _, exportID := range exportIDs {
+		if err := reconciler.store.EnsureExportQueued(ctx, exportID, reconciler.now().UTC()); err != nil {
 			return err
 		}
 	}
