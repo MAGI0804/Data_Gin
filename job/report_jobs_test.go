@@ -106,4 +106,7 @@ func TestReportResultCleanupTaskIsStrictAndScheduledForCleanupQueue(t *testing.T
 	if err := DecodeReportResultCleanupTaskPayload([]byte(`{"extra":true}`)); err == nil {
 		t.Fatal("DecodeReportResultCleanupTaskPayload() accepted unknown field")
 	}
+	if ReportResultCleanupCron != "* * * * *" {
+		t.Fatalf("result cleanup schedule = %q", ReportResultCleanupCron)
+	}
 }

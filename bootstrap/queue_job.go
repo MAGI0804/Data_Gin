@@ -81,6 +81,13 @@ func setupQueueJob() {
 	} else if _, err := client.Enqueue(cleanupTask); err != nil && !errors.Is(err, asynq.ErrDuplicateTask) {
 		console.Warning("Failed to enqueue initial Excel match cleanup task: %v", err)
 	}
+	if reportWorkerEnabled {
+		if cleanupTask, err := job.NewReportResultCleanupTask(); err != nil {
+			console.Warning("Failed to create initial report result cleanup task: %v", err)
+		} else if _, err := client.Enqueue(cleanupTask); err != nil && !errors.Is(err, asynq.ErrDuplicateTask) {
+			console.Warning("Failed to enqueue initial report result cleanup task: %v", err)
+		}
+	}
 	if global.MallWeatherEnabledAtStartup {
 		geocodeProcessor, err := data_svc.NewMallGeocodeProcessor()
 		if err != nil {

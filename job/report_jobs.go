@@ -23,7 +23,7 @@ const (
 	ReportExportCleanupTimeout = 30 * time.Minute
 	ReportExportCleanupUnique  = 50 * time.Minute
 	ReportExportCleanupCron    = "37 * * * *"
-	ReportResultCleanupCron    = "7,17,27,37,47,57 * * * *"
+	ReportResultCleanupCron    = "* * * * *"
 	ReportRunFailureMaxRetry   = 3
 	// Snapshot runs wait behind the report-scoped Oracle result table lock.
 	// Business failures are capped separately; this allows about 12 hours.
@@ -108,7 +108,7 @@ func NewReportResultCleanupTask() (*asynq.Task, error) {
 		asynq.Queue(ReportCleanupQueueName),
 		asynq.Timeout(ReportExportCleanupTimeout),
 		asynq.MaxRetry(5),
-		asynq.Unique(9*time.Minute),
+		asynq.Unique(50*time.Second),
 	), nil
 }
 
