@@ -25,6 +25,17 @@ func TestReportRunReconcilerFailsExpiredQueuedRunsBeforeDeliveryRecovery(t *test
 	}
 }
 
+func TestReportRunReconcilerRecoversLegacySnapshotStates(t *testing.T) {
+	store := &fakeReconciliationStore{legacyRecoveryCount: 3}
+	reconciler := NewReportRunReconcilerWithDependencies(store, fakeReportCredentialDecryptor{}, &fakeResultEvidenceReader{})
+	if err := reconciler.Reconcile(t.Context()); err != nil {
+		t.Fatalf("Reconcile() error = %v", err)
+	}
+	if store.legacyRecoveryCalls != 1 {
+		t.Fatalf("legacy recovery calls = %d", store.legacyRecoveryCalls)
+	}
+}
+
 func TestReportRunReconcilerRecoversLostExportDelivery(t *testing.T) {
 	now := time.Date(2026, 9, 4, 18, 0, 0, 0, time.UTC)
 	store := &fakeReconciliationStore{missingExportIDs: []uint{41}}
@@ -161,6 +172,13 @@ type fakeReconciliationStore struct {
 	automaticExportRunID        uint
 	terminalCleanupCount        int64
 	terminalCleanupCalls        int
+	legacyRecoveryCount         int64
+	legacyRecoveryCalls         int
+}
+
+func (store *fakeReconciliationStore) RecoverLegacySnapshotStates(context.Context, time.Time, int) (int64, error) {
+	store.legacyRecoveryCalls++
+	return store.legacyRecoveryCount, nil
 }
 
 func (store *fakeReconciliationStore) ListReconciliationCandidates(context.Context, time.Time, int) ([]uint, error) {

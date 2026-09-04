@@ -99,6 +99,24 @@ func TestExpiredQueuedRunQueryUsesCreationDeadline(t *testing.T) {
 	}
 }
 
+func TestLegacySnapshotStateQueryIncludesUnpurgedLegacyStatuses(t *testing.T) {
+	query := legacySnapshotStateQuery(newDryRunDB(t), 20).Find(&[]model.ReportRun{})
+	if query.Error != nil {
+		t.Fatalf("build legacy state query: %v", query.Error)
+	}
+	statement := query.Statement.SQL.String()
+	for _, fragment := range []string{"status IN", "result_purged_at IS NULL", "ORDER BY id ASC", "LIMIT"} {
+		if !strings.Contains(statement, fragment) {
+			t.Fatalf("legacy state query %q does not contain %q", statement, fragment)
+		}
+	}
+	for _, status := range []string{model.ReportRunStatusExporting, model.ReportRunStatusExported} {
+		if !containsSQLVariable(query.Statement.Vars, status) {
+			t.Fatalf("legacy state query does not include status %q: vars=%#v", status, query.Statement.Vars)
+		}
+	}
+}
+
 func TestExpiredInterruptedRunQueryIncludesCancelledAndLeaseLessRuns(t *testing.T) {
 	now := time.Date(2026, 9, 4, 18, 30, 0, 0, time.UTC)
 	query := expiredInterruptedRunQuery(newDryRunDB(t), now, 20).Pluck("id", &[]uint{})

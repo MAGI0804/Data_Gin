@@ -22,6 +22,7 @@ const (
 )
 
 type reportReconciliationStore interface {
+	RecoverLegacySnapshotStates(context.Context, time.Time, int) (int64, error)
 	ListReconciliationCandidates(context.Context, time.Time, int) ([]uint, error)
 	BeginReconciliation(context.Context, uint, string, string, time.Time, time.Duration) (*reportrepo.RunLease, error)
 	LoadRuntimeContract(context.Context, uint, string) (*reportrepo.RuntimeContract, error)
@@ -103,6 +104,13 @@ func (reconciler *ReportRunReconciler) reconcileCycle(ctx context.Context) {
 
 func (reconciler *ReportRunReconciler) Reconcile(ctx context.Context) error {
 	now := reconciler.now().UTC()
+	legacyRecoveryCount, err := reconciler.store.RecoverLegacySnapshotStates(ctx, now, reconciler.batchSize)
+	if err != nil {
+		return err
+	}
+	if legacyRecoveryCount > 0 {
+		zap.L().Info("已恢复历史报表快照状态", zap.Int64("report_run_count", legacyRecoveryCount))
+	}
 	if _, err := reconciler.store.RecoverExpiredPreOracleRuns(ctx, now, reconciler.batchSize); err != nil {
 		return err
 	}

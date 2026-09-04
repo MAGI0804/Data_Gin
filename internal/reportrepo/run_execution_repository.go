@@ -67,6 +67,52 @@ func (repository *Repository) ListReconciliationCandidates(ctx context.Context, 
 	return runIDs, nil
 }
 
+func (repository *Repository) RecoverLegacySnapshotStates(ctx context.Context, now time.Time, limit int) (int64, error) {
+	if repository == nil || repository.db == nil || ctx == nil || now.IsZero() || limit < 1 || limit > 100 {
+		return 0, fmt.Errorf("report execution recovery: invalid legacy state request")
+	}
+	now = now.UTC().Truncate(time.Millisecond)
+	var candidates []struct {
+		ID     uint   `gorm:"column:id"`
+		Status string `gorm:"column:status"`
+	}
+	if err := legacySnapshotStateQuery(repository.db.WithContext(ctx), limit).Find(&candidates).Error; err != nil {
+		return 0, fmt.Errorf("report execution recovery: list legacy states: %w", err)
+	}
+	var recovered int64
+	for _, candidate := range candidates {
+		updates := map[string]interface{}{
+			"worker_id": "", "lease_token": "", "lease_expires_at": nil, "heartbeat_at": nil, "updated_at": now,
+		}
+		switch candidate.Status {
+		case model.ReportRunStatusExporting:
+			updates["status"] = model.ReportRunStatusSucceeded
+		case model.ReportRunStatusExported:
+			updates["status"] = model.ReportRunStatusSucceeded
+			updates["result_expires_at"] = now
+		default:
+			continue
+		}
+		result := repository.db.WithContext(ctx).Model(&model.ReportRun{}).
+			Where("id = ? AND status = ? AND result_purged_at IS NULL", candidate.ID, candidate.Status).
+			Updates(updates)
+		if result.Error != nil {
+			return recovered, fmt.Errorf("report execution recovery: recover legacy state: %w", result.Error)
+		}
+		recovered += result.RowsAffected
+	}
+	return recovered, nil
+}
+
+func legacySnapshotStateQuery(db *gorm.DB, limit int) *gorm.DB {
+	return db.Model(&model.ReportRun{}).
+		Select("id", "status").
+		Where("status IN ? AND result_purged_at IS NULL", []string{
+			model.ReportRunStatusExporting, model.ReportRunStatusExported,
+		}).
+		Order("id ASC").Limit(limit)
+}
+
 func buildReconciliationCandidateQuery(db *gorm.DB, now time.Time, limit int) *gorm.DB {
 	return db.Model(&model.ReportRun{}).
 		Where(
