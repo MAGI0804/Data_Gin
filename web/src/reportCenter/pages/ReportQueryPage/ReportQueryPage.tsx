@@ -3,7 +3,7 @@ import DatePicker from 'antd/es/date-picker'
 import dayjs from 'dayjs'
 import { ChevronDown, ChevronLeft, ChevronRight, Download, Filter, Info, Play, Plus, Square, Trash2 } from 'lucide-react'
 import { Button, DataTable, Dialog, FeedbackState, FilterToolbar, PageCanvas, PageHeader, Section, StatusTag, type StatusTagTone } from '../../../ui'
-import { cancelReportRun, createReportExport, createReportRun, getReportDownloads, getReportExport, getReportExportDownload, queryReportResults, getReportRun, getReportRunContract, type ReportCenterClient } from '../../api'
+import { cancelReportRun, createReportExport, createReportRun, getReportDownloads, getReportExport, getReportExportDownload, isRetryableReportPollFailure, queryReportResults, getReportRun, getReportRunContract, reportPollRetryDelay, type ReportCenterClient } from '../../api'
 import { buildNewReportRunState, canBindReportExport, canRetryReportExportBinding, canStartNewReportRun, initialReportParameterValues, isReportExportSettled, terminalReportRunStatuses, visibleReportParameters } from '../../queryParameters'
 import { buildReportConditions, editableReportConditionValue, initialReportConditionValues, isReportInputListType, orderedReportInputEntries } from '../../refCursorConfig'
 import type { ReportExport, ReportFilterOperator, ReportInputField, ReportParameter, ReportResultColumn, ReportResultFilter, ReportResultPage, ReportResultQuery, ReportRun, ReportRunContract, ReportSummary } from '../../types'
@@ -42,6 +42,17 @@ export function ReportQueryPage({ client, navigation }: { client: ReportCenterCl
   const pollAbortRef = useRef<AbortController | null>(null)
   const keepRunningRef = useRef<HTMLButtonElement>(null)
 
+  function replacePollController() {
+    pollAbortRef.current?.abort()
+    const controller = new AbortController()
+    pollAbortRef.current = controller
+    return controller
+  }
+
+  function ownsPoll(controller: AbortController) {
+    return !controller.signal.aborted && pollAbortRef.current === controller
+  }
+
   useEffect(() => () => pollAbortRef.current?.abort(), [])
 
   useEffect(() => {
@@ -59,6 +70,7 @@ export function ReportQueryPage({ client, navigation }: { client: ReportCenterCl
     setCursorHistory([''])
     setCursorIndex(0)
     setOperation({ busy: false, error: '' })
+    setCancelState({ open: false, busy: false, error: '' })
     if (!selectedId) return
     const reportId = Number(selectedId)
     const controller = new AbortController()
@@ -90,7 +102,9 @@ export function ReportQueryPage({ client, navigation }: { client: ReportCenterCl
       runInput = normalized.parameters
     }
     setOperation({ busy: true, error: '' })
-    const response = await createReportRun(client, contract.definitionId, runInput, contract.executionMode, contract.jsonInput)
+    const controller = replacePollController()
+    const response = await createReportRun(client, contract.definitionId, runInput, contract.executionMode, contract.jsonInput, controller.signal)
+    if (!ownsPoll(controller)) return
     if (!response.ok) {
       setOperation({ busy: false, error: response.error })
       return
@@ -100,30 +114,36 @@ export function ReportQueryPage({ client, navigation }: { client: ReportCenterCl
     setReportExport(null)
     setCursorHistory([''])
     setCursorIndex(0)
-    await pollRun(response.data.id)
+    await pollRun(response.data.id, controller)
   }
 
-  async function pollRun(runId: number) {
-    pollAbortRef.current?.abort()
-    const controller = new AbortController()
-    pollAbortRef.current = controller
-    while (!controller.signal.aborted) {
+  async function pollRun(runId: number, controller = replacePollController()) {
+    let transientFailures = 0
+    while (ownsPoll(controller)) {
       const response = await getReportRun(client, runId, controller.signal)
+      if (!ownsPoll(controller)) return
       if (!response.ok) {
-        if (!controller.signal.aborted) setOperation({ busy: false, error: response.error })
+        if (isRetryableReportPollFailure(response)) {
+          transientFailures++
+          await wait(reportPollRetryDelay(response, transientFailures), controller.signal)
+          continue
+        }
+        setOperation({ busy: false, error: response.error })
         return
       }
+      transientFailures = 0
       setRun(response.data)
       if (terminalReportRunStatuses.has(response.data.status)) {
         setOperation({ busy: false, error: response.data.errorMessage })
         if (response.data.resultAvailable) {
           await loadResults(runId, emptyResultQuery, '', 0, controller.signal)
         }
-        if (canBindReportExport(response.data)) await startExport(runId)
+        if (!ownsPoll(controller)) return
+        if (canBindReportExport(response.data)) await startExport(runId, controller)
         return
       }
       if (canBindReportExport(response.data)) {
-        await startExport(runId)
+        await startExport(runId, controller)
         return
       }
       await wait(1500, controller.signal)
@@ -139,6 +159,7 @@ export function ReportQueryPage({ client, navigation }: { client: ReportCenterCl
   async function loadResults(runId: number, query: ReportResultQuery, cursor: string, pageIndex: number, signal?: AbortSignal) {
     setOperation((current) => ({ ...current, busy: true, error: '' }))
     const response = await queryReportResults(client, runId, query, cursor, 100, signal)
+    if (signal?.aborted) return
     if (!response.ok) {
       if (!signal?.aborted) setOperation({ busy: false, error: response.error })
       return
@@ -151,62 +172,80 @@ export function ReportQueryPage({ client, navigation }: { client: ReportCenterCl
 
   async function nextPage() {
     if (!run || !result?.pagination.nextCursor) return
+    const controller = replacePollController()
     const nextIndex = cursorIndex + 1
     const nextHistory = [...cursorHistory.slice(0, nextIndex), result.pagination.nextCursor]
     setCursorHistory(nextHistory)
-    await loadResults(run.id, appliedQuery, result.pagination.nextCursor, nextIndex)
+    await loadResults(run.id, appliedQuery, result.pagination.nextCursor, nextIndex, controller.signal)
   }
 
   async function previousPage() {
     if (!run || cursorIndex === 0) return
+    const controller = replacePollController()
     const previousIndex = cursorIndex - 1
-    await loadResults(run.id, appliedQuery, cursorHistory[previousIndex], previousIndex)
+    await loadResults(run.id, appliedQuery, cursorHistory[previousIndex], previousIndex, controller.signal)
   }
 
   async function applyResultQuery() {
     if (!run?.resultAvailable || operation.busy || reportExport) return
     const normalized = normalizeResultQuery(resultQuery)
+    const controller = replacePollController()
     setAppliedQuery(normalized)
     setCursorHistory([''])
     setCursorIndex(0)
-    await loadResults(run.id, normalized, '', 0)
+    await loadResults(run.id, normalized, '', 0, controller.signal)
   }
 
   async function cancelRun() {
     if (!run?.canCancel || cancelState.busy) return
+    const controller = replacePollController()
     setCancelState({ open: true, busy: true, error: '' })
-    const response = await cancelReportRun(client, run.id)
+    const response = await cancelReportRun(client, run.id, controller.signal)
+    if (!ownsPoll(controller)) return
     if (!response.ok) {
       setCancelState({ open: true, busy: false, error: response.error })
+      await pollRun(run.id, controller)
       return
     }
     setCancelState({ open: false, busy: false, error: '' })
     setRun(response.data)
-    if (!terminalReportRunStatuses.has(response.data.status)) await pollRun(response.data.id)
+    if (terminalReportRunStatuses.has(response.data.status)) {
+      setOperation({ busy: false, error: response.data.errorMessage })
+      return
+    }
+    await pollRun(response.data.id, controller)
   }
 
-  async function startExport(runID = run?.id) {
+  async function startExport(runID = run?.id, controller = replacePollController()) {
     if (!runID || reportExport) return
+    if (!ownsPoll(controller)) return
     setOperation({ busy: true, error: '' })
-    const response = await createReportExport(client, runID, appliedQuery)
+    const response = await createReportExport(client, runID, appliedQuery, controller.signal)
+    if (!ownsPoll(controller)) return
     if (!response.ok) {
       setOperation({ busy: false, error: response.error })
       return
     }
     setReportExport(response.data)
-    await pollExport(response.data.id)
+    await pollExport(response.data.id, controller)
   }
 
-  async function pollExport(exportId: number) {
-    const controller = new AbortController()
-    pollAbortRef.current = controller
+  async function pollExport(exportId: number, controller = replacePollController()) {
     let readyCleanupPolls = 0
-    while (!controller.signal.aborted) {
+    let transientFailures = 0
+    while (ownsPoll(controller)) {
       const response = await getReportExport(client, exportId, controller.signal)
+      if (!ownsPoll(controller)) return
       if (!response.ok) {
-        if (!controller.signal.aborted) setOperation({ busy: false, error: response.error })
+        if (isRetryableReportPollFailure(response)) {
+          transientFailures++
+          await wait(reportPollRetryDelay(response, transientFailures), controller.signal)
+          continue
+        }
+        setOperation({ busy: false, error: response.error })
         return
       }
+      transientFailures = 0
       setReportExport(response.data)
       if (isReportExportSettled(response.data)) {
         setOperation({ busy: false, error: response.data.errorMessage })
@@ -269,7 +308,7 @@ export function ReportQueryPage({ client, navigation }: { client: ReportCenterCl
       {navigation}
       <PageHeader eyebrow="REPORT CENTER" title="报表下载" actions={run ? <div className={styles.pageActions}>{run.canCancel ? <button type="button" onClick={() => setCancelState({ open: true, busy: false, error: '' })}><Square aria-hidden="true" />取消生成</button> : null}<button type="button" onClick={startNewRun} disabled={!canStartNewRun}><Plus aria-hidden="true" />重新选择</button></div> : undefined} />
       <FilterToolbar summary={run ? <StatusTag tone={runTone(run)}>{runLabel(run.status)}</StatusTag> : <StatusTag tone="neutral">等待选择报表</StatusTag>}>
-        <div className={styles.catalogSelector}><label className={styles.selector}>选择报表<select value={selectedId} onChange={(event) => setSelectedId(event.currentTarget.value)} disabled={loading || published.length === 0}><option value="">请选择已上线报表</option>{reportsByCategory.map(([category, reports]) => <optgroup label={category} key={category}>{reports.map((report) => <option value={report.id} key={report.id}>{report.name}</option>)}</optgroup>)}</select></label>{hasMore ? <button type="button" onClick={() => void loadMore()} disabled={loadingMore}>{loadingMore ? '正在加载…' : '加载更多'}</button> : null}</div>
+        <div className={styles.catalogSelector}><label className={styles.selector}>选择报表<select value={selectedId} onChange={(event) => { pollAbortRef.current?.abort(); setSelectedId(event.currentTarget.value) }} disabled={loading || published.length === 0}><option value="">请选择已上线报表</option>{reportsByCategory.map(([category, reports]) => <optgroup label={category} key={category}>{reports.map((report) => <option value={report.id} key={report.id}>{report.name}</option>)}</optgroup>)}</select></label>{hasMore ? <button type="button" onClick={() => void loadMore()} disabled={loadingMore}>{loadingMore ? '正在加载…' : '加载更多'}</button> : null}</div>
       </FilterToolbar>
       {selectedId ? <Section title="下载条件" actions={<button type="button" aria-expanded={parametersOpen} onClick={() => setParametersOpen((open) => !open)}><ChevronDown className={parametersOpen ? styles.chevronOpen : undefined} aria-hidden="true" />{parametersOpen ? '收起' : '展开'}</button>}>
         {parametersOpen ? <>
@@ -406,7 +445,7 @@ function displayConditionOption(value: unknown) { return typeof value === 'strin
 function comparableConditionValue(value: unknown) { return JSON.stringify(value) }
 function displayCell(value: unknown, nullDisplay: string) { if (value === null || value === undefined) return nullDisplay || '-'; if (typeof value === 'object') return JSON.stringify(value); return String(value) }
 function numericValueType(valueType: string) { return valueType === 'integer' || valueType === 'decimal' || valueType === 'number' }
-function wait(milliseconds: number, signal: AbortSignal) { return new Promise<void>((resolve) => { const finish = () => { window.clearTimeout(timer); signal.removeEventListener('abort', finish); resolve() }; const timer = window.setTimeout(finish, milliseconds); signal.addEventListener('abort', finish, { once: true }) }) }
+function wait(milliseconds: number, signal: AbortSignal) { return new Promise<void>((resolve) => { if (signal.aborted) { resolve(); return } const finish = () => { window.clearTimeout(timer); signal.removeEventListener('abort', finish); resolve() }; const timer = window.setTimeout(finish, milliseconds); signal.addEventListener('abort', finish, { once: true }); if (signal.aborted) finish() }) }
 function runTone(run: ReportRun): StatusTagTone { return ['SUCCEEDED', 'EXPORTED', 'RESULT_PURGED'].includes(run.status) ? 'success' : run.status === 'FAILED' || run.status === 'CANCELLED' ? 'danger' : run.status === 'UNKNOWN' || run.status === 'RECONCILING' || run.status === 'SUPERSEDED' ? 'warning' : 'running' }
 function runLabel(status: ReportRun['status']) { return ({ QUEUED: '等待执行', RUNNING: '正在执行', CANCEL_REQUESTED: '正在取消', SUCCEEDED: '运行成功', FAILED: '运行失败', CANCELLED: '已取消', UNKNOWN: '状态待确认', RECONCILING: '正在对账', EXPORTING: '正在导出', EXPORTED: '已导出', RESULT_PURGING: '正在清理结果', RESULT_PURGED: '结果已清理', SUPERSEDED: '已被新运行替代' })[status] }
 function exportTone(item: ReportExport): StatusTagTone { return item.status === 'READY' ? 'success' : item.status === 'FAILED' || item.status === 'CANCELLED' || item.status === 'EXPIRED' ? 'danger' : 'running' }

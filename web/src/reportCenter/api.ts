@@ -1,4 +1,4 @@
-import type { ClientResponse, HTTPMethod } from '../api/client'
+import type { ClientFailureKind, ClientResponse, HTTPMethod } from '../api/client'
 import { isReportInputQueryName } from './inputQueryName.js'
 import { parseReportInputSchemaDocument, reportInputSchemaDocument } from './refCursorConfig.js'
 import type { ReportAudit, ReportAuditPage, ReportAuditQuery, ReportCatalogPage, ReportCatalogQuery, ReportColumn, ReportDatasource, ReportDatasourceInput, ReportDatasourceTest, ReportDefinitionStatus, ReportDraft, ReportExport, ReportExportPage, ReportFilterOperator, ReportGrant, ReportInputOption, ReportInputQueryDefinition, ReportInputQueryDefinitionInput, ReportInputQueryTestResult, ReportParameter, ReportProcedureArgument, ReportProcedurePage, ReportProcedureRef, ReportProcedureSignature, ReportProcedureSummary, ReportPublication, ReportResultPage, ReportResultQuery, ReportResultTableColumn, ReportResultTablePage, ReportResultTableRef, ReportResultTableSchema, ReportResultTableSummary, ReportRun, ReportRunContract, ReportRunStatus, ReportSummary, ReportVersionDiff, ReportVersionPage, ReportVersionSummary } from './types'
@@ -14,7 +14,30 @@ export type ReportCenterClient = (path: string, options?: {
   acceptSafeErrorMessage?: boolean
 }) => Promise<ClientResponse>
 
-type ReportAPIResult<T> = { ok: true; data: T } | { ok: false; error: string }
+export type ReportAPIFailure = {
+  ok: false
+  error: string
+  kind?: ClientFailureKind
+  status?: number
+  retryAfterSeconds?: number
+}
+export type ReportAPIResult<T> = { ok: true; data: T } | ReportAPIFailure
+
+export function isRetryableReportPollFailure(result: ReportAPIFailure) {
+  return result.kind === 'network'
+    || result.kind === 'offline'
+    || result.kind === 'timeout'
+    || result.status === 502
+    || result.status === 503
+    || result.status === 504
+}
+
+export function reportPollRetryDelay(result: ReportAPIFailure, consecutiveFailures: number) {
+  const attempt = Math.max(0, Math.min(2, consecutiveFailures - 1))
+  const backoff = Math.min(5000, 1500 * (2 ** attempt))
+  if (result.retryAfterSeconds === undefined) return backoff
+  return Math.max(backoff, Math.max(0, result.retryAfterSeconds) * 1000)
+}
 
 export async function getReportCatalog(client: ReportCenterClient, query: ReportCatalogQuery, signal?: AbortSignal) {
 	return getReportCatalogFromPath(client, '/v1/reports', query, signal, '报表目录加载失败，请稍后重试。')
@@ -373,17 +396,17 @@ export async function getReportVersionDiff(client: ReportCenterClient, reportId:
   return requestAndParse(client, `/v1/reports/${reportId}/version-diff?${search}`, { method: 'GET', signal }, parseReportVersionDiff, '报表版本差异加载失败。')
 }
 
-export async function createReportRun(client: ReportCenterClient, reportId: number, input: Record<string, unknown>, executionMode: ReportDraft['executionMode'], jsonInput = executionMode === 'REF_CURSOR'): Promise<ReportAPIResult<ReportRun>> {
+export async function createReportRun(client: ReportCenterClient, reportId: number, input: Record<string, unknown>, executionMode: ReportDraft['executionMode'], jsonInput = executionMode === 'REF_CURSOR', signal?: AbortSignal): Promise<ReportAPIResult<ReportRun>> {
   const body = jsonInput ? { conditions: input } : { parameters: input }
-  return requestAndParse(client, `/v1/reports/${reportId}/runs`, { method: 'POST', body }, parseReportRun, '报表运行创建失败。')
+  return requestAndParse(client, `/v1/reports/${reportId}/runs`, { method: 'POST', body, signal }, parseReportRun, '报表运行创建失败。')
 }
 
 export async function getReportRun(client: ReportCenterClient, runId: number, signal?: AbortSignal): Promise<ReportAPIResult<ReportRun>> {
   return requestAndParse(client, `/v1/report-runs/${runId}`, { method: 'GET', signal }, parseReportRun, '报表运行状态加载失败。')
 }
 
-export async function cancelReportRun(client: ReportCenterClient, runId: number): Promise<ReportAPIResult<ReportRun>> {
-  return requestAndParse(client, `/v1/report-runs/${runId}/cancel`, { method: 'POST' }, parseReportRun, '报表运行取消失败。')
+export async function cancelReportRun(client: ReportCenterClient, runId: number, signal?: AbortSignal): Promise<ReportAPIResult<ReportRun>> {
+  return requestAndParse(client, `/v1/report-runs/${runId}/cancel`, { method: 'POST', signal }, parseReportRun, '报表运行取消失败。')
 }
 
 export async function getReportResults(client: ReportCenterClient, runId: number, cursor = '', limit = 100, signal?: AbortSignal): Promise<ReportAPIResult<ReportResultPage>> {
@@ -396,8 +419,8 @@ export async function queryReportResults(client: ReportCenterClient, runId: numb
 	return requestAndParse(client, `/v1/report-runs/${runId}/results/query`, { method: 'POST', body: { ...query, cursor, limit }, signal }, parseReportResultPage, '报表结果加载失败。')
 }
 
-export async function createReportExport(client: ReportCenterClient, runId: number, query: ReportResultQuery): Promise<ReportAPIResult<ReportExport>> {
-	return requestAndParse(client, `/v1/report-runs/${runId}/export`, { method: 'POST', body: query }, parseReportExport, '正式导出创建失败。')
+export async function createReportExport(client: ReportCenterClient, runId: number, query: ReportResultQuery, signal?: AbortSignal): Promise<ReportAPIResult<ReportExport>> {
+	return requestAndParse(client, `/v1/report-runs/${runId}/export`, { method: 'POST', body: query, signal }, parseReportExport, '正式导出创建失败。')
 }
 
 export async function getReportExport(client: ReportCenterClient, exportId: number, signal?: AbortSignal): Promise<ReportAPIResult<ReportExport>> {
@@ -612,7 +635,13 @@ export function parseReportAuditPage(payload: unknown): ReportAuditPage {
 
 async function requestAndParse<T>(client: ReportCenterClient, path: string, options: Parameters<ReportCenterClient>[1], parse: (payload: unknown) => T, fallback: string): Promise<ReportAPIResult<T>> {
   const response = await client(path, { ...options, showResult: false, silentLoading: true, acceptSafeErrorMessage: true })
-  if (!response.ok) return { ok: false, error: response.error?.message ?? fallback }
+  if (!response.ok) {
+    const failure: Extract<ReportAPIResult<T>, { ok: false }> = { ok: false, error: response.error?.message ?? fallback }
+    if (response.error?.kind) failure.kind = response.error.kind
+    if (Number.isFinite(response.status)) failure.status = response.status
+    if (response.error?.retryAfterSeconds !== undefined) failure.retryAfterSeconds = response.error.retryAfterSeconds
+    return failure
+  }
   try {
     return { ok: true, data: parse(response.data) }
   } catch {

@@ -3,7 +3,7 @@ import { readdirSync, readFileSync } from 'node:fs'
 import test from 'node:test'
 import ts from 'typescript'
 
-import { createReportInputQueryDefinition, createReportRun, deleteReportDraft, getReportAudits, getReportDownloads, getReportInputOptions, getReportInputQueries, getReportInputQueryDefinitions, getReportProcedureSignature, getReportProcedures, getReportResultTableSchema, getReportResultTables, parsePublication, parseReportAuditPage, parseReportCatalogPage, parseReportDatasource, parseReportDatasources, parseReportDatasourceTest, parseReportDraft, parseReportExport, parseReportExportPage, parseReportInputQueryDefinitions, parseReportInputQueryTestResult, parseReportProcedurePage, parseReportProcedureSignature, parseReportResultPage, parseReportResultTablePage, parseReportResultTableSchema, parseReportRun, parseReportRunContract, parseReportVersionDiff, parseReportVersionPage, saveAndPublishReportDraft, saveReportDraft, testReportDatasourceConnection, testReportInputQueryDefinition } from '../.test-dist/reportCenter/api.js'
+import { cancelReportRun, createReportExport, createReportInputQueryDefinition, createReportRun, deleteReportDraft, getReportAudits, getReportDownloads, getReportInputOptions, getReportInputQueries, getReportInputQueryDefinitions, getReportProcedureSignature, getReportProcedures, getReportResultTableSchema, getReportResultTables, getReportRun, isRetryableReportPollFailure, parsePublication, parseReportAuditPage, parseReportCatalogPage, parseReportDatasource, parseReportDatasources, parseReportDatasourceTest, parseReportDraft, parseReportExport, parseReportExportPage, parseReportInputQueryDefinitions, parseReportInputQueryTestResult, parseReportProcedurePage, parseReportProcedureSignature, parseReportResultPage, parseReportResultTablePage, parseReportResultTableSchema, parseReportRun, parseReportRunContract, parseReportVersionDiff, parseReportVersionPage, reportPollRetryDelay, saveAndPublishReportDraft, saveReportDraft, testReportDatasourceConnection, testReportInputQueryDefinition } from '../.test-dist/reportCenter/api.js'
 import { applyExcelMapping, buildReportConditions, excelMappingFromColumns, initialReportConditionValues, moveReportInputField, orderedReportInputEntries, parseExcelMappingDocument, parseReportInputSchemaDocument, parseReportInputSchemaText, reconcileReportColumnsWithResultSchema, renameExcelMappingField, reportColumnsFromResultSchema } from '../.test-dist/reportCenter/refCursorConfig.js'
 import { reportParameterControls, reportParameterFlagDisabled, updateReportParameterFlag, updateReportParameterLogicalType } from '../.test-dist/reportCenter/parameterConfig.js'
 import { buildNewReportRunState, canBindReportExport, canRetryReportExportBinding, canStartNewReportRun, initialReportParameterValues } from '../.test-dist/reportCenter/queryParameters.js'
@@ -75,6 +75,18 @@ test('Oracle object editor searches on demand and cancels superseded catalog req
   assert.match(source, /getReportResultTables\([\s\S]*?controller\.signal\)/)
   assert.doesNotMatch(source, /getReportProcedures\(client, draft\.datasourceId, \{ limit: 30 \}/)
   assert.doesNotMatch(source, /getReportResultTables\(client, draft\.datasourceId, \{ limit: 30 \}/)
+})
+
+test('report download selection cancels the superseded run-to-export chain', () => {
+  const source = readFileSync(new URL('../src/reportCenter/pages/ReportQueryPage/ReportQueryPage.tsx', import.meta.url), 'utf8')
+  assert.match(source, /onChange=\{\(event\) => \{ pollAbortRef\.current\?\.abort\(\); setSelectedId\(event\.currentTarget\.value\) \}\}/)
+  assert.match(source, /createReportRun\([\s\S]*?controller\.signal\)/)
+  assert.match(source, /createReportExport\([\s\S]*?controller\.signal\)/)
+  assert.match(source, /if \(!ownsPoll\(controller\)\) return[\s\S]*?await startExport\(runId, controller\)/)
+  assert.match(source, /if \(signal\?\.aborted\) return[\s\S]*?if \(!response\.ok\)/)
+  assert.match(source, /if \(signal\.aborted\) \{ resolve\(\); return \}/)
+  assert.match(source, /setCancelState\(\{ open: true, busy: false, error: response\.error \}\)[\s\S]*?await pollRun\(run\.id, controller\)/)
+  assert.match(source, /terminalReportRunStatuses\.has\(response\.data\.status\)[\s\S]*?setOperation\(\{ busy: false, error: response\.data\.errorMessage \}\)/)
 })
 
 function typescriptFiles(directory) {
@@ -299,6 +311,49 @@ test('createReportRun sends conditions for JSON procedures and keeps parameters 
   assert.deepEqual(requests[0].options.body, { conditions: { store_id: 'S001' } })
   assert.deepEqual(requests[1].options.body, { parameters: { storeCode: 'S001' } })
   assert.deepEqual(requests[2].options.body, { conditions: { supplier_id: 'A001' } })
+})
+
+test('run and export mutations forward cancellation signals', async () => {
+  const requests = []
+  const signal = new AbortController().signal
+  const client = async (path, options) => {
+    requests.push({ path, options })
+    if (path.endsWith('/cancel')) return { ok: true, data: { data: { id: 31, runUuid: 'run', definitionId: 9, versionId: 24, status: 'CANCEL_REQUESTED' } } }
+    return { ok: true, data: { data: { id: 41, runId: 31, exportUuid: 'export', status: 'PENDING' } } }
+  }
+  await cancelReportRun(client, 31, signal)
+  await createReportExport(client, 31, { filters: [], sort: [] }, signal)
+  assert.equal(requests[0].options.signal, signal)
+  assert.equal(requests[1].options.signal, signal)
+})
+
+test('report polling preserves transient failures and retries only recoverable responses', async () => {
+  const transient = await getReportRun(async () => ({
+    ok: false,
+    status: 503,
+    data: { message: '服务暂时不可用' },
+    error: { kind: 'server', message: '服务暂时不可用', retryAfterSeconds: 7 },
+  }), 31)
+  assert.deepEqual(transient, {
+    ok: false,
+    error: '服务暂时不可用',
+    kind: 'server',
+    status: 503,
+    retryAfterSeconds: 7,
+  })
+  assert.equal(isRetryableReportPollFailure(transient), true)
+  assert.equal(reportPollRetryDelay(transient, 1), 7000)
+  assert.equal(reportPollRetryDelay({ ok: false, error: '网络异常', kind: 'network' }, 1), 1500)
+  assert.equal(reportPollRetryDelay({ ok: false, error: '网络异常', kind: 'network' }, 2), 3000)
+  assert.equal(reportPollRetryDelay({ ok: false, error: '网络异常', kind: 'network' }, 4), 5000)
+
+  assert.equal(isRetryableReportPollFailure({ ok: false, error: '网关错误', status: 502 }), true)
+  assert.equal(isRetryableReportPollFailure({ ok: false, error: '请求超时', kind: 'timeout' }), true)
+  assert.equal(isRetryableReportPollFailure({ ok: false, error: '请求过多', kind: 'rate_limited', status: 429 }), false)
+  assert.equal(isRetryableReportPollFailure({ ok: false, error: '未登录', kind: 'unauthorized', status: 401 }), false)
+  assert.equal(isRetryableReportPollFailure({ ok: false, error: '无权限', kind: 'forbidden', status: 403 }), false)
+  assert.equal(isRetryableReportPollFailure({ ok: false, error: '参数错误', kind: 'client', status: 409 }), false)
+  assert.equal(isRetryableReportPollFailure({ ok: false, error: '服务异常', kind: 'server', status: 500 }), false)
 })
 
 test('report parameter defaults use the same editable shapes as their controls', () => {
