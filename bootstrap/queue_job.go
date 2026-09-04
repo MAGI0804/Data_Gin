@@ -41,6 +41,7 @@ func setupQueueJob() {
 		config.GetInt("cfg.queue_job.report_worker.queue_weight"),
 		config.GetInt("cfg.queue_job.report_worker.run_concurrency"),
 		config.GetInt("cfg.queue_job.report_worker.export_concurrency"),
+		config.GetInt("cfg.queue_job.report_worker.cleanup_concurrency"),
 	)
 	servers := make([]queueJobServer, 0, len(serverSpecs))
 	for _, spec := range serverSpecs {
@@ -140,8 +141,8 @@ type queueJobServerSpec struct {
 	queues      map[string]int
 }
 
-func queueJobServerSpecs(configured map[string]int, defaultConcurrency int, reportEnabled bool, weight, runConcurrency, exportConcurrency int) []queueJobServerSpec {
-	specs := make([]queueJobServerSpec, 0, 3)
+func queueJobServerSpecs(configured map[string]int, defaultConcurrency int, reportEnabled bool, weight, runConcurrency, exportConcurrency, cleanupConcurrency int) []queueJobServerSpec {
+	specs := make([]queueJobServerSpec, 0, 4)
 	if generalQueues := nonReportWorkerQueues(configured); len(generalQueues) > 0 {
 		specs = append(specs, queueJobServerSpec{name: "default", concurrency: defaultConcurrency, queues: generalQueues})
 	}
@@ -149,6 +150,7 @@ func queueJobServerSpecs(configured map[string]int, defaultConcurrency int, repo
 		specs = append(specs,
 			queueJobServerSpec{name: "report run", concurrency: runConcurrency, queues: map[string]int{job.ReportQueueName: weight}},
 			queueJobServerSpec{name: "report export", concurrency: exportConcurrency, queues: map[string]int{job.ReportExportQueueName: weight}},
+			queueJobServerSpec{name: "report cleanup", concurrency: cleanupConcurrency, queues: map[string]int{job.ReportCleanupQueueName: weight}},
 		)
 	}
 	return specs
@@ -255,7 +257,7 @@ func newOfficePushHandler(processor officePushProcessor) asynq.HandlerFunc {
 func nonReportWorkerQueues(configured map[string]int) map[string]int {
 	queues := make(map[string]int, len(configured))
 	for name, value := range configured {
-		if name != job.ReportQueueName && name != job.ReportExportQueueName {
+		if name != job.ReportQueueName && name != job.ReportExportQueueName && name != job.ReportCleanupQueueName {
 			queues[name] = value
 		}
 	}

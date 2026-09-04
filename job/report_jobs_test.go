@@ -79,7 +79,7 @@ func TestOutboxRegistryResolvesReportExport(t *testing.T) {
 	}
 }
 
-func TestReportExportCleanupTaskIsStrictAndScheduledForExportQueue(t *testing.T) {
+func TestReportExportCleanupTaskIsStrictAndScheduledForCleanupQueue(t *testing.T) {
 	task, err := NewReportExportCleanupTask()
 	if err != nil {
 		t.Fatalf("NewReportExportCleanupTask() error=%v", err)
@@ -95,7 +95,7 @@ func TestReportExportCleanupTaskIsStrictAndScheduledForExportQueue(t *testing.T)
 	}
 }
 
-func TestReportResultCleanupTaskIsStrictAndScheduledForExportQueue(t *testing.T) {
+func TestReportResultCleanupTaskIsStrictAndScheduledForCleanupQueue(t *testing.T) {
 	task, err := NewReportResultCleanupTask()
 	if err != nil {
 		t.Fatalf("NewReportResultCleanupTask() error=%v", err)

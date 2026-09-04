@@ -61,10 +61,11 @@ func init() {
 				"retry_max_seconds":    config.Get("QueueJob.Outbox.RetryMaxSeconds", 300),
 			},
 			"report_worker": map[string]interface{}{
-				"enabled":            reportWorkerEnabled(),
-				"queue_weight":       reportWorkerQueueWeight(),
-				"run_concurrency":    reportWorkerConcurrency("QueueJob.ReportWorker.RunConcurrency", 4),
-				"export_concurrency": reportWorkerConcurrency("QueueJob.ReportWorker.ExportConcurrency", 2),
+				"enabled":             reportWorkerEnabled(),
+				"queue_weight":        reportWorkerQueueWeight(),
+				"run_concurrency":     reportWorkerConcurrency("QueueJob.ReportWorker.RunConcurrency", 4),
+				"export_concurrency":  reportWorkerConcurrency("QueueJob.ReportWorker.ExportConcurrency", 2),
+				"cleanup_concurrency": reportWorkerConcurrency("QueueJob.ReportWorker.CleanupConcurrency", 1),
 			},
 		}
 	})

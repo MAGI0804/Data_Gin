@@ -62,6 +62,9 @@ func validateReportCenterRuntime() error {
 	if config.GetInt("cfg.queue_job.report_worker.export_concurrency") <= 0 {
 		return fmt.Errorf("report export worker concurrency must be positive")
 	}
+	if config.GetInt("cfg.queue_job.report_worker.cleanup_concurrency") <= 0 {
+		return fmt.Errorf("report cleanup worker concurrency must be positive")
+	}
 	if err := (reportsecret.EnvironmentKeyring{}).Validate(); err != nil {
 		return fmt.Errorf("oracle datasource credential keyring: %w", err)
 	}

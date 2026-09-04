@@ -42,12 +42,13 @@ func TestReportRunHandlerSkipsPermanentFailures(t *testing.T) {
 
 func TestReportWorkersUseDedicatedQueues(t *testing.T) {
 	configured := map[string]int{
-		"default":                 3,
-		job.ReportQueueName:       99,
-		job.ReportExportQueueName: 88,
+		"default":                  3,
+		job.ReportQueueName:        99,
+		job.ReportExportQueueName:  88,
+		job.ReportCleanupQueueName: 77,
 	}
-	specs := queueJobServerSpecs(configured, 10, true, 2, 4, 5)
-	if len(specs) != 3 {
+	specs := queueJobServerSpecs(configured, 10, true, 2, 4, 5, 1)
+	if len(specs) != 4 {
 		t.Fatalf("server specs = %#v", specs)
 	}
 	if specs[0].name != "default" || specs[0].concurrency != 10 || len(specs[0].queues) != 1 || specs[0].queues["default"] != 3 {
@@ -58,6 +59,9 @@ func TestReportWorkersUseDedicatedQueues(t *testing.T) {
 	}
 	if specs[2].name != "report export" || specs[2].concurrency != 5 || len(specs[2].queues) != 1 || specs[2].queues[job.ReportExportQueueName] != 2 {
 		t.Fatalf("report export server = %#v", specs[2])
+	}
+	if specs[3].name != "report cleanup" || specs[3].concurrency != 1 || len(specs[3].queues) != 1 || specs[3].queues[job.ReportCleanupQueueName] != 2 {
+		t.Fatalf("report cleanup server = %#v", specs[3])
 	}
 	seen := make(map[string]string)
 	for _, spec := range specs {
@@ -71,8 +75,8 @@ func TestReportWorkersUseDedicatedQueues(t *testing.T) {
 }
 
 func TestQueueJobServerSpecsDoNotInventDefaultQueue(t *testing.T) {
-	specs := queueJobServerSpecs(map[string]int{job.ReportQueueName: 2}, 10, true, 2, 4, 2)
-	if len(specs) != 2 || specs[0].name != "report run" || specs[1].name != "report export" {
+	specs := queueJobServerSpecs(map[string]int{job.ReportQueueName: 2}, 10, true, 2, 4, 2, 1)
+	if len(specs) != 3 || specs[0].name != "report run" || specs[1].name != "report export" || specs[2].name != "report cleanup" {
 		t.Fatalf("server specs = %#v", specs)
 	}
 }

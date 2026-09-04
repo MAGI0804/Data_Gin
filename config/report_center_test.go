@@ -56,12 +56,16 @@ QueueJob:
   ReportWorker:
     RunConcurrency: 0
     ExportConcurrency: 0
+    CleanupConcurrency: 0
 `)
 	if concurrency := pkgConfig.GetInt("cfg.queue_job.report_worker.run_concurrency"); concurrency != 0 {
 		t.Fatalf("run concurrency = %d, want 0", concurrency)
 	}
 	if concurrency := pkgConfig.GetInt("cfg.queue_job.report_worker.export_concurrency"); concurrency != 0 {
 		t.Fatalf("export concurrency = %d, want 0", concurrency)
+	}
+	if concurrency := pkgConfig.GetInt("cfg.queue_job.report_worker.cleanup_concurrency"); concurrency != 0 {
+		t.Fatalf("cleanup concurrency = %d, want 0", concurrency)
 	}
 }
 

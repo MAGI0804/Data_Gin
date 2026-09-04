@@ -17,6 +17,7 @@ const (
 	TypeReportResultCleanup    = "report:result_cleanup"
 	ReportQueueName            = "report"
 	ReportExportQueueName      = "report_export"
+	ReportCleanupQueueName     = "report_cleanup"
 	ReportRunTimeout           = 35 * time.Minute
 	ReportExportTimeout        = 6 * time.Hour
 	ReportExportCleanupTimeout = 30 * time.Minute
@@ -89,7 +90,7 @@ func NewReportExportCleanupTask() (*asynq.Task, error) {
 	return asynq.NewTask(
 		TypeReportExportCleanup,
 		[]byte(`{}`),
-		asynq.Queue(ReportExportQueueName),
+		asynq.Queue(ReportCleanupQueueName),
 		asynq.Timeout(ReportExportCleanupTimeout),
 		asynq.MaxRetry(5),
 		asynq.Unique(ReportExportCleanupUnique),
@@ -104,7 +105,7 @@ func NewReportResultCleanupTask() (*asynq.Task, error) {
 	return asynq.NewTask(
 		TypeReportResultCleanup,
 		[]byte(`{}`),
-		asynq.Queue(ReportExportQueueName),
+		asynq.Queue(ReportCleanupQueueName),
 		asynq.Timeout(ReportExportCleanupTimeout),
 		asynq.MaxRetry(5),
 		asynq.Unique(9*time.Minute),
