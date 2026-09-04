@@ -41,6 +41,10 @@ type ReportExportTaskPayload struct {
 	ExportID uint `json:"export_id"`
 }
 
+type ReportResultCleanupTaskPayload struct {
+	RunID uint `json:"run_id,omitempty"`
+}
+
 func DecodeReportRunTaskPayload(payload []byte) (ReportRunTaskPayload, error) {
 	var decoded ReportRunTaskPayload
 	decoder := json.NewDecoder(bytes.NewReader(payload))
@@ -102,9 +106,24 @@ func DecodeReportExportCleanupTaskPayload(payload []byte) error {
 }
 
 func NewReportResultCleanupTask() (*asynq.Task, error) {
+	return newReportResultCleanupTask(ReportResultCleanupTaskPayload{})
+}
+
+func NewReportResultCleanupRunTask(runID uint) (*asynq.Task, error) {
+	if runID == 0 {
+		return nil, fmt.Errorf("report result cleanup task: run id is required")
+	}
+	return newReportResultCleanupTask(ReportResultCleanupTaskPayload{RunID: runID})
+}
+
+func newReportResultCleanupTask(payload ReportResultCleanupTaskPayload) (*asynq.Task, error) {
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("report result cleanup task: encode payload: %w", err)
+	}
 	return asynq.NewTask(
 		TypeReportResultCleanup,
-		[]byte(`{}`),
+		encoded,
 		asynq.Queue(ReportCleanupQueueName),
 		asynq.Timeout(ReportExportCleanupTimeout),
 		asynq.MaxRetry(5),
@@ -112,8 +131,18 @@ func NewReportResultCleanupTask() (*asynq.Task, error) {
 	), nil
 }
 
-func DecodeReportResultCleanupTaskPayload(payload []byte) error {
-	return decodeEmptyReportTaskPayload(payload, "report result cleanup task")
+func DecodeReportResultCleanupTaskPayload(payload []byte) (ReportResultCleanupTaskPayload, error) {
+	var decoded ReportResultCleanupTaskPayload
+	decoder := json.NewDecoder(bytes.NewReader(payload))
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&decoded); err != nil {
+		return ReportResultCleanupTaskPayload{}, fmt.Errorf("report result cleanup task: invalid payload")
+	}
+	var trailing interface{}
+	if err := decoder.Decode(&trailing); err != io.EOF {
+		return ReportResultCleanupTaskPayload{}, fmt.Errorf("report result cleanup task: invalid payload")
+	}
+	return decoded, nil
 }
 
 func decodeEmptyReportTaskPayload(payload []byte, label string) error {

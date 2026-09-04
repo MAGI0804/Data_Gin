@@ -43,6 +43,29 @@ func TestReportRunProcessorWaitsWithoutConsumingFailureRetry(t *testing.T) {
 	}
 }
 
+func TestReportRunProcessorRequestsTargetedCleanupForStaleResultPurge(t *testing.T) {
+	now := time.Date(2026, 8, 12, 12, 0, 0, 0, time.UTC)
+	expired := now.Add(-time.Minute)
+	store := newFakeReportExecutionStore()
+	store.beginDisposition = reportrepo.RunDispositionBusy
+	store.blocker = &reportrepo.RunExecutionBlocker{
+		RunID: 24, Status: model.ReportRunStatusResultPurging, ResultExpiresAt: &expired,
+	}
+	processor := newTestReportRunProcessor(store, &fakeReportProcedureExecutor{})
+	err := processor.Process(t.Context(), 31, 0, true)
+	cleanupRunID, ok := ReportRunCleanupTarget(err)
+	if !errors.Is(err, ErrReportRunWaitingForSnapshot) || !ok || cleanupRunID != 24 {
+		t.Fatalf("error=%v cleanupRunID=%d ok=%v", err, cleanupRunID, ok)
+	}
+
+	activeLease := now.Add(time.Minute)
+	store.blocker.LeaseExpiresAt = &activeLease
+	err = processor.Process(t.Context(), 31, 0, true)
+	if cleanupRunID, ok = ReportRunCleanupTarget(err); ok || cleanupRunID != 0 {
+		t.Fatalf("active cleanup lease target=%d ok=%v", cleanupRunID, ok)
+	}
+}
+
 func TestReportRunProcessorFailsQueuedRunWhenSnapshotWaitExpires(t *testing.T) {
 	store := newFakeReportExecutionStore()
 	store.beginDisposition = reportrepo.RunDispositionBusy
@@ -323,6 +346,7 @@ type fakeReportExecutionStore struct {
 	unknown                    int
 	unknownCode                string
 	beginDisposition           reportrepo.RunDisposition
+	blocker                    *reportrepo.RunExecutionBlocker
 	runAttempt                 int
 	released                   int
 	queuedFailed               int
@@ -350,7 +374,7 @@ func (store *fakeReportExecutionStore) BeginExecution(context.Context, uint, str
 	if attempt == 0 {
 		attempt = 1
 	}
-	return &reportrepo.RunLease{Disposition: disposition, Run: model.ReportRun{Attempt: attempt}}, nil
+	return &reportrepo.RunLease{Disposition: disposition, Run: model.ReportRun{Attempt: attempt}, Blocker: store.blocker}, nil
 }
 func (store *fakeReportExecutionStore) HeartbeatExecution(context.Context, uint, string, time.Time, time.Duration) (reportrepo.RunControl, error) {
 	store.mu.Lock()

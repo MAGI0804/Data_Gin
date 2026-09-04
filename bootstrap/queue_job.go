@@ -68,7 +68,7 @@ func setupQueueJob() {
 	mux.HandleFunc(job.TypeOfficePushSchedule, newOfficePushScheduleHandler(officePushSchedulePlanner))
 	if reportWorkerEnabled {
 		reportProcessor := data_svc.NewReportRunProcessor()
-		mux.HandleFunc(job.TypeReportRun, newReportRunHandler(reportProcessor))
+		mux.HandleFunc(job.TypeReportRun, newReportRunHandler(reportProcessor, client))
 		reportExportProcessor := data_svc.NewReportExportProcessor()
 		mux.HandleFunc(job.TypeReportExport, newReportExportHandler(reportExportProcessor))
 		reportExportCleaner := data_svc.NewReportExportCleaner()
@@ -220,6 +220,11 @@ type reportExportCleaner interface {
 
 type reportResultCleaner interface {
 	Cleanup(context.Context) (data_svc.ReportResultCleanupResult, error)
+	CleanupRun(context.Context, uint) (bool, error)
+}
+
+type reportCleanupTaskEnqueuer interface {
+	Enqueue(*asynq.Task, ...asynq.Option) (*asynq.TaskInfo, error)
 }
 
 type officePushProcessor interface {
@@ -271,7 +276,7 @@ func nonReportWorkerQueues(configured map[string]int) map[string]int {
 	return queues
 }
 
-func newReportRunHandler(processor reportRunProcessor) asynq.HandlerFunc {
+func newReportRunHandler(processor reportRunProcessor, cleanupEnqueuer reportCleanupTaskEnqueuer) asynq.HandlerFunc {
 	return func(ctx context.Context, task *asynq.Task) error {
 		if processor == nil {
 			return fmt.Errorf("report run handler: processor is not configured")
@@ -284,6 +289,15 @@ func newReportRunHandler(processor reportRunProcessor) asynq.HandlerFunc {
 			return fmt.Errorf("%w: %v", asynq.SkipRetry, err)
 		}
 		if err := processor.Process(ctx, payload.RunID, job.ReportRunFailureMaxRetry, mallWeatherExportRetryAllowed(ctx)); err != nil {
+			if cleanupRunID, ok := data_svc.ReportRunCleanupTarget(err); ok && cleanupEnqueuer != nil {
+				cleanupTask, taskErr := job.NewReportResultCleanupRunTask(cleanupRunID)
+				if taskErr == nil {
+					_, taskErr = cleanupEnqueuer.Enqueue(cleanupTask)
+				}
+				if taskErr != nil && !errors.Is(taskErr, asynq.ErrDuplicateTask) {
+					zap.L().Error("报表前序快照定向清理投递失败", zap.Uint("report_run_id", payload.RunID), zap.Uint("blocker_run_id", cleanupRunID), zap.Error(taskErr))
+				}
+			}
 			if errors.Is(err, data_svc.ErrReportRunProcessNonRetryable) {
 				return fmt.Errorf("%w: %v", asynq.SkipRetry, err)
 			}
@@ -317,10 +331,18 @@ func newReportResultCleanupHandler(cleaner reportResultCleaner) asynq.HandlerFun
 		if task == nil || task.Type() != job.TypeReportResultCleanup {
 			return fmt.Errorf("%w: invalid report result cleanup task", asynq.SkipRetry)
 		}
-		if err := job.DecodeReportResultCleanupTaskPayload(task.Payload()); err != nil {
+		payload, err := job.DecodeReportResultCleanupTaskPayload(task.Payload())
+		if err != nil {
 			return fmt.Errorf("%w: %v", asynq.SkipRetry, err)
 		}
-		_, err := cleaner.Cleanup(ctx)
+		if payload.RunID != 0 {
+			_, err := cleaner.CleanupRun(ctx, payload.RunID)
+			if err != nil {
+				zap.L().Error("报表结果定向清理失败", zap.Uint("report_run_id", payload.RunID), zap.Error(err))
+			}
+			return err
+		}
+		_, err = cleaner.Cleanup(ctx)
 		return err
 	}
 }

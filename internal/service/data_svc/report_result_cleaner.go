@@ -148,6 +148,18 @@ func (cleaner *ReportResultCleaner) Cleanup(ctx context.Context) (ReportResultCl
 	return result, errors.Join(cleanupErrors...)
 }
 
+func (cleaner *ReportResultCleaner) CleanupRun(ctx context.Context, runID uint) (bool, error) {
+	if cleaner == nil || cleaner.store == nil || cleaner.credential == nil || cleaner.oracle == nil || cleaner.now == nil || cleaner.newToken == nil ||
+		ctx == nil || runID == 0 || cleaner.leaseTTL <= 0 || cleaner.stateTimeout <= 0 || cleaner.purgeBatchSize < 1 {
+		return false, fmt.Errorf("report result cleaner: invalid targeted cleanup")
+	}
+	claimed, err := cleaner.cleanupExpired(ctx, runID)
+	if errors.Is(err, reportrepo.ErrReportResultCleanupConflict) {
+		return false, nil
+	}
+	return claimed, err
+}
+
 func (cleaner *ReportResultCleaner) cleanupExpired(ctx context.Context, runID uint) (bool, error) {
 	token := cleaner.newToken()
 	stateCtx, cancel := cleaner.stateContext(ctx)

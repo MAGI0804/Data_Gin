@@ -14,7 +14,7 @@ import (
 func TestReportRunHandlerDecodesStrictPayload(t *testing.T) {
 	processor := &fakeReportRunProcessor{}
 	task := asynq.NewTask(job.TypeReportRun, []byte(`{"run_id":31}`))
-	if err := newReportRunHandler(processor)(t.Context(), task); err != nil {
+	if err := newReportRunHandler(processor, nil)(t.Context(), task); err != nil {
 		t.Fatalf("handler error = %v", err)
 	}
 	if processor.runID != 31 {
@@ -27,16 +27,29 @@ func TestReportRunHandlerDecodesStrictPayload(t *testing.T) {
 		t.Fatal("queue retry should remain available without Asynq retry metadata")
 	}
 	bad := asynq.NewTask(job.TypeReportRun, []byte(`{"run_id":31,"secret":"x"}`))
-	if err := newReportRunHandler(processor)(t.Context(), bad); !errors.Is(err, asynq.SkipRetry) {
+	if err := newReportRunHandler(processor, nil)(t.Context(), bad); !errors.Is(err, asynq.SkipRetry) {
 		t.Fatalf("invalid payload error = %v", err)
 	}
 }
 
 func TestReportRunHandlerSkipsPermanentFailures(t *testing.T) {
 	processor := &fakeReportRunProcessor{err: data_svc.ErrReportRunProcessNonRetryable}
-	err := newReportRunHandler(processor)(t.Context(), asynq.NewTask(job.TypeReportRun, []byte(`{"run_id":31}`)))
+	err := newReportRunHandler(processor, nil)(t.Context(), asynq.NewTask(job.TypeReportRun, []byte(`{"run_id":31}`)))
 	if !errors.Is(err, asynq.SkipRetry) {
 		t.Fatalf("handler error = %v", err)
+	}
+}
+
+func TestReportRunHandlerEnqueuesTargetedSnapshotCleanup(t *testing.T) {
+	processor := &fakeReportRunProcessor{err: targetedCleanupError{runID: 24}}
+	enqueuer := &fakeReportCleanupTaskEnqueuer{}
+	err := newReportRunHandler(processor, enqueuer)(t.Context(), asynq.NewTask(job.TypeReportRun, []byte(`{"run_id":31}`)))
+	if err == nil || enqueuer.task == nil {
+		t.Fatalf("handler error=%v task=%v", err, enqueuer.task)
+	}
+	payload, decodeErr := job.DecodeReportResultCleanupTaskPayload(enqueuer.task.Payload())
+	if decodeErr != nil || payload.RunID != 24 || enqueuer.task.Type() != job.TypeReportResultCleanup {
+		t.Fatalf("payload=%+v type=%q error=%v", payload, enqueuer.task.Type(), decodeErr)
 	}
 }
 
@@ -86,6 +99,18 @@ type fakeReportRunProcessor struct {
 	failureRetryLimit int
 	queueRetryAllowed bool
 	err               error
+}
+
+type targetedCleanupError struct{ runID uint }
+
+func (err targetedCleanupError) Error() string      { return "waiting for cleanup" }
+func (err targetedCleanupError) CleanupRunID() uint { return err.runID }
+
+type fakeReportCleanupTaskEnqueuer struct{ task *asynq.Task }
+
+func (enqueuer *fakeReportCleanupTaskEnqueuer) Enqueue(task *asynq.Task, _ ...asynq.Option) (*asynq.TaskInfo, error) {
+	enqueuer.task = task
+	return nil, nil
 }
 
 func (processor *fakeReportRunProcessor) Process(_ context.Context, runID uint, failureRetryLimit int, queueRetryAllowed bool) error {

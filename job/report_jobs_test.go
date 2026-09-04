@@ -103,10 +103,24 @@ func TestReportResultCleanupTaskIsStrictAndScheduledForCleanupQueue(t *testing.T
 	if task.Type() != TypeReportResultCleanup || string(task.Payload()) != `{}` {
 		t.Fatalf("result cleanup task type=%q payload=%q", task.Type(), task.Payload())
 	}
-	if err := DecodeReportResultCleanupTaskPayload([]byte(`{"extra":true}`)); err == nil {
+	if _, err := DecodeReportResultCleanupTaskPayload([]byte(`{"extra":true}`)); err == nil {
 		t.Fatal("DecodeReportResultCleanupTaskPayload() accepted unknown field")
 	}
 	if ReportResultCleanupCron != "* * * * *" {
 		t.Fatalf("result cleanup schedule = %q", ReportResultCleanupCron)
+	}
+}
+
+func TestReportResultCleanupRunTaskTargetsOneRun(t *testing.T) {
+	task, err := NewReportResultCleanupRunTask(24)
+	if err != nil {
+		t.Fatalf("NewReportResultCleanupRunTask() error=%v", err)
+	}
+	payload, err := DecodeReportResultCleanupTaskPayload(task.Payload())
+	if err != nil || payload.RunID != 24 {
+		t.Fatalf("payload=%+v error=%v", payload, err)
+	}
+	if task.Type() != TypeReportResultCleanup {
+		t.Fatalf("task type=%q", task.Type())
 	}
 }

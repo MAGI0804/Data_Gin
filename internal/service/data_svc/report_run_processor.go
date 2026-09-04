@@ -37,10 +37,23 @@ var errReportRunWorkerTemporary = errors.New("report run processor: temporary fa
 
 var ErrReportRunWaitingForSnapshot = reportRunWaitingError{}
 
-type reportRunWaitingError struct{}
+type reportRunWaitingError struct{ cleanupRunID uint }
 
 func (reportRunWaitingError) Error() string             { return "report run processor: waiting for snapshot slot" }
 func (reportRunWaitingError) RetryDelay() time.Duration { return job.ReportRunRetryDelay }
+func (err reportRunWaitingError) CleanupRunID() uint    { return err.cleanupRunID }
+func (reportRunWaitingError) Is(target error) bool {
+	_, ok := target.(reportRunWaitingError)
+	return ok
+}
+
+func ReportRunCleanupTarget(err error) (uint, bool) {
+	var waiting interface{ CleanupRunID() uint }
+	if !errors.As(err, &waiting) || waiting.CleanupRunID() == 0 {
+		return 0, false
+	}
+	return waiting.CleanupRunID(), true
+}
 
 type reportExecutionStore interface {
 	BeginExecution(context.Context, uint, string, string, time.Time, time.Duration) (*reportrepo.RunLease, error)
@@ -164,7 +177,8 @@ func (processor *ReportRunProcessor) Process(ctx context.Context, runID uint, fa
 			}
 			return fmt.Errorf("%w: snapshot wait timeout", ErrReportRunProcessNonRetryable)
 		}
-		return ErrReportRunWaitingForSnapshot
+		cleanupRunID := staleResultCleanupBlocker(lease.Blocker, processor.now().UTC())
+		return reportRunWaitingError{cleanupRunID: cleanupRunID}
 	case reportrepo.RunDispositionTerminal:
 		return nil
 	case reportrepo.RunDispositionReconcile:
@@ -269,6 +283,15 @@ func (processor *ReportRunProcessor) Process(ctx context.Context, runID uint, fa
 		return fmt.Errorf("%w: success state could not be confirmed", ErrReportRunProcessNonRetryable)
 	}
 	return unknownErr
+}
+
+func staleResultCleanupBlocker(blocker *reportrepo.RunExecutionBlocker, now time.Time) uint {
+	if blocker == nil || blocker.RunID == 0 || blocker.Status != model.ReportRunStatusResultPurging ||
+		blocker.ResultExpiresAt == nil || now.Before(blocker.ResultExpiresAt.UTC()) || blocker.ResultPurgedAt != nil ||
+		blocker.ExportID != nil || blocker.LeaseExpiresAt != nil && now.Before(blocker.LeaseExpiresAt.UTC()) {
+		return 0
+	}
+	return blocker.RunID
 }
 
 func buildRefCursorPayload(run model.ReportRun) (string, error) {
