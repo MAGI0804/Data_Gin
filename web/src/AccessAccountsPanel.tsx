@@ -19,7 +19,7 @@ import {
   type AccessRole as Role,
   type RoleCatalogStatus,
 } from './accessManagement'
-import { DataTable, Dialog, FeedbackState, FilterToolbar, Section, StatusTag } from './ui'
+import { DataTable, Dialog, Drawer, FeedbackState, FilterToolbar, Section, StatusTag } from './ui'
 import styles from './AccessManagementPage.module.css'
 
 type ApiResult = { ok: boolean; status: number; data: unknown }
@@ -274,7 +274,7 @@ export function AccessAccountsPanel({ client, canManage, canManageRoles, canRead
     {!loading && accounts.length === 0 ? <FeedbackState kind="empty" title="暂无匹配账号" description="调整搜索条件后重试。" /> : null}
     {accounts.length > 0 ? <DataTable containerClassName={styles.accountTable} minWidth={900} scrollLabel="账号目录表格"><thead><tr><th scope="col">账号</th><th scope="col">联系方式</th><th scope="col">角色</th><th scope="col">商场范围</th><th scope="col">状态</th><th scope="col">操作</th></tr></thead><tbody>{accounts.map((account) => <tr key={account.id}><td><span className={styles.accountIdentity}><UserRound aria-hidden="true" /><span><strong>{account.nickname}</strong><code>{account.account}</code></span></span></td><td>{account.phone || '未绑定'}</td><td>{account.roles.map((role) => role.name).join('、') || '未分配'}</td><td>{account.mallScopeMode === 'ALL' ? '全部商场' : `${account.mallIds.length} 个商场`}</td><td><StatusTag tone={account.status === 'ACTIVE' ? 'success' : 'neutral'}>{account.status === 'ACTIVE' ? '启用' : '停用'}</StatusTag></td><td><button type="button" disabled={mutating} onClick={() => openAccount(account)}><Pencil aria-hidden="true" />管理</button></td></tr>)}</tbody></DataTable> : null}
 
-    <Dialog className={styles.accountDialog} open={Boolean(selected)} title={selected?.nickname ?? '账号管理'} description={selected ? `${selected.account} · ${selected.phone || '未绑定手机号'}` : undefined} closeDisabled={mutating} onClose={closeAccount}>
+    <Drawer open={Boolean(selected)} size="wide" title={selected?.nickname ?? '账号管理'} description={selected ? `${selected.account} · ${selected.phone || '未绑定手机号'}` : undefined} closeLabel="关闭账号管理" closeDisabled={mutating} onClose={closeAccount}>
       {selected && <div className={styles.accountEditor} key={selected.id}>
         <div className={styles.editorStatus}><StatusTag tone={selected.status === 'ACTIVE' ? 'success' : 'neutral'}>{selected.status === 'ACTIVE' ? '账号已启用' : '账号已停用'}</StatusTag>{canManage && <button type="button" disabled={mutating} onClick={() => setPendingStatus(selected)}>{selected.status === 'ACTIVE' ? '停用账号' : '启用账号'}</button>}</div>
         <nav className={styles.editorTabs} aria-label={`${selected.nickname} 账号设置`}>{dialogTabs.map((item) => { const Icon = item.icon; return <button type="button" key={item.key} className={accountSection === item.key ? styles.activeEditorTab : undefined} aria-current={accountSection === item.key ? 'page' : undefined} onClick={() => { setMessage(''); setAccountSection(item.key) }}><Icon aria-hidden="true" />{item.label}</button> })}</nav>
@@ -287,7 +287,7 @@ export function AccessAccountsPanel({ client, canManage, canManageRoles, canRead
           {accountSection === 'security' && <form className={styles.singleForm} onSubmit={(event) => { event.preventDefault(); const form = new FormData(event.currentTarget); void mutate(`/v1/access/accounts/${selected.id}/password`, { password: value(form, 'password'), reason: value(form, 'reason') }, '密码已重置，账号旧会话已失效。') }}><h3>登录安全</h3><p>重置密码后，该账号的所有旧会话会立即失效。</p><Field label="新密码"><input type="password" name="password" minLength={10} maxLength={72} required autoComplete="new-password" placeholder="10–72 位" /></Field><Field label="重置原因"><input name="reason" required /></Field><button className={styles.primary} type="submit" disabled={mutating}><KeyRound aria-hidden="true" />重置密码</button></form>}
         </div>
       </div>}
-    </Dialog>
+    </Drawer>
 
     <Dialog className={styles.createAccountDialog} open={creating} title="创建控制台账号" description="创建后即可通过角色和分类权限控制可用功能。" closeDisabled={mutating} onClose={() => setCreating(false)}><form className={styles.drawerForm} onSubmit={create}>
       {message && <p className={styles.message} role="status">{message}</p>}
