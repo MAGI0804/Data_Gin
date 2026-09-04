@@ -161,21 +161,50 @@ func (repository *Repository) RecoverExpiredPreOracleRuns(ctx context.Context, n
 		return 0, fmt.Errorf("report execution recovery: invalid request")
 	}
 	now = now.UTC().Truncate(time.Millisecond)
-	var candidates []struct {
-		ID      uint   `gorm:"column:id"`
-		RunUUID string `gorm:"column:run_uuid"`
-	}
-	err := repository.db.WithContext(ctx).Model(&model.ReportRun{}).
-		Where("status = ? AND oracle_started_at IS NULL AND lease_expires_at IS NOT NULL AND lease_expires_at <= ?", model.ReportRunStatusRunning, now).
-		Select("id", "run_uuid").Order("id ASC").Limit(limit).Find(&candidates).Error
+	var candidateIDs []uint
+	err := expiredInterruptedRunQuery(repository.db.WithContext(ctx), now, limit).Pluck("id", &candidateIDs).Error
 	if err != nil {
 		return 0, fmt.Errorf("report execution recovery: list expired runs: %w", err)
 	}
 	var recovered int64
-	for _, candidate := range candidates {
+	for _, runID := range candidateIDs {
 		err := repository.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			var run model.ReportRun
+			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&run, runID).Error; err != nil {
+				return fmt.Errorf("lock interrupted run: %w", err)
+			}
+			if (run.Status != model.ReportRunStatusRunning && run.Status != model.ReportRunStatusCancelRequested) ||
+				run.LeaseExpiresAt != nil && now.Before(run.LeaseExpiresAt.UTC()) {
+				return nil
+			}
+			if run.OracleStartedAt != nil {
+				result := tx.Model(&model.ReportRun{}).Where("id = ? AND status IN ?", run.ID,
+					[]string{model.ReportRunStatusRunning, model.ReportRunStatusCancelRequested}).
+					Updates(unknownRunUpdates(now, "INTERRUPTED_AFTER_ORACLE_START", "执行结果需要对账"))
+				if result.Error != nil {
+					return fmt.Errorf("quarantine interrupted run: %w", result.Error)
+				}
+				if result.RowsAffected == 0 {
+					return nil
+				}
+				recovered++
+				return repository.writeSystemAudit(ctx, tx, "REPORT_RUN_UNKNOWN", "REPORT_RUN", run.ID, map[string]interface{}{"reasonCode": "INTERRUPTED_AFTER_ORACLE_START"})
+			}
+			if run.CancelRequested || run.Status == model.ReportRunStatusCancelRequested {
+				result := tx.Model(&model.ReportRun{}).Where("id = ? AND status IN ?", run.ID,
+					[]string{model.ReportRunStatusRunning, model.ReportRunStatusCancelRequested}).
+					Updates(terminalRunUpdates(model.ReportRunStatusCancelled, "CANCELLED", "报表运行已取消", now))
+				if result.Error != nil {
+					return fmt.Errorf("cancel interrupted run: %w", result.Error)
+				}
+				if result.RowsAffected == 0 {
+					return nil
+				}
+				recovered++
+				return repository.writeSystemAudit(ctx, tx, "REPORT_RUN_CANCELLED", "REPORT_RUN", run.ID, map[string]interface{}{"reasonCode": "INTERRUPTED_BEFORE_ORACLE_START"})
+			}
 			result := tx.Model(&model.ReportRun{}).
-				Where("id = ? AND status = ? AND oracle_started_at IS NULL AND lease_expires_at <= ?", candidate.ID, model.ReportRunStatusRunning, now).
+				Where("id = ? AND status = ? AND oracle_started_at IS NULL", run.ID, model.ReportRunStatusRunning).
 				Updates(map[string]interface{}{
 					"status": model.ReportRunStatusQueued, "worker_id": "", "lease_token": "", "lease_expires_at": nil,
 					"heartbeat_at": nil, "error_code": "", "error_message_safe": "", "updated_at": now,
@@ -186,7 +215,7 @@ func (repository *Repository) RecoverExpiredPreOracleRuns(ctx context.Context, n
 			if result.RowsAffected == 0 {
 				return nil
 			}
-			outbox := tx.Model(&model.AsyncJobOutbox{}).Where("task_key = ? AND task_type = ?", "report:run:"+candidate.RunUUID, "report:run").
+			outbox := tx.Model(&model.AsyncJobOutbox{}).Where("task_key = ? AND task_type = ?", "report:run:"+run.RunUUID, "report:run").
 				Updates(map[string]interface{}{"published_at": nil, "available_at": now, "attempts": 0, "last_error_safe": "", "locked_by": "", "locked_at": nil, "updated_at": now})
 			if outbox.Error != nil {
 				return fmt.Errorf("reset outbox: %w", outbox.Error)
@@ -194,7 +223,7 @@ func (repository *Repository) RecoverExpiredPreOracleRuns(ctx context.Context, n
 			if outbox.RowsAffected != 1 {
 				return fmt.Errorf("reset outbox count changed")
 			}
-			if err := repository.writeSystemAudit(ctx, tx, "REPORT_RUN_RETRY_QUEUED", "REPORT_RUN", candidate.ID, map[string]interface{}{"reasonCode": "PRE_ORACLE_LEASE_EXPIRED"}); err != nil {
+			if err := repository.writeSystemAudit(ctx, tx, "REPORT_RUN_RETRY_QUEUED", "REPORT_RUN", run.ID, map[string]interface{}{"reasonCode": "PRE_ORACLE_LEASE_EXPIRED"}); err != nil {
 				return err
 			}
 			recovered++
@@ -205,6 +234,13 @@ func (repository *Repository) RecoverExpiredPreOracleRuns(ctx context.Context, n
 		}
 	}
 	return recovered, nil
+}
+
+func expiredInterruptedRunQuery(db *gorm.DB, now time.Time, limit int) *gorm.DB {
+	return db.Model(&model.ReportRun{}).
+		Where("status IN ? AND (lease_expires_at IS NULL OR lease_expires_at <= ?)",
+			[]string{model.ReportRunStatusRunning, model.ReportRunStatusCancelRequested}, now.UTC().Truncate(time.Millisecond)).
+		Order("id ASC").Limit(limit)
 }
 
 func (repository *Repository) BeginExecution(

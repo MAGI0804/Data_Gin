@@ -99,6 +99,28 @@ func TestExpiredQueuedRunQueryUsesCreationDeadline(t *testing.T) {
 	}
 }
 
+func TestExpiredInterruptedRunQueryIncludesCancelledAndLeaseLessRuns(t *testing.T) {
+	now := time.Date(2026, 9, 4, 18, 30, 0, 0, time.UTC)
+	query := expiredInterruptedRunQuery(newDryRunDB(t), now, 20).Pluck("id", &[]uint{})
+	if query.Error != nil {
+		t.Fatalf("build interrupted run query: %v", query.Error)
+	}
+	statement := query.Statement.SQL.String()
+	for _, fragment := range []string{"status IN", "lease_expires_at IS NULL", "lease_expires_at <= ?", "ORDER BY id ASC", "LIMIT"} {
+		if !strings.Contains(statement, fragment) {
+			t.Fatalf("interrupted run query %q does not contain %q", statement, fragment)
+		}
+	}
+	for _, status := range []string{model.ReportRunStatusRunning, model.ReportRunStatusCancelRequested} {
+		if !containsSQLVariable(query.Statement.Vars, status) {
+			t.Fatalf("interrupted run query does not include status %q: vars=%v", status, query.Statement.Vars)
+		}
+	}
+	if !containsSQLVariable(query.Statement.Vars, now) {
+		t.Fatalf("interrupted run query does not include lease deadline %v: vars=%v", now, query.Statement.Vars)
+	}
+}
+
 func TestAutomaticReportExportBelongsToRequestingUser(t *testing.T) {
 	now := time.Date(2026, 9, 4, 17, 0, 0, 0, time.UTC)
 	run := model.ReportRun{
