@@ -1,8 +1,12 @@
 import ConfigProvider from 'antd/es/config-provider'
 import zhCN from 'antd/es/locale/zh_CN'
+import dayjs from 'dayjs'
+import 'dayjs/locale/zh-cn'
 import type { ThemeConfig } from 'antd/es/config-provider/context'
 import type { ReactNode } from 'react'
 import { consoleColors } from '../../styles/themeTokens'
+
+dayjs.locale('zh-cn')
 
 const consoleTheme: ThemeConfig = {
   token: {
