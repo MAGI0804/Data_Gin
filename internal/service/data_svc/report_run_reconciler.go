@@ -184,12 +184,6 @@ func (reconciler *ReportRunReconciler) reconcileOne(ctx context.Context, runID u
 	if err != nil {
 		return reconciler.pending(ctx, runID, leaseToken, "ORACLE_RESULT_UNAVAILABLE", err)
 	}
-	// A positive row count proves that Oracle committed the run-scoped result.
-	// Zero rows cannot distinguish a valid empty report from a transaction that
-	// never committed, so keep the run in UNKNOWN instead of risking a replay.
-	if rowCount == 0 && runtime.Version.ExecutionMode != model.ReportExecutionModeRefCursor {
-		return reconciler.pending(ctx, runID, leaseToken, "ORACLE_RESULT_NOT_PROVEN", errors.New("committed result is not observable"))
-	}
 	finishedAt := reconciler.now().UTC()
 	stateCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), reconciler.stateTimeout)
 	defer cancel()

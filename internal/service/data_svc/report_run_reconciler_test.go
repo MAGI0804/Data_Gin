@@ -68,7 +68,7 @@ func TestReportRunReconcilerUsesRunScopedResultAsCommitEvidence(t *testing.T) {
 	}
 }
 
-func TestReportRunReconcilerKeepsEmptyAmbiguousResultPending(t *testing.T) {
+func TestReportRunReconcilerAcceptsEmptyTableSnapshot(t *testing.T) {
 	store := &fakeReconciliationStore{runtime: reconciliationRuntime()}
 	reconciler := NewReportRunReconcilerWithDependencies(store, fakeReportCredentialDecryptor{}, &fakeResultEvidenceReader{})
 	reconciler.now = func() time.Time { return time.Date(2026, 8, 13, 10, 0, 0, 0, time.UTC) }
@@ -77,7 +77,7 @@ func TestReportRunReconcilerKeepsEmptyAmbiguousResultPending(t *testing.T) {
 	if err := reconciler.ReconcileOne(t.Context(), 31); err != nil {
 		t.Fatalf("ReconcileOne() error = %v", err)
 	}
-	if store.succeeded != 0 || store.pending != 1 || store.pendingCode != "ORACLE_RESULT_NOT_PROVEN" {
+	if store.succeeded != 1 || store.rowCount != 0 || store.pending != 0 {
 		t.Fatalf("succeeded=%d pending=%d code=%q", store.succeeded, store.pending, store.pendingCode)
 	}
 }
