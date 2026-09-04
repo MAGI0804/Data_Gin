@@ -359,6 +359,21 @@ func TestReportRunServiceStopsAfterLatestVersionChangesTwice(t *testing.T) {
 	}
 }
 
+func TestReportRunServiceDoesNotRetryBusySnapshot(t *testing.T) {
+	store := &fakeReportRunStore{
+		published:    publishedRunFixture(),
+		createErrors: []error{reportrepo.ErrReportRunBusy},
+	}
+	service := NewReportRunServiceWithDependencies(store, &fakeReportParameterCipher{})
+
+	_, err := service.Create(t.Context(), 17, 9, requestbody.ReportRunCreateRequest{
+		Parameters: map[string]json.RawMessage{"storeCode": json.RawMessage(`"S001"`), "secret": json.RawMessage(`"value"`)},
+	})
+	if !errors.Is(err, ErrReportRunBusy) || store.findCalls != 1 || store.createCalls != 1 {
+		t.Fatalf("Create() error=%v find calls=%d create calls=%d", err, store.findCalls, store.createCalls)
+	}
+}
+
 func TestReportRunServiceMapsAuthorizationAndContractRaces(t *testing.T) {
 	for _, test := range []struct {
 		name string
@@ -368,6 +383,7 @@ func TestReportRunServiceMapsAuthorizationAndContractRaces(t *testing.T) {
 		{name: "denied", err: reportrepo.ErrReportActionDenied, want: ErrReportRunDenied},
 		{name: "missing", err: reportrepo.ErrPublishedReportNotFound, want: ErrReportNotFound},
 		{name: "contract changed", err: reportrepo.ErrDraftVersionConflict, want: ErrReportConflict},
+		{name: "snapshot busy", err: reportrepo.ErrReportRunBusy, want: ErrReportRunBusy},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			store := &fakeReportRunStore{published: publishedRunFixture(), err: test.err}

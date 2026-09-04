@@ -54,6 +54,7 @@ func TestReportControllerErrorContract(t *testing.T) {
 		{name: "publication invalid", err: data_svc.ErrReportPublicationInvalid, wantStatus: http.StatusUnprocessableEntity},
 		{name: "temporary result table", err: fmt.Errorf("%w: %w", data_svc.ErrReportPublicationInvalid, data_svc.ErrReportPublicationTemporaryTable), wantStatus: http.StatusUnprocessableEntity},
 		{name: "parameter keyring unavailable", err: data_svc.ErrReportRunCredentialUnavailable, wantStatus: http.StatusServiceUnavailable},
+		{name: "report run busy", err: data_svc.ErrReportRunBusy, wantStatus: http.StatusConflict},
 		{name: "input query unavailable", err: data_svc.ErrReportInputQueryUnavailable, wantStatus: http.StatusServiceUnavailable},
 		{name: "internal", err: errors.New("database password=secret"), wantStatus: http.StatusInternalServerError},
 	}
@@ -305,12 +306,14 @@ func TestReportControllerVersionEndpointsValidateAndScopeRequests(t *testing.T) 
 
 func TestReportControllerCreateRunMapsDeniedAndInvalid(t *testing.T) {
 	for _, test := range []struct {
-		name       string
-		err        error
-		wantStatus int
+		name        string
+		err         error
+		wantStatus  int
+		wantMessage string
 	}{
 		{name: "denied", err: data_svc.ErrReportRunDenied, wantStatus: http.StatusForbidden},
 		{name: "invalid", err: data_svc.ErrReportRunInvalid, wantStatus: http.StatusUnprocessableEntity},
+		{name: "busy", err: data_svc.ErrReportRunBusy, wantStatus: http.StatusConflict, wantMessage: "已有生成任务"},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			runService := &fakeReportRunService{err: test.err}
@@ -323,6 +326,9 @@ func TestReportControllerCreateRunMapsDeniedAndInvalid(t *testing.T) {
 			router.ServeHTTP(recorder, request)
 			if recorder.Code != test.wantStatus {
 				t.Fatalf("status = %d body=%s", recorder.Code, recorder.Body)
+			}
+			if test.wantMessage != "" && !strings.Contains(recorder.Body.String(), test.wantMessage) {
+				t.Fatalf("body = %s, want message %q", recorder.Body, test.wantMessage)
 			}
 		})
 	}

@@ -26,6 +26,7 @@ import (
 var (
 	ErrReportRunInvalid               = errors.New("report run service: invalid input")
 	ErrReportRunDenied                = errors.New("report run service: forbidden")
+	ErrReportRunBusy                  = errors.New("report run service: report is busy")
 	ErrReportRunCredentialUnavailable = errors.New("report run service: credential configuration unavailable")
 )
 
@@ -539,7 +540,7 @@ func classifyReportRunStoreError(err error) error {
 	case errors.Is(err, reportrepo.ErrDraftVersionConflict):
 		return ErrReportConflict
 	case errors.Is(err, reportrepo.ErrReportRunBusy):
-		return ErrReportConflict
+		return ErrReportRunBusy
 	case errors.Is(err, reportrepo.ErrInvalidRun):
 		return fmt.Errorf("%w: repository rejected run", ErrReportRunInvalid)
 	default:

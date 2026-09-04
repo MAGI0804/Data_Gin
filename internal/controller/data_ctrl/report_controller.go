@@ -331,6 +331,8 @@ func classifyReportError(err error) (*errcode.Error, string) {
 		return errcode.UnprocessableEntity, "报表查询参数校验失败"
 	case errors.Is(err, data_svc.ErrReportRunDenied):
 		return errcode.Forbidden, "没有该报表的查询权限"
+	case errors.Is(err, data_svc.ErrReportRunBusy):
+		return errcode.Conflict, "该报表已有生成任务，或上一份结果仍在读取、导出或清理，请稍后重试"
 	case errors.Is(err, data_svc.ErrReportRunCredentialUnavailable):
 		return errcode.ServiceUnavailable, "报表敏感参数加密配置不可用，请联系管理员"
 	case errors.Is(err, data_svc.ErrReportInputQueryUnavailable):
