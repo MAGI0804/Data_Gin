@@ -130,12 +130,18 @@ func decodeEmptyReportTaskPayload(payload []byte, label string) error {
 }
 
 func ReportOutboxTaskDefinitions(maxRetry int) []OutboxTaskDefinition {
-	return []OutboxTaskDefinition{{TaskType: TypeReportRun, Queue: ReportQueueName, MaxRetry: maxRetry, Timeout: ReportRunTimeout, Build: NewReportRunTask}}
+	return []OutboxTaskDefinition{{
+		TaskType: TypeReportRun, Queue: ReportQueueName, MaxRetry: maxRetry, Timeout: ReportRunTimeout,
+		RecoverTaskIDConflict: true, Build: NewReportRunTask,
+	}}
 }
 
 // ReportExportOutboxTaskDefinitions is registered only when the matching
 // export worker is enabled, so rolling deployments never publish tasks to an
 // instance without a handler.
 func ReportExportOutboxTaskDefinitions(maxRetry int) []OutboxTaskDefinition {
-	return []OutboxTaskDefinition{{TaskType: TypeReportExport, Queue: ReportExportQueueName, MaxRetry: maxRetry, Timeout: ReportExportTimeout, Build: NewReportExportTask}}
+	return []OutboxTaskDefinition{{
+		TaskType: TypeReportExport, Queue: ReportExportQueueName, MaxRetry: maxRetry, Timeout: ReportExportTimeout,
+		RecoverTaskIDConflict: true, Build: NewReportExportTask,
+	}}
 }

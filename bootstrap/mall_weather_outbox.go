@@ -17,6 +17,7 @@ import (
 	"gin-biz-web-api/pkg/logger"
 
 	"github.com/google/uuid"
+	"github.com/hibiken/asynq"
 	"go.uber.org/zap"
 )
 
@@ -66,9 +67,13 @@ func startOutboxDispatcher(reportWorkerEnabled bool) {
 		console.Warning("Outbox dispatcher was not started: %v", err)
 		return
 	}
+	inspector := asynq.NewInspector(asynq.RedisClientOpt{
+		Addr: redisAddrFromConfig(), Username: config.GetString("cfg.queue_job.redis.username"),
+		Password: config.GetString("cfg.queue_job.redis.password"), DB: config.GetInt("cfg.queue_job.redis.db"),
+	})
 	dispatcher, err := job.NewOutboxDispatcher(
 		data_dao.NewAsyncJobOutboxDAO(database.DB),
-		job.NewAsynqTaskPublisher(global.QueueJobClient),
+		job.NewAsynqTaskPublisher(global.QueueJobClient, inspector),
 		registry,
 		job.OutboxDispatcherConfig{
 			WorkerID:     "outbox-" + uuid.NewString(),
@@ -88,6 +93,7 @@ func startOutboxDispatcher(reportWorkerEnabled bool) {
 		},
 	)
 	if err != nil {
+		_ = inspector.Close()
 		console.Warning("Outbox dispatcher was not started: %v", err)
 		return
 	}
@@ -98,6 +104,7 @@ func startOutboxDispatcher(reportWorkerEnabled bool) {
 	if outboxLifecycle.cancel != nil {
 		outboxLifecycle.Unlock()
 		cancel()
+		_ = inspector.Close()
 		console.Warning("Outbox dispatcher is already running")
 		return
 	}
@@ -107,6 +114,7 @@ func startOutboxDispatcher(reportWorkerEnabled bool) {
 
 	go func() {
 		defer close(done)
+		defer func() { _ = inspector.Close() }()
 		if err := dispatcher.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
 			logger.Error("Outbox dispatcher stopped", zap.Error(err))
 		}
@@ -115,6 +123,10 @@ func startOutboxDispatcher(reportWorkerEnabled bool) {
 		startReportRunReconciler(data_svc.NewReportRunReconciler())
 	}
 	console.Success("Outbox dispatcher started successfully")
+}
+
+func redisAddrFromConfig() string {
+	return config.GetString("cfg.queue_job.redis.host") + ":" + config.GetString("cfg.queue_job.redis.port")
 }
 
 func stopOutboxDispatcher() {

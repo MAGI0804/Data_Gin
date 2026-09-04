@@ -43,7 +43,8 @@ func TestOutboxRegistryResolvesReportRun(t *testing.T) {
 		QueueName: ReportQueueName, PayloadJSON: model.JSONText(`{"run_id":31}`),
 	})
 	if err != nil || task.Type() != TypeReportRun || options.TaskID != "report:run:run-uuid" ||
-		options.Queue != ReportQueueName || options.Timeout != ReportRunTimeout || options.MaxRetry != ReportRunMaxRetry {
+		!options.RecoverTaskIDConflict || options.Queue != ReportQueueName ||
+		options.Timeout != ReportRunTimeout || options.MaxRetry != ReportRunMaxRetry {
 		t.Fatalf("Resolve() task=%#v options=%#v error=%v", task, options, err)
 	}
 	if options.Timeout != 35*time.Minute {
@@ -72,7 +73,8 @@ func TestOutboxRegistryResolvesReportExport(t *testing.T) {
 		TaskKey: "report:export:export-uuid", TaskType: TypeReportExport,
 		QueueName: ReportExportQueueName, PayloadJSON: model.JSONText(`{"export_id":41}`),
 	})
-	if err != nil || task.Type() != TypeReportExport || options.Timeout != ReportExportTimeout || options.MaxRetry != ReportExportMaxRetry {
+	if err != nil || task.Type() != TypeReportExport || !options.RecoverTaskIDConflict ||
+		options.Timeout != ReportExportTimeout || options.MaxRetry != ReportExportMaxRetry {
 		t.Fatalf("Resolve() task=%#v options=%#v error=%v", task, options, err)
 	}
 }

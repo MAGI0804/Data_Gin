@@ -74,8 +74,31 @@ func (store *fakeOutboxStore) MarkFailed(_ context.Context, id uint, availableAt
 }
 
 type fakeMallWeatherPublisher struct {
-	calls []publishCall
-	err   error
+	calls  []publishCall
+	err    error
+	errors []error
+}
+
+type fakeAsynqTaskEnqueuer struct {
+	err error
+}
+
+func (client *fakeAsynqTaskEnqueuer) EnqueueContext(context.Context, *asynq.Task, ...asynq.Option) (*asynq.TaskInfo, error) {
+	return nil, client.err
+}
+
+type fakeAsynqTaskInspector struct {
+	info     *asynq.TaskInfo
+	runCalls int
+}
+
+func (inspector *fakeAsynqTaskInspector) GetTaskInfo(string, string) (*asynq.TaskInfo, error) {
+	return inspector.info, nil
+}
+
+func (inspector *fakeAsynqTaskInspector) RunTask(string, string) error {
+	inspector.runCalls++
+	return nil
 }
 
 type publishCall struct {
@@ -90,6 +113,11 @@ func (publisher *fakeMallWeatherPublisher) Publish(_ context.Context, task *asyn
 		payload:  string(task.Payload()),
 		options:  options,
 	})
+	if len(publisher.errors) > 0 {
+		err := publisher.errors[0]
+		publisher.errors = publisher.errors[1:]
+		return err
+	}
 	return publisher.err
 }
 
@@ -135,6 +163,22 @@ func TestOutboxDispatcherTreatsTaskIDConflictAsPublished(t *testing.T) {
 	}
 	if len(store.failed) != 0 {
 		t.Fatalf("failed rows = %+v", store.failed)
+	}
+}
+
+func TestAsynqTaskPublisherRequeuesArchivedReportTask(t *testing.T) {
+	task := asynq.NewTask(TypeReportRun, []byte(`{"run_id":27}`))
+	inspector := &fakeAsynqTaskInspector{info: &asynq.TaskInfo{
+		ID: "report:run:run-uuid", Queue: ReportQueueName, Type: TypeReportRun,
+		Payload: task.Payload(), State: asynq.TaskStateArchived,
+	}}
+	publisher := NewAsynqTaskPublisher(&fakeAsynqTaskEnqueuer{err: asynq.ErrTaskIDConflict}, inspector)
+	err := publisher.Publish(t.Context(), task, TaskPublishOptions{
+		TaskID: "report:run:run-uuid", Queue: ReportQueueName, MaxRetry: ReportRunMaxRetry,
+		RecoverTaskIDConflict: true,
+	})
+	if err != nil || inspector.runCalls != 1 {
+		t.Fatalf("Publish() error=%v run calls=%d", err, inspector.runCalls)
 	}
 }
 

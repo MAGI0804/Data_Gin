@@ -1,6 +1,7 @@
 package job
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -22,9 +23,10 @@ const (
 )
 
 var (
-	ErrInvalidOutboxTask = errors.New("invalid outbox task")
-	ErrOutboxPublish     = errors.New("outbox publish failed")
-	ErrOutboxState       = errors.New("outbox state update failed")
+	ErrInvalidOutboxTask          = errors.New("invalid outbox task")
+	ErrOutboxPublish              = errors.New("outbox publish failed")
+	ErrOutboxState                = errors.New("outbox state update failed")
+	ErrOutboxTaskConflictRecovery = errors.New("outbox task conflict recovery failed")
 )
 
 type OutboxStore interface {
@@ -34,10 +36,11 @@ type OutboxStore interface {
 }
 
 type TaskPublishOptions struct {
-	TaskID   string
-	Queue    string
-	MaxRetry int
-	Timeout  time.Duration
+	TaskID                string
+	Queue                 string
+	MaxRetry              int
+	Timeout               time.Duration
+	RecoverTaskIDConflict bool
 }
 
 type TaskPublisher interface {
@@ -45,11 +48,25 @@ type TaskPublisher interface {
 }
 
 type AsynqTaskPublisher struct {
-	client *asynq.Client
+	client    asynqTaskEnqueuer
+	inspector asynqTaskInspector
 }
 
-func NewAsynqTaskPublisher(client *asynq.Client) *AsynqTaskPublisher {
-	return &AsynqTaskPublisher{client: client}
+type asynqTaskEnqueuer interface {
+	EnqueueContext(context.Context, *asynq.Task, ...asynq.Option) (*asynq.TaskInfo, error)
+}
+
+type asynqTaskInspector interface {
+	GetTaskInfo(queue, id string) (*asynq.TaskInfo, error)
+	RunTask(queue, id string) error
+}
+
+func NewAsynqTaskPublisher(client asynqTaskEnqueuer, inspectors ...asynqTaskInspector) *AsynqTaskPublisher {
+	var inspector asynqTaskInspector
+	if len(inspectors) > 0 {
+		inspector = inspectors[0]
+	}
+	return &AsynqTaskPublisher{client: client, inspector: inspector}
 }
 
 func (publisher *AsynqTaskPublisher) Publish(ctx context.Context, task *asynq.Task, options TaskPublishOptions) error {
@@ -65,15 +82,39 @@ func (publisher *AsynqTaskPublisher) Publish(ctx context.Context, task *asynq.Ta
 		optionsList = append(optionsList, asynq.Timeout(options.Timeout))
 	}
 	_, err := publisher.client.EnqueueContext(ctx, task, optionsList...)
-	return err
+	if !errors.Is(err, asynq.ErrTaskIDConflict) || !options.RecoverTaskIDConflict {
+		return err
+	}
+	if publisher.inspector == nil {
+		return ErrOutboxTaskConflictRecovery
+	}
+	info, inspectErr := publisher.inspector.GetTaskInfo(options.Queue, options.TaskID)
+	if inspectErr != nil {
+		return fmt.Errorf("%w: inspect task", ErrOutboxTaskConflictRecovery)
+	}
+	if info.Type != task.Type() || !bytes.Equal(info.Payload, task.Payload()) {
+		return fmt.Errorf("%w: task identity mismatch", ErrOutboxTaskConflictRecovery)
+	}
+	switch info.State {
+	case asynq.TaskStateArchived:
+		if runErr := publisher.inspector.RunTask(options.Queue, options.TaskID); runErr != nil {
+			return fmt.Errorf("%w: requeue archived task", ErrOutboxTaskConflictRecovery)
+		}
+		return nil
+	case asynq.TaskStateActive, asynq.TaskStatePending, asynq.TaskStateScheduled, asynq.TaskStateRetry, asynq.TaskStateAggregating:
+		return nil
+	default:
+		return fmt.Errorf("%w: task is %s", ErrOutboxTaskConflictRecovery, info.State)
+	}
 }
 
 type OutboxTaskDefinition struct {
-	TaskType string
-	Queue    string
-	MaxRetry int
-	Timeout  time.Duration
-	Build    func([]byte) (*asynq.Task, error)
+	TaskType              string
+	Queue                 string
+	MaxRetry              int
+	Timeout               time.Duration
+	RecoverTaskIDConflict bool
+	Build                 func([]byte) (*asynq.Task, error)
 }
 
 type OutboxTaskRegistry struct {
@@ -118,9 +159,11 @@ func (registry *OutboxTaskRegistry) Resolve(row model.AsyncJobOutbox) (*asynq.Ta
 	if err != nil || task == nil || task.Type() != definition.TaskType {
 		return nil, TaskPublishOptions{}, ErrInvalidOutboxTask
 	}
-	return task, TaskPublishOptions{
+	options := TaskPublishOptions{
 		TaskID: row.TaskKey, Queue: definition.Queue, MaxRetry: definition.MaxRetry, Timeout: definition.Timeout,
-	}, nil
+		RecoverTaskIDConflict: definition.RecoverTaskIDConflict,
+	}
+	return task, options, nil
 }
 
 func MallWeatherOutboxTaskDefinitions(maxRetry int, fetchTimeout time.Duration) []OutboxTaskDefinition {
