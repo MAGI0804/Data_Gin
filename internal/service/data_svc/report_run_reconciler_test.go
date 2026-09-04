@@ -7,8 +7,23 @@ import (
 	"time"
 
 	"gin-biz-web-api/internal/reportrepo"
+	"gin-biz-web-api/job"
 	"gin-biz-web-api/model"
 )
+
+func TestReportRunReconcilerFailsExpiredQueuedRunsBeforeDeliveryRecovery(t *testing.T) {
+	now := time.Date(2026, 9, 4, 18, 0, 0, 0, time.UTC)
+	store := &fakeReconciliationStore{expiredQueuedIDs: []uint{31}}
+	reconciler := NewReportRunReconcilerWithDependencies(store, fakeReportCredentialDecryptor{}, &fakeResultEvidenceReader{})
+	reconciler.now = func() time.Time { return now }
+
+	if err := reconciler.Reconcile(t.Context()); err != nil {
+		t.Fatalf("Reconcile() error = %v", err)
+	}
+	if !store.expiredCutoff.Equal(now.Add(-job.ReportRunSnapshotWaitLimit)) || store.queuedFailed != 1 || store.queuedFailedID != 31 {
+		t.Fatalf("cutoff=%v failed=%d failedID=%d", store.expiredCutoff, store.queuedFailed, store.queuedFailedID)
+	}
+}
 
 func TestReportRunReconcilerUsesRunScopedResultAsCommitEvidence(t *testing.T) {
 	store := &fakeReconciliationStore{runtime: reconciliationRuntime()}
@@ -88,11 +103,15 @@ func (reader *fakeResultEvidenceReader) CountCommittedRows(context.Context, repo
 }
 
 type fakeReconciliationStore struct {
-	runtime     *reportrepo.RuntimeContract
-	succeeded   int
-	rowCount    int64
-	pending     int
-	pendingCode string
+	runtime          *reportrepo.RuntimeContract
+	succeeded        int
+	rowCount         int64
+	pending          int
+	pendingCode      string
+	expiredQueuedIDs []uint
+	expiredCutoff    time.Time
+	queuedFailed     int
+	queuedFailedID   uint
 }
 
 func (store *fakeReconciliationStore) ListReconciliationCandidates(context.Context, time.Time, int) ([]uint, error) {
@@ -116,6 +135,15 @@ func (store *fakeReconciliationStore) MarkReconciliationPending(_ context.Contex
 }
 func (store *fakeReconciliationStore) RecoverExpiredPreOracleRuns(context.Context, time.Time, int) (int64, error) {
 	return 0, nil
+}
+func (store *fakeReconciliationStore) ListExpiredQueuedRuns(_ context.Context, cutoff time.Time, _ int) ([]uint, error) {
+	store.expiredCutoff = cutoff
+	return store.expiredQueuedIDs, nil
+}
+func (store *fakeReconciliationStore) MarkQueuedExecutionFailed(_ context.Context, runID uint, _, _ string, _ time.Time) error {
+	store.queuedFailed++
+	store.queuedFailedID = runID
+	return nil
 }
 func (store *fakeReconciliationStore) ListQueuedRunsMissingDelivery(context.Context, int) ([]uint, error) {
 	return nil, nil

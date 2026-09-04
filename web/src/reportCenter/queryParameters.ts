@@ -2,6 +2,7 @@ import type { ReportExport, ReportExportStatus, ReportParameter, ReportResultPag
 
 export const terminalReportRunStatuses = new Set<ReportRunStatus>(['SUCCEEDED', 'FAILED', 'CANCELLED', 'EXPORTED', 'RESULT_PURGED', 'SUPERSEDED'])
 export const terminalReportExportStatuses = new Set<ReportExportStatus>(['READY', 'FAILED', 'CANCELLED', 'EXPIRED'])
+const reportExportRunStatuses = new Set<ReportRunStatus>(['SUCCEEDED', 'EXPORTING', 'EXPORTED', 'RESULT_PURGING', 'RESULT_PURGED'])
 
 export type NewReportRunState = {
   values: Record<string, unknown>
@@ -32,6 +33,14 @@ export function canStartNewReportRun(runStatus: ReportRunStatus, reportExport: P
   const runFinished = terminalReportRunStatuses.has(runStatus)
   const exportFinished = isReportExportSettled(reportExport)
   return !busy && runFinished && exportFinished
+}
+
+export function canBindReportExport(run: Pick<ReportRun, 'status' | 'resultAvailable'>) {
+  return run.resultAvailable || reportExportRunStatuses.has(run.status)
+}
+
+export function canRetryReportExportBinding(run: Pick<ReportRun, 'status' | 'resultAvailable'> | null, reportExport: ReportExport | null) {
+  return run !== null && reportExport === null && canBindReportExport(run)
 }
 
 export function isReportExportSettled(reportExport: Pick<ReportExport, 'status' | 'purgedAt'> | null) {

@@ -21,11 +21,59 @@ func TestReportRunProcessorExecutesProcedureOnceAndPersistsSuccess(t *testing.T)
 	store := newFakeReportExecutionStore()
 	executor := &fakeReportProcedureExecutor{rowCount: 18}
 	processor := newTestReportRunProcessor(store, executor)
-	if err := processor.Process(t.Context(), 31, true); err != nil {
+	if err := processor.Process(t.Context(), 31, 3, true); err != nil {
 		t.Fatalf("Process() error = %v", err)
 	}
 	if executor.calls != 1 || executor.values["runId"] != "1234" || store.succeeded != 1 || store.unknown != 0 || store.failed != 0 {
 		t.Fatalf("calls=%d succeeded=%d unknown=%d failed=%d", executor.calls, store.succeeded, store.unknown, store.failed)
+	}
+}
+
+func TestReportRunProcessorWaitsWithoutConsumingFailureRetry(t *testing.T) {
+	store := newFakeReportExecutionStore()
+	store.beginDisposition = reportrepo.RunDispositionBusy
+	processor := newTestReportRunProcessor(store, &fakeReportProcedureExecutor{})
+	err := processor.Process(t.Context(), 31, 0, true)
+	if !errors.Is(err, ErrReportRunWaitingForSnapshot) || store.failed != 0 {
+		t.Fatalf("Process() error = %v, failed = %d", err, store.failed)
+	}
+	var hint interface{ RetryDelay() time.Duration }
+	if !errors.As(err, &hint) || hint.RetryDelay() != 15*time.Second {
+		t.Fatalf("waiting error retry hint = %v", err)
+	}
+}
+
+func TestReportRunProcessorFailsQueuedRunWhenSnapshotWaitExpires(t *testing.T) {
+	store := newFakeReportExecutionStore()
+	store.beginDisposition = reportrepo.RunDispositionBusy
+	processor := newTestReportRunProcessor(store, &fakeReportProcedureExecutor{})
+	err := processor.Process(t.Context(), 31, 3, false)
+	if !errors.Is(err, ErrReportRunProcessNonRetryable) || store.queuedFailed != 1 {
+		t.Fatalf("Process() error = %v, queued failed = %d", err, store.queuedFailed)
+	}
+}
+
+func TestReportRunProcessorUsesExecutionAttemptsForFailureRetryBudget(t *testing.T) {
+	tests := []struct {
+		name         string
+		attempt      int
+		wantReleased int
+		wantFailed   int
+	}{
+		{name: "third retry remains available", attempt: 3, wantReleased: 1},
+		{name: "fourth attempt exhausts retries", attempt: 4, wantFailed: 1},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			store := newFakeReportExecutionStore()
+			store.runAttempt = tt.attempt
+			store.loadErr = errors.New("temporary contract load failure")
+			processor := newTestReportRunProcessor(store, &fakeReportProcedureExecutor{})
+			err := processor.Process(t.Context(), 31, 3, true)
+			if store.released != tt.wantReleased || store.failed != tt.wantFailed {
+				t.Fatalf("Process() error = %v, released = %d, failed = %d", err, store.released, store.failed)
+			}
+		})
 	}
 }
 
@@ -38,7 +86,7 @@ func TestReportRunProcessorBuildsSingleJSONCursorPayload(t *testing.T) {
 	executor := &fakeReportProcedureExecutor{rowCount: 2}
 	processor := newTestReportRunProcessor(store, executor)
 
-	if err := processor.Process(t.Context(), 31, true); err != nil {
+	if err := processor.Process(t.Context(), 31, 3, true); err != nil {
 		t.Fatalf("Process() error = %v", err)
 	}
 	if got, want := executor.jsonPayload, `{"report_id":31,"conditions":{"c_store_id":[],"c_supplier_id":["a","b"],"datein_begin":"20260504","datein_end":""}}`; got != want {
@@ -56,7 +104,7 @@ func TestReportRunProcessorBuildsJSONResultTablePayloadWithRunID(t *testing.T) {
 	executor := &fakeReportProcedureExecutor{rowCount: 2}
 	processor := newTestReportRunProcessor(store, executor)
 
-	if err := processor.Process(t.Context(), 31, true); err != nil {
+	if err := processor.Process(t.Context(), 31, 3, true); err != nil {
 		t.Fatalf("Process() error = %v", err)
 	}
 	if got, want := executor.jsonPayload, `{"report_id":31,"conditions":{"c_supplier_id":["a","b"],"datein_begin":"20260504"}}`; got != want {
@@ -132,7 +180,7 @@ func TestReportRunProcessorMarksUnknownWithoutRetryingAfterCommitAmbiguity(t *te
 	store := newFakeReportExecutionStore()
 	executor := &fakeReportProcedureExecutor{err: errOracleCommitOutcomeUnknown}
 	processor := newTestReportRunProcessor(store, executor)
-	err := processor.Process(t.Context(), 31, true)
+	err := processor.Process(t.Context(), 31, 3, true)
 	if !errors.Is(err, ErrReportRunProcessNonRetryable) {
 		t.Fatalf("Process() error = %v, want non-retryable", err)
 	}
@@ -146,7 +194,7 @@ func TestReportRunProcessorCommitAmbiguityOverridesConcurrentCancellation(t *tes
 	store.cancelOnInspectAfterOracle = true
 	executor := &fakeReportProcedureExecutor{err: errOracleCommitOutcomeUnknown}
 	processor := newTestReportRunProcessor(store, executor)
-	err := processor.Process(t.Context(), 31, true)
+	err := processor.Process(t.Context(), 31, 3, true)
 	if !errors.Is(err, ErrReportRunProcessNonRetryable) || store.unknown != 1 || store.cancelled != 0 {
 		t.Fatalf("error=%v unknown=%d cancelled=%d", err, store.unknown, store.cancelled)
 	}
@@ -158,7 +206,7 @@ func TestReportRunProcessorRoutesUnknownRunsToReconciliation(t *testing.T) {
 	processor := newTestReportRunProcessor(store, &fakeReportProcedureExecutor{})
 	called := 0
 	processor.reconcileOne = func(context.Context, uint) error { called++; return nil }
-	if err := processor.Process(t.Context(), 31, true); err != nil {
+	if err := processor.Process(t.Context(), 31, 3, true); err != nil {
 		t.Fatalf("Process() error = %v", err)
 	}
 	if called != 1 {
@@ -173,7 +221,7 @@ func TestReportRunProcessorHeartbeatCancelsOracleExecution(t *testing.T) {
 	processor := newTestReportRunProcessor(store, executor)
 	processor.heartbeatInterval = time.Millisecond
 	processor.stateTimeout = time.Second
-	if err := processor.Process(t.Context(), 31, true); err != nil {
+	if err := processor.Process(t.Context(), 31, 3, true); err != nil {
 		t.Fatalf("Process() error = %v", err)
 	}
 	if executor.calls != 1 || store.cancelled != 1 {
@@ -186,7 +234,7 @@ func TestReportRunProcessorRejectsRuntimeContractBeforeOracleStart(t *testing.T)
 	store.loadErr = errors.New("hash mismatch")
 	executor := &fakeReportProcedureExecutor{}
 	processor := newTestReportRunProcessor(store, executor)
-	err := processor.Process(t.Context(), 31, false)
+	err := processor.Process(t.Context(), 31, 0, true)
 	if !errors.Is(err, ErrReportRunProcessNonRetryable) || executor.calls != 0 || store.failed != 1 || store.oracleStarted != 0 {
 		t.Fatalf("error=%v calls=%d failed=%d oracleStarted=%d", err, executor.calls, store.failed, store.oracleStarted)
 	}
@@ -198,7 +246,7 @@ func TestReportRunProcessorPreservesOracleCauseForWorkerAndPersistsSafeFailure(t
 	executor := &fakeReportProcedureExecutor{err: oracleErr}
 	processor := newTestReportRunProcessor(store, executor)
 
-	err := processor.Process(t.Context(), 31, true)
+	err := processor.Process(t.Context(), 31, 3, true)
 	if !errors.Is(err, ErrReportRunProcessNonRetryable) {
 		t.Fatalf("Process() error = %v, want non-retryable", err)
 	}
@@ -275,6 +323,9 @@ type fakeReportExecutionStore struct {
 	unknown                    int
 	unknownCode                string
 	beginDisposition           reportrepo.RunDisposition
+	runAttempt                 int
+	released                   int
+	queuedFailed               int
 }
 
 func newFakeReportExecutionStore() *fakeReportExecutionStore {
@@ -295,7 +346,11 @@ func (store *fakeReportExecutionStore) BeginExecution(context.Context, uint, str
 	if disposition == reportrepo.RunDispositionUnknown {
 		disposition = reportrepo.RunDispositionAcquired
 	}
-	return &reportrepo.RunLease{Disposition: disposition}, nil
+	attempt := store.runAttempt
+	if attempt == 0 {
+		attempt = 1
+	}
+	return &reportrepo.RunLease{Disposition: disposition, Run: model.ReportRun{Attempt: attempt}}, nil
 }
 func (store *fakeReportExecutionStore) HeartbeatExecution(context.Context, uint, string, time.Time, time.Duration) (reportrepo.RunControl, error) {
 	store.mu.Lock()
@@ -350,6 +405,11 @@ func (store *fakeReportExecutionStore) MarkExecutionUnknown(_ context.Context, _
 	return nil
 }
 func (store *fakeReportExecutionStore) ReleaseExecutionForRetry(context.Context, uint, string, time.Time) error {
+	store.released++
+	return nil
+}
+func (store *fakeReportExecutionStore) MarkQueuedExecutionFailed(context.Context, uint, string, string, time.Time) error {
+	store.queuedFailed++
 	return nil
 }
 func (store *fakeReportExecutionStore) ListReconciliationCandidates(context.Context, time.Time, int) ([]uint, error) {
@@ -366,6 +426,9 @@ func (store *fakeReportExecutionStore) MarkReconciliationPending(context.Context
 }
 func (store *fakeReportExecutionStore) RecoverExpiredPreOracleRuns(context.Context, time.Time, int) (int64, error) {
 	return 0, nil
+}
+func (store *fakeReportExecutionStore) ListExpiredQueuedRuns(context.Context, time.Time, int) ([]uint, error) {
+	return nil, nil
 }
 func (store *fakeReportExecutionStore) ListQueuedRunsMissingDelivery(context.Context, int) ([]uint, error) {
 	return nil, nil

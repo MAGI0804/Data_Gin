@@ -23,7 +23,13 @@ const (
 	ReportExportCleanupUnique  = 50 * time.Minute
 	ReportExportCleanupCron    = "37 * * * *"
 	ReportResultCleanupCron    = "7,17,27,37,47,57 * * * *"
-	ReportRunMaxRetry          = 3
+	ReportRunFailureMaxRetry   = 3
+	// Snapshot runs wait behind the report-scoped Oracle result table lock.
+	// Business failures are capped separately; this allows about 12 hours.
+	ReportRunRetryDelay        = 15 * time.Second
+	ReportRunMaxRetry          = 2880
+	ReportRunSnapshotWaitLimit = ReportRunMaxRetry * ReportRunRetryDelay
+	ReportExportMaxRetry       = 3
 )
 
 type ReportRunTaskPayload struct {

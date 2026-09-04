@@ -154,7 +154,7 @@ type excelMatchCleanupRunner interface {
 }
 
 type reportRunProcessor interface {
-	Process(context.Context, uint, bool) error
+	Process(context.Context, uint, int, bool) error
 }
 
 type reportExportProcessor interface {
@@ -237,7 +237,7 @@ func newReportRunHandler(processor reportRunProcessor) asynq.HandlerFunc {
 		if err != nil {
 			return fmt.Errorf("%w: %v", asynq.SkipRetry, err)
 		}
-		if err := processor.Process(ctx, payload.RunID, mallWeatherExportRetryAllowed(ctx)); err != nil {
+		if err := processor.Process(ctx, payload.RunID, job.ReportRunFailureMaxRetry, mallWeatherExportRetryAllowed(ctx)); err != nil {
 			if errors.Is(err, data_svc.ErrReportRunProcessNonRetryable) {
 				return fmt.Errorf("%w: %v", asynq.SkipRetry, err)
 			}

@@ -6,7 +6,7 @@ import ts from 'typescript'
 import { createReportInputQueryDefinition, createReportRun, deleteReportDraft, getReportAudits, getReportDownloads, getReportInputOptions, getReportInputQueries, getReportInputQueryDefinitions, getReportProcedureSignature, getReportProcedures, getReportResultTableSchema, getReportResultTables, parsePublication, parseReportAuditPage, parseReportCatalogPage, parseReportDatasource, parseReportDatasources, parseReportDatasourceTest, parseReportDraft, parseReportExport, parseReportExportPage, parseReportInputQueryDefinitions, parseReportInputQueryTestResult, parseReportProcedurePage, parseReportProcedureSignature, parseReportResultPage, parseReportResultTablePage, parseReportResultTableSchema, parseReportRun, parseReportRunContract, parseReportVersionDiff, parseReportVersionPage, saveAndPublishReportDraft, saveReportDraft, testReportDatasourceConnection, testReportInputQueryDefinition } from '../.test-dist/reportCenter/api.js'
 import { applyExcelMapping, buildReportConditions, excelMappingFromColumns, initialReportConditionValues, moveReportInputField, orderedReportInputEntries, parseExcelMappingDocument, parseReportInputSchemaDocument, parseReportInputSchemaText, reconcileReportColumnsWithResultSchema, renameExcelMappingField, reportColumnsFromResultSchema } from '../.test-dist/reportCenter/refCursorConfig.js'
 import { reportParameterControls, reportParameterFlagDisabled, updateReportParameterFlag, updateReportParameterLogicalType } from '../.test-dist/reportCenter/parameterConfig.js'
-import { buildNewReportRunState, canStartNewReportRun, initialReportParameterValues } from '../.test-dist/reportCenter/queryParameters.js'
+import { buildNewReportRunState, canBindReportExport, canRetryReportExportBinding, canStartNewReportRun, initialReportParameterValues } from '../.test-dist/reportCenter/queryParameters.js'
 import { createLatestRequestGuard } from '../.test-dist/reportCenter/components/ReportVersionDrawer/requestGuard.js'
 import { normalizeDatasourceCode, validateDatasourceConnection, validateDatasourceSave } from '../.test-dist/reportCenter/datasourceValidation.js'
 import { mergeReportInputOptions, reportInputOptionMatches, reportInputSelectionKeys, reportInputSelectionValue } from '../.test-dist/reportCenter/inputOptions.js'
@@ -370,6 +370,21 @@ test('new report runs are allowed only after run and export processing finish', 
   }
   assert.equal(canStartNewReportRun('SUCCEEDED', { status: 'READY', purgedAt: null }, false), false)
   assert.equal(canStartNewReportRun('SUCCEEDED', { status: 'READY', purgedAt: '2026-09-04T08:30:00Z' }, false), true)
+})
+
+test('completed runs can bind the user export after Oracle results were cleaned', () => {
+  assert.equal(canBindReportExport({ status: 'SUCCEEDED', resultAvailable: true }), true)
+  assert.equal(canBindReportExport({ status: 'EXPORTING', resultAvailable: false }), true)
+  assert.equal(canBindReportExport({ status: 'RESULT_PURGING', resultAvailable: false }), true)
+  assert.equal(canBindReportExport({ status: 'RESULT_PURGED', resultAvailable: false }), true)
+  assert.equal(canBindReportExport({ status: 'FAILED', resultAvailable: false }), false)
+})
+
+test('completed runs can retry binding the user export after a transient failure', () => {
+  const run = { status: 'RESULT_PURGED', resultAvailable: false }
+  assert.equal(canRetryReportExportBinding(run, null), true)
+  assert.equal(canRetryReportExportBinding(run, { status: 'READY' }), false)
+  assert.equal(canRetryReportExportBinding({ status: 'FAILED', resultAvailable: false }, null), false)
 })
 
 test('new report run state clears the frozen snapshot and restores parameter defaults', () => {

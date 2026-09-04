@@ -42,10 +42,6 @@ func (repository *Repository) CreateOrGetExport(ctx context.Context, actor, runI
 		} else if err != nil {
 			return fmt.Errorf("report export: lock run: %w", err)
 		}
-		requestedAt := command.Outbox.AvailableAt.UTC()
-		if run.Status != model.ReportRunStatusSucceeded || run.ResultPurgedAt != nil || run.ResultExpiresAt == nil || !requestedAt.Before(run.ResultExpiresAt.UTC()) {
-			return ErrReportExportRunNotReady
-		}
 		if err := repository.authorizeRunExport(ctx, tx, actor, &run); err != nil {
 			return err
 		}
@@ -61,15 +57,20 @@ func (repository *Repository) CreateOrGetExport(ctx context.Context, actor, runI
 		if err != nil {
 			return fmt.Errorf("report export: encode frozen query: %w", err)
 		}
+		// Reuse the user's immutable file even after its Oracle source rows were purged.
 		var existing model.ReportExport
 		if err := tx.Where("run_id = ?", runID).First(&existing).Error; err == nil {
-			if string(existing.FrozenFiltersJSON) != string(filtersJSON) || string(existing.FrozenSortJSON) != string(sortJSON) {
+			if existing.CreatedBy != actor || string(existing.FrozenFiltersJSON) != string(filtersJSON) || string(existing.FrozenSortJSON) != string(sortJSON) {
 				return ErrReportExportRunNotReady
 			}
 			command.Export = existing
 			return nil
 		} else if !errors.Is(err, gorm.ErrRecordNotFound) {
 			return fmt.Errorf("report export: find existing: %w", err)
+		}
+		requestedAt := command.Outbox.AvailableAt.UTC()
+		if run.Status != model.ReportRunStatusSucceeded || run.ResultPurgedAt != nil || run.ResultExpiresAt == nil || !requestedAt.Before(run.ResultExpiresAt.UTC()) {
+			return ErrReportExportRunNotReady
 		}
 		command.Export.FrozenColumnsJSON = run.PresentationSnapshotJSON
 		command.Export.FrozenFiltersJSON = model.JSONText(filtersJSON)

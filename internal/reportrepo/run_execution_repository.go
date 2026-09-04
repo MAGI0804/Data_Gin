@@ -2,6 +2,7 @@ package reportrepo
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -92,6 +93,24 @@ func (repository *Repository) ListQueuedRunsMissingDelivery(ctx context.Context,
 	return runIDs, nil
 }
 
+func (repository *Repository) ListExpiredQueuedRuns(ctx context.Context, cutoff time.Time, limit int) ([]uint, error) {
+	if repository == nil || repository.db == nil || ctx == nil || cutoff.IsZero() || limit < 1 || limit > 100 {
+		return nil, fmt.Errorf("report execution recovery: invalid expired queue query")
+	}
+	var runIDs []uint
+	err := expiredQueuedRunQuery(repository.db.WithContext(ctx), cutoff, limit).Pluck("id", &runIDs).Error
+	if err != nil {
+		return nil, fmt.Errorf("report execution recovery: list expired queued runs: %w", err)
+	}
+	return runIDs, nil
+}
+
+func expiredQueuedRunQuery(db *gorm.DB, cutoff time.Time, limit int) *gorm.DB {
+	return db.Model(&model.ReportRun{}).
+		Where("status = ? AND created_at <= ?", model.ReportRunStatusQueued, cutoff.UTC().Truncate(time.Millisecond)).
+		Order("id ASC").Limit(limit)
+}
+
 func (repository *Repository) EnsureRunQueued(ctx context.Context, runID uint, now time.Time) error {
 	if repository == nil || repository.db == nil || ctx == nil || runID == 0 || now.IsZero() {
 		return fmt.Errorf("report execution recovery: invalid queue request")
@@ -114,6 +133,26 @@ func (repository *Repository) EnsureRunQueued(ctx context.Context, runID uint, n
 			return fmt.Errorf("report execution recovery: queued outbox count changed")
 		}
 		return nil
+	})
+}
+
+func (repository *Repository) MarkQueuedExecutionFailed(ctx context.Context, runID uint, code, safeMessage string, now time.Time) error {
+	if repository == nil || repository.db == nil || ctx == nil || runID == 0 || !validRunError(code, safeMessage) || now.IsZero() {
+		return fmt.Errorf("report execution: invalid queued failure")
+	}
+	now = now.UTC().Truncate(time.Millisecond)
+	return repository.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		result := tx.Model(&model.ReportRun{}).Where("id = ? AND status = ?", runID, model.ReportRunStatusQueued).Updates(map[string]interface{}{
+			"status": model.ReportRunStatusFailed, "finished_at": now, "error_code": code,
+			"error_message_safe": strings.TrimSpace(safeMessage), "updated_at": now,
+		})
+		if result.Error != nil {
+			return fmt.Errorf("report execution: fail queued run: %w", result.Error)
+		}
+		if result.RowsAffected != 1 {
+			return ErrReportRunLeaseLost
+		}
+		return repository.writeSystemAudit(ctx, tx, "REPORT_RUN_FAILED", "REPORT_RUN", runID, map[string]interface{}{"reasonCode": code})
 	})
 }
 
@@ -478,14 +517,27 @@ func (repository *Repository) MarkExecutionSucceeded(ctx context.Context, runID 
 	if rowCount < 0 || finishedAt.IsZero() || !expiresAt.After(finishedAt) {
 		return fmt.Errorf("report execution: invalid success update")
 	}
+	finishedAt = finishedAt.UTC().Truncate(time.Millisecond)
 	updates := map[string]interface{}{
 		"status": model.ReportRunStatusSucceeded, "row_count": rowCount,
-		"finished_at": finishedAt.UTC().Truncate(time.Millisecond), "result_expires_at": expiresAt.UTC().Truncate(time.Millisecond),
+		"finished_at": finishedAt, "result_expires_at": expiresAt.UTC().Truncate(time.Millisecond),
 		"error_code": "", "error_message_safe": "", "unknown_at": nil, "unknown_reason_code": "",
 		"worker_id": "", "lease_token": "", "lease_expires_at": nil, "heartbeat_at": nil,
-		"updated_at": finishedAt.UTC().Truncate(time.Millisecond),
+		"updated_at": finishedAt,
 	}
-	return repository.updateOwnedExecutionWithAudit(ctx, runID, leaseToken, updates, true, "REPORT_RUN_SUCCEEDED", map[string]interface{}{"rowCount": rowCount})
+	return repository.markSucceededAndQueueExport(ctx, runID, leaseToken, model.ReportRunStatusRunning, true, updates, "REPORT_RUN_SUCCEEDED", rowCount, finishedAt)
+}
+
+func buildAutomaticReportExport(run model.ReportRun, exportUUID string, now time.Time) (model.ReportExport, model.AsyncJobOutbox, error) {
+	if run.ID == 0 || run.RequestedBy == 0 || uuid.Validate(exportUUID) != nil || now.IsZero() || !json.Valid([]byte(run.PresentationSnapshotJSON)) {
+		return model.ReportExport{}, model.AsyncJobOutbox{}, fmt.Errorf("report execution: invalid automatic export")
+	}
+	export := model.ReportExport{
+		ExportUUID: exportUUID, RunID: run.ID, Status: model.ReportExportStatusPending,
+		FrozenFiltersJSON: model.JSONText(`[]`), FrozenSortJSON: model.JSONText(`[]`),
+		FrozenColumnsJSON: run.PresentationSnapshotJSON, CreatedBy: run.RequestedBy,
+	}
+	return export, NewReportExportOutbox(exportUUID, now), nil
 }
 
 func (repository *Repository) ConfirmExecutionSucceeded(ctx context.Context, runID uint, rowCount int64) (bool, error) {
@@ -575,12 +627,67 @@ func (repository *Repository) MarkReconciliationSucceeded(ctx context.Context, r
 	if rowCount < 0 || finishedAt.IsZero() || !expiresAt.After(finishedAt) {
 		return fmt.Errorf("report reconciliation: invalid success update")
 	}
-	return repository.updateOwnedReconciliationWithAudit(ctx, runID, leaseToken, map[string]interface{}{
+	finishedAt = finishedAt.UTC().Truncate(time.Millisecond)
+	updates := map[string]interface{}{
 		"status": model.ReportRunStatusSucceeded, "row_count": rowCount, "finished_at": finishedAt.UTC().Truncate(time.Millisecond),
 		"result_expires_at": expiresAt.UTC().Truncate(time.Millisecond), "unknown_at": nil, "unknown_reason_code": "",
 		"next_reconcile_at": nil, "error_code": "", "error_message_safe": "", "worker_id": "", "lease_token": "",
 		"lease_expires_at": nil, "heartbeat_at": nil, "updated_at": finishedAt.UTC().Truncate(time.Millisecond),
-	}, "REPORT_RUN_RECONCILED", map[string]interface{}{"rowCount": rowCount})
+	}
+	return repository.markSucceededAndQueueExport(ctx, runID, leaseToken, model.ReportRunStatusReconciling, false, updates, "REPORT_RUN_RECONCILED", rowCount, finishedAt)
+}
+
+func (repository *Repository) markSucceededAndQueueExport(
+	ctx context.Context,
+	runID uint,
+	leaseToken, expectedStatus string,
+	requireNotCancelled bool,
+	updates map[string]interface{},
+	auditAction string,
+	rowCount int64,
+	finishedAt time.Time,
+) error {
+	return repository.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		query := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Where("id = ? AND status = ? AND lease_token = ?", runID, expectedStatus, leaseToken)
+		if requireNotCancelled {
+			query = query.Where("cancel_requested = ?", false)
+		}
+		var run model.ReportRun
+		if err := query.First(&run).Error; errors.Is(err, gorm.ErrRecordNotFound) {
+			return ErrReportRunLeaseLost
+		} else if err != nil {
+			return fmt.Errorf("report execution: lock successful run: %w", err)
+		}
+		updateQuery := tx.Model(&model.ReportRun{}).Where("id = ? AND status = ? AND lease_token = ?", runID, expectedStatus, leaseToken)
+		if requireNotCancelled {
+			updateQuery = updateQuery.Where("cancel_requested = ?", false)
+		}
+		result := updateQuery.Updates(updates)
+		if result.Error != nil {
+			return fmt.Errorf("report execution: persist success: %w", result.Error)
+		}
+		if result.RowsAffected != 1 {
+			return ErrReportRunLeaseLost
+		}
+		if err := repository.writeSystemAudit(ctx, tx, auditAction, "REPORT_RUN", runID, map[string]interface{}{"rowCount": rowCount}); err != nil {
+			return err
+		}
+		if !frozenRunAllowsAction(run.PermissionSnapshotJSON, run.RequestedBy, ReportActionExport) {
+			return nil
+		}
+		export, outbox, err := buildAutomaticReportExport(run, uuid.NewString(), finishedAt)
+		if err != nil {
+			return err
+		}
+		if err := tx.Create(&export).Error; err != nil {
+			return fmt.Errorf("report execution: create automatic export: %w", err)
+		}
+		outbox.PayloadJSON = model.JSONText(fmt.Sprintf(`{"export_id":%d}`, export.ID))
+		if err := tx.Create(&outbox).Error; err != nil {
+			return fmt.Errorf("report execution: create automatic export outbox: %w", err)
+		}
+		return repository.writeSystemAudit(ctx, tx, "REPORT_EXPORT_AUTO_QUEUED", "REPORT_EXPORT", export.ID, map[string]interface{}{"runId": runID})
+	})
 }
 
 func (repository *Repository) MarkReconciliationPending(ctx context.Context, runID uint, leaseToken, code, safeMessage string, now time.Time) error {

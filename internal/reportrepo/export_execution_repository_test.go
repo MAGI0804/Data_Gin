@@ -26,6 +26,26 @@ func TestAuditedExportUpdateRollsBackWhenAuditFails(t *testing.T) {
 	}
 }
 
+func TestMarkExportFailedSchedulesRunResultCleanup(t *testing.T) {
+	db, transactionState := newTransactionDB(t)
+	repository := New(db)
+	repository.writeSystemAudit = func(context.Context, *gorm.DB, string, string, uint, map[string]interface{}) error { return nil }
+	err := repository.MarkExportFailed(t.Context(), 41, "11111111-1111-4111-8111-111111111111", "EXPORT_FAILED", "导出失败", time.Now().UTC())
+	if err != nil || transactionState.commits != 1 || transactionState.rollbacks != 0 {
+		t.Fatalf("error=%v transaction=%#v", err, transactionState)
+	}
+	foundCleanupUpdate := false
+	for _, statement := range transactionState.execs {
+		if strings.Contains(statement, "UPDATE `report_runs`") && strings.Contains(statement, "`result_expires_at`") {
+			foundCleanupUpdate = true
+			break
+		}
+	}
+	if !foundCleanupUpdate {
+		t.Fatalf("run cleanup update missing from SQL: %#v", transactionState.execs)
+	}
+}
+
 func TestClassifyExportStartUsesLeaseExpiry(t *testing.T) {
 	now := time.Date(2026, 8, 12, 12, 0, 0, 0, time.UTC)
 	past, future := now.Add(-time.Minute), now.Add(time.Minute)

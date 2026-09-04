@@ -64,7 +64,7 @@ func TestReportExportTaskAcceptsOnlyExportID(t *testing.T) {
 }
 
 func TestOutboxRegistryResolvesReportExport(t *testing.T) {
-	registry, err := NewOutboxTaskRegistry(ReportExportOutboxTaskDefinitions(ReportRunMaxRetry)...)
+	registry, err := NewOutboxTaskRegistry(ReportExportOutboxTaskDefinitions(ReportExportMaxRetry)...)
 	if err != nil {
 		t.Fatalf("NewOutboxTaskRegistry() error = %v", err)
 	}
@@ -72,7 +72,7 @@ func TestOutboxRegistryResolvesReportExport(t *testing.T) {
 		TaskKey: "report:export:export-uuid", TaskType: TypeReportExport,
 		QueueName: ReportExportQueueName, PayloadJSON: model.JSONText(`{"export_id":41}`),
 	})
-	if err != nil || task.Type() != TypeReportExport || options.Timeout != ReportExportTimeout || options.MaxRetry != ReportRunMaxRetry {
+	if err != nil || task.Type() != TypeReportExport || options.Timeout != ReportExportTimeout || options.MaxRetry != ReportExportMaxRetry {
 		t.Fatalf("Resolve() task=%#v options=%#v error=%v", task, options, err)
 	}
 }

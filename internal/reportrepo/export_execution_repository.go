@@ -257,14 +257,32 @@ func (repository *Repository) ReleaseExportForRetry(ctx context.Context, exportI
 }
 
 func (repository *Repository) MarkExportFailed(ctx context.Context, exportID uint, leaseToken, code, safeMessage string, finishedAt time.Time) error {
-	if !validRunError(code, safeMessage) || finishedAt.IsZero() {
+	if repository == nil || repository.db == nil || ctx == nil || exportID == 0 || uuid.Validate(leaseToken) != nil ||
+		!validRunError(code, safeMessage) || finishedAt.IsZero() {
 		return fmt.Errorf("report export execution: invalid failure update")
 	}
 	finishedAt = finishedAt.UTC().Truncate(time.Millisecond)
-	return repository.updateOwnedExportWithAudit(ctx, exportID, leaseToken, map[string]interface{}{
-		"status": model.ReportExportStatusFailed, "error_code": code, "error_message_safe": strings.TrimSpace(safeMessage),
-		"worker_id": "", "lease_token": "", "lease_expires_at": nil, "heartbeat_at": nil, "updated_at": finishedAt,
-	}, false, "REPORT_EXPORT_FAILED", map[string]interface{}{"errorCode": code})
+	return repository.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		result := tx.Model(&model.ReportExport{}).
+			Where("id = ? AND status = ? AND lease_token = ?", exportID, model.ReportExportStatusRunning, leaseToken).
+			Updates(map[string]interface{}{
+				"status": model.ReportExportStatusFailed, "error_code": code, "error_message_safe": strings.TrimSpace(safeMessage),
+				"worker_id": "", "lease_token": "", "lease_expires_at": nil, "heartbeat_at": nil, "updated_at": finishedAt,
+			})
+		if result.Error != nil {
+			return fmt.Errorf("report export execution: persist failure: %w", result.Error)
+		}
+		if result.RowsAffected != 1 {
+			return ErrReportExportLeaseLost
+		}
+		runID := tx.Model(&model.ReportExport{}).Select("run_id").Where("id = ?", exportID)
+		if err := tx.Model(&model.ReportRun{}).
+			Where("id = (?) AND status = ? AND result_purged_at IS NULL", runID, model.ReportRunStatusSucceeded).
+			Update("result_expires_at", finishedAt).Error; err != nil {
+			return fmt.Errorf("report export execution: schedule failed result cleanup: %w", err)
+		}
+		return repository.writeSystemAudit(ctx, tx, "REPORT_EXPORT_FAILED", "REPORT_EXPORT", exportID, map[string]interface{}{"errorCode": code})
+	})
 }
 
 func (repository *Repository) MarkExportCancelled(ctx context.Context, exportID uint, leaseToken string, finishedAt time.Time) error {

@@ -4,7 +4,7 @@ import dayjs from 'dayjs'
 import { ChevronDown, ChevronLeft, ChevronRight, Download, Filter, Info, Play, Plus, Square, Trash2 } from 'lucide-react'
 import { Button, DataTable, Dialog, FeedbackState, FilterToolbar, PageCanvas, PageHeader, Section, StatusTag, type StatusTagTone } from '../../../ui'
 import { cancelReportRun, createReportExport, createReportRun, getReportDownloads, getReportExport, getReportExportDownload, queryReportResults, getReportRun, getReportRunContract, type ReportCenterClient } from '../../api'
-import { buildNewReportRunState, canStartNewReportRun, initialReportParameterValues, isReportExportSettled, terminalReportRunStatuses, visibleReportParameters } from '../../queryParameters'
+import { buildNewReportRunState, canBindReportExport, canRetryReportExportBinding, canStartNewReportRun, initialReportParameterValues, isReportExportSettled, terminalReportRunStatuses, visibleReportParameters } from '../../queryParameters'
 import { buildReportConditions, editableReportConditionValue, initialReportConditionValues, isReportInputListType, orderedReportInputEntries } from '../../refCursorConfig'
 import type { ReportExport, ReportFilterOperator, ReportInputField, ReportParameter, ReportResultColumn, ReportResultFilter, ReportResultPage, ReportResultQuery, ReportRun, ReportRunContract, ReportSummary } from '../../types'
 import { ReportFieldDetailDrawer } from '../../components/ReportFieldDetailDrawer/ReportFieldDetailDrawer'
@@ -118,8 +118,12 @@ export function ReportQueryPage({ client, navigation }: { client: ReportCenterCl
         setOperation({ busy: false, error: response.data.errorMessage })
         if (response.data.resultAvailable) {
           await loadResults(runId, emptyResultQuery, '', 0, controller.signal)
-          await startExport(runId)
         }
+        if (canBindReportExport(response.data)) await startExport(runId)
+        return
+      }
+      if (canBindReportExport(response.data)) {
+        await startExport(runId)
         return
       }
       await wait(1500, controller.signal)
@@ -274,7 +278,7 @@ export function ReportQueryPage({ client, navigation }: { client: ReportCenterCl
         {contract ? <form className={styles.parameterForm} onSubmit={(event) => void submitRun(event)}>{contract.jsonInput ? orderedReportInputEntries(contract.inputSchema).map(([code, field]) => <ConditionField client={client} reportId={contract.definitionId} code={code} disabled={frozen || operation.busy} field={field} key={code} value={values[code]} onChange={(value) => setValues((current) => ({ ...current, [code]: value }))} />) : visibleReportParameters(contract.parameters).map((parameter) => <ParameterField disabled={frozen || operation.busy} key={parameter.code} parameter={parameter} value={values[parameter.code]} onChange={(value) => setValues((current) => ({ ...current, [parameter.code]: value }))} />)}<div className={styles.runActions}><Button variant="primary" type="submit" disabled={frozen || operation.busy}><Play aria-hidden="true" />生成下载文件</Button></div></form> : null}
         </> : <div className={styles.collapsedParameters}>{contract ? `${reportConditionCount(contract)} 个筛选条件${frozen ? ' · 本次运行条件已冻结' : ''}` : '筛选区已收起'}</div>}
       </Section> : null}
-      {operation.error ? <FeedbackState kind="error" title="操作未完成" description={operation.error} action={reportExport && !isReportExportSettled(reportExport) ? <button type="button" onClick={() => void resumeExportPolling()}>{reportExport.status === 'READY' ? '重新检查清理状态' : '恢复文件状态查询'}</button> : run && !terminalReportRunStatuses.has(run.status) ? <button type="button" onClick={() => void resumeRun()}>恢复状态查询</button> : undefined} /> : null}
+      {operation.error ? <FeedbackState kind="error" title="操作未完成" description={operation.error} action={reportExport && !isReportExportSettled(reportExport) ? <button type="button" onClick={() => void resumeExportPolling()}>{reportExport.status === 'READY' ? '重新检查清理状态' : '恢复文件状态查询'}</button> : canRetryReportExportBinding(run, reportExport) ? <button type="button" onClick={() => void startExport(run?.id)}>重新获取下载文件</button> : run && !terminalReportRunStatuses.has(run.status) ? <button type="button" onClick={() => void resumeRun()}>恢复状态查询</button> : undefined} /> : null}
       {loading ? <FeedbackState kind="loading" title="正在加载可下载报表" /> : error ? <FeedbackState kind="error" title="可下载报表加载失败" description={error} action={<button type="button" onClick={reload}>重试</button>} /> : null}
       {run ? <Section title="下载文件" actions={<div className={styles.resultActions}>{reportExport ? <StatusTag tone={exportTone(reportExport)}>{reportExport.status === 'READY' && !reportExport.purgedAt ? '可下载 · 清理中' : exportLabel(reportExport.status)}</StatusTag> : <StatusTag tone={runTone(run)}>{runLabel(run.status)}</StatusTag>}{reportExport?.canDownload ? <Button variant="primary" onClick={() => void downloadExport()}><Download aria-hidden="true" />下载文件</Button> : null}</div>} flush>
         {operation.busy && !reportExport?.canDownload ? <FeedbackState kind="loading" title={reportExport ? '正在生成 Excel' : '正在生成报表'} description={reportExport ? exportProgress(reportExport) : undefined} /> : null}

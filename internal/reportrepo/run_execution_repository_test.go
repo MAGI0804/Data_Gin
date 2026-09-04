@@ -2,6 +2,7 @@ package reportrepo
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -81,6 +82,57 @@ func TestTableSnapshotExecutionBlockerIsScopedToReportAndKeepsQueueOrder(t *test
 	}
 	if !containsSQLVariable(query.Statement.Vars, model.ReportRunStatusCancelRequested) {
 		t.Fatalf("blocker vars do not include cancel-requested runs: %#v", query.Statement.Vars)
+	}
+}
+
+func TestExpiredQueuedRunQueryUsesCreationDeadline(t *testing.T) {
+	cutoff := time.Date(2026, 9, 4, 18, 0, 0, 0, time.UTC)
+	query := expiredQueuedRunQuery(newDryRunDB(t), cutoff, 20).Pluck("id", &[]uint{})
+	if query.Error != nil {
+		t.Fatalf("build expired queue query: %v", query.Error)
+	}
+	statement := query.Statement.SQL.String()
+	for _, fragment := range []string{"status = ?", "created_at <= ?", "ORDER BY id ASC", "LIMIT"} {
+		if !strings.Contains(statement, fragment) {
+			t.Fatalf("expired queue query %q does not contain %q", statement, fragment)
+		}
+	}
+}
+
+func TestAutomaticReportExportBelongsToRequestingUser(t *testing.T) {
+	now := time.Date(2026, 9, 4, 17, 0, 0, 0, time.UTC)
+	run := model.ReportRun{
+		BaseModel: model.BaseModel{ID: 31}, RequestedBy: 17,
+		PresentationSnapshotJSON: model.JSONText(`[{"fieldId":"order","exportVisible":true}]`),
+	}
+	export, outbox, err := buildAutomaticReportExport(run, "11111111-1111-4111-8111-111111111111", now)
+	if err != nil {
+		t.Fatalf("buildAutomaticReportExport() error = %v", err)
+	}
+	if export.RunID != run.ID || export.CreatedBy != run.RequestedBy || export.Status != model.ReportExportStatusPending ||
+		string(export.FrozenFiltersJSON) != `[]` || string(export.FrozenSortJSON) != `[]` ||
+		string(export.FrozenColumnsJSON) != string(run.PresentationSnapshotJSON) {
+		t.Fatalf("automatic export = %#v", export)
+	}
+	if outbox.TaskKey != "report:export:"+export.ExportUUID || outbox.QueueName != "report_export" || outbox.AvailableAt != now {
+		t.Fatalf("automatic export outbox = %#v", outbox)
+	}
+	if !json.Valid([]byte(export.FrozenColumnsJSON)) {
+		t.Fatal("automatic export columns are invalid JSON")
+	}
+}
+
+func TestQueuedSnapshotTimeoutBecomesAuditedFailure(t *testing.T) {
+	db, transactionState := newTransactionDB(t)
+	repository := New(db)
+	auditCalled := false
+	repository.writeSystemAudit = func(_ context.Context, _ *gorm.DB, action, targetType string, targetID uint, detail map[string]interface{}) error {
+		auditCalled = action == "REPORT_RUN_FAILED" && targetType == "REPORT_RUN" && targetID == 31 && detail["reasonCode"] == "SNAPSHOT_WAIT_TIMEOUT"
+		return nil
+	}
+	err := repository.MarkQueuedExecutionFailed(t.Context(), 31, "SNAPSHOT_WAIT_TIMEOUT", "等待超时", time.Now().UTC())
+	if err != nil || !auditCalled || transactionState.commits != 1 || transactionState.rollbacks != 0 {
+		t.Fatalf("error=%v audit=%t transaction=%#v", err, auditCalled, transactionState)
 	}
 }
 

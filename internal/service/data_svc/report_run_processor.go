@@ -17,6 +17,7 @@ import (
 	"gin-biz-web-api/internal/reportoracle"
 	"gin-biz-web-api/internal/reportrepo"
 	"gin-biz-web-api/internal/reportsecret"
+	"gin-biz-web-api/job"
 	"gin-biz-web-api/model"
 
 	"github.com/google/uuid"
@@ -34,6 +35,13 @@ var ErrReportRunProcessNonRetryable = errors.New("report run processor: non-retr
 
 var errReportRunWorkerTemporary = errors.New("report run processor: temporary failure")
 
+var ErrReportRunWaitingForSnapshot = reportRunWaitingError{}
+
+type reportRunWaitingError struct{}
+
+func (reportRunWaitingError) Error() string             { return "report run processor: waiting for snapshot slot" }
+func (reportRunWaitingError) RetryDelay() time.Duration { return job.ReportRunRetryDelay }
+
 type reportExecutionStore interface {
 	BeginExecution(context.Context, uint, string, string, time.Time, time.Duration) (*reportrepo.RunLease, error)
 	HeartbeatExecution(context.Context, uint, string, time.Time, time.Duration) (reportrepo.RunControl, error)
@@ -45,6 +53,7 @@ type reportExecutionStore interface {
 	MarkExecutionCancelled(context.Context, uint, string, time.Time) error
 	MarkExecutionUnknown(context.Context, uint, string, string, string, time.Time) error
 	ReleaseExecutionForRetry(context.Context, uint, string, time.Time) error
+	MarkQueuedExecutionFailed(context.Context, uint, string, string, time.Time) error
 	LoadRuntimeContract(context.Context, uint, string) (*reportrepo.RuntimeContract, error)
 }
 
@@ -109,8 +118,8 @@ func NewReportRunProcessorWithDependencies(
 	return processor
 }
 
-func (processor *ReportRunProcessor) Process(ctx context.Context, runID uint, retryAllowed bool) error {
-	if processor == nil || processor.store == nil || processor.executor == nil || ctx == nil || runID == 0 {
+func (processor *ReportRunProcessor) Process(ctx context.Context, runID uint, failureRetryLimit int, queueRetryAllowed bool) error {
+	if processor == nil || processor.store == nil || processor.executor == nil || ctx == nil || runID == 0 || failureRetryLimit < 0 {
 		return fmt.Errorf("%w: invalid processor input", ErrReportRunProcessNonRetryable)
 	}
 	leaseToken := uuid.NewString()
@@ -130,7 +139,19 @@ func (processor *ReportRunProcessor) Process(ctx context.Context, runID uint, re
 	}
 	switch lease.Disposition {
 	case reportrepo.RunDispositionBusy:
-		return errReportRunWorkerTemporary
+		if !queueRetryAllowed {
+			stateCtx, cancel := processor.stateContext(ctx)
+			defer cancel()
+			err := processor.store.MarkQueuedExecutionFailed(stateCtx, runID, "SNAPSHOT_WAIT_TIMEOUT", "等待其他用户的报表文件生成超时，请重新提交", processor.now().UTC())
+			if errors.Is(err, reportrepo.ErrReportRunLeaseLost) {
+				return nil
+			}
+			if err != nil {
+				return errReportRunWorkerTemporary
+			}
+			return fmt.Errorf("%w: snapshot wait timeout", ErrReportRunProcessNonRetryable)
+		}
+		return ErrReportRunWaitingForSnapshot
 	case reportrepo.RunDispositionTerminal:
 		return nil
 	case reportrepo.RunDispositionReconcile:
@@ -145,6 +166,7 @@ func (processor *ReportRunProcessor) Process(ctx context.Context, runID uint, re
 	default:
 		return fmt.Errorf("%w: unsupported run disposition", ErrReportRunProcessNonRetryable)
 	}
+	retryAllowed := lease.Run.Attempt > 0 && lease.Run.Attempt <= failureRetryLimit
 
 	runCtx, cancel := context.WithCancel(ctx)
 	monitorDone := processor.startMonitor(runCtx, cancel, runID, leaseToken)

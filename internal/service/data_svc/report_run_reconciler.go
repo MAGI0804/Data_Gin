@@ -9,6 +9,7 @@ import (
 	"gin-biz-web-api/internal/reportoracle"
 	"gin-biz-web-api/internal/reportrepo"
 	"gin-biz-web-api/internal/reportsecret"
+	"gin-biz-web-api/job"
 	"gin-biz-web-api/model"
 
 	"github.com/google/uuid"
@@ -26,6 +27,8 @@ type reportReconciliationStore interface {
 	MarkReconciliationSucceeded(context.Context, uint, string, int64, time.Time, time.Time) error
 	MarkReconciliationPending(context.Context, uint, string, string, string, time.Time) error
 	RecoverExpiredPreOracleRuns(context.Context, time.Time, int) (int64, error)
+	ListExpiredQueuedRuns(context.Context, time.Time, int) ([]uint, error)
+	MarkQueuedExecutionFailed(context.Context, uint, string, string, time.Time) error
 	ListQueuedRunsMissingDelivery(context.Context, int) ([]uint, error)
 	EnsureRunQueued(context.Context, uint, time.Time) error
 }
@@ -91,15 +94,25 @@ func (reconciler *ReportRunReconciler) reconcileCycle(ctx context.Context) {
 }
 
 func (reconciler *ReportRunReconciler) Reconcile(ctx context.Context) error {
-	if _, err := reconciler.store.RecoverExpiredPreOracleRuns(ctx, reconciler.now().UTC(), reconciler.batchSize); err != nil {
+	now := reconciler.now().UTC()
+	if _, err := reconciler.store.RecoverExpiredPreOracleRuns(ctx, now, reconciler.batchSize); err != nil {
 		return err
 	}
-	runIDs, err := reconciler.store.ListReconciliationCandidates(ctx, reconciler.now().UTC(), reconciler.batchSize)
+	runIDs, err := reconciler.store.ListReconciliationCandidates(ctx, now, reconciler.batchSize)
 	if err != nil {
 		return err
 	}
 	for _, runID := range runIDs {
 		if err := reconciler.reconcileOne(ctx, runID); err != nil && !errors.Is(err, context.Canceled) {
+			return err
+		}
+	}
+	expiredQueuedIDs, err := reconciler.store.ListExpiredQueuedRuns(ctx, now.Add(-job.ReportRunSnapshotWaitLimit), reconciler.batchSize)
+	if err != nil {
+		return err
+	}
+	for _, runID := range expiredQueuedIDs {
+		if err := reconciler.store.MarkQueuedExecutionFailed(ctx, runID, "SNAPSHOT_WAIT_TIMEOUT", "等待其他用户的报表文件生成超时，请重新提交", now); err != nil && !errors.Is(err, reportrepo.ErrReportRunLeaseLost) {
 			return err
 		}
 	}

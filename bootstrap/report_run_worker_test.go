@@ -20,6 +20,12 @@ func TestReportRunHandlerDecodesStrictPayload(t *testing.T) {
 	if processor.runID != 31 {
 		t.Fatalf("run id = %d", processor.runID)
 	}
+	if processor.failureRetryLimit != job.ReportRunFailureMaxRetry {
+		t.Fatalf("failure retry limit = %d", processor.failureRetryLimit)
+	}
+	if !processor.queueRetryAllowed {
+		t.Fatal("queue retry should remain available without Asynq retry metadata")
+	}
 	bad := asynq.NewTask(job.TypeReportRun, []byte(`{"run_id":31,"secret":"x"}`))
 	if err := newReportRunHandler(processor)(t.Context(), bad); !errors.Is(err, asynq.SkipRetry) {
 		t.Fatalf("invalid payload error = %v", err)
@@ -50,11 +56,15 @@ func TestReportWorkerQueuesAreEnabledAtomically(t *testing.T) {
 }
 
 type fakeReportRunProcessor struct {
-	runID uint
-	err   error
+	runID             uint
+	failureRetryLimit int
+	queueRetryAllowed bool
+	err               error
 }
 
-func (processor *fakeReportRunProcessor) Process(_ context.Context, runID uint, _ bool) error {
+func (processor *fakeReportRunProcessor) Process(_ context.Context, runID uint, failureRetryLimit int, queueRetryAllowed bool) error {
 	processor.runID = runID
+	processor.failureRetryLimit = failureRetryLimit
+	processor.queueRetryAllowed = queueRetryAllowed
 	return processor.err
 }
