@@ -53,6 +53,17 @@ func TestReportRunReconcilerCreatesMissingAutomaticExport(t *testing.T) {
 	}
 }
 
+func TestReportRunReconcilerSchedulesHistoricalTerminalExportCleanup(t *testing.T) {
+	store := &fakeReconciliationStore{terminalCleanupCount: 2}
+	reconciler := NewReportRunReconcilerWithDependencies(store, fakeReportCredentialDecryptor{}, &fakeResultEvidenceReader{})
+	if err := reconciler.Reconcile(t.Context()); err != nil {
+		t.Fatalf("Reconcile() error = %v", err)
+	}
+	if store.terminalCleanupCalls != 1 {
+		t.Fatalf("terminal cleanup calls = %d", store.terminalCleanupCalls)
+	}
+}
+
 func TestReportRunReconcilerUsesRunScopedResultAsCommitEvidence(t *testing.T) {
 	store := &fakeReconciliationStore{runtime: reconciliationRuntime()}
 	reader := &fakeResultEvidenceReader{rowCount: 12}
@@ -148,6 +159,8 @@ type fakeReconciliationStore struct {
 	missingExportCutoff         time.Time
 	automaticExportQueued       int
 	automaticExportRunID        uint
+	terminalCleanupCount        int64
+	terminalCleanupCalls        int
 }
 
 func (store *fakeReconciliationStore) ListReconciliationCandidates(context.Context, time.Time, int) ([]uint, error) {
@@ -204,4 +217,8 @@ func (store *fakeReconciliationStore) EnsureAutomaticExportQueued(_ context.Cont
 	store.automaticExportQueued++
 	store.automaticExportRunID = runID
 	return nil
+}
+func (store *fakeReconciliationStore) ScheduleTerminalExportResultCleanup(context.Context, time.Time, int) (int64, error) {
+	store.terminalCleanupCalls++
+	return store.terminalCleanupCount, nil
 }

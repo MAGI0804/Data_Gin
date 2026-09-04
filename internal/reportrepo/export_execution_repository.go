@@ -95,6 +95,37 @@ func successfulRunsMissingExportQuery(db *gorm.DB, now time.Time, limit int) *go
 		Order("runs.id ASC").Limit(limit)
 }
 
+func (repository *Repository) ScheduleTerminalExportResultCleanup(ctx context.Context, now time.Time, limit int) (int64, error) {
+	if repository == nil || repository.db == nil || ctx == nil || now.IsZero() || limit < 1 || limit > 100 {
+		return 0, fmt.Errorf("report export recovery: invalid terminal cleanup request")
+	}
+	now = now.UTC().Truncate(time.Millisecond)
+	var runIDs []uint
+	if err := terminalExportSnapshotCleanupQuery(repository.db.WithContext(ctx), now, limit).Pluck("runs.id", &runIDs).Error; err != nil {
+		return 0, fmt.Errorf("report export recovery: list terminal snapshots: %w", err)
+	}
+	if len(runIDs) == 0 {
+		return 0, nil
+	}
+	result := repository.db.WithContext(ctx).Model(&model.ReportRun{}).
+		Where("id IN ? AND status = ? AND result_purged_at IS NULL", runIDs, model.ReportRunStatusSucceeded).
+		Where("result_expires_at IS NULL OR result_expires_at > ?", now).
+		Updates(map[string]interface{}{"result_expires_at": now, "updated_at": now})
+	if result.Error != nil {
+		return 0, fmt.Errorf("report export recovery: schedule terminal snapshot cleanup: %w", result.Error)
+	}
+	return result.RowsAffected, nil
+}
+
+func terminalExportSnapshotCleanupQuery(db *gorm.DB, now time.Time, limit int) *gorm.DB {
+	return db.Table("report_runs AS runs").
+		Joins("JOIN report_exports AS exports ON exports.run_id = runs.id").
+		Where("runs.status = ? AND runs.result_purged_at IS NULL", model.ReportRunStatusSucceeded).
+		Where("runs.result_expires_at IS NULL OR runs.result_expires_at > ?", now.UTC().Truncate(time.Millisecond)).
+		Where("exports.status IN ?", []string{model.ReportExportStatusFailed, model.ReportExportStatusCancelled, model.ReportExportStatusExpired}).
+		Order("runs.id ASC").Limit(limit)
+}
+
 func (repository *Repository) EnsureAutomaticExportQueued(ctx context.Context, runID uint, now time.Time) error {
 	if repository == nil || repository.db == nil || ctx == nil || runID == 0 || now.IsZero() {
 		return fmt.Errorf("report export recovery: invalid automatic export request")

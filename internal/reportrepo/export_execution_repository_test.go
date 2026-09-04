@@ -126,6 +126,25 @@ func TestSuccessfulRunsMissingExportQueryTargetsLegacySnapshots(t *testing.T) {
 	}
 }
 
+func TestTerminalExportSnapshotCleanupQueryTargetsUnpurgedResults(t *testing.T) {
+	now := time.Date(2026, 9, 4, 20, 30, 0, 0, time.UTC)
+	query := terminalExportSnapshotCleanupQuery(newDryRunDB(t), now, 20).Pluck("runs.id", &[]uint{})
+	if query.Error != nil {
+		t.Fatalf("build terminal cleanup query: %v", query.Error)
+	}
+	statement := query.Statement.SQL.String()
+	for _, fragment := range []string{"JOIN report_exports", "runs.status = ?", "runs.result_purged_at IS NULL", "runs.result_expires_at IS NULL OR runs.result_expires_at > ?", "exports.status IN", "ORDER BY runs.id ASC", "LIMIT"} {
+		if !strings.Contains(statement, fragment) {
+			t.Fatalf("terminal cleanup query %q does not contain %q", statement, fragment)
+		}
+	}
+	for _, status := range []string{model.ReportExportStatusFailed, model.ReportExportStatusCancelled, model.ReportExportStatusExpired} {
+		if !containsSQLVariable(query.Statement.Vars, status) {
+			t.Fatalf("terminal cleanup query does not include status %q: vars=%#v", status, query.Statement.Vars)
+		}
+	}
+}
+
 func TestOwnedExportUsesDedicatedLeaseFence(t *testing.T) {
 	repository := New(newDryRunDB(t))
 	query := repository.ownedExport(t.Context(), 41, "11111111-1111-4111-8111-111111111111").
