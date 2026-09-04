@@ -403,15 +403,32 @@ func (repository *Repository) MarkExportFailed(ctx context.Context, exportID uin
 }
 
 func (repository *Repository) MarkExportCancelled(ctx context.Context, exportID uint, leaseToken string, finishedAt time.Time) error {
-	if finishedAt.IsZero() {
+	if repository == nil || repository.db == nil || ctx == nil || exportID == 0 || uuid.Validate(leaseToken) != nil || finishedAt.IsZero() {
 		return fmt.Errorf("report export execution: invalid cancellation update")
 	}
 	finishedAt = finishedAt.UTC().Truncate(time.Millisecond)
-	return repository.updateOwnedExportWithAudit(ctx, exportID, leaseToken, map[string]interface{}{
-		"status": model.ReportExportStatusCancelled, "cancel_requested": true,
-		"error_code": "CANCELLED", "error_message_safe": "报表导出已取消",
-		"worker_id": "", "lease_token": "", "lease_expires_at": nil, "heartbeat_at": nil, "updated_at": finishedAt,
-	}, false, "REPORT_EXPORT_CANCELLED", nil)
+	return repository.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		result := tx.Model(&model.ReportExport{}).
+			Where("id = ? AND status = ? AND lease_token = ?", exportID, model.ReportExportStatusRunning, leaseToken).
+			Updates(map[string]interface{}{
+				"status": model.ReportExportStatusCancelled, "cancel_requested": true,
+				"error_code": "CANCELLED", "error_message_safe": "报表导出已取消",
+				"worker_id": "", "lease_token": "", "lease_expires_at": nil, "heartbeat_at": nil, "updated_at": finishedAt,
+			})
+		if result.Error != nil {
+			return fmt.Errorf("report export execution: persist cancellation: %w", result.Error)
+		}
+		if result.RowsAffected != 1 {
+			return ErrReportExportLeaseLost
+		}
+		runID := tx.Model(&model.ReportExport{}).Select("run_id").Where("id = ?", exportID)
+		if err := tx.Model(&model.ReportRun{}).
+			Where("id = (?) AND status = ? AND result_purged_at IS NULL", runID, model.ReportRunStatusSucceeded).
+			Update("result_expires_at", finishedAt).Error; err != nil {
+			return fmt.Errorf("report export execution: schedule cancelled result cleanup: %w", err)
+		}
+		return repository.writeSystemAudit(ctx, tx, "REPORT_EXPORT_CANCELLED", "REPORT_EXPORT", exportID, nil)
+	})
 }
 
 func (repository *Repository) ClaimResultPurge(ctx context.Context, exportID uint, leaseToken string, now time.Time) (*ExportRuntime, error) {
