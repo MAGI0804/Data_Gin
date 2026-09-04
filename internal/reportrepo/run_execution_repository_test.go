@@ -315,3 +315,17 @@ func TestCancellableRunBeforeOracleDoesNotCancelLiveOrStartedLease(t *testing.T)
 		})
 	}
 }
+
+func TestQueuedRunRecoveryRotatesCandidateTimestamp(t *testing.T) {
+	now := time.Date(2026, 9, 4, 22, 30, 0, 0, time.UTC)
+	query := touchQueuedRunRecovery(newDryRunDB(t), 29, now)
+	statement := query.Statement.SQL.String()
+	for _, fragment := range []string{"UPDATE `report_runs`", "`updated_at`", "id = ?", "status = ?"} {
+		if !strings.Contains(statement, fragment) {
+			t.Fatalf("recovery rotation SQL %q does not contain %q", statement, fragment)
+		}
+	}
+	if !containsSQLVariable(query.Statement.Vars, uint(29)) || !containsSQLVariable(query.Statement.Vars, model.ReportRunStatusQueued) {
+		t.Fatalf("recovery rotation vars=%#v", query.Statement.Vars)
+	}
+}

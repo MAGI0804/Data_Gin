@@ -191,3 +191,17 @@ func TestExportStoredValueValidation(t *testing.T) {
 		t.Fatal("artifact validation mismatch")
 	}
 }
+
+func TestExportRecoveryRotatesCandidateTimestamp(t *testing.T) {
+	now := time.Date(2026, 9, 4, 22, 30, 0, 0, time.UTC)
+	query := touchExportRecovery(newDryRunDB(t), 41, model.ReportExportStatusPending, now)
+	statement := query.Statement.SQL.String()
+	for _, fragment := range []string{"UPDATE `report_exports`", "`updated_at`", "id = ?", "status = ?"} {
+		if !strings.Contains(statement, fragment) {
+			t.Fatalf("recovery rotation SQL %q does not contain %q", statement, fragment)
+		}
+	}
+	if !containsSQLVariable(query.Statement.Vars, uint(41)) || !containsSQLVariable(query.Statement.Vars, model.ReportExportStatusPending) {
+		t.Fatalf("recovery rotation vars=%#v", query.Statement.Vars)
+	}
+}

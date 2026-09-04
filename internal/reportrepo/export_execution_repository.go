@@ -197,8 +197,19 @@ func (repository *Repository) EnsureExportQueued(ctx context.Context, exportID u
 		if result := restoreJobOutbox(tx, outbox, now); result.Error != nil {
 			return fmt.Errorf("report export recovery: restore outbox: %w", result.Error)
 		}
+		if result := touchExportRecovery(tx, export.ID, export.Status, now); result.Error != nil || result.RowsAffected != 1 {
+			if result.Error != nil {
+				return fmt.Errorf("report export recovery: rotate export: %w", result.Error)
+			}
+			return ErrReportExportLeaseLost
+		}
 		return nil
 	})
+}
+
+func touchExportRecovery(tx *gorm.DB, exportID uint, status string, now time.Time) *gorm.DB {
+	return tx.Model(&model.ReportExport{}).Where("id = ? AND status = ?", exportID, status).
+		Update("updated_at", now.UTC().Truncate(time.Millisecond))
 }
 
 func (repository *Repository) BeginExport(ctx context.Context, exportID uint, workerID, leaseToken string, now time.Time, leaseTTL time.Duration) (*ExportLease, error) {

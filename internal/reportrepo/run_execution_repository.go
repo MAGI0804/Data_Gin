@@ -315,8 +315,19 @@ func (repository *Repository) EnsureRunQueued(ctx context.Context, runID uint, n
 		if result := restoreJobOutbox(tx, recoveredRunOutbox(run, now), now); result.Error != nil {
 			return fmt.Errorf("report execution recovery: restore queued outbox: %w", result.Error)
 		}
+		if result := touchQueuedRunRecovery(tx, run.ID, now); result.Error != nil || result.RowsAffected != 1 {
+			if result.Error != nil {
+				return fmt.Errorf("report execution recovery: rotate queued run: %w", result.Error)
+			}
+			return ErrReportRunLeaseLost
+		}
 		return nil
 	})
+}
+
+func touchQueuedRunRecovery(tx *gorm.DB, runID uint, now time.Time) *gorm.DB {
+	return tx.Model(&model.ReportRun{}).Where("id = ? AND status = ?", runID, model.ReportRunStatusQueued).
+		Update("updated_at", now.UTC().Truncate(time.Millisecond))
 }
 
 func (repository *Repository) MarkQueuedExecutionFailed(ctx context.Context, runID uint, code, safeMessage string, now time.Time) error {
