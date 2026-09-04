@@ -384,6 +384,28 @@ func TestReportDraftServiceUpdateRequiresLockAndMapsMissingBeforeConflict(t *tes
 	}
 }
 
+func TestReportDraftServiceAllowsOneTimeCategoryRepairForPublishedLegacyReport(t *testing.T) {
+	request := validReportDraftRequest()
+	lockVersion := uint64(3)
+	request.ExpectedLockVersion = &lockVersion
+	store := &fakeReportDraftStore{found: draftFromValidRequestForTest(t, request)}
+	store.found.Definition.Status = model.ReportDefinitionStatusActive
+	store.found.Definition.Category = ""
+
+	if _, err := NewReportDraftServiceWithStore(store).Update(t.Context(), 17, 8, request); err != nil {
+		t.Fatalf("repair empty category: %v", err)
+	}
+	if store.updateCalls != 1 || store.found.Definition.Category != request.Category {
+		t.Fatalf("repaired draft = %#v, update calls = %d", store.found, store.updateCalls)
+	}
+
+	request.Category = "其他分类"
+	request.ExpectedLockVersion = &store.found.LockVersion
+	if _, err := NewReportDraftServiceWithStore(store).Update(t.Context(), 17, 8, request); !errors.Is(err, ErrReportInvalid) {
+		t.Fatalf("change repaired active category error = %v", err)
+	}
+}
+
 func TestReportDraftServiceReturnsPersistedCreateAndUpdateState(t *testing.T) {
 	persistedAt := time.Date(2026, 8, 12, 10, 0, 0, 0, time.UTC)
 	store := &fakeReportDraftStore{}

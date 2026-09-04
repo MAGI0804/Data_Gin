@@ -28,6 +28,7 @@ func TestReportDownloadCatalogServiceRequestsOnlyPublishedExportableReports(t *t
 		t.Fatalf("List() error = %v", err)
 	}
 	if store.actor != 17 || !store.query.PublishedOnly || store.query.Action != reportrepo.ReportActionExport ||
+		store.query.AdditionalAction != reportrepo.ReportActionQuery ||
 		store.query.AfterID != 3 || store.query.Limit != 20 || store.query.Category != "财务" || store.query.Search != "销售" {
 		t.Fatalf("List() query = %#v", store.query)
 	}

@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -252,7 +253,7 @@ func newGrantRecords(definitionID, versionID uint, grants []model.ReportGrant, n
 	return rows
 }
 
-func validateDraftReferences(ctx context.Context, tx *gorm.DB, datasourceID uint, grants []model.ReportGrant) error {
+func validateDraftReferences(ctx context.Context, tx *gorm.DB, datasourceID uint, category string, grants []model.ReportGrant) error {
 	var datasourceCount int64
 	if err := tx.WithContext(ctx).Model(&model.ReportDatasource{}).
 		Where("id = ? AND enabled = ? AND driver = ?", datasourceID, true, model.ReportDatasourceDriverOracle).Count(&datasourceCount).Error; err != nil {
@@ -260,6 +261,14 @@ func validateDraftReferences(ctx context.Context, tx *gorm.DB, datasourceID uint
 	}
 	if err := validateReferenceCount("datasource", datasourceCount, 1); err != nil {
 		return err
+	}
+	var categoryPolicyCount int64
+	if err := tx.WithContext(ctx).Model(&model.ReportCategoryAccess{}).
+		Where("category = ?", strings.TrimSpace(category)).Count(&categoryPolicyCount).Error; err != nil {
+		return fmt.Errorf("report draft: validate category access: %w", err)
+	}
+	if categoryPolicyCount > 0 {
+		return nil
 	}
 	return validateGrantReferences(ctx, tx, grants)
 }

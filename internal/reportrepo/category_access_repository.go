@@ -37,15 +37,7 @@ func (repository *Repository) ListCategoryAccess(ctx context.Context, actor uint
 		return nil, err
 	}
 	var records []categoryAccessRecord
-	err := repository.db.WithContext(ctx).Table("report_definitions AS definitions").
-		Select(`definitions.category, COUNT(definitions.id) AS report_count,
-			COALESCE(category_access.id, 0) AS category_access_id,
-			COALESCE(category_access.lock_version, 0) AS lock_version`).
-		Joins("LEFT JOIN report_category_access AS category_access ON category_access.category = definitions.category").
-		Where("definitions.category <> ''").
-		Group("definitions.category, category_access.id, category_access.lock_version").
-		Order("definitions.category ASC").
-		Scan(&records).Error
+	err := buildCategoryAccessListQuery(repository.db.WithContext(ctx)).Scan(&records).Error
 	if err != nil {
 		return nil, fmt.Errorf("report category access: list categories: %w", err)
 	}
@@ -83,6 +75,21 @@ func (repository *Repository) ListCategoryAccess(ctx context.Context, actor uint
 	return result, nil
 }
 
+func buildCategoryAccessListQuery(db *gorm.DB) *gorm.DB {
+	return db.Table(`(
+			SELECT category FROM report_definitions WHERE TRIM(category) <> ''
+			UNION
+			SELECT category FROM report_category_access
+		) AS categories`).
+		Select(`categories.category, COUNT(definitions.id) AS report_count,
+			COALESCE(category_access.id, 0) AS category_access_id,
+			COALESCE(category_access.lock_version, 0) AS lock_version`).
+		Joins("LEFT JOIN report_definitions AS definitions ON definitions.category = categories.category").
+		Joins("LEFT JOIN report_category_access AS category_access ON category_access.category = categories.category").
+		Group("categories.category, category_access.id, category_access.lock_version").
+		Order("categories.category ASC")
+}
+
 func (repository *Repository) ReplaceCategoryAccess(
 	ctx context.Context,
 	actor uint,
@@ -100,11 +107,15 @@ func (repository *Repository) ReplaceCategoryAccess(
 
 	var saved CategoryAccess
 	err := repository.transact(ctx, repository.db, func(tx *gorm.DB) error {
+		policy, err := lockCategoryAccess(ctx, tx, category)
+		if err != nil {
+			return err
+		}
 		var reportCount int64
 		if err := tx.WithContext(ctx).Model(&model.ReportDefinition{}).Where("category = ?", category).Count(&reportCount).Error; err != nil {
 			return fmt.Errorf("report category access: count reports: %w", err)
 		}
-		if reportCount == 0 {
+		if reportCount == 0 && policy.ID == 0 {
 			return ErrCategoryAccessNotFound
 		}
 		referenceGrants := make([]model.ReportGrant, 0, len(grants))
@@ -119,10 +130,6 @@ func (repository *Repository) ReplaceCategoryAccess(
 			return err
 		}
 
-		policy, err := lockCategoryAccess(ctx, tx, category)
-		if err != nil {
-			return err
-		}
 		if policy.ID == 0 {
 			if expectedLockVersion != 0 {
 				return ErrCategoryAccessConflict

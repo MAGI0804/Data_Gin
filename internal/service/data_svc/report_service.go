@@ -257,7 +257,7 @@ func (service *ReportDraftService) Update(ctx context.Context, actor, definition
 	if err != nil {
 		return nil, classifyReportStoreError(err)
 	}
-	if existing.Definition.Status == model.ReportDefinitionStatusActive && strings.TrimSpace(request.Category) != existing.Definition.Category {
+	if existing.Definition.Status == model.ReportDefinitionStatusActive && strings.TrimSpace(existing.Definition.Category) != "" && strings.TrimSpace(request.Category) != existing.Definition.Category {
 		return nil, invalidReport("published report category cannot be changed")
 	}
 	draft, err := reportDraftFromRequest(actor, request)

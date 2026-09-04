@@ -39,12 +39,13 @@ type Draft struct {
 }
 
 type DraftListQuery struct {
-	AfterID       uint
-	Limit         int
-	Category      string
-	Search        string
-	PublishedOnly bool
-	Action        string
+	AfterID          uint
+	Limit            int
+	Category         string
+	Search           string
+	PublishedOnly    bool
+	Action           string
+	AdditionalAction string
 }
 
 type DraftSummary struct {
@@ -82,7 +83,7 @@ type Publication struct {
 }
 
 type transactionRunner func(context.Context, *gorm.DB, func(*gorm.DB) error) error
-type draftReferenceValidator func(context.Context, *gorm.DB, uint, []model.ReportGrant) error
+type draftReferenceValidator func(context.Context, *gorm.DB, uint, string, []model.ReportGrant) error
 type draftDefinitionLocker func(context.Context, *gorm.DB, uint, uint) (*definitionRecord, error)
 type draftVersionLocker func(context.Context, *gorm.DB, uint, uint) (*versionRecord, error)
 type publicationDatasourceLocker func(context.Context, *gorm.DB, uint, string) error
@@ -153,7 +154,7 @@ func (repository *Repository) CreateDraft(ctx context.Context, ownerUserID uint,
 		if draft.Definition.OwnerUserID != ownerUserID {
 			return invalidDraft("definition owner does not match owner scope")
 		}
-		if err := repository.validateReferences(ctx, tx, draft.Definition.DatasourceID, draft.Grants); err != nil {
+		if err := repository.validateReferences(ctx, tx, draft.Definition.DatasourceID, draft.Definition.Category, draft.Grants); err != nil {
 			return err
 		}
 		definitionRecord := newDefinitionRecord(draft.Definition)
@@ -354,7 +355,7 @@ func (repository *Repository) PublishDraft(ctx context.Context, ownerUserID, def
 		if err := repository.lockPublicationSource(ctx, tx, current.DatasourceID, publication.DatasourceSnapshotFingerprint); err != nil {
 			return err
 		}
-		if err := repository.validateReferences(ctx, tx, current.DatasourceID, published.Grants); err != nil {
+		if err := repository.validateReferences(ctx, tx, current.DatasourceID, definition.Category, published.Grants); err != nil {
 			return err
 		}
 		if err := replaceResultTableBinding(ctx, tx, definitionID, current.ID, current.ReportVersion, publication.ConnectionFingerprint, publication.ConnectionIdentitySource); err != nil {
@@ -590,6 +591,14 @@ func buildDraftListQuery(db *gorm.DB, actor uint, query DraftListQuery) *gorm.DB
 	}
 	if query.PublishedOnly {
 		dbQuery = dbQuery.Where(publishedReportAccessPredicate, publishedArguments...)
+		if additionalAction := query.AdditionalAction; validReportAction(additionalAction) && additionalAction != action {
+			additionalArguments := []interface{}{
+				model.ReportDefinitionStatusActive,
+				additionalAction, "USER", actor, "ROLE", model.RoleStatusActive, actor,
+				additionalAction, "USER", actor, "ROLE", model.RoleStatusActive, actor,
+			}
+			dbQuery = dbQuery.Where(publishedReportAccessPredicate, additionalArguments...)
+		}
 	} else {
 		arguments := []interface{}{actor, []string{model.ReportDefinitionStatusDraft, model.ReportDefinitionStatusActive}}
 		arguments = append(arguments, publishedArguments...)
@@ -691,7 +700,7 @@ func (repository *Repository) UpdateDraft(
 		if draft.Definition.OwnerUserID != 0 && draft.Definition.OwnerUserID != ownerUserID {
 			return invalidDraft("definition owner cannot be changed")
 		}
-		if err := repository.validateReferences(ctx, tx, draft.Definition.DatasourceID, draft.Grants); err != nil {
+		if err := repository.validateReferences(ctx, tx, draft.Definition.DatasourceID, draft.Definition.Category, draft.Grants); err != nil {
 			return err
 		}
 
@@ -776,7 +785,7 @@ func (repository *Repository) SaveDraftCollections(
 		if version.VersionNumber != expectedLockVersion {
 			return ErrDraftVersionConflict
 		}
-		if err := repository.validateReferences(ctx, tx, definition.DatasourceID, grants); err != nil {
+		if err := repository.validateReferences(ctx, tx, definition.DatasourceID, definition.Category, grants); err != nil {
 			return err
 		}
 		nextVersion := version.ReportVersion

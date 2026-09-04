@@ -246,7 +246,7 @@ func TestRepositoryReferenceValidationStopsDraftWrites(t *testing.T) {
 			repository.lockVersion = func(context.Context, *gorm.DB, uint, uint) (*versionRecord, error) {
 				return &versionRecord{ReportVersion: model.ReportVersion{BaseModel: model.BaseModel{ID: 11}, DefinitionID: 7, DatasourceID: 3, VersionNumber: 1, Status: model.ReportVersionStatusDraft}}, nil
 			}
-			repository.validateReferences = func(context.Context, *gorm.DB, uint, []model.ReportGrant) error {
+			repository.validateReferences = func(context.Context, *gorm.DB, uint, string, []model.ReportGrant) error {
 				referenceCalls++
 				return referenceError
 			}
@@ -362,7 +362,7 @@ func TestPublishDraftFreezesContractAndCreatesCleanNextDraft(t *testing.T) {
 		draft.Grants = []model.ReportGrant{{DefinitionID: 7, SubjectType: "ROLE", SubjectID: 2}}
 		return nil
 	}
-	repository.validateReferences = func(_ context.Context, _ *gorm.DB, datasourceID uint, grants []model.ReportGrant) error {
+	repository.validateReferences = func(_ context.Context, _ *gorm.DB, datasourceID uint, _ string, grants []model.ReportGrant) error {
 		if datasourceID != 3 || len(grants) != 1 {
 			t.Fatalf("reference validation datasource=%d grants=%#v", datasourceID, grants)
 		}
@@ -484,7 +484,7 @@ func TestPublishDraftStopsAtEveryAtomicBoundary(t *testing.T) {
 			injected := errors.New("injected failure")
 			repository, transactionState := publicationTestRepository(t)
 			calls := make([]string, 0, len(steps))
-			repository.validateReferences = func(context.Context, *gorm.DB, uint, []model.ReportGrant) error {
+			repository.validateReferences = func(context.Context, *gorm.DB, uint, string, []model.ReportGrant) error {
 				calls = append(calls, steps[0])
 				if failedStep == steps[0] {
 					return injected
@@ -704,14 +704,24 @@ func TestListDraftsUsesBoundedKeysetAndSharedQueryAccess(t *testing.T) {
 func TestDownloadCatalogQueryExcludesOwnerDraftsAndRequiresExport(t *testing.T) {
 	db := newDryRunDB(t)
 	statement := buildDraftListQuery(db.Session(&gorm.Session{DryRun: true}), 5,
-		DraftListQuery{Limit: 20, PublishedOnly: true, Action: ReportActionExport}).Scan(&[]draftSummaryRecord{})
+		DraftListQuery{Limit: 20, PublishedOnly: true, Action: ReportActionExport, AdditionalAction: ReportActionQuery}).Scan(&[]draftSummaryRecord{})
 	sqlText := statement.Statement.SQL.String()
 	if strings.Contains(sqlText, "definitions.owner_user_id = ? AND definitions.status IN") {
 		t.Fatalf("download SQL includes owner draft branch: %s", sqlText)
 	}
-	if !containsSQLVariable(statement.Statement.Vars, ReportActionExport) || containsSQLVariable(statement.Statement.Vars, ReportActionQuery) {
+	if countSQLVariable(statement.Statement.Vars, ReportActionExport) != 2 || countSQLVariable(statement.Statement.Vars, ReportActionQuery) != 2 {
 		t.Fatalf("download SQL vars = %#v", statement.Statement.Vars)
 	}
+}
+
+func countSQLVariable(values []interface{}, expected interface{}) int {
+	count := 0
+	for _, value := range values {
+		if value == expected {
+			count++
+		}
+	}
+	return count
 }
 
 func containsSQLVariable(values []interface{}, expected interface{}) bool {

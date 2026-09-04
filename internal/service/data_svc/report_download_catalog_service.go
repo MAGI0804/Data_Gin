@@ -45,12 +45,13 @@ func (service *ReportDownloadCatalogService) List(
 		return nil, invalidReport("invalid list filters")
 	}
 	page, err := service.store.ListDrafts(ctx, actor, reportrepo.DraftListQuery{
-		AfterID:       afterID,
-		Limit:         limit,
-		Category:      category,
-		Search:        search,
-		PublishedOnly: true,
-		Action:        reportrepo.ReportActionExport,
+		AfterID:          afterID,
+		Limit:            limit,
+		Category:         category,
+		Search:           search,
+		PublishedOnly:    true,
+		Action:           reportrepo.ReportActionExport,
+		AdditionalAction: reportrepo.ReportActionQuery,
 	})
 	if err != nil {
 		return nil, classifyReportStoreError(err)
