@@ -224,6 +224,21 @@ func TestReusableReportRunUsesNewestMatchingFingerprint(t *testing.T) {
 	}
 }
 
+func TestReusableActiveReportRunExcludesCancellingAndPurgingRuns(t *testing.T) {
+	fingerprint := strings.Repeat("a", 64)
+	runs := []model.ReportRun{
+		{BaseModel: model.BaseModel{ID: 31}, Status: model.ReportRunStatusResultPurging, ExecutionFingerprint: fingerprint},
+		{BaseModel: model.BaseModel{ID: 30}, Status: model.ReportRunStatusCancelRequested, ExecutionFingerprint: fingerprint},
+	}
+	if got := reusableActiveReportRun(runs, fingerprint); got != nil {
+		t.Fatalf("reused terminalizing run %#v", got)
+	}
+	runs = append(runs, model.ReportRun{BaseModel: model.BaseModel{ID: 32}, Status: model.ReportRunStatusQueued, ExecutionFingerprint: fingerprint})
+	if got := reusableActiveReportRun(runs, fingerprint); got == nil || got.ID != 32 {
+		t.Fatalf("reusable queued run = %#v", got)
+	}
+}
+
 func TestReportRunSlotIsIndependentPerUser(t *testing.T) {
 	query := reportRunSlotScope(newDryRunDB(t), 9, 17).
 		Where("status IN ?", []string{model.ReportRunStatusQueued, model.ReportRunStatusRunning}).
@@ -249,13 +264,16 @@ func TestReplacedSnapshotRemainsSucceededUntilCleanupFinishes(t *testing.T) {
 		t.Fatalf("schedule snapshot cleanup: %v", query.Error)
 	}
 	statement := query.Statement.SQL.String()
-	for _, fragment := range []string{"UPDATE `report_runs`", "`result_expires_at`", "status = ?", "result_purged_at IS NULL"} {
+	for _, fragment := range []string{"UPDATE `report_runs`", "`result_expires_at`", "status = ?", "result_purged_at IS NULL", "NOT EXISTS", "report_exports"} {
 		if !strings.Contains(statement, fragment) {
 			t.Fatalf("snapshot cleanup SQL %q does not contain %q", statement, fragment)
 		}
 	}
 	if !containsSQLVariable(query.Statement.Vars, model.ReportRunStatusSucceeded) ||
-		containsSQLVariable(query.Statement.Vars, model.ReportRunStatusSuperseded) {
+		containsSQLVariable(query.Statement.Vars, model.ReportRunStatusSuperseded) ||
+		!containsSQLVariable(query.Statement.Vars, model.ReportExportStatusPending) ||
+		!containsSQLVariable(query.Statement.Vars, model.ReportExportStatusRunning) ||
+		!containsSQLVariable(query.Statement.Vars, model.ReportExportStatusReady) {
 		t.Fatalf("snapshot cleanup must preserve SUCCEEDED until Oracle purge: vars=%#v", query.Statement.Vars)
 	}
 }

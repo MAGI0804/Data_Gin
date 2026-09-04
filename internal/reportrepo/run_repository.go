@@ -151,11 +151,10 @@ func prepareReportRunSlot(ctx context.Context, tx *gorm.DB, definitionID, actor 
 		return preparation, fmt.Errorf("report run: lock active snapshot slot: %w", err)
 	}
 	if len(activeRuns) > 0 {
-		if existing := reusableReportRun(activeRuns, executionFingerprint); existing != nil {
+		if existing := reusableActiveReportRun(activeRuns, executionFingerprint); existing != nil {
 			preparation.ExistingRun = existing
 			return preparation, nil
 		}
-		return preparation, ErrReportRunBusy
 	}
 	var snapshots []model.ReportRun
 	if err := reportRunSlotScope(tx.WithContext(ctx), definitionID, actor).Clauses(clause.Locking{Strength: "UPDATE"}).
@@ -175,42 +174,34 @@ func prepareReportRunSlot(ctx context.Context, tx *gorm.DB, definitionID, actor 
 	for _, snapshot := range snapshots {
 		runIDs = append(runIDs, snapshot.ID)
 	}
-	if err := tx.WithContext(ctx).Where("run_id IN ? AND expires_at <= ?", runIDs, now).Delete(&model.ReportResultReadLease{}).Error; err != nil {
-		return preparation, fmt.Errorf("report run: clear expired snapshot readers: %w", err)
-	}
-	var activeReaders int64
-	if err := tx.WithContext(ctx).Model(&model.ReportResultReadLease{}).
-		Where("run_id IN ? AND expires_at > ?", runIDs, now).Count(&activeReaders).Error; err != nil {
-		return preparation, fmt.Errorf("report run: count active snapshot readers: %w", err)
-	}
-	if activeReaders > 0 {
-		return preparation, ErrReportRunBusy
-	}
-	var activeExports int64
-	if err := tx.WithContext(ctx).Model(&model.ReportExport{}).Where(
-		"run_id IN ? AND (status IN ? OR (status = ? AND purged_at IS NULL))",
-		runIDs, []string{model.ReportExportStatusPending, model.ReportExportStatusRunning}, model.ReportExportStatusReady,
-	).Count(&activeExports).Error; err != nil {
-		return preparation, fmt.Errorf("report run: count active snapshot exports: %w", err)
-	}
-	if activeExports > 0 {
-		return preparation, ErrReportRunBusy
-	}
 	result := scheduleReplacedSnapshotsForCleanup(tx.WithContext(ctx), runIDs, now)
 	if result.Error != nil {
 		return preparation, fmt.Errorf("report run: schedule previous snapshot cleanup: %w", result.Error)
-	}
-	if result.RowsAffected != int64(len(runIDs)) {
-		return preparation, ErrReportRunBusy
 	}
 	return preparation, nil
 }
 
 func scheduleReplacedSnapshotsForCleanup(tx *gorm.DB, runIDs []uint, now time.Time) *gorm.DB {
 	now = now.UTC().Truncate(time.Millisecond)
+	activeExport := tx.Table("report_exports AS active_exports").Select("1").
+		Where("active_exports.run_id = report_runs.id AND active_exports.purged_at IS NULL").
+		Where("active_exports.status IN ?", []string{
+			model.ReportExportStatusPending, model.ReportExportStatusRunning, model.ReportExportStatusReady,
+		})
 	return tx.Model(&model.ReportRun{}).
 		Where("id IN ? AND status = ? AND result_purged_at IS NULL", runIDs, model.ReportRunStatusSucceeded).
+		Where("NOT EXISTS (?)", activeExport).
 		Updates(map[string]interface{}{"result_expires_at": now, "updated_at": now})
+}
+
+func reusableActiveReportRun(runs []model.ReportRun, executionFingerprint string) *model.ReportRun {
+	for index := range runs {
+		if (runs[index].Status == model.ReportRunStatusQueued || runs[index].Status == model.ReportRunStatusRunning) &&
+			runs[index].ExecutionFingerprint == executionFingerprint {
+			return &runs[index]
+		}
+	}
+	return nil
 }
 
 func reusableReportRun(runs []model.ReportRun, executionFingerprint string) *model.ReportRun {
