@@ -344,6 +344,7 @@ func reportDraftValidationMessage(err error) string {
 	detail := strings.TrimPrefix(err.Error(), data_svc.ErrReportInvalid.Error()+": ")
 	messages := map[string]string{
 		"invalid report identity":                                               "请检查报表名称、编码、分类、说明和 Oracle 数据源",
+		"published report category cannot be changed":                           "已上线报表不能直接修改分类，请新建报表后重新发布",
 		"invalid Oracle procedure":                                              "存储过程名称不合法，请从 Oracle 目录重新选择",
 		"invalid JSON input argument":                                           "JSON 入参名不合法，请重新选择存储过程",
 		"invalid JSON result-table arguments":                                   "所选存储过程必须只有一个 JSON 入参且不得有出参",

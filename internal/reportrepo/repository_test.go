@@ -680,6 +680,7 @@ func TestListDraftsUsesBoundedKeysetAndSharedQueryAccess(t *testing.T) {
 	sqlText := statement.Statement.SQL.String()
 	for _, fragment := range []string{
 		"draft_versions.version_number ELSE 0 END AS lock_version", "definitions.owner_user_id = ?", "definitions.status IN", "definitions.id > ?",
+		"FROM report_category_access AS category_access", "JOIN report_category_grants AS category_grants", "configured_category.category = definitions.category",
 		"published_versions.id IS NOT NULL", "FROM report_grants AS grants", "grants.version_id = published_versions.id",
 		"JSON_CONTAINS(grants.actions_json, JSON_QUOTE(?))",
 		"grants.subject_type = ? AND grants.subject_id = ?", "FROM user_roles AS memberships", "JOIN roles", "roles.status = ?",
@@ -697,6 +698,19 @@ func TestListDraftsUsesBoundedKeysetAndSharedQueryAccess(t *testing.T) {
 	}
 	if got := escapeLike(`a%b_`); got != `a\%b\_` {
 		t.Fatalf("escapeLike() = %q", got)
+	}
+}
+
+func TestDownloadCatalogQueryExcludesOwnerDraftsAndRequiresExport(t *testing.T) {
+	db := newDryRunDB(t)
+	statement := buildDraftListQuery(db.Session(&gorm.Session{DryRun: true}), 5,
+		DraftListQuery{Limit: 20, PublishedOnly: true, Action: ReportActionExport}).Scan(&[]draftSummaryRecord{})
+	sqlText := statement.Statement.SQL.String()
+	if strings.Contains(sqlText, "definitions.owner_user_id = ? AND definitions.status IN") {
+		t.Fatalf("download SQL includes owner draft branch: %s", sqlText)
+	}
+	if !containsSQLVariable(statement.Statement.Vars, ReportActionExport) || containsSQLVariable(statement.Statement.Vars, ReportActionQuery) {
+		t.Fatalf("download SQL vars = %#v", statement.Statement.Vars)
 	}
 }
 

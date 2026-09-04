@@ -99,6 +99,12 @@ type ReportGrantRequest struct {
 	Actions     json.RawMessage `json:"actions"`
 }
 
+type ReportCategoryAccessSaveRequest struct {
+	Category            string               `json:"category"`
+	ExpectedLockVersion uint64               `json:"expectedLockVersion"`
+	Grants              []ReportGrantRequest `json:"grants"`
+}
+
 type ReportPublishRequest struct {
 	ExpectedLockVersion uint64 `json:"expectedLockVersion"`
 }

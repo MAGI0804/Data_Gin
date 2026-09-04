@@ -261,7 +261,10 @@ func validateDraftReferences(ctx context.Context, tx *gorm.DB, datasourceID uint
 	if err := validateReferenceCount("datasource", datasourceCount, 1); err != nil {
 		return err
 	}
+	return validateGrantReferences(ctx, tx, grants)
+}
 
+func validateGrantReferences(ctx context.Context, tx *gorm.DB, grants []model.ReportGrant) error {
 	userIDs := make([]uint, 0, len(grants))
 	roleIDs := make([]uint, 0, len(grants))
 	for _, grant := range grants {

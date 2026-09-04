@@ -24,6 +24,8 @@ func TestReportCenterTableNames(t *testing.T) {
 		{name: "parameters", got: (ReportParameter{}).TableName(), want: "report_parameters"},
 		{name: "columns", got: (ReportColumn{}).TableName(), want: "report_columns"},
 		{name: "grants", got: (ReportGrant{}).TableName(), want: "report_grants"},
+		{name: "category access", got: (ReportCategoryAccess{}).TableName(), want: "report_category_access"},
+		{name: "category grants", got: (ReportCategoryGrant{}).TableName(), want: "report_category_grants"},
 		{name: "runs", got: (ReportRun{}).TableName(), want: "report_runs"},
 		{name: "exports", got: (ReportExport{}).TableName(), want: "report_exports"},
 		{name: "result read leases", got: (ReportResultReadLease{}).TableName(), want: "report_result_read_leases"},
@@ -57,6 +59,24 @@ func TestReportGrantUniqueSubjectIsVersionScoped(t *testing.T) {
 	}
 	want := []string{"version_id", "subject_type", "subject_id"}
 	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("index fields = %v, want %v", got, want)
+	}
+}
+
+func TestReportCategoryGrantUniqueSubjectIsCategoryScoped(t *testing.T) {
+	parsed, err := schema.Parse(&ReportCategoryGrant{}, &sync.Map{}, schema.NamingStrategy{})
+	if err != nil {
+		t.Fatalf("schema.Parse() error = %v", err)
+	}
+	index, ok := parsed.ParseIndexes()["uk_report_category_grant_subject"]
+	if !ok || index.Class != "UNIQUE" {
+		t.Fatalf("category grant subject index = %#v", index)
+	}
+	got := make([]string, 0, len(index.Fields))
+	for _, field := range index.Fields {
+		got = append(got, field.DBName)
+	}
+	if want := []string{"category_access_id", "subject_type", "subject_id"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("index fields = %v, want %v", got, want)
 	}
 }

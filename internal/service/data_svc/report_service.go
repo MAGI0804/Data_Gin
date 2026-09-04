@@ -253,8 +253,12 @@ func (service *ReportDraftService) Update(ctx context.Context, actor, definition
 	}
 	// Preserve 404 for a missing scoped report. A deletion or concurrent change
 	// after this read is still correctly reported as a 409 by UpdateDraft.
-	if _, err := service.store.FindDraftByID(ctx, actor, definitionID); err != nil {
+	existing, err := service.store.FindDraftByID(ctx, actor, definitionID)
+	if err != nil {
 		return nil, classifyReportStoreError(err)
+	}
+	if existing.Definition.Status == model.ReportDefinitionStatusActive && strings.TrimSpace(request.Category) != existing.Definition.Category {
+		return nil, invalidReport("published report category cannot be changed")
 	}
 	draft, err := reportDraftFromRequest(actor, request)
 	if err != nil {
@@ -286,7 +290,7 @@ func reportDraftFromRequest(actor uint, request requestbody.ReportDraftSaveReque
 	request.Name = strings.TrimSpace(request.Name)
 	request.Category = strings.TrimSpace(request.Category)
 	request.Description = strings.TrimSpace(request.Description)
-	if !reportCodePattern.MatchString(request.Code) || request.Name == "" || utf8.RuneCountInString(request.Name) > 128 ||
+	if !reportCodePattern.MatchString(request.Code) || request.Name == "" || utf8.RuneCountInString(request.Name) > 128 || request.Category == "" ||
 		utf8.RuneCountInString(request.Category) > 64 || utf8.RuneCountInString(request.Description) > 500 || request.DatasourceID == 0 {
 		return nil, invalidReport("invalid report identity")
 	}

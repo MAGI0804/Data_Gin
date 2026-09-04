@@ -279,6 +279,26 @@ func registerReportCenterRoutes(api *gin.RouterGroup, enabled bool) {
 	registerReportRunRoutes(api, data_ctrl.NewReportRunController())
 	registerReportExportRoutes(api, data_ctrl.NewReportExportController())
 	registerReportAuditRoutes(api, data_ctrl.NewReportAuditController())
+	registerReportCategoryAccessRoutes(api, data_ctrl.NewReportCategoryAccessController())
+	registerReportDownloadCatalogRoutes(api, data_ctrl.NewReportDownloadCatalogController())
+}
+
+func registerReportCategoryAccessRoutes(api *gin.RouterGroup, controller *data_ctrl.ReportCategoryAccessController) {
+	group := api.Group("/v1/report-category-access")
+	group.Use(middleware.AuthJWT(), middleware.RequirePermission(model.PermissionReportManage))
+	group.GET("", controller.List)
+	group.PUT("", controller.Replace)
+}
+
+func registerReportDownloadCatalogRoutes(api *gin.RouterGroup, controller *data_ctrl.ReportDownloadCatalogController) {
+	api.GET(
+		"/v1/report-downloads",
+		middleware.AuthJWT(),
+		middleware.RequirePermission(model.PermissionReportRead),
+		middleware.RequirePermission(model.PermissionReportExecute),
+		middleware.RequirePermission(model.PermissionReportExport),
+		controller.List,
+	)
 }
 
 func registerReportInputQueryRoutes(api *gin.RouterGroup, controller *data_ctrl.ReportInputQueryController) {

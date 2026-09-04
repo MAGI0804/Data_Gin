@@ -449,6 +449,8 @@ func reportCenterMigrationModels() []interface{} {
 		&model.ReportParameter{},
 		&model.ReportColumn{},
 		&model.ReportGrant{},
+		&model.ReportCategoryAccess{},
+		&model.ReportCategoryGrant{},
 		&model.ReportRun{},
 		&model.ReportExport{},
 		&model.ReportResultReadLease{},

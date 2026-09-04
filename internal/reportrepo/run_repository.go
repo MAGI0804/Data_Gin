@@ -401,6 +401,13 @@ func loadPublishedReport(ctx context.Context, db *gorm.DB, actor, definitionID u
 		return nil, err
 	}
 	published.Parameters, published.Columns, published.Grants = draft.Parameters, draft.Columns, draft.Grants
+	categoryConfigured, categoryGrants, err := loadCategoryReportGrants(ctx, db, definition.Category)
+	if err != nil {
+		return nil, err
+	}
+	if categoryConfigured {
+		published.Grants = categoryGrants
+	}
 	authority, allowed, err := actorCanRunReport(ctx, db, actor, definition.OwnerUserID, action, published.Grants)
 	if err != nil {
 		return nil, err

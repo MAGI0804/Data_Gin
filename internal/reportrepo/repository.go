@@ -39,10 +39,12 @@ type Draft struct {
 }
 
 type DraftListQuery struct {
-	AfterID  uint
-	Limit    int
-	Category string
-	Search   string
+	AfterID       uint
+	Limit         int
+	Category      string
+	Search        string
+	PublishedOnly bool
+	Action        string
 }
 
 type DraftSummary struct {
@@ -576,35 +578,27 @@ func buildDraftListQuery(db *gorm.DB, actor uint, query DraftListQuery) *gorm.DB
 			CASE WHEN definitions.owner_user_id = ? THEN draft_versions.version_number ELSE 0 END AS lock_version,
 			definitions.owner_user_id = ? AS is_owner`, actor, actor).
 		Joins("LEFT JOIN report_versions AS draft_versions ON draft_versions.id = definitions.current_draft_version_id AND draft_versions.definition_id = definitions.id AND draft_versions.status = ?", model.ReportVersionStatusDraft).
-		Joins("LEFT JOIN report_versions AS published_versions ON published_versions.id = definitions.current_published_version_id AND published_versions.definition_id = definitions.id AND published_versions.status = ?", model.ReportVersionStatusPublished).
-		Where(`(
+		Joins("LEFT JOIN report_versions AS published_versions ON published_versions.id = definitions.current_published_version_id AND published_versions.definition_id = definitions.id AND published_versions.status = ?", model.ReportVersionStatusPublished)
+	action := query.Action
+	if !validReportAction(action) {
+		action = ReportActionQuery
+	}
+	publishedArguments := []interface{}{
+		model.ReportDefinitionStatusActive,
+		action, "USER", actor, "ROLE", model.RoleStatusActive, actor,
+		action, "USER", actor, "ROLE", model.RoleStatusActive, actor,
+	}
+	if query.PublishedOnly {
+		dbQuery = dbQuery.Where(publishedReportAccessPredicate, publishedArguments...)
+	} else {
+		arguments := []interface{}{actor, []string{model.ReportDefinitionStatusDraft, model.ReportDefinitionStatusActive}}
+		arguments = append(arguments, publishedArguments...)
+		dbQuery = dbQuery.Where(`(
 			definitions.owner_user_id = ?
 			AND definitions.status IN ?
 			AND draft_versions.id IS NOT NULL
-		) OR (
-			definitions.status = ?
-			AND published_versions.id IS NOT NULL
-			AND EXISTS (
-				SELECT 1
-				FROM report_grants AS grants
-				WHERE grants.definition_id = definitions.id
-					AND grants.version_id = published_versions.id
-					AND JSON_CONTAINS(grants.actions_json, JSON_QUOTE(?))
-					AND (
-						(grants.subject_type = ? AND grants.subject_id = ?)
-						OR (
-							grants.subject_type = ?
-							AND EXISTS (
-								SELECT 1
-								FROM user_roles AS memberships
-								JOIN roles ON roles.id = memberships.role_id AND roles.status = ?
-								WHERE memberships.user_id = ? AND memberships.role_id = grants.subject_id
-							)
-						)
-					)
-			)
-		)`, actor, []string{model.ReportDefinitionStatusDraft, model.ReportDefinitionStatusActive},
-			model.ReportDefinitionStatusActive, ReportActionQuery, "USER", actor, "ROLE", model.RoleStatusActive, actor)
+		) OR (`+publishedReportAccessPredicate+`)`, arguments...)
+	}
 	if query.AfterID > 0 {
 		dbQuery = dbQuery.Where("definitions.id > ?", query.AfterID)
 	}
@@ -618,6 +612,56 @@ func buildDraftListQuery(db *gorm.DB, actor uint, query DraftListQuery) *gorm.DB
 
 	return dbQuery.Order("definitions.id ASC").Limit(query.Limit + 1)
 }
+
+const publishedReportAccessPredicate = `
+	definitions.status = ?
+	AND published_versions.id IS NOT NULL
+	AND (
+				EXISTS (
+					SELECT 1
+					FROM report_category_access AS category_access
+					JOIN report_category_grants AS category_grants ON category_grants.category_access_id = category_access.id
+					WHERE category_access.category = definitions.category
+						AND JSON_CONTAINS(category_grants.actions_json, JSON_QUOTE(?))
+						AND (
+							(category_grants.subject_type = ? AND category_grants.subject_id = ?)
+							OR (
+								category_grants.subject_type = ?
+								AND EXISTS (
+									SELECT 1
+									FROM user_roles AS category_memberships
+									JOIN roles AS category_roles ON category_roles.id = category_memberships.role_id AND category_roles.status = ?
+									WHERE category_memberships.user_id = ? AND category_memberships.role_id = category_grants.subject_id
+								)
+							)
+						)
+				)
+				OR (
+					NOT EXISTS (
+						SELECT 1 FROM report_category_access AS configured_category
+						WHERE configured_category.category = definitions.category
+					)
+					AND EXISTS (
+						SELECT 1
+						FROM report_grants AS grants
+						WHERE grants.definition_id = definitions.id
+							AND grants.version_id = published_versions.id
+							AND JSON_CONTAINS(grants.actions_json, JSON_QUOTE(?))
+							AND (
+								(grants.subject_type = ? AND grants.subject_id = ?)
+								OR (
+									grants.subject_type = ?
+									AND EXISTS (
+										SELECT 1
+										FROM user_roles AS memberships
+										JOIN roles ON roles.id = memberships.role_id AND roles.status = ?
+										WHERE memberships.user_id = ? AND memberships.role_id = grants.subject_id
+									)
+								)
+							)
+					)
+				)
+			)`
 
 func (repository *Repository) UpdateDraft(
 	ctx context.Context,

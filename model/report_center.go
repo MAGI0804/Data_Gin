@@ -255,6 +255,34 @@ type ReportGrant struct {
 
 func (ReportGrant) TableName() string { return "report_grants" }
 
+// ReportCategoryAccess marks a report category as using category-level
+// authorization. Once configured, its grants replace legacy report-level
+// grants, including when the category intentionally has no grants.
+type ReportCategoryAccess struct {
+	BaseModel
+	Category    string `gorm:"column:category;size:64;not null;uniqueIndex" json:"category"`
+	LockVersion uint64 `gorm:"column:lock_version;not null;default:1" json:"lockVersion"`
+	UpdatedBy   uint   `gorm:"column:updated_by;not null" json:"updatedBy"`
+	WeatherTimestamps
+}
+
+func (ReportCategoryAccess) TableName() string { return "report_category_access" }
+
+// ReportCategoryGrant assigns query and export actions to a user or role for
+// every published report in one configured category.
+type ReportCategoryGrant struct {
+	BaseModel
+	CategoryAccessID uint     `gorm:"column:category_access_id;not null;uniqueIndex:uk_report_category_grant_subject,priority:1;index" json:"categoryAccessId"`
+	SubjectType      string   `gorm:"column:subject_type;size:16;not null;uniqueIndex:uk_report_category_grant_subject,priority:2" json:"subjectType"`
+	SubjectID        uint     `gorm:"column:subject_id;not null;uniqueIndex:uk_report_category_grant_subject,priority:3;index" json:"subjectId"`
+	ActionsJSON      JSONText `gorm:"column:actions_json;type:json;not null" json:"actions"`
+	CreatedBy        uint     `gorm:"column:created_by;not null" json:"createdBy"`
+	UpdatedBy        uint     `gorm:"column:updated_by;not null" json:"updatedBy"`
+	WeatherTimestamps
+}
+
+func (ReportCategoryGrant) TableName() string { return "report_category_grants" }
+
 // ReportRun is the durable MySQL control record for one Oracle execution and
 // its immutable parameter, permission and presentation snapshots.
 type ReportRun struct {
