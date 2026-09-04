@@ -242,6 +242,24 @@ func TestReportRunSlotIsIndependentPerUser(t *testing.T) {
 	}
 }
 
+func TestReplacedSnapshotRemainsSucceededUntilCleanupFinishes(t *testing.T) {
+	now := time.Date(2026, 9, 4, 20, 30, 0, 0, time.UTC)
+	query := scheduleReplacedSnapshotsForCleanup(newDryRunDB(t), []uint{28}, now)
+	if query.Error != nil {
+		t.Fatalf("schedule snapshot cleanup: %v", query.Error)
+	}
+	statement := query.Statement.SQL.String()
+	for _, fragment := range []string{"UPDATE `report_runs`", "`result_expires_at`", "status = ?", "result_purged_at IS NULL"} {
+		if !strings.Contains(statement, fragment) {
+			t.Fatalf("snapshot cleanup SQL %q does not contain %q", statement, fragment)
+		}
+	}
+	if !containsSQLVariable(query.Statement.Vars, model.ReportRunStatusSucceeded) ||
+		containsSQLVariable(query.Statement.Vars, model.ReportRunStatusSuperseded) {
+		t.Fatalf("snapshot cleanup must preserve SUCCEEDED until Oracle purge: vars=%#v", query.Statement.Vars)
+	}
+}
+
 func TestRunSnapshotsContainNoCredentialFields(t *testing.T) {
 	permission, err := encodeRunPermissionSnapshot(17, ReportActionQuery, runAuthority{Source: "ROLE", Grants: []model.ReportGrant{{SubjectType: "ROLE", SubjectID: 2, ActionsJSON: model.JSONText(`["QUERY"]`)}}})
 	if err != nil || !json.Valid([]byte(permission)) {

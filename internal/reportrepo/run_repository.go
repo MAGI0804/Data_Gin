@@ -106,18 +106,6 @@ func (repository *Repository) CreateRun(ctx context.Context, actor, definitionID
 		if err := repository.createReportRun(ctx, tx, &run); err != nil {
 			return err
 		}
-		for _, supersededRunID := range slot.SupersededRunIDs {
-			detail, detailErr := json.Marshal(map[string]interface{}{"replacedByRunId": run.ID})
-			if detailErr != nil {
-				return fmt.Errorf("report run: encode superseded audit: %w", detailErr)
-			}
-			if err := repository.writeAudit(ctx, tx, model.ReportAudit{
-				ActorUserID: actor, Action: "REPORT_RUN_SUPERSEDED", TargetType: "REPORT_RUN", TargetID: supersededRunID,
-				RequestID: uuid.NewString(), DetailJSON: model.JSONText(detail),
-			}); err != nil {
-				return err
-			}
-		}
 		outbox.PayloadJSON = model.JSONText(fmt.Sprintf(`{"run_id":%d}`, run.ID))
 		if err := repository.createRunOutbox(ctx, tx, &outbox); err != nil {
 			return err
@@ -208,17 +196,21 @@ func prepareReportRunSlot(ctx context.Context, tx *gorm.DB, definitionID, actor 
 	if activeExports > 0 {
 		return preparation, ErrReportRunBusy
 	}
-	result := tx.WithContext(ctx).Model(&model.ReportRun{}).
-		Where("id IN ? AND status = ? AND result_purged_at IS NULL", runIDs, model.ReportRunStatusSucceeded).
-		Updates(map[string]interface{}{"status": model.ReportRunStatusSuperseded, "updated_at": now})
+	result := scheduleReplacedSnapshotsForCleanup(tx.WithContext(ctx), runIDs, now)
 	if result.Error != nil {
-		return preparation, fmt.Errorf("report run: supersede previous snapshot: %w", result.Error)
+		return preparation, fmt.Errorf("report run: schedule previous snapshot cleanup: %w", result.Error)
 	}
 	if result.RowsAffected != int64(len(runIDs)) {
 		return preparation, ErrReportRunBusy
 	}
-	preparation.SupersededRunIDs = runIDs
 	return preparation, nil
+}
+
+func scheduleReplacedSnapshotsForCleanup(tx *gorm.DB, runIDs []uint, now time.Time) *gorm.DB {
+	now = now.UTC().Truncate(time.Millisecond)
+	return tx.Model(&model.ReportRun{}).
+		Where("id IN ? AND status = ? AND result_purged_at IS NULL", runIDs, model.ReportRunStatusSucceeded).
+		Updates(map[string]interface{}{"result_expires_at": now, "updated_at": now})
 }
 
 func reusableReportRun(runs []model.ReportRun, executionFingerprint string) *model.ReportRun {
