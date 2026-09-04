@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } 
 import DatePicker from 'antd/es/date-picker'
 import dayjs from 'dayjs'
 import { ChevronDown, ChevronLeft, ChevronRight, Download, Filter, Info, Play, Plus, Square, Trash2 } from 'lucide-react'
-import { Button, DataTable, Dialog, FeedbackState, FilterToolbar, MetricStrip, PageCanvas, PageHeader, Section, StatusTag, type StatusTagTone } from '../../../ui'
+import { Button, DataTable, Dialog, FeedbackState, FilterToolbar, PageCanvas, PageHeader, Section, StatusTag, type StatusTagTone } from '../../../ui'
 import { cancelReportRun, createReportExport, createReportRun, getReportDownloads, getReportExport, getReportExportDownload, queryReportResults, getReportRun, getReportRunContract, type ReportCenterClient } from '../../api'
 import { buildNewReportRunState, canStartNewReportRun, initialReportParameterValues, terminalReportExportStatuses, terminalReportRunStatuses, visibleReportParameters } from '../../queryParameters'
 import { buildReportConditions, editableReportConditionValue, initialReportConditionValues, isReportInputListType, orderedReportInputEntries } from '../../refCursorConfig'
@@ -29,9 +29,9 @@ export function ReportQueryPage({ client, navigation }: { client: ReportCenterCl
   const [cursorIndex, setCursorIndex] = useState(0)
   const [operation, setOperation] = useState<{ busy: boolean; error: string }>({ busy: false, error: '' })
   const [reportExport, setReportExport] = useState<ReportExport | null>(null)
-	const [resultQuery, setResultQuery] = useState<ReportResultQuery>(emptyResultQuery)
-	const [appliedQuery, setAppliedQuery] = useState<ReportResultQuery>(emptyResultQuery)
-	const [filtersOpen, setFiltersOpen] = useState(false)
+  const [resultQuery, setResultQuery] = useState<ReportResultQuery>(emptyResultQuery)
+  const [appliedQuery, setAppliedQuery] = useState<ReportResultQuery>(emptyResultQuery)
+  const [filtersOpen, setFiltersOpen] = useState(false)
   const [parametersOpen, setParametersOpen] = useState(true)
   const [cancelState, setCancelState] = useState({ open: false, busy: false, error: '' })
   const [detailColumn, setDetailColumn] = useState<ReportResultColumn | null>(null)
@@ -46,8 +46,8 @@ export function ReportQueryPage({ client, navigation }: { client: ReportCenterCl
     setRun(null)
     setResult(null)
     setReportExport(null)
-		setResultQuery(emptyResultQuery)
-		setAppliedQuery(emptyResultQuery)
+    setResultQuery(emptyResultQuery)
+    setAppliedQuery(emptyResultQuery)
     setCursorHistory([''])
     setCursorIndex(0)
     setOperation({ busy: false, error: '' })
@@ -108,7 +108,10 @@ export function ReportQueryPage({ client, navigation }: { client: ReportCenterCl
       setRun(response.data)
       if (terminalReportRunStatuses.has(response.data.status)) {
         setOperation({ busy: false, error: response.data.errorMessage })
-				if (response.data.resultAvailable) await loadResults(runId, emptyResultQuery, '', 0, controller.signal)
+        if (response.data.resultAvailable) {
+          await loadResults(runId, emptyResultQuery, '', 0, controller.signal)
+          await startExport(runId)
+        }
         return
       }
       await wait(1500, controller.signal)
@@ -121,9 +124,9 @@ export function ReportQueryPage({ client, navigation }: { client: ReportCenterCl
     await pollRun(run.id)
   }
 
-	async function loadResults(runId: number, query: ReportResultQuery, cursor: string, pageIndex: number, signal?: AbortSignal) {
+  async function loadResults(runId: number, query: ReportResultQuery, cursor: string, pageIndex: number, signal?: AbortSignal) {
     setOperation((current) => ({ ...current, busy: true, error: '' }))
-		const response = await queryReportResults(client, runId, query, cursor, 100, signal)
+    const response = await queryReportResults(client, runId, query, cursor, 100, signal)
     if (!response.ok) {
       if (!signal?.aborted) setOperation({ busy: false, error: response.error })
       return
@@ -139,23 +142,23 @@ export function ReportQueryPage({ client, navigation }: { client: ReportCenterCl
     const nextIndex = cursorIndex + 1
     const nextHistory = [...cursorHistory.slice(0, nextIndex), result.pagination.nextCursor]
     setCursorHistory(nextHistory)
-		await loadResults(run.id, appliedQuery, result.pagination.nextCursor, nextIndex)
+    await loadResults(run.id, appliedQuery, result.pagination.nextCursor, nextIndex)
   }
 
   async function previousPage() {
     if (!run || cursorIndex === 0) return
     const previousIndex = cursorIndex - 1
-		await loadResults(run.id, appliedQuery, cursorHistory[previousIndex], previousIndex)
+    await loadResults(run.id, appliedQuery, cursorHistory[previousIndex], previousIndex)
   }
 
-	async function applyResultQuery() {
-		if (!run?.resultAvailable || operation.busy || reportExport) return
-		const normalized = normalizeResultQuery(resultQuery)
-		setAppliedQuery(normalized)
-		setCursorHistory([''])
-		setCursorIndex(0)
-		await loadResults(run.id, normalized, '', 0)
-	}
+  async function applyResultQuery() {
+    if (!run?.resultAvailable || operation.busy || reportExport) return
+    const normalized = normalizeResultQuery(resultQuery)
+    setAppliedQuery(normalized)
+    setCursorHistory([''])
+    setCursorIndex(0)
+    await loadResults(run.id, normalized, '', 0)
+  }
 
   async function cancelRun() {
     if (!run?.canCancel || cancelState.busy) return
@@ -170,10 +173,10 @@ export function ReportQueryPage({ client, navigation }: { client: ReportCenterCl
     if (!terminalReportRunStatuses.has(response.data.status)) await pollRun(response.data.id)
   }
 
-  async function startExport() {
-    if (!run?.resultAvailable || reportExport) return
+  async function startExport(runID = run?.id) {
+    if (!runID || reportExport) return
     setOperation({ busy: true, error: '' })
-		const response = await createReportExport(client, run.id, appliedQuery)
+    const response = await createReportExport(client, runID, appliedQuery)
     if (!response.ok) {
       setOperation({ busy: false, error: response.error })
       return
@@ -230,35 +233,30 @@ export function ReportQueryPage({ client, navigation }: { client: ReportCenterCl
 
   const frozen = Boolean(run)
   const canStartNewRun = run ? canStartNewReportRun(run.status, reportExport?.status ?? null, operation.busy) : false
-  const activeStage = !selectedId ? 0 : !run ? 1 : !result ? 2 : 3
   return (
     <PageCanvas density="compact">
       {navigation}
-      <PageHeader eyebrow="REPORT CENTER" title="报表中心" description="这里只展示已上线且当前账号拥有分类下载权限的报表；填写条件后生成个人专属的 Excel 文件。" actions={run ? <div className={styles.pageActions}>{run.canCancel ? <button type="button" onClick={() => setCancelState({ open: true, busy: false, error: '' })}><Square aria-hidden="true" />取消运行</button> : null}<button type="button" onClick={startNewRun} disabled={!canStartNewRun}><Plus aria-hidden="true" />新建下载任务</button></div> : undefined} />
+      <PageHeader eyebrow="REPORT CENTER" title="报表下载" actions={run ? <div className={styles.pageActions}>{run.canCancel ? <button type="button" onClick={() => setCancelState({ open: true, busy: false, error: '' })}><Square aria-hidden="true" />取消生成</button> : null}<button type="button" onClick={startNewRun} disabled={!canStartNewRun}><Plus aria-hidden="true" />重新选择</button></div> : undefined} />
       <FilterToolbar summary={run ? <StatusTag tone={runTone(run)}>{runLabel(run.status)}</StatusTag> : <StatusTag tone="neutral">等待选择报表</StatusTag>}>
         <div className={styles.catalogSelector}><label className={styles.selector}>选择报表<select value={selectedId} onChange={(event) => setSelectedId(event.currentTarget.value)} disabled={loading || operation.busy || frozen || published.length === 0}><option value="">请选择已上线报表</option>{reportsByCategory.map(([category, reports]) => <optgroup label={category} key={category}>{reports.map((report) => <option value={report.id} key={report.id}>{report.name}</option>)}</optgroup>)}</select></label>{hasMore ? <button type="button" onClick={() => void loadMore()} disabled={loadingMore || operation.busy || frozen}>{loadingMore ? '正在加载…' : '加载更多'}</button> : null}</div>
       </FilterToolbar>
-      <ol className={styles.runStages} aria-label="报表执行流程">
-        {['选择报表', '配置条件', 'Oracle 执行', '预览与导出'].map((label, index) => <li className={index === activeStage ? styles.currentStage : index < activeStage ? styles.completedStage : undefined} aria-current={index === activeStage ? 'step' : undefined} key={label}><span>{String(index + 1).padStart(2, '0')}</span><strong>{label}</strong><small>{index < activeStage ? '已完成' : index === activeStage ? '当前步骤' : '等待'}</small></li>)}
-      </ol>
-      <Section title="筛选条件" description={contract ? `发布版本 #${contract.versionId} · 条件会统一写入存储过程 JSON` : '选择报表后读取已发布筛选契约。'} actions={<button type="button" aria-expanded={parametersOpen} onClick={() => setParametersOpen((open) => !open)}><ChevronDown className={parametersOpen ? styles.chevronOpen : undefined} aria-hidden="true" />{parametersOpen ? '收起条件' : '展开条件'}</button>}>
+      {selectedId ? <Section title="下载条件" actions={<button type="button" aria-expanded={parametersOpen} onClick={() => setParametersOpen((open) => !open)}><ChevronDown className={parametersOpen ? styles.chevronOpen : undefined} aria-hidden="true" />{parametersOpen ? '收起' : '展开'}</button>}>
         {parametersOpen ? <>
-        {contractState.loading ? <FeedbackState kind="loading" title="正在读取已发布筛选契约" /> : null}
-        {contractState.error ? <FeedbackState kind="error" title="筛选契约加载失败" description={contractState.error} /> : null}
-        {contract ? <form className={styles.parameterForm} onSubmit={(event) => void submitRun(event)}>{contract.jsonInput ? orderedReportInputEntries(contract.inputSchema).map(([code, field]) => <ConditionField client={client} reportId={contract.definitionId} code={code} disabled={frozen || operation.busy} field={field} key={code} value={values[code]} onChange={(value) => setValues((current) => ({ ...current, [code]: value }))} />) : visibleReportParameters(contract.parameters).map((parameter) => <ParameterField disabled={frozen || operation.busy} key={parameter.code} parameter={parameter} value={values[parameter.code]} onChange={(value) => setValues((current) => ({ ...current, [parameter.code]: value }))} />)}<div className={styles.runActions}><span>{frozen ? '本次条件已冻结；点击页头“新建运行”可恢复默认条件并重新查询。' : `${reportConditionCount(contract)} 个可填写筛选条件。`}</span><Button variant="primary" type="submit" disabled={frozen || operation.busy}><Play aria-hidden="true" />运行报表</Button></div></form> : null}
-        {!contract && !contractState.loading && !contractState.error ? <FeedbackState kind="empty" title="尚未选择报表" description="请选择一份已上线且所在分类已授权的报表。" /> : null}
+        {contractState.loading ? <FeedbackState kind="loading" title="正在加载下载条件" /> : null}
+        {contractState.error ? <FeedbackState kind="error" title="下载条件加载失败" description={contractState.error} /> : null}
+        {contract ? <form className={styles.parameterForm} onSubmit={(event) => void submitRun(event)}>{contract.jsonInput ? orderedReportInputEntries(contract.inputSchema).map(([code, field]) => <ConditionField client={client} reportId={contract.definitionId} code={code} disabled={frozen || operation.busy} field={field} key={code} value={values[code]} onChange={(value) => setValues((current) => ({ ...current, [code]: value }))} />) : visibleReportParameters(contract.parameters).map((parameter) => <ParameterField disabled={frozen || operation.busy} key={parameter.code} parameter={parameter} value={values[parameter.code]} onChange={(value) => setValues((current) => ({ ...current, [parameter.code]: value }))} />)}<div className={styles.runActions}><Button variant="primary" type="submit" disabled={frozen || operation.busy}><Play aria-hidden="true" />生成下载文件</Button></div></form> : null}
         </> : <div className={styles.collapsedParameters}>{contract ? `${reportConditionCount(contract)} 个筛选条件${frozen ? ' · 本次运行条件已冻结' : ''}` : '筛选区已收起'}</div>}
-      </Section>
-      {run ? <MetricStrip role="status" label="本次报表运行概览" items={[{ key: 'status', label: '运行状态', value: runLabel(run.status), detail: operation.busy ? '状态同步中' : '已同步' }, { key: 'run', label: '运行编号', value: `#${run.id}`, detail: contract ? `版本 #${contract.versionId}` : undefined }, { key: 'rows', label: '结果行数', value: run.rowCount.toLocaleString('zh-CN'), detail: result ? `当前页 ${result.rows.length} 行` : '等待结果' }, { key: 'retention', label: '结果保留', value: run.resultExpiresAt ? formatDateShort(run.resultExpiresAt) : '-', detail: run.errorMessage || '按运行快照管理' }]} /> : null}
+      </Section> : null}
       {operation.error ? <FeedbackState kind="error" title="操作未完成" description={operation.error} action={run && !terminalReportRunStatuses.has(run.status) ? <button type="button" onClick={() => void resumeRun()}>恢复状态查询</button> : undefined} /> : null}
-      <Section title="结果预览" description={contract?.jsonInput ? '读取存储过程写入的结果表快照；分页和导出不会重新执行存储过程。' : '使用签名 Cursor 进行 Oracle Keyset 分页，不会重新执行存储过程。'} actions={run?.resultAvailable ? <div className={styles.resultActions}>{reportExport ? <StatusTag tone={exportTone(reportExport)}>{exportLabel(reportExport.status)}</StatusTag> : null}<button type="button" onClick={() => void startExport()} disabled={operation.busy || Boolean(reportExport)}><Download aria-hidden="true" />生成正式 Excel</button>{reportExport?.canDownload ? <Button variant="primary" onClick={() => void downloadExport()}>下载文件</Button> : null}</div> : undefined} flush>
-		{result && contract?.executionMode !== 'REF_CURSOR' ? <ResultQueryToolbar page={result} query={resultQuery} open={filtersOpen} disabled={operation.busy || Boolean(reportExport)} onToggle={() => setFiltersOpen((value) => !value)} onChange={setResultQuery} onApply={() => void applyResultQuery()} /> : null}
-        {operation.busy && !result ? <FeedbackState kind="loading" title={reportExport ? '正在生成并校验正式 Excel' : '正在执行报表'} description={reportExport ? exportProgress(reportExport) : 'Oracle 存储过程只会执行一次，请稍候。'} /> : null}
-        {!run && !loading ? <FeedbackState kind="empty" title={published.length === 0 ? '暂无可下载报表' : '尚未生成报表'} description={published.length === 0 ? '只有已上线且分类已授权的报表会显示在这里。' : '填写筛选条件并运行后，可预览结果并生成 Excel。'} /> : null}
-        {loading ? <FeedbackState kind="loading" title="正在读取可用报表" /> : error ? <FeedbackState kind="error" title="可用报表加载失败" description={error} action={<button type="button" onClick={reload}>重试</button>} /> : null}
-        {result ? <ResultTable page={result} onInspect={setDetailColumn} /> : null}
-        {result ? <div className={styles.pagination}><span>第 {cursorIndex + 1} 页 · 每页 {result.pagination.pageSize} 行</span><div><button type="button" onClick={() => void previousPage()} disabled={operation.busy || cursorIndex === 0}><ChevronLeft aria-hidden="true" />上一页</button><button type="button" onClick={() => void nextPage()} disabled={operation.busy || !result.pagination.hasMore}>下一页<ChevronRight aria-hidden="true" /></button></div></div> : null}
-      </Section>
+      {loading ? <FeedbackState kind="loading" title="正在加载可下载报表" /> : error ? <FeedbackState kind="error" title="可下载报表加载失败" description={error} action={<button type="button" onClick={reload}>重试</button>} /> : null}
+      {run ? <Section title="下载文件" actions={<div className={styles.resultActions}>{reportExport ? <StatusTag tone={exportTone(reportExport)}>{exportLabel(reportExport.status)}</StatusTag> : <StatusTag tone={runTone(run)}>{runLabel(run.status)}</StatusTag>}{reportExport?.canDownload ? <Button variant="primary" onClick={() => void downloadExport()}><Download aria-hidden="true" />下载文件</Button> : null}</div>} flush>
+        {operation.busy && !reportExport?.canDownload ? <FeedbackState kind="loading" title={reportExport ? '正在生成 Excel' : '正在生成报表'} description={reportExport ? exportProgress(reportExport) : undefined} /> : null}
+        {result ? <details className={styles.optionalPreview}><summary>查看结果预览（可选）</summary><div>
+          {contract?.executionMode !== 'REF_CURSOR' ? <ResultQueryToolbar page={result} query={resultQuery} open={filtersOpen} disabled={operation.busy || Boolean(reportExport)} onToggle={() => setFiltersOpen((value) => !value)} onChange={setResultQuery} onApply={() => void applyResultQuery()} /> : null}
+          <ResultTable page={result} onInspect={setDetailColumn} />
+          <div className={styles.pagination}><span>第 {cursorIndex + 1} 页 · 每页 {result.pagination.pageSize} 行</span><div><button type="button" onClick={() => void previousPage()} disabled={operation.busy || cursorIndex === 0}><ChevronLeft aria-hidden="true" />上一页</button><button type="button" onClick={() => void nextPage()} disabled={operation.busy || !result.pagination.hasMore}>下一页<ChevronRight aria-hidden="true" /></button></div></div>
+        </div></details> : null}
+      </Section> : null}
       <Dialog open={cancelState.open && Boolean(run?.canCancel)} role="alertdialog" title="确认取消报表运行" description={run ? `运行 #${run.id} 的取消请求提交后不能撤回。` : undefined} closeDisabled={cancelState.busy} closeOnBackdrop={!cancelState.busy} initialFocusRef={keepRunningRef} onClose={() => setCancelState({ open: false, busy: false, error: '' })} footer={<><button ref={keepRunningRef} type="button" disabled={cancelState.busy} onClick={() => setCancelState({ open: false, busy: false, error: '' })}>继续运行</button><Button variant="danger" disabled={cancelState.busy} onClick={() => void cancelRun()}>{cancelState.busy ? '正在提交…' : '确认取消运行'}</Button></>}><p className={styles.cancelWarning}>系统会请求 Oracle 侧停止当前执行；已经写入结果表的数据仍按运行清理策略处理。</p>{cancelState.error ? <p className={styles.cancelError} role="alert">{cancelState.error}</p> : null}</Dialog>
       <ReportFieldDetailDrawer column={detailColumn} onClose={() => setDetailColumn(null)} />
     </PageCanvas>
@@ -383,7 +381,6 @@ function runLabel(status: ReportRun['status']) { return ({ QUEUED: '等待执行
 function exportTone(item: ReportExport): StatusTagTone { return item.status === 'READY' ? 'success' : item.status === 'FAILED' || item.status === 'CANCELLED' || item.status === 'EXPIRED' ? 'danger' : 'running' }
 function exportLabel(status: ReportExport['status']) { return ({ PENDING: '等待导出', RUNNING: '生成并上传 Excel', READY: '文件就绪', FAILED: '导出失败', CANCELLED: '导出取消', EXPIRED: '文件已过期' })[status] }
 function exportProgress(item: ReportExport) { return `${exportLabel(item.status)} · 已处理 ${item.processedRows.toLocaleString('zh-CN')} 行${item.currentSheet ? ` · ${item.currentSheet}` : ''}` }
-function formatDateShort(value: string) { const date = new Date(value); return Number.isNaN(date.getTime()) ? '-' : new Intl.DateTimeFormat('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }).format(date) }
 function safeIntegerRule(value: unknown) { return typeof value === 'number' && Number.isSafeInteger(value) && value >= 0 ? value : undefined }
 function zonedDateTimeToRFC3339(value: string, timezone: string) {
   if (/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(?::\d{2})?(?:Z|[+-]\d{2}:\d{2})$/.test(value)) {
