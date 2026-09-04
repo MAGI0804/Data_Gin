@@ -418,6 +418,23 @@ func (r *gormAccountAuthRepository) LoadProfile(ctx context.Context, userID uint
 	} else if err := r.db.WithContext(ctx).Table("role_permissions").Distinct("role_permissions.permission_code").Joins("JOIN user_roles ON user_roles.role_id = role_permissions.role_id").Joins("JOIN roles ON roles.id = user_roles.role_id").Where("user_roles.user_id = ? AND roles.status = ?", userID, model.RoleStatusActive).Pluck("role_permissions.permission_code", &permissions).Error; err != nil {
 		return nil, err
 	}
+	if !isSuper {
+		actions, err := loadConsoleReportCategoryActions(ctx, r.db, userID)
+		if err != nil {
+			return nil, err
+		}
+		seen := make(map[string]struct{}, len(permissions)+3)
+		for _, permission := range permissions {
+			seen[permission] = struct{}{}
+		}
+		for _, permission := range reportRuntimePermissions(actions) {
+			if _, exists := seen[permission]; exists {
+				continue
+			}
+			permissions = append(permissions, permission)
+			seen[permission] = struct{}{}
+		}
+	}
 	mallIDs := []uint{}
 	if account.MallScopeMode == model.MallScopeSelected {
 		if err := r.db.WithContext(ctx).Model(&model.UserMallScope{}).Where("user_id = ?", userID).Pluck("mall_id", &mallIDs).Error; err != nil {

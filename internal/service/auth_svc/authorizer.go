@@ -16,6 +16,7 @@ const maximumPermissionCodeBytes = 64
 type authorizationRepository interface {
 	ActiveConsoleRoles(ctx context.Context, userID uint) ([]authorizationRole, error)
 	ConsoleRoleHasPermission(ctx context.Context, userID uint, code string) (bool, error)
+	ConsoleHasReportCategoryAction(ctx context.Context, userID uint, action string) (bool, error)
 	OpenAPIHasPermission(ctx context.Context, userID uint, code string, now time.Time) (bool, error)
 }
 
@@ -59,17 +60,23 @@ func (a *Authorizer) HasPermission(ctx context.Context, user model.User, code st
 				return true, nil
 			}
 		}
-		if len(roles) == 0 {
-			return false, nil
+		if len(roles) > 0 {
+			for _, candidate := range permissionCandidates(code) {
+				allowed, err := a.repository.ConsoleRoleHasPermission(ctx, user.ID, candidate)
+				if err != nil {
+					return false, fmt.Errorf("authorizer: check console permission: %w", err)
+				}
+				if allowed {
+					return true, nil
+				}
+			}
 		}
-		for _, candidate := range permissionCandidates(code) {
-			allowed, err := a.repository.ConsoleRoleHasPermission(ctx, user.ID, candidate)
+		if action := reportCategoryActionForPermission(code); action != "" {
+			allowed, err := a.repository.ConsoleHasReportCategoryAction(ctx, user.ID, action)
 			if err != nil {
-				return false, fmt.Errorf("authorizer: check console permission: %w", err)
+				return false, fmt.Errorf("authorizer: check report category permission: %w", err)
 			}
-			if allowed {
-				return true, nil
-			}
+			return allowed, nil
 		}
 		return false, nil
 	case model.AccountTypeOpenAPI:
@@ -149,6 +156,23 @@ func (r *gormAuthorizationRepository) ConsoleRoleHasPermission(ctx context.Conte
 		Where("user_roles.user_id = ? AND roles.status = ? AND role_permissions.permission_code = ?", userID, model.RoleStatusActive, code).
 		Limit(1).Scan(&marker).Error
 	return marker == 1, err
+}
+
+func (r *gormAuthorizationRepository) ConsoleHasReportCategoryAction(ctx context.Context, userID uint, action string) (bool, error) {
+	db, err := r.database(ctx)
+	if err != nil {
+		return false, err
+	}
+	actions, err := loadConsoleReportCategoryActions(ctx, db, userID)
+	if err != nil {
+		return false, err
+	}
+	for _, candidate := range actions {
+		if candidate == action {
+			return true, nil
+		}
+	}
+	return false, nil
 }
 
 func (r *gormAuthorizationRepository) OpenAPIHasPermission(ctx context.Context, userID uint, code string, now time.Time) (bool, error) {

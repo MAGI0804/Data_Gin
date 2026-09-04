@@ -17,6 +17,9 @@ type fakeAuthorizationRepository struct {
 	consolePermissions map[string]bool
 	openPermissions    map[string]bool
 	permissionErrors   map[string]error
+	categoryActions    map[string]bool
+	categoryError      error
+	categoryCodes      []string
 	err                error
 	roleCalls          int
 	consoleCodes       []string
@@ -38,6 +41,13 @@ func (f *fakeAuthorizationRepository) ConsoleRoleHasPermission(_ context.Context
 	}
 	return f.console, f.err
 }
+func (f *fakeAuthorizationRepository) ConsoleHasReportCategoryAction(_ context.Context, _ uint, action string) (bool, error) {
+	f.categoryCodes = append(f.categoryCodes, action)
+	if f.categoryError != nil {
+		return false, f.categoryError
+	}
+	return f.categoryActions[action], nil
+}
 func (f *fakeAuthorizationRepository) OpenAPIHasPermission(_ context.Context, _ uint, code string, now time.Time) (bool, error) {
 	f.openCodes, f.now = append(f.openCodes, code), now
 	if err := f.permissionErrors[code]; err != nil {
@@ -47,6 +57,43 @@ func (f *fakeAuthorizationRepository) OpenAPIHasPermission(_ context.Context, _ 
 		return f.openPermissions[code], nil
 	}
 	return f.openAPI, f.err
+}
+
+func TestAuthorizerUsesReportCategoryGrantsAsRuntimeCapability(t *testing.T) {
+	user := model.User{BaseModel: &model.BaseModel{ID: 7}, AccountType: model.AccountTypeConsole, Status: model.AccountStatusActive}
+	tests := []struct {
+		name       string
+		permission string
+		actions    map[string]bool
+		want       bool
+		wantAction string
+	}{
+		{name: "query opens report navigation", permission: model.PermissionReportRead, actions: map[string]bool{"QUERY": true}, want: true, wantAction: "QUERY"},
+		{name: "query allows report execution", permission: model.PermissionReportExecute, actions: map[string]bool{"QUERY": true}, want: true, wantAction: "QUERY"},
+		{name: "export allows download", permission: model.PermissionReportExport, actions: map[string]bool{"EXPORT": true}, want: true, wantAction: "EXPORT"},
+		{name: "query does not allow export", permission: model.PermissionReportExport, actions: map[string]bool{"QUERY": true}, wantAction: "EXPORT"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			repository := &fakeAuthorizationRepository{categoryActions: tt.actions}
+			allowed, err := newAuthorizer(repository).HasPermission(context.Background(), user, tt.permission)
+			if err != nil || allowed != tt.want {
+				t.Fatalf("HasPermission() = %t, %v, want %t", allowed, err, tt.want)
+			}
+			if !reflect.DeepEqual(repository.categoryCodes, []string{tt.wantAction}) {
+				t.Fatalf("category checks = %v, want %v", repository.categoryCodes, []string{tt.wantAction})
+			}
+		})
+	}
+}
+
+func TestReportRuntimePermissions(t *testing.T) {
+	if got := reportRuntimePermissions([]string{"QUERY"}); !reflect.DeepEqual(got, []string{model.PermissionReportRead, model.PermissionReportExecute}) {
+		t.Fatalf("query permissions = %v", got)
+	}
+	if got := reportRuntimePermissions([]string{"QUERY", "EXPORT"}); !reflect.DeepEqual(got, []string{model.PermissionReportRead, model.PermissionReportExecute, model.PermissionReportExport}) {
+		t.Fatalf("export permissions = %v", got)
+	}
 }
 
 func TestAuthorizerDeniesInvalidUsersWithoutRepository(t *testing.T) {
