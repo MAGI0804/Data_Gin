@@ -162,6 +162,24 @@ func TestAutomaticReportExportBelongsToRequestingUser(t *testing.T) {
 	}
 }
 
+func TestRestoreJobOutboxCreatesOrResetsDeliveryAtomically(t *testing.T) {
+	now := time.Date(2026, 9, 4, 21, 0, 0, 0, time.UTC)
+	run := model.ReportRun{BaseModel: model.BaseModel{ID: 31}, RunUUID: "11111111-1111-4111-8111-111111111111"}
+	query := restoreJobOutbox(newDryRunDB(t), recoveredRunOutbox(run, now), now)
+	if query.Error != nil {
+		t.Fatalf("restoreJobOutbox() error = %v", query.Error)
+	}
+	statement := query.Statement.SQL.String()
+	for _, fragment := range []string{"INSERT INTO `async_job_outbox`", "ON DUPLICATE KEY UPDATE", "`payload_json`", "`published_at`", "`available_at`"} {
+		if !strings.Contains(statement, fragment) {
+			t.Fatalf("restore outbox SQL %q does not contain %q", statement, fragment)
+		}
+	}
+	if !containsSQLVariable(query.Statement.Vars, model.JSONText(`{"run_id":31}`)) {
+		t.Fatalf("restore outbox does not include rebuilt payload: vars=%#v", query.Statement.Vars)
+	}
+}
+
 func TestQueuedSnapshotTimeoutBecomesAuditedFailure(t *testing.T) {
 	db, transactionState := newTransactionDB(t)
 	repository := New(db)

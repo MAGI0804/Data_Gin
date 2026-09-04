@@ -170,13 +170,8 @@ func (repository *Repository) EnsureRunQueued(ctx context.Context, runID uint, n
 		if run.Status != model.ReportRunStatusQueued {
 			return nil
 		}
-		result := tx.Model(&model.AsyncJobOutbox{}).Where("task_key = ? AND task_type = ?", "report:run:"+run.RunUUID, "report:run").
-			Updates(map[string]interface{}{"published_at": nil, "available_at": now, "attempts": 0, "last_error_safe": "", "locked_by": "", "locked_at": nil, "updated_at": now})
-		if result.Error != nil {
-			return fmt.Errorf("report execution recovery: reset queued outbox: %w", result.Error)
-		}
-		if result.RowsAffected != 1 {
-			return fmt.Errorf("report execution recovery: queued outbox count changed")
+		if result := restoreJobOutbox(tx, recoveredRunOutbox(run, now), now); result.Error != nil {
+			return fmt.Errorf("report execution recovery: restore queued outbox: %w", result.Error)
 		}
 		return nil
 	})
@@ -261,13 +256,8 @@ func (repository *Repository) RecoverExpiredPreOracleRuns(ctx context.Context, n
 			if result.RowsAffected == 0 {
 				return nil
 			}
-			outbox := tx.Model(&model.AsyncJobOutbox{}).Where("task_key = ? AND task_type = ?", "report:run:"+run.RunUUID, "report:run").
-				Updates(map[string]interface{}{"published_at": nil, "available_at": now, "attempts": 0, "last_error_safe": "", "locked_by": "", "locked_at": nil, "updated_at": now})
-			if outbox.Error != nil {
-				return fmt.Errorf("reset outbox: %w", outbox.Error)
-			}
-			if outbox.RowsAffected != 1 {
-				return fmt.Errorf("reset outbox count changed")
+			if result := restoreJobOutbox(tx, recoveredRunOutbox(run, now), now); result.Error != nil {
+				return fmt.Errorf("restore outbox: %w", result.Error)
 			}
 			if err := repository.writeSystemAudit(ctx, tx, "REPORT_RUN_RETRY_QUEUED", "REPORT_RUN", run.ID, map[string]interface{}{"reasonCode": "PRE_ORACLE_LEASE_EXPIRED"}); err != nil {
 				return err
@@ -287,6 +277,25 @@ func expiredInterruptedRunQuery(db *gorm.DB, now time.Time, limit int) *gorm.DB 
 		Where("status IN ? AND (lease_expires_at IS NULL OR lease_expires_at <= ?)",
 			[]string{model.ReportRunStatusRunning, model.ReportRunStatusCancelRequested}, now.UTC().Truncate(time.Millisecond)).
 		Order("id ASC").Limit(limit)
+}
+
+func recoveredRunOutbox(run model.ReportRun, now time.Time) model.AsyncJobOutbox {
+	outbox := NewReportRunOutbox(run.RunUUID, now)
+	outbox.PayloadJSON = model.JSONText(fmt.Sprintf(`{"run_id":%d}`, run.ID))
+	return outbox
+}
+
+func restoreJobOutbox(tx *gorm.DB, outbox model.AsyncJobOutbox, now time.Time) *gorm.DB {
+	now = now.UTC().Truncate(time.Millisecond)
+	outbox.AvailableAt = now
+	return tx.Clauses(clause.OnConflict{
+		Columns: []clause.Column{{Name: "task_key"}},
+		DoUpdates: clause.Assignments(map[string]interface{}{
+			"task_type": outbox.TaskType, "payload_json": outbox.PayloadJSON, "queue_name": outbox.QueueName,
+			"available_at": now, "published_at": nil, "attempts": 0, "last_error_safe": "",
+			"locked_by": "", "locked_at": nil, "updated_at": now,
+		}),
+	}).Create(&outbox)
 }
 
 func (repository *Repository) BeginExecution(

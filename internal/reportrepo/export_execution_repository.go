@@ -192,17 +192,10 @@ func (repository *Repository) EnsureExportQueued(ctx context.Context, exportID u
 			(export.Status != model.ReportExportStatusRunning || export.LeaseExpiresAt != nil && now.Before(export.LeaseExpiresAt.UTC())) {
 			return nil
 		}
-		result := tx.Model(&model.AsyncJobOutbox{}).
-			Where("task_key = ? AND task_type = ?", "report:export:"+export.ExportUUID, "report:export").
-			Updates(map[string]interface{}{
-				"published_at": nil, "available_at": now, "attempts": 0, "last_error_safe": "",
-				"locked_by": "", "locked_at": nil, "updated_at": now,
-			})
-		if result.Error != nil {
-			return fmt.Errorf("report export recovery: reset outbox: %w", result.Error)
-		}
-		if result.RowsAffected != 1 {
-			return fmt.Errorf("report export recovery: outbox count changed")
+		outbox := NewReportExportOutbox(export.ExportUUID, now)
+		outbox.PayloadJSON = model.JSONText(fmt.Sprintf(`{"export_id":%d}`, export.ID))
+		if result := restoreJobOutbox(tx, outbox, now); result.Error != nil {
+			return fmt.Errorf("report export recovery: restore outbox: %w", result.Error)
 		}
 		return nil
 	})
