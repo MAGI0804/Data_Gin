@@ -126,10 +126,17 @@ func (service *ReportRunService) Create(ctx context.Context, actor, definitionID
 		(request.RefreshNonce != "" && !refreshNoncePattern.MatchString(request.RefreshNonce)) || len(request.Parameters) > maxReportParameters || len(request.Conditions) > maxReportParameters {
 		return nil, fmt.Errorf("%w: actor, report and parameters are required", ErrReportRunInvalid)
 	}
+	var initialJSONInput bool
 	for attempt := 0; attempt < maxReportRunCreateAttempts; attempt++ {
 		published, err := service.store.FindPublishedReport(ctx, actor, definitionID, reportrepo.ReportActionQuery)
 		if err != nil {
 			return nil, classifyReportRunStoreError(err)
+		}
+		usesJSONInput := isJSONInputReport(published.Version)
+		if attempt == 0 {
+			initialJSONInput = usesJSONInput
+		} else if usesJSONInput != initialJSONInput {
+			return nil, ErrReportConflict
 		}
 		result, err := service.createRunFromPublished(ctx, actor, definitionID, request, published)
 		if err == nil {
@@ -145,6 +152,9 @@ func (service *ReportRunService) Create(ctx context.Context, actor, definitionID
 func (service *ReportRunService) createRunFromPublished(ctx context.Context, actor, definitionID uint, request requestbody.ReportRunCreateRequest, published *reportrepo.PublishedReport) (*ReportRunDTO, error) {
 	if isJSONInputReport(published.Version) {
 		return service.createJSONInputRun(ctx, actor, definitionID, request, published)
+	}
+	if len(request.Conditions) > 0 {
+		return nil, fmt.Errorf("%w: conditions are only valid for JSON input reports", ErrReportRunInvalid)
 	}
 	definitions := reportParameterDefinitions(published.Parameters)
 	runUUID := uuid.NewString()

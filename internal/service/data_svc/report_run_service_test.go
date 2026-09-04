@@ -344,6 +344,42 @@ func TestReportRunServiceRevalidatesConditionsAgainstLatestPublishedVersion(t *t
 	}
 }
 
+func TestReportRunServiceStopsRetryWhenPublishedInputModeChanges(t *testing.T) {
+	previous := publishedRunFixture()
+	previous.Version.ExecutionMode = model.ReportExecutionModeRefCursor
+	previous.Version.InputSchemaJSON = model.JSONText(`{"store_id":{"type":"str","displayName":"门店","required":true}}`)
+	previous.Parameters = nil
+	latest := publishedRunFixture()
+	latest.Version.ID = 24
+	latest.Parameters = nil
+	store := &fakeReportRunStore{
+		publishedSequence: []*reportrepo.PublishedReport{previous, latest},
+		createErrors:      []error{reportrepo.ErrDraftVersionConflict},
+	}
+	service := NewReportRunServiceWithDependencies(store, &fakeReportParameterCipher{})
+
+	_, err := service.Create(t.Context(), 17, 9, requestbody.ReportRunCreateRequest{
+		Conditions: map[string]json.RawMessage{"store_id": json.RawMessage(`"S001"`)},
+	})
+	if !errors.Is(err, ErrReportConflict) || store.findCalls != 2 || store.createCalls != 1 {
+		t.Fatalf("Create() error=%v find calls=%d create calls=%d", err, store.findCalls, store.createCalls)
+	}
+}
+
+func TestReportRunServiceRejectsConditionsForParameterReport(t *testing.T) {
+	published := publishedRunFixture()
+	published.Parameters = nil
+	store := &fakeReportRunStore{published: published}
+	service := NewReportRunServiceWithDependencies(store, &fakeReportParameterCipher{})
+
+	_, err := service.Create(t.Context(), 17, 9, requestbody.ReportRunCreateRequest{
+		Conditions: map[string]json.RawMessage{"storeCode": json.RawMessage(`"S001"`)},
+	})
+	if !errors.Is(err, ErrReportRunInvalid) || !strings.Contains(err.Error(), "conditions are only valid") || store.createCalls != 0 {
+		t.Fatalf("Create() error=%v create calls=%d", err, store.createCalls)
+	}
+}
+
 func TestReportRunServiceStopsAfterLatestVersionChangesTwice(t *testing.T) {
 	store := &fakeReportRunStore{
 		publishedSequence: []*reportrepo.PublishedReport{publishedRunFixture(), publishedRunFixture()},
