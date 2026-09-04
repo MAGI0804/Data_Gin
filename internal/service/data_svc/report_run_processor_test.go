@@ -66,6 +66,25 @@ func TestReportRunProcessorRequestsTargetedCleanupForStaleResultPurge(t *testing
 	}
 }
 
+func TestStaleResultCleanupBlockerAcceptsExpiredSuccessAndTerminalExport(t *testing.T) {
+	now := time.Date(2026, 8, 12, 12, 0, 0, 0, time.UTC)
+	expired := now.Add(-time.Minute)
+	failed := model.ReportExportStatusFailed
+	exportID := uint(41)
+	blocker := &reportrepo.RunExecutionBlocker{
+		RunID: 24, Status: model.ReportRunStatusSucceeded, ResultExpiresAt: &expired,
+		ExportID: &exportID, ExportStatus: &failed,
+	}
+	if got := staleResultCleanupBlocker(blocker, now); got != 24 {
+		t.Fatalf("cleanup blocker=%d", got)
+	}
+	ready := model.ReportExportStatusReady
+	blocker.ExportStatus = &ready
+	if got := staleResultCleanupBlocker(blocker, now); got != 0 {
+		t.Fatalf("ready export cleanup blocker=%d", got)
+	}
+}
+
 func TestReportRunProcessorFailsQueuedRunWhenSnapshotWaitExpires(t *testing.T) {
 	store := newFakeReportExecutionStore()
 	store.beginDisposition = reportrepo.RunDispositionBusy

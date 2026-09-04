@@ -286,12 +286,29 @@ func (processor *ReportRunProcessor) Process(ctx context.Context, runID uint, fa
 }
 
 func staleResultCleanupBlocker(blocker *reportrepo.RunExecutionBlocker, now time.Time) uint {
-	if blocker == nil || blocker.RunID == 0 || blocker.Status != model.ReportRunStatusResultPurging ||
+	if blocker == nil || blocker.RunID == 0 ||
+		(blocker.Status != model.ReportRunStatusSucceeded && blocker.Status != model.ReportRunStatusResultPurging) ||
 		blocker.ResultExpiresAt == nil || now.Before(blocker.ResultExpiresAt.UTC()) || blocker.ResultPurgedAt != nil ||
-		blocker.ExportID != nil || blocker.LeaseExpiresAt != nil && now.Before(blocker.LeaseExpiresAt.UTC()) {
+		blocker.LeaseExpiresAt != nil && now.Before(blocker.LeaseExpiresAt.UTC()) || !staleResultCleanupExport(blocker, now) {
 		return 0
 	}
 	return blocker.RunID
+}
+
+func staleResultCleanupExport(blocker *reportrepo.RunExecutionBlocker, now time.Time) bool {
+	if blocker.ExportID == nil {
+		return true
+	}
+	if blocker.ExportStatus == nil || blocker.ExportPurgedAt != nil ||
+		blocker.ExportLeaseExpiresAt != nil && now.Before(blocker.ExportLeaseExpiresAt.UTC()) {
+		return false
+	}
+	switch *blocker.ExportStatus {
+	case model.ReportExportStatusFailed, model.ReportExportStatusCancelled, model.ReportExportStatusExpired:
+		return true
+	default:
+		return false
+	}
 }
 
 func buildRefCursorPayload(run model.ReportRun) (string, error) {
