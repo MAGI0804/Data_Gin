@@ -104,72 +104,79 @@ func (reconciler *ReportRunReconciler) reconcileCycle(ctx context.Context) {
 
 func (reconciler *ReportRunReconciler) Reconcile(ctx context.Context) error {
 	now := reconciler.now().UTC()
+	var recoveryErrors []error
 	legacyRecoveryCount, err := reconciler.store.RecoverLegacySnapshotStates(ctx, now, reconciler.batchSize)
 	if err != nil {
-		return err
-	}
-	if legacyRecoveryCount > 0 {
+		recoveryErrors = append(recoveryErrors, fmt.Errorf("recover legacy snapshot states: %w", err))
+	} else if legacyRecoveryCount > 0 {
 		zap.L().Info("已恢复历史报表快照状态", zap.Int64("report_run_count", legacyRecoveryCount))
 	}
 	if _, err := reconciler.store.RecoverExpiredPreOracleRuns(ctx, now, reconciler.batchSize); err != nil {
-		return err
+		recoveryErrors = append(recoveryErrors, fmt.Errorf("recover interrupted report runs: %w", err))
 	}
 	runIDs, err := reconciler.store.ListReconciliationCandidates(ctx, now, reconciler.batchSize)
 	if err != nil {
-		return err
-	}
-	for _, runID := range runIDs {
-		if err := reconciler.reconcileOne(ctx, runID); err != nil && !errors.Is(err, context.Canceled) {
-			return err
+		recoveryErrors = append(recoveryErrors, fmt.Errorf("list report reconciliation candidates: %w", err))
+	} else {
+		for _, runID := range runIDs {
+			if err := reconciler.reconcileOne(ctx, runID); err != nil && !errors.Is(err, context.Canceled) {
+				recoveryErrors = append(recoveryErrors, fmt.Errorf("reconcile report run %d: %w", runID, err))
+			}
 		}
 	}
 	expiredQueuedIDs, err := reconciler.store.ListExpiredQueuedRuns(ctx, now.Add(-job.ReportRunSnapshotWaitLimit), reconciler.batchSize)
 	if err != nil {
-		return err
-	}
-	for _, runID := range expiredQueuedIDs {
-		if err := reconciler.store.MarkQueuedExecutionFailed(ctx, runID, "SNAPSHOT_WAIT_TIMEOUT", "等待其他用户的报表文件生成超时，请重新提交", now); err != nil && !errors.Is(err, reportrepo.ErrReportRunLeaseLost) {
-			return err
+		recoveryErrors = append(recoveryErrors, fmt.Errorf("list expired queued report runs: %w", err))
+	} else {
+		for _, runID := range expiredQueuedIDs {
+			if err := reconciler.store.MarkQueuedExecutionFailed(ctx, runID, "SNAPSHOT_WAIT_TIMEOUT", "等待其他用户的报表文件生成超时，请重新提交", now); err != nil && !errors.Is(err, reportrepo.ErrReportRunLeaseLost) {
+				recoveryErrors = append(recoveryErrors, fmt.Errorf("fail expired queued report run %d: %w", runID, err))
+			}
 		}
 	}
 	queuedIDs, err := reconciler.store.ListQueuedRunsMissingDelivery(ctx, reconciler.batchSize)
 	if err != nil {
-		return err
-	}
-	for _, runID := range queuedIDs {
-		if err := reconciler.store.EnsureRunQueued(ctx, runID, reconciler.now().UTC()); err != nil {
-			return err
+		recoveryErrors = append(recoveryErrors, fmt.Errorf("list undelivered report runs: %w", err))
+	} else {
+		for _, runID := range queuedIDs {
+			if err := reconciler.store.EnsureRunQueued(ctx, runID, reconciler.now().UTC()); err != nil {
+				recoveryErrors = append(recoveryErrors, fmt.Errorf("restore report run delivery %d: %w", runID, err))
+				continue
+			}
+			zap.L().Info("已恢复报表查询任务投递", zap.Uint("report_run_id", runID))
 		}
-		zap.L().Info("已恢复报表查询任务投递", zap.Uint("report_run_id", runID))
 	}
 	terminalCleanupCount, err := reconciler.store.ScheduleTerminalExportResultCleanup(ctx, now, reconciler.batchSize)
 	if err != nil {
-		return err
-	}
-	if terminalCleanupCount > 0 {
+		recoveryErrors = append(recoveryErrors, fmt.Errorf("schedule terminal export result cleanup: %w", err))
+	} else if terminalCleanupCount > 0 {
 		zap.L().Info("已恢复终态导出的报表结果清理", zap.Int64("report_run_count", terminalCleanupCount))
 	}
 	missingExportRunIDs, err := reconciler.store.ListSuccessfulRunsMissingExport(ctx, now, reconciler.batchSize)
 	if err != nil {
-		return err
-	}
-	for _, runID := range missingExportRunIDs {
-		if err := reconciler.store.EnsureAutomaticExportQueued(ctx, runID, reconciler.now().UTC()); err != nil {
-			return err
+		recoveryErrors = append(recoveryErrors, fmt.Errorf("list report runs missing exports: %w", err))
+	} else {
+		for _, runID := range missingExportRunIDs {
+			if err := reconciler.store.EnsureAutomaticExportQueued(ctx, runID, reconciler.now().UTC()); err != nil {
+				recoveryErrors = append(recoveryErrors, fmt.Errorf("restore automatic export for run %d: %w", runID, err))
+				continue
+			}
+			zap.L().Info("已补建历史报表自动导出", zap.Uint("report_run_id", runID))
 		}
-		zap.L().Info("已补建历史报表自动导出", zap.Uint("report_run_id", runID))
 	}
 	exportIDs, err := reconciler.store.ListExportsMissingDelivery(ctx, now, reconciler.batchSize)
 	if err != nil {
-		return err
-	}
-	for _, exportID := range exportIDs {
-		if err := reconciler.store.EnsureExportQueued(ctx, exportID, reconciler.now().UTC()); err != nil {
-			return err
+		recoveryErrors = append(recoveryErrors, fmt.Errorf("list undelivered report exports: %w", err))
+	} else {
+		for _, exportID := range exportIDs {
+			if err := reconciler.store.EnsureExportQueued(ctx, exportID, reconciler.now().UTC()); err != nil {
+				recoveryErrors = append(recoveryErrors, fmt.Errorf("restore report export delivery %d: %w", exportID, err))
+				continue
+			}
+			zap.L().Info("已恢复报表导出任务投递", zap.Uint("report_export_id", exportID))
 		}
-		zap.L().Info("已恢复报表导出任务投递", zap.Uint("report_export_id", exportID))
 	}
-	return nil
+	return errors.Join(recoveryErrors...)
 }
 
 func (reconciler *ReportRunReconciler) ReconcileOne(ctx context.Context, runID uint) error {

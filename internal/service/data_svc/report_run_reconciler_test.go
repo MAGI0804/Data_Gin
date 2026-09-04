@@ -50,6 +50,20 @@ func TestReportRunReconcilerRecoversLostExportDelivery(t *testing.T) {
 	}
 }
 
+func TestReportRunReconcilerContinuesAfterOneDeliveryRecoveryFails(t *testing.T) {
+	store := &fakeReconciliationStore{
+		queuedRecoveryIDs: []uint{31}, ensureRunQueuedErr: errors.New("broken run outbox"),
+		missingExportIDs: []uint{41},
+	}
+	reconciler := NewReportRunReconcilerWithDependencies(store, fakeReportCredentialDecryptor{}, &fakeResultEvidenceReader{})
+	if err := reconciler.Reconcile(t.Context()); err == nil {
+		t.Fatal("Reconcile() error = nil")
+	}
+	if store.runQueuedCalls != 1 || store.exportQueued != 1 || store.exportQueuedID != 41 {
+		t.Fatalf("runQueued=%d exportQueued=%d exportID=%d", store.runQueuedCalls, store.exportQueued, store.exportQueuedID)
+	}
+}
+
 func TestReportRunReconcilerCreatesMissingAutomaticExport(t *testing.T) {
 	now := time.Date(2026, 9, 4, 20, 0, 0, 0, time.UTC)
 	store := &fakeReconciliationStore{successfulRunsMissingExport: []uint{26}}
@@ -174,6 +188,9 @@ type fakeReconciliationStore struct {
 	terminalCleanupCalls        int
 	legacyRecoveryCount         int64
 	legacyRecoveryCalls         int
+	queuedRecoveryIDs           []uint
+	ensureRunQueuedErr          error
+	runQueuedCalls              int
 }
 
 func (store *fakeReconciliationStore) RecoverLegacySnapshotStates(context.Context, time.Time, int) (int64, error) {
@@ -213,10 +230,11 @@ func (store *fakeReconciliationStore) MarkQueuedExecutionFailed(_ context.Contex
 	return nil
 }
 func (store *fakeReconciliationStore) ListQueuedRunsMissingDelivery(context.Context, int) ([]uint, error) {
-	return nil, nil
+	return store.queuedRecoveryIDs, nil
 }
 func (store *fakeReconciliationStore) EnsureRunQueued(context.Context, uint, time.Time) error {
-	return nil
+	store.runQueuedCalls++
+	return store.ensureRunQueuedErr
 }
 func (store *fakeReconciliationStore) ListExportsMissingDelivery(_ context.Context, now time.Time, _ int) ([]uint, error) {
 	store.exportRecoveryCutoff = now
