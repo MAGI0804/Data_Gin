@@ -27,8 +27,9 @@ import (
 	"go.uber.org/zap"
 )
 
-const schemaMigrationVersion = "2026-09-01-access-permission-v20"
-const previousSchemaMigrationVersion = "2026-09-01-office-message-schedule-v19"
+const schemaMigrationVersion = "2026-09-04-report-category-access-v21"
+const previousSchemaMigrationVersion = "2026-09-01-access-permission-v20"
+const officeMessageScheduleMigrationVersion = "2026-09-01-office-message-schedule-v19"
 const officeMessageFileMigrationVersion = "2026-09-01-office-message-file-v18"
 const officeMessageBotMigrationVersion = "2026-09-01-office-message-bot-v17"
 const officeMessageCompatMigrationVersion = "2026-09-01-office-message-compat-v16"
@@ -109,7 +110,7 @@ func ApplySchemaMigrations() (resultErr error) {
 	}
 	baselineVersion, baselineApplied, err := appliedSchemaMigrationBaseline(
 		db,
-		officeMessageIncrementalMigrationBaselines(),
+		schemaIncrementalMigrationBaselines(),
 	)
 	if err != nil {
 		return err
@@ -120,7 +121,7 @@ func ApplySchemaMigrations() (resultErr error) {
 	if err := runPendingSchemaMigration(
 		baselineApplied,
 		func() error {
-			return db.AutoMigrate(officeMessageMigrationModels()...)
+			return db.AutoMigrate(incrementalSchemaMigrationModels()...)
 		},
 		autoMigrateTables,
 	); err != nil {
@@ -183,9 +184,10 @@ func bojunOracleMigrationModels() []interface{} {
 	}
 }
 
-func officeMessageIncrementalMigrationBaselines() []string {
+func schemaIncrementalMigrationBaselines() []string {
 	return []string{
 		previousSchemaMigrationVersion,
+		officeMessageScheduleMigrationVersion,
 		officeMessageFileMigrationVersion,
 		officeMessageBotMigrationVersion,
 		officeMessageCompatMigrationVersion,
@@ -193,6 +195,14 @@ func officeMessageIncrementalMigrationBaselines() []string {
 		officeMessagePreviousMigrationVersion,
 		officeMessageMigrationBaselineVersion,
 	}
+}
+
+func incrementalSchemaMigrationModels() []interface{} {
+	models := append([]interface{}{}, officeMessageMigrationModels()...)
+	return append(models,
+		&model.ReportCategoryAccess{},
+		&model.ReportCategoryGrant{},
+	)
 }
 
 func officeMessageMigrationModels() []interface{} {

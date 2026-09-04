@@ -39,12 +39,15 @@ func TestReportCenterMigrationModelsAreUnique(t *testing.T) {
 	}
 }
 
-func TestSchemaMigrationVersionIncludesBojunOracleModels(t *testing.T) {
-	if schemaMigrationVersion != "2026-09-01-access-permission-v20" {
+func TestSchemaMigrationVersionIncludesReportCategoryAccess(t *testing.T) {
+	if schemaMigrationVersion != "2026-09-04-report-category-access-v21" {
 		t.Fatalf("schemaMigrationVersion = %q", schemaMigrationVersion)
 	}
-	if previousSchemaMigrationVersion != "2026-09-01-office-message-schedule-v19" {
+	if previousSchemaMigrationVersion != "2026-09-01-access-permission-v20" {
 		t.Fatalf("previousSchemaMigrationVersion = %q", previousSchemaMigrationVersion)
+	}
+	if officeMessageScheduleMigrationVersion != "2026-09-01-office-message-schedule-v19" {
+		t.Fatalf("officeMessageScheduleMigrationVersion = %q", officeMessageScheduleMigrationVersion)
 	}
 	if officeMessageFileMigrationVersion != "2026-09-01-office-message-file-v18" {
 		t.Fatalf("officeMessageFileMigrationVersion = %q", officeMessageFileMigrationVersion)
@@ -73,6 +76,12 @@ func TestOfficeMessagePreferredMigrationBaseline(t *testing.T) {
 		wantVersion     string
 		wantApplied     bool
 	}{
+		{
+			name:            "v20 direct upgrade",
+			appliedVersions: []string{"2026-09-01-access-permission-v20"},
+			wantVersion:     "2026-09-01-access-permission-v20",
+			wantApplied:     true,
+		},
 		{
 			name:            "v19 direct upgrade",
 			appliedVersions: []string{"2026-09-01-office-message-schedule-v19"},
@@ -125,8 +134,9 @@ func TestOfficeMessagePreferredMigrationBaseline(t *testing.T) {
 				"2026-09-01-office-message-bot-v17",
 				"2026-09-01-office-message-file-v18",
 				"2026-09-01-office-message-schedule-v19",
+				"2026-09-01-access-permission-v20",
 			},
-			wantVersion: "2026-09-01-office-message-schedule-v19",
+			wantVersion: "2026-09-01-access-permission-v20",
 			wantApplied: true,
 		},
 		{
@@ -135,7 +145,7 @@ func TestOfficeMessagePreferredMigrationBaseline(t *testing.T) {
 		},
 	}
 
-	candidates := officeMessageIncrementalMigrationBaselines()
+	candidates := schemaIncrementalMigrationBaselines()
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			gotVersion, gotApplied := preferredSchemaMigrationBaseline(candidates, test.appliedVersions)
@@ -143,6 +153,27 @@ func TestOfficeMessagePreferredMigrationBaseline(t *testing.T) {
 				t.Fatalf("preferredSchemaMigrationBaseline() = (%q, %t), want (%q, %t)", gotVersion, gotApplied, test.wantVersion, test.wantApplied)
 			}
 		})
+	}
+}
+
+func TestIncrementalSchemaMigrationIncludesReportCategoryAccessTables(t *testing.T) {
+	models := incrementalSchemaMigrationModels()
+	want := []reflect.Type{
+		reflect.TypeOf(&model.OfficeMessage{}),
+		reflect.TypeOf(&model.OfficePushTarget{}),
+		reflect.TypeOf(&model.OfficePushSchedule{}),
+		reflect.TypeOf(&model.OfficePushRun{}),
+		reflect.TypeOf(&model.OfficeProcedureExportLock{}),
+		reflect.TypeOf(&model.ReportCategoryAccess{}),
+		reflect.TypeOf(&model.ReportCategoryGrant{}),
+	}
+	if len(models) != len(want) {
+		t.Fatalf("incrementalSchemaMigrationModels() count = %d, want %d", len(models), len(want))
+	}
+	for index, migrationModel := range models {
+		if gotType := reflect.TypeOf(migrationModel); gotType != want[index] {
+			t.Fatalf("incrementalSchemaMigrationModels()[%d] = %v, want %v", index, gotType, want[index])
+		}
 	}
 }
 
