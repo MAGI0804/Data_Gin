@@ -49,6 +49,7 @@ export type NavKey =
   | 'excel_write'
   | 'report_catalog'
   | 'report_configuration'
+  | 'report_permissions'
   | 'report_query'
   | 'report_exports'
   | 'office_messages'
@@ -90,7 +91,8 @@ export const navGroups: NavGroup[] = [
     items: [
       { key: 'report_catalog', label: '报表目录', description: '报表定义与发布状态', icon: <FileSpreadsheet aria-hidden="true" /> },
       { key: 'report_configuration', label: '报表配置', description: '过程、形参与字段契约', icon: <Settings2 aria-hidden="true" /> },
-      { key: 'report_query', label: '报表查询', description: '参数查询与结果预览', icon: <Search aria-hidden="true" /> },
+      { key: 'report_permissions', label: '分类权限', description: '按分类授权用户与角色', icon: <Users aria-hidden="true" /> },
+      { key: 'report_query', label: '报表下载', description: '仅展示已上线报表', icon: <Search aria-hidden="true" /> },
       { key: 'report_exports', label: '导出中心', description: 'Excel 与结果清理状态', icon: <Download aria-hidden="true" /> },
     ],
   },
@@ -133,7 +135,7 @@ const navKeys = navItems.map((item) => item.key)
 const compactWorkspaceKeys = new Set<NavKey>([
   'access_management', 'sources', 'receive', 'pull_records', 'backfill', 'youzan_distribution', 'rules', 'processed',
   'methods', 'destinations', 'tasks', 'push_policy', 'overview', 'runs', 'delivery_logs', 'step_runs', 'business_overview', 'store_info',
-  'mall_weather', 'report_catalog', 'report_configuration', 'report_query', 'report_exports', 'excel_jobs',
+  'mall_weather', 'report_catalog', 'report_configuration', 'report_permissions', 'report_query', 'report_exports', 'excel_jobs',
   'excel_schemes', 'excel_write',
   'office_messages', 'office_push',
 ])
@@ -165,6 +167,7 @@ export function usesCompactWorkspace(key: NavKey) {
 export function reportCenterSection(key: NavKey): ReportCenterSection | null {
   if (key === 'report_catalog') return 'catalog'
   if (key === 'report_configuration') return 'configuration'
+  if (key === 'report_permissions') return 'permissions'
   if (key === 'report_query') return 'query'
   if (key === 'report_exports') return 'exports'
   return null
@@ -172,6 +175,7 @@ export function reportCenterSection(key: NavKey): ReportCenterSection | null {
 
 export function reportCenterNavKey(section: ReportCenterSection): NavKey {
   if (section === 'configuration') return 'report_configuration'
+  if (section === 'permissions') return 'report_permissions'
   if (section === 'query') return 'report_query'
   if (section === 'exports') return 'report_exports'
   return 'report_catalog'

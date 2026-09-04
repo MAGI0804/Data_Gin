@@ -1,7 +1,7 @@
 import type { ClientResponse, HTTPMethod } from '../api/client'
 import { isReportInputQueryName } from './inputQueryName.js'
 import { parseReportInputSchemaDocument, reportInputSchemaDocument } from './refCursorConfig.js'
-import type { ReportAudit, ReportAuditPage, ReportAuditQuery, ReportCatalogPage, ReportCatalogQuery, ReportColumn, ReportDatasource, ReportDatasourceInput, ReportDatasourceTest, ReportDefinitionStatus, ReportDraft, ReportExport, ReportExportPage, ReportFilterOperator, ReportGrant, ReportInputOption, ReportInputQueryDefinition, ReportInputQueryDefinitionInput, ReportInputQueryTestResult, ReportParameter, ReportProcedureArgument, ReportProcedurePage, ReportProcedureRef, ReportProcedureSignature, ReportProcedureSummary, ReportPublication, ReportResultPage, ReportResultQuery, ReportResultTableColumn, ReportResultTablePage, ReportResultTableRef, ReportResultTableSchema, ReportResultTableSummary, ReportRun, ReportRunContract, ReportRunStatus, ReportSummary, ReportVersionDiff, ReportVersionPage, ReportVersionSummary } from './types'
+import type { ReportAudit, ReportAuditPage, ReportAuditQuery, ReportCatalogPage, ReportCatalogQuery, ReportCategoryAccess, ReportColumn, ReportDatasource, ReportDatasourceInput, ReportDatasourceTest, ReportDefinitionStatus, ReportDraft, ReportExport, ReportExportPage, ReportFilterOperator, ReportGrant, ReportInputOption, ReportInputQueryDefinition, ReportInputQueryDefinitionInput, ReportInputQueryTestResult, ReportParameter, ReportProcedureArgument, ReportProcedurePage, ReportProcedureRef, ReportProcedureSignature, ReportProcedureSummary, ReportPublication, ReportResultPage, ReportResultQuery, ReportResultTableColumn, ReportResultTablePage, ReportResultTableRef, ReportResultTableSchema, ReportResultTableSummary, ReportRun, ReportRunContract, ReportRunStatus, ReportSummary, ReportVersionDiff, ReportVersionPage, ReportVersionSummary } from './types'
 
 type JsonRecord = Record<string, unknown>
 
@@ -17,22 +17,63 @@ export type ReportCenterClient = (path: string, options?: {
 type ReportAPIResult<T> = { ok: true; data: T } | { ok: false; error: string }
 
 export async function getReportCatalog(client: ReportCenterClient, query: ReportCatalogQuery, signal?: AbortSignal) {
+	return getReportCatalogFromPath(client, '/v1/reports', query, signal, '报表目录加载失败，请稍后重试。')
+}
+
+export async function getReportDownloads(client: ReportCenterClient, query: ReportCatalogQuery, signal?: AbortSignal) {
+	return getReportCatalogFromPath(client, '/v1/report-downloads', query, signal, '可下载报表加载失败，请稍后重试。')
+}
+
+async function getReportCatalogFromPath(client: ReportCenterClient, path: string, query: ReportCatalogQuery, signal: AbortSignal | undefined, fallbackError: string) {
   const search = new URLSearchParams()
   if (query.search?.trim()) search.set('search', query.search.trim())
   if (query.category?.trim()) search.set('category', query.category.trim())
   if (query.afterId && query.afterId > 0) search.set('afterId', String(query.afterId))
   search.set('limit', String(Math.min(100, Math.max(1, query.limit ?? 50))))
 
-  const response = await client(`/v1/reports?${search.toString()}`, {
+  const response = await client(`${path}?${search.toString()}`, {
     method: 'GET',
     signal,
     showResult: false,
     silentLoading: true,
   })
   if (!response.ok) {
-    return { ok: false as const, error: response.error?.message ?? '报表目录加载失败，请稍后重试。' }
+    return { ok: false as const, error: response.error?.message ?? fallbackError }
   }
-  return { ok: true as const, page: parseReportCatalogPage(response.data) }
+  try {
+    return { ok: true as const, page: parseReportCatalogPage(response.data) }
+  } catch {
+    return { ok: false as const, error: '服务返回的报表目录格式不完整，请稍后重试。' }
+  }
+}
+
+export async function getReportCategoryAccess(client: ReportCenterClient, signal?: AbortSignal): Promise<ReportAPIResult<ReportCategoryAccess[]>> {
+	return requestAndParse(client, '/v1/report-category-access', { method: 'GET', signal }, parseReportCategoryAccessList, '报表分类权限加载失败。')
+}
+
+export async function replaceReportCategoryAccess(client: ReportCenterClient, access: ReportCategoryAccess): Promise<ReportAPIResult<ReportCategoryAccess>> {
+	return requestAndParse(client, '/v1/report-category-access', {
+		method: 'PUT',
+		body: { category: access.category, expectedLockVersion: access.lockVersion, grants: access.grants },
+	}, parseReportCategoryAccess, '报表分类权限保存失败。')
+}
+
+export function parseReportCategoryAccessList(payload: unknown): ReportCategoryAccess[] {
+	const data = unwrapData(payload)
+	if (!Array.isArray(data.items)) throw new Error('invalid report category access list')
+	return data.items.map(parseReportCategoryAccess)
+}
+
+export function parseReportCategoryAccess(payload: unknown): ReportCategoryAccess {
+	const data = unwrapData(payload)
+	const category = publicString(data.category, 64)
+	const reportCount = strictNonNegativeInteger(data.reportCount)
+	const configured = data.configured === true
+	const lockVersion = nonNegativeInteger(data.lockVersion)
+	if (!category || !Array.isArray(data.grants) || configured !== (lockVersion > 0)) throw new Error('invalid report category access')
+	const grants = data.grants.map(parseReportGrant)
+	if (grants.some((grant) => !grant)) throw new Error('invalid report category grants')
+	return { category, reportCount, configured, lockVersion, grants: grants as ReportGrant[] }
 }
 
 export function parseReportCatalogPage(payload: unknown): ReportCatalogPage {

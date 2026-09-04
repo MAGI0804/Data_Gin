@@ -78,6 +78,21 @@ test('only applies manage-to-read inference supported by the backend authorizer'
   assert.equal(canViewNavigationItem('office_messages', ['office_message.manage']), false)
 })
 
+test('separates report administration from the download-only navigation', () => {
+  const downloadPermissions = ['report.read', 'report.execute', 'report.export']
+  assert.equal(canViewNavigationItem('report_query', downloadPermissions), true)
+  assert.equal(canViewNavigationItem('report_exports', downloadPermissions), true)
+  assert.equal(canViewNavigationItem('report_catalog', downloadPermissions), false)
+  assert.equal(canViewNavigationItem('report_configuration', downloadPermissions), false)
+  assert.equal(canViewNavigationItem('report_permissions', downloadPermissions), false)
+
+  const administrationPermissions = ['report.read', 'report.manage']
+  assert.equal(canViewNavigationItem('report_catalog', administrationPermissions), true)
+  assert.equal(canViewNavigationItem('report_configuration', administrationPermissions), true)
+  assert.equal(canViewNavigationItem('report_permissions', administrationPermissions), true)
+  assert.equal(canViewNavigationItem('report_query', administrationPermissions), false)
+})
+
 test('builds overview requests only for readable signals', () => {
   assert.deepEqual(overviewRequestPlan(['pipeline.read', 'data.read'], '2026-09-01T00:00'), {
     runs: '/v1/runs?page=1&page_size=100&start_time=2026-09-01T00%3A00',

@@ -2,7 +2,9 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 import { getReportCatalog, type ReportCenterClient } from './api'
 import type { ReportCatalogQuery, ReportSummary } from './types'
 
-export function useReportCatalog(client: ReportCenterClient, query: ReportCatalogQuery) {
+type ReportCatalogLoader = typeof getReportCatalog
+
+export function useReportCatalog(client: ReportCenterClient, query: ReportCatalogQuery, loadCatalog: ReportCatalogLoader = getReportCatalog) {
   const { afterId, category, limit, search } = query
   const [items, setItems] = useState<ReportSummary[]>([])
   const [loading, setLoading] = useState(true)
@@ -22,7 +24,7 @@ export function useReportCatalog(client: ReportCenterClient, query: ReportCatalo
     setHasMore(false)
     setNextAfterId(0)
     setError('')
-    void getReportCatalog(client, { afterId, category, limit, search }, controller.signal).then((result) => {
+    void loadCatalog(client, { afterId, category, limit, search }, controller.signal).then((result) => {
       if (controller.signal.aborted || requestGeneration.current !== generation) return
       if (!result.ok) {
         setError(result.error)
@@ -35,7 +37,7 @@ export function useReportCatalog(client: ReportCenterClient, query: ReportCatalo
       setLoading(false)
     })
     return () => controller.abort()
-  }, [afterId, category, client, limit, reloadVersion, search])
+  }, [afterId, category, client, limit, loadCatalog, reloadVersion, search])
 
   const reload = useCallback(() => setReloadVersion((version) => version + 1), [])
   const loadMore = useCallback(async () => {
@@ -43,7 +45,7 @@ export function useReportCatalog(client: ReportCenterClient, query: ReportCatalo
     const generation = requestGeneration.current
     setLoadingMore(true)
     setError('')
-    const result = await getReportCatalog(client, { category, limit, search, afterId: nextAfterId })
+    const result = await loadCatalog(client, { category, limit, search, afterId: nextAfterId })
     if (requestGeneration.current !== generation) return
     if (!result.ok) {
       setError(result.error)
@@ -54,6 +56,6 @@ export function useReportCatalog(client: ReportCenterClient, query: ReportCatalo
     setHasMore(result.page.hasMore)
     setNextAfterId(result.page.nextAfterId)
     setLoadingMore(false)
-  }, [category, client, hasMore, limit, loading, loadingMore, nextAfterId, search])
+  }, [category, client, hasMore, limit, loadCatalog, loading, loadingMore, nextAfterId, search])
   return { items, loading, loadingMore, error, hasMore, reload, loadMore }
 }

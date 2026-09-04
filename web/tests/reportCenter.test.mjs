@@ -3,7 +3,7 @@ import { readdirSync, readFileSync } from 'node:fs'
 import test from 'node:test'
 import ts from 'typescript'
 
-import { createReportInputQueryDefinition, createReportRun, deleteReportDraft, getReportAudits, getReportInputOptions, getReportInputQueries, getReportInputQueryDefinitions, getReportProcedureSignature, getReportProcedures, getReportResultTableSchema, getReportResultTables, parsePublication, parseReportAuditPage, parseReportCatalogPage, parseReportDatasource, parseReportDatasources, parseReportDatasourceTest, parseReportDraft, parseReportExport, parseReportExportPage, parseReportInputQueryDefinitions, parseReportInputQueryTestResult, parseReportProcedurePage, parseReportProcedureSignature, parseReportResultPage, parseReportResultTablePage, parseReportResultTableSchema, parseReportRun, parseReportRunContract, parseReportVersionDiff, parseReportVersionPage, saveAndPublishReportDraft, saveReportDraft, testReportDatasourceConnection, testReportInputQueryDefinition } from '../.test-dist/reportCenter/api.js'
+import { createReportInputQueryDefinition, createReportRun, deleteReportDraft, getReportAudits, getReportCategoryAccess, getReportDownloads, getReportInputOptions, getReportInputQueries, getReportInputQueryDefinitions, getReportProcedureSignature, getReportProcedures, getReportResultTableSchema, getReportResultTables, parsePublication, parseReportAuditPage, parseReportCatalogPage, parseReportCategoryAccessList, parseReportDatasource, parseReportDatasources, parseReportDatasourceTest, parseReportDraft, parseReportExport, parseReportExportPage, parseReportInputQueryDefinitions, parseReportInputQueryTestResult, parseReportProcedurePage, parseReportProcedureSignature, parseReportResultPage, parseReportResultTablePage, parseReportResultTableSchema, parseReportRun, parseReportRunContract, parseReportVersionDiff, parseReportVersionPage, replaceReportCategoryAccess, saveAndPublishReportDraft, saveReportDraft, testReportDatasourceConnection, testReportInputQueryDefinition } from '../.test-dist/reportCenter/api.js'
 import { applyExcelMapping, buildReportConditions, excelMappingFromColumns, initialReportConditionValues, moveReportInputField, orderedReportInputEntries, parseExcelMappingDocument, parseReportInputSchemaDocument, parseReportInputSchemaText, reconcileReportColumnsWithResultSchema, renameExcelMappingField, reportColumnsFromResultSchema } from '../.test-dist/reportCenter/refCursorConfig.js'
 import { reportParameterControls, reportParameterFlagDisabled, updateReportParameterFlag, updateReportParameterLogicalType } from '../.test-dist/reportCenter/parameterConfig.js'
 import { buildNewReportRunState, canStartNewReportRun, initialReportParameterValues } from '../.test-dist/reportCenter/queryParameters.js'
@@ -113,6 +113,43 @@ test('parseReportCatalogPage reads the standard API envelope', () => {
   assert.equal(page.items[0].isOwner, false)
   assert.equal(page.hasMore, true)
   assert.equal(page.nextAfterId, 12)
+})
+
+test('download catalog uses its dedicated published-only endpoint', async () => {
+  const requests = []
+  const client = async (path, options) => {
+    requests.push({ path, options })
+    return { ok: true, data: { data: { items: [], hasMore: false } } }
+  }
+  const result = await getReportDownloads(client, { category: ' 财务 ', search: ' 销售 ', limit: 20 })
+  assert.equal(result.ok, true)
+  assert.equal(requests[0].path, '/v1/report-downloads?search=%E9%94%80%E5%94%AE&category=%E8%B4%A2%E5%8A%A1&limit=20')
+  assert.equal(requests[0].options.method, 'GET')
+
+  const malformed = await getReportDownloads(async () => ({ ok: true, data: { data: { items: [], hasMore: true, nextAfterId: 0 } } }), { limit: 20 })
+  assert.equal(malformed.ok, false)
+})
+
+test('category access parser and client preserve optimistic locking', async () => {
+  const access = {
+    category: '财务', reportCount: 3, configured: true, lockVersion: 2,
+    grants: [{ subjectType: 'ROLE', subjectId: 7, actions: ['QUERY', 'EXPORT'] }],
+  }
+  assert.deepEqual(parseReportCategoryAccessList({ data: { items: [access] } }), [access])
+  assert.throws(() => parseReportCategoryAccessList({ data: { items: [{ ...access, configured: false }] } }))
+
+  const requests = []
+  const client = async (path, options) => {
+    requests.push({ path, options })
+    return options?.method === 'GET'
+      ? { ok: true, data: { data: { items: [access] } } }
+      : { ok: true, data: { data: { ...access, lockVersion: 3 } } }
+  }
+  assert.equal((await getReportCategoryAccess(client)).ok, true)
+  const saved = await replaceReportCategoryAccess(client, access)
+  assert.equal(saved.ok, true)
+  assert.equal(requests[1].path, '/v1/report-category-access')
+  assert.deepEqual(requests[1].options.body, { category: '财务', expectedLockVersion: 2, grants: access.grants })
 })
 
 test('input schema rejects payloads beyond the backend 64 KiB boundary', () => {

@@ -1,16 +1,15 @@
 import { useEffect, useRef, useState, type Dispatch, type SetStateAction } from 'react'
-import { Plus, Trash2 } from 'lucide-react'
 import { Button, Dialog, Drawer } from '../../../ui'
 import { getReportDraft, getReportResultTableSchema, publishReportDraft, saveAndPublishReportDraft, saveReportDraft, type ReportCenterClient } from '../../api'
 import { countReportColumnsMissingFromResultSchema, newReportInputField, parseExcelMappingDocument, parseReportInputSchemaDocument, excelMappingFromColumns, refreshReportColumnMetadataPreservingUnknown } from '../../refCursorConfig'
-import type { ReportDatasource, ReportDraft, ReportGrant, ReportPublication, ReportResultTableColumn, ReportSummary } from '../../types'
+import type { ReportDatasource, ReportDraft, ReportPublication, ReportResultTableColumn, ReportSummary } from '../../types'
 import { ReportExcelMappingEditor, type ExcelMappingSchemaState } from './ReportExcelMappingEditor'
 import { ReportInputSchemaEditor } from './ReportInputSchemaEditor'
 import { ReportProcedureEditor } from './ReportProcedureEditor'
 import styles from './ReportConfigDrawer.module.css'
 
-type Tab = 'basic' | 'procedure' | 'conditions' | 'excel' | 'permissions'
-const tabs: Array<{ key: Tab; label: string }> = [{ key: 'basic', label: '基本信息' }, { key: 'procedure', label: '存储过程' }, { key: 'conditions', label: '筛选条件' }, { key: 'excel', label: 'Excel 映射' }, { key: 'permissions', label: '权限' }]
+type Tab = 'basic' | 'procedure' | 'conditions' | 'excel'
+const tabs: Array<{ key: Tab; label: string }> = [{ key: 'basic', label: '基本信息' }, { key: 'procedure', label: '存储过程' }, { key: 'conditions', label: '筛选条件' }, { key: 'excel', label: 'Excel 映射' }]
 const oracleIdentifierPattern = /^[A-Za-z][A-Za-z0-9_$#]{0,127}$/
 
 export function ReportConfigDrawer({ client, report, datasources, datasourcesLoading = false, datasourcesError = '', onClose, onPublished, onSaved }: { client: ReportCenterClient; report: ReportSummary | null; datasources: ReportDatasource[]; datasourcesLoading?: boolean; datasourcesError?: string; onClose: () => void; onPublished?: (publication: ReportPublication) => void; onSaved?: () => void }) {
@@ -70,7 +69,7 @@ export function ReportConfigDrawer({ client, report, datasources, datasourcesLoa
 
   function validationError() {
     if (bodyRef.current?.querySelector('[aria-invalid="true"]')) return '请先修正标红的配置项。'
-    if (!draft.name.trim() || draft.name.trim().length > 128 || !/^[A-Za-z][A-Za-z0-9_-]{2,63}$/.test(draft.code.trim()) || !draft.datasourceId) return '请完整填写报表名称、合法编码和 Oracle 数据源。'
+    if (!draft.name.trim() || draft.name.trim().length > 128 || !/^[A-Za-z][A-Za-z0-9_-]{2,63}$/.test(draft.code.trim()) || !draft.category.trim() || !draft.datasourceId) return '请完整填写报表名称、合法编码、分类和 Oracle 数据源。'
     if (draft.category.trim().length > 64 || draft.description.trim().length > 500) return '分类最多 64 字，说明最多 500 字。'
     if (datasources.find((item) => item.id === draft.datasourceId)?.enabled === false) return '当前 Oracle 数据源已停用，请先启用或更换数据源。'
     if (!draft.procedure.owner || !draft.procedure.name) return '请从 Oracle 查询结果中选择存储过程。'
@@ -86,7 +85,6 @@ export function ReportConfigDrawer({ client, report, datasources, datasourcesLoa
       const mapping = parseExcelMappingDocument(excelMappingFromColumns(draft.columns))
       if (Object.keys(mapping).length === 0) return '请至少配置一个 Oracle 结果表字段到 Excel 表头的映射。'
     } catch (error) { return error instanceof Error ? error.message : 'Excel 字段映射不完整。' }
-    if (draft.grants.some((grant) => grant.subjectId <= 0 || grant.actions.length === 0)) return '每个权限主体都必须填写大于 0 的 ID，并至少选择查询或导出权限。'
     return ''
   }
 
@@ -155,7 +153,7 @@ function Editor({ tab, client, draft, datasources, datasourcesLoading, datasourc
     return <div className={styles.form}>
       <Field label="报表名称"><input value={draft.name} onChange={(event) => set('name', event.currentTarget.value)} /></Field>
       <Field label="报表编码"><input value={draft.code} onChange={(event) => set('code', event.currentTarget.value)} /></Field>
-      <Field label="分类"><input value={draft.category} onChange={(event) => set('category', event.currentTarget.value)} /></Field>
+      <Field label="分类"><input required disabled={draft.status === 'ACTIVE' && Boolean(draft.category.trim())} value={draft.category} onChange={(event) => set('category', event.currentTarget.value)} />{draft.status === 'ACTIVE' ? <small>{draft.category.trim() ? '已上线报表不能直接更换分类，避免权限边界变化。' : '历史未分类报表可补录一次分类，保存后不能直接更换。'}</small> : null}</Field>
       <Field label="Oracle 数据源"><select value={draft.datasourceId || ''} disabled={datasourcesLoading} onChange={(event) => {
         const datasourceId = Number(event.currentTarget.value)
         onChange(datasourceId === draft.datasourceId ? draft : { ...draft, datasourceId, procedure: emptyProcedure(), executionMode: 'TABLE_SNAPSHOT', result: emptyResult() })
@@ -165,18 +163,11 @@ function Editor({ tab, client, draft, datasources, datasourcesLoading, datasourc
   }
   if (tab === 'procedure') return <ReportProcedureEditor client={client} draft={draft} onChange={onChange} />
   if (tab === 'conditions') return <ReportInputSchemaEditor client={client} schema={draft.inputSchema} onChange={(inputSchema) => set('inputSchema', inputSchema)} />
-  if (tab === 'excel') return <ReportExcelMappingEditor result={draft.result} columns={draft.columns} schema={excelSchema} schemaState={excelSchemaState} onChange={(columns) => set('columns', columns)} onRetry={onExcelSchemaRetry} />
-  return <PermissionEditor grants={draft.grants} onChange={(grants) => set('grants', grants)} />
-}
-
-function PermissionEditor({ grants, onChange }: { grants: ReportGrant[]; onChange: (grants: ReportGrant[]) => void }) {
-  return <div className={styles.list}><div className={styles.listHeader}><strong>报表级用户/角色授权</strong><button type="button" onClick={() => onChange([...grants, { subjectType: 'ROLE', subjectId: 0, actions: ['QUERY'] }])}><Plus aria-hidden="true" />新增</button></div>{grants.map((grant, index) => <div className={styles.row} key={`${grant.subjectType}-${index}`}><select aria-label="主体类型" value={grant.subjectType} onChange={(event) => onChange(replaceAt(grants, index, { ...grant, subjectType: event.currentTarget.value as 'USER' | 'ROLE' }))}><option value="ROLE">角色</option><option value="USER">用户</option></select><input type="number" min="1" aria-label="主体 ID" value={grant.subjectId || ''} onChange={(event) => onChange(replaceAt(grants, index, { ...grant, subjectId: Number(event.currentTarget.value) }))} /><label><input type="checkbox" checked={grant.actions.includes('QUERY')} onChange={(event) => onChange(replaceAt(grants, index, { ...grant, actions: toggle(grant.actions, 'QUERY', event.currentTarget.checked) }))} />查询</label><label><input type="checkbox" checked={grant.actions.includes('EXPORT')} onChange={(event) => onChange(replaceAt(grants, index, { ...grant, actions: toggle(grant.actions, 'EXPORT', event.currentTarget.checked) }))} />导出</label><button className={styles.delete} type="button" aria-label="删除此授权" onClick={() => onChange(grants.filter((_, itemIndex) => itemIndex !== index))}><Trash2 aria-hidden="true" /></button></div>)}</div>
+  return <ReportExcelMappingEditor result={draft.result} columns={draft.columns} schema={excelSchema} schemaState={excelSchemaState} onChange={(columns) => set('columns', columns)} onRetry={onExcelSchemaRetry} />
 }
 
 function Field({ label, wide, children }: { label: string; wide?: boolean; children: React.ReactNode }) { return <label className={wide ? styles.wide : ''}>{label}{children}</label> }
 function emptyProcedure(): ReportDraft['procedure'] { return { owner: '', package: '', name: '', overload: '', jsonInputArgName: '', resultCursorArgName: '' } }
 function emptyResult(): ReportDraft['result'] { return { tableOwner: '', tableName: '' } }
 function emptyDraft(): ReportDraft { const [code, field] = newReportInputField(0); return { id: 0, code: '', name: '', category: '', description: '', datasourceId: 0, status: 'DRAFT', lockVersion: 0, executionMode: 'TABLE_SNAPSHOT', procedure: emptyProcedure(), inputSchema: { [code]: field }, result: emptyResult(), callTemplate: '', parameters: [], columns: [], grants: [], createdAt: null, updatedAt: null } }
-function replaceAt<T>(items: T[], index: number, item: T) { return items.map((value, position) => position === index ? item : value) }
-function toggle(values: string[], value: string, checked: boolean) { return checked ? [...new Set([...values, value])] : values.filter((item) => item !== value) }
 function draftFingerprint(draft: ReportDraft) { return JSON.stringify(draft) }

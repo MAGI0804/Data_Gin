@@ -3,9 +3,10 @@ import { overviewSignalAccess } from './overviewWorkspacePolicy'
 export function canViewNavigationItem(key: string, permissions: readonly string[]) {
   if (key === 'access_management') return permissions.some((permission) => permission.startsWith('system.'))
   if (key === 'overview') return Object.values(overviewSignalAccess(permissions)).some(Boolean)
-  if (key === 'report_catalog') return permissions.includes('report.read')
+  if (key === 'report_catalog') return permissions.includes('report.read') && permissions.includes('report.manage')
   if (key === 'report_configuration') return permissions.includes('report.read') && permissions.includes('report.manage')
-  if (key === 'report_query') return permissions.includes('report.read') && permissions.includes('report.execute')
+  if (key === 'report_permissions') return permissions.includes('report.read') && permissions.includes('report.manage')
+  if (key === 'report_query') return permissions.includes('report.read') && permissions.includes('report.execute') && permissions.includes('report.export')
   if (key === 'report_exports') return permissions.includes('report.read') && permissions.includes('report.export')
 
   const required = navPermission(key)

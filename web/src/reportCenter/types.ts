@@ -207,7 +207,7 @@ export type ReportInputQueryTestResult = {
 
 export type ReportInputSchema = Record<string, ReportInputField>
 
-export type ReportCenterSection = 'catalog' | 'configuration' | 'query' | 'exports'
+export type ReportCenterSection = 'catalog' | 'configuration' | 'permissions' | 'query' | 'exports'
 
 export type ReportParameter = {
   code: string
@@ -264,6 +264,14 @@ export type ReportColumn = {
 }
 
 export type ReportGrant = { subjectType: 'USER' | 'ROLE'; subjectId: number; actions: string[] }
+
+export type ReportCategoryAccess = {
+  category: string
+  reportCount: number
+  configured: boolean
+  lockVersion: number
+  grants: ReportGrant[]
+}
 
 export type ReportDraft = {
   id: number
