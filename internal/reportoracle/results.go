@@ -267,9 +267,25 @@ func BuildPurgePlan(contract ResultSnapshotContract) (PurgePlan, error) {
 	if contract.table.Owner == "" || contract.table.Name == "" {
 		return PurgePlan{}, configurationError("result snapshot contract is not validated")
 	}
+	return buildTablePurgePlan(contract.table)
+}
+
+// BuildTablePurgePlan builds the bounded purge used when recovering an old
+// table snapshot. Cleanup only depends on the published table identity: its
+// historical presentation columns may legitimately differ from the current
+// Oracle table after a newer report version is published.
+func BuildTablePurgePlan(table ResultTableRef) (PurgePlan, error) {
+	normalized, err := NormalizeResultTableRef(table)
+	if err != nil {
+		return PurgePlan{}, err
+	}
+	return buildTablePurgePlan(normalized)
+}
+
+func buildTablePurgePlan(table ResultTableRef) (PurgePlan, error) {
 	statement := fmt.Sprintf(
 		"DELETE FROM %s.%s WHERE ROWID IN (SELECT ROWID FROM %s.%s WHERE ROWNUM <= :1)",
-		contract.table.Owner, contract.table.Name, contract.table.Owner, contract.table.Name,
+		table.Owner, table.Name, table.Owner, table.Name,
 	)
 	return PurgePlan{statement: statement}, nil
 }

@@ -92,6 +92,20 @@ func TestBuildPurgePlanIsBounded(t *testing.T) {
 	}
 }
 
+func TestBuildTablePurgePlanDoesNotDependOnHistoricalColumns(t *testing.T) {
+	plan, err := BuildTablePurgePlan(ResultTableRef{Owner: "report", Name: "result_rows"})
+	if err != nil {
+		t.Fatalf("BuildTablePurgePlan() error = %v", err)
+	}
+	want := "DELETE FROM REPORT.RESULT_ROWS WHERE ROWID IN (SELECT ROWID FROM REPORT.RESULT_ROWS WHERE ROWNUM <= :1)"
+	if plan.statement != want {
+		t.Fatalf("statement = %q, want %q", plan.statement, want)
+	}
+	if _, err := BuildTablePurgePlan(ResultTableRef{Owner: "REPORT", Name: "ROWS; DROP TABLE X"}); !errors.Is(err, ErrInvalidConfiguration) {
+		t.Fatalf("unsafe table error = %v, want ErrInvalidConfiguration", err)
+	}
+}
+
 func TestBuildResultCountPlanCountsWholeTable(t *testing.T) {
 	plan, err := BuildResultCountPlan(testSnapshotContract())
 	if err != nil {

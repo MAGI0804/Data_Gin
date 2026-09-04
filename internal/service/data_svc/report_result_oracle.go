@@ -5,7 +5,6 @@ import (
 	"errors"
 	"time"
 
-	"gin-biz-web-api/internal/reportcontract"
 	"gin-biz-web-api/internal/reportoracle"
 	"gin-biz-web-api/internal/reportrepo"
 	"gin-biz-web-api/model"
@@ -27,15 +26,15 @@ func (oracleReportResultCleanupFactory) Open(ctx context.Context, runtime report
 	closeOnError := func(openErr error) (reportExportOracleSession, error) {
 		return nil, errors.Join(openErr, adapter.Close())
 	}
-	configuredColumns := make([]string, 0, len(runtime.Columns))
-	for _, column := range runtime.Columns {
-		configuredColumns = append(configuredColumns, column.DatabaseColumn)
-	}
 	queryTimeout := time.Duration(runtime.Datasource.QueryTimeoutSeconds) * time.Second
 	if queryTimeout <= 0 {
 		queryTimeout = defaultReportPublicationInspectionTimeout
 	}
 	if runtime.Version.ExecutionMode == model.ReportExecutionModeRefCursor {
+		configuredColumns := make([]string, 0, len(runtime.Columns))
+		for _, column := range runtime.Columns {
+			configuredColumns = append(configuredColumns, column.DatabaseColumn)
+		}
 		if err := adapter.ValidateJSONSnapshotStore(queryCtx); err != nil {
 			return closeOnError(err)
 		}
@@ -44,23 +43,11 @@ func (oracleReportResultCleanupFactory) Open(ctx context.Context, runtime report
 			runUUID: runtime.Run.RunUUID, queryTimeout: queryTimeout,
 		}, nil
 	}
-	ref := reportoracle.ResultTableSnapshotRef(
-		reportoracle.ResultTableRef{Owner: runtime.Version.ResultTableOwner, Name: runtime.Version.ResultTableName}, configuredColumns,
-	)
-	resultColumns, err := adapter.InspectResultTable(queryCtx, ref.Table)
-	if err != nil {
+	table := reportoracle.ResultTableRef{Owner: runtime.Version.ResultTableOwner, Name: runtime.Version.ResultTableName}
+	if err := adapter.ValidateResultSnapshotTable(queryCtx, table); err != nil {
 		return closeOnError(err)
 	}
-	if err := reportcontract.VerifyRuntimeResultMetadata(
-		[]byte(runtime.Version.CompiledSpecJSON), runtime.Run.ContractHash, runtime.Run.ResultSchemaHash, resultColumns,
-	); err != nil {
-		return closeOnError(err)
-	}
-	contract, err := adapter.InspectResultSnapshotContract(queryCtx, ref)
-	if err != nil {
-		return closeOnError(err)
-	}
-	purgePlan, err := reportoracle.BuildPurgePlan(contract)
+	purgePlan, err := reportoracle.BuildTablePurgePlan(table)
 	if err != nil {
 		return closeOnError(err)
 	}
