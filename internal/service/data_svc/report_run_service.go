@@ -35,6 +35,7 @@ var (
 )
 
 const maxReportJSONConditionsBytes = 1024 * 1024
+const maxReportRunCreateAttempts = 2
 
 type reportRunStore interface {
 	FindPublishedReport(context.Context, uint, uint, string) (*reportrepo.PublishedReport, error)
@@ -124,10 +125,23 @@ func (service *ReportRunService) Create(ctx context.Context, actor, definitionID
 		(request.RefreshNonce != "" && !refreshNoncePattern.MatchString(request.RefreshNonce)) || len(request.Parameters) > maxReportParameters || len(request.Conditions) > maxReportParameters {
 		return nil, fmt.Errorf("%w: actor, report and parameters are required", ErrReportRunInvalid)
 	}
-	published, err := service.store.FindPublishedReport(ctx, actor, definitionID, reportrepo.ReportActionQuery)
-	if err != nil {
-		return nil, classifyReportRunStoreError(err)
+	for attempt := 0; attempt < maxReportRunCreateAttempts; attempt++ {
+		published, err := service.store.FindPublishedReport(ctx, actor, definitionID, reportrepo.ReportActionQuery)
+		if err != nil {
+			return nil, classifyReportRunStoreError(err)
+		}
+		result, err := service.createRunFromPublished(ctx, actor, definitionID, request, published)
+		if err == nil {
+			return result, nil
+		}
+		if !errors.Is(err, reportrepo.ErrDraftVersionConflict) || attempt == maxReportRunCreateAttempts-1 {
+			return nil, classifyReportRunStoreError(err)
+		}
 	}
+	return nil, ErrReportConflict
+}
+
+func (service *ReportRunService) createRunFromPublished(ctx context.Context, actor, definitionID uint, request requestbody.ReportRunCreateRequest, published *reportrepo.PublishedReport) (*ReportRunDTO, error) {
 	if isJSONInputReport(published.Version) {
 		return service.createJSONInputRun(ctx, actor, definitionID, request, published)
 	}
@@ -164,7 +178,7 @@ func (service *ReportRunService) Create(ctx context.Context, actor, definitionID
 		Outbox: reportrepo.NewReportRunOutbox(runUUID, createdAt),
 	}
 	if err := service.store.CreateRun(ctx, actor, definitionID, command); err != nil {
-		return nil, classifyReportRunStoreError(err)
+		return nil, err
 	}
 	return &ReportRunDTO{
 		ID: command.Run.ID, RunUUID: command.Run.RunUUID, DefinitionID: definitionID,
@@ -216,7 +230,7 @@ func (service *ReportRunService) createJSONInputRun(
 		Outbox: reportrepo.NewReportRunOutbox(runUUID, createdAt),
 	}
 	if err := service.store.CreateRun(ctx, actor, definitionID, command); err != nil {
-		return nil, classifyReportRunStoreError(err)
+		return nil, err
 	}
 	return &ReportRunDTO{
 		ID: command.Run.ID, RunUUID: command.Run.RunUUID, DefinitionID: definitionID,

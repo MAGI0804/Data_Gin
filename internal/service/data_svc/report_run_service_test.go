@@ -289,6 +289,76 @@ func TestReportRunServiceFingerprintUsesBusinessParametersAndRefreshNonce(t *tes
 	}
 }
 
+func TestReportRunServiceRetriesWithLatestPublishedVersion(t *testing.T) {
+	previous := publishedRunFixture()
+	latest := publishedRunFixture()
+	latest.Version.ID = 24
+	latest.Version.ContractHash = strings.Repeat("e", 64)
+	latest.Version.ProcedureSignatureHash = strings.Repeat("f", 64)
+	latest.Version.ResultSchemaHash = strings.Repeat("1", 64)
+	store := &fakeReportRunStore{
+		publishedSequence: []*reportrepo.PublishedReport{previous, latest},
+		createErrors:      []error{reportrepo.ErrDraftVersionConflict, nil},
+	}
+	service := NewReportRunServiceWithDependencies(store, &fakeReportParameterCipher{})
+
+	result, err := service.Create(t.Context(), 17, 9, requestbody.ReportRunCreateRequest{
+		Parameters: map[string]json.RawMessage{"storeCode": json.RawMessage(`"S001"`), "secret": json.RawMessage(`"value"`)},
+	})
+	if err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	if result.VersionID != latest.Version.ID || store.findCalls != 2 || store.createCalls != 2 {
+		t.Fatalf("result=%#v find calls=%d create calls=%d", result, store.findCalls, store.createCalls)
+	}
+	if len(store.commands) != 2 || store.commands[0].Run.VersionID != previous.Version.ID || store.commands[1].Run.VersionID != latest.Version.ID ||
+		store.commands[1].Run.ContractHash != latest.Version.ContractHash {
+		t.Fatalf("commands = %#v", store.commands)
+	}
+}
+
+func TestReportRunServiceRevalidatesConditionsAgainstLatestPublishedVersion(t *testing.T) {
+	previous := publishedRunFixture()
+	previous.Version.ExecutionMode = model.ReportExecutionModeRefCursor
+	previous.Version.InputSchemaJSON = model.JSONText(`{"store_id":{"type":"str","displayName":"门店","required":true}}`)
+	previous.Parameters = nil
+	latest := publishedRunFixture()
+	latest.Version.ID = 24
+	latest.Version.ExecutionMode = model.ReportExecutionModeRefCursor
+	latest.Version.InputSchemaJSON = model.JSONText(`{"supplier_id":{"type":"str","displayName":"供应商","required":true}}`)
+	latest.Parameters = nil
+	store := &fakeReportRunStore{
+		publishedSequence: []*reportrepo.PublishedReport{previous, latest},
+		createErrors:      []error{reportrepo.ErrDraftVersionConflict},
+	}
+	service := NewReportRunServiceWithDependencies(store, &fakeReportParameterCipher{})
+
+	_, err := service.Create(t.Context(), 17, 9, requestbody.ReportRunCreateRequest{
+		Conditions: map[string]json.RawMessage{"store_id": json.RawMessage(`"S001"`)},
+	})
+	if !errors.Is(err, ErrReportRunInvalid) {
+		t.Fatalf("Create() error = %v, want ErrReportRunInvalid", err)
+	}
+	if store.findCalls != 2 || store.createCalls != 1 {
+		t.Fatalf("find calls=%d create calls=%d", store.findCalls, store.createCalls)
+	}
+}
+
+func TestReportRunServiceStopsAfterLatestVersionChangesTwice(t *testing.T) {
+	store := &fakeReportRunStore{
+		publishedSequence: []*reportrepo.PublishedReport{publishedRunFixture(), publishedRunFixture()},
+		createErrors:      []error{reportrepo.ErrDraftVersionConflict, reportrepo.ErrDraftVersionConflict},
+	}
+	service := NewReportRunServiceWithDependencies(store, &fakeReportParameterCipher{})
+
+	_, err := service.Create(t.Context(), 17, 9, requestbody.ReportRunCreateRequest{
+		Parameters: map[string]json.RawMessage{"storeCode": json.RawMessage(`"S001"`), "secret": json.RawMessage(`"value"`)},
+	})
+	if !errors.Is(err, ErrReportConflict) || store.findCalls != maxReportRunCreateAttempts || store.createCalls != maxReportRunCreateAttempts {
+		t.Fatalf("Create() error=%v find calls=%d create calls=%d", err, store.findCalls, store.createCalls)
+	}
+}
+
 func TestReportRunServiceMapsAuthorizationAndContractRaces(t *testing.T) {
 	for _, test := range []struct {
 		name string
@@ -311,16 +381,32 @@ func TestReportRunServiceMapsAuthorizationAndContractRaces(t *testing.T) {
 }
 
 type fakeReportRunStore struct {
-	published *reportrepo.PublishedReport
-	command   *reportrepo.CreateRunCommand
-	err       error
+	published         *reportrepo.PublishedReport
+	publishedSequence []*reportrepo.PublishedReport
+	command           *reportrepo.CreateRunCommand
+	commands          []*reportrepo.CreateRunCommand
+	err               error
+	createErrors      []error
+	findCalls         int
+	createCalls       int
 }
 
 func (store *fakeReportRunStore) FindPublishedReport(context.Context, uint, uint, string) (*reportrepo.PublishedReport, error) {
+	store.findCalls++
+	if len(store.publishedSequence) > 0 {
+		index := min(store.findCalls-1, len(store.publishedSequence)-1)
+		return store.publishedSequence[index], store.err
+	}
 	return store.published, store.err
 }
 func (store *fakeReportRunStore) CreateRun(_ context.Context, _, _ uint, command *reportrepo.CreateRunCommand) error {
+	store.createCalls++
 	store.command = command
+	copy := *command
+	store.commands = append(store.commands, &copy)
+	if len(store.createErrors) >= store.createCalls && store.createErrors[store.createCalls-1] != nil {
+		return store.createErrors[store.createCalls-1]
+	}
 	command.Run.ID = 31
 	command.Run.CreatedAt = time.Now().UTC()
 	return store.err
