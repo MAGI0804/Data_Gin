@@ -13,6 +13,7 @@ import (
 	"gin-biz-web-api/model"
 
 	"github.com/google/uuid"
+	"go.uber.org/zap"
 )
 
 const (
@@ -92,7 +93,9 @@ func (reconciler *ReportRunReconciler) Run(ctx context.Context) error {
 }
 
 func (reconciler *ReportRunReconciler) reconcileCycle(ctx context.Context) {
-	_ = reconciler.Reconcile(ctx)
+	if err := reconciler.Reconcile(ctx); err != nil && !errors.Is(err, context.Canceled) {
+		zap.L().Error("报表任务恢复周期失败", zap.String("worker_id", reconciler.workerID), zap.Error(err))
+	}
 }
 
 func (reconciler *ReportRunReconciler) Reconcile(ctx context.Context) error {
@@ -126,6 +129,7 @@ func (reconciler *ReportRunReconciler) Reconcile(ctx context.Context) error {
 		if err := reconciler.store.EnsureRunQueued(ctx, runID, reconciler.now().UTC()); err != nil {
 			return err
 		}
+		zap.L().Info("已恢复报表查询任务投递", zap.Uint("report_run_id", runID))
 	}
 	exportIDs, err := reconciler.store.ListExportsMissingDelivery(ctx, now, reconciler.batchSize)
 	if err != nil {
@@ -135,6 +139,7 @@ func (reconciler *ReportRunReconciler) Reconcile(ctx context.Context) error {
 		if err := reconciler.store.EnsureExportQueued(ctx, exportID, reconciler.now().UTC()); err != nil {
 			return err
 		}
+		zap.L().Info("已恢复报表导出任务投递", zap.Uint("report_export_id", exportID))
 	}
 	return nil
 }

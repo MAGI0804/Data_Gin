@@ -139,6 +139,11 @@ func (processor *ReportRunProcessor) Process(ctx context.Context, runID uint, fa
 	}
 	switch lease.Disposition {
 	case reportrepo.RunDispositionBusy:
+		zap.L().Info(
+			"报表运行等待前序快照释放",
+			zap.Uint("report_run_id", runID),
+			zap.Bool("queue_retry_allowed", queueRetryAllowed),
+		)
 		if !queueRetryAllowed {
 			stateCtx, cancel := processor.stateContext(ctx)
 			defer cancel()

@@ -51,7 +51,7 @@ func setupQueueJob() {
 		if global.QueueJobServer == nil {
 			global.QueueJobServer = server
 		}
-		servers = append(servers, queueJobServer{name: spec.name, server: server})
+		servers = append(servers, queueJobServer{name: spec.name, server: server, concurrency: spec.concurrency, queues: spec.queues})
 	}
 
 	mux := asynq.NewServeMux()
@@ -128,8 +128,10 @@ func setupQueueJob() {
 }
 
 type queueJobServer struct {
-	name   string
-	server *asynq.Server
+	name        string
+	server      *asynq.Server
+	concurrency int
+	queues      map[string]int
 }
 
 type queueJobServerSpec struct {
@@ -154,6 +156,12 @@ func queueJobServerSpecs(configured map[string]int, defaultConcurrency int, repo
 
 func startQueueJobServer(worker queueJobServer, mux *asynq.ServeMux) {
 	go func() {
+		logger.Info(
+			"Queue Job Server Starting",
+			zap.String("worker", worker.name),
+			zap.Int("concurrency", worker.concurrency),
+			zap.Any("queues", worker.queues),
+		)
 		if err := worker.server.Run(mux); err != nil {
 			logger.Error("Queue Job Server Failed", zap.String("worker", worker.name), zap.Error(err))
 			console.Exit("Queue Job Server %s Failed %v", worker.name, err)

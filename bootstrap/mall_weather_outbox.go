@@ -169,6 +169,7 @@ func startReportRunReconciler(reconciler reportRunReconciler) {
 	reportReconciliationLifecycle.cancel = cancel
 	reportReconciliationLifecycle.done = done
 	reportReconciliationLifecycle.Unlock()
+	console.Success("Report task reconciler started successfully")
 	go func() {
 		defer close(done)
 		if err := reconciler.Run(ctx); err != nil && !errors.Is(err, context.Canceled) {
