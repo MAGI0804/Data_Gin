@@ -19,6 +19,7 @@ export function ReportQueryPage({ client, navigation }: { client: ReportCenterCl
   const { items, loading, loadingMore, error, hasMore, reload, loadMore } = useReportCatalog(client, query, getReportDownloads)
   const published = items.filter((report) => report.status === 'ACTIVE')
   const reportsByCategory = groupReportsByCategory(published)
+  const defaultReportId = published[0]?.id ?? 0
   const [selectedId, setSelectedId] = useState('')
   const [contract, setContract] = useState<ReportRunContract | null>(null)
   const [values, setValues] = useState<Record<string, unknown>>({})
@@ -39,6 +40,10 @@ export function ReportQueryPage({ client, navigation }: { client: ReportCenterCl
   const keepRunningRef = useRef<HTMLButtonElement>(null)
 
   useEffect(() => () => pollAbortRef.current?.abort(), [])
+
+  useEffect(() => {
+    if (!selectedId && defaultReportId > 0) setSelectedId(String(defaultReportId))
+  }, [defaultReportId, selectedId])
 
   useEffect(() => {
     pollAbortRef.current?.abort()
