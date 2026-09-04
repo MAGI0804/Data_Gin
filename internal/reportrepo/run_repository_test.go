@@ -30,6 +30,23 @@ func TestActorCanRunReportSupportsOwnerAndUserGrant(t *testing.T) {
 	}
 }
 
+func TestConfiguredCategoryAccessDoesNotAllowOwnerBypass(t *testing.T) {
+	published := &PublishedReport{
+		Definition:               model.ReportDefinition{OwnerUserID: 9},
+		CategoryAccessConfigured: true,
+	}
+	authority, allowed, err := actorCanRunReport(t.Context(), newDryRunDB(t), 9, published.authorizationOwner(), ReportActionQuery, nil)
+	if err != nil || allowed || authority.Source != "" {
+		t.Fatalf("configured empty category owner access = %#v %t, %v", authority, allowed, err)
+	}
+
+	published.CategoryAccessConfigured = false
+	authority, allowed, err = actorCanRunReport(t.Context(), newDryRunDB(t), 9, published.authorizationOwner(), ReportActionQuery, nil)
+	if err != nil || !allowed || authority.Source != "OWNER" {
+		t.Fatalf("legacy owner access = %#v %t, %v", authority, allowed, err)
+	}
+}
+
 func TestMatchRoleGrantsUsesOnlyActiveMemberships(t *testing.T) {
 	grants := []model.ReportGrant{
 		{SubjectType: "ROLE", SubjectID: 2, ActionsJSON: model.JSONText(`["QUERY"]`)},

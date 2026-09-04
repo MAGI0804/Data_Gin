@@ -31,12 +31,13 @@ const (
 )
 
 type PublishedReport struct {
-	Definition model.ReportDefinition
-	Version    model.ReportVersion
-	Parameters []model.ReportParameter
-	Columns    []model.ReportColumn
-	Grants     []model.ReportGrant
-	authority  runAuthority
+	Definition               model.ReportDefinition
+	Version                  model.ReportVersion
+	Parameters               []model.ReportParameter
+	Columns                  []model.ReportColumn
+	Grants                   []model.ReportGrant
+	CategoryAccessConfigured bool
+	authority                runAuthority
 }
 
 type CreateRunCommand struct {
@@ -84,7 +85,7 @@ func (repository *Repository) CreateRun(ctx context.Context, actor, definitionID
 		if err != nil {
 			return err
 		}
-		exportAuthority, exportAllowed, err := actorCanRunReport(ctx, tx, actor, published.Definition.OwnerUserID, ReportActionExport, published.Grants)
+		exportAuthority, exportAllowed, err := actorCanRunReport(ctx, tx, actor, published.authorizationOwner(), ReportActionExport, published.Grants)
 		if err != nil {
 			return err
 		}
@@ -407,8 +408,9 @@ func loadPublishedReport(ctx context.Context, db *gorm.DB, actor, definitionID u
 	}
 	if categoryConfigured {
 		published.Grants = categoryGrants
+		published.CategoryAccessConfigured = true
 	}
-	authority, allowed, err := actorCanRunReport(ctx, db, actor, definition.OwnerUserID, action, published.Grants)
+	authority, allowed, err := actorCanRunReport(ctx, db, actor, published.authorizationOwner(), action, published.Grants)
 	if err != nil {
 		return nil, err
 	}
@@ -417,6 +419,13 @@ func loadPublishedReport(ctx context.Context, db *gorm.DB, actor, definitionID u
 	}
 	published.authority = authority
 	return published, nil
+}
+
+func (published *PublishedReport) authorizationOwner() uint {
+	if published == nil || published.CategoryAccessConfigured {
+		return 0
+	}
+	return published.Definition.OwnerUserID
 }
 
 func requireEnabledOracleDatasource(ctx context.Context, db *gorm.DB, datasourceID uint) error {
