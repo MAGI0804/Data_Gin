@@ -23,6 +23,7 @@ const (
 
 type reportReconciliationStore interface {
 	RecoverLegacySnapshotStates(context.Context, time.Time, int) (int64, error)
+	RecoverLegacySupersededSnapshots(context.Context, time.Time, int) (int64, error)
 	ListReconciliationCandidates(context.Context, time.Time, int) ([]uint, error)
 	BeginReconciliation(context.Context, uint, string, string, time.Time, time.Duration) (*reportrepo.RunLease, error)
 	LoadRuntimeContract(context.Context, uint, string) (*reportrepo.RuntimeContract, error)
@@ -110,6 +111,12 @@ func (reconciler *ReportRunReconciler) Reconcile(ctx context.Context) error {
 		recoveryErrors = append(recoveryErrors, fmt.Errorf("recover legacy snapshot states: %w", err))
 	} else if legacyRecoveryCount > 0 {
 		zap.L().Info("已恢复历史报表快照状态", zap.Int64("report_run_count", legacyRecoveryCount))
+	}
+	supersededRecoveryCount, err := reconciler.store.RecoverLegacySupersededSnapshots(ctx, now, reconciler.batchSize)
+	if err != nil {
+		recoveryErrors = append(recoveryErrors, fmt.Errorf("recover superseded snapshots: %w", err))
+	} else if supersededRecoveryCount > 0 {
+		zap.L().Info("已恢复历史替代报表快照", zap.Int64("report_run_count", supersededRecoveryCount))
 	}
 	if _, err := reconciler.store.RecoverExpiredPreOracleRuns(ctx, now, reconciler.batchSize); err != nil {
 		recoveryErrors = append(recoveryErrors, fmt.Errorf("recover interrupted report runs: %w", err))

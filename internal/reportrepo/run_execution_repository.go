@@ -104,6 +104,130 @@ func (repository *Repository) RecoverLegacySnapshotStates(ctx context.Context, n
 	return recovered, nil
 }
 
+type legacySupersededDisposition uint8
+
+const (
+	legacySupersededWait legacySupersededDisposition = iota
+	legacySupersededOverwritten
+	legacySupersededNeedsPurge
+)
+
+func (repository *Repository) RecoverLegacySupersededSnapshots(ctx context.Context, now time.Time, limit int) (int64, error) {
+	if repository == nil || repository.db == nil || ctx == nil || now.IsZero() || limit < 1 || limit > 100 {
+		return 0, fmt.Errorf("report execution recovery: invalid superseded snapshot request")
+	}
+	now = now.UTC().Truncate(time.Millisecond)
+	var candidates []struct {
+		ID           uint `gorm:"column:id"`
+		DefinitionID uint `gorm:"column:definition_id"`
+	}
+	if err := legacySupersededSnapshotQuery(repository.db.WithContext(ctx), limit).
+		Select("id", "definition_id").Find(&candidates).Error; err != nil {
+		return 0, fmt.Errorf("report execution recovery: list superseded snapshots: %w", err)
+	}
+	var recovered int64
+	for _, candidate := range candidates {
+		err := repository.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+			var definition model.ReportDefinition
+			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Select("id").First(&definition, candidate.DefinitionID).Error; err != nil {
+				return fmt.Errorf("lock superseded snapshot scope: %w", err)
+			}
+			var run model.ReportRun
+			if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Select("id", "definition_id", "version_id", "status", "result_purged_at").First(&run, candidate.ID).Error; err != nil {
+				return fmt.Errorf("lock superseded snapshot: %w", err)
+			}
+			if run.DefinitionID != candidate.DefinitionID || run.Status != model.ReportRunStatusSuperseded || run.ResultPurgedAt != nil {
+				return nil
+			}
+			var version model.ReportVersion
+			if err := tx.Select("id", "execution_mode", "result_table_owner", "result_table_name").
+				Where("id = ? AND definition_id = ?", run.VersionID, run.DefinitionID).First(&version).Error; err != nil {
+				return fmt.Errorf("load superseded snapshot version: %w", err)
+			}
+			var newerPurged int64
+			var newerSnapshot int64
+			if version.ExecutionMode == model.ReportExecutionModeTableSnapshot {
+				newerSameTable := tx.Table("report_runs AS newer").
+					Joins("JOIN report_versions AS versions ON versions.id = newer.version_id AND versions.definition_id = newer.definition_id").
+					Where("newer.definition_id = ? AND newer.id > ?", run.DefinitionID, run.ID).
+					Where("versions.execution_mode = ? AND versions.result_table_owner = ? AND versions.result_table_name = ?",
+						model.ReportExecutionModeTableSnapshot, version.ResultTableOwner, version.ResultTableName)
+				if err := newerSameTable.
+					Where("newer.status = ? AND newer.result_purged_at IS NOT NULL", model.ReportRunStatusResultPurged).
+					Count(&newerPurged).Error; err != nil {
+					return fmt.Errorf("inspect newer purged snapshot: %w", err)
+				}
+				if newerPurged == 0 {
+					if err := newerSameTable.
+						Where("newer.status IN ? OR (newer.oracle_started_at IS NOT NULL AND newer.status IN ?)",
+							unpurgedSnapshotStatuses(), []string{model.ReportRunStatusRunning, model.ReportRunStatusCancelRequested, model.ReportRunStatusUnknown, model.ReportRunStatusReconciling}).
+						Count(&newerSnapshot).Error; err != nil {
+						return fmt.Errorf("inspect newer snapshot ownership: %w", err)
+					}
+				}
+			}
+			disposition := classifyLegacySupersededSnapshot(newerPurged > 0, newerSnapshot > 0)
+			updates := map[string]interface{}{
+				"worker_id": "", "lease_token": "", "lease_expires_at": nil, "heartbeat_at": nil, "updated_at": now,
+			}
+			action := ""
+			detail := map[string]interface{}{}
+			switch disposition {
+			case legacySupersededWait:
+				return nil
+			case legacySupersededOverwritten:
+				updates["status"] = model.ReportRunStatusResultPurged
+				updates["result_purged_at"] = now
+				action = "REPORT_RESULT_PURGED"
+				detail["reasonCode"] = "SHARED_TABLE_PURGED_BY_NEWER_SNAPSHOT"
+			case legacySupersededNeedsPurge:
+				updates["status"] = model.ReportRunStatusSucceeded
+				updates["result_expires_at"] = now
+				action = "REPORT_RESULT_CLEANUP_QUEUED"
+				detail["reasonCode"] = "LEGACY_SUPERSEDED_SNAPSHOT"
+			}
+			result := tx.Model(&model.ReportRun{}).
+				Where("id = ? AND status = ? AND result_purged_at IS NULL", run.ID, model.ReportRunStatusSuperseded).
+				Updates(updates)
+			if result.Error != nil {
+				return fmt.Errorf("recover superseded snapshot: %w", result.Error)
+			}
+			if result.RowsAffected == 0 {
+				return nil
+			}
+			recovered++
+			return repository.writeSystemAudit(ctx, tx, action, "REPORT_RUN", run.ID, detail)
+		})
+		if err != nil {
+			return recovered, fmt.Errorf("report execution recovery: %w", err)
+		}
+	}
+	return recovered, nil
+}
+
+func legacySupersededSnapshotQuery(db *gorm.DB, limit int) *gorm.DB {
+	return db.Model(&model.ReportRun{}).
+		Where("status = ? AND result_purged_at IS NULL", model.ReportRunStatusSuperseded).
+		Order("id DESC").Limit(limit)
+}
+
+func unpurgedSnapshotStatuses() []string {
+	return []string{
+		model.ReportRunStatusSucceeded, model.ReportRunStatusExporting, model.ReportRunStatusExported,
+		model.ReportRunStatusResultPurging, model.ReportRunStatusSuperseded,
+	}
+}
+
+func classifyLegacySupersededSnapshot(newerPurged, newerSnapshot bool) legacySupersededDisposition {
+	if newerPurged {
+		return legacySupersededOverwritten
+	}
+	if newerSnapshot {
+		return legacySupersededWait
+	}
+	return legacySupersededNeedsPurge
+}
+
 func legacySnapshotStateQuery(db *gorm.DB, limit int) *gorm.DB {
 	return db.Model(&model.ReportRun{}).
 		Select("id", "status").
@@ -439,7 +563,8 @@ func tableSnapshotExecutionBlockerQuery(tx *gorm.DB, run model.ReportRun) *gorm.
 	}
 	query := tx.Model(&model.ReportRun{}).
 		Where("definition_id = ? AND id <> ?", run.DefinitionID, run.ID).
-		Where("status IN ? OR (status = ? AND result_purged_at IS NULL)", blockingStatuses, model.ReportRunStatusSucceeded)
+		Where("status IN ? OR (status IN ? AND result_purged_at IS NULL)", blockingStatuses,
+			[]string{model.ReportRunStatusSucceeded, model.ReportRunStatusSuperseded})
 	if run.Status == model.ReportRunStatusQueued {
 		query = query.Or("definition_id = ? AND status = ? AND id < ?", run.DefinitionID, model.ReportRunStatusQueued, run.ID)
 	}

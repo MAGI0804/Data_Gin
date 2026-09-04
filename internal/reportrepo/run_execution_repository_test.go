@@ -83,6 +83,9 @@ func TestTableSnapshotExecutionBlockerIsScopedToReportAndKeepsQueueOrder(t *test
 	if !containsSQLVariable(query.Statement.Vars, model.ReportRunStatusCancelRequested) {
 		t.Fatalf("blocker vars do not include cancel-requested runs: %#v", query.Statement.Vars)
 	}
+	if !containsSQLVariable(query.Statement.Vars, model.ReportRunStatusSuperseded) {
+		t.Fatalf("blocker vars do not include unpurged superseded runs: %#v", query.Statement.Vars)
+	}
 }
 
 func TestExpiredQueuedRunQueryUsesCreationDeadline(t *testing.T) {
@@ -113,6 +116,35 @@ func TestLegacySnapshotStateQueryIncludesUnpurgedLegacyStatuses(t *testing.T) {
 	for _, status := range []string{model.ReportRunStatusExporting, model.ReportRunStatusExported} {
 		if !containsSQLVariable(query.Statement.Vars, status) {
 			t.Fatalf("legacy state query does not include status %q: vars=%#v", status, query.Statement.Vars)
+		}
+	}
+}
+
+func TestLegacySupersededSnapshotRecoveryRequiresOverwriteEvidence(t *testing.T) {
+	tests := []struct {
+		name            string
+		newerPurged     bool
+		newerSnapshot   bool
+		wantDisposition legacySupersededDisposition
+	}{
+		{name: "newer physically purged snapshot proves shared table cleanup", newerPurged: true, wantDisposition: legacySupersededOverwritten},
+		{name: "newer snapshot owner must finish cleanup first", newerSnapshot: true, wantDisposition: legacySupersededWait},
+		{name: "latest legacy snapshot requires physical purge", wantDisposition: legacySupersededNeedsPurge},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if got := classifyLegacySupersededSnapshot(test.newerPurged, test.newerSnapshot); got != test.wantDisposition {
+				t.Fatalf("classifyLegacySupersededSnapshot() = %v, want %v", got, test.wantDisposition)
+			}
+		})
+	}
+	query := legacySupersededSnapshotQuery(newDryRunDB(t), 20).Pluck("id", &[]uint{})
+	if query.Error != nil {
+		t.Fatalf("build superseded query: %v", query.Error)
+	}
+	for _, fragment := range []string{"status = ?", "result_purged_at IS NULL", "ORDER BY id DESC", "LIMIT"} {
+		if !strings.Contains(query.Statement.SQL.String(), fragment) {
+			t.Fatalf("superseded query %q does not contain %q", query.Statement.SQL.String(), fragment)
 		}
 	}
 }

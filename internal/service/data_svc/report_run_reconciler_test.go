@@ -188,6 +188,8 @@ type fakeReconciliationStore struct {
 	terminalCleanupCalls        int
 	legacyRecoveryCount         int64
 	legacyRecoveryCalls         int
+	supersededRecoveryCount     int64
+	supersededRecoveryCalls     int
 	queuedRecoveryIDs           []uint
 	ensureRunQueuedErr          error
 	runQueuedCalls              int
@@ -196,6 +198,10 @@ type fakeReconciliationStore struct {
 func (store *fakeReconciliationStore) RecoverLegacySnapshotStates(context.Context, time.Time, int) (int64, error) {
 	store.legacyRecoveryCalls++
 	return store.legacyRecoveryCount, nil
+}
+func (store *fakeReconciliationStore) RecoverLegacySupersededSnapshots(context.Context, time.Time, int) (int64, error) {
+	store.supersededRecoveryCalls++
+	return store.supersededRecoveryCount, nil
 }
 
 func (store *fakeReconciliationStore) ListReconciliationCandidates(context.Context, time.Time, int) ([]uint, error) {
