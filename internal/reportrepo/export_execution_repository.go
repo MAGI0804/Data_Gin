@@ -72,6 +72,72 @@ func (repository *Repository) ListExportsMissingDelivery(ctx context.Context, no
 	return exportIDs, nil
 }
 
+func (repository *Repository) ListSuccessfulRunsMissingExport(ctx context.Context, now time.Time, limit int) ([]uint, error) {
+	if repository == nil || repository.db == nil || ctx == nil || now.IsZero() || limit < 1 || limit > 100 {
+		return nil, fmt.Errorf("report export recovery: invalid missing export query")
+	}
+	var runIDs []uint
+	err := successfulRunsMissingExportQuery(repository.db.WithContext(ctx), now, limit).Pluck("runs.id", &runIDs).Error
+	if err != nil {
+		return nil, fmt.Errorf("report export recovery: list successful runs: %w", err)
+	}
+	return runIDs, nil
+}
+
+func successfulRunsMissingExportQuery(db *gorm.DB, now time.Time, limit int) *gorm.DB {
+	return db.Table("report_runs AS runs").
+		Joins("JOIN report_versions AS versions ON versions.id = runs.version_id AND versions.definition_id = runs.definition_id").
+		Joins("LEFT JOIN report_exports AS exports ON exports.run_id = runs.id").
+		Where("runs.status = ? AND runs.result_purged_at IS NULL AND runs.updated_at <= ?",
+			model.ReportRunStatusSucceeded, now.UTC().Add(-30*time.Second).Truncate(time.Millisecond)).
+		Where("runs.result_expires_at IS NULL OR runs.result_expires_at > ?", now.UTC().Truncate(time.Millisecond)).
+		Where("versions.execution_mode = ? AND exports.id IS NULL", model.ReportExecutionModeTableSnapshot).
+		Order("runs.id ASC").Limit(limit)
+}
+
+func (repository *Repository) EnsureAutomaticExportQueued(ctx context.Context, runID uint, now time.Time) error {
+	if repository == nil || repository.db == nil || ctx == nil || runID == 0 || now.IsZero() {
+		return fmt.Errorf("report export recovery: invalid automatic export request")
+	}
+	now = now.UTC().Truncate(time.Millisecond)
+	return repository.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		var run model.ReportRun
+		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&run, runID).Error; err != nil {
+			return fmt.Errorf("report export recovery: lock successful run: %w", err)
+		}
+		if run.Status != model.ReportRunStatusSucceeded || run.ResultPurgedAt != nil {
+			return nil
+		}
+		var exportCount int64
+		if err := tx.Model(&model.ReportExport{}).Where("run_id = ?", runID).Count(&exportCount).Error; err != nil {
+			return fmt.Errorf("report export recovery: count exports: %w", err)
+		}
+		if exportCount > 0 {
+			return nil
+		}
+		if !frozenRunAllowsAction(run.PermissionSnapshotJSON, run.RequestedBy, ReportActionExport) {
+			if err := tx.Model(&model.ReportRun{}).
+				Where("id = ? AND status = ? AND result_purged_at IS NULL", runID, model.ReportRunStatusSucceeded).
+				Update("result_expires_at", now).Error; err != nil {
+				return fmt.Errorf("report export recovery: expire non-exportable snapshot: %w", err)
+			}
+			return repository.writeSystemAudit(ctx, tx, "REPORT_RESULT_CLEANUP_QUEUED", "REPORT_RUN", runID, map[string]interface{}{"reasonCode": "EXPORT_NOT_ALLOWED"})
+		}
+		export, outbox, err := buildAutomaticReportExport(run, uuid.NewString(), now)
+		if err != nil {
+			return err
+		}
+		if err := tx.Create(&export).Error; err != nil {
+			return fmt.Errorf("report export recovery: create automatic export: %w", err)
+		}
+		outbox.PayloadJSON = model.JSONText(fmt.Sprintf(`{"export_id":%d}`, export.ID))
+		if err := tx.Create(&outbox).Error; err != nil {
+			return fmt.Errorf("report export recovery: create automatic export outbox: %w", err)
+		}
+		return repository.writeSystemAudit(ctx, tx, "REPORT_EXPORT_AUTO_RECOVERED", "REPORT_EXPORT", export.ID, map[string]interface{}{"runId": runID})
+	})
+}
+
 func exportDeliveryRecoveryQuery(db *gorm.DB, now time.Time, limit int) *gorm.DB {
 	now = now.UTC().Truncate(time.Millisecond)
 	return db.Model(&model.ReportExport{}).

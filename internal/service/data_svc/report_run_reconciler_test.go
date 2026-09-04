@@ -39,6 +39,20 @@ func TestReportRunReconcilerRecoversLostExportDelivery(t *testing.T) {
 	}
 }
 
+func TestReportRunReconcilerCreatesMissingAutomaticExport(t *testing.T) {
+	now := time.Date(2026, 9, 4, 20, 0, 0, 0, time.UTC)
+	store := &fakeReconciliationStore{successfulRunsMissingExport: []uint{26}}
+	reconciler := NewReportRunReconcilerWithDependencies(store, fakeReportCredentialDecryptor{}, &fakeResultEvidenceReader{})
+	reconciler.now = func() time.Time { return now }
+
+	if err := reconciler.Reconcile(t.Context()); err != nil {
+		t.Fatalf("Reconcile() error = %v", err)
+	}
+	if store.missingExportCutoff != now || store.automaticExportQueued != 1 || store.automaticExportRunID != 26 {
+		t.Fatalf("cutoff=%v queued=%d runID=%d", store.missingExportCutoff, store.automaticExportQueued, store.automaticExportRunID)
+	}
+}
+
 func TestReportRunReconcilerUsesRunScopedResultAsCommitEvidence(t *testing.T) {
 	store := &fakeReconciliationStore{runtime: reconciliationRuntime()}
 	reader := &fakeResultEvidenceReader{rowCount: 12}
@@ -117,19 +131,23 @@ func (reader *fakeResultEvidenceReader) CountCommittedRows(context.Context, repo
 }
 
 type fakeReconciliationStore struct {
-	runtime              *reportrepo.RuntimeContract
-	succeeded            int
-	rowCount             int64
-	pending              int
-	pendingCode          string
-	expiredQueuedIDs     []uint
-	expiredCutoff        time.Time
-	queuedFailed         int
-	queuedFailedID       uint
-	missingExportIDs     []uint
-	exportRecoveryCutoff time.Time
-	exportQueued         int
-	exportQueuedID       uint
+	runtime                     *reportrepo.RuntimeContract
+	succeeded                   int
+	rowCount                    int64
+	pending                     int
+	pendingCode                 string
+	expiredQueuedIDs            []uint
+	expiredCutoff               time.Time
+	queuedFailed                int
+	queuedFailedID              uint
+	missingExportIDs            []uint
+	exportRecoveryCutoff        time.Time
+	exportQueued                int
+	exportQueuedID              uint
+	successfulRunsMissingExport []uint
+	missingExportCutoff         time.Time
+	automaticExportQueued       int
+	automaticExportRunID        uint
 }
 
 func (store *fakeReconciliationStore) ListReconciliationCandidates(context.Context, time.Time, int) ([]uint, error) {
@@ -176,5 +194,14 @@ func (store *fakeReconciliationStore) ListExportsMissingDelivery(_ context.Conte
 func (store *fakeReconciliationStore) EnsureExportQueued(_ context.Context, exportID uint, _ time.Time) error {
 	store.exportQueued++
 	store.exportQueuedID = exportID
+	return nil
+}
+func (store *fakeReconciliationStore) ListSuccessfulRunsMissingExport(_ context.Context, now time.Time, _ int) ([]uint, error) {
+	store.missingExportCutoff = now
+	return store.successfulRunsMissingExport, nil
+}
+func (store *fakeReconciliationStore) EnsureAutomaticExportQueued(_ context.Context, runID uint, _ time.Time) error {
+	store.automaticExportQueued++
+	store.automaticExportRunID = runID
 	return nil
 }

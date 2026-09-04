@@ -34,6 +34,8 @@ type reportReconciliationStore interface {
 	EnsureRunQueued(context.Context, uint, time.Time) error
 	ListExportsMissingDelivery(context.Context, time.Time, int) ([]uint, error)
 	EnsureExportQueued(context.Context, uint, time.Time) error
+	ListSuccessfulRunsMissingExport(context.Context, time.Time, int) ([]uint, error)
+	EnsureAutomaticExportQueued(context.Context, uint, time.Time) error
 }
 
 type reportResultEvidenceReader interface {
@@ -130,6 +132,16 @@ func (reconciler *ReportRunReconciler) Reconcile(ctx context.Context) error {
 			return err
 		}
 		zap.L().Info("已恢复报表查询任务投递", zap.Uint("report_run_id", runID))
+	}
+	missingExportRunIDs, err := reconciler.store.ListSuccessfulRunsMissingExport(ctx, now, reconciler.batchSize)
+	if err != nil {
+		return err
+	}
+	for _, runID := range missingExportRunIDs {
+		if err := reconciler.store.EnsureAutomaticExportQueued(ctx, runID, reconciler.now().UTC()); err != nil {
+			return err
+		}
+		zap.L().Info("已补建历史报表自动导出", zap.Uint("report_run_id", runID))
 	}
 	exportIDs, err := reconciler.store.ListExportsMissingDelivery(ctx, now, reconciler.batchSize)
 	if err != nil {
