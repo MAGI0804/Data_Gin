@@ -4,7 +4,7 @@ import dayjs from 'dayjs'
 import { ChevronDown, ChevronLeft, ChevronRight, Download, Filter, Info, Play, Plus, Square, Trash2 } from 'lucide-react'
 import { Button, DataTable, Dialog, FeedbackState, FilterToolbar, PageCanvas, PageHeader, Section, StatusTag, type StatusTagTone } from '../../../ui'
 import { cancelReportRun, createReportExport, createReportRun, getReportDownloads, getReportExport, getReportExportDownload, queryReportResults, getReportRun, getReportRunContract, type ReportCenterClient } from '../../api'
-import { buildNewReportRunState, canStartNewReportRun, initialReportParameterValues, terminalReportExportStatuses, terminalReportRunStatuses, visibleReportParameters } from '../../queryParameters'
+import { buildNewReportRunState, canStartNewReportRun, initialReportParameterValues, isReportExportSettled, terminalReportRunStatuses, visibleReportParameters } from '../../queryParameters'
 import { buildReportConditions, editableReportConditionValue, initialReportConditionValues, isReportInputListType, orderedReportInputEntries } from '../../refCursorConfig'
 import type { ReportExport, ReportFilterOperator, ReportInputField, ReportParameter, ReportResultColumn, ReportResultFilter, ReportResultPage, ReportResultQuery, ReportRun, ReportRunContract, ReportSummary } from '../../types'
 import { ReportFieldDetailDrawer } from '../../components/ReportFieldDetailDrawer/ReportFieldDetailDrawer'
@@ -200,7 +200,7 @@ export function ReportQueryPage({ client, navigation }: { client: ReportCenterCl
         return
       }
       setReportExport(response.data)
-      if (terminalReportExportStatuses.has(response.data.status)) {
+      if (isReportExportSettled(response.data)) {
         setOperation({ busy: false, error: response.data.errorMessage })
         return
       }
@@ -219,7 +219,7 @@ export function ReportQueryPage({ client, navigation }: { client: ReportCenterCl
   }
 
   function startNewRun() {
-    if (!contract || !run || !canStartNewReportRun(run.status, reportExport?.status ?? null, operation.busy)) return
+    if (!contract || !run || !canStartNewReportRun(run.status, reportExport, operation.busy)) return
     pollAbortRef.current?.abort()
     pollAbortRef.current = null
     const next = buildNewReportRunState(contract.parameters)
@@ -237,7 +237,7 @@ export function ReportQueryPage({ client, navigation }: { client: ReportCenterCl
   }
 
   const frozen = Boolean(run)
-  const canStartNewRun = run ? canStartNewReportRun(run.status, reportExport?.status ?? null, operation.busy) : false
+  const canStartNewRun = run ? canStartNewReportRun(run.status, reportExport, operation.busy) : false
   return (
     <PageCanvas density="compact">
       {navigation}

@@ -28,10 +28,16 @@ export function initialReportParameterValues(parameters: ReportParameter[]) {
   }, {})
 }
 
-export function canStartNewReportRun(runStatus: ReportRunStatus, exportStatus: ReportExportStatus | null, busy: boolean) {
+export function canStartNewReportRun(runStatus: ReportRunStatus, reportExport: Pick<ReportExport, 'status' | 'purgedAt'> | null, busy: boolean) {
   const runFinished = terminalReportRunStatuses.has(runStatus)
-  const exportFinished = exportStatus === null || terminalReportExportStatuses.has(exportStatus)
+  const exportFinished = isReportExportSettled(reportExport)
   return !busy && runFinished && exportFinished
+}
+
+export function isReportExportSettled(reportExport: Pick<ReportExport, 'status' | 'purgedAt'> | null) {
+  if (reportExport === null) return true
+  if (!terminalReportExportStatuses.has(reportExport.status)) return false
+  return reportExport.status !== 'READY' || reportExport.purgedAt !== null
 }
 
 export function buildNewReportRunState(parameters: ReportParameter[]): NewReportRunState {

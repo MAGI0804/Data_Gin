@@ -360,13 +360,16 @@ test('new report runs are allowed only after run and export processing finish', 
   const runStatuses = ['QUEUED', 'RUNNING', 'CANCEL_REQUESTED', 'SUCCEEDED', 'FAILED', 'CANCELLED', 'UNKNOWN', 'RECONCILING', 'EXPORTING', 'EXPORTED', 'RESULT_PURGING', 'RESULT_PURGED', 'SUPERSEDED']
   const exportStatuses = [null, 'PENDING', 'RUNNING', 'READY', 'FAILED', 'CANCELLED', 'EXPIRED']
   const terminalRuns = new Set(['SUCCEEDED', 'FAILED', 'CANCELLED', 'EXPORTED', 'RESULT_PURGED', 'SUPERSEDED'])
-  const terminalExports = new Set([null, 'READY', 'FAILED', 'CANCELLED', 'EXPIRED'])
+  const terminalExports = new Set([null, 'FAILED', 'CANCELLED', 'EXPIRED'])
   for (const runStatus of runStatuses) {
     for (const exportStatus of exportStatuses) {
-      assert.equal(canStartNewReportRun(runStatus, exportStatus, false), terminalRuns.has(runStatus) && terminalExports.has(exportStatus), `${runStatus}/${exportStatus}`)
-      assert.equal(canStartNewReportRun(runStatus, exportStatus, true), false, `${runStatus}/${exportStatus}/busy`)
+      const reportExport = exportStatus === null ? null : { status: exportStatus, purgedAt: null }
+      assert.equal(canStartNewReportRun(runStatus, reportExport, false), terminalRuns.has(runStatus) && terminalExports.has(exportStatus), `${runStatus}/${exportStatus}`)
+      assert.equal(canStartNewReportRun(runStatus, reportExport, true), false, `${runStatus}/${exportStatus}/busy`)
     }
   }
+  assert.equal(canStartNewReportRun('SUCCEEDED', { status: 'READY', purgedAt: null }, false), false)
+  assert.equal(canStartNewReportRun('SUCCEEDED', { status: 'READY', purgedAt: '2026-09-04T08:30:00Z' }, false), true)
 })
 
 test('new report run state clears the frozen snapshot and restores parameter defaults', () => {
