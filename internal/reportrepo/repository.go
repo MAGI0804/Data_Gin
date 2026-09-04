@@ -98,7 +98,12 @@ type publishedReportLoader func(context.Context, *gorm.DB, uint, uint, string, b
 type reportRunWriter func(context.Context, *gorm.DB, *model.ReportRun) error
 type reportRunOutboxWriter func(context.Context, *gorm.DB, *model.AsyncJobOutbox) error
 type enabledDatasourceValidator func(context.Context, *gorm.DB, uint) error
-type reportRunSlotPreparer func(context.Context, *gorm.DB, uint, uint, time.Time) ([]uint, error)
+type reportRunSlotPreparation struct {
+	ExistingRun      *model.ReportRun
+	SupersededRunIDs []uint
+}
+
+type reportRunSlotPreparer func(context.Context, *gorm.DB, uint, uint, string, time.Time) (reportRunSlotPreparation, error)
 
 type Repository struct {
 	db                    *gorm.DB

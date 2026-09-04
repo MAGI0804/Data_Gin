@@ -160,17 +160,67 @@ func TestCreateRunRollsBackAtEveryWriteBoundary(t *testing.T) {
 
 func TestCreateRunRejectsBusyReportSnapshotSlot(t *testing.T) {
 	repository, transactionState := runTestRepository(t)
-	repository.prepareRunSlot = func(_ context.Context, _ *gorm.DB, definitionID, actor uint, _ time.Time) ([]uint, error) {
+	repository.prepareRunSlot = func(_ context.Context, _ *gorm.DB, definitionID, actor uint, fingerprint string, _ time.Time) (reportRunSlotPreparation, error) {
 		if definitionID != 9 || actor != 17 {
 			t.Fatalf("slot scope = report %d actor %d", definitionID, actor)
 		}
-		return nil, ErrReportRunBusy
+		if fingerprint != strings.Repeat("d", 64) {
+			t.Fatalf("slot fingerprint = %q", fingerprint)
+		}
+		return reportRunSlotPreparation{}, ErrReportRunBusy
 	}
 	if err := repository.CreateRun(t.Context(), 17, 9, validRunCommand()); !errors.Is(err, ErrReportRunBusy) {
 		t.Fatalf("CreateRun() error = %v, want ErrReportRunBusy", err)
 	}
 	if transactionState.begins != 1 || transactionState.rollbacks != 1 || transactionState.commits != 0 {
 		t.Fatalf("transaction state = %#v", transactionState)
+	}
+}
+
+func TestCreateRunReusesMatchingActiveRun(t *testing.T) {
+	repository, transactionState := runTestRepository(t)
+	existing := model.ReportRun{
+		BaseModel: model.BaseModel{ID: 28}, WeatherTimestamps: model.WeatherTimestamps{CreatedAt: time.Date(2026, 9, 4, 10, 7, 0, 0, time.UTC)},
+		RunUUID: "22222222-2222-4222-8222-222222222222", DefinitionID: 9, VersionID: 23,
+		RequestedBy: 17, Status: model.ReportRunStatusRunning, ExecutionFingerprint: strings.Repeat("d", 64),
+	}
+	repository.prepareRunSlot = func(context.Context, *gorm.DB, uint, uint, string, time.Time) (reportRunSlotPreparation, error) {
+		return reportRunSlotPreparation{ExistingRun: &existing}, nil
+	}
+	repository.createReportRun = func(context.Context, *gorm.DB, *model.ReportRun) error {
+		t.Fatal("matching run must not create another control row")
+		return nil
+	}
+	repository.createRunOutbox = func(context.Context, *gorm.DB, *model.AsyncJobOutbox) error {
+		t.Fatal("matching run must not create another queue task")
+		return nil
+	}
+	repository.writeAudit = func(context.Context, *gorm.DB, model.ReportAudit) error {
+		t.Fatal("matching run must not create a duplicate audit")
+		return nil
+	}
+	command := validRunCommand()
+	if err := repository.CreateRun(t.Context(), 17, 9, command); err != nil {
+		t.Fatalf("CreateRun() error = %v", err)
+	}
+	if command.Run.ID != existing.ID || command.Run.RunUUID != existing.RunUUID || command.Run.Status != existing.Status || !command.Run.CreatedAt.Equal(existing.CreatedAt) {
+		t.Fatalf("reused command = %#v", command)
+	}
+	if transactionState.begins != 1 || transactionState.commits != 1 || transactionState.rollbacks != 0 {
+		t.Fatalf("transaction state = %#v", transactionState)
+	}
+}
+
+func TestReusableReportRunUsesNewestMatchingFingerprint(t *testing.T) {
+	runs := []model.ReportRun{
+		{BaseModel: model.BaseModel{ID: 31}, ExecutionFingerprint: strings.Repeat("a", 64)},
+		{BaseModel: model.BaseModel{ID: 30}, ExecutionFingerprint: strings.Repeat("b", 64)},
+	}
+	if got := reusableReportRun(runs, strings.Repeat("a", 64)); got == nil || got.ID != 31 {
+		t.Fatalf("reusableReportRun() = %#v", got)
+	}
+	if got := reusableReportRun(runs, strings.Repeat("c", 64)); got != nil {
+		t.Fatalf("reusableReportRun() unexpected match = %#v", got)
 	}
 }
 
@@ -313,6 +363,8 @@ func runTestRepository(t *testing.T) (*Repository, *transactionDriverState) {
 		}, nil
 	}
 	repository.validateRunSource = func(context.Context, *gorm.DB, uint) error { return nil }
-	repository.prepareRunSlot = func(context.Context, *gorm.DB, uint, uint, time.Time) ([]uint, error) { return nil, nil }
+	repository.prepareRunSlot = func(context.Context, *gorm.DB, uint, uint, string, time.Time) (reportRunSlotPreparation, error) {
+		return reportRunSlotPreparation{}, nil
+	}
 	return repository, transactionState
 }

@@ -81,9 +81,13 @@ func (repository *Repository) CreateRun(ctx context.Context, actor, definitionID
 			published.Version.ProcedureSignatureHash != command.Run.ProcedureSignatureHash || published.Version.ResultSchemaHash != command.Run.ResultSchemaHash {
 			return ErrDraftVersionConflict
 		}
-		supersededRunIDs, err := repository.prepareRunSlot(ctx, tx, definitionID, actor, outbox.AvailableAt)
+		slot, err := repository.prepareRunSlot(ctx, tx, definitionID, actor, run.ExecutionFingerprint, outbox.AvailableAt)
 		if err != nil {
 			return err
+		}
+		if slot.ExistingRun != nil {
+			run = *slot.ExistingRun
+			return nil
 		}
 		exportAuthority, exportAllowed, err := actorCanRunReport(ctx, tx, actor, published.authorizationOwner(), ReportActionExport, published.Grants)
 		if err != nil {
@@ -102,7 +106,7 @@ func (repository *Repository) CreateRun(ctx context.Context, actor, definitionID
 		if err := repository.createReportRun(ctx, tx, &run); err != nil {
 			return err
 		}
-		for _, supersededRunID := range supersededRunIDs {
+		for _, supersededRunID := range slot.SupersededRunIDs {
 			detail, detailErr := json.Marshal(map[string]interface{}{"replacedByRunId": run.ID})
 			if detailErr != nil {
 				return fmt.Errorf("report run: encode superseded audit: %w", detailErr)
@@ -141,9 +145,10 @@ func (repository *Repository) CreateRun(ctx context.Context, actor, definitionID
 	return nil
 }
 
-func prepareReportRunSlot(ctx context.Context, tx *gorm.DB, definitionID, actor uint, now time.Time) ([]uint, error) {
-	if ctx == nil || tx == nil || definitionID == 0 || actor == 0 || now.IsZero() {
-		return nil, ErrInvalidRun
+func prepareReportRunSlot(ctx context.Context, tx *gorm.DB, definitionID, actor uint, executionFingerprint string, now time.Time) (reportRunSlotPreparation, error) {
+	var preparation reportRunSlotPreparation
+	if ctx == nil || tx == nil || definitionID == 0 || actor == 0 || len(executionFingerprint) != 64 || now.IsZero() {
+		return preparation, ErrInvalidRun
 	}
 	now = now.UTC().Truncate(time.Millisecond)
 	activeStatuses := []string{
@@ -153,56 +158,76 @@ func prepareReportRunSlot(ctx context.Context, tx *gorm.DB, definitionID, actor 
 	}
 	var activeRuns []model.ReportRun
 	if err := reportRunSlotScope(tx.WithContext(ctx), definitionID, actor).Clauses(clause.Locking{Strength: "UPDATE"}).
-		Select("id").Where("status IN ?", activeStatuses).Find(&activeRuns).Error; err != nil {
-		return nil, fmt.Errorf("report run: lock active snapshot slot: %w", err)
+		Select("id", "run_uuid", "definition_id", "version_id", "requested_by", "status", "execution_fingerprint", "created_at").
+		Where("status IN ?", activeStatuses).Order("id DESC").Find(&activeRuns).Error; err != nil {
+		return preparation, fmt.Errorf("report run: lock active snapshot slot: %w", err)
 	}
 	if len(activeRuns) > 0 {
-		return nil, ErrReportRunBusy
+		if existing := reusableReportRun(activeRuns, executionFingerprint); existing != nil {
+			preparation.ExistingRun = existing
+			return preparation, nil
+		}
+		return preparation, ErrReportRunBusy
 	}
 	var snapshots []model.ReportRun
 	if err := reportRunSlotScope(tx.WithContext(ctx), definitionID, actor).Clauses(clause.Locking{Strength: "UPDATE"}).
-		Select("id").Where("status = ? AND result_purged_at IS NULL", model.ReportRunStatusSucceeded).
-		Find(&snapshots).Error; err != nil {
-		return nil, fmt.Errorf("report run: lock current snapshot: %w", err)
+		Select("id", "run_uuid", "definition_id", "version_id", "requested_by", "status", "execution_fingerprint", "created_at").
+		Where("status = ? AND result_purged_at IS NULL", model.ReportRunStatusSucceeded).
+		Order("id DESC").Find(&snapshots).Error; err != nil {
+		return preparation, fmt.Errorf("report run: lock current snapshot: %w", err)
 	}
 	if len(snapshots) == 0 {
-		return nil, nil
+		return preparation, nil
+	}
+	if existing := reusableReportRun(snapshots, executionFingerprint); existing != nil {
+		preparation.ExistingRun = existing
+		return preparation, nil
 	}
 	runIDs := make([]uint, 0, len(snapshots))
 	for _, snapshot := range snapshots {
 		runIDs = append(runIDs, snapshot.ID)
 	}
 	if err := tx.WithContext(ctx).Where("run_id IN ? AND expires_at <= ?", runIDs, now).Delete(&model.ReportResultReadLease{}).Error; err != nil {
-		return nil, fmt.Errorf("report run: clear expired snapshot readers: %w", err)
+		return preparation, fmt.Errorf("report run: clear expired snapshot readers: %w", err)
 	}
 	var activeReaders int64
 	if err := tx.WithContext(ctx).Model(&model.ReportResultReadLease{}).
 		Where("run_id IN ? AND expires_at > ?", runIDs, now).Count(&activeReaders).Error; err != nil {
-		return nil, fmt.Errorf("report run: count active snapshot readers: %w", err)
+		return preparation, fmt.Errorf("report run: count active snapshot readers: %w", err)
 	}
 	if activeReaders > 0 {
-		return nil, ErrReportRunBusy
+		return preparation, ErrReportRunBusy
 	}
 	var activeExports int64
 	if err := tx.WithContext(ctx).Model(&model.ReportExport{}).Where(
 		"run_id IN ? AND (status IN ? OR (status = ? AND purged_at IS NULL))",
 		runIDs, []string{model.ReportExportStatusPending, model.ReportExportStatusRunning}, model.ReportExportStatusReady,
 	).Count(&activeExports).Error; err != nil {
-		return nil, fmt.Errorf("report run: count active snapshot exports: %w", err)
+		return preparation, fmt.Errorf("report run: count active snapshot exports: %w", err)
 	}
 	if activeExports > 0 {
-		return nil, ErrReportRunBusy
+		return preparation, ErrReportRunBusy
 	}
 	result := tx.WithContext(ctx).Model(&model.ReportRun{}).
 		Where("id IN ? AND status = ? AND result_purged_at IS NULL", runIDs, model.ReportRunStatusSucceeded).
 		Updates(map[string]interface{}{"status": model.ReportRunStatusSuperseded, "updated_at": now})
 	if result.Error != nil {
-		return nil, fmt.Errorf("report run: supersede previous snapshot: %w", result.Error)
+		return preparation, fmt.Errorf("report run: supersede previous snapshot: %w", result.Error)
 	}
 	if result.RowsAffected != int64(len(runIDs)) {
-		return nil, ErrReportRunBusy
+		return preparation, ErrReportRunBusy
 	}
-	return runIDs, nil
+	preparation.SupersededRunIDs = runIDs
+	return preparation, nil
+}
+
+func reusableReportRun(runs []model.ReportRun, executionFingerprint string) *model.ReportRun {
+	for index := range runs {
+		if runs[index].ExecutionFingerprint == executionFingerprint {
+			return &runs[index]
+		}
+	}
+	return nil
 }
 
 func reportRunSlotScope(db *gorm.DB, definitionID, actor uint) *gorm.DB {
