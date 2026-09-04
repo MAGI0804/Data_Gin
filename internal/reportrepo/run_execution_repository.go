@@ -43,6 +43,24 @@ type RunLease struct {
 	Disposition RunDisposition
 	LeaseToken  string
 	Run         model.ReportRun
+	Blocker     *RunExecutionBlocker
+}
+
+type RunExecutionBlocker struct {
+	RunID                uint       `gorm:"column:run_id"`
+	RequestedBy          uint       `gorm:"column:requested_by"`
+	Status               string     `gorm:"column:status"`
+	Attempt              int        `gorm:"column:attempt"`
+	CancelRequested      bool       `gorm:"column:cancel_requested"`
+	OracleStartedAt      *time.Time `gorm:"column:oracle_started_at"`
+	LeaseExpiresAt       *time.Time `gorm:"column:lease_expires_at"`
+	ResultExpiresAt      *time.Time `gorm:"column:result_expires_at"`
+	ResultPurgedAt       *time.Time `gorm:"column:result_purged_at"`
+	ExportID             *uint      `gorm:"column:export_id"`
+	ExportStatus         *string    `gorm:"column:export_status"`
+	ExportAttempt        *int       `gorm:"column:export_attempt"`
+	ExportLeaseExpiresAt *time.Time `gorm:"column:export_lease_expires_at"`
+	ExportPurgedAt       *time.Time `gorm:"column:export_purged_at"`
 }
 
 type RuntimeContract struct {
@@ -482,12 +500,13 @@ func (repository *Repository) BeginExecution(
 			return nil
 		}
 		if tableSnapshot {
-			blocked, err := tableSnapshotExecutionBlocked(tx, lease.Run)
+			blocker, err := tableSnapshotExecutionBlocker(tx, lease.Run)
 			if err != nil {
 				return err
 			}
-			if blocked {
+			if blocker != nil {
 				lease.Disposition = RunDispositionBusy
+				lease.Blocker = blocker
 				return nil
 			}
 		}
@@ -547,13 +566,24 @@ func lockReportExecutionScope(tx *gorm.DB, runID uint) (bool, error) {
 	return true, nil
 }
 
-func tableSnapshotExecutionBlocked(tx *gorm.DB, run model.ReportRun) (bool, error) {
+func tableSnapshotExecutionBlocker(tx *gorm.DB, run model.ReportRun) (*RunExecutionBlocker, error) {
 	query := tableSnapshotExecutionBlockerQuery(tx, run)
-	var blockers int64
-	if err := query.Count(&blockers).Error; err != nil {
-		return false, fmt.Errorf("report execution: inspect table snapshot scope: %w", err)
+	var blocker RunExecutionBlocker
+	result := query.
+		Select(`report_runs.id AS run_id, report_runs.requested_by, report_runs.status, report_runs.attempt,
+			report_runs.cancel_requested, report_runs.oracle_started_at, report_runs.lease_expires_at,
+			report_runs.result_expires_at, report_runs.result_purged_at, exports.id AS export_id,
+			exports.status AS export_status, exports.attempt AS export_attempt,
+			exports.lease_expires_at AS export_lease_expires_at, exports.purged_at AS export_purged_at`).
+		Joins("LEFT JOIN report_exports AS exports ON exports.run_id = report_runs.id").
+		Order("report_runs.id ASC").Limit(1).Scan(&blocker)
+	if result.Error != nil {
+		return nil, fmt.Errorf("report execution: inspect table snapshot scope: %w", result.Error)
 	}
-	return blockers > 0, nil
+	if result.RowsAffected == 0 {
+		return nil, nil
+	}
+	return &blocker, nil
 }
 
 func tableSnapshotExecutionBlockerQuery(tx *gorm.DB, run model.ReportRun) *gorm.DB {
@@ -562,11 +592,11 @@ func tableSnapshotExecutionBlockerQuery(tx *gorm.DB, run model.ReportRun) *gorm.
 		model.ReportRunStatusExporting, model.ReportRunStatusResultPurging,
 	}
 	query := tx.Model(&model.ReportRun{}).
-		Where("definition_id = ? AND id <> ?", run.DefinitionID, run.ID).
-		Where("status IN ? OR (status IN ? AND result_purged_at IS NULL)", blockingStatuses,
+		Where("report_runs.definition_id = ? AND report_runs.id <> ?", run.DefinitionID, run.ID).
+		Where("report_runs.status IN ? OR (report_runs.status IN ? AND report_runs.result_purged_at IS NULL)", blockingStatuses,
 			[]string{model.ReportRunStatusSucceeded, model.ReportRunStatusSuperseded})
 	if run.Status == model.ReportRunStatusQueued {
-		query = query.Or("definition_id = ? AND status = ? AND id < ?", run.DefinitionID, model.ReportRunStatusQueued, run.ID)
+		query = query.Or("report_runs.definition_id = ? AND report_runs.status = ? AND report_runs.id < ?", run.DefinitionID, model.ReportRunStatusQueued, run.ID)
 	}
 	return query
 }

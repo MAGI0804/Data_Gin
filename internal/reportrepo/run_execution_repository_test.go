@@ -75,7 +75,7 @@ func TestTableSnapshotExecutionBlockerIsScopedToReportAndKeepsQueueOrder(t *test
 		t.Fatalf("build blocker query: %v", query.Error)
 	}
 	statement := query.Statement.SQL.String()
-	for _, fragment := range []string{"definition_id = ? AND id <> ?", "result_purged_at IS NULL", "definition_id = ? AND status = ? AND id < ?"} {
+	for _, fragment := range []string{"report_runs.definition_id = ? AND report_runs.id <> ?", "report_runs.result_purged_at IS NULL", "report_runs.definition_id = ? AND report_runs.status = ? AND report_runs.id < ?"} {
 		if !strings.Contains(statement, fragment) {
 			t.Fatalf("blocker query %q does not contain %q", statement, fragment)
 		}
