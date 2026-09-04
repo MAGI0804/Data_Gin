@@ -84,12 +84,10 @@ test('separates report administration from the download-only navigation', () => 
   assert.equal(canViewNavigationItem('report_exports', downloadPermissions), true)
   assert.equal(canViewNavigationItem('report_catalog', downloadPermissions), false)
   assert.equal(canViewNavigationItem('report_configuration', downloadPermissions), false)
-  assert.equal(canViewNavigationItem('report_permissions', downloadPermissions), false)
 
   const administrationPermissions = ['report.read', 'report.manage']
   assert.equal(canViewNavigationItem('report_catalog', administrationPermissions), true)
   assert.equal(canViewNavigationItem('report_configuration', administrationPermissions), true)
-  assert.equal(canViewNavigationItem('report_permissions', administrationPermissions), true)
   assert.equal(canViewNavigationItem('report_query', administrationPermissions), false)
 })
 

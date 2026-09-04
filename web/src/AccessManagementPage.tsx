@@ -1,6 +1,7 @@
 import { FormEvent, useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import Select from 'antd/es/select'
-import { KeyRound, Plus, RefreshCcw, ShieldCheck } from 'lucide-react'
+import { Building2, FileSpreadsheet, KeyRound, Plus, RefreshCcw, ShieldCheck, UserRound } from 'lucide-react'
+import { AccessAccountReportCategories } from './AccessAccountReportCategories'
 import { AccessRoleCreateDrawer, type AccessRoleCreateInput } from './AccessRoleCreateDrawer'
 import { DataAuthorizationPage } from './DataAuthorizationPage'
 import {
@@ -28,6 +29,7 @@ type ApiClient = (path: string, options?: { method?: 'GET' | 'POST' | 'PUT' | 'P
 type Tab = 'accounts' | 'roles' | 'open-api' | 'audits'
 type Audit = { id: number; actorUserId: number; action: string; targetType: string; targetId: number; reason: string; createdAt: string }
 type MallCatalogStatus = 'idle' | 'loading' | 'ready' | 'error'
+type AccountSection = 'overview' | 'roles' | 'malls' | 'reports' | 'security'
 
 const headers = () => ({ 'Idempotency-Key': `access:${globalThis.crypto.randomUUID()}` })
 const tabLabels: Record<Tab, string> = { accounts: '控制台账号', roles: '角色管理', 'open-api': '开放 API', audits: '权限审计' }
@@ -69,14 +71,14 @@ export function AccessManagementPage({ client, permissions }: { client: ApiClien
     <nav className={styles.tabs} aria-label="账号与权限模块">
       {availableTabs.map((item) => <button type="button" key={item} className={tab === item ? styles.activeTab : undefined} aria-current={tab === item ? 'page' : undefined} onClick={() => setTab(item)}>{tabLabels[item]}</button>)}
     </nav>
-    {tab === 'accounts' && <AccountPanel client={client} canManage={canAccountManage} canManageRoles={canRoleManage} canReadRoles={canRoleRead} grantablePermissionCodes={permissions} />}
+    {tab === 'accounts' && <AccountPanel client={client} canManage={canAccountManage} canManageRoles={canRoleManage} canReadRoles={canRoleRead} canManageReportCategories={canAccountManage && permissions.includes('report.manage')} grantablePermissionCodes={permissions} />}
     {tab === 'roles' && <RolePanel client={client} canManage={canRoleManage} grantablePermissionCodes={permissions} />}
     {tab === 'open-api' && <DataAuthorizationPage client={client} />}
     {tab === 'audits' && <AuditPanel client={client} />}
   </PageCanvas>
 }
 
-function AccountPanel({ client, canManage, canManageRoles, canReadRoles, grantablePermissionCodes }: { client: ApiClient; canManage: boolean; canManageRoles: boolean; canReadRoles: boolean; grantablePermissionCodes: string[] }) {
+function AccountPanel({ client, canManage, canManageRoles, canReadRoles, canManageReportCategories, grantablePermissionCodes }: { client: ApiClient; canManage: boolean; canManageRoles: boolean; canReadRoles: boolean; canManageReportCategories: boolean; grantablePermissionCodes: string[] }) {
   const [accounts, setAccounts] = useState<Account[]>([])
   const [roles, setRoles] = useState<Role[]>([])
   const [catalog, setCatalog] = useState<Permission[]>([])
@@ -96,6 +98,7 @@ function AccountPanel({ client, canManage, canManageRoles, canReadRoles, grantab
   const [creating, setCreating] = useState(false)
   const [busy, setBusy] = useState(false)
   const [message, setMessage] = useState('')
+  const [accountSection, setAccountSection] = useState<AccountSection>('overview')
   const selectedIDRef = useRef(0)
   const selected = accounts.find((item) => item.id === selectedID) ?? accounts[0]
   const activeRoles = useMemo(() => roles.filter((role) => role.status === 'ACTIVE'), [roles])
@@ -103,6 +106,12 @@ function AccountPanel({ client, canManage, canManageRoles, canReadRoles, grantab
     const grantable = new Set(grantablePermissionCodes)
     return catalog.filter((permission) => grantable.has(permission.code))
   }, [catalog, grantablePermissionCodes])
+  const hasReportRuntimePermissions = useMemo(() => {
+    if (!selected) return false
+    const assigned = new Set(selected.roles.map((role) => role.code))
+    const effective = new Set(activeRoles.filter((role) => assigned.has(role.code)).flatMap((role) => role.permissions))
+    return ['report.read', 'report.execute', 'report.export'].every((permission) => effective.has(permission))
+  }, [activeRoles, selected])
 
   const load = useCallback(async () => {
     setBusy(true); setMessage('')
@@ -246,15 +255,25 @@ function AccountPanel({ client, canManage, canManageRoles, canReadRoles, grantab
         {message && <p className={styles.message} role="status">{message}</p>}
         {!selected ? <FeedbackState kind={busy ? 'loading' : 'empty'} title={busy ? '正在加载控制台账号' : '暂无控制台账号'} /> : <>
           <header className={styles.detailHeader}><div><span>控制台账号</span><h3>{selected.nickname}</h3><p>{selected.account} · {selected.phone || '未绑定手机号'}</p></div>{canManage && <button type="button" disabled={busy} onClick={() => void mutate(`/v1/access/accounts/${selected.id}/status`, { status: selected.status === 'ACTIVE' ? 'DISABLED' : 'ACTIVE', reason: selected.status === 'ACTIVE' ? '管理员停用账号' : '管理员启用账号' })}>{selected.status === 'ACTIVE' ? '停用账号' : '启用账号'}</button>}</header>
-          <dl className={styles.summary}><div><dt>状态</dt><dd>{selected.status}</dd></div><div><dt>角色</dt><dd>{selected.roles.map((role) => role.name).join('、') || '未分配'}</dd></div><div><dt>商场范围</dt><dd>{selected.mallScopeMode === 'ALL' ? '全部商场' : selected.mallIds.join(', ') || '未指定'}</dd></div></dl>
-          {canManage && <div className={styles.forms}>
-            <form onSubmit={(event) => { event.preventDefault(); const form = new FormData(event.currentTarget); void mutate(`/v1/access/accounts/${selected.id}`, { phone: value(form, 'phone'), nickname: value(form, 'nickname'), reason: value(form, 'reason') }) }}><h4>基础信息</h4><Field label="手机号"><input name="phone" required pattern="1[3-9][0-9]{9}" placeholder="输入完整手机号" /></Field><Field label="昵称"><input name="nickname" defaultValue={selected.nickname} required /></Field><Field label="变更原因"><input name="reason" required /></Field><button type="submit" disabled={busy}>保存信息</button></form>
-            {canReplaceAccountRoles(roleCatalogStatus)
-              ? <form onSubmit={(event) => { event.preventDefault(); const form = new FormData(event.currentTarget); void mutate(`/v1/access/accounts/${selected.id}/roles`, { roleIds: editRoleIDs, reason: value(form, 'reason') }) }}><div className={styles.roleSelectionHeader}><h4>角色全量替换</h4>{canManageRoles && grantableCatalog.length > 0 && <button type="button" disabled={busy} onClick={() => { setRoleCreatorError(''); setRoleCreatorTarget('edit') }}><Plus aria-hidden="true" />自定义角色与权限</button>}</div>{activeRoles.map((role) => <label className={styles.check} key={role.id}><input type="checkbox" name="roleIds" value={role.id} checked={editRoleIDs.includes(role.id)} onChange={(event) => toggleRole(role.id, event.currentTarget.checked, 'edit')} />{role.name}<small>{role.permissions.length} 项权限</small></label>)}<Field label="变更原因"><input name="reason" required /></Field><button type="submit" disabled={busy}>保存角色</button></form>
-              : <div className={styles.roleUnavailable} role="status"><h4>角色全量替换</h4><p>{roleCatalogStatus === 'error' ? '角色目录加载失败，为避免清空现有角色，暂时禁止保存。' : '角色目录加载完成后即可编辑。'}</p></div>}
-            <form onSubmit={(event) => updateMallScope(event, selected.id)}><h4>商场范围</h4><MallScopeFields mode={editMallScopeMode} mallIDs={editMallIDs} malls={malls} catalogStatus={mallCatalogStatus} disabled={busy} onModeChange={setEditMallScopeMode} onMallIDsChange={setEditMallIDs} onRetry={loadMalls} /><Field label="变更原因"><input name="reason" required /></Field><button type="submit" disabled={busy || editMallScopeMode === 'SELECTED' && mallCatalogStatus !== 'ready'}>保存范围</button></form>
-            <form onSubmit={(event) => { event.preventDefault(); const form = new FormData(event.currentTarget); void mutate(`/v1/access/accounts/${selected.id}/password`, { password: value(form, 'password'), reason: value(form, 'reason') }) }}><h4>重置密码</h4><Field label="新密码"><input type="password" name="password" minLength={10} maxLength={72} required autoComplete="new-password" placeholder="10–72 位" /></Field><Field label="重置原因"><input name="reason" required /></Field><button type="submit" disabled={busy}><KeyRound aria-hidden="true" />重置密码</button></form>
-          </div>}
+          <nav className={styles.accountSubnav} aria-label={`${selected.nickname} 账号设置`}>
+            <button type="button" className={accountSection === 'overview' ? styles.activeSubnav : undefined} aria-current={accountSection === 'overview' ? 'page' : undefined} onClick={() => setAccountSection('overview')}><UserRound aria-hidden="true" />账号概览</button>
+            {canManage && <button type="button" className={accountSection === 'roles' ? styles.activeSubnav : undefined} aria-current={accountSection === 'roles' ? 'page' : undefined} onClick={() => setAccountSection('roles')}><ShieldCheck aria-hidden="true" />角色权限</button>}
+            {canManage && <button type="button" className={accountSection === 'malls' ? styles.activeSubnav : undefined} aria-current={accountSection === 'malls' ? 'page' : undefined} onClick={() => setAccountSection('malls')}><Building2 aria-hidden="true" />商场范围</button>}
+            {canManageReportCategories && <button type="button" className={accountSection === 'reports' ? styles.activeSubnav : undefined} aria-current={accountSection === 'reports' ? 'page' : undefined} onClick={() => setAccountSection('reports')}><FileSpreadsheet aria-hidden="true" />报表分类</button>}
+            {canManage && <button type="button" className={accountSection === 'security' ? styles.activeSubnav : undefined} aria-current={accountSection === 'security' ? 'page' : undefined} onClick={() => setAccountSection('security')}><KeyRound aria-hidden="true" />登录安全</button>}
+          </nav>
+          <div className={styles.accountSection}>
+            {accountSection === 'overview' && <>
+              <dl className={styles.summary}><div><dt>状态</dt><dd>{selected.status === 'ACTIVE' ? '启用' : '停用'}</dd></div><div><dt>角色</dt><dd>{selected.roles.map((role) => role.name).join('、') || '未分配'}</dd></div><div><dt>商场范围</dt><dd>{selected.mallScopeMode === 'ALL' ? '全部商场' : `${selected.mallIds.length} 个指定商场`}</dd></div></dl>
+              {canManage && <form className={styles.singleForm} onSubmit={(event) => { event.preventDefault(); const form = new FormData(event.currentTarget); void mutate(`/v1/access/accounts/${selected.id}`, { phone: value(form, 'phone'), nickname: value(form, 'nickname'), reason: value(form, 'reason') }) }}><h4>基础信息</h4><p>更新账号的联系人与控制台显示名称。</p><Field label="手机号"><input name="phone" required pattern="1[3-9][0-9]{9}" placeholder="输入完整手机号" /></Field><Field label="昵称"><input name="nickname" defaultValue={selected.nickname} required /></Field><Field label="变更原因"><input name="reason" required /></Field><button className={styles.primary} type="submit" disabled={busy}>保存基础信息</button></form>}
+            </>}
+            {accountSection === 'roles' && (canReplaceAccountRoles(roleCatalogStatus)
+              ? <form className={styles.singleForm} onSubmit={(event) => { event.preventDefault(); const form = new FormData(event.currentTarget); void mutate(`/v1/access/accounts/${selected.id}/roles`, { roleIds: editRoleIDs, reason: value(form, 'reason') }) }}><div className={styles.roleSelectionHeader}><div><h4>角色权限</h4><p>角色决定账号可访问的业务模块，保存后旧会话会失效。</p></div>{canManageRoles && grantableCatalog.length > 0 && <button type="button" disabled={busy} onClick={() => { setRoleCreatorError(''); setRoleCreatorTarget('edit') }}><Plus aria-hidden="true" />自定义角色</button>}</div><div className={styles.roleChoices}>{activeRoles.map((role) => <label className={styles.check} key={role.id}><input type="checkbox" name="roleIds" value={role.id} checked={editRoleIDs.includes(role.id)} onChange={(event) => toggleRole(role.id, event.currentTarget.checked, 'edit')} />{role.name}<small>{role.permissions.length} 项权限</small></label>)}</div><Field label="变更原因"><input name="reason" required /></Field><button className={styles.primary} type="submit" disabled={busy}>保存角色权限</button></form>
+              : <div className={styles.roleUnavailable} role="status"><h4>角色权限</h4><p>{roleCatalogStatus === 'error' ? '角色目录加载失败，为避免清空现有角色，暂时禁止保存。' : '角色目录加载完成后即可编辑。'}</p></div>)}
+            {accountSection === 'malls' && <form className={styles.singleForm} onSubmit={(event) => updateMallScope(event, selected.id)}><h4>商场范围</h4><p>限制该账号可查看和操作的商场数据。</p><MallScopeFields mode={editMallScopeMode} mallIDs={editMallIDs} malls={malls} catalogStatus={mallCatalogStatus} disabled={busy} onModeChange={setEditMallScopeMode} onMallIDsChange={setEditMallIDs} onRetry={loadMalls} /><Field label="变更原因"><input name="reason" required /></Field><button className={styles.primary} type="submit" disabled={busy || editMallScopeMode === 'SELECTED' && mallCatalogStatus !== 'ready'}>保存商场范围</button></form>}
+            {accountSection === 'reports' && canManageReportCategories && <AccessAccountReportCategories accountID={selected.id} accountName={selected.nickname} client={client} hasRuntimePermissions={hasReportRuntimePermissions} />}
+            {accountSection === 'security' && <form className={styles.singleForm} onSubmit={(event) => { event.preventDefault(); const form = new FormData(event.currentTarget); void mutate(`/v1/access/accounts/${selected.id}/password`, { password: value(form, 'password'), reason: value(form, 'reason') }) }}><h4>登录安全</h4><p>重置密码后，该账号的所有旧会话会立即失效。</p><Field label="新密码"><input type="password" name="password" minLength={10} maxLength={72} required autoComplete="new-password" placeholder="10–72 位" /></Field><Field label="重置原因"><input name="reason" required /></Field><button className={styles.primary} type="submit" disabled={busy}><KeyRound aria-hidden="true" />重置密码</button></form>}
+          </div>
         </>}
       </div>}
     />

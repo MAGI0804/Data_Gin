@@ -5,14 +5,30 @@ import {
   accountRoleIDs,
   accessMallCatalogPath,
   accessMallScopeRequest,
+  accessAccountReportCategoriesPath,
   accessManagementCapabilities,
   canReplaceAccountRoles,
   mergeAccessMalls,
   parseAccessMallCatalog,
   parseAccessAccounts,
+  parseAccessAccountReportCategories,
   parseCreatedAccessRole,
   updateRoleSelection,
 } from '../.test-dist/accessManagement.js'
+
+test('parses account report category permissions', () => {
+  assert.equal(accessAccountReportCategoriesPath(7), '/v1/access/accounts/7/report-categories')
+  assert.throws(() => accessAccountReportCategoriesPath(0), /invalid access account id/)
+  assert.deepEqual(parseAccessAccountReportCategories({ data: { items: [{
+    category: ' 财务 ', reportCount: 3, configured: true, lockVersion: 2,
+    directActions: ['QUERY'], inheritedActions: ['QUERY', 'EXPORT'], effectiveActions: ['QUERY', 'EXPORT'],
+  }] } }), [{
+    category: '财务', reportCount: 3, configured: true, lockVersion: 2,
+    directActions: ['QUERY'], inheritedActions: ['QUERY', 'EXPORT'], effectiveActions: ['QUERY', 'EXPORT'],
+  }])
+  assert.equal(parseAccessAccountReportCategories({ data: { items: [{ category: '财务', reportCount: 1, configured: false, lockVersion: 2, directActions: [], inheritedActions: [], effectiveActions: [] }] } }), null)
+  assert.equal(parseAccessAccountReportCategories({ data: { items: [{ category: '财务', reportCount: 1, configured: true, lockVersion: 1, directActions: ['DELETE'], inheritedActions: [], effectiveActions: [] }] } }), null)
+})
 
 test('builds a valid account mall scope request', () => {
   assert.deepEqual(accessMallScopeRequest('ALL', [7, 8]), { mallScopeMode: 'ALL', mallIds: [] })

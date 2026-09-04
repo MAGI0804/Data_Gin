@@ -33,9 +33,16 @@
 .summary div + div { border-inline-start: 1px solid var(--color-border); }
 .summary dt { color: var(--color-text-secondary); font-size: 11px; }
 .summary dd { margin: var(--space-1) 0 0; overflow-wrap: anywhere; font-size: 12px; }
-.forms { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-4); }
-.forms form { display: grid; align-content: start; gap: var(--space-2); padding-block: var(--space-3); border-top: 1px solid var(--color-border); }
-.forms h4 { margin: 0 0 var(--space-1); }
+.accountSubnav { display: flex; gap: 0; overflow-x: auto; border-bottom: 1px solid var(--color-border); }
+.accountSubnav button { display: inline-flex; flex: 0 0 auto; gap: var(--space-2); align-items: center; border: 0; border-bottom: 2px solid transparent; border-radius: 0; background: transparent; color: var(--color-text-secondary); }
+.accountSubnav button svg { width: 16px; height: 16px; }
+.accountSubnav .activeSubnav { border-bottom-color: var(--access-accent); background: var(--color-brand-soft); color: var(--color-text); }
+.accountSection { min-height: 360px; padding-block: var(--space-4); }
+.singleForm { display: grid; max-width: 720px; gap: var(--space-3); }
+.singleForm h4, .singleForm p { margin: 0; }
+.singleForm > p { color: var(--color-text-secondary); font-size: 13px; }
+.singleForm > button { justify-self: start; }
+.roleChoices { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: var(--space-2); border-block: 1px solid var(--color-border); padding-block: var(--space-3); }
 .check { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: var(--space-2); align-items: center; color: var(--color-text); font-size: 13px; font-weight: 500; }
 .check small { grid-column: 2; margin-block-start: calc(-1 * var(--space-1)); color: var(--color-text-secondary); font-size: 11px; font-weight: 500; }
 .roleSelectionHeader { display: flex; flex-wrap: wrap; gap: var(--space-2); align-items: center; justify-content: space-between; }
@@ -55,11 +62,34 @@
 .permissionMatrix label small, .permissionMatrix label em { color: var(--color-text-secondary); font-size: 11px; font-style: normal; font-weight: 500; }
 .saveRow { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: var(--space-2); align-items: end; }
 .drawerForm { display: grid; gap: var(--space-3); }
+.reportAccess { display: grid; gap: var(--space-3); }
+.reportAccessIntro { display: flex; gap: var(--space-3); align-items: flex-start; border-inline-start: 3px solid var(--access-accent); background: var(--color-brand-soft); padding: var(--space-3); }
+.reportAccessIntro > svg { flex: 0 0 auto; width: 20px; height: 20px; color: var(--color-brand-active); }
+.reportAccessIntro p { margin: var(--space-1) 0 0; color: var(--color-text-secondary); font-size: 12px; }
+.permissionNotice, .inheritedNotice { margin: 0; border-inline-start: 3px solid var(--color-warning); background: var(--color-warning-soft); padding: var(--space-3); color: var(--color-warning-text); font-size: 12px; }
+.inheritedNotice { border-inline-start-color: var(--color-border-strong); background: var(--color-surface-subtle); color: var(--color-text-secondary); }
+.reportAccessToolbar { display: flex; gap: var(--space-3); align-items: center; justify-content: space-between; }
+.reportAccessToolbar label { display: flex; flex: 1 1 auto; max-width: 420px; align-items: center; border: 1px solid var(--color-border-strong); background: var(--color-canvas); padding-inline: var(--space-3); }
+.reportAccessToolbar label:focus-within { border-color: var(--color-brand); box-shadow: 0 0 0 2px var(--color-brand-soft); }
+.reportAccessToolbar svg { width: 16px; height: 16px; color: var(--color-text-secondary); }
+.reportAccessToolbar input { width: 100%; border: 0; outline: 0; background: transparent; padding-inline: var(--space-2); }
+.reportAccessToolbar > span { color: var(--color-text-secondary); font-size: 12px; }
+.categoryList { display: grid; border-top: 1px solid var(--color-border); }
+.categoryList article { display: grid; grid-template-columns: minmax(180px, .8fr) minmax(260px, 1.4fr) auto; gap: var(--space-4); align-items: center; border-bottom: 1px solid var(--color-border); padding-block: var(--space-3); }
+.categoryIdentity { display: flex; min-width: 0; gap: var(--space-2); align-items: center; }
+.categoryIdentity svg { flex: 0 0 auto; width: 18px; height: 18px; color: var(--color-brand-active); }
+.categoryIdentity span, .categoryIdentity small { display: block; min-width: 0; }
+.categoryIdentity small { margin-block-start: var(--space-1); color: var(--color-text-secondary); font-size: 11px; }
+.categoryStatus { display: flex; min-width: 0; flex-wrap: wrap; gap: var(--space-2); align-items: center; }
+.categoryStatus > span { color: var(--color-text-secondary); font-size: 12px; }
+.permissionChoice { display: grid; grid-template-columns: auto minmax(0, 1fr); gap: var(--space-3); align-items: start; border: 1px solid var(--color-border); padding: var(--space-3); }
+.permissionChoice span, .permissionChoice small { display: block; }
+.permissionChoice small { margin-block-start: var(--space-1); color: var(--color-text-secondary); font-size: 12px; font-weight: 500; }
 .srOnly { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; clip-path: inset(50%); }
 .danger { border-color: var(--color-danger); color: var(--color-danger); background: var(--color-canvas); }
 .dangerNotice { margin: 0; border-inline-start: 3px solid var(--color-danger); background: var(--color-notice-danger); padding: var(--space-3); color: var(--color-danger); }
 .auditFilter { display: flex; flex: 1 1 auto; flex-wrap: wrap; gap: var(--space-2); align-items: end; }
 .auditFilter label { display: grid; gap: var(--space-1); min-width: 180px; color: var(--color-text-secondary); font-size: 12px; font-weight: 650; }
 .auditFilter :is(input, select) { border: 1px solid var(--color-border-strong); background: var(--color-canvas); padding-inline: var(--space-3); }
-@media (max-width: 839px) { .masterDetail { min-height: 0; } .masterPane { padding-inline-end: 0; } .forms { grid-template-columns: 1fr; } }
-@media (max-width: 599px) { .summary { grid-template-columns: 1fr; } .summary div + div { border-inline-start: 0; border-top: 1px solid var(--color-border); } .saveRow, .search { grid-template-columns: 1fr; } .auditFilter, .auditFilter label { width: 100%; } }
+@media (max-width: 839px) { .masterDetail { min-height: 0; } .masterPane { padding-inline-end: 0; } .roleChoices { grid-template-columns: 1fr; } }
+@media (max-width: 599px) { .detailHeader { align-items: stretch; flex-direction: column; } .summary { grid-template-columns: 1fr; } .summary div + div { border-inline-start: 0; border-top: 1px solid var(--color-border); } .saveRow, .search { grid-template-columns: 1fr; } .auditFilter, .auditFilter label { width: 100%; } .reportAccessToolbar { align-items: stretch; flex-direction: column; } .reportAccessToolbar label { width: 100%; max-width: none; } .categoryList article { grid-template-columns: 1fr; gap: var(--space-2); } .categoryList article > button { justify-self: start; } }

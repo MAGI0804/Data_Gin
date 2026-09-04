@@ -55,6 +55,57 @@ export type AccessMallCatalog = {
   nextAfterId: number
 }
 
+export type AccessReportAction = 'QUERY' | 'EXPORT'
+
+export type AccessAccountReportCategory = {
+  category: string
+  reportCount: number
+  configured: boolean
+  lockVersion: number
+  directActions: AccessReportAction[]
+  inheritedActions: AccessReportAction[]
+  effectiveActions: AccessReportAction[]
+}
+
+export function accessAccountReportCategoriesPath(accountID: number) {
+  if (!Number.isSafeInteger(accountID) || accountID <= 0) throw new Error('invalid access account id')
+  return `/v1/access/accounts/${accountID}/report-categories`
+}
+
+export function parseAccessAccountReportCategories(payload: unknown): AccessAccountReportCategory[] | null {
+  if (!payload || typeof payload !== 'object' || Array.isArray(payload)) return null
+  const data = (payload as Record<string, unknown>).data
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return null
+  const items = (data as Record<string, unknown>).items
+  if (!Array.isArray(items)) return null
+  const result: AccessAccountReportCategory[] = []
+  for (const value of items) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return null
+    const item = value as Record<string, unknown>
+    const directActions = parseAccessReportActions(item.directActions)
+    const inheritedActions = parseAccessReportActions(item.inheritedActions)
+    const effectiveActions = parseAccessReportActions(item.effectiveActions)
+    if (typeof item.category !== 'string' || !item.category.trim() || !Number.isSafeInteger(item.reportCount) || Number(item.reportCount) < 0 ||
+      typeof item.configured !== 'boolean' || !Number.isSafeInteger(item.lockVersion) || Number(item.lockVersion) < 0 ||
+      item.configured !== (Number(item.lockVersion) > 0) || !directActions || !inheritedActions || !effectiveActions) return null
+    result.push({
+      category: item.category.trim(), reportCount: Number(item.reportCount), configured: item.configured,
+      lockVersion: Number(item.lockVersion), directActions, inheritedActions, effectiveActions,
+    })
+  }
+  return result
+}
+
+function parseAccessReportActions(value: unknown): AccessReportAction[] | null {
+  if (!Array.isArray(value)) return null
+  const result: AccessReportAction[] = []
+  for (const action of value) {
+    if (action !== 'QUERY' && action !== 'EXPORT') return null
+    if (!result.includes(action)) result.push(action)
+  }
+  return result
+}
+
 export function accessMallCatalogPath(afterID = 0, limit = 200) {
   if (!Number.isSafeInteger(afterID) || afterID < 0 || !Number.isSafeInteger(limit) || limit < 1 || limit > 200) {
     throw new Error('invalid access mall pagination')
