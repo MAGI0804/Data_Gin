@@ -160,7 +160,10 @@ func TestCreateRunRollsBackAtEveryWriteBoundary(t *testing.T) {
 
 func TestCreateRunRejectsBusyReportSnapshotSlot(t *testing.T) {
 	repository, transactionState := runTestRepository(t)
-	repository.prepareRunSlot = func(context.Context, *gorm.DB, uint, time.Time) ([]uint, error) {
+	repository.prepareRunSlot = func(_ context.Context, _ *gorm.DB, definitionID, actor uint, _ time.Time) ([]uint, error) {
+		if definitionID != 9 || actor != 17 {
+			t.Fatalf("slot scope = report %d actor %d", definitionID, actor)
+		}
 		return nil, ErrReportRunBusy
 	}
 	if err := repository.CreateRun(t.Context(), 17, 9, validRunCommand()); !errors.Is(err, ErrReportRunBusy) {
@@ -168,6 +171,24 @@ func TestCreateRunRejectsBusyReportSnapshotSlot(t *testing.T) {
 	}
 	if transactionState.begins != 1 || transactionState.rollbacks != 1 || transactionState.commits != 0 {
 		t.Fatalf("transaction state = %#v", transactionState)
+	}
+}
+
+func TestReportRunSlotIsIndependentPerUser(t *testing.T) {
+	query := reportRunSlotScope(newDryRunDB(t), 9, 17).
+		Where("status IN ?", []string{model.ReportRunStatusQueued, model.ReportRunStatusRunning}).
+		Find(&[]model.ReportRun{})
+	if query.Error != nil {
+		t.Fatalf("build slot query: %v", query.Error)
+	}
+	statement := query.Statement.SQL.String()
+	for _, fragment := range []string{"definition_id = ?", "requested_by = ?", "status IN"} {
+		if !strings.Contains(statement, fragment) {
+			t.Fatalf("slot query %q does not contain %q", statement, fragment)
+		}
+	}
+	if !containsSQLVariable(query.Statement.Vars, uint(9)) || !containsSQLVariable(query.Statement.Vars, uint(17)) {
+		t.Fatalf("slot vars = %#v", query.Statement.Vars)
 	}
 }
 
@@ -292,6 +313,6 @@ func runTestRepository(t *testing.T) (*Repository, *transactionDriverState) {
 		}, nil
 	}
 	repository.validateRunSource = func(context.Context, *gorm.DB, uint) error { return nil }
-	repository.prepareRunSlot = func(context.Context, *gorm.DB, uint, time.Time) ([]uint, error) { return nil, nil }
+	repository.prepareRunSlot = func(context.Context, *gorm.DB, uint, uint, time.Time) ([]uint, error) { return nil, nil }
 	return repository, transactionState
 }

@@ -81,7 +81,7 @@ func (repository *Repository) CreateRun(ctx context.Context, actor, definitionID
 			published.Version.ProcedureSignatureHash != command.Run.ProcedureSignatureHash || published.Version.ResultSchemaHash != command.Run.ResultSchemaHash {
 			return ErrDraftVersionConflict
 		}
-		supersededRunIDs, err := repository.prepareRunSlot(ctx, tx, definitionID, outbox.AvailableAt)
+		supersededRunIDs, err := repository.prepareRunSlot(ctx, tx, definitionID, actor, outbox.AvailableAt)
 		if err != nil {
 			return err
 		}
@@ -141,8 +141,8 @@ func (repository *Repository) CreateRun(ctx context.Context, actor, definitionID
 	return nil
 }
 
-func prepareReportRunSlot(ctx context.Context, tx *gorm.DB, definitionID uint, now time.Time) ([]uint, error) {
-	if ctx == nil || tx == nil || definitionID == 0 || now.IsZero() {
+func prepareReportRunSlot(ctx context.Context, tx *gorm.DB, definitionID, actor uint, now time.Time) ([]uint, error) {
+	if ctx == nil || tx == nil || definitionID == 0 || actor == 0 || now.IsZero() {
 		return nil, ErrInvalidRun
 	}
 	now = now.UTC().Truncate(time.Millisecond)
@@ -152,16 +152,16 @@ func prepareReportRunSlot(ctx context.Context, tx *gorm.DB, definitionID uint, n
 		model.ReportRunStatusResultPurging,
 	}
 	var activeRuns []model.ReportRun
-	if err := tx.WithContext(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).
-		Select("id").Where("definition_id = ? AND status IN ?", definitionID, activeStatuses).Find(&activeRuns).Error; err != nil {
+	if err := reportRunSlotScope(tx.WithContext(ctx), definitionID, actor).Clauses(clause.Locking{Strength: "UPDATE"}).
+		Select("id").Where("status IN ?", activeStatuses).Find(&activeRuns).Error; err != nil {
 		return nil, fmt.Errorf("report run: lock active snapshot slot: %w", err)
 	}
 	if len(activeRuns) > 0 {
 		return nil, ErrReportRunBusy
 	}
 	var snapshots []model.ReportRun
-	if err := tx.WithContext(ctx).Clauses(clause.Locking{Strength: "UPDATE"}).
-		Select("id").Where("definition_id = ? AND status = ? AND result_purged_at IS NULL", definitionID, model.ReportRunStatusSucceeded).
+	if err := reportRunSlotScope(tx.WithContext(ctx), definitionID, actor).Clauses(clause.Locking{Strength: "UPDATE"}).
+		Select("id").Where("status = ? AND result_purged_at IS NULL", model.ReportRunStatusSucceeded).
 		Find(&snapshots).Error; err != nil {
 		return nil, fmt.Errorf("report run: lock current snapshot: %w", err)
 	}
@@ -203,6 +203,10 @@ func prepareReportRunSlot(ctx context.Context, tx *gorm.DB, definitionID uint, n
 		return nil, ErrReportRunBusy
 	}
 	return runIDs, nil
+}
+
+func reportRunSlotScope(db *gorm.DB, definitionID, actor uint) *gorm.DB {
+	return db.Model(&model.ReportRun{}).Where("definition_id = ? AND requested_by = ?", definitionID, actor)
 }
 
 func writeReportRun(ctx context.Context, tx *gorm.DB, run *model.ReportRun) error {

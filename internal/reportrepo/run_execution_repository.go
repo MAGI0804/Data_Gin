@@ -183,6 +183,10 @@ func (repository *Repository) BeginExecution(
 	now = now.UTC().Truncate(time.Millisecond)
 	lease := &RunLease{}
 	err := repository.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		tableSnapshot, err := lockReportExecutionScope(tx, runID)
+		if err != nil {
+			return err
+		}
 		if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).First(&lease.Run, runID).Error; errors.Is(err, gorm.ErrRecordNotFound) {
 			return ErrReportRunNotFound
 		} else if err != nil {
@@ -223,6 +227,16 @@ func (repository *Repository) BeginExecution(
 		if disposition != RunDispositionAcquired {
 			return nil
 		}
+		if tableSnapshot {
+			blocked, err := tableSnapshotExecutionBlocked(tx, lease.Run)
+			if err != nil {
+				return err
+			}
+			if blocked {
+				lease.Disposition = RunDispositionBusy
+				return nil
+			}
+		}
 		expiresAt := now.Add(leaseTTL).UTC().Truncate(time.Millisecond)
 		updates := map[string]interface{}{
 			"status": model.ReportRunStatusRunning, "worker_id": strings.TrimSpace(workerID),
@@ -253,6 +267,53 @@ func (repository *Repository) BeginExecution(
 		return nil, err
 	}
 	return lease, nil
+}
+
+func lockReportExecutionScope(tx *gorm.DB, runID uint) (bool, error) {
+	var identity struct {
+		DefinitionID uint `gorm:"column:definition_id"`
+		VersionID    uint `gorm:"column:version_id"`
+	}
+	if err := tx.Model(&model.ReportRun{}).Select("definition_id", "version_id").Where("id = ?", runID).Take(&identity).Error; errors.Is(err, gorm.ErrRecordNotFound) {
+		return false, ErrReportRunNotFound
+	} else if err != nil {
+		return false, fmt.Errorf("report execution: load run identity: %w", err)
+	}
+	var version model.ReportVersion
+	if err := tx.Select("execution_mode").Where("id = ? AND definition_id = ?", identity.VersionID, identity.DefinitionID).Take(&version).Error; err != nil {
+		return false, fmt.Errorf("report execution: load execution mode: %w", err)
+	}
+	if version.ExecutionMode != model.ReportExecutionModeTableSnapshot {
+		return false, nil
+	}
+	var definition model.ReportDefinition
+	if err := tx.Clauses(clause.Locking{Strength: "UPDATE"}).Select("id").Where("id = ?", identity.DefinitionID).Take(&definition).Error; err != nil {
+		return false, fmt.Errorf("report execution: lock table snapshot scope: %w", err)
+	}
+	return true, nil
+}
+
+func tableSnapshotExecutionBlocked(tx *gorm.DB, run model.ReportRun) (bool, error) {
+	query := tableSnapshotExecutionBlockerQuery(tx, run)
+	var blockers int64
+	if err := query.Count(&blockers).Error; err != nil {
+		return false, fmt.Errorf("report execution: inspect table snapshot scope: %w", err)
+	}
+	return blockers > 0, nil
+}
+
+func tableSnapshotExecutionBlockerQuery(tx *gorm.DB, run model.ReportRun) *gorm.DB {
+	blockingStatuses := []string{
+		model.ReportRunStatusRunning, model.ReportRunStatusCancelRequested, model.ReportRunStatusUnknown, model.ReportRunStatusReconciling,
+		model.ReportRunStatusExporting, model.ReportRunStatusResultPurging,
+	}
+	query := tx.Model(&model.ReportRun{}).
+		Where("definition_id = ? AND id <> ?", run.DefinitionID, run.ID).
+		Where("status IN ? OR (status = ? AND result_purged_at IS NULL)", blockingStatuses, model.ReportRunStatusSucceeded)
+	if run.Status == model.ReportRunStatusQueued {
+		query = query.Or("definition_id = ? AND status = ? AND id < ?", run.DefinitionID, model.ReportRunStatusQueued, run.ID)
+	}
+	return query
 }
 
 func cancellableRunBeforeOracle(run model.ReportRun, now time.Time) bool {

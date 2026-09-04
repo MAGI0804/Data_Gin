@@ -67,6 +67,23 @@ func TestClassifyRunStartProtectsOracleExecutionFromBlindTakeover(t *testing.T) 
 	}
 }
 
+func TestTableSnapshotExecutionBlockerIsScopedToReportAndKeepsQueueOrder(t *testing.T) {
+	run := model.ReportRun{BaseModel: model.BaseModel{ID: 31}, DefinitionID: 9, Status: model.ReportRunStatusQueued}
+	query := tableSnapshotExecutionBlockerQuery(newDryRunDB(t), run).Count(new(int64))
+	if query.Error != nil {
+		t.Fatalf("build blocker query: %v", query.Error)
+	}
+	statement := query.Statement.SQL.String()
+	for _, fragment := range []string{"definition_id = ? AND id <> ?", "result_purged_at IS NULL", "definition_id = ? AND status = ? AND id < ?"} {
+		if !strings.Contains(statement, fragment) {
+			t.Fatalf("blocker query %q does not contain %q", statement, fragment)
+		}
+	}
+	if !containsSQLVariable(query.Statement.Vars, model.ReportRunStatusCancelRequested) {
+		t.Fatalf("blocker vars do not include cancel-requested runs: %#v", query.Statement.Vars)
+	}
+}
+
 func TestOwnedExecutionUsesDedicatedLeaseTokenFence(t *testing.T) {
 	repository := New(newDryRunDB(t))
 	query := repository.ownedExecution(t.Context(), 31, "11111111-1111-4111-8111-111111111111").
