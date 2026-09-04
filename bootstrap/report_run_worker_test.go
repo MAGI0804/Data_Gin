@@ -40,18 +40,40 @@ func TestReportRunHandlerSkipsPermanentFailures(t *testing.T) {
 	}
 }
 
-func TestReportWorkerQueuesAreEnabledAtomically(t *testing.T) {
-	configured := map[string]int{"default": 3, job.ReportQueueName: 99}
-	disabled := reportWorkerQueues(configured, false, 2)
-	if _, exists := disabled[job.ReportQueueName]; exists {
-		t.Fatalf("disabled queues contain report: %#v", disabled)
+func TestReportWorkersUseDedicatedQueues(t *testing.T) {
+	configured := map[string]int{
+		"default":                 3,
+		job.ReportQueueName:       99,
+		job.ReportExportQueueName: 88,
 	}
-	if _, exists := disabled[job.ReportExportQueueName]; exists {
-		t.Fatalf("disabled queues contain report export: %#v", disabled)
+	specs := queueJobServerSpecs(configured, 10, true, 2, 4, 5)
+	if len(specs) != 3 {
+		t.Fatalf("server specs = %#v", specs)
 	}
-	enabled := reportWorkerQueues(configured, true, 2)
-	if enabled[job.ReportQueueName] != 2 || enabled[job.ReportExportQueueName] != 2 || configured[job.ReportQueueName] != 99 {
-		t.Fatalf("enabled=%#v configured=%#v", enabled, configured)
+	if specs[0].name != "default" || specs[0].concurrency != 10 || len(specs[0].queues) != 1 || specs[0].queues["default"] != 3 {
+		t.Fatalf("default server = %#v", specs[0])
+	}
+	if specs[1].name != "report run" || specs[1].concurrency != 4 || len(specs[1].queues) != 1 || specs[1].queues[job.ReportQueueName] != 2 {
+		t.Fatalf("report run server = %#v", specs[1])
+	}
+	if specs[2].name != "report export" || specs[2].concurrency != 5 || len(specs[2].queues) != 1 || specs[2].queues[job.ReportExportQueueName] != 2 {
+		t.Fatalf("report export server = %#v", specs[2])
+	}
+	seen := make(map[string]string)
+	for _, spec := range specs {
+		for queue := range spec.queues {
+			if owner, exists := seen[queue]; exists {
+				t.Fatalf("queue %q is consumed by %q and %q", queue, owner, spec.name)
+			}
+			seen[queue] = spec.name
+		}
+	}
+}
+
+func TestQueueJobServerSpecsDoNotInventDefaultQueue(t *testing.T) {
+	specs := queueJobServerSpecs(map[string]int{job.ReportQueueName: 2}, 10, true, 2, 4, 2)
+	if len(specs) != 2 || specs[0].name != "report run" || specs[1].name != "report export" {
+		t.Fatalf("server specs = %#v", specs)
 	}
 }
 

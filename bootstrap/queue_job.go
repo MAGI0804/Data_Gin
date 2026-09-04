@@ -34,20 +34,25 @@ func setupQueueJob() {
 	global.QueueJobClient = client
 
 	reportWorkerEnabled := global.ReportCenterEnabledAtStartup
-	queues := reportWorkerQueues(
+	serverSpecs := queueJobServerSpecs(
 		config.Get("cfg.queue_job.config_opt.queues").(map[string]int),
+		config.GetInt("cfg.queue_job.config_opt.concurrency"),
 		reportWorkerEnabled,
 		config.GetInt("cfg.queue_job.report_worker.queue_weight"),
+		config.GetInt("cfg.queue_job.report_worker.run_concurrency"),
+		config.GetInt("cfg.queue_job.report_worker.export_concurrency"),
 	)
-	server := jobPkg.NewAsynqServer(
-		redisAddr,
-		redisUsername,
-		redisPassword,
-		redisDB,
-		config.GetInt("cfg.queue_job.config_opt.concurrency"),
-		queues,
-	)
-	global.QueueJobServer = server
+	servers := make([]queueJobServer, 0, len(serverSpecs))
+	for _, spec := range serverSpecs {
+		server := jobPkg.NewAsynqServer(
+			redisAddr, redisUsername, redisPassword, redisDB,
+			spec.concurrency, spec.queues,
+		)
+		if global.QueueJobServer == nil {
+			global.QueueJobServer = server
+		}
+		servers = append(servers, queueJobServer{name: spec.name, server: server})
+	}
 
 	mux := asynq.NewServeMux()
 	mux.Use(jobLoggingMiddleware)
@@ -114,15 +119,46 @@ func setupQueueJob() {
 		}
 	}
 
-	go func(mux *asynq.ServeMux, server *asynq.Server) {
-		if err := server.Run(mux); err != nil {
-			logger.Error("Queue Job Server Failed", zap.Error(err))
-			console.Exit("Queue Job Server Failed %v", err)
-		}
-	}(mux, server)
+	for _, worker := range servers {
+		startQueueJobServer(worker, mux)
+	}
 
 	startOutboxDispatcher(reportWorkerEnabled)
 
+}
+
+type queueJobServer struct {
+	name   string
+	server *asynq.Server
+}
+
+type queueJobServerSpec struct {
+	name        string
+	concurrency int
+	queues      map[string]int
+}
+
+func queueJobServerSpecs(configured map[string]int, defaultConcurrency int, reportEnabled bool, weight, runConcurrency, exportConcurrency int) []queueJobServerSpec {
+	specs := make([]queueJobServerSpec, 0, 3)
+	if generalQueues := nonReportWorkerQueues(configured); len(generalQueues) > 0 {
+		specs = append(specs, queueJobServerSpec{name: "default", concurrency: defaultConcurrency, queues: generalQueues})
+	}
+	if reportEnabled {
+		specs = append(specs,
+			queueJobServerSpec{name: "report run", concurrency: runConcurrency, queues: map[string]int{job.ReportQueueName: weight}},
+			queueJobServerSpec{name: "report export", concurrency: exportConcurrency, queues: map[string]int{job.ReportExportQueueName: weight}},
+		)
+	}
+	return specs
+}
+
+func startQueueJobServer(worker queueJobServer, mux *asynq.ServeMux) {
+	go func() {
+		if err := worker.server.Run(mux); err != nil {
+			logger.Error("Queue Job Server Failed", zap.String("worker", worker.name), zap.Error(err))
+			console.Exit("Queue Job Server %s Failed %v", worker.name, err)
+		}
+	}()
 }
 
 type mallGeocodeProcessor interface {
@@ -208,19 +244,12 @@ func newOfficePushHandler(processor officePushProcessor) asynq.HandlerFunc {
 	}
 }
 
-func reportWorkerQueues(configured map[string]int, enabled bool, weight int) map[string]int {
-	queues := make(map[string]int, len(configured)+2)
+func nonReportWorkerQueues(configured map[string]int) map[string]int {
+	queues := make(map[string]int, len(configured))
 	for name, value := range configured {
 		if name != job.ReportQueueName && name != job.ReportExportQueueName {
 			queues[name] = value
 		}
-	}
-	if enabled {
-		if weight <= 0 {
-			weight = 2
-		}
-		queues[job.ReportQueueName] = weight
-		queues[job.ReportExportQueueName] = weight
 	}
 	return queues
 }

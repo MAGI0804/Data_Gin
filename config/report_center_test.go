@@ -48,6 +48,23 @@ QueueJob:
 	}
 }
 
+func TestReportWorkerConcurrencyPreservesExplicitZero(t *testing.T) {
+	t.Setenv(EnvReportCenterEnabled, "")
+	t.Setenv(EnvReportWorkerEnabled, "")
+	loadReportCenterTestConfig(t, `
+QueueJob:
+  ReportWorker:
+    RunConcurrency: 0
+    ExportConcurrency: 0
+`)
+	if concurrency := pkgConfig.GetInt("cfg.queue_job.report_worker.run_concurrency"); concurrency != 0 {
+		t.Fatalf("run concurrency = %d, want 0", concurrency)
+	}
+	if concurrency := pkgConfig.GetInt("cfg.queue_job.report_worker.export_concurrency"); concurrency != 0 {
+		t.Fatalf("export concurrency = %d, want 0", concurrency)
+	}
+}
+
 func loadReportCenterTestConfig(t *testing.T, contents string) {
 	t.Helper()
 	configDir := t.TempDir()

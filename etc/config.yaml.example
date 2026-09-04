@@ -56,6 +56,8 @@ QueueJob:
   ReportWorker:
     Enabled: ${REPORT_WORKER_ENABLED:-true}
     QueueWeight: 2
+    RunConcurrency: ${REPORT_RUN_WORKER_CONCURRENCY:-4}
+    ExportConcurrency: ${REPORT_EXPORT_WORKER_CONCURRENCY:-2}
 
 ReportCenter:
   Enabled: ${REPORT_CENTER_ENABLED:-true}

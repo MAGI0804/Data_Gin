@@ -56,6 +56,12 @@ func validateReportCenterRuntime() error {
 	if config.GetInt("cfg.queue_job.report_worker.queue_weight") <= 0 {
 		return fmt.Errorf("report worker queue weight must be positive")
 	}
+	if config.GetInt("cfg.queue_job.report_worker.run_concurrency") <= 0 {
+		return fmt.Errorf("report run worker concurrency must be positive")
+	}
+	if config.GetInt("cfg.queue_job.report_worker.export_concurrency") <= 0 {
+		return fmt.Errorf("report export worker concurrency must be positive")
+	}
 	if err := (reportsecret.EnvironmentKeyring{}).Validate(); err != nil {
 		return fmt.Errorf("oracle datasource credential keyring: %w", err)
 	}
