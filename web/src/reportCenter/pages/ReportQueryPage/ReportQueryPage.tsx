@@ -13,6 +13,9 @@ import { useReportCatalog } from '../../useReportCatalog'
 import styles from './ReportQueryPage.module.css'
 
 const emptyResultQuery: ReportResultQuery = { filters: [], sort: [] }
+const reportExportPollIntervalMs = 1800
+const maxReadyCleanupPolls = 8
+const maxReadyCleanupPollIntervalMs = 10000
 
 export function ReportQueryPage({ client, navigation }: { client: ReportCenterClient; navigation?: ReactNode }) {
   const query = useMemo(() => ({ limit: 100 }), [])
@@ -193,10 +196,11 @@ export function ReportQueryPage({ client, navigation }: { client: ReportCenterCl
   async function pollExport(exportId: number) {
     const controller = new AbortController()
     pollAbortRef.current = controller
+    let readyCleanupPolls = 0
     while (!controller.signal.aborted) {
       const response = await getReportExport(client, exportId, controller.signal)
       if (!response.ok) {
-        setOperation({ busy: false, error: response.error })
+        if (!controller.signal.aborted) setOperation({ busy: false, error: response.error })
         return
       }
       setReportExport(response.data)
@@ -204,8 +208,26 @@ export function ReportQueryPage({ client, navigation }: { client: ReportCenterCl
         setOperation({ busy: false, error: response.data.errorMessage })
         return
       }
-      await wait(1800, controller.signal)
+      if (response.data.status === 'READY') {
+        readyCleanupPolls++
+        if (readyCleanupPolls >= maxReadyCleanupPolls) {
+          setOperation({ busy: false, error: '文件已生成，但结果仍在清理中。你可以先下载文件，稍后重新检查。' })
+          return
+        }
+      } else {
+        readyCleanupPolls = 0
+      }
+      const delay = response.data.status === 'READY'
+        ? Math.min(reportExportPollIntervalMs * (2 ** Math.max(0, readyCleanupPolls - 1)), maxReadyCleanupPollIntervalMs)
+        : reportExportPollIntervalMs
+      await wait(delay, controller.signal)
     }
+  }
+
+  async function resumeExportPolling() {
+    if (!reportExport || operation.busy || isReportExportSettled(reportExport)) return
+    setOperation({ busy: true, error: '' })
+    await pollExport(reportExport.id)
   }
 
   async function downloadExport() {
@@ -252,9 +274,9 @@ export function ReportQueryPage({ client, navigation }: { client: ReportCenterCl
         {contract ? <form className={styles.parameterForm} onSubmit={(event) => void submitRun(event)}>{contract.jsonInput ? orderedReportInputEntries(contract.inputSchema).map(([code, field]) => <ConditionField client={client} reportId={contract.definitionId} code={code} disabled={frozen || operation.busy} field={field} key={code} value={values[code]} onChange={(value) => setValues((current) => ({ ...current, [code]: value }))} />) : visibleReportParameters(contract.parameters).map((parameter) => <ParameterField disabled={frozen || operation.busy} key={parameter.code} parameter={parameter} value={values[parameter.code]} onChange={(value) => setValues((current) => ({ ...current, [parameter.code]: value }))} />)}<div className={styles.runActions}><Button variant="primary" type="submit" disabled={frozen || operation.busy}><Play aria-hidden="true" />生成下载文件</Button></div></form> : null}
         </> : <div className={styles.collapsedParameters}>{contract ? `${reportConditionCount(contract)} 个筛选条件${frozen ? ' · 本次运行条件已冻结' : ''}` : '筛选区已收起'}</div>}
       </Section> : null}
-      {operation.error ? <FeedbackState kind="error" title="操作未完成" description={operation.error} action={run && !terminalReportRunStatuses.has(run.status) ? <button type="button" onClick={() => void resumeRun()}>恢复状态查询</button> : undefined} /> : null}
+      {operation.error ? <FeedbackState kind="error" title="操作未完成" description={operation.error} action={reportExport && !isReportExportSettled(reportExport) ? <button type="button" onClick={() => void resumeExportPolling()}>{reportExport.status === 'READY' ? '重新检查清理状态' : '恢复文件状态查询'}</button> : run && !terminalReportRunStatuses.has(run.status) ? <button type="button" onClick={() => void resumeRun()}>恢复状态查询</button> : undefined} /> : null}
       {loading ? <FeedbackState kind="loading" title="正在加载可下载报表" /> : error ? <FeedbackState kind="error" title="可下载报表加载失败" description={error} action={<button type="button" onClick={reload}>重试</button>} /> : null}
-      {run ? <Section title="下载文件" actions={<div className={styles.resultActions}>{reportExport ? <StatusTag tone={exportTone(reportExport)}>{exportLabel(reportExport.status)}</StatusTag> : <StatusTag tone={runTone(run)}>{runLabel(run.status)}</StatusTag>}{reportExport?.canDownload ? <Button variant="primary" onClick={() => void downloadExport()}><Download aria-hidden="true" />下载文件</Button> : null}</div>} flush>
+      {run ? <Section title="下载文件" actions={<div className={styles.resultActions}>{reportExport ? <StatusTag tone={exportTone(reportExport)}>{reportExport.status === 'READY' && !reportExport.purgedAt ? '可下载 · 清理中' : exportLabel(reportExport.status)}</StatusTag> : <StatusTag tone={runTone(run)}>{runLabel(run.status)}</StatusTag>}{reportExport?.canDownload ? <Button variant="primary" onClick={() => void downloadExport()}><Download aria-hidden="true" />下载文件</Button> : null}</div>} flush>
         {operation.busy && !reportExport?.canDownload ? <FeedbackState kind="loading" title={reportExport ? '正在生成 Excel' : '正在生成报表'} description={reportExport ? exportProgress(reportExport) : undefined} /> : null}
         {result ? <details className={styles.optionalPreview}><summary>查看结果预览（可选）</summary><div>
           {contract?.executionMode !== 'REF_CURSOR' ? <ResultQueryToolbar page={result} query={resultQuery} open={filtersOpen} disabled={operation.busy || Boolean(reportExport)} onToggle={() => setFiltersOpen((value) => !value)} onChange={setResultQuery} onApply={() => void applyResultQuery()} /> : null}
