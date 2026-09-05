@@ -96,12 +96,12 @@ func (publisher *AsynqTaskPublisher) Publish(ctx context.Context, task *asynq.Ta
 		return fmt.Errorf("%w: task identity mismatch", ErrOutboxTaskConflictRecovery)
 	}
 	switch info.State {
-	case asynq.TaskStateArchived:
+	case asynq.TaskStateArchived, asynq.TaskStateRetry, asynq.TaskStateScheduled:
 		if runErr := publisher.inspector.RunTask(options.Queue, options.TaskID); runErr != nil {
-			return fmt.Errorf("%w: requeue archived task", ErrOutboxTaskConflictRecovery)
+			return fmt.Errorf("%w: make existing task runnable", ErrOutboxTaskConflictRecovery)
 		}
 		return nil
-	case asynq.TaskStateActive, asynq.TaskStatePending, asynq.TaskStateScheduled, asynq.TaskStateRetry, asynq.TaskStateAggregating:
+	case asynq.TaskStateActive, asynq.TaskStatePending, asynq.TaskStateAggregating:
 		return nil
 	default:
 		return fmt.Errorf("%w: task is %s", ErrOutboxTaskConflictRecovery, info.State)

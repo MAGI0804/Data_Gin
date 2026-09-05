@@ -166,19 +166,23 @@ func TestOutboxDispatcherTreatsTaskIDConflictAsPublished(t *testing.T) {
 	}
 }
 
-func TestAsynqTaskPublisherRequeuesArchivedReportTask(t *testing.T) {
-	task := asynq.NewTask(TypeReportRun, []byte(`{"run_id":27}`))
-	inspector := &fakeAsynqTaskInspector{info: &asynq.TaskInfo{
-		ID: "report:run:run-uuid", Queue: ReportQueueName, Type: TypeReportRun,
-		Payload: task.Payload(), State: asynq.TaskStateArchived,
-	}}
-	publisher := NewAsynqTaskPublisher(&fakeAsynqTaskEnqueuer{err: asynq.ErrTaskIDConflict}, inspector)
-	err := publisher.Publish(t.Context(), task, TaskPublishOptions{
-		TaskID: "report:run:run-uuid", Queue: ReportQueueName, MaxRetry: ReportRunMaxRetry,
-		RecoverTaskIDConflict: true,
-	})
-	if err != nil || inspector.runCalls != 1 {
-		t.Fatalf("Publish() error=%v run calls=%d", err, inspector.runCalls)
+func TestAsynqTaskPublisherMakesRecoverableReportTaskRunnable(t *testing.T) {
+	for _, state := range []asynq.TaskState{asynq.TaskStateArchived, asynq.TaskStateRetry, asynq.TaskStateScheduled} {
+		t.Run(state.String(), func(t *testing.T) {
+			task := asynq.NewTask(TypeReportRun, []byte(`{"run_id":27}`))
+			inspector := &fakeAsynqTaskInspector{info: &asynq.TaskInfo{
+				ID: "report:run:run-uuid", Queue: ReportQueueName, Type: TypeReportRun,
+				Payload: task.Payload(), State: state,
+			}}
+			publisher := NewAsynqTaskPublisher(&fakeAsynqTaskEnqueuer{err: asynq.ErrTaskIDConflict}, inspector)
+			err := publisher.Publish(t.Context(), task, TaskPublishOptions{
+				TaskID: "report:run:run-uuid", Queue: ReportQueueName, MaxRetry: ReportRunMaxRetry,
+				RecoverTaskIDConflict: true,
+			})
+			if err != nil || inspector.runCalls != 1 {
+				t.Fatalf("Publish() error=%v run calls=%d", err, inspector.runCalls)
+			}
+		})
 	}
 }
 
