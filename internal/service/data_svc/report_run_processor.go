@@ -37,22 +37,39 @@ var errReportRunWorkerTemporary = errors.New("report run processor: temporary fa
 
 var ErrReportRunWaitingForSnapshot = reportRunWaitingError{}
 
-type reportRunWaitingError struct{ cleanupRunID uint }
+type reportRunWaitingError struct {
+	cleanupRunID    uint
+	cleanupExportID uint
+}
+
+type ReportCleanupTarget struct {
+	RunID    uint
+	ExportID uint
+}
 
 func (reportRunWaitingError) Error() string             { return "report run processor: waiting for snapshot slot" }
 func (reportRunWaitingError) RetryDelay() time.Duration { return job.ReportRunRetryDelay }
 func (err reportRunWaitingError) CleanupRunID() uint    { return err.cleanupRunID }
+func (err reportRunWaitingError) CleanupExportID() uint { return err.cleanupExportID }
 func (reportRunWaitingError) Is(target error) bool {
 	_, ok := target.(reportRunWaitingError)
 	return ok
 }
 
-func ReportRunCleanupTarget(err error) (uint, bool) {
-	var waiting interface{ CleanupRunID() uint }
-	if !errors.As(err, &waiting) || waiting.CleanupRunID() == 0 {
-		return 0, false
+func ReportRunCleanupTarget(err error) (ReportCleanupTarget, bool) {
+	var runWaiting interface{ CleanupRunID() uint }
+	var exportWaiting interface{ CleanupExportID() uint }
+	var target ReportCleanupTarget
+	if errors.As(err, &runWaiting) {
+		target.RunID = runWaiting.CleanupRunID()
 	}
-	return waiting.CleanupRunID(), true
+	if errors.As(err, &exportWaiting) {
+		target.ExportID = exportWaiting.CleanupExportID()
+	}
+	if (target.RunID == 0) == (target.ExportID == 0) {
+		return ReportCleanupTarget{}, false
+	}
+	return target, true
 }
 
 type reportExecutionStore interface {
@@ -177,8 +194,8 @@ func (processor *ReportRunProcessor) Process(ctx context.Context, runID uint, fa
 			}
 			return fmt.Errorf("%w: snapshot wait timeout", ErrReportRunProcessNonRetryable)
 		}
-		cleanupRunID := staleResultCleanupBlocker(lease.Blocker, processor.now().UTC())
-		return reportRunWaitingError{cleanupRunID: cleanupRunID}
+		cleanupTarget := staleResultCleanupBlocker(lease.Blocker, processor.now().UTC())
+		return reportRunWaitingError{cleanupRunID: cleanupTarget.RunID, cleanupExportID: cleanupTarget.ExportID}
 	case reportrepo.RunDispositionTerminal:
 		return nil
 	case reportrepo.RunDispositionReconcile:
@@ -285,25 +302,32 @@ func (processor *ReportRunProcessor) Process(ctx context.Context, runID uint, fa
 	return unknownErr
 }
 
-func staleResultCleanupBlocker(blocker *reportrepo.RunExecutionBlocker, now time.Time) uint {
+func staleResultCleanupBlocker(blocker *reportrepo.RunExecutionBlocker, now time.Time) ReportCleanupTarget {
 	if blocker == nil || blocker.RunID == 0 ||
 		(blocker.Status != model.ReportRunStatusSucceeded && blocker.Status != model.ReportRunStatusResultPurging) ||
-		blocker.ResultExpiresAt == nil || now.Before(blocker.ResultExpiresAt.UTC()) || blocker.ResultPurgedAt != nil ||
-		blocker.LeaseExpiresAt != nil && now.Before(blocker.LeaseExpiresAt.UTC()) || !staleResultCleanupExport(blocker, now) {
-		return 0
+		blocker.ResultPurgedAt != nil || blocker.LeaseExpiresAt != nil && now.Before(blocker.LeaseExpiresAt.UTC()) {
+		return ReportCleanupTarget{}
 	}
-	return blocker.RunID
+	if blocker.ExportID != nil {
+		if blocker.ExportStatus == nil || blocker.ExportPurgedAt != nil ||
+			blocker.ExportLeaseExpiresAt != nil && now.Before(blocker.ExportLeaseExpiresAt.UTC()) {
+			return ReportCleanupTarget{}
+		}
+		if *blocker.ExportStatus == model.ReportExportStatusReady {
+			return ReportCleanupTarget{ExportID: *blocker.ExportID}
+		}
+		if !terminalResultCleanupExportStatus(*blocker.ExportStatus) {
+			return ReportCleanupTarget{}
+		}
+	}
+	if blocker.ResultExpiresAt == nil || now.Before(blocker.ResultExpiresAt.UTC()) {
+		return ReportCleanupTarget{}
+	}
+	return ReportCleanupTarget{RunID: blocker.RunID}
 }
 
-func staleResultCleanupExport(blocker *reportrepo.RunExecutionBlocker, now time.Time) bool {
-	if blocker.ExportID == nil {
-		return true
-	}
-	if blocker.ExportStatus == nil || blocker.ExportPurgedAt != nil ||
-		blocker.ExportLeaseExpiresAt != nil && now.Before(blocker.ExportLeaseExpiresAt.UTC()) {
-		return false
-	}
-	switch *blocker.ExportStatus {
+func terminalResultCleanupExportStatus(status string) bool {
+	switch status {
 	case model.ReportExportStatusFailed, model.ReportExportStatusCancelled, model.ReportExportStatusExpired:
 		return true
 	default:

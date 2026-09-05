@@ -124,3 +124,17 @@ func TestReportResultCleanupRunTaskTargetsOneRun(t *testing.T) {
 		t.Fatalf("task type=%q", task.Type())
 	}
 }
+
+func TestReportResultCleanupExportTaskTargetsOneExport(t *testing.T) {
+	task, err := NewReportResultCleanupExportTask(41)
+	if err != nil {
+		t.Fatalf("NewReportResultCleanupExportTask() error=%v", err)
+	}
+	payload, err := DecodeReportResultCleanupTaskPayload(task.Payload())
+	if err != nil || payload.ExportID != 41 || payload.RunID != 0 {
+		t.Fatalf("payload=%+v error=%v", payload, err)
+	}
+	if _, err := DecodeReportResultCleanupTaskPayload([]byte(`{"run_id":24,"export_id":41}`)); err == nil {
+		t.Fatal("DecodeReportResultCleanupTaskPayload() accepted multiple targets")
+	}
+}

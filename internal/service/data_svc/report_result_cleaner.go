@@ -161,6 +161,13 @@ func (cleaner *ReportResultCleaner) CleanupRun(ctx context.Context, runID uint) 
 	return claimed, err
 }
 
+func (cleaner *ReportResultCleaner) CleanupExport(ctx context.Context, exportID uint) error {
+	if cleaner == nil || cleaner.ready == nil || ctx == nil || exportID == 0 {
+		return fmt.Errorf("report result cleaner: invalid targeted export cleanup")
+	}
+	return cleaner.ready.CleanupReadyResult(ctx, exportID)
+}
+
 func (cleaner *ReportResultCleaner) cleanupExpired(ctx context.Context, runID uint) (bool, error) {
 	token := cleaner.newToken()
 	stateCtx, cancel := cleaner.stateContext(ctx)

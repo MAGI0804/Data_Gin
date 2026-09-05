@@ -221,6 +221,7 @@ type reportExportCleaner interface {
 type reportResultCleaner interface {
 	Cleanup(context.Context) (data_svc.ReportResultCleanupResult, error)
 	CleanupRun(context.Context, uint) (bool, error)
+	CleanupExport(context.Context, uint) error
 }
 
 type reportCleanupTaskEnqueuer interface {
@@ -289,13 +290,20 @@ func newReportRunHandler(processor reportRunProcessor, cleanupEnqueuer reportCle
 			return fmt.Errorf("%w: %v", asynq.SkipRetry, err)
 		}
 		if err := processor.Process(ctx, payload.RunID, job.ReportRunFailureMaxRetry, mallWeatherExportRetryAllowed(ctx)); err != nil {
-			if cleanupRunID, ok := data_svc.ReportRunCleanupTarget(err); ok && cleanupEnqueuer != nil {
-				cleanupTask, taskErr := job.NewReportResultCleanupRunTask(cleanupRunID)
+			if cleanupTarget, ok := data_svc.ReportRunCleanupTarget(err); ok && cleanupEnqueuer != nil {
+				var cleanupTask *asynq.Task
+				var taskErr error
+				if cleanupTarget.ExportID != 0 {
+					cleanupTask, taskErr = job.NewReportResultCleanupExportTask(cleanupTarget.ExportID)
+				} else {
+					cleanupTask, taskErr = job.NewReportResultCleanupRunTask(cleanupTarget.RunID)
+				}
 				if taskErr == nil {
 					_, taskErr = cleanupEnqueuer.Enqueue(cleanupTask)
 				}
 				if taskErr != nil && !errors.Is(taskErr, asynq.ErrDuplicateTask) {
-					zap.L().Error("报表前序快照定向清理投递失败", zap.Uint("report_run_id", payload.RunID), zap.Uint("blocker_run_id", cleanupRunID), zap.Error(taskErr))
+					zap.L().Error("报表前序快照定向清理投递失败", zap.Uint("report_run_id", payload.RunID),
+						zap.Uint("blocker_run_id", cleanupTarget.RunID), zap.Uint("blocker_export_id", cleanupTarget.ExportID), zap.Error(taskErr))
 				}
 			}
 			if errors.Is(err, data_svc.ErrReportRunProcessNonRetryable) {
@@ -339,6 +347,13 @@ func newReportResultCleanupHandler(cleaner reportResultCleaner) asynq.HandlerFun
 			_, err := cleaner.CleanupRun(ctx, payload.RunID)
 			if err != nil {
 				zap.L().Error("报表结果定向清理失败", zap.Uint("report_run_id", payload.RunID), zap.Error(err))
+			}
+			return err
+		}
+		if payload.ExportID != 0 {
+			err := cleaner.CleanupExport(ctx, payload.ExportID)
+			if err != nil {
+				zap.L().Error("报表结果文件定向释放失败", zap.Uint("report_export_id", payload.ExportID), zap.Error(err))
 			}
 			return err
 		}

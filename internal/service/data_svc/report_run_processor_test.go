@@ -53,16 +53,16 @@ func TestReportRunProcessorRequestsTargetedCleanupForStaleResultPurge(t *testing
 	}
 	processor := newTestReportRunProcessor(store, &fakeReportProcedureExecutor{})
 	err := processor.Process(t.Context(), 31, 0, true)
-	cleanupRunID, ok := ReportRunCleanupTarget(err)
-	if !errors.Is(err, ErrReportRunWaitingForSnapshot) || !ok || cleanupRunID != 24 {
-		t.Fatalf("error=%v cleanupRunID=%d ok=%v", err, cleanupRunID, ok)
+	cleanupTarget, ok := ReportRunCleanupTarget(err)
+	if !errors.Is(err, ErrReportRunWaitingForSnapshot) || !ok || cleanupTarget.RunID != 24 || cleanupTarget.ExportID != 0 {
+		t.Fatalf("error=%v cleanupTarget=%+v ok=%v", err, cleanupTarget, ok)
 	}
 
 	activeLease := now.Add(time.Minute)
 	store.blocker.LeaseExpiresAt = &activeLease
 	err = processor.Process(t.Context(), 31, 0, true)
-	if cleanupRunID, ok = ReportRunCleanupTarget(err); ok || cleanupRunID != 0 {
-		t.Fatalf("active cleanup lease target=%d ok=%v", cleanupRunID, ok)
+	if cleanupTarget, ok = ReportRunCleanupTarget(err); ok || cleanupTarget != (ReportCleanupTarget{}) {
+		t.Fatalf("active cleanup lease target=%+v ok=%v", cleanupTarget, ok)
 	}
 }
 
@@ -75,13 +75,14 @@ func TestStaleResultCleanupBlockerAcceptsExpiredSuccessAndTerminalExport(t *test
 		RunID: 24, Status: model.ReportRunStatusSucceeded, ResultExpiresAt: &expired,
 		ExportID: &exportID, ExportStatus: &failed,
 	}
-	if got := staleResultCleanupBlocker(blocker, now); got != 24 {
-		t.Fatalf("cleanup blocker=%d", got)
+	if got := staleResultCleanupBlocker(blocker, now); got != (ReportCleanupTarget{RunID: 24}) {
+		t.Fatalf("cleanup blocker=%+v", got)
 	}
 	ready := model.ReportExportStatusReady
 	blocker.ExportStatus = &ready
-	if got := staleResultCleanupBlocker(blocker, now); got != 0 {
-		t.Fatalf("ready export cleanup blocker=%d", got)
+	blocker.ResultExpiresAt = nil
+	if got := staleResultCleanupBlocker(blocker, now); got != (ReportCleanupTarget{ExportID: 41}) {
+		t.Fatalf("ready export cleanup blocker=%+v", got)
 	}
 }
 

@@ -46,9 +46,24 @@ func TestReportResultCleanupHandlerRunsTargetedCleaner(t *testing.T) {
 	}
 }
 
+func TestReportResultCleanupHandlerRunsTargetedExportCleaner(t *testing.T) {
+	cleaner := &fakeReportResultCleaner{}
+	task, err := job.NewReportResultCleanupExportTask(41)
+	if err != nil {
+		t.Fatalf("NewReportResultCleanupExportTask() error=%v", err)
+	}
+	if err := newReportResultCleanupHandler(cleaner).ProcessTask(t.Context(), task); err != nil {
+		t.Fatalf("ProcessTask() error=%v", err)
+	}
+	if cleaner.targetExportID != 41 || cleaner.calls != 0 || cleaner.targetRunID != 0 {
+		t.Fatalf("targetExportID=%d targetRunID=%d full cleanup calls=%d", cleaner.targetExportID, cleaner.targetRunID, cleaner.calls)
+	}
+}
+
 type fakeReportResultCleaner struct {
-	calls       int
-	targetRunID uint
+	calls          int
+	targetRunID    uint
+	targetExportID uint
 }
 
 func (cleaner *fakeReportResultCleaner) Cleanup(context.Context) (data_svc.ReportResultCleanupResult, error) {
@@ -59,4 +74,9 @@ func (cleaner *fakeReportResultCleaner) Cleanup(context.Context) (data_svc.Repor
 func (cleaner *fakeReportResultCleaner) CleanupRun(_ context.Context, runID uint) (bool, error) {
 	cleaner.targetRunID = runID
 	return true, nil
+}
+
+func (cleaner *fakeReportResultCleaner) CleanupExport(_ context.Context, exportID uint) error {
+	cleaner.targetExportID = exportID
+	return nil
 }

@@ -63,6 +63,17 @@ func TestReportResultCleanerTableSnapshotExpiresWithoutOracleDelete(t *testing.T
 	}
 }
 
+func TestReportResultCleanerTargetsReadyExport(t *testing.T) {
+	ready := &fakeReadyResultPurger{}
+	cleaner := NewReportResultCleanerWithDependencies(&fakeReportResultCleanupStore{}, ready, staticReportCredentialDecryptor{}, fakeResultCleanupOracleFactory{})
+	if err := cleaner.CleanupExport(t.Context(), 41); err != nil {
+		t.Fatalf("CleanupExport() error=%v", err)
+	}
+	if ready.exportID != 41 {
+		t.Fatalf("ready export id=%d", ready.exportID)
+	}
+}
+
 func testReportResultCleaner(now time.Time, store *fakeReportResultCleanupStore, ready *fakeReadyResultPurger, session reportExportOracleSession) *ReportResultCleaner {
 	cleaner := NewReportResultCleanerWithDependencies(store, ready, staticReportCredentialDecryptor{}, fakeResultCleanupOracleFactory{session: session})
 	cleaner.now = func() time.Time { return now }

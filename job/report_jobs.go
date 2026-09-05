@@ -42,7 +42,8 @@ type ReportExportTaskPayload struct {
 }
 
 type ReportResultCleanupTaskPayload struct {
-	RunID uint `json:"run_id,omitempty"`
+	RunID    uint `json:"run_id,omitempty"`
+	ExportID uint `json:"export_id,omitempty"`
 }
 
 func DecodeReportRunTaskPayload(payload []byte) (ReportRunTaskPayload, error) {
@@ -116,6 +117,13 @@ func NewReportResultCleanupRunTask(runID uint) (*asynq.Task, error) {
 	return newReportResultCleanupTask(ReportResultCleanupTaskPayload{RunID: runID})
 }
 
+func NewReportResultCleanupExportTask(exportID uint) (*asynq.Task, error) {
+	if exportID == 0 {
+		return nil, fmt.Errorf("report result cleanup task: export id is required")
+	}
+	return newReportResultCleanupTask(ReportResultCleanupTaskPayload{ExportID: exportID})
+}
+
 func newReportResultCleanupTask(payload ReportResultCleanupTaskPayload) (*asynq.Task, error) {
 	encoded, err := json.Marshal(payload)
 	if err != nil {
@@ -140,6 +148,9 @@ func DecodeReportResultCleanupTaskPayload(payload []byte) (ReportResultCleanupTa
 	}
 	var trailing interface{}
 	if err := decoder.Decode(&trailing); err != io.EOF {
+		return ReportResultCleanupTaskPayload{}, fmt.Errorf("report result cleanup task: invalid payload")
+	}
+	if decoded.RunID != 0 && decoded.ExportID != 0 {
 		return ReportResultCleanupTaskPayload{}, fmt.Errorf("report result cleanup task: invalid payload")
 	}
 	return decoded, nil

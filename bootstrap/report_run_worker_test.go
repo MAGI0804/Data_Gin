@@ -53,6 +53,19 @@ func TestReportRunHandlerEnqueuesTargetedSnapshotCleanup(t *testing.T) {
 	}
 }
 
+func TestReportRunHandlerEnqueuesReadyExportCleanup(t *testing.T) {
+	processor := &fakeReportRunProcessor{err: targetedCleanupError{exportID: 41}}
+	enqueuer := &fakeReportCleanupTaskEnqueuer{}
+	err := newReportRunHandler(processor, enqueuer)(t.Context(), asynq.NewTask(job.TypeReportRun, []byte(`{"run_id":31}`)))
+	if err == nil || enqueuer.task == nil {
+		t.Fatalf("handler error=%v task=%v", err, enqueuer.task)
+	}
+	payload, decodeErr := job.DecodeReportResultCleanupTaskPayload(enqueuer.task.Payload())
+	if decodeErr != nil || payload.ExportID != 41 || payload.RunID != 0 {
+		t.Fatalf("payload=%+v error=%v", payload, decodeErr)
+	}
+}
+
 func TestReportWorkersUseDedicatedQueues(t *testing.T) {
 	configured := map[string]int{
 		"default":                  3,
@@ -101,10 +114,14 @@ type fakeReportRunProcessor struct {
 	err               error
 }
 
-type targetedCleanupError struct{ runID uint }
+type targetedCleanupError struct {
+	runID    uint
+	exportID uint
+}
 
-func (err targetedCleanupError) Error() string      { return "waiting for cleanup" }
-func (err targetedCleanupError) CleanupRunID() uint { return err.runID }
+func (err targetedCleanupError) Error() string         { return "waiting for cleanup" }
+func (err targetedCleanupError) CleanupRunID() uint    { return err.runID }
+func (err targetedCleanupError) CleanupExportID() uint { return err.exportID }
 
 type fakeReportCleanupTaskEnqueuer struct{ task *asynq.Task }
 
