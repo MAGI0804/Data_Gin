@@ -14,11 +14,11 @@ import (
 
 func TestReportExportQueryServiceScopesActorAndSignsVerifiedObject(t *testing.T) {
 	now := time.Date(2026, 8, 13, 10, 0, 0, 0, time.UTC)
-	expires := now.Add(time.Hour)
+	expires, purgedAt := now.Add(time.Hour), now.Add(-time.Minute)
 	store := &fakeReportExportQueryStore{row: &model.ReportExport{
 		BaseModel: model.BaseModel{ID: 41}, ExportUUID: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", RunID: 31,
 		Status: model.ReportExportStatusReady, ResultObjectKey: "private/report.xlsx", ResultChecksum: "checksum",
-		FileSizeBytes: 123, ReadyAt: &now, ExpiresAt: &expires, CreatedBy: 17,
+		FileSizeBytes: 123, ReadyAt: &now, ExpiresAt: &expires, PurgedAt: &purgedAt, CreatedBy: 17,
 	}}
 	signer := &fakeReportExportSigner{size: 123}
 	service := NewReportExportQueryServiceWithDependencies(store, func() (reportExportDownloadSigner, error) { return signer, nil })

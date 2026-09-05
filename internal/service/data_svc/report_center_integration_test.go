@@ -151,8 +151,8 @@ func TestReportCenterEndToEnd(t *testing.T) {
 		if storedRun.Status != model.ReportRunStatusResultPurged || storedRun.ResultPurgedAt == nil {
 			t.Fatalf("purged run state = %#v", storedRun)
 		}
-		if count := countReportIntegrationOracleRows(t, ctx, cfg, fixture, run.DefinitionID); count != 0 {
-			t.Fatalf("Oracle rows after READY export = %d, want 0", count)
+		if count := countReportIntegrationOracleRows(t, ctx, cfg, fixture, run.DefinitionID); count != run.RowCount {
+			t.Fatalf("Oracle rows after READY export = %d, want %d until the next procedure run clears them", count, run.RowCount)
 		}
 		assertReportIntegrationWorkbook(t, ctx, realOSS, storedExport, fixture.excelHeader, expectedFirstValue, run.RowCount)
 

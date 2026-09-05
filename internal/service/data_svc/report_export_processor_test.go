@@ -64,6 +64,24 @@ func TestReportExportProcessorTableSnapshotMarksResultPurgedWithoutOracleDelete(
 	}
 }
 
+func TestReportExportProcessorDoesNotMarkPurgedWhenReadyResultClaimConflicts(t *testing.T) {
+	now := time.Date(2026, 9, 5, 12, 0, 0, 0, time.UTC)
+	runtime := testReportExportRuntime(now)
+	runtime.Version.ExecutionMode = model.ReportExecutionModeTableSnapshot
+	runtime.Export.Status = model.ReportExportStatusReady
+	store := &fakeReportExportExecutionStore{runtime: runtime, claimErr: reportrepo.ErrReportResultPurgeConflict}
+	processor := NewReportExportProcessorWithDependencies(store, failingReportCredentialDecryptor{}, fakeReportExportOracleFactory{})
+	processor.now = func() time.Time { return now }
+	processor.newToken = tokenSequence("22222222-2222-4222-8222-222222222222")
+
+	if err := processor.CleanupReadyResult(t.Context(), 41); err == nil {
+		t.Fatal("CleanupReadyResult() accepted a conflicting result claim")
+	}
+	if store.markPurgedCalls != 0 || store.purged {
+		t.Fatalf("markPurgedCalls=%d purged=%t", store.markPurgedCalls, store.purged)
+	}
+}
+
 func TestReportExportProcessorDoesNotPurgeWhenUploadFails(t *testing.T) {
 	now := time.Date(2026, 8, 12, 12, 0, 0, 0, time.UTC)
 	store := &fakeReportExportExecutionStore{runtime: testReportExportRuntime(now)}
@@ -192,12 +210,14 @@ func (store *fakeReportExportObjectStore) DeleteObject(context.Context, string) 
 }
 
 type fakeReportExportExecutionStore struct {
-	runtime    *reportrepo.ExportRuntime
-	ready      bool
-	failed     bool
-	purged     bool
-	readyRows  int64
-	purgedRows int64
+	runtime         *reportrepo.ExportRuntime
+	claimErr        error
+	ready           bool
+	failed          bool
+	purged          bool
+	readyRows       int64
+	purgedRows      int64
+	markPurgedCalls int
 }
 
 func (store *fakeReportExportExecutionStore) BeginExport(_ context.Context, _ uint, _, token string, _ time.Time, _ time.Duration) (*reportrepo.ExportLease, error) {
@@ -246,6 +266,9 @@ func (*fakeReportExportExecutionStore) MarkExportCancelled(context.Context, uint
 }
 
 func (store *fakeReportExportExecutionStore) ClaimResultPurge(context.Context, uint, string, time.Time) (*reportrepo.ExportRuntime, error) {
+	if store.claimErr != nil {
+		return nil, store.claimErr
+	}
 	copy := *store.runtime
 	return &copy, nil
 }
@@ -255,6 +278,7 @@ func (*fakeReportExportExecutionStore) UpdateResultPurgeProgress(context.Context
 }
 
 func (store *fakeReportExportExecutionStore) MarkResultPurged(_ context.Context, _ uint, _ string, rows int64, _ time.Time) error {
+	store.markPurgedCalls++
 	store.purged, store.purgedRows = true, rows
 	return nil
 }
