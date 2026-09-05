@@ -8,6 +8,7 @@ import (
 
 	"gin-biz-web-api/internal/reportrepo"
 	"gin-biz-web-api/internal/reportsecret"
+	"gin-biz-web-api/model"
 
 	"github.com/google/uuid"
 )
@@ -167,6 +168,12 @@ func (cleaner *ReportResultCleaner) cleanupExpired(ctx context.Context, runID ui
 	cancel()
 	if err != nil {
 		return false, err
+	}
+	if runtime.Version.ExecutionMode == model.ReportExecutionModeTableSnapshot {
+		stateCtx, cancel = cleaner.stateContext(ctx)
+		err = cleaner.store.MarkExpiredResultPurged(stateCtx, runID, token, runtime.Run.RowCount, cleaner.now())
+		cancel()
+		return true, err
 	}
 	password, err := cleaner.credential.Decrypt(runtime.Datasource.CredentialKeyVersion, runtime.Datasource.PasswordCiphertext)
 	if err != nil {

@@ -42,6 +42,27 @@ func TestReportResultCleanerReleasesExpiredRunAfterOracleFailure(t *testing.T) {
 	}
 }
 
+func TestReportResultCleanerTableSnapshotExpiresWithoutOracleDelete(t *testing.T) {
+	now := time.Date(2026, 9, 5, 12, 0, 0, 0, time.UTC)
+	runtime := testResultCleanupRuntime(now)
+	runtime.Version.ExecutionMode = model.ReportExecutionModeTableSnapshot
+	store := &fakeReportResultCleanupStore{expired: []reportrepo.ResultCleanupCandidate{{RunID: 32}}, runtime: runtime}
+	session := &fakeReportExportOracleSession{purgeCounts: []int64{1}}
+	cleaner := NewReportResultCleanerWithDependencies(store, &fakeReadyResultPurger{}, failingReportCredentialDecryptor{}, fakeResultCleanupOracleFactory{session: session})
+	cleaner.now = func() time.Time { return now }
+	cleaner.newToken = func() string { return "11111111-1111-4111-8111-111111111111" }
+	cleaner.batchSize, cleaner.maxRuns = 10, 100
+
+	result, err := cleaner.Cleanup(t.Context())
+	if err != nil {
+		t.Fatalf("Cleanup() error=%v", err)
+	}
+	if result != (ReportResultCleanupResult{Scanned: 1, Claimed: 1, Purged: 1}) || !store.finished ||
+		store.finishedRows != runtime.Run.RowCount || session.purgeCalls != 0 {
+		t.Fatalf("result=%+v store=%#v purgeCalls=%d", result, store, session.purgeCalls)
+	}
+}
+
 func testReportResultCleaner(now time.Time, store *fakeReportResultCleanupStore, ready *fakeReadyResultPurger, session reportExportOracleSession) *ReportResultCleaner {
 	cleaner := NewReportResultCleanerWithDependencies(store, ready, staticReportCredentialDecryptor{}, fakeResultCleanupOracleFactory{session: session})
 	cleaner.now = func() time.Time { return now }
@@ -54,7 +75,7 @@ func testResultCleanupRuntime(now time.Time) *reportrepo.ResultCleanupRuntime {
 	expires := now.Add(-time.Hour)
 	return &reportrepo.ResultCleanupRuntime{
 		Run:        model.ReportRun{BaseModel: model.BaseModel{ID: 32}, RunUUID: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", Status: model.ReportRunStatusResultPurging, RowCount: 9, ResultExpiresAt: &expires},
-		Version:    model.ReportVersion{BaseModel: model.BaseModel{ID: 23}, ResultTableOwner: "REPORT_OWNER", ResultTableName: "REPORT_RESULT", ResultRunIDColumn: "RUN_ID", ResultRowIDColumn: "ID"},
+		Version:    model.ReportVersion{BaseModel: model.BaseModel{ID: 23}, ExecutionMode: model.ReportExecutionModeRefCursor, ResultTableOwner: "REPORT_OWNER", ResultTableName: "REPORT_RESULT", ResultRunIDColumn: "RUN_ID", ResultRowIDColumn: "ID"},
 		Datasource: model.ReportDatasource{CredentialKeyVersion: "v1", PasswordCiphertext: "cipher"},
 	}
 }

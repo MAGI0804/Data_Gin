@@ -4,6 +4,7 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/hex"
+	"errors"
 	"os"
 	"testing"
 	"time"
@@ -41,6 +42,25 @@ func TestReportExportProcessorRendersUploadsVerifiesAndPurges(t *testing.T) {
 	}
 	if session.readCalls != 1 || session.purgeCalls != 1 {
 		t.Fatalf("session read=%d purge=%d", session.readCalls, session.purgeCalls)
+	}
+}
+
+func TestReportExportProcessorTableSnapshotMarksResultPurgedWithoutOracleDelete(t *testing.T) {
+	now := time.Date(2026, 9, 5, 12, 0, 0, 0, time.UTC)
+	runtime := testReportExportRuntime(now)
+	runtime.Version.ExecutionMode = model.ReportExecutionModeTableSnapshot
+	runtime.Export.Status = model.ReportExportStatusReady
+	store := &fakeReportExportExecutionStore{runtime: runtime}
+	session := &fakeReportExportOracleSession{purgeCounts: []int64{1}}
+	processor := NewReportExportProcessorWithDependencies(store, failingReportCredentialDecryptor{}, fakeReportExportOracleFactory{session: session})
+	processor.now = func() time.Time { return now }
+	processor.newToken = tokenSequence("22222222-2222-4222-8222-222222222222")
+
+	if err := processor.CleanupReadyResult(t.Context(), 41); err != nil {
+		t.Fatalf("CleanupReadyResult() error=%v", err)
+	}
+	if !store.purged || store.purgedRows != runtime.Run.RowCount || session.purgeCalls != 0 {
+		t.Fatalf("store=%#v purgeCalls=%d", store, session.purgeCalls)
 	}
 }
 
@@ -90,7 +110,7 @@ func testReportExportRuntime(now time.Time) *reportrepo.ExportRuntime {
 	return &reportrepo.ExportRuntime{
 		Export:     model.ReportExport{BaseModel: model.BaseModel{ID: 41}, ExportUUID: "aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa", RunID: 31, Status: model.ReportExportStatusRunning, FrozenColumnsJSON: model.JSONText(`[{"fieldId":"1","logicalCode":"orderNo","databaseColumn":"ORDER_NO","excelHeader":"订单号","valueType":"string","exportVisible":true,"exportAllowed":true}]`)},
 		Run:        model.ReportRun{BaseModel: model.BaseModel{ID: 31}, RunUUID: "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb", VersionID: 23, DefinitionID: 9, Status: model.ReportRunStatusSucceeded, RowCount: 1, ResultExpiresAt: &expires},
-		Version:    model.ReportVersion{BaseModel: model.BaseModel{ID: 23}, DatasourceID: 7, ResultTableOwner: "REPORT_OWNER", ResultTableName: "REPORT_RESULT", ResultRunIDColumn: "RUN_ID", ResultRowIDColumn: "ID"},
+		Version:    model.ReportVersion{BaseModel: model.BaseModel{ID: 23}, DatasourceID: 7, ExecutionMode: model.ReportExecutionModeRefCursor, ResultTableOwner: "REPORT_OWNER", ResultTableName: "REPORT_RESULT", ResultRunIDColumn: "RUN_ID", ResultRowIDColumn: "ID"},
 		Datasource: model.ReportDatasource{BaseModel: model.BaseModel{ID: 7}, CredentialKeyVersion: "v1", PasswordCiphertext: "cipher"},
 	}
 }
@@ -98,6 +118,12 @@ func testReportExportRuntime(now time.Time) *reportrepo.ExportRuntime {
 type staticReportCredentialDecryptor struct{}
 
 func (staticReportCredentialDecryptor) Decrypt(_, _ string) (string, error) { return "password", nil }
+
+type failingReportCredentialDecryptor struct{}
+
+func (failingReportCredentialDecryptor) Decrypt(_, _ string) (string, error) {
+	return "", errors.New("credential decrypt must not be called")
+}
 
 type fakeReportExportOracleFactory struct{ session reportExportOracleSession }
 

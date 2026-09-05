@@ -277,6 +277,19 @@ func (processor *ReportExportProcessor) purgeReadyExport(ctx context.Context, ex
 			return errors.Join(errReportExportWorkerTemporary, confirmErr, waitErr)
 		}
 	}
+	if runtime.Version.ExecutionMode == model.ReportExecutionModeTableSnapshot {
+		stateCtx, cancel := processor.stateContext(ctx)
+		err := processor.store.MarkResultPurged(stateCtx, exportID, purgeToken, runtime.Run.RowCount, processor.now())
+		cancel()
+		if err != nil {
+			confirmed, confirmErr := processor.confirmResultPurged(ctx, exportID)
+			if confirmed {
+				return nil
+			}
+			return errors.Join(errReportExportWorkerTemporary, err, confirmErr)
+		}
+		return nil
+	}
 	password, err := processor.credential.Decrypt(runtime.Datasource.CredentialKeyVersion, runtime.Datasource.PasswordCiphertext)
 	if err != nil {
 		return processor.releasePurge(ctx, exportID, purgeToken, err)
