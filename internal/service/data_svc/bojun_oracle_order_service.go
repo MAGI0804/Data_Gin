@@ -37,7 +37,7 @@ type bojunOracleCredentialDecryptor interface {
 
 type bojunOracleConnection interface {
 	QueryBojunRetailAfterID(context.Context, uint64, int) ([]reportoracle.BojunRetailRow, error)
-	QueryBojunRetailByModifiedTime(context.Context, time.Time, time.Time, uint64, int) ([]reportoracle.BojunRetailRow, error)
+	QueryBojunRetailByStatusTime(context.Context, time.Time, time.Time, uint64, int) ([]reportoracle.BojunRetailRow, error)
 	MaxBojunRetailID(context.Context) (uint64, error)
 	UpdateBojunRetailPushStatus(context.Context, uint64, bool, int) error
 	Close() error
@@ -207,15 +207,15 @@ func (service *BojunOracleOrderService) SyncIncremental(ctx context.Context) (re
 	return result, nil
 }
 
-func (service *BojunOracleOrderService) PreviewByModifiedTime(ctx context.Context, startTime, endTime string) (*BojunOrderSyncResult, error) {
-	return service.runByModifiedTime(ctx, startTime, endTime, false)
+func (service *BojunOracleOrderService) PreviewByStatusTime(ctx context.Context, startTime, endTime string) (*BojunOrderSyncResult, error) {
+	return service.runByStatusTime(ctx, startTime, endTime, false)
 }
 
-func (service *BojunOracleOrderService) SyncByModifiedTime(ctx context.Context, startTime, endTime string) (*BojunOrderSyncResult, error) {
-	return service.runByModifiedTime(ctx, startTime, endTime, true)
+func (service *BojunOracleOrderService) SyncByStatusTime(ctx context.Context, startTime, endTime string) (*BojunOrderSyncResult, error) {
+	return service.runByStatusTime(ctx, startTime, endTime, true)
 }
 
-func (service *BojunOracleOrderService) runByModifiedTime(
+func (service *BojunOracleOrderService) runByStatusTime(
 	ctx context.Context,
 	startTime string,
 	endTime string,
@@ -251,7 +251,7 @@ func (service *BojunOracleOrderService) runByModifiedTime(
 			return result, err
 		}
 		queryCtx, cancel := reportOracleQueryContext(ctx, *datasource)
-		rows, queryErr := connection.QueryBojunRetailByModifiedTime(queryCtx, start, end, afterID, service.batchSize)
+		rows, queryErr := connection.QueryBojunRetailByStatusTime(queryCtx, start, end, afterID, service.batchSize)
 		cancel()
 		if queryErr != nil {
 			return result, queryErr

@@ -38,12 +38,12 @@ func (syncer *fakeBojunOracleOrderSyncer) SyncIncremental(context.Context) (*Boj
 	return &BojunOrderSyncResult{}, nil
 }
 
-func (syncer *fakeBojunOracleOrderSyncer) PreviewByModifiedTime(context.Context, string, string) (*BojunOrderSyncResult, error) {
+func (syncer *fakeBojunOracleOrderSyncer) PreviewByStatusTime(context.Context, string, string) (*BojunOrderSyncResult, error) {
 	syncer.previewCalls++
 	return &BojunOrderSyncResult{}, nil
 }
 
-func (syncer *fakeBojunOracleOrderSyncer) SyncByModifiedTime(context.Context, string, string) (*BojunOrderSyncResult, error) {
+func (syncer *fakeBojunOracleOrderSyncer) SyncByStatusTime(context.Context, string, string) (*BojunOrderSyncResult, error) {
 	syncer.syncCalls++
 	return &BojunOrderSyncResult{}, nil
 }
@@ -71,7 +71,7 @@ func TestBojunOrderSourceRouterRequiresExplicitOracleEnable(t *testing.T) {
 	}
 }
 
-func TestBojunOrderSourceRouterUsesOracleModifiedTimeWhenEnabled(t *testing.T) {
+func TestBojunOrderSourceRouterUsesOracleStatusTimeWhenEnabled(t *testing.T) {
 	api := &fakeBojunAPIOrderSyncer{}
 	oracle := &fakeBojunOracleOrderSyncer{}
 	router := &BojunOrderSourceRouter{

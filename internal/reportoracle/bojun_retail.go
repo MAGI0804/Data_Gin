@@ -52,13 +52,13 @@ FROM (
 WHERE ROWNUM <= :2
 ORDER BY M_RETAIL_ID`
 
-const bojunRetailModifiedTimeRangeSQL = `
+const bojunRetailStatusTimeRangeSQL = `
 SELECT ` + bojunRetailProjectedColumns + `
 FROM (
     SELECT ` + bojunRetailSourceColumns + `
     FROM ` + BojunRetailTable + `
-    WHERE MODIFIEDDATE >= :1
-      AND MODIFIEDDATE < :2
+    WHERE STATUSTIME >= :1
+      AND STATUSTIME < :2
       AND M_RETAIL_ID > :3
     ORDER BY M_RETAIL_ID
 )
@@ -82,7 +82,7 @@ func (adapter *Adapter) QueryBojunRetailAfterID(ctx context.Context, afterID uin
 	return adapter.queryBojunRetailRows(ctx, bojunRetailAfterIDSQL, afterID, limit)
 }
 
-func (adapter *Adapter) QueryBojunRetailByModifiedTime(
+func (adapter *Adapter) QueryBojunRetailByStatusTime(
 	ctx context.Context,
 	start time.Time,
 	end time.Time,
@@ -98,7 +98,7 @@ func (adapter *Adapter) QueryBojunRetailByModifiedTime(
 	if err := validateBojunRetailBatchSize(limit); err != nil {
 		return nil, err
 	}
-	return adapter.queryBojunRetailRows(ctx, bojunRetailModifiedTimeRangeSQL, start, end, afterID, limit)
+	return adapter.queryBojunRetailRows(ctx, bojunRetailStatusTimeRangeSQL, start, end, afterID, limit)
 }
 
 func (adapter *Adapter) MaxBojunRetailID(ctx context.Context) (uint64, error) {

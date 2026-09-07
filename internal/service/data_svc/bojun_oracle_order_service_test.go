@@ -38,10 +38,10 @@ type fakeBojunOracleConnection struct {
 	writeBackOK   []bool
 	writeBackDate []int
 	writeBackErr  error
-	modifiedStart time.Time
-	modifiedEnd   time.Time
-	modifiedAfter uint64
-	modifiedCalls int
+	statusStart   time.Time
+	statusEnd     time.Time
+	statusAfter   uint64
+	statusCalls   int
 }
 
 func (connection *fakeBojunOracleConnection) QueryBojunRetailAfterID(_ context.Context, afterID uint64, _ int) ([]reportoracle.BojunRetailRow, error) {
@@ -50,11 +50,11 @@ func (connection *fakeBojunOracleConnection) QueryBojunRetailAfterID(_ context.C
 	return append([]reportoracle.BojunRetailRow(nil), connection.rows...), nil
 }
 
-func (connection *fakeBojunOracleConnection) QueryBojunRetailByModifiedTime(_ context.Context, start, end time.Time, afterID uint64, _ int) ([]reportoracle.BojunRetailRow, error) {
-	connection.modifiedStart = start
-	connection.modifiedEnd = end
-	connection.modifiedAfter = afterID
-	connection.modifiedCalls++
+func (connection *fakeBojunOracleConnection) QueryBojunRetailByStatusTime(_ context.Context, start, end time.Time, afterID uint64, _ int) ([]reportoracle.BojunRetailRow, error) {
+	connection.statusStart = start
+	connection.statusEnd = end
+	connection.statusAfter = afterID
+	connection.statusCalls++
 	return append([]reportoracle.BojunRetailRow(nil), connection.rows...), nil
 }
 
@@ -459,9 +459,9 @@ func TestBojunOraclePreviewDoesNotSupplementExistingAPIOrder(t *testing.T) {
 	store := service.retailOrderDAO.(*fakeBojunOracleRetailStore)
 	store.orders["API-ORDER-132"] = &model.BojunRetailOrder{BaseModel: model.BaseModel{ID: 1320}, DocNo: "API-ORDER-132"}
 
-	result, err := service.PreviewByModifiedTime(t.Context(), "2026-08-25T10:00", "2026-08-25T11:00")
+	result, err := service.PreviewByStatusTime(t.Context(), "2026-08-25T10:00", "2026-08-25T11:00")
 	if err != nil {
-		t.Fatalf("PreviewByModifiedTime() error = %v", err)
+		t.Fatalf("PreviewByStatusTime() error = %v", err)
 	}
 	if store.supplementCalls != 0 || store.orders["API-ORDER-132"].OracleRetailID != nil || result.PreviewCount != 1 ||
 		pusher.calls != 0 || len(connection.writeBackIDs) != 0 {
@@ -506,7 +506,7 @@ func TestBojunOracleSuccessfulPushWithFailedWriteBackDoesNotAdvance(t *testing.T
 	}
 }
 
-func TestBojunOraclePreviewQueriesModifiedTimeWithoutWritingOrAdvancing(t *testing.T) {
+func TestBojunOraclePreviewQueriesStatusTimeWithoutWritingOrAdvancing(t *testing.T) {
 	statusTime := time.Date(2026, 8, 25, 15, 42, 21, 0, time.Local)
 	connection := &fakeBojunOracleConnection{rows: []reportoracle.BojunRetailRow{{
 		RetailID: 15, StoreCode: "ABCN001A001", DocNo: "SALE-15", StatusTime: statusTime,
@@ -517,12 +517,12 @@ func TestBojunOraclePreviewQueriesModifiedTimeWithoutWritingOrAdvancing(t *testi
 	service.batchSize = 2
 	rawStore := service.rawDataDAO.(*fakeBojunRawDataCreator)
 
-	result, err := service.PreviewByModifiedTime(t.Context(), "2026-08-25T10:00", "2026-08-25T11:00")
+	result, err := service.PreviewByStatusTime(t.Context(), "2026-08-25T10:00", "2026-08-25T11:00")
 	if err != nil {
-		t.Fatalf("PreviewByModifiedTime() error = %v", err)
+		t.Fatalf("PreviewByStatusTime() error = %v", err)
 	}
-	if connection.modifiedCalls != 1 || connection.modifiedStart.Hour() != 10 || connection.modifiedEnd.Hour() != 11 || connection.modifiedAfter != 0 {
-		t.Fatalf("modified query start=%v end=%v after=%d calls=%d", connection.modifiedStart, connection.modifiedEnd, connection.modifiedAfter, connection.modifiedCalls)
+	if connection.statusCalls != 1 || connection.statusStart.Hour() != 10 || connection.statusEnd.Hour() != 11 || connection.statusAfter != 0 {
+		t.Fatalf("status time query start=%v end=%v after=%d calls=%d", connection.statusStart, connection.statusEnd, connection.statusAfter, connection.statusCalls)
 	}
 	if result.PreviewCount != 1 || result.WritableCount != 1 || rawStore.created != 0 || state.advancedTo != 0 {
 		t.Fatalf("result=%+v raw writes=%d state=%+v", result, rawStore.created, state)

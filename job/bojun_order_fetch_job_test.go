@@ -21,7 +21,7 @@ func TestNewBojunOrderFetchTaskNormalizesLegacyModeToAPI(t *testing.T) {
 	}
 }
 
-func TestNewBojunOrderFetchTaskAcceptsOracleModifiedTimeBackfill(t *testing.T) {
+func TestNewBojunOrderFetchTaskAcceptsOracleStatusTimeBackfill(t *testing.T) {
 	task, err := NewBojunOrderFetchTask(BojunOrderFetchPayload{
 		SourceMode: " ORACLE ", StartTime: "2026-08-25 10:00:00", EndTime: "2026-08-25 11:00:00",
 	})

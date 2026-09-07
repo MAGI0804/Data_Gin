@@ -101,7 +101,7 @@ export function BojunBackfillPage({ client, loading, onCompletedRefresh }: { cli
 
   return <PageCanvas>
     <PageHeader eyebrow="DATA BACKFILL" title="伯俊订单补拉" description="先真实拉取并预览，再按相同时间范围投递后台补拉任务；已有 docno 不覆盖。" />
-    <Section title="补拉范围" description="预览阶段不会写入数据库。" actions={<StatusTag tone={preview ? 'success' : 'neutral'}>{preview ? '预览已就绪' : '等待预览'}</StatusTag>}>
+    <Section title="补拉范围" description="Oracle 模式按订单完成时间查询（结束时间不包含），API 模式按上游接口时间查询；预览阶段不会写入数据库。" actions={<StatusTag tone={preview ? 'success' : 'neutral'}>{preview ? '预览已就绪' : '等待预览'}</StatusTag>}>
       <form className={styles.form} onSubmit={submit}>
         <Field label="开始时间" name="start_time" defaultValue={datetimeLocalMinutesAgo(60)} onChange={invalidatePreview} />
         <Field label="结束时间" name="end_time" defaultValue={datetimeLocalMinutesAgo(0)} onChange={invalidatePreview} />

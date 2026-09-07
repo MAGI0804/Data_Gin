@@ -30,8 +30,8 @@ type bojunAPIOrderSyncer interface {
 
 type bojunOracleOrderSyncer interface {
 	SyncIncremental(context.Context) (*BojunOrderSyncResult, error)
-	PreviewByModifiedTime(context.Context, string, string) (*BojunOrderSyncResult, error)
-	SyncByModifiedTime(context.Context, string, string) (*BojunOrderSyncResult, error)
+	PreviewByStatusTime(context.Context, string, string) (*BojunOrderSyncResult, error)
+	SyncByStatusTime(context.Context, string, string) (*BojunOrderSyncResult, error)
 }
 
 type BojunOrderSourceRouter struct {
@@ -97,7 +97,7 @@ func (router *BojunOrderSourceRouter) PreviewOrders(ctx context.Context, startTi
 	var result *BojunOrderSyncResult
 	var err error
 	if router.mode == BojunOrderSourceOracle {
-		result, err = router.oracle.PreviewByModifiedTime(ctx, startTime, endTime)
+		result, err = router.oracle.PreviewByStatusTime(ctx, startTime, endTime)
 	} else {
 		result, err = router.api.PreviewOrders(ctx, startTime, endTime)
 	}
@@ -111,7 +111,7 @@ func (router *BojunOrderSourceRouter) SyncOrders(ctx context.Context, startTime,
 	var result *BojunOrderSyncResult
 	var err error
 	if router.mode == BojunOrderSourceOracle {
-		result, err = router.oracle.SyncByModifiedTime(ctx, startTime, endTime)
+		result, err = router.oracle.SyncByStatusTime(ctx, startTime, endTime)
 	} else {
 		result, err = router.api.SyncOrders(ctx, startTime, endTime)
 	}

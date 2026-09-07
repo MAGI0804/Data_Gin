@@ -124,7 +124,7 @@ func LegacyTaskDefinitions() []LegacyTaskDefinition {
 			InputTable:  "伯俊 middleretail.query / " + reportoracle.BojunRetailTable,
 			OutputTable: "raw_data / bojun_retail_orders",
 			Handler:     "internal/service/data_svc/bojun_order_source_router.go",
-			Description: "API 模式按接口时间补拉；Oracle 模式按 MODIFIEDDATE 范围补拉且不推进增量水位；docno 已存在的数据不覆盖。",
+			Description: "API 模式按接口时间补拉；Oracle 模式按订单完成时间 STATUSTIME 范围补拉且不推进增量水位；docno 已存在的数据不覆盖。",
 			Editable:    true,
 			DefaultPayload: map[string]interface{}{
 				"source_mode": "api",

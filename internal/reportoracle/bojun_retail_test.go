@@ -22,7 +22,7 @@ func TestBojunRetailSQLUsesFixedTableAndBoundFilters(t *testing.T) {
 
 	for name, statement := range map[string]string{
 		"incremental": bojunRetailAfterIDSQL,
-		"time range":  bojunRetailModifiedTimeRangeSQL,
+		"time range":  bojunRetailStatusTimeRangeSQL,
 		"maximum id":  bojunRetailMaxIDSQL,
 		"push status": bojunRetailPushStatusSQL,
 	} {
@@ -40,12 +40,15 @@ func TestBojunRetailSQLUsesFixedTableAndBoundFilters(t *testing.T) {
 			t.Fatalf("incremental SQL is missing %q", fragment)
 		}
 	}
-	for _, fragment := range []string{"MODIFIEDDATE >= :1", "MODIFIEDDATE < :2", "M_RETAIL_ID > :3", "ROWNUM <= :4"} {
-		if !strings.Contains(bojunRetailModifiedTimeRangeSQL, fragment) {
+	for _, fragment := range []string{"STATUSTIME >= :1", "STATUSTIME < :2", "M_RETAIL_ID > :3", "ROWNUM <= :4"} {
+		if !strings.Contains(bojunRetailStatusTimeRangeSQL, fragment) {
 			t.Fatalf("time range SQL is missing %q", fragment)
 		}
 	}
-	for _, statement := range []string{bojunRetailAfterIDSQL, bojunRetailModifiedTimeRangeSQL} {
+	if strings.Contains(bojunRetailStatusTimeRangeSQL, "MODIFIEDDATE") {
+		t.Fatal("time range SQL must filter by STATUSTIME instead of MODIFIEDDATE")
+	}
+	for _, statement := range []string{bojunRetailAfterIDSQL, bojunRetailStatusTimeRangeSQL} {
 		for _, fragment := range []string{
 			"STORE_NAME", "DM_VP_C_VIP_MOBILE", "TOT_AMT_SF", "TOT_AMT_TS", "IS_TOSHOP",
 			"NVL(STATUS, '0') AS STATUS", "JSON_ITEM",
